@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { Award, Sparkles } from "lucide-react";
 import {
   CERTIFICATE_KINDS,
@@ -13,10 +14,12 @@ import {
   emptyTcDetails,
   formatCertDate,
   issueCertificate,
+  isUidaiFormKind,
   listCertificates,
   loadCertificates,
   previewFeesPaidForStudent,
   suggestNextCertificateNumber,
+  uidaiFormUrl,
   voidCertificate,
   type CertificateIssue,
   type CertificateKind,
@@ -38,6 +41,10 @@ import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
+import { CertificatesReportsRunner } from "@/components/reports/ModuleReportRunners";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { StudentHitsFilterExport } from "@/components/reports/StudentHitsFilterExport";
 import {
   CertificateSheet,
@@ -54,13 +61,52 @@ import {
   type HoldCheck,
 } from "@/lib/holds";
 import type { HoldCode } from "@/lib/types";
+import { useHoldDecisions } from "@/lib/useHoldDecisions";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+type Tab = "dashboard" | "desk" | "reports";
+
+type CertStep = "student" | "type" | "details" | "draft" | "issue";
+
+const CERT_STEPS: StepDef<CertStep>[] = [
+  {
+    id: "student",
+    title: "Student",
+    what: "Find the student by name, admission no. or mobile (or class / section), and check PEN and APAAR ID.",
+  },
+  {
+    id: "type",
+    title: "Certificate type",
+    what: "Pick the certificate, see the next certificate no., and set the issue date and conduct.",
+  },
+  {
+    id: "details",
+    title: "Details",
+    what: "Fields only this certificate needs — TC register details, fees-paid period, or a note on UIDAI's Aadhaar form.",
+  },
+  {
+    id: "draft",
+    title: "Draft (AI)",
+    what: "Optional: let AI draft the certificate text, then edit it before issue. Not used for UIDAI's form.",
+  },
+  {
+    id: "issue",
+    title: "Preview & issue",
+    what: "Add remarks, check open dues and holds, then Issue & print — the issued certificate opens in the preview beside Recent issues.",
+  },
+];
+
 export function CertificatesWorkspace() {
+  // Fee holds are server truth. Without this the gates below read an
+  // unloaded snapshot and every child looks allowed.
+  const holdDecisions = useHoldDecisions();
   const session = useDemoSession();
+  const [tab, setTab] = useState<Tab>("desk");
+  const [certStep, setCertStep] = useState<CertStep>("student");
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
   const [issues, setIssues] = useState<CertificateIssue[]>([]);
@@ -95,15 +141,20 @@ export function CertificatesWorkspace() {
   );
   const [feesIncludeSiblings, setFeesIncludeSiblings] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [voidTargetId, setVoidTargetId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  // Re-read when the server copy of fee holds lands (login/refresh hydration).
+  useModuleStateHydration("fee_holds", () => setTick((t) => t + 1));
   const [aiLanguage, setAiLanguage] = useState<"en" | "hi" | "both">("both");
   const [aiPurpose, setAiPurpose] = useState("");
   const [aiDetails, setAiDetails] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [customTitle, setCustomTitle] = useState("");
   const [customBody, setCustomBody] = useState("");
+  const [customIsAi, setCustomIsAi] = useState(false);
+  const [aiGenerationId, setAiGenerationId] = useState("");
 
   function refresh() {
     const m = loadMasters();
@@ -121,10 +172,12 @@ export function CertificatesWorkspace() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensureCertificatesHydrated } = await import(
-        "@/lib/certificatesPersistence"
-      );
-      await ensureCertificatesHydrated();
+      const [{ ensureCertificatesHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/certificatesPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await withHydrationSlot(() => ensureCertificatesHydrated());
       refresh();
     })();
   }, []);
@@ -162,7 +215,9 @@ export function CertificatesWorkspace() {
   const eligibility = useMemo(() => {
     if (!student) return null;
     return certificateEligibility(student, kind);
-  }, [student, kind, tick]);
+    // holdDecisions.version: eligibility folds in checkHold, which reads a
+    // snapshot that lands after the first render.
+  }, [student, kind, tick, holdDecisions.version]);
 
   useEffect(() => {
     const code = holdCodeForCertificate(kind);
@@ -172,7 +227,7 @@ export function CertificatesWorkspace() {
     }
     setHoldCode(code);
     setHoldCheck(checkHold(student.id, code));
-  }, [student?.id, kind, tick]);
+  }, [student?.id, kind, tick, holdDecisions.version]);
 
   useEffect(() => {
     if (!student) {
@@ -242,6 +297,11 @@ export function CertificatesWorkspace() {
     [issues, previewId],
   );
 
+  const voidTarget = useMemo(
+    () => issues.find((i) => i.id === voidTargetId) ?? null,
+    [issues, voidTargetId],
+  );
+
   const nextCertNoPreview = useMemo(() => {
     if (!student) return "";
     const ay = student.academicYearCode || session.academicYearCode || DEFAULT_AY;
@@ -250,7 +310,8 @@ export function CertificatesWorkspace() {
 
   async function onGenerateCertificateAi() {
     if (!student) {
-      setError("Pick a student first");
+      setCertStep("student");
+      setError("Pick a student first — step 1 · Student");
       return;
     }
     setAiLoading(true);
@@ -278,6 +339,7 @@ export function CertificatesWorkspace() {
         tcSubjectsStudied?: string;
         tcGamesActivities?: string;
         tcAnnualExamResult?: string;
+        generationId?: string;
       };
       if (!res.ok || data.error) {
         setError(data.error || "AI generation failed");
@@ -285,6 +347,8 @@ export function CertificatesWorkspace() {
       }
       setCustomTitle(data.title || "");
       setCustomBody(data.body || "");
+      setCustomIsAi(true);
+      setAiGenerationId(data.generationId || "");
       if (data.remarks) setRemarks(data.remarks);
       if (kind === "tc") {
         setTcForm((prev) => ({
@@ -310,7 +374,8 @@ export function CertificatesWorkspace() {
 
   function onIssue() {
     if (!student) {
-      setError("Pick a student first");
+      setCertStep("student");
+      setError("Pick a student first — step 1 · Student");
       return;
     }
     const mastersNow = masters ?? loadMasters();
@@ -339,6 +404,7 @@ export function CertificatesWorkspace() {
       remarks,
       customTitle: customBody ? customTitle : undefined,
       customBody: customBody || undefined,
+      aiGenerated: customBody ? customIsAi : undefined,
       inactivateOnTc,
       pen,
       apaarId,
@@ -367,7 +433,19 @@ export function CertificatesWorkspace() {
           : undefined,
     });
     if (!result.ok) {
-      setError(result.error);
+      // TC / fees-paid field errors belong to step 3; say so and go there.
+      if (
+        (kind === "tc" || kind === "fees_paid") &&
+        !(eligibility?.blockers ?? []).includes(result.error)
+      ) {
+        setCertStep("details");
+        setError(`${result.error} — see step 3 · Details`);
+      } else if (result.error === "Student not found") {
+        setCertStep("student");
+        setError(`${result.error} — see step 1 · Student`);
+      } else {
+        setError(result.error);
+      }
       return;
     }
     flash(
@@ -375,19 +453,33 @@ export function CertificatesWorkspace() {
         result.issue.inactivatedStudent ? " · student marked inactive" : ""
       }`,
     );
+    if (customIsAi && aiGenerationId) {
+      reportAiOutcome({
+        ids: [aiGenerationId],
+        outcome: "accepted",
+        targetType: "certificate",
+        targetId: result.issue.id,
+      });
+    }
     setRemarks("");
     setReasonForLeaving("");
     setCustomTitle("");
     setCustomBody("");
+    setCustomIsAi(false);
+    setAiGenerationId("");
     refresh();
     setPreviewId(result.issue.id);
-    window.setTimeout(() => printCertificate(result.issue.id), 200);
+    if (isUidaiFormKind(result.issue.kind)) {
+      window.open(uidaiFormUrl(result.issue.studentId, result.issue.issuedOn), "_blank", "noopener");
+    } else {
+      window.setTimeout(() => printCertificate(result.issue.id), 200);
+    }
   }
 
   return (
     <ErpWorkspaceShell
       title="Certificates"
-      subtitle="Issue TC, bonafide, character, fee clearance, and fees-paid certificates for reimbursement — open dues gate TC / no-dues."
+      subtitle="Issue TC, bonafide, character, fee clearance, fees-paid (reimbursement) and Aadhaar (UIDAI format) certificates — open dues gate TC / no-dues."
       icon={<Award className="size-6" aria-hidden />}
       error={error}
       notice={notice}
@@ -398,17 +490,50 @@ export function CertificatesWorkspace() {
         </p>
       }
     >
-      <div className="mt-4">
-        <ModuleDashboardHost moduleId="certificates" />
-      </div>
+      <ModuleTabs
+        aria-label="Certificates sections"
+        value={tab}
+        onChange={(id) => setTab(id as Tab)}
+        items={[
+          { id: "dashboard", label: "Dashboard", tone: "navy" },
+          { id: "desk", label: "Issue & register", tone: "amber" },
+          { id: "reports", label: "Reports", tone: "teal" },
+        ]}
+      />
 
+      {tab === "dashboard" ? (
+        <div className="mt-6">
+          <ModuleDashboardHost
+            moduleId="certificates"
+            onNavigateTab={(t) => setTab(t as Tab)}
+          />
+        </div>
+      ) : null}
+
+      {tab === "reports" ? (
+        <div className="mt-6">
+          <CertificatesReportsRunner />
+        </div>
+      ) : null}
+
+      {tab === "desk" ? (
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
         <div className="space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Issue certificate
             </h2>
 
+            {/* Every step stays mounted (inactive ones only hidden), so a
+                half-filled form survives moving between steps. */}
+            <StepTabs
+              aria-label="Issue certificate steps"
+              steps={CERT_STEPS}
+              value={certStep}
+              onChange={setCertStep}
+              className="mt-3"
+            >
+            <div className={certStep === "student" ? "" : "hidden"}>
             <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,0.7fr)_minmax(0,0.7fr)]">
               <label className="block text-sm">
                 <span className="mb-1 block text-[11px] text-[var(--muted)]">
@@ -487,7 +612,7 @@ export function CertificatesWorkspace() {
             {!selected && (query.trim() || classId || sectionId) ? (
               <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
                 {hits.length === 0 ? (
-                  <li className="rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-3 text-sm text-[var(--muted)]">
+                  <li className="rounded-lg bg-[var(--surface-sunken)] px-3 py-3 text-sm text-[var(--muted)]">
                     No students match.
                   </li>
                 ) : (
@@ -495,7 +620,7 @@ export function CertificatesWorkspace() {
                   <li key={h.student.id}>
                     <button
                       type="button"
-                      className="w-full rounded-lg border border-[rgba(32,48,80,0.12)] px-3 py-2 text-left hover:border-[rgba(197,160,40,0.45)] hover:bg-[rgba(197,160,40,0.08)]"
+                      className="w-full rounded-lg border border-[var(--border)] px-3 py-2 text-left hover:border-[rgba(197,160,40,0.45)] hover:bg-[rgba(197,160,40,0.08)]"
                       onClick={() => {
                         setSelected(h);
                         setQuery(h.student.fullName);
@@ -520,7 +645,7 @@ export function CertificatesWorkspace() {
             ) : null}
 
             {selected && student ? (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--surface-sunken)] px-3 py-2">
                 <div className="text-sm text-[var(--brand-deep)]">
                   <span className="font-semibold">{student.fullName}</span>
                   <span className="text-[var(--muted)]">
@@ -575,7 +700,7 @@ export function CertificatesWorkspace() {
               </label>
             </div>
             {student && (!pen || !apaarId) ? (
-              <p className="mt-1.5 text-[11px] text-[#b45309]">
+              <p className="mt-1.5 text-[11px] text-[var(--warning)]">
                 {!pen && !apaarId
                   ? "PEN and APAAR ID missing on SIS — enter before issue if available (required for UDISE+ / DigiLocker flows)."
                   : !pen
@@ -584,6 +709,9 @@ export function CertificatesWorkspace() {
               </p>
             ) : null}
 
+            </div>
+
+            <div className={certStep === "type" ? "" : "hidden"}>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <label className="block text-sm sm:col-span-2">
                 <span className="mb-1 block text-[11px] text-[var(--muted)]">
@@ -635,8 +763,16 @@ export function CertificatesWorkspace() {
               </label>
             </div>
 
+            </div>
+
+            <div className={certStep === "details" ? "" : "hidden"}>
+            {kind !== "fees_paid" && kind !== "tc" && !isUidaiFormKind(kind) ? (
+              <p className="mt-3 text-[11px] text-[var(--muted)]">
+                No extra details for this certificate — go on to the next step.
+              </p>
+            ) : null}
             {kind === "fees_paid" ? (
-              <div className="mt-3 space-y-3 rounded-lg border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.02)] p-3">
+              <div className="mt-3 space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
                 <p className="text-[11px] font-semibold text-[var(--brand-deep)]">
                   Fees paid — reimbursement certificate
                 </p>
@@ -690,7 +826,7 @@ export function CertificatesWorkspace() {
                 </div>
                 {feesPaidPreview ? (
                   "error" in feesPaidPreview ? (
-                    <p className="text-[11px] font-semibold text-[#dc2626]">
+                    <p className="text-[11px] font-semibold text-[var(--danger)]">
                       {feesPaidPreview.error}
                     </p>
                   ) : (
@@ -708,7 +844,7 @@ export function CertificatesWorkspace() {
             ) : null}
 
             {kind === "tc" ? (
-              <div className="mt-3 space-y-3 rounded-lg border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.02)] p-3">
+              <div className="mt-3 space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
                 <p className="text-[11px] font-semibold text-[var(--brand-deep)]">
                   CBSE Annexure-I fields
                 </p>
@@ -1007,13 +1143,42 @@ export function CertificatesWorkspace() {
               </div>
             ) : null}
 
-            <div className="mt-4 rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3">
+            {isUidaiFormKind(kind) ? (
+              <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3 text-[11px] text-[var(--brand-deep)]">
+                <h3 className="text-xs font-bold">UIDAI&apos;s own form</h3>
+                <p className="mt-1">
+                  Prints UIDAI&apos;s &ldquo;Certificate for Aadhaar Enrolment/
+                  Update&rdquo; filled from the student&apos;s record — name,
+                  address, PIN, New Enrolment or Update, and the Principal as
+                  certifier (Head of recognised educational institution). It is
+                  proof of address, valid for 3 months from the issue date.
+                </p>
+                <p className="mt-1 font-semibold">
+                  After printing: paste the child&apos;s recent colour
+                  photo, cross-sign and cross-stamp it, Principal signs and
+                  stamps, parent/child signs. Blank boxes are filled by pen —
+                  never &ldquo;NA&rdquo;.
+                </p>
+              </div>
+            ) : null}
+
+            </div>
+
+            <div className={certStep === "draft" ? "" : "hidden"}>
+            {isUidaiFormKind(kind) ? (
+              <p className="mt-3 text-[11px] text-[var(--muted)]">
+                UIDAI&apos;s form prints as is — there is no AI draft for it.
+              </p>
+            ) : null}
+            <div
+              className={`mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3 ${isUidaiFormKind(kind) ? "hidden" : ""}`}
+            >
               <h3 className="text-xs font-bold text-[var(--brand-deep)]">
-                Draft with AI (CBSE + UP Basic Education)
+                Draft with AI (UP Basic Education)
               </h3>
               <p className="mt-1 text-[10px] text-[var(--muted)]">
-                Generates certificate text per CBSE affiliation norms and UP
-                Basic Shiksha guidelines — English, Hindi, or both.
+                Generates certificate text per UP Basic Shiksha guidelines —
+                English, Hindi, or both.
               </p>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 <label className="text-[11px] font-semibold text-[var(--muted)]">
@@ -1051,7 +1216,7 @@ export function CertificatesWorkspace() {
               </label>
               <button
                 type="button"
-                className="mt-2 rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] disabled:opacity-50"
                 disabled={aiLoading || !student}
                 onClick={() => void onGenerateCertificateAi()}
               >
@@ -1070,6 +1235,9 @@ export function CertificatesWorkspace() {
               ) : null}
             </div>
 
+            </div>
+
+            <div className={certStep === "issue" ? "" : "hidden"}>
             <label className="mt-3 block text-sm">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">
                 Remarks / purpose (optional)
@@ -1089,7 +1257,7 @@ export function CertificatesWorkspace() {
             </label>
 
             {eligibility ? (
-              <div className="mt-3 space-y-1.5 rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-3 py-2 text-[11px]">
+              <div className="mt-3 space-y-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-[11px]">
                 <p className="text-[var(--brand-deep)]">
                   Open dues:{" "}
                   <span className="font-bold">
@@ -1099,19 +1267,19 @@ export function CertificatesWorkspace() {
                   {eligibility.openDueCount === 1 ? "" : "s"})
                 </p>
                 {eligibility.blockers.map((b) => (
-                  <p key={b} className="font-semibold text-[#dc2626]">
+                  <p key={b} className="font-semibold text-[var(--danger)]">
                     {b}
                   </p>
                 ))}
                 {eligibility.warnings.map((w) => (
-                  <p key={w} className="text-[#b45309]">
+                  <p key={w} className="text-[var(--warning)]">
                     {w}
                   </p>
                 ))}
                 {eligibility.requiresOverride ? (
                   <button
                     type="button"
-                    className="mt-1 rounded-md bg-white px-2 py-1 text-[11px] font-bold text-[var(--brand-deep)]"
+                    className="mt-1 rounded-md bg-[var(--card)] px-2 py-1 text-[11px] font-bold text-[var(--brand-deep)]"
                     onClick={() => setHoldDialog(true)}
                   >
                     Unlock with Principal PIN
@@ -1137,11 +1305,13 @@ export function CertificatesWorkspace() {
             >
               Issue & print
             </button>
+            </div>
+            </StepTabs>
           </div>
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Recent issues
             </h2>
@@ -1151,7 +1321,7 @@ export function CertificatesWorkspace() {
               </p>
             ) : (
               <ErpTableShell className="mt-2">
-                <ul className="max-h-72 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
+                <ul className="max-h-72 divide-y divide-[var(--border)] overflow-y-auto">
                 {issues.slice(0, 25).map((iss) => {
                   const voided = !!iss.voidedAt;
                   return (
@@ -1169,6 +1339,14 @@ export function CertificatesWorkspace() {
                         <div className="text-sm font-semibold text-[var(--brand-deep)]">
                           {iss.certNo}
                           {voided ? " · void" : ""}
+                          {iss.aiGenerated ? (
+                            <span
+                              className="ml-1.5 rounded-full bg-[rgba(197,160,40,0.15)] px-1.5 py-0.5 text-[9px] font-semibold text-[#8a6400]"
+                              title="Initial text drafted by the AI assistant, reviewed before issue — internal note, never printed on the certificate"
+                            >
+                              AI-drafted
+                            </span>
+                          ) : null}
                         </div>
                         <div className="text-[11px] text-[var(--muted)]">
                           {certificateKindLabel(iss.kind)} · {iss.studentName} ·{" "}
@@ -1181,6 +1359,10 @@ export function CertificatesWorkspace() {
                           className="text-[11px] font-semibold text-[var(--brand-mid)]"
                           onClick={() => {
                             setPreviewId(iss.id);
+                            if (isUidaiFormKind(iss.kind)) {
+                              window.open(uidaiFormUrl(iss.studentId, iss.issuedOn), "_blank", "noopener");
+                              return;
+                            }
                             window.setTimeout(
                               () => printCertificate(iss.id),
                               100,
@@ -1192,19 +1374,8 @@ export function CertificatesWorkspace() {
                         {!voided ? (
                           <button
                             type="button"
-                            className="text-[11px] font-semibold text-[#dc2626]"
-                            onClick={() => {
-                              if (
-                                !window.confirm(
-                                  `Void ${iss.certNo}? Student status is not restored.`,
-                                )
-                              ) {
-                                return;
-                              }
-                              voidCertificate(iss.id);
-                              refresh();
-                              flash("Certificate voided");
-                            }}
+                            className="text-[11px] font-semibold text-[var(--danger)]"
+                            onClick={() => setVoidTargetId(iss.id)}
                           >
                             Void
                           </button>
@@ -1219,7 +1390,7 @@ export function CertificatesWorkspace() {
           </div>
 
           {preview ? (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.03)] p-3">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
               <div className="mb-2 flex items-center justify-between gap-2 print-hide">
                 <h2 className="text-sm font-bold text-[var(--brand-deep)]">
                   Preview
@@ -1227,16 +1398,29 @@ export function CertificatesWorkspace() {
                 <button
                   type="button"
                   className="btn-accent rounded-lg px-3 py-1.5 text-xs font-bold"
-                  onClick={() => printCertificate(preview.id)}
+                  onClick={() =>
+                    isUidaiFormKind(preview.kind)
+                      ? window.open(uidaiFormUrl(preview.studentId, preview.issuedOn), "_blank", "noopener")
+                      : printCertificate(preview.id)
+                  }
                 >
                   Print
                 </button>
               </div>
-              <CertificateSheet issue={preview} />
+              {isUidaiFormKind(preview.kind) ? (
+                <iframe
+                  title={`Aadhaar certificate ${preview.certNo}`}
+                  src={uidaiFormUrl(preview.studentId, preview.issuedOn)}
+                  className="h-[720px] w-full rounded-lg border border-[var(--border)] bg-white"
+                />
+              ) : (
+                <CertificateSheet issue={preview} />
+              )}
             </div>
           ) : null}
         </div>
       </div>
+      ) : null}
 
       {holdDialog &&
       student &&
@@ -1256,6 +1440,28 @@ export function CertificatesWorkspace() {
           }}
         />
       ) : null}
+
+      <ConfirmDialog
+        open={!!voidTarget}
+        onOpenChange={(open) => {
+          if (!open) setVoidTargetId(null);
+        }}
+        title={
+          voidTarget
+            ? `Void ${voidTarget.certNo}?`
+            : "Void this certificate?"
+        }
+        description="Student status is not restored."
+        confirmLabel="Void"
+        tone="danger"
+        onConfirm={() => {
+          if (!voidTarget) return;
+          voidCertificate(voidTarget.id);
+          refresh();
+          flash("Certificate voided");
+          setVoidTargetId(null);
+        }}
+      />
     </ErpWorkspaceShell>
   );
 }

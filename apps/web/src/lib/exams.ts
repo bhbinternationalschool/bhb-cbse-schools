@@ -4,6 +4,13 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { sessionDaysSummary } from "@/lib/studentWorkingDays";
+import {
+  findAttendanceOverride,
+  loadAttendanceResultOverrides,
+  type AttendanceResultOverridesState,
+} from "@/lib/attendanceResultOverrides";
+import type { ExamRoom } from "@/lib/examSeating";
 import {
   DEFAULT_AY,
   loadMasters,
@@ -16,6 +23,7 @@ import {
   loadSis,
   normalizeStudent,
   saveSis,
+  type SisState,
   type SisStudent,
 } from "@/lib/sis";
 import {
@@ -26,13 +34,116 @@ import {
   resolveStudentSubjects,
 } from "@/lib/studentCurriculum";
 import { curriculumAfterClassChange } from "@/lib/officeCurriculumWorkflow";
-import { checkHold, setReportCardHoldFromStage } from "@/lib/holds";
+import {
+  checkHold,
+  checkHoldsForStudents,
+  setReportCardHoldFromStage,
+  type HoldCheck,
+} from "@/lib/holds";
 import {
   loadAttendance,
-  type AttendanceRegister,
+  type AttendanceState,
 } from "@/lib/attendance";
 import type { Subject as MasterSubject } from "@/lib/foundationMasters";
 import { ncfTagForSubject } from "@/lib/cbseSubjectGroups";
+import { recordExamsDeletion } from "@/lib/examsNormalizedClient";
+
+/**
+ * A subject graded, not marked: Masters calls it co-scholastic, or its NCF
+ * tag is CO. Either signal keeps it off the marks grid — it is rated on the
+ * scheme's co-scholastic areas instead. Until 2026-09-30 only the tag was
+ * checked, so Work Education and Music (co-scholastic in Masters, tagged B/C)
+ * were given marks columns out of 80.
+ */
+export function isGradedNotMarked(sub: { code: string; category: string; ncfTagId?: string | null; cbseGroupId?: string | null }): boolean {
+  return sub.category === "co_scholastic" || ncfTagForSubject(sub) === "CO";
+}
+
+/**
+ * Exam-desk subjects with the graded ones taken out, by Masters' word.
+ *
+ * The exam catalogue keeps rows it synthesised before a subject was marked
+ * co-scholastic (ART, GK and MUS sat there as marks out of 100 after the
+ * 2026-09-30 fix), so the sync skipping them is not enough: every list a
+ * marks grid or report card reads goes through this as well.
+ */
+function withoutGradedSubjects(subs: ExamSubject[], masters: MastersState | null | undefined): ExamSubject[] {
+  if (!masters) return subs;
+  const graded = new Set(
+    masters.subjects
+      .filter((m) => !m.parentId && isGradedNotMarked(m))
+      .map((m) => m.code.trim().toUpperCase()),
+  );
+  if (graded.size === 0) return subs;
+  return subs.filter((x) => !graded.has(x.code.trim().toUpperCase()));
+}
+
+/**
+ * Co-scholastic subjects Masters links to this class — each becomes a grade
+ * row on the sheet (A–E on the scheme's scale), never a marks column.
+ */
+export function coScholasticSubjectAreasForClass(
+  classId: string,
+  masters: MastersState | null | undefined,
+): CoScholasticArea[] {
+  if (!masters) return [];
+  const out: CoScholasticArea[] = [];
+  const seen = new Set<string>();
+  for (const link of masters.classSubjects ?? []) {
+    if (!link.isActive || link.classId !== classId) continue;
+    const sub = masters.subjects.find((x) => x.id === link.subjectId);
+    if (!sub || !sub.isActive || sub.parentId || !isGradedNotMarked(sub)) continue;
+    const code = sub.code.trim().toUpperCase();
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    out.push({ code, label: sub.nameEn || code });
+  }
+  return out;
+}
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
+import {
+  componentFailed,
+  componentsForSubject,
+  componentsForTerm,
+  componentsTotalMax,
+  defaultAssessmentScheme,
+  effectivePassPercent,
+  gradeForPercent,
+  gradeLabel,
+  NEP_CO_SCHOLASTIC_AREAS,
+  normalizeAssessmentSchemes,
+  schemeForClass,
+  splitForSubject,
+  type AssessmentScheme,
+  type CoScholasticArea,
+  type CoScholasticScale,
+} from "@/lib/examSchemes";
+
+import {
+  normalizeReportCardTemplates,
+  reportCardTemplateForClass,
+  resolvePresentation,
+  type CardPresentation,
+  type ReportCardTemplate,
+} from "@/lib/examReportTemplates";
+
+export {
+  reportCardTemplateForClass,
+  type CardPresentation,
+  type ReportCardTemplate,
+} from "@/lib/examReportTemplates";
+
+export {
+  componentsForSubject,
+  componentsForTerm,
+  componentsTotalMax,
+  gradeForPercent,
+  gradeLabel,
+  schemeForClass,
+  type AssessmentScheme,
+  type SchemeComponent,
+} from "@/lib/examSchemes";
 
 export type ExamTerm = {
   id: string;
@@ -92,6 +203,35 @@ export type ExamPolicy = {
   defaultRequiresSeparateMarksheet: boolean;
   /** Fail promotion if any subject is below pass % */
   requireAllSubjectsPassForPromotion: boolean;
+  /** NEP 2020 HPC — show socio-emotional/psychomotor co-scholastic domain
+   * ratings on the marks-entry grid and printed report card. Opt-in
+   * (defaults false) so it never appears on a report unannounced. */
+  enableCoScholastic: boolean;
+  /**
+   * How each class band is assessed — grade scale, marks vs grades vs
+   * descriptors, subject components (80 + 20, theory + practical), pass and
+   * promotion rules, co-scholastic areas. One default scheme always exists
+   * and reproduces the pre-2026-09-15 behaviour; the school adds others
+   * per band (see lib/examSchemes.ts).
+   */
+  schemes: AssessmentScheme[];
+  /**
+   * How each class's printed report card looks — layout, title, which
+   * blocks and signatures. Prefilled templates, assigned per class or per
+   * band; "Classic" reproduces the old card (lib/examReportTemplates.ts).
+   */
+  reportTemplates: ReportCardTemplate[];
+  /**
+   * Early-warning thresholds for the At-risk tab (lib/academicRisk.ts).
+   * Absent → DEFAULT_RISK_THRESHOLDS; the school tunes them here.
+   */
+  riskThresholds: {
+    attendancePct: number;
+    incidents: number;
+    homeworkRatio: number;
+    homeworkMinDue: number;
+    subjectDrops: number;
+  };
 };
 
 export type ExamSubject = {
@@ -119,13 +259,154 @@ export type ExamDateSheetEntry = {
   updatedAt: string;
 };
 
+/** Provenance of a remark that ends up on a printed report card. "ai" = an
+ * accepted AI draft, untouched; "ai_edited" = AI draft the teacher changed;
+ * "manual" = typed by a human. Kept on the record itself so the report can
+ * be audited later without consulting a separate log. */
+export type RemarkSource = "manual" | "ai" | "ai_edited";
+
+export function normalizeRemarkSource(v: unknown): RemarkSource {
+  return v === "ai" || v === "ai_edited" ? v : "manual";
+}
+
 export type StudentSubjectMark = {
   studentId: string;
   subjectId: string;
+  /** Which part of the subject this row is — "" for the whole subject,
+   * else a SchemeComponent code ("TE", "PT", "PR"…). One row per part. */
+  component: string;
   /** null = not entered / absent */
   marksObtained: number | null;
+  /** Grade for this row. In grade-only / descriptor schemes the teacher
+   * picks it and marksObtained stays null. */
   grade: string;
   remark: string;
+  /** Provenance of `remark`; "manual" for anything saved before this existed */
+  remarkSource: RemarkSource;
+};
+
+/** Class teacher's overall remark for one student on one mark sheet — the
+ * "Remarks" line at the bottom of the report card. Optional Hindi text is a
+ * translation of `text` (never independently authored) so both say the same
+ * thing to the parent. */
+export type StudentOverallRemark = {
+  studentId: string;
+  text: string;
+  textHi: string;
+  source: RemarkSource;
+  /** When the AI draft behind this was produced; null for manual */
+  generatedAt: string | null;
+  /** Engine/model label recorded at generation time, "" for manual */
+  model: string;
+};
+
+/**
+ * One student's marks on one question of one question paper — the item
+ * level beneath the subject total. Lets "Class 8-B is weak on Ch 3 /
+ * LO M802 / application items" be derived instead of guessed, and lets
+ * subject totals be summed rather than typed. Sits on the mark sheet like
+ * `coScholastic` does; empty on sheets saved before this existed.
+ */
+export type StudentItemScore = {
+  studentId: string;
+  subjectId: string;
+  /** ExamPaper.id the student wrote */
+  paperId: string;
+  /** Which set (A/B/…) the student wrote — questions differ per set */
+  setCode: string;
+  /** ExamPaperQuestion.id */
+  questionId: string;
+  /** null = not marked yet / absent for this item */
+  marks: number | null;
+};
+
+/** NEP 2020 Holistic Progress Card — co-scholastic domains rated by whoever
+ * enters marks for the class (same permission, no separate class-teacher
+ * gate — see the co-scholastic rounds's plan for why). */
+export type CoScholasticDomain = string;
+
+/** CBSE-style letter rating — 3-band A–C by default, 5-band A–E when the
+ * scheme says so — deliberately distinct from the 8-point A1–E academic
+ * scale so the two are never confused on a printed report. */
+export type CoScholasticRating = "A" | "B" | "C" | "D" | "E" | "AB";
+
+/** A child absent for the term's observation — recorded, never graded. */
+export const CO_SCHOLASTIC_ABSENT = "AB" as const;
+
+/** Pure — a stored/typed value as a rating, or null for "not rated". */
+export function parseCoScholasticRating(v: unknown): CoScholasticRating | null {
+  return v === "A" || v === "B" || v === "C" || v === "D" || v === "E" || v === CO_SCHOLASTIC_ABSENT
+    ? v
+    : null;
+}
+
+export type StudentCoScholasticEntry = {
+  studentId: string;
+  domain: CoScholasticDomain;
+  /** null = not yet rated */
+  rating: CoScholasticRating | null;
+};
+
+const CO_SCHOLASTIC_RATING_LABELS: Record<"A" | "B" | "C", string> = {
+  A: "Outstanding",
+  B: "Good",
+  C: "Needs Improvement",
+};
+
+const CO_SCHOLASTIC_RATING_LABELS_FIVE: Record<Exclude<CoScholasticRating, "AB">, string> = {
+  A: "Outstanding",
+  B: "Very Good",
+  C: "Good",
+  D: "Satisfactory",
+  E: "Needs Improvement",
+};
+
+/**
+ * Pure — human label for a co-scholastic rating letter. The same letter
+ * means different things on the two scales (C is the bottom of A–C but the
+ * middle of A–E), so the scale is part of the question.
+ */
+export function coScholasticRatingLabel(
+  rating: CoScholasticRating | null,
+  scale: CoScholasticScale = "three",
+): string {
+  if (!rating) return "Not rated";
+  if (rating === CO_SCHOLASTIC_ABSENT) return "Absent";
+  if (scale === "five" || rating === "D" || rating === "E") {
+    return CO_SCHOLASTIC_RATING_LABELS_FIVE[rating];
+  }
+  return CO_SCHOLASTIC_RATING_LABELS[rating];
+}
+
+const CO_SCHOLASTIC_DOMAIN_LABELS: Record<string, string> = {
+  socioEmotional: "Socio-Emotional Skills",
+  psychomotor: "Psychomotor Skills",
+};
+
+/** Pure — human label for a co-scholastic domain / area. */
+export function coScholasticDomainLabel(
+  domain: CoScholasticDomain,
+  areas?: CoScholasticArea[],
+): string {
+  return (
+    areas?.find((a) => a.code === domain)?.label ??
+    CO_SCHOLASTIC_DOMAIN_LABELS[domain] ??
+    domain
+  );
+}
+
+export const CO_SCHOLASTIC_DOMAINS: CoScholasticDomain[] = [
+  "socioEmotional",
+  "psychomotor",
+];
+
+/** A student who did not sit one subject's paper in this exam. One row per
+ * (student, subject); "absent in all subjects" is simply every subject
+ * listed. The reason is optional and is printed on the card next to AB. */
+export type StudentExamAbsence = {
+  studentId: string;
+  subjectId: string;
+  reason: string;
 };
 
 export type MarkSheet = {
@@ -135,10 +416,202 @@ export type MarkSheet = {
   classId: string;
   sectionId: string;
   marks: StudentSubjectMark[];
+  /** Student × subject absences in this exam — empty on sheets saved before this existed. */
+  absences: StudentExamAbsence[];
+  /** NEP 2020 HPC co-scholastic domain ratings — per student, not per
+   * subject, so this sits alongside `marks`, not nested inside it. Empty on
+   * sheets saved before this field existed. */
+  coScholastic: StudentCoScholasticEntry[];
+  /** Class teacher's overall remark per student — sits beside `marks` like
+   * `coScholastic` does. Empty on sheets saved before this field existed. */
+  overallRemarks: StudentOverallRemark[];
+  /** Question-wise marks per student per paper — see StudentItemScore. */
+  itemScores: StudentItemScore[];
   lockedAt: string | null;
   enteredBy: string;
   updatedAt: string;
 };
+
+/** Row id shared with exam_desk_marks: the old three-part key for a whole
+ * mark, a fourth part for a component, so rows saved before components
+ * existed keep their ids. */
+export function examMarkRowId(
+  sheetId: string,
+  m: Pick<StudentSubjectMark, "studentId" | "subjectId" | "component">,
+): string {
+  const base = `${sheetId}:${m.studentId}:${m.subjectId}`;
+  return m.component ? `${base}:${m.component}` : base;
+}
+
+export type FlatExamMark = {
+  id: string;
+  sheetId: string;
+  studentId: string;
+  subjectId: string;
+  component: string;
+  marksObtained: number | null;
+  grade: string;
+  remark: string;
+  remarkSource: RemarkSource;
+};
+
+/** Pure — flattens every sheet's `marks[]` into one addressable record per
+ * student-subject, keyed the same way exam_desk_marks already is at the DB
+ * layer (`${sheetId}:${studentId}:${subjectId}`). StudentSubjectMark has no
+ * `id` of its own, so this is what makes per-mark audit diffing possible —
+ * diffing `sheets[]` directly would only prove a marksheet was touched
+ * somewhere, not which student's mark changed or from what value. */
+export function flattenExamMarks(sheets: MarkSheet[]): FlatExamMark[] {
+  const out: FlatExamMark[] = [];
+  for (const sheet of sheets) {
+    for (const mark of sheet.marks) {
+      out.push({
+        id: examMarkRowId(sheet.id, mark),
+        sheetId: sheet.id,
+        studentId: mark.studentId,
+        subjectId: mark.subjectId,
+        component: mark.component,
+        marksObtained: mark.marksObtained,
+        grade: mark.grade,
+        remark: mark.remark,
+        remarkSource: mark.remarkSource,
+      });
+    }
+  }
+  return out;
+}
+
+export type FlatExamAbsence = {
+  id: string;
+  sheetId: string;
+  studentId: string;
+  subjectId: string;
+  reason: string;
+};
+
+/** Pure — one addressable record per absent student, for audit diffing. */
+export function flattenAbsences(sheets: MarkSheet[]): FlatExamAbsence[] {
+  const out: FlatExamAbsence[] = [];
+  for (const sheet of sheets) {
+    for (const a of sheet.absences ?? []) {
+      out.push({
+        id: `${sheet.id}:${a.studentId}:${a.subjectId}`,
+        sheetId: sheet.id,
+        studentId: a.studentId,
+        subjectId: a.subjectId,
+        reason: a.reason,
+      });
+    }
+  }
+  return out;
+}
+
+export function absenceKey(studentId: string, subjectId: string): string {
+  return `${studentId}:${subjectId}`;
+}
+
+export function normalizeAbsences(list: unknown): StudentExamAbsence[] {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  const out: StudentExamAbsence[] = [];
+  for (const raw of list as Partial<StudentExamAbsence>[]) {
+    const studentId = String(raw?.studentId ?? "").trim();
+    const subjectId = String(raw?.subjectId ?? "").trim();
+    const key = `${studentId}:${subjectId}`;
+    if (!studentId || !subjectId || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ studentId, subjectId, reason: String(raw?.reason ?? "").trim().slice(0, 200) });
+  }
+  return out;
+}
+
+export type FlatOverallRemark = {
+  id: string;
+  sheetId: string;
+  studentId: string;
+  text: string;
+  textHi: string;
+  source: RemarkSource;
+};
+
+/** Pure — same key scheme as the other flatteners, for the class teacher's
+ * overall remark: `${sheetId}:${studentId}`, matching exam_desk_remarks'
+ * synthetic id at the DB layer. */
+export function flattenOverallRemarks(sheets: MarkSheet[]): FlatOverallRemark[] {
+  const out: FlatOverallRemark[] = [];
+  for (const sheet of sheets) {
+    for (const r of sheet.overallRemarks) {
+      out.push({
+        id: `${sheet.id}:${r.studentId}`,
+        sheetId: sheet.id,
+        studentId: r.studentId,
+        text: r.text,
+        textHi: r.textHi,
+        source: r.source,
+      });
+    }
+  }
+  return out;
+}
+
+export type FlatItemScore = {
+  id: string;
+  sheetId: string;
+  studentId: string;
+  subjectId: string;
+  paperId: string;
+  setCode: string;
+  questionId: string;
+  marks: number | null;
+};
+
+export function flattenItemScores(sheets: MarkSheet[]): FlatItemScore[] {
+  const out: FlatItemScore[] = [];
+  for (const sheet of sheets) {
+    for (const e of sheet.itemScores ?? []) {
+      out.push({
+        id: `${sheet.id}:${e.studentId}:${e.paperId}:${e.setCode}:${e.questionId}`,
+        sheetId: sheet.id,
+        studentId: e.studentId,
+        subjectId: e.subjectId,
+        paperId: e.paperId,
+        setCode: e.setCode,
+        questionId: e.questionId,
+        marks: e.marks,
+      });
+    }
+  }
+  return out;
+}
+
+export type FlatCoScholasticRating = {
+  id: string;
+  sheetId: string;
+  studentId: string;
+  domain: CoScholasticDomain;
+  rating: CoScholasticRating | null;
+};
+
+/** Pure — same reasoning and key scheme as flattenExamMarks(), for
+ * co-scholastic ratings: `${sheetId}:${studentId}:${domain}`, matching
+ * exam_desk_coscholastic's synthetic id at the DB layer. */
+export function flattenCoScholastic(
+  sheets: MarkSheet[],
+): FlatCoScholasticRating[] {
+  const out: FlatCoScholasticRating[] = [];
+  for (const sheet of sheets) {
+    for (const entry of sheet.coScholastic) {
+      out.push({
+        id: `${sheet.id}:${entry.studentId}:${entry.domain}`,
+        sheetId: sheet.id,
+        studentId: entry.studentId,
+        domain: entry.domain,
+        rating: entry.rating,
+      });
+    }
+  }
+  return out;
+}
 
 export type PromotionDecision =
   | "pending"
@@ -166,6 +639,32 @@ export type PromotionRecord = {
   appliedToSisAt: string | null;
 };
 
+/**
+ * One child's seat for a whole exam.
+ *
+ * Saved rather than recomputed on each open: a child must find the same
+ * bench on every paper, and the slip pasted on the desk has to match what
+ * the invigilator's sheet says. Regenerating would move seats the moment a
+ * child is admitted or marked left.
+ */
+export type ExamSeatAssignment = {
+  roomId: string;
+  benchNumber: number;
+  /** 1-based, left to right. */
+  seatNumber: number;
+  studentId: string;
+  classId: string;
+};
+
+export type ExamSeatingPlan = {
+  id: string;
+  academicYearCode: string;
+  examTermId: string;
+  generatedAt: string;
+  generatedBy: string;
+  seats: ExamSeatAssignment[];
+};
+
 export type ExamsState = {
   version: 1;
   terms: ExamTerm[];
@@ -174,6 +673,34 @@ export type ExamsState = {
   sheets: MarkSheet[];
   policy: ExamPolicy;
   promotions: PromotionRecord[];
+  /** Exam rooms with their own bench count and bench size. */
+  rooms: ExamRoom[];
+  /** One saved seating plan per exam. */
+  seating: ExamSeatingPlan[];
+};
+
+/**
+ * Stores a caller has already loaded.
+ *
+ * Every reader in this file falls back to `loadExams()` / `loadMasters()` /
+ * `loadSis()` when a dep is missing. That is correct and it is slow: each of
+ * those is a localStorage read plus a JSON.parse plus a normalise pass over
+ * the whole blob (the SIS one is 1.2 MB). On 2026-09-15 the mark-entry grid
+ * called into this path once per CELL per render — 529 parses of the SIS
+ * blob and 1,455 of masters for ONE keystroke, 9.6 s frozen. A screen that
+ * loops over students or subjects loads each store once and passes it here.
+ */
+export type ExamDeps = {
+  state?: ExamsState;
+  masters?: MastersState;
+  sis?: SisState;
+  attendance?: AttendanceState;
+  /** Hand-corrected attendance per result (lib/attendanceResultOverrides). */
+  attendanceOverrides?: AttendanceResultOverridesState;
+  /** "Today" for the attendance count (tests pin it). */
+  todayIso?: string;
+  /** Pre-computed HOLD_REPORT_CARD verdicts by student id. */
+  holdChecks?: Map<string, HoldCheck>;
 };
 
 const STORAGE_KEY = "bhb_exams_v1";
@@ -182,6 +709,24 @@ let serverExamsCache: ExamsState | null = null;
 
 function id(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * The id of an exam subject synthesised from a masters subject code.
+ *
+ * Deterministic on purpose. Synthesised subjects used to get a random id and
+ * were written to storage from inside a read (a render, a report card) so
+ * that the next read would find them by id. Making the read pure means the
+ * same code must always resolve to the same id, whether or not it has been
+ * persisted yet — a mark saved against `esub_skt` on the phone and one saved
+ * on the desk are the same subject.
+ */
+export function examSubjectIdForCode(code: string): string {
+  const slug = code
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return `esub_${slug || "x"}`;
 }
 
 export function todayIso() {
@@ -207,6 +752,10 @@ export function defaultExamPolicy(): ExamPolicy {
     defaultRequiredOnMarksheet: true,
     defaultRequiresSeparateMarksheet: true,
     requireAllSubjectsPassForPromotion: true,
+    enableCoScholastic: false,
+    schemes: [defaultAssessmentScheme(33)],
+    reportTemplates: normalizeReportCardTemplates([]),
+    riskThresholds: { attendancePct: 75, incidents: 3, homeworkRatio: 0.6, homeworkMinDue: 5, subjectDrops: 2 },
   };
 }
 
@@ -216,11 +765,12 @@ export function normalizeExamPolicy(
   const d = defaultExamPolicy();
   if (!p) return d;
   const stage = p.reportCardHoldFromStage;
+  const passPercent = Math.min(
+    100,
+    Math.max(1, Math.floor(p.passPercent ?? d.passPercent)),
+  );
   return {
-    passPercent: Math.min(
-      100,
-      Math.max(1, Math.floor(p.passPercent ?? d.passPercent)),
-    ),
+    passPercent,
     gradeScale: "cbse8",
     defaultUtMaxMarks: Math.max(
       1,
@@ -256,6 +806,67 @@ export function normalizeExamPolicy(
       p.defaultRequiresSeparateMarksheet !== false,
     requireAllSubjectsPassForPromotion:
       p.requireAllSubjectsPassForPromotion !== false,
+    enableCoScholastic: !!p.enableCoScholastic,
+    schemes: normalizeAssessmentSchemes(p.schemes, passPercent),
+    reportTemplates: normalizeReportCardTemplates(p.reportTemplates),
+    riskThresholds: normalizeRiskThresholds(p.riskThresholds),
+  };
+}
+
+/** The scheme that assesses this class (the default when none names it). */
+export function schemeForClassId(
+  classId: string,
+  policy: ExamPolicy,
+): AssessmentScheme {
+  return schemeForClass(classId, policy.schemes);
+}
+
+/**
+ * Co-scholastic areas rated for a class: the scheme's own list, else the
+ * legacy NEP pair when the policy switch is on, else none.
+ */
+/** The printed-card template for this class (the default when none names it). */
+export function reportTemplateForClassId(
+  classId: string,
+  policy: ExamPolicy,
+): ReportCardTemplate {
+  return reportCardTemplateForClass(classId, policy.reportTemplates);
+}
+
+export function coScholasticAreasForClass(
+  classId: string,
+  policy: ExamPolicy,
+  masters?: MastersState | null,
+): CoScholasticArea[] {
+  const scheme = schemeForClassId(classId, policy);
+  const base =
+    scheme.coScholasticAreas.length > 0
+      ? scheme.coScholasticAreas
+      : policy.enableCoScholastic
+        ? NEP_CO_SCHOLASTIC_AREAS
+        : [];
+  // A subject Masters calls co-scholastic is graded here whatever the scheme
+  // says: marking it co-scholastic is the school's decision to rate it, and
+  // until this existed it fell off the marks grid with nowhere to grade it.
+  const extra = coScholasticSubjectAreasForClass(classId, masters).filter(
+    (a) => !base.some((b) => b.code.trim().toUpperCase() === a.code),
+  );
+  return extra.length ? [...base, ...extra] : base;
+}
+
+function normalizeRiskThresholds(
+  r: Partial<ExamPolicy["riskThresholds"]> | null | undefined,
+): ExamPolicy["riskThresholds"] {
+  const d = { attendancePct: 75, incidents: 3, homeworkRatio: 0.6, homeworkMinDue: 5, subjectDrops: 2 };
+  if (!r) return d;
+  const n = (v: unknown, lo: number, hi: number, dflt: number) =>
+    typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt;
+  return {
+    attendancePct: n(r.attendancePct, 0, 100, d.attendancePct),
+    incidents: Math.floor(n(r.incidents, 1, 50, d.incidents)),
+    homeworkRatio: n(r.homeworkRatio, 0, 1, d.homeworkRatio),
+    homeworkMinDue: Math.floor(n(r.homeworkMinDue, 1, 100, d.homeworkMinDue)),
+    subjectDrops: Math.floor(n(r.subjectDrops, 1, 20, d.subjectDrops)),
   };
 }
 
@@ -438,6 +1049,8 @@ function emptyState(): ExamsState {
     sheets: [],
     policy: defaultExamPolicy(),
     promotions: [],
+    rooms: [],
+    seating: [],
   };
 }
 
@@ -581,9 +1194,50 @@ function normalizeMark(m: Partial<StudentSubjectMark>): StudentSubjectMark {
   return {
     studentId: m.studentId ?? "",
     subjectId: m.subjectId ?? "",
+    component: String(m.component ?? "").toUpperCase().slice(0, 8),
     marksObtained: obtained,
     grade: m.grade ?? "—",
     remark: m.remark ?? "",
+    remarkSource: normalizeRemarkSource(m.remarkSource),
+  };
+}
+
+function normalizeOverallRemark(
+  r: Partial<StudentOverallRemark>,
+): StudentOverallRemark {
+  return {
+    studentId: r.studentId ?? "",
+    text: String(r.text ?? ""),
+    textHi: String(r.textHi ?? ""),
+    source: normalizeRemarkSource(r.source),
+    generatedAt: r.generatedAt ?? null,
+    model: String(r.model ?? ""),
+  };
+}
+
+function normalizeItemScore(e: Partial<StudentItemScore>): StudentItemScore {
+  const n = e.marks == null || e.marks === undefined ? null : Number(e.marks);
+  return {
+    studentId: String(e.studentId ?? ""),
+    subjectId: String(e.subjectId ?? ""),
+    paperId: String(e.paperId ?? ""),
+    setCode: String(e.setCode ?? "A").toUpperCase().slice(0, 1) || "A",
+    questionId: String(e.questionId ?? ""),
+    marks: n == null || !Number.isFinite(n) ? null : Math.max(0, n),
+  };
+}
+
+function normalizeCoScholasticEntry(
+  e: Partial<StudentCoScholasticEntry>,
+): StudentCoScholasticEntry {
+  const rating = parseCoScholasticRating(e.rating);
+  // Any area code the scheme defines is valid; unknown strings used to be
+  // silently coerced to socio-emotional, which mislabelled the rating.
+  const domain = String(e.domain ?? "").trim() || "socioEmotional";
+  return {
+    studentId: e.studentId ?? "",
+    domain,
+    rating,
   };
 }
 
@@ -595,6 +1249,20 @@ function normalizeSheet(s: Partial<MarkSheet>): MarkSheet {
     classId: s.classId ?? "",
     sectionId: s.sectionId ?? "",
     marks: Array.isArray(s.marks) ? s.marks.map(normalizeMark) : [],
+    absences: normalizeAbsences(s.absences),
+    coScholastic: Array.isArray(s.coScholastic)
+      ? s.coScholastic.map(normalizeCoScholasticEntry)
+      : [],
+    overallRemarks: Array.isArray(s.overallRemarks)
+      ? s.overallRemarks
+          .map(normalizeOverallRemark)
+          .filter((r) => r.studentId && (r.text || r.textHi))
+      : [],
+    itemScores: Array.isArray(s.itemScores)
+      ? s.itemScores
+          .map(normalizeItemScore)
+          .filter((e) => e.studentId && e.subjectId && e.paperId && e.questionId)
+      : [],
     lockedAt: s.lockedAt ?? null,
     enteredBy: s.enteredBy ?? "",
     updatedAt: s.updatedAt ?? new Date().toISOString(),
@@ -634,7 +1302,7 @@ export function loadExams(): ExamsState {
     return emptyState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyState();
     const parsed = JSON.parse(raw) as ExamsState;
     const terms =
@@ -659,6 +1327,13 @@ export function loadExams(): ExamsState {
       promotions: Array.isArray(parsed.promotions)
         ? parsed.promotions.map(normalizePromotion)
         : [],
+      // Carried, not dropped. This normaliser sits between the read and the
+      // push, and a field it forgets is a field the next save erases from
+      // the database.
+      rooms: Array.isArray(parsed.rooms) ? parsed.rooms.map(normalizeExamRoom) : [],
+      seating: Array.isArray(parsed.seating)
+        ? parsed.seating.map(normalizeSeatingPlan)
+        : [],
     };
     const migrated = terms.some(
       (t, i) =>
@@ -668,7 +1343,7 @@ export function loadExams(): ExamsState {
     const missingPolicy = !parsed.policy;
     if (migrated || missingPolicy) {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
       } catch (e) {
         console.warn("[exams] localStorage quota exceeded", e);
       }
@@ -679,26 +1354,46 @@ export function loadExams(): ExamsState {
   }
 }
 
-export function saveExams(state: ExamsState) {
+/**
+ * Returns whether the state was actually stored.
+ *
+ * It used to return void, and every caller read that as success. A refused
+ * write — a closed academic year selected in the header, or a role without
+ * `exams: edit` — returned early here, and the date sheet answered "Paper
+ * updated" while the paper had not moved. The screen said the opposite of
+ * what the data said, which is the one thing a save must never do.
+ *
+ * The refusal itself still raises its own event for the global banner; this
+ * is so the caller can stop and say so in place.
+ */
+export function saveExams(state: ExamsState): { ok: boolean; error?: string } {
   if (typeof window !== "undefined") {
-    if (!assertModulePermission("exams", "edit", "saveExams")) return;
+    if (!assertModulePermission("exams", "edit", "saveExams")) {
+      return {
+        ok: false,
+        error:
+          "This change was not saved — the exams desk is read-only for you, " +
+          "or the academic year selected at the top is closed.",
+      };
+    }
   }
 
   if (typeof window === "undefined") {
     writeExamsLocalRaw(state);
-    void import("@/lib/examsPersistence").then(({ scheduleExamsSync }) => {
+    void trackServerWork(import("@/lib/examsPersistence").then(({ scheduleExamsSync }) => {
       scheduleExamsSync(state);
-    });
-    return;
+    }));
+    return { ok: true };
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[exams] localStorage quota exceeded — relying on server DB sync", e);
   }
-  void import("@/lib/examsPersistence").then(({ scheduleExamsSync }) => {
+  void trackServerWork(import("@/lib/examsPersistence").then(({ scheduleExamsSync }) => {
     scheduleExamsSync(state);
-  });
+  }));
+  return { ok: true };
 }
 
 export function writeExamsLocalRaw(state: ExamsState) {
@@ -707,7 +1402,7 @@ export function writeExamsLocalRaw(state: ExamsState) {
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[exams] localStorage quota exceeded — relying on server DB sync", e);
   }
@@ -783,7 +1478,19 @@ export function listExamTerms(
   const s = state ?? loadExams();
   return s.terms
     .filter((t) => t.isActive && t.academicYearCode === ay)
-    .sort((a, b) => a.sortOrder - b.sortOrder);
+    .sort(compareExamTermsByDate);
+}
+
+/**
+ * Exams in the order they are held (8 Oct 2026): by the exam window's start
+ * date; terms without dates keep their sortOrder after the dated ones.
+ * sortOrder alone was creation order, so a Half-Yearly created before PT-1
+ * was listed first.
+ */
+export function compareExamTermsByDate(a: ExamTerm, b: ExamTerm): number {
+  const ka = (a.startsOn || "").slice(0, 10) || "9999-99-99";
+  const kb = (b.startsOn || "").slice(0, 10) || "9999-99-99";
+  return ka.localeCompare(kb) || a.sortOrder - b.sortOrder;
 }
 
 export function listAllExamTerms(
@@ -793,7 +1500,7 @@ export function listAllExamTerms(
   const s = state ?? loadExams();
   return s.terms
     .filter((t) => t.academicYearCode === ay)
-    .sort((a, b) => a.sortOrder - b.sortOrder);
+    .sort(compareExamTermsByDate);
 }
 
 export function createExamTerm(input: {
@@ -983,6 +1690,13 @@ export function deleteExamTerm(
         "Cannot delete — student marks exist. Deactivate instead, or clear marks first.",
     };
   }
+  if (typeof window !== "undefined") {
+    recordExamsDeletion("exam_desk_terms", [termId]);
+    recordExamsDeletion(
+      "exam_desk_date_sheet",
+      state.dateSheet.filter((row) => row.examTermId === termId).map((row) => row.id),
+    );
+  }
   saveExams({
     ...state,
     terms: state.terms.filter((t) => t.id !== termId),
@@ -1029,6 +1743,133 @@ export function listExamDateSheet(
         a.startTime.localeCompare(b.startTime) ||
         a.classId.localeCompare(b.classId),
     );
+}
+
+/* ── rooms and seating ───────────────────────────────────────────── */
+
+function normalizeExamRoom(r: Partial<ExamRoom>): ExamRoom {
+  const seats = Math.floor(Number(r.seatsPerBench ?? 2));
+  return {
+    id: r.id ?? id("room"),
+    name: (r.name ?? "").trim() || "Room",
+    benches: Math.max(0, Math.floor(Number(r.benches ?? 0))),
+    // Two or three; anything else is somebody's typo, and a bench of seven
+    // would quietly break every arrangement built on it.
+    seatsPerBench: seats === 3 ? 3 : 2,
+    isActive: r.isActive !== false,
+    note: (r.note ?? "").trim(),
+    sortOrder: Math.floor(Number(r.sortOrder ?? 0)),
+  };
+}
+
+function normalizeSeatingPlan(p: Partial<ExamSeatingPlan>): ExamSeatingPlan {
+  return {
+    id: p.id ?? id("seat"),
+    academicYearCode: p.academicYearCode ?? DEFAULT_AY,
+    examTermId: p.examTermId ?? "",
+    generatedAt: p.generatedAt ?? new Date().toISOString(),
+    generatedBy: p.generatedBy ?? "",
+    seats: Array.isArray(p.seats)
+      ? p.seats.map((s) => ({
+          roomId: String(s.roomId ?? ""),
+          benchNumber: Math.max(1, Math.floor(Number(s.benchNumber ?? 1))),
+          seatNumber: Math.max(1, Math.floor(Number(s.seatNumber ?? 1))),
+          studentId: String(s.studentId ?? ""),
+          classId: String(s.classId ?? ""),
+        }))
+      : [],
+  };
+}
+
+export function listExamRooms(state?: ExamsState): ExamRoom[] {
+  return (state ?? loadExams()).rooms
+    .slice()
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+}
+
+export function saveExamRoom(input: Partial<ExamRoom>): { ok: true; room: ExamRoom } | { ok: false; error: string } {
+  const name = (input.name ?? "").trim();
+  if (!name) return { ok: false, error: "Give the room a name" };
+  const benches = Math.floor(Number(input.benches ?? 0));
+  if (!Number.isFinite(benches) || benches < 1) {
+    return { ok: false, error: "How many benches does this room have?" };
+  }
+  const state = loadExams();
+  const clash = state.rooms.find(
+    (r) => r.id !== input.id && r.name.trim().toLowerCase() === name.toLowerCase(),
+  );
+  if (clash) return { ok: false, error: `There is already a room called ${clash.name}` };
+  const room = normalizeExamRoom({
+    ...input,
+    name,
+    benches,
+    sortOrder: input.sortOrder ?? state.rooms.length + 1,
+  });
+  const rooms = state.rooms.some((r) => r.id === room.id)
+    ? state.rooms.map((r) => (r.id === room.id ? room : r))
+    : [...state.rooms, room];
+  saveExams({ ...state, rooms });
+  return { ok: true, room };
+}
+
+export function deleteExamRoom(roomId: string): { ok: true } | { ok: false; error: string } {
+  const state = loadExams();
+  // A room a saved plan seats children in is not removed from under them.
+  const used = state.seating.find((p) => p.seats.some((s) => s.roomId === roomId));
+  if (used) {
+    return {
+      ok: false,
+      error: "Children are seated in this room by a saved plan. Clear that plan first.",
+    };
+  }
+  if (typeof window !== "undefined") recordExamsDeletion("exam_desk_rooms", [roomId]);
+  saveExams({ ...state, rooms: state.rooms.filter((r) => r.id !== roomId) });
+  return { ok: true };
+}
+
+export function seatingPlanFor(
+  academicYearCode: string,
+  examTermId: string,
+  state?: ExamsState,
+): ExamSeatingPlan | null {
+  const s = state ?? loadExams();
+  return (
+    s.seating.find(
+      (p) => p.academicYearCode === academicYearCode && p.examTermId === examTermId,
+    ) ?? null
+  );
+}
+
+/** One plan per exam — generating again replaces it, never stacks a second. */
+export function saveSeatingPlan(input: {
+  academicYearCode: string;
+  examTermId: string;
+  generatedBy: string;
+  seats: ExamSeatAssignment[];
+}): { ok: true; plan: ExamSeatingPlan } | { ok: false; error: string } {
+  if (!input.examTermId) return { ok: false, error: "Select an exam" };
+  const state = loadExams();
+  const existing = seatingPlanFor(input.academicYearCode, input.examTermId, state);
+  const plan = normalizeSeatingPlan({
+    id: existing?.id,
+    academicYearCode: input.academicYearCode,
+    examTermId: input.examTermId,
+    generatedAt: new Date().toISOString(),
+    generatedBy: input.generatedBy,
+    seats: input.seats,
+  });
+  const seating = existing
+    ? state.seating.map((p) => (p.id === plan.id ? plan : p))
+    : [...state.seating, plan];
+  saveExams({ ...state, seating });
+  return { ok: true, plan };
+}
+
+export function deleteSeatingPlan(planId: string): { ok: true } {
+  const state = loadExams();
+  if (typeof window !== "undefined") recordExamsDeletion("exam_desk_seating", [planId]);
+  saveExams({ ...state, seating: state.seating.filter((p) => p.id !== planId) });
+  return { ok: true };
 }
 
 export function saveExamDateSheetEntry(input: {
@@ -1118,12 +1959,16 @@ export function saveExamDateSheetEntry(input: {
       error: "This class already has an overlapping exam sitting",
     };
   }
-  saveExams({
+  // Report what the write did, not what it was asked to do. A refused save
+  // used to come back here as success and the date sheet said "Paper
+  // updated" over an unchanged date.
+  const saved = saveExams({
     ...state,
     dateSheet: state.dateSheet.some((row) => row.id === entry.id)
       ? state.dateSheet.map((row) => (row.id === entry.id ? entry : row))
       : [...state.dateSheet, entry],
   });
+  if (!saved.ok) return { ok: false, error: saved.error ?? "Not saved" };
   return { ok: true, entry };
 }
 
@@ -1134,10 +1979,12 @@ export function deleteExamDateSheetEntry(
   if (!state.dateSheet.some((row) => row.id === entryId)) {
     return { ok: false, error: "Date-sheet entry not found" };
   }
-  saveExams({
+  if (typeof window !== "undefined") recordExamsDeletion("exam_desk_date_sheet", [entryId]);
+  const saved = saveExams({
     ...state,
     dateSheet: state.dateSheet.filter((row) => row.id !== entryId),
   });
+  if (!saved.ok) return { ok: false, error: saved.error ?? "Not saved" };
   return { ok: true };
 }
 
@@ -1163,11 +2010,16 @@ export function subjectsForClass(
 export function syncExamSubjectsFromMasters(
   classId?: string,
   state?: ExamsState,
+  deps?: ExamDeps & {
+    /** Write the widened catalog to storage. Off by default: this is a
+     * read-path helper and a read must not write (see ExamDeps). */
+    persist?: boolean;
+  },
 ): ExamsState {
-  const s = state ?? loadExams();
+  const s = state ?? deps?.state ?? loadExams();
   let masters: MastersState;
   try {
-    masters = loadMasters();
+    masters = deps?.masters ?? loadMasters();
   } catch {
     return s;
   }
@@ -1183,15 +2035,14 @@ export function syncExamSubjectsFromMasters(
       if (!link.isActive || link.classId !== cid) continue;
       const sub = masters.subjects.find((x) => x.id === link.subjectId);
       if (!sub || !sub.isActive || sub.parentId) continue;
-      const tag = ncfTagForSubject(sub);
-      if (tag === "CO") continue;
+      if (isGradedNotMarked(sub)) continue;
       linkedCodes.set(sub.code.toUpperCase(), sub);
     }
   }
 
   // Also pull any confirmed student enrollments so cart-only codes exist
   try {
-    const sis = loadSis();
+    const sis = deps?.sis ?? loadSis();
     for (const st of sis.students) {
       if (classId && st.classId !== classId) continue;
       if (!isCurriculumConfirmed(st)) continue;
@@ -1199,7 +2050,7 @@ export function syncExamSubjectsFromMasters(
         forAssessment: true,
       });
       for (const sub of enrolled) {
-        if (sub.parentId) continue;
+        if (sub.parentId || isGradedNotMarked(sub)) continue;
         linkedCodes.set(sub.code.toUpperCase(), sub);
       }
     }
@@ -1217,7 +2068,7 @@ export function syncExamSubjectsFromMasters(
     const existing = byCode.get(code);
     if (!existing) {
       const row: ExamSubject = {
-        id: id("esub"),
+        id: examSubjectIdForCode(master.code),
         code: master.code,
         name: master.nameEn,
         classIds: classId ? [classId] : [],
@@ -1252,7 +2103,7 @@ export function syncExamSubjectsFromMasters(
 
   if (!changed) return s;
   const next = { ...s, subjects };
-  saveExams(next);
+  if (deps?.persist) saveExams(next);
   return next;
 }
 
@@ -1279,7 +2130,7 @@ function matchExamSubjectsToCodes(
     const master = mastersSubs.find((s) => s.code.toUpperCase() === code);
     if (!master) continue;
     out.push({
-      id: id("esub"),
+      id: examSubjectIdForCode(master.code),
       code: master.code,
       name: master.nameEn,
       classIds: [],
@@ -1298,21 +2149,22 @@ function matchExamSubjectsToCodes(
 export function subjectsForStudent(
   student: SisStudent,
   state?: ExamsState,
+  deps?: ExamDeps,
 ): ExamSubject[] {
-  let s = state ?? loadExams();
-  s = syncExamSubjectsFromMasters(student.classId, s);
+  let s = state ?? deps?.state ?? loadExams();
+  s = syncExamSubjectsFromMasters(student.classId, s, deps);
   const examSubs = subjectsForClass(student.classId, s);
 
   let masters: MastersState;
   try {
-    masters = loadMasters();
+    masters = deps?.masters ?? loadMasters();
   } catch {
     return examSubs;
   }
 
   const enrolled = resolveStudentSubjects(student, masters, {
     forAssessment: true,
-  });
+  }).filter((sub) => !isGradedNotMarked(sub));
   const source = assessmentEnrollmentSource(student, masters);
 
   if (enrolled.length === 0) {
@@ -1327,16 +2179,12 @@ export function subjectsForStudent(
     masters.subjects,
   );
 
-  // Persist any synthesized exam subjects
-  const knownIds = new Set(s.subjects.map((x) => x.id));
-  const toAdd = matched.filter((m) => !knownIds.has(m.id));
-  if (toAdd.length > 0) {
-    const next = { ...s, subjects: [...s.subjects, ...toAdd] };
-    saveExams(next);
-  }
+  // Synthesised subjects are NOT written here — this runs inside renders and
+  // report cards. Their ids are deterministic (examSubjectIdForCode), and
+  // saveMarkSheet persists whichever ones a sheet actually uses.
 
-  if (matched.length > 0) return matched;
-  return source === "confirmed_cart" ? [] : examSubs;
+  if (matched.length > 0) return withoutGradedSubjects(matched, masters);
+  return source === "confirmed_cart" ? [] : withoutGradedSubjects(examSubs, masters);
 }
 
 /** Union of subjects needed for a section mark sheet (per-student enrollment aware). */
@@ -1344,18 +2192,20 @@ export function subjectsForMarkEntry(
   classId: string,
   students: SisStudent[],
   state?: ExamsState,
+  deps?: ExamDeps,
 ): ExamSubject[] {
-  const s = syncExamSubjectsFromMasters(classId, state ?? loadExams());
+  const d = withLoadedDeps(deps);
+  const s = syncExamSubjectsFromMasters(classId, state ?? d.state, d);
   const byCode = new Map<string, ExamSubject>();
 
   for (const st of students) {
-    for (const sub of subjectsForStudent(st, s)) {
+    for (const sub of subjectsForStudent(st, s, d)) {
       byCode.set(sub.code.toUpperCase(), sub);
     }
   }
 
   if (byCode.size === 0) {
-    return subjectsForClass(classId, s);
+    return withoutGradedSubjects(subjectsForClass(classId, s), d.masters);
   }
 
   return [...byCode.values()].sort(
@@ -1368,10 +2218,76 @@ export function studentTakesExamSubject(
   student: SisStudent,
   subject: ExamSubject,
   state?: ExamsState,
+  deps?: ExamDeps,
 ): boolean {
-  const list = subjectsForStudent(student, state);
+  const list = subjectsForStudent(student, state, deps);
   const code = subject.code.toUpperCase();
   return list.some((s) => s.code.toUpperCase() === code);
+}
+
+/** Fill in whichever stores the caller did not pass, loading each ONCE. */
+function withLoadedDeps(deps?: ExamDeps): ExamDeps & { state: ExamsState } {
+  let masters: MastersState | null = deps?.masters ?? null;
+  if (!masters) {
+    try {
+      masters = loadMasters();
+    } catch {
+      masters = null;
+    }
+  }
+  let sis: SisState | null = deps?.sis ?? null;
+  if (!sis) {
+    try {
+      sis = loadSis();
+    } catch {
+      sis = null;
+    }
+  }
+  return {
+    ...deps,
+    state: deps?.state ?? loadExams(),
+    ...(masters ? { masters } : {}),
+    ...(sis ? { sis } : {}),
+  };
+}
+
+/**
+ * Which exam subjects each student in a section takes, resolved once for the
+ * whole roster: `Map<studentId, Set<subjectId>>`.
+ *
+ * The mark-entry grid asked `studentTakesExamSubject` per cell in render,
+ * and each call re-parsed the school's stores from localStorage. For LKG-A
+ * (33 × 7 cells) that was 9.6 s per keystroke. This does the same
+ * resolution with every store loaded once and every class synced once.
+ */
+export function subjectTakeMap(
+  students: SisStudent[],
+  subjects: ExamSubject[],
+  state?: ExamsState,
+  deps?: ExamDeps,
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  if (students.length === 0) return out;
+  const d = withLoadedDeps(deps);
+  let s = state ?? d.state;
+  for (const classId of new Set(students.map((st) => st.classId))) {
+    s = syncExamSubjectsFromMasters(classId, s, d);
+  }
+  const idsByCode = new Map<string, string[]>();
+  for (const sub of subjects) {
+    const code = sub.code.toUpperCase();
+    idsByCode.set(code, [...(idsByCode.get(code) ?? []), sub.id]);
+  }
+  for (const st of students) {
+    const takes = new Set<string>();
+    for (const sub of subjectsForStudent(st, s, d)) {
+      for (const sid of idsByCode.get(sub.code.toUpperCase()) ?? []) {
+        takes.add(sid);
+      }
+    }
+    out.set(st.id, takes);
+  }
+  return out;
 }
 
 export function findMarkSheet(
@@ -1402,102 +2318,233 @@ export function buildEmptyMarksGrid(
   term: ExamTerm,
   existing?: MarkSheet,
   passPercent = 33,
+  scheme?: AssessmentScheme,
 ): StudentSubjectMark[] {
   const map = new Map<string, StudentSubjectMark>();
   for (const m of existing?.marks ?? []) {
-    map.set(`${m.studentId}:${m.subjectId}`, m);
+    map.set(`${m.studentId}:${m.subjectId}:${m.component}`, m);
   }
+  const pass = scheme ? effectivePassPercent(scheme, passPercent) : passPercent;
+  const gradeOf = (obtained: number | null, max: number, prevGrade: string | undefined) => {
+    if (scheme && scheme.displayMode !== "marks_grade" && obtained == null) {
+      // Grade-only / descriptor entry: the teacher picked this grade.
+      return prevGrade && prevGrade !== "—" ? prevGrade : "—";
+    }
+    if (scheme) {
+      return gradeForPercent(obtained == null || max <= 0 ? null : (obtained / max) * 100, scheme);
+    }
+    return gradeFromMarks(obtained, max, pass);
+  };
   const out: StudentSubjectMark[] = [];
+  const partsBySubject = new Map(
+    subjects.map((sub) => [sub.id, scheme ? componentsForSubject(scheme, term.code, sub.code) : []] as const),
+  );
   for (const st of students) {
     for (const sub of subjects) {
-      const key = `${st.id}:${sub.id}`;
+      const parts = partsBySubject.get(sub.id) ?? [];
+      if (parts.length === 0) {
+        const prev = map.get(`${st.id}:${sub.id}:`);
+        const max = effectiveMaxMarks(term, sub);
+        const obtained = prev?.marksObtained ?? null;
+        out.push({
+          studentId: st.id,
+          subjectId: sub.id,
+          component: "",
+          marksObtained: obtained,
+          grade: gradeOf(obtained, max, prev?.grade),
+          remark: prev?.remark ?? "",
+          remarkSource: prev?.remarkSource ?? "manual",
+        });
+        continue;
+      }
+      for (const c of parts) {
+        const prev = map.get(`${st.id}:${sub.id}:${c.code}`);
+        const obtained = prev?.marksObtained ?? null;
+        out.push({
+          studentId: st.id,
+          subjectId: sub.id,
+          component: c.code,
+          marksObtained: obtained,
+          grade: gradeOf(obtained, c.maxMarks, prev?.grade),
+          remark: prev?.remark ?? "",
+          remarkSource: prev?.remarkSource ?? "manual",
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/** Pure — mirrors buildEmptyMarksGrid(): one entry per (student x domain)
+ * pair, carrying forward any existing rating from `existing`, defaulting to
+ * unrated (null) otherwise. */
+export function buildEmptyCoScholasticGrid(
+  students: SisStudent[],
+  existing?: MarkSheet,
+  areas?: CoScholasticArea[],
+): StudentCoScholasticEntry[] {
+  const map = new Map<string, StudentCoScholasticEntry>();
+  for (const e of existing?.coScholastic ?? []) {
+    map.set(`${e.studentId}:${e.domain}`, e);
+  }
+  const domains = areas ? areas.map((a) => a.code) : CO_SCHOLASTIC_DOMAINS;
+  const out: StudentCoScholasticEntry[] = [];
+  for (const st of students) {
+    for (const domain of domains) {
+      const key = `${st.id}:${domain}`;
       const prev = map.get(key);
-      const max = effectiveMaxMarks(term, sub);
-      const obtained = prev?.marksObtained ?? null;
       out.push({
         studentId: st.id,
-        subjectId: sub.id,
-        marksObtained: obtained,
-        grade: gradeFromMarks(obtained, max, passPercent),
-        remark: prev?.remark ?? "",
+        domain,
+        rating: prev?.rating ?? null,
       });
     }
   }
   return out;
 }
 
-export function saveMarkSheet(input: {
+export type SaveMarkSheetInput = {
   academicYearCode: string;
   examTermId: string;
   classId: string;
   sectionId: string;
   marks: StudentSubjectMark[];
+  coScholastic?: StudentCoScholasticEntry[];
+  /** Student × subject absences; omit to keep what the sheet had. */
+  absences?: StudentExamAbsence[];
   enteredBy: string;
   lock?: boolean;
-}):
-  | { ok: true; sheet: MarkSheet }
+};
+
+/** What a sheet write is for. The server applies different rules to each:
+ * a locked sheet still takes remarks and an unlock, nothing else. */
+export type SheetWriteIntent =
+  | "marks"
+  | "lock"
+  | "unlock"
+  | "remarks"
+  | "itemScores";
+
+export const LOCKED_SHEET_MESSAGE =
+  "Mark sheet is locked — ask the principal or exam in-charge to unlock it before changing marks";
+
+/**
+ * Pure: validate and build the next version of a section's mark sheet
+ * without touching storage. `existing` is the sheet the caller holds — from
+ * the browser's copy on the desk, from the database on the server — so the
+ * lock and the version it carries are whatever THAT copy says.
+ *
+ * Refuses a locked sheet outright. It used to let `lock: true` through,
+ * which meant "Save & lock" on an already-locked sheet quietly rewrote the
+ * marks it was supposed to be protecting.
+ */
+export function prepareMarkSheet(
+  input: SaveMarkSheetInput,
+  state: ExamsState,
+  existing: MarkSheet | undefined,
+  deps?: ExamDeps,
+):
+  | { ok: true; sheet: MarkSheet; subjectsUsed: ExamSubject[] }
   | { ok: false; error: string } {
   if (!input.examTermId || !input.sectionId || !input.classId) {
     return { ok: false, error: "Select exam, class and section" };
   }
-  const state = loadExams();
   const term = state.terms.find((t) => t.id === input.examTermId);
   if (!term) return { ok: false, error: "Exam term not found" };
+  if (existing?.lockedAt) {
+    return { ok: false, error: LOCKED_SHEET_MESSAGE };
+  }
 
-  const subjects = subjectsForMarkEntry(
-    input.classId,
-    // Validate against marks' student ids present in sheet
-    (() => {
-      try {
-        const sis = loadSis();
-        const ids = new Set(input.marks.map((m) => m.studentId));
-        return sis.students.filter((st) => ids.has(st.id));
-      } catch {
-        return [];
-      }
-    })(),
-    state,
-  );
+  const d = withLoadedDeps({ ...deps, state });
+  const ids = new Set(input.marks.map((m) => m.studentId));
+  const students = (d.sis?.students ?? []).filter((st) => ids.has(st.id));
+  const subjects = subjectsForMarkEntry(input.classId, students, state, d);
   const subById = new Map(subjects.map((s) => [s.id, s]));
   // Also allow any active exam subject by id (legacy sheets)
   for (const s of state.subjects) {
     if (s.isActive && !subById.has(s.id)) subById.set(s.id, s);
   }
-  const passPercent = getExamPolicy(state).passPercent;
+  const policy = getExamPolicy(state);
+  const scheme = schemeForClassId(input.classId, policy);
+  // Parts are per subject: English may be Written + Oral while Maths is one
+  // mark, and a subject without a split keeps the scheme's components.
+  const partsCache = new Map<string, ReturnType<typeof componentsForSubject>>();
+  const partsOf = (sub: ExamSubject | undefined) => {
+    if (!sub) return componentsForTerm(scheme, term.code);
+    let hit = partsCache.get(sub.id);
+    if (!hit) {
+      hit = componentsForSubject(scheme, term.code, sub.code);
+      partsCache.set(sub.id, hit);
+    }
+    return hit;
+  };
+  const maxFor = (sub: ExamSubject | undefined, component: string): number => {
+    if (component) return partsOf(sub).find((c) => c.code === component)?.maxMarks ?? 0;
+    return sub ? effectiveMaxMarks(term, sub) : 100;
+  };
 
   for (const m of input.marks) {
     const sub = subById.get(m.subjectId);
     if (!sub) continue;
-    const max = effectiveMaxMarks(term, sub);
+    const parts = partsOf(sub);
+    const partByCode = new Map(parts.map((c) => [c.code, c]));
+    const component = String(m.component ?? "").toUpperCase();
+    if (component && !partByCode.has(component)) {
+      return {
+        ok: false,
+        error: `${sub.name}: "${component}" is not one of its parts in this class's assessment scheme`,
+      };
+    }
+    if (!component && parts.length > 0) {
+      return {
+        ok: false,
+        error: `${sub.name}: this exam is entered component-wise (${parts.map((c) => c.code).join(" + ")}) for this class`,
+      };
+    }
+    const max = maxFor(sub, component);
     if (m.marksObtained != null && m.marksObtained > max) {
       return {
         ok: false,
-        error: `${sub.name}: marks cannot exceed ${max}`,
+        error: `${sub.name}${component ? ` (${partByCode.get(component)?.label ?? component})` : ""}: marks cannot exceed ${max}`,
       };
     }
   }
 
-  const existing = findMarkSheet(
-    input.academicYearCode,
-    input.examTermId,
-    input.sectionId,
-    state,
-  );
-  if (existing?.lockedAt && !input.lock) {
-    return {
-      ok: false,
-      error: "Mark sheet is locked — unlock is not available in demo",
-    };
-  }
+  const absences = normalizeAbsences(input.absences ?? existing?.absences ?? []);
+  const absentKeys = new Set(absences.map((a) => absenceKey(a.studentId, a.subjectId)));
 
   const normalizedMarks = input.marks.map((m) => {
     const sub = subById.get(m.subjectId);
-    const max = sub ? effectiveMaxMarks(term, sub) : 100;
+    const component = String(m.component ?? "").toUpperCase();
+    const max = maxFor(sub, component);
+    if (absentKeys.has(absenceKey(m.studentId, m.subjectId))) {
+      // Absent for this paper: no marks, whatever the cell held.
+      return normalizeMark({ ...m, component, marksObtained: null, grade: "AB" });
+    }
+    const picked =
+      scheme.displayMode !== "marks_grade" && m.marksObtained == null
+        ? m.grade && m.grade !== "—"
+          ? m.grade
+          : "—"
+        : gradeForPercent(
+            m.marksObtained == null || max <= 0 ? null : (m.marksObtained / max) * 100,
+            scheme,
+          );
     return normalizeMark({
       ...m,
-      grade: gradeFromMarks(m.marksObtained, max, passPercent),
+      component,
+      grade: picked,
     });
   });
+
+  // One sheet per section is shared by every teacher of it. A subject teacher
+  // sees and sends only their own subjects, so the sheet keeps every other
+  // subject's marks exactly as stored — until 2026-10-05 a save replaced the
+  // whole sheet and erased the other teachers' marks (Class V HY was being
+  // filled subject by subject that morning). A subject the caller sent is
+  // theirs to rewrite; one they did not send is left alone.
+  const sentSubjects = new Set(input.marks.map((m) => m.subjectId));
+  const keptMarks = (existing?.marks ?? []).filter((m) => !sentSubjects.has(m.subjectId));
 
   const now = new Date().toISOString();
   const sheet = normalizeSheet({
@@ -1506,17 +2553,325 @@ export function saveMarkSheet(input: {
     examTermId: input.examTermId,
     classId: input.classId,
     sectionId: input.sectionId,
-    marks: normalizedMarks,
+    marks: [...keptMarks, ...normalizedMarks],
+    absences,
+    coScholastic: input.coScholastic ?? existing?.coScholastic ?? [],
+    overallRemarks: existing?.overallRemarks ?? [],
+    itemScores: existing?.itemScores ?? [],
     lockedAt: input.lock ? now : existing?.lockedAt ?? null,
     enteredBy: input.enteredBy,
     updatedAt: now,
   });
 
-  const sheets = existing
-    ? state.sheets.map((s) => (s.id === existing.id ? sheet : s))
+  // Synthesised subjects the sheet refers to but the catalog has not stored
+  // yet — persisted alongside the sheet so its marks always resolve.
+  const known = new Set(state.subjects.map((x) => x.id));
+  const subjectsUsed: ExamSubject[] = [];
+  for (const m of sheet.marks) {
+    if (known.has(m.subjectId)) continue;
+    const sub = subById.get(m.subjectId);
+    if (sub) {
+      subjectsUsed.push(sub);
+      known.add(sub.id);
+    }
+  }
+
+  return { ok: true, sheet, subjectsUsed };
+}
+
+/**
+ * Write one sheet to the local copy and queue it for the server on its own.
+ *
+ * Sheets used to travel inside the whole-desk push, which replaced every
+ * sheet on the server with whatever this browser held — a stale tab saving
+ * Class 10-B silently deleted the 9-A sheet another teacher had just saved,
+ * marks and all. A sheet now goes alone, carrying the version it was edited
+ * from (`expectedUpdatedAt`), so the server can refuse it if someone else
+ * saved in between instead of overwriting them.
+ *
+ * On the server this only updates the process cache; the route that called
+ * it pushes the sheet itself and awaits the result.
+ */
+function commitSheet(
+  state: ExamsState,
+  sheet: MarkSheet,
+  opts: {
+    expectedUpdatedAt: string | null;
+    intent: SheetWriteIntent;
+    reason?: string;
+    subjectsUsed?: ExamSubject[];
+  },
+): void {
+  const subjects =
+    opts.subjectsUsed && opts.subjectsUsed.length > 0
+      ? [...state.subjects, ...opts.subjectsUsed]
+      : state.subjects;
+  const sheets = state.sheets.some((s) => s.id === sheet.id)
+    ? state.sheets.map((s) => (s.id === sheet.id ? sheet : s))
     : [sheet, ...state.sheets];
-  saveExams({ ...state, sheets });
+  const next: ExamsState = { ...state, subjects, sheets };
+
+  if (typeof window === "undefined") {
+    writeExamsLocalRaw(next);
+    return;
+  }
+  if (!assertModulePermission("exams", "edit", "saveMarkSheet")) return;
+  writeExamsLocalRaw(next);
+  void trackServerWork(
+    import("@/lib/examsSheetSync").then(({ scheduleExamSheetPush }) => {
+      scheduleExamSheetPush(sheet.id, {
+        expectedUpdatedAt: opts.expectedUpdatedAt,
+        intent: opts.intent,
+        reason: opts.reason,
+        subjectsUsed: opts.subjectsUsed,
+      });
+    }),
+  );
+}
+
+export function saveMarkSheet(
+  input: SaveMarkSheetInput,
+): { ok: true; sheet: MarkSheet } | { ok: false; error: string } {
+  const state = loadExams();
+  const existing = findMarkSheet(
+    input.academicYearCode,
+    input.examTermId,
+    input.sectionId,
+    state,
+  );
+  const prepared = prepareMarkSheet(input, state, existing);
+  if (!prepared.ok) return prepared;
+  commitSheet(state, prepared.sheet, {
+    expectedUpdatedAt: existing?.updatedAt ?? null,
+    intent: input.lock ? "lock" : "marks",
+    subjectsUsed: prepared.subjectsUsed,
+  });
+  return { ok: true, sheet: prepared.sheet };
+}
+
+/**
+ * Lift the lock on a section's sheet so marks can be corrected. Who may do
+ * this is decided on the server (owner / principal / admin / office, or the
+ * exams approve grant); the reason is recorded in the audit log with the
+ * unlock itself.
+ */
+export function unlockMarkSheet(input: {
+  academicYearCode: string;
+  examTermId: string;
+  sectionId: string;
+  reason: string;
+  by: string;
+}): { ok: true; sheet: MarkSheet } | { ok: false; error: string } {
+  const reason = input.reason.trim();
+  if (reason.length < 4) {
+    return { ok: false, error: "Give a reason for unlocking (at least a few words)" };
+  }
+  const state = loadExams();
+  const existing = findMarkSheet(
+    input.academicYearCode,
+    input.examTermId,
+    input.sectionId,
+    state,
+  );
+  if (!existing) return { ok: false, error: "No mark sheet saved for this exam and section" };
+  if (!existing.lockedAt) return { ok: false, error: "This mark sheet is not locked" };
+  const sheet = normalizeSheet({
+    ...existing,
+    lockedAt: null,
+    enteredBy: input.by || existing.enteredBy,
+    updatedAt: new Date().toISOString(),
+  });
+  commitSheet(state, sheet, {
+    expectedUpdatedAt: existing.updatedAt,
+    intent: "unlock",
+    reason,
+  });
   return { ok: true, sheet };
+}
+
+/**
+ * Save report-card remarks onto an existing mark sheet — the class teacher's
+ * overall remark per student plus (optionally) per-subject remarks — without
+ * touching marks, grades or co-scholastic ratings.
+ *
+ * Deliberately allowed on a LOCKED sheet: locking freezes marks so subject
+ * teachers can't change scores after moderation, but the class teacher
+ * writes remarks *after* that, right before printing. Remarks never feed
+ * grades or promotion, so this can't disturb what the lock protects.
+ *
+ * Marks are the source of a remark, so a sheet must already exist — there is
+ * no remark without something to remark on.
+ */
+export function saveSheetRemarks(input: {
+  academicYearCode: string;
+  examTermId: string;
+  sectionId: string;
+  overallRemarks: StudentOverallRemark[];
+  /** Per-subject remarks to write; entries for unknown student/subject pairs are ignored */
+  subjectRemarks?: {
+    studentId: string;
+    subjectId: string;
+    remark: string;
+    remarkSource: RemarkSource;
+  }[];
+}): { ok: true; sheet: MarkSheet } | { ok: false; error: string } {
+  const state = loadExams();
+  const existing = findMarkSheet(
+    input.academicYearCode,
+    input.examTermId,
+    input.sectionId,
+    state,
+  );
+  if (!existing) {
+    return { ok: false, error: "Save marks for this exam and section first" };
+  }
+  const subjectByKey = new Map(
+    (input.subjectRemarks ?? []).map((r) => [`${r.studentId}:${r.subjectId}`, r]),
+  );
+  const marks = existing.marks.map((m) => {
+    const r = subjectByKey.get(`${m.studentId}:${m.subjectId}`);
+    if (!r) return m;
+    return normalizeMark({
+      ...m,
+      remark: r.remark,
+      remarkSource: r.remark.trim() ? r.remarkSource : "manual",
+    });
+  });
+  const sheet = normalizeSheet({
+    ...existing,
+    marks,
+    overallRemarks: input.overallRemarks,
+    updatedAt: new Date().toISOString(),
+  });
+  commitSheet(state, sheet, {
+    expectedUpdatedAt: existing.updatedAt,
+    intent: "remarks",
+  });
+  return { ok: true, sheet };
+}
+
+/**
+ * Save question-wise marks for one paper (and set) onto the section's mark
+ * sheet, creating the sheet if this is the first entry for the exam. With
+ * `applyTotals`, each student's subject mark becomes the sum of their item
+ * marks (clamped to the subject max) and the grade is recomputed — the
+ * item grid becomes the source of truth for that subject; students with no
+ * item entered keep whatever subject mark they had.
+ *
+ * Refuses on a locked sheet: item marks feed subject totals, and a locked
+ * sheet means those totals are frozen.
+ */
+export function saveSheetItemScores(input: {
+  academicYearCode: string;
+  examTermId: string;
+  classId: string;
+  sectionId: string;
+  subjectId: string;
+  paperId: string;
+  setCode: string;
+  /** Full grid for this paper+set; entries for other papers are untouched */
+  scores: { studentId: string; questionId: string; marks: number | null }[];
+  applyTotals: boolean;
+  enteredBy: string;
+}): { ok: true; sheet: MarkSheet; totalsApplied: number } | { ok: false; error: string } {
+  const state = loadExams();
+  const term = state.terms.find((t) => t.id === input.examTermId);
+  if (!term) return { ok: false, error: "Exam term not found" };
+  const existing = findMarkSheet(
+    input.academicYearCode,
+    input.examTermId,
+    input.sectionId,
+    state,
+  );
+  if (existing?.lockedAt) {
+    return { ok: false, error: "Mark sheet is locked — item marks feed the totals" };
+  }
+  const setCode = (input.setCode || "A").toUpperCase().slice(0, 1);
+  const kept = (existing?.itemScores ?? []).filter(
+    (e) => !(e.paperId === input.paperId && e.setCode === setCode),
+  );
+  const fresh: StudentItemScore[] = input.scores
+    .map((x) =>
+      normalizeItemScore({
+        studentId: x.studentId,
+        subjectId: input.subjectId,
+        paperId: input.paperId,
+        setCode,
+        questionId: x.questionId,
+        marks: x.marks,
+      }),
+    )
+    .filter((e) => e.studentId && e.questionId);
+
+  let marks = existing?.marks ?? [];
+  let totalsApplied = 0;
+  if (input.applyTotals) {
+    const sub =
+      state.subjects.find((s) => s.id === input.subjectId) ?? null;
+    const policy = getExamPolicy(state);
+    const scheme = schemeForClassId(input.classId, policy);
+    const parts = sub
+      ? componentsForSubject(scheme, term.code, sub.code)
+      : componentsForTerm(scheme, term.code);
+    // Item marks are the written paper: they feed the exam component when
+    // the class is assessed component-wise, else the whole subject mark.
+    const target = parts.find((c) => c.kind === "exam") ?? parts[0] ?? null;
+    const max = target ? target.maxMarks : sub ? effectiveMaxMarks(term, sub) : 100;
+    const passPercent = effectivePassPercent(scheme, policy.passPercent);
+    const totals = new Map<string, number>();
+    const touched = new Set<string>();
+    for (const e of fresh) {
+      if (e.marks == null) continue;
+      totals.set(e.studentId, (totals.get(e.studentId) ?? 0) + e.marks);
+      touched.add(e.studentId);
+    }
+    const component = target?.code ?? "";
+    const byStudent = new Map(
+      marks
+        .filter((m) => m.subjectId === input.subjectId && m.component === component)
+        .map((m) => [m.studentId, m]),
+    );
+    void passPercent;
+    for (const studentId of touched) {
+      const total = Math.min(max, Math.round((totals.get(studentId) ?? 0) * 100) / 100);
+      const prev = byStudent.get(studentId);
+      const next = normalizeMark({
+        ...(prev ?? { studentId, subjectId: input.subjectId, component, remark: "", remarkSource: "manual" }),
+        component,
+        marksObtained: total,
+        grade: gradeForPercent(max > 0 ? (total / max) * 100 : null, scheme),
+      });
+      if (prev) {
+        marks = marks.map((m) => (m === prev ? next : m));
+      } else {
+        marks = [...marks, next];
+      }
+      totalsApplied += 1;
+    }
+  }
+
+  const now = new Date().toISOString();
+  const sheet = normalizeSheet({
+    ...(existing ?? {
+      id: id("ms"),
+      academicYearCode: input.academicYearCode,
+      examTermId: input.examTermId,
+      classId: input.classId,
+      sectionId: input.sectionId,
+      coScholastic: [],
+      overallRemarks: [],
+      lockedAt: null,
+    }),
+    marks,
+    itemScores: [...kept, ...fresh],
+    enteredBy: input.enteredBy || existing?.enteredBy || "",
+    updatedAt: now,
+  });
+  commitSheet(state, sheet, {
+    expectedUpdatedAt: existing?.updatedAt ?? null,
+    intent: "itemScores",
+  });
+  return { ok: true, sheet, totalsApplied };
 }
 
 export type ReportCardLine = {
@@ -1525,7 +2880,26 @@ export type ReportCardLine = {
   maxMarks: number;
   marksObtained: number | null;
   grade: string;
+  /** Long form of the grade under the scheme ("Meets expectations"). */
+  gradeLabel: string;
+  /** Absent for this subject's paper: printed AB, left out of totals. */
+  absent: boolean;
   remark: string;
+  /** The pass line this subject's total is held to (its own split's, else
+   * the scheme's, else the school's). */
+  passPercent?: number;
+  /** Component breakdown when the class is assessed component-wise. */
+  parts: {
+    code: string;
+    label: string;
+    maxMarks: number;
+    marksObtained: number | null;
+    /** Below its own pass line (a part with its own pass %, or every part
+     * under passEachComponent). */
+    failed: boolean;
+    /** That own pass line, when the part has one. */
+    passPercent?: number | null;
+  }[];
 };
 
 export type ReportCardComponentLine = {
@@ -1556,6 +2930,10 @@ export type ReportCard = {
     presentDays: number;
     workingDays: number;
     percent: number;
+    /** Working days nobody marked (computed figure only) — a gap, not presence. */
+    unmarkedDays?: number;
+    /** Set when a person corrected the figure for this result (who, why). */
+    edited?: { note: string; by: string; at: string; computedPresent: number; computedWorking: number } | null;
   } | null;
   holdBlocked: boolean;
   holdMessage: string;
@@ -1563,34 +2941,146 @@ export type ReportCard = {
   curriculumSource: "confirmed_cart" | "class_map";
   /** Soft note when enrollment is provisional */
   curriculumNote: string;
+  /** NEP 2020 HPC co-scholastic domain ratings for THIS exam term's own
+   * sheet — never aggregated across HY/Final component exams, since letter
+   * grades don't average meaningfully. Empty when the policy has this
+   * feature off or nothing was rated yet. */
+  coScholastic: {
+    domain: CoScholasticDomain;
+    domainLabel: string;
+    rating: CoScholasticRating | null;
+    ratingLabel: string;
+  }[];
+  /** Class teacher's overall remark from THIS term's own sheet (never
+   * aggregated across component exams). null when none was written. */
+  overallRemark: { text: string; textHi: string; source: RemarkSource } | null;
+  /** The scheme this class is assessed under. */
+  schemeId: string;
+  schemeName: string;
+  displayMode: AssessmentScheme["displayMode"];
+  /** Set by buildClassResultSheet when the scheme shows them; null otherwise. */
+  rank: number | null;
+  classSize: number | null;
+  classAverage: number | null;
+  /** "Promoted to VI" / "Detained" from the recorded decision, when the
+   * scheme prints it and a decision exists. */
+  result: string | null;
+  /** Absent from EVERY subject of this exam. The card prints one banner. */
+  absent: { reason: string } | null;
+  /** Subjects the child was absent for, when not all of them. */
+  absentSubjects: string[];
+  /** The scheme asks for the profile photo on the card. */
+  showPhoto: boolean;
+  /** What the printed card shows, from the class's template. */
+  presentation: CardPresentation;
 };
 
-function attendanceSummaryForStudent(
-  studentId: string,
-  sectionId: string,
+function overallRemarkForReportCard(
   ay: string,
+  examTermId: string,
+  sectionId: string,
+  studentId: string,
+  state: ExamsState,
+): ReportCard["overallRemark"] {
+  const sheet = findMarkSheet(ay, examTermId, sectionId, state);
+  const r = sheet?.overallRemarks.find((x) => x.studentId === studentId);
+  if (!r || (!r.text.trim() && !r.textHi.trim())) return null;
+  return { text: r.text, textHi: r.textHi, source: r.source };
+}
+
+/**
+ * The result's attendance (director, 8 Oct 2026): working days from the
+ * Masters holiday calendar for the child's class, counted from the working
+ * day after admission, up to the exam's last day (or today); present from
+ * the registers (P/L 1, HD ½). A person's correction for this exam term
+ * replaces it and is marked as edited. Until now this divided by "days a
+ * register was marked", which a skipped week turned into 100%.
+ */
+function attendanceSummaryForStudent(
+  student: SisStudent,
+  ay: string,
+  term: ExamTerm,
+  deps: ExamDeps | undefined,
 ): ReportCard["attendance"] {
-  const regs = loadAttendance().registers.filter(
-    (r: AttendanceRegister) =>
-      r.academicYearCode === ay && r.sectionId === sectionId,
-  );
-  if (regs.length === 0) return null;
-  let present = 0;
-  let working = 0;
-  for (const r of regs) {
-    const mark = r.marks.find((m) => m.studentId === studentId);
-    if (!mark) continue;
-    working += 1;
-    if (mark.status === "P" || mark.status === "L" || mark.status === "HD") {
-      present += mark.status === "HD" ? 0.5 : 1;
+  let masters: MastersState | null = deps?.masters ?? null;
+  if (!masters) {
+    try {
+      masters = loadMasters();
+    } catch {
+      masters = null;
     }
   }
-  if (working === 0) return null;
+  const registers = (deps?.attendance ?? loadAttendance()).registers;
+  const computed = masters
+    ? sessionDaysSummary({
+        masters,
+        ay,
+        classId: student.classId,
+        studentId: student.id,
+        joinedOn: student.joinedOn,
+        registers,
+        until: (term.endsOn || "").slice(0, 10) || undefined,
+        today: deps?.todayIso ?? new Date().toISOString().slice(0, 10),
+      })
+    : null;
+  const override = findAttendanceOverride(
+    deps?.attendanceOverrides ?? loadAttendanceResultOverrides(),
+    ay,
+    term.id,
+    student.id,
+  );
+  if (override) {
+    return {
+      presentDays: override.presentDays,
+      workingDays: override.workingDays,
+      percent: Math.round((override.presentDays / override.workingDays) * 1000) / 10,
+      edited: {
+        note: override.note,
+        by: override.by,
+        at: override.at,
+        computedPresent: computed?.presentDays ?? 0,
+        computedWorking: computed?.workingDays ?? 0,
+      },
+    };
+  }
+  if (!computed || computed.workingDays === 0 || computed.percent === null) return null;
+  // Nothing at all marked for this child: no figure rather than "0 of 120".
+  if (computed.unmarkedDays === computed.workingDays) return null;
   return {
-    presentDays: present,
-    workingDays: working,
-    percent: Math.round((present / working) * 1000) / 10,
+    presentDays: computed.presentDays,
+    workingDays: computed.workingDays,
+    percent: computed.percent,
+    unmarkedDays: computed.unmarkedDays,
+    edited: null,
   };
+}
+
+/** Resolve one student's co-scholastic ratings from THIS exam term's own
+ * sheet (never from aggregate-contributor sheets — see ReportCard.coScholastic). */
+function coScholasticForReportCard(
+  ay: string,
+  examTermId: string,
+  sectionId: string,
+  studentId: string,
+  state: ExamsState,
+  policy: ExamPolicy,
+  classId: string,
+  masters?: MastersState | null,
+): ReportCard["coScholastic"] {
+  const areas = coScholasticAreasForClass(classId, policy, masters);
+  if (areas.length === 0) return [];
+  const scale = schemeForClassId(classId, policy).coScholasticScale;
+  const sheet = findMarkSheet(ay, examTermId, sectionId, state);
+  if (!sheet) return [];
+  const codes = new Set(areas.map((a) => a.code));
+  return sheet.coScholastic
+    .filter((e) => e.studentId === studentId && codes.has(e.domain))
+    .map((e) => ({
+      domain: e.domain,
+      domainLabel: coScholasticDomainLabel(e.domain, areas),
+      rating: e.rating,
+      ratingLabel: coScholasticRatingLabel(e.rating, scale),
+    }));
 }
 
 function contributorsForAggregate(
@@ -1619,27 +3109,89 @@ function studentHasMarksOnSheet(
   );
 }
 
-/** Resolve a mark row by exam-subject id or matching code (legacy id drift). */
-function markForExamSubject(
+/** Every row (all components) for a student and subject, by id or code. */
+function marksForExamSubject(
   sheet: MarkSheet | undefined,
   studentId: string,
   subject: ExamSubject,
   allSubjects: ExamSubject[],
-): StudentSubjectMark | undefined {
-  if (!sheet) return undefined;
-  const direct = sheet.marks.find(
+): StudentSubjectMark[] {
+  if (!sheet) return [];
+  const direct = sheet.marks.filter(
     (m) => m.studentId === studentId && m.subjectId === subject.id,
   );
-  if (direct) return direct;
+  if (direct.length) return direct;
   const code = subject.code.toUpperCase();
   const ids = new Set(
     allSubjects
       .filter((s) => s.code.toUpperCase() === code)
       .map((s) => s.id),
   );
-  return sheet.marks.find(
+  return sheet.marks.filter(
     (m) => m.studentId === studentId && ids.has(m.subjectId),
   );
+}
+
+/**
+ * One subject's standing on one sheet under a scheme: the whole mark, or
+ * the sum of its component marks with the breakdown. `obtained` is null
+ * until at least one part is entered.
+ */
+function subjectStandingOnSheet(
+  sheet: MarkSheet | undefined,
+  studentId: string,
+  subject: ExamSubject,
+  allSubjects: ExamSubject[],
+  term: ExamTerm,
+  scheme: AssessmentScheme,
+  passPercent: number,
+): {
+  maxMarks: number;
+  obtained: number | null;
+  pickedGrade: string;
+  remark: string;
+  parts: ReportCardLine["parts"];
+} {
+  const rows = marksForExamSubject(sheet, studentId, subject, allSubjects);
+  const components = componentsForSubject(scheme, term.code, subject.code);
+  const remark = rows.find((r) => r.remark)?.remark ?? "";
+  if (components.length === 0) {
+    const whole = rows.find((r) => !r.component) ?? rows[0];
+    return {
+      maxMarks: effectiveMaxMarks(term, subject),
+      obtained: whole?.marksObtained ?? null,
+      pickedGrade: whole?.grade ?? "—",
+      remark,
+      parts: [],
+    };
+  }
+  let sum = 0;
+  let any = false;
+  const parts = components.map((c) => {
+    const row = rows.find((r) => r.component === c.code);
+    const got = row?.marksObtained ?? null;
+    if (got != null) {
+      sum += got;
+      any = true;
+    }
+    const failed = componentFailed(c, got, scheme, passPercent);
+    const ownPass = c.passPercent ?? (scheme.passEachComponent ? passPercent : null);
+    return {
+      code: c.code,
+      label: c.label,
+      maxMarks: c.maxMarks,
+      marksObtained: got,
+      failed,
+      passPercent: ownPass,
+    };
+  });
+  return {
+    maxMarks: componentsTotalMax(components),
+    obtained: any ? Math.round(sum * 100) / 100 : null,
+    pickedGrade: rows.find((r) => r.grade && r.grade !== "—")?.grade ?? "—",
+    remark,
+    parts,
+  };
 }
 
 export function buildReportCard(input: {
@@ -1647,18 +3199,23 @@ export function buildReportCard(input: {
   classLabel: string;
   examTermId: string;
   academicYearCode?: string;
+  /** Pass the stores when building cards for more than one student. */
+  deps?: ExamDeps;
 }): ReportCard | { error: string } {
   const ay = input.academicYearCode ?? input.student.academicYearCode ?? DEFAULT_AY;
-  const state = loadExams();
+  const state = input.deps?.state ?? loadExams();
   const term = state.terms.find((t) => t.id === input.examTermId);
   if (!term) return { error: "Exam term not found" };
 
-  let masters: MastersState | null = null;
-  try {
-    masters = loadMasters();
-  } catch {
-    masters = null;
+  let masters: MastersState | null = input.deps?.masters ?? null;
+  if (!masters) {
+    try {
+      masters = loadMasters();
+    } catch {
+      masters = null;
+    }
   }
+  const deps: ExamDeps = { ...input.deps, state, masters: masters ?? undefined };
 
   const mode = masters
     ? curriculumChoiceMode(classGroupForStudent(input.student, masters))
@@ -1682,7 +3239,7 @@ export function buildReportCard(input: {
     }
   }
 
-  const subjects = subjectsForStudent(input.student, state);
+  const subjects = subjectsForStudent(input.student, state, deps);
   if (subjects.length === 0) {
     return {
       error: cartStage
@@ -1701,7 +3258,38 @@ export function buildReportCard(input: {
         : "";
 
   const policy = getExamPolicy(state);
-  const hold = checkHold(input.student.id, "HOLD_REPORT_CARD");
+  const scheme = schemeForClassId(input.student.classId, policy);
+  const passLine = effectivePassPercent(scheme, policy.passPercent);
+  const gradeOf = (obtained: number | null, max: number, picked = "—") =>
+    scheme.displayMode !== "marks_grade" && obtained == null
+      ? picked
+      : gradeForPercent(obtained == null || max <= 0 ? null : (obtained / max) * 100, scheme);
+  const cardMeta = {
+    schemeId: scheme.id,
+    schemeName: scheme.name,
+    displayMode: scheme.displayMode,
+    rank: null,
+    classSize: null,
+    classAverage: null,
+    result: null,
+    absent: null,
+    absentSubjects: [] as string[],
+    showPhoto: scheme.showPhoto,
+    presentation: resolvePresentation(
+      reportTemplateForClassId(input.student.classId, policy),
+      {
+        showPhoto: scheme.showPhoto,
+        showAttendance: scheme.showAttendance ?? policy.showAttendanceOnReport,
+        showRank: scheme.showRank,
+        showClassAverage: scheme.showClassAverage,
+        showResult: scheme.showResultOnCard,
+      },
+    ),
+  };
+  const showAttendance = cardMeta.presentation.showAttendance;
+  const hold =
+    input.deps?.holdChecks?.get(input.student.id) ??
+    checkHold(input.student.id, "HOLD_REPORT_CARD");
   const allExamSubs = state.subjects;
 
   const wantAggregate =
@@ -1732,7 +3320,10 @@ export function buildReportCard(input: {
       for (const c of contributors) {
         if (!c.requiresSeparateMarksheet) continue;
         const sheet = findMarkSheet(ay, c.id, input.student.sectionId, state);
-        if (!studentHasMarksOnSheet(sheet, input.student.id)) {
+        if (
+          !studentHasMarksOnSheet(sheet, input.student.id) &&
+          !sheet?.absences.some((a) => a.studentId === input.student.id)
+        ) {
           missing.push(c.code);
         }
       }
@@ -1748,25 +3339,39 @@ export function buildReportCard(input: {
     let totalObtained = 0;
     let totalMax = 0;
     let subjectsWithMarks = 0;
+    const absentReasons: string[] = [];
 
     for (const sub of subjects) {
       let weightedSum = 0;
       let weightTotal = 0;
       let anyMark = false;
       let remark = "";
+      // Absent for this subject on every contributing exam → the line is AB.
+      let absentOn = 0;
 
       for (const c of contributors) {
         const weight =
           aggregateMode === "hy" ? c.weightInHy : c.weightInFinal;
         const sheet = findMarkSheet(ay, c.id, input.student.sectionId, state);
-        const m = markForExamSubject(
+        const absence = sheet?.absences.find(
+          (a) => a.studentId === input.student.id && a.subjectId === sub.id,
+        );
+        if (absence) {
+          absentOn += 1;
+          if (absence.reason) absentReasons.push(absence.reason);
+        }
+        const standing = subjectStandingOnSheet(
           sheet,
           input.student.id,
           sub,
           allExamSubs,
+          c,
+          scheme,
+          passLine,
         );
-        const max = effectiveMaxMarks(c, sub);
-        const obtained = m?.marksObtained ?? null;
+        const m = standing.obtained == null ? undefined : { remark: standing.remark };
+        const max = standing.maxMarks;
+        const obtained = absence ? null : standing.obtained;
         if (c.requiredOnMarksheet || obtained != null) {
           components.push({
             examTermId: c.id,
@@ -1793,17 +3398,19 @@ export function buildReportCard(input: {
           ? Math.round((weightedSum / weightTotal) * displayMax * 10) / 10
           : null;
 
+      const lineAbsent = contributors.length > 0 && absentOn === contributors.length;
+      const aggGrade = lineAbsent ? "AB" : gradeOf(obtainedScaled, displayMax);
       lines.push({
         subjectId: sub.id,
         subjectName: sub.name,
         maxMarks: displayMax,
-        marksObtained: obtainedScaled,
-        grade: gradeFromMarks(
-          obtainedScaled,
-          displayMax,
-          policy.passPercent,
-        ),
+        marksObtained: lineAbsent ? null : obtainedScaled,
+        grade: aggGrade,
+        gradeLabel: gradeLabel(aggGrade, scheme),
+        absent: lineAbsent,
         remark,
+        passPercent: splitForSubject(scheme, sub.code)?.passPercent ?? passLine,
+        parts: [],
       });
 
       if (obtainedScaled != null) {
@@ -1813,7 +3420,8 @@ export function buildReportCard(input: {
       }
     }
 
-    if (subjectsWithMarks === 0) {
+    const absentEverywhere = lines.length > 0 && lines.every((l) => l.absent);
+    if (subjectsWithMarks === 0 && !absentEverywhere) {
       return {
         error: `No component marks found for ${
           aggregateMode === "hy" ? "Half-yearly" : "Final"
@@ -1845,20 +3453,39 @@ export function buildReportCard(input: {
       totalObtained: Math.round(totalObtained * 10) / 10,
       totalMax,
       percent,
-      overallGrade: policy.includeOverallGrade
-        ? gradeFromPercent(percent, policy.passPercent)
-        : "—",
-      attendance: policy.showAttendanceOnReport
-        ? attendanceSummaryForStudent(
-            input.student.id,
-            input.student.sectionId,
-            ay,
-          )
+      overallGrade:
+        policy.includeOverallGrade && !absentEverywhere
+          ? gradeForPercent(percent, scheme)
+          : "—",
+      ...cardMeta,
+      absent: absentEverywhere ? { reason: absentReasons[0] ?? "" } : null,
+      absentSubjects: absentEverywhere
+        ? []
+        : lines.filter((l) => l.absent).map((l) => l.subjectName),
+      attendance: showAttendance
+        ? attendanceSummaryForStudent(input.student, ay, term, input.deps)
         : null,
       holdBlocked: !hold.allowed,
       holdMessage: hold.allowed ? "" : hold.message,
       curriculumSource,
       curriculumNote,
+      coScholastic: coScholasticForReportCard(
+        ay,
+        term.id,
+        input.student.sectionId,
+        input.student.id,
+        state,
+        policy,
+        input.student.classId,
+        masters,
+      ),
+      overallRemark: overallRemarkForReportCard(
+        ay,
+        term.id,
+        input.student.sectionId,
+        input.student.id,
+        state,
+      ),
     };
   }
 
@@ -1868,40 +3495,62 @@ export function buildReportCard(input: {
       error: "No marks saved for this class section and exam yet",
     };
   }
+  const myAbsences = sheet.absences.filter((a) => a.studentId === input.student.id);
 
   const lines: ReportCardLine[] = [];
   let totalObtained = 0;
   let totalMax = 0;
   let counted = 0;
 
+  let graded = 0;
   for (const sub of subjects) {
-    const m = markForExamSubject(sheet, input.student.id, sub, allExamSubs);
-    const max = effectiveMaxMarks(term, sub);
-    const obtained = m?.marksObtained ?? null;
+    const absence = myAbsences.find((a) => a.subjectId === sub.id) ?? null;
+    const standing = subjectStandingOnSheet(
+      sheet,
+      input.student.id,
+      sub,
+      allExamSubs,
+      term,
+      scheme,
+      passLine,
+    );
+    const max = standing.maxMarks;
+    const obtained = absence ? null : standing.obtained;
+    const grade = absence ? "AB" : gradeOf(obtained, max, standing.pickedGrade);
     lines.push({
       subjectId: sub.id,
       subjectName: sub.name,
       maxMarks: max,
       marksObtained: obtained,
-      grade: gradeFromMarks(obtained, max, policy.passPercent),
-      remark: m?.remark ?? "",
+      grade,
+      gradeLabel: gradeLabel(grade, scheme),
+      absent: !!absence,
+      remark: standing.remark,
+      passPercent: splitForSubject(scheme, sub.code)?.passPercent ?? passLine,
+      parts: standing.parts,
     });
     if (obtained != null) {
       totalObtained += obtained;
       totalMax += max;
       counted += 1;
     }
+    if (grade !== "—" && !absence) graded += 1;
   }
+  const absentAll = lines.length > 0 && lines.every((l) => l.absent);
+  const absence = absentAll
+    ? { reason: myAbsences.find((a) => a.reason)?.reason ?? "" }
+    : null;
 
-  if (counted === 0) {
+  if (counted === 0 && graded === 0 && !absence) {
     return { error: "No marks entered for this student in this exam" };
   }
   if (
     policy.requireAllSubjectsForReport &&
-    counted < subjects.length
+    !absence &&
+    Math.max(counted, graded) + myAbsences.length < subjects.length
   ) {
     return {
-      error: `Exam policy requires all ${subjects.length} subjects marked (${counted} entered)`,
+      error: `Exam policy requires all ${subjects.length} subjects marked (${Math.max(counted, graded)} entered)`,
     };
   }
 
@@ -1921,20 +3570,37 @@ export function buildReportCard(input: {
     totalObtained,
     totalMax,
     percent,
-    overallGrade: policy.includeOverallGrade
-      ? gradeFromPercent(percent, policy.passPercent)
-      : "—",
-    attendance: policy.showAttendanceOnReport
-      ? attendanceSummaryForStudent(
-          input.student.id,
-          input.student.sectionId,
-          ay,
-        )
+    overallGrade:
+      policy.includeOverallGrade && totalMax > 0 && !absence
+        ? gradeForPercent(percent, scheme)
+        : "—",
+    ...cardMeta,
+    absent: absence,
+    absentSubjects: absence ? [] : lines.filter((l) => l.absent).map((l) => l.subjectName),
+    attendance: showAttendance
+      ? attendanceSummaryForStudent(input.student, ay, term, input.deps)
       : null,
     holdBlocked: !hold.allowed,
     holdMessage: hold.allowed ? "" : hold.message,
     curriculumSource,
     curriculumNote,
+    coScholastic: coScholasticForReportCard(
+      ay,
+      term.id,
+      input.student.sectionId,
+      input.student.id,
+      state,
+      policy,
+      input.student.classId,
+      masters,
+    ),
+    overallRemark: overallRemarkForReportCard(
+      ay,
+      term.id,
+      input.student.sectionId,
+      input.student.id,
+      state,
+    ),
   };
 }
 
@@ -1953,16 +3619,27 @@ export function evaluatePromotionPass(
   lines: ReportCardLine[],
   passPercent: number,
   requireAllSubjects: boolean,
+  opts?: { passEachComponent?: boolean },
 ): { passed: boolean; failedSubjects: string[] } {
   const failedSubjects: string[] = [];
   let obtainedTotal = 0;
   let maxTotal = 0;
   for (const line of lines) {
+    if (line.absent) {
+      failedSubjects.push(`${line.subjectName} (absent)`);
+      continue;
+    }
     if (line.marksObtained == null || line.maxMarks <= 0) continue;
     obtainedTotal += line.marksObtained;
     maxTotal += line.maxMarks;
     const pct = (line.marksObtained / line.maxMarks) * 100;
-    if (pct < passPercent) failedSubjects.push(line.subjectName);
+    // A part fails the subject only where it must be passed on its own: it
+    // has its own pass line (a subject split's "Oral 33 %"), or the scheme
+    // passes every part separately (XI–XII theory and practical).
+    const partFailed = (line.parts ?? []).some(
+      (p) => p.failed && (!!opts?.passEachComponent || p.passPercent != null),
+    );
+    if (pct < (line.passPercent ?? passPercent) || partFailed) failedSubjects.push(line.subjectName);
   }
   const overallPct = maxTotal > 0 ? (obtainedTotal / maxTotal) * 100 : 0;
   if (requireAllSubjects && failedSubjects.length > 0) {
@@ -2022,6 +3699,8 @@ export type ClassResultRow = {
   error: string | null;
   passed: boolean;
   failedSubjects: string[];
+  /** Why `suggested` is what it is when the child did not pass. */
+  suggestionNote: string;
   suggested: PromotionDecision;
   record: PromotionRecord | null;
   nextClass: SchoolClass | null;
@@ -2055,17 +3734,45 @@ export function buildClassResultSheet(input: {
   sectionId: string;
   examTermId: string;
   academicYearCode?: string;
+  deps?: ExamDeps;
 }): ClassResultSheet | { error: string } {
   const ay = input.academicYearCode ?? DEFAULT_AY;
-  const state = loadExams();
+  const state = input.deps?.state ?? loadExams();
   const term = state.terms.find((t) => t.id === input.examTermId);
   if (!term) return { error: "Exam term not found" };
   const policy = getExamPolicy(state);
-  const masters = loadMasters();
+  const masters = input.deps?.masters ?? loadMasters();
   const nextClass = nextClassAfter(input.classId, masters);
   const nextSection = nextClass
     ? defaultSectionForClass(nextClass.id, masters)
     : null;
+  // One parse of every store for the whole section, not one per child.
+  const deps: ExamDeps = {
+    ...input.deps,
+    state,
+    masters,
+    sis: input.deps?.sis ?? loadSis(),
+    attendance: input.deps?.attendance ?? loadAttendance(),
+    attendanceOverrides: input.deps?.attendanceOverrides ?? loadAttendanceResultOverrides(),
+    holdChecks:
+      input.deps?.holdChecks ??
+      checkHoldsForStudents(
+        input.students.map((s) => s.id),
+        "HOLD_REPORT_CARD",
+      ),
+  };
+
+  const scheme = schemeForClassId(input.classId, policy);
+  const passLine = effectivePassPercent(scheme, policy.passPercent);
+  const requireAll =
+    scheme.requireAllSubjectsPass ?? policy.requireAllSubjectsPassForPromotion;
+  const show = resolvePresentation(reportTemplateForClassId(input.classId, policy), {
+    showPhoto: scheme.showPhoto,
+    showAttendance: scheme.showAttendance ?? policy.showAttendanceOnReport,
+    showRank: scheme.showRank,
+    showClassAverage: scheme.showClassAverage,
+    showResult: scheme.showResultOnCard,
+  });
 
   const rows: ClassResultRow[] = [];
   for (const student of input.students) {
@@ -2074,6 +3781,7 @@ export function buildClassResultSheet(input: {
       classLabel: input.classLabel,
       examTermId: term.id,
       academicYearCode: ay,
+      deps,
     });
     if ("error" in card) {
       const record =
@@ -2084,6 +3792,7 @@ export function buildClassResultSheet(input: {
         error: card.error,
         passed: false,
         failedSubjects: [],
+        suggestionNote: "",
         suggested: "pending",
         record,
         nextClass,
@@ -2091,14 +3800,43 @@ export function buildClassResultSheet(input: {
       });
       continue;
     }
+    if (card.absent) {
+      rows.push({
+        student,
+        card,
+        error: null,
+        passed: false,
+        failedSubjects: [],
+        suggestionNote: "Absent from this exam",
+        suggested: "pending",
+        record: findPromotionRecord(student.id, term.id, ay, state) ?? null,
+        nextClass,
+        nextSection,
+      });
+      continue;
+    }
     const evalPass = evaluatePromotionPass(
       card.lines,
-      policy.passPercent,
-      policy.requireAllSubjectsPassForPromotion,
+      passLine,
+      requireAll,
+      { passEachComponent: scheme.passEachComponent },
     );
-    const suggested: PromotionDecision = evalPass.passed
-      ? "promoted"
-      : "detained";
+    // The scheme's promotion rule decides what a failure means: RTE bands
+    // are promoted regardless, V/VIII under the 2019 amendment sit a
+    // re-examination first, IX upwards are detained.
+    let suggested: PromotionDecision = "promoted";
+    let suggestionNote = "";
+    if (!evalPass.passed) {
+      if (scheme.promotionRule === "no_detention") {
+        suggested = "promoted";
+        suggestionNote = "Promoted under the no-detention rule";
+      } else if (scheme.promotionRule === "reexam_then_detain") {
+        suggested = "conditional";
+        suggestionNote = "Re-examination required";
+      } else {
+        suggested = "detained";
+      }
+    }
     const record =
       findPromotionRecord(student.id, term.id, ay, state) ?? null;
     rows.push({
@@ -2107,11 +3845,53 @@ export function buildClassResultSheet(input: {
       error: null,
       passed: evalPass.passed,
       failedSubjects: evalPass.failedSubjects,
+      suggestionNote,
       suggested,
       record,
       nextClass,
       nextSection,
     });
+  }
+
+  // Rank, class average and the recorded result, when the scheme prints
+  // them. Ties share a rank; the next rank skips (1, 1, 3).
+  const withCards = rows.filter((r) => r.card && r.card.totalMax > 0 && !r.card.absent);
+  const average =
+    withCards.length > 0
+      ? Math.round(
+          (withCards.reduce((s, r) => s + (r.card?.percent ?? 0), 0) /
+            withCards.length) *
+            10,
+        ) / 10
+      : null;
+  const byPercent = [...withCards].sort(
+    (a, b) => (b.card?.percent ?? 0) - (a.card?.percent ?? 0),
+  );
+  const rankOf = new Map<string, number>();
+  byPercent.forEach((r, i) => {
+    const prev = byPercent[i - 1];
+    const rank =
+      prev && prev.card?.percent === r.card?.percent
+        ? (rankOf.get(prev.student.id) ?? i + 1)
+        : i + 1;
+    rankOf.set(r.student.id, rank);
+  });
+  for (const r of rows) {
+    if (!r.card) continue;
+    const decision = r.record?.decision;
+    r.card = {
+      ...r.card,
+      rank: show.showRank ? (rankOf.get(r.student.id) ?? null) : null,
+      classSize: show.showRank ? withCards.length : null,
+      classAverage: show.showClassAverage ? average : null,
+      result: r.card.absent
+        ? "Absent"
+        : show.showResult && decision && decision !== "pending"
+          ? decision === "promoted" && r.record?.toClassId
+            ? `Promoted to ${masters.classes.find((c) => c.id === r.record?.toClassId)?.name ?? "next class"}`
+            : promotionDecisionLabel(decision)
+          : null,
+    };
   }
 
   const summary = {
@@ -2278,10 +4058,14 @@ export function suggestPromotionsForSection(input: {
       overallGrade: row.card.overallGrade,
       passed: row.passed,
       decidedBy: input.decidedBy,
-      remark:
+      remark: [
+        row.suggestionNote,
         row.failedSubjects.length > 0
           ? `Below pass: ${row.failedSubjects.join(", ")}`
           : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
     });
     if (r.ok) updated += 1;
     else skipped += 1;

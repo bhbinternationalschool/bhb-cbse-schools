@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MessageCircle } from "lucide-react";
 import {
   alertOnIncomingMessages,
   ensureBrowserNotifyPermission,
@@ -89,13 +90,14 @@ export function StaffInternalChatButton() {
     setMasters(loadMasters());
     setPrefs(loadChatAlertPrefs());
     refresh();
-    void import("@/lib/erpChatPersistence").then(
-      ({ ensureErpChatHydrated }) => {
-        void ensureErpChatHydrated().then((changed) => {
-          if (changed) refresh();
-        });
-      },
-    );
+    void Promise.all([
+      import("@/lib/erpChatPersistence"),
+      import("@/lib/deskHydrateGuard"),
+    ]).then(([{ ensureErpChatHydrated }, { withHydrationSlot }]) => {
+      void withHydrationSlot(() => ensureErpChatHydrated()).then((changed) => {
+        if (changed) refresh();
+      });
+    });
     function onChat() {
       refresh();
     }
@@ -149,7 +151,14 @@ export function StaffInternalChatButton() {
         /* ignore */
       }
     }
-    const id = window.setInterval(() => void tick(), 8000);
+    // Was 8000 — this button is mounted globally in AppShell, so every
+    // logged-in staff member's open tab was hitting /api/chat every 8s,
+    // all day. That was the largest identified driver of Supabase egress:
+    // GET /api/chat used to pull the full 4.13 MB school_mirror_state
+    // blob (now fixed separately — see erpChatActorLite.server.ts), but
+    // even with that fixed, an internal staff chat has no reason to poll
+    // this aggressively. 30s is still responsive for a workplace tool.
+    const id = window.setInterval(() => void tick(), 30_000);
     void tick();
     return () => {
       alive = false;
@@ -434,20 +443,20 @@ export function StaffInternalChatButton() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="relative flex h-9 w-9 items-center justify-center rounded-full bg-[#25D366] text-white shadow-sm transition hover:brightness-105"
+        className="relative flex h-9 w-9 items-center justify-center rounded-full bg-[var(--primary)] text-[var(--primary-foreground)] shadow-sm transition hover:brightness-105"
         aria-label="Chat"
         title={headerTitle}
       >
-        <WhatsAppGlyph />
+        <MessageCircle className="h-[18px] w-[18px]" strokeWidth={2.25} />
         {unread > 0 ? (
-          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#dc2626] px-1 text-[9px] font-bold text-white ring-2 ring-[var(--surface)]">
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--danger)] px-1 text-[9px] font-bold text-white ring-2 ring-[var(--surface)]">
             {unread > 9 ? "9+" : unread}
           </span>
         ) : null}
       </button>
 
       {open ? (
-        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 flex h-[min(78vh,32rem)] w-[min(100vw-1.5rem,23rem)] flex-col overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.14)] bg-white shadow-[0_16px_40px_rgba(32,48,80,0.28)]">
+        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 flex h-[min(78vh,32rem)] w-[min(100vw-1.5rem,23rem)] flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[0_16px_40px_rgba(32,48,80,0.28)]">
           <header className="flex items-center justify-between gap-2 bg-[#075E54] px-3 py-2.5 text-white">
             <div className="min-w-0">
               <p className="text-[13px] font-bold tracking-wide">{headerTitle}</p>
@@ -461,7 +470,7 @@ export function StaffInternalChatButton() {
             <div className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
-                className="rounded-md px-1.5 py-1 text-[11px] font-semibold hover:bg-white/10"
+                className="rounded-md px-1.5 py-1 text-[11px] font-semibold hover:bg-[var(--card)]/10"
                 title={prefs.muted ? "Unmute alerts" : "Mute alerts"}
                 onClick={toggleMute}
               >
@@ -470,7 +479,7 @@ export function StaffInternalChatButton() {
               {activeThreadId || composer ? (
                 <button
                   type="button"
-                  className="rounded-md px-2 py-1 text-[11px] font-semibold hover:bg-white/10"
+                  className="rounded-md px-2 py-1 text-[11px] font-semibold hover:bg-[var(--card)]/10"
                   onClick={() => {
                     setActiveThreadId(null);
                     setComposer(null);
@@ -481,7 +490,7 @@ export function StaffInternalChatButton() {
               ) : (
                 <button
                   type="button"
-                  className="rounded-md px-2 py-1 text-[11px] font-semibold hover:bg-white/10"
+                  className="rounded-md px-2 py-1 text-[11px] font-semibold hover:bg-[var(--card)]/10"
                   onClick={() => setOpen(false)}
                 >
                   ✕
@@ -491,13 +500,13 @@ export function StaffInternalChatButton() {
           </header>
 
           {composer === "new-group" && actor?.kind === "staff" ? (
-            <div className="flex flex-1 flex-col overflow-hidden bg-white">
-              <div className="space-y-2 border-b border-[rgba(32,48,80,0.08)] px-3 py-2">
+            <div className="flex flex-1 flex-col overflow-hidden bg-[var(--card)]">
+              <div className="space-y-2 border-b border-[var(--border)] px-3 py-2">
                 <p className="text-[12px] font-bold text-[var(--brand-deep)]">
                   New staff group
                 </p>
                 <input
-                  className="w-full rounded-lg border border-[rgba(32,48,80,0.12)] px-3 py-1.5 text-[12px] outline-none"
+                  className="w-full rounded-lg border border-[var(--border)] px-3 py-1.5 text-[12px] outline-none"
                   placeholder="Group name"
                   value={groupTitle}
                   onChange={(e) => setGroupTitle(e.target.value)}
@@ -509,7 +518,7 @@ export function StaffInternalChatButton() {
                   return (
                     <label
                       key={s.id}
-                      className="flex cursor-pointer items-center gap-2 border-b border-[rgba(32,48,80,0.06)] px-3 py-2 text-[12px]"
+                      className="flex cursor-pointer items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-[12px]"
                     >
                       <input
                         type="checkbox"
@@ -529,7 +538,7 @@ export function StaffInternalChatButton() {
                   );
                 })}
               </div>
-              <div className="flex gap-2 border-t border-[rgba(32,48,80,0.08)] p-2">
+              <div className="flex gap-2 border-t border-[var(--border)] p-2">
                 <button
                   type="button"
                   className="flex-1 rounded-lg bg-[#25D366] py-2 text-[12px] font-bold text-white disabled:opacity-40"
@@ -541,7 +550,7 @@ export function StaffInternalChatButton() {
               </div>
             </div>
           ) : composer === "new-announcement" && actor?.kind === "staff" ? (
-            <div className="flex flex-1 flex-col gap-2 bg-white p-3">
+            <div className="flex flex-1 flex-col gap-2 bg-[var(--card)] p-3">
               <p className="text-[12px] font-bold text-[var(--brand-deep)]">
                 Class announcement channel
               </p>
@@ -549,7 +558,7 @@ export function StaffInternalChatButton() {
                 Parents can read only; staff assigned to the section can post.
               </p>
               <select
-                className="rounded-lg border border-[rgba(32,48,80,0.12)] px-3 py-2 text-[12px]"
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-[12px]"
                 value={announceSectionId}
                 onChange={(e) => setAnnounceSectionId(e.target.value)}
               >
@@ -571,7 +580,7 @@ export function StaffInternalChatButton() {
             </div>
           ) : !activeThreadId ? (
             <>
-              <div className="flex gap-1 border-b border-[rgba(32,48,80,0.08)] bg-[#f0f2f5] px-2 py-1.5">
+              <div className="flex gap-1 border-b border-[var(--border)] bg-[#f0f2f5] px-2 py-1.5">
                 {(
                   (isParent
                     ? (["recent", "parents"] as TabId[])
@@ -583,7 +592,7 @@ export function StaffInternalChatButton() {
                     onClick={() => setTab(id)}
                     className={`rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${
                       tab === id
-                        ? "bg-white text-[#075E54] shadow-sm"
+                        ? "bg-[var(--card)] text-[#075E54] shadow-sm"
                         : "text-[var(--muted)]"
                     }`}
                   >
@@ -591,9 +600,9 @@ export function StaffInternalChatButton() {
                   </button>
                 ))}
               </div>
-              <div className="border-b border-[rgba(32,48,80,0.08)] bg-[#f0f2f5] px-2.5 py-2">
+              <div className="border-b border-[var(--border)] bg-[#f0f2f5] px-2.5 py-2">
                 <input
-                  className="w-full rounded-lg border-0 bg-white px-3 py-1.5 text-[12px] text-[var(--brand-deep)] shadow-sm outline-none ring-1 ring-[rgba(32,48,80,0.08)]"
+                  className="w-full rounded-lg border-0 bg-[var(--card)] px-3 py-1.5 text-[12px] text-[var(--brand-deep)] shadow-sm outline-none ring-1 ring-[rgba(32,48,80,0.08)]"
                   placeholder={
                     isParent
                       ? "Search teachers…"
@@ -604,7 +613,7 @@ export function StaffInternalChatButton() {
                 />
               </div>
               {!isParent ? (
-                <div className="flex gap-1 border-b border-[rgba(32,48,80,0.06)] bg-white px-2 py-1.5">
+                <div className="flex gap-1 border-b border-[var(--border)] bg-[var(--card)] px-2 py-1.5">
                   <button
                     type="button"
                     className="rounded-md bg-[#e7f8ef] px-2 py-1 text-[10px] font-bold text-[#075E54]"
@@ -614,7 +623,7 @@ export function StaffInternalChatButton() {
                   </button>
                   <button
                     type="button"
-                    className="rounded-md bg-[#e7f0f8] px-2 py-1 text-[10px] font-bold text-[#203050]"
+                    className="rounded-md bg-[#e7f0f8] px-2 py-1 text-[10px] font-bold text-[var(--brand-deep)]"
                     onClick={() => setComposer("new-announcement")}
                   >
                     + Class announce
@@ -628,7 +637,7 @@ export function StaffInternalChatButton() {
                   </button>
                 </div>
               ) : (
-                <div className="flex justify-end border-b border-[rgba(32,48,80,0.06)] bg-white px-2 py-1.5">
+                <div className="flex justify-end border-b border-[var(--border)] bg-[var(--card)] px-2 py-1.5">
                   <button
                     type="button"
                     className="rounded-md px-2 py-1 text-[10px] font-semibold text-[var(--muted)]"
@@ -638,7 +647,7 @@ export function StaffInternalChatButton() {
                   </button>
                 </div>
               )}
-              <div className="flex-1 overflow-y-auto bg-white">
+              <div className="flex-1 overflow-y-auto bg-[var(--card)]">
                 {(tab === "recent" || tab === "groups") &&
                   filteredThreads.map((t) => {
                     if (!masters) return null;
@@ -649,7 +658,7 @@ export function StaffInternalChatButton() {
                       <button
                         key={t.id}
                         type="button"
-                        className="flex w-full items-center gap-2.5 border-b border-[rgba(32,48,80,0.06)] px-3 py-2.5 text-left hover:bg-[#f5f6f6]"
+                        className="flex w-full items-center gap-2.5 border-b border-[var(--border)] px-3 py-2.5 text-left hover:bg-[#f5f6f6]"
                         onClick={() => openThread(t.id)}
                       >
                         <Avatar name={name} kind={t.kind} />
@@ -691,7 +700,7 @@ export function StaffInternalChatButton() {
                       <button
                         key={s.id}
                         type="button"
-                        className="flex w-full items-center gap-2.5 border-b border-[rgba(32,48,80,0.06)] px-3 py-2.5 text-left hover:bg-[#f5f6f6]"
+                        className="flex w-full items-center gap-2.5 border-b border-[var(--border)] px-3 py-2.5 text-left hover:bg-[#f5f6f6]"
                         onClick={() => onOpenStaff(s.id)}
                       >
                         <Avatar name={s.fullName} kind="staff_dm" />
@@ -721,7 +730,7 @@ export function StaffInternalChatButton() {
                       <button
                         key={p.householdId}
                         type="button"
-                        className="flex w-full items-center gap-2.5 border-b border-[rgba(32,48,80,0.06)] px-3 py-2.5 text-left hover:bg-[#f5f6f6]"
+                        className="flex w-full items-center gap-2.5 border-b border-[var(--border)] px-3 py-2.5 text-left hover:bg-[#f5f6f6]"
                         onClick={() => onOpenParent(p.householdId)}
                       >
                         <Avatar name={p.guardianName} kind="staff_parent_dm" />
@@ -751,7 +760,7 @@ export function StaffInternalChatButton() {
                       <button
                         key={t.id}
                         type="button"
-                        className="flex w-full items-center gap-2.5 border-b border-[rgba(32,48,80,0.06)] px-3 py-2.5 text-left hover:bg-[#f5f6f6]"
+                        className="flex w-full items-center gap-2.5 border-b border-[var(--border)] px-3 py-2.5 text-left hover:bg-[#f5f6f6]"
                         onClick={() =>
                           actor?.householdId &&
                           onOpenParent(actor.householdId, t.id)
@@ -773,7 +782,7 @@ export function StaffInternalChatButton() {
             </>
           ) : (
             <>
-              <div className="flex items-center gap-2 border-b border-[rgba(32,48,80,0.08)] bg-[#f0f2f5] px-3 py-2">
+              <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[#f0f2f5] px-3 py-2">
                 <Avatar
                   name={activeTitle}
                   kind={activeThread?.kind || "staff_dm"}
@@ -796,7 +805,7 @@ export function StaffInternalChatButton() {
                 }}
               >
                 {activeMessages.length === 0 ? (
-                  <p className="rounded-lg bg-white/80 px-3 py-2 text-center text-[11px] text-[var(--muted)]">
+                  <p className="rounded-lg bg-[var(--card)]/80 px-3 py-2 text-center text-[11px] text-[var(--muted)]">
                     {canPost
                       ? "Say hello — messages stay inside the school ERP."
                       : "Waiting for school updates…"}
@@ -813,7 +822,7 @@ export function StaffInternalChatButton() {
                           className={`max-w-[85%] rounded-lg px-2.5 py-1.5 text-[12px] shadow-sm ${
                             mine
                               ? "rounded-br-sm bg-[#dcf8c6] text-[var(--brand-deep)]"
-                              : "rounded-bl-sm bg-white text-[var(--brand-deep)]"
+                              : "rounded-bl-sm bg-[var(--card)] text-[var(--brand-deep)]"
                           }`}
                         >
                           {!mine ? (
@@ -856,7 +865,7 @@ export function StaffInternalChatButton() {
                 >
                   <input
                     ref={inputRef}
-                    className="min-w-0 flex-1 rounded-full border-0 bg-white px-3 py-2 text-[13px] text-[var(--brand-deep)] shadow-sm outline-none ring-1 ring-[rgba(32,48,80,0.08)]"
+                    className="min-w-0 flex-1 rounded-full border-0 bg-[var(--card)] px-3 py-2 text-[13px] text-[var(--brand-deep)] shadow-sm outline-none ring-1 ring-[rgba(32,48,80,0.08)]"
                     placeholder="Type a message"
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
@@ -920,14 +929,6 @@ function Avatar({
     >
       {staffInitials(name || "?")}
     </span>
-  );
-}
-
-function WhatsAppGlyph() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.435 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
-    </svg>
   );
 }
 

@@ -18,6 +18,9 @@ import {
   exportFilterReport,
   type ReportColumn,
 } from "@/lib/reportExport";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
+import { recordStudentLeaveDeletion } from "@/lib/studentLeaveNormalizedClient";
 
 const STORAGE_KEY = "bhb_student_leave_v1";
 
@@ -105,7 +108,7 @@ export function loadStudentLeave(): StudentLeaveState {
     return emptyStudentLeaveState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyStudentLeaveState();
     const parsed = JSON.parse(raw) as Partial<StudentLeaveState>;
     return {
@@ -125,7 +128,7 @@ export function writeStudentLeaveLocalRaw(state: StudentLeaveState) {
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[studentLeave] localStorage quota exceeded — relying on server DB sync", e);
   }
@@ -140,13 +143,13 @@ export function saveStudentLeave(state: StudentLeaveState): void {
 
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[studentLeave] localStorage quota exceeded — relying on server DB sync", e);
   }
-  void import("@/lib/studentLeavePersistence").then(({ scheduleStudentLeaveSync }) => {
+  void trackServerWork(import("@/lib/studentLeavePersistence").then(({ scheduleStudentLeaveSync }) => {
     scheduleStudentLeaveSync(state);
-  });
+  }));
 }
 
 export function createStudentLeaveRequest(input: {
@@ -255,6 +258,7 @@ export function deleteStudentLeaveRequest(
       error: "Only pending or cancelled requests can be deleted",
     };
   }
+  recordStudentLeaveDeletion(id);
   saveStudentLeave({
     ...state,
     requests: state.requests.filter((r) => r.id !== id),

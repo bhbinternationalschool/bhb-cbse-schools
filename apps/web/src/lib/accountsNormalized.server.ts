@@ -30,9 +30,12 @@ import type {
   Trustee,
   VendorBill,
   VendorBillLine,
-} from "@/lib/accounts";
+} from "@/lib/accountsTypes";
 import { accountsDualWriteDbEnabled } from "@/lib/accountsDbConfig";
+import { syncModeBankMapFromBanks } from "@/lib/accountsNormalize";
+import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 export type AccountsDeskSyncMeta = {
   coaCount: number;
@@ -80,21 +83,6 @@ async function resolveCtx(): Promise<{
   tenantId: string;
 } | null> {
   return getServerTenantContext();
-}
-
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  const { data } = await sb.from(table).select("id").eq("tenant_id", tenantId);
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
 }
 
 async function upsertChunks(
@@ -908,28 +896,6 @@ function rowToFiscalYear(r: Record<string, unknown>): FiscalYear {
   };
 }
 
-function collectNestedLineIds<T extends { id: string }>(
-  parents: Array<{ id: string; lines?: T[] }>,
-): Set<string> {
-  const keep = new Set<string>();
-  for (const parent of parents) {
-    for (const line of parent.lines ?? []) {
-      keep.add(line.id);
-    }
-  }
-  return keep;
-}
-
-function collectJournalLineIds(entries: JournalEntry[]): Set<string> {
-  const keep = new Set<string>();
-  for (const entry of entries) {
-    (entry.lines ?? []).forEach((_, idx) => {
-      keep.add(journalLineId(entry.id, idx));
-    });
-  }
-  return keep;
-}
-
 function sortLinesByIndex<T>(
   rows: Record<string, unknown>[],
   parentKey: string,
@@ -947,8 +913,17 @@ function sortLinesByIndex<T>(
   return map;
 }
 
+/** The only accounts tables a desk save may delete from — by named id. */
+export const ACCOUNTS_DELETABLE_TABLES = [
+  "accounts_desk_bank_accounts",
+  "accounts_desk_coa_accounts",
+  "accounts_desk_expense_categories",
+  "accounts_desk_vendors",
+] as const;
+
 export async function pushAccountsDeskToDb(
   state: AccountsState,
+  deletes: NamedDeletes = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (!accountsDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
@@ -960,7 +935,13 @@ export async function pushAccountsDeskToDb(
   const cashLedger = state.cashLedger ?? [];
   const bankAccounts = state.bankAccounts ?? [];
   const bankLedger = state.bankLedger ?? [];
-  const modeBankMap = state.modeBankMap ?? [];
+  // Which bank each payment mode lands in is derived from the banks' own
+  // modes. A browser that lost its copy sends an empty map; that wiped the
+  // table on every save (8 Oct 2026). Empty → derive from the banks sent;
+  // still empty → leave the table alone.
+  const modeBankMap = (state.modeBankMap ?? []).length
+    ? state.modeBankMap!
+    : syncModeBankMapFromBanks(bankAccounts);
   const reconSessions = state.reconSessions ?? [];
   const expenseCategories = state.expenseCategories ?? [];
   const expenseVouchers = state.expenseVouchers ?? [];
@@ -977,88 +958,12 @@ export async function pushAccountsDeskToDb(
   const fiscalYears = state.fiscalYears ?? [];
   const settings = state.settings ?? DEFAULT_SETTINGS;
 
-  await Promise.all([
-    deleteStale(sb, tenantId, "accounts_desk_cash_pools", new Set(cashPools.map((p) => p.id))),
-    deleteStale(sb, tenantId, "accounts_desk_cash_ledger", new Set(cashLedger.map((e) => e.id))),
-    deleteStale(sb, tenantId, "accounts_desk_bank_accounts", new Set(bankAccounts.map((b) => b.id))),
-    deleteStale(sb, tenantId, "accounts_desk_bank_ledger", new Set(bankLedger.map((e) => e.id))),
-    deleteStale(sb, tenantId, "accounts_desk_recon_sessions", new Set(reconSessions.map((s) => s.id))),
-    deleteStale(
-      sb,
-      tenantId,
-      "accounts_desk_recon_lines",
-      collectNestedLineIds(reconSessions),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "accounts_desk_expense_categories",
-      new Set(expenseCategories.map((c) => c.id)),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "accounts_desk_expense_vouchers",
-      new Set(expenseVouchers.map((v) => v.id)),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "accounts_desk_expense_voucher_lines",
-      collectNestedLineIds(expenseVouchers),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "accounts_desk_recurring_rules",
-      new Set(recurringRules.map((r) => r.id)),
-    ),
-    deleteStale(sb, tenantId, "accounts_desk_vendors", new Set(vendors.map((v) => v.id))),
-    deleteStale(sb, tenantId, "accounts_desk_vendor_bills", new Set(vendorBills.map((b) => b.id))),
-    deleteStale(
-      sb,
-      tenantId,
-      "accounts_desk_vendor_bill_lines",
-      collectNestedLineIds(vendorBills),
-    ),
-    deleteStale(sb, tenantId, "accounts_desk_payables", new Set(payables.map((p) => p.id))),
-    deleteStale(sb, tenantId, "accounts_desk_trustees", new Set(trustees.map((t) => t.id))),
-    deleteStale(sb, tenantId, "accounts_desk_owner_loans", new Set(ownerLoans.map((l) => l.id))),
-    deleteStale(
-      sb,
-      tenantId,
-      "accounts_desk_owner_loan_schedule",
-      new Set(ownerLoanSchedule.map((r) => r.id)),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "accounts_desk_owner_cash_handovers",
-      new Set(ownerCashHandovers.map((h) => h.id)),
-    ),
-    deleteStale(sb, tenantId, "accounts_desk_coa_accounts", new Set(coaAccounts.map((c) => c.id))),
-    deleteStale(
-      sb,
-      tenantId,
-      "accounts_desk_journal_entries",
-      new Set(journalEntries.map((j) => j.id)),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "accounts_desk_journal_lines",
-      collectJournalLineIds(journalEntries),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "accounts_desk_fiscal_years",
-      new Set(fiscalYears.map((fy) => fy.code)),
-    ),
-  ]);
-
-  await sb.from("accounts_desk_mode_bank_map").delete().eq("tenant_id", tenantId);
-
+  // No prune. This save used to delete every row of 22 tables that the
+  // browser did not hold, so a fee counter that had not re-read erased the
+  // office's cash and bank entries, and a fresh browser's seeded chart of
+  // accounts erased the school's. Ledgers, vouchers, bills, loans and journals
+  // are voided or closed, never deleted; the four masters the UI can delete
+  // arrive as named ids and are deleted after the upserts below.
   const reconLineRows = reconSessions.flatMap((session) =>
     (session.lines ?? []).map((line, idx) =>
       reconLineToRow(tenantId, session.id, idx, line),
@@ -1115,9 +1020,27 @@ export async function pushAccountsDeskToDb(
     ["accounts_desk_fiscal_years", fiscalYears.map((fy) => fiscalYearToRow(tenantId, fy))],
   ];
 
+  // A row this save names for deletion is not upserted back first.
   for (const [table, rows] of tables) {
-    const r = await upsertChunks(sb, table, rows);
+    const gone = new Set(deletes[table] ?? []);
+    const keep = gone.size ? rows.filter((r) => !gone.has(String(r.id))) : rows;
+    const r = await upsertChunks(sb, table, keep);
     if (!r.ok) return r;
+  }
+
+  for (const table of ACCOUNTS_DELETABLE_TABLES) {
+    const r = await deleteNamedIds(sb, tenantId, table, deletes[table]);
+    if (!r.ok) return r;
+  }
+  // A mode still pointing at a bank the user deleted is unmapped, not kept.
+  const goneBanks = deletes["accounts_desk_bank_accounts"] ?? [];
+  if (goneBanks.length) {
+    const { error } = await sb
+      .from("accounts_desk_mode_bank_map")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .in("bank_id", goneBanks);
+    if (error) return { ok: false, error: `accounts_desk_mode_bank_map: ${error.message}` };
   }
 
   await sb.from("accounts_desk_settings").upsert(
@@ -1134,6 +1057,29 @@ export async function pushAccountsDeskToDb(
   for (const v of expenseVouchers) {
     const at = v.date;
     if (at && (!lastVoucherAt || at > lastVoucherAt)) lastVoucherAt = at;
+  }
+
+  // Any head or sub-head the school just added must be postable straight
+  // away. The desk chart is the school's to edit, so the server book follows
+  // it here rather than waiting for someone to edit a seed in the repo — the
+  // hand-kept version of this is what let "5010 Milk Expenses" exist on the
+  // desk while the book had never heard of it.
+  //
+  // Additive and idempotent, so a push that changes nothing installs nothing.
+  // Never allowed to fail the desk save: the chart is already stored, and a
+  // books problem must not cost the office its work.
+  try {
+    const { syncDeskChartToLedger } = await import("@/lib/ledger/ledger.server");
+    const synced = await syncDeskChartToLedger();
+    if (synced.ok && synced.accountsAdded > 0) {
+      console.log(
+        `[accounts] installed ${synced.accountsAdded} desk account(s) into the server book: ${synced.added.join(", ")}`,
+      );
+    } else if (!synced.ok) {
+      console.error(`[accounts] desk chart -> ledger sync failed: ${synced.error}`);
+    }
+  } catch (e) {
+    console.error("[accounts] desk chart -> ledger sync threw", e);
   }
 
   await sb.from("accounts_desk_sync_meta").upsert(
@@ -1155,6 +1101,9 @@ export async function pushAccountsDeskToDb(
 export async function fetchAccountsDeskFromDb(): Promise<{
   bundle: AccountsDeskBundle;
   meta: AccountsDeskSyncMeta | null;
+  /** false = a read failed; the bundle is unknown, NOT an empty desk. */
+  ok: boolean;
+  error?: string;
 }> {
   const ctx = await resolveCtx();
   const empty: AccountsDeskBundle = {
@@ -1179,8 +1128,59 @@ export async function fetchAccountsDeskFromDb(): Promise<{
     fiscalYears: [],
     settings: DEFAULT_SETTINGS,
   };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
+
+  // Every list is read in pages. PostgREST stops at 1,000 rows and reports
+  // the cut as success: the cash and bank ledgers and the journal lines pass
+  // that, and a browser handed the first thousand would show — and, while
+  // saves pruned, push back — a ledger missing the rest. Read errors are
+  // kept, not dropped: a failed read must not look like an empty desk.
+  const page = (table: string, orderBy = "id") =>
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from(table).select("*").eq("tenant_id", tenantId).order(orderBy).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null }));
+
+  const results = await Promise.all([
+    page("accounts_desk_cash_pools"),
+    page("accounts_desk_cash_ledger"),
+    page("accounts_desk_bank_accounts"),
+    page("accounts_desk_bank_ledger"),
+    page("accounts_desk_mode_bank_map", "mode"),
+    page("accounts_desk_recon_sessions"),
+    page("accounts_desk_recon_lines"),
+    page("accounts_desk_expense_categories"),
+    page("accounts_desk_expense_vouchers"),
+    page("accounts_desk_expense_voucher_lines"),
+    page("accounts_desk_recurring_rules"),
+    page("accounts_desk_vendors"),
+    page("accounts_desk_vendor_bills"),
+    page("accounts_desk_vendor_bill_lines"),
+    page("accounts_desk_payables"),
+    page("accounts_desk_trustees"),
+    page("accounts_desk_owner_loans"),
+    page("accounts_desk_owner_loan_schedule"),
+    page("accounts_desk_owner_cash_handovers"),
+    page("accounts_desk_coa_accounts"),
+    page("accounts_desk_journal_entries"),
+    page("accounts_desk_journal_lines"),
+    page("accounts_desk_fiscal_years"),
+    sb
+      .from("accounts_desk_settings")
+      .select("expense_approval_paise, petty_threshold_paise")
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+    sb
+      .from("accounts_desk_sync_meta")
+      .select(META_SELECT)
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+  ]);
+  const failed = results.find((r) => r.error);
+  if (failed?.error) {
+    console.error("[accounts-db] fetch failed", failed.error.message);
+    return { bundle: empty, meta: null, ok: false, error: failed.error.message };
+  }
 
   const [
     { data: cashPoolRows },
@@ -1208,41 +1208,7 @@ export async function fetchAccountsDeskFromDb(): Promise<{
     { data: fiscalYearRows },
     { data: settingsRow },
     { data: metaRow },
-  ] = await Promise.all([
-    sb.from("accounts_desk_cash_pools").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_cash_ledger").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_bank_accounts").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_bank_ledger").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_mode_bank_map").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_recon_sessions").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_recon_lines").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_expense_categories").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_expense_vouchers").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_expense_voucher_lines").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_recurring_rules").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_vendors").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_vendor_bills").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_vendor_bill_lines").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_payables").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_trustees").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_owner_loans").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_owner_loan_schedule").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_owner_cash_handovers").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_coa_accounts").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_journal_entries").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_journal_lines").select("*").eq("tenant_id", tenantId),
-    sb.from("accounts_desk_fiscal_years").select("*").eq("tenant_id", tenantId),
-    sb
-      .from("accounts_desk_settings")
-      .select("expense_approval_paise, petty_threshold_paise")
-      .eq("tenant_id", tenantId)
-      .maybeSingle(),
-    sb
-      .from("accounts_desk_sync_meta")
-      .select(META_SELECT)
-      .eq("tenant_id", tenantId)
-      .maybeSingle(),
-  ]);
+  ] = results;
 
   const reconLinesBySession = sortLinesByIndex<Record<string, unknown>>(
     (reconLineRows ?? []) as Record<string, unknown>[],
@@ -1280,9 +1246,13 @@ export async function fetchAccountsDeskFromDb(): Promise<{
       bankLedger: (bankLedgerRows ?? []).map((r) =>
         rowToBankLedger(r as Record<string, unknown>),
       ),
-      modeBankMap: (modeBankMapRows ?? []).map((r) =>
-        rowToModeBankMap(r as Record<string, unknown>),
-      ),
+      // An empty table reads as the mapping the banks imply, never as "no
+      // bank takes UPI".
+      modeBankMap: (modeBankMapRows ?? []).length
+        ? (modeBankMapRows ?? []).map((r) => rowToModeBankMap(r as Record<string, unknown>))
+        : syncModeBankMapFromBanks(
+            (bankAccountRows ?? []).map((r) => rowToBankAccount(r as Record<string, unknown>)),
+          ),
       reconSessions: (reconSessionRows ?? []).map((r) => {
         const rec = r as Record<string, unknown>;
         const lines = (reconLinesBySession.get(String(rec.id)) ?? []).map((line) =>
@@ -1352,5 +1322,6 @@ export async function fetchAccountsDeskFromDb(): Promise<{
           updatedAt: String((metaRow as { updated_at: string }).updated_at),
         }
       : null,
+    ok: true,
   };
 }

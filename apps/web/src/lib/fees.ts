@@ -8,6 +8,8 @@ import {
   resolvedConcessionGrantsForStudent,
 } from "@/lib/feeDiscountRuntime";
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
+import { sendFromSchoolWhatsApp } from "@/lib/waMe";
 import {
   getSchoolMirrorSync,
   scheduleClientSchoolMirrorSync,
@@ -15,6 +17,7 @@ import {
 } from "@/lib/schoolDataMirror";
 import {
   DEFAULT_AY,
+  academicYearStartOn,
   currentAcademicYearCode,
   dueOnForSessionMonth,
   formatInr,
@@ -28,6 +31,7 @@ import {
   resolveStudentFeeGroupId,
   resolveStructureLinesForClass,
   resolveSiblingTierValue,
+  saveMasters,
   shouldBillMidYearLine,
   concessionAmountFromValue,
   type MastersState,
@@ -54,17 +58,15 @@ import {
   stopFutureBlocks,
 } from "@/lib/feeAdjustments";
 import {
-  isStoreIssueDueOnFeeTake,
-  listStoreIssuesForStudent,
-  loadStore,
-  storeDueKey,
-  storeIssueNetBilledPaise,
-  type StoreIssueLine,
-} from "@/lib/store";
-import {
   computeTransportPeriodDues,
   loadTransport,
 } from "@/lib/transport";
+import {
+  DEFAULT_FEE_BACKDATE_POLICY,
+  backdatePolicyApplies,
+  feeBackdateVerdict,
+  type FeeBackdatePolicy,
+} from "@/lib/feeBackdate";
 import { TENANT } from "@/lib/types";
 import {
   activePlanForStudent,
@@ -81,6 +83,13 @@ import {
   type InstallmentPlanInterval,
   type PlanAllocation,
 } from "@/lib/installmentPlans";
+import { writeCacheOrInvalidate, readCache, removeCache } from "@/lib/browserStorage";
+import {
+  recordAccountsPostingFailure,
+  type AccountsPostingAction,
+} from "@/lib/accountsPostingFailures";
+import { trackServerWork } from "@/lib/serverWork";
+import { recordFeeDayCloseDeletion } from "@/lib/feesNormalizedClient";
 
 export type DueKind =
   | "academic"
@@ -201,6 +210,52 @@ export const TENDER_MODES: {
   },
 ];
 
+/**
+ * Today's money by how it was taken — one line per mode, biggest first.
+ *
+ * Gateway money gets its own line rather than being folded into UPI: a UPI
+ * paid into the school's own QR is not the same thing as a link the parent
+ * tapped, and the office reconciles them differently. `gatewayProvider` is
+ * the only thing that tells them apart — the mode of both is "upi".
+ *
+ * `totalPaise` is what the caller is showing as the day's collection. Any
+ * shortfall between the tenders and that total is named "Mode not
+ * recorded", so the parts always add up to the figure beside them: a
+ * receipt whose tenders were lost (the 2026-09-06 wipe did exactly that)
+ * still happened, and silently short parts would be the worse lie.
+ */
+export function collectionsByMode(
+  vouchers: CollectionVoucher[],
+  totalPaise: number,
+): { mode: string; label: string; paise: number }[] {
+  const totals = new Map<string, number>();
+  let tendered = 0;
+  for (const v of vouchers) {
+    for (const t of v.tenders ?? []) {
+      const amount = Number(t.amountPaise) || 0;
+      if (amount === 0) continue;
+      const key = t.gatewayProvider ? "online" : t.mode;
+      totals.set(key, (totals.get(key) ?? 0) + amount);
+      tendered += amount;
+    }
+  }
+  if (tendered < totalPaise) {
+    totals.set("unrecorded", (totals.get("unrecorded") ?? 0) + (totalPaise - tendered));
+  }
+  return [...totals.entries()]
+    .map(([mode, paise]) => ({
+      mode,
+      label:
+        mode === "online"
+          ? "Online (gateway)"
+          : mode === "unrecorded"
+            ? "Mode not recorded"
+            : (TENDER_MODES.find((m) => m.value === mode)?.label ?? mode),
+      paise,
+    }))
+    .sort((a, b) => b.paise - a.paise);
+}
+
 export function tenderModeLabel(mode: TenderMode): string {
   return TENDER_MODES.find((m) => m.value === mode)?.label ?? mode;
 }
@@ -229,6 +284,60 @@ export type FeeDueLine = {
   balancePaise: number;
   label: string;
 };
+
+/**
+ * A store credit sale, as the fee counter needs it.
+ *
+ * Passed in rather than derived: the store is a server-truth module and this
+ * function is synchronous. The caller fetches these once per household and
+ * hands them over, so no fee code reaches into the store's tables and the
+ * store's balance stays the only version of what is owed.
+ */
+export type InjectedStoreDue = {
+  saleId: string;
+  saleNo: string;
+  studentId: string;
+  saleDate: string;
+  balancePaise: number;
+  totalPaise: number;
+  paidPaise: number;
+  itemSummary: string;
+};
+
+/** The due key a store sale collects under. */
+export function storeSaleDueKey(studentId: string, saleId: string): string {
+  return `store:${studentId}:${saleId}`;
+}
+
+function storeDueToLine(d: InjectedStoreDue): FeeDueLine {
+  return {
+    dueKey: storeSaleDueKey(d.studentId, d.saleId),
+    kind: "store",
+    studentId: d.studentId,
+    feeHeadId: "",
+    feeHeadName: "Store",
+    installmentId: null,
+    installmentLabel: "Store",
+    specialFeeId: null,
+    structureLineId: null,
+    storeIssueId: d.saleId,
+    storeIssueNo: d.saleNo,
+    storeItems: [],
+    transport: null,
+    dueOn: d.saleDate,
+    billedPaise: d.totalPaise,
+    concessionPaise: 0,
+    concessionDetails: [],
+    // Straight from the store, not adjusted by this module's paid map: the
+    // store's own balance already accounts for every collection that reached
+    // it, including ones made here. A fee receipt whose store call has not
+    // landed yet leaves the due standing, which is the honest state and is
+    // what prompts the retry.
+    paidPaise: d.paidPaise,
+    balancePaise: d.balancePaise,
+    label: `Store · ${d.saleNo}${d.itemSummary ? ` · ${d.itemSummary}` : ""}`,
+  };
+}
 
 /** One approved grant applied to a due line. */
 export type FeeConcessionDetail = {
@@ -397,6 +506,31 @@ export type VoucherTender = {
   bankName: string;
   /** School bank account that received / will receive this tender. */
   bankAccountId?: string;
+  /**
+   * The payment gateway that captured this money, when one did ("cashfree",
+   * "razorpay"). Gateway money is not in a bank account yet: it settles a
+   * cycle later, net of fees, so the book holds it in clearing until the
+   * settlement says which bank got how much. Empty for counter tenders —
+   * including a UPI paid into the school's own QR, which really is in the
+   * bank the same day.
+   */
+  gatewayProvider?: string;
+  /**
+   * Gateway fee passed on to the parent, on top of `amountPaise`, where the
+   * school has chosen not to absorb it.
+   *
+   * NOT part of `amountPaise`, and deliberately so: `amountPaise` is what the
+   * receipt is written for, and the receipt is for the fee the school levied.
+   * The parent paid more than that, so the gateway is holding more than that,
+   * which is why the ledger debits clearing with the sum of the two — the
+   * settlement journal credits clearing with Cashfree's gross, and a receipt
+   * that debited only the fee would drive clearing negative by this amount on
+   * every online payment.
+   *
+   * Meaningless without `gatewayProvider`: there is no gateway charge to
+   * recover on cash at the counter.
+   */
+  gatewaySurchargePaise?: number;
   /**
    * Cheque (and similar) — receipt issued but bank clearance pending.
    * Non-cheque modes are always "cleared".
@@ -637,11 +771,53 @@ export function formatManualBookRef(seriesCode: string, leaf: string): string {
   return `${s}/${n}`;
 }
 
-/** True if this school/paper receipt ref is already used on a live voucher. */
+/**
+ * The paper number written on a receipt, whichever way it was recorded — the
+ * manual-book path stores SERIES/LEAF, the counter stores a free-text school
+ * receipt no.
+ */
+export function paperRefOf(v: {
+  manualBookSeries?: string;
+  manualBookLeaf?: string;
+  schoolReceiptNo?: string;
+}): string {
+  const manual = formatManualBookRef(
+    v.manualBookSeries ?? "",
+    v.manualBookLeaf ?? "",
+  );
+  return manual || (v.schoolReceiptNo ?? "").trim();
+}
+
+/**
+ * Trailing digits of a book stub, so a serial range sorts 9 before 10 rather
+ * than as text, where "9" would fall after "10" and hide a whole page of the
+ * book from a range filter.
+ */
+export function leafNumber(ref: string): number | null {
+  const m = ref.trim().match(/(\d+)\s*$/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * True if this school/paper receipt ref is already used on a live voucher of
+ * ANOTHER family.
+ *
+ * The paper book is written one leaf per family visit, not one leaf per
+ * system receipt: collect for two siblings and both receipts legitimately
+ * carry the same number. Blocking that made the counter clear the field to
+ * get past it, which left receipts with no link to the book at all — worse
+ * for reconciliation than the duplicate the rule was guarding against.
+ *
+ * Reuse across a DIFFERENT household is still refused. That is the case the
+ * rule exists for: one family's leaf recorded against another family's money.
+ */
 export function isSchoolReceiptNoTaken(
   schoolReceiptNo: string,
   fees?: FeesState,
   exceptVoucherId?: string,
+  sameHouseholdId?: string,
 ): boolean {
   const key = schoolReceiptNo.trim().toUpperCase();
   if (!key) return false;
@@ -649,6 +825,7 @@ export function isSchoolReceiptNoTaken(
   return f.vouchers.some((v) => {
     if (v.voidedAt) return false;
     if (exceptVoucherId && v.id === exceptVoucherId) return false;
+    if (sameHouseholdId && v.householdId === sameHouseholdId) return false;
     if ((v.schoolReceiptNo ?? "").trim().toUpperCase() === key) return true;
     if (
       v.source === "manual_book" &&
@@ -911,7 +1088,7 @@ function notifyFeesUpdated() {
 function kickFeesIdbHydrate() {
   if (feesIdbHydrateStarted || typeof window === "undefined") return;
   feesIdbHydrateStarted = true;
-  void import("@/lib/feesLocalStore").then(async (idb) => {
+  void trackServerWork(import("@/lib/feesLocalStore").then(async (idb) => {
     if (!idb.feesIdbAvailable()) return;
     const remote = await idb.readFeesFromIdb();
     if (!remote) return;
@@ -922,7 +1099,7 @@ function kickFeesIdbHydrate() {
       feesWorkingCopy = next;
       notifyFeesUpdated();
     }
-  });
+  }));
 }
 
 /**
@@ -951,11 +1128,12 @@ export async function hydrateFeesStore(): Promise<boolean> {
   return true;
 }
 
-function persistFeesClient(state: FeesState) {
+function persistFeesClient(state: FeesState, opts?: { sync?: boolean }) {
+  const sync = opts?.sync ?? true;
   feesWorkingCopy = state;
   const compact = compactFeesForStorage(state);
 
-  void import("@/lib/feesLocalStore").then(async (idb) => {
+  void trackServerWork(import("@/lib/feesLocalStore").then(async (idb) => {
     if (idb.feesIdbAvailable()) {
       try {
         await idb.writeFeesToIdb(compact);
@@ -963,29 +1141,31 @@ function persistFeesClient(state: FeesState) {
         console.warn("[fees] IndexedDB write failed", e);
       }
     }
-  });
+  }));
 
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(compact));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(compact));
   } catch (err) {
     if (!isStorageQuotaError(err)) throw err;
     console.warn(
       "[fees] localStorage quota exceeded — using IndexedDB + server mirror",
     );
     try {
-      localStorage.removeItem(STORAGE_KEY);
+      removeCache(STORAGE_KEY);
     } catch {
       /* ignore */
     }
-    void import("@/lib/feesLocalStore").then((idb) => {
+    void trackServerWork(import("@/lib/feesLocalStore").then((idb) => {
       idb.markFeesPreferIdb();
-    });
+    }));
   }
 
-  scheduleClientSchoolMirrorSync({ fees: state });
-  void import("@/lib/feesPersistence").then(({ scheduleFeesSync }) => {
-    scheduleFeesSync(state);
-  });
+  if (sync) {
+    scheduleClientSchoolMirrorSync({ fees: state });
+    void trackServerWork(import("@/lib/feesPersistence").then(({ scheduleFeesSync }) => {
+      scheduleFeesSync(state);
+    }));
+  }
   notifyFeesUpdated();
 }
 
@@ -1002,16 +1182,16 @@ export function loadFees(): FeesState {
 
   try {
     if (!feesIdbHydrateStarted) {
-      void import("@/lib/feesLocalStore").then(async (idb) => {
+      void trackServerWork(import("@/lib/feesLocalStore").then(async (idb) => {
         if (idb.feesPreferIdb()) {
           const hydrated = await hydrateFeesStore();
           if (hydrated) return;
         }
         kickFeesIdbHydrate();
-      });
+      }));
     }
 
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (raw) {
       feesWorkingCopy = parseFeesJson(raw);
       return feesWorkingCopy;
@@ -1178,7 +1358,7 @@ export function createChargeVoucher(input: {
 
   let installmentLabel = input.installmentLabel || "Session";
   let dueOn = input.dueOn || new Date().toISOString().slice(0, 10);
-  let installmentId = input.installmentId ?? null;
+  const installmentId = input.installmentId ?? null;
   if (installmentId) {
     const inst = masters.installments.find((i) => i.id === installmentId);
     if (inst) {
@@ -1368,13 +1548,20 @@ export function saveFees(state: FeesState) {
   persistFeesClient(state);
 }
 
-/** Hydrate path — write localStorage + mirror without closed-session guard / cloud schedule. */
+/**
+ * Hydrate path — write localStorage + IndexedDB WITHOUT scheduling a push.
+ * Until 2026-08-18 this delegated to persistFeesClient, which always
+ * scheduled the fees desk push — so every fees hydration re-uploaded all
+ * vouchers and re-ran the open-dues rebuild (5 pushes in the 6 minutes
+ * after one deploy, 37 open-dues rebuilds in an hour, from a desk nobody
+ * was editing). Edits reach the DB through saveFees() only.
+ */
 export function writeFeesLocalRaw(state: FeesState) {
   if (typeof window === "undefined") {
     setMirrorSlice("fees", state);
     return;
   }
-  persistFeesClient(state);
+  persistFeesClient(state, { sync: false });
 }
 
 /** Wipe all collection vouchers from desk + IndexedDB + mirror sync. */
@@ -1389,9 +1576,9 @@ export async function wipeFeeCollections(): Promise<{
     const compact = compactFeesForStorage(next);
     feesWorkingCopy = next;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(compact));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(compact));
     } catch {
-      localStorage.removeItem(STORAGE_KEY);
+      removeCache(STORAGE_KEY);
     }
     const idb = await import("@/lib/feesLocalStore");
     if (idb.feesIdbAvailable()) {
@@ -1477,29 +1664,14 @@ function normalizeVoucherLine(l: Partial<VoucherLine>): VoucherLine {
                 : l.dueKey?.startsWith("cv:")
                   ? "voucher"
                   : "academic";
-  let storeItems = Array.isArray(l.storeItems) ? l.storeItems : [];
-  let storeIssueNo = l.storeIssueNo ?? "";
+  const storeItems = Array.isArray(l.storeItems) ? l.storeItems : [];
+  const storeIssueNo = l.storeIssueNo ?? "";
   const transportDetail = l.transport ?? null;
 
-  // Backfill item details for older store receipts from the issue register
-  if (kind === "store" && storeItems.length === 0 && l.dueKey) {
-    const parts = l.dueKey.split(":");
-    const issueId = parts[2];
-    if (issueId) {
-      const iss = loadStore().issues.find((i) => i.id === issueId);
-      if (iss) {
-        storeIssueNo = storeIssueNo || iss.issueNo;
-        storeItems = iss.lines.map((x) => ({
-          sku: x.sku,
-          name: x.name,
-          sizeLabel: x.sizeLabel,
-          qty: x.qty,
-          unitPricePaise: x.unitPricePaise,
-          linePaise: x.linePaise,
-        }));
-      }
-    }
-  }
+  // Older store receipts that were written without their item lines cannot be
+  // backfilled any more: the issue register they were read from is gone with
+  // the old module. The receipt still shows its amount; it simply lists no
+  // items, which is honest about what is known.
 
   const concessionDetails = Array.isArray(l.concessionDetails)
     ? l.concessionDetails.map((c) => ({
@@ -1565,6 +1737,7 @@ function normalizeVoucher(v: Partial<CollectionVoucher>): CollectionVoucher {
       instrumentDate: t.instrumentDate ?? "",
       bankName: t.bankName ?? "",
       bankAccountId: t.bankAccountId ?? "",
+      gatewayProvider: t.gatewayProvider ?? "",
       realisation:
         t.realisation ??
         (t.mode === "cheque" ? "subject_to_clearance" : "cleared"),
@@ -1574,6 +1747,145 @@ function normalizeVoucher(v: Partial<CollectionVoucher>): CollectionVoucher {
     voidedAt: v.voidedAt ?? null,
     whatsappSentAt: v.whatsappSentAt ?? null,
   };
+}
+
+/**
+ * The stamp that marks a discount as given at the counter rather than by a
+ * standing Masters rule.
+ *
+ * Written onto the due line by `applyPostedWaiver` and frozen onto the
+ * receipt by `voucherLineFromDue`; read back by `counterWaiversByDueKey`. One
+ * constant because the reader subtracts money based on it — a typo on either
+ * side would silently stop settling discounts again, which is the whole bug.
+ */
+export const COUNTER_DISCOUNT_CODE = "COUNTER";
+
+/**
+ * Counter discounts, read back from the receipts that recorded them.
+ *
+ * WHY THIS EXISTS
+ * A discount given at the counter is settled through a `fee_adjustments`
+ * waiver row, and `postedWaiversByDueKey` subtracts it. That works in the
+ * browser and nowhere else:
+ *
+ *   loadFeeAdjustments()  →  if (typeof window === "undefined") return [];
+ *
+ * The open-dues cache is rebuilt on the SERVER. There the waiver map is
+ * always empty, `applyPostedWaiver` does nothing, and the balance settles at
+ *
+ *   billed − standing concession − cash collected
+ *
+ * which is EXACTLY the discount. Every family given a counter discount then
+ * showed that discount as still owed. Measured on production 2026-09-13: 265
+ * dues, 120 children, ₹77,854 — and for 231 of them the open balance equalled
+ * the waiver to the rupee, with billed − waived − collected summing to zero.
+ *
+ * Worse, the waiver rows themselves are not durable. They live in
+ * localStorage, synced as one whole-blob `module_local_state` row, so
+ * whichever browser saves last wins: 302 counter discounts are recorded on
+ * receipts and only ONE waiver row survives in the database.
+ *
+ * So the receipt is the source of truth here, not the adjustment. It is
+ * written once, server-side, never overwritten by another browser, and it
+ * already carries the number.
+ *
+ * THE SAME WAIVER RECORDED TWICE
+ * A due part-paid across two receipts can carry the waiver on BOTH lines,
+ * because the bug made the discount reappear as owed and the counter stamped
+ * it again. Summing then over-states the waiver. It is left summed anyway:
+ * `applyPostedWaiver` floors the balance at zero, and on all seven production
+ * cases the family had in fact settled, so zero is the right answer whether
+ * the waiver is counted once or twice. Capping it instead would need a rule
+ * for which receipt's figure is the real one, and there is no honest way to
+ * choose. What actually stops this recurring is the fix itself: once a
+ * discount stops reappearing, nobody re-enters it.
+ *
+ * ONLY THE COUNTER PART
+ * `line.concessionPaise` is the WHOLE discount on that line — standing
+ * Masters concessions plus the counter waiver. The standing part is
+ * recomputed by `concessionForHead` on every pass, so counting the whole
+ * figure here would subtract it twice. On production that would be ₹96,694
+ * wrongly knocked off. Only `concessionDetails` entries stamped `COUNTER` are
+ * taken: 302 lines are purely counter, 378 purely standing, 12 carry both.
+ */
+export function counterWaiversByDueKey(fees: FeesState): Map<string, number> {
+  const map = new Map<string, number>();
+  const fromLabel = new Map<string, number>();
+  for (const v of fees.vouchers) {
+    if (v.voidedAt) continue;
+    for (const line of v.lines) {
+      let waived = 0;
+      for (const d of line.concessionDetails ?? []) {
+        if (d.code === COUNTER_DISCOUNT_CODE) waived += d.amountPaise ?? 0;
+      }
+      if (waived > 0) {
+        map.set(line.dueKey, (map.get(line.dueKey) ?? 0) + waived);
+        continue;
+      }
+      const labelled = waiverFromReceiptLabel(line.label);
+      if (labelled > 0) {
+        fromLabel.set(line.dueKey, Math.max(fromLabel.get(line.dueKey) ?? 0, labelled));
+      }
+    }
+  }
+  // Receipts from before the COUNTER stamp existed (17 Mar – 8 May 2026 on
+  // production) carry the waiver only in the line's label. A due with any
+  // stamped receipt keeps the stamped figure; the label is the fallback.
+  for (const [dueKey, amount] of fromLabel) {
+    if (!map.has(dueKey)) map.set(dueKey, amount);
+  }
+  return map;
+}
+
+/**
+ * "Tuition Fee · April · −₹125 waived" → 12500 paise.
+ *
+ * THE OLDER RECEIPTS
+ * Until the COUNTER stamp was added, a counter discount reached the receipt
+ * only as text: the dues engine appends "· −₹X waived" to the label of a due
+ * it has applied a waiver to (see applyPostedWaiver), and the counter froze
+ * that label onto the receipt. `concessionDetails` on those lines is empty.
+ * On production, 14 Sep 2026: 72 live lines, ₹25,737 — every one of them
+ * shown to the family as still owed, and contradicted by the family's own
+ * receipt saying it was waived.
+ *
+ * X is the WHOLE waiver applied to that due at the moment of collection, so a
+ * due part-paid across two receipts carries the same X twice; the caller
+ * takes the largest, not the sum. X is never the standing concession — that
+ * is not written into the label — so it cannot be subtracted twice the way
+ * `line.concessionPaise` would be. A fully waived head ("· waived", no
+ * amount) is not read: nothing on the line says how much, and there are none
+ * on production.
+ */
+export function waiverFromReceiptLabel(label: string | undefined): number {
+  const m = /[−-]\s*₹\s*([\d,]+(?:\.\d{1,2})?)\s+waived\s*$/.exec(label || "");
+  if (!m) return 0;
+  const rupees = Number(m[1]!.replace(/,/g, ""));
+  return Number.isFinite(rupees) && rupees > 0 ? Math.round(rupees * 100) : 0;
+}
+
+/**
+ * Every settled discount for this student: the counter ones read off the
+ * receipts, plus any waiver recorded from the adjustments screen.
+ *
+ * A counter discount that reached a receipt is counted ONCE, from the
+ * receipt. Its adjustment row — when one survived — names the voucher it came
+ * from, so it can be recognised and skipped rather than subtracted again.
+ * Waivers with no such voucher are a different act: a discount recorded
+ * WITHOUT collecting anything, which never reaches a receipt line and is only
+ * ever known from the adjustment.
+ */
+export function settledWaiversByDueKey(
+  fees: FeesState,
+  studentId: string,
+): Map<string, number> {
+  const fromReceipts = counterWaiversByDueKey(fees);
+  const map = new Map(fromReceipts);
+  for (const [dueKey, amount] of postedWaiversByDueKey(studentId)) {
+    if (fromReceipts.has(dueKey)) continue;
+    map.set(dueKey, (map.get(dueKey) ?? 0) + amount);
+  }
+  return map;
 }
 
 export function paidByDueKey(fees: FeesState): Map<string, number> {
@@ -1736,18 +2048,60 @@ export function syncAllStudentFeeGroups(options?: {
   return { updated, skipped };
 }
 
+/**
+ * All row ids the same child holds across sessions (memoized ~5s): grants
+ * key on a session row id, but the concession belongs to the CHILD — after
+ * promotion the new row must still see last session's grant.
+ */
+let grantAliasMemo: { at: number; map: Map<string, string[]> } | null = null;
+function grantAliasIdsFor(student: {
+  id: string;
+  admissionNo: string;
+}): string[] {
+  const adm = (student.admissionNo || "").trim().toUpperCase();
+  if (!adm) return [];
+  const now = Date.now();
+  if (!grantAliasMemo || now - grantAliasMemo.at > 5000) {
+    const map = new Map<string, string[]>();
+    for (const s of loadSis().students) {
+      const k = (s.admissionNo || "").trim().toUpperCase();
+      if (!k) continue;
+      const list = map.get(k) ?? [];
+      list.push(s.id);
+      map.set(k, list);
+    }
+    grantAliasMemo = { at: now, map };
+  }
+  return (grantAliasMemo.map.get(adm) ?? []).filter((id) => id !== student.id);
+}
+
 function concessionForHead(
   masters: MastersState,
   student: { id: string; admissionNo: string; academicYearCode?: string },
   feeHeadId: string,
   billedPaise: number,
   asOf: string,
+  /**
+   * The date THIS due falls on. A grant is judged against the month it is
+   * being applied to, not against today.
+   *
+   * Without this a discount granted in August discounted April as well: the
+   * only question asked was whether the grant is live now. That is how a
+   * ₹150 counter discount showed as ₹300 on the month it was given — the
+   * one-off waiver for that month, plus a recurring grant dated to the NEXT
+   * installment which nothing stopped from reaching backwards.
+   *
+   * Omitted, it falls back to asOf, which is the old behaviour — used by
+   * callers that have no single due in hand.
+   */
+  effectiveOn?: string,
 ): { totalPaise: number; details: FeeConcessionDetail[] } {
   const mastersWithRules = mergeDiscountRulesFromSeed(masters);
   const grants = resolvedConcessionGrantsForStudent(
     mastersWithRules,
     student,
-    asOf,
+    effectiveOn || asOf,
+    grantAliasIdsFor(student),
   );
   const details: FeeConcessionDetail[] = [];
   let total = 0;
@@ -1807,6 +2161,30 @@ function concessionForHead(
   return { totalPaise: capped, details };
 }
 
+/**
+ * The transport discount a student actually gets on a given monthly fee.
+ *
+ * Exported so the riders-by-bus roster can show the same number the invoice
+ * charges. It deliberately calls the same `concessionForHead` the fee engine
+ * uses rather than reimplementing the rule resolution — a roster that
+ * computed discounts its own way would eventually disagree with the bill,
+ * and the office would have no way to tell which one was lying.
+ *
+ * Returns zero when no TRANSPORT fee head exists, which is the honest answer:
+ * without that head no transport concession can be applied to a bill either.
+ */
+export function transportConcessionForStudent(
+  masters: MastersState,
+  student: { id: string; admissionNo: string; academicYearCode?: string },
+  monthlyFeePaise: number,
+  asOf: string,
+): { totalPaise: number; details: FeeConcessionDetail[] } {
+  if (monthlyFeePaise <= 0) return { totalPaise: 0, details: [] };
+  const headId = masters.feeHeads.find((h) => h.code === "TRANSPORT")?.id ?? "";
+  if (!headId) return { totalPaise: 0, details: [] };
+  return concessionForHead(masters, student, headId, monthlyFeePaise, asOf);
+}
+
 export function formatConcessionDetailLine(d: FeeConcessionDetail): string {
   const bits = [d.name, d.rateLabel];
   if (d.siblingLabel) bits.push(d.siblingLabel);
@@ -1863,14 +2241,34 @@ export function computeStudentDues(
     includePaid?: boolean;
     /** Include inactive students (inactive dues register). Default false. */
     includeInactive?: boolean;
+    /**
+     * Open store sales for this student, fetched by the caller. Omitted
+     * everywhere except the counter, so no other screen changes.
+     */
+    storeDues?: InjectedStoreDue[];
+    /**
+     * The paid-by-due-key map, when the caller is already looping students.
+     *
+     * It is built from the whole voucher history and does not vary by
+     * student, so computing it inside this function meant a full scan of
+     * every voucher ONCE PER STUDENT — the fee counter's search does this
+     * for up to 80 students per keystroke. Passed in, it is built once.
+     *
+     * Omit it and the behaviour is exactly as before; there is no cache and
+     * therefore nothing that can go stale.
+     */
+    paidMap?: Map<string, number>;
   },
 ): FeeDueLine[] {
   if (student.status !== "active" && !options?.includeInactive) return [];
   const asOf = options?.asOf ?? new Date().toISOString().slice(0, 10);
   const includeFuture = options?.includeFuture ?? true;
   const includePaid = options?.includePaid ?? true;
-  const paidMap = paidByDueKey(fees);
-  const waiverMap = postedWaiversByDueKey(student.id);
+  const paidMap = options?.paidMap ?? paidByDueKey(fees);
+  // Receipts first, adjustments second. The adjustment store is invisible to
+  // the server and is not durable anyway, so a counter discount that reached
+  // a receipt is settled from the receipt.
+  const waiverMap = settledWaiversByDueKey(fees, student.id);
   const lines: FeeDueLine[] = [];
   const midYearPolicy = normalizeMidYearFeePolicy(masters.midYearFeePolicy);
 
@@ -1920,6 +2318,7 @@ export function computeStudentDues(
         sl.feeHeadId,
         billed,
         asOf,
+        dueOn,
       );
       const paid = paidMap.get(dueKey) ?? 0;
       const balance = Math.max(0, billed - concession.totalPaise - paid);
@@ -1976,7 +2375,14 @@ export function computeStudentDues(
     const transportHeadId =
       masters.feeHeads.find((h) => h.code === "TRANSPORT")?.id ?? "";
     const transportConcession = transportHeadId
-      ? concessionForHead(masters, student, transportHeadId, td.amountPaise, asOf)
+      ? concessionForHead(
+          masters,
+          student,
+          transportHeadId,
+          td.amountPaise,
+          asOf,
+          td.dueOn,
+        )
       : { totalPaise: 0, details: [] as FeeConcessionDetail[] };
     const balance = Math.max(
       0,
@@ -2047,6 +2453,7 @@ export function computeStudentDues(
       sf.feeHeadId,
       billed,
       asOf,
+      sf.dueOn,
     );
     const paid = paidMap.get(dueKey) ?? 0;
     const balance = Math.max(0, billed - concession.totalPaise - paid);
@@ -2078,65 +2485,13 @@ export function computeStudentDues(
     });
   }
 
-  const store = loadStore();
-  for (const iss of listStoreIssuesForStudent(student.id, store)) {
-    if (iss.academicYearCode !== (student.academicYearCode || DEFAULT_AY)) {
-      continue;
-    }
-    // Cash / already settled at counter — not a Fee Take due
-    if (
-      iss.paymentStatus === "paid" ||
-      iss.paymentStatus === "void" ||
-      iss.recipientKind === "staff" ||
-      !iss.studentId
-    ) {
-      continue;
-    }
-    if (!isStoreIssueDueOnFeeTake(iss)) {
-      continue;
-    }
-    if (!includeFuture && isAfterRunningSessionMonth(iss.issuedOn, asOf)) {
-      continue;
-    }
-    const dueKey = storeDueKey(student.id, iss.id);
-    const billed = storeIssueNetBilledPaise(iss);
-    const counterPaid = Math.max(0, iss.counterPaidPaise || 0);
-    const paid = (paidMap.get(dueKey) ?? 0) + counterPaid;
-    const balance = Math.max(0, billed - paid);
-    if (balance <= 0) {
-      if (!(includePaid && paid > 0)) continue;
-    }
-    const itemCount = iss.lines.reduce((s, l) => s + l.qty, 0);
-    lines.push({
-      dueKey,
-      kind: "store",
-      studentId: student.id,
-      feeHeadId: "",
-      feeHeadName: "Store",
-      installmentId: null,
-      installmentLabel: "Store",
-      specialFeeId: null,
-      structureLineId: null,
-      storeIssueId: iss.id,
-      storeIssueNo: iss.issueNo,
-      storeItems: iss.lines.map((l: StoreIssueLine) => ({
-        sku: l.sku,
-        name: l.name,
-        sizeLabel: l.sizeLabel,
-        qty: l.qty,
-        unitPricePaise: l.unitPricePaise,
-        linePaise: l.linePaise,
-      })),
-      transport: null,
-      dueOn: iss.issuedOn,
-      billedPaise: billed,
-      concessionPaise: 0,
-      concessionDetails: [],
-      paidPaise: paid,
-      balancePaise: balance,
-      label: `Store · ${iss.issueNo} · ${itemCount} item${itemCount === 1 ? "" : "s"}`,
-    });
-  }
+  // Store dues are no longer derived here.
+  //
+  // The store was rebuilt as a server-truth module (inv_*); a credit sale's
+  // balance lives on inv_sales.balance_paise and is collected in Store &
+  // purchase. Deriving dues from the old browser-held register would report
+  // whatever that empty cache happened to contain. Historical store lines
+  // already written onto vouchers still render — only the derivation is gone.
 
   const paidMapRaw = new Map<string, number>();
   for (const v of fees.vouchers) {
@@ -2153,25 +2508,16 @@ export function computeStudentDues(
   // Apply stop-future + waivers to lines collected via raw push (transport/special/store)
   const adjusted = lines
     .filter((l) => !stopFutureBlocks(student.id, l.dueOn))
-    .map((l) => {
-      const waived = waiverMap.get(l.dueKey) ?? 0;
-      if (waived <= 0) return l;
-      const balance = Math.max(0, l.balancePaise - waived);
-      return {
-        ...l,
-        concessionPaise: l.concessionPaise + waived,
-        balancePaise: balance,
-        label:
-          balance <= 0
-            ? `${l.label} · waived`
-            : `${l.label} · −${formatInr(waived)} waived`,
-      };
-    })
+    .map((l) => applyPostedWaiver(l, waiverMap))
     .filter(
       (l) =>
         l.balancePaise > 0 ||
         (includePaid && (l.paidPaise > 0 || (waiverMap.get(l.dueKey) ?? 0) > 0)),
     );
+  // Everything waived above is done; the tail lines (arrears, charge
+  // vouchers, ad-hoc, late fees, store) are appended after this point and
+  // get the same treatment at the end — see waiveTailLines below.
+  const waiverDone = new Set(adjusted.map((l) => l.dueKey));
 
   // Late fee on overdue academic/special balances
   for (const late of computeLateFeeDues(
@@ -2227,6 +2573,26 @@ export function computeStudentDues(
     }
   }
 
+  /**
+   * A counter discount on a tail line (arrears, charge voucher, ad-hoc, late
+   * fee, store) posts a waiver like any other, but those lines are built
+   * AFTER the waiver pass above — so the discount reduced what was collected
+   * while the line kept its full balance, and the difference sat on screen as
+   * a phantom due for ever. Found 2026-08-29 on an arrear discounted ₹200:
+   * ₹1,600 billed, ₹1,400 collected, ₹200 "still due".
+   */
+  const waiveTailLines = (all: FeeDueLine[]): FeeDueLine[] =>
+    all
+      .map((l) =>
+        waiverDone.has(l.dueKey) ? l : applyPostedWaiver(l, waiverMap),
+      )
+      .filter(
+        (l) =>
+          l.balancePaise > 0 ||
+          l.paidPaise > 0 ||
+          (waiverMap.get(l.dueKey) ?? 0) > 0,
+      );
+
   if (plan) {
     const covered = coveredDueKeySet(plan);
     const filtered = adjusted.filter((l) => !covered.has(l.dueKey));
@@ -2235,12 +2601,19 @@ export function computeStudentDues(
       asOf,
       includeFuture,
     });
-    return appendArrearsDues(
-      [...filtered, ...slices],
-      student,
-      fees,
-      paidMap,
-      includePaid,
+    return waiveTailLines(
+      appendStoreDues(
+        appendArrearsDues(
+          [...filtered, ...slices],
+          student,
+          fees,
+          paidMap,
+          includePaid,
+        ),
+        student,
+        options?.storeDues,
+        includePaid,
+      ),
     ).sort((a, b) =>
       a.dueOn === b.dueOn
         ? a.label.localeCompare(b.label)
@@ -2248,17 +2621,72 @@ export function computeStudentDues(
     );
   }
 
-  return appendArrearsDues(
-    adjusted,
-    student,
-    fees,
-    paidMap,
-    includePaid,
+  return waiveTailLines(
+    appendStoreDues(
+      appendArrearsDues(adjusted, student, fees, paidMap, includePaid),
+      student,
+      options?.storeDues,
+      includePaid,
+    ),
   ).sort((a, b) =>
     a.dueOn === b.dueOn
       ? a.label.localeCompare(b.label)
       : a.dueOn.localeCompare(b.dueOn),
   );
+}
+
+/** Subtract a posted waiver from one due line, stamping the label. */
+function applyPostedWaiver(
+  l: FeeDueLine,
+  waiverMap: Map<string, number>,
+): FeeDueLine {
+  const waived = waiverMap.get(l.dueKey) ?? 0;
+  if (waived <= 0) return l;
+  const balance = Math.max(0, l.balancePaise - waived);
+  return {
+    ...l,
+    concessionPaise: l.concessionPaise + waived,
+    // Name it in the same list Masters concessions appear in.
+    //
+    // A waiver used to change only concessionPaise and the label suffix, so
+    // the head's discount breakdown listed the standing concessions and said
+    // nothing about the waiver — the total was right while the itemisation
+    // was short by exactly the counter discount. Asked where the money had
+    // gone, the screen could not say. It is a different KIND of discount from
+    // a standing rule, and says so, but it is not invisible.
+    concessionDetails: [
+      ...(l.concessionDetails ?? []),
+      {
+        grantId: "",
+        concessionId: "",
+        code: COUNTER_DISCOUNT_CODE,
+        name: "Counter discount · this month only",
+        kind: "waiver",
+        rateLabel: formatInr(waived),
+        siblingLabel: "",
+        amountPaise: waived,
+      },
+    ],
+    balancePaise: balance,
+    label:
+      balance <= 0
+        ? `${l.label} · waived`
+        : `${l.label} · −${formatInr(waived)} waived`,
+  };
+}
+
+function appendStoreDues(
+  lines: FeeDueLine[],
+  student: SisStudent,
+  storeDues: InjectedStoreDue[] | undefined,
+  includePaid: boolean,
+): FeeDueLine[] {
+  if (!storeDues?.length) return lines;
+  const mine = storeDues.filter(
+    (d) => d.studentId === student.id && (includePaid || d.balancePaise > 0),
+  );
+  if (mine.length === 0) return lines;
+  return [...lines, ...mine.map(storeDueToLine)];
 }
 
 /** Apply active late-fee rules to overdue open dues. */
@@ -2690,11 +3118,39 @@ export function computeHouseholdDues(
     asOf?: string;
     includeFuture?: boolean;
     includePaid?: boolean;
+    storeDues?: InjectedStoreDue[];
+    /**
+     * Scope the household to ONE session's student records.
+     *
+     * A child promoted across years has one `students` row per year, all of
+     * them `status: "active"` — on this data 679 active rows were only ~236
+     * real children, and 157 of 189 households spanned more than one year.
+     * Summing the bundle without this adds last year's child to this year's
+     * child and reports several times the true balance (seen in the wild: a
+     * "pay remaining dues" QR for 62,050 on a household that owed 10,500).
+     *
+     * `searchFeeStudents` has always scoped this way — that is why the
+     * counter's own numbers were right while the receipt's were not.
+     *
+     * Omit it and nothing changes: callers that resolve specific dueKeys
+     * (pay links, parent checkout, the per-student ledger) must keep seeing
+     * every record, or a key belonging to an older row stops resolving.
+     */
+    academicYearCode?: string;
   },
 ): { student: SisStudent; dues: FeeDueLine[] }[] {
-  const members = sis.students.filter(
+  let members = sis.students.filter(
     (s) => s.householdId === householdId && s.status === "active",
   );
+  if (options?.academicYearCode) {
+    const scope = normAyCode(options.academicYearCode);
+    const scoped = members.filter(
+      (s) => normAyCode(s.academicYearCode) === scope,
+    );
+    // Fall back to every record when the scope matches nothing, so a family
+    // with only older rows still shows a balance instead of a silent zero.
+    if (scoped.length) members = scoped;
+  }
   return members.map((student) => ({
     student,
     dues: computeStudentDues(student, masters, fees, options),
@@ -2808,7 +3264,12 @@ export function nextReceiptNo(
   ayCode = DEFAULT_AY,
   series: FeeReceiptSeries = "F",
 ): string {
-  if (typeof window !== "undefined") {
+  // The school's own RECEIPT series in Masters wins wherever we are. This
+  // used to be browser-only, so a receipt issued by a server route (the
+  // mobile fee counter) started a second, parallel "F/<ay>/0001" series
+  // beside the desk's RCV-##### book. Two series over one cash box is how a
+  // day's collection stops reconciling.
+  try {
     const masters = loadMasters();
     const fromSeries = suggestFromSeriesCode(
       masters.numberSeries,
@@ -2817,6 +3278,8 @@ export function nextReceiptNo(
       fees.vouchers.map((v) => v.receiptNo),
     );
     if (fromSeries) return fromSeries;
+  } catch {
+    /* no masters yet — fall through to the built-in series below */
   }
 
   const prefixes =
@@ -2840,6 +3303,51 @@ export function receiptSeriesOf(receiptNo: string): FeeReceiptSeries | "" {
   return "";
 }
 
+/**
+ * Fire an accounts posting without letting a books problem block the desk —
+ * but never let it fail silently either.
+ *
+ * The receipt is already saved by the time this runs; accounts is a second
+ * write that may legitimately be refused (role without `accounts:edit`, no
+ * bank master yet, a closed fiscal year). Until 2026-08-23 all three ended in
+ * `.catch(() => {})` and the books simply drifted from the fee desk. Now the
+ * failure lands in the retry queue and raises `bhb-accounts-posting-failed`,
+ * so it is visible and replayable.
+ */
+function runAccountsPosting(
+  spec: {
+    action: AccountsPostingAction;
+    sourceId: string;
+    label: string;
+    amountPaise: number;
+    payload: unknown;
+  },
+  post: (
+    m: typeof import("@/lib/accountsPostings"),
+  ) => { ok: true } | { ok: false; error: string },
+): void {
+  // Postings need the school's own cash pools and chart. Pull the accounts
+  // desk before the posting seeds anything, or a fresh browser would post
+  // against (and push) a seeded desk of its own.
+  void trackServerWork(Promise.all([
+    import("@/lib/accountsPersistence"),
+    import("@/lib/accountsPostings"),
+  ])
+    .then(async ([p, m]) => {
+      await p.ensureAccountsSeeded();
+      const res = post(m);
+      if (!res.ok) {
+        recordAccountsPostingFailure({ ...spec, reason: res.error });
+      }
+    })
+    .catch((e: unknown) => {
+      recordAccountsPostingFailure({
+        ...spec,
+        reason: e instanceof Error ? e.message : String(e),
+      });
+    }));
+}
+
 export function collectPayment(input: {
   householdId: string;
   lines: VoucherLine[];
@@ -2856,15 +3364,34 @@ export function collectPayment(input: {
   receiptSeries?: FeeReceiptSeries;
   manualBookSeries?: string;
   manualBookLeaf?: string;
-  /** Skip backdate / duplicate soft checks when already confirmed by UI */
+  /** Skip the manual-book paper-age soft check when confirmed by the UI. */
   allowBackdate?: boolean;
+  /**
+   * The school's back-dating setting, and whether THIS person may overrule
+   * it (owner / admin / principal). Both are passed in rather than read here
+   * so the rule stays testable and the caller cannot forget which session it
+   * is acting for.
+   *
+   * Omitted, the strict reading applies: same-day only. A caller that does
+   * not say who is collecting does not get to back-date.
+   */
+  backdatePolicy?: FeeBackdatePolicy;
+  mayBackdate?: boolean;
+  /** Today in the school's timezone; defaults to the server's own clock. */
+  todayIsoOverride?: string;
   allowDuplicate?: boolean;
 }):
   | { ok: true; voucher: CollectionVoucher }
   | {
       ok: false;
       error: string;
-      code?: "backdate" | "duplicate" | "manual_no" | "day_closed" | "rbac";
+      code?:
+        | "backdate"
+        | "backdate_blocked"
+        | "duplicate"
+        | "manual_no"
+        | "day_closed"
+        | "rbac";
     } {
   if (!assertModulePermission("fees", "create", "collectPayment")) {
     return {
@@ -2928,10 +3455,59 @@ export function collectPayment(input: {
     };
   }
 
-  if (manualRef && isSchoolReceiptNoTaken(manualRef, fees)) {
+  // The date rule, enforced HERE and not only in the two user interfaces.
+  // The web counter had a free date box and the app had none; both now ask
+  // the same question, and this is the answer that actually binds — a
+  // request posted straight to the API gets the same refusal the counter
+  // would have shown.
+  //
+  // Machine-recorded money is exempt: a payment-link receipt carries the
+  // date the gateway says the parent paid, which is legitimately days old
+  // when a webhook is replayed or a settlement reconciled late.
+  if (backdatePolicyApplies(source)) {
+    const verdict = feeBackdateVerdict({
+      collectionDate: input.collectionDate,
+      today:
+        input.todayIsoOverride ||
+        new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }),
+      sessionStartOn:
+        academicYearStartOn(input.academicYearCode || currentAcademicYearCode()) ?? "",
+      policy: input.backdatePolicy ?? DEFAULT_FEE_BACKDATE_POLICY,
+      mayOverride: input.mayBackdate === true,
+    });
+    if (!verdict.ok) {
+      // NOT "backdate": that code means the manual-book paper-age warning,
+      // which the panel offers to waive on a confirm. This one is the
+      // school's setting and there is nothing to confirm — waiving it would
+      // hand every clerk the override the setting exists to withhold.
+      return { ok: false, error: verdict.reason, code: "backdate_blocked" };
+    }
+  }
+
+  if (
+    manualRef &&
+    isSchoolReceiptNoTaken(manualRef, fees, undefined, input.householdId)
+  ) {
+    // Name the receipt that holds it. "Already used" sends the counter
+    // hunting through the book; "used on RCV-00118 (04-May-2026, ₹4,000)"
+    // is either recognised as their own earlier entry or found in seconds.
+    const clash = fees.vouchers.find(
+      (v) =>
+        !v.voidedAt &&
+        v.householdId !== input.householdId &&
+        ((v.schoolReceiptNo ?? "").trim().toUpperCase() ===
+          manualRef.toUpperCase() ||
+          (v.source === "manual_book" &&
+            formatManualBookRef(
+              v.manualBookSeries,
+              v.manualBookLeaf,
+            ).toUpperCase() === manualRef.toUpperCase())),
+    );
     return {
       ok: false,
-      error: `School / paper receipt no. "${manualRef}" is already used on another receipt`,
+      error: clash
+        ? `School / paper receipt no. "${manualRef}" is already on receipt ${clash.receiptNo} (${clash.collectionDate}, ${formatInr(clash.totalPaise)}) — use the next number in the book`
+        : `School / paper receipt no. "${manualRef}" is already used on another receipt`,
       code: "manual_no",
     };
   }
@@ -3058,27 +3634,33 @@ export function collectPayment(input: {
     voucher.receiptNo,
   );
 
-  void import("@/lib/accounts")
-    .then((m) => {
-      const storeAmountPaise = voucher.lines
-        .filter((l) => l.kind === "store")
-        .reduce((n, l) => n + l.amountPaise, 0);
-      m.postFeeCollectionToAccounts({
-        voucherId: voucher.id,
-        collectionDate: voucher.collectionDate,
-        receiptNo: voucher.receiptNo,
-        label: voucher.householdId,
-        tenders: voucher.tenders.map((t) => ({
-          mode: t.mode,
-          amountPaise: t.amountPaise,
-          bankAccountId: t.bankAccountId,
-        })),
-        storeAmountPaise,
-      });
-    })
-    .catch(() => {
-      /* accounts optional */
-    });
+  {
+    const storeAmountPaise = voucher.lines
+      .filter((l) => l.kind === "store")
+      .reduce((n, l) => n + l.amountPaise, 0);
+    const args = {
+      voucherId: voucher.id,
+      collectionDate: voucher.collectionDate,
+      receiptNo: voucher.receiptNo,
+      label: voucher.householdId,
+      tenders: voucher.tenders.map((t) => ({
+        mode: t.mode,
+        amountPaise: t.amountPaise,
+        bankAccountId: t.bankAccountId,
+      })),
+      storeAmountPaise,
+    };
+    runAccountsPosting(
+      {
+        action: "fee_receipt",
+        sourceId: `fee_v_${voucher.id}`,
+        label: `Receipt ${voucher.receiptNo}`,
+        amountPaise: voucher.totalPaise,
+        payload: args,
+      },
+      (m) => m.postFeeCollectionToAccounts(args),
+    );
+  }
 
   return { ok: true, voucher };
 }
@@ -3198,7 +3780,82 @@ export function voidVoucher(voucherId: string): boolean {
     planAllocations: nextAllocations,
     installmentPlans: nextPlans,
   });
+
+  // Back the receipt out of the cash book, the bank book and the GL. Without
+  // this the money stayed on the books for good — cash in hand and fee income
+  // were overstated by every voided receipt (audit 2026-08-23, L1).
+  reverseFeeCollectionInBooks(voucher, "Fee receipt voided");
+
+  // An R-series receipt is an admissions registration payment — reopen it in
+  // the CRM, or the lead keeps saying "paid" for money the void returned.
+  // (No-op for ordinary fee receipts: nothing links to this voucher id.)
+  void trackServerWork(import("@/lib/admissions")
+    .then(({ revertRegistrationPaymentForVoidedReceipt }) => {
+      revertRegistrationPaymentForVoidedReceipt(voucher.id);
+    })
+    .catch(() => {}));
+
+  // Future-month grants born from this receipt's counter discount die with
+  // it — a voided receipt must not leave its concession running in Masters.
+  revokeGrantsFromVoidedReceipt(voucher);
+
+  // So do the counter waivers it carried: otherwise the discount outlives
+  // the receipt and each retry stacks another waiver on the same line.
+  void trackServerWork(import("@/lib/feeAdjustments").then(({ cancelAdjustmentsForVoucher }) => {
+    cancelAdjustmentsForVoucher({
+      voucherId: voucher.id,
+      receiptNo: voucher.receiptNo,
+    });
+  }));
   return true;
+}
+
+/**
+ * Reject every Masters concession grant stamped with this voucher's marker
+ * (`[v:<id>]`, written when the counter's "save for future months" applied).
+ * Rejection, not deletion: the grant stays on file with the void note, so
+ * Concessions shows why the discount stopped.
+ */
+function revokeGrantsFromVoidedReceipt(voucher: CollectionVoucher): void {
+  const masters = loadMasters();
+  const marker = `[v:${voucher.id}]`;
+  const grants = masters.concessionGrants ?? [];
+  let changed = false;
+  const next = grants.map((g) => {
+    if (g.status === "rejected" || !g.reason.includes(marker)) return g;
+    changed = true;
+    return {
+      ...g,
+      status: "rejected" as const,
+      reason: `${g.reason} · auto-revoked — receipt ${voucher.receiptNo} voided ${new Date().toISOString().slice(0, 10)}`,
+    };
+  });
+  if (changed) {
+    void trackServerWork(saveMasters({ ...masters, concessionGrants: next }));
+  }
+}
+
+/**
+ * Reverse one receipt in accounts, surfacing any refusal to the retry queue.
+ *
+ * Shared by voidVoucher and bounceCheque — a bounce voids the receipt inline
+ * rather than calling voidVoucher, so both doors need the same reversal.
+ */
+function reverseFeeCollectionInBooks(
+  voucher: CollectionVoucher,
+  reason: string,
+): void {
+  const args = { voucherId: voucher.id, reason };
+  runAccountsPosting(
+    {
+      action: "fee_reversal",
+      sourceId: `fee_v_${voucher.id}`,
+      label: `Void of receipt ${voucher.receiptNo}`,
+      amountPaise: voucher.totalPaise,
+      payload: args,
+    },
+    (m) => m.reverseFeeCollectionInAccounts(args),
+  );
 }
 
 /** 10-digit IN mobile → WhatsApp E.164 without plus (e.g. 9198…). */
@@ -3333,14 +3990,6 @@ export function composeWhatsAppFeeReceipt(
   return lines.join("\n");
 }
 
-export function whatsAppFeeReceiptUrl(
-  mobile: string,
-  message: string,
-): string | null {
-  const e164 = toWhatsAppE164(mobile);
-  if (!e164) return null;
-  return `https://wa.me/${e164}?text=${encodeURIComponent(message)}`;
-}
 
 export function markWhatsAppReceiptSent(voucherId: string): boolean {
   const fees = loadFees();
@@ -3354,6 +4003,24 @@ export function markWhatsAppReceiptSent(voucherId: string): boolean {
     ),
   });
   return true;
+}
+
+/**
+ * Best-effort push notification alongside a fee receipt — never blocks or
+ * affects the WhatsApp flow, which stays the primary channel (Round 14).
+ */
+function notifyFeeReceiptPush(householdId: string, voucher: CollectionVoucher) {
+  if (typeof window === "undefined") return;
+  void trackServerWork(fetch("/api/push/notify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      householdId,
+      title: "Fee receipt",
+      body: `Receipt ${voucher.receiptNo} — ${formatInr(voucher.totalPaise)} received. Thank you.`,
+      url: "/parent?tab=fees",
+    }),
+  }).catch(() => undefined));
 }
 
 /**
@@ -3448,35 +4115,76 @@ export async function deliverWhatsAppFeeReceipt(input: {
     typeof navigator !== "undefined" &&
     navigator.clipboard?.writeText
   ) {
-    void navigator.clipboard.writeText(receiptUrl).catch(() => undefined);
+    void trackServerWork(navigator.clipboard.writeText(receiptUrl).catch(() => undefined));
   }
 
   // Live WhatsApp Business API — message from school number (+91 94519 38805)
   if (typeof window !== "undefined") {
     try {
-      const { loadWaTemplates, listApprovedTemplates } = await import(
-        "@/lib/waTemplates"
-      );
-      const approvedFees = listApprovedTemplates(loadWaTemplates(), {
-        module: "fees",
+      const {
+        loadWaTemplates,
+        resolveTemplateForSend,
+        templateVariablePositions,
+      } = await import("@/lib/waTemplates");
+      const waState = loadWaTemplates();
+
+      // ONLY the receipt template. This used to take the first approved
+      // template in the whole `fees` module matching the family's language,
+      // which on 2026-09-07 meant a Hindi-preferring family was sent
+      // `bhb_fee_pay_link` — a "pay this link" message — moments after they
+      // had paid at the counter. Falling back across template FAMILIES is
+      // never right: the fallback for "no Hindi receipt" is the English
+      // receipt, never a different message.
+      // ONE resolver, so a template added in Masters is the one that goes
+      // out — and so the number it goes out FROM follows the school's own
+      // routing (per template, else per module, else the default) instead of
+      // a single hardcoded env var.
+      const wantLang = waTemplateLanguageFor(hh);
+      const resolved = resolveTemplateForSend({
+        state: waState,
+        familyKey: "fees_receipt",
+        language: wantLang,
       });
-      const feeTpl = approvedFees[0];
+      const feeTpl = resolved.ok ? resolved.template : undefined;
+      const fromPhoneNumberId = resolved.ok
+        ? resolved.sender?.phoneNumberId
+        : undefined;
+
+      // Meta rejects a send whose parameter count does not match the
+      // registered template, so the positions come from the template's OWN
+      // declared variable order rather than being hardcoded. The approved
+      // bhb_fee_receipt takes five — receiptNo, childName, feeDue, paidOn,
+      // schoolName — and this used to send two.
+      const studentNames = payload.students
+        .map((st) => st.fullName)
+        .filter(Boolean);
+      const values: Record<string, string> = {
+        receiptNo: input.voucher.receiptNo,
+        childName: studentNames.join(", ") || hint || "your child",
+        feeDue: formatInr(input.voucher.totalPaise),
+        paidOn: input.voucher.collectionDate,
+        schoolName:
+          process.env.NEXT_PUBLIC_SCHOOL_NAME || "BHB International School",
+        guardianName: hint,
+        amount: formatInr(input.voucher.totalPaise),
+      };
       const template = feeTpl
         ? {
             name: feeTpl.metaName,
             language: feeTpl.metaLanguage || feeTpl.language,
-            variables: {
-              "1": input.voucher.receiptNo,
-              "2": String(input.voucher.totalPaise / 100),
-            },
+            variables: templateVariablePositions(feeTpl, values),
           }
         : undefined;
 
+      const fallbackMobile = normalizeMobile(hh?.altMobile ?? "") || undefined;
       const res = await fetch("/api/wa/dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [{ mobile, body: message, template }],
+          module: "fees",
+          messages: [
+            { mobile, fallbackMobile, body: message, template, fromPhoneNumberId },
+          ],
         }),
       });
       const dispatch = (await res.json()) as {
@@ -3488,6 +4196,7 @@ export async function deliverWhatsAppFeeReceipt(input: {
         if (input.markSent !== false) {
           markWhatsAppReceiptSent(input.voucher.id);
         }
+        notifyFeeReceiptPush(input.voucher.householdId, input.voucher);
         return {
           ok: true,
           mobile,
@@ -3524,6 +4233,7 @@ export async function deliverWhatsAppFeeReceipt(input: {
       if (input.markSent !== false) {
         markWhatsAppReceiptSent(input.voucher.id);
       }
+      notifyFeeReceiptPush(input.voucher.householdId, input.voucher);
       return {
         ok: true,
         mobile,
@@ -3537,16 +4247,44 @@ export async function deliverWhatsAppFeeReceipt(input: {
     pdfDownloaded = true;
   }
 
-  const url = whatsAppFeeReceiptUrl(mobile, message);
-  if (!url) {
-    return { ok: false, error: "Could not build WhatsApp link" };
-  }
-  if (typeof window !== "undefined") {
-    window.open(url, "_blank", "noopener,noreferrer");
+  // The school sends the receipt, as the APPROVED TEMPLATE, or nobody does.
+  //
+  // This used to send `text`, and plain text is deliverable only inside
+  // Meta's 24-hour window — so pressing "Send WhatsApp" on a receipt for a
+  // parent who had not messaged the school that day always failed with
+  // "outside Meta's 24 hour window", however healthy the template registry
+  // was. The automatic send was moved onto the template on 2026-09-08 and
+  // this button was left behind, so the button kept failing after the
+  // automatic path was fixed.
+  //
+  // Going through the same server endpoint as the automatic send means one
+  // implementation of "message a family their receipt": the family's own
+  // language, the PDF attached, the send recorded in `wa_receipt_sends`, and
+  // the delivery ticks flowing to the same place. `force` because a person
+  // pressed the button — the already-sent guard is there to stop machines
+  // repeating themselves, not to stop the office answering a parent.
+  const res = await fetch("/api/fees/receipt-wa", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ voucherId: input.voucher.id, force: true }),
+  }).catch(() => null);
+  const sent = (await res?.json().catch(() => null)) as
+    | { sent?: boolean; reason?: string; error?: string }
+    | null;
+  if (!res?.ok || !sent?.sent) {
+    return {
+      ok: false,
+      error:
+        `The school's WhatsApp could not send this receipt: ` +
+        `${sent?.reason || sent?.error || "no reply from the server"}. ` +
+        `Nothing was sent from your own WhatsApp. The PDF is downloaded — ` +
+        `attach it by hand if the family needs it now.`,
+    };
   }
   if (input.markSent !== false) {
     markWhatsAppReceiptSent(input.voucher.id);
   }
+  notifyFeeReceiptPush(input.voucher.householdId, input.voucher);
   return {
     ok: true,
     mobile,
@@ -3557,45 +4295,6 @@ export async function deliverWhatsAppFeeReceipt(input: {
 }
 
 /** @deprecated Prefer deliverWhatsAppFeeReceipt — text-only open */
-export function openWhatsAppFeeReceipt(input: {
-  voucher: CollectionVoucher;
-  mobile?: string;
-  sis?: SisState | null;
-  masters?: MastersState | null;
-  markSent?: boolean;
-}):
-  | { ok: true; url: string; mobile: string }
-  | { ok: false; error: string } {
-  if (input.voucher.voidedAt) {
-    return { ok: false, error: "Cannot send a voided receipt" };
-  }
-  const s = input.sis ?? loadSis();
-  const hh = householdOf(s, input.voucher.householdId);
-  const mobile =
-    normalizeMobile(input.mobile ?? "") || householdWhatsApp(hh);
-  if (!isValidMobile(mobile)) {
-    return {
-      ok: false,
-      error: "Add a valid 10-digit WhatsApp number for this household",
-    };
-  }
-  const message = composeWhatsAppFeeReceipt(
-    input.voucher,
-    s,
-    input.masters,
-  );
-  const url = whatsAppFeeReceiptUrl(mobile, message);
-  if (!url) {
-    return { ok: false, error: "Could not build WhatsApp link" };
-  }
-  if (typeof window !== "undefined") {
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
-  if (input.markSent !== false) {
-    markWhatsAppReceiptSent(input.voucher.id);
-  }
-  return { ok: true, url, mobile };
-}
 
 function syncVoucherTenderRealisation(
   voucher: CollectionVoucher,
@@ -3729,6 +4428,30 @@ export function clearCheque(
         : v,
     ),
   });
+
+  // The collection debited Cheques in Hand, not Bank. This is the day the
+  // bank actually has the money, so this is the day it moves.
+  {
+    const args = {
+      chequeId: cheque.id,
+      voucherId: cheque.voucherId,
+      amountPaise: cheque.amountPaise,
+      clearedOn: now.slice(0, 10),
+      chequeNo: cheque.chequeNo,
+      receiptNo: cheque.receiptNo,
+      bankId: voucher.tenders[cheque.tenderIndex]?.bankAccountId || undefined,
+    };
+    runAccountsPosting(
+      {
+        action: "cheque_clearance",
+        sourceId: `fee_chq_${cheque.voucherId}_${cheque.id}`,
+        label: `Cheque ${cheque.chequeNo || cheque.receiptNo} cleared`,
+        amountPaise: cheque.amountPaise,
+        payload: args,
+      },
+      (m) => m.postChequeClearanceToAccounts(args),
+    );
+  }
   return { ok: true, cheque: nextCheque };
 }
 
@@ -3797,6 +4520,14 @@ export function bounceCheque(
     ),
     cheques: nextCheques,
   });
+
+  // A bounce voids the receipt inline (above), so the books have to come off
+  // too — including the bank leg if a sibling cheque on this receipt had
+  // already cleared.
+  reverseFeeCollectionInBooks(
+    voucher,
+    `Cheque ${cheque.chequeNo || "—"} bounced: ${reason}`,
+  );
   return { ok: true, cheque: nextCheque };
 }
 
@@ -3805,7 +4536,56 @@ export type StudentSearchHit = {
   household: Household | null;
   classLabel: string;
   balancePaise: number;
+  /**
+   * Why this student matched — "father: Rakesh Kumar", "class: 4". Shown on
+   * the counter so a clerk can trust a hit that does not carry the typed
+   * words in the child's own name. Empty when the query was empty.
+   */
+  matchReasons?: string[];
 };
+
+/** One searchable field of a student: its label and the value to match. */
+function studentSearchFields(
+  st: SisStudent,
+  hh: Household | null,
+  classLabel: string,
+): { label: string; value: string }[] {
+  return [
+    { label: "name", value: st.fullName },
+    { label: "adm no", value: st.admissionNo },
+    { label: "father", value: st.fatherName ?? "" },
+    { label: "mother", value: st.motherName ?? "" },
+    { label: "guardian", value: hh?.guardianName ?? "" },
+    { label: "class", value: classLabel },
+    { label: "mobile", value: hh?.mobile ?? "" },
+    { label: "WhatsApp", value: hh?.whatsappMobile ?? "" },
+    { label: "father's mobile", value: st.fatherMobile ?? "" },
+    { label: "mother's mobile", value: st.motherMobile ?? "" },
+  ];
+}
+
+/**
+ * Every typed word must match some field (AND across words, OR across
+ * fields) — "rakesh 4" finds Rakesh's children in class 4, not everyone
+ * named Rakesh plus everyone in class 4. Returns null when nothing matched.
+ */
+function matchStudentQuery(
+  fields: { label: string; value: string }[],
+  words: string[],
+): string[] | null {
+  const reasons = new Map<string, string>();
+  for (const word of words) {
+    // A bare 1–2 digit word is a class ("4", "12"), not a fragment of an
+    // admission number or a phone — ADM-0412 and 9990004111 both contain
+    // "4", and matching those made "rakesh 4" return the whole family.
+    const classOnly = /^\d{1,2}$/.test(word);
+    const pool = classOnly ? fields.filter((f) => f.label === "class") : fields;
+    const hit = pool.find((f) => f.value && f.value.toLowerCase().includes(word));
+    if (!hit) return null;
+    if (hit.label !== "name") reasons.set(hit.label, `${hit.label}: ${hit.value}`);
+  }
+  return [...reasons.values()];
+}
 
 function normAyCode(code: string): string {
   const t = (code || "").trim().replace(/\s+/g, "").replace(/–/g, "-");
@@ -3837,10 +4617,16 @@ export function searchFeeStudents(
   const q = query.trim().toLowerCase();
   const classId = filters?.classId ?? "";
   const sectionId = filters?.sectionId ?? "";
-  const className = (id: string) =>
-    m.classes.find((c) => c.id === id)?.name ?? "—";
-  const sectionName = (id: string) =>
-    m.sections.find((x) => x.id === id)?.name ?? "";
+  // Index once. These were linear finds called per student: householdOf over
+  // 193 households inside the filter for ~680 active students is ~131,000
+  // comparisons per search, and className/sectionName repeated it for every
+  // result. Debouncing hid the cost without removing it — the work still
+  // blocked the main thread, which is what made typing feel like it hung.
+  const classNameById = new Map(m.classes.map((c) => [c.id, c.name]));
+  const sectionNameById = new Map(m.sections.map((x) => [x.id, x.name]));
+  const householdById = new Map(s.households.map((h) => [h.id, h]));
+  const className = (id: string) => classNameById.get(id) ?? "—";
+  const sectionName = (id: string) => sectionNameById.get(id) ?? "";
 
   let list = filters?.includeInactive
     ? s.students.slice()
@@ -3863,36 +4649,51 @@ export function searchFeeStudents(
   if (sectionId) {
     list = list.filter((st) => st.sectionId === sectionId);
   }
+  const labelOf = (st: SisStudent) => {
+    const sec = sectionName(st.sectionId);
+    return sec
+      ? `${className(st.classId)}-${sec}`
+      : className(st.classId);
+  };
+  // Why each student matched — attached to the hit so the counter can show it.
+  const reasonsById = new Map<string, string[]>();
   if (q) {
+    const words = q.split(/\s+/).filter(Boolean);
     list = list.filter((st) => {
-      const hh = householdOf(s, st.householdId);
-      return (
-        st.fullName.toLowerCase().includes(q) ||
-        st.admissionNo.toLowerCase().includes(q) ||
-        (hh?.mobile ?? "").includes(q) ||
-        (hh?.whatsappMobile ?? "").includes(q) ||
-        (hh?.guardianName ?? "").toLowerCase().includes(q) ||
-        (st.fatherName ?? "").toLowerCase().includes(q)
+      const hh = householdById.get(st.householdId) ?? null;
+      const reasons = matchStudentQuery(
+        studentSearchFields(st, hh, labelOf(st)),
+        words,
       );
+      if (!reasons) return false;
+      reasonsById.set(st.id, reasons);
+      return true;
     });
   }
+
+  // Built once for the whole result set rather than once per student: it
+  // is the same map every time, and rebuilding it per hit was the bulk of
+  // what made typing in the counter feel stuck.
+  const paidMap = paidByDueKey(f);
 
   return list
     .slice(0, classId || sectionId ? 80 : 40)
     .map((student) => {
       const dues = computeStudentDues(student, m, f, {
         includeFuture: filters?.includeFuture ?? false,
+        paidMap,
       });
       const balancePaise = openFeeDues(dues).reduce(
         (sum, d) => sum + d.balancePaise,
         0,
       );
-      const hh = householdOf(s, student.householdId) ?? null;
+      const hh = householdById.get(student.householdId) ?? null;
       return {
         student,
         household: hh,
-        classLabel: `${className(student.classId)}-${sectionName(student.sectionId)}`,
+        classLabel: labelOf(student),
         balancePaise,
+        matchReasons: reasonsById.get(student.id) ?? [],
       };
     })
     .sort((a, b) => a.student.fullName.localeCompare(b.student.fullName));
@@ -4007,16 +4808,7 @@ export function buildDayBook(
   modeTotals: DayCloseModeTotal[];
   /** Collected amount split by voucher line kind */
   kindTotals: { kind: DueKind; label: string; paise: number; lineCount: number }[];
-  /** Store credit issues raised on this calendar date (may still be unpaid) */
-  storeIssues: {
-    issueId: string;
-    issueNo: string;
-    studentId: string;
-    totalPaise: number;
-    itemCount: number;
-    voided: boolean;
-  }[];
-  storeIssuedPaise: number;
+  /** Collected against store dues, from the vouchers themselves. */
   storeCollectedPaise: number;
 } {
   const vouchers = vouchersForCollectionDate(closeDate, fees);
@@ -4088,22 +4880,9 @@ export function buildDayBook(
       };
     });
 
-  const store = loadStore();
-  const storeIssues = store.issues
-    .filter((i) => i.issuedOn === closeDate)
-    .map((i) => ({
-      issueId: i.id,
-      issueNo: i.issueNo,
-      studentId: i.studentId,
-      totalPaise: i.totalPaise,
-      itemCount: i.lines.reduce((s, l) => s + l.qty, 0),
-      voided: !!i.voidedAt,
-    }))
-    .sort((a, b) => a.issueNo.localeCompare(b.issueNo));
-
-  const storeIssuedPaise = storeIssues
-    .filter((i) => !i.voided)
-    .reduce((s, i) => s + i.totalPaise, 0);
+  // Store issues raised on the day are no longer listed here — they live in
+  // the Store & purchase day book now. Reporting an empty list would read as
+  // "no store sales today", which is not something this function can know.
   const storeCollectedPaise = byKind.get("store")?.paise ?? 0;
 
   const totalPaise = vouchers.reduce((s, v) => s + v.totalPaise, 0);
@@ -4115,8 +4894,6 @@ export function buildDayBook(
     cashPaise,
     modeTotals,
     kindTotals,
-    storeIssues,
-    storeIssuedPaise,
     storeCollectedPaise,
   };
 }
@@ -4172,6 +4949,17 @@ function upsertDayClose(session: DayCloseSession, fees: FeesState): FeesState {
         d.counterId === session.counterId
       ),
   );
+  // A session this replaces is deleted on the server by name — a save no
+  // longer deletes what it leaves out.
+  const replaced = fees.dayCloses
+    .filter(
+      (d) =>
+        d.closeDate === session.closeDate &&
+        d.counterId === session.counterId &&
+        d.id !== session.id,
+    )
+    .map((d) => d.id);
+  if (replaced.length && typeof window !== "undefined") recordFeeDayCloseDeletion(replaced);
   return {
     ...fees,
     dayCloses: [session, ...withoutSameDate],
@@ -4322,13 +5110,16 @@ export function approveDayClose(input: {
     resolvedAt: now,
   };
   saveFees(upsertDayClose(session, fees));
-  void import("@/lib/accounts")
-    .then((m) => {
-      m.applyDayCloseHandover(session);
-    })
-    .catch(() => {
-      /* accounts optional */
-    });
+  runAccountsPosting(
+    {
+      action: "day_close",
+      sourceId: `day_close_${session.id}`,
+      label: `Day close ${session.closeDate}`,
+      amountPaise: session.systemCashPaise,
+      payload: session,
+    },
+    (m) => m.applyDayCloseHandover(session),
+  );
   return { ok: true, session };
 }
 

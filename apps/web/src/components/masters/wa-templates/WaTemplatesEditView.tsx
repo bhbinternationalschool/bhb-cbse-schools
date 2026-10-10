@@ -10,6 +10,7 @@ import {
   type WaHeaderFormat,
   type WaTemplate,
   type WaTemplateButton,
+  type WaSenderNumber,
 } from "@/lib/waTemplates";
 import { WaTemplateVariablesPicker } from "@/components/masters/WaTemplateVariablesPicker";
 import { WaTemplateContentHelper } from "./WaTemplateContentHelper";
@@ -18,12 +19,15 @@ import { waBtnOutline, waBtnPrimary, waBtnTeal, waInp } from "./waTemplateUi";
 
 function TemplateEditor({
   template,
+  senders,
   readOnly,
   submitting,
   onSubmitMeta,
   onSave,
 }: {
   template: WaTemplate;
+  /** The school's numbers, for the per-template override. */
+  senders: WaSenderNumber[];
   readOnly: boolean;
   submitting: boolean;
   onSubmitMeta: () => void;
@@ -136,9 +140,12 @@ function TemplateEditor({
     );
   }
 
+  // An approved template is edited IN PLACE on Meta (it goes back to review
+  // while the old wording keeps sending), so approval no longer locks the
+  // button — it changes what the button says.
+  const onMeta = !!template.metaTemplateId && template.status !== "draft";
   const canSubmit =
     !readOnly &&
-    template.status !== "approved" &&
     body.trim().length > 0 &&
     metaName.trim().length > 0;
 
@@ -162,7 +169,7 @@ function TemplateEditor({
             </span>
           ) : null}
           {mediaNotice ? (
-            <span className="text-[11px] text-[#0f766e]">{mediaNotice}</span>
+            <span className="text-[11px] text-[var(--tone-teal)]">{mediaNotice}</span>
           ) : null}
         </div>
 
@@ -177,6 +184,34 @@ function TemplateEditor({
         </label>
 
         <div className="grid gap-2 sm:grid-cols-2">
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            Send from
+            <select
+              className={`${waInp} mt-1 text-[11px]`}
+              value={template.senderNumberId ?? ""}
+              disabled={readOnly}
+              onChange={(e) =>
+                onSave(
+                  { senderNumberId: e.target.value },
+                  e.target.value
+                    ? "This template will send from its own number"
+                    : "Back to this module's number",
+                )
+              }
+            >
+              {/* The module's number is the setting people maintain; this
+                  override exists for the exception, not the rule. */}
+              <option value="">Module&rsquo;s number</option>
+              {senders
+                .filter((sd) => !sd.paused)
+                .map((sd) => (
+                  <option key={sd.id} value={sd.id}>
+                    {sd.label}
+                  </option>
+                ))}
+            </select>
+          </label>
+
           <label className="block text-[11px] font-semibold text-[var(--muted)]">
             Header type
             <select
@@ -208,7 +243,7 @@ function TemplateEditor({
         </div>
 
         {needsMediaHeader ? (
-          <div className="rounded-lg border border-[rgba(32,48,80,0.1)] p-2">
+          <div className="rounded-lg border border-[var(--border)] p-2">
             <p className="text-[11px] font-semibold text-[var(--brand-deep)]">
               Header media upload
             </p>
@@ -295,7 +330,7 @@ function TemplateEditor({
         </label>
 
         {carousel.length > 0 ? (
-          <div className="rounded-lg border border-[rgba(32,48,80,0.1)] p-2">
+          <div className="rounded-lg border border-[var(--border)] p-2">
             <p className="mb-2 text-[11px] font-semibold text-[var(--brand-deep)]">
               Carousel cards ({carousel.length})
             </p>
@@ -303,7 +338,7 @@ function TemplateEditor({
               {carousel.map((c, idx) => (
                 <li
                   key={c.id}
-                  className="rounded-lg border border-[rgba(32,48,80,0.08)] bg-white p-2"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-2"
                 >
                   <p className="text-[10px] font-bold text-[var(--muted)]">
                     Card {idx + 1}
@@ -357,9 +392,11 @@ function TemplateEditor({
             >
               {submitting
                 ? "Submitting…"
-                : template.status === "pending"
-                  ? "Re-submit to Meta"
-                  : "Submit to Meta"}
+                : onMeta
+                  ? "Update on Meta (re-review)"
+                  : template.status === "pending"
+                    ? "Re-submit to Meta"
+                    : "Submit to Meta"}
             </button>
             <button
               type="button"
@@ -389,6 +426,7 @@ function TemplateEditor({
 
 export function WaTemplatesEditView({
   template,
+  senders,
   readOnly,
   notice,
   submitting,
@@ -397,6 +435,7 @@ export function WaTemplatesEditView({
   onSubmitMeta,
 }: {
   template: WaTemplate;
+  senders: WaSenderNumber[];
   readOnly: boolean;
   notice: string | null;
   submitting: boolean;
@@ -425,6 +464,7 @@ export function WaTemplatesEditView({
       >
         <TemplateEditor
           template={template}
+          senders={senders}
           readOnly={readOnly}
           submitting={submitting}
           onSubmitMeta={onSubmitMeta}

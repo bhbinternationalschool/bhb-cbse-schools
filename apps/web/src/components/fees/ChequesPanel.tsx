@@ -34,7 +34,14 @@ export function ChequesPanel({
 
   const cheques = useMemo(() => {
     void tick;
-    return listCheques(undefined, filter === "all" ? "all" : filter);
+    const list = listCheques(undefined, filter === "all" ? "all" : filter);
+    // Cheques waiting to go to the bank: by cheque date, the one due first on
+    // top (a post-dated cheque cannot be deposited early). Other views keep
+    // newest-received first.
+    if (filter === "received" || filter === "open") {
+      return [...list].sort((a, b) => (a.chequeDate || "9999").localeCompare(b.chequeDate || "9999"));
+    }
+    return list;
   }, [tick, filter]);
 
   const stats = useMemo(() => {

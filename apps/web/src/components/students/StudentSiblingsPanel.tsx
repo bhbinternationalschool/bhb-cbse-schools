@@ -36,6 +36,10 @@ export function StudentSiblingsPanel({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [linking, setLinking] = useState<string | null>(null);
+  /** The child about to be taken out of their family, while the office confirms. */
+  const [separating, setSeparating] = useState<SisStudent | null>(null);
+  const [clearParents, setClearParents] = useState(true);
+  const [separateBusy, setSeparateBusy] = useState(false);
 
   function refresh() {
     setMasters(loadMasters());
@@ -126,6 +130,52 @@ export function StudentSiblingsPanel({
     );
   }
 
+  /**
+   * Take a child out of a family they were wrongly linked to — on the
+   * server, so their session rows and their own receipts move together and
+   * no stale browser can put them back (lib/sisSeparate.server.ts). Then
+   * re-read the roster from the server.
+   */
+  async function onSeparate() {
+    if (!separating) return;
+    setSeparateBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/sis/separate-sibling", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId: separating.id, clearParentDetails: clearParents }),
+      });
+      const json = (await res.json()) as
+        | { ok: true; householdCode: string; receiptsMoved: number; receiptsShared: number }
+        | { ok: false; error: string };
+      if (!json.ok) {
+        setError(json.error || "Could not separate");
+        return;
+      }
+      const [{ resetSisPersistenceCache, ensureSisHydrated }, fees] = await Promise.all([
+        import("@/lib/sisPersistence"),
+        import("@/lib/feesPersistence"),
+      ]);
+      resetSisPersistenceCache();
+      fees.resetFeesPersistenceCache();
+      await Promise.all([ensureSisHydrated(), fees.ensureFeesHydrated()]);
+      const next = loadSis();
+      setSis(next);
+      onChanged?.(next);
+      const bits = [`${separating.fullName} now has a family of their own (${json.householdCode})`];
+      if (json.receiptsMoved) bits.push(`${json.receiptsMoved} receipt${json.receiptsMoved === 1 ? "" : "s"} moved with them`);
+      if (json.receiptsShared) bits.push(`${json.receiptsShared} shared receipt${json.receiptsShared === 1 ? "" : "s"} left with the family`);
+      if (clearParents) bits.push("enter their parents' details on Edit");
+      flash(bits.join(" · "));
+      setSeparating(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not separate");
+    } finally {
+      setSeparateBusy(false);
+    }
+  }
+
   if (!sis || !masters) {
     return (
       <p className="mt-4 text-sm text-[var(--muted)]">Loading siblings…</p>
@@ -140,9 +190,10 @@ export function StudentSiblingsPanel({
             Siblings
           </h2>
           <p className="mt-0.5 text-xs text-[var(--muted)]">
-            Existing links share one household. Possible siblings match on
-            parent mobile, Aadhaar, or father + mother name — confirm before
-            linking.
+            Existing links share one household — parent details are shared by
+            every child in it. Not siblings? Expand the family and press
+            Separate. Possible siblings match on parent mobile, Aadhaar, or
+            father + mother name — confirm before linking.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
@@ -184,6 +235,52 @@ export function StudentSiblingsPanel({
         </p>
       ) : null}
 
+      {separating ? (
+        <div
+          role="dialog"
+          aria-label={`Separate ${separating.fullName} from this family`}
+          className="rounded-xl border border-[rgba(196,149,58,0.45)] bg-[rgba(196,149,58,0.08)] px-4 py-3 text-sm"
+        >
+          <p className="font-semibold text-[var(--brand-deep)]">
+            Separate {separating.fullName} ({separating.admissionNo}) from this family?
+          </p>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            They get a family of their own. Editing the others will no longer change them, and their own receipts move
+            with them. The other children stay as they are.
+          </p>
+          <label className="mt-2 flex items-start gap-2 text-xs text-[var(--brand-deep)]">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={clearParents}
+              onChange={(e) => setClearParents(e.target.checked)}
+            />
+            <span>
+              Clear the parent details on {separating.fullName.split(" ")[0]}&apos;s record (they were copied from this
+              family — enter the real ones on Edit afterwards)
+            </span>
+          </label>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              disabled={separateBusy}
+              className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+              onClick={() => void onSeparate()}
+            >
+              {separateBusy ? "Separating…" : "Separate"}
+            </button>
+            <button
+              type="button"
+              disabled={separateBusy}
+              className="rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+              onClick={() => setSeparating(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="grid gap-4 lg:grid-cols-3">
         <SiblingColumn
           title="Existing household"
@@ -207,6 +304,15 @@ export function StudentSiblingsPanel({
                 students={g.students}
                 sis={sis}
                 masters={masters}
+                onSeparate={
+                  // Only with someone else in the family to separate from.
+                  new Set(g.students.map((x) => x.admissionNo || x.id)).size > 1
+                    ? (st) => {
+                        setClearParents(true);
+                        setSeparating(st);
+                      }
+                    : undefined
+                }
               />
             </ExpandRow>
           ))}
@@ -313,8 +419,8 @@ const COLUMN_TONE = {
 
 const COUNT_TONE = {
   navy: "bg-[rgba(32,48,80,0.1)] text-[var(--brand-deep)]",
-  teal: "bg-[rgba(15,118,110,0.16)] text-[#0f766e]",
-  amber: "bg-[rgba(196,149,58,0.2)] text-[var(--brand-gold)]",
+  teal: "bg-[rgba(15,118,110,0.16)] text-[var(--tone-teal)]",
+  amber: "bg-[rgba(196,149,58,0.2)] text-[var(--warning)]",
 } as const;
 
 function SiblingColumn({
@@ -417,11 +523,14 @@ function StudentMiniList({
   sis,
   masters,
   showSession,
+  onSeparate,
 }: {
   students: SisStudent[];
   sis: SisState;
   masters: MastersState;
   showSession?: boolean;
+  /** Offered on a family with more than one child: take this one out. */
+  onSeparate?: (s: SisStudent) => void;
 }) {
   return (
     <ul className="divide-y divide-[rgba(32,48,80,0.06)] rounded-lg border border-[rgba(32,48,80,0.08)]">
@@ -446,12 +555,24 @@ function StudentMiniList({
                 : ""}
             </div>
           </div>
-          <Link
-            href={`/students/${s.id}/edit`}
-            className="shrink-0 text-xs font-medium text-[var(--brand-mid)]"
-          >
-            Edit
-          </Link>
+          <div className="flex shrink-0 items-center gap-3">
+            {onSeparate ? (
+              <button
+                type="button"
+                className="text-xs font-medium text-[var(--warning)]"
+                onClick={() => onSeparate(s)}
+                title="Not a sibling — give this child a family of their own"
+              >
+                Separate
+              </button>
+            ) : null}
+            <Link
+              href={`/students/${s.id}/edit`}
+              className="text-xs font-medium text-[var(--brand-mid)]"
+            >
+              Edit
+            </Link>
+          </div>
         </li>
       ))}
     </ul>

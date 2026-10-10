@@ -1,6 +1,17 @@
 /**
- * Timetable AI auto-assign — local constraint solver.
- * Places subjects from classSubjects + staff subjectTeachingLinks.
+ * Timetable auto-assign — a constraint solver (not an LLM): the same inputs
+ * always give the same week, and it can never double-book a teacher.
+ *
+ * Inputs: Masters class subjects (periods/week), teacher links, each class's
+ * bell schedule (pre-primary may keep its own timing), and the placement
+ * rules per class subject (lib/timetableRules — double periods, time of
+ * day, most per day, periods to avoid). The placing itself is
+ * lib/timetablePlacement (pure, tested).
+ *
+ * Who teaches (director, 5 Oct 2026): a teacher linked to the subject for
+ * this class wins (a specialist — PE, music); else, in a class whose class
+ * teacher takes every subject (Nursery–UKG by default), the class teacher;
+ * else any teacher linked to the subject elsewhere.
  */
 
 import { classGroupCodeForName, type MastersState } from "@/lib/masters";
@@ -15,17 +26,19 @@ import { effectiveGridWeekdays } from "@/lib/timetableCalendar";
 import { listExamDateSheet, loadExams } from "@/lib/exams";
 import {
   applySolverResultToState,
+  bellForClass,
+  classTeacherTakesAll,
   ensureGrid,
   loadTimetable,
   saveTimetable,
-  teacherOccupancy,
-  teachingPeriods,
   type TimetableConflict,
   type TimetableGrid,
   type TimetableSlot,
   type TimetableSolverStats,
   type TimetableState,
 } from "@/lib/timetable";
+import { bellFacts, effectiveSubjectRule, type TimetableSubjectRule } from "@/lib/timetableRules";
+import { markBusy, placeSection, type BusyMap, type PlacementUnit } from "@/lib/timetablePlacement";
 
 export type DemandUnit = {
   classId: string;
@@ -35,6 +48,10 @@ export type DemandUnit = {
   remaining: number;
   /** masters = class subject map; nep_fallback = NEP stage suggestion */
   source: "masters" | "nep_fallback";
+  rule: TimetableSubjectRule;
+  subjectName: string;
+  /** Who teaches it: a linked subject teacher, the class teacher, or a teacher of it elsewhere. */
+  teacherSource: "subject_link" | "class_teacher" | "elsewhere" | "none";
 };
 
 export type UnfilledDemand = {
@@ -61,33 +78,70 @@ export type AutoAssignResult = {
   explanation: SolverExplanation[];
 };
 
-function staffForSubject(
+function linksForAy<T extends { academicYearCode?: string }>(links: T[] | undefined, ay: string): T[] {
+  return (links ?? []).filter((l) => !l.academicYearCode || l.academicYearCode === ay);
+}
+
+/** The section's class teacher(s), primary first. */
+export function classTeachersOf(
   masters: MastersState,
   classId: string,
   sectionId: string,
   academicYearCode: string,
-  subjectId: string,
 ): StaffRecord[] {
-  const primary: StaffRecord[] = [];
-  const fallback: StaffRecord[] = [];
+  const hits: { s: StaffRecord; primary: boolean }[] = [];
+  for (const s of masters.staff ?? []) {
+    if (s.status !== "active") continue;
+    for (const l of linksForAy(s.classTeacherLinks, academicYearCode)) {
+      if (l.classId !== classId) continue;
+      if (l.sectionId && l.sectionId !== sectionId) continue;
+      hits.push({ s, primary: l.isPrimary });
+      break;
+    }
+  }
+  return hits.sort((a, b) => Number(b.primary) - Number(a.primary)).map((h) => h.s);
+}
+
+/** Who can teach this subject in this section, and why them. */
+export function teachersForSubject(
+  masters: MastersState,
+  state: Pick<TimetableState, "classTeacherAllClassIds">,
+  classId: string,
+  sectionId: string,
+  academicYearCode: string,
+  subjectId: string,
+): { teachers: StaffRecord[]; source: DemandUnit["teacherSource"] } {
+  const linked: StaffRecord[] = [];
+  const elsewhere: StaffRecord[] = [];
   for (const s of masters.staff ?? []) {
     if (s.status !== "active") continue;
     let classHit = false;
     let subjectHit = false;
-    for (const l of s.subjectTeachingLinks ?? []) {
+    for (const l of linksForAy(s.subjectTeachingLinks, academicYearCode)) {
       if (l.subjectId !== subjectId) continue;
-      if (l.academicYearCode && l.academicYearCode !== academicYearCode) {
-        continue;
-      }
       subjectHit = true;
       if (l.classId !== classId) continue;
       if (l.sectionId && l.sectionId !== sectionId) continue;
       classHit = true;
     }
-    if (classHit) primary.push(s);
-    else if (subjectHit) fallback.push(s);
+    if (classHit) linked.push(s);
+    else if (subjectHit) elsewhere.push(s);
   }
-  return primary.length ? primary : fallback;
+  if (linked.length) return { teachers: linked, source: "subject_link" };
+  const cls = masters.classes.find((c) => c.id === classId);
+  const group = cls?.groupCode ?? classGroupCodeForName(cls?.name ?? "");
+  if (classTeacherTakesAll(state, classId, group)) {
+    const ct = classTeachersOf(masters, classId, sectionId, academicYearCode);
+    // A class whose class teacher takes everything never borrows a
+    // stranger linked to the subject in another class.
+    return ct.length ? { teachers: ct.slice(0, 1), source: "class_teacher" } : { teachers: [], source: "none" };
+  }
+  return elsewhere.length ? { teachers: elsewhere, source: "elsewhere" } : { teachers: [], source: "none" };
+}
+
+export function isPrePrimaryClass(masters: MastersState, classId: string): boolean {
+  const cls = masters.classes.find((c) => c.id === classId);
+  return (cls?.groupCode ?? classGroupCodeForName(cls?.name ?? "")) === "PRE_PRIMARY";
 }
 
 function nepStageForClass(
@@ -156,8 +210,10 @@ export function buildDemand(
   masters: MastersState,
   academicYearCode: string,
   targets: { classId: string; sectionId: string }[],
+  state: Pick<TimetableState, "classTeacherAllClassIds" | "subjectRules"> = loadTimetable(),
 ): DemandUnit[] {
   const out: DemandUnit[] = [];
+  const subjectById = new Map((masters.subjects ?? []).map((s) => [s.id, s]));
   for (const t of targets) {
     const links = (masters.classSubjects ?? []).filter(
       (l) => l.classId === t.classId && l.isActive !== false,
@@ -180,98 +236,34 @@ export function buildDemand(
         source: "nep_fallback" as const,
       }));
     }
+    const preprimary = isPrePrimaryClass(masters, t.classId);
 
     for (const load of loads) {
       const need = Math.max(0, Math.floor(load.periodsPerWeek || 0));
       if (!need) continue;
-      const teachers = staffForSubject(
-        masters,
-        t.classId,
-        t.sectionId,
-        academicYearCode,
-        load.subjectId,
-      );
+      const who = teachersForSubject(masters, state, t.classId, t.sectionId, academicYearCode, load.subjectId);
+      const sub = subjectById.get(load.subjectId);
+      const subjectLike = {
+        id: load.subjectId,
+        code: sub?.code ?? "",
+        nameEn: sub?.nameEn ?? "",
+        category: sub?.category,
+        coScholasticArea: (sub as { coScholasticArea?: string } | undefined)?.coScholasticArea,
+      };
       out.push({
         classId: t.classId,
         sectionId: t.sectionId,
         subjectId: load.subjectId,
-        teacherIds: teachers.map((x) => x.id),
+        teacherIds: who.teachers.map((x) => x.id),
         remaining: need,
         source: load.source,
+        rule: effectiveSubjectRule(state.subjectRules ?? [], t.classId, subjectLike, need, preprimary),
+        subjectName: sub?.nameEn || sub?.code || load.subjectId,
+        teacherSource: who.source,
       });
     }
   }
   return out;
-}
-
-type Cell = { weekday: number; periodNo: number };
-
-function emptyCells(
-  weekdays: number[],
-  periodNos: number[],
-  occupied: Set<string>,
-): Cell[] {
-  const cells: Cell[] = [];
-  for (const wd of weekdays) {
-    for (const pn of periodNos) {
-      const key = `${wd}|${pn}`;
-      if (!occupied.has(key)) cells.push({ weekday: wd, periodNo: pn });
-    }
-  }
-  return cells;
-}
-
-function scoreCell(
-  cell: Cell,
-  subjectId: string,
-  teacherId: string,
-  gridSlots: TimetableSlot[],
-  teacherBusy: Map<string, string>,
-): number {
-  let score = 100;
-  // Prefer spreading subject across weekdays
-  const sameDay = gridSlots.filter(
-    (s) => s.subjectId === subjectId && s.weekday === cell.weekday,
-  ).length;
-  score -= sameDay * 18;
-
-  // Prefer not stacking consecutive periods for same teacher
-  const adj = gridSlots.filter(
-    (s) =>
-      s.teacherId === teacherId &&
-      s.weekday === cell.weekday &&
-      Math.abs(s.periodNo - cell.periodNo) === 1,
-  ).length;
-  score -= adj * 8;
-
-  // Prefer mid-day slightly over extreme ends
-  if (cell.periodNo === 1 || cell.periodNo >= 7) score -= 3;
-
-  // Illegal if teacher busy elsewhere
-  if (teacherBusy.has(`${teacherId}|${cell.weekday}|${cell.periodNo}`)) {
-    return -1e9;
-  }
-  return score;
-}
-
-function pickTeacher(
-  teacherIds: string[],
-  cell: Cell,
-  teacherBusy: Map<string, string>,
-  loadCount: Map<string, number>,
-): string | null {
-  let best: string | null = null;
-  let bestScore = -1e9;
-  for (const tid of teacherIds) {
-    if (teacherBusy.has(`${tid}|${cell.weekday}|${cell.periodNo}`)) continue;
-    const load = loadCount.get(tid) || 0;
-    const score = 1000 - load * 5;
-    if (score > bestScore) {
-      bestScore = score;
-      best = tid;
-    }
-  }
-  return best;
 }
 
 export function runAutoAssign(input: {
@@ -283,50 +275,38 @@ export function runAutoAssign(input: {
   persist?: boolean;
 }): AutoAssignResult {
   const state0 = loadTimetable();
-  const periods = teachingPeriods(state0.bellTemplate);
-  const periodNos = periods.map((p) => p.no);
   const explanation: SolverExplanation[] = [];
+  const className = (id: string) => input.masters.classes.find((c) => c.id === id)?.name ?? id;
+  const sectionLabel = (classId: string, sectionId: string) => {
+    const sec = input.masters.sections.find((s) => s.id === sectionId)?.name ?? "";
+    return sec ? `${className(classId)}-${sec}` : className(classId);
+  };
 
-  if (!periodNos.length) {
-    explanation.push({
-      level: "error",
-      text: "No teaching periods in bell template — fix Setup first",
-    });
-  }
   if (!input.targets.length) {
-    explanation.push({
-      level: "error",
-      text: "Select at least one class–section",
-    });
+    explanation.push({ level: "error", text: "Select at least one class–section" });
   }
 
   let state = state0;
   const resultGrids: TimetableGrid[] = [];
-  const teacherBusy = teacherOccupancy(state, undefined, input.academicYearCode);
+  const targetKeys = new Set(input.targets.map((t) => `${t.classId}|${t.sectionId}`));
 
-  // Optionally clear target grids from occupancy
-  for (const t of input.targets) {
-    const g = state.grids.find(
-      (x) =>
-        x.academicYearCode === input.academicYearCode &&
-        x.classId === t.classId &&
-        x.sectionId === t.sectionId,
-    );
-    if (!g) continue;
-    if (input.clearExisting !== false) {
-      for (const s of g.slots) {
-        if (s.teacherId) {
-          teacherBusy.delete(`${s.teacherId}|${s.weekday}|${s.periodNo}`);
-        }
-      }
+  // Every other grid's teachers, as clock times on their own class's bell.
+  const busy: BusyMap = new Map();
+  const load = new Map<string, number>();
+  for (const g of state.grids) {
+    if (g.academicYearCode !== input.academicYearCode) continue;
+    if (input.clearExisting !== false && targetKeys.has(`${g.classId}|${g.sectionId}`)) continue;
+    const facts = bellFacts(bellForClass(state, g.classId));
+    for (const s of g.slots) {
+      if (!s.teacherId) continue;
+      const at = facts.interval.get(s.periodNo);
+      if (!at) continue;
+      markBusy(busy, s.teacherId, s.weekday, at);
+      load.set(s.teacherId, (load.get(s.teacherId) ?? 0) + 1);
     }
   }
 
-  const demand = buildDemand(
-    input.masters,
-    input.academicYearCode,
-    input.targets,
-  );
+  const demand = buildDemand(input.masters, input.academicYearCode, input.targets, state0);
   const targetClassIds = new Set(input.targets.map((target) => target.classId));
   const datedExamSittings = listExamDateSheet(
     input.academicYearCode,
@@ -345,34 +325,23 @@ export function runAutoAssign(input: {
       text: "No subject periods/week on class subject links — set Masters → Subjects first",
     });
   }
-  const fallbackClassIds = new Set(
-    demand.filter((d) => d.source === "nep_fallback").map((d) => d.classId),
-  );
+  const fallbackClassIds = new Set(demand.filter((d) => d.source === "nep_fallback").map((d) => d.classId));
   if (fallbackClassIds.size) {
-    const names = [...fallbackClassIds]
-      .map(
-        (id) => input.masters.classes.find((c) => c.id === id)?.name ?? id,
-      )
-      .join(", ");
     explanation.push({
       level: "info",
-      text: `No class–subject map in Masters for: ${names}. Used NEP stage suggested subjects/periods instead — link subjects in Masters → Subjects to control the load.`,
+      text: `No class–subject map in Masters for: ${[...fallbackClassIds].map(className).join(", ")}. Used NEP stage suggested subjects/periods instead — link subjects in Masters → Subjects to control the load.`,
     });
   }
-
-  // Hardest first: fewest teachers, most periods
-  demand.sort((a, b) => {
-    const ta = a.teacherIds.length || 99;
-    const tb = b.teacherIds.length || 99;
-    if (ta !== tb) return ta - tb;
-    return b.remaining - a.remaining;
-  });
-
-  const loadCount = new Map<string, number>();
-  // Seed load from other sections
-  for (const key of teacherBusy.keys()) {
-    const tid = key.split("|")[0]!;
-    loadCount.set(tid, (loadCount.get(tid) || 0) + 1);
+  const viaClassTeacher = new Set(
+    demand.filter((d) => d.teacherSource === "class_teacher").map((d) => `${d.classId}|${d.sectionId}`),
+  );
+  if (viaClassTeacher.size) {
+    explanation.push({
+      level: "info",
+      text: `Class teacher takes the subjects with no specialist in: ${[...viaClassTeacher]
+        .map((k) => sectionLabel(k.split("|")[0]!, k.split("|")[1]!))
+        .join(", ")}.`,
+    });
   }
 
   const unfilled: UnfilledDemand[] = [];
@@ -380,17 +349,12 @@ export function runAutoAssign(input: {
   let scoreSum = 0;
 
   for (const t of input.targets) {
-    const cal = effectiveGridWeekdays(
-      input.masters,
-      input.academicYearCode,
-      t.classId,
-    );
+    const cal = effectiveGridWeekdays(input.masters, input.academicYearCode, t.classId);
     const weekdays = cal.weekdays.length
       ? cal.weekdays
       : state0.workingWeekdays.length
         ? state0.workingWeekdays
         : [1, 2, 3, 4, 5, 6];
-
     if (cal.skippedFull.length) {
       explanation.push({
         level: "info",
@@ -399,237 +363,74 @@ export function runAutoAssign(input: {
           .join(", ")}`,
       });
     }
+    const facts = bellFacts(bellForClass(state0, t.classId));
+    if (!facts.order.length) {
+      explanation.push({
+        level: "error",
+        text: `${sectionLabel(t.classId, t.sectionId)}: its bell schedule has no teaching periods — fix Setup first.`,
+      });
+      continue;
+    }
 
-    const ensured = ensureGrid(
-      input.academicYearCode,
-      t.classId,
-      t.sectionId,
-      state,
-    );
+    const ensured = ensureGrid(input.academicYearCode, t.classId, t.sectionId, state);
     state = ensured.state;
-    let slots: TimetableSlot[] =
-      input.clearExisting === false
-        ? [...ensured.grid.slots].filter((s) => weekdays.includes(s.weekday))
-        : [];
+    const existing: TimetableSlot[] =
+      input.clearExisting === false ? ensured.grid.slots.filter((s) => weekdays.includes(s.weekday)) : [];
 
-    // Drop slots that landed on full weekly holidays when clearing/rebuilding
-    if (input.clearExisting !== false) {
-      slots = [];
+    const units: PlacementUnit[] = demand
+      .filter((d) => d.classId === t.classId && d.sectionId === t.sectionId)
+      .map((d) => ({
+        classId: d.classId,
+        sectionId: d.sectionId,
+        subjectId: d.subjectId,
+        subjectName: d.subjectName,
+        teacherIds: d.teacherIds,
+        periodsPerWeek: d.remaining,
+        rule: d.rule,
+      }));
+
+    const capacity = weekdays.length * facts.order.length - existing.length;
+    const wanted = units.reduce((n, u) => n + u.periodsPerWeek, 0);
+    if (wanted > capacity) {
+      explanation.push({
+        level: "warn",
+        text: `${sectionLabel(t.classId, t.sectionId)} needs ${wanted} periods a week but its timing has ${capacity} — reduce periods/week in Masters → Subjects.`,
+      });
     }
 
-    const occupied = new Set(slots.map((s) => `${s.weekday}|${s.periodNo}`));
-    const sectionDemand = demand.filter(
-      (d) => d.classId === t.classId && d.sectionId === t.sectionId,
-    );
-
-    for (const d of sectionDemand) {
-      if (!d.teacherIds.length) {
-        unfilled.push({
-          classId: d.classId,
-          sectionId: d.sectionId,
-          subjectId: d.subjectId,
-          remaining: d.remaining,
-          reason: "No teacher linked to this subject (Staff → Duties)",
-        });
-        explanation.push({
-          level: "warn",
-          text: `No teacher for subject on ${t.classId.slice(0, 6)}… — ${d.remaining} periods left unfilled`,
-        });
-        continue;
-      }
-
-      let left = d.remaining;
-      while (left > 0) {
-        const cells = emptyCells(weekdays, periodNos, occupied);
-        let best: {
-          cell: Cell;
-          teacherId: string;
-          score: number;
-        } | null = null;
-
-        for (const cell of cells) {
-          const teacherId = pickTeacher(
-            d.teacherIds,
-            cell,
-            teacherBusy,
-            loadCount,
-          );
-          if (!teacherId) continue;
-          const sc = scoreCell(
-            cell,
-            d.subjectId,
-            teacherId,
-            slots,
-            teacherBusy,
-          );
-          if (sc < 0) continue;
-          if (!best || sc > best.score) {
-            best = { cell, teacherId, score: sc };
-          }
-        }
-
-        if (!best) {
-          unfilled.push({
-            classId: d.classId,
-            sectionId: d.sectionId,
-            subjectId: d.subjectId,
-            remaining: left,
-            reason: "No free legal cell (teacher busy, holiday, or grid full)",
-          });
-          break;
-        }
-
-        const slot: TimetableSlot = {
-          weekday: best.cell.weekday,
-          periodNo: best.cell.periodNo,
-          subjectId: d.subjectId,
-          teacherId: best.teacherId,
-          roomId: "",
-        };
-        slots.push(slot);
-        occupied.add(`${slot.weekday}|${slot.periodNo}`);
-        teacherBusy.set(
-          `${slot.teacherId}|${slot.weekday}|${slot.periodNo}`,
-          `${t.classId}|${t.sectionId}`,
-        );
-        loadCount.set(
-          best.teacherId,
-          (loadCount.get(best.teacherId) || 0) + 1,
-        );
-        placed += 1;
-        scoreSum += best.score;
-        left -= 1;
-      }
+    const r = placeSection({ target: { ...t, weekdays, facts }, units, busy, load, existing });
+    placed += r.placed;
+    scoreSum += r.scoreSum;
+    unfilled.push(...r.unfilled);
+    for (const n of r.notes) {
+      explanation.push({ level: n.level, text: `${sectionLabel(t.classId, t.sectionId)} · ${n.text}` });
     }
 
-    const grid: TimetableGrid = {
-      ...ensured.grid,
-      slots,
-      updatedAt: new Date().toISOString(),
-    };
+    const grid: TimetableGrid = { ...ensured.grid, slots: r.slots, updatedAt: new Date().toISOString() };
     resultGrids.push(grid);
-    state = {
-      ...state,
-      grids: state.grids.map((g) => (g.id === grid.id ? grid : g)),
-    };
+    state = { ...state, grids: state.grids.map((g) => (g.id === grid.id ? grid : g)) };
   }
 
-  // Local repair pass: try to place remaining unfilled with looser spread
-  const still: UnfilledDemand[] = [];
-  for (const u of unfilled) {
-    if (u.reason.includes("No teacher")) {
-      still.push(u);
-      continue;
-    }
-    const grid = resultGrids.find(
-      (g) => g.classId === u.classId && g.sectionId === u.sectionId,
-    );
-    if (!grid) {
-      still.push(u);
-      continue;
-    }
-    const cal = effectiveGridWeekdays(
-      input.masters,
-      input.academicYearCode,
-      u.classId,
-    );
-    const weekdays = cal.weekdays.length
-      ? cal.weekdays
-      : state0.workingWeekdays.length
-        ? state0.workingWeekdays
-        : [1, 2, 3, 4, 5, 6];
-    const teachers = staffForSubject(
-      input.masters,
-      u.classId,
-      u.sectionId,
-      input.academicYearCode,
-      u.subjectId,
-    ).map((s) => s.id);
-    let left = u.remaining;
-    const occupied = new Set(
-      grid.slots.map((s) => `${s.weekday}|${s.periodNo}`),
-    );
-    while (left > 0) {
-      const cells = emptyCells(weekdays, periodNos, occupied);
-      let placedOne = false;
-      for (const cell of cells) {
-        const tid = pickTeacher(teachers, cell, teacherBusy, loadCount);
-        if (!tid) continue;
-        grid.slots.push({
-          weekday: cell.weekday,
-          periodNo: cell.periodNo,
-          subjectId: u.subjectId,
-          teacherId: tid,
-          roomId: "",
-        });
-        occupied.add(`${cell.weekday}|${cell.periodNo}`);
-        teacherBusy.set(
-          `${tid}|${cell.weekday}|${cell.periodNo}`,
-          `${u.classId}|${u.sectionId}`,
-        );
-        loadCount.set(tid, (loadCount.get(tid) || 0) + 1);
-        placed += 1;
-        left -= 1;
-        placedOne = true;
-        break;
-      }
-      if (!placedOne) break;
-    }
-    if (left > 0) {
-      still.push({ ...u, remaining: left, reason: "Still no free cell after repair" });
-    }
-  }
-
-  const demandTotal = demand.reduce((n, d) => n + d.remaining, 0);
-  // demand.remaining was mutated conceptually — recompute from original build
-  const demandFresh = buildDemand(
-    input.masters,
-    input.academicYearCode,
-    input.targets,
-  );
-  const needed = demandFresh.reduce((n, d) => n + d.remaining, 0);
-  const fillPercent =
-    needed > 0 ? Math.round((placed / needed) * 100) : placed ? 100 : 0;
-
-  const conflicts = [] as TimetableConflict[];
-  // Detect within result
-  const tmap = new Map<string, string>();
-  for (const g of resultGrids) {
-    for (const s of g.slots) {
-      if (!s.teacherId) continue;
-      const k = `${s.teacherId}|${s.weekday}|${s.periodNo}`;
-      if (tmap.has(k) && tmap.get(k) !== `${g.classId}|${g.sectionId}`) {
-        conflicts.push({
-          kind: "teacher_clash",
-          weekday: s.weekday,
-          periodNo: s.periodNo,
-          classId: g.classId,
-          sectionId: g.sectionId,
-          teacherId: s.teacherId,
-          subjectId: s.subjectId,
-          detail: "Teacher clash after assign",
-        });
-      }
-      tmap.set(k, `${g.classId}|${g.sectionId}`);
-    }
-  }
-
+  const needed = demand.reduce((n, d) => n + d.remaining, 0);
+  const fillPercent = needed > 0 ? Math.round((placed / needed) * 100) : placed ? 100 : 0;
+  const conflicts: TimetableConflict[] = [];
   const stats: TimetableSolverStats = {
     fillPercent,
     placed,
-    unfilled: still.reduce((n, u) => n + u.remaining, 0),
+    unfilled: unfilled.reduce((n, u) => n + u.remaining, 0),
     conflicts: conflicts.length,
     score: placed ? Math.round(scoreSum / placed) : 0,
   };
 
   explanation.unshift({
     level: fillPercent >= 90 ? "info" : fillPercent >= 60 ? "warn" : "error",
-    text: `Auto-assign placed ${placed}/${needed || demandTotal} periods (${fillPercent}%) · score ${stats.score}`,
+    text: `Auto-assign placed ${placed}/${needed} periods (${fillPercent}%) · score ${stats.score}`,
   });
-  if (still.length) {
+  const noTeacher = unfilled.filter((u) => u.reason.startsWith("No teacher"));
+  if (noTeacher.length) {
     explanation.push({
       level: "warn",
-      text: `${still.length} subject load(s) partially unfilled — add teachers or reduce periods/week`,
+      text: `${noTeacher.reduce((n, u) => n + u.remaining, 0)} period(s) have no teacher — link teachers in Staff → Teaching allocation, or set the class teacher for classes where the class teacher takes all subjects.`,
     });
   }
 
@@ -642,7 +443,7 @@ export function runAutoAssign(input: {
     ok: true,
     state: nextState,
     grids: resultGrids,
-    unfilled: still,
+    unfilled,
     conflicts,
     score: stats.score,
     stats,

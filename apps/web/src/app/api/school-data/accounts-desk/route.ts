@@ -3,19 +3,29 @@ import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
-import type { AccountsState } from "@/lib/accounts";
+import type { AccountsState } from "@/lib/accountsTypes";
 import { accountsDualWriteDbEnabled } from "@/lib/accountsDbConfig";
 import {
+  ACCOUNTS_DELETABLE_TABLES,
   fetchAccountsDeskFromDb,
   pushAccountsDeskToDb,
 } from "@/lib/accountsNormalized.server";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["accounts-desk"], "GET");
   if (!auth.ok) return auth.response
-  const { bundle, meta } = await fetchAccountsDeskFromDb();
+  const { bundle, meta, ok, error } = await fetchAccountsDeskFromDb();
+  // Unknown is not empty: a failed read answered 200 with an empty desk, and
+  // the browser took it as the school's accounts.
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: `Could not read the accounts desk: ${error || "read failed"}` },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     ...bundle,
@@ -32,7 +42,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
-  let body: Omit<AccountsState, "version">;
+  let body: Omit<AccountsState, "version"> & { deletes?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -64,7 +74,7 @@ export async function POST(req: Request) {
       expenseApprovalPaise: 1_000_000,
       pettyThresholdPaise: 200_000,
     },
-  });
+  }, readNamedDeletes(body.deletes, ACCOUNTS_DELETABLE_TABLES));
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 502 });
   }

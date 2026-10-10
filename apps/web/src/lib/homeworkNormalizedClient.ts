@@ -5,10 +5,46 @@
 import type { HomeworkState } from "@/lib/homework";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
 
 const META_KEY = "bhb_homework_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pending: HomeworkState | null = null;
+
+/**
+ * Diary entries deleted here and not yet confirmed by the server. A save never
+ * deletes by absence any more, so a deletion has to be said; kept across
+ * reloads so a failed push still carries it next time.
+ */
+const DIARY_DELETES_KEY = "bhb_homework_diary_deletes_v1";
+
+function readDiaryDeletes(): string[] {
+  try {
+    const raw = localStorage.getItem(DIARY_DELETES_KEY);
+    const v = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeDiaryDeletes(ids: string[]) {
+  try {
+    if (ids.length) localStorage.setItem(DIARY_DELETES_KEY, JSON.stringify(ids));
+    else localStorage.removeItem(DIARY_DELETES_KEY);
+  } catch {
+    /* the next save still carries what is in memory */
+  }
+}
+
+/** Record that the user deleted a diary entry; the next desk push sends it. */
+export function recordHomeworkDiaryDeletion(id: string) {
+  if (typeof window === "undefined" || !id) return;
+  writeDiaryDeletes([...new Set([...readDiaryDeletes(), id])]);
+}
 
 type DeskMeta = {
   updatedAt: string;
@@ -41,7 +77,9 @@ export function homeworkNormalizedSyncEnabled(): boolean {
 }
 
 export function homeworkReadFromDbClientEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_HOMEWORK_READ_FROM_DB === "true";
+  const flag = process.env.NEXT_PUBLIC_HOMEWORK_READ_FROM_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 export function scheduleHomeworkDeskSync(state: HomeworkState) {
@@ -59,6 +97,7 @@ export function scheduleHomeworkDeskSync(state: HomeworkState) {
 }
 
 async function pushHomeworkDeskApi(state: HomeworkState) {
+  const deleteDiaryIds = readDiaryDeletes();
   try {
     const res = await fetch("/api/school-data/homework-desk", {
       method: "POST",
@@ -69,6 +108,7 @@ async function pushHomeworkDeskApi(state: HomeworkState) {
         submissions: state.submissions,
         seen: state.seen,
         settings: state.settings,
+        deleteDiaryIds,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -78,6 +118,11 @@ async function pushHomeworkDeskApi(state: HomeworkState) {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      // Only now is it safe to forget the deletions this push carried.
+      if (deleteDiaryIds.length) {
+        const sent = new Set(deleteDiaryIds);
+        writeDiaryDeletes(readDiaryDeletes().filter((id) => !sent.has(id)));
+      }
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         postCount: body.postCount ?? state.posts.length,
@@ -85,7 +130,12 @@ async function pushHomeworkDeskApi(state: HomeworkState) {
     } else if (!res.ok) {
       console.warn("[homework-db] desk push failed", body?.error || res.status);
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("homework");
+    else recordDeskSyncFailure("homework", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("homework", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[homework-db] desk push error", e);
   }
 }
@@ -138,7 +188,7 @@ type HomeworkDeskBundle = Pick<
 
 export async function hydrateHomeworkDeskFromDb(
   preferDb?: boolean,
-): Promise<{ bundle: HomeworkDeskBundle; changed: boolean }> {
+): Promise<{ bundle: HomeworkDeskBundle; changed: boolean; ok: boolean }> {
   const remote = await fetchHomeworkDeskFromApi();
   const empty: HomeworkDeskBundle = {
     posts: [],
@@ -147,7 +197,7 @@ export async function hydrateHomeworkDeskFromDb(
     seen: [],
     settings: { examModeFreeze: false },
   };
-  if (!remote) return { bundle: empty, changed: false };
+  if (!remote) return { bundle: empty, changed: false, ok: false };
 
   const meta = readMeta();
   const shouldTake =
@@ -157,12 +207,12 @@ export async function hydrateHomeworkDeskFromDb(
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.postCount > meta.postCount;
 
-  if (!shouldTake) return { bundle: empty, changed: false };
+  if (!shouldTake) return { bundle: empty, changed: false, ok: true };
 
   writeMeta({
     updatedAt: remote.updatedAt,
     postCount: remote.postCount,
   });
 
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

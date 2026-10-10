@@ -6,7 +6,7 @@ import {
   classLabelForStudent,
   resolveParentHousehold,
 } from "@/lib/parentPortal";
-import { loadSis, type Household, type SisStudent } from "@/lib/sis";
+import { loadSis, type Household, type SisStudent, childrenOfHousehold} from "@/lib/sis";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
@@ -62,9 +62,10 @@ export function ParentStudentLeavePortal({
       setActiveId(null);
       return;
     }
-    const kids = sis.students.filter(
-      (s) => s.householdId === hh.id && s.status === "active",
-    );
+    // One row per child, this session. SIS keeps a row per child per year and
+    // leaves them all active, so the unscoped filter showed a family their own
+    // child once for every year they had been enrolled.
+    const kids = childrenOfHousehold(sis, hh.id, DEFAULT_AY);
     setChildren(kids);
     const aid =
       activeId && kids.some((k) => k.id === activeId)
@@ -127,12 +128,12 @@ export function ParentStudentLeavePortal({
   return (
     <div className="px-4 pb-8 pt-3">
       {error ? (
-        <p className="mb-3 rounded-lg bg-[rgba(180,35,24,0.08)] px-3 py-2 text-sm text-[#b42318]">
+        <p className="mb-3 rounded-lg bg-[rgba(180,35,24,0.08)] px-3 py-2 text-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}
       {notice ? (
-        <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[#0f7a4c]">
+        <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[var(--success)]">
           {notice}
         </p>
       ) : null}
@@ -248,7 +249,7 @@ export function ParentStudentLeavePortal({
                     {req.status === "pending" ? (
                       <button
                         type="button"
-                        className="mt-2 text-xs text-[#b42318] underline"
+                        className="mt-2 text-xs text-[var(--danger)] underline"
                         onClick={() => {
                           const r = cancelStudentLeaveRequest(req.id);
                           if (!r.ok) setError(r.error);

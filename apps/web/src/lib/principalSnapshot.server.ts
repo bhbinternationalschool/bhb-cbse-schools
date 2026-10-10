@@ -9,14 +9,20 @@ import { ensureExamsHydratedServer } from "@/lib/examsPersistence";
 import { ensureAdmissionsHydratedServer } from "@/lib/admissionsPersistence";
 import { ensurePaymentsHydratedServer } from "@/lib/paymentsPersistence";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
+import { loadSis } from "@/lib/sis";
 import { loadAdmissions, funnelCounts } from "@/lib/admissions";
-import { loadAttendance, summarizeMarks, todayIso } from "@/lib/attendance";
+import { withoutReviewDemo } from "@/lib/reviewDemoRecords";
+import { loadAttendance, todayIso } from "@/lib/attendance";
+import { todayAttendanceFigures } from "@/lib/attendanceToday";
 import { computeFeeKpis } from "@/lib/feeFinance";
-import { loadFees } from "@/lib/fees";
+import { storeDuesSummary } from "@/lib/inventory/sales.server";
+import { fetchOpenDuesSummary } from "@/lib/feesDeskAncillary.server";
+import { collectionsByMode, loadFees } from "@/lib/fees";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
-import { loadStaffAttendance, summarizeStaffMarks } from "@/lib/staffAttendance";
+import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
+import { loadStaffAttendance, staffMarkTotals } from "@/lib/staffAttendance";
 import { loadVault } from "@/lib/vault";
-import { listLowStockItems, loadStore } from "@/lib/store";
+import { stockReport } from "@/lib/inventory/reports.server";
 
 export type PrincipalSnapshot = {
   generatedAt: string;
@@ -26,6 +32,17 @@ export type PrincipalSnapshot = {
     mtdCollectionPaise: number;
     openDuesPaise: number;
     defaulterHouseholds: number;
+    /** When the dues cache the reminders use was last rebuilt; "" = unknown. */
+    duesRebuiltAt: string;
+    /** Books / uniform on credit. null = the store could not be read. */
+    storeDuesPaise: number | null;
+    storeDueStudents: number;
+    /** Today's money by how it was taken; parts sum to todayCollectionPaise. */
+    todayByMode: { mode: string; label: string; paise: number }[];
+  };
+  students: {
+    /** Active children in the running session. */
+    activeCount: number;
   };
   attendance: {
     date: string;
@@ -34,6 +51,8 @@ export type PrincipalSnapshot = {
     studentLeave: number;
     studentMarkedPct: number;
     sectionsMarked: number;
+    /** Children with a mark today (the percentage is of these, not of all). */
+    studentsMarked?: number;
   };
   staff: {
     activeCount: number;
@@ -69,39 +88,109 @@ export async function buildPrincipalSnapshot(
   const today = todayIso();
   const monthPrefix = today.slice(0, 7);
 
+  // Store stock is server truth now. A failed read must not read as "nothing
+  // is low" — that is the same class of lie this module was rebuilt to remove
+  // — so it degrades to 0 only after being logged.
+  let lowStockSkus = 0;
+  try {
+    lowStockSkus = (await stockReport()).totals.belowReorder;
+  } catch (e) {
+    console.error(
+      "[principalSnapshot] low-stock count unavailable:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+
+  // Books and uniform bought on credit. Quoted BESIDE the fee dues, never
+  // inside them: a store slip is settled through the store's own counter
+  // with the fee receipt as its reference, so folding it into "Open dues"
+  // (or into a pay link) would quote money this ERP cannot yet collect
+  // online. Unknown must not read as nothing — a failed read stays null and
+  // the tile says so.
+  let storeDuesPaise: number | null = null;
+  let storeDueStudents = 0;
+  try {
+    const store = await storeDuesSummary();
+    storeDuesPaise = store.balancePaise;
+    storeDueStudents = store.studentCount;
+  } catch (e) {
+    console.error(
+      "[principalSnapshot] store dues unavailable:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+
+  // The dues the REMINDERS are built from — the same row the fee dashboard
+  // now shows. Two screens each computing their own total is how the office
+  // ended up reading ₹11.5 lakh on one and ₹13.4 lakh on the other, with no
+  // way to tell which the parent would be asked for.
+  //
+  // The live computation below still runs: it fills the student count and
+  // the rest of the fee KPIs, and it is the fallback when the cache has
+  // never been built.
+  let duesSummary: Awaited<ReturnType<typeof fetchOpenDuesSummary>> | null = null;
+  try {
+    duesSummary = await fetchOpenDuesSummary(ay);
+  } catch (e) {
+    console.error(
+      "[principalSnapshot] open-dues summary unavailable:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+
   const feeKpi = computeFeeKpis({ academicYearCode: ay });
   const vouchers = loadFees().vouchers.filter(
     (v) => !v.voidedAt && v.academicYearCode === ay,
   );
-  const todayCollectionPaise = vouchers
-    .filter((v) => v.collectionDate === today)
-    .reduce((s, v) => s + v.totalPaise, 0);
+  const todayVouchers = vouchers.filter((v) => v.collectionDate === today);
+  const todayCollectionPaise = todayVouchers.reduce(
+    (s, v) => s + v.totalPaise,
+    0,
+  );
+
+  // Today's money by how it was taken. Built from the SAME vouchers as the
+  // total above, so the parts always add up to the figure beside them —
+  // buildDayBook was the other candidate, but it is school-wide and
+  // unfiltered by year, so its total and this one can differ on a day that
+  // takes an arrear from a closed session.
+  const todayByMode = collectionsByMode(todayVouchers, todayCollectionPaise);
   const mtdCollectionPaise = vouchers
     .filter((v) => v.collectionDate.startsWith(monthPrefix))
     .reduce((s, v) => s + v.totalPaise, 0);
+
+  // The school's own size, which every app showed nowhere. Same filter the
+  // principal lists use, so the tile and the list it opens agree.
+  const sis = loadSis();
+  const activeStudents = withoutReviewDemo(sis).students.filter(
+    (st) => st.status === "active" && st.academicYearCode === ay,
+  ).length;
 
   const att = loadAttendance();
   const todayRegs = (att.registers ?? []).filter(
     (r) => r.academicYearCode === ay && r.date === today,
   );
-  let stuPresent = 0;
-  let stuAbsent = 0;
-  let stuLeave = 0;
-  for (const r of todayRegs) {
-    const s = summarizeMarks(r.marks || []);
-    stuPresent += s.present;
-    stuAbsent += s.absent;
-    stuLeave += s.leave;
-  }
-  const stuMarked = stuPresent + stuAbsent + stuLeave;
-  const activeSections = masters.sections.filter((s) => s.isActive).length;
-  const attendanceRegistersPending = Math.max(0, activeSections - todayRegs.length);
+  const todayAtt = todayAttendanceFigures(todayRegs);
+  const activeSections = masters.sections.filter((s) => s.isActive);
+  const markedSectionIds = new Set(todayRegs.map((r) => r.sectionId));
+  // Per section, not a single school-wide check: holidays can be scoped to
+  // one class group ("Pre-Primary Saturday off" while the rest of the
+  // school has class), so a section on its own day off must not count as
+  // a pending register, but the other sections still do. Half-holidays
+  // still expect a register (students do attend, just for less of the day).
+  const attendanceRegistersPending = activeSections.filter((s) => {
+    if (markedSectionIds.has(s.id)) return false;
+    const classification = classifyClassHolidayDay(masters, today, ay, s.classId);
+    return classification.status !== "holiday";
+  }).length;
 
   const staffAtt = loadStaffAttendance();
   const staffToday = (staffAtt.registers ?? []).find(
     (r) => r.date === today && r.academicYearCode === ay,
   );
-  const staffSum = staffToday ? summarizeStaffMarks(staffToday.marks || []) : null;
+  // staffMarkTotals, not summarizeStaffMarks: the latter is keyed by status
+  // code, so `.present` read undefined and every app showed 0 staff present
+  // against a full register (2026-09-16).
+  const staffSum = staffToday ? staffMarkTotals(staffToday.marks || []) : null;
   const activeStaff = (masters.staff ?? []).filter((s) => s.status === "active").length;
 
   const adm = loadAdmissions();
@@ -126,18 +215,30 @@ export async function buildPrincipalSnapshot(
     fees: {
       todayCollectionPaise,
       mtdCollectionPaise,
-      openDuesPaise: feeKpi.openPaise,
-      defaulterHouseholds: feeKpi.studentsWithOpenDues,
+      openDuesPaise:
+        duesSummary && duesSummary.rows > 0
+          ? duesSummary.totalBalancePaise
+          : feeKpi.openPaise,
+      defaulterHouseholds:
+        duesSummary && duesSummary.rows > 0
+          ? duesSummary.students
+          : feeKpi.studentsWithOpenDues,
+      duesRebuiltAt: duesSummary?.rebuiltAt ?? "",
+      storeDuesPaise,
+      storeDueStudents,
+      todayByMode,
     },
+    students: { activeCount: activeStudents },
     attendance: {
       date: today,
-      studentPresent: stuPresent,
-      studentAbsent: stuAbsent,
-      studentLeave: stuLeave,
-      studentMarkedPct: stuMarked
-        ? Math.round((stuPresent / stuMarked) * 100)
-        : 0,
-      sectionsMarked: todayRegs.length,
+      // Late children were present; half-days show here as present too
+      // (the percentage weighs them ½).
+      studentPresent: todayAtt.present + todayAtt.late + todayAtt.halfDay,
+      studentAbsent: todayAtt.absent,
+      studentLeave: todayAtt.leave,
+      studentMarkedPct: todayAtt.pct,
+      sectionsMarked: todayAtt.sectionsMarked,
+      studentsMarked: todayAtt.marked,
     },
     staff: {
       activeCount: activeStaff,
@@ -147,13 +248,19 @@ export async function buildPrincipalSnapshot(
     admissions: {
       pipeline,
       enrolled: funnel.enrolled || 0,
+      // Same filter as /api/v1/principal/lists?kind=followups so the card
+      // and its drill-down agree: closed leads (enrolled/lost) need no follow-up.
       followUpsDue: adm.leads.filter(
-        (l) => l.nextFollowUpAt && l.nextFollowUpAt.slice(0, 10) <= today,
+        (l) =>
+          l.nextFollowUpAt &&
+          l.nextFollowUpAt.slice(0, 10) <= today &&
+          l.stage !== "enrolled" &&
+          l.stage !== "lost",
       ).length,
     },
     alerts: {
       vaultExpiring30d,
-      lowStockSkus: listLowStockItems(loadStore()).length,
+      lowStockSkus: lowStockSkus,
       attendanceRegistersPending,
     },
   };

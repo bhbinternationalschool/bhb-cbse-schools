@@ -1,0 +1,129 @@
+import { ImageResponse } from "next/og";
+import { NextResponse } from "next/server";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { getDemoSession } from "@/lib/auth";
+import { loadMasters } from "@/lib/masters";
+import { hasPermission } from "@/lib/rbac";
+import { BIRTHDAY_FORMATS, normalizeDesign, normalizeFormat } from "@/lib/birthdayCards";
+import { renderBirthdayCard } from "@/lib/birthdayCardDesigns";
+import { birthdayCardSigOk, cardSignatureFor, findBirthdayCardSubject, readBirthdayState } from "@/lib/birthday.server";
+import { readCanvaBirthdayCard } from "@/lib/canvaBirthday.server";
+import { TENANT } from "@/lib/types";
+
+export const runtime = "nodejs";
+
+/**
+ * Birthday card PNG. Two callers:
+ *  - staff in the browser (session) — preview / download;
+ *  - WhatsApp / Facebook fetching the image link we sent — no session, so the
+ *    URL carries an HMAC over (student or staff, date, design, format) signed with
+ *    CRON_SECRET / WA_DISPATCH_SECRET. `sample=1` renders a demo card for the
+ *    template picker (no student data) and needs a session.
+ */
+
+type FontEntry = { name: string; data: ArrayBuffer; weight: 400 | 700; style: "normal" };
+let fontCache: FontEntry[] | null = null;
+async function loadFonts(origin: string): Promise<FontEntry[]> {
+  if (fontCache) return fontCache;
+  const files: { file: string; weight: 400 | 700 }[] = [
+    { file: "NotoSansDevanagari-Regular.ttf", weight: 400 },
+    { file: "NotoSansDevanagari-Bold.woff", weight: 700 },
+  ];
+  const out: FontEntry[] = [];
+  for (const f of files) {
+    let data: ArrayBuffer | null = null;
+    try {
+      const buf = await fs.readFile(path.join(process.cwd(), "public", "fonts", f.file));
+      data = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+    } catch {
+      try {
+        const r = await fetch(`${origin}/fonts/${f.file}`);
+        if (r.ok) data = await r.arrayBuffer();
+      } catch {
+        /* skip */
+      }
+    }
+    if (data) out.push({ name: "Noto Sans Devanagari", data, weight: f.weight, style: "normal" });
+  }
+  if (out.length) fontCache = out;
+  return out;
+}
+
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const q = url.searchParams;
+  // "canva" is the school's own Canva card (made earlier by the greeting run
+  // and kept in storage). It is signed under that name, so check the
+  // signature against it before swapping in a built-in design to draw.
+  const isCanva = q.get("design") === "canva";
+  let design = normalizeDesign(q.get("design"));
+  const format = normalizeFormat(q.get("format"));
+  const studentId = (q.get("student") || "").slice(0, 60);
+  const staffId = (q.get("staff") || "").slice(0, 60);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(q.get("date") || "") ? String(q.get("date")) : new Date().toISOString().slice(0, 10);
+  const sample = q.get("sample") === "1";
+  const sig = q.get("sig") || "";
+  const group = q.get("group") === "1";
+
+  const session = await getDemoSession().catch(() => null);
+  let staff = !!session && session.persona === "staff";
+  // A colleague's card is Staff-module material: the office preview of one
+  // needs Staff access, not merely a desk login. A signed link still works —
+  // that is what WhatsApp fetches.
+  if (staff && staffId && !hasPermission(session!, loadMasters(), "staff", "view")) staff = false;
+  // Same prefix the URL builder signs with: a student's signature never opens
+  // a staff member's card.
+  const signedId = group ? "group" : staffId ? `staff:${staffId}` : studentId;
+  if (!staff && !birthdayCardSigOk(sig, { studentId: signedId, date, design: isCanva ? "canva" : design, format })) {
+    return NextResponse.json({ error: "Not allowed" }, { status: 403 });
+  }
+
+  if (isCanva && !group && (studentId || staffId)) {
+    const settings = (await readBirthdayState()).settings;
+    const source = staffId ? settings.canvaStaffDesign : settings.canvaStudentDesign;
+    const png = await readCanvaBirthdayCard(staffId ? "staff" : "student", staffId || studentId, date, source);
+    if (png) {
+      return new Response(Buffer.from(png), {
+        headers: { "Content-Type": "image/png", "Cache-Control": staff ? "private, max-age=60" : "public, max-age=86400" },
+      });
+    }
+    // Not made (or the design changed since): the built-in card, never a broken image.
+    design = settings.design;
+  }
+
+  const origin = `${url.protocol}//${url.host}`;
+  const crestUrl = TENANT.logoCrestUrl?.startsWith("http") ? TENANT.logoCrestUrl : `${origin}${TENANT.logoCrestUrl || ""}`;
+  const f = BIRTHDAY_FORMATS.find((x) => x.id === format)!;
+  const dateLabel = new Date(`${date}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
+  const wish = (q.get("wish") || "").slice(0, 120);
+
+  const signature = await cardSignatureFor(staffId ? "staff" : "student");
+
+  let data;
+  if (sample) {
+    data = { studentName: "Aarav Sharma", className: "Class VI · A", dateLabel, schoolName: TENANT.nameDisplay, tagline: TENANT.tagline, crestUrl, photoUrl: "", wish, signature };
+  } else if (staffId) {
+    const subject = await findBirthdayCardSubject({ date, staffId });
+    if (!subject.ok) return NextResponse.json({ error: subject.error }, { status: 404 });
+    const includePhoto = q.get("photo") !== "0";
+    data = { studentName: subject.studentName, className: subject.className, dateLabel, schoolName: TENANT.nameDisplay, tagline: TENANT.tagline, crestUrl, photoUrl: includePhoto ? subject.photoUrl : "", wish, signature };
+  } else if (group) {
+    const subjects = await findBirthdayCardSubject({ date, group: true });
+    if (!subjects.ok) return NextResponse.json({ error: subjects.error }, { status: 404 });
+    data = { studentName: "", className: "", dateLabel, schoolName: TENANT.nameDisplay, tagline: TENANT.tagline, crestUrl, photoUrl: "", wish, signature, names: subjects.names };
+  } else {
+    const subject = await findBirthdayCardSubject({ date, studentId });
+    if (!subject.ok) return NextResponse.json({ error: subject.error }, { status: 404 });
+    const includePhoto = q.get("photo") !== "0";
+    data = { studentName: subject.studentName, className: subject.className, dateLabel, schoolName: TENANT.nameDisplay, tagline: TENANT.tagline, crestUrl, photoUrl: includePhoto ? subject.photoUrl : "", wish, signature };
+  }
+
+  const fonts = await loadFonts(origin);
+  return new ImageResponse(renderBirthdayCard(design, format, data), {
+    width: f.width,
+    height: f.height,
+    fonts: fonts.length ? fonts : undefined,
+    headers: { "Cache-Control": staff ? "private, max-age=60" : "public, max-age=86400" },
+  });
+}

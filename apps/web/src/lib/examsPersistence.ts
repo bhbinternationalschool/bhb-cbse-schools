@@ -14,6 +14,10 @@ import {
   scheduleExamsDeskSync,
 } from "@/lib/examsNormalizedClient";
 import { mergeDbDeskIntoExamsState } from "@/lib/examsNormalizedMerge";
+import {
+  pendingExamSheetIds,
+  retryPendingExamSheets,
+} from "@/lib/examsSheetSync";
 import { examsReadFromDbEnabled } from "@/lib/examsDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
 import {
@@ -21,6 +25,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "exams";
 
@@ -41,7 +46,7 @@ export function resetExamsPersistenceCache() {
 
 export function scheduleExamsSync(state: ExamsState) {
   if (typeof window === "undefined") {
-    void pushExamsRemoteServer(state);
+    void trackServerWork(pushExamsRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("exams")) {
@@ -77,7 +82,6 @@ export async function pushExamsRemoteServer(
  */
 export async function ensureExamsHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = examsReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("exams")
@@ -85,7 +89,10 @@ export async function ensureExamsHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateExamsDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateExamsDeskFromDb(readFromDb);
+  if (!ok) return false;
+
+  markDeskHydrated(MODULE);
   const hasDesk =
     bundle.sheets.length > 0 ||
     bundle.promotions.length > 0 ||
@@ -94,12 +101,18 @@ export async function ensureExamsHydrated(): Promise<boolean> {
   if (changed && (hasDesk || readFromDb)) {
     const merged = mergeDbDeskIntoExamsState(loadExams(), bundle, {
       preferDb: readFromDb,
+      keepLocalSheetIds: pendingExamSheetIds(),
     });
     writeExamsLocalRaw(merged);
     normChanged = true;
   }
 
-  if (normChanged) {
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+  // The one exception is a sheet THIS browser saved that never reached the
+  // server: it was kept in the merge above, and goes up now.
+  void trackServerWork(retryPendingExamSheets());
+
+  if (normChanged && !readFromDb) {
     scheduleExamsSync(loadExams());
   }
 

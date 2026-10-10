@@ -4,10 +4,18 @@ import { useEffect, useMemo, useState, Fragment } from "react";
 import Link from "next/link";
 import { Wallet } from "lucide-react";
 import { loadMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
+import type { StaffRecord } from "@/lib/foundationMasters";
+import { UpiPayButton, type UpiPaid } from "@/components/payments/UpiPayButton";
+import { recordUpiProof, useRecordedUpiProofs } from "@/lib/upiProofsClient";
+import { PayoutButton } from "@/components/payments/PayoutButton";
+import { PayoutSwitchPanel } from "@/components/payments/PayoutSwitchPanel";
 import {
   loadSalarySetup,
   normalizeSalarySettings,
 } from "@/lib/salarySetup";
+import { buildSalaryRegister, salaryRegisterTitle } from "@/lib/payrollRegister";
+import { downloadPdfReport, downloadXlsxReport } from "@/lib/reportExport";
+import { TENANT } from "@/lib/types";
 import {
   approvePayrollRun,
   auditDraftRebuilt,
@@ -21,6 +29,9 @@ import {
   listPayrollAudit,
   loadPayroll,
   markPayrollPaid,
+  recordPayrollLinePayment,
+  payrollRunPaymentDate,
+  todayIstDate,
   mergePreservedAdjustments,
   monthHasCommittedRun,
   payrollAuditActionLabel,
@@ -55,8 +66,10 @@ import {
   resolveSessionStaff,
 } from "@/lib/staffResolve";
 import { loadIncrementState } from "@/lib/salaryIncrement";
+import { canSeeModuleTab } from "@/lib/rbac";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { StepChainGuide, type StepDef } from "@/components/ui/StepTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import {
   ErpTable,
@@ -64,6 +77,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { JuneHoldPanel } from "@/components/payroll/JuneHoldPanel";
 import { StatutoryRemitPanel } from "@/components/payroll/StatutoryRemitPanel";
@@ -78,6 +92,22 @@ import {
   StaffMyAdvances,
   StaffMyPayslips,
 } from "@/components/payroll/StaffSelfService";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+
+/**
+ * One month's salary, in order: make the run, check it, get it approved,
+ * then pay and record it. The tabs stay as they are; a guide over them
+ * says which step this is and what comes next.
+ */
+const PAYROLL_CYCLE_STEPS: StepDef<PayTab>[] = [
+  { id: "runs", title: "Runs", what: "Start the month's payroll run (a draft) from the assigned salary structures, attendance and leave." },
+  { id: "detail", title: "Run detail", what: "Check every staff line — days, earnings, deductions, advances — then submit the run." },
+  { id: "approvals", title: "Approvals", what: "The approver approves the submitted run, or returns it for correction." },
+  { id: "payslips", title: "Payslips", what: "Each staff member's payslip for the approved month." },
+  { id: "print", title: "Print payslips", what: "Print or share the payslips in bulk." },
+  { id: "bank", title: "Bank file", what: "Make the bank upload file (NEFT) for the net salaries." },
+  { id: "tally", title: "Tally sync", what: "Send the month's salary entries to Tally." },
+];
 
 type PayTab =
   | "dashboard"
@@ -139,7 +169,10 @@ export function PayrollWorkspace() {
 
   useEffect(() => {
     setMasters(loadMasters());
-    setRuns(loadPayroll().runs);
+    // Newest month first. The store is insertion-ordered (and a server
+    // reload has no ORDER BY), so the list read in whatever order runs were
+    // created or fetched (director, 8 Oct 2026: dated lists in date order).
+    setRuns([...loadPayroll().runs].sort((a, b) => b.month.localeCompare(a.month) || (b.createdAt || "").localeCompare(a.createdAt || "")));
   }, [tick]);
 
   useEffect(() => {
@@ -150,17 +183,26 @@ export function PayrollWorkspace() {
         { ensureStaffAttendanceHydrated },
         { ensureStaffHrHydrated },
         { ensureStaffAdvancesHydrated },
+        { ensureStatutoryHydrated },
+        { ensureSalarySetupHydrated },
+        { withHydrationSlot },
       ] = await Promise.all([
         import("@/lib/payrollPersistence"),
         import("@/lib/staffAttendancePersistence"),
         import("@/lib/staffHrPersistence"),
         import("@/lib/staffAdvancesPersistence"),
+        import("@/lib/statutoryPersistence"),
+        import("@/lib/salarySetupPersistence"),
+        import("@/lib/deskHydrateGuard"),
       ]);
       await Promise.all([
-        ensurePayrollHydrated(),
-        ensureStaffAttendanceHydrated(),
-        ensureStaffHrHydrated(),
-        ensureStaffAdvancesHydrated(),
+        withHydrationSlot(() => ensurePayrollHydrated()),
+        withHydrationSlot(() => ensureStaffAttendanceHydrated()),
+        withHydrationSlot(() => ensureStaffHrHydrated()),
+        withHydrationSlot(() => ensureStaffAdvancesHydrated()),
+        withHydrationSlot(() => ensureStatutoryHydrated()),
+        // Salary structures/assignments — payroll runs are computed from them.
+        withHydrationSlot(() => ensureSalarySetupHydrated()),
       ]);
       setTick((t) => t + 1);
     })();
@@ -175,6 +217,17 @@ export function PayrollWorkspace() {
     if (!masters) return false;
     return canViewStaffAdvancesDesk(session, masters);
   }, [masters, session]);
+
+  // Read-only payroll tabs a Payroll FUNCTION opens (Masters → Roles →
+  // "Payroll runs & payslips") for someone without the whole module. Runs,
+  // approvals, holds and increments write payroll and stay with the module.
+  const fnTabs = useMemo(() => {
+    if (allowed) return [] as PayTab[];
+    return (["payslips", "print", "reports"] as PayTab[]).filter((t) =>
+      canSeeModuleTab(session, masters, "payroll", t),
+    );
+  }, [allowed, session, masters]);
+  const seesTab = (t: PayTab) => allowed || fnTabs.includes(t);
 
   const advancesEdit = useMemo(() => {
     if (!masters) return false;
@@ -219,7 +272,44 @@ export function PayrollWorkspace() {
     setTick((n) => n + 1);
   }
 
+  /**
+   * Payroll reads attendance from this browser's copy, and a day with no
+   * mark now counts as ABSENT — so a stale or failed copy would dock
+   * everyone. Re-read the staff register and leave from the server before
+   * every build, and refuse to build on a failed read (unknown is not
+   * "absent"). Anything the office marked before this moment counts.
+   */
+  async function freshAttendanceForPayroll(): Promise<boolean> {
+    try {
+      const [att, hr, guard] = await Promise.all([
+        import("@/lib/staffAttendancePersistence"),
+        import("@/lib/staffHrPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      guard.resetDeskHydrated("staff_attendance");
+      guard.resetDeskHydrated("staff_hr");
+      await Promise.all([att.ensureStaffAttendanceHydrated(), hr.ensureStaffHrHydrated()]);
+      if (!guard.isDeskHydrated("staff_attendance") || !guard.isDeskHydrated("staff_hr")) {
+        flash(
+          "Could not load the latest staff attendance / leave — payroll was NOT calculated. Check the connection and try again.",
+          true,
+        );
+        return false;
+      }
+      return true;
+    } catch {
+      flash("Could not load the latest staff attendance — payroll was NOT calculated.", true);
+      return false;
+    }
+  }
+
   function processBulk(replace = false) {
+    void (async () => {
+      if (await freshAttendanceForPayroll()) processBulkNow(replace);
+    })();
+  }
+
+  function processBulkNow(replace = false) {
     if (!masters || !allowed) return;
     const r = processPayrollDraft({
       masters,
@@ -236,7 +326,7 @@ export function PayrollWorkspace() {
             "Replace the existing draft for this month with a fresh bulk calculation?",
           )
         ) {
-          processBulk(true);
+          processBulkNow(true);
         }
         return;
       }
@@ -252,6 +342,12 @@ export function PayrollWorkspace() {
   }
 
   function processIndividual() {
+    void (async () => {
+      if (await freshAttendanceForPayroll()) processIndividualNow();
+    })();
+  }
+
+  function processIndividualNow() {
     if (!masters || !allowed) return;
     if (!processStaffId) {
       flash("Select a staff member", true);
@@ -372,14 +468,14 @@ export function PayrollWorkspace() {
     refresh();
   }
 
-  function onPaid() {
+  function onPaid(paidOn: string) {
     if (!selected) return;
-    const r = markPayrollPaid(selected.id, session.fullName);
+    const r = markPayrollPaid(selected.id, session.fullName, paidOn);
     if (!r.ok) {
       flash(r.error, true);
       return;
     }
-    flash("Marked as paid");
+    flash(`Marked as paid on ${paidOn}`);
     setSelectedId(r.run.id);
     refresh();
   }
@@ -396,6 +492,27 @@ export function PayrollWorkspace() {
     refresh();
   }
 
+  /** One row per staff, heads as columns, totals — Excel or PDF. */
+  async function onExportRegister(format: "xlsx" | "pdf") {
+    if (!selected) return;
+    const reg = buildSalaryRegister(selected);
+    const input = {
+      title: salaryRegisterTitle(selected),
+      subtitle: `${TENANT.nameDisplay} · ${selected.lines.length} staff${selected.status === "draft" || selected.status === "pending_approval" ? " · DRAFT — not posted to accounts" : ""}`,
+      columns: reg.columns,
+      rows: [...reg.rows, reg.totals],
+      fileBaseName: `salary_register_${selected.month}_${selected.status}`,
+    };
+    try {
+      if (format === "pdf") await downloadPdfReport(input);
+      else await downloadXlsxReport(input);
+      flash(`Salary register ${format.toUpperCase()} downloaded`);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Export failed", true);
+    }
+  }
+
+  /** Tally-style ledger: one row per head per staff — for accounts import only. */
   function onExport() {
     if (!selected) return;
     const salary = loadSalarySetup();
@@ -403,11 +520,11 @@ export function PayrollWorkspace() {
       normalizeSalarySettings(salary.settings).salaryAccountLabel ||
       "Salary account";
     const csv = payrollTallyCsv(selected, label);
-    downloadTextFile(`payroll_${selected.month}_${selected.status}.csv`, csv);
+    downloadTextFile(`payroll_ledger_${selected.month}_${selected.status}.csv`, csv);
     flash(
       selected.status === "posted" || selected.status === "paid"
-        ? "Account CSV downloaded"
-        : "Preview CSV (draft — not posted to accounts)",
+        ? "Tally ledger CSV downloaded"
+        : "Tally ledger CSV (draft — not posted to accounts)",
     );
   }
 
@@ -426,6 +543,12 @@ export function PayrollWorkspace() {
   }
 
   function rebuildDraft() {
+    void (async () => {
+      if (await freshAttendanceForPayroll()) rebuildDraftNow();
+    })();
+  }
+
+  function rebuildDraftNow() {
     if (!masters || !selected || selected.status !== "draft") return;
     const prevByStaff = new Map(
       selected.lines.map((l) => [l.staffId, l] as const),
@@ -537,7 +660,7 @@ export function PayrollWorkspace() {
             tone: "coral",
           },
           { id: "holds", label: "June holds", tone: "coral" },
-          { id: "govt", label: "PF/ESIC govt", tone: "slate" },
+          { id: "govt", label: "EPF/ESIC Compliance", tone: "slate" },
           { id: "increment", label: "Increment", tone: "violet" },
           { id: "advances", label: "Advances", tone: "teal" },
           { id: "payslips", label: "Payslips", tone: "amber" },
@@ -549,24 +672,40 @@ export function PayrollWorkspace() {
           { id: "mine", label: "My payslip", tone: "violet" },
           { id: "myAdvances", label: "My advances", tone: "teal" },
         ]
-      : advancesDesk
-        ? [
-            { id: "advances", label: "Staff advances", tone: "teal" },
-            { id: "myAdvances", label: "My advances", tone: "teal" },
-          ]
-        : [
-            { id: "mine", label: "My payslip", tone: "violet" },
-            { id: "myAdvances", label: "My advances", tone: "teal" },
-          ];
+      : [
+          ...(fnTabs.includes("payslips")
+            ? [{ id: "payslips" as const, label: "Payslips", tone: "amber" as const }]
+            : []),
+          ...(fnTabs.includes("print")
+            ? [{ id: "print" as const, label: "Print payslips", tone: "navy" as const }]
+            : []),
+          ...(fnTabs.includes("reports")
+            ? [{ id: "reports" as const, label: "Reports", tone: "slate" as const }]
+            : []),
+          ...(advancesDesk
+            ? [
+                { id: "advances" as const, label: "Staff advances", tone: "teal" as const },
+                { id: "myAdvances" as const, label: "My advances", tone: "teal" as const },
+              ]
+            : [
+                { id: "mine" as const, label: "My payslip", tone: "violet" as const },
+                { id: "myAdvances" as const, label: "My advances", tone: "teal" as const },
+              ]),
+        ];
 
   useEffect(() => {
     if (allowed) return;
+    if (fnTabs.includes(tab)) return;
+    if (fnTabs.length > 0 && tab === "dashboard") {
+      setTab(fnTabs[0]!);
+      return;
+    }
     if (advancesDesk && tab !== "advances" && tab !== "myAdvances") {
       setTab("advances");
       return;
     }
     if (!advancesDesk && tab !== "mine" && tab !== "myAdvances") setTab("mine");
-  }, [allowed, advancesDesk, tab]);
+  }, [allowed, advancesDesk, fnTabs, tab]);
 
   return (
     <ErpWorkspaceShell
@@ -609,7 +748,7 @@ export function PayrollWorkspace() {
       }
     >
       {!allowed && !advancesDesk ? (
-        <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3 text-sm text-[var(--muted)]">
+        <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--muted)]">
           Staff self-service — payslips and advances for{" "}
           <strong className="text-[var(--brand-deep)]">
             {selfStaff?.fullName || "your linked staff profile"}
@@ -624,6 +763,12 @@ export function PayrollWorkspace() {
         onChange={(id) => setTab(id as PayTab)}
         items={tabs}
       />
+      <StepChainGuide
+        chains={[{ label: "Monthly payroll", steps: PAYROLL_CYCLE_STEPS }]}
+        value={tab}
+        onChange={setTab}
+        visible={tabs.map((t) => t.id)}
+      />
 
       {tab === "dashboard" && allowed ? (
         <ModuleDashboardHost
@@ -634,7 +779,7 @@ export function PayrollWorkspace() {
 
       {tab === "runs" && allowed ? (
         <div className="space-y-4">
-          <div className="space-y-3 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <p className="text-xs text-[var(--muted)]">
             Process salary as <strong>draft</strong> (bulk or individual). Edit
             freely until you <strong>publish to salary account</strong> — draft
@@ -644,7 +789,7 @@ export function PayrollWorkspace() {
           {(() => {
             const committed = monthHasCommittedRun(month, ay);
             return committed ? (
-              <p className="mt-2 rounded-lg bg-[rgba(180,35,24,0.08)] px-2.5 py-1.5 text-[11px] font-medium text-[#b42318]">
+              <p className="mt-2 rounded-lg bg-[var(--danger-soft)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--danger)]">
                 {month} is already {payrollStatusLabel(committed.status)} —
                 recall that run before creating a new draft.
               </p>
@@ -662,13 +807,13 @@ export function PayrollWorkspace() {
               </label>
               <button
                 type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-xs font-semibold text-white"
+                className="rounded-lg bg-[var(--primary)] px-3 py-2 text-xs font-semibold text-[var(--primary-foreground)]"
                 onClick={() => processBulk(false)}
               >
                 Process bulk draft
               </button>
             </div>
-            <div className="flex flex-wrap items-end gap-3 border-t border-[rgba(32,48,80,0.08)] pt-3">
+            <div className="flex flex-wrap items-end gap-3 border-t border-[var(--border)] pt-3">
               <label className="text-xs font-semibold text-[var(--muted)]">
                 Individual staff
                 <select
@@ -686,17 +831,18 @@ export function PayrollWorkspace() {
               </label>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
                 onClick={processIndividual}
               >
                 Process individual draft
               </button>
             </div>
           </div>
-          <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-[rgba(32,48,80,0.1)] text-[11px] text-[var(--muted)]">
+          <ErpTableShell exportAs="payroll_runs" exportTitle="Payroll runs">
+            <div className="overflow-x-auto">
+            <ErpTable>
+              <ErpTableHead>
+                <tr className="text-[11px] text-[var(--muted)]">
                   <th className="px-4 py-2.5 font-medium">Month</th>
                   <th className="px-4 py-2.5 font-medium">Kind</th>
                   <th className="px-4 py-2.5 font-medium">Status</th>
@@ -704,17 +850,14 @@ export function PayrollWorkspace() {
                   <th className="px-4 py-2.5 font-medium">Net total</th>
                   <th className="px-4 py-2.5 font-medium" />
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {runs
                   .filter((r) => r.academicYearCode === ay)
                   .map((r) => {
                     const net = r.lines.reduce((s, l) => s + l.netPay, 0);
                     return (
-                      <tr
-                        key={r.id}
-                        className="border-b border-[rgba(32,48,80,0.06)]"
-                      >
+                      <tr key={r.id}>
                         <td className="px-4 py-2.5 font-semibold text-[var(--brand-deep)]">
                           {r.month}
                         </td>
@@ -727,16 +870,27 @@ export function PayrollWorkspace() {
                         <td className="px-4 py-2.5">{r.lines.length}</td>
                         <td className="px-4 py-2.5">{formatInr(net)}</td>
                         <td className="px-4 py-2.5 text-right">
-                          <button
-                            type="button"
-                            className="text-[11px] font-semibold"
-                            onClick={() => {
-                              setSelectedId(r.id);
-                              setTab("detail");
-                            }}
-                          >
-                            Open
-                          </button>
+                          <RowActionMenu
+                            row={r}
+                            label={`Actions for run ${r.month}`}
+                            actions={[
+                              {
+                                id: "open",
+                                label: "Open run",
+                                onSelect: (x) => {
+                                  setSelectedId(x.id);
+                                  setTab("detail");
+                                },
+                              },
+                              {
+                                id: "book",
+                                label: "See it in the server book",
+                                onSelect: () => {
+                                  window.location.href = "/accounts?tab=book";
+                                },
+                              },
+                            ]}
+                          />
                         </td>
                       </tr>
                     );
@@ -752,9 +906,10 @@ export function PayrollWorkspace() {
                     </td>
                   </tr>
                 ) : null}
-              </tbody>
-            </table>
-          </div>
+              </ErpTableBody>
+            </ErpTable>
+            </div>
+          </ErpTableShell>
         </div>
       ) : null}
 
@@ -774,11 +929,36 @@ export function PayrollWorkspace() {
             onPaid={onPaid}
             onDelete={onDelete}
             onExport={onExport}
+            onExportRegister={onExportRegister}
             onExportAccount={onExportAccountLedger}
             onRebuild={rebuildDraft}
             onRemoveLine={onRemoveLine}
             onEditComponent={onEditComponent}
             onEditAdjustments={onEditAdjustments}
+            onLinePaid={(staffId, p) => {
+              const r = recordPayrollLinePayment(selected.id, staffId, { mode: "upi", date: p.paidOn, ref: p.utr }, session.fullName);
+              if (!r.ok) {
+                flash(r.error, true);
+                return;
+              }
+              const line = selected.lines.find((x) => x.staffId === staffId);
+              // A Cashfree payout's UTR is recorded by the server already.
+              if (!p.viaPayout) void recordUpiProof({
+                utr: p.utr,
+                amountPaise: Math.round(((line?.amountPayable ?? line?.netPay) || 0) * 100),
+                paidOn: p.paidOn,
+                payeeName: line?.fullName || "",
+                payeeVpa: p.payeeVpa,
+                targetKind: "payroll_line",
+                targetId: `${selected.id}|${staffId}`,
+                targetLabel: `Salary ${selected.month} — ${line?.fullName || staffId}`,
+              }).then((rec) => {
+                if (!rec.ok) flash(`UTR saved on the line, but: ${rec.error}`, true);
+              });
+              flash(`UTR ${p.utr} recorded`);
+              refresh();
+            }}
+            staffById={(id) => masters?.staff.find((x) => x.id === id)}
             readOnly={readOnly}
           />
         ) : (
@@ -798,7 +978,7 @@ export function PayrollWorkspace() {
         />
       ) : null}
 
-      {tab === "payslips" && allowed ? (
+      {tab === "payslips" && seesTab("payslips") ? (
         <PayslipsAdmin
           runs={runs.filter(
             (r) =>
@@ -813,16 +993,21 @@ export function PayrollWorkspace() {
         />
       ) : null}
 
-      {tab === "print" && allowed ? (
+      {tab === "print" && seesTab("print") ? (
         <PrintPayslipsPanel academicYearCode={ay} />
       ) : null}
 
-      {tab === "reports" && allowed ? (
+      {tab === "reports" && seesTab("reports") ? (
         <PayrollReportsPanel academicYearCode={ay} />
       ) : null}
 
       {tab === "bank" && allowed ? (
-        <BankFileExportPanel academicYearCode={ay} />
+        <div className="space-y-4">
+          {/* Salary by bank file, or one by one from the Cashfree wallet when
+              the owner has switched it on (director, 7 Oct 2026). */}
+          <PayoutSwitchPanel />
+          <BankFileExportPanel academicYearCode={ay} />
+        </div>
       ) : null}
 
       {tab === "tally" && allowed ? (
@@ -868,11 +1053,14 @@ function RunDetail({
   onPaid,
   onDelete,
   onExport,
+  onExportRegister,
   onExportAccount,
   onRebuild,
   onRemoveLine,
   onEditComponent,
   onEditAdjustments,
+  onLinePaid,
+  staffById,
   readOnly = false,
 }: {
   run: PayrollRun;
@@ -885,9 +1073,10 @@ function RunDetail({
   canApprove: boolean;
   onPublish: () => void;
   onRecall: () => void;
-  onPaid: () => void;
+  onPaid: (paidOn: string) => void;
   onDelete: () => void;
   onExport: () => void;
+  onExportRegister: (format: "xlsx" | "pdf") => void;
   onExportAccount: () => void;
   onRebuild: () => void;
   onRemoveLine: (staffId: string) => void;
@@ -896,9 +1085,20 @@ function RunDetail({
     staffId: string,
     patch: Parameters<typeof updateDraftLineAdjustments>[2],
   ) => void;
+  onLinePaid: (staffId: string, paid: UpiPaid) => void;
+  staffById: (id: string) => StaffRecord | undefined;
   readOnly?: boolean;
 }) {
   const [workflowNote, setWorkflowNote] = useState("");
+  // UTRs recorded for this run's salary lines — from the Pay UPI button or a
+  // screenshot confirmed on WhatsApp (api/payments/upi-proofs).
+  const upiPaid = useRecordedUpiProofs(
+    "payroll_line",
+    run.status === "posted" || run.status === "paid" ? run.lines.map((l) => `${run.id}|${l.staffId}`) : [],
+    run.lockVersion || 0,
+  );
+  // The day the salary was paid; empty = the lines' own date, else today.
+  const [paidOnDraft, setPaidOnDraft] = useState("");
   const net = run.lines.reduce((s, l) => s + l.netPay, 0);
   const payable = run.lines.reduce(
     (s, l) => s + (l.amountPayable ?? (l.juneHold ? 0 : l.netPay)),
@@ -913,9 +1113,22 @@ function RunDetail({
   const gross = run.lines.reduce((s, l) => s + l.gross, 0);
   const inAccounts = run.status === "posted" || run.status === "paid";
 
+  // Attendance renders as "22/1/0/0"; sorting that string is meaningless, so
+  // the column yields days present. Gross and net sort on paise.
+  const lineSort = useTableSort(
+    run.lines,
+    {
+      staff: (l) => l.fullName,
+      present: (l) => l.daysPresent,
+      gross: (l) => l.gross,
+      net: (l) => l.netPay,
+    },
+    "staff",
+  );
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div>
           <h2 className="text-lg font-bold text-[var(--brand-deep)]">
             {run.month} · {payrollStatusLabel(run.status)}
@@ -942,19 +1155,19 @@ function RunDetail({
               : ""}
           </p>
           {run.rejectionNote ? (
-            <p className="mt-2 rounded-lg bg-[rgba(180,35,24,0.1)] px-2.5 py-1.5 text-[11px] font-medium text-[#b42318]">
+            <p className="mt-2 rounded-lg bg-[var(--danger-soft)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--danger)]">
               Last rejection
               {run.rejectedBy ? ` by ${run.rejectedBy}` : ""}:{" "}
               {run.rejectionNote}
             </p>
           ) : null}
           {run.submissionNote && run.status === "pending_approval" ? (
-            <p className="mt-2 rounded-lg bg-[rgba(32,48,80,0.06)] px-2.5 py-1.5 text-[11px] text-[var(--brand-deep)]">
+            <p className="mt-2 rounded-lg bg-[var(--surface-sunken)] px-2.5 py-1.5 text-[11px] text-[var(--brand-deep)]">
               Submission note: {run.submissionNote}
             </p>
           ) : null}
           {isPayrollLocked(run) ? (
-            <p className="mt-2 rounded-lg bg-[rgba(32,48,80,0.06)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--brand-deep)]">
+            <p className="mt-2 rounded-lg bg-[var(--surface-sunken)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--brand-deep)]">
               Locked — line amounts cannot change. Recall to draft to edit
               (posted runs void account entries).
             </p>
@@ -992,14 +1205,14 @@ function RunDetail({
             <>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.18)] px-2.5 py-1.5 text-[11px] font-semibold"
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold"
                 onClick={onRebuild}
               >
                 Rebuild
               </button>
               <button
                 type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1.5 text-[11px] font-semibold text-white"
+                className="rounded-lg bg-[var(--primary)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--primary-foreground)]"
                 onClick={() => onSubmit(workflowNote)}
               >
                 Submit for approval
@@ -1007,7 +1220,7 @@ function RunDetail({
               {canApprove ? (
                 <button
                   type="button"
-                  className="rounded-lg bg-[#15803d] px-2.5 py-1.5 text-[11px] font-semibold text-white"
+                  className="rounded-lg bg-[var(--tone-green-solid)] px-2.5 py-1.5 text-[11px] font-semibold text-white"
                   onClick={() => onApprove(workflowNote)}
                 >
                   Approve now
@@ -1021,14 +1234,14 @@ function RunDetail({
                 <>
                   <button
                     type="button"
-                    className="rounded-lg bg-[#15803d] px-2.5 py-1.5 text-[11px] font-semibold text-white"
+                    className="rounded-lg bg-[var(--tone-green-solid)] px-2.5 py-1.5 text-[11px] font-semibold text-white"
                     onClick={() => onApprove(workflowNote)}
                   >
                     Principal approve
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg border border-[#b42318]/40] px-2.5 py-1.5 text-[11px] font-semibold text-[#b42318]"
+                    className="rounded-lg border border-[var(--danger)]/40 px-2.5 py-1.5 text-[11px] font-semibold text-[var(--danger)]"
                     onClick={() => {
                       if (!workflowNote.trim()) {
                         window.alert("Enter a rejection reason in the note box");
@@ -1047,7 +1260,7 @@ function RunDetail({
               )}
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.18)] px-2.5 py-1.5 text-[11px] font-semibold"
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold"
                 onClick={onRecall}
               >
                 Withdraw to draft
@@ -1058,7 +1271,7 @@ function RunDetail({
             <>
               <button
                 type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
+                className="rounded-lg bg-[var(--primary)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
                 disabled={readOnly}
                 onClick={onPublish}
               >
@@ -1066,7 +1279,7 @@ function RunDetail({
               </button>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.18)] px-2.5 py-1.5 text-[11px] font-semibold"
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold"
                 onClick={onRecall}
               >
                 Recall to draft
@@ -1075,16 +1288,29 @@ function RunDetail({
           ) : null}
           {run.status === "posted" ? (
             <>
+              {/* The day the salary was actually paid — the books date the
+                  payment on it (not the day this button is pressed). */}
+              <label className="flex items-center gap-1 text-[11px] font-semibold">
+                Paid on
+                <input
+                  type="date"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-1.5 py-1 text-[11px]"
+                  value={paidOnDraft || payrollRunPaymentDate(run) || todayIstDate()}
+                  min={`${run.month}-01`}
+                  max={todayIstDate()}
+                  onChange={(e) => setPaidOnDraft(e.target.value)}
+                />
+              </label>
               <button
                 type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1.5 text-[11px] font-semibold text-white"
-                onClick={onPaid}
+                className="rounded-lg bg-[var(--primary)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--primary-foreground)]"
+                onClick={() => onPaid(paidOnDraft || payrollRunPaymentDate(run) || todayIstDate())}
               >
                 Mark paid
               </button>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.18)] px-2.5 py-1.5 text-[11px] font-semibold"
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold"
                 onClick={onRecall}
               >
                 Recall (void account)
@@ -1093,15 +1319,31 @@ function RunDetail({
           ) : null}
           <button
             type="button"
-            className="rounded-lg border border-[rgba(32,48,80,0.18)] px-2.5 py-1.5 text-[11px] font-semibold"
-            onClick={onExport}
+            className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1.5 text-[11px] font-semibold text-white"
+            onClick={() => onExportRegister("xlsx")}
+            title="One row per staff, every head as a column, totals"
           >
-            Preview CSV
+            Register Excel
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold"
+            onClick={() => onExportRegister("pdf")}
+          >
+            Register PDF
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--muted)]"
+            onClick={onExport}
+            title="One row per head per staff — for Tally / accounts import"
+          >
+            Tally ledger CSV
           </button>
           {inAccounts ? (
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.18)] px-2.5 py-1.5 text-[11px] font-semibold"
+              className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-semibold"
               onClick={onExportAccount}
             >
               Account ledger CSV
@@ -1110,7 +1352,7 @@ function RunDetail({
           {run.status === "draft" || run.status === "pending_approval" ? (
             <button
               type="button"
-              className="rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-[#b42318]"
+              className="rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-[var(--danger)]"
               onClick={onDelete}
             >
               Delete
@@ -1119,14 +1361,15 @@ function RunDetail({
         </div>
       </div>
 
-      <ErpTableShell>
+      <ErpTableShell exportAs="payroll_run_lines" exportTitle="Payroll run lines">
+        <div className="overflow-x-auto">
         <ErpTable minWidth="min-w-[780px]">
           <ErpTableHead>
             <tr>
-              <th className="px-4 py-2.5 font-bold">Staff</th>
-              <th className="px-4 py-2.5 font-bold">P / A / HD / LWP</th>
-              <th className="px-4 py-2.5 font-bold">Gross</th>
-              <th className="px-4 py-2.5 font-bold">Net</th>
+              <ErpSortTh sort={lineSort} field="staff">Staff</ErpSortTh>
+              <ErpSortTh sort={lineSort} field="present">P / A / HD / LWP</ErpSortTh>
+              <ErpSortTh sort={lineSort} field="gross">Gross</ErpSortTh>
+              <ErpSortTh sort={lineSort} field="net">Net</ErpSortTh>
               <th className="px-4 py-2.5 font-bold">Payable</th>
               <th className="px-4 py-2.5 font-bold">Govt PF/ESIC</th>
               <th className="px-4 py-2.5 font-bold">Hold</th>
@@ -1134,14 +1377,14 @@ function RunDetail({
             </tr>
           </ErpTableHead>
           <ErpTableBody>
-            {run.lines.map((l) => {
+            {lineSort.rows.map((l) => {
               const open = expandedStaffId === l.staffId;
               const lockedDue = editable
                 ? outstandingForStaff(l.staffId)
                 : l.advanceTaken || 0;
               return (
                 <Fragment key={l.staffId}>
-                  <tr className="border-b border-[rgba(32,48,80,0.06)]">
+                  <tr className="border-b border-[var(--border)]">
                     <td className="px-3 py-2">
                       <div className="font-semibold text-[var(--brand-deep)]">
                         {l.fullName}
@@ -1211,28 +1454,95 @@ function RunDetail({
                         : "—"}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        className="text-[11px] font-semibold text-[var(--brand-deep)]"
-                        onClick={() =>
-                          setExpandedStaffId(open ? null : l.staffId)
-                        }
-                      >
-                        {editable ? "Adjust / pay" : "Details"}
-                      </button>
-                      {editable ? (
+                      <span className="inline-flex items-center gap-1">
+                        {/* Pay this salary by UPI and record its UTR from the
+                            app's screenshot (director, 7 Oct 2026). */}
+                        {(run.status === "posted" || run.status === "paid") && !readOnly ? (
+                          (() => {
+                            const st = staffById(l.staffId);
+                            const amt = l.amountPayable ?? (l.juneHold ? 0 : l.netPay);
+                            const lineKey = `${run.id}|${l.staffId}`;
+                            const linePaid = Boolean(upiPaid.get(lineKey)) || /UTR \d{12}/.test(l.note || "");
+                            return amt > 0 ? (
+                              <>
+                              <UpiPayButton
+                                label={
+                                  upiPaid.get(`${run.id}|${l.staffId}`)
+                                    ? `Paid ✓ ${upiPaid.get(`${run.id}|${l.staffId}`)!.utr.slice(-4)}`
+                                    : /UTR \d{12}/.test(l.note || "")
+                                      ? "Paid ✓ UPI"
+                                      : "Pay UPI"
+                                }
+                                payeeName={l.fullName}
+                                payeeVpa={st?.upiId || ""}
+                                payeeMobile={st?.mobile || ""}
+                                amountPaise={Math.round(amt * 100)}
+                                note={`Salary ${run.month} · ${l.empCode || l.fullName}`}
+                                earliest={`${run.month}-01`}
+                                onPaid={(p) => onLinePaid(l.staffId, p)}
+                              />
+                              {/* Or straight from the Cashfree wallet when the
+                                  owner's switch is on (director, 7 Oct 2026). */}
+                              <PayoutButton
+                                paid={linePaid}
+                                payee={{
+                                  name: l.fullName,
+                                  vpa: st?.upiId || "",
+                                  accountNumber: st?.bankAccountNo || "",
+                                  ifsc: st?.bankIfsc || "",
+                                  phone: st?.mobile || "",
+                                }}
+                                amountPaise={Math.round(amt * 100)}
+                                note={`Salary ${run.month}`}
+                                target={{ kind: "payroll_line", id: lineKey, label: `Salary ${run.month} — ${l.fullName}` }}
+                                subjectId={l.staffId}
+                                period={run.id}
+                                onPaid={(p) => onLinePaid(l.staffId, p)}
+                              />
+                              </>
+                            ) : null;
+                          })()
+                        ) : null}
                         <button
                           type="button"
-                          className="ml-2 text-[11px] font-semibold text-[#b42318]"
-                          onClick={() => onRemoveLine(l.staffId)}
+                          className="text-[11px] font-semibold text-[var(--brand-deep)]"
+                          onClick={() =>
+                            setExpandedStaffId(open ? null : l.staffId)
+                          }
                         >
-                          Remove
+                          {editable ? "Adjust / pay" : "Details"}
                         </button>
-                      ) : null}
+                        <RowActionMenu
+                          row={l}
+                          label={`Actions for ${l.fullName}`}
+                          actions={[
+                            {
+                              id: "details",
+                              label: editable ? "Adjust / pay" : "Details",
+                              onSelect: (x) => setExpandedStaffId(open ? null : x.staffId),
+                            },
+                            {
+                              id: "staff",
+                              label: "Open staff record",
+                              onSelect: (x) => {
+                                window.location.href = `/staff/${encodeURIComponent(x.staffId)}/edit`;
+                              },
+                            },
+                            {
+                              id: "remove",
+                              label: "Remove from this run",
+                              tone: "danger",
+                              separatorAbove: true,
+                              hidden: () => !editable,
+                              onSelect: (x) => onRemoveLine(x.staffId),
+                            },
+                          ]}
+                        />
+                      </span>
                     </td>
                   </tr>
                   {open ? (
-                    <tr className="border-b border-[rgba(32,48,80,0.06)] bg-[rgba(32,48,80,0.02)]">
+                    <tr className="border-b border-[var(--border)] bg-[var(--surface-sunken)]">
                       <td colSpan={8} className="px-3 py-3">
                         <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                           <label className="text-[10px] font-semibold text-[var(--muted)]">
@@ -1297,7 +1607,7 @@ function RunDetail({
                           </label>
                           <label className="text-[10px] font-semibold text-[var(--muted)]">
                             Advance outstanding (locked)
-                            <span className="mt-0.5 block rounded border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.04)] px-2 py-1.5 text-xs font-semibold text-[var(--brand-deep)]">
+                            <span className="mt-0.5 block rounded border border-[var(--border)] bg-[var(--surface-sunken)] px-2 py-1.5 text-xs font-semibold text-[var(--brand-deep)]">
                               {formatInr(lockedDue)}
                             </span>
                             <span className="mt-0.5 block text-[10px] font-normal">
@@ -1460,6 +1770,7 @@ function RunDetail({
             })}
           </ErpTableBody>
         </ErpTable>
+        </div>
       </ErpTableShell>
     </div>
   );
@@ -1533,7 +1844,7 @@ function PayslipCard({
   line: PayrollStaffLine;
 }) {
   return (
-    <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="font-bold text-[var(--brand-deep)]">
@@ -1576,7 +1887,7 @@ function PayslipCard({
               .map((c) => (
                 <li
                   key={c.headCode}
-                  className="flex justify-between text-[#b42318]"
+                  className="flex justify-between text-[var(--danger)]"
                 >
                   <span>{c.headName}</span>
                   <span>−{formatInr(c.amount)}</span>
@@ -1629,7 +1940,7 @@ function PayrollAuditPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div>
           <h2 className="font-display text-lg font-bold text-[var(--brand-deep)]">
             Payroll audit log
@@ -1641,29 +1952,26 @@ function PayrollAuditPanel() {
         </div>
         <button
           type="button"
-          className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-1.5 text-xs font-semibold"
+          className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold"
           onClick={() => setTick((n) => n + 1)}
         >
           Refresh
         </button>
       </div>
-      <div className="overflow-x-auto rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-        <table className="min-w-full text-left text-xs">
-          <thead>
-            <tr className="border-b border-[rgba(32,48,80,0.1)] text-[var(--muted)]">
+      <ErpTableShell className="overflow-x-auto" exportAs="payroll_audit_trail" exportTitle="Payroll audit trail">
+        <ErpTable minWidth="min-w-full" className="text-xs">
+          <ErpTableHead>
+            <tr className="text-[var(--muted)]">
               <th className="px-3 py-2 font-semibold">When</th>
               <th className="px-3 py-2 font-semibold">Who</th>
               <th className="px-3 py-2 font-semibold">Action</th>
               <th className="px-3 py-2 font-semibold">Month</th>
               <th className="px-3 py-2 font-semibold">Detail</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {rows.map((e) => (
-              <tr
-                key={e.id}
-                className="border-b border-[rgba(32,48,80,0.06)]"
-              >
+              <tr key={e.id}>
                 <td className="px-3 py-2 whitespace-nowrap">
                   {e.at.replace("T", " ").slice(0, 19)}
                 </td>
@@ -1685,9 +1993,9 @@ function PayrollAuditPanel() {
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
-      </div>
+          </ErpTableBody>
+        </ErpTable>
+      </ErpTableShell>
     </div>
   );
 }

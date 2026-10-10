@@ -1,13 +1,27 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — the marks-entry grid and the promotion summary — cells are inputs, not a record list
 
-import { useEffect, useMemo, useState } from "react";
-import { ClipboardList } from "lucide-react";
+import { setAttendanceOverride } from "@/lib/attendanceResultOverrides";
 import {
+  isRestrictedTeacher,
+  useMyTeaching,
+  type MyTeaching,
+} from "@/components/staff/useMyTeaching";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { urlAsksForTab } from "@/lib/nucleusHandoff";
+import { ClipboardList, ScanLine } from "lucide-react";
+import {
+  absenceKey,
   applyPromotionsToSis,
   buildClassResultSheet,
+  buildEmptyCoScholasticGrid,
   buildEmptyMarksGrid,
   buildReportCard,
   canPrintReportCard,
+  coScholasticAreasForClass,
+  parseCoScholasticRating,
+  coScholasticDomainLabel,
+  componentsForSubject,
   createExamTerm,
   deactivateExamTerm,
   deleteExamTerm,
@@ -19,28 +33,55 @@ import {
   listExamTerms,
   promotionDecisionLabel,
   saveExamPolicy,
+  loadExams,
+  reportTemplateForClassId,
   saveMarkSheet,
   savePromotionDecision,
-  studentTakesExamSubject,
+  schemeForClassId,
   subjectsForMarkEntry,
+  subjectTakeMap,
   suggestPromotionsForSection,
+  unlockMarkSheet,
   updateExamTerm,
+  type AssessmentScheme,
   type ClassResultRow,
+  type CoScholasticDomain,
+  type CoScholasticRating,
+  type ExamDeps,
   type ExamPolicy,
+  type ExamSubject,
   type ExamTerm,
+  type SchemeComponent,
   type PromotionDecision,
   type ReportCard,
+  type StudentCoScholasticEntry,
   type StudentSubjectMark,
 } from "@/lib/exams";
+import { loadAttendance } from "@/lib/attendance";
+import {
+  clearExamSheetConflict,
+  examSheetConflicts,
+  retryPendingExamSheets,
+  type SheetConflict,
+} from "@/lib/examsSheetSync";
+import { DeskSyncBanner } from "@/components/accounts/DeskSyncBanner";
+import { AssessmentSchemesPanel } from "@/components/exams/AssessmentSchemesPanel";
+import { ReportCardTemplatesPanel } from "@/components/exams/ReportCardTemplatesPanel";
+import { coScholasticRatingsFor, pickableGrades, type CoScholasticArea, type GradeBand } from "@/lib/examSchemes";
 import { rosterForSection } from "@/lib/attendance";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
-import { loadSis, type SisState } from "@/lib/sis";
-import { checkHold, setReportCardHoldFromStage, type HoldCheck } from "@/lib/holds";
+import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
+import {
+  checkHold,
+  checkHoldsForStudents,
+  setReportCardHoldFromStage,
+  type HoldCheck,
+} from "@/lib/holds";
 import {
   StudentAvatar,
   StudentNameLabel,
 } from "@/components/students/StudentAvatar";
-import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import {
   ErpTable,
@@ -49,6 +90,7 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { ExamReadinessDashboard } from "@/components/exams/ExamReadinessDashboard";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import {
   HoldStatusBanner,
@@ -62,40 +104,537 @@ import {
   ClassResultSheetView,
   printClassResultSheet,
 } from "@/components/exams/ClassResultSheet";
-import { ExamDateSheetPanel } from "@/components/exams/ExamDateSheetPanel";
+import { useHoldDecisions } from "@/lib/useHoldDecisions";
+import { ExamDateSheetGrid } from "@/components/exams/ExamDateSheetGrid";
+import { ExamSeatingPanel } from "@/components/exams/ExamSeatingPanel";
+import { InvigilationPanel } from "@/components/exams/InvigilationPanel";
 import { ExamPapersPanel } from "@/components/exams/ExamPapersPanel";
-import { hasPermission } from "@/lib/rbac";
+import { AnswerSheetScanDialog, type ScanSubject } from "@/components/exams/AnswerSheetScanDialog";
+import { AdmitCardsPanel } from "@/components/exams/AdmitCardsPanel";
+import { RemarksPanel } from "@/components/exams/RemarksPanel";
+import { ItemScoresPanel } from "@/components/exams/ItemScoresPanel";
+import { AtRiskPanel } from "@/components/exams/AtRiskPanel";
+import { StepChainGuide, StepTabs, type StepDef } from "@/components/ui/StepTabs";
+import { ExamReportsRunner } from "@/components/reports/ModuleReportRunners";
+import {
+  canWriteModuleTab,
+  hasPermission,
+  inferRoleCodes,
+  visibleModuleTabs,
+} from "@/lib/rbac";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Tab =
   | "dashboard"
   | "marks"
+  | "items"
+  | "atrisk"
+  | "remarks"
   | "datesheet"
+  | "seating"
+  | "invigilation"
   | "papers"
+  | "admitcards"
   | "reports"
   | "results"
+  | "result_reports"
   | "setup";
 
+/**
+ * "Exams & policy" is set up in this order, because each step inherits from
+ * the one before: the school policy gives every scheme its pass % and every
+ * new exam its default marks; schemes say how each class band is graded;
+ * exams are what marks are entered against; report cards print the result.
+ */
+type SetupStep = "policy" | "schemes" | "exams" | "reports";
+
+/**
+ * One exam, start to finish, across the module's tabs: plan it, seat it,
+ * staff it, set the papers, issue admit cards, enter marks, publish
+ * results, print report cards.
+ */
+const EXAM_CYCLE_STEPS: StepDef<Tab>[] = [
+  { id: "datesheet", title: "Date-sheet", what: "Which subject is on which day, class by class." },
+  { id: "seating", title: "Seating", what: "Seat students across rooms and benches for each paper." },
+  { id: "invigilation", title: "Invigilation", what: "Which teacher watches which room, each day." },
+  { id: "papers", title: "Question papers", what: "Set, import or print the question papers." },
+  { id: "admitcards", title: "Admit cards", what: "Print admit cards for students cleared to sit." },
+  { id: "marks", title: "Mark entry", what: "Teachers enter marks and grades, class by class." },
+  { id: "results", title: "Results", what: "Check and publish the results." },
+  { id: "reports", title: "Report cards", what: "Print or send each student's report card." },
+];
+
+const SETUP_STEPS: StepDef<SetupStep>[] = [
+  {
+    id: "policy",
+    title: "School policy",
+    what: "Pass %, default marks for unit tests and term exams, report-card and promotion rules, at-risk thresholds. Everything below starts from these.",
+  },
+  {
+    id: "schemes",
+    title: "Assessment schemes",
+    what: "How each class band is graded: marks or grades, grade bands, subject splits (e.g. written + oral) and co-scholastic areas. Classes not given a scheme use the default.",
+  },
+  {
+    id: "exams",
+    title: "Session exams",
+    what: "Create the unit tests and term exams for this session (code, name, max marks, how they count toward half-yearly / final), and switch them on or off.",
+  },
+  {
+    id: "reports",
+    title: "Report cards",
+    what: "Choose the report-card template for each class band — what prints, in which layout. Then marks entered against the exams above print through it.",
+  },
+];
+
+function cellKey(studentId: string, subjectId: string, component = "") {
+  return `${studentId}:${subjectId}:${component}`;
+}
+
+/** One column of the marks grid: a subject, or one component of it. */
+type GridColumn = { subject: ExamSubject; component: SchemeComponent | null };
+
+function columnKey(col: GridColumn): string {
+  return `${col.subject.id}:${col.component?.code ?? ""}`;
+}
+
+type MarkRowProps = {
+  student: SisStudent;
+  /** Passed down so the name label does not re-read the SIS blob per row. */
+  sis: SisState | undefined;
+  columns: GridColumn[];
+  term: ExamTerm;
+  /** columnKey → what the cell shows: the mark, or the picked grade. */
+  values: Record<string, string>;
+  /** Exam-subject ids on this student's curriculum. */
+  takes: Set<string> | undefined;
+  locked: boolean;
+  /** "marks": numeric inputs. "grades": a grade picker per column (grade-only / descriptor schemes). */
+  entryMode: "marks" | "grades";
+  grades: GradeBand[];
+  areas: CoScholasticArea[];
+  /** domain → rating ("" for unrated). */
+  ratings: Record<string, string>;
+  /** Letters the scheme grades co-scholastic areas in (A–C or A–E). */
+  ratingChoices: string[];
+  /** Absent for every subject taken (the row toggle). */
+  absentAll: boolean;
+  /** Absent for at least one subject — shows the reason box. */
+  absentAny: boolean;
+  absentReason: string;
+  onAbsentAll: (studentId: string, absent: boolean) => void;
+  onAbsentReason: (studentId: string, reason: string) => void;
+  onMark: (studentId: string, subjectId: string, component: string, value: string) => void;
+  onGrade: (studentId: string, subjectId: string, component: string, grade: string) => void;
+  onRating: (studentId: string, domain: CoScholasticDomain, value: string) => void;
+  /** Photograph this child's answer sheet for suggested marks; absent = not offered here. */
+  onScan?: (studentId: string) => void;
+};
+
+/**
+ * One student's row of the marks grid.
+ *
+ * Memoised on purpose: a keystroke changes ONE cell, and the row's props for
+ * every other student are referentially the same (the parent keeps a
+ * per-student values object stable while its contents are unchanged), so
+ * only the edited row re-renders. Before this the whole 2,000-line
+ * workspace re-rendered every cell on every keystroke and, worse, asked the
+ * subject resolver per cell — see subjectTakeMap.
+ */
+/** Stable empties: the marks table no longer carries co-scholastic cells. */
+const NO_AREAS: CoScholasticArea[] = [];
+const NO_RATINGS: Record<string, string> = {};
+
+const MarkRow = memo(function MarkRow({
+  student: st,
+  sis,
+  columns,
+  term,
+  values,
+  takes,
+  locked,
+  entryMode,
+  grades,
+  areas,
+  ratings,
+  ratingChoices,
+  absentAll,
+  absentAny,
+  absentReason,
+  onAbsentAll,
+  onAbsentReason,
+  onMark,
+  onGrade,
+  onRating,
+  onScan,
+}: MarkRowProps) {
+  return (
+    <tr className="border-b border-[var(--border)]">
+      <td className="sticky left-0 z-10 bg-[var(--card)] px-3 py-1.5">
+        <div className="flex items-center gap-2">
+          <StudentAvatar student={st} size={28} />
+          <div className="min-w-0">
+            <div className="truncate font-medium text-[var(--brand-deep)]">
+              <StudentNameLabel student={st} sis={sis} />
+            </div>
+            <div className="text-[10px] text-[var(--muted)]">
+              {st.admissionNo}
+              {st.rollNo ? ` · Roll ${st.rollNo}` : ""}
+            </div>
+            <label className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
+              <input
+                type="checkbox"
+                checked={absentAll}
+                disabled={locked}
+                onChange={(e) => onAbsentAll(st.id, e.target.checked)}
+                aria-label={`${st.fullName} absent in all subjects`}
+                title="Absent in all subjects. For one paper, type AB in that subject's cell."
+              />
+              <span className={absentAny ? "font-semibold text-[var(--danger)]" : ""}>
+                {absentAll ? "Absent (all)" : absentAny ? "Absent (some)" : "Present"}
+              </span>
+              {absentAny ? (
+                <input
+                  className="field !w-36 !px-1.5 !py-0.5 text-[11px]"
+                  value={absentReason}
+                  disabled={locked}
+                  placeholder="Reason (optional)"
+                  maxLength={200}
+                  onChange={(e) => onAbsentReason(st.id, e.target.value)}
+                  aria-label={`${st.fullName} reason for absence`}
+                />
+              ) : null}
+            </label>
+            {onScan && !locked && !absentAll ? (
+              <button
+                type="button"
+                className="mt-1 inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--brand-deep)]"
+                onClick={() => onScan(st.id)}
+                title="Photograph the answer sheet and get suggested marks to check"
+              >
+                <ScanLine className="size-3" aria-hidden />
+                Scan sheet · स्कैन
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </td>
+      {columns.map((col) => {
+        const sub = col.subject;
+        const code = col.component?.code ?? "";
+        const key = columnKey(col);
+        const takesIt = takes ? takes.has(sub.id) : true;
+        const max = col.component ? col.component.maxMarks : effectiveMaxMarks(term, sub);
+        const name = col.component ? `${sub.name} ${col.component.label}` : sub.name;
+        return (
+          <td key={cellKey(st.id, sub.id, code)} className="px-1 py-1">
+            {!takesIt ? (
+              <span
+                className="block w-14 px-1 py-1 text-center text-[10px] text-[var(--muted)]"
+                title="Not on this student's curriculum"
+              >
+                —
+              </span>
+            ) : entryMode === "grades" ? (
+              <select
+                className="field !w-16 !px-1 !py-1 text-center"
+                disabled={locked}
+                value={values[key] ?? ""}
+                onChange={(e) => onGrade(st.id, sub.id, code, e.target.value)}
+                aria-label={`${st.fullName} ${name}`}
+              >
+                <option value="">—</option>
+                {grades.map((g) => (
+                  <option key={g.grade} value={g.grade} title={g.label}>
+                    {g.grade}
+                  </option>
+                ))}
+                <option value="AB">AB · absent</option>
+              </select>
+            ) : (
+              <input
+                className={`field !w-14 !px-1 !py-1 text-center tabular-nums ${
+                  values[key] === "AB" ? "!font-semibold !text-[var(--danger)]" : ""
+                }`}
+                inputMode="decimal"
+                disabled={locked}
+                value={values[key] ?? ""}
+                onChange={(e) => onMark(st.id, sub.id, code, e.target.value)}
+                aria-label={`${st.fullName} ${name}`}
+                title={`out of ${max} · type AB if absent for this paper`}
+              />
+            )}
+          </td>
+        );
+      })}
+      {areas.map((area) => (
+        <td key={`${st.id}:${area.code}`} className="px-1 py-1">
+          <select
+            className="field !w-16 !px-1 !py-1 text-center"
+            disabled={locked}
+            value={ratings[area.code] ?? ""}
+            onChange={(e) => onRating(st.id, area.code, e.target.value)}
+            aria-label={`${st.fullName} ${coScholasticDomainLabel(area.code, areas)}`}
+          >
+            <option value="">—</option>
+            {ratingChoices.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+            <option value="AB">AB · absent</option>
+          </select>
+        </td>
+      ))}
+    </tr>
+  );
+});
+
+type CoScholasticRowProps = {
+  student: SisStudent;
+  sis: SisState | undefined;
+  locked: boolean;
+  areas: CoScholasticArea[];
+  ratings: Record<string, string>;
+  ratingChoices: string[];
+  onRating: (studentId: string, domain: CoScholasticDomain, value: string) => void;
+  /** Tick = AB in every area; untick clears the AB grades it set. */
+  onAbsentAll: (studentId: string, absent: boolean) => void;
+};
+
+/**
+ * One student's row of the co-scholastic table — a grade per area, never a
+ * mark. Its own table under the scholastic one, so a teacher never mistakes
+ * a graded subject for a marked one. Memoised like MarkRow.
+ */
+const CoScholasticRow = memo(function CoScholasticRow({
+  student: st,
+  sis,
+  locked,
+  areas,
+  ratings,
+  ratingChoices,
+  onRating,
+  onAbsentAll,
+}: CoScholasticRowProps) {
+  const absentAll = areas.length > 0 && areas.every((a) => ratings[a.code] === "AB");
+  const absentAny = areas.some((a) => ratings[a.code] === "AB");
+  return (
+    <tr className="border-b border-[var(--border)]">
+      <td className="sticky left-0 z-10 bg-[var(--card)] px-3 py-1.5">
+        <div className="flex items-center gap-2">
+          <StudentAvatar student={st} size={28} />
+          <div className="min-w-0">
+            <div className="truncate font-medium text-[var(--brand-deep)]">
+              <StudentNameLabel student={st} sis={sis} />
+            </div>
+            <div className="text-[10px] text-[var(--muted)]">
+              {st.admissionNo}
+              {st.rollNo ? ` · Roll ${st.rollNo}` : ""}
+            </div>
+            <label className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
+              <input
+                type="checkbox"
+                checked={absentAll}
+                disabled={locked}
+                onChange={(e) => onAbsentAll(st.id, e.target.checked)}
+                aria-label={`${st.fullName} absent in all co-scholastic areas`}
+                title="Absent for every co-scholastic area (AB). For one area, pick AB in that column."
+              />
+              <span className={absentAny ? "font-semibold text-[var(--danger)]" : ""}>
+                {absentAll ? "Absent (all)" : absentAny ? "Absent (some)" : "Present"}
+              </span>
+            </label>
+          </div>
+        </div>
+      </td>
+      {areas.map((area) => (
+        <td key={`${st.id}:${area.code}`} className="px-1 py-1 text-center">
+          <select
+            className="field !w-16 !px-1 !py-1 text-center"
+            disabled={locked}
+            value={ratings[area.code] ?? ""}
+            onChange={(e) => onRating(st.id, area.code, e.target.value)}
+            aria-label={`${st.fullName} ${coScholasticDomainLabel(area.code, areas)}`}
+          >
+            <option value="">—</option>
+            {ratingChoices.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+            <option value="AB">AB · absent</option>
+          </select>
+        </td>
+      ))}
+    </tr>
+  );
+});
+
+/**
+ * Per-student objects that keep their identity while their contents are
+ * unchanged, so MarkRow's memo holds for every row but the one being typed
+ * in. Cheap: one string per student per render.
+ */
+function useStableByStudent<T extends Record<string, string>>(
+  roster: SisStudent[],
+  build: (st: SisStudent) => T,
+  deps: unknown[],
+): Map<string, T> {
+  const cache = useRef(new Map<string, { sig: string; value: T }>());
+  return useMemo(() => {
+    const out = new Map<string, T>();
+    for (const st of roster) {
+      const value = build(st);
+      const sig = Object.keys(value)
+        .sort()
+        .map((k) => `${k}=${value[k]}`)
+        .join("|");
+      const prev = cache.current.get(st.id);
+      if (prev && prev.sig === sig) {
+        out.set(st.id, prev.value);
+      } else {
+        cache.current.set(st.id, { sig, value });
+        out.set(st.id, value);
+      }
+    }
+    return out;
+    // `deps` is the caller's own list; `build` and `roster` are covered by it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+}
+
+function ConflictNotice({
+  conflicts,
+  onDismiss,
+}: {
+  conflicts: SheetConflict[];
+  onDismiss: (sheetId: string) => void;
+}) {
+  if (conflicts.length === 0) return null;
+  return (
+    <div
+      role="alert"
+      className="mt-4 rounded-xl border border-[var(--warning)]/50 bg-[var(--warning-soft)] p-4 text-sm"
+    >
+      <p className="font-semibold text-[var(--ink)]">
+        {conflicts.length === 1
+          ? "One save was refused by the server"
+          : `${conflicts.length} saves were refused by the server`}
+      </p>
+      <ul className="mt-2 space-y-2">
+        {conflicts.map((c) => (
+          <li key={c.sheetId} className="flex flex-wrap items-start justify-between gap-2">
+            <span className="text-[var(--ink)]">
+              {c.error}
+              <span className="block text-xs text-[var(--muted)]">
+                Your copy of that sheet ({c.sheet.marks.filter((m) => m.marksObtained != null).length} marks) is kept in this browser until you dismiss this.
+              </span>
+            </span>
+            <button
+              type="button"
+              className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-semibold"
+              onClick={() => onDismiss(c.sheetId)}
+            >
+              Dismiss
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+const UNLOCK_ROLES = new Set(["owner", "principal", "admin", "office"]);
+
+/**
+ * Anyone who is not a restricted teacher (and the first paint, before
+ * /my-teaching answers). One shared object on purpose: built inline it was a
+ * new object every render, so `subjects` handed back a fresh [] every render,
+ * the grid-reset effect re-ran and set a fresh [] grid, and the page rendered
+ * itself in a loop — which the dashboard's Recharts donut turned into
+ * "Maximum update depth exceeded" and a dead Exams page (2026-10-05).
+ */
+const UNRESTRICTED_TEACHING: MyTeaching = {
+  unrestricted: true,
+  academicYearCode: "",
+  teaching: [],
+};
+
+const EXAM_TABS: ModuleTabItem[] = [
+  { id: "dashboard", label: "Dashboard", tone: "navy" },
+  { id: "marks", label: "Mark entry", tone: "sky" },
+  { id: "items", label: "Item scores", tone: "sky" },
+  { id: "atrisk", label: "At-risk", tone: "coral" },
+  { id: "remarks", label: "Remarks", tone: "teal" },
+  { id: "datesheet", label: "Date-sheet", tone: "violet" },
+  { id: "seating", label: "Seating", tone: "navy" },
+  { id: "invigilation", label: "Invigilation", tone: "coral" },
+  { id: "papers", label: "Question papers", tone: "rose" },
+  { id: "admitcards", label: "Admit cards", tone: "sky" },
+  { id: "reports", label: "Report cards", tone: "amber" },
+  { id: "results", label: "Results", tone: "green" },
+  { id: "result_reports", label: "Result reports", tone: "teal" },
+  { id: "setup", label: "Exams & policy", tone: "navy" },
+];
+
 export function ExamsWorkspace() {
+  // Fee holds are server truth. Without this the gates below read an
+  // unloaded snapshot and every child looks allowed.
+  useHoldDecisions();
   const session = useDemoSession();
+  const { my: myTeachingRaw } = useMyTeaching();
+  const teacherMode = isRestrictedTeacher(myTeachingRaw);
+  const myTeaching = myTeachingRaw ?? UNRESTRICTED_TEACHING;
   const [tab, setTab] = useState<Tab>("dashboard");
+
+  // The Nucleus bookmark opens this workspace straight at the question papers desk, so the
+  // office never hunts for the tab. Read once, on the client, and never
+  // written back to the URL.
+  useEffect(() => {
+    if (urlAsksForTab(window.location.search, "papers")) setTab("papers");
+  }, []);
   const [masters, setMasters] = useState<MastersState | null>(() =>
     typeof window !== "undefined" ? loadMasters() : null,
   );
   const [sis, setSis] = useState<SisState | null>(() =>
     typeof window !== "undefined" ? loadSis() : null,
   );
+
+  // Someone holding only some Exams functions (Masters → Roles, e.g. Mark
+  // entry or Date sheet) sees only their tabs.
+  const shownTabs = useMemo(
+    () => visibleModuleTabs(EXAM_TABS, session, masters, "exams"),
+    [session, masters],
+  );
+  useEffect(() => {
+    if (!masters) return;
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as Tab);
+    }
+  }, [masters, shownTabs, tab]);
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [examTermId, setExamTermId] = useState("");
   const [grid, setGrid] = useState<StudentSubjectMark[]>([]);
+  const [coScholasticGrid, setCoScholasticGrid] = useState<StudentCoScholasticEntry[]>([]);
+  /** "studentId:subjectId" cells the child was absent for. */
+  const [absentCells, setAbsentCells] = useState<Set<string>>(new Set());
+  /** studentId → optional reason, shared by that child's absent papers. */
+  const [absentReasons, setAbsentReasons] = useState<Map<string, string>>(new Map());
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  /** Results → the attendance figure being corrected for one child. */
+  const [attEdit, setAttEdit] = useState<{ studentId: string; present: string; working: string; note: string; error: string } | null>(null);
   const [reportStudentId, setReportStudentId] = useState<string | null>(null);
   const [preview, setPreview] = useState<ReportCard | null>(null);
   const [holdCheck, setHoldCheck] = useState<HoldCheck | null>(null);
   const [holdDialog, setHoldDialog] = useState(false);
+  const [conflicts, setConflicts] = useState<SheetConflict[]>([]);
+  /** The child whose answer sheet is being scanned; null = dialog closed. */
+  const [scanStudentId, setScanStudentId] = useState<string | null>(null);
 
   const [newCode, setNewCode] = useState("UT3");
   const [newLabel, setNewLabel] = useState("Unit Test 3");
@@ -110,6 +649,7 @@ export function ExamsWorkspace() {
   const [newRequiredMs, setNewRequiredMs] = useState(true);
   const [newSeparateMs, setNewSeparateMs] = useState(true);
   const [policyDraft, setPolicyDraft] = useState<ExamPolicy | null>(null);
+  const [setupStep, setSetupStep] = useState<SetupStep>("policy");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editCode, setEditCode] = useState("");
   const [editLabel, setEditLabel] = useState("");
@@ -132,29 +672,91 @@ export function ExamsWorkspace() {
     const p = getExamPolicy();
     setPolicyDraft(p);
     setReportCardHoldFromStage(p.reportCardHoldFromStage);
+    setConflicts(examSheetConflicts());
     setTick((x) => x + 1);
   }
+
+  // A refused save is recorded by the push, which runs after the click
+  // handler returns; pick it up when the sync status changes.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onFailed = () => setConflicts(examSheetConflicts());
+    window.addEventListener("bhb-desk-sync-failed", onFailed);
+    return () => window.removeEventListener("bhb-desk-sync-failed", onFailed);
+  }, []);
+
+  // Masters is read once at mount, and the staff roster is the slice that
+  // arrives last: it has its own hydrate, kicked from whichever desk asked for
+  // it. This desk never asked, so a browser that opened on Exams held masters
+  // with no staff and the invigilator picker had nobody to offer. Repaint
+  // whenever a hydrate reports masters changed.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onMasters = () => setMasters(loadMasters());
+    window.addEventListener("bhb-masters-updated", onMasters);
+    return () => window.removeEventListener("bhb-masters-updated", onMasters);
+  }, []);
+
+  // Corrected result attendance hydrates from module_local_state after
+  // first paint — repaint the results when it lands or changes.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onOverrides = () => setTick((t) => t + 1);
+    window.addEventListener("bhb-attendance-overrides", onOverrides);
+    return () => window.removeEventListener("bhb-attendance-overrides", onOverrides);
+  }, []);
 
   useEffect(() => {
     // Paint immediately from localStorage, then refresh after remote hydrate
     refresh();
     void (async () => {
-      const { ensureSisHydrated } = await import("@/lib/sisPersistence");
-      const { ensureExamsHydrated } = await import("@/lib/examsPersistence");
-      await Promise.all([ensureSisHydrated(), ensureExamsHydrated()]);
+      const [
+        { ensureSisHydrated },
+        { ensureExamsHydrated },
+        { ensureMastersHydrated },
+        { ensureStaffHydrated },
+        { withHydrationSlot },
+      ] = await Promise.all([
+        import("@/lib/sisPersistence"),
+        import("@/lib/examsPersistence"),
+        import("@/lib/mastersPersistence"),
+        import("@/lib/staffPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      await Promise.all([
+        withHydrationSlot(() => ensureSisHydrated()),
+        withHydrationSlot(() => ensureExamsHydrated()),
+        withHydrationSlot(() => ensureMastersHydrated()),
+        // Invigilation, seating and admit cards all read masters.staff.
+        withHydrationSlot(() => ensureStaffHydrated()),
+      ]);
       refresh();
     })();
   }, []);
 
-  const terms = useMemo(() => {
+  /**
+   * ONE parse of the exams blob per change, shared by everything below.
+   * Every reader in lib/exams falls back to loadExams() when not given a
+   * state, and the grid used to hit that fallback per cell per render.
+   */
+  const exams = useMemo(() => {
     void tick;
-    return listExamTerms(ay);
-  }, [ay, tick]);
+    return loadExams();
+  }, [tick]);
 
-  const allTerms = useMemo(() => {
-    void tick;
-    return listAllExamTerms(ay);
-  }, [ay, tick]);
+  /** Stores already in hand, for the readers that loop over students. */
+  const examDeps = useMemo<ExamDeps>(
+    () => ({
+      state: exams,
+      masters: masters ?? undefined,
+      sis: sis ?? undefined,
+    }),
+    [exams, masters, sis],
+  );
+
+  const terms = useMemo(() => listExamTerms(ay, exams), [ay, exams]);
+
+  const allTerms = useMemo(() => listAllExamTerms(ay, exams), [ay, exams]);
 
   useEffect(() => {
     if (!examTermId && terms[0]) setExamTermId(terms[0].id);
@@ -167,15 +769,23 @@ export function ExamsWorkspace() {
     if (!masters) return [];
     // Treat missing isActive as active (legacy rows)
     const active = masters.classes.filter((c) => c.isActive !== false);
-    return active.length > 0 ? active : masters.classes;
-  }, [masters]);
+    const all = active.length > 0 ? active : masters.classes;
+    if (!teacherMode) return all;
+    const mine = new Set(myTeaching.teaching.map((t) => t.classId));
+    return all.filter((c) => mine.has(c.id));
+  }, [masters, teacherMode, myTeaching]);
 
   const sectionOptions = useMemo(() => {
     if (!masters || !classId) return [];
     const forClass = masters.sections.filter((s) => s.classId === classId);
     const active = forClass.filter((s) => s.isActive !== false);
-    return active.length > 0 ? active : forClass;
-  }, [masters, classId]);
+    const all = active.length > 0 ? active : forClass;
+    if (!teacherMode) return all;
+    const mine = new Set(
+      myTeaching.teaching.filter((t) => t.classId === classId).map((t) => t.sectionId),
+    );
+    return all.filter((s) => mine.has(s.id));
+  }, [masters, classId, teacherMode, myTeaching]);
 
   useEffect(() => {
     if (!sectionId) return;
@@ -183,7 +793,7 @@ export function ExamsWorkspace() {
   }, [sectionId, sectionOptions]);
 
   const term = terms.find((t) => t.id === examTermId) ?? null;
-  const policy = policyDraft ?? getExamPolicy();
+  const policy = policyDraft ?? getExamPolicy(exams);
 
   const roster = useMemo(() => {
     if (!sis || !sectionId) return [];
@@ -195,16 +805,105 @@ export function ExamsWorkspace() {
 
   const subjects = useMemo(() => {
     if (!classId) return [];
-    return subjectsForMarkEntry(classId, roster);
-  }, [classId, roster, tick]);
+    const all = subjectsForMarkEntry(classId, roster, exams, examDeps);
+    if (!teacherMode) return all;
+    // A subject teacher enters marks for their own subjects; the class
+    // teacher of the section sees every subject of it.
+    const sec = myTeaching.teaching.find(
+      (t) => t.classId === classId && t.sectionId === sectionId,
+    );
+    if (!sec) return [];
+    if (sec.isClassTeacher) return all;
+    // Exam subjects have their own ids; match the teacher's by code.
+    const codes = new Set(sec.subjects.map((x) => x.code));
+    return all.filter((x) => codes.has(x.code.trim().toUpperCase()));
+  }, [classId, sectionId, roster, exams, examDeps, teacherMode, myTeaching]);
+
+  /** How this class is assessed — the school's scheme for it. */
+  const scheme = useMemo<AssessmentScheme | null>(
+    () => (classId ? schemeForClassId(classId, policy) : null),
+    [classId, policy],
+  );
+  const entryMode: "marks" | "grades" =
+    scheme && scheme.displayMode !== "marks_grade" ? "grades" : "marks";
+  const gradeChoices = useMemo(() => (scheme ? pickableGrades(scheme) : []), [scheme]);
+  const areas = useMemo<CoScholasticArea[]>(
+    // Masters' co-scholastic subjects for the class join the scheme's areas,
+    // so a subject marked co-scholastic is graded here, not marked.
+    () => (classId ? coScholasticAreasForClass(classId, policy, masters) : []),
+    [classId, policy, masters],
+  );
+  const ratingChoices = useMemo(
+    () => coScholasticRatingsFor(scheme?.coScholasticScale ?? "three"),
+    [scheme],
+  );
+  /** Subject × component columns for the current exam. */
+  const columns = useMemo<GridColumn[]>(() => {
+    if (!term) return [];
+    const out: GridColumn[] = [];
+    for (const subject of subjects) {
+      // Per subject: English may be Written + Oral while Maths is one mark.
+      const parts = scheme ? componentsForSubject(scheme, term.code, subject.code) : [];
+      if (parts.length === 0) out.push({ subject, component: null });
+      else for (const component of parts) out.push({ subject, component });
+    }
+    return out;
+  }, [subjects, scheme, term]);
+
+  /** studentId → exam-subject ids on that child's curriculum, resolved once
+   * for the section. The grid, setMark and onSave all read this. */
+  const takesBy = useMemo(
+    () => subjectTakeMap(roster, subjects, exams, examDeps),
+    [roster, subjects, exams, examDeps],
+  );
+
+  const gridIndex = useMemo(() => {
+    const m = new Map<string, StudentSubjectMark>();
+    for (const c of grid) m.set(cellKey(c.studentId, c.subjectId, c.component), c);
+    return m;
+  }, [grid]);
+
+  const valuesByStudent = useStableByStudent(
+    roster,
+    (st) => {
+      const values: Record<string, string> = {};
+      for (const col of columns) {
+        const c = gridIndex.get(cellKey(st.id, col.subject.id, col.component?.code ?? ""));
+        values[columnKey(col)] = absentCells.has(absenceKey(st.id, col.subject.id))
+          ? "AB"
+          : entryMode === "grades"
+            ? c?.grade && c.grade !== "—"
+              ? c.grade
+              : ""
+            : c?.marksObtained == null
+              ? ""
+              : String(c.marksObtained);
+      }
+      return values;
+    },
+    [roster, columns, gridIndex, entryMode, absentCells],
+  );
+
+  const ratingsByStudent = useStableByStudent(
+    roster,
+    (st) => {
+      const ratings: Record<string, string> = {};
+      for (const e of coScholasticGrid) {
+        if (e.studentId === st.id) ratings[e.domain] = e.rating ?? "";
+      }
+      return ratings;
+    },
+    [roster, coScholasticGrid],
+  );
 
   useEffect(() => {
     if (!term || !sectionId || !classId) {
-      setGrid([]);
+      // Keep the same empty grid: a fresh [] is a new state, and a re-render.
+      setGrid((prev) => (prev.length === 0 ? prev : []));
       setDirty(false);
       return;
     }
-    const existing = findMarkSheet(ay, term.id, sectionId);
+    const existing = findMarkSheet(ay, term.id, sectionId, exams);
     setGrid(
       buildEmptyMarksGrid(
         roster,
@@ -212,10 +911,24 @@ export function ExamsWorkspace() {
         term,
         existing,
         policy.passPercent,
+        scheme ?? undefined,
+      ),
+    );
+    setCoScholasticGrid(buildEmptyCoScholasticGrid(roster, existing, areas));
+    setAbsentCells(new Set((existing?.absences ?? []).map((a) => absenceKey(a.studentId, a.subjectId))));
+    setAbsentReasons(
+      new Map(
+        (existing?.absences ?? [])
+          .filter((a) => a.reason)
+          .map((a) => [a.studentId, a.reason]),
       ),
     );
     setDirty(false);
-  }, [ay, term?.id, sectionId, classId, roster, subjects, policy.passPercent]);
+    // `exams` is deliberately not a dependency: a save bumps it, and
+    // rebuilding the grid from the saved sheet then would be a no-op that
+    // also discards anything typed between clicking Save and the re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ay, term?.id, sectionId, classId, roster, subjects, policy.passPercent, scheme, areas]);
 
   function flash(msg: string) {
     setNotice(msg);
@@ -223,32 +936,154 @@ export function ExamsWorkspace() {
     window.setTimeout(() => setNotice(null), 2800);
   }
 
-  function cellKey(studentId: string, subjectId: string) {
-    return `${studentId}:${subjectId}`;
-  }
-
-  function setMark(studentId: string, subjectId: string, value: string) {
-    if (!term) return;
-    const sub = subjects.find((s) => s.id === subjectId);
-    if (!sub) return;
-    const st = roster.find((s) => s.id === studentId);
-    if (st && !studentTakesExamSubject(st, sub)) return;
-    const max = effectiveMaxMarks(term, sub);
-    let obtained: number | null = null;
-    if (value.trim() !== "") {
-      const n = Number(value);
-      if (!Number.isFinite(n)) return;
-      obtained = Math.min(max, Math.max(0, n));
-    }
-    setGrid((prev) =>
-      prev.map((m) =>
-        m.studentId === studentId && m.subjectId === subjectId
-          ? { ...m, marksObtained: obtained }
-          : m,
-      ),
-    );
+  /** Absent for one paper (typed AB in the cell), or present again. */
+  const setAbsentCell = useCallback((studentId: string, subjectId: string, absent: boolean) => {
+    setAbsentCells((prev) => {
+      const key = absenceKey(studentId, subjectId);
+      if (prev.has(key) === absent) return prev;
+      const next = new Set(prev);
+      if (absent) next.add(key);
+      else next.delete(key);
+      return next;
+    });
     setDirty(true);
-  }
+  }, []);
+
+  /** The row toggle: absent for every subject this child takes, or none. */
+  const setAbsentAll = useCallback(
+    (studentId: string, absent: boolean) => {
+      const takes = takesBy.get(studentId);
+      const subjectIds = subjects
+        .filter((sub) => !takes || takes.has(sub.id))
+        .map((sub) => sub.id);
+      setAbsentCells((prev) => {
+        const next = new Set(prev);
+        for (const sid of subjectIds) {
+          const key = absenceKey(studentId, sid);
+          if (absent) next.add(key);
+          else next.delete(key);
+        }
+        return next;
+      });
+      setDirty(true);
+    },
+    [subjects, takesBy],
+  );
+
+  const setAbsentReason = useCallback((studentId: string, reason: string) => {
+    setAbsentReasons((prev) => {
+      const next = new Map(prev);
+      next.set(studentId, reason);
+      return next;
+    });
+    setDirty(true);
+  }, []);
+
+  /** Which children are absent for everything they take / for anything. */
+  const absentByStudent = useMemo(() => {
+    const out = new Map<string, { all: boolean; any: boolean }>();
+    for (const st of roster) {
+      const takes = takesBy.get(st.id);
+      const mine = subjects.filter((sub) => !takes || takes.has(sub.id));
+      const count = mine.filter((sub) => absentCells.has(absenceKey(st.id, sub.id))).length;
+      out.set(st.id, { all: mine.length > 0 && count === mine.length, any: count > 0 });
+    }
+    return out;
+  }, [roster, subjects, takesBy, absentCells]);
+
+  const setMark = useCallback(
+    (studentId: string, subjectId: string, component: string, value: string) => {
+      if (!term) return;
+      const col = columns.find(
+        (c) => c.subject.id === subjectId && (c.component?.code ?? "") === component,
+      );
+      if (!col) return;
+      const takes = takesBy.get(studentId);
+      if (takes && !takes.has(subjectId)) return;
+      const raw = value.trim();
+      // "AB" (or just "a") in a cell = absent for this paper.
+      if (/^ab?$/i.test(raw)) {
+        setAbsentCell(studentId, subjectId, true);
+        return;
+      }
+      setAbsentCell(studentId, subjectId, false);
+      const cleaned = raw.replace(/[^0-9.]/g, "");
+      const max = col.component ? col.component.maxMarks : effectiveMaxMarks(term, col.subject);
+      let obtained: number | null = null;
+      if (cleaned !== "") {
+        const n = Number(cleaned);
+        if (!Number.isFinite(n)) return;
+        obtained = Math.min(max, Math.max(0, n));
+      }
+      setGrid((prev) =>
+        prev.map((m) =>
+          m.studentId === studentId && m.subjectId === subjectId && m.component === component
+            ? { ...m, marksObtained: obtained }
+            : m,
+        ),
+      );
+      setDirty(true);
+    },
+    [term, columns, takesBy, setAbsentCell],
+  );
+
+
+  /** Grade-only / descriptor schemes: the teacher picks the grade; no number. */
+  const setGrade = useCallback(
+    (studentId: string, subjectId: string, component: string, grade: string) => {
+      const takes = takesBy.get(studentId);
+      if (takes && !takes.has(subjectId)) return;
+      if (grade === "AB") {
+        setAbsentCell(studentId, subjectId, true);
+        return;
+      }
+      setAbsentCell(studentId, subjectId, false);
+      setGrid((prev) =>
+        prev.map((m) =>
+          m.studentId === studentId && m.subjectId === subjectId && m.component === component
+            ? { ...m, marksObtained: null, grade: grade || "—" }
+            : m,
+        ),
+      );
+      setDirty(true);
+    },
+    [takesBy, setAbsentCell],
+  );
+
+  const setCoScholasticRating = useCallback(
+    (studentId: string, domain: CoScholasticDomain, value: string) => {
+      const rating: CoScholasticRating | null = parseCoScholasticRating(value);
+      setCoScholasticGrid((prev) =>
+        prev.map((e) =>
+          e.studentId === studentId && e.domain === domain
+            ? { ...e, rating }
+            : e,
+        ),
+      );
+      setDirty(true);
+    },
+    [],
+  );
+
+  /** Absent for the whole co-scholastic sheet: AB in every area, or clear
+   * the AB grades back to unrated. Grades already given stay on untick. */
+  const setCoScholasticAbsentAll = useCallback(
+    (studentId: string, absent: boolean) => {
+      setCoScholasticGrid((prev) =>
+        prev.map((e) =>
+          e.studentId !== studentId
+            ? e
+            : absent
+              ? { ...e, rating: "AB" }
+              : e.rating === "AB"
+                ? { ...e, rating: null }
+                : e,
+        ),
+      );
+      setDirty(true);
+    },
+    [],
+  );
 
   function onSave(lock = false) {
     if (!term || !classId || !sectionId) {
@@ -257,9 +1092,11 @@ export function ExamsWorkspace() {
     }
     // Drop marks for subjects the student does not take
     const marks = grid.map((m) => {
-      const st = roster.find((s) => s.id === m.studentId);
-      const sub = subjects.find((s) => s.id === m.subjectId);
-      if (st && sub && !studentTakesExamSubject(st, sub)) {
+      if (absentCells.has(absenceKey(m.studentId, m.subjectId))) {
+        return { ...m, marksObtained: null, grade: "AB" };
+      }
+      const takes = takesBy.get(m.studentId);
+      if (takes && !takes.has(m.subjectId)) {
         return { ...m, marksObtained: null, grade: "—" };
       }
       return m;
@@ -270,6 +1107,11 @@ export function ExamsWorkspace() {
       classId,
       sectionId,
       marks,
+      coScholastic: areas.length > 0 ? coScholasticGrid : undefined,
+      absences: [...absentCells].map((key) => {
+        const [studentId, subjectId] = key.split(":");
+        return { studentId: studentId ?? "", subjectId: subjectId ?? "", reason: absentReasons.get(studentId ?? "") ?? "" };
+      }),
       enteredBy: session.fullName,
       lock,
     });
@@ -281,9 +1123,49 @@ export function ExamsWorkspace() {
     refresh();
     flash(
       lock
-        ? "Mark sheet saved and locked"
-        : `Marks saved · ${roster.length} students`,
+        ? "Mark sheet saved and locked · sending to the server"
+        : `Marks saved · ${roster.length} students · sending to the server`,
     );
+  }
+
+  const canUnlock = useMemo(() => {
+    if (!masters) return false;
+    try {
+      if (hasPermission(session, masters, "exams", "approve")) return true;
+      return inferRoleCodes(session, masters).some((c) => UNLOCK_ROLES.has(c));
+    } catch {
+      return false;
+    }
+  }, [session, masters]);
+
+  function onUnlock() {
+    if (!term || !sectionId) return;
+    const reason = window.prompt(
+      "Why is this mark sheet being unlocked? (recorded in the audit log)",
+      "",
+    );
+    if (reason === null) return;
+    const result = unlockMarkSheet({
+      academicYearCode: ay,
+      examTermId: term.id,
+      sectionId,
+      reason,
+      by: session.fullName,
+    });
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    refresh();
+    flash("Mark sheet unlocked · sending to the server");
+  }
+
+  async function retrySync(): Promise<boolean> {
+    const ok = await retryPendingExamSheets();
+    const { scheduleExamsSync } = await import("@/lib/examsPersistence");
+    scheduleExamsSync(loadExams());
+    refresh();
+    return ok;
   }
 
   function classLabelOf(studentId: string): string {
@@ -311,12 +1193,43 @@ export function ExamsWorkspace() {
       setHoldDialog(true);
       return;
     }
-    const card = buildReportCard({
-      student: st,
-      classLabel: classLabelOf(studentId),
-      examTermId,
-      academicYearCode: ay,
-    });
+    const studentScheme = schemeForClassId(st.classId, policy);
+    const studentTemplate = reportTemplateForClassId(st.classId, policy);
+    let card: ReportCard | { error: string };
+    if (
+      (studentTemplate.showRank ?? studentScheme.showRank) ||
+      (studentTemplate.showClassAverage ?? studentScheme.showClassAverage) ||
+      (studentTemplate.showResult ?? studentScheme.showResultOnCard)
+    ) {
+      // Rank and average need the whole section; the result comes from the
+      // recorded decision. buildClassResultSheet fills all three.
+      const sheet = buildClassResultSheet({
+        students: rosterForSection(sis?.students ?? [], st.sectionId, {
+          classId: st.classId,
+          academicYearCode: ay,
+        }),
+        classLabel: classLabelOf(studentId),
+        classId: st.classId,
+        sectionId: st.sectionId,
+        examTermId,
+        academicYearCode: ay,
+        deps: { ...examDeps, attendance: loadAttendance() },
+      });
+      if ("error" in sheet) {
+        card = { error: sheet.error };
+      } else {
+        const row = sheet.rows.find((r) => r.student.id === studentId);
+        card = row?.card ?? { error: row?.error || "No marks for this student" };
+      }
+    } else {
+      card = buildReportCard({
+        student: st,
+        classLabel: classLabelOf(studentId),
+        examTermId,
+        academicYearCode: ay,
+        deps: { ...examDeps, holdChecks: new Map([[studentId, hold]]) },
+      });
+    }
     if ("error" in card) {
       setError(card.error);
       setPreview(null);
@@ -491,10 +1404,57 @@ export function ExamsWorkspace() {
   }
 
   const sheetMeta = useMemo(() => {
-    void tick;
     if (!examTermId || !sectionId) return null;
-    return findMarkSheet(ay, examTermId, sectionId);
-  }, [ay, examTermId, sectionId, tick]);
+    return findMarkSheet(ay, examTermId, sectionId, exams);
+  }, [ay, examTermId, sectionId, exams]);
+
+  /**
+   * Answer-sheet scan (2026-09-30) fills ONE number per subject, so it is
+   * offered only where the grid has one number per subject: marks, not
+   * grades, and no theory/practical split — a scanned total cannot say
+   * which component it belongs to. Subjects split into parts (English =
+   * Written + Oral) are left out of the scan; the rest are offered.
+   */
+  const canScan =
+    entryMode === "marks" &&
+    !!term &&
+    columns.some((c) => !c.component) &&
+    !sheetMeta?.lockedAt;
+
+  const scanStudent = scanStudentId ? roster.find((s) => s.id === scanStudentId) ?? null : null;
+  const scanSubjects = useMemo<ScanSubject[]>(() => {
+    if (!scanStudentId || !term) return [];
+    const takes = takesBy.get(scanStudentId);
+    return columns
+      .filter((c) => !c.component && (!takes || takes.has(c.subject.id)))
+      .filter((c) => !absentCells.has(absenceKey(scanStudentId, c.subject.id)))
+      .map((c) => ({
+        id: c.subject.id,
+        code: c.subject.code.trim().toUpperCase(),
+        name: c.subject.name,
+        maxMarks: effectiveMaxMarks(term, c.subject),
+      }));
+  }, [scanStudentId, term, columns, takesBy, absentCells]);
+
+  /** The confirmed total goes into the grid like a typed mark; Save is still the teacher's. */
+  function onScanUse(subjectId: string, total: number) {
+    if (!scanStudentId) return;
+    setMark(scanStudentId, subjectId, "", String(total));
+    const name = scanStudent?.fullName ?? "the student";
+    setScanStudentId(null);
+    flash(`${total} filled in for ${name} — press Save marks to keep it`);
+  }
+
+  /** Fee-hold verdicts for the section, computed once per roster change
+   * instead of once per child per render on the report-card list. */
+  const reportHolds = useMemo(() => {
+    void tick;
+    if (tab !== "reports" || roster.length === 0) return new Map<string, HoldCheck>();
+    return checkHoldsForStudents(
+      roster.map((s) => s.id),
+      "HOLD_REPORT_CARD",
+    );
+  }, [tab, roster, tick]);
 
   const classLabel = useMemo(() => {
     const c = classOptions.find((x) => x.id === classId)?.name ?? "—";
@@ -514,10 +1474,36 @@ export function ExamsWorkspace() {
       sectionId,
       examTermId,
       academicYearCode: ay,
+      deps: { ...examDeps, attendance: loadAttendance() },
     });
     if ("error" in built) return { error: built.error } as const;
     return { sheet: built } as const;
-  }, [tab, tick, examTermId, classId, sectionId, roster, classLabel, ay]);
+  }, [tab, tick, examTermId, classId, sectionId, roster, classLabel, ay, examDeps]);
+
+  // The result sheet, best first; every column sorts (decision by its label).
+  const resultSort = useTableSort(
+    classResult?.sheet?.rows ?? [],
+    {
+      percent: (row) => row.card ? row.card.percent : -1,
+      grade: (row) => row.card?.overallGrade ?? "",
+      student: (row) => row.student.fullName,
+      attendance: (row) => row.card?.attendance?.percent ?? null,
+      pass: (row) => (row.card ? row.passed : null),
+      decision: (row) => promotionDecisionLabel(row.record?.decision ?? "pending"),
+      // Mirrors the Next class cell, so the order matches what is shown.
+      next: (row) => {
+        const d = row.record?.decision ?? "pending";
+        if (d === "promoted") {
+          return row.nextClass
+            ? `${row.nextClass.name}${row.nextSection ? `-${row.nextSection.name}` : ""}`
+            : "No next class";
+        }
+        return d === "detained" ? "Same class" : null;
+      },
+    },
+    "percent",
+    "desc",
+  );
 
   function onSuggestPromotions() {
     if (!examTermId || !classId || !sectionId) {
@@ -617,21 +1603,34 @@ export function ExamsWorkspace() {
         aria-label="Exams sections"
         value={tab}
         onChange={(id) => setTab(id as Tab)}
-        items={[
-          { id: "dashboard", label: "Dashboard", tone: "navy" },
-          { id: "marks", label: "Mark entry", tone: "sky" },
-          { id: "datesheet", label: "Date-sheet", tone: "violet" },
-          { id: "papers", label: "Question papers", tone: "rose" },
-          { id: "reports", label: "Report cards", tone: "amber" },
-          { id: "results", label: "Results", tone: "green" },
-          { id: "setup", label: "Exams & policy", tone: "navy" },
-        ]}
+        items={shownTabs}
+      />
+      <StepChainGuide
+        chains={[{ label: "Exam cycle", steps: EXAM_CYCLE_STEPS }]}
+        value={tab}
+        onChange={setTab}
+      />
+
+      <DeskSyncBanner
+        module="exams"
+        title="Your exam marks are not saved on the server"
+        onRetry={retrySync}
+      />
+      <ConflictNotice
+        conflicts={conflicts}
+        onDismiss={(id) => {
+          clearExamSheetConflict(id);
+          setConflicts(examSheetConflicts());
+        }}
       />
 
       {tab !== "setup" &&
       tab !== "dashboard" &&
       tab !== "datesheet" &&
-      tab !== "papers" ? (
+      tab !== "seating" &&
+      tab !== "invigilation" &&
+      tab !== "papers" &&
+      tab !== "admitcards" ? (
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <label className="block text-sm">
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
@@ -697,7 +1696,7 @@ export function ExamsWorkspace() {
       ) : null}
 
       {tab === "datesheet" && masters ? (
-        <ExamDateSheetPanel
+        <ExamDateSheetGrid
           academicYearCode={ay}
           masters={masters}
           terms={terms}
@@ -705,12 +1704,28 @@ export function ExamsWorkspace() {
         />
       ) : null}
 
+      {tab === "seating" && masters ? (
+        <ExamSeatingPanel
+          academicYearCode={ay}
+          masters={masters}
+          terms={terms}
+        />
+      ) : null}
+
+      {tab === "invigilation" && masters ? (
+        <InvigilationPanel academicYearCode={ay} masters={masters} terms={terms} />
+      ) : null}
+
+      {tab === "admitcards" && masters ? (
+        <AdmitCardsPanel academicYearCode={ay} masters={masters} terms={terms} />
+      ) : null}
+
       {tab === "papers" && masters ? (
         <ExamPapersPanel
           masters={masters}
           academicYearCode={ay}
           terms={terms}
-          canEdit={hasPermission(session, masters, "exams", "edit")}
+          canEdit={canWriteModuleTab(session, masters, "exams", "papers")}
           actorName={session.fullName || "Staff"}
           onError={setError}
           onNotice={(msg) => {
@@ -722,8 +1737,361 @@ export function ExamsWorkspace() {
       ) : null}
 
       {tab === "setup" ? (
-        <div className="mt-6 grid gap-6 lg:grid-cols-2">
-          <section className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-5">
+        <div className="mt-6 space-y-4">
+          <StepTabs
+            aria-label="Exams setup steps"
+            steps={SETUP_STEPS.map((st) => ({
+              ...st,
+              badge:
+                st.id === "schemes"
+                  ? policy.schemes.length
+                  : st.id === "exams"
+                    ? allTerms.length
+                    : st.id === "reports"
+                      ? (policy.reportTemplates ?? []).length
+                      : undefined,
+            }))}
+            value={setupStep}
+            onChange={setSetupStep}
+          />
+          <div className="max-w-4xl">
+          {setupStep === "policy" ? (
+          <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
+            <h2 className="text-sm font-bold text-[var(--brand-deep)]">
+              Exam policy
+            </h2>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Grading, defaults, and report card rules
+            </p>
+            {policyDraft ? (
+              <div className="mt-4 space-y-3">
+                <label className="block text-sm">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Pass % (grade D minimum)
+                  </span>
+                  <input
+                    className="field !py-1.5"
+                    inputMode="numeric"
+                    value={policyDraft.passPercent}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        passPercent: Number(
+                          e.target.value.replace(/\D/g, "") || 33,
+                        ),
+                      })
+                    }
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Default UT max marks
+                  </span>
+                  <input
+                    className="field !py-1.5"
+                    inputMode="numeric"
+                    value={policyDraft.defaultUtMaxMarks}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        defaultUtMaxMarks: Number(
+                          e.target.value.replace(/\D/g, "") || 40,
+                        ),
+                      })
+                    }
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Default term / annual max marks
+                  </span>
+                  <input
+                    className="field !py-1.5"
+                    inputMode="numeric"
+                    value={policyDraft.defaultTermMaxMarks}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        defaultTermMaxMarks: Number(
+                          e.target.value.replace(/\D/g, "") || 80,
+                        ),
+                      })
+                    }
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                    Report card fee hold from stage
+                  </span>
+                  <select
+                    className="field !py-1.5"
+                    value={policyDraft.reportCardHoldFromStage}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        reportCardHoldFromStage: e.target
+                          .value as ExamPolicy["reportCardHoldFromStage"],
+                      })
+                    }
+                  >
+                    {(["S1", "S2", "S3", "S4"] as const).map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-[var(--muted)]">
+                    Saving policy updates HOLD_REPORT_CARD and applies default
+                    max marks to exams that still have no student marks (UT → UT
+                    default; others → term default).
+                  </p>
+                </label>
+                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                  <input
+                    type="checkbox"
+                    checked={policyDraft.showAttendanceOnReport}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        showAttendanceOnReport: e.target.checked,
+                      })
+                    }
+                  />
+                  Show attendance on report card
+                </label>
+                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                  <input
+                    type="checkbox"
+                    checked={policyDraft.includeOverallGrade}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        includeOverallGrade: e.target.checked,
+                      })
+                    }
+                  />
+                  Show overall grade
+                </label>
+                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                  <input
+                    type="checkbox"
+                    checked={policyDraft.enableCoScholastic}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        enableCoScholastic: e.target.checked,
+                      })
+                    }
+                  />
+                  Enable NEP 2020 co-scholastic domains (socio-emotional,
+                  psychomotor) on marks entry and report cards
+                </label>
+                <div className="rounded-lg border border-[var(--border)] p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
+                    At-risk thresholds (early-warning list)
+                  </p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-5">
+                    {(
+                      [
+                        ["attendancePct", "Attendance below %", 0, 100, 1],
+                        ["incidents", "Incidents ≥", 1, 50, 1],
+                        ["homeworkRatio", "Homework below (0–1)", 0, 1, 0.05],
+                        ["homeworkMinDue", "…with at least N due", 1, 100, 1],
+                        ["subjectDrops", "Subjects slipped ≥", 1, 20, 1],
+                      ] as const
+                    ).map(([key, label, min, max, step]) => (
+                      <label key={key} className="block text-[11px] text-[var(--muted)]">
+                        {label}
+                        <input
+                          type="number"
+                          min={min}
+                          max={max}
+                          step={step}
+                          className="field mt-0.5 !py-1 text-sm"
+                          value={policyDraft.riskThresholds[key]}
+                          onChange={(e) =>
+                            setPolicyDraft({
+                              ...policyDraft,
+                              riskThresholds: {
+                                ...policyDraft.riskThresholds,
+                                [key]: Number(e.target.value),
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                  <input
+                    type="checkbox"
+                    checked={policyDraft.requireAllSubjectsForReport}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        requireAllSubjectsForReport: e.target.checked,
+                      })
+                    }
+                  />
+                  Require all subjects marked before report
+                </label>
+                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                  <input
+                    type="checkbox"
+                    checked={policyDraft.requireAllSubjectsPassForPromotion}
+                    onChange={(e) =>
+                      setPolicyDraft({
+                        ...policyDraft,
+                        requireAllSubjectsPassForPromotion: e.target.checked,
+                      })
+                    }
+                  />
+                  Fail promotion if any subject is below pass %
+                </label>
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                    HY / Final aggregates
+                  </p>
+                  <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                    <input
+                      type="checkbox"
+                      checked={policyDraft.includeComponentsInHyFinalReports}
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          includeComponentsInHyFinalReports: e.target.checked,
+                        })
+                      }
+                    />
+                    Fold component exams into HY / Final reports
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+                    <input
+                      type="checkbox"
+                      checked={
+                        policyDraft.enforceSeparateMarksheetsForAggregate
+                      }
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          enforceSeparateMarksheetsForAggregate:
+                            e.target.checked,
+                        })
+                      }
+                    />
+                    Block HY/Final if required separate marksheet missing
+                  </label>
+                  <p className="text-[11px] text-[var(--muted)]">
+                    Defaults for new exams
+                  </p>
+                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
+                    <input
+                      type="checkbox"
+                      checked={policyDraft.defaultCountsTowardHy}
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          defaultCountsTowardHy: e.target.checked,
+                        })
+                      }
+                    />
+                    Count toward HY
+                    <input
+                      className="field !py-0.5 !w-14"
+                      value={policyDraft.defaultWeightInHy}
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          defaultWeightInHy: Number(
+                            e.target.value.replace(/\D/g, "") || 0,
+                          ),
+                        })
+                      }
+                      title="Default HY weight"
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
+                    <input
+                      type="checkbox"
+                      checked={policyDraft.defaultCountsTowardFinal}
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          defaultCountsTowardFinal: e.target.checked,
+                        })
+                      }
+                    />
+                    Count toward Final
+                    <input
+                      className="field !py-0.5 !w-14"
+                      value={policyDraft.defaultWeightInFinal}
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          defaultWeightInFinal: Number(
+                            e.target.value.replace(/\D/g, "") || 0,
+                          ),
+                        })
+                      }
+                      title="Default Final weight"
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
+                    <input
+                      type="checkbox"
+                      checked={policyDraft.defaultRequiredOnMarksheet}
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          defaultRequiredOnMarksheet: e.target.checked,
+                        })
+                      }
+                    />
+                    Required on marksheet
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
+                    <input
+                      type="checkbox"
+                      checked={policyDraft.defaultRequiresSeparateMarksheet}
+                      onChange={(e) =>
+                        setPolicyDraft({
+                          ...policyDraft,
+                          defaultRequiresSeparateMarksheet: e.target.checked,
+                        })
+                      }
+                    />
+                    Requires separate marksheet
+                  </label>
+                </div>
+                <p className="text-[11px] text-[var(--muted)]">
+                  Grade scale: CBSE 8-point (A1–E)
+                </p>
+                <button
+                  type="button"
+                  className="btn-accent rounded-lg px-3 py-2 text-xs font-semibold"
+                  onClick={onSavePolicy}
+                >
+                  Save policy
+                </button>
+              </div>
+            ) : null}
+          </section>
+          ) : null}
+          {setupStep === "schemes" ? (
+            <>
+          <AssessmentSchemesPanel
+            policy={policy}
+            masters={masters}
+            terms={allTerms}
+            onSaved={refresh}
+            onFlash={flash}
+            onError={setError}
+          />
+            </>
+          ) : null}
+          {setupStep === "exams" ? (
+          <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Create exam
             </h2>
@@ -879,7 +2247,7 @@ export function ExamsWorkspace() {
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-1 text-[11px] font-semibold"
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold"
                 onClick={() => {
                   setNewCode("UT3");
                   setNewLabel("Unit Test 3");
@@ -896,7 +2264,7 @@ export function ExamsWorkspace() {
               </button>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-1 text-[11px] font-semibold"
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold"
                 onClick={() => {
                   setNewCode("PREBOARD");
                   setNewLabel("Pre-board");
@@ -923,7 +2291,7 @@ export function ExamsWorkspace() {
             <h3 className="mt-6 text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
               Session exams
             </h3>
-            <ul className="mt-2 divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="mt-2 divide-y divide-[var(--border)]">
               {allTerms.map((t) => {
                 const hasData = examHasPersistedStudentData(t.id);
                 const isEditing = editingId === t.id;
@@ -982,7 +2350,7 @@ export function ExamsWorkspace() {
                             placeholder="Note"
                           />
                         </div>
-                        <div className="space-y-2 border-t border-[rgba(32,48,80,0.08)] pt-2">
+                        <div className="space-y-2 border-t border-[var(--border)] pt-2">
                           <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
                             <input
                               type="checkbox"
@@ -1062,7 +2430,7 @@ export function ExamsWorkspace() {
                           </button>
                           <button
                             type="button"
-                            className="rounded-md border border-[rgba(32,48,80,0.15)] px-2.5 py-1 text-[11px] font-semibold"
+                            className="rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold"
                             onClick={cancelEdit}
                           >
                             Cancel
@@ -1121,7 +2489,7 @@ export function ExamsWorkspace() {
                           {!hasData ? (
                             <button
                               type="button"
-                              className="text-[11px] font-semibold text-[#dc2626]"
+                              className="text-[11px] font-semibold text-[var(--danger)]"
                               onClick={() => onDeleteExam(t)}
                             >
                               Delete
@@ -1142,282 +2510,39 @@ export function ExamsWorkspace() {
               })}
             </ul>
           </section>
-
-          <section className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-5">
-            <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-              Exam policy
-            </h2>
-            <p className="mt-1 text-xs text-[var(--muted)]">
-              Grading, defaults, and report card rules
-            </p>
-            {policyDraft ? (
-              <div className="mt-4 space-y-3">
-                <label className="block text-sm">
-                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                    Pass % (grade D minimum)
-                  </span>
-                  <input
-                    className="field !py-1.5"
-                    inputMode="numeric"
-                    value={policyDraft.passPercent}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        passPercent: Number(
-                          e.target.value.replace(/\D/g, "") || 33,
-                        ),
-                      })
-                    }
-                  />
-                </label>
-                <label className="block text-sm">
-                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                    Default UT max marks
-                  </span>
-                  <input
-                    className="field !py-1.5"
-                    inputMode="numeric"
-                    value={policyDraft.defaultUtMaxMarks}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        defaultUtMaxMarks: Number(
-                          e.target.value.replace(/\D/g, "") || 40,
-                        ),
-                      })
-                    }
-                  />
-                </label>
-                <label className="block text-sm">
-                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                    Default term / annual max marks
-                  </span>
-                  <input
-                    className="field !py-1.5"
-                    inputMode="numeric"
-                    value={policyDraft.defaultTermMaxMarks}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        defaultTermMaxMarks: Number(
-                          e.target.value.replace(/\D/g, "") || 80,
-                        ),
-                      })
-                    }
-                  />
-                </label>
-                <label className="block text-sm">
-                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                    Report card fee hold from stage
-                  </span>
-                  <select
-                    className="field !py-1.5"
-                    value={policyDraft.reportCardHoldFromStage}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        reportCardHoldFromStage: e.target
-                          .value as ExamPolicy["reportCardHoldFromStage"],
-                      })
-                    }
-                  >
-                    {(["S1", "S2", "S3", "S4"] as const).map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="mt-1 text-[11px] text-[var(--muted)]">
-                    Saving policy updates HOLD_REPORT_CARD and applies default
-                    max marks to exams that still have no student marks (UT → UT
-                    default; others → term default).
-                  </p>
-                </label>
-                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-                  <input
-                    type="checkbox"
-                    checked={policyDraft.showAttendanceOnReport}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        showAttendanceOnReport: e.target.checked,
-                      })
-                    }
-                  />
-                  Show attendance on report card
-                </label>
-                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-                  <input
-                    type="checkbox"
-                    checked={policyDraft.includeOverallGrade}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        includeOverallGrade: e.target.checked,
-                      })
-                    }
-                  />
-                  Show overall grade
-                </label>
-                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-                  <input
-                    type="checkbox"
-                    checked={policyDraft.requireAllSubjectsForReport}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        requireAllSubjectsForReport: e.target.checked,
-                      })
-                    }
-                  />
-                  Require all subjects marked before report
-                </label>
-                <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-                  <input
-                    type="checkbox"
-                    checked={policyDraft.requireAllSubjectsPassForPromotion}
-                    onChange={(e) =>
-                      setPolicyDraft({
-                        ...policyDraft,
-                        requireAllSubjectsPassForPromotion: e.target.checked,
-                      })
-                    }
-                  />
-                  Fail promotion if any subject is below pass %
-                </label>
-                <div className="rounded-lg border border-[rgba(32,48,80,0.1)] bg-[var(--surface)] p-3 space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-                    HY / Final aggregates
-                  </p>
-                  <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-                    <input
-                      type="checkbox"
-                      checked={policyDraft.includeComponentsInHyFinalReports}
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          includeComponentsInHyFinalReports: e.target.checked,
-                        })
-                      }
-                    />
-                    Fold component exams into HY / Final reports
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-                    <input
-                      type="checkbox"
-                      checked={
-                        policyDraft.enforceSeparateMarksheetsForAggregate
-                      }
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          enforceSeparateMarksheetsForAggregate:
-                            e.target.checked,
-                        })
-                      }
-                    />
-                    Block HY/Final if required separate marksheet missing
-                  </label>
-                  <p className="text-[11px] text-[var(--muted)]">
-                    Defaults for new exams
-                  </p>
-                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
-                    <input
-                      type="checkbox"
-                      checked={policyDraft.defaultCountsTowardHy}
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          defaultCountsTowardHy: e.target.checked,
-                        })
-                      }
-                    />
-                    Count toward HY
-                    <input
-                      className="field !py-0.5 !w-14"
-                      value={policyDraft.defaultWeightInHy}
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          defaultWeightInHy: Number(
-                            e.target.value.replace(/\D/g, "") || 0,
-                          ),
-                        })
-                      }
-                      title="Default HY weight"
-                    />
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
-                    <input
-                      type="checkbox"
-                      checked={policyDraft.defaultCountsTowardFinal}
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          defaultCountsTowardFinal: e.target.checked,
-                        })
-                      }
-                    />
-                    Count toward Final
-                    <input
-                      className="field !py-0.5 !w-14"
-                      value={policyDraft.defaultWeightInFinal}
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          defaultWeightInFinal: Number(
-                            e.target.value.replace(/\D/g, "") || 0,
-                          ),
-                        })
-                      }
-                      title="Default Final weight"
-                    />
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
-                    <input
-                      type="checkbox"
-                      checked={policyDraft.defaultRequiredOnMarksheet}
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          defaultRequiredOnMarksheet: e.target.checked,
-                        })
-                      }
-                    />
-                    Required on marksheet
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-[var(--brand-deep)]">
-                    <input
-                      type="checkbox"
-                      checked={policyDraft.defaultRequiresSeparateMarksheet}
-                      onChange={(e) =>
-                        setPolicyDraft({
-                          ...policyDraft,
-                          defaultRequiresSeparateMarksheet: e.target.checked,
-                        })
-                      }
-                    />
-                    Requires separate marksheet
-                  </label>
-                </div>
-                <p className="text-[11px] text-[var(--muted)]">
-                  Grade scale: CBSE 8-point (A1–E)
-                </p>
-                <button
-                  type="button"
-                  className="btn-accent rounded-lg px-3 py-2 text-xs font-semibold"
-                  onClick={onSavePolicy}
-                >
-                  Save policy
-                </button>
-              </div>
-            ) : null}
-          </section>
+          ) : null}
+          {setupStep === "reports" ? (
+            <>
+          <ReportCardTemplatesPanel
+            policy={policy}
+            masters={masters}
+            onSaved={refresh}
+            onFlash={flash}
+            onError={setError}
+          />
+            </>
+          ) : null}
+          </div>
         </div>
       ) : null}
 
       {tab === "dashboard" ? (
-        <div className="mt-6">
+        <div className="mt-6 space-y-6">
+          <ExamReadinessDashboard
+            ay={ay}
+            terms={terms}
+            exams={exams}
+            masters={masters}
+            sis={sis}
+            policy={policy}
+            teaching={teacherMode ? myTeaching : null}
+            onOpen={(termId, cls, sec) => {
+              setExamTermId(termId);
+              setClassId(cls);
+              setSectionId(sec);
+              setTab("marks");
+            }}
+          />
           <ModuleDashboardHost
             moduleId="exams"
             onNavigateTab={(t) => setTab(t as Tab)}
@@ -1428,20 +2553,25 @@ export function ExamsWorkspace() {
       {tab === "marks" ? (
         <div className="mt-6">
           {!classId || !sectionId || !term ? (
-            <p className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-10 text-center text-sm text-[var(--muted)]">
+            <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
               Select exam, class and section to enter marks. Create new exams
               under <strong>Exams &amp; policy</strong>.
             </p>
           ) : roster.length === 0 ? (
-            <p className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-10 text-center text-sm text-[var(--muted)]">
+            <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
               No active students in this section.
             </p>
           ) : (
             <>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--muted)]">
                 <span>
-                  {roster.length} students · {subjects.length} subjects
-                  (enrollment-aware)
+                  {roster.length} students · {subjects.length} scholastic
+                  {areas.length > 0 ? ` · ${areas.length} co-scholastic` : ""} (enrollment-aware)
+                  {scheme ? ` · ${scheme.name}` : ""}
+                  {entryMode === "grades" ? " · grades, not marks" : ""}
+                  {absentCells.size > 0
+                    ? ` · ${[...absentByStudent.values()].filter((a) => a.any).length} absent (${absentCells.size} papers)`
+                    : ""}
                   {sheetMeta?.lockedAt
                     ? " · locked"
                     : sheetMeta
@@ -1460,101 +2590,216 @@ export function ExamsWorkspace() {
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
                     disabled={!!sheetMeta?.lockedAt}
                     onClick={() => onSave(true)}
                   >
                     Save & lock
                   </button>
+                  {sheetMeta?.lockedAt && canUnlock ? (
+                    <button
+                      type="button"
+                      className="rounded-lg border border-[var(--warning)]/60 px-3 py-1.5 text-xs font-semibold"
+                      onClick={onUnlock}
+                      title="Lift the lock so marks can be corrected. The reason is recorded."
+                    >
+                      Unlock
+                    </button>
+                  ) : null}
                 </div>
               </div>
 
+              {columns.length > 0 ? (
+                <>
+                  <h3 className="mb-2 mt-1 text-sm font-bold text-[var(--brand-deep)]">
+                    Scholastic · {entryMode === "grades" ? "grades" : "marks"}
+                    <span className="ml-2 text-xs font-normal text-[var(--muted)]">
+                      Subjects marked scholastic in Masters
+                    </span>
+                  </h3>
               <ErpTableShell>
+                <div className="overflow-x-auto">
                 <ErpTable minWidth="min-w-full" className="text-xs sm:text-sm">
                   <ErpTableHead>
                     <tr>
-                      <th className="sticky left-0 z-10 bg-[rgba(32,48,80,0.03)] px-4 py-2.5 font-bold text-[var(--brand-deep)]">
+                      <th className="sticky left-0 z-10 bg-[var(--surface-sunken)] px-4 py-2.5 font-bold text-[var(--brand-deep)]">
                         Student
                       </th>
-                      {subjects.map((sub) => (
+                      {columns.map((col) => (
                         <th
-                          key={sub.id}
-                          className="px-4 py-2.5 text-center font-bold text-[var(--brand-deep)]"
+                          key={columnKey(col)}
+                          className="px-3 py-2.5 text-center font-bold text-[var(--brand-deep)]"
                         >
-                          {sub.code}
+                          <span className="block max-w-[9rem] whitespace-normal leading-tight" title={col.subject.code}>
+                            {col.subject.name || col.subject.code}
+                          </span>
+                          {col.component ? (
+                            <span className="block text-[10px] font-semibold text-[var(--muted)]">
+                              {col.component.label}
+                            </span>
+                          ) : null}
                           <div className="text-[10px] font-normal text-[var(--muted)]">
-                            /{term ? effectiveMaxMarks(term, sub) : "—"}
+                            {entryMode === "grades"
+                              ? "grade"
+                              : `/${col.component ? col.component.maxMarks : term ? effectiveMaxMarks(term, col.subject) : "—"}`}
                           </div>
                         </th>
                       ))}
                     </tr>
                   </ErpTableHead>
                   <ErpTableBody>
-                    {roster.map((st) => (
-                      <tr
-                        key={st.id}
-                        className="border-b border-[rgba(32,48,80,0.06)]"
-                      >
-                        <td className="sticky left-0 z-10 bg-white px-3 py-1.5">
-                          <div className="flex items-center gap-2">
-                            <StudentAvatar student={st} size={28} />
-                            <div className="min-w-0">
-                              <div className="truncate font-medium text-[var(--brand-deep)]">
-                                <StudentNameLabel student={st} />
-                              </div>
-                              <div className="text-[10px] text-[var(--muted)]">
-                                {st.admissionNo}
-                                {st.rollNo ? ` · Roll ${st.rollNo}` : ""}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        {subjects.map((sub) => {
-                          const cell = grid.find(
-                            (m) =>
-                              m.studentId === st.id &&
-                              m.subjectId === sub.id,
-                          );
-                          const takes = studentTakesExamSubject(st, sub);
-                          return (
-                            <td
-                              key={cellKey(st.id, sub.id)}
-                              className="px-1 py-1"
-                            >
-                              {takes ? (
-                                <input
-                                  className="field !w-14 !px-1 !py-1 text-center tabular-nums"
-                                  inputMode="decimal"
-                                  disabled={!!sheetMeta?.lockedAt}
-                                  value={
-                                    cell?.marksObtained == null
-                                      ? ""
-                                      : String(cell.marksObtained)
-                                  }
-                                  onChange={(e) =>
-                                    setMark(st.id, sub.id, e.target.value)
-                                  }
-                                  aria-label={`${st.fullName} ${sub.name}`}
-                                />
-                              ) : (
-                                <span
-                                  className="block w-14 px-1 py-1 text-center text-[10px] text-[var(--muted)]"
-                                  title="Not on this student's curriculum"
-                                >
-                                  —
-                                </span>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
+                    {term
+                      ? roster.map((st) => (
+                          <MarkRow
+                            key={st.id}
+                            student={st}
+                            sis={sis ?? undefined}
+                            columns={columns}
+                            term={term}
+                            values={valuesByStudent.get(st.id) ?? {}}
+                            takes={takesBy.get(st.id)}
+                            locked={!!sheetMeta?.lockedAt}
+                            entryMode={entryMode}
+                            grades={gradeChoices}
+                            areas={NO_AREAS}
+                            ratings={NO_RATINGS}
+                            ratingChoices={ratingChoices}
+                            absentAll={absentByStudent.get(st.id)?.all ?? false}
+                            absentAny={absentByStudent.get(st.id)?.any ?? false}
+                            absentReason={absentReasons.get(st.id) ?? ""}
+                            onAbsentAll={setAbsentAll}
+                            onAbsentReason={setAbsentReason}
+                            onMark={setMark}
+                            onGrade={setGrade}
+                            onRating={setCoScholasticRating}
+                            onScan={canScan ? setScanStudentId : undefined}
+                          />
+                        ))
+                      : null}
                   </ErpTableBody>
                 </ErpTable>
+                </div>
               </ErpTableShell>
+                </>
+              ) : null}
+
+              {areas.length > 0 ? (
+                <>
+                  <h3 className="mb-2 mt-5 text-sm font-bold text-[var(--brand-deep)]">
+                    Co-scholastic · grades ({ratingChoices.join(", ")} · AB if absent)
+                    <span className="ml-2 text-xs font-normal text-[var(--muted)]">
+                      Subjects marked co-scholastic in Masters, and the scheme&apos;s areas — graded, not marked
+                    </span>
+                  </h3>
+                  <ErpTableShell>
+                    <div className="overflow-x-auto">
+                    <ErpTable minWidth="min-w-full" className="text-xs sm:text-sm">
+                      <ErpTableHead>
+                        <tr>
+                          <th className="sticky left-0 z-10 bg-[var(--surface-sunken)] px-4 py-2.5 font-bold text-[var(--brand-deep)]">
+                            Student
+                          </th>
+                          {areas.map((area) => (
+                            <th
+                              key={area.code}
+                              className="px-4 py-2.5 text-center font-bold text-[var(--brand-deep)]"
+                            >
+                              {coScholasticDomainLabel(area.code, areas)}
+                              <div className="text-[10px] font-normal text-[var(--muted)]">grade</div>
+                            </th>
+                          ))}
+                        </tr>
+                      </ErpTableHead>
+                      <ErpTableBody>
+                        {term
+                          ? roster.map((st) => (
+                              <CoScholasticRow
+                                key={st.id}
+                                student={st}
+                                sis={sis ?? undefined}
+                                locked={!!sheetMeta?.lockedAt}
+                                areas={areas}
+                                ratings={ratingsByStudent.get(st.id) ?? {}}
+                                ratingChoices={ratingChoices}
+                                onRating={setCoScholasticRating}
+                                onAbsentAll={setCoScholasticAbsentAll}
+                              />
+                            ))
+                          : null}
+                      </ErpTableBody>
+                    </ErpTable>
+                    </div>
+                  </ErpTableShell>
+                </>
+              ) : null}
+              {canScan && scanStudent && term && scanSubjects.length > 0 ? (
+                <AnswerSheetScanDialog
+                  key={scanStudent.id}
+                  studentId={scanStudent.id}
+                  studentName={scanStudent.fullName}
+                  classId={classId}
+                  sectionId={sectionId}
+                  termId={term.id}
+                  subjects={scanSubjects}
+                  defaultSubjectId={scanSubjects.length === 1 ? scanSubjects[0]!.id : undefined}
+                  onUse={onScanUse}
+                  onClose={() => setScanStudentId(null)}
+                />
+              ) : null}
             </>
           )}
         </div>
+      ) : null}
+
+      {tab === "items" ? (
+        <ItemScoresPanel
+          ay={ay}
+          term={term}
+          classId={classId}
+          sectionId={sectionId}
+          roster={roster}
+          subjects={subjects}
+          classLabel={classLabel}
+          masters={masters}
+          canEdit={!!masters && canWriteModuleTab(session, masters, "exams", "items")}
+          enteredBy={session.fullName}
+          onSaved={refresh}
+          onFlash={flash}
+          onError={setError}
+        />
+      ) : null}
+
+      {tab === "atrisk" ? (
+        <AtRiskPanel
+          ay={ay}
+          term={term}
+          classId={classId}
+          sectionId={sectionId}
+          roster={roster}
+          masters={masters}
+          policy={policy}
+          canEdit={!!masters && hasPermission(session, masters, "exams", "edit")}
+          onFlash={flash}
+          onError={setError}
+        />
+      ) : null}
+
+      {tab === "remarks" ? (
+        <RemarksPanel
+          ay={ay}
+          term={term}
+          terms={terms}
+          classId={classId}
+          sectionId={sectionId}
+          classLabel={classLabel}
+          roster={roster}
+          subjects={subjects}
+          policy={policy}
+          canEdit={!!masters && canWriteModuleTab(session, masters, "exams", "remarks")}
+          onSaved={refresh}
+          onFlash={flash}
+          onError={setError}
+        />
       ) : null}
 
       {tab === "reports" ? (
@@ -1568,16 +2813,17 @@ export function ExamsWorkspace() {
                 Select class and section above.
               </p>
             ) : (
-              <ul className="mt-3 divide-y divide-[rgba(32,48,80,0.1)] overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
+              <ul className="mt-3 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
                 {roster.map((st) => {
-                  const hold = checkHold(st.id, "HOLD_REPORT_CARD");
+                  const hold =
+                    reportHolds.get(st.id) ?? checkHold(st.id, "HOLD_REPORT_CARD");
                   return (
                     <li key={st.id}>
                       <button
                         type="button"
-                        className={`flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-[rgba(32,48,80,0.03)] ${
+                        className={`flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-[var(--surface-sunken)] ${
                           reportStudentId === st.id
-                            ? "bg-[rgba(32,48,80,0.06)]"
+                            ? "bg-[var(--surface-sunken)]"
                             : ""
                         }`}
                         onClick={() => openReport(st.id)}
@@ -1585,7 +2831,7 @@ export function ExamsWorkspace() {
                         <StudentAvatar student={st} size={36} />
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-medium text-[var(--ink)]">
-                            <StudentNameLabel student={st} />
+                            <StudentNameLabel student={st} sis={sis ?? undefined} />
                           </div>
                           <div className="text-xs text-[var(--muted)]">
                             {st.admissionNo}
@@ -1651,7 +2897,7 @@ export function ExamsWorkspace() {
                 <ReportCardSheet card={preview} />
               </div>
             ) : (
-              <p className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-10 text-center text-sm text-[var(--muted)]">
+              <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
                 Select a student to preview their report card for the chosen
                 exam.
               </p>
@@ -1663,12 +2909,12 @@ export function ExamsWorkspace() {
       {tab === "results" ? (
         <div className="mt-6 space-y-4">
           {!classId || !sectionId || !examTermId ? (
-            <p className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-10 text-center text-sm text-[var(--muted)]">
+            <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
               Select exam, class and section. Use Annual / Half-yearly for
               promotion decisions (aggregates apply when enabled in policy).
             </p>
           ) : classResult && "error" in classResult ? (
-            <p className="rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
+            <p className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm text-[var(--danger)]">
               {classResult.error}
             </p>
           ) : classResult && "sheet" in classResult ? (
@@ -1688,14 +2934,14 @@ export function ExamsWorkspace() {
                 <div className="flex flex-wrap gap-2 print-hide">
                   <button
                     type="button"
-                    className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold"
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold"
                     onClick={onSuggestPromotions}
                   >
                     Auto suggest
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold"
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold"
                     onClick={onApplyPromotions}
                   >
                     Apply promotions to SIS
@@ -1715,23 +2961,23 @@ export function ExamsWorkspace() {
               </div>
 
               <ErpTableShell className="print-hide">
+                <div className="overflow-x-auto">
                 <ErpTable minWidth="min-w-full" className="text-xs sm:text-sm">
                   <ErpTableHead>
                     <tr>
-                      <th className="px-4 py-2.5 font-bold text-[var(--brand-deep)]">
+                      <ErpSortTh sort={resultSort} field="student" className="px-4 py-2.5 font-bold text-[var(--brand-deep)]">
                         Student
-                      </th>
-                      <th className="px-4 py-2.5 text-right font-bold">%</th>
-                      <th className="px-4 py-2.5 text-right font-bold">
-                        Grade
-                      </th>
-                      <th className="px-4 py-2.5 font-bold">Pass</th>
-                      <th className="px-4 py-2.5 font-bold">Decision</th>
-                      <th className="px-4 py-2.5 font-bold">Next class</th>
+                      </ErpSortTh>
+                      <ErpSortTh sort={resultSort} field="percent" align="right" className="px-4 py-2.5 text-right font-bold">%</ErpSortTh>
+                      <ErpSortTh sort={resultSort} field="grade" className="px-4 py-2.5 text-right font-bold">Grade</ErpSortTh>
+                      <ErpSortTh sort={resultSort} field="attendance" className="px-4 py-2.5 font-bold"><span title="Present / working days — working days from the Masters holiday calendar, counted from the day after admission">Attendance</span></ErpSortTh>
+                      <ErpSortTh sort={resultSort} field="pass" className="px-4 py-2.5 font-bold">Pass</ErpSortTh>
+                      <ErpSortTh sort={resultSort} field="decision" className="px-4 py-2.5 font-bold">Decision</ErpSortTh>
+                      <ErpSortTh sort={resultSort} field="next" className="px-4 py-2.5 font-bold">Next class</ErpSortTh>
                     </tr>
                   </ErpTableHead>
                   <ErpTableBody>
-                    {classResult.sheet.rows.map((row) => {
+                    {resultSort.rows.map((row) => {
                       const decision =
                         row.record?.decision ??
                         (row.card ? "pending" : "pending");
@@ -1739,7 +2985,7 @@ export function ExamsWorkspace() {
                       return (
                         <tr
                           key={row.student.id}
-                          className="border-b border-[rgba(32,48,80,0.06)]"
+                          className="border-b border-[var(--border)]"
                         >
                           <td className="px-3 py-2">
                             <div className="flex items-center gap-2">
@@ -1751,7 +2997,7 @@ export function ExamsWorkspace() {
                                 <div className="text-[10px] text-[var(--muted)]">
                                   {row.student.admissionNo}
                                   {row.error ? (
-                                    <span className="ml-1 text-[#b45309]">
+                                    <span className="ml-1 text-[var(--warning)]">
                                       · {row.error}
                                     </span>
                                   ) : null}
@@ -1770,15 +3016,107 @@ export function ExamsWorkspace() {
                           <td className="px-2 py-2 text-right font-semibold">
                             {row.card?.overallGrade ?? "—"}
                           </td>
+                          <td className="px-2 py-2 text-xs">
+                            {attEdit?.studentId === row.student.id ? (
+                              <div className="flex min-w-[15rem] flex-col gap-1">
+                                <div className="flex items-center gap-1">
+                                  <input className="field !py-1 w-16" inputMode="decimal" aria-label="Present days" value={attEdit.present} onChange={(e) => setAttEdit({ ...attEdit, present: e.target.value, error: "" })} />
+                                  <span>/</span>
+                                  <input className="field !py-1 w-16" inputMode="decimal" aria-label="Working days" value={attEdit.working} onChange={(e) => setAttEdit({ ...attEdit, working: e.target.value, error: "" })} />
+                                </div>
+                                <input className="field !py-1" placeholder="Why (kept with the result)" value={attEdit.note} onChange={(e) => setAttEdit({ ...attEdit, note: e.target.value, error: "" })} />
+                                {attEdit.error ? <span className="text-[var(--danger)]">{attEdit.error}</span> : null}
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    className="font-semibold text-[var(--brand-mid)] underline"
+                                    onClick={() => {
+                                      const r = setAttendanceOverride({
+                                        academicYearCode: ay,
+                                        examTermId,
+                                        studentId: row.student.id,
+                                        presentDays: Number(attEdit.present),
+                                        workingDays: Number(attEdit.working),
+                                        note: attEdit.note,
+                                        by: session.fullName,
+                                      });
+                                      if (!r.ok) setAttEdit({ ...attEdit, error: r.error });
+                                      else {
+                                        setAttEdit(null);
+                                        setTick((t) => t + 1);
+                                      }
+                                    }}
+                                  >
+                                    Save
+                                  </button>
+                                  <button type="button" className="text-[var(--muted)] underline" onClick={() => setAttEdit(null)}>
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div>
+                                {row.card?.attendance ? (
+                                  <span className="tabular-nums font-semibold">
+                                    {row.card.attendance.presentDays}/{row.card.attendance.workingDays}
+                                    <span className="font-normal text-[var(--muted)]"> ({row.card.attendance.percent}%)</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-[var(--muted)]">—</span>
+                                )}
+                                {row.card?.attendance?.edited ? (
+                                  <span
+                                    className="ml-1 rounded bg-[rgba(197,160,40,0.2)] px-1 text-[10px] font-semibold text-[var(--brand-deep)]"
+                                    title={`Edited by ${row.card.attendance.edited.by}: ${row.card.attendance.edited.note}. Registers say ${row.card.attendance.edited.computedPresent}/${row.card.attendance.edited.computedWorking}.`}
+                                  >
+                                    edited
+                                  </span>
+                                ) : row.card?.attendance?.unmarkedDays ? (
+                                  <span className="block text-[10px] text-[var(--danger)]">{row.card.attendance.unmarkedDays} day(s) not marked</span>
+                                ) : null}
+                                {row.card ? (
+                                  <div className="mt-0.5 flex gap-2 text-[10px]">
+                                    <button
+                                      type="button"
+                                      className="font-semibold text-[var(--brand-mid)] underline"
+                                      onClick={() =>
+                                        setAttEdit({
+                                          studentId: row.student.id,
+                                          present: String(row.card?.attendance?.presentDays ?? ""),
+                                          working: String(row.card?.attendance?.workingDays ?? ""),
+                                          note: row.card?.attendance?.edited?.note ?? "",
+                                          error: "",
+                                        })
+                                      }
+                                    >
+                                      Edit
+                                    </button>
+                                    {row.card.attendance?.edited ? (
+                                      <button
+                                        type="button"
+                                        className="text-[var(--muted)] underline"
+                                        onClick={() => {
+                                          setAttendanceOverride({ academicYearCode: ay, examTermId, studentId: row.student.id, presentDays: 0, workingDays: 0, note: "", by: session.fullName, clear: true });
+                                          setTick((t) => t + 1);
+                                        }}
+                                      >
+                                        Use registers
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                            )}
+                          </td>
                           <td className="px-2 py-2">
                             {!row.card ? (
                               <span className="text-[var(--muted)]">—</span>
                             ) : row.passed ? (
-                              <span className="font-semibold text-[#15803d]">
+                              <span className="font-semibold text-[var(--success)]">
                                 Pass
                               </span>
                             ) : (
-                              <span className="font-semibold text-[#b45309]">
+                              <span className="font-semibold text-[var(--warning)]">
                                 Fail
                               </span>
                             )}
@@ -1828,11 +3166,18 @@ export function ExamsWorkspace() {
                     })}
                   </ErpTableBody>
                 </ErpTable>
+                </div>
               </ErpTableShell>
 
               <ClassResultSheetView sheet={classResult.sheet} />
             </>
           ) : null}
+        </div>
+      ) : null}
+
+      {tab === "result_reports" ? (
+        <div className="mt-6">
+          <ExamReportsRunner ay={ay} />
         </div>
       ) : null}
 

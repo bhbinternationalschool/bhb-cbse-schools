@@ -1,0 +1,1770 @@
+import "package:flutter/material.dart";
+import "package:flutter_secure_storage/flutter_secure_storage.dart";
+import "package:speech_to_text/speech_to_text.dart";
+import "package:url_launcher/url_launcher.dart";
+
+import "../../core/api/api_client.dart";
+import "../../core/theme/app_theme.dart";
+import "../../core/ui/haptics.dart";
+import "../../core/ui/motion.dart";
+import "../../core/ui/spacing.dart";
+import "video_player_screen.dart";
+import "../../core/i18n/locale_controller.dart";
+import "../../core/billing/open_checkout.dart";
+import "../../core/billing/play_billing.dart";
+import "../../core/config/app_config.dart";
+import "../../l10n/app_localizations.dart";
+
+/// What the tutor is told about the child and, when opened from a
+/// homework item, the assignment.
+class TutorContext {
+  const TutorContext({
+    required this.child,
+    this.subjectLabel = "",
+    this.homeworkTitle = "",
+    this.homeworkBody = "",
+  });
+
+  final ParentChild child;
+  final String subjectLabel;
+  final String homeworkTitle;
+  final String homeworkBody;
+
+  Map<String, String> toJson() => {
+    "childName": child.fullName,
+    "className": [
+      child.className,
+      if (child.sectionName.isNotEmpty) child.sectionName,
+    ].join(" "),
+    if (subjectLabel.isNotEmpty) "subjectLabel": subjectLabel,
+    if (homeworkTitle.isNotEmpty) "homeworkTitle": homeworkTitle,
+    if (homeworkBody.isNotEmpty) "homeworkBody": homeworkBody,
+  };
+}
+
+/// The AI tutor for parents. Hints are free (a daily allowance); the full
+/// tutor — teaching, examples, practice, checking answers, homework help,
+/// exam prep — runs for the length of a pass. Replies stream in as the
+/// tutor writes them.
+class TutorScreen extends StatefulWidget {
+  const TutorScreen({
+    super.key,
+    required this.api,
+    required this.context,
+    this.initialMode = "hint",
+  });
+
+  final ApiClient api;
+  final TutorContext context;
+  final String initialMode;
+
+  @override
+  State<TutorScreen> createState() => _TutorScreenState();
+}
+
+class _Msg {
+  _Msg(this.role, this.text, {this.mode = "", this.topic = ""});
+
+  final String role;
+  String text;
+  final String mode;
+
+  /// For an assistant reply: the question it answered — the video topic.
+  final String topic;
+  String charge = "";
+
+  /// The server's id for this generation, so reporting it names the exact
+  /// reply. Empty when the server did not send one; reporting still works.
+  String generationId = "";
+
+  /// Set once the parent has reported this reply, so the button reads back
+  /// what they did instead of inviting a second identical report.
+  bool reported = false;
+}
+
+/// The composer's example for each mode, in the app's language. The server
+/// sends an English example too; it is the fallback for a mode added later.
+String? _promptFor(L l, String mode) => switch (mode) {
+  "hint" => l.tutPromptHint,
+  "teach" => l.tutPromptTeach,
+  "examples" => l.tutPromptExamples,
+  "practice" => l.tutPromptPractice,
+  "score" => l.tutPromptScore,
+  "homework" => l.tutPromptHomework,
+  "exam" => l.tutPromptExam,
+  _ => null,
+};
+
+class _TutorScreenState extends State<TutorScreen> {
+  TutorStatus? _status;
+  String? _error;
+  late String _mode = widget.initialMode;
+
+  /// "hi", "both" (Hindi then English) or "en"; starts from the family's
+  /// preference on record.
+  String _language = "en";
+  final _messages = <_Msg>[];
+  final _input = TextEditingController();
+  final _scroll = ScrollController();
+  bool _busy = false;
+
+  static const _guideSeenKey = "tutor_guide_seen_v1";
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    _maybeShowGuide();
+  }
+
+  /// The tuition guide opens by itself the first time a family opens the
+  /// tutor, and lives behind the ? in the app bar after that.
+  Future<void> _maybeShowGuide() async {
+    const storage = FlutterSecureStorage();
+    String? seen;
+    try {
+      seen = await storage.read(key: _guideSeenKey);
+    } catch (_) {
+      seen = "1";
+    }
+    if (seen != null || !mounted) return;
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    if (!mounted) return;
+    await _showGuide();
+    try {
+      await storage.write(key: _guideSeenKey, value: "1");
+    } catch (_) {
+      /* a phone that refuses storage just sees it again next time */
+    }
+  }
+
+  Future<void> _showGuide() => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (context) => _GuideSheet(
+      childFirstName: widget.context.child.fullName.split(" ").first,
+    ),
+  );
+
+  @override
+  void dispose() {
+    _input.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() => _error = null);
+    try {
+      final s = await widget.api.fetchTutorStatus(widget.context.child.id);
+      if (!mounted) return;
+      setState(() {
+        _status = s;
+        if (_messages.isEmpty) _language = s.defaultLanguage;
+      });
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = context.l10n.couldNotReachTheSchoolServer);
+      }
+    }
+  }
+
+  TutorModeInfo? get _modeInfo {
+    final s = _status;
+    if (s == null) return null;
+    for (final m in s.modes) {
+      if (m.code == _mode) return m;
+    }
+    return s.modes.isEmpty ? null : s.modes.first;
+  }
+
+  void _scrollToEnd() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scroll.hasClients) return;
+      _scroll.animateTo(
+        _scroll.position.maxScrollExtent,
+        duration: AppMotion.base,
+        curve: AppMotion.enter,
+      );
+    });
+  }
+
+  Future<void> _send() async {
+    final text = _input.text.trim();
+    final status = _status;
+    if (text.isEmpty || _busy || status == null) return;
+    final mode = _modeInfo;
+    // A paid mode without a pass is refused by the server; say so before
+    // the round trip and open the passes instead.
+    if (mode != null && mode.paid && !status.allowance.hasPass) {
+      Haptics.warning();
+      _showPasses(
+        reason: context.l10n.tutModeNeedsPassReason(
+          mode.label,
+          widget.context.child.fullName.split(" ").first,
+        ),
+      );
+      return;
+    }
+    Haptics.tap();
+    _input.clear();
+    final history = [
+      for (final m in _messages.where((m) => m.text.isNotEmpty))
+        TutorTurn(m.role, m.text),
+    ];
+    final reply = _Msg("assistant", "", mode: _mode, topic: text);
+    setState(() {
+      _busy = true;
+      _messages.add(_Msg("user", text, mode: _mode));
+      _messages.add(reply);
+    });
+    _scrollToEnd();
+    try {
+      await for (final ev in widget.api.askTutorStream(
+        message: text,
+        mode: _mode,
+        history: history,
+        context: widget.context.toJson(),
+        studentId: widget.context.child.id,
+        language: _language,
+      )) {
+        if (!mounted) return;
+        switch (ev) {
+          case TutorDelta(:final text):
+            setState(() => reply.text += text);
+            _scrollToEnd();
+          case TutorDone(
+            reply: final full,
+            :final charge,
+            :final allowance,
+            :final generationId,
+          ):
+            setState(() {
+              if (full.isNotEmpty) reply.text = full;
+              reply.charge = charge;
+              reply.generationId = generationId;
+              if (allowance != null) {
+                _status = _withAllowance(status, allowance);
+              }
+            });
+        }
+      }
+      Haptics.success();
+    } on TutorRefused catch (e) {
+      Haptics.warning();
+      if (!mounted) return;
+      setState(() {
+        _messages.removeLast();
+        if (e.allowance != null) _status = _withAllowance(status, e.allowance!);
+      });
+      if (e.needsPass) {
+        _showPasses(reason: e.message);
+      } else {
+        _toast(e.message);
+      }
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _messages.removeLast());
+      _toast(e.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _messages.removeLast());
+      _toast(context.l10n.tutCouldNotReachTheTutor);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _showVideos(String topic) async {
+    Haptics.tap();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => _VideosSheet(
+        api: widget.api,
+        studentId: widget.context.child.id,
+        topic: topic,
+        language: _language,
+      ),
+    );
+  }
+
+  TutorStatus _withAllowance(TutorStatus s, TutorAllowance a) => TutorStatus(
+    configured: s.configured,
+    defaultLanguage: s.defaultLanguage,
+    videosAvailable: s.videosAvailable,
+    modes: s.modes,
+    allowance: a,
+    plans: s.plans,
+    orders: s.orders,
+    note: s.note,
+  );
+
+  void _toast(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// Report one AI reply to the school.
+  ///
+  /// The category is a tap, the words optional — a parent who is upset
+  /// should be able to flag an answer in two taps without composing a
+  /// sentence. Only a confirmed write flips the button to "Reported": if
+  /// the server refuses, the parent is told and can try again, because a
+  /// safety complaint silently dropped is worse than no button at all.
+  Future<void> _reportReply(_Msg msg) async {
+    if (msg.role != "assistant" || msg.text.trim().isEmpty) return;
+    final l = context.l10n;
+
+    final note = TextEditingController();
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheet) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          16 + MediaQuery.viewInsetsOf(sheet).bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(l.tutReportTitle, style: AppText.titleMedium),
+            const SizedBox(height: 4),
+            Text(l.tutReportBody, style: AppText.bodySmallMuted),
+            const SizedBox(height: 12),
+            for (final c in [
+              ("wrong", l.tutReportWrong),
+              ("inappropriate", l.tutReportInappropriate),
+              ("confusing", l.tutReportConfusing),
+              ("other", l.tutReportOther),
+            ])
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text(c.$2, style: AppText.bodyMedium),
+                onTap: () => Navigator.pop(sheet, c.$1),
+              ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: note,
+              maxLines: 2,
+              maxLength: 500,
+              decoration: InputDecoration(
+                labelText: l.tutReportNote,
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.pop(sheet),
+                child: Text(l.cancel),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null || !mounted) return;
+
+    // The question this reply answered, so the school sees the exchange
+    // rather than an answer with no context.
+    final i = _messages.indexOf(msg);
+    final asked = i > 0 && _messages[i - 1].role == "user"
+        ? _messages[i - 1].text
+        : "";
+
+    try {
+      await widget.api.reportTutorReply(
+        reply: msg.text,
+        generationId: msg.generationId,
+        question: asked,
+        studentId: widget.context.child.id,
+        category: chosen,
+        reason: note.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() => msg.reported = true);
+      _toast(context.l10n.tutReportThanks);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      _toast(e.message);
+    } catch (_) {
+      if (!mounted) return;
+      _toast(context.l10n.tutCouldNotSendReport);
+    }
+  }
+
+  Future<void> _showPasses({String? reason}) async {
+    final status = _status;
+    if (status == null) return;
+    final bought = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => _PassSheet(
+        api: widget.api,
+        status: status,
+        child: widget.context.child,
+        reason: reason,
+      ),
+    );
+    if (bought == true) await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final status = _status;
+    final child = widget.context.child;
+    return Scaffold(
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(context.l10n.aiTutor, style: AppText.titleMedium),
+            Text(
+              widget.context.homeworkTitle.isNotEmpty
+                  ? widget.context.homeworkTitle
+                  : child.fullName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.labelMedium.copyWith(color: Color(0xFFB8C0D4)),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            tooltip: context.l10n.howToUseTheTutor,
+            onPressed: () {
+              Haptics.tap();
+              _showGuide();
+            },
+            icon: const Icon(Icons.help_outline),
+          ),
+          if (status != null)
+            TextButton.icon(
+              onPressed: () => _showPasses(),
+              icon: const Icon(Icons.workspace_premium_outlined, size: 18),
+              label: Text(
+                status.allowance.hasPass
+                    ? status.allowance.validLabel
+                    : context.l10n.tutGetAPass,
+              ),
+              style: TextButton.styleFrom(foregroundColor: Colors.white),
+            ),
+        ],
+      ),
+      body: AppCrossfade(
+        child: status == null
+            ? Center(
+                key: ValueKey(_error == null ? "loading" : "error"),
+                child: _error == null
+                    ? const CircularProgressIndicator(color: AppColors.primary)
+                    : Padding(
+                        padding: Insets.state,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.cloud_off_outlined,
+                              size: 40,
+                              color: AppColors.muted,
+                            ),
+                            const SizedBox(height: Space.md),
+                            Text(_error!, textAlign: TextAlign.center),
+                            const SizedBox(height: Space.md),
+                            FilledButton(
+                              onPressed: _load,
+                              child: Text(context.l10n.retry),
+                            ),
+                          ],
+                        ),
+                      ),
+              )
+            : !status.configured
+            ? Center(
+                key: const ValueKey("off"),
+                child: Padding(
+                  padding: Insets.state,
+                  child: Text(
+                    context.l10n.theTutorIsNotSwitchedOn,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              )
+            : Column(
+                key: const ValueKey("chat"),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      Space.xl,
+                      Space.sm,
+                      Space.lg,
+                      0,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            context.l10n.tutReplyLanguage,
+                            style: AppText.bodySmallMuted,
+                          ),
+                        ),
+                        _LanguageToggle(
+                          language: _language,
+                          dark: false,
+                          onChanged: (v) {
+                            Haptics.tap();
+                            setState(() => _language = v);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  _ModeBar(
+                    modes: status.modes,
+                    selected: _mode,
+                    hasPass: status.allowance.hasPass,
+                    onSelect: (code) {
+                      if (code == _mode) return;
+                      Haptics.tap();
+                      setState(() => _mode = code);
+                    },
+                  ),
+                  _AllowanceStrip(allowance: status.allowance, mode: _modeInfo),
+                  Expanded(
+                    child: _messages.isEmpty
+                        ? _Welcome(
+                            mode: _modeInfo,
+                            note: status.note,
+                            onGuide: () {
+                              Haptics.tap();
+                              _showGuide();
+                            },
+                          )
+                        : ListView.builder(
+                            controller: _scroll,
+                            padding: const EdgeInsets.fromLTRB(
+                              Space.lg,
+                              Space.md,
+                              Space.md,
+                              Space.xl,
+                            ),
+                            itemCount: _messages.length,
+                            itemBuilder: (context, i) => _Bubble(
+                              msg: _messages[i],
+                              busy: _busy && i == _messages.length - 1,
+                              onVideos: _messages[i].topic.isEmpty
+                                  ? null
+                                  : () => _showVideos(_messages[i].topic),
+                              onReport: () => _reportReply(_messages[i]),
+                            ),
+                          ),
+                  ),
+                  _Composer(
+                    controller: _input,
+                    hint:
+                        _promptFor(context.l10n, _mode) ??
+                        _modeInfo?.prompt ??
+                        context.l10n.tutAskTheTutor,
+                    busy: _busy,
+                    onSend: _send,
+                    // Spoken questions are recognised in the reply language;
+                    // "both" listens in Hindi, which also catches Hinglish.
+                    speechLocale: _language == "en" ? "en_IN" : "hi_IN",
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class _ModeBar extends StatelessWidget {
+  const _ModeBar({
+    required this.modes,
+    required this.selected,
+    required this.hasPass,
+    required this.onSelect,
+  });
+
+  final List<TutorModeInfo> modes;
+  final String selected;
+  final bool hasPass;
+  final void Function(String code) onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 46,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.md, 0),
+        itemCount: modes.length,
+        separatorBuilder: (_, _) => const SizedBox(width: Space.sm),
+        itemBuilder: (context, i) {
+          final m = modes[i];
+          final on = m.code == selected;
+          final locked = m.paid && !hasPass;
+          return AnimatedContainer(
+            duration: AppMotion.fast,
+            decoration: BoxDecoration(
+              color: on ? AppColors.primary : Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: on
+                    ? AppColors.primary
+                    : AppColors.ink.withValues(alpha: 0.12),
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => onSelect(m.code),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    children: [
+                      if (locked) ...[
+                        Icon(
+                          Icons.lock_outline,
+                          size: 13,
+                          color: on ? Colors.white70 : AppColors.muted,
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      Text(
+                        m.label,
+                        style: AppText.labelLarge.copyWith(
+                          color: on ? Colors.white : AppColors.ink,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _AllowanceStrip extends StatelessWidget {
+  const _AllowanceStrip({required this.allowance, required this.mode});
+
+  final TutorAllowance allowance;
+  final TutorModeInfo? mode;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = context.l10n;
+    final String text;
+    if (allowance.hasPass) {
+      text = allowance.passUsedToday >= allowance.passMessagesPerDay
+          ? l.tutFullTutorOnLimitReached(
+              allowance.studentFirstName,
+              allowance.validLabel,
+            )
+          : l.tutFullTutorOn(allowance.studentFirstName, allowance.validLabel);
+    } else if (mode != null && mode!.paid) {
+      text = l.tutModeNeedsPass(mode!.label);
+    } else {
+      text = l.tutFreeHintsLeft(
+        allowance.freeLeft.toString(),
+        allowance.freeHintsPerDay.toString(),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        Space.xl,
+        Space.sm,
+        Space.lg,
+        Space.xs,
+      ),
+      child: Row(
+        children: [
+          Icon(
+            allowance.hasPass ? Icons.verified_outlined : Icons.info_outline,
+            size: 14,
+            color: allowance.hasPass ? AppColors.success : AppColors.muted,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              text,
+              style: AppText.labelMedium.copyWith(
+                color: allowance.hasPass ? AppColors.success : AppColors.muted,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Welcome extends StatelessWidget {
+  const _Welcome({required this.mode, required this.note, this.onGuide});
+
+  final TutorModeInfo? mode;
+  final String note;
+  final VoidCallback? onGuide;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: Insets.page,
+      children: [
+        Container(
+          padding: Insets.card,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.ink.withValues(alpha: 0.08)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                mode?.label ?? context.l10n.tutTutor,
+                style: AppText.titleSmallInk.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: Space.xs),
+              Text(
+                mode?.blurb ?? "",
+                style: AppText.bodyMediumInk.copyWith(height: 1.4),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: Space.md),
+        if (onGuide != null)
+          OutlinedButton.icon(
+            onPressed: onGuide,
+            icon: const Icon(Icons.menu_book_outlined, size: 18),
+            label: Text(context.l10n.howToUseTheTutorAs),
+          ),
+        const SizedBox(height: Space.lg),
+        Text(note, style: AppText.bodySmallMuted.copyWith(height: 1.45)),
+        const SizedBox(height: Space.sm),
+        Text(
+          context.l10n.repliesAreWrittenByAnAi,
+          style: AppText.bodySmallMuted.copyWith(height: 1.45),
+        ),
+      ],
+    );
+  }
+}
+
+class _Bubble extends StatelessWidget {
+  const _Bubble({
+    required this.msg,
+    required this.busy,
+    this.onVideos,
+    this.onReport,
+  });
+
+  final _Msg msg;
+  final bool busy;
+  final VoidCallback? onVideos;
+  final VoidCallback? onReport;
+
+  @override
+  Widget build(BuildContext context) {
+    final mine = msg.role == "user";
+    final waiting = !mine && msg.text.isEmpty && busy;
+    return Align(
+      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width * 0.82,
+        ),
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
+        decoration: BoxDecoration(
+          color: mine ? AppColors.primary : Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(16),
+            topRight: const Radius.circular(16),
+            bottomLeft: Radius.circular(mine ? 16 : 4),
+            bottomRight: Radius.circular(mine ? 4 : 16),
+          ),
+          border: mine
+              ? null
+              : Border.all(color: AppColors.ink.withValues(alpha: 0.08)),
+        ),
+        child: waiting
+            ? const SizedBox(
+                width: 36,
+                height: 14,
+                child: Center(
+                  child: SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.muted,
+                    ),
+                  ),
+                ),
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SelectableText(
+                    // The model is asked for plain text but still bolds with
+                    // asterisks now and then; a parent should never see them.
+                    msg.text.replaceAll("**", ""),
+                    style: AppText.bodyMedium.copyWith(
+                      height: 1.45,
+                      color: mine ? Colors.white : AppColors.ink,
+                    ),
+                  ),
+                  if (!mine && msg.charge.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Text(
+                          msg.charge == "free"
+                              ? context.l10n.tutFreeHint
+                              : context.l10n.tutFullTutor,
+                          style: AppText.labelSmallMuted,
+                        ),
+                        const Spacer(),
+                        if (onVideos != null)
+                          InkWell(
+                            onTap: onVideos,
+                            borderRadius: BorderRadius.circular(12),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.play_circle_outline,
+                                    size: 15,
+                                    color: AppColors.danger,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    context.l10n.tutWatchVideos,
+                                    style: AppText.labelMedium.copyWith(
+                                      color: AppColors.danger,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        // Every AI reply can be reported. Play requires a way
+                        // to flag offensive AI output, and a parent whose
+                        // child was given a bad answer needs somewhere to say
+                        // so — on the reply itself, not buried in a menu.
+                        if (onReport != null) ...[
+                          const SizedBox(width: 4),
+                          InkWell(
+                            onTap: msg.reported ? null : onReport,
+                            borderRadius: BorderRadius.circular(12),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    msg.reported
+                                        ? Icons.check_circle_outline
+                                        : Icons.flag_outlined,
+                                    size: 15,
+                                    color: AppColors.muted,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    msg.reported
+                                        ? context.l10n.tutReported
+                                        : context.l10n.tutReport,
+                                    style: AppText.labelMediumMuted,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class _Composer extends StatefulWidget {
+  const _Composer({
+    required this.controller,
+    required this.hint,
+    required this.busy,
+    required this.onSend,
+    required this.speechLocale,
+  });
+
+  final TextEditingController controller;
+  final String hint;
+  final bool busy;
+  final VoidCallback onSend;
+  final String speechLocale;
+
+  @override
+  State<_Composer> createState() => _ComposerState();
+}
+
+/// The composer with a microphone: a parent who would rather speak than
+/// type — or cannot type Hindi easily — taps the mic, speaks, and the
+/// words land in the box to check before sending. Recognition runs on
+/// the phone's own speech service; the app records and uploads nothing.
+class _ComposerState extends State<_Composer> {
+  final _speech = SpeechToText();
+  bool _ready = false;
+  bool _listening = false;
+  String _baseText = "";
+
+  @override
+  void dispose() {
+    if (_listening) _speech.stop();
+    super.dispose();
+  }
+
+  Future<void> _toggleMic() async {
+    if (_listening) {
+      await _speech.stop();
+      if (mounted) setState(() => _listening = false);
+      return;
+    }
+    Haptics.tap();
+    if (!_ready) {
+      _ready = await _speech.initialize(
+        onError: (_) {
+          if (mounted) setState(() => _listening = false);
+        },
+        onStatus: (status) {
+          if ((status == "done" || status == "notListening") && mounted) {
+            setState(() => _listening = false);
+          }
+        },
+      );
+    }
+    if (!_ready) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.voiceInputIsNotAvailableOn)),
+        );
+      }
+      return;
+    }
+    _baseText = widget.controller.text.trim();
+    setState(() => _listening = true);
+    await _speech.listen(
+      listenOptions: SpeechListenOptions(
+        localeId: widget.speechLocale,
+        partialResults: true,
+        listenMode: ListenMode.dictation,
+      ),
+      onResult: (result) {
+        final heard = result.recognizedWords.trim();
+        final joined = [
+          if (_baseText.isNotEmpty) _baseText,
+          if (heard.isNotEmpty) heard,
+        ].join(" ");
+        widget.controller.text = joined;
+        widget.controller.selection = TextSelection.fromPosition(
+          TextPosition(offset: joined.length),
+        );
+        if (result.finalResult && mounted) {
+          Haptics.success();
+          setState(() => _listening = false);
+        }
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          Space.md,
+          Space.sm,
+          Space.md,
+          Space.md,
+        ),
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: AppMotion.fast,
+              decoration: BoxDecoration(
+                color: _listening ? AppColors.danger : Colors.white,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: _listening
+                      ? AppColors.danger
+                      : AppColors.ink.withValues(alpha: 0.12),
+                ),
+              ),
+              child: IconButton(
+                tooltip: _listening
+                    ? context.l10n.tutStop
+                    : context.l10n.tutSpeakYourQuestion,
+                onPressed: widget.busy ? null : _toggleMic,
+                icon: Icon(
+                  _listening ? Icons.stop : Icons.mic_none,
+                  color: _listening ? Colors.white : AppColors.primary,
+                ),
+              ),
+            ),
+            const SizedBox(width: Space.sm),
+            Expanded(
+              child: TextField(
+                controller: widget.controller,
+                minLines: 1,
+                maxLines: 5,
+                textInputAction: TextInputAction.send,
+                onSubmitted: (_) => widget.onSend(),
+                decoration: InputDecoration(
+                  hintText: _listening
+                      ? context.l10n.tutListeningSpeakNow
+                      : widget.hint,
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: Space.sm),
+            IconButton.filled(
+              onPressed: widget.busy ? null : widget.onSend,
+              style: IconButton.styleFrom(backgroundColor: AppColors.primary),
+              icon: widget.busy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.arrow_upward, color: Colors.white),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The passes on sale. Buying opens the school's payment page; the pass
+/// switches on by itself once the bank confirms.
+class _PassSheet extends StatefulWidget {
+  const _PassSheet({
+    required this.api,
+    required this.status,
+    required this.child,
+    this.reason,
+  });
+
+  final ApiClient api;
+  final TutorStatus status;
+  final ParentChild child;
+  final String? reason;
+
+  @override
+  State<_PassSheet> createState() => _PassSheetState();
+}
+
+class _PassSheetState extends State<_PassSheet> {
+  String? _buying;
+
+  /// Play's own product records, when this is the Play build. Null until the
+  /// store answers; empty when it cannot.
+  PlayProducts? _playProducts;
+  PlayBilling? _play;
+
+  @override
+  void initState() {
+    super.initState();
+    if (AppConfig.playBilling) _initPlay();
+  }
+
+  @override
+  void dispose() {
+    _play?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _initPlay() async {
+    final play = PlayBilling(widget.api);
+    _play = play;
+    // Listen before anything is bought: Play delivers purchases left over
+    // from a previous run on this stream, and a listener attached only around
+    // a tap would drop them after the parent had paid.
+    play.listen(
+      studentId: widget.child.id,
+      onGranted: (planCode, endsAt) {
+        Haptics.success();
+        if (mounted) Navigator.pop(context, true);
+      },
+      onFailed: (message) {
+        Haptics.warning();
+        if (mounted) {
+          setState(() => _buying = null);
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(message)));
+        }
+      },
+    );
+    final found = await play.products(
+      widget.status.plans.map((p) => p.code).toSet(),
+    );
+    if (mounted) setState(() => _playProducts = found);
+  }
+
+  Future<void> _buy(TutorPlanInfo plan) async {
+    if (_buying != null) return;
+    setState(() => _buying = plan.code);
+
+    if (AppConfig.playBilling) {
+      // Play build: the store takes the money and the outcome arrives on the
+      // purchase stream, not from this call.
+      final catalogue = _playProducts;
+      final product = catalogue?.found[plan.code];
+      if (product == null) {
+        Haptics.warning();
+        if (mounted) {
+          setState(() => _buying = null);
+          // Name the actual fault. "Not ready, try again" sent somebody
+          // hunting a phone problem when the answer was a product that had
+          // never been set Active in Play Console.
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              duration: const Duration(seconds: 8),
+              content: Text(
+                catalogue?.problem ?? context.l10n.tutStillAskingGooglePlay,
+              ),
+            ),
+          );
+        }
+        return;
+      }
+      try {
+        await _play!.buy(product);
+      } catch (_) {
+        Haptics.warning();
+        if (mounted) {
+          setState(() => _buying = null);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(context.l10n.tutGooglePlayCouldNotStart)),
+          );
+        }
+      }
+      return;
+    }
+
+    final l = context.l10n;
+    try {
+      final r = await widget.api.buyTutorPass(
+        planCode: plan.code,
+        studentId: widget.child.id,
+      );
+      final uri = Uri.tryParse(r.checkoutUrl);
+      if (uri == null) {
+        throw ApiException(l.tutCouldNotOpenPaymentPage, 502);
+      }
+      final opened = await openCheckout(uri);
+      if (!opened) {
+        throw ApiException(l.tutNoBrowserForPaymentPage, 0);
+      }
+      Haptics.success();
+      if (mounted) Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      Haptics.warning();
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.couldNotReachTheSchoolServer)),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _buying = null);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final a = widget.status.allowance;
+    final first = widget.child.fullName.split(" ").first;
+    final classLabel = [
+      widget.child.className,
+      if (widget.child.sectionName.isNotEmpty) widget.child.sectionName,
+    ].join(" ");
+    final pending = widget.status.orders
+        .where((o) => o.status == "pending")
+        .toList();
+    return SafeArea(
+      child: Padding(
+        padding: Insets.sheet,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              context.l10n.tutPassFor(first),
+              style: AppText.titleMediumInk.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: Space.xs),
+            Text(
+              widget.reason ??
+                  context.l10n.tutUnlockFullTutor(first, classLabel),
+              style: AppText.bodyMediumInk.copyWith(height: 1.45),
+            ),
+            if (a.hasPass) ...[
+              const SizedBox(height: Space.md),
+              Row(
+                children: [
+                  const Icon(
+                    Icons.verified,
+                    size: 16,
+                    color: AppColors.success,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    a.passPlanLabel.isNotEmpty
+                        ? context.l10n.tutCurrentPassWithPlan(
+                            a.passPlanLabel,
+                            a.validLabel,
+                          )
+                        : context.l10n.tutCurrentPass(a.validLabel),
+                    style: AppText.bodySmall.copyWith(color: AppColors.success),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: Space.lg),
+            for (final p in widget.status.plans) ...[
+              _PlanTile(
+                plan: p,
+                busy: _buying == p.code,
+                enabled: _buying == null,
+                onTap: () => _buy(p),
+              ),
+              const SizedBox(height: Space.sm),
+            ],
+            if (pending.isNotEmpty) ...[
+              const SizedBox(height: Space.sm),
+              Text(
+                context.l10n.tutWaitingForBank(
+                  pending
+                      .map(
+                        (o) => context.l10n.tutPendingPass(
+                          o.days.toString(),
+                          o.amountLabel,
+                        ),
+                      )
+                      .join(", "),
+                ),
+                style: AppText.bodySmallMuted.copyWith(height: 1.4),
+              ),
+            ],
+            const SizedBox(height: Space.sm),
+            Text(
+              context.l10n.tutPassTerms(first, classLabel),
+              style: AppText.labelMediumMuted.copyWith(height: 1.4),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlanTile extends StatelessWidget {
+  const _PlanTile({
+    required this.plan,
+    required this.busy,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final TutorPlanInfo plan;
+  final bool busy;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      plan.label,
+                      style: AppText.bodyLargeInk.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      plan.days == 1
+                          ? context.l10n.tutFullTutorForOneDay
+                          : context.l10n.tutFullTutorForDays(
+                              plan.days.toString(),
+                            ),
+                      style: AppText.labelMediumMuted,
+                    ),
+                  ],
+                ),
+              ),
+              if (busy)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Text(
+                  plan.priceLabel,
+                  style: AppText.titleSmall.copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              const SizedBox(width: 6),
+              const Icon(Icons.chevron_right, color: AppColors.muted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// हिं / EN — the reply language. Sits in the app bar so a parent who does
+/// not read English finds it before typing anything.
+class _LanguageToggle extends StatelessWidget {
+  const _LanguageToggle({
+    required this.language,
+    required this.onChanged,
+    this.dark = true,
+  });
+
+  final String language;
+  final void Function(String) onChanged;
+
+  /// On the navy app bar (light text) or on the page (ink text).
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget seg(String code, String label) {
+      final on = language == code;
+      return InkWell(
+        onTap: () => onChanged(code),
+        borderRadius: BorderRadius.circular(14),
+        child: AnimatedContainer(
+          duration: AppMotion.fast,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: on ? AppColors.accentSoft : Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Text(
+            label,
+            style: AppText.bodySmall.copyWith(
+              color: on
+                  ? AppColors.primary
+                  : dark
+                  ? Colors.white
+                  : AppColors.ink,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(right: 4),
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: dark
+            ? Colors.white.withValues(alpha: 0.14)
+            : AppColors.ink.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [seg("hi", "हिं"), seg("both", "हिं+EN"), seg("en", "EN")],
+      ),
+    );
+  }
+}
+
+/// Videos for the topic of one reply — DIKSHA's NCERT/CBSE lessons first,
+/// YouTube to top up. Each plays inside the app, never in a separate
+/// YouTube app the parent may not have.
+class _VideosSheet extends StatefulWidget {
+  const _VideosSheet({
+    required this.api,
+    required this.studentId,
+    required this.topic,
+    required this.language,
+  });
+
+  final ApiClient api;
+  final String studentId;
+  final String topic;
+  final String language;
+
+  @override
+  State<_VideosSheet> createState() => _VideosSheetState();
+}
+
+class _VideosSheetState extends State<_VideosSheet> {
+  TutorVideos? _videos;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final v = await widget.api.fetchTutorVideos(
+        studentId: widget.studentId,
+        topic: widget.topic,
+        language: widget.language,
+      );
+      if (mounted) setState(() => _videos = v);
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = context.l10n.couldNotReachTheSchoolServer);
+      }
+    }
+  }
+
+  Future<void> _open(String url) async {
+    Haptics.tap();
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
+  }
+
+  /// Plays inside the app: a link handed to the system is claimed by the
+  /// YouTube app on most phones and pulls the parent out of ours.
+  Future<void> _play(TutorVideo v) {
+    Haptics.tap();
+    return Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => VideoPlayerScreen(video: v)));
+  }
+
+  /// Where the list came from, so a government lesson and a stranger's
+  /// upload are not trusted alike.
+  String _sourceNote(List<TutorVideo> items) {
+    final diksha = items.where((i) => i.fromDiksha).length;
+    if (diksha > 0 && diksha == items.length) {
+      return context.l10n.tutVideosAllDiksha;
+    }
+    if (diksha > 0) {
+      return context.l10n.tutVideosSomeDiksha;
+    }
+    return context.l10n.tutVideosFromYoutube;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = _videos;
+    return SafeArea(
+      child: Padding(
+        padding: Insets.sheet,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              context.l10n.tutVideosOnThisTopic,
+              style: AppText.titleMediumInk.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: Space.xs),
+            Text(
+              widget.topic,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.bodySmallMuted,
+            ),
+            const SizedBox(height: Space.lg),
+            if (v == null && _error == null)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(Space.lg),
+                  child: CircularProgressIndicator(color: AppColors.primary),
+                ),
+              )
+            else if (_error != null)
+              Text(_error!, style: const TextStyle(color: AppColors.danger))
+            else ...[
+              if (v!.items.isEmpty)
+                Text(
+                  context.l10n.tutNoVideosFound,
+                  style: AppText.bodyMediumInk,
+                ),
+              for (final item in v.items) ...[
+                _VideoTile(video: item, onTap: () => _play(item)),
+                const SizedBox(height: Space.sm),
+              ],
+              const SizedBox(height: Space.xs),
+              OutlinedButton.icon(
+                onPressed: () => _open(v.searchUrl),
+                icon: const Icon(Icons.search, size: 18),
+                label: Text(context.l10n.tutSearchOnYoutube),
+              ),
+              const SizedBox(height: Space.sm),
+              Text(_sourceNote(v.items), style: AppText.labelMediumMuted),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VideoTile extends StatelessWidget {
+  const _VideoTile({required this.video, required this.onTap});
+
+  final TutorVideo video;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 112,
+              height: 66,
+              child: video.thumbnail.isEmpty
+                  ? const ColoredBox(color: Color(0xFFE6E4DC))
+                  : Image.network(
+                      video.thumbnail,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) =>
+                          const ColoredBox(color: Color(0xFFE6E4DC)),
+                    ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      video.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.bodyMediumInk.copyWith(
+                        height: 1.3,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      !video.fromDiksha || video.channel == "DIKSHA"
+                          ? video.channel
+                          : "DIKSHA · ${video.channel}",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.labelMediumMuted,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: Icon(Icons.play_circle_fill, color: AppColors.danger),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The tuition routine, in the parent's language: what to do each day
+/// with the tutor instead of paying for a tuition teacher.
+class _GuideSheet extends StatelessWidget {
+  const _GuideSheet({required this.childFirstName});
+
+  final String childFirstName;
+
+  @override
+  Widget build(BuildContext context) {
+    final n = childFirstName;
+    final l = context.l10n;
+    final steps = <(IconData, String, String)>[
+      (Icons.menu_book_outlined, l.tutGuideStep1Title, l.tutGuideStep1Body(n)),
+      (Icons.functions, l.tutGuideStep2Title, l.tutGuideStep2Body(n)),
+      (Icons.edit_note, l.tutGuideStep3Title, l.tutGuideStep3Body(n)),
+      (Icons.fact_check_outlined, l.tutGuideStep4Title, l.tutGuideStep4Body(n)),
+      (Icons.home_work_outlined, l.tutGuideStep5Title, l.tutGuideStep5Body),
+      (
+        Icons.event_available_outlined,
+        l.tutGuideStep6Title,
+        l.tutGuideStep6Body,
+      ),
+      (Icons.play_circle_outline, l.tutGuideStep7Title, l.tutGuideStep7Body),
+      (
+        Icons.lightbulb_outline,
+        l.tutGuideFreeHintsTitle,
+        l.tutGuideFreeHintsBody(n),
+      ),
+    ];
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.86,
+      maxChildSize: 0.95,
+      builder: (context, controller) => SafeArea(
+        child: ListView(
+          controller: controller,
+          padding: Insets.sheet,
+          children: [
+            Text(
+              l.tutGuideHeading,
+              style: AppText.titleLargeInk.copyWith(height: 1.3),
+            ),
+            const SizedBox(height: Space.xs),
+            Text(
+              l.tutGuideIntro(n),
+              style: AppText.bodyMediumMuted.copyWith(height: 1.45),
+            ),
+            const SizedBox(height: Space.lg),
+            for (final (icon, title, body) in steps) ...[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: ModuleTone.amber.background,
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    child: Icon(
+                      icon,
+                      size: 19,
+                      color: ModuleTone.amber.foreground,
+                    ),
+                  ),
+                  const SizedBox(width: Space.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: AppText.bodyLargeInk.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          body,
+                          style: AppText.bodySmallInk.copyWith(height: 1.45),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: Space.lg),
+            ],
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(l.tutGuideGotIt),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

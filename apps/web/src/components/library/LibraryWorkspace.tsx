@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isbnChecksumOk } from "@/lib/openLookups";
+import { lookupIsbnApi } from "@/lib/openLookupsClient";
 import Link from "next/link";
 import {
   BarChart3,
@@ -9,6 +11,7 @@ import {
   FileText,
   LayoutDashboard,
   Library,
+  Loader2,
   Repeat2,
 } from "lucide-react";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
@@ -20,10 +23,12 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
+import { ExportMenu, RowActionMenu } from "@/components/ui/erp-grid";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
-import { DOC_ACCEPT, DOC_MAX_BYTES } from "@/lib/sis";
-import { DEFAULT_AY, formatInr, loadMasters, type MastersState } from "@/lib/masters";
+import { DOC_ACCEPT, DOC_MAX_BYTES, studentsInSession} from "@/lib/sis";
+import { DEFAULT_AY, formatInr, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
   availableCountForTitle,
@@ -40,6 +45,10 @@ import {
   libraryStats,
   listActiveTitles,
   loadLibrary,
+  mergeEbookShelfSeed,
+  saveLibrary,
+  upsertEbookShelf,
+  bookcaseCode,
   overdueIssues,
   returnBook,
   runLibraryReport,
@@ -50,15 +59,19 @@ import {
   type LibraryIssue,
   type LibraryItemCondition,
   type LibraryProcurementDoc,
+  type LibraryEbook,
   type LibraryReportFormat,
   type LibraryReportId,
   type LibraryTitle,
 } from "@/lib/library";
 import { ensureLibraryHydrated } from "@/lib/libraryPersistence";
+import { withHydrationSlot } from "@/lib/deskHydrateGuard";
 import {
   runLibraryProcurementOcrApi,
   type LibraryProcurementOcrSuggestion,
 } from "@/lib/ocrClient";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import type { RowAction } from "@/components/ui/erp-grid";
 
 type LibTab =
   | "dashboard"
@@ -66,6 +79,7 @@ type LibTab =
   | "issue"
   | "history"
   | "procurement"
+  | "ebooks"
   | "reports";
 
 const TABS: ModuleTabItem[] = [
@@ -74,6 +88,7 @@ const TABS: ModuleTabItem[] = [
   { id: "issue", label: "Issue / Return", tone: "amber" },
   { id: "history", label: "History", tone: "green" },
   { id: "procurement", label: "Procurement", tone: "violet" },
+  { id: "ebooks", label: "E-books", tone: "coral" },
   { id: "reports", label: "Reports", tone: "slate" },
 ];
 
@@ -115,6 +130,57 @@ export function LibraryWorkspace() {
   const [catalogCategory, setCatalogCategory] = useState<LibraryCategory | "all">("all");
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
   const [titleForm, setTitleForm] = useState(emptyTitleForm());
+  const [isbnBusy, setIsbnBusy] = useState(false);
+  const [isbnNote, setIsbnNote] = useState<string | null>(null);
+
+  /**
+   * Fill the catalogue row from Open Library, without overwriting work.
+   *
+   * Only empty boxes are touched. The librarian has the physical book in
+   * hand and Open Library does not, so whatever they typed wins over
+   * whatever a stranger catalogued — this saves typing, it does not
+   * correct anybody.
+   */
+  async function fillFromIsbn() {
+    setIsbnNote(null);
+    setIsbnBusy(true);
+    try {
+      const res = await lookupIsbnApi(titleForm.isbn);
+      if (!res.ok) {
+        setIsbnNote(res.message);
+        return;
+      }
+      const b = res.data;
+      const filled: string[] = [];
+      setTitleForm((f) => {
+        const next = { ...f };
+        if (!f.title.trim() && b.title) {
+          next.title = b.title;
+          filled.push("title");
+        }
+        if (!f.author.trim() && b.author) {
+          next.author = b.author;
+          filled.push("author");
+        }
+        if (!f.publisher.trim() && b.publisher) {
+          next.publisher = b.publisher;
+          filled.push("publisher");
+        }
+        if (!f.edition.trim() && b.year) {
+          next.edition = b.year;
+          filled.push("year");
+        }
+        return next;
+      });
+      setIsbnNote(
+        filled.length
+          ? `Filled ${filled.join(", ")} — check against the book.`
+          : `Found "${b.title}" — every box was already filled, so nothing was changed.`,
+      );
+    } finally {
+      setIsbnBusy(false);
+    }
+  }
   const [showTitleForm, setShowTitleForm] = useState(false);
 
   // Issue / return
@@ -169,10 +235,10 @@ export function LibraryWorkspace() {
   const [reportTo, setReportTo] = useState(todayIso());
 
   useEffect(() => {
-    void ensureLibraryHydrated().then((changed) => {
+    void withHydrationSlot(() => ensureLibraryHydrated()).then((changed) => {
       if (changed) refresh();
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   useEffect(() => {
@@ -184,6 +250,7 @@ export function LibraryWorkspace() {
       "issue",
       "history",
       "procurement",
+      "ebooks",
       "reports",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as LibTab);
@@ -214,6 +281,32 @@ export function LibraryWorkspace() {
   const titles = listActiveTitles(state);
   const overdue = overdueIssues(state);
 
+  /**
+   * Overdue loans as a table: what is out, who has it, how late. A list could
+   * not be sorted by how overdue a book was, which is the only order this is
+   * ever read in.
+   *
+   * Open loans keep their list — each row opens a return form inside itself,
+   * with a date, a condition and damage notes — and the procurement shelf
+   * keeps its cards, because each is a photograph of a bill.
+   */
+  const overdueCols: DataTableColumn<(typeof overdue)[number]>[] = [
+    { key: "title", header: "Item", value: (i) => titleForIssue(i), sortable: true },
+    {
+      key: "borrower", header: "With", sortable: true,
+      value: (i) => borrowerLabel(i, { students: sis?.students, staff: staffRoster }),
+    },
+    { key: "due", header: "Due", value: (i) => i.dueOn, sortable: true },
+    {
+      key: "remind", header: "",
+      render: () => (
+        <Link href="/comms" className="text-xs font-semibold text-[var(--brand-deep)] underline">
+          Remind on WA
+        </Link>
+      ),
+    },
+  ];
+
   const filteredTitles = useMemo(() => {
     const q = catalogSearch.trim().toLowerCase();
     return titles.filter((t) => {
@@ -228,11 +321,29 @@ export function LibraryWorkspace() {
     });
   }, [titles, catalogSearch, catalogCategory]);
 
+  // "Available" is computed per title rather than stored, so it sorts on the
+  // count itself, not on the rendered cell.
+  const titleSort = useTableSort(
+    filteredTitles,
+    {
+      title: (t) => t.title,
+      category: (t) => categoryLabel(t.category),
+      author: (t) => t.author || null,
+      shelf: (t) => t.shelf || null,
+      copies: (t) => t.copiesTotal,
+      available: (t) => availableCountForTitle(t.id, state),
+      purchase: (t) => t.purchaseDate || null,
+    },
+    "title",
+  );
+
   const studentHits = useMemo(() => {
     const q = borrowerQuery.trim().toLowerCase();
     if (q.length < 2 || borrowerType !== "student" || !sis) return [];
-    return sis.students
-      .filter((s) => s.status === "active")
+    // One row per child, this session. SIS keeps a row per child per year and
+    // marks them all active, so the same name appeared several times and, in a
+    // capped list, pushed real matches off the end.
+    return studentsInSession(sis, currentAcademicYearCode(masters))
       .filter(
         (s) =>
           s.fullName.toLowerCase().includes(q) ||
@@ -254,7 +365,9 @@ export function LibraryWorkspace() {
   }, [staffRoster, borrowerQuery, borrowerType]);
 
   const openLoans = useMemo(
-    () => state.issues.filter((i) => !i.returnedOn),
+    // Soonest due first. Insertion order plus the 20-row cap kept the
+    // oldest loans, so a newly issued book never showed (8 Oct 2026).
+    () => state.issues.filter((i) => !i.returnedOn).sort((a, b) => (a.dueOn || "").localeCompare(b.dueOn || "") || (b.issuedOn || "").localeCompare(a.issuedOn || "")),
     [state.issues],
   );
 
@@ -285,6 +398,27 @@ export function LibraryWorkspace() {
     histStudentId,
     histStaffId,
   ]);
+  // Newest loan first, as the history always opened.
+  const historySort = useTableSort(
+    filteredHistory,
+    {
+      title: (i) => titleForIssue(i),
+      accession: (i) => {
+        const acc = accessionForIssue(i);
+        return acc === "—" ? null : acc;
+      },
+      borrower: (i) =>
+        borrowerLabel(i, { students: sis?.students, staff: staffRoster }),
+      issued: (i) => i.issuedOn,
+      due: (i) => i.dueOn || null,
+      // Still out: no return date yet, so it sorts with the blanks.
+      returned: (i) => i.returnedOn || null,
+      condition: (i) => conditionLabel(i.issueCondition),
+      fine: (i) => i.finePaise || 0,
+    },
+    "issued",
+    "desc",
+  );
 
   function flashErr(msg: string) {
     setError(msg);
@@ -570,7 +704,7 @@ export function LibraryWorkspace() {
             ].map((c) => (
               <div
                 key={c.label}
-                className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4"
+                className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4"
               >
                 <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
                   <c.icon className="size-4" aria-hidden />
@@ -584,7 +718,7 @@ export function LibraryWorkspace() {
           </div>
           {overdue.length > 0 ? (
             <div className="rounded-xl border border-[rgba(180,35,24,0.2)] bg-[rgba(180,35,24,0.04)] p-4">
-              <p className="text-sm font-semibold text-[#b42318]">
+              <p className="text-sm font-semibold text-[var(--danger)]">
                 {overdue.length} overdue loan(s)
               </p>
               <button
@@ -643,7 +777,7 @@ export function LibraryWorkspace() {
           </div>
 
           {showTitleForm ? (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
               <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
                 {editingTitleId ? "Edit catalogue item" : "New catalogue item"}
               </h2>
@@ -696,6 +830,33 @@ export function LibraryWorkspace() {
                     }
                     className={`${field} mt-1`}
                   />
+                  {/* Free Open Library lookup. It fills ONLY the boxes that
+                      are still empty, so a librarian who has already typed
+                      the title they can see on the cover never has it
+                      replaced by a different edition's wording. */}
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isbnBusy || !isbnChecksumOk(titleForm.isbn)}
+                      onClick={() => void fillFromIsbn()}
+                      className="inline-flex items-center gap-1 rounded-lg border border-[var(--border)] px-2 py-1 text-[11px] font-semibold disabled:opacity-40"
+                      title={
+                        isbnChecksumOk(titleForm.isbn)
+                          ? "Fetch title, author and publisher"
+                          : "Enter a full ISBN first"
+                      }
+                    >
+                      {isbnBusy ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <BookOpen className="h-3 w-3" />
+                      )}
+                      {isbnBusy ? "Looking up…" : "Fetch details"}
+                    </button>
+                    {isbnNote ? (
+                      <span className="text-[11px] text-[var(--muted)]">{isbnNote}</span>
+                    ) : null}
+                  </div>
                 </label>
                 <label className="block text-xs text-[var(--muted)]">
                   Publisher
@@ -786,18 +947,52 @@ export function LibraryWorkspace() {
             </div>
           ) : null}
 
+          <div className="flex justify-end">
+            <ExportMenu
+              title="Library catalogue"
+              subtitle={`${filteredTitles.length} title(s)`}
+              fileBaseName="library_catalogue"
+              columns={[
+                { key: "title", header: "Title", width: 2 },
+                { key: "isbn", header: "ISBN" },
+                { key: "category", header: "Category" },
+                { key: "author", header: "Author", width: 1.5 },
+                { key: "shelf", header: "Rack" },
+                { key: "copies", header: "Copies", align: "right" },
+                { key: "available", header: "Available", align: "right" },
+                { key: "purchase", header: "Purchase" },
+              ]}
+              rows={() =>
+                titleSort.rows.map((t) => ({
+                  title: t.title,
+                  isbn: t.isbn || "",
+                  category: categoryLabel(t.category),
+                  author: t.author || "",
+                  shelf: t.shelf || "",
+                  copies: t.copiesTotal,
+                  available: availableCountForTitle(t.id, state),
+                  purchase: t.purchaseDate || "",
+                }))
+              }
+              onMessage={(msg) => {
+                setNotice(msg);
+                window.setTimeout(() => setNotice(null), 2800);
+              }}
+              compact
+            />
+          </div>
           <ErpTableShell>
             <div className="overflow-x-auto">
               <ErpTable minWidth="min-w-[56rem]">
                 <ErpTableHead>
                   <tr>
-                    <th className="px-4 py-2.5 font-bold">Title</th>
-                    <th className="px-4 py-2.5 font-bold">Category</th>
-                    <th className="px-4 py-2.5 font-bold">Author</th>
-                    <th className="px-4 py-2.5 font-bold">Rack</th>
-                    <th className="px-4 py-2.5 font-bold">Copies</th>
-                    <th className="px-4 py-2.5 font-bold">Available</th>
-                    <th className="px-4 py-2.5 font-bold">Purchase</th>
+                    <ErpSortTh sort={titleSort} field="title">Title</ErpSortTh>
+                    <ErpSortTh sort={titleSort} field="category">Category</ErpSortTh>
+                    <ErpSortTh sort={titleSort} field="author">Author</ErpSortTh>
+                    <ErpSortTh sort={titleSort} field="shelf">Rack</ErpSortTh>
+                    <ErpSortTh sort={titleSort} field="copies">Copies</ErpSortTh>
+                    <ErpSortTh sort={titleSort} field="available">Available</ErpSortTh>
+                    <ErpSortTh sort={titleSort} field="purchase">Purchase</ErpSortTh>
                     <th className="px-4 py-2.5 font-bold" />
                   </tr>
                 </ErpTableHead>
@@ -813,8 +1008,8 @@ export function LibraryWorkspace() {
                       </td>
                     </tr>
                   ) : (
-                    filteredTitles.map((t) => (
-                      <tr key={t.id} className="hover:bg-[rgba(32,48,80,0.02)]">
+                    titleSort.rows.map((t) => (
+                      <tr key={t.id} className="hover:bg-[var(--surface-sunken)]">
                         <td className="px-4 py-2">
                           <p className="font-medium">{t.title}</p>
                           {t.isbn ? (
@@ -830,12 +1025,36 @@ export function LibraryWorkspace() {
                         </td>
                         <td className="px-4 py-2 text-xs">{t.purchaseDate || "—"}</td>
                         <td className="px-4 py-2">
-                          <DeskListActions
-                            readOnly={readOnly}
-                            onEdit={() => startEditTitle(t)}
-                            onDelete={() => handleDeleteTitle(t.id)}
-                            deleteConfirm={`Delete "${t.title}" from catalogue?`}
-                          />
+                          <div className="flex items-center justify-end gap-1">
+                            <RowActionMenu
+                              row={t}
+                              label={`Actions for ${t.title}`}
+                              actions={[
+                                {
+                                  id: "issue",
+                                  label: "Issue a copy",
+                                  hidden: () => readOnly,
+                                  onSelect: () => setTab("issue"),
+                                },
+                                {
+                                  id: "history",
+                                  label: "Loan history",
+                                  onSelect: () => setTab("history"),
+                                },
+                                {
+                                  id: "edit",
+                                  label: "Edit details",
+                                  hidden: () => readOnly,
+                                  onSelect: (r) => startEditTitle(r),
+                                },
+                              ]}
+                            />
+                            <DeskListActions
+                              readOnly={readOnly}
+                              onDelete={() => handleDeleteTitle(t.id)}
+                              deleteConfirm={`Delete "${t.title}" from catalogue?`}
+                            />
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -849,7 +1068,7 @@ export function LibraryWorkspace() {
 
       {tab === "issue" ? (
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               Issue item
             </h2>
@@ -866,8 +1085,8 @@ export function LibraryWorkspace() {
                   }}
                   className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
                     borrowerType === t
-                      ? "bg-[var(--brand-deep)] text-white"
-                      : "border border-[rgba(32,48,80,0.15)] text-[var(--brand-deep)]"
+                      ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                      : "border border-[var(--border)] text-[var(--brand-deep)]"
                   }`}
                 >
                   {t === "student" ? "Student" : "Staff"}
@@ -902,7 +1121,7 @@ export function LibraryWorkspace() {
                           setBorrowerQuery(s.fullName);
                         }
                       }}
-                      className={`w-full px-3 py-2 text-left hover:bg-[rgba(32,48,80,0.04)] ${
+                      className={`w-full px-3 py-2 text-left hover:bg-[var(--surface-sunken)] ${
                         (borrowerType === "student"
                           ? selectedStudentId
                           : selectedStaffId) === s.id
@@ -930,7 +1149,7 @@ export function LibraryWorkspace() {
                   onClick={() => setIssueMode(m)}
                   className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
                     issueMode === m
-                      ? "bg-[rgba(32,48,80,0.08)] text-[var(--brand-deep)]"
+                      ? "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
                       : "text-[var(--muted)]"
                   }`}
                 >
@@ -1031,12 +1250,12 @@ export function LibraryWorkspace() {
             ) : null}
           </div>
 
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               Open loans — return
             </h2>
             <ErpTableShell className="mt-3">
-              <ul className="divide-y divide-[rgba(32,48,80,0.08)] text-sm">
+              <ul className="divide-y divide-[var(--border)] text-sm">
                 {openLoans.length === 0 ? (
                   <li className="px-4 py-6 text-center text-[var(--muted)]">
                     No open loans
@@ -1082,7 +1301,7 @@ export function LibraryWorkspace() {
                         ) : null}
                       </div>
                       {returningIssueId === issue.id ? (
-                        <div className="mt-3 rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3">
+                        <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
                           <div className="grid gap-3 sm:grid-cols-2">
                             <label className="block text-xs text-[var(--muted)]">
                               Return date
@@ -1143,7 +1362,7 @@ export function LibraryWorkspace() {
 
       {tab === "history" ? (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <label className="block text-xs text-[var(--muted)]">
               From
               <input
@@ -1185,8 +1404,7 @@ export function LibraryWorkspace() {
                   className={`${field} mt-1`}
                 >
                   <option value="">All students</option>
-                  {(sis?.students ?? [])
-                    .filter((s) => s.status === "active")
+                  {studentsInSession(sis, currentAcademicYearCode(masters))
                     .map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.fullName}
@@ -1222,19 +1440,53 @@ export function LibraryWorkspace() {
             </label>
           </div>
 
+          <div className="flex justify-end">
+            <ExportMenu
+              title="Library transactions"
+              subtitle={`${filteredHistory.length} loan(s)${histOpenOnly ? " · open only" : ""}`}
+              fileBaseName="library_transactions"
+              columns={[
+                { key: "title", header: "Title", width: 2 },
+                { key: "accession", header: "Accession" },
+                { key: "borrower", header: "Borrower", width: 1.6 },
+                { key: "type", header: "Type" },
+                { key: "issued", header: "Issued" },
+                { key: "due", header: "Due" },
+                { key: "returned", header: "Returned" },
+                { key: "fine", header: "Fine (₹)", align: "right" },
+              ]}
+              rows={() =>
+                filteredHistory.map((issue) => ({
+                  title: titleForIssue(issue),
+                  accession: accessionForIssue(issue),
+                  borrower: borrowerLabel(issue, { students: sis?.students, staff: staffRoster }),
+                  type: issue.borrowerType,
+                  issued: issue.issuedOn,
+                  due: issue.dueOn,
+                  returned: issue.returnedOn || "Open",
+                  fine: issue.finePaise ? issue.finePaise / 100 : "",
+                }))
+              }
+              onMessage={(msg) => {
+                setNotice(msg);
+                window.setTimeout(() => setNotice(null), 2800);
+              }}
+              compact
+            />
+          </div>
           <ErpTableShell>
             <div className="overflow-x-auto">
               <ErpTable minWidth="min-w-[64rem]">
                 <ErpTableHead>
                   <tr>
-                    <th className="px-4 py-2.5 font-bold">Title</th>
-                    <th className="px-4 py-2.5 font-bold">Accession</th>
-                    <th className="px-4 py-2.5 font-bold">Borrower</th>
-                    <th className="px-4 py-2.5 font-bold">Issued</th>
-                    <th className="px-4 py-2.5 font-bold">Due</th>
-                    <th className="px-4 py-2.5 font-bold">Returned</th>
-                    <th className="px-4 py-2.5 font-bold">Condition</th>
-                    <th className="px-4 py-2.5 font-bold">Fine</th>
+                    <ErpSortTh sort={historySort} field="title" className="px-4 py-2.5 font-bold">Title</ErpSortTh>
+                    <ErpSortTh sort={historySort} field="accession" className="px-4 py-2.5 font-bold">Accession</ErpSortTh>
+                    <ErpSortTh sort={historySort} field="borrower" className="px-4 py-2.5 font-bold">Borrower</ErpSortTh>
+                    <ErpSortTh sort={historySort} field="issued" className="px-4 py-2.5 font-bold">Issued</ErpSortTh>
+                    <ErpSortTh sort={historySort} field="due" className="px-4 py-2.5 font-bold">Due</ErpSortTh>
+                    <ErpSortTh sort={historySort} field="returned" className="px-4 py-2.5 font-bold">Returned</ErpSortTh>
+                    <ErpSortTh sort={historySort} field="condition" className="px-4 py-2.5 font-bold">Condition</ErpSortTh>
+                    <ErpSortTh sort={historySort} field="fine" className="px-4 py-2.5 font-bold">Fine</ErpSortTh>
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
@@ -1248,8 +1500,8 @@ export function LibraryWorkspace() {
                       </td>
                     </tr>
                   ) : (
-                    filteredHistory.map((issue) => (
-                      <tr key={issue.id} className="hover:bg-[rgba(32,48,80,0.02)]">
+                    historySort.rows.map((issue) => (
+                      <tr key={issue.id} className="hover:bg-[var(--surface-sunken)]">
                         <td className="px-4 py-2 font-medium">
                           {titleForIssue(issue)}
                         </td>
@@ -1300,28 +1552,19 @@ export function LibraryWorkspace() {
           </ErpTableShell>
 
           {overdue.length > 0 ? (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
               <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
                 Overdue reminders
               </h3>
-              <ul className="mt-2 divide-y divide-[rgba(32,48,80,0.08)] text-sm">
-                {overdue.map((issue) => (
-                  <li key={issue.id} className="py-2">
-                    <span className="font-medium">{titleForIssue(issue)}</span>
-                    <span className="text-[var(--muted)]">
-                      {" "}
-                      · {borrowerLabel(issue, { students: sis?.students, staff: staffRoster })}{" "}
-                      · due {issue.dueOn}
-                    </span>
-                    <Link
-                      href="/comms"
-                      className="ml-2 text-xs font-semibold text-[var(--brand-deep)] underline"
-                    >
-                      Remind on WA
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+              <DataTable
+                columns={overdueCols}
+                rows={overdue}
+                rowKey={(i) => i.id}
+                minWidth="min-w-[640px]"
+                exportFileBaseName="library-overdue"
+                exportTitle="Overdue loans"
+                emptyTitle="Nothing overdue"
+              />
             </div>
           ) : null}
         </div>
@@ -1329,7 +1572,7 @@ export function LibraryWorkspace() {
 
       {tab === "procurement" ? (
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--brand-deep)]">
               <FileText className="size-4" aria-hidden />
               Upload bill / challan
@@ -1433,11 +1676,11 @@ export function LibraryWorkspace() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               Procurement records
             </h2>
-            <ul className="mt-3 divide-y divide-[rgba(32,48,80,0.08)] text-sm">
+            <ul className="mt-3 divide-y divide-[var(--border)] text-sm">
               {state.procurementDocs.length === 0 ? (
                 <li className="py-6 text-center text-[var(--muted)]">
                   No procurement documents yet
@@ -1453,7 +1696,7 @@ export function LibraryWorkspace() {
                         className="h-14 w-14 rounded-lg border object-cover"
                       />
                     ) : (
-                      <div className="flex h-14 w-14 items-center justify-center rounded-lg border bg-[rgba(32,48,80,0.04)] text-[10px] font-bold uppercase">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-lg border bg-[var(--surface-sunken)] text-[10px] font-bold uppercase">
                         PDF
                       </div>
                     )}
@@ -1489,8 +1732,16 @@ export function LibraryWorkspace() {
         </div>
       ) : null}
 
+      {tab === "ebooks" ? (
+        <EbooksPanel
+          tick={tick}
+          readOnly={readOnly}
+          onChanged={(msg) => refresh(msg)}
+        />
+      ) : null}
+
       {tab === "reports" ? (
-        <div className="max-w-lg space-y-4 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+        <div className="max-w-lg space-y-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--brand-deep)]">
             <BarChart3 className="size-4" aria-hidden />
             Export reports
@@ -1556,5 +1807,242 @@ export function LibraryWorkspace() {
         </div>
       ) : null}
     </ErpWorkspaceShell>
+  );
+}
+
+/* ─── E-books shelf ─────────────────────────────────────────── */
+
+/**
+ * The school's FlipHTML5 shelf, catalogued: which bookcase is which book,
+ * for which class and subject. This list feeds two readers — the parent /
+ * student shelf API (which attaches the pass key) and the teaching module's
+ * "from school shelf" picker on chapter resources. The codes are opaque and
+ * the shelf pages unreadable from here, so a person who has the shelf open
+ * names each one, once, and it sticks.
+ */
+function EbooksPanel({
+  tick,
+  readOnly,
+  onChanged,
+}: {
+  tick: number;
+  readOnly: boolean;
+  onChanged: (msg: string) => void;
+}) {
+  const state = useMemo(() => {
+    void tick;
+    return loadLibrary();
+  }, [tick]);
+  const [url, setUrl] = useState("");
+  const [title, setTitle] = useState("");
+  const [subject, setSubject] = useState("");
+  const [classes, setClasses] = useState("");
+  const [editId, setEditId] = useState<string | null>(null);
+
+  function beginEdit(b: LibraryEbook) {
+    setEditId(b.id);
+    setUrl(b.url);
+    setTitle(b.title);
+    setSubject(b.subject);
+    setClasses(b.classLabels.join(", "));
+  }
+
+  function submit() {
+    const res = upsertEbookShelf(state, {
+      url: url.trim(),
+      title: title.trim(),
+      subject: subject.trim(),
+      classLabels: classes
+        .split(/[,\s]+/)
+        .map((c) => c.trim())
+        .filter(Boolean),
+    });
+    if ("error" in res) {
+      onChanged(res.error);
+      return;
+    }
+    saveLibrary(res.state);
+    setUrl("");
+    setTitle("");
+    setSubject("");
+    setClasses("");
+    setEditId(null);
+    onChanged(editId ? "E-book updated" : "E-book added to the shelf");
+  }
+
+  function loadSeed() {
+    const merged = mergeEbookShelfSeed(state.ebooks);
+    if (merged.added === 0) {
+      onChanged("Every seeded bookcase is already on the shelf");
+      return;
+    }
+    saveLibrary({ ...state, ebooks: merged.ebooks });
+    onChanged(
+      `${merged.added} bookcases added — name each one so readers know what it is`,
+    );
+  }
+
+  const ebookCols: DataTableColumn<LibraryEbook>[] = [
+    {
+      key: "title", header: "E-book", sortable: true,
+      value: (b) => b.title || bookcaseCode(b.url) || "",
+      render: (b) => (
+        <span className={b.isActive ? undefined : "opacity-50"}>
+          <span className="font-medium text-[var(--brand-deep)]">
+            {b.title || `Untitled (${bookcaseCode(b.url) || "?"})`}
+          </span>
+          {!b.title ? (
+            <span className="ml-2 rounded-full bg-[rgba(197,160,40,0.18)] px-2 py-0.5 text-[10px] font-bold text-[#8a5a10]">
+              needs a name
+            </span>
+          ) : null}
+        </span>
+      ),
+    },
+    { key: "subject", header: "Subject", value: (b) => b.subject || "—", sortable: true },
+    {
+      key: "classes", header: "Classes",
+      value: (b) => (b.classLabels.length ? b.classLabels.join(", ") : "—"),
+    },
+    {
+      key: "visible", header: "On the shelf", sortable: true,
+      value: (b) => (b.isActive ? "Visible" : "Hidden"),
+      render: (b) =>
+        b.isActive ? (
+          <span className="text-[var(--ok)]">Visible</span>
+        ) : (
+          <span className="text-[var(--muted)]">Hidden</span>
+        ),
+    },
+  ];
+
+  const ebookActions: RowAction<LibraryEbook>[] = [
+    { id: "open", label: "Open", onSelect: (b) => window.open(b.url, "_blank", "noopener,noreferrer") },
+    { id: "edit", label: "Edit", hidden: () => readOnly, onSelect: (b) => beginEdit(b) },
+    {
+      id: "toggle",
+      label: "Hide from readers",
+      hidden: () => readOnly,
+      onSelect: (b) => toggleActive(b),
+    },
+  ];
+
+  function toggleActive(b: LibraryEbook) {
+    saveLibrary({
+      ...state,
+      ebooks: state.ebooks.map((e) =>
+        e.id === b.id ? { ...e, isActive: !e.isActive } : e,
+      ),
+    });
+    onChanged(b.isActive ? "Hidden from readers" : "Visible to readers again");
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
+              E-book shelf ({state.ebooks.length})
+            </h2>
+            <p className="text-xs text-[var(--muted)]">
+              These feed the parent shelf and the syllabus &ldquo;from school
+              shelf&rdquo; picker. Name, subject and classes are what readers
+              and teachers see.
+            </p>
+          </div>
+          {!readOnly ? (
+            <button
+              type="button"
+              onClick={loadSeed}
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+            >
+              Load school bookcases
+            </button>
+          ) : null}
+        </div>
+
+        {!readOnly ? (
+          <div className="mt-3 flex flex-wrap items-end gap-2 rounded-lg border border-dashed border-[var(--border)] px-3 py-2">
+            <label className="text-[11px] font-semibold text-[var(--muted)]">
+              FlipHTML5 shelf link
+              <input
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://fliphtml5.com/bookcase/…"
+                className="mt-1 block w-72 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
+              />
+            </label>
+            <label className="text-[11px] font-semibold text-[var(--muted)]">
+              Title
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Class VIII Maths"
+                className="mt-1 block w-48 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
+              />
+            </label>
+            <label className="text-[11px] font-semibold text-[var(--muted)]">
+              Subject
+              <input
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="Mathematics"
+                className="mt-1 block w-36 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
+              />
+            </label>
+            <label className="text-[11px] font-semibold text-[var(--muted)]">
+              Classes
+              <input
+                value={classes}
+                onChange={(e) => setClasses(e.target.value)}
+                placeholder="VIII or VI, VII"
+                className="mt-1 block w-28 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!url.trim()}
+              className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+            >
+              {editId ? "Save" : "Add"}
+            </button>
+            {editId ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditId(null);
+                  setUrl("");
+                  setTitle("");
+                  setSubject("");
+                  setClasses("");
+                }}
+                className="px-2 py-1.5 text-xs font-semibold text-[var(--muted)]"
+              >
+                Cancel
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {state.ebooks.length === 0 ? (
+          <p className="mt-4 text-sm text-[var(--muted)]">
+            Nothing on the shelf yet. &ldquo;Load school bookcases&rdquo; adds
+            the school&rsquo;s FlipHTML5 cases in one go; then name each one.
+          </p>
+        ) : (
+          <DataTable
+            columns={ebookCols}
+            rows={state.ebooks}
+            rowKey={(b) => b.id}
+            rowActions={ebookActions}
+            rowActionsLabel="E-book actions"
+            minWidth="min-w-[720px]"
+            emptyTitle="No e-books on the shelf yet"
+          />
+        )}
+      </div>
+    </div>
   );
 }

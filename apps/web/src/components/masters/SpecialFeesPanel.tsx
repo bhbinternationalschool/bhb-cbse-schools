@@ -306,11 +306,11 @@ export function SpecialFeesPanel({
       <div className="grid gap-5 lg:grid-cols-[0.95fr_1.15fr]">
         {/* List + create */}
         <div className="space-y-4">
-          <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-            <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
+          <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
+            <div className="border-b border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
               Special fees · {ay}
             </div>
-            <ul className="max-h-[320px] divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
+            <ul className="max-h-[320px] divide-y divide-[var(--border)] overflow-y-auto">
               {specialFees.map((f) => {
                 const on = f.id === selectedId;
                 const assignCount = (state.specialFeeAssignments ?? []).filter(
@@ -320,7 +320,7 @@ export function SpecialFeesPanel({
                   <li
                     key={f.id}
                     className={`flex items-start gap-2 px-4 py-3 ${
-                      on ? "bg-[rgba(32,48,80,0.06)]" : ""
+                      on ? "bg-[var(--surface-sunken)]" : ""
                     }`}
                   >
                     <button
@@ -385,7 +385,7 @@ export function SpecialFeesPanel({
               ) : null}
             </ul>
             {selected ? (
-              <div className="border-t border-[rgba(32,48,80,0.08)] px-4 py-2">
+              <div className="border-t border-[var(--border)] px-4 py-2">
                 <button
                   type="button"
                   className="text-xs font-medium text-[var(--brand-mid)]"
@@ -399,7 +399,7 @@ export function SpecialFeesPanel({
 
           <form
             onSubmit={saveFee}
-            className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4"
+            className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4"
           >
             <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
               {editingId ? "Edit special fee" : "Create special fee"}
@@ -477,7 +477,7 @@ export function SpecialFeesPanel({
               {editingId ? (
                 <button
                   type="button"
-                  className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
+                  className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
                   onClick={resetFeeForm}
                 >
                   Cancel
@@ -497,7 +497,7 @@ export function SpecialFeesPanel({
         <div className="space-y-4">
           <form
             onSubmit={assign}
-            className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4"
+            className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4"
           >
             <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
               Assign
@@ -518,7 +518,7 @@ export function SpecialFeesPanel({
                   <div className="mb-1.5 text-sm text-[var(--muted)]">
                     Classes (optional — all students in class)
                   </div>
-                  <div className="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto rounded-xl border border-[rgba(32,48,80,0.12)] p-2">
+                  <div className="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto rounded-xl border border-[var(--border)] p-2">
                     {state.classes
                       .filter((c) => c.isActive)
                       .map((c) => {
@@ -530,7 +530,7 @@ export function SpecialFeesPanel({
                             onClick={() => toggleClass(c.id)}
                             className={`rounded-lg px-2 py-1 text-xs font-medium ${
                               on
-                                ? "bg-[var(--brand-deep)] text-white"
+                                ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                                 : "bg-[var(--surface)] text-[var(--brand-deep)]"
                             }`}
                           >
@@ -584,7 +584,7 @@ export function SpecialFeesPanel({
                       ))}
                     </select>
                   </div>
-                  <ul className="max-h-52 overflow-y-auto rounded-xl border border-[rgba(32,48,80,0.12)]">
+                  <ul className="max-h-52 overflow-y-auto rounded-xl border border-[var(--border)]">
                     {studentsForPicker.map((s) => {
                       const on = studentIds.includes(s.id);
                       return (
@@ -593,7 +593,7 @@ export function SpecialFeesPanel({
                             type="button"
                             onClick={() => toggleStudent(s.id)}
                             className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm ${
-                              on ? "bg-[rgba(32,48,80,0.08)]" : ""
+                              on ? "bg-[var(--surface-sunken)]" : ""
                             }`}
                           >
                             <span>
@@ -635,12 +635,12 @@ export function SpecialFeesPanel({
             )}
           </form>
 
-          <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-            <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
+          <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
+            <div className="border-b border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
               Assignments
               {selected ? ` · ${selected.name}` : ""}
             </div>
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {assignmentsForSelected.map((a) => {
                 const people = resolveSpecialFeeAssignees(sessionState, a);
                 const classNames = a.classIds

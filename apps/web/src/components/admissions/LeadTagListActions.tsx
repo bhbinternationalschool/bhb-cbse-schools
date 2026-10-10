@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import type { AdmissionLead } from "@/lib/admissions";
+import { openWaMe } from "@/lib/waMe";
+import { TRADING_NAME } from "@/lib/publicOrgProfile";
 
 export type LeadTagListActionHandlers = {
   onOpenLead: (leadId: string) => void;
@@ -24,10 +26,10 @@ function btn(
   teal?: boolean,
 ): string {
   if (danger) {
-    return "rounded-lg border border-[rgba(180,35,24,0.35)] bg-white px-2 py-1 text-[10px] font-semibold text-[#b42318] hover:bg-[rgba(180,35,24,0.06)]";
+    return "rounded-lg border border-[rgba(180,35,24,0.35)] bg-white px-2 py-1 text-[10px] font-semibold text-[var(--danger)] hover:bg-[rgba(180,35,24,0.06)]";
   }
   if (teal) {
-    return "rounded-lg bg-[#0f766e] px-2 py-1 text-[10px] font-semibold text-white hover:brightness-110";
+    return "rounded-lg bg-[var(--tone-teal-solid)] px-2 py-1 text-[10px] font-semibold text-white hover:brightness-110";
   }
   if (primary) {
     return "rounded-lg bg-[var(--brand-deep)] px-2 py-1 text-[10px] font-semibold text-white hover:brightness-110";
@@ -35,10 +37,18 @@ function btn(
   return "rounded-lg border border-[rgba(32,48,80,0.18)] bg-white px-2 py-1 text-[10px] font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]";
 }
 
+/**
+ * The lead's 10-digit number, or null.
+ *
+ * This used to return a wa.me URL and the button was an <a> straight into the
+ * counsellor's own WhatsApp. A lead then heard from a personal number, and the
+ * school had no record of it. It returns the NUMBER now; the send goes through
+ * the school's Business API like every other outbound message.
+ */
 function waHref(mobile: string): string | null {
   const m = (mobile || "").replace(/\D/g, "").slice(-10);
   if (!/^[6-9]\d{9}$/.test(m)) return null;
-  return `https://wa.me/91${m}`;
+  return m;
 }
 
 function telHref(mobile: string): string | null {
@@ -115,15 +125,18 @@ export function LeadTagListActions({
       ) : null}
 
       {wa ? (
-        <a
-          href={wa}
-          target="_blank"
-          rel="noreferrer"
+        <button
+          type="button"
           className={btn()}
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            openWaMe(wa, `Namaste 🙏 — from ${TRADING_NAME} about your enquiry.`, undefined, {
+              module: "admissions",
+            });
+          }}
         >
           WhatsApp
-        </a>
+        </button>
       ) : null}
 
       {lead.mobile ? (
@@ -142,7 +155,7 @@ export function LeadTagListActions({
       {canEdit && suspected && handlers.onVerifyWithSis ? (
         <button
           type="button"
-          className="rounded-lg bg-[#166534] px-2 py-1 text-[10px] font-semibold text-white hover:brightness-110"
+          className="rounded-lg bg-[var(--tone-green-deep-solid)] px-2 py-1 text-[10px] font-semibold text-white hover:brightness-110"
           onClick={() => handlers.onVerifyWithSis!(lead.id)}
           title="Confirm match — update lead from SIS and mark Admitted"
         >

@@ -10,6 +10,8 @@ import type {
   StaffStream,
 } from "@/lib/foundationMasters";
 import { DEFAULT_AY } from "@/lib/masters";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type SalaryHeadKind = "earning" | "deduction" | "employer";
 
@@ -69,9 +71,55 @@ export type StaffSalaryLink = {
   basicOverride: number;
   /** Who avails PF / ESIC on this assignment */
   statutoryCover: StatutoryCover;
+  /**
+   * Extra ₹/month paid on top of the structure. Earned and shown on the
+   * payslip, but outside every statutory base: PF wages, ESIC eligibility
+   * and ESIC wages are computed on the structure (basic + its allowances)
+   * alone. 0 = none.
+   */
+  additionalAmount: number;
+  /** Label printed for the additional line, e.g. "Additional allowance" */
+  additionalLabel: string;
+  /**
+   * The school pays this staff member's own PF and ESIC share on top of the
+   * salary, so what reaches their hand is the agreed figure. The amount is
+   * DERIVED from the deductions actually computed for the month — never
+   * typed — because a typed one goes stale the moment the basic moves.
+   * Like additionalAmount it sits outside every statutory base, so grossing
+   * up never widens PF wages or ESIC eligibility.
+   */
+  statutoryGrossUp: boolean;
   effectiveFrom: string;
   salaryAccountNote: string;
 };
+
+/** Virtual earning head for the per-staff additional amount (no master row). */
+export const ADDITIONAL_HEAD_CODE = "ADDL";
+export function additionalHead(label?: string): SalaryHead {
+  return {
+    id: "addl",
+    code: ADDITIONAL_HEAD_CODE,
+    name: (label || "").trim() || "Additional allowance",
+    kind: "earning",
+    tallyLedger: "Additional Allowance",
+    isActive: true,
+    sortOrder: 99,
+  };
+}
+
+/** Virtual earning head for the derived PF/ESIC gross-up (no master row). */
+export const GROSS_UP_HEAD_CODE = "SGUP";
+export function statutoryGrossUpHead(): SalaryHead {
+  return {
+    id: "sgup",
+    code: GROSS_UP_HEAD_CODE,
+    name: "PF/ESIC paid by school",
+    kind: "earning",
+    tallyLedger: "Staff Statutory Gross-up",
+    isActive: true,
+    sortOrder: 98,
+  };
+}
 
 export function normalizeStatutoryCover(
   v?: string | null,
@@ -371,10 +419,10 @@ export function defaultSalarySetupState(): SalarySetupState {
 export function loadSalarySetup(): SalarySetupState {
   if (typeof window === "undefined") return defaultSalarySetupState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) {
       const seed = defaultSalarySetupState();
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(seed));
       return seed;
     }
     const parsed = JSON.parse(raw) as Partial<SalarySetupState>;
@@ -403,7 +451,51 @@ export function saveSalarySetup(state: SalarySetupState) {
   if (!assertModulePermission("payroll", "edit", "saveSalarySetup")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  // Persist to Supabase (salary_setup_state). Until 2026-08-18 this stopped
+  // at localStorage and the login-time cache wipe erased the whole setup.
+  void trackServerWork(import("@/lib/salarySetupPersistence").then(({ scheduleSalarySetupSync }) => {
+    scheduleSalarySetupSync(state);
+  }));
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("bhb-salary-setup-updated"));
+  }
+}
+
+/** Hydrate path — write the local cache without RBAC checks or a push. */
+export function writeSalarySetupLocalRaw(state: SalarySetupState) {
+  if (typeof window === "undefined") return;
+  const seed = defaultSalarySetupState();
+  const next: SalarySetupState = {
+    version: 1,
+    settings: normalizeSalarySettings(state.settings),
+    heads: Array.isArray(state.heads) && state.heads.length ? state.heads.map(normalizeHead) : seed.heads,
+    structures:
+      Array.isArray(state.structures) && state.structures.length
+        ? state.structures.map(normalizeStructure)
+        : seed.structures,
+    staffLinks: Array.isArray(state.staffLinks) ? state.staffLinks.map(normalizeLink) : [],
+  };
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
+  window.dispatchEvent(new CustomEvent("bhb-salary-setup-updated"));
+}
+
+/**
+ * "Empty" = nothing beyond the bundled defaults: no staff assigned and no
+ * structure other than the seeded ones. Used by the blob helper so a
+ * cold browser never overwrites a configured server copy with defaults.
+ */
+export function salarySetupIsEmpty(state: SalarySetupState): boolean {
+  const seed = defaultSalarySetupState();
+  const seedStructureIds = new Set(seed.structures.map((x) => x.id));
+  const seedHeadIds = new Set(seed.heads.map((x) => x.id));
+  const customStructures = (state.structures ?? []).filter((x) => !seedStructureIds.has(x.id));
+  const customHeads = (state.heads ?? []).filter((x) => !seedHeadIds.has(x.id));
+  return (
+    (state.staffLinks ?? []).length === 0 &&
+    customStructures.length === 0 &&
+    customHeads.length === 0
+  );
 }
 
 function normalizeHead(h: Partial<SalaryHead>): SalaryHead {
@@ -455,6 +547,9 @@ function normalizeLink(l: Partial<StaffSalaryLink>): StaffSalaryLink {
     structureId: String(l.structureId || ""),
     basicOverride: Math.max(0, Number(l.basicOverride) || 0),
     statutoryCover: normalizeStatutoryCover(l.statutoryCover),
+    additionalAmount: Math.max(0, Math.round(Number(l.additionalAmount) || 0)),
+    additionalLabel: String(l.additionalLabel || "").trim().slice(0, 60),
+    statutoryGrossUp: l.statutoryGrossUp === true,
     effectiveFrom: String(l.effectiveFrom || "").slice(0, 10),
     salaryAccountNote: String(l.salaryAccountNote || ""),
   };
@@ -582,17 +677,73 @@ export function resolveStructureForStaff(
   return scored[0]?.s ?? active[0] ?? null;
 }
 
+/**
+ * Wage ceilings from Masters → Statutory (EPF/ESIC establishment config).
+ *   - PF: when applyEpfWageCeiling, the 12% (EE and ER) is computed on
+ *     min(basic, epfWageCeiling) — ₹15,000 by statute — not on the whole basic.
+ *   - ESIC: the ceiling is an eligibility threshold — staff whose gross is
+ *     above esicWageCeiling (₹21,000) are outside ESIC, so both ESIC heads
+ *     drop to 0 for them.
+ *   - ESIC low-wage exemption: gross up to esicEmployeeExemptWageLimit
+ *     (₹5,000) → employee share 0, employer share still payable.
+ */
+export type StatutoryCeilings = {
+  applyEpfWageCeiling: boolean;
+  epfWageCeiling: number;
+  esicWageCeiling: number;
+  esicEmployeeExemptWageLimit: number;
+};
+
+export function statutoryCeilingsFrom(
+  cfg?: Partial<StatutoryCeilings> | null,
+): StatutoryCeilings {
+  return {
+    applyEpfWageCeiling: cfg?.applyEpfWageCeiling !== false,
+    epfWageCeiling: Number(cfg?.epfWageCeiling) > 0 ? Number(cfg?.epfWageCeiling) : 15000,
+    esicWageCeiling: Number(cfg?.esicWageCeiling) > 0 ? Number(cfg?.esicWageCeiling) : 21000,
+    esicEmployeeExemptWageLimit:
+      cfg?.esicEmployeeExemptWageLimit === undefined || cfg?.esicEmployeeExemptWageLimit === null
+        ? 5000
+        : Math.max(0, Number(cfg.esicEmployeeExemptWageLimit) || 0),
+  };
+}
+
+export function isPfHeadCode(raw: string): boolean {
+  const code = (raw || "").toUpperCase();
+  return code === "PF_EE" || code === "PF_ER" || code.startsWith("PF_");
+}
+export function isEsicHeadCode(raw: string): boolean {
+  const code = (raw || "").toUpperCase();
+  return (
+    code === "ESIC_EE" || code === "ESIC_ER" || code.startsWith("ESIC_") || code === "ESI_EE" || code === "ESI_ER"
+  );
+}
+
 export function computeStructureAmounts(
   state: SalarySetupState,
   structure: SalaryStructure,
   basicOverride = 0,
   statutoryCover: StatutoryCover = "both",
+  statutory?: Partial<StatutoryCeilings> | null,
+  /** Per-staff additional ₹/month — paid, shown, but outside PF/ESIC bases */
+  additional?: { amount: number; label?: string } | null,
+  /** Pay this staff member's own PF + ESIC share on top (see StaffSalaryLink) */
+  statutoryGrossUp = false,
 ): {
   basic: number;
   earnings: { head: SalaryHead; amount: number }[];
   deductions: { head: SalaryHead; amount: number }[];
   employer: { head: SalaryHead; amount: number }[];
+  /** Everything paid, additional and gross-up included */
   gross: number;
+  /** Structure earnings only — the wage the statutory rules looked at */
+  statutoryGross: number;
+  /** The additional line, 0 when none */
+  additionalAmount: number;
+  /** The derived gross-up line, 0 when the school does not bear the cut */
+  statutoryGrossUpAmount: number;
+  /** The staff member's own PF + ESIC share this month, gross-up or not */
+  employeeStatutoryCut: number;
   totalDeductions: number;
 } {
   const cover = normalizeStatutoryCover(statutoryCover);
@@ -612,24 +763,66 @@ export function computeStructureAmounts(
   const earnings: { head: SalaryHead; amount: number }[] = [];
   const deductions: { head: SalaryHead; amount: number }[] = [];
   const employer: { head: SalaryHead; amount: number }[] = [];
+  const ceilings = statutoryCeilingsFrom(statutory);
+  const pfWages = ceilings.applyEpfWageCeiling ? Math.min(basic, ceilings.epfWageCeiling) : basic;
 
+  const lineAmount = (head: SalaryHead, line: SalaryStructureLine): number => {
+    if (head.code === "BASIC" && basicOverride > 0) return basicOverride;
+    if (line.calc !== "percent_of_basic") return line.amount;
+    const base = isPfHeadCode(head.code) ? pfWages : basic;
+    return Math.round((base * line.amount) / 100);
+  };
+
+  // Earnings first — ESIC eligibility depends on gross.
+  const statutoryLines: { head: SalaryHead; line: SalaryStructureLine }[] = [];
   for (const line of structure.lines) {
     const head = headsById.get(line.headId);
     if (!head || !head.isActive) continue;
     if (!headAllowedByStatutory(head.code, cover)) continue;
+    if (head.kind === "earning") earnings.push({ head, amount: lineAmount(head, line) });
+    else statutoryLines.push({ head, line });
+  }
+  const statutoryGross = earnings.reduce((s, e) => s + e.amount, 0);
+  const esicEligible = statutoryGross <= ceilings.esicWageCeiling;
+  // Low-wage staff: no employee ESIC share, employer share still due.
+  const esicEmployeeExempt =
+    ceilings.esicEmployeeExemptWageLimit > 0 && statutoryGross <= ceilings.esicEmployeeExemptWageLimit;
+  for (const { head, line } of statutoryLines) {
+    const isEsic = isEsicHeadCode(head.code);
     const amount =
-      head.code === "BASIC" && basicOverride > 0
-        ? basicOverride
-        : line.calc === "percent_of_basic"
-          ? Math.round((basic * line.amount) / 100)
-          : line.amount;
+      isEsic && !esicEligible
+        ? 0
+        : isEsic && head.kind === "deduction" && esicEmployeeExempt
+          ? 0
+          : lineAmount(head, line);
     const row = { head, amount };
-    if (head.kind === "earning") earnings.push(row);
-    else if (head.kind === "deduction") deductions.push(row);
+    if (head.kind === "deduction") deductions.push(row);
     else employer.push(row);
   }
 
-  const gross = earnings.reduce((s, e) => s + e.amount, 0);
+  // Additional is appended AFTER every statutory decision above so it can
+  // never widen PF wages, ESIC eligibility or the ESIC wage base.
+  const additionalAmount = Math.max(0, Math.round(Number(additional?.amount) || 0));
+  if (additionalAmount > 0) {
+    earnings.push({ head: additionalHead(additional?.label), amount: additionalAmount });
+  }
+
+  // The gross-up is the staff member's OWN share, read back off the
+  // deductions just computed — so it tracks the basic, the ₹15,000 PF
+  // ceiling and every ESIC exemption automatically. It is appended here,
+  // beside the additional, for the same reason: it must not widen any
+  // statutory base. Employer-side heads live in `employer` and are the
+  // school's cost either way, so they are not part of this.
+  const employeeStatutoryCut = deductions.reduce(
+    (s, d) => (isPfHeadCode(d.head.code) || isEsicHeadCode(d.head.code) ? s + d.amount : s),
+    0,
+  );
+  const statutoryGrossUpAmount = statutoryGrossUp ? employeeStatutoryCut : 0;
+  if (statutoryGrossUpAmount > 0) {
+    earnings.push({ head: statutoryGrossUpHead(), amount: statutoryGrossUpAmount });
+  }
+  const gross = statutoryGross + additionalAmount + statutoryGrossUpAmount;
+
   const totalDeductions = deductions.reduce((s, e) => s + e.amount, 0);
   return {
     basic,
@@ -637,8 +830,27 @@ export function computeStructureAmounts(
     deductions,
     employer,
     gross,
+    statutoryGross,
+    additionalAmount,
+    statutoryGrossUpAmount,
+    employeeStatutoryCut,
     totalDeductions,
   };
+}
+
+/** The additional-amount argument for computeStructureAmounts from a staff link. */
+export function additionalFromLink(
+  link?: Pick<StaffSalaryLink, "additionalAmount" | "additionalLabel"> | null,
+): { amount: number; label?: string } | null {
+  if (!link || !(link.additionalAmount > 0)) return null;
+  return { amount: link.additionalAmount, label: link.additionalLabel };
+}
+
+/** The gross-up flag for computeStructureAmounts from a staff link. */
+export function grossUpFromLink(
+  link?: Pick<StaffSalaryLink, "statutoryGrossUp"> | null,
+): boolean {
+  return link?.statutoryGrossUp === true;
 }
 
 export function salarySetupCompleteness(state: SalarySetupState): {

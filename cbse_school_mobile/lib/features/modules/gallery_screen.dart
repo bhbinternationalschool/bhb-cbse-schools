@@ -1,0 +1,330 @@
+import "package:flutter/material.dart";
+import "package:url_launcher/url_launcher.dart";
+
+import "../../core/api/api_client.dart";
+import "../../core/theme/app_theme.dart";
+import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
+
+/// The school's published photo albums.
+///
+/// Each album is a Material 3 carousel of its own pictures. This is the one
+/// place in the parent app where a carousel is the right shape: the photos
+/// are the content, they are few, none ranks above another, and nobody needs
+/// to count them or act on one. Everywhere a parent must not miss an item —
+/// notices, dues, homework — stays a list.
+///
+/// Drafts never reach here; the server sends published albums only.
+class GalleryScreen extends StatelessWidget {
+  const GalleryScreen({super.key, required this.api});
+
+  final ApiClient api;
+
+  @override
+  Widget build(BuildContext context) {
+    return ModuleShell<List<GalleryAlbum>>(
+      guideId: "gallery",
+      title: context.l10n.gallery,
+      subtitle: context.l10n.homeSchoolPhotos,
+      load: api.fetchGalleryAlbums,
+      emptyIcon: Icons.photo_library_outlined,
+      emptyText: context.l10n.noAlbumsPublishedYetPhotosFrom,
+      isEmpty: (albums) => albums.isEmpty,
+      builder: (context, albums, _) {
+        // Class-gallery photos are served by the ERP, which checks who is
+        // looking: they need the login, which goes to the ERP host only.
+        return FutureBuilder<Map<String, String>>(
+          future: api.imageHeaders(),
+          builder: (context, snap) => ListView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            itemCount: albums.length,
+            itemBuilder: (context, i) => _AlbumBlock(
+              album: albums[i],
+              api: api,
+              headers: snap.data ?? const {},
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _AlbumBlock extends StatelessWidget {
+  const _AlbumBlock({
+    required this.album,
+    required this.api,
+    required this.headers,
+  });
+
+  final GalleryAlbum album;
+  final ApiClient api;
+  final Map<String, String> headers;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            album.title,
+            style: AppText.bodyLargeInk.copyWith(fontWeight: FontWeight.w600),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2, bottom: 10),
+            child: Text(
+              [
+                if (album.description.isNotEmpty) album.description,
+                context.l10n.homePhotoCount(album.photos.length),
+              ].join(" · "),
+              style: AppText.labelMediumMuted,
+            ),
+          ),
+          SizedBox(
+            height: 210,
+            child: CarouselView.weighted(
+              // One large picture with the next two tapering. A single photo
+              // gets the whole width instead, because a lone tapering slice
+              // reads as a loading state.
+              flexWeights: album.photos.length == 1
+                  ? const [1]
+                  : const [5, 3, 2],
+              itemSnapping: true,
+              shrinkExtent: 100,
+              backgroundColor: AppColors.ink.withValues(alpha: 0.06),
+              onTap: (i) => _openViewer(context, i),
+              children: [
+                for (final photo in album.photos)
+                  _PhotoTile(
+                    photo: photo,
+                    headers: api.isOwnServer(photo.url) ? headers : null,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openViewer(BuildContext context, int index) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _PhotoViewer(
+          album: album,
+          initialIndex: index,
+          api: api,
+          headers: headers,
+        ),
+      ),
+    );
+  }
+}
+
+class _PhotoTile extends StatelessWidget {
+  const _PhotoTile({required this.photo, this.headers});
+
+  final GalleryPhoto photo;
+  final Map<String, String>? headers;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (photo.isVideo)
+          // No thumbnail is made for a clip; a dark tile with a play badge
+          // says "video" without downloading it.
+          const ColoredBox(
+            color: Color(0xFF2C2C2A),
+            child: Center(
+              child: Icon(
+                Icons.play_circle_outline,
+                color: Colors.white,
+                size: 54,
+              ),
+            ),
+          )
+        else
+          Image.network(
+            photo.url,
+            headers: headers,
+            fit: BoxFit.cover,
+            // A carousel of broken tiles is worse than a carousel of grey ones:
+            // the parent cannot tell whether the school posted nothing or the
+            // phone lost the connection.
+            errorBuilder: (_, _, _) => const ColoredBox(
+              color: Color(0xFFECEAE3),
+              child: Icon(
+                Icons.image_not_supported_outlined,
+                color: AppColors.muted,
+              ),
+            ),
+            loadingBuilder: (context, child, progress) => progress == null
+                ? child
+                : const ColoredBox(color: Color(0xFFECEAE3)),
+          ),
+        if (photo.caption.isNotEmpty)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(10, 14, 10, 8),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0x00000000), Color(0xB3000000)],
+                ),
+              ),
+              child: Text(
+                photo.caption,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: AppText.labelMedium.copyWith(color: Colors.white),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Full-screen album, swiped one picture at a time.
+///
+/// A PageView and not a carousel: here the parent is looking AT a photo, not
+/// choosing between photos, so a tapering neighbour would be a distraction.
+class _PhotoViewer extends StatefulWidget {
+  const _PhotoViewer({
+    required this.album,
+    required this.initialIndex,
+    required this.api,
+    required this.headers,
+  });
+
+  final GalleryAlbum album;
+  final int initialIndex;
+  final ApiClient api;
+  final Map<String, String> headers;
+
+  @override
+  State<_PhotoViewer> createState() => _PhotoViewerState();
+}
+
+class _PhotoViewerState extends State<_PhotoViewer> {
+  late final PageController _controller = PageController(
+    initialPage: widget.initialIndex,
+  );
+  late int _index = widget.initialIndex;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final photos = widget.album.photos;
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text(widget.album.title, style: AppText.titleSmall),
+        // Position, because a parent swiping through thirty photos of a sports
+        // day should be able to tell how far along they are.
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 14),
+            child: Center(
+              child: Text(
+                "${_index + 1} / ${photos.length}",
+                style: AppText.bodySmall.copyWith(color: Colors.white70),
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: PageView.builder(
+        controller: _controller,
+        itemCount: photos.length,
+        onPageChanged: (i) => setState(() => _index = i),
+        itemBuilder: (context, i) {
+          final photo = photos[i];
+          return Column(
+            children: [
+              Expanded(
+                child: photo.isVideo
+                    ? Center(
+                        child: FilledButton.icon(
+                          icon: const Icon(Icons.play_arrow),
+                          label: Text(
+                            Localizations.localeOf(context).languageCode == "hi"
+                                ? "वीडियो चलाएँ"
+                                : "Play video",
+                          ),
+                          onPressed: () => _playVideo(context, photo),
+                        ),
+                      )
+                    : InteractiveViewer(
+                        minScale: 1,
+                        maxScale: 4,
+                        child: Center(
+                          child: Image.network(
+                            photo.url,
+                            headers: widget.api.isOwnServer(photo.url)
+                                ? widget.headers
+                                : null,
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, _, _) => const Icon(
+                              Icons.image_not_supported_outlined,
+                              color: Colors.white38,
+                              size: 44,
+                            ),
+                          ),
+                        ),
+                      ),
+              ),
+              if (photo.caption.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
+                  child: Text(
+                    photo.caption,
+                    textAlign: TextAlign.center,
+                    style: AppText.bodySmall.copyWith(color: Colors.white70),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// A class-gallery clip: a ten-minute link from the ERP (asked with the
+/// login), opened in the phone's own video player.
+Future<void> _playVideo(BuildContext context, GalleryPhoto photo) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final link =
+        await (context.findAncestorStateOfType<_PhotoViewerState>()!.widget.api)
+            .galleryVideoLink(photo.id);
+    if (link.isEmpty ||
+        !await launchUrl(
+          Uri.parse(link),
+          mode: LaunchMode.externalApplication,
+        )) {
+      throw Exception("no player");
+    }
+  } catch (_) {
+    messenger.showSnackBar(
+      const SnackBar(content: Text("Could not open the video — try again.")),
+    );
+  }
+}

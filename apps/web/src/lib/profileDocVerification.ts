@@ -23,6 +23,7 @@ import {
   type SisStudent,
   writeSisLocalRaw,
 } from "@/lib/sis";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type DocVerifySubject = "student" | "staff";
 
@@ -43,9 +44,9 @@ function nowIso() {
 
 function persistSisForParent(state: ReturnType<typeof loadSis>) {
   writeSisLocalRaw(state);
-  void import("@/lib/sisPersistence").then(({ scheduleSisSync }) => {
+  void trackServerWork(import("@/lib/sisPersistence").then(({ scheduleSisSync }) => {
     scheduleSisSync(state);
-  });
+  }));
 }
 
 /** Limited household fields parents may update themselves. */

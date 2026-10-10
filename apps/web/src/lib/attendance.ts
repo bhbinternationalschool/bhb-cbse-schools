@@ -5,6 +5,7 @@
  * Policy: teacher cut-off lock, absent WhatsApp nudges, office exceptions.
  */
 
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { getSessionActor } from "@/lib/sessionActor";
 import { hasPermission } from "@/lib/rbac";
@@ -13,10 +14,14 @@ import {
   householdOf,
   householdWhatsApp,
   loadSis,
+  normalizeMobile,
   type SisStudent,
 } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import { openWaMe, waMeUrl } from "@/lib/waMe";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
+import { recordAttendanceDeletion } from "@/lib/attendanceDeletes";
 
 export type AttendanceStatus = "P" | "A" | "L" | "HD" | "LE";
 
@@ -60,6 +65,12 @@ export type AttendancePolicy = {
   absentNudgeEnabled: boolean;
   /** Cap how many wa.me tabs open after one save */
   absentNudgeMaxOpen: number;
+  /**
+   * When these settings were last changed. A save writes the policy only
+   * when this is newer than the stored one, so a tab holding the old
+   * cut-off can't put it back. "" on a copy from before this existed.
+   */
+  updatedAt?: string;
 };
 
 export type AbsentNudgeLog = {
@@ -210,6 +221,7 @@ function normalizePolicy(raw?: Partial<AttendancePolicy> | null): AttendancePoli
           DEFAULT_ATTENDANCE_POLICY.absentNudgeMaxOpen,
       ),
     ),
+    updatedAt: raw?.updatedAt || "",
   };
 }
 
@@ -271,7 +283,7 @@ export function loadAttendance(): AttendanceState {
     return emptyAttendanceState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyAttendanceState();
     return normalizeAttendanceState(JSON.parse(raw));
   } catch {
@@ -287,23 +299,23 @@ export function saveAttendance(state: AttendanceState) {
   const next = normalizeAttendanceState(state);
   if (typeof window === "undefined") {
     writeAttendanceLocalRaw(next);
-    void import("@/lib/attendancePersistence").then(
+    void trackServerWork(import("@/lib/attendancePersistence").then(
       ({ scheduleAttendanceSync }) => {
         scheduleAttendanceSync(next);
       },
-    );
+    ));
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   } catch (e) {
     console.warn("[attendance] localStorage quota exceeded — relying on server DB sync", e);
   }
-  void import("@/lib/attendancePersistence").then(
+  void trackServerWork(import("@/lib/attendancePersistence").then(
     ({ scheduleAttendanceSync }) => {
       scheduleAttendanceSync(next);
     },
-  );
+  ));
 }
 
 export function writeAttendanceLocalRaw(state: AttendanceState) {
@@ -313,7 +325,7 @@ export function writeAttendanceLocalRaw(state: AttendanceState) {
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   } catch (e) {
     console.warn("[attendance] localStorage quota exceeded — relying on server DB sync", e);
   }
@@ -443,7 +455,7 @@ export function saveAttendancePolicy(
     return { ok: false, error: "Not allowed to edit attendance settings" };
   }
   const state = loadAttendance();
-  const policy = normalizePolicy({ ...state.policy, ...patch });
+  const policy = normalizePolicy({ ...state.policy, ...patch, updatedAt: new Date().toISOString() });
   saveAttendance({ ...state, policy });
   return { ok: true, policy };
 }
@@ -500,8 +512,16 @@ export function composeAbsentNudgeMessage(input: {
   studentName: string;
   date: string;
   classLabel?: string;
+  /** The family's language; the school writes in Hindi unless they chose English. */
+  hindi?: boolean;
 }): string {
   const where = input.classLabel ? ` (${input.classLabel})` : "";
+  if (input.hindi) {
+    return (
+      `${TENANT.shortName}: ${input.studentName}${where} ${input.date} को *अनुपस्थित* दर्ज हैं। ` +
+      `यदि यह सही है तो OK लिखें, और यदि बच्चा स्कूल आया था तो WRONG लिखें। धन्यवाद 🙏`
+    );
+  }
   return (
     `${TENANT.shortName}: ${input.studentName}${where} is marked ABSENT on ${input.date}. ` +
     `Reply OK if correct, or WRONG if the child was present. Thank you.`
@@ -512,6 +532,7 @@ export type AbsentNudgeDraft = {
   studentId: string;
   studentName: string;
   mobile: string;
+  fallbackMobile?: string;
   message: string;
   waUrl: string;
 };
@@ -540,15 +561,18 @@ export function buildAbsentNudgeDrafts(input: {
     const hh = householdOf(sis, st.householdId);
     const mobile = householdWhatsApp(hh);
     if (!mobile || mobile.length < 10) continue;
+    const fallbackMobile = normalizeMobile(hh?.altMobile || "") || undefined;
     const message = composeAbsentNudgeMessage({
       studentName: st.fullName,
       date: input.register.date,
       classLabel: input.classLabel,
+      hindi: waTemplateLanguageFor(hh ?? {}) === "hi",
     });
     drafts.push({
       studentId: st.id,
       studentName: st.fullName,
       mobile,
+      fallbackMobile,
       message,
       waUrl: waMeUrl(mobile, message),
     });
@@ -565,7 +589,7 @@ export function openAbsentNudges(
   let opened = 0;
   for (const d of drafts) {
     if (opened >= cap) break;
-    openWaMe(d.mobile, d.message);
+    openWaMe(d.mobile, d.message, d.fallbackMobile);
     opened += 1;
   }
   return opened;
@@ -732,6 +756,11 @@ export function deleteRegister(
   const state = loadAttendance();
   const i = state.registers.findIndex((r) => r.id === registerId);
   if (i < 0) return { ok: false, error: "Register not found" };
+  recordAttendanceDeletion("attendance_desk_registers", [registerId]);
+  recordAttendanceDeletion(
+    "attendance_desk_absent_nudges",
+    state.absentNudges.filter((n) => n.registerId === registerId).map((n) => n.id),
+  );
   const next: AttendanceState = {
     ...state,
     registers: state.registers.filter((r) => r.id !== registerId),
@@ -930,9 +959,21 @@ export function rebuildExceptionsInto(state: AttendanceState): AttendanceState {
     );
   }
 
+  const exceptions = [...openManual, ...auto, ...kept].slice(0, 800);
+  // Open automatic exceptions are re-derived under fresh ids on every
+  // rebuild; the ones this rebuild superseded are deleted by name (a save no
+  // longer deletes what it leaves out). Resolved ones and disputes are never
+  // superseded here, and the 800 cap only trims this browser's copy.
+  const now = new Set(exceptions.map((e) => e.id));
+  recordAttendanceDeletion(
+    "attendance_desk_exceptions",
+    state.exceptions
+      .filter((e) => e.status === "open" && e.kind !== "parent_dispute" && !now.has(e.id))
+      .map((e) => e.id),
+  );
   return {
     ...state,
-    exceptions: [...openManual, ...auto, ...kept].slice(0, 800),
+    exceptions,
   };
 }
 
@@ -998,11 +1039,11 @@ export function resolveAttendanceException(input: {
   };
   const nextState = { ...state, exceptions: next };
   writeAttendanceLocalRaw(nextState);
-  void import("@/lib/attendancePersistence").then(
+  void trackServerWork(import("@/lib/attendancePersistence").then(
     ({ scheduleAttendanceSync }) => {
       scheduleAttendanceSync(nextState);
     },
-  );
+  ));
   return { ok: true };
 }
 
@@ -1052,6 +1093,11 @@ export function fileParentAttendanceDispute(input: {
         e.date === input.date
       ),
   );
+  // A dispute this one replaces is deleted by name.
+  recordAttendanceDeletion(
+    "attendance_desk_exceptions",
+    state.exceptions.filter((e) => !withoutDup.includes(e)).map((e) => e.id),
+  );
   const next = {
     ...state,
     exceptions: [exception, ...withoutDup].slice(0, 800),
@@ -1061,11 +1107,11 @@ export function fileParentAttendanceDispute(input: {
     saveAttendance(next);
   } else {
     writeAttendanceLocalRaw(next);
-    void import("@/lib/attendancePersistence").then(
+    void trackServerWork(import("@/lib/attendancePersistence").then(
       ({ scheduleAttendanceSync }) => {
         scheduleAttendanceSync(next);
       },
-    );
+    ));
   }
   return { ok: true, exception };
 }
@@ -1108,7 +1154,7 @@ export function statusTone(status: AttendanceStatus): {
       };
     case "A":
       return {
-        bg: "bg-[#dc2626]",
+        bg: "bg-[var(--tone-red-solid)]",
         text: "text-white",
         ring: "ring-[#dc2626]",
       };

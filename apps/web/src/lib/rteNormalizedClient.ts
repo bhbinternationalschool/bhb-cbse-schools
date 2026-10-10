@@ -5,6 +5,25 @@
 import type { RteState } from "@/lib/rteEws";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+import { afterStampedDeskSave, captureDeskStamps, stampedDeskBody } from "@/lib/deskStampsClient";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+
+const RTE_SLICES = ["seats", "applications"] as const;
+
+const RTE_DESK = "rte";
+
+/** A seat row or application the user deleted; the next push deletes it by id. */
+export function recordRteDeletion(
+  table: "rte_desk_seats" | "rte_desk_applications",
+  ids: string[],
+) {
+  recordDeskDeletion(RTE_DESK, table, ids);
+}
 
 const META_KEY = "bhb_rte_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -58,14 +77,23 @@ export function scheduleRteDeskSync(state: RteState) {
 }
 
 async function pushRteDeskApi(state: RteState) {
+  const sentDeletes = pendingDeskDeletes(RTE_DESK);
+  const holder = {
+    seats: state.seats,
+    applications: state.applications,
+    settings: state.settings,
+  } as Record<string, unknown>;
+  // Only the rows this browser changed, each with the stamp it loaded.
+  const sent = stampedDeskBody("rte", holder, RTE_SLICES);
+  if (!sent.anything && !Object.values(sentDeletes).some((ids) => ids?.length)) return;
   try {
     const res = await fetch("/api/school-data/rte-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        seats: state.seats,
-        applications: state.applications,
-        settings: state.settings,
+        ...sent.body,
+        // Deletions are named, never inferred from what this browser lacks.
+        deletes: sentDeletes,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -74,8 +102,13 @@ async function pushRteDeskApi(state: RteState) {
       seatCount?: number;
       applicationCount?: number;
       error?: string;
+      stamps?: RowStamps;
+      conflicts?: RowConflicts;
+      settingsStamp?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(RTE_DESK, sentDeletes);
+      afterStampedDeskSave("rte", holder, RTE_SLICES, sent, body);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         seatCount: body.seatCount ?? state.seats.length,
@@ -84,7 +117,12 @@ async function pushRteDeskApi(state: RteState) {
     } else if (!res.ok) {
       console.warn("[rte-db] desk push failed", body?.error || res.status);
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("rte");
+    else recordDeskSyncFailure("rte", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("rte", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[rte-db] desk push error", e);
   }
 }
@@ -94,6 +132,7 @@ export async function hydrateRteDeskFromDb(
 ): Promise<{
   bundle: Pick<RteState, "seats" | "applications" | "settings">;
   changed: boolean;
+  ok: boolean;
 }> {
   if (!isSupabaseConfigured()) {
     return {
@@ -103,6 +142,7 @@ export async function hydrateRteDeskFromDb(
         settings: { mandatedPct: 25, autoApplyFeeWaiver: true, note: "" },
       },
       changed: false,
+      ok: false,
     };
   }
   try {
@@ -118,6 +158,7 @@ export async function hydrateRteDeskFromDb(
           settings: { mandatedPct: 25, autoApplyFeeWaiver: true, note: "" },
         },
         changed: false,
+        ok: false,
       };
     }
     const body = (await res.json()) as {
@@ -127,6 +168,8 @@ export async function hydrateRteDeskFromDb(
       updatedAt?: string;
       seatCount?: number;
       applicationCount?: number;
+      stamps?: RowStamps;
+      settingsStamp?: string;
     };
 
     const bundle = {
@@ -161,6 +204,7 @@ export async function hydrateRteDeskFromDb(
           settings: { mandatedPct: 25, autoApplyFeeWaiver: true, note: "" },
         },
         changed: false,
+        ok: true,
       };
     }
 
@@ -169,8 +213,10 @@ export async function hydrateRteDeskFromDb(
       seatCount: body.seatCount ?? bundle.seats.length,
       applicationCount: body.applicationCount ?? bundle.applications.length,
     });
+    // The rows as the server holds them are the base of the next save.
+    captureDeskStamps("rte", bundle as Record<string, unknown>, RTE_SLICES, body.stamps, body.settingsStamp);
 
-    return { bundle, changed: true };
+    return { bundle, changed: true, ok: true };
   } catch {
     return {
       bundle: {
@@ -179,6 +225,7 @@ export async function hydrateRteDeskFromDb(
         settings: { mandatedPct: 25, autoApplyFeeWaiver: true, note: "" },
       },
       changed: false,
+      ok: false,
     };
   }
 }

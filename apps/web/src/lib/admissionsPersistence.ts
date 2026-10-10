@@ -4,6 +4,7 @@
 
 import {
   admissionsStateIsEmpty,
+  defaultAdmissionsState,
   loadAdmissions,
   normalizeAdmissionsState,
   writeAdmissionsLocalRaw,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/admissions";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
+  captureAdmissionStamps,
   hydrateAdmissionsDeskFromDb,
   scheduleAdmissionsDeskSync,
 } from "@/lib/admissionsNormalizedClient";
@@ -27,6 +29,7 @@ import {
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "admissions";
 
@@ -113,7 +116,7 @@ export function scheduleAdmissionsSync(state: AdmissionsState) {
   const normalized = normalizeAdmissionsState(state);
 
   if (typeof window === "undefined") {
-    void pushAdmissionsRemoteServer(normalized);
+    void trackServerWork(pushAdmissionsRemoteServer(normalized));
     return;
   }
 
@@ -125,7 +128,7 @@ export function scheduleAdmissionsSync(state: AdmissionsState) {
     pushTimer = null;
     if (!payload) return;
     if (!deskSkipBlobPushClient("admissions")) {
-      void pushBlobState(payload);
+      void trackServerWork(pushBlobState(payload));
     }
     scheduleAdmissionsDeskSync(payload);
   }, DESK_PUSH_DEBOUNCE_MS);
@@ -135,7 +138,6 @@ export function scheduleAdmissionsSync(state: AdmissionsState) {
 export async function ensureAdmissionsHydrated(): Promise<boolean> {
   if (!admissionsRemoteEnabled()) return false;
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   let changed = false;
   const skipBlob = deskSkipBlobHydrateClient("admissions");
@@ -159,18 +161,35 @@ export async function ensureAdmissionsHydrated(): Promise<boolean> {
     }
   }
 
-  const { state: deskState, changed: deskChanged } =
+  const { state: deskState, changed: deskChanged, ok, stamps: deskStamps } =
     await hydrateAdmissionsDeskFromDb(admissionsReadFromDbEnabled());
-  if (deskChanged && deskState) {
+  if (!ok) {
+    if (typeof window !== "undefined") {
+      const { reportLoadFailure } = await import("@/components/shell/Toast");
+      reportLoadFailure("admissions data");
+    }
+    return false;
+  }
+
+  markDeskHydrated(MODULE);
+  const readFromDb = admissionsReadFromDbEnabled();
+  if (readFromDb && deskState && admissionsStateIsEmpty(deskState)) {
+    const local = loadAdmissions();
+    if (!admissionsStateIsEmpty(local)) {
+      const empty = defaultAdmissionsState();
+      writeAdmissionsLocalRaw(empty);
+      changed = true;
+    }
+  } else if (deskChanged && deskState) {
     const merged = mergeDbDeskIntoAdmissionsState(loadAdmissions(), deskState, {
-      preferDb: admissionsReadFromDbEnabled(),
+      preferDb: readFromDb,
     });
     writeAdmissionsLocalRaw(merged);
     changed = true;
   }
 
   const next = loadAdmissions();
-  if (!admissionsStateIsEmpty(next)) {
+  if (!readFromDb && !admissionsStateIsEmpty(next)) {
     scheduleAdmissionsSync(next);
   } else if (!skipBlob) {
     const remote = await fetchRemoteBlob();
@@ -178,6 +197,14 @@ export async function ensureAdmissionsHydrated(): Promise<boolean> {
       writeAdmissionsLocalRaw(remote.state);
       changed = true;
     }
+  }
+
+  // Which version of each row this browser now holds: its saves send only
+  // rows changed since, stamped, so they can't overwrite newer ones.
+  captureAdmissionStamps(deskStamps, normalizeAdmissionsState(loadAdmissions()));
+
+  if (changed && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("bhb-admissions-hydrated"));
   }
 
   return changed;

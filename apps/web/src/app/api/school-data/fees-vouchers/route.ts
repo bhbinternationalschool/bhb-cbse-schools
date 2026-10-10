@@ -1,37 +1,92 @@
 import { NextResponse } from "next/server";
+import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
+import { requestMeta } from "@/lib/api/v1/auth";
+import { deskReadGate, visibleSlices } from "@/lib/deskFeatureGate.server";
+import { FEE_DESK_KEYS } from "@/lib/rbacFeatureCatalog/money";
+import { auditArrayDiff } from "@/lib/auditDeskDiff.server";
 import type { CollectionVoucher, FeesState } from "@/lib/fees";
-import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.server";
+import {
+  FEE_ANCILLARY_DELETABLE_TABLES,
+  type FeeDeskAncillary,
+} from "@/lib/feesDeskAncillary.server";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 import {
   fetchFeeDeskFromDb,
   feesDualWriteDbEnabled,
   pushFeeDeskToDb,
 } from "@/lib/feesNormalized.server";
 
+function voucherAuditSummary(
+  v: CollectionVoucher,
+  action: "create" | "update" | "delete",
+): string {
+  const amount = `₹${(v.totalPaise / 100).toLocaleString("en-IN")}`;
+  const verb =
+    action === "create" ? "Collected" : action === "delete" ? "Removed" : "Updated";
+  const voided = v.voidedAt ? " · VOIDED" : "";
+  return `${verb} receipt ${v.receiptNo || v.id} · ${amount}${voided}`;
+}
+
 export const runtime = "nodejs";
 
 /** GET — pull full fee desk from normalized tables */
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["fees-vouchers"], "GET");
-  if (!auth.ok) return auth.response
-  const desk = await fetchFeeDeskFromDb();
-  return NextResponse.json({
-    ok: true,
-    vouchers: desk.vouchers,
-    ancillary: desk.ancillary,
-    count: desk.vouchers.length,
-    updatedAt: desk.meta?.updatedAt || new Date().toISOString(),
-    meta: desk.meta,
-  });
+  // The Fees grant, or the read-only "Fee dashboard & reports" function.
+  // That function owns every desk key, so its reader gets the same whole
+  // desk — never a cut-down copy that a later save from the same browser
+  // could push back over the receipts. Any other fee function reads nothing
+  // here: its screens work through their own routes.
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["fees-vouchers"]);
+  if (gate.mode === "deny") return gate.response;
+  if (gate.mode === "feature") {
+    const seen = visibleSlices("fees", gate);
+    if (!FEE_DESK_KEYS.every((k) => seen.has(k))) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Reading the fee desk needs the Fees grant or the fee reports function.",
+          reason: "feature_forbidden",
+        },
+        { status: 403 },
+      );
+    }
+  }
+  try {
+    const result = await cachedDeskJson({
+      cacheKey: "fees-vouchers",
+      tables: ["fee_desk_vouchers", "fee_desk_voucher_lines", "fee_desk_voucher_tenders", "fee_desk_open_dues"],
+      ifNoneMatch: req.headers.get("if-none-match"),
+      build: async () => {
+        const desk = await fetchFeeDeskFromDb();
+        if (!desk.ok) throw new Error("Fee desk fetch failed — tenant/db unavailable");
+        return {
+          ok: true,
+          vouchers: desk.vouchers,
+          ancillary: desk.ancillary,
+          count: desk.vouchers.length,
+          updatedAt: desk.meta?.updatedAt || new Date().toISOString(),
+          meta: desk.meta,
+        };
+      },
+    });
+    return deskJsonResponse(result);
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "Fee desk fetch failed" },
+      { status: 503 },
+    );
+  }
 }
 
 type DeskPostBody = Pick<FeesState, "vouchers"> &
   Partial<FeeDeskAncillary> & {
     rebuildOpenDues?: boolean;
     academicYearCode?: string;
+    deletes?: unknown;
   };
 
 /** POST — push fee desk snapshot (vouchers + ancillary) + rebuild open dues */
@@ -64,9 +119,20 @@ export async function POST(req: Request) {
     chargeVouchers: body.chargeVouchers ?? [],
   };
 
+  // Desk sync pushes the full voucher snapshot every time, not individual
+  // edits — fees was one of the least-governed modules (zero audit_events
+  // rows) precisely because there was never a per-record write to hang an
+  // audit entry on. Diff against what's already stored so a resync of
+  // unchanged data stays silent and only real create/edit/void/delete get
+  // written.
+  const priorDesk = await fetchFeeDeskFromDb();
+  const priorVouchers = priorDesk.ok ? priorDesk.vouchers : [];
+
   const result = await pushFeeDeskToDb(state, {
     academicYearCode: body.academicYearCode,
     rebuildOpenDues: body.rebuildOpenDues,
+    // Deletions are named by the desk, never inferred from what it lacks.
+    deletes: readNamedDeletes(body.deletes, FEE_ANCILLARY_DELETABLE_TABLES),
   });
   if (!result.ok) {
     return NextResponse.json(
@@ -74,6 +140,18 @@ export async function POST(req: Request) {
       { status: 502 },
     );
   }
+
+  const { ip, userAgent } = requestMeta(req);
+  await auditArrayDiff({
+    session: auth.ctx.session,
+    module: "fees",
+    entityType: "collection_voucher",
+    before: priorVouchers,
+    after: state.vouchers,
+    ip,
+    userAgent,
+    summarize: voucherAuditSummary,
+  });
 
   return NextResponse.json({
     ok: true,

@@ -9,12 +9,18 @@ import { FeeReportsPanel } from "@/components/fees/FeeFinancePanels";
 import { PayrollReportsPanel } from "@/components/payroll/PayrollReportsPanel";
 import {
   AccountsReportsRunner,
+  CertificatesReportsRunner,
+  CommsReportsRunner,
+  ExamReportsRunner,
   HomeworkReportsRunner,
+  LibraryReportsRunner,
   StoreReportsRunner,
+  TimetableReportsRunner,
   TransportReportsRunner,
   TrustReportsRunner,
 } from "@/components/reports/ModuleReportRunners";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { useMyTeaching } from "@/components/staff/useMyTeaching";
 import {
   StaffAttendanceReportsPanel,
   StaffLeaveReportsPanel,
@@ -38,6 +44,7 @@ import {
 } from "@/lib/reportsCenter";
 import {
   filterReportsCenterEntries,
+  isStaffRecordsEntry,
   listReportsCenterEntries,
   moduleLabel,
   REPORTS_CENTER_MODULES,
@@ -45,6 +52,12 @@ import {
 } from "@/lib/reportsCenterCatalog";
 import { isModuleEnabled } from "@/lib/moduleRegistry";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 
 type HubTab = "dashboard" | "catalog" | "recent" | ReportsCenterModuleId;
 
@@ -58,17 +71,27 @@ export function ReportsCenterWorkspace() {
   const [recent, setRecent] = useState<ReportsCenterRecentItem[]>([]);
   const [ay, setAy] = useState("");
 
+  // Teacher mode (2026-09-29): no reports about colleagues (staff leave,
+  // staff attendance), and the class-based runners narrow to the teacher's
+  // own sections (each runner reads "my classes" itself). Principal /
+  // office come back unrestricted — unchanged. Colleagues' records stay
+  // hidden until that answer confirms a school-wide login, failing closed
+  // while it loads so a teacher never gets a moment with the Staff tab.
+  const { my } = useMyTeaching();
+  const hideStaffRecords = !my?.unrestricted;
+
   const { allowedModules, allowedRbac } = useMemo(() => {
     const masters = loadMasters();
     const rbac = loadRbac();
     const mods = REPORTS_CENTER_MODULES.filter((m) => {
       if (!canAccessModule(session, masters, m.rbacModule, rbac)) return false;
+      if (hideStaffRecords && m.id === "staff") return false;
       if (m.id === "rte") return isModuleEnabled("rte_ews");
       return true;
     });
     const set = new Set<RbacModule>(mods.map((m) => m.rbacModule));
     return { allowedModules: mods, allowedRbac: set };
-  }, [session]);
+  }, [session, hideStaffRecords]);
 
   const canExport = useMemo(() => {
     const masters = loadMasters();
@@ -104,8 +127,8 @@ export function ReportsCenterWorkspace() {
         query,
         moduleId: moduleFilter,
         allowedRbac,
-      }),
-    [allEntries, query, moduleFilter, allowedRbac],
+      }).filter((e) => !hideStaffRecords || !isStaffRecordsEntry(e)),
+    [allEntries, query, moduleFilter, allowedRbac, hideStaffRecords],
   );
 
   const hubTabs: ModuleTabItem[] = useMemo(() => {
@@ -156,7 +179,7 @@ export function ReportsCenterWorkspace() {
       }
       icon={<FileBarChart2 className="size-6" aria-hidden />}
       actions={
-        <p className="rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
+        <p className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-sm text-[var(--brand-deep)]">
           <span className="font-semibold">{filtered.length}</span> report
           {filtered.length === 1 ? "" : "s"}
           {moduleFilter !== "all" || query
@@ -211,22 +234,20 @@ export function ReportsCenterWorkspace() {
             </select>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.1)] bg-white">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-[rgba(32,48,80,0.04)] text-xs uppercase tracking-wide text-[var(--muted)]">
+          <ErpTableShell>
+            <div className="overflow-x-auto">
+            <ErpTable>
+              <ErpTableHead>
                 <tr>
                   <th className="px-3 py-2 font-medium">Report</th>
                   <th className="px-3 py-2 font-medium">Module</th>
                   <th className="px-3 py-2 font-medium">Category</th>
                   <th className="px-3 py-2 font-medium text-right">Actions</th>
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {filtered.map((e) => (
-                  <tr
-                    key={e.key}
-                    className="border-t border-[rgba(32,48,80,0.06)]"
-                  >
+                  <tr key={e.key}>
                     <td className="px-3 py-2.5">
                       <p className="font-medium text-[var(--brand-deep)]">
                         {e.label}
@@ -245,7 +266,7 @@ export function ReportsCenterWorkspace() {
                       <div className="flex flex-wrap justify-end gap-1.5">
                         <button
                           type="button"
-                          className="rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-1 text-xs font-medium text-[var(--brand-deep)]"
+                          className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-medium text-[var(--brand-deep)]"
                           onClick={() => {
                             recordReportsCenterOpen(e);
                             setRecent(loadReportsCenterRecent());
@@ -256,7 +277,7 @@ export function ReportsCenterWorkspace() {
                         </button>
                         <Link
                           href={e.href}
-                          className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1 text-xs font-medium text-white"
+                          className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-xs font-medium text-[var(--primary-foreground)]"
                           onClick={(ev) => openEntry(e, ev)}
                         >
                           Open module
@@ -275,9 +296,10 @@ export function ReportsCenterWorkspace() {
                     </td>
                   </tr>
                 ) : null}
-              </tbody>
-            </table>
-          </div>
+              </ErpTableBody>
+            </ErpTable>
+            </div>
+          </ErpTableShell>
         </section>
       ) : null}
 
@@ -301,19 +323,21 @@ export function ReportsCenterWorkspace() {
             ) : null}
           </div>
           {recent.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-[rgba(32,48,80,0.15)] px-4 py-8 text-center text-sm text-[var(--muted)]">
+            <p className="rounded-xl border border-dashed border-[var(--border)] px-4 py-8 text-center text-sm text-[var(--muted)]">
               Nothing yet — pick a report from Catalog.
             </p>
           ) : (
             <ul className="space-y-1.5">
               {recent
-                .filter((r) =>
-                  allowedModules.some((m) => m.id === r.moduleId),
+                .filter(
+                  (r) =>
+                    allowedModules.some((m) => m.id === r.moduleId) &&
+                    (!hideStaffRecords || !isStaffRecordsEntry(r)),
                 )
                 .map((r) => (
                   <li
                     key={`${r.key}_${r.at}`}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
                   >
                     <div>
                       <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -327,7 +351,7 @@ export function ReportsCenterWorkspace() {
                     <div className="flex gap-1.5">
                       <button
                         type="button"
-                        className="rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-1 text-xs font-medium"
+                        className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-medium"
                         onClick={() =>
                           setTab(r.moduleId as ReportsCenterModuleId)
                         }
@@ -336,7 +360,7 @@ export function ReportsCenterWorkspace() {
                       </button>
                       <Link
                         href={r.href}
-                        className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1 text-xs font-medium text-white"
+                        className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-xs font-medium text-[var(--primary-foreground)]"
                       >
                         Open
                       </Link>
@@ -364,7 +388,7 @@ export function ReportsCenterWorkspace() {
               Open full module →
             </Link>
           </div>
-          <ModuleRunner id={tab} ay={ay} />
+          <ModuleRunner id={tab} ay={ay} hideStaffRecords={hideStaffRecords} />
         </section>
       ) : null}
     </ErpWorkspaceShell>
@@ -374,9 +398,11 @@ export function ReportsCenterWorkspace() {
 function ModuleRunner({
   id,
   ay,
+  hideStaffRecords,
 }: {
   id: ReportsCenterModuleId;
   ay: string;
+  hideStaffRecords: boolean;
 }) {
   switch (id) {
     case "fees":
@@ -386,8 +412,13 @@ function ModuleRunner({
     case "admissions":
       return <AdmissionReportsPanel />;
     case "staff":
-      return <StaffLeaveReportsPanel ay={ay} scope="leave" />;
+      // Unreachable for a teacher (the tab is not offered); belt and braces
+      // for a stale ?module=staff link.
+      return hideStaffRecords ? null : <StaffLeaveReportsPanel ay={ay} scope="leave" />;
     case "attendance":
+      // A teacher gets their own classes' student attendance only — the
+      // staff attendance report is every colleague's punches.
+      if (hideStaffRecords) return <StudentAttendanceReportsPanel ay={ay} />;
       return (
         <div className="space-y-8">
           <div>
@@ -466,6 +497,16 @@ function ModuleRunner({
       return <AccountsReportsRunner />;
     case "trust":
       return <TrustReportsRunner />;
+    case "timetable":
+      return <TimetableReportsRunner ay={ay} />;
+    case "exams":
+      return <ExamReportsRunner ay={ay} />;
+    case "library":
+      return <LibraryReportsRunner />;
+    case "certificates":
+      return <CertificatesReportsRunner />;
+    case "comms":
+      return <CommsReportsRunner />;
     default:
       return null;
   }

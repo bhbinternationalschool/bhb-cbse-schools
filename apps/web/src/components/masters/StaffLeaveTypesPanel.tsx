@@ -129,7 +129,7 @@ export function StaffLeaveTypesPanel() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <MastersTableCard title="Leave types & adjustment rules">
-          <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+          <ul className="divide-y divide-[var(--border)]">
             {hr.leaveTypes.map((t) => (
               <li
                 key={t.code}
@@ -217,7 +217,7 @@ export function StaffLeaveTypesPanel() {
               </label>
             </div>
 
-            <div className="rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] p-3">
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
               <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
                 Adjustment rules
               </p>
@@ -273,7 +273,7 @@ export function StaffLeaveTypesPanel() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+                className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
                 onClick={onSave}
               >
                 {editingCode ? "Save" : "Add"}
@@ -281,7 +281,7 @@ export function StaffLeaveTypesPanel() {
               {editingCode ? (
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
                   onClick={resetForm}
                 >
                   Cancel

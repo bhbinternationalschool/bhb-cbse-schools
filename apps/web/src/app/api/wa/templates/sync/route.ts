@@ -6,6 +6,7 @@
 
 import { NextResponse } from "next/server";
 import {
+  applyMetaTemplateQualityUpdate,
   applyMetaTemplateStatusUpdate,
   applyMetaTemplateSync,
   emptyWaTemplates,
@@ -13,11 +14,14 @@ import {
   type WaTemplatesState,
 } from "@/lib/waTemplates";
 import {
+  clearPendingTemplateQualityEvents,
   clearPendingTemplateStatusEvents,
   fetchMetaMessageTemplates,
+  readPendingTemplateQualityEvents,
   readPendingTemplateStatusEvents,
   waTemplatesMetaConfigured,
 } from "@/lib/waTemplatesMeta.server";
+import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 
 export const runtime = "nodejs";
 
@@ -30,6 +34,11 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  // Staff with wa_templates edit only: this drains the pending webhook
+  // status/quality events and returns the registry. Middleware does not
+  // cover /api.
+  const auth = await requireStaffPermission(req, "wa_templates", "edit");
+  if (!auth.ok) return auth.response;
   let body: { state?: WaTemplatesState } = {};
   try {
     body = (await req.json()) as typeof body;
@@ -44,15 +53,22 @@ export async function POST(req: Request) {
     state = applyMetaTemplateStatusUpdate(state, evt);
   }
 
+  const pendingQuality = await readPendingTemplateQualityEvents();
+  for (const evt of pendingQuality) {
+    state = applyMetaTemplateQualityUpdate(state, evt);
+  }
+
   const meta = await fetchMetaMessageTemplates();
   if (meta.ok) {
     state = applyMetaTemplateSync(state, meta.rows, "meta_sync");
     if (pending.length) await clearPendingTemplateStatusEvents();
+    if (pendingQuality.length) await clearPendingTemplateQualityEvents();
     return NextResponse.json({
       ok: true,
       mode: meta.mode,
       synced: meta.rows.length,
       statusEventsApplied: pending.length,
+      qualityEventsApplied: pendingQuality.length,
       state,
     });
   }
@@ -68,11 +84,13 @@ export async function POST(req: Request) {
   };
 
   if (pending.length) await clearPendingTemplateStatusEvents();
+  if (pendingQuality.length) await clearPendingTemplateQualityEvents();
   return NextResponse.json({
     ok: true,
     mode: meta.mode || "local_demo",
     synced: state.templates.length,
     statusEventsApplied: pending.length,
+    qualityEventsApplied: pendingQuality.length,
     state,
     note: "Approved local templates in demo mode",
   });

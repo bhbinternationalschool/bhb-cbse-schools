@@ -9,6 +9,7 @@ import {
 import type { WaChatCategory } from "@/lib/waChatCategories";
 import { waOutboundConfigured } from "@/lib/waSend";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 
 export const runtime = "nodejs";
 
@@ -93,7 +94,7 @@ export async function POST(req: Request) {
     const r = await staffSendWaHubTemplate({
       threadId: body.threadId,
       templateName: body.template.name,
-      language: body.template.language || "en",
+      language: body.template.language || SCHOOL_DEFAULT_WA_LANGUAGE,
       variableKeys: body.template.variableKeys,
       variables: body.template.variables,
       previewText: body.template.previewText,

@@ -8,7 +8,6 @@ import { ACCOUNTS_REPORTS } from "@/lib/accountsReportCatalog";
 import { FEE_REPORTS } from "@/lib/feeReportCatalog";
 import { PAYROLL_REPORTS } from "@/lib/payrollReportCatalog";
 import { SIS_REPORTS } from "@/lib/sisReportCatalog";
-import { STORE_REPORTS } from "@/lib/storeReportCatalog";
 import {
   attendanceReportDefs,
   leaveReportDefs,
@@ -20,8 +19,12 @@ import { HOMEWORK_REPORTS } from "@/lib/homework";
 import { PTM_REPORTS } from "@/lib/ptm";
 import { STUDENT_LEAVE_REPORTS } from "@/lib/studentLeave";
 import { VAULT_REPORTS } from "@/lib/vault";
-import { PURCHASE_REPORTS } from "@/lib/purchase";
 import { RTE_REPORTS } from "@/lib/rteEws";
+import { TIMETABLE_REPORTS } from "@/lib/timetableReportCatalog";
+import { EXAM_REPORTS } from "@/lib/examReportCatalog";
+import { LIBRARY_REPORTS } from "@/lib/library";
+import { CERTIFICATES_REPORTS } from "@/lib/certificatesReportCatalog";
+import { COMMS_REPORTS } from "@/lib/commsReportCatalog";
 import { isModuleEnabled } from "@/lib/moduleRegistry";
 import type { RbacModule } from "@/lib/rbac";
 
@@ -33,6 +36,7 @@ export type ReportsCenterModuleId =
   | "attendance"
   | "homework"
   | "ptm"
+  | "events"
   | "student_leave"
   | "vault"
   | "rte"
@@ -41,7 +45,12 @@ export type ReportsCenterModuleId =
   | "purchase"
   | "transport"
   | "accounts"
-  | "trust";
+  | "trust"
+  | "timetable"
+  | "exams"
+  | "library"
+  | "certificates"
+  | "comms";
 
 export type ReportsCenterEntry = {
   /** Stable id: module:reportId */
@@ -125,6 +134,14 @@ export const REPORTS_CENTER_MODULES: ReportsCenterModuleDef[] = [
     embeddable: true,
   },
   {
+    id: "events",
+    label: "Events & calendar",
+    blurb: "Upcoming events · RSVP tallies",
+    rbacModule: "events",
+    href: "/events?tab=rsvps",
+    embeddable: false,
+  },
+  {
     id: "student_leave",
     label: "Student leave",
     blurb: "Register · medical · chronic",
@@ -183,7 +200,10 @@ export const REPORTS_CENTER_MODULES: ReportsCenterModuleDef[] = [
   {
     id: "accounts",
     label: "Accounts",
-    blurb: "Day book · P&L · balance sheet",
+    // No longer "P&L · balance sheet": the financial statements moved to
+    // Accounts → Book reports, which builds them from the server book
+    // (2026-09-06). What is left here are the desk's own registers.
+    blurb: "Day book · cash register · expenses · payables",
     rbacModule: "accounts",
     href: "/accounts?tab=reports",
     embeddable: true,
@@ -194,6 +214,51 @@ export const REPORTS_CENTER_MODULES: ReportsCenterModuleDef[] = [
     blurb: "Cost sheet · CWIP · allotments",
     rbacModule: "trust",
     href: "/trust?tab=reports",
+    embeddable: true,
+  },
+  {
+    id: "timetable",
+    label: "Timetable",
+    blurb: "Teacher load · free periods · substitutions",
+    rbacModule: "timetable",
+    href: "/timetable?tab=reports",
+    embeddable: true,
+  },
+  {
+    id: "exams",
+    label: "Exams",
+    blurb: "Result analysis · toppers · CBSE summary",
+    rbacModule: "exams",
+    href: "/exams?tab=result_reports",
+    embeddable: true,
+  },
+  {
+    id: "library",
+    label: "Library",
+    blurb: "Circulation · overdue · borrower ledgers",
+    // Library has no dedicated RBAC module — it's gated under "store"
+    // (see lib/library.ts's assertModulePermission calls).
+    rbacModule: "store",
+    href: "/library?tab=reports",
+    embeddable: true,
+  },
+  {
+    id: "certificates",
+    label: "Certificates",
+    blurb: "Issue register · TC register",
+    rbacModule: "certificates",
+    href: "/certificates?tab=reports",
+    embeddable: true,
+  },
+  {
+    id: "comms",
+    label: "Comms",
+    blurb: "Notices · news publish registers",
+    // Comms has no single RBAC module — notices/news/gallery are gated
+    // separately (see lib/schoolComms.ts's canEditComms). "notices" is
+    // the broadest, used here to gate the module tab itself.
+    rbacModule: "notices",
+    href: "/comms?tab=reports",
     embeddable: true,
   },
 ];
@@ -381,28 +446,23 @@ export function listReportsCenterEntries(): ReportsCenterEntry[] {
       ),
     );
   }
-  for (const r of STORE_REPORTS) {
+  // Store and purchase reports live in the module itself now, where they are
+  // run against the server ledger. Listed here as four real reports rather
+  // than the long menu the old browser-held register advertised.
+  for (const r of [
+    { id: "stock-register", label: "Stock register", hint: "On hand and value per item" },
+    { id: "item-margin", label: "Item margin", hint: "Sold, revenue, cost and margin" },
+    { id: "sales-day-book", label: "Sales day book", hint: "Counter sales with tender split" },
+    { id: "purchases-by-vendor", label: "Purchases by vendor", hint: "Bought, returned and outstanding" },
+  ]) {
     out.push(
       entry(
         "store",
         "store",
-        "/store?tab=reports",
+        "/inventory?tab=reports",
         r.id,
         r.label,
-        r.category,
-        r.hint,
-      ),
-    );
-  }
-  for (const r of PURCHASE_REPORTS) {
-    out.push(
-      entry(
-        "purchase",
-        "purchase",
-        "/store?tab=purchase",
-        r.id,
-        r.label,
-        "procurement",
+        "store",
         r.hint,
       ),
     );
@@ -446,6 +506,71 @@ export function listReportsCenterEntries(): ReportsCenterEntry[] {
       ),
     );
   }
+  for (const r of TIMETABLE_REPORTS) {
+    out.push(
+      entry(
+        "timetable",
+        "timetable",
+        "/timetable?tab=reports",
+        r.id,
+        r.label,
+        r.category,
+        r.hint,
+      ),
+    );
+  }
+  for (const r of EXAM_REPORTS) {
+    out.push(
+      entry(
+        "exams",
+        "exams",
+        "/exams?tab=result_reports",
+        r.id,
+        r.label,
+        r.category,
+        r.hint,
+      ),
+    );
+  }
+  for (const r of LIBRARY_REPORTS) {
+    out.push(
+      entry(
+        "library",
+        "store",
+        "/library?tab=reports",
+        r.id,
+        r.label,
+        "library",
+        r.hint,
+      ),
+    );
+  }
+  for (const r of CERTIFICATES_REPORTS) {
+    out.push(
+      entry(
+        "certificates",
+        "certificates",
+        "/certificates?tab=reports",
+        r.id,
+        r.label,
+        r.category,
+        r.hint,
+      ),
+    );
+  }
+  for (const r of COMMS_REPORTS) {
+    out.push(
+      entry(
+        "comms",
+        r.id === "news_register" ? "news" : "notices",
+        "/comms?tab=reports",
+        r.id,
+        r.label,
+        r.category,
+        r.hint,
+      ),
+    );
+  }
 
   return out;
 }
@@ -468,6 +593,19 @@ export function filterReportsCenterEntries(
     const hay = `${e.label} ${e.hint || ""} ${e.category} ${e.moduleId} ${e.reportId}`.toLowerCase();
     return hay.includes(q);
   });
+}
+
+/**
+ * Reports about the staff themselves — leave, and staff attendance (which
+ * sits under the attendance module). A teacher holds "staff.view" and
+ * "attendance.view" for their own work, and until 2026-09-29 that listed
+ * every colleague's leave and punches here. Teacher mode drops these.
+ */
+export function isStaffRecordsEntry(e: {
+  moduleId: string;
+  href: string;
+}): boolean {
+  return e.moduleId === "staff" || e.href.includes("tab=staff-reports");
 }
 
 export function moduleLabel(id: ReportsCenterModuleId): string {

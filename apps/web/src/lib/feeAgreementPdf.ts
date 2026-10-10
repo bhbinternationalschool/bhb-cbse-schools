@@ -3,7 +3,7 @@
  * guardian header + head × Apr–Mar matrix + summary + signatures.
  */
 
-import { jsPDF } from "jspdf";
+import type { jsPDF } from "jspdf";
 import {
   drawPdfLetterhead,
   resolvePdfLetterhead,
@@ -329,7 +329,8 @@ export async function downloadFeeAgreementPdf(
   if (!docs.length) throw new Error("No student selected for Fee Agreement");
 
   const letterhead = await resolvePdfLetterhead(options?.masters ?? loadMasters());
-  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  const { jsPDF: JsPDF } = await import("jspdf");
+  const doc = new JsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 20;

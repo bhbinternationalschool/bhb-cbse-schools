@@ -1,0 +1,475 @@
+import "package:flutter/material.dart";
+
+import "../../core/popups/app_popups.dart";
+import "../../core/ui/running_strip.dart";
+import "../../core/guide/screen_guides.dart";
+import "../../core/api/api_client.dart";
+import "../../core/theme/app_theme.dart";
+import "../modules/chat_inbox_screen.dart";
+import "../modules/notices_screen.dart";
+import "admission_leads_screen.dart";
+import "documents_screen.dart";
+import "fee_counter_screen.dart";
+import "fee_defaulters_screen.dart";
+import "visitor_gate_screen.dart";
+import "my_collections_screen.dart";
+import "survey_screen.dart";
+import "leave_approvals_screen.dart";
+import "payslips_screen.dart";
+import "self_attendance_screen.dart";
+import "staff_complaints_screen.dart";
+import "staff_leave_screen.dart";
+import "staff_roster_screen.dart";
+import "student_leave_queue_screen.dart";
+import "transport_requests_screen.dart";
+import "waiting_card.dart";
+import "../../core/i18n/locale_controller.dart";
+
+String _greeting() {
+  final h = DateTime.now().hour;
+  if (h < 12) return "Good morning · सुप्रभात";
+  if (h < 17) return "Good afternoon · नमस्ते";
+  return "Good evening · नमस्ते";
+}
+
+class _Tile {
+  const _Tile(
+    this.label,
+    this.hindi,
+    this.icon,
+    this.tone,
+    this.feature,
+    this.open,
+  );
+
+  final String label;
+  final String hindi;
+  final IconData icon;
+  final ModuleTone tone;
+
+  /// Mobile feature id from the ERP — the tile is hidden without it.
+  final String feature;
+  final Widget Function(ApiClient api) open;
+}
+
+/// Home for staff who neither teach nor drive: the office (accountant,
+/// counsellor, computer operator, transport in-charge) and support staff
+/// (peon, sweeper, gardener). Everyone gets punch, presence, notices,
+/// leave and payslips; the office also gets the queues it works —
+/// complaints, parents' leave, documents, transport requests.
+///
+/// Labels carry Hindi because most support staff read Hindi first.
+class DeskHomeScreen extends StatefulWidget {
+  const DeskHomeScreen({
+    super.key,
+    required this.api,
+    required this.onLogout,
+    this.openRoute,
+  });
+
+  final ApiClient api;
+  final VoidCallback onLogout;
+  final String? openRoute;
+
+  @override
+  State<DeskHomeScreen> createState() => _DeskHomeScreenState();
+}
+
+class _DeskHomeScreenState extends State<DeskHomeScreen> {
+  String _name = "";
+  String _kind = "support";
+  int _refresh = 0;
+  StaffFeatureSet _features = const StaffFeatureSet.empty();
+
+  static final _common = <_Tile>[
+    _Tile(
+      "GPS punch",
+      "हाज़िरी",
+      Icons.where_to_vote_outlined,
+      ModuleTone.teal,
+      "gps_punch",
+      (api) => SelfAttendanceScreen(api: api),
+    ),
+    _Tile(
+      "Notices",
+      "सूचनाएँ",
+      Icons.campaign_outlined,
+      ModuleTone.pink,
+      "notices",
+      (api) => NoticesScreen(api: api),
+    ),
+    _Tile(
+      "My leave",
+      "छुट्टी",
+      Icons.event_outlined,
+      ModuleTone.coral,
+      "my_leave",
+      (api) => StaffLeaveScreen(api: api),
+    ),
+    _Tile(
+      "Payslips",
+      "वेतन पर्ची",
+      Icons.receipt_long_outlined,
+      ModuleTone.gray,
+      "my_payslips",
+      (api) => PayslipsScreen(api: api),
+    ),
+  ];
+
+  static final _work = <_Tile>[
+    _Tile(
+      "Collect fees",
+      "फ़ीस लें",
+      Icons.point_of_sale_outlined,
+      ModuleTone.green,
+      "fee_take",
+      (api) => FeeCounterScreen(api: api),
+    ),
+    _Tile(
+      "Defaulters",
+      "बकाया",
+      Icons.currency_rupee,
+      ModuleTone.coral,
+      "fee_defaulters",
+      (api) => FeeDefaultersScreen(api: api, canCollect: true),
+    ),
+    _Tile(
+      "My collections",
+      "आज का संग्रह",
+      Icons.account_balance_wallet_outlined,
+      ModuleTone.teal,
+      "fee_collections",
+      (api) => MyCollectionsScreen(api: api),
+    ),
+    _Tile(
+      "Admission leads",
+      "प्रवेश",
+      Icons.how_to_reg_outlined,
+      ModuleTone.blue,
+      "admission_leads",
+      (api) => AdmissionLeadsScreen(api: api),
+    ),
+    _Tile(
+      "Field survey",
+      "सर्वे",
+      Icons.map_outlined,
+      ModuleTone.amber,
+      "field_survey",
+      (api) => SurveyScreen(api: api),
+    ),
+    _Tile(
+      "Visitor gate",
+      "आगंतुक",
+      Icons.meeting_room_outlined,
+      ModuleTone.purple,
+      "visitor_gate",
+      (api) => VisitorGateScreen(api: api),
+    ),
+    _Tile(
+      "Complaints",
+      "शिकायतें",
+      Icons.report_problem_outlined,
+      ModuleTone.amber,
+      "complaints_handle",
+      (api) => StaffComplaintsScreen(api: api),
+    ),
+    _Tile(
+      "Leave requests",
+      "छात्र अवकाश",
+      Icons.event_busy_outlined,
+      ModuleTone.blue,
+      "student_leave_decide",
+      (api) => StudentLeaveQueueScreen(api: api),
+    ),
+    _Tile(
+      "Documents",
+      "दस्तावेज़",
+      Icons.folder_open_outlined,
+      ModuleTone.purple,
+      "documents_verify",
+      (api) => DocumentsScreen(api: api),
+    ),
+    _Tile(
+      "Transport requests",
+      "परिवहन",
+      Icons.directions_bus_outlined,
+      ModuleTone.blue,
+      "transport_requests",
+      (api) => TransportRequestsScreen(api: api),
+    ),
+    _Tile(
+      "Messages",
+      "संदेश",
+      Icons.chat_bubble_outline,
+      ModuleTone.teal,
+      "messages",
+      (api) => ChatInboxScreen(api: api),
+    ),
+    _Tile(
+      "Staff contacts",
+      "कर्मचारी",
+      Icons.contact_phone_outlined,
+      ModuleTone.green,
+      "staff_roster",
+      (api) => StaffRosterScreen(api: api),
+    ),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    // The school's pop-up for staff, if any — once per app open (core/popups).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) AppPopups.maybeShow(context, widget.api);
+    });
+    _load();
+  }
+
+  Future<void> _load() async {
+    final name = await widget.api.guardianName();
+    final kind = await widget.api.homeKind();
+    try {
+      final s = await widget.api.fetchStaffSummary();
+      if (mounted) {
+        setState(() {
+          _name = s.fullName;
+          _kind = s.homeKind.isEmpty ? (kind ?? "support") : s.homeKind;
+          _refresh += 1;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _name = name ?? "";
+          _kind = kind ?? "support";
+        });
+      }
+    }
+    try {
+      final f = await widget.api.fetchStaffFeatures();
+      if (mounted) setState(() => _features = f);
+    } catch (_) {
+      /* keep whatever we had */
+    }
+    if (widget.openRoute != null && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _openDeepLink(widget.openRoute!),
+      );
+    }
+  }
+
+  void _push(Widget w) =>
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => w));
+
+  void _openDeepLink(String raw) {
+    final path = Uri.tryParse(raw)?.path ?? raw;
+    switch (path) {
+      case "/leave":
+        _push(StaffLeaveScreen(api: widget.api));
+      case "/leave-approvals":
+        _push(LeaveApprovalsScreen(api: widget.api));
+      case "/complaints":
+        _push(StaffComplaintsScreen(api: widget.api));
+      case "/student-leave":
+        _push(StudentLeaveQueueScreen(api: widget.api));
+      case "/documents":
+        _push(DocumentsScreen(api: widget.api));
+      case "/chat":
+        _push(ChatInboxScreen(api: widget.api));
+      case "/notices":
+        _push(NoticesScreen(api: widget.api));
+    }
+  }
+
+  void _openWaiting(String kind) {
+    switch (kind) {
+      case "staff_leave":
+        _push(LeaveApprovalsScreen(api: widget.api));
+      case "student_leave":
+        _push(StudentLeaveQueueScreen(api: widget.api));
+      case "complaints":
+        _push(StaffComplaintsScreen(api: widget.api));
+      case "documents":
+        _push(DocumentsScreen(api: widget.api));
+    }
+  }
+
+  Future<void> _signOut() async {
+    await widget.api.signOut();
+    if (mounted) widget.onLogout();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // What appears is the ERP's answer, not a guess from the role name: an
+    // accountant gets the fee counter, a sweeper gets punch and payslips.
+    final office = _kind == "office" || _kind == "leadership";
+    final tiles = [
+      ..._common,
+      ..._work,
+    ].where((t) => _features.has(t.feature)).toList();
+    return Scaffold(
+      body: RefreshIndicator(
+        onRefresh: _load,
+        color: AppColors.primary,
+        child: ListView(
+          padding: EdgeInsets.zero,
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            Container(
+              decoration: const BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.vertical(
+                  bottom: Radius.circular(28),
+                ),
+              ),
+              padding: EdgeInsets.fromLTRB(
+                20,
+                MediaQuery.paddingOf(context).top + 18,
+                12,
+                28,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _greeting(),
+                          style: AppText.bodySmall.copyWith(
+                            color: AppColors.accentSoft,
+                          ),
+                        ),
+                        Text(
+                          _name.isEmpty ? "Staff" : _name,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppText.titleMedium.copyWith(
+                            color: Colors.white,
+                          ),
+                        ),
+                        Text(
+                          office ? "Office · कार्यालय" : "Staff · कर्मचारी",
+                          style: AppText.bodySmall.copyWith(
+                            color: Color(0xFFB8C0D4),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const ScreenGuideButton(
+                    guideId: "desk-home",
+                    screenLabel: "Home",
+                  ),
+                  IconButton(
+                    tooltip: context.l10n.signOut,
+                    onPressed: _signOut,
+                    icon: const Icon(Icons.logout, color: Colors.white),
+                  ),
+                ],
+              ),
+            ),
+            // Notices and news scrolling across, as on the web ERP.
+            RunningStrip(
+              api: widget.api,
+              onOpen: () => _push(NoticesScreen(api: widget.api)),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (office) ...[
+                    WaitingCard(
+                      api: widget.api,
+                      onOpen: _openWaiting,
+                      refreshKey: _refresh,
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  Card(
+                    child: ListTile(
+                      leading: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: ModuleTone.teal.background,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.where_to_vote_outlined,
+                          color: ModuleTone.teal.foreground,
+                        ),
+                      ),
+                      title: Text(
+                        context.l10n.markMyAttendance,
+                        style: AppText.bodyMediumInk.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: Text(
+                        context.l10n.gpsPunchInAndOutAt,
+                        style: AppText.bodySmallMuted,
+                      ),
+                      trailing: const Icon(
+                        Icons.chevron_right,
+                        color: AppColors.muted,
+                      ),
+                      onTap: () => _push(SelfAttendanceScreen(api: widget.api)),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  GridView.count(
+                    crossAxisCount: 3,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: 10,
+                    crossAxisSpacing: 8,
+                    childAspectRatio: 0.95,
+                    children: [
+                      for (final t in tiles)
+                        InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () => _push(t.open(widget.api)),
+                          child: Column(
+                            children: [
+                              Container(
+                                width: 52,
+                                height: 52,
+                                decoration: BoxDecoration(
+                                  color: t.tone.background,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Icon(
+                                  t.icon,
+                                  color: t.tone.foreground,
+                                  size: 26,
+                                ),
+                              ),
+                              const SizedBox(height: 5),
+                              Text(
+                                t.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppText.labelMediumInk,
+                              ),
+                              Text(
+                                t.hindi,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppText.labelSmallMuted,
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

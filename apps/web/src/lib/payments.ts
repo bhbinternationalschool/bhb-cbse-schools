@@ -25,7 +25,9 @@ import {
   scheduleClientSchoolMirrorSync,
   setMirrorSlice,
 } from "@/lib/schoolDataMirror";
-import { loadSis } from "@/lib/sis";
+import { isHiddenReviewDemoHousehold, loadSis } from "@/lib/sis";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type PaymentLinkStatus =
   | "open"
@@ -115,7 +117,7 @@ export function loadPayments(): PaymentsState {
     return emptyPaymentsState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyPaymentsState();
     const parsed = JSON.parse(raw) as PaymentsState;
     if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.links)) {
@@ -135,16 +137,16 @@ export function savePayments(state: PaymentsState) {
 
   if (typeof window === "undefined") {
     setMirrorSlice("payments", state);
-    void import("@/lib/paymentsPersistence").then(({ schedulePaymentsSync }) => {
+    void trackServerWork(import("@/lib/paymentsPersistence").then(({ schedulePaymentsSync }) => {
       schedulePaymentsSync(state);
-    });
+    }));
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   scheduleClientSchoolMirrorSync({ payments: state });
-  void import("@/lib/paymentsPersistence").then(({ schedulePaymentsSync }) => {
+  void trackServerWork(import("@/lib/paymentsPersistence").then(({ schedulePaymentsSync }) => {
     schedulePaymentsSync(state);
-  });
+  }));
 }
 
 export function writePaymentsLocalRaw(state: PaymentsState) {
@@ -152,7 +154,7 @@ export function writePaymentsLocalRaw(state: PaymentsState) {
     setMirrorSlice("payments", state);
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   scheduleClientSchoolMirrorSync({ payments: state });
 }
 
@@ -250,9 +252,12 @@ export function getPaymentLinkByCode(
 }
 
 export function listPaymentLinks(state?: PaymentsState): PaymentLink[] {
-  return [...(state ?? loadPayments()).links].sort((a, b) =>
-    b.createdAt.localeCompare(a.createdAt),
-  );
+  // Staff screens do not show the Play review family's links (see
+  // hideReviewDemoFromStaff in lib/sis). loadSis() is what learns its ids.
+  if (typeof window !== "undefined") loadSis();
+  return [...(state ?? loadPayments()).links]
+    .filter((l) => !isHiddenReviewDemoHousehold(l.householdId))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export function openPaymentLinkCount(state?: PaymentsState): number {
@@ -291,6 +296,58 @@ export function duesToPaymentLines(dues: FeeDueLine[]): PaymentLinkLine[] {
   }));
 }
 
+/** "dueKey:paise|…" in key order — two links asking for the same money. */
+function linesKey(lines: { dueKey: string; amountPaise: number }[]): string {
+  return lines
+    .map((l) => `${l.dueKey}:${l.amountPaise}`)
+    .sort()
+    .join("|");
+}
+
+/**
+ * An open link already asking this family for exactly this money, from the
+ * same place (its note), still good past today — or undefined.
+ *
+ * Every tap used to mint a new link and a new gateway order (director,
+ * 9 Oct 2026: one family had 13 links for the same ₹19,300; a parent's
+ * double tap made two open orders 17 seconds apart). Two live orders for
+ * one set of dues means a parent can pay twice, and the second payment
+ * books nothing and needs a manual refund. The note is part of the match
+ * because it carries what the gateway order was made for (the rail a
+ * parent picked in the app), so a link is reused only for the same ask.
+ */
+export function findReusablePaymentLink(
+  links: PaymentLink[],
+  want: { householdId: string; studentId: string; note: string; lines: PaymentLinkLine[]; amountPaise: number },
+  today: string,
+): PaymentLink | undefined {
+  const key = linesKey(want.lines);
+  return links.find(
+    (l) =>
+      l.status === "open" &&
+      l.expiresOn > today &&
+      l.householdId === want.householdId &&
+      l.studentId === want.studentId &&
+      (l.note || "") === want.note &&
+      l.amountPaise === want.amountPaise &&
+      linesKey(l.lines) === key,
+  );
+}
+
+/**
+ * The gateway checkout of a link createPaymentLink handed back as reused,
+ * when it already has one on this gateway — the caller sends the payer
+ * there instead of making another order. "" for a new link.
+ */
+export function reusableCheckoutUrl(
+  created: { link: PaymentLink; reused?: boolean },
+  gateway: string,
+): string {
+  if (!created.reused) return "";
+  const l = created.link;
+  return l.gatewayMode === gateway && l.gatewayCheckoutUrl ? l.gatewayCheckoutUrl : "";
+}
+
 export function createPaymentLink(input: {
   householdId: string;
   studentId: string;
@@ -301,17 +358,69 @@ export function createPaymentLink(input: {
   academicYearCode?: string;
   expiresInDays?: number;
   note?: string;
+  /**
+   * What the parent should actually pay, when that is less than the full
+   * balance of the selected dues — a counter discount, or an amount the
+   * clerk typed into the collect box.
+   *
+   * Without this the link was always raised for the GROSS balance: the
+   * clerk granted a discount, sent the link, and the parent was asked for
+   * the undiscounted figure. Allocated oldest-due-first, the same order a
+   * part payment is applied at the counter, so the link's breakup matches
+   * the receipt the payment will produce.
+   */
+  targetPaise?: number;
+  /**
+   * Always mint a new link, even when an open one asks for the same money.
+   * Only auto-pay sets this: its link is tied to one debit.
+   */
+  fresh?: boolean;
 }):
-  | { ok: true; link: PaymentLink }
+  | { ok: true; link: PaymentLink; reused?: boolean }
   | { ok: false; error: string } {
   const open = openFeeDues(input.dues).filter((d) => d.balancePaise > 0);
   if (open.length === 0) {
     return { ok: false, error: "Select at least one open due" };
   }
-  const lines = duesToPaymentLines(open);
+
+  const gross = open.reduce((s, d) => s + d.balancePaise, 0);
+  const target =
+    input.targetPaise === undefined
+      ? gross
+      : Math.max(0, Math.min(Math.round(input.targetPaise), gross));
+  if (target <= 0) {
+    return { ok: false, error: "Amount must be positive" };
+  }
+
+  const ordered = [...open].sort((a, b) => {
+    const byDue = a.dueOn.localeCompare(b.dueOn);
+    return byDue !== 0 ? byDue : a.dueKey.localeCompare(b.dueKey);
+  });
+
+  let remain = target;
+  const charged: FeeDueLine[] = [];
+  for (const d of ordered) {
+    if (remain <= 0) break;
+    const take = Math.min(d.balancePaise, remain);
+    if (take <= 0) continue;
+    charged.push({ ...d, balancePaise: take });
+    remain -= take;
+  }
+
+  const lines = duesToPaymentLines(charged);
   const amountPaise = lines.reduce((s, l) => s + l.amountPaise, 0);
   if (amountPaise <= 0) {
     return { ok: false, error: "Amount must be positive" };
+  }
+
+  const note = input.note?.trim() ?? "";
+  if (!input.fresh) {
+    const existing = findReusablePaymentLink(
+      refreshExpired(loadPayments()).links,
+      { householdId: input.householdId, studentId: input.studentId, note, lines, amountPaise },
+      todayIso(),
+    );
+    if (existing) return { ok: true, link: existing, reused: true };
   }
 
   const link = normalizeLink({
@@ -332,7 +441,7 @@ export function createPaymentLink(input: {
     paidAt: null,
     voucherId: null,
     receiptNo: null,
-    note: input.note?.trim() ?? "",
+    note,
   });
 
   const state = loadPayments();
@@ -416,6 +525,13 @@ export function applyPaymentLink(input: {
   cashierName: string;
   upiRef?: string;
   collectionDate?: string;
+  /**
+   * Gateway fee the parent paid on top of the fee, where the school passes it
+   * on. Added to the tender's own surcharge field, never to the receipt: the
+   * receipt is for the fee, and the amount check that refuses a receipt for
+   * the wrong money compares against the fee alone.
+   */
+  gatewaySurchargePaise?: number;
 }):
   | { ok: true; link: PaymentLink; voucherId: string; receiptNo: string }
   | { ok: false; error: string } {
@@ -450,6 +566,20 @@ export function applyPaymentLink(input: {
         ref: upiRef,
         instrumentDate: collectionDate,
         bankName: "",
+        // A real gateway holds this money until it settles, so the book puts
+        // it in clearing rather than in a bank it has not reached. Demo links
+        // carry no provider: nothing was captured, so nothing is in transit.
+        gatewayProvider:
+          link.gatewayMode === "cashfree" || link.gatewayMode === "razorpay"
+            ? link.gatewayMode
+            : "",
+        // Only where a gateway really captured the money. A demo link holds
+        // nothing in clearing, so there is nothing for a surcharge to sit
+        // against and honouring one would unbalance the receipt.
+        gatewaySurchargePaise:
+          link.gatewayMode === "cashfree" || link.gatewayMode === "razorpay"
+            ? Math.max(0, Math.round(input.gatewaySurchargePaise || 0))
+            : 0,
         realisation: "cleared",
       },
     ],
@@ -623,7 +753,31 @@ export function composeWhatsAppPaymentLinkMessage(
   link: PaymentLink,
   payUrl: string,
   schoolName: string,
+  autoSettle = false,
+  hindi = false,
 ): string {
+  if (hindi) {
+    return [
+      `*${schoolName}*`,
+      `फीस भुगतान लिंक · ${link.code}`,
+      "",
+      `${link.studentName}${link.classLabel ? ` (${link.classLabel})` : ""}`,
+      `राशि: *${formatInr(link.amountPaise)}*`,
+      `मान्य: ${link.expiresOn} तक`,
+      "",
+      autoSettle ? "सुरक्षित भुगतान (UPI / कार्ड / नेटबैंकिंग):" : "GPay / UPI से भुगतान करें:",
+      payUrl,
+      "",
+      ...(autoSettle
+        ? ["भुगतान के बाद रसीद अपने-आप WhatsApp पर आ जाएगी।"]
+        : [
+            "1️⃣ लिंक खोलें → Google Pay / UPI से भुगतान करें",
+            "2️⃣ रसीद के लिए पेज पर *Confirm paid* दबाएँ",
+          ]),
+      "",
+      "या स्कूल काउंटर पर भुगतान करके UTR नंबर बताएँ।",
+    ].join("\n");
+  }
   const lines = [
     `*${schoolName}*`,
     `Fee payment link · ${link.code}`,
@@ -632,11 +786,15 @@ export function composeWhatsAppPaymentLinkMessage(
     `Amount: *${formatInr(link.amountPaise)}*`,
     `Valid till: ${link.expiresOn}`,
     "",
-    "Pay with GPay / UPI:",
+    autoSettle ? "Pay securely (UPI / card / netbanking):" : "Pay with GPay / UPI:",
     payUrl,
     "",
-    "1️⃣ Open link → pay in Google Pay / UPI",
-    "2️⃣ Tap *Confirm paid* on the page for receipt",
+    ...(autoSettle
+      ? ["Receipt comes automatically on WhatsApp after payment."]
+      : [
+          "1️⃣ Open link → pay in Google Pay / UPI",
+          "2️⃣ Tap *Confirm paid* on the page for receipt",
+        ]),
     "",
     "Or pay at school counter and share UTR.",
   ];
@@ -650,14 +808,17 @@ export function whatsAppPaymentLinkUrl(
   const digits = mobile.replace(/\D/g, "");
   const phone = digits.length === 10 ? `91${digits}` : digits;
   if (typeof window !== "undefined") {
-    void fetch("/api/wa/dispatch", {
+    void trackServerWork(fetch("/api/wa/dispatch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         messages: [{ mobile: phone, body: message }],
       }),
-    }).catch(() => null);
+    }).catch(() => null));
   }
+  // personal-whatsapp-allow: builder only — every staff caller now goes
+  // through openWaMe(). Kept because the parent-facing pay page composes
+  // the same link for the PARENT to forward from their own phone.
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 

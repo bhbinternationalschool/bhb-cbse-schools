@@ -15,15 +15,22 @@ export const dynamic = "force-dynamic";
 export default async function RegisterPage({
   searchParams,
 }: {
-  searchParams: Promise<{ src?: string }>;
+  searchParams: Promise<{ src?: string; lead?: string }>;
 }) {
   const [sp, config] = await Promise.all([
     searchParams,
     loadPublicRegistrationConfig(),
   ]);
+  // `lead` is the signed token from the WhatsApp registration link. It is
+  // resolved in the browser (not here) so a bad or expired token shows the
+  // parent an ordinary form rather than an error page.
   return (
     <>
-      <PublicFamilyRegisterForm initialSrc={sp.src ?? null} config={config} />
+      <PublicFamilyRegisterForm
+        initialSrc={sp.src ?? null}
+        linkToken={sp.lead ?? null}
+        config={config}
+      />
       <CrmParentChatWidget />
     </>
   );

@@ -1,3 +1,4 @@
+import { createSseParser, readGeminiStreamChunk } from "@/lib/aiStream";
 /**
  * Google Gemini — ERP floating assistant (server-only).
  */
@@ -13,17 +14,50 @@ export function geminiApiKey(): string {
   ).trim();
 }
 
-export function geminiModel(): string {
+/**
+ * Model per tier. "flash" is the default for every route; "pro" is opted
+ * into per call (exam papers, marking schemes — anything where a plausible
+ * but wrong answer costs more than the tokens). Both overridable by env so
+ * a retired model name is a config change, not a deploy.
+ */
+export function geminiModel(tier: "flash" | "pro" = "flash"): string {
+  if (tier === "pro") {
+    return (
+      process.env.GEMINI_PRO_MODEL ||
+      // Available on the prod key as of 2026-08-18 (see docs/AI_ROADMAP_2026-08.md §1b).
+      "gemini-2.5-pro"
+    ).trim();
+  }
   return (
     process.env.GEMINI_MODEL ||
     process.env.GOOGLE_GEMINI_MODEL ||
-    "gemini-2.0-flash"
+    // gemini-2.0/2.5-flash were retired for new users (404 as of 2026-08-18);
+    // Google names 3.6-flash as the replacement.
+    "gemini-3.6-flash"
   ).trim();
 }
+
+export type LlmUsage = {
+  promptTokens: number | null;
+  completionTokens: number | null;
+};
 
 export function geminiConfigured(): boolean {
   return geminiApiKey().length > 0;
 }
+
+const GEMINI_SAFETY = [
+  { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+  { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+  {
+    category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+    threshold: "BLOCK_MEDIUM_AND_ABOVE",
+  },
+  {
+    category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+    threshold: "BLOCK_MEDIUM_AND_ABOVE",
+  },
+];
 
 export type GeminiChatTurn = {
   role: "user" | "model";
@@ -36,13 +70,18 @@ export async function generateGeminiText(opts: {
   userMessage: string;
   maxTokens?: number;
   temperature?: number;
-}): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  /** Explicit model id; defaults to the flash-tier model */
+  model?: string;
+}): Promise<
+  | { ok: true; text: string; model: string; usage: LlmUsage }
+  | { ok: false; error: string; model: string }
+> {
+  const model = (opts.model || geminiModel()).trim();
   const key = geminiApiKey();
   if (!key) {
-    return { ok: false, error: "GEMINI_API_KEY not configured" };
+    return { ok: false, error: "GEMINI_API_KEY not configured", model };
   }
 
-  const model = geminiModel();
   const version = process.env.GEMINI_API_VERSION || "v1beta";
   const url = `https://generativelanguage.googleapis.com/${version}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
 
@@ -68,24 +107,7 @@ export async function generateGeminiText(opts: {
           temperature: opts.temperature ?? 0.35,
           maxOutputTokens: opts.maxTokens ?? 1024,
         },
-        safetySettings: [
-          {
-            category: "HARM_CATEGORY_HARASSMENT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE",
-          },
-          {
-            category: "HARM_CATEGORY_HATE_SPEECH",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE",
-          },
-          {
-            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE",
-          },
-          {
-            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE",
-          },
-        ],
+        safetySettings: GEMINI_SAFETY,
       }),
     });
 
@@ -94,6 +116,10 @@ export async function generateGeminiText(opts: {
         content?: { parts?: { text?: string }[] };
         finishReason?: string;
       }[];
+      usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+      };
       error?: { message?: string };
     };
 
@@ -101,8 +127,13 @@ export async function generateGeminiText(opts: {
       return {
         ok: false,
         error: json.error?.message || `Gemini HTTP ${res.status}`,
+        model,
       };
     }
+    const usage: LlmUsage = {
+      promptTokens: json.usageMetadata?.promptTokenCount ?? null,
+      completionTokens: json.usageMetadata?.candidatesTokenCount ?? null,
+    };
 
     const text = (json.candidates?.[0]?.content?.parts || [])
       .map((p) => p.text || "")
@@ -113,14 +144,123 @@ export async function generateGeminiText(opts: {
       return {
         ok: false,
         error: `Empty Gemini response (${json.candidates?.[0]?.finishReason || "unknown"})`,
+        model,
       };
     }
 
-    return { ok: true, text: sanitizeGeminiReply(text) };
+    return { ok: true, text: sanitizeGeminiReply(text), model, usage };
   } catch (e) {
     return {
       ok: false,
       error: e instanceof Error ? e.message : "Gemini request failed",
+      model,
+    };
+  }
+}
+
+/**
+ * generateGeminiText, streamed: streamGenerateContent with alt=sse hands
+ * back candidate parts as they are produced. `onDelta` sees each slice;
+ * the resolved value is the whole reply (sanitised the same way) with the
+ * usage the last chunk reports.
+ */
+export async function streamGeminiText(
+  opts: {
+    system: string;
+    history?: GeminiChatTurn[];
+    userMessage: string;
+    maxTokens?: number;
+    temperature?: number;
+    model?: string;
+  },
+  onDelta: (text: string) => void,
+): Promise<
+  | { ok: true; text: string; model: string; usage: LlmUsage }
+  | { ok: false; error: string; model: string }
+> {
+  const model = (opts.model || geminiModel()).trim();
+  const key = geminiApiKey();
+  if (!key) {
+    return { ok: false, error: "GEMINI_API_KEY not configured", model };
+  }
+  const version = process.env.GEMINI_API_VERSION || "v1beta";
+  const url = `https://generativelanguage.googleapis.com/${version}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(key)}`;
+
+  const contents: { role: string; parts: { text: string }[] }[] = [];
+  for (const turn of (opts.history || []).slice(-10)) {
+    const text = turn.text.trim();
+    if (!text) continue;
+    contents.push({
+      role: turn.role === "model" ? "model" : "user",
+      parts: [{ text }],
+    });
+  }
+  contents.push({ role: "user", parts: [{ text: opts.userMessage.trim() }] });
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: opts.system }] },
+        contents,
+        generationConfig: {
+          temperature: opts.temperature ?? 0.35,
+          maxOutputTokens: opts.maxTokens ?? 1024,
+        },
+        safetySettings: GEMINI_SAFETY,
+      }),
+    });
+    if (!res.ok || !res.body) {
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: { message?: string };
+      };
+      return {
+        ok: false,
+        error: json.error?.message || `Gemini HTTP ${res.status}`,
+        model,
+      };
+    }
+    let text = "";
+    let finishReason = "";
+    let usage: LlmUsage = { promptTokens: null, completionTokens: null };
+    const parser = createSseParser();
+    const decoder = new TextDecoder();
+    const reader = res.body.getReader();
+    const take = (payloads: string[]) => {
+      for (const p of payloads) {
+        const chunk = readGeminiStreamChunk(p);
+        if (!chunk) continue;
+        if (chunk.error) throw new Error(chunk.error);
+        if (chunk.text) {
+          text += chunk.text;
+          onDelta(chunk.text);
+        }
+        if (chunk.finishReason) finishReason = chunk.finishReason;
+        if (chunk.usage) usage = chunk.usage;
+      }
+    };
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      take(parser.feed(decoder.decode(value, { stream: true })));
+    }
+    take(parser.feed(decoder.decode()));
+    take(parser.flush());
+    text = text.trim();
+    if (!text) {
+      return {
+        ok: false,
+        error: `Empty Gemini response (${finishReason || "unknown"})`,
+        model,
+      };
+    }
+    return { ok: true, text: sanitizeGeminiReply(text), model, usage };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Gemini request failed",
+      model,
     };
   }
 }
@@ -133,4 +273,163 @@ function sanitizeGeminiReply(text: string): string {
     /* fine */
   }
   return out;
+}
+
+/**
+ * One image (or PDF), or several, + instructions → JSON. Used for form / document
+ * extraction where Gemini's multimodal input does OCR + structuring in one
+ * call. Returns raw text (caller parses); strips a ```json fence if present.
+ */
+export async function generateGeminiVisionJson(opts: {
+  system: string;
+  prompt: string;
+  /** Raw base64 (no data: prefix) */
+  base64: string;
+  mimeType: string;
+  /**
+   * Further pages, sent after the first in order — one call sees a whole
+   * multi-page answer sheet, so a question that runs over a page break is
+   * read as one answer (added 2026-09-30).
+   */
+  moreImages?: { base64: string; mimeType: string }[];
+  maxTokens?: number;
+  model?: string;
+}): Promise<
+  | { ok: true; text: string; model: string; usage: LlmUsage }
+  | { ok: false; error: string; model: string }
+> {
+  const model = (opts.model || geminiModel()).trim();
+  const key = geminiApiKey();
+  if (!key) return { ok: false, error: "GEMINI_API_KEY not configured", model };
+  const version = process.env.GEMINI_API_VERSION || "v1beta";
+  const url = `https://generativelanguage.googleapis.com/${version}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: `${opts.system}\n\nRespond with valid JSON only — no markdown fences.` }] },
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { inline_data: { mime_type: opts.mimeType, data: opts.base64 } },
+              ...(opts.moreImages ?? []).map((img) => ({
+                inline_data: { mime_type: img.mimeType, data: img.base64 },
+              })),
+              { text: opts.prompt },
+            ],
+          },
+        ],
+        generationConfig: { temperature: 0.1, maxOutputTokens: opts.maxTokens ?? 1500, responseMimeType: "application/json" },
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+      error?: { message?: string };
+    };
+    if (!res.ok) return { ok: false, error: json.error?.message || `Gemini HTTP ${res.status}`, model };
+    const text = (json.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("").trim();
+    if (!text) return { ok: false, error: `Empty Gemini response (${json.candidates?.[0]?.finishReason || "unknown"})`, model };
+    const m = text.match(/^```(?:json)?\s*([\s\S]*?)```$/i);
+    return {
+      ok: true,
+      text: (m ? m[1] : text).trim(),
+      model,
+      usage: {
+        promptTokens: json.usageMetadata?.promptTokenCount ?? null,
+        completionTokens: json.usageMetadata?.candidatesTokenCount ?? null,
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Gemini request failed", model };
+  }
+}
+
+/**
+ * Transcribe audio.
+ *
+ * Same inline-data shape as the vision call: the bytes ride in the request as
+ * base64 rather than being uploaded first, which keeps a voice note to one
+ * round trip. Callers must size-check before getting here — see
+ * guardVoiceNote() — because the cost of a refusal is paid on upload, not on
+ * the reply.
+ */
+export async function transcribeGeminiAudio(opts: {
+  system: string;
+  prompt: string;
+  /** Raw base64 (no data: prefix) */
+  base64: string;
+  mimeType: string;
+  maxTokens?: number;
+  model?: string;
+}): Promise<
+  | { ok: true; text: string; model: string; usage: LlmUsage }
+  | { ok: false; error: string; model: string }
+> {
+  const model = (opts.model || geminiModel()).trim();
+  const key = geminiApiKey();
+  if (!key) return { ok: false, error: "GEMINI_API_KEY not configured", model };
+  const version = process.env.GEMINI_API_VERSION || "v1beta";
+  const url = `https://generativelanguage.googleapis.com/${version}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: opts.system }] },
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { inline_data: { mime_type: opts.mimeType, data: opts.base64 } },
+              { text: opts.prompt },
+            ],
+          },
+        ],
+        // Transcription is not a creative task: the same audio should give the
+        // same words every time it is retried.
+        generationConfig: {
+          temperature: 0,
+          maxOutputTokens: opts.maxTokens ?? 2000,
+          responseMimeType: "application/json",
+        },
+        safetySettings: GEMINI_SAFETY,
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+      error?: { message?: string };
+    };
+    if (!res.ok) {
+      return { ok: false, error: json.error?.message || `Gemini HTTP ${res.status}`, model };
+    }
+    const text = (json.candidates?.[0]?.content?.parts || [])
+      .map((p) => p.text || "")
+      .join("")
+      .trim();
+    if (!text) {
+      // A safety block here is almost always a false positive on a parent
+      // complaint; it is reported as a failure so the note reaches a human.
+      const why = json.candidates?.[0]?.finishReason || "unknown";
+      return { ok: false, error: `Empty Gemini response (${why})`, model };
+    }
+    return {
+      ok: true,
+      text,
+      model,
+      usage: {
+        promptTokens: json.usageMetadata?.promptTokenCount ?? null,
+        completionTokens: json.usageMetadata?.candidatesTokenCount ?? null,
+      },
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Gemini transcription failed",
+      model,
+    };
+  }
 }

@@ -26,6 +26,10 @@ import {
 } from "@/lib/salaryIncrement";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import type { MastersState } from "@/lib/masters";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Mode = "policy" | "ops" | "full";
 
@@ -52,6 +56,10 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
   const [indEffective, setIndEffective] = useState("");
   const [indNote, setIndNote] = useState("");
 
+  const [hydrateTick, setHydrateTick] = useState(0);
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("salary_increment", () => setHydrateTick((t) => t + 1));
+
   useEffect(() => {
     const s = loadIncrementState();
     setPolicy(normalizeIncrementPolicy(s.policy));
@@ -64,7 +72,7 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
       setIndEffective(defaultEffectiveFrom(s.policy));
     }
     if (!selectedId && s.batches[0]) setSelectedId(s.batches[0].id);
-  }, [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tick, hydrateTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selected = useMemo(
     () => batches.find((b) => b.id === selectedId) ?? null,
@@ -256,6 +264,20 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
     return selected.lines.filter((l) => l.status === "skipped");
   }, [selected, filter]);
 
+  // Mode and Value hold inputs while the run is a draft, so they are not sort handles.
+  const incSort = useTableSort(
+    visibleLines,
+    {
+      staff: (l) => l.empCode,
+      stream: (l) => l.stream,
+      oldBasic: (l) => l.oldBasic,
+      newBasic: (l) => l.newBasic,
+      status: (l) => l.status,
+    },
+    "staff",
+    "asc",
+  );
+
   const tally = useMemo(() => {
     if (!selected) return null;
     const inc = selected.lines.filter((l) => l.status === "included");
@@ -269,7 +291,7 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
         <p className="text-sm font-medium text-[var(--brand-deep)]">{notice}</p>
       ) : null}
       {error ? (
-        <p className="text-sm font-medium text-[#b42318]">{error}</p>
+        <p className="text-sm font-medium text-[var(--danger)]">{error}</p>
       ) : null}
 
       {showPolicy ? (
@@ -546,7 +568,7 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
             {indPreview ? (
               <p className="text-sm text-[var(--brand-deep)]">
                 {indPreview.error ? (
-                  <span className="text-[#b42318]">{indPreview.error}</span>
+                  <span className="text-[var(--danger)]">{indPreview.error}</span>
                 ) : (
                   <>
                     Current basic {formatInr(indPreview.oldBasic)} →{" "}
@@ -631,7 +653,7 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
               </Link>
             ) : null}
             {!policy.enabled ? (
-              <p className="w-full text-xs text-[#b42318]">
+              <p className="w-full text-xs text-[var(--danger)]">
                 Enable and save the policy before building a batch.
               </p>
             ) : null}
@@ -759,24 +781,21 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
                   </div>
 
                   <div className="overflow-x-auto">
-                    <table className="min-w-full text-left text-xs">
-                      <thead>
-                        <tr className="border-b border-[rgba(32,48,80,0.1)] text-[var(--muted)]">
-                          <th className="py-2 pr-2 font-semibold">Staff</th>
-                          <th className="py-2 pr-2 font-semibold">Stream</th>
-                          <th className="py-2 pr-2 font-semibold">Old basic</th>
+                    <ErpTable className="text-xs">
+                      <ErpTableHead>
+                        <tr>
+                          <ErpSortTh sort={incSort} field="staff" className="py-2 pr-2 font-semibold">Staff</ErpSortTh>
+                          <ErpSortTh sort={incSort} field="stream" className="py-2 pr-2 font-semibold">Stream</ErpSortTh>
+                          <ErpSortTh sort={incSort} field="oldBasic" align="right" className="py-2 pr-2 font-semibold">Old basic</ErpSortTh>
                           <th className="py-2 pr-2 font-semibold">Mode</th>
                           <th className="py-2 pr-2 font-semibold">Value</th>
-                          <th className="py-2 pr-2 font-semibold">New basic</th>
-                          <th className="py-2 font-semibold">Status</th>
+                          <ErpSortTh sort={incSort} field="newBasic" align="right" className="py-2 pr-2 font-semibold">New basic</ErpSortTh>
+                          <ErpSortTh sort={incSort} field="status" className="py-2 font-semibold">Status</ErpSortTh>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {visibleLines.map((l) => (
-                          <tr
-                            key={l.staffId}
-                            className="border-b border-[rgba(32,48,80,0.06)]"
-                          >
+                      </ErpTableHead>
+                      <ErpTableBody>
+                        {incSort.rows.map((l) => (
+                          <tr key={l.staffId}>
                             <td className="py-2 pr-2">
                               <span className="font-semibold text-[var(--brand-deep)]">
                                 {l.empCode}
@@ -836,23 +855,28 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
                                   {l.skipReason}
                                 </span>
                               ) : selected.status === "draft" ? (
-                                <button
-                                  type="button"
-                                  className="font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline"
-                                  onClick={() => toggleInclude(l.staffId)}
-                                >
-                                  {l.status === "included"
-                                    ? "Included · exclude"
-                                    : "Excluded · include"}
-                                </button>
+                                <span className="inline-flex items-center gap-1">
+                                  <span className="capitalize">{l.status}</span>
+                                  <RowActionMenu
+                                    row={l}
+                                    label="Increment line actions"
+                                    actions={[
+                                      {
+                                        id: "toggle",
+                                        label: l.status === "included" ? "Exclude from this run" : "Include in this run",
+                                        onSelect: (x) => toggleInclude(x.staffId),
+                                      },
+                                    ]}
+                                  />
+                                </span>
                               ) : (
                                 l.status
                               )}
                             </td>
                           </tr>
                         ))}
-                      </tbody>
-                    </table>
+                      </ErpTableBody>
+                    </ErpTable>
                     {visibleLines.length === 0 ? (
                       <p className="py-4 text-sm text-[var(--muted)]">
                         No rows in this filter.

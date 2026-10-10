@@ -3,19 +3,30 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
-  AlertTriangle,
-  ArrowRight,
   BookOpen,
   GraduationCap,
   IndianRupee,
   RefreshCw,
+  Sparkles,
   Users,
 } from "lucide-react";
 import { formatInr } from "@/lib/masters";
+import { AlertBannerList } from "@/components/dashboard/AlertBannerList";
+import { duesFreshnessHint } from "@/lib/feeStoreDuesKpi";
+import { WaNumberGapBanner } from "@/components/comms/WaNumberGapBanner";
 import type { PrincipalSnapshot } from "@/lib/principalSnapshot.server";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { ErpChartCard, ErpMetricCard } from "@/components/ui/erp-roster";
+import { ErpDonut } from "@/components/ui/erp-chart-lazy";
+import {
+  dashboardToneToMetric,
+  kpiIconForTone,
+  type DashboardTone,
+} from "@/components/dashboard/ModuleDashboard";
 
+/** Thin wrapper over the shared ErpMetricCard so this cockpit's KPI tiles
+ * use the same tone→icon mapping as the model-driven module dashboards. */
 function KpiCard({
   label,
   value,
@@ -27,50 +38,18 @@ function KpiCard({
   value: string;
   hint?: string;
   href?: string;
-  tone?: "navy" | "teal" | "rose" | "gold";
+  tone?: DashboardTone;
 }) {
-  const tones = {
-    navy: "border-[rgba(32,48,80,0.12)]",
-    teal: "border-[rgba(15,118,110,0.25)]",
-    rose: "border-[rgba(180,35,24,0.2)]",
-    gold: "border-[rgba(197,160,40,0.35)]",
-  };
-  const inner = (
-    <div
-      className={`rounded-2xl border bg-white p-4 transition hover:shadow-md ${tones[tone]}`}
-    >
-      <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
-        {label}
-      </p>
-      <p className="mt-1 font-display text-2xl font-semibold text-[var(--brand-deep)]">
-        {value}
-      </p>
-      {hint ? (
-        <p className="mt-1 text-xs text-[var(--muted)]">{hint}</p>
-      ) : null}
-      {href ? (
-        <span className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[var(--brand-deep)]">
-          Open <ArrowRight className="h-3 w-3" />
-        </span>
-      ) : null}
-    </div>
+  return (
+    <ErpMetricCard
+      title={label}
+      value={value}
+      hint={hint}
+      href={href}
+      tone={dashboardToneToMetric(tone)}
+      icon={kpiIconForTone(tone)}
+    />
   );
-  if (href) {
-    return (
-      <Link
-        href={href}
-        className="block cursor-pointer"
-        onClick={() => {
-          if (typeof window !== "undefined") {
-            window.location.href = href;
-          }
-        }}
-      >
-        {inner}
-      </Link>
-    );
-  }
-  return inner;
 }
 
 export function PrincipalCockpit() {
@@ -78,6 +57,11 @@ export function PrincipalCockpit() {
   const [snap, setSnap] = useState<PrincipalSnapshot | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [digest, setDigest] = useState<
+    { headline: string; highlights: string[] } | null
+  >(null);
+  const [digestLoading, setDigestLoading] = useState(false);
+  const [digestError, setDigestError] = useState<string | null>(null);
 
   const fetchSnapshot = useCallback(async () => {
     setLoading(true);
@@ -106,6 +90,40 @@ export function PrincipalCockpit() {
       setLoading(false);
     }
   }, [session.academicYearCode]);
+
+  useEffect(() => {
+    setDigest(null);
+    setDigestError(null);
+  }, [snap]);
+
+  async function fetchDigest() {
+    if (!snap) return;
+    setDigestLoading(true);
+    setDigestError(null);
+    setDigest(null);
+    try {
+      const res = await fetch("/api/ai/leadership-digest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ snapshot: snap }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        headline?: string;
+        highlights?: string[];
+      };
+      if (!json.ok || !json.headline || !json.highlights) {
+        setDigestError(json.error || "Digest failed");
+        return;
+      }
+      setDigest({ headline: json.headline, highlights: json.highlights });
+    } catch (e) {
+      setDigestError(e instanceof Error ? e.message : "Digest failed");
+    } finally {
+      setDigestLoading(false);
+    }
+  }
 
   useEffect(() => {
     void fetchSnapshot();
@@ -138,7 +156,7 @@ export function PrincipalCockpit() {
   if (err) {
     return (
       <div className="p-4">
-        <p className="text-sm text-[#b42318]">{err}</p>
+        <p className="text-sm text-[var(--danger)]">{err}</p>
         <button
           onClick={() => void fetchSnapshot()}
           className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--brand-deep)] underline"
@@ -151,12 +169,39 @@ export function PrincipalCockpit() {
   const displaySnap: PrincipalSnapshot = snap ?? {
     generatedAt: new Date().toISOString(),
     academicYearCode: session.academicYearCode || "2025-26",
-    fees: { todayCollectionPaise: 0, mtdCollectionPaise: 0, openDuesPaise: 0, defaulterHouseholds: 0 },
+    fees: {
+      todayCollectionPaise: 0,
+      mtdCollectionPaise: 0,
+      openDuesPaise: 0,
+      defaulterHouseholds: 0,
+      duesRebuiltAt: "",
+      storeDuesPaise: null,
+      storeDueStudents: 0,
+      todayByMode: [],
+    },
+    students: { activeCount: 0 },
     attendance: { date: "Today", studentPresent: 0, studentAbsent: 0, studentLeave: 0, studentMarkedPct: 0, sectionsMarked: 0 },
     staff: { activeCount: 0, presentToday: 0, absentToday: 0 },
     admissions: { pipeline: 0, enrolled: 0, followUpsDue: 0 },
     alerts: { vaultExpiring30d: 0, lowStockSkus: 0, attendanceRegistersPending: 0 },
   };
+
+  // Books and uniform bought on credit are the store's money, not the fee
+  // book's: they are settled at the store counter against the fee receipt,
+  // and nothing online can collect them yet. So they are named here beside
+  // the fee dues, never added to them.
+  const duesFreshness = duesFreshnessHint(displaySnap.fees.duesRebuiltAt);
+  const storeDuesHint = [
+    `${displaySnap.fees.defaulterHouseholds} students`,
+    duesFreshness,
+    displaySnap.fees.storeDuesPaise === null
+      ? "store dues unavailable"
+      : displaySnap.fees.storeDuesPaise > 0
+        ? `plus ${formatInr(displaySnap.fees.storeDuesPaise)} books/uniform (${displaySnap.fees.storeDueStudents})`
+        : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const alerts: { text: string; href: string }[] = [];
   if (displaySnap.alerts.attendanceRegistersPending > 0) {
@@ -180,16 +225,16 @@ export function PrincipalCockpit() {
 
   return (
     <div className="principal-cockpit mx-auto max-w-5xl space-y-5 pb-4">
-      <section className="relative rounded-2xl border border-[rgba(32,48,80,0.1)] bg-[var(--brand-deep)] px-5 py-6 text-white">
+      <section className="relative rounded-2xl border border-[var(--border)] bg-[var(--primary)] px-5 py-6 text-[var(--primary-foreground)]">
         <div className="flex items-center justify-between">
-          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-white/70">
+          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--primary-foreground)]/70">
             Principal desk · {displaySnap.academicYearCode}
           </p>
           <button
             onClick={() => void fetchSnapshot()}
             disabled={loading}
             title="Refresh Dashboard Data"
-            className="flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20 disabled:opacity-50 transition"
+            className="flex items-center gap-1.5 rounded-lg bg-[var(--primary-foreground)]/10 px-3 py-1 text-xs font-medium text-[var(--primary-foreground)] transition hover:bg-[var(--primary-foreground)]/20 disabled:opacity-50"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             {loading ? "Refreshing..." : "Refresh"}
@@ -198,26 +243,64 @@ export function PrincipalCockpit() {
         <h1 className="mt-1 font-display text-2xl font-semibold">
           Good day, {session.fullName.split(/\s+/)[0]}
         </h1>
-        <p className="mt-1 text-sm text-white/75">
+        <p className="mt-1 text-sm text-[var(--primary-foreground)]/75">
           School pulse for {displaySnap.attendance.date}
         </p>
       </section>
 
-      {alerts.length > 0 ? (
-        <div className="space-y-2">
-          {alerts.map((a) => (
-            <Link
-              key={a.text}
-              href={a.href}
-              className="flex items-center gap-2 rounded-xl border border-[rgba(180,35,24,0.2)] bg-[rgba(180,35,24,0.05)] px-4 py-3 text-sm font-medium text-[var(--brand-deep)]"
-            >
-              <AlertTriangle className="h-4 w-4 shrink-0 text-[#b42318]" />
-              {a.text}
-              <ArrowRight className="ml-auto h-4 w-4 opacity-50" />
-            </Link>
-          ))}
+      {/* Families no WhatsApp message can reach, with the number box in it —
+          the principal can fix one on the spot instead of forwarding it. */}
+      <WaNumberGapBanner />
+      <AlertBannerList alerts={alerts} />
+
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-sm font-semibold text-[var(--brand-deep)]">
+            <Sparkles className="h-4 w-4 text-[var(--brand-gold)]" />
+            AI daily digest
+          </div>
+          <button
+            type="button"
+            disabled={digestLoading || !snap}
+            onClick={() => void fetchDigest()}
+            className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+          >
+            {digestLoading
+              ? "Summarizing…"
+              : digest
+                ? "Re-summarize"
+                : "Summarize today"}
+          </button>
         </div>
-      ) : null}
+        {digestError ? (
+          <p className="mt-2 text-[11px] text-[var(--danger)]">
+            {digestError}
+          </p>
+        ) : null}
+        {digest ? (
+          <div className="mt-2">
+            <p className="text-sm font-medium text-[var(--ink)]">
+              {digest.headline}
+            </p>
+            <ul className="mt-1.5 space-y-1">
+              {digest.highlights.map((h) => (
+                <li
+                  key={h}
+                  className="flex items-start gap-1.5 text-[12px] text-[var(--muted)]"
+                >
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-[var(--muted)]" />
+                  {h}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : !digestError ? (
+          <p className="mt-1.5 text-[11px] text-[var(--muted)]">
+            AI-synthesized from the numbers on this page — nothing here is
+            computed by the AI, only phrased and prioritized.
+          </p>
+        ) : null}
+      </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
@@ -230,14 +313,26 @@ export function PrincipalCockpit() {
         <KpiCard
           label="Open dues"
           value={formatInr(displaySnap.fees.openDuesPaise)}
-          hint={`${displaySnap.fees.defaulterHouseholds} students`}
+          hint={storeDuesHint}
           href="/fees/defaulters"
           tone="rose"
         />
         <KpiCard
           label="Student attendance"
-          value={`${displaySnap.attendance.studentMarkedPct}%`}
-          hint={`${displaySnap.attendance.sectionsMarked} sections marked`}
+          value={displaySnap.attendance.sectionsMarked ? `${displaySnap.attendance.studentMarkedPct}%` : "—"}
+          hint={
+            displaySnap.attendance.sectionsMarked
+              ? [
+                  displaySnap.attendance.studentsMarked != null
+                    ? `${displaySnap.attendance.studentsMarked} of ${displaySnap.students.activeCount} children marked`
+                    : "",
+                  `${displaySnap.attendance.sectionsMarked} sections marked`,
+                  displaySnap.alerts.attendanceRegistersPending ? `${displaySnap.alerts.attendanceRegistersPending} pending` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+              : "No registers marked yet today"
+          }
           href="/attendance"
           tone="teal"
         />
@@ -269,6 +364,39 @@ export function PrincipalCockpit() {
         />
       </div>
 
+      {displaySnap.attendance.studentPresent +
+        displaySnap.attendance.studentAbsent +
+        displaySnap.attendance.studentLeave >
+      0 ? (
+        <ErpChartCard title="Today's attendance breakdown">
+          <ErpDonut
+            rows={[
+              {
+                key: "present",
+                label: "Present",
+                value: displaySnap.attendance.studentPresent,
+                color: "var(--chart-4)",
+              },
+              {
+                key: "absent",
+                label: "Absent",
+                value: displaySnap.attendance.studentAbsent,
+                color: "var(--chart-2)",
+              },
+              {
+                key: "leave",
+                label: "Leave",
+                value: displaySnap.attendance.studentLeave,
+                color: "var(--chart-3)",
+              },
+            ]}
+            centerValue={`${displaySnap.attendance.studentMarkedPct}%`}
+            centerLabel="marked"
+            height={180}
+          />
+        </ErpChartCard>
+      ) : null}
+
       <section className="grid gap-2 sm:grid-cols-4">
         {[
           { href: "/students", label: "Students", icon: GraduationCap },
@@ -286,7 +414,7 @@ export function PrincipalCockpit() {
                   window.location.href = item.href;
                 }
               }}
-              className="flex items-center gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-3 py-3 text-sm font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.05)] cursor-pointer"
+              className="flex cursor-pointer items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-sm font-semibold text-[var(--brand-deep)] transition-colors duration-[var(--motion-fast)] hover:bg-[var(--surface-sunken)]"
             >
               <Icon className="h-4 w-4 opacity-70" />
               {item.label}

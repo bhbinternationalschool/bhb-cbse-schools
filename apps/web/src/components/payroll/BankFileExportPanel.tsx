@@ -21,6 +21,9 @@ import {
   loadSalarySetup,
   normalizeSalarySettings,
 } from "@/lib/salarySetup";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function BankFileExportPanel({
   academicYearCode,
@@ -68,6 +71,20 @@ export function BankFileExportPanel({
       requirePosted: true,
     });
   }, [masters, month, academicYearCode, includeUpi, tick]);
+
+  // Status first, so the accounts that are NOT ready to pay come together.
+  const bankSort = useTableSort(
+    preview?.rows ?? [],
+    {
+      staff: (r) => r.empCode,
+      account: (r) => r.accountNo || "",
+      ifsc: (r) => r.ifsc || "",
+      amount: (r) => r.amount,
+      status: (r) => r.ok ? 1 : 0,
+    },
+    "status",
+    "asc",
+  );
 
   const settings = normalizeSalarySettings(loadSalarySetup().settings);
 
@@ -117,7 +134,7 @@ export function BankFileExportPanel({
           </p>
         ) : null}
         {error ? (
-          <p className="mt-2 text-sm font-medium text-[#b42318]">{error}</p>
+          <p className="mt-2 text-sm font-medium text-[var(--danger)]">{error}</p>
         ) : null}
 
         <div className="mt-3 rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2 text-xs text-[var(--muted)]">
@@ -234,22 +251,20 @@ export function BankFileExportPanel({
                 <strong>{formatInr(preview.totalAmount)}</strong>
               </p>
               <div className="mt-3 overflow-x-auto">
-                <table className="min-w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-[rgba(32,48,80,0.1)] text-[var(--muted)]">
-                      <th className="py-2 pr-2 font-semibold">Staff</th>
-                      <th className="py-2 pr-2 font-semibold">A/c</th>
-                      <th className="py-2 pr-2 font-semibold">IFSC</th>
-                      <th className="py-2 pr-2 font-semibold">Amount</th>
-                      <th className="py-2 font-semibold">Status</th>
+                <ErpTable className="text-xs">
+                  <ErpTableHead>
+                    <tr>
+                      <ErpSortTh sort={bankSort} field="staff" className="py-2 pr-2 font-semibold">Staff</ErpSortTh>
+                      <ErpSortTh sort={bankSort} field="account" className="py-2 pr-2 font-semibold">A/c</ErpSortTh>
+                      <ErpSortTh sort={bankSort} field="ifsc" className="py-2 pr-2 font-semibold">IFSC</ErpSortTh>
+                      <ErpSortTh sort={bankSort} field="amount" align="right" className="py-2 pr-2 font-semibold">Amount</ErpSortTh>
+                      <ErpSortTh sort={bankSort} field="status" className="py-2 font-semibold">Status</ErpSortTh>
+                      <th className="w-10 px-2 py-2" aria-label="Actions" />
                     </tr>
-                  </thead>
-                  <tbody>
-                    {preview.rows.map((r) => (
-                      <tr
-                        key={r.staffId}
-                        className="border-b border-[rgba(32,48,80,0.06)]"
-                      >
+                  </ErpTableHead>
+                  <ErpTableBody>
+                    {bankSort.rows.map((r) => (
+                      <tr key={r.staffId}>
                         <td className="py-2 pr-2">
                           <span className="font-semibold text-[var(--brand-deep)]">
                             {r.empCode}
@@ -271,10 +286,13 @@ export function BankFileExportPanel({
                           {r.ok ? (
                             <span className="text-teal-700">Ready</span>
                           ) : (
-                            <span className="text-[#b42318]">
+                            <span className="text-[var(--danger)]">
                               {r.issues.join(" · ")}
                             </span>
                           )}
+                        </td>
+                        <td className="px-2 py-1.5 text-right">
+                          <RowActionMenu row={r} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
                         </td>
                       </tr>
                     ))}
@@ -289,8 +307,8 @@ export function BankFileExportPanel({
                         </td>
                       </tr>
                     ) : null}
-                  </tbody>
-                </table>
+                  </ErpTableBody>
+                </ErpTable>
               </div>
             </>
           )}

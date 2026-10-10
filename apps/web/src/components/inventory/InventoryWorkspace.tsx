@@ -1,0 +1,187 @@
+"use client";
+
+/**
+ * Store & Purchase — one module.
+ *
+ * This replaces the two sidebar entries (Store, with its own Purchase tab,
+ * and a separate Purchase module) that were the same domain built twice. One
+ * catalogue, one vendor list, one set of stock numbers.
+ *
+ * Masters load once here and are passed down; the tabs never refetch them on
+ * their own, and never read a client-side store.
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import { Boxes } from "lucide-react";
+import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { StepChainGuide, type StepDef } from "@/components/ui/StepTabs";
+import { CatalogueTab } from "@/components/inventory/CatalogueTab";
+import { CounterTab } from "@/components/inventory/CounterTab";
+import { ReportsTab } from "@/components/inventory/ReportsTab";
+import { StockTab } from "@/components/inventory/StockTab";
+import { InvAlert, InvSpinner } from "@/components/inventory/InvUi";
+import { KitsTab } from "@/components/inventory/KitsTab";
+import { MastersTab } from "@/components/inventory/MastersTab";
+import { PurchaseTab } from "@/components/inventory/PurchaseTab";
+import { VendorsTab } from "@/components/inventory/VendorsTab";
+import { useInvBootstrap } from "@/lib/inventory/client";
+import { ensureMastersHydrated } from "@/lib/mastersPersistence";
+import { loadMasters } from "@/lib/masters";
+import { Button } from "@/components/ui/button";
+import { useDemoSession } from "@/components/shell/SessionContext";
+import { visibleModuleTabs } from "@/lib/rbac";
+
+type Tab =
+  | "counter"
+  | "catalogue"
+  | "purchase"
+  | "stock"
+  | "reports"
+  | "vendors"
+  | "kits"
+  | "masters";
+
+const TABS: {
+  id: Tab;
+  label: string;
+  tone: "navy" | "sky" | "teal" | "violet" | "green" | "coral" | "amber";
+}[] = [
+  { id: "counter", label: "Counter", tone: "coral" },
+  { id: "catalogue", label: "Catalogue", tone: "navy" },
+  { id: "purchase", label: "Purchase", tone: "green" },
+  { id: "stock", label: "Stock", tone: "amber" },
+  { id: "reports", label: "Reports", tone: "violet" },
+  { id: "vendors", label: "Vendors", tone: "sky" },
+  { id: "kits", label: "Kits by class", tone: "teal" },
+  { id: "masters", label: "Setup", tone: "violet" },
+];
+
+const TAB_IDS = TABS.map((t) => t.id);
+
+/**
+ * Setting the store up, in order: categories, units and stock locations;
+ * the vendors; the items; class kits made of items; then buying stock.
+ * Counter stays the first tab — it is the daily one.
+ */
+const STORE_SETUP_STEPS: StepDef<Tab>[] = [
+  { id: "masters", title: "Setup", what: "Item categories, units and stock locations — what every item is filed under." },
+  { id: "vendors", title: "Vendors", what: "The suppliers the store buys from." },
+  { id: "catalogue", title: "Catalogue", what: "Every item the store sells, with its price and tax." },
+  { id: "kits", title: "Kits by class", what: "The books-and-uniform kit each class buys, made of catalogue items." },
+  { id: "purchase", title: "Purchase", what: "Order from vendors, receive the goods into stock, and record the bills." },
+];
+
+export function InventoryWorkspace() {
+  const [tab, setTab] = useState<Tab>("counter");
+
+  // Honour ?tab=… from a deep link (the old /purchase route redirects here).
+  // Done in an effect rather than a useState initializer: the server renders
+  // with no URL search, and hydration keeps that server value, so an
+  // initializer reading window.location is silently discarded. Runs once, so
+  // the tab then stays wherever the user puts it.
+  useEffect(() => {
+    const asked = new URLSearchParams(window.location.search).get("tab");
+    if (asked && TAB_IDS.includes(asked as Tab)) setTab(asked as Tab);
+  }, []);
+  const boot = useInvBootstrap();
+
+  // Class names come from masters, which is still a localStorage-backed
+  // module. Only the labels are used here — kit assignments store class ids.
+  const [classes, setClasses] = useState<{ id: string; label: string }[]>([]);
+  const [sections, setSections] = useState<
+    { id: string; classId: string; label: string }[]
+  >([]);
+  useEffect(() => {
+    let alive = true;
+    void ensureMastersHydrated()
+      .catch(() => false)
+      .then(() => {
+        if (!alive) return;
+        const m = loadMasters();
+        setClasses(
+          (m.classes ?? [])
+            .filter((c) => c.isActive !== false)
+            .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+            .map((c) => ({ id: c.id, label: c.name })),
+        );
+        setSections(
+          (m.sections ?? [])
+            .filter((s) => s.isActive !== false)
+            .map((s) => ({ id: s.id, classId: s.classId, label: s.name })),
+        );
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Someone holding only some Store functions (Counter, Purchase, …) sees
+  // only their tabs. The inventory routes enforce the same split, writes
+  // included (lib/inventory/route.server.ts).
+  const session = useDemoSession();
+  const tabItems = useMemo(
+    () =>
+      visibleModuleTabs(TABS, session, null, "store").map((t) => ({
+        id: t.id,
+        label: t.label,
+        tone: t.tone,
+      })),
+    [session],
+  );
+  useEffect(() => {
+    if (tabItems.length > 0 && !tabItems.some((t) => t.id === tab)) {
+      setTab(tabItems[0]!.id as Tab);
+    }
+  }, [tabItems, tab]);
+
+  return (
+    <ErpWorkspaceShell
+      title="Store & purchase"
+      subtitle="Catalogue, vendors, pricing and stock — stored on the school server"
+      icon={<Boxes className="size-5" />}
+    >
+      <ModuleTabs
+        items={tabItems}
+        value={tab}
+        onChange={(id) => setTab(id as Tab)}
+        aria-label="Store sections"
+      />
+      <StepChainGuide
+        chains={[{ label: "Store setup", steps: STORE_SETUP_STEPS }]}
+        value={tab}
+        onChange={setTab}
+      />
+
+      {boot.loading ? (
+        <InvSpinner label="Loading store" />
+      ) : boot.error || !boot.data ? (
+        <div className="space-y-3">
+          <InvAlert error={boot.error || "Could not load the store"} />
+          <Button size="sm" variant="outline" onClick={boot.reload}>
+            Try again
+          </Button>
+        </div>
+      ) : (
+        <div className="pt-1">
+          {tab === "counter" ? (
+            <CounterTab boot={boot.data} classes={classes} sections={sections} />
+          ) : null}
+          {tab === "catalogue" ? (
+            <CatalogueTab boot={boot.data} onChanged={boot.reload} />
+          ) : null}
+          {tab === "purchase" ? <PurchaseTab boot={boot.data} /> : null}
+          {tab === "stock" ? <StockTab boot={boot.data} /> : null}
+          {tab === "reports" ? <ReportsTab boot={boot.data} /> : null}
+          {tab === "vendors" ? <VendorsTab onChanged={boot.reload} /> : null}
+          {tab === "kits" ? (
+            <KitsTab classes={classes} onChanged={boot.reload} />
+          ) : null}
+          {tab === "masters" ? (
+            <MastersTab boot={boot.data} onChanged={boot.reload} />
+          ) : null}
+        </div>
+      )}
+    </ErpWorkspaceShell>
+  );
+}

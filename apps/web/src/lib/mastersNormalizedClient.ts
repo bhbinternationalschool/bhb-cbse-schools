@@ -2,16 +2,77 @@
  * Client → server sync for masters desk slices.
  */
 
+import { isFeatureRefusalMessage } from "@/lib/deskFeatureAuth";
 import type { MastersState } from "@/lib/masters";
 import { emptyMastersShell } from "@/lib/masters";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { stripStaffFromMastersForBlob } from "@/lib/staffPersistence";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
 
 const META_KEY = "bhb_masters_desk_db_meta_v1";
 const LOCAL_EDIT_META_KEY = "bhb_masters_mirror_meta_v1";
+/** Mirrors STORAGE_KEY in masters.ts — read-only, to detect an empty desk. */
+const LOCAL_STATE_KEY = "bhb_masters_v5";
+
+/**
+ * True when this browser holds no classes at all.
+ *
+ * Emptiness is not an edit. A desk with zero classes never hydrated, or was
+ * wiped — either way there is nothing in it worth defending against the
+ * server, and treating it as a local edit is what froze devices: `shouldTake`
+ * requires `remoteAt > localEditAt`, hydration itself stamps `localEditAt`, so
+ * an empty desk with a recent stamp refuses the server's data forever. The
+ * device then pushes its emptiness, the server refuses it (`rejected wipe push
+ * stored=15 incoming=0`), and nothing ever gets better. Clearing site data was
+ * the only cure, which is exactly the repair step this migration exists to
+ * abolish.
+ *
+ * Safe because it can only ever pull data IN. And there is no legitimate
+ * "I deleted every class" state to protect: guardMastersOverwrite already
+ * refuses those pushes server-side, so such a state can never be authoritative.
+ * This is the client-side half of a rule the server has enforced all along.
+ *
+ * Unreadable or absent local state counts as empty — a desk that cannot be
+ * parsed is not one whose contents should outrank the database.
+ */
+function localMastersIsEmpty(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = localStorage.getItem(LOCAL_STATE_KEY);
+    if (!raw) return true;
+    const state = JSON.parse(raw) as { classes?: unknown };
+    return !Array.isArray(state.classes) || state.classes.length === 0;
+  } catch {
+    return true;
+  }
+}
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pending: MastersState | null = null;
+
+/**
+ * Serializes pushMastersDeskApi calls. Debounce alone does not: it only
+ * collapses edits that land in the same tick, but DESK_PUSH_DEBOUNCE_MS is 0,
+ * so two edits a network round-trip apart each get their own timer and both
+ * fire. pushMastersDeskApi reads baseUpdatedAt from localStorage at call
+ * time, so two in-flight pushes read the SAME base, the first to land
+ * advances the server's revision, and the second is refused as "changed on
+ * another device" — not a second device, just this browser racing itself.
+ * Production logs on 2026-08-12 showed exactly this: paired rejections
+ * milliseconds to tens of seconds apart, same base, no other session
+ * involved. Chaining through this promise means a push's readMeta() only
+ * ever runs after the previous push's writeMeta() has landed.
+ */
+let pushChain: Promise<unknown> = Promise.resolve();
+
+function enqueuePush(state: MastersState): Promise<MastersPushResult> {
+  const result = pushChain.then(() => pushMastersDeskApi(state));
+  pushChain = result.catch(() => {});
+  return result;
+}
 
 type DeskMeta = {
   updatedAt: string;
@@ -92,15 +153,23 @@ function remoteDeskHasData(
   );
 }
 
-export function flushMastersDeskSyncPending(): void {
-  if (typeof window === "undefined") return;
+/**
+ * Push any pending masters state now and report what happened.
+ *
+ * Returns the push result so a caller can await the real outcome; `null`
+ * means there was nothing pending. Existing callers that ignore the return
+ * value (pagehide, logout) keep their previous behaviour.
+ */
+export function flushMastersDeskSyncPending(): Promise<MastersPushResult | null> {
+  if (typeof window === "undefined") return Promise.resolve(null);
   if (pushTimer) {
     clearTimeout(pushTimer);
     pushTimer = null;
   }
   const batch = pending;
   pending = null;
-  if (batch) void pushMastersDeskApi(batch);
+  if (!batch) return Promise.resolve(null);
+  return enqueuePush(batch);
 }
 
 export function scheduleMastersDeskSync(state: MastersState) {
@@ -113,18 +182,35 @@ export function scheduleMastersDeskSync(state: MastersState) {
     pending = null;
     pushTimer = null;
     if (!batch) return;
-    void pushMastersDeskApi(batch);
+    void enqueuePush(batch);
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
-async function pushMastersDeskApi(state: MastersState) {
+/**
+ * Result of a masters push. Returned rather than swallowed so a caller can
+ * await the outcome instead of assuming success — the UI currently reports
+ * "saved" synchronously, which is how 16 refused writes looked like 16
+ * successful ones. Stage 2 makes the workspace await this.
+ */
+export type MastersPushResult = { ok: true } | { ok: false; reason: string };
+
+async function pushMastersDeskApi(
+  state: MastersState,
+): Promise<MastersPushResult> {
   try {
     const payload = stripStaffFromMastersForBlob(state);
     const { version: _v, ...rest } = payload;
     const res = await fetch("/api/school-data/masters-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ version: 2, ...rest }),
+      body: JSON.stringify({
+        version: 2,
+        ...rest,
+        // Optimistic locking: the desk revision this client last hydrated
+        // or pushed at. The server refuses the push (409 "stale") when the
+        // desk has moved since — see mastersRevisionGuard.ts.
+        baseUpdatedAt: readMeta().updatedAt || null,
+      }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
@@ -132,33 +218,129 @@ async function pushMastersDeskApi(state: MastersState) {
       classCount?: number;
       feeHeadCount?: number;
       error?: string;
+      reason?: string;
+      functionOnly?: boolean;
     } | null;
+    if (res.ok && body?.ok && body.functionOnly) {
+      // Saved through a function grant (a teacher's class subjects): the
+      // server merged it onto the stored desk and returns no revision on
+      // purpose — this browser holds the teaching subset only.
+      recordDeskSyncSuccess("masters");
+      return { ok: true };
+    }
     if (res.ok && body?.ok) {
+      // Never invent a revision. This value becomes `baseUpdatedAt` on the
+      // next push, so a local clock here is exactly what made every masters
+      // save 409 in production. If the server omitted it, keep the last
+      // known server value and let the next hydrate correct it.
+      if (!body.updatedAt) {
+        console.warn("[masters-db] push accepted but server returned no revision");
+      }
       writeMeta({
-        updatedAt: body.updatedAt || new Date().toISOString(),
+        updatedAt: body.updatedAt || readMeta().updatedAt,
         classCount: body.classCount ?? state.classes.length,
         feeHeadCount: body.feeHeadCount ?? state.feeHeads.length,
       });
-    } else if (!res.ok) {
-      console.warn("[masters-db] desk push failed", body?.error || res.status);
+      recordDeskSyncSuccess("masters");
+      return { ok: true };
     }
+
+    // Record that this did not land, before any of the returns below. (This
+    // call once sat after the last of them and never ran.)
+    recordDeskSyncFailure("masters", { status: res.status, error: body?.error });
+
+    // Every rejection below used to be invisible except `stale`. On
+    // 2026-08-09 a device holding a foreign class-id generation had 16
+    // consecutive saves refused with `regenerated` while the screen kept
+    // reporting success — the academic session could not be changed all
+    // evening and nothing on screen said why. A refused write must always
+    // reach the user.
+    if (res.status === 409) {
+      const rehydrate =
+        body?.reason === "stale" ||
+        body?.reason === "unversioned" ||
+        body?.reason === "regenerated" ||
+        body?.reason === "wipe" ||
+        body?.reason === "subject_wipe" ||
+        body?.reason === "unknown_subject";
+      console.warn(`[masters-db] push refused (${body?.reason})`, body?.error);
+      await reportMastersPushFailure(
+        body?.reason === "stale"
+          ? "Masters changed on another device — your last change was NOT saved. " +
+              "The screen will refresh with the current data; please re-apply it."
+          : body?.reason === "unversioned"
+            ? "Your last change was NOT saved — this device had not loaded the school's " +
+                "masters yet. The screen will refresh with the current data; please re-apply it."
+          : body?.reason === "regenerated"
+            ? "Your last change was NOT saved. This device is holding an older " +
+              "copy of the class list, so the server refused it to protect the " +
+              "student records. The screen will refresh — please re-apply your change."
+            : body?.reason === "wipe"
+              ? "Your last change was NOT saved. It would have removed every class, " +
+                "which the server refuses. Reload and try again."
+              : `Your last change was NOT saved. ${body?.error || "The server refused it."}`,
+      );
+      if (rehydrate) {
+        // The server's copy wins: drop this browser's claim that its copy is
+        // newer, so the reload TAKES the server's Masters instead of keeping
+        // the refused copy and pushing it again (10 Oct 2026).
+        try {
+          localStorage.removeItem(LOCAL_EDIT_META_KEY);
+        } catch {
+          /* storage unavailable */
+        }
+        const { resetDeskHydrated } = await import("@/lib/deskHydrateGuard");
+        resetDeskHydrated("masters");
+      }
+      return { ok: false, reason: body?.reason ?? "conflict" };
+    }
+
+    // 401/403/500/503 and anything else: also silent until now.
+    console.warn("[masters-db] desk push failed", body?.error || res.status);
+    // A function-grant refusal was already said by recordDeskSyncFailure.
+    if (res.status === 403 && isFeatureRefusalMessage(body?.error)) {
+      return { ok: false, reason: "feature_forbidden" };
+    }
+    await reportMastersPushFailure(
+      res.status === 401 || res.status === 403
+        ? "Your last change was NOT saved — your session has expired or you do not " +
+            "have permission. Sign in again and re-apply the change."
+        : `Your last change was NOT saved — the server returned ${res.status}. ` +
+            "Please try again.",
+    );
+    return { ok: false, reason: `http_${res.status}` };
   } catch (e) {
+    recordDeskSyncFailure("masters", { status: 0, error: e instanceof Error ? e.message : String(e) });
+    // A genuine network fault. Say that specifically — do NOT tell the user
+    // to check their connection for a server-side failure, which is what the
+    // generic loader message did and sent the director hunting a fine router.
     console.warn("[masters-db] desk push error", e);
+    await reportMastersPushFailure(
+      "Your last change was NOT saved — could not reach the server. " +
+        "Check your connection and try again.",
+    );
+    return { ok: false, reason: "network" };
   }
+}
+
+async function reportMastersPushFailure(message: string) {
+  if (typeof window === "undefined") return;
+  const { pushToast } = await import("@/components/shell/Toast");
+  pushToast({ kind: "error", message, durationMs: 0 });
 }
 
 export async function hydrateMastersDeskFromDb(
   preferDb?: boolean,
-): Promise<{ bundle: Omit<MastersState, "version">; changed: boolean }> {
+): Promise<{ bundle: Omit<MastersState, "version">; changed: boolean; ok: boolean }> {
   const { version: _v, ...empty } = emptyMastersShell();
 
-  if (!isSupabaseConfigured()) return { bundle: empty, changed: false };
+  if (!isSupabaseConfigured()) return { bundle: empty, changed: false, ok: true };
   try {
     const res = await fetch("/api/school-data/masters-desk", {
       method: "GET",
       cache: "no-store",
     });
-    if (!res.ok) return { bundle: empty, changed: false };
+    if (!res.ok) return { bundle: empty, changed: false, ok: false };
     const body = (await res.json()) as Omit<MastersState, "version"> & {
       updatedAt?: string;
       classCount?: number;
@@ -167,6 +349,13 @@ export async function hydrateMastersDeskFromDb(
       meta?: { sliceCount?: number; updatedAt?: string };
     };
     const bundle = body as Omit<MastersState, "version">;
+    if ((body as { teachingOnly?: boolean }).teachingOnly) {
+      // A teacher's view of Masters (classes, subjects, holidays — no fees).
+      // Take it, but record no revision: this browser has not seen the whole
+      // desk, so it must never become a base for a push, and the next
+      // full-rights sign-in here must re-read everything.
+      return { bundle, changed: true, ok: true };
+    }
     const meta = readMeta();
     const localEditAt = readLocalMastersEditAt();
     const remoteAt = body.updatedAt || body.meta?.updatedAt || "";
@@ -179,8 +368,8 @@ export async function hydrateMastersDeskFromDb(
       updatedAt: remoteAt,
     });
 
-    const readFromDb =
-      preferDb || process.env.NEXT_PUBLIC_MASTERS_READ_FROM_DB === "true";
+    const flag = process.env.NEXT_PUBLIC_MASTERS_READ_FROM_DB?.trim().toLowerCase();
+    const readFromDb = preferDb || flag !== "false";
 
     const remoteIsNewer =
       !!remoteAt &&
@@ -190,19 +379,34 @@ export async function hydrateMastersDeskFromDb(
     const bootstrapNewDevice =
       hasRemote && !meta.updatedAt && !localEditAt;
 
+    // An empty desk has nothing to defend, so it must never block hydration.
+    // See localMastersIsEmpty: this is the one case where local loses despite
+    // a newer localEditAt, and it is the case that froze every device.
+    const localIsEmpty = localMastersIsEmpty();
+
     // Never let "remote has rows" alone clobber newer local edits (read-from-DB mode).
     const shouldTake = readFromDb
-      ? remoteIsNewer || (!localEditAt && hasRemote)
-      : hasRemote && (bootstrapNewDevice || remoteIsNewer);
+      ? remoteIsNewer || ((!localEditAt || localIsEmpty) && hasRemote)
+      : hasRemote && (bootstrapNewDevice || remoteIsNewer || localIsEmpty);
 
-    if (!shouldTake) return { bundle: empty, changed: false };
+    // The server's revision is recorded only when this browser takes the
+    // server's copy. Recording it while KEEPING an older local copy (as
+    // before 10 Oct 2026) let that copy pass the revision lock on its next
+    // save — the refused Masters came straight back. A browser that keeps a
+    // pending edit pushes against the revision it last took; if Masters has
+    // moved on, the server refuses (409), the claim above is dropped, and
+    // the reload takes the server's copy. A page reload always starts from
+    // the server now (module data is not stored on the device).
+    if (!shouldTake) return { bundle: empty, changed: false, ok: true };
     writeMeta({
-      updatedAt: remoteAt || new Date().toISOString(),
+      // Same rule as the push path: a revision only ever comes from the
+      // server. Keep the previous one rather than stamping a local clock.
+      updatedAt: remoteAt || meta.updatedAt,
       classCount: remoteClasses,
       feeHeadCount: body.feeHeadCount ?? bundle.feeHeads?.length ?? 0,
     });
-    return { bundle, changed: true };
+    return { bundle, changed: true, ok: true };
   } catch {
-    return { bundle: empty, changed: false };
+    return { bundle: empty, changed: false, ok: false };
   }
 }

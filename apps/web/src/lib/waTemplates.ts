@@ -2,6 +2,8 @@
  * School-wide WhatsApp Business template registry (Meta WABA).
  * Store: localStorage `bhb_wa_templates_v1` + Supabase blob `wa_templates_state`.
  */
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_wa_templates_v1";
 
@@ -12,6 +14,9 @@ export type WaTemplateStatus =
   | "rejected"
   | "paused";
 
+/** Meta's delivery-quality rating for an approved template (message_template_quality_update). */
+export type WaTemplateQuality = "GREEN" | "YELLOW" | "RED" | "UNKNOWN";
+
 export type WaTemplateCategory =
   | "UTILITY"
   | "MARKETING"
@@ -19,23 +24,34 @@ export type WaTemplateCategory =
 
 export type WaTemplateLanguage = "en" | "hi";
 
-export type WaTemplateModule =
-  | "admissions"
-  | "fees"
-  | "attendance"
-  | "homework"
-  | "exams"
-  | "ptm"
-  | "leave"
-  | "vault"
-  | "comms"
-  | "store"
-  | "transport"
-  | "certificates"
-  | "rte"
-  | "field"
-  | "staff"
-  | "general";
+/**
+ * The modules a template can belong to.
+ *
+ * The LIST is the source and the type is derived from it, not the other way
+ * round. A hand-kept copy beside a union drifts, and the drift is invisible:
+ * the routing screen would simply not offer the module nobody added to the
+ * list, and that module would quietly keep using the default number.
+ */
+export const WA_TEMPLATE_MODULES = [
+  "admissions",
+  "fees",
+  "attendance",
+  "homework",
+  "exams",
+  "ptm",
+  "leave",
+  "vault",
+  "comms",
+  "store",
+  "transport",
+  "certificates",
+  "rte",
+  "field",
+  "staff",
+  "general",
+] as const;
+
+export type WaTemplateModule = (typeof WA_TEMPLATE_MODULES)[number];
 
 export type WaHeaderFormat =
   | "NONE"
@@ -75,6 +91,8 @@ export type WaTemplate = {
   metaLanguage: string;
   metaTemplateId: string;
   rejectionReason: string;
+  quality: WaTemplateQuality;
+  qualityUpdatedAt: string;
   syncedAt: string;
   headerFormat: WaHeaderFormat;
   headerText: string;
@@ -87,6 +105,15 @@ export type WaTemplate = {
   /** Uploaded header media filename (PDF/JPG etc.) */
   mediaFileName: string;
   carousel: WaCarouselCard[];
+  /**
+   * Send this ONE template from a specific number, overriding the module's.
+   *
+   * Empty is the normal case and is not a gap: the module's number is the
+   * setting people actually maintain, and per-template routing exists for the
+   * exception, not the rule. Sixty-seven templates each needing a number set
+   * is sixty-seven chances to forget one.
+   */
+  senderNumberId?: string;
   /** Free-text fallback for 24h session / wa.me */
   localFallbackBody: string;
   paused: boolean;
@@ -94,11 +121,35 @@ export type WaTemplate = {
   createdAt: string;
 };
 
+/**
+ * A WhatsApp number the school can send FROM.
+ *
+ * Templates are registered against the WABA, not against a number, so every
+ * number here can send every approved template — which number sends what is
+ * the school's routing decision, not Meta's restriction.
+ */
+export type WaSenderNumber = {
+  id: string;
+  /** What staff call it: "Office", "Fees counter", "Admissions". */
+  label: string;
+  /** Meta's phone_number_id — the thing the Graph API is actually posted to. */
+  phoneNumberId: string;
+  /** Shown to staff so they can tell which number a family will see. */
+  displayNumber: string;
+  /** Used by any module with no sender of its own. Exactly one is true. */
+  isDefault: boolean;
+  paused: boolean;
+};
+
 export type WaTemplatesState = {
   version: 1;
   templates: WaTemplate[];
   lastMetaSyncAt: string;
   audit: { at: string; by: string; action: string; detail: string }[];
+  /** Numbers the school can send from. Empty = the single env-configured one. */
+  senders: WaSenderNumber[];
+  /** Which number each module sends from. A module absent here uses the default. */
+  moduleSenders: Partial<Record<WaTemplateModule, string>>;
 };
 
 function nid(prefix: string) {
@@ -141,11 +192,35 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "amount", label: "Amount", group: "Fees", sample: "₹5,000" },
   { key: "dueDate", label: "Due date", group: "Fees", sample: "15 Aug 2026" },
   { key: "payLink", label: "Payment link", group: "Fees", sample: "https://school.example/pay" },
+  { key: "duePayToken", label: "Pay-now button token (family's dues)", group: "Fees", sample: "eyJoIjoiaGhfYWJjIiwic2MiOiJvcGVuIn0.Ab12Cd34Ef56Gh78Ij90Kl", hint: "Fills the reminder's Pay now button: opens this family's payment for what they owe at that moment." },
+  { key: "payToken", label: "Pay-now button token (link id + code)", group: "Fees", sample: "pl_8f3k2x9a.PL-7K2M", hint: "Fills the Pay now button's URL; the sender supplies it from the payment link." },
   { key: "receiptNo", label: "Receipt number", group: "Fees", sample: "RCP-1042" },
+  { key: "maxAmount", label: "Auto-pay monthly limit", group: "Fees", sample: "₹15,000" },
+  { key: "autopayLink", label: "Auto-pay set-up link", group: "Fees", sample: "https://bhbinternational.school/pay/autopay/ap_hh12_mf3k2x" },
+  { key: "debitDate", label: "Auto-pay debit date", group: "Fees", sample: "Tue, 6 Oct" },
+  { key: "relayKind", label: "Office relay: kind of message", group: "School", sample: "Fees" },
+  { key: "relaySender", label: "Office relay: who sent it", group: "School", sample: "Priya Sharma (98765 43210), parent of Aarav Sharma, Class 5 A" },
+  { key: "relayCode", label: "Office relay: reference code", group: "School", sample: "K7Q2" },
+  { key: "relayMessage", label: "Office relay: the message", group: "School", sample: "I paid the fee yesterday but it still shows due" },
+  { key: "briefDate", label: "Brief date", group: "School", sample: "10 Sep 2026" },
+  { key: "collection", label: "Day's collection line", group: "Fees", sample: "₹4,850 in 7 receipts — Cash ₹3,000, UPI ₹1,850" },
+  { key: "expenses", label: "Day's expenses line", group: "Fees", sample: "₹1,200 across 3 vouchers" },
+  { key: "students", label: "Student attendance line", group: "Student", sample: "88% of those marked — 210 in, 30 absent" },
+  { key: "staff", label: "Staff attendance line", group: "Staff", sample: "30 of 35 present, 2 absent without approved leave" },
+  { key: "leavePending", label: "Leave requests waiting", group: "Staff", sample: "2 waiting — reply LEAVE to decide" },
+  { key: "stillOpen", label: "What is still open (AI note)", group: "School", sample: "Two sections never marked attendance today, covering 38 children" },
+  { key: "defaulters", label: "Overdue families line", group: "Fees", sample: "146 families owe ₹1,46,000 — list attached" },
+  { key: "trackToken", label: "Bus tracking button token", group: "Transport", sample: "stu_7f21.1789412400.k3Qw", hint: "Fills the Track the bus button's URL; the sender supplies it and it dies at the end of the run." },
+  { key: "trackLink", label: "Bus tracking link", group: "Transport", sample: "https://school.example/track/bus/stu_7f21.1789412400.k3Qw" },
   { key: "paidOn", label: "Paid on date", group: "Fees", sample: "4 Aug 2026" },
   { key: "stage", label: "Reminder stage", group: "Fees", sample: "2" },
+  { key: "examDay", label: "Exam day", group: "Student", sample: "Friday, 18 Sep", hint: "Filled by the exam-eve sweep (lib/examEve.ts) in the family's language." },
+  { key: "childPapers", label: "Each child's paper that day", group: "Student", sample: "Ansh (VII) — Hindi  |  Arav (IV) — Mathematics", hint: "One line per child. Meta refuses a newline inside a variable, so children are joined with \"  |  \"." },
+  { key: "weekLabel", label: "Week covered", group: "School", sample: "8–13 Sep" },
+  { key: "childSummary", label: "Each child's week", group: "Student", sample: "Aarav (III A) — Present 5 of 6 days · Hindi 18/20  |  Anaya (LKG A) — Present 6 of 6 days", hint: "One line per child from lib/weeklyChildDigest.ts; a family with nothing true to report is not messaged." },
   { key: "registerLink", label: "Registration link", group: "Admissions", sample: "https://school.example/register" },
-  { key: "homeworkTitle", label: "Homework title", group: "Academic", sample: "Math worksheet ch.4" },
+  { key: "homeworkTitle", label: "Homework title", group: "Academic", sample: "Exercise 5.2, questions 1–5" },
+  { key: "chapterLine", label: "Subject, book, chapter and what it covers", group: "Academic", sample: "Mathematics · Propel Maths Grade 5 · Ch 5 More about Operations on Numbers — DMAS, unitary method", hint: "Resolved from the school's own books by homeworkExpand. One line — Meta refuses a newline inside a variable — and it degrades to subject and book, then to the subject alone, so the line is never a bare dash, never untrue, and never repeats what the greeting already said." },
   { key: "subject", label: "Subject", group: "Academic", sample: "Mathematics" },
   { key: "examName", label: "Exam name", group: "Academic", sample: "Term 1" },
   { key: "ptmDate", label: "PTM date", group: "Academic", sample: "12 Aug 2026" },
@@ -157,11 +232,30 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "staffName", label: "Staff name", group: "Staff", sample: "Rajesh Kumar" },
   { key: "noticeTitle", label: "Notice title", group: "Comms", sample: "Holiday announcement" },
   { key: "noticeBody", label: "Notice body", group: "Comms", sample: "School closed on Friday." },
+  { key: "messageText", label: "Parent's message", group: "Comms", sample: "Amay could not finish the worksheet, please guide." },
+  { key: "holidayTitle", label: "Holiday name", group: "Holidays", sample: "Diwali break" },
+  { key: "holidayFrom", label: "Holiday from", group: "Holidays", sample: "Mon 19 Oct" },
+  { key: "holidayTo", label: "Holiday to", group: "Holidays", sample: "Sat 24 Oct" },
+  { key: "reopenDate", label: "School reopens on", group: "Holidays", sample: "Mon 26 Oct" },
+  { key: "holidayReason", label: "Closure reason", group: "Holidays", sample: "the heat wave" },
+  { key: "orderedBy", label: "Closure ordered by", group: "Holidays", sample: "the District Magistrate, Varanasi" },
+  { key: "holidayNote", label: "Holiday note", group: "Holidays", sample: "Homework for these days is in the parent app." },
   { key: "docTitle", label: "Document title", group: "Vault", sample: "Fire NOC" },
   { key: "expiryDate", label: "Expiry date", group: "Vault", sample: "31 Dec 2026" },
   { key: "orderNo", label: "Store order no.", group: "Store", sample: "STR-882" },
   { key: "orderStatus", label: "Store order status", group: "Store", sample: "Ready" },
   { key: "routeName", label: "Transport route", group: "Transport", sample: "Route 3 — City" },
+  { key: "busNo", label: "Bus number", group: "Transport", sample: "MAGIC 1" },
+  { key: "stopName", label: "Bus stop", group: "Transport", sample: "Ayar Mod" },
+  { key: "expectedTime", label: "Expected time at stop", group: "Transport", sample: "07:10" },
+  { key: "minutesLate", label: "Minutes late", group: "Transport", sample: "20" },
+  { key: "effectiveFrom", label: "Change effective from", group: "Transport", sample: "1 Sep 2026" },
+  { key: "actionTaken", label: "What the school is doing", group: "Transport", sample: "A replacement bus is on the way." },
+  { key: "alertTitle", label: "Fleet alert title", group: "Transport", sample: "Bus moving outside school hours" },
+  { key: "missingDocs", label: "Documents still needed (UDISE+)", group: "Student", sample: "child's Aadhaar card, birth certificate" },
+  { key: "docLabel", label: "Document type received", group: "Student", sample: "Aadhaar card" },
+  { key: "changes", label: "What to change in UDISE+", group: "Student", sample: "Date of Birth → 12/05/2019" },
+  { key: "detail", label: "Alert detail", group: "Transport", sample: "Moving at 38 km/h at 21:40 IST, outside the transport day." },
   { key: "certType", label: "Certificate type", group: "Certificates", sample: "Bonafide" },
   { key: "date", label: "Date", group: "General", sample: "4 Aug 2026" },
   { key: "time", label: "Time", group: "General", sample: "10:30 AM" },
@@ -244,11 +338,370 @@ type SeedDef = {
   footerEn?: string;
   footerHi?: string;
   buttons?: WaTemplateButton[];
+  /** Hindi labels for the same buttons, same order. Falls back to `buttons`. */
+  buttonsHi?: WaTemplateButton[];
   mediaUrl?: string;
   carousel?: Omit<WaCarouselCard, "id">[];
 };
 
+/**
+ * Where a static button should take a parent. The parent app is the one
+ * destination every template can safely point at without a per-family
+ * variable — Meta only allows a variable at the END of a button URL, and a
+ * full pay link cannot be expressed that way.
+ */
+export const WA_PARENT_APP_URL = "https://bhbinternational.school/parent";
+
+const OPEN_APP_EN: WaTemplateButton = { type: "URL", text: "Open parent app", url: WA_PARENT_APP_URL };
+const OPEN_APP_HI: WaTemplateButton = { type: "URL", text: "पैरेंट ऐप खोलें", url: WA_PARENT_APP_URL };
+const CALL_ME_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Call me back" };
+const CALL_ME_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "मुझे फ़ोन करें" };
+/**
+ * The weekly digest's only button. A tap is an INBOUND message, which is the
+ * one thing that opens Meta's 24-hour window — the school cannot open it by
+ * sending. That is the whole engagement mechanism: news worth reading, and
+ * one tap that lets the school answer freely for a day.
+ */
+/**
+ * The exam-eve button. Its text is matched by lib/examEve.ts `isPracticeTap`
+ * — change one and the other must change with it, or a tap arrives as text
+ * nothing recognises.
+ */
+const EXAM_PRACTICE_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Start practice" };
+const EXAM_PRACTICE_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "अभ्यास शुरू करें" };
+const DIGEST_MORE_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Tell me more" };
+const DIGEST_MORE_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "और बताइए" };
+const PAID_EN: WaTemplateButton = { type: "QUICK_REPLY", text: "Already paid" };
+const PAID_HI: WaTemplateButton = { type: "QUICK_REPLY", text: "भुगतान हो गया" };
+/**
+ * "Pay now" that opens THIS family's payment link. Meta allows one variable
+ * in a button URL, at the end; /pay/go unpacks link id + code from it and
+ * lands on the school's pay page, which hands off to Cashfree.
+ */
+export const WA_PAY_NOW_URL = "https://bhbinternational.school/pay/go/{{payToken}}";
+const PAY_NOW_EN: WaTemplateButton = { type: "URL", text: "Pay now", url: WA_PAY_NOW_URL };
+const PAY_NOW_HI: WaTemplateButton = { type: "URL", text: "अभी भुगतान करें", url: WA_PAY_NOW_URL };
+/**
+ * "Track the bus" that opens THIS child's live position.
+ *
+ * One variable, at the end, same rule as the pay button. The token binds one
+ * student and expires with the run it was issued in — /track/bus checks the
+ * signature, the expiry, AND whether the bus is on a run before it shows
+ * anything, so an old link reveals nothing rather than the driver's house.
+ */
+export const WA_BUS_TRACK_URL =
+  "https://bhbinternational.school/track/bus/{{trackToken}}";
+const TRACK_BUS_EN: WaTemplateButton = { type: "URL", text: "Track the bus", url: WA_BUS_TRACK_URL };
+const TRACK_BUS_HI: WaTemplateButton = { type: "URL", text: "बस ट्रैक करें", url: WA_BUS_TRACK_URL };
+/**
+ * "Pay now" on the fee reminders: THIS family's payment for what they owe at
+ * the moment they tap — /pay/due raises the checkout then and redirects to
+ * the gateway. It used to open the parent portal login (WA_PARENT_APP_URL),
+ * so a parent had to sign in before they could pay anything; 1,126 reminders
+ * went out that way in September 2026.
+ */
+export const WA_DUE_PAY_URL = "https://bhbinternational.school/pay/due/{{duePayToken}}";
+const PAY_DUE_EN: WaTemplateButton = { type: "URL", text: "Pay now", url: WA_DUE_PAY_URL };
+const PAY_DUE_HI: WaTemplateButton = { type: "URL", text: "अभी भुगतान करें", url: WA_DUE_PAY_URL };
+/** The parent portal's fee page — still on the transport fee reminder, which no rule sends yet. */
+const PAY_PORTAL_EN: WaTemplateButton = { type: "URL", text: "Pay now", url: WA_PARENT_APP_URL };
+const PAY_PORTAL_HI: WaTemplateButton = { type: "URL", text: "अभी भुगतान करें", url: WA_PARENT_APP_URL };
+
 const SEED_DEFS: SeedDef[] = [
+  // Every template reads the same way on a parent's phone: a warm greeting,
+  // the facts on their own lines with a small icon each, one clear thing to
+  // do, and a fixed sign-off — Meta refuses a body that starts or ends on a
+  // variable, and a parent skims a message, they do not read it.
+  //
+  // ── Transport ────────────────────────────────────────────────
+  // Nothing sends until Meta approves the name: the fleet-edge alert path
+  // has already proved that free-form fails outside the 24h window, 223
+  // times in a row. The ETA wording says "expected" and names it as a
+  // schedule on purpose — there is no live position behind it.
+  {
+    familyKey: "transport_eta",
+    nameEn: "Bus expected time",
+    nameHi: "बस का अनुमानित समय",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_eta",
+    headerFormat: "TEXT",
+    headerTextEn: "Bus update",
+    headerTextHi: "बस अपडेट",
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\n🚌 Bus *{{busNo}}* is expected at *{{stopName}}* at about *{{expectedTime}}* for {{childName}}.\n\nThis is the scheduled time, not the bus's live position. Please be at the stop a few minutes early.\n\nHave a good day! 🌼",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n🚌 {{childName}} के लिए बस *{{busNo}}* *{{stopName}}* पर लगभग *{{expectedTime}}* बजे पहुँचने की उम्मीद है।\n\nयह निर्धारित समय है, बस की लाइव लोकेशन नहीं। कृपया कुछ मिनट पहले स्टॉप पर पहुँचें।\n\nआपका दिन शुभ हो! 🌼",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
+    familyKey: "transport_delay",
+    nameEn: "Bus running late",
+    nameHi: "बस देरी से",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_delay",
+    headerFormat: "TEXT",
+    headerTextEn: "Bus running late",
+    headerTextHi: "बस देरी से",
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\n⏰ Bus *{{busNo}}* is running about *{{minutesLate}} minutes late* for {{stopName}}.\n\n{{childName}} will be picked up as soon as it arrives — please keep them ready at the stop.\n\nSorry for the wait, and thank you for your patience. 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n⏰ बस *{{busNo}}* {{stopName}} के लिए लगभग *{{minutesLate}} मिनट देरी* से चल रही है।\n\n{{childName}} को बस पहुँचते ही ले लिया जाएगा — कृपया उन्हें स्टॉप पर तैयार रखें।\n\nअसुविधा के लिए खेद है, आपके धैर्य के लिए धन्यवाद। 🙏",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
+    familyKey: "transport_breakdown",
+    nameEn: "Bus breakdown",
+    nameHi: "बस खराब",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_breakdown",
+    headerFormat: "TEXT",
+    headerTextEn: "Bus update: important",
+    headerTextHi: "बस सूचना: महत्वपूर्ण",
+    buttons: [CALL_ME_EN],
+    buttonsHi: [CALL_ME_HI],
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\n⚠️ Bus *{{busNo}}* has broken down on the way.\n\n✅ {{childName}} is *safe* with the bus attendant.\n\n🔧 What we are doing: {{actionTaken}}\n\nWe will message you again the moment there is an update. Thank you for your patience. 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n⚠️ बस *{{busNo}}* रास्ते में खराब हो गई है।\n\n✅ {{childName}} बस परिचारक के साथ *सुरक्षित* हैं।\n\n🔧 हम क्या कर रहे हैं: {{actionTaken}}\n\nकोई भी नई जानकारी मिलते ही हम फिर संदेश भेजेंगे। आपके धैर्य के लिए धन्यवाद। 🙏",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
+    familyKey: "transport_route_change",
+    nameEn: "Bus or stop changed",
+    nameHi: "बस या स्टॉप में बदलाव",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_route_change",
+    headerFormat: "TEXT",
+    headerTextEn: "Transport change",
+    headerTextHi: "परिवहन में बदलाव",
+    buttons: [{ type: "QUICK_REPLY", text: "Need a change" }],
+    buttonsHi: [{ type: "QUICK_REPLY", text: "बदलाव चाहिए" }],
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\nThere is a change in {{childName}}'s school transport:\n\n📅 From: *{{effectiveFrom}}*\n📍 Stop: *{{stopName}}*\n🚌 Bus: *{{busNo}}*\n\nIf this does not suit your family, please reply to this message or call the school office and we will sort it out.\n\nThank you! 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} के स्कूल परिवहन में बदलाव है:\n\n📅 कब से: *{{effectiveFrom}}*\n📍 स्टॉप: *{{stopName}}*\n🚌 बस: *{{busNo}}*\n\nयदि यह आपके परिवार के लिए उपयुक्त न हो, तो कृपया इसी संदेश का उत्तर दें या विद्यालय कार्यालय में फ़ोन करें — हम व्यवस्था कर देंगे।\n\nधन्यवाद! 🙏",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
+    familyKey: "transport_pin_request",
+    nameEn: "Share your child's boarding point",
+    nameHi: "बच्चे का बस स्टॉप बताइए",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_pin_request",
+    headerFormat: "TEXT",
+    headerTextEn: "Where does your child wait?",
+    headerTextHi: "आपका बच्चा कहाँ खड़ा होता है?",
+    /*
+      Two buttons, and the refusal is one of them.
+      A family that would rather not share a location must be able to say so
+      in one tap, in their own language, without composing a sentence — and
+      their answer is recorded so nobody asks them again next term. A request
+      whose only easy answer is yes is not a request.
+    */
+    buttons: [
+      { type: "QUICK_REPLY", text: "Share location" },
+      { type: "QUICK_REPLY", text: "Not now" },
+    ],
+    buttonsHi: [
+      { type: "QUICK_REPLY", text: "लोकेशन भेजें" },
+      { type: "QUICK_REPLY", text: "अभी नहीं" },
+    ],
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\n" +
+      "{{childName}} travels on bus *{{busNo}}*. Right now the school only knows your village, not the exact spot where {{childName}} waits — so the driver goes by memory.\n\n" +
+      "📍 *What we are asking:* open the attachment (📎) in this chat, choose *Location*, and send the spot where your child actually stands each morning. Please send it from that spot if you can.\n\n" +
+      "✅ *What it is used for:* only to place the bus stop correctly — a stop nearer your home, the driver knowing exactly where to halt, and a truer arrival time. Your fee does not change because of this.\n\n" +
+      "👀 *Who sees it:* the school transport office and your child's driver. Nobody else, and it is not shared outside the school.\n\n" +
+      "🙋 *If you would rather not:* tap *Not now*. Your child's bus and stop stay exactly as they are — nothing changes and we will not ask again.\n\n" +
+      "Thank you 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n" +
+      "{{childName}} बस *{{busNo}}* से आते-जाते हैं। अभी विद्यालय को सिर्फ़ आपका गाँव पता है, वह सही जगह नहीं जहाँ {{childName}} रोज़ खड़े होते हैं — इसलिए चालक अंदाज़े से रोकता है।\n\n" +
+      "📍 *हमें क्या चाहिए:* इसी चैट में 📎 (अटैचमेंट) दबाइए, *Location* चुनिए, और वह जगह भेजिए जहाँ आपका बच्चा रोज़ सुबह खड़ा होता है। हो सके तो वहीं खड़े होकर भेजिए।\n\n" +
+      "✅ *इससे क्या फ़ायदा:* सिर्फ़ बस स्टॉप सही जगह लगाने के लिए — घर के पास का स्टॉप, चालक को ठीक जगह पता, और बस आने का सही समय। इससे आपकी फ़ीस में कोई बदलाव नहीं होगा।\n\n" +
+      "👀 *कौन देखेगा:* सिर्फ़ विद्यालय का परिवहन कार्यालय और आपके बच्चे के बस चालक। और कोई नहीं, विद्यालय के बाहर यह जानकारी नहीं जाती।\n\n" +
+      "🙋 *अगर नहीं भेजना चाहें:* *अभी नहीं* दबा दीजिए। आपके बच्चे की बस और स्टॉप जैसे हैं वैसे ही रहेंगे — कुछ नहीं बदलेगा और हम दोबारा नहीं पूछेंगे।\n\n" +
+      "धन्यवाद 🙏",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
+    familyKey: "transport_not_boarded",
+    nameEn: "Child did not board",
+    nameHi: "बच्चा बस में नहीं चढ़ा",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_not_boarded",
+    headerFormat: "TEXT",
+    headerTextEn: "Safety check",
+    headerTextHi: "सुरक्षा जांच",
+    buttons: [{ type: "QUICK_REPLY", text: "Travelling separately" }, CALL_ME_EN],
+    buttonsHi: [{ type: "QUICK_REPLY", text: "अलग से आ रहे हैं" }, CALL_ME_HI],
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\n❗ {{childName}} did *not board* bus *{{busNo}}* at {{stopName}} at *{{time}}* today.\n\nIf they are travelling separately today, please reply *OK* so we know all is well. If not, please call the school office right away.\n\nWe just want to be sure your child is safe. 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n❗ {{childName}} आज *{{time}}* बजे {{stopName}} पर बस *{{busNo}}* में *नहीं चढ़े*।\n\nयदि वे आज अलग से आ रहे हैं, तो कृपया *OK* लिखकर उत्तर दें ताकि हमें पता रहे कि सब ठीक है। यदि नहीं, तो कृपया तुरंत विद्यालय कार्यालय में फ़ोन करें।\n\nहम बस यह सुनिश्चित करना चाहते हैं कि आपका बच्चा सुरक्षित है। 🙏",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+
+  // The two marks an attendant actually makes on every run. "Did not board"
+  // has existed since 2026-09-08 and is the alarm; these two are the ordinary
+  // days, and they are what a parent at work is waiting for.
+  //
+  // Only the pickup message carries a tracking button. Once a child is off
+  // the bus a live vehicle position tells the family nothing about their own
+  // child and everything about a vehicle full of other people's — so the
+  // drop message deliberately has no link on it. Do not "make it
+  // consistent" by adding one.
+  {
+    familyKey: "transport_boarded",
+    nameEn: "Child boarded the bus",
+    nameHi: "बच्चा बस में चढ़ गया",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_boarded",
+    headerFormat: "TEXT",
+    headerTextEn: "On the bus",
+    headerTextHi: "बस में",
+    buttons: [TRACK_BUS_EN],
+    buttonsHi: [TRACK_BUS_HI],
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\n🚌 {{childName}} boarded bus *{{busNo}}* at *{{stopName}}* at *{{time}}*.\n\nTap *Track the bus* below to see where it is right now. The link works while the bus is on its run.\n\nIf the button does not open, use this link:\n🔗 {{trackLink}}\n\nHave a good day! 🌼",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n🚌 {{childName}} *{{time}}* बजे *{{stopName}}* से बस *{{busNo}}* में चढ़ गए।\n\nबस अभी कहाँ है यह देखने के लिए नीचे *बस ट्रैक करें* दबाएँ। यह लिंक बस के रास्ते में रहने तक काम करता है।\n\nयदि बटन न खुले, तो यह लिंक इस्तेमाल करें:\n🔗 {{trackLink}}\n\nआपका दिन शुभ हो! 🌼",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
+    familyKey: "transport_dropped",
+    nameEn: "Child got off the bus",
+    nameHi: "बच्चा बस से उतर गया",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_transport_dropped",
+    headerFormat: "TEXT",
+    headerTextEn: "Off the bus",
+    headerTextHi: "बस से उतरे",
+    buttons: [CALL_ME_EN],
+    buttonsHi: [CALL_ME_HI],
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\n✅ {{childName}} got off bus *{{busNo}}* at *{{stopName}}* at *{{time}}*.\n\nIf anything does not look right, tap below and the transport desk will call you back.",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n✅ {{childName}} *{{time}}* बजे *{{stopName}}* पर बस *{{busNo}}* से उतर गए।\n\nयदि कुछ ठीक न लगे, तो नीचे दबाएँ — परिवहन कार्यालय आपको फ़ोन करेगा।",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  // Owner alerts from the fleet tick (fleetLive.server.ts): a bus moving
+  // outside the transport day, low fuel, a service or a paper falling due.
+  // Sent to the owners on the roster; the template exists because an owner
+  // who has not written to the school number for a day is outside Meta's
+  // 24h window, exactly when a night-time movement alert matters most.
+  {
+    familyKey: "fleet_owner_alert",
+    nameEn: "Fleet alert to owner",
+    nameHi: "वाहन चेतावनी (मालिक)",
+    module: "transport",
+    category: "UTILITY",
+    metaName: "bhb_fleet_owner_alert",
+    headerFormat: "TEXT",
+    headerTextEn: "Fleet alert",
+    headerTextHi: "वाहन चेतावनी",
+    bodyEn:
+      "🚨 *{{alertTitle}}*\n\n🚌 Vehicle: *{{busNo}}*\n🕒 {{time}}\n\n{{detail}}\n\nOpen Transport → Live in the ERP for the map. — {{schoolName}} 🙏",
+    bodyHi:
+      "🚨 *{{alertTitle}}*\n\n🚌 वाहन: *{{busNo}}*\n🕒 {{time}}\n\n{{detail}}\n\nनक़्शे के लिए ERP में Transport → Live खोलें। — {{schoolName}} 🙏",
+    footerEn: "Transport desk · automatic alert",
+    footerHi: "परिवहन कार्यालय · स्वचालित चेतावनी",
+  },
+
+  // ── UDISE+ documents ──────────────────────────────────────────
+  //
+  // The request goes to the family; the photo they send back is read by the
+  // school's AI, filed on the child and used to correct the record (see
+  // udiseDocIntake.server.ts). The two live together so that what the parent
+  // is asked for is exactly what the intake knows how to read.
+  {
+    familyKey: "udise_docs_request",
+    nameEn: "UDISE+ documents request",
+    nameHi: "UDISE+ दस्तावेज़ अनुरोध",
+    module: "rte",
+    category: "UTILITY",
+    metaName: "bhb_udise_docs_request",
+    headerFormat: "TEXT",
+    headerTextEn: "Documents for UDISE+",
+    headerTextHi: "UDISE+ के लिए दस्तावेज़",
+    buttons: [{ type: "QUICK_REPLY", text: "Sending now" }, { type: "QUICK_REPLY", text: "Already given" }, CALL_ME_EN],
+    buttonsHi: [{ type: "QUICK_REPLY", text: "अभी भेज रहे हैं" }, { type: "QUICK_REPLY", text: "पहले दे दिया" }, CALL_ME_HI],
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\nThe Government's UDISE+ student register needs a few documents for {{childName}} ({{classLabel}}). Still to receive:\n\n📄 *{{missingDocs}}*\n\nSimply *reply to this message with a clear photo* of each document — our system reads it and files it on {{childName}}'s record the same minute. No visit to the office needed.\n\nKindly send by *{{dueDate}}* so the APAAR ID and PEN can be issued in time. Thank you! 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\nसरकार के UDISE+ छात्र रजिस्टर के लिए {{childName}} ({{classLabel}}) के कुछ दस्तावेज़ चाहिए। अभी बाकी:\n\n📄 *{{missingDocs}}*\n\nबस *इसी संदेश के उत्तर में हर दस्तावेज़ की साफ़ फ़ोटो भेज दें* — हमारा सिस्टम उसे पढ़कर उसी मिनट {{childName}} के रिकॉर्ड में जोड़ देता है। कार्यालय आने की ज़रूरत नहीं।\n\nकृपया *{{dueDate}}* तक भेजें ताकि APAAR ID और PEN समय पर बन सके। धन्यवाद! 🙏",
+    footerEn: "School office · Reply to this message with the photo",
+    footerHi: "विद्यालय कार्यालय · फ़ोटो इसी संदेश के उत्तर में भेजें",
+  },
+  // To the office, not a parent — so no greeting, and terse on purpose: it
+  // is what to type into the portal. Text goes first when the staff member's
+  // own 24h window is open; this template carries it when it is not.
+  {
+    familyKey: "udise_doc_received",
+    nameEn: "UDISE+ document received (office)",
+    nameHi: "UDISE+ दस्तावेज़ प्राप्त (कार्यालय)",
+    module: "rte",
+    category: "UTILITY",
+    metaName: "bhb_udise_doc_received",
+    headerFormat: "TEXT",
+    headerTextEn: "UDISE+ document received",
+    headerTextHi: "UDISE+ दस्तावेज़ प्राप्त",
+    bodyEn:
+      "📄 *{{docLabel}}* received for *{{childName}}* ({{classLabel}}) from {{guardianName}} on WhatsApp.\n\n✏️ Change in UDISE+: {{changes}}\n\nThe file is on the child's record in the ERP (Students → UDISE+). — {{schoolName}} office 🏫",
+    bodyHi:
+      "📄 *{{docLabel}}* प्राप्त — *{{childName}}* ({{classLabel}}), {{guardianName}} द्वारा व्हाट्सऐप पर।\n\n✏️ UDISE+ में बदलें: {{changes}}\n\nफ़ाइल ERP में बच्चे के रिकॉर्ड पर है (Students → UDISE+)। — {{schoolName}} कार्यालय 🏫",
+    footerEn: "UDISE+ desk · automatic",
+    footerHi: "UDISE+ डेस्क · स्वचालित",
+  },
+
+  {
+    /*
+      The 6 PM brief for whoever runs the school.
+
+      A DOCUMENT header because the detail — class by class, expenses by
+      head, tomorrow's calling list — cannot fit in a 1024-character body
+      and should not sit in a chat message anyway: it carries parents'
+      phone numbers and fee balances.
+
+      The body is a fixed skeleton with one single-line value per number,
+      NOT one {{summary}} variable. Meta refuses a parameter containing a
+      newline, so a multi-line summary would be rejected at send time and
+      the only symptom would be a 6 PM message that never arrived.
+
+      UTILITY, not MARKETING: this reports on the day's own transactions to
+      the people accountable for them.
+    */
+    familyKey: "leadership_daily_brief",
+    nameEn: "Daily brief for leadership",
+    nameHi: "दैनिक रिपोर्ट (प्रबंधन)",
+    module: "comms",
+    category: "UTILITY",
+    metaName: "bhb_daily_brief",
+    headerFormat: "DOCUMENT",
+    bodyEn:
+      "📊 *{{schoolName}}* — {{briefDate}}\n\n💰 Collection: {{collection}}\n🧾 Expenses: {{expenses}}\n🎒 Students: {{students}}\n👩‍🏫 Staff: {{staff}}\n📝 Leave: {{leavePending}}\n📞 Overdue: {{defaulters}}\n\n🔎 Still open: {{stillOpen}}\n\nThe full brief is attached — class by class, expenses by head, and tomorrow's calling list.",
+    bodyHi:
+      "📊 *{{schoolName}}* — {{briefDate}}\n\n💰 वसूली: {{collection}}\n🧾 खर्च: {{expenses}}\n🎒 छात्र: {{students}}\n👩‍🏫 स्टाफ: {{staff}}\n📝 अवकाश: {{leavePending}}\n📞 बकाया: {{defaulters}}\n\n🔎 अभी लंबित: {{stillOpen}}\n\nपूरी रिपोर्ट संलग्न है — कक्षावार उपस्थिति, मदवार खर्च और कल के लिए कॉलिंग सूची।",
+    footerEn: "Office · confidential",
+    footerHi: "कार्यालय · गोपनीय",
+  },
+  // ── Admissions ───────────────────────────────────────────────
   {
     familyKey: "admissions_registration_invite",
     nameEn: "Registration invite",
@@ -256,12 +709,15 @@ const SEED_DEFS: SeedDef[] = [
     module: "admissions",
     category: "UTILITY",
     metaName: "bhb_registration_invite",
+    headerFormat: "TEXT",
+    headerTextEn: "Registration",
+    headerTextHi: "पंजीकरण",
     bodyEn:
-      "Namaste {{guardianName}}, please complete registration for *{{childName}}* at {{schoolName}}. Register: {{registerLink}}",
+      "Namaste {{guardianName}} ji 🙏\n\nThank you for your interest in *{{schoolName}}* for {{childName}}. 🎒\n\nThe next step is a short online registration — it takes about 5 minutes:\n\n🔗 {{registerLink}}\n\nOnce done, our admissions team will call you to fix a campus visit. We look forward to welcoming your family! 🌼",
     bodyHi:
-      "नमस्ते {{guardianName}}, कृपया {{schoolName}} में *{{childName}}* का पंजीकरण पूरा करें। लिंक: {{registerLink}}",
-    footerEn: "Admissions desk",
-    footerHi: "प्रवेश कार्यालय",
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} के लिए *{{schoolName}}* में रुचि दिखाने के लिए धन्यवाद। 🎒\n\nअगला कदम एक छोटा-सा ऑनलाइन पंजीकरण है — इसमें लगभग 5 मिनट लगते हैं:\n\n🔗 {{registerLink}}\n\nपंजीकरण के बाद हमारी प्रवेश टीम आपको फ़ोन करके कैंपस विज़िट तय करेगी। आपके परिवार का स्वागत करने की प्रतीक्षा है! 🌼",
+    footerEn: "Admissions desk · Reply to this message for help",
+    footerHi: "प्रवेश कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "admissions_fee_reminder",
@@ -270,10 +726,17 @@ const SEED_DEFS: SeedDef[] = [
     module: "admissions",
     category: "UTILITY",
     metaName: "bhb_registration_fee_reminder",
+    headerFormat: "TEXT",
+    headerTextEn: "Registration fee",
+    headerTextHi: "पंजीकरण शुल्क",
+    buttons: [PAID_EN],
+    buttonsHi: [PAID_HI],
     bodyEn:
-      "Dear {{guardianName}}, registration fee for *{{childName}}* is due: *{{feeDue}}*. Pay: {{payLink}}",
+      "Namaste {{guardianName}} ji 🙏\n\nA gentle reminder — the registration fee for {{childName}} is pending:\n\n💰 Amount: *{{feeDue}}*\n\nPay securely in a minute (UPI, card or net banking):\n🔗 {{payLink}}\n\nYour seat is confirmed as soon as the payment goes through. Thank you! 🙏",
     bodyHi:
-      "प्रिय {{guardianName}}, *{{childName}}* का पंजीकरण शुल्क बकाया है: *{{feeDue}}*। भुगतान: {{payLink}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\nएक विनम्र स्मरण — {{childName}} का पंजीकरण शुल्क बाकी है:\n\n💰 राशि: *{{feeDue}}*\n\nएक मिनट में सुरक्षित भुगतान करें (UPI, कार्ड या नेट बैंकिंग):\n🔗 {{payLink}}\n\nभुगतान होते ही सीट पक्की हो जाएगी। धन्यवाद! 🙏",
+    footerEn: "Admissions desk · Reply to this message for help",
+    footerHi: "प्रवेश कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "admissions_open_day",
@@ -285,9 +748,11 @@ const SEED_DEFS: SeedDef[] = [
     headerFormat: "IMAGE",
     mediaUrl: "",
     bodyEn:
-      "Dear {{guardianName}}, you are invited to visit campus for *{{childName}}* counselling at {{schoolName}}. Register: {{registerLink}}",
+      "Namaste {{guardianName}} ji 🙏\n\nYou are warmly invited to visit *{{schoolName}}* with {{childName}}! 🏫\n\nWalk through our classrooms, meet the teachers, and get a one-to-one counselling session on the right class and the way we teach.\n\nBook your visit here:\n🔗 {{registerLink}}\n\nWe would love to show you around. 🌼",
     bodyHi:
-      "प्रिय {{guardianName}}, {{schoolName}} में *{{childName}}* की काउंसलिंग हेतु कैंपस आने का निमंत्रण। पंजीकरण: {{registerLink}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} के साथ *{{schoolName}}* देखने आने का हार्दिक निमंत्रण! 🏫\n\nहमारी कक्षाएँ देखें, शिक्षकों से मिलें, और सही कक्षा व हमारी पढ़ाने की पद्धति पर व्यक्तिगत काउंसलिंग पाएँ।\n\nअपनी विज़िट यहाँ बुक करें:\n🔗 {{registerLink}}\n\nआपको कैंपस दिखाने में हमें खुशी होगी। 🌼",
+    footerEn: "Admissions desk · Reply STOP to opt out",
+    footerHi: "प्रवेश कार्यालय · संदेश बंद करने के लिए STOP लिखें",
   },
   {
     familyKey: "admissions_followup",
@@ -296,11 +761,20 @@ const SEED_DEFS: SeedDef[] = [
     module: "admissions",
     category: "UTILITY",
     metaName: "bhb_admission_followup",
+    headerFormat: "TEXT",
+    headerTextEn: "Admission enquiry",
+    headerTextHi: "प्रवेश पूछताछ",
+    buttons: [{ type: "QUICK_REPLY", text: "Yes, call me" }, { type: "QUICK_REPLY", text: "Book campus visit" }],
+    buttonsHi: [{ type: "QUICK_REPLY", text: "हाँ, फ़ोन करें" }, { type: "QUICK_REPLY", text: "कैंपस विज़िट बुक करें" }],
     bodyEn:
-      "Namaste {{guardianName}}, checking in on *{{childName}}*'s admission enquiry at {{schoolName}}. Reply YES to continue or call the desk.",
+      "Namaste {{guardianName}} ji 🙏\n\nJust checking in on {{childName}}'s admission enquiry at *{{schoolName}}*. 🎒\n\nIs there anything we can help with — the class, fees, transport, or a campus visit?\n\n👉 Reply *YES* and our admissions team will call you back, or reply with your question here.\n\nWe are happy to help. 🙏",
     bodyHi:
-      "नमस्ते {{guardianName}}, {{schoolName}} में *{{childName}}* की प्रवेश पूछताछ पर फॉलो-अप। जारी रखने के लिए YES लिखें।",
+      "नमस्ते {{guardianName}} जी 🙏\n\n*{{schoolName}}* में {{childName}} की प्रवेश पूछताछ के बारे में हाल जानना चाहते हैं। 🎒\n\nक्या किसी बात में मदद चाहिए — कक्षा, शुल्क, परिवहन या कैंपस विज़िट?\n\n👉 *YES* लिखें और हमारी प्रवेश टीम आपको फ़ोन करेगी, या अपना प्रश्न यहीं लिख भेजें।\n\nहमें मदद करके खुशी होगी। 🙏",
+    footerEn: "Admissions desk · Reply to this message for help",
+    footerHi: "प्रवेश कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
+
+  // ── Fees ─────────────────────────────────────────────────────
   {
     familyKey: "fees_soft_reminder",
     nameEn: "Fee soft reminder",
@@ -308,10 +782,17 @@ const SEED_DEFS: SeedDef[] = [
     module: "fees",
     category: "UTILITY",
     metaName: "bhb_fee_soft_reminder",
+    headerFormat: "TEXT",
+    headerTextEn: "Fee reminder",
+    headerTextHi: "शुल्क स्मरण",
+    buttons: [PAY_DUE_EN, PAID_EN],
+    buttonsHi: [PAY_DUE_HI, PAID_HI],
     bodyEn:
-      "Dear {{guardianName}}, fee for *{{childName}}* ({{classLabel}}) is due soon: *{{feeDue}}*. Pay: {{payLink}}",
+      "Namaste {{guardianName}} ji 🙏\n\nA friendly reminder that {{childName}}'s school fee ({{classLabel}}) is due soon:\n\n💰 Amount: *{{feeDue}}*\n\nTap *Pay now* below to pay directly — UPI (GPay, PhonePe, Paytm), card or net banking. No login needed, and the receipt comes to WhatsApp by itself.\n\nIf the button does not open: {{payLink}}\n\nThank you! 🙏",
     bodyHi:
-      "प्रिय {{guardianName}}, *{{childName}}* ({{classLabel}}) का शुल्क शीघ्र देय: *{{feeDue}}*। भुगतान: {{payLink}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\nएक विनम्र स्मरण — {{childName}} ({{classLabel}}) का विद्यालय शुल्क शीघ्र देय है:\n\n💰 राशि: *{{feeDue}}*\n\nनीचे *अभी भुगतान करें* दबाकर सीधे भुगतान करें — UPI (GPay, PhonePe, Paytm), कार्ड या नेट बैंकिंग। लॉगिन की ज़रूरत नहीं, रसीद अपने आप व्हाट्सऐप पर आ जाएगी।\n\nयदि बटन न खुले: {{payLink}}\n\nधन्यवाद! 🙏",
+    footerEn: "Fee counter · Reply to this message for help",
+    footerHi: "शुल्क काउंटर · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "fees_stage_reminder",
@@ -320,10 +801,17 @@ const SEED_DEFS: SeedDef[] = [
     module: "fees",
     category: "UTILITY",
     metaName: "bhb_fee_stage_reminder",
+    headerFormat: "TEXT",
+    headerTextEn: "Fee overdue",
+    headerTextHi: "शुल्क बकाया",
+    buttons: [PAY_DUE_EN, PAID_EN, { type: "QUICK_REPLY", text: "Need more time" }],
+    buttonsHi: [PAY_DUE_HI, PAID_HI, { type: "QUICK_REPLY", text: "थोड़ा समय चाहिए" }],
     bodyEn:
-      "Dear {{guardianName}}, *{{childName}}* has overdue fees (stage {{stage}}): *{{feeDue}}*. Please clear dues: {{payLink}}",
+      "Namaste {{guardianName}} ji 🙏\n\n{{childName}}'s school fee is *overdue* (reminder {{stage}}):\n\n💰 Amount pending: *{{feeDue}}*\n\nTap *Pay now* below to pay directly — UPI (GPay, PhonePe, Paytm), card or net banking. No login needed, and the receipt comes to WhatsApp by itself.\n\nIf the button does not open: {{payLink}}\n\nAlready paid, or need a little more time? Tap a button below. Thank you! 🙏",
     bodyHi:
-      "प्रिय {{guardianName}}, *{{childName}}* का बकाया शुल्क (चरण {{stage}}): *{{feeDue}}*। भुगतान: {{payLink}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} का विद्यालय शुल्क *बकाया* है (स्मरण {{stage}}):\n\n💰 बकाया राशि: *{{feeDue}}*\n\nनीचे *अभी भुगतान करें* दबाकर सीधे भुगतान करें — UPI (GPay, PhonePe, Paytm), कार्ड या नेट बैंकिंग। लॉगिन की ज़रूरत नहीं, रसीद अपने आप व्हाट्सऐप पर आ जाएगी।\n\nयदि बटन न खुले: {{payLink}}\n\nभुगतान कर दिया है या थोड़ा समय चाहिए? नीचे का बटन दबाएँ। धन्यवाद! 🙏",
+    footerEn: "Fee counter · Reply to this message for help",
+    footerHi: "शुल्क काउंटर · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "fees_pay_link",
@@ -333,9 +821,53 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_fee_pay_link",
     bodyEn:
-      "{{schoolName}}: Pay link for *{{childName}}* — amount *{{feeDue}}*: {{payLink}}",
+      "Namaste 🙏 Your fee payment link from *{{schoolName}}* for {{childName}} is ready:\n\n💰 Amount: *{{feeDue}}*\n\nTap *Pay now* below to pay securely with UPI, card or net banking — the receipt comes to you on WhatsApp right after.\n\nIf the button does not open, use this link:\n🔗 {{payLink}}\n\nThank you! 🙏",
     bodyHi:
-      "{{schoolName}}: *{{childName}}* हेतु भुगतान लिंक — राशि *{{feeDue}}*: {{payLink}}",
+      "नमस्ते 🙏 *{{schoolName}}* की ओर से {{childName}} के शुल्क भुगतान का लिंक तैयार है:\n\n💰 राशि: *{{feeDue}}*\n\nUPI, कार्ड या नेट बैंकिंग से सुरक्षित भुगतान के लिए नीचे *अभी भुगतान करें* दबाएँ — रसीद तुरंत व्हाट्सऐप पर मिलेगी।\n\nयदि बटन न खुले, तो यह लिंक इस्तेमाल करें:\n🔗 {{payLink}}\n\nधन्यवाद! 🙏",
+    buttons: [PAY_NOW_EN],
+    buttonsHi: [PAY_NOW_HI],
+    footerEn: "Fee counter · Reply to this message for help",
+    footerHi: "शुल्क काउंटर · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
+    /*
+      Fee auto-pay (lib/feeAutopay.server.ts). The invite carries the family's
+      own approval page; the debit notice goes the day before every debit.
+      Neither ends on a variable and no two variables touch — the autopilot
+      submits these to Meta by itself, and Meta refuses either shape.
+    */
+    familyKey: "fees_autopay_invite",
+    nameEn: "Fee auto-pay invite",
+    nameHi: "शुल्क ऑटो-पे आमंत्रण",
+    module: "fees",
+    category: "UTILITY",
+    metaName: "bhb_fee_autopay_invite",
+    headerFormat: "TEXT",
+    headerTextEn: "Fee auto-pay",
+    headerTextHi: "शुल्क ऑटो-पे",
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\n*{{schoolName}}* now offers fee *auto-pay* for {{childName}}. Approve it once and each month's fee is paid automatically from your bank account or UPI — no queue, no missed date, and the receipt comes to WhatsApp.\n\n🔒 Limit you approve: up to *{{maxAmount}}* a month. You get a message before every debit, and you can stop it any time from your UPI app or by telling the school.\n\nSet it up here (takes a minute): {{autopayLink}}\n\nThank you! 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n*{{schoolName}}* अब {{childName}} के शुल्क के लिए *ऑटो-पे* की सुविधा दे रहा है। एक बार स्वीकृति दें, फिर हर महीने का शुल्क आपके बैंक खाते या UPI से अपने आप जमा हो जाएगा — न लाइन, न तारीख छूटने की चिंता, और रसीद व्हाट्सऐप पर आएगी।\n\n🔒 आपकी स्वीकृत सीमा: हर महीने अधिकतम *{{maxAmount}}*। हर कटौती से पहले आपको संदेश मिलेगा, और आप इसे कभी भी अपने UPI ऐप से या विद्यालय को बताकर बंद कर सकते हैं।\n\nयहाँ सेट करें (एक मिनट लगेगा): {{autopayLink}}\n\nधन्यवाद! 🙏",
+    footerEn: "Fee counter · Reply to this message for help",
+    footerHi: "शुल्क काउंटर · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
+    familyKey: "fees_autopay_debit",
+    nameEn: "Fee auto-pay debit notice",
+    nameHi: "शुल्क ऑटो-पे कटौती सूचना",
+    module: "fees",
+    category: "UTILITY",
+    metaName: "bhb_fee_autopay_debit",
+    headerFormat: "TEXT",
+    headerTextEn: "Auto-pay debit notice",
+    headerTextHi: "ऑटो-पे कटौती सूचना",
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\nA note from *{{schoolName}}*: the fee for {{childName}} of *{{amount}}* will be auto-debited on *{{debitDate}}* through your auto-pay.\n\nThere is nothing you need to do, and please do not pay this amount at the counter. The receipt comes to WhatsApp once the debit goes through.\n\nPlease keep enough balance in the account. To stop or change auto-pay, reply to this message. Thank you! 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n*{{schoolName}}* की ओर से सूचना: {{childName}} का शुल्क *{{amount}}* आपके ऑटो-पे से *{{debitDate}}* को अपने आप कटेगा।\n\nआपको कुछ करने की आवश्यकता नहीं है, और कृपया यह राशि काउंटर पर जमा न करें। कटौती होते ही रसीद व्हाट्सऐप पर आ जाएगी।\n\nकृपया खाते में पर्याप्त राशि रखें। ऑटो-पे बंद करने या बदलने के लिए इसी संदेश का उत्तर दें। धन्यवाद! 🙏",
+    footerEn: "Fee counter · Reply to this message for help",
+    footerHi: "शुल्क काउंटर · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "fees_receipt",
@@ -345,9 +877,40 @@ const SEED_DEFS: SeedDef[] = [
     category: "UTILITY",
     metaName: "bhb_fee_receipt",
     bodyEn:
-      "Receipt {{receiptNo}} for *{{childName}}*: paid *{{feeDue}}* on {{paidOn}}. Thank you — {{schoolName}}",
+      "Namaste 🙏 Thank you for your payment!\n\n✅ Receipt no: *{{receiptNo}}*\n👧 Student: {{childName}}\n💰 Paid: *{{feeDue}}*\n📅 On: {{paidOn}}\n\nYour receipt PDF is attached above and is also saved in the parent app under Receipts.\n\nWith thanks, *{{schoolName}}* 🌼",
     bodyHi:
-      "*{{childName}}* की रसीद {{receiptNo}}: {{paidOn}} को *{{feeDue}}* प्राप्त। धन्यवाद — {{schoolName}}",
+      "नमस्ते 🙏 भुगतान के लिए धन्यवाद!\n\n✅ रसीद संख्या: *{{receiptNo}}*\n👧 छात्र: {{childName}}\n💰 भुगतान: *{{feeDue}}*\n📅 दिनांक: {{paidOn}}\n\nरसीद की PDF ऊपर संलग्न है और पैरेंट ऐप में \"Receipts\" में भी सुरक्षित है।\n\nसधन्यवाद, *{{schoolName}}* 🌼",
+    footerEn: "Fee counter · Keep this for your records",
+    footerHi: "शुल्क काउंटर · इसे अपने रिकॉर्ड के लिए रखें",
+  },
+  {
+    /**
+     * The receipt WITH the PDF attached.
+     *
+     * A separate family rather than a header added to `fees_receipt`, and
+     * that is the whole point: editing an approved template sends it back to
+     * PENDING at Meta, and `fees_receipt` is the one template that finally
+     * works. So this is submitted alongside, and the sender prefers it only
+     * once Meta has approved it in BOTH languages — until then receipts keep
+     * going out as text, and nothing regresses.
+     *
+     * The body also fixes a line that was never true: `fees_receipt` says
+     * "your receipt PDF is attached above" while declaring no header, so it
+     * promised parents an attachment it could not carry.
+     */
+    familyKey: "fees_receipt_doc",
+    nameEn: "Fee receipt with PDF",
+    nameHi: "शुल्क रसीद (PDF सहित)",
+    module: "fees",
+    category: "UTILITY",
+    metaName: "bhb_fee_receipt_pdf",
+    headerFormat: "DOCUMENT",
+    bodyEn:
+      "Namaste 🙏 Thank you for your payment!\n\n✅ Receipt no: *{{receiptNo}}*\n👧 Student: {{childName}}\n💰 Paid: *{{feeDue}}*\n📅 On: {{paidOn}}\n\nThe signed receipt is attached above as a PDF, and is also saved in the parent app under Receipts.\n\nWith thanks, *{{schoolName}}* 🌼",
+    bodyHi:
+      "नमस्ते 🙏 भुगतान के लिए धन्यवाद!\n\n✅ रसीद संख्या: *{{receiptNo}}*\n👧 छात्र: {{childName}}\n💰 भुगतान: *{{feeDue}}*\n📅 दिनांक: {{paidOn}}\n\nहस्ताक्षरित रसीद ऊपर PDF के रूप में संलग्न है, और पैरेंट ऐप में \"Receipts\" में भी सुरक्षित है।\n\nसधन्यवाद, *{{schoolName}}* 🌼",
+    footerEn: "Fee counter · Keep this for your records",
+    footerHi: "शुल्क काउंटर · इसे अपने रिकॉर्ड के लिए रखें",
   },
   {
     familyKey: "fees_marketing_carousel",
@@ -357,21 +920,27 @@ const SEED_DEFS: SeedDef[] = [
     category: "MARKETING",
     metaName: "bhb_fee_offer_carousel",
     headerFormat: "NONE",
-    bodyEn: "Fee options for the new session at {{schoolName}} — swipe cards below.",
-    bodyHi: "{{schoolName}} में नए सत्र के शुल्क विकल्प — नीचे कार्ड देखें।",
+    bodyEn:
+      "Namaste 🙏 Fee options for the new session at *{{schoolName}}* — swipe the cards below to see what suits your family best. 🎒",
+    bodyHi:
+      "नमस्ते 🙏 *{{schoolName}}* में नए सत्र के शुल्क विकल्प — नीचे कार्ड स्वाइप करके देखें कि आपके परिवार के लिए क्या सबसे उपयुक्त है। 🎒",
     carousel: [
       {
         headerFormat: "IMAGE",
-        body: "Early bird concession — save on annual fees.",
+        body: "🌟 Early-bird concession — pay the annual fee before the session starts and save.",
         buttons: [{ type: "URL", text: "Pay now", url: "{{payLink}}" }],
       },
       {
         headerFormat: "IMAGE",
-        body: "Installment plans available for {{classLabel}}.",
+        body: "📆 Easy instalments for {{classLabel}} — spread the fee across the year, no extra charge.",
         buttons: [{ type: "QUICK_REPLY", text: "Know more" }],
       },
     ],
+    footerEn: "Fee counter · Reply STOP to opt out",
+    footerHi: "शुल्क काउंटर · संदेश बंद करने के लिए STOP लिखें",
   },
+
+  // ── Daily school life ────────────────────────────────────────
   {
     familyKey: "attendance_absent",
     nameEn: "Student absent alert",
@@ -379,10 +948,17 @@ const SEED_DEFS: SeedDef[] = [
     module: "attendance",
     category: "UTILITY",
     metaName: "bhb_attendance_absent",
+    headerFormat: "TEXT",
+    headerTextEn: "Attendance today",
+    headerTextHi: "आज की उपस्थिति",
+    buttons: [{ type: "QUICK_REPLY", text: "Child is unwell" }, { type: "QUICK_REPLY", text: "This is a mistake" }],
+    buttonsHi: [{ type: "QUICK_REPLY", text: "बच्चा अस्वस्थ है" }, { type: "QUICK_REPLY", text: "यह गलती है" }],
     bodyEn:
-      "Dear {{guardianName}}, *{{childName}}* ({{classLabel}}) is marked absent today ({{date}}). Reply if this is incorrect.",
+      "Namaste {{guardianName}} ji 🙏\n\n📋 {{childName}} ({{classLabel}}) has been marked *absent* today, {{date}}.\n\nIf this is a mistake, or if your child is unwell, please reply to this message so the class teacher knows.\n\nWishing {{childName}} a quick return to class! 🌼",
     bodyHi:
-      "प्रिय {{guardianName}}, *{{childName}}* ({{classLabel}}) आज ({{date}}) अनुपस्थित अंकित है। गलत हो तो उत्तर दें।",
+      "नमस्ते {{guardianName}} जी 🙏\n\n📋 {{childName}} ({{classLabel}}) आज, {{date}} को *अनुपस्थित* अंकित किए गए हैं।\n\nयदि यह गलती है, या आपका बच्चा अस्वस्थ है, तो कृपया इसी संदेश का उत्तर दें ताकि कक्षा शिक्षक को पता रहे।\n\n{{childName}} जल्द कक्षा में लौटें, यही कामना है! 🌼",
+    footerEn: "Class teacher · Reply to this message",
+    footerHi: "कक्षा शिक्षक · इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "homework_published",
@@ -391,10 +967,78 @@ const SEED_DEFS: SeedDef[] = [
     module: "homework",
     category: "UTILITY",
     metaName: "bhb_homework_published",
+    headerFormat: "TEXT",
+    headerTextEn: "New homework",
+    headerTextHi: "नया गृहकार्य",
+    buttons: [OPEN_APP_EN],
+    buttonsHi: [OPEN_APP_HI],
     bodyEn:
-      "Homework for {{classLabel}} — {{subject}}: {{homeworkTitle}}. Due {{dueDate}}. — {{schoolName}}",
+      "Namaste 🙏 New homework for *{{classLabel}}* is up:\n\n📘 Subject: *{{subject}}*\n📝 Work: {{homeworkTitle}}\n📅 Due: *{{dueDate}}*\n\nOpen the parent app for the full details — and tap *Ask tutor* there if your child needs a hand with it. 🎓\n\n— {{schoolName}}, with thanks 🙏",
     bodyHi:
-      "{{classLabel}} गृहकार्य — {{subject}}: {{homeworkTitle}}। अंतिम तिथि {{dueDate}}। — {{schoolName}}",
+      "नमस्ते 🙏 *{{classLabel}}* का नया गृहकार्य आ गया है:\n\n📘 विषय: *{{subject}}*\n📝 कार्य: {{homeworkTitle}}\n📅 अंतिम तिथि: *{{dueDate}}*\n\nपूरा विवरण पैरेंट ऐप में देखें — और यदि बच्चे को मदद चाहिए तो वहीं *Ask tutor* दबाएँ। 🎓\n\n— {{schoolName}}, सधन्यवाद 🙏",
+    footerEn: "Class teacher · Open the parent app for details",
+    footerHi: "कक्षा शिक्षक · विवरण पैरेंट ऐप में देखें",
+  },
+  {
+    /*
+      The homework a parent can act on WITHOUT opening anything.
+
+      `homework_published` above tells them homework exists and sends them to
+      the app for what it is — which is a second app to open for a parent who
+      is already reading their phone, and nothing at all for the many who
+      never installed it. Director's instruction, 18 Sep 2026: show the
+      chapter here, in WhatsApp, and stop asking them to open the app.
+
+      The help offer moves with it. "Tap Ask tutor in the app" becomes "reply
+      TUTOR on this number", which is the same tutor on the channel the
+      message already arrived on.
+
+      A separate family rather than an edit to the approved one: an edited
+      template goes back into Meta's queue, and homework would stop reaching
+      families while it sat there. This one is preferred the moment it is
+      approved in BOTH languages, and until then the old one keeps sending —
+      the same arrangement as fees_receipt / fees_receipt_doc.
+    */
+    familyKey: "homework_published_full",
+    nameEn: "Homework published (with the chapter)",
+    nameHi: "गृहकार्य प्रकाशित (अध्याय सहित)",
+    module: "homework",
+    category: "UTILITY",
+    metaName: "bhb_homework_full",
+    headerFormat: "TEXT",
+    headerTextEn: "New homework",
+    headerTextHi: "नया गृहकार्य",
+    bodyEn:
+      "Namaste 🙏 New homework for *{{classLabel}}*:\n\n📘 {{chapterLine}}\n✏️ {{homeworkTitle}}\n📅 Due: *{{dueDate}}*\n\n✅ When it is done, send a photo of the work to this number — it goes straight to the subject teacher.\n🎓 Needs a hand with it? Reply *TUTOR* and we will help your child through it.\n\n— {{schoolName}}, with thanks 🙏",
+    bodyHi:
+      "नमस्ते 🙏 *{{classLabel}}* का नया गृहकार्य:\n\n📘 {{chapterLine}}\n✏️ {{homeworkTitle}}\n📅 अंतिम तिथि: *{{dueDate}}*\n\n✅ पूरा होने पर कॉपी की फ़ोटो इसी नंबर पर भेज दें — वह सीधे विषय शिक्षक तक पहुँचेगी।\n🎓 मदद चाहिए? *TUTOR* लिखकर भेजें, हम बच्चे की सहायता करेंगे।\n\n— {{schoolName}}, सधन्यवाद 🙏",
+    footerEn: "Class teacher · Reply TUTOR for help",
+    footerHi: "कक्षा शिक्षक · मदद हेतु TUTOR भेजें",
+  },
+  {
+    familyKey: "exams_tomorrow",
+    nameEn: "Tomorrow's exam paper",
+    nameHi: "कल का पेपर",
+    module: "exams",
+    category: "UTILITY",
+    metaName: "bhb_exam_tomorrow",
+    headerFormat: "TEXT",
+    headerTextEn: "Tomorrow's exam",
+    headerTextHi: "कल की परीक्षा",
+    buttons: [EXAM_PRACTICE_EN],
+    buttonsHi: [EXAM_PRACTICE_HI],
+    // UTILITY and nothing else: no price, no pass, no offer. Meta reclassifies
+    // a template carrying a sales pitch as MARKETING — dearer, and blocked
+    // more. Anything about the tutor pass is said inside the conversation,
+    // after the parent has chosen to tap. {{childPapers}} is one line per
+    // child joined with "  |  " (Meta refuses a newline in a parameter);
+    // lib/examEve.ts is the only thing that builds it.
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\nTomorrow ({{examDay}}), 8:30 AM:\n\n{{childPapers}}\n\nTap *Start practice* for a short practice session on tomorrow's subject. Reply *TIMETABLE* for the full date sheet. Best wishes! 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\nकल ({{examDay}}), सुबह 8:30 बजे:\n\n{{childPapers}}\n\nकल के विषय का छोटा अभ्यास करने के लिए *अभ्यास शुरू करें* दबाइए। पूरी समय-सारणी के लिए *TIMETABLE* लिखें। शुभकामनाएँ! 🙏",
+    footerEn: "School office · Half-yearly examination",
+    footerHi: "विद्यालय कार्यालय · अर्धवार्षिक परीक्षा",
   },
   {
     familyKey: "exams_datesheet",
@@ -403,11 +1047,15 @@ const SEED_DEFS: SeedDef[] = [
     module: "exams",
     category: "UTILITY",
     metaName: "bhb_exam_datesheet",
+    buttons: [OPEN_APP_EN],
+    buttonsHi: [OPEN_APP_HI],
     headerFormat: "DOCUMENT",
     bodyEn:
-      "Dear {{guardianName}}, datesheet for *{{childName}}* ({{examName}}) is ready. Please check the attached schedule.",
+      "Namaste {{guardianName}} ji 🙏\n\n📅 The date sheet for *{{examName}}* is ready for {{childName}} — it is attached above as a PDF.\n\nPlease note the dates, and help your child start revision early. The AI tutor in the parent app has an *Exam preparation* mode for exactly this. 🎓\n\nAll the best to {{childName}}! 🌟",
     bodyHi:
-      "प्रिय {{guardianName}}, *{{childName}}* की डेटशीट ({{examName}}) तैयार है। संलग्न समय-सारणी देखें।",
+      "नमस्ते {{guardianName}} जी 🙏\n\n📅 {{childName}} के लिए *{{examName}}* की डेटशीट तैयार है — ऊपर PDF संलग्न है।\n\nकृपया तारीखें नोट करें और बच्चे को समय से दोहराई शुरू करने में मदद करें। पैरेंट ऐप के AI ट्यूटर में इसी के लिए *Exam preparation* मोड है। 🎓\n\n{{childName}} को शुभकामनाएँ! 🌟",
+    footerEn: "Examination desk · Reply to this message for help",
+    footerHi: "परीक्षा विभाग · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "exams_result",
@@ -416,10 +1064,17 @@ const SEED_DEFS: SeedDef[] = [
     module: "exams",
     category: "UTILITY",
     metaName: "bhb_exam_result",
+    headerFormat: "TEXT",
+    headerTextEn: "Results are out",
+    headerTextHi: "परिणाम घोषित",
+    buttons: [OPEN_APP_EN],
+    buttonsHi: [OPEN_APP_HI],
     bodyEn:
-      "Results for {{examName}} — *{{childName}}* are published. Login to parent portal for details. — {{schoolName}}",
+      "Namaste 🙏 The results of *{{examName}}* are out for {{childName}}! 🎉\n\nOpen the parent app to see the marks, the report card and the teacher's remarks.\n\nWhatever the result, a word of encouragement from you goes a long way. 💛\n\n— {{schoolName}}, with best wishes 🙏",
     bodyHi:
-      "{{examName}} के परिणाम — *{{childName}}* प्रकाशित। विवरण हेतु पोर्टल देखें। — {{schoolName}}",
+      "नमस्ते 🙏 {{childName}} के *{{examName}}* के परिणाम आ गए हैं! 🎉\n\nअंक, रिपोर्ट कार्ड और शिक्षक की टिप्पणी पैरेंट ऐप में देखें।\n\nपरिणाम जो भी हो, आपके प्रोत्साहन के दो शब्द बहुत मायने रखते हैं। 💛\n\n— {{schoolName}}, शुभकामनाओं सहित 🙏",
+    footerEn: "Examination desk · Open the parent app",
+    footerHi: "परीक्षा विभाग · पैरेंट ऐप खोलें",
   },
   {
     familyKey: "ptm_invite",
@@ -428,10 +1083,15 @@ const SEED_DEFS: SeedDef[] = [
     module: "ptm",
     category: "UTILITY",
     metaName: "bhb_ptm_invite",
+    headerFormat: "TEXT",
+    headerTextEn: "Parent-Teacher Meeting",
+    headerTextHi: "अभिभावक-शिक्षक बैठक",
     bodyEn:
-      "Dear {{guardianName}}, PTM for *{{childName}}* on {{ptmDate}} at {{ptmTime}}. Book slot: {{ptmLink}}",
+      "Namaste {{guardianName}} ji 🙏\n\nYou are invited to the Parent–Teacher Meeting for {{childName}}:\n\n📅 Date: *{{ptmDate}}*\n⏰ Time: *{{ptmTime}}*\n\nPick a slot that suits you (it takes a moment):\n🔗 {{ptmLink}}\n\nA short conversation with the class teacher makes a real difference. We look forward to meeting you! 🌼",
     bodyHi:
-      "प्रिय {{guardianName}}, *{{childName}}* की PTM {{ptmDate}} को {{ptmTime}} बजे। स्लॉट बुक करें: {{ptmLink}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} की अभिभावक–शिक्षक बैठक (PTM) में आपका स्वागत है:\n\n📅 दिनांक: *{{ptmDate}}*\n⏰ समय: *{{ptmTime}}*\n\nअपना सुविधाजनक स्लॉट चुनें (बस एक पल लगता है):\n🔗 {{ptmLink}}\n\nकक्षा शिक्षक से एक छोटी-सी बातचीत बहुत फ़र्क़ लाती है। आपसे मिलने की प्रतीक्षा है! 🌼",
+    footerEn: "Class teacher · Reply to this message for help",
+    footerHi: "कक्षा शिक्षक · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "leave_student_status",
@@ -440,10 +1100,15 @@ const SEED_DEFS: SeedDef[] = [
     module: "leave",
     category: "UTILITY",
     metaName: "bhb_student_leave_status",
+    headerFormat: "TEXT",
+    headerTextEn: "Leave request",
+    headerTextHi: "अवकाश अनुरोध",
     bodyEn:
-      "Leave request for *{{childName}}* is *{{leaveStatus}}* ({{leaveFrom}}–{{leaveTo}}). — {{schoolName}}",
+      "Namaste 🙏 An update on {{childName}}'s leave request:\n\n📋 Status: *{{leaveStatus}}*\n📅 Dates: {{leaveFrom}} to {{leaveTo}}\n\nIf you have a question about this, reply to this message and the class teacher will get back to you.\n\n— {{schoolName}}, with thanks 🙏",
     bodyHi:
-      "*{{childName}}* का अवकाश अनुरोध *{{leaveStatus}}* है ({{leaveFrom}}–{{leaveTo}})। — {{schoolName}}",
+      "नमस्ते 🙏 {{childName}} के अवकाश अनुरोध पर अपडेट:\n\n📋 स्थिति: *{{leaveStatus}}*\n📅 दिनांक: {{leaveFrom}} से {{leaveTo}}\n\nइस बारे में कोई प्रश्न हो तो इसी संदेश का उत्तर दें — कक्षा शिक्षक आपसे संपर्क करेंगे।\n\n— {{schoolName}}, सधन्यवाद 🙏",
+    footerEn: "Class teacher · Reply to this message for help",
+    footerHi: "कक्षा शिक्षक · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "leave_staff_status",
@@ -452,10 +1117,69 @@ const SEED_DEFS: SeedDef[] = [
     module: "staff",
     category: "UTILITY",
     metaName: "bhb_staff_leave_status",
+    headerFormat: "TEXT",
+    headerTextEn: "Leave request",
+    headerTextHi: "अवकाश अनुरोध",
     bodyEn:
-      "Hi {{staffName}}, your leave request is *{{leaveStatus}}* ({{leaveFrom}}–{{leaveTo}}).",
+      "Hello {{staffName}} 🙏\n\nAn update on your leave request:\n\n📋 Status: *{{leaveStatus}}*\n📅 Dates: {{leaveFrom}} to {{leaveTo}}\n\nFor anything about this, please reply to this message or speak to the office. Thank you!",
     bodyHi:
-      "नमस्ते {{staffName}}, आपका अवकाश अनुरोध *{{leaveStatus}}* है ({{leaveFrom}}–{{leaveTo}})।",
+      "नमस्ते {{staffName}} जी 🙏\n\nआपके अवकाश अनुरोध पर अपडेट:\n\n📋 स्थिति: *{{leaveStatus}}*\n📅 दिनांक: {{leaveFrom}} से {{leaveTo}}\n\nइस बारे में कुछ भी पूछना हो तो इसी संदेश का उत्तर दें या कार्यालय से बात करें। धन्यवाद!",
+    footerEn: "School office",
+    footerHi: "विद्यालय कार्यालय",
+  },
+  // ── "Here is what you can do on WhatsApp" ──────────────────────────
+  //
+  // Both of these are MARKETING, not UTILITY: nothing has happened to the
+  // recipient, the school is telling them a facility exists. Categorising
+  // an announcement as UTILITY is how a WABA gets its templates rejected
+  // wholesale, and it would be a lie to Meta besides.
+  //
+  // NEITHER carries a quick-reply button, on purpose. `matchSeedQuickReply`
+  // scans every seed's QUICK_REPLY text against ANY inbound message, and
+  // the parent bot turns a match into "escalate to the office". A button
+  // reading *TUTOR* or *IN* would therefore stop that word working as a
+  // command — for everyone, not just whoever tapped it. The body tells
+  // people what to type instead. Do not add one.
+  {
+    familyKey: "staff_wa_commands",
+    nameEn: "Staff: what you can do on WhatsApp",
+    nameHi: "स्टाफ: व्हाट्सऐप पर क्या कर सकते हैं",
+    module: "staff",
+    category: "MARKETING",
+    metaName: "bhb_staff_wa_commands",
+    headerFormat: "TEXT",
+    headerTextEn: "WhatsApp for staff",
+    headerTextHi: "स्टाफ के लिए व्हाट्सऐप",
+    // Only what EVERY staff member has is listed as keywords: attendance.
+    // The class-channel and transport commands are role-specific, so they
+    // are pointed at rather than spelled out — a template that lists a
+    // keyword the reader's role cannot use teaches them the bot is broken.
+    bodyEn:
+      "Namaste {{staffName}} 🙏\n\nYou can use WhatsApp for daily work at *{{schoolName}}* — just message this number.\n\n⏱ *Attendance*\n• *IN* — mark your arrival\n• *OUT* — mark your leaving\n• *STATUS* — what is marked for you today\n\n📚 *Class teachers* — post homework, a notice or an exam date to your class parents. Send *HELP* to see how.\n\n🚌 *Transport staff* — send *ROUTE* for today's route, or *BREAKDOWN* to report a delay.\n\nSend *MENU* any time to see what applies to you, or *HUMAN* to reach the office.",
+    bodyHi:
+      "नमस्ते {{staffName}} जी 🙏\n\n*{{schoolName}}* में रोज़ के काम अब व्हाट्सऐप से हो सकते हैं — इसी नंबर पर संदेश भेजें।\n\n⏱ *उपस्थिति*\n• *IN* — आने पर लिखें\n• *OUT* — जाते समय लिखें\n• *STATUS* — आज आपकी उपस्थिति\n\n📚 *कक्षा शिक्षक* — गृहकार्य, सूचना या परीक्षा तिथि अपनी कक्षा के अभिभावकों को भेजें। तरीका जानने के लिए *HELP* लिखें।\n\n🚌 *परिवहन स्टाफ* — आज का रूट देखने के लिए *ROUTE*, देरी बताने के लिए *BREAKDOWN* लिखें।\n\nअपने लिए विकल्प देखने के लिए कभी भी *MENU* लिखें, या कार्यालय के लिए *HUMAN*।",
+    footerEn: "Staff desk · Reply MENU for your options",
+    footerHi: "स्टाफ डेस्क · विकल्पों के लिए MENU लिखें",
+  },
+  {
+    familyKey: "study_help_intro",
+    nameEn: "Study help on WhatsApp",
+    nameHi: "व्हाट्सऐप पर पढ़ाई में मदद",
+    module: "general",
+    category: "MARKETING",
+    metaName: "bhb_study_help_intro",
+    headerFormat: "TEXT",
+    headerTextEn: "Study help",
+    headerTextHi: "पढ़ाई में मदद",
+    // Addressed to the PARENT, because the parent's number is the one the
+    // school has. A child's own number cannot be messaged first — we do
+    // not know it until the parent links it, which is what LINK is for.
+    bodyEn:
+      "Namaste {{guardianName}} 🙏\n\n*{{schoolName}}* now has study help on WhatsApp for {{childName}}. Message this number and send *TUTOR* to start.\n\n• *HINT* — a nudge for homework, free every day\n• *TEACH* a topic · *EXAMPLES* · *PRACTICE*\n• *SCORE* — check your child's answer\n\nWould your child rather use it from their own phone? Reply *LINK* and we will send you a code to give them. That number gets study help only — never fees, receipts or payments, and it cannot buy anything.\n\nReply *TUTOR* to try it now.",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n*{{schoolName}}* में अब {{childName}} के लिए व्हाट्सऐप पर पढ़ाई में मदद उपलब्ध है। इसी नंबर पर *TUTOR* लिखकर शुरू करें।\n\n• *HINT* — गृहकार्य में इशारा, रोज़ मुफ़्त\n• *TEACH* किसी विषय पर · *EXAMPLES* · *PRACTICE*\n• *SCORE* — अपने बच्चे का उत्तर जाँचें\n\nक्या आपका बच्चा अपने फ़ोन से इसका उपयोग करना चाहेगा? *LINK* लिखें, हम आपको एक कोड भेजेंगे जो आप उन्हें दें। उस नंबर पर सिर्फ़ पढ़ाई की मदद मिलेगी — शुल्क, रसीद या भुगतान कभी नहीं, और वह कुछ ख़रीद भी नहीं सकता।\n\nअभी आज़माने के लिए *TUTOR* लिखें।",
+    footerEn: "Reply STOP to opt out",
+    footerHi: "संदेश बंद करने के लिए STOP लिखें",
   },
   {
     familyKey: "vault_expiry",
@@ -464,10 +1188,15 @@ const SEED_DEFS: SeedDef[] = [
     module: "vault",
     category: "UTILITY",
     metaName: "bhb_vault_expiry",
+    headerFormat: "TEXT",
+    headerTextEn: "Document renewal",
+    headerTextHi: "दस्तावेज़ नवीनीकरण",
     bodyEn:
-      "Reminder: document *{{docTitle}}* expires on {{expiryDate}}. Please renew. — {{schoolName}}",
+      "Namaste 🙏 A reminder from *{{schoolName}}*:\n\n📄 Document: *{{docTitle}}*\n⏳ Expires on: *{{expiryDate}}*\n\nPlease renew it before that date and share the new copy with the school office, so the records stay complete. Thank you! 🙏",
     bodyHi:
-      "अनुस्मारक: दस्तावेज़ *{{docTitle}}* की वैधता {{expiryDate}} को समाप्त। नवीनीकरण करें। — {{schoolName}}",
+      "नमस्ते 🙏 *{{schoolName}}* की ओर से एक स्मरण:\n\n📄 दस्तावेज़: *{{docTitle}}*\n⏳ वैधता समाप्ति: *{{expiryDate}}*\n\nकृपया इस तिथि से पहले इसका नवीनीकरण कराएँ और नई प्रति विद्यालय कार्यालय को दें, ताकि रिकॉर्ड पूरा रहे। धन्यवाद! 🙏",
+    footerEn: "School office · Reply to this message for help",
+    footerHi: "विद्यालय कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "comms_notice",
@@ -476,8 +1205,60 @@ const SEED_DEFS: SeedDef[] = [
     module: "comms",
     category: "UTILITY",
     metaName: "bhb_school_notice",
-    bodyEn: "*{{schoolName}} notice*\n{{noticeTitle}}\n\n{{noticeBody}}",
-    bodyHi: "*{{schoolName}} सूचना*\n{{noticeTitle}}\n\n{{noticeBody}}",
+    headerFormat: "TEXT",
+    headerTextEn: "School notice",
+    headerTextHi: "विद्यालय सूचना",
+    bodyEn:
+      "📢 *Notice from {{schoolName}}*\n\n*{{noticeTitle}}*\n\n{{noticeBody}}\n\nPlease read carefully and reply to this message if you have a question. Thank you! 🙏",
+    bodyHi:
+      "📢 *{{schoolName}} की सूचना*\n\n*{{noticeTitle}}*\n\n{{noticeBody}}\n\nकृपया ध्यान से पढ़ें और कोई प्रश्न हो तो इसी संदेश का उत्तर दें। धन्यवाद! 🙏",
+    footerEn: "School office",
+    footerHi: "विद्यालय कार्यालय",
+  },
+  {
+    /*
+      Sent to an OFFICE phone, never to a family: a message the bot could not
+      answer, forwarded by the office relay when that phone has not written to
+      the school number in the last 24 hours. Variables are in the order the
+      relay fills them — kind, sender, code, message (waRelay.server.ts).
+    */
+    familyKey: "comms_weekly_child_digest",
+    nameEn: "Weekly child digest",
+    nameHi: "साप्ताहिक बाल रिपोर्ट",
+    module: "comms",
+    category: "UTILITY",
+    metaName: "bhb_weekly_child_digest",
+    headerFormat: "TEXT",
+    headerTextEn: "Your child this week",
+    headerTextHi: "इस सप्ताह आपके बच्चे",
+    buttons: [DIGEST_MORE_EN],
+    buttonsHi: [DIGEST_MORE_HI],
+    // {{childSummary}} is ONE line per child, joined with "  |  ", because
+    // Meta refuses a parameter containing a newline. lib/weeklyChildDigest.ts
+    // is the only thing that builds it.
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\nHow the week went ({{weekLabel}}):\n\n{{childSummary}}\n\nTap *Tell me more* and we can answer anything — attendance, marks, fees, transport. Thank you for being part of the school. 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\nइस सप्ताह ({{weekLabel}}) का हाल:\n\n{{childSummary}}\n\n*और बताइए* दबाइए — उपस्थिति, अंक, शुल्क, वाहन, किसी भी बात का उत्तर मिलेगा। विद्यालय परिवार का हिस्सा होने के लिए धन्यवाद। 🙏",
+    footerEn: "School office · Reply STOP to stop these",
+    footerHi: "विद्यालय कार्यालय · बंद करने के लिए STOP लिखें",
+  },
+  {
+    familyKey: "comms_office_relay",
+    nameEn: "Office relay forward",
+    nameHi: "कार्यालय को अग्रेषित संदेश",
+    module: "comms",
+    category: "UTILITY",
+    metaName: "bhb_office_relay",
+    headerFormat: "TEXT",
+    headerTextEn: "Message for the office",
+    headerTextHi: "कार्यालय के लिए संदेश",
+    bodyEn:
+      "📨 A message the school's WhatsApp assistant could not answer.\n\nType: *{{relayKind}}*\nFrom: {{relaySender}}\nReference: #{{relayCode}}\n\nMessage: {{relayMessage}}\n\nTo answer, reply to this message or start your reply with #{{relayCode}}. Your answer is sent to them from the school number.",
+    bodyHi:
+      "📨 एक संदेश जिसका उत्तर विद्यालय का WhatsApp सहायक नहीं दे सका।\n\nप्रकार: *{{relayKind}}*\nकिसका: {{relaySender}}\nसंदर्भ: #{{relayCode}}\n\nसंदेश: {{relayMessage}}\n\nउत्तर देने के लिए इसी संदेश का उत्तर दें, या अपना उत्तर #{{relayCode}} से शुरू करें। आपका उत्तर विद्यालय के नंबर से उन्हें भेजा जाएगा।",
+    footerEn: "School office relay",
+    footerHi: "विद्यालय कार्यालय",
   },
   {
     familyKey: "store_order",
@@ -486,10 +1267,15 @@ const SEED_DEFS: SeedDef[] = [
     module: "store",
     category: "UTILITY",
     metaName: "bhb_store_order",
+    headerFormat: "TEXT",
+    headerTextEn: "School store",
+    headerTextHi: "स्कूल स्टोर",
     bodyEn:
-      "Store order {{orderNo}} for *{{childName}}* is *{{orderStatus}}*. Amount: {{feeDue}}. — {{schoolName}}",
+      "Namaste 🙏 An update on your school store order for {{childName}}:\n\n🧾 Order: *{{orderNo}}*\n📦 Status: *{{orderStatus}}*\n💰 Amount: {{feeDue}}\n\nBooks and uniforms can be collected from the school store on working days. Reply to this message for help.\n\n— {{schoolName}}, with thanks 🙏",
     bodyHi:
-      "*{{childName}}* का स्टोर ऑर्डर {{orderNo}} *{{orderStatus}}* है। राशि: {{feeDue}}। — {{schoolName}}",
+      "नमस्ते 🙏 {{childName}} के स्कूल स्टोर ऑर्डर पर अपडेट:\n\n🧾 ऑर्डर: *{{orderNo}}*\n📦 स्थिति: *{{orderStatus}}*\n💰 राशि: {{feeDue}}\n\nकिताबें और यूनिफ़ॉर्म कार्य-दिवसों में स्कूल स्टोर से ले सकते हैं। सहायता के लिए इसी संदेश का उत्तर दें।\n\n— {{schoolName}}, सधन्यवाद 🙏",
+    footerEn: "School store",
+    footerHi: "स्कूल स्टोर",
   },
   {
     familyKey: "transport_fee",
@@ -498,10 +1284,17 @@ const SEED_DEFS: SeedDef[] = [
     module: "transport",
     category: "UTILITY",
     metaName: "bhb_transport_fee",
+    headerFormat: "TEXT",
+    headerTextEn: "Transport fee",
+    headerTextHi: "परिवहन शुल्क",
+    buttons: [PAY_PORTAL_EN, PAID_EN],
+    buttonsHi: [PAY_PORTAL_HI, PAID_HI],
     bodyEn:
-      "Transport fee for *{{childName}}* (route {{routeName}}) due: *{{feeDue}}*. Pay: {{payLink}}",
+      "Namaste 🙏 A reminder that the transport fee for {{childName}} is due:\n\n🚌 Route: {{routeName}}\n💰 Amount: *{{feeDue}}*\n\nPay in a minute from your phone:\n🔗 {{payLink}}\n\nThe receipt comes to you on WhatsApp right after. Thank you! 🙏",
     bodyHi:
-      "*{{childName}}* (मार्ग {{routeName}}) का परिवहन शुल्क बकाया: *{{feeDue}}*। भुगतान: {{payLink}}",
+      "नमस्ते 🙏 स्मरण — {{childName}} का परिवहन शुल्क देय है:\n\n🚌 मार्ग: {{routeName}}\n💰 राशि: *{{feeDue}}*\n\nअपने फ़ोन से एक मिनट में भुगतान करें:\n🔗 {{payLink}}\n\nरसीद तुरंत व्हाट्सऐप पर मिलेगी। धन्यवाद! 🙏",
+    footerEn: "Transport desk · Reply to this message for help",
+    footerHi: "परिवहन कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "certificates_ready",
@@ -510,10 +1303,15 @@ const SEED_DEFS: SeedDef[] = [
     module: "certificates",
     category: "UTILITY",
     metaName: "bhb_certificate_ready",
+    headerFormat: "TEXT",
+    headerTextEn: "Certificate ready",
+    headerTextHi: "प्रमाणपत्र तैयार",
     bodyEn:
-      "Dear {{guardianName}}, {{certType}} for *{{childName}}* is ready for collection. — {{schoolName}}",
+      "Namaste {{guardianName}} ji 🙏\n\n📜 The *{{certType}}* for {{childName}} is ready and waiting for you at the school office.\n\nYou can collect it on any working day during office hours. Please carry a photo ID.\n\n— {{schoolName}}, with thanks 🙏",
     bodyHi:
-      "प्रिय {{guardianName}}, *{{childName}}* का {{certType}} संग्रह हेतु तैयार है। — {{schoolName}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\n📜 {{childName}} का *{{certType}}* तैयार है और विद्यालय कार्यालय में आपकी प्रतीक्षा कर रहा है।\n\nकिसी भी कार्य-दिवस पर कार्यालय समय में इसे ले सकते हैं। कृपया एक फोटो पहचान-पत्र साथ लाएँ।\n\n— {{schoolName}}, सधन्यवाद 🙏",
+    footerEn: "School office · Reply to this message for help",
+    footerHi: "विद्यालय कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "rte_nudge",
@@ -522,10 +1320,17 @@ const SEED_DEFS: SeedDef[] = [
     module: "rte",
     category: "UTILITY",
     metaName: "bhb_rte_nudge",
+    headerFormat: "TEXT",
+    headerTextEn: "RTE / EWS admission",
+    headerTextHi: "RTE / EWS प्रवेश",
+    buttons: [{ type: "QUICK_REPLY", text: "Which documents?" }],
+    buttonsHi: [{ type: "QUICK_REPLY", text: "कौन-से दस्तावेज़?" }],
     bodyEn:
-      "Dear {{guardianName}}, please complete RTE/EWS documents for *{{childName}}* by {{dueDate}}. — {{schoolName}}",
+      "Namaste {{guardianName}} ji 🙏\n\nTo complete {{childName}}'s RTE/EWS admission, a few documents are still needed:\n\n📅 Please submit them by *{{dueDate}}*\n\nBring them to the school office, or reply to this message if you are unsure which documents are required — we will guide you.\n\n— {{schoolName}}, with thanks 🙏",
     bodyHi:
-      "प्रिय {{guardianName}}, कृपया *{{childName}}* के RTE/EWS दस्तावेज़ {{dueDate}} तक पूरे करें। — {{schoolName}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} का RTE/EWS प्रवेश पूरा करने के लिए कुछ दस्तावेज़ अभी बाकी हैं:\n\n📅 कृपया *{{dueDate}}* तक जमा करें\n\nइन्हें विद्यालय कार्यालय में लाएँ, या कौन-से दस्तावेज़ चाहिए यह पूछने के लिए इसी संदेश का उत्तर दें — हम मार्गदर्शन करेंगे।\n\n— {{schoolName}}, सधन्यवाद 🙏",
+    footerEn: "Admissions desk · Reply to this message for help",
+    footerHi: "प्रवेश कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
   {
     familyKey: "field_survey_nudge",
@@ -534,10 +1339,31 @@ const SEED_DEFS: SeedDef[] = [
     module: "field",
     category: "MARKETING",
     metaName: "bhb_field_survey_nudge",
+    headerFormat: "TEXT",
+    headerTextEn: "Hello from the school",
+    headerTextHi: "विद्यालय की ओर से नमस्ते",
+    buttons: [CALL_ME_EN],
+    buttonsHi: [CALL_ME_HI],
     bodyEn:
-      "Hi {{guardianName}}, our team visited regarding *{{childName}}*. Complete enquiry: {{registerLink}} — {{schoolName}}",
+      "Namaste {{guardianName}} ji 🙏\n\nIt was lovely to meet you when our team visited about {{childName}}'s schooling. 🎒\n\nIf you would like to take the next step with *{{schoolName}}*, complete a quick enquiry here and our admissions desk will call you:\n🔗 {{registerLink}}\n\nNo pressure at all — we are here whenever you are ready. 🌼",
     bodyHi:
-      "नमस्ते {{guardianName}}, हमारी टीम *{{childName}}* हेतु मिली थी। पूछताछ पूरी करें: {{registerLink}} — {{schoolName}}",
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{childName}} की पढ़ाई के बारे में जब हमारी टीम आई थी, आपसे मिलकर अच्छा लगा। 🎒\n\nयदि आप *{{schoolName}}* के साथ अगला कदम बढ़ाना चाहें, तो यहाँ एक छोटी-सी पूछताछ पूरी करें — हमारा प्रवेश कार्यालय आपको फ़ोन करेगा:\n🔗 {{registerLink}}\n\nकोई दबाव नहीं — जब भी आप तैयार हों, हम यहीं हैं। 🌼",
+    footerEn: "Admissions desk · Reply STOP to opt out",
+    footerHi: "प्रवेश कार्यालय · संदेश बंद करने के लिए STOP लिखें",
+  },
+  {
+    familyKey: "auth_parent_login_otp",
+    nameEn: "Parent login OTP",
+    nameHi: "पालक लॉगिन OTP",
+    module: "general",
+    category: "AUTHENTICATION",
+    metaName: "bhb_parent_login_otp",
+    // Meta fixes the wording of AUTHENTICATION templates; only the code
+    // slot is ours. Left as approved.
+    bodyEn:
+      "{{otp}} is your parent login verification code. Do not share this code with anyone. It expires in 10 minutes.",
+    bodyHi:
+      "{{otp}} आपका पालक लॉगिन सत्यापन कोड है। कृपया यह कोड किसी से साझा न करें। यह 10 मिनट में समाप्त हो जाएगा।",
   },
   {
     familyKey: "admissions_marketing_carousel",
@@ -546,27 +1372,93 @@ const SEED_DEFS: SeedDef[] = [
     module: "admissions",
     category: "MARKETING",
     metaName: "bhb_admission_carousel",
-    bodyEn: "Why families choose {{schoolName}} — explore highlights.",
-    bodyHi: "{{schoolName}} क्यों चुनें — मुख्य बातें देखें।",
+    bodyEn:
+      "Namaste 🙏 Admissions are open at *{{schoolName}}*! Swipe the cards below to see why families choose us — and how to apply. 🎒",
+    bodyHi:
+      "नमस्ते 🙏 *{{schoolName}}* में प्रवेश खुले हैं! नीचे कार्ड स्वाइप करके देखें कि परिवार हमें क्यों चुनते हैं — और आवेदन कैसे करें। 🎒",
     carousel: [
       {
         headerFormat: "IMAGE",
-        body: "CBSE curriculum · strong academics",
-        buttons: [
-          { type: "URL", text: "Apply", url: "{{registerLink}}" },
-        ],
+        body: "📚 CBSE pattern, NCERT books, small classes — and an AI tutor at home for every child.",
+        buttons: [{ type: "URL", text: "Apply", url: "{{registerLink}}" }],
       },
       {
         headerFormat: "IMAGE",
-        body: "Sports, labs & activity clubs",
+        body: "⚽ Sports, science lab, activity clubs and a library children actually use.",
         buttons: [{ type: "QUICK_REPLY", text: "Visit campus" }],
       },
       {
         headerFormat: "IMAGE",
-        body: "Safe transport & daycare options",
+        body: "🚌 Safe school buses with attendants, and a parent app that keeps you informed.",
         buttons: [{ type: "QUICK_REPLY", text: "Call desk" }],
       },
     ],
+    footerEn: "Admissions desk · Reply STOP to opt out",
+    footerHi: "प्रवेश कार्यालय · संदेश बंद करने के लिए STOP लिखें",
+  },
+
+  // ── Holidays ─────────────────────────────────────────────────
+  // Two shapes. A planned holiday comes straight off the Masters calendar
+  // (title and dates). An unplanned closure — the DM orders schools shut
+  // for a heat wave, a cold wave, heavy rain, an election — carries the
+  // reason and who ordered it, so a parent knows it is not the school's
+  // whim and that the calendar holds otherwise. Both end on a fixed line
+  // because Meta refuses a body that ends on a variable.
+  {
+    familyKey: "holiday_notice",
+    nameEn: "Holiday notice (planned)",
+    nameHi: "अवकाश सूचना (नियोजित)",
+    module: "comms",
+    category: "UTILITY",
+    metaName: "bhb_holiday_notice",
+    headerFormat: "TEXT",
+    headerTextEn: "Holiday notice",
+    headerTextHi: "अवकाश सूचना",
+    bodyEn:
+      "Namaste 🙏 A holiday notice from *{{schoolName}}*:\n\n🎉 *{{holidayTitle}}*\n📅 From: *{{holidayFrom}}*\n📅 To: *{{holidayTo}}*\n🏫 School reopens: *{{reopenDate}}*\n\n📝 {{holidayNote}}\n\nEnjoy the break with your family, and see you back at school! 🌼",
+    bodyHi:
+      "नमस्ते 🙏 *{{schoolName}}* की ओर से अवकाश सूचना:\n\n🎉 *{{holidayTitle}}*\n📅 से: *{{holidayFrom}}*\n📅 तक: *{{holidayTo}}*\n🏫 विद्यालय फिर खुलेगा: *{{reopenDate}}*\n\n📝 {{holidayNote}}\n\nपरिवार के साथ अवकाश का आनंद लें, फिर मिलते हैं विद्यालय में! 🌼",
+    footerEn: "School office · Reply to this message for help",
+    footerHi: "विद्यालय कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
+    familyKey: "holiday_emergency",
+    nameEn: "Unplanned closure (weather / administration)",
+    nameHi: "अचानक अवकाश (मौसम / प्रशासन)",
+    module: "comms",
+    category: "UTILITY",
+    metaName: "bhb_holiday_emergency",
+    headerFormat: "TEXT",
+    headerTextEn: "School closed",
+    headerTextHi: "विद्यालय बंद",
+    bodyEn:
+      "Namaste 🙏 An important notice from *{{schoolName}}*:\n\n⚠️ School will remain *CLOSED* due to *{{holidayReason}}*, as ordered by {{orderedBy}}.\n\n📅 Closed from: *{{holidayFrom}}*\n📅 Closed till: *{{holidayTo}}*\n🏫 School reopens: *{{reopenDate}}*\n🚌 School buses will not run on these days.\n\n📝 {{holidayNote}}\n\nPlease keep your child safe at home. We will message you if the dates change. Thank you! 🙏",
+    bodyHi:
+      "नमस्ते 🙏 *{{schoolName}}* की ओर से महत्वपूर्ण सूचना:\n\n⚠️ *{{holidayReason}}* के कारण, {{orderedBy}} के आदेश पर विद्यालय *बंद* रहेगा।\n\n📅 बंद: *{{holidayFrom}}* से\n📅 तक: *{{holidayTo}}*\n🏫 विद्यालय फिर खुलेगा: *{{reopenDate}}*\n🚌 इन दिनों स्कूल बसें नहीं चलेंगी।\n\n📝 {{holidayNote}}\n\nकृपया बच्चे को घर पर सुरक्षित रखें। तारीखों में बदलाव हुआ तो हम संदेश भेजेंगे। धन्यवाद! 🙏",
+    footerEn: "School office · Reply to this message for help",
+    footerHi: "विद्यालय कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+
+  // ── Teachers ─────────────────────────────────────────────────
+  // A parent's message relayed to a teacher through the school's number.
+  // Free-form only reaches a teacher inside Meta's 24h session; this
+  // template carries it any time within school hours.
+  {
+    familyKey: "teacher_message",
+    nameEn: "Parent message for teacher",
+    nameHi: "अभिभावक का शिक्षक के लिए संदेश",
+    module: "general",
+    category: "UTILITY",
+    metaName: "bhb_teacher_message",
+    headerFormat: "TEXT",
+    headerTextEn: "Message from a parent",
+    headerTextHi: "अभिभावक का संदेश",
+    bodyEn:
+      "Hello {{staffName}} 🙏\n\nA parent has sent you a message through the school:\n\n👧 Student: *{{childName}}* ({{classLabel}})\n👤 From: {{guardianName}}\n\n💬 \"{{messageText}}\"\n\nPlease reply in the staff app or call the parent. Parents are told teachers respond between 8 AM and 8 PM. Thank you!",
+    bodyHi:
+      "नमस्ते {{staffName}} जी 🙏\n\nएक अभिभावक ने विद्यालय के माध्यम से आपको संदेश भेजा है:\n\n👧 छात्र: *{{childName}}* ({{classLabel}})\n👤 भेजने वाले: {{guardianName}}\n\n💬 \"{{messageText}}\"\n\nकृपया स्टाफ ऐप में उत्तर दें या अभिभावक को फ़ोन करें। अभिभावकों को बताया गया है कि शिक्षक सुबह 8 से रात 8 बजे के बीच उत्तर देते हैं। धन्यवाद!",
+    footerEn: "School office · Sent via the parent app",
+    footerHi: "विद्यालय कार्यालय · पैरेंट ऐप के माध्यम से भेजा गया",
   },
 ];
 
@@ -598,12 +1490,14 @@ function buildSeedTemplate(
     metaLanguage: language === "hi" ? "hi" : "en",
     metaTemplateId: "",
     rejectionReason: "",
+    quality: "UNKNOWN",
+    qualityUpdatedAt: "",
     syncedAt: "",
     headerFormat: def.headerFormat || "NONE",
     headerText,
     body,
     footer,
-    buttons: def.buttons || [],
+    buttons: (isHi ? def.buttonsHi || def.buttons : def.buttons) || [],
     variables: extractVariables(
       [headerText, body, footer, ...carousel.map((c) => c.body)].join("\n"),
     ),
@@ -632,6 +1526,8 @@ export function emptyWaTemplates(): WaTemplatesState {
     templates: seedWaTemplates(),
     lastMetaSyncAt: "",
     audit: [],
+    senders: [],
+    moduleSenders: {},
   };
 }
 
@@ -664,6 +1560,12 @@ function normalizeTemplate(raw: Partial<WaTemplate> | null): WaTemplate | null {
     metaLanguage: String(raw.metaLanguage || language),
     metaTemplateId: String(raw.metaTemplateId || ""),
     rejectionReason: String(raw.rejectionReason || ""),
+    quality: (
+      ["GREEN", "YELLOW", "RED", "UNKNOWN"] as const
+    ).includes(raw.quality as WaTemplateQuality)
+      ? (raw.quality as WaTemplateQuality)
+      : "UNKNOWN",
+    qualityUpdatedAt: String(raw.qualityUpdatedAt || ""),
     syncedAt: String(raw.syncedAt || ""),
     headerFormat: (raw.headerFormat as WaHeaderFormat) || "NONE",
     headerText: String(raw.headerText || ""),
@@ -708,7 +1610,13 @@ export function normalizeWaTemplatesState(
   const byId = new Map(parsed.map((t) => [t.id, t]));
   // Merge missing seed families so catalog stays complete after upgrades
   for (const s of seeded) {
-    if (!byId.has(s.id)) byId.set(s.id, s);
+    const cur = byId.get(s.id);
+    if (!cur) {
+      byId.set(s.id, s);
+      continue;
+    }
+    const refreshed = refreshSeedFurniture(cur, s);
+    if (refreshed !== cur) byId.set(s.id, refreshed);
   }
   return {
     version: 1,
@@ -726,16 +1634,146 @@ export function normalizeWaTemplatesState(
           detail: String(a?.detail || ""),
         }))
       : [],
+    senders: normalizeSenders(raw.senders),
+    moduleSenders: normalizeModuleSenders(raw.moduleSenders),
+  };
+}
+
+/**
+ * Give a never-submitted, never-reworded seed template the header, footer
+ * and buttons its seed now carries.
+ *
+ * The registry keeps whatever it was seeded with; a later release that adds
+ * a header to the seed would otherwise reach only a fresh install. The 2026-09
+ * polish added a title line and tappable replies to every parent template,
+ * and production held sixty templates seeded before that — identical body,
+ * no header, no buttons — that no one had ever submitted.
+ *
+ * The rule is deliberately narrow, and only ever ADDS:
+ *   - nothing already on Meta is touched (a metaTemplateId, or approved);
+ *   - the body must still be the seed's own words — a reworded template is
+ *     the school's, and its furniture is theirs to decide;
+ *   - a header, footer or button set the template already has is kept.
+ */
+function refreshSeedFurniture(cur: WaTemplate, seed: WaTemplate): WaTemplate {
+  if (cur.metaTemplateId || cur.status === "approved") return cur;
+  if (cur.body !== seed.body) return cur;
+  let next = cur;
+  const noHeader = cur.headerFormat === "NONE" && !cur.headerText.trim();
+  if (noHeader && seed.headerFormat === "TEXT" && seed.headerText.trim()) {
+    next = { ...next, headerFormat: "TEXT", headerText: seed.headerText };
+  }
+  if (!cur.footer.trim() && seed.footer.trim()) {
+    next = { ...next, footer: seed.footer };
+  }
+  if (cur.buttons.length === 0 && seed.buttons.length > 0) {
+    next = { ...next, buttons: seed.buttons };
+  }
+  if (next === cur) return cur;
+  return {
+    ...next,
+    variables: collectTemplateVariables({
+      headerText: next.headerText,
+      body: next.body,
+      footer: next.footer,
+      carousel: next.carousel,
+    }),
+  };
+}
+
+export type SeedQuickReplyMatch = {
+  familyKey: string;
+  language: WaTemplateLanguage;
+  label: string;
+};
+
+/**
+ * Was this inbound text a tap on one of the school's own template buttons?
+ *
+ * A quick-reply tap arrives as the button's label — "Already paid", "बच्चा
+ * अस्वस्थ है" — and the parent bot would otherwise read it as free text:
+ * "Child is unwell" matched the *child* keyword and listed the family's
+ * children; "This is a mistake" got the keyword menu. A parent who tapped the
+ * button the school offered deserves an acknowledgement and a person, so the
+ * caller treats a match as a hand-off to the office.
+ */
+export function matchSeedQuickReply(text: string): SeedQuickReplyMatch | null {
+  const t = (text || "").trim().toLowerCase();
+  if (!t) return null;
+  for (const def of SEED_DEFS) {
+    for (const [language, buttons] of [
+      ["en", def.buttons ?? []],
+      ["hi", def.buttonsHi ?? def.buttons ?? []],
+    ] as const) {
+      for (const b of buttons) {
+        if (b.type === "QUICK_REPLY" && b.text.trim().toLowerCase() === t) {
+          return { familyKey: def.familyKey, language, label: b.text };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** What the bot says back when a parent taps a template button. */
+export function quickReplyAcknowledgement(match: SeedQuickReplyMatch): string {
+  return match.language === "hi"
+    ? "धन्यवाद 🙏 आपका उत्तर विद्यालय कार्यालय तक पहुँच गया है। हम शीघ्र ही आपसे संपर्क करेंगे।"
+    : "Thank you 🙏 Your reply has reached the school office. We will get back to you shortly.";
+}
+
+/**
+ * The seed's own text for one family in one language — what a fresh install
+ * would register on Meta. Preview screens that show "what the parent will
+ * read" derive from this rather than keeping a second copy of the words.
+ */
+export function seedTemplateText(
+  familyKey: string,
+  language: WaTemplateLanguage,
+): { body: string; variables: string[]; metaName: string } | null {
+  const t = seedTemplateFor(familyKey, language);
+  if (!t) return null;
+  return { body: t.body, variables: t.variables, metaName: t.metaName };
+}
+
+/** The whole seed template for a family in one language, or null. */
+export function seedTemplateFor(
+  familyKey: string,
+  language: WaTemplateLanguage,
+): WaTemplate | null {
+  const def = SEED_DEFS.find((d) => d.familyKey === familyKey);
+  return def ? buildSeedTemplate(def, language) : null;
+}
+
+/**
+ * A registry template re-dressed in its seed's current words — body, title
+ * line, footer, buttons — with its identity (id, Meta id, status, sender
+ * routing) untouched. This is the explicit "restyle what is already on Meta"
+ * step; normalizeWaTemplatesState deliberately never does it by itself.
+ */
+export function withSeedText(t: WaTemplate): WaTemplate {
+  const seed = seedTemplateFor(t.familyKey, t.language);
+  if (!seed) return t;
+  return {
+    ...t,
+    headerFormat: seed.headerFormat,
+    headerText: seed.headerText,
+    body: seed.body,
+    footer: seed.footer,
+    buttons: seed.buttons,
+    carousel: t.carousel.length ? t.carousel : seed.carousel,
+    variables: seed.variables,
+    localFallbackBody: seed.body,
   };
 }
 
 export function loadWaTemplates(): WaTemplatesState {
   if (typeof window === "undefined") return emptyWaTemplates();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) {
       const seeded = emptyWaTemplates();
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(seeded));
       return seeded;
     }
     return normalizeWaTemplatesState(
@@ -748,11 +1786,56 @@ export function loadWaTemplates(): WaTemplatesState {
 
 export function writeWaTemplatesLocalRaw(state: WaTemplatesState): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(
+  writeCacheOrInvalidate(
     STORAGE_KEY,
     JSON.stringify(normalizeWaTemplatesState(state)),
   );
   window.dispatchEvent(new CustomEvent("bhb-wa-templates"));
+}
+
+/**
+ * Exactly one default, no blanks, ids kept stable.
+ *
+ * A registry with two defaults, or none, is worse than an empty one: the send
+ * path would pick whichever came first in an array whose order nobody
+ * controls. If the data disagrees, the FIRST usable number wins and the rest
+ * are demoted — deterministic beats clever.
+ */
+function normalizeSenders(raw: unknown): WaSenderNumber[] {
+  if (!Array.isArray(raw)) return [];
+  const out: WaSenderNumber[] = [];
+  for (const r of raw) {
+    const o = (r ?? {}) as Partial<WaSenderNumber>;
+    const phoneNumberId = String(o.phoneNumberId || "").trim();
+    if (!phoneNumberId) continue;
+    out.push({
+      id: String(o.id || "").trim() || nid("was"),
+      label: String(o.label || "").trim() || phoneNumberId,
+      phoneNumberId,
+      displayNumber: String(o.displayNumber || "").trim(),
+      isDefault: false,
+      paused: !!o.paused,
+    });
+  }
+  const wanted = (raw as Partial<WaSenderNumber>[]).findIndex((r) => r?.isDefault);
+  const firstUsable = out.findIndex((sd) => !sd.paused);
+  const idx = wanted >= 0 && wanted < out.length && !out[wanted].paused
+    ? wanted
+    : firstUsable;
+  if (idx >= 0) out[idx].isDefault = true;
+  return out;
+}
+
+function normalizeModuleSenders(
+  raw: unknown,
+): Partial<Record<WaTemplateModule, string>> {
+  const out: Partial<Record<WaTemplateModule, string>> = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const id = String(v || "").trim();
+    if (id) out[k as WaTemplateModule] = id;
+  }
+  return out;
 }
 
 export function waTemplatesIsEmpty(state: WaTemplatesState): boolean {
@@ -762,11 +1845,11 @@ export function waTemplatesIsEmpty(state: WaTemplatesState): boolean {
 export function saveWaTemplates(state: WaTemplatesState): void {
   if (typeof window === "undefined") return;
   const next = normalizeWaTemplatesState(state);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   window.dispatchEvent(new CustomEvent("bhb-wa-templates"));
-  void import("@/lib/waTemplatesPersistence").then(({ scheduleWaTemplatesSync }) => {
+  void trackServerWork(import("@/lib/waTemplatesPersistence").then(({ scheduleWaTemplatesSync }) => {
     scheduleWaTemplatesSync(next);
-  });
+  }));
 }
 
 export function appendWaTemplatesAudit(
@@ -796,6 +1879,163 @@ export function listApprovedTemplates(
   });
 }
 
+/**
+ * The approved template for ONE message family, in the family's language.
+ *
+ * Falling back across template FAMILIES is never right. Selecting "the first
+ * approved template in the fees module matching the family's language" meant
+ * that on 2026-09-07 a Hindi-preferring family was sent `bhb_fee_pay_link` —
+ * a "pay this link" message — moments after paying at the counter, because
+ * that happened to be the first approved Hindi template in the module.
+ *
+ * The fallback for "no Hindi receipt" is the ENGLISH RECEIPT, never a
+ * different message. Returns undefined when the family has no approved
+ * template at all; the caller must then not claim to have sent one.
+ */
+export function pickTemplateForFamily(
+  approved: WaTemplate[],
+  familyKey: string,
+  wantLang: WaTemplateLanguage,
+): WaTemplate | undefined {
+  const family = approved.filter((t) => t.familyKey === familyKey);
+  return (
+    family.find((t) => t.language === wantLang) ??
+    family.find((t) => t.language === "en") ??
+    family[0]
+  );
+}
+
+/**
+ * Positional variables for a Meta template send, in the order the template
+ * itself declares.
+ *
+ * Meta rejects a send whose parameter count does not match the registered
+ * template, so these can never be hardcoded: `bhb_fee_receipt` takes five
+ * (receiptNo, childName, feeDue, paidOn, schoolName) and the receipt sender
+ * supplied two, which would have been refused even once the template was
+ * approved.
+ *
+ * A blank parameter is also refused, so an unfilled name becomes "—" rather
+ * than "". A receipt that names a field it could not fill still arrives; one
+ * that will not send does not.
+ */
+export function templateVariablePositions(
+  tpl: Pick<WaTemplate, "variables">,
+  values: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    (tpl.variables ?? []).map((name, i) => [
+      String(i + 1),
+      values[name] || "\u2014",
+    ]),
+  );
+}
+
+/**
+ * Is this template family usable at all?
+ *
+ * A family is BOTH languages or it is nothing. The school writes to families
+ * in Hindi or English and the parent chooses which; a family approved only in
+ * English silently sends English to a Hindi household, and a family approved
+ * only in Hindi does the reverse. On 2026-09-07 the fee module had exactly
+ * that shape — bhb_fee_pay_link approved in hi and pending in en — and the
+ * receipt sender, reaching for "any approved fees template in this language",
+ * would have told a family who had just paid at the counter to pay a link.
+ *
+ * So the resolver refuses a half-approved family outright rather than picking
+ * the half that exists.
+ */
+export function templateFamilyReady(
+  state: WaTemplatesState,
+  familyKey: string,
+): { ready: true } | { ready: false; missing: WaTemplateLanguage[] } {
+  const missing: WaTemplateLanguage[] = [];
+  for (const lang of ["en", "hi"] as WaTemplateLanguage[]) {
+    const t = state.templates.find(
+      (x) =>
+        x.familyKey === familyKey &&
+        x.language === lang &&
+        x.status === "approved" &&
+        !x.paused,
+    );
+    if (!t) missing.push(lang);
+  }
+  return missing.length === 0 ? { ready: true } : { ready: false, missing };
+}
+
+/**
+ * The number a given template sends from.
+ *
+ * Per-template override first, then the module's number, then the school's
+ * default, then the single env-configured number. The chain exists so that
+ * adding a second number is a Masters decision rather than a deploy, and so
+ * that a module nobody has routed still sends rather than silently failing.
+ */
+export function resolveSenderNumber(
+  state: WaTemplatesState,
+  template: Pick<WaTemplate, "module" | "senderNumberId">,
+): WaSenderNumber | null {
+  const live = (state.senders ?? []).filter((sd) => !sd.paused);
+  const byId = (id?: string) =>
+    id ? live.find((sd) => sd.id === id) ?? null : null;
+  return (
+    byId(template.senderNumberId) ||
+    byId(state.moduleSenders?.[template.module]) ||
+    live.find((sd) => sd.isDefault) ||
+    null
+  );
+}
+
+export type TemplateForSend =
+  | {
+      ok: true;
+      template: WaTemplate;
+      /** null = fall back to the env-configured number. */
+      sender: WaSenderNumber | null;
+    }
+  | { ok: false; reason: string };
+
+/**
+ * THE resolver. Every sender should come through here.
+ *
+ * Before this, each sender chose its own way — the fee receipt by family and
+ * language, others by "first approved template in the module" — which is why
+ * adding a template in Masters did not reliably change what went out, and why
+ * a Hindi family could receive the wrong message entirely.
+ *
+ * `language` is the FAMILY's choice, never the sender's. There is no argument
+ * here for overriding it, on purpose.
+ */
+export function resolveTemplateForSend(input: {
+  state: WaTemplatesState;
+  familyKey: string;
+  language: WaTemplateLanguage;
+}): TemplateForSend {
+  const { state, familyKey, language } = input;
+  const ready = templateFamilyReady(state, familyKey);
+  if (!ready.ready) {
+    return {
+      ok: false,
+      reason:
+        `The "${familyKey}" template is only approved in ` +
+        `${ready.missing.length === 2 ? "neither language" : ready.missing[0] === "hi" ? "English" : "Hindi"}` +
+        `. Both Hindi and English must be approved before the school sends it, ` +
+        `so a family always gets the language they chose.`,
+    };
+  }
+  const template = state.templates.find(
+    (t) =>
+      t.familyKey === familyKey &&
+      t.language === language &&
+      t.status === "approved" &&
+      !t.paused,
+  );
+  if (!template) {
+    return { ok: false, reason: `No approved "${familyKey}" template in ${language}` };
+  }
+  return { ok: true, template, sender: resolveSenderNumber(state, template) };
+}
+
 export function getTemplateById(
   state: WaTemplatesState,
   id: string,
@@ -823,6 +2063,7 @@ export function updateTemplateLocal(
       | "localFallbackBody"
       | "mediaUrl"
       | "mediaFileName"
+      | "senderNumberId"
       | "headerFormat"
       | "headerText"
       | "carousel"
@@ -859,24 +2100,32 @@ export function updateTemplateLocal(
   );
 }
 
-/** Sample values for Meta template review examples. */
+/**
+ * Sample values for Meta template review examples.
+ *
+ * Meta's reviewer sees these in place of the variables, so every one must
+ * read like the real thing. This used to fall back to the variable's own
+ * NAME — a reviewer reading "busNo" where a bus number should be, or
+ * "actionTaken" as a sentence, has a reason to reject — so the catalogue in
+ * WA_TEMPLATE_VARIABLES is the source, with a few overrides that read better
+ * on the school's own domain.
+ */
 export function sampleValueForWaVar(name: string): string {
-  const samples: Record<string, string> = {
-    guardianName: "Priya Sharma",
+  const overrides: Record<string, string> = {
     childName: "Aarav",
     studentName: "Aarav",
-    schoolName: "BHB International School",
     registerLink: "https://bhbinternational.school/register",
     payLink: "https://bhbinternational.school/pay",
+    ptmLink: "https://bhbinternational.school/parent",
     feeDue: "₹5,000",
-    amount: "₹5,000",
-    dueDate: "15 Aug 2026",
     className: "Class 5A",
     date: "22 Jul 2026",
     time: "10:00 AM",
     otp: "123456",
   };
-  return samples[name] || name.slice(0, 20) || "Sample";
+  if (overrides[name]) return overrides[name]!;
+  const fromCatalogue = WA_TEMPLATE_VARIABLES.find((v) => v.key === name)?.sample;
+  return fromCatalogue || "Sample";
 }
 
 function positionalizeTemplateText(
@@ -898,7 +2147,21 @@ function escapeRegExp(s: string): string {
 }
 
 /** Build Meta Graph API payload to create + submit a message template. */
-export function buildMetaTemplateCreatePayload(template: WaTemplate): {
+export function buildMetaTemplateCreatePayload(
+  template: WaTemplate,
+  /**
+   * A handle from Meta's resumable upload API, standing in for the media a
+   * real send will attach.
+   *
+   * Meta will not accept an IMAGE/VIDEO/DOCUMENT header without an EXAMPLE
+   * file, which is why media templates could not be submitted from here at
+   * all: the builder warned and dropped the header, so `bhb_exam_datesheet`
+   * and `bhb_open_day_invite` were never submitted and datesheets simply
+   * could not be sent. The handle is only ever a sample for review — every
+   * send supplies its own document or image.
+   */
+  opts?: { headerHandle?: string },
+): {
   name: string;
   language: string;
   category: WaTemplateCategory;
@@ -906,6 +2169,35 @@ export function buildMetaTemplateCreatePayload(template: WaTemplate): {
   warnings: string[];
 } {
   const warnings: string[] = [];
+  const metaNameEarly = (template.metaName || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "_")
+    .slice(0, 512);
+  if (!metaNameEarly) {
+    warnings.push("Meta template name is required (snake_case, e.g. bhb_fee_reminder).");
+  }
+
+  if (template.category === "AUTHENTICATION") {
+    // Meta generates the message text for AUTHENTICATION templates itself
+    // from these structured flags — custom BODY/HEADER/FOOTER text (used
+    // only for local preview/fallback) is not submitted to Meta. Meta also
+    // requires exactly one OTP-type button on every AUTHENTICATION template
+    // (rejects creation outright otherwise) — COPY_CODE fits a web/app login
+    // flow; ONE_TAP is only for a native app with a registered signature hash.
+    return {
+      name: metaNameEarly,
+      language: template.metaLanguage || template.language,
+      category: template.category,
+      components: [
+        { type: "BODY", add_security_recommendation: true },
+        { type: "FOOTER", code_expiration_minutes: 10 },
+        { type: "BUTTONS", buttons: [{ type: "OTP", otp_type: "COPY_CODE" }] },
+      ],
+      warnings,
+    };
+  }
+
   const components: Record<string, unknown>[] = [];
 
   if (template.headerFormat === "TEXT" && template.headerText.trim()) {
@@ -921,9 +2213,17 @@ export function buildMetaTemplateCreatePayload(template: WaTemplate): {
     template.headerFormat !== "NONE" &&
     template.headerFormat !== "TEXT"
   ) {
-    warnings.push(
-      `Media header (${template.headerFormat}) — create in ERP as draft, then add image/video in Meta once approved, or use a TEXT header for auto-submit.`,
-    );
+    if (opts?.headerHandle) {
+      components.push({
+        type: "HEADER",
+        format: template.headerFormat,
+        example: { header_handle: [opts.headerHandle] },
+      });
+    } else {
+      warnings.push(
+        `Media header (${template.headerFormat}) needs an example file — upload one through Meta's resumable upload API and pass its handle, or submit with a TEXT header.`,
+      );
+    }
   }
 
   const bodyVars = extractVariables(template.body);
@@ -951,18 +2251,19 @@ export function buildMetaTemplateCreatePayload(template: WaTemplate): {
         return { type: "QUICK_REPLY", text: b.text.slice(0, 25) };
       }
       if (b.type === "URL") {
-        const url = (b.url || "https://bhbinternational.school").slice(0, 2000);
-        const hasVar = /\{\{/.test(url);
+        const raw = (b.url || "https://bhbinternational.school").slice(0, 2000);
+        // Meta numbers a button's single variable {{1}} and wants an example
+        // that looks like a real value — never the variable's name.
+        const urlVars = extractVariables(raw);
+        const url = urlVars.length
+          ? raw.replace(/\{\{\s*[a-zA-Z][a-zA-Z0-9_]*\s*\}\}/, "{{1}}")
+          : raw;
         return {
           type: "URL",
           text: b.text.slice(0, 25),
           url,
-          ...(hasVar
-            ? {
-                example: [
-                  url.replace(/\{\{[^}]+\}\}/g, "sample"),
-                ],
-              }
+          ...(urlVars.length
+            ? { example: [url.replace("{{1}}", sampleValueForWaVar(urlVars[0]!))] }
             : {}),
         };
       }
@@ -975,22 +2276,26 @@ export function buildMetaTemplateCreatePayload(template: WaTemplate): {
     components.push({ type: "BUTTONS", buttons });
   }
 
-  const metaName = (template.metaName || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, "_")
-    .slice(0, 512);
-  if (!metaName) {
-    warnings.push("Meta template name is required (snake_case, e.g. bhb_fee_reminder).");
-  }
-
   return {
-    name: metaName,
+    name: metaNameEarly,
     language: template.metaLanguage || template.language,
     category: template.category,
     components,
     warnings,
   };
+}
+
+/**
+ * Payload for editing a template that already exists on Meta
+ * (POST /{template-id}). Only components travel: Meta refuses a name or
+ * language on an edit, and a changed category is a separate decision.
+ */
+export function buildMetaTemplateEditPayload(template: WaTemplate): {
+  components: Record<string, unknown>[];
+  warnings: string[];
+} {
+  const full = buildMetaTemplateCreatePayload(template);
+  return { components: full.components, warnings: full.warnings };
 }
 
 export type WaTemplateLayoutKind =
@@ -1012,56 +2317,67 @@ export const WA_TEMPLATE_CONTENT_SNIPPETS: {
   id: WaTemplateContentPurpose;
   label: string;
   module: WaTemplateModule;
+  header: string;
   body: string;
   footer: string;
 }[] = [
+  // Starter text in the same shape as every seeded template: a greeting by
+  // name, the facts on their own lines with a small icon each, one clear thing
+  // to do, and a sign-off. Footers are plain text — Meta refuses a variable
+  // there, so "{{schoolName}}" in a footer was a guaranteed rejection.
   {
     id: "fee_reminder",
     label: "Fee reminder",
     module: "fees",
+    header: "Fee reminder",
     body:
-      "Namaste {{guardianName}}, fee of {{feeDue}} for {{childName}} ({{classLabel}}) is due by {{dueDate}}. Pay securely: {{payLink}}",
-    footer: "{{schoolName}}",
+      "Namaste {{guardianName}} ji 🙏\n\nA friendly reminder that {{childName}}'s school fee ({{classLabel}}) is due:\n\n💰 Amount: *{{feeDue}}*\n📅 Due by: *{{dueDate}}*\n\nPay in a minute from your phone — UPI, card or net banking:\n🔗 {{payLink}}\n\nYour receipt arrives on WhatsApp the moment the payment goes through. Thank you! 🙏",
+    footer: "Fee counter · Reply to this message for help",
   },
   {
     id: "ptm",
     label: "PTM invite",
-    module: "general",
+    module: "ptm",
+    header: "Parent-Teacher Meeting",
     body:
-      "Dear {{guardianName}}, PTM for {{childName}} is on {{ptmDate}} at {{ptmTime}}. Book your slot: {{ptmLink}}",
-    footer: "{{schoolName}}",
+      "Namaste {{guardianName}} ji 🙏\n\nYou are invited to the Parent–Teacher Meeting for {{childName}}:\n\n📅 Date: *{{ptmDate}}*\n⏰ Time: *{{ptmTime}}*\n\nPick a slot that suits you:\n🔗 {{ptmLink}}\n\nA short conversation with the class teacher makes a real difference. We look forward to meeting you! 🌼",
+    footer: "Class teacher · Reply to this message for help",
   },
   {
     id: "homework",
     label: "Homework published",
-    module: "comms",
+    module: "homework",
+    header: "New homework",
     body:
-      "{{guardianName}}, new homework for {{childName}} ({{classLabel}}): {{homeworkTitle}} — {{subject}}.",
-    footer: "{{schoolName}}",
+      "Namaste 🙏 New homework for *{{classLabel}}* is up:\n\n📘 Subject: *{{subject}}*\n📝 Work: {{homeworkTitle}}\n\nOpen the parent app for the full details — and tap *Ask tutor* there if {{childName}} needs a hand with it. 🎓\n\n— {{schoolName}}, with thanks 🙏",
+    footer: "Class teacher · Open the parent app for details",
   },
   {
     id: "transport",
     label: "Transport update",
     module: "transport",
+    header: "Bus update",
     body:
-      "Update for {{childName}}: route {{routeName}} — please check timing with transport desk.",
-    footer: "{{schoolName}}",
+      "Namaste {{guardianName}} ji 🙏\n\n🚌 An update on {{childName}}'s school bus:\n\n📍 Route: *{{routeName}}*\n🕖 Expected at your stop: *{{expectedTime}}*\n\nThis is the scheduled time, not the bus's live position. Please be at the stop a few minutes early.\n\nHave a good day! 🌼",
+    footer: "Transport desk · Reply to this message for help",
   },
   {
     id: "admission",
     label: "Admission follow-up",
     module: "admissions",
+    header: "Admission enquiry",
     body:
-      "Hello {{guardianName}}, thank you for your interest in {{schoolName}}. Complete registration: {{registerLink}}",
-    footer: "Admissions desk",
+      "Namaste {{guardianName}} ji 🙏\n\nThank you for your interest in *{{schoolName}}* for {{childName}}. 🎒\n\nThe next step is a short online registration — it takes about 5 minutes:\n🔗 {{registerLink}}\n\nOnce done, our admissions team will call you to fix a campus visit. We look forward to welcoming your family! 🌼",
+    footer: "Admissions desk · Reply to this message for help",
   },
   {
     id: "general",
     label: "General notice",
     module: "general",
+    header: "School notice",
     body:
-      "Namaste {{guardianName}}, {{noticeTitle}} — {{noticeBody}}",
-    footer: "{{schoolName}}",
+      "Namaste {{guardianName}} ji 🙏\n\n📢 *{{noticeTitle}}*\n\n{{noticeBody}}\n\nPlease read carefully and reply to this message if you have a question.\n\n— {{schoolName}}, with thanks 🙏",
+    footer: "School office · Reply to this message for help",
   },
 ];
 
@@ -1159,6 +2475,8 @@ export function createDraftWaTemplate(
     metaLanguage: opts.language,
     metaTemplateId: "",
     rejectionReason: "",
+    quality: "UNKNOWN",
+    qualityUpdatedAt: "",
     syncedAt: "",
     headerFormat,
     headerText: opts.headerText || "",
@@ -1229,6 +2547,38 @@ export function markTemplateSubmittedToMeta(
   );
 }
 
+/**
+ * After an in-place edit on Meta: back to pending, Meta id kept.
+ *
+ * The id is the same template — Meta reviews the new components under it —
+ * so senders that resolve by family keep finding it, and the status webhook
+ * flips it back to approved with no manual step.
+ */
+export function markTemplateEditedOnMeta(
+  state: WaTemplatesState,
+  id: string,
+  by: string,
+): WaTemplatesState {
+  const templates = state.templates.map((t) =>
+    t.id === id
+      ? {
+          ...t,
+          status: "pending" as const,
+          rejectionReason: "",
+          syncedAt: nowIso(),
+          updatedAt: nowIso(),
+        }
+      : t,
+  );
+  const tpl = templates.find((t) => t.id === id);
+  return appendWaTemplatesAudit(
+    { ...state, templates, lastMetaSyncAt: nowIso() },
+    by,
+    "edit_meta",
+    `${tpl?.metaName ?? id} (${tpl?.metaTemplateId ?? "?"})`,
+  );
+}
+
 export function mapMetaTemplateStatus(
   metaStatus: string,
 ): WaTemplateStatus | null {
@@ -1248,7 +2598,41 @@ export type MetaTemplateSyncRow = {
   id?: string;
   rejected_reason?: string;
   category?: string;
+  /**
+   * The components Meta actually holds. Asked for since 2026-09-12, because
+   * without them the registry could never learn that a template's SHAPE
+   * differs from the seed — see metaHeaderFormatOf.
+   */
+  components?: { type?: string; format?: string; text?: string }[];
 };
+
+/**
+ * The header Meta really approved for a template, from its components.
+ *
+ * The seed said `bhb_daily_brief` had a DOCUMENT header, and the registry
+ * believed it for two days. Meta had no header at all: the submit path
+ * DROPS a media header when it has no example file to send with it (a media
+ * header needs a handle from the resumable upload API first), so the
+ * template was created, approved and used header-less while the ERP went on
+ * attaching a document parameter to every send. Meta answered every one with
+ * "(#132018) There's an issue with the parameters in your template", the
+ * 6 PM brief never arrived, and the scheduler log showed only a 502.
+ *
+ * A registry that disagrees with Meta about SHAPE fails exactly as silently
+ * as one that disagreed about status did in September. So the shape is read
+ * back from Meta like the status is.
+ */
+export function metaHeaderFormatOf(row: MetaTemplateSyncRow): WaHeaderFormat | null {
+  if (!Array.isArray(row.components)) return null;
+  const header = row.components.find(
+    (c) => String(c?.type || "").toUpperCase() === "HEADER",
+  );
+  if (!header) return "NONE";
+  const fmt = String(header.format || "TEXT").toUpperCase();
+  return fmt === "IMAGE" || fmt === "VIDEO" || fmt === "DOCUMENT" || fmt === "TEXT"
+    ? (fmt as WaHeaderFormat)
+    : "NONE";
+}
 
 /**
  * Merge Meta Graph message_templates list into registry by metaName + language.
@@ -1258,7 +2642,7 @@ export function applyMetaTemplateSync(
   rows: MetaTemplateSyncRow[],
   by = "meta_sync",
 ): WaTemplatesState {
-  let templates = [...state.templates];
+  const templates = [...state.templates];
   const now = nowIso();
   for (const row of rows) {
     const lang: WaTemplateLanguage = (row.language || "")
@@ -1281,6 +2665,10 @@ export function applyMetaTemplateSync(
         metaTemplateId: row.id || cur.metaTemplateId,
         rejectionReason: row.rejected_reason || cur.rejectionReason,
         category: (row.category as WaTemplateCategory) || cur.category,
+        // Meta's shape wins over the seed's. Only when Meta actually told
+        // us — an older list call did not ask for components, and a missing
+        // answer must not be read as "no header".
+        headerFormat: metaHeaderFormatOf(row) ?? cur.headerFormat,
         syncedAt: now,
         updatedAt: now,
       };
@@ -1297,6 +2685,8 @@ export function applyMetaTemplateSync(
         metaLanguage: row.language || lang,
         metaTemplateId: row.id || "",
         rejectionReason: row.rejected_reason || "",
+        quality: "UNKNOWN",
+        qualityUpdatedAt: "",
         syncedAt: now,
         headerFormat: "NONE",
         headerText: "",
@@ -1363,6 +2753,82 @@ export function applyMetaTemplateStatusUpdate(
   };
 }
 
+/** Apply a message_template_quality_update webhook event (does not touch status). */
+export function applyMetaTemplateQualityUpdate(
+  state: WaTemplatesState,
+  evt: {
+    message_template_name?: string;
+    message_template_language?: string;
+    new_quality_score?: string;
+  },
+): WaTemplatesState {
+  const name = evt.message_template_name || "";
+  const lang = evt.message_template_language || "";
+  if (!name) return state;
+  const score = (evt.new_quality_score || "").toUpperCase();
+  const quality: WaTemplateQuality = (
+    ["GREEN", "YELLOW", "RED"] as const
+  ).includes(score as "GREEN" | "YELLOW" | "RED")
+    ? (score as WaTemplateQuality)
+    : "UNKNOWN";
+  const now = nowIso();
+  let touched = false;
+  const templates: WaTemplate[] = state.templates.map((t) => {
+    if (t.metaName !== name) return t;
+    if (lang && t.metaLanguage !== lang && t.language !== lang.slice(0, 2)) {
+      return t;
+    }
+    touched = true;
+    return { ...t, quality, qualityUpdatedAt: now, updatedAt: now };
+  });
+  if (!touched) return state;
+  return { ...state, templates };
+}
+
+/** The variable a URL button carries, if any (Meta allows one, at the end). */
+export function buttonUrlVariable(b: WaTemplateButton): string | null {
+  if (b.type !== "URL" || !b.url) return null;
+  return extractVariables(b.url)[0] ?? null;
+}
+
+/**
+ * Button components for a template send — one per URL button whose target
+ * carries a variable. Meta refuses a send that omits them, and a "Pay now"
+ * that opens the wrong family's link is worse than one that fails, so a
+ * button whose value the sender did not supply is reported, not defaulted.
+ */
+export function templateButtonComponents(
+  tpl: Pick<WaTemplate, "buttons">,
+  vars: Record<string, string>,
+): {
+  components: {
+    type: "button";
+    sub_type: "url";
+    index: number;
+    parameters: { type: "text"; text: string }[];
+  }[];
+  missing: string[];
+} {
+  const components: ReturnType<typeof templateButtonComponents>["components"] = [];
+  const missing: string[] = [];
+  (tpl.buttons ?? []).slice(0, 3).forEach((b, index) => {
+    const key = buttonUrlVariable(b);
+    if (!key) return;
+    const value = (vars[key] ?? "").trim();
+    if (!value) {
+      missing.push(key);
+      return;
+    }
+    components.push({
+      type: "button",
+      sub_type: "url",
+      index,
+      parameters: [{ type: "text", text: value.slice(0, 2000) }],
+    });
+  });
+  return { components, missing };
+}
+
 /** Map named {{vars}} to Meta positional body parameters in declaration order. */
 export function buildTemplateBodyParameters(
   template: WaTemplate,
@@ -1384,6 +2850,19 @@ export function statusTone(status: WaTemplateStatus): string {
       return "bg-rose-100 text-rose-800";
     case "paused":
       return "bg-slate-200 text-slate-700";
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
+}
+
+export function qualityTone(quality: WaTemplateQuality): string {
+  switch (quality) {
+    case "GREEN":
+      return "bg-emerald-100 text-emerald-800";
+    case "YELLOW":
+      return "bg-amber-100 text-amber-900";
+    case "RED":
+      return "bg-rose-100 text-rose-800";
     default:
       return "bg-slate-100 text-slate-700";
   }

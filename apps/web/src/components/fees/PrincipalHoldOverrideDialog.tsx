@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import {
   DEFAULT_PRINCIPAL_PIN,
   HOLD_LABELS,
@@ -37,6 +38,7 @@ export function PrincipalHoldOverrideDialog({
   const [error, setError] = useState<string | null>(null);
   const label = block?.label ?? HOLD_LABELS[holdCode];
   const isRehold = mode === "rehold";
+  // Escape belongs to the dialog now.
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -71,13 +73,14 @@ export function PrincipalHoldOverrideDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
-      <form
-        onSubmit={submit}
-        className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl"
-        role="dialog"
+    // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
+    // had none of them, so Tab left the open form for the page behind it.
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogPopup
         aria-labelledby="hold-override-title"
+        className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl"
       >
+        <form onSubmit={submit}>
         <h2
           id="hold-override-title"
           className="text-lg font-semibold text-[var(--brand-deep)]"
@@ -176,8 +179,9 @@ export function PrincipalHoldOverrideDialog({
             {isRehold ? "Re-hold" : "Unhold"}
           </button>
         </div>
-      </form>
-    </div>
+        </form>
+      </DialogPopup>
+    </Dialog>
   );
 }
 
@@ -192,7 +196,7 @@ export function HoldStatusBanner({
   if (!check || check.allowed) {
     if (check?.allowed && check.override) {
       return (
-        <p className="rounded-lg bg-[rgba(22,163,74,0.1)] px-3 py-2 text-xs text-[#15803d]">
+        <p className="rounded-lg bg-[rgba(22,163,74,0.1)] px-3 py-2 text-xs text-[var(--tone-green)]">
           Hold overridden until {check.override.expiresOn} ·{" "}
           {check.override.reason}
         </p>

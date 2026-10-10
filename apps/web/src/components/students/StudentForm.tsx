@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { PincodeFill } from "@/components/ui/open-lookup-fields";
+import { pushToast } from "@/components/shell/Toast";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -13,6 +15,15 @@ import {
   type MastersState,
 } from "@/lib/masters";
 import { bumpStudentSeriesUses } from "@/lib/numberSeries";
+import { StudentAttendanceCard } from "@/components/students/StudentAttendanceCard";
+import { StudentExamMarksCard } from "@/components/students/StudentExamMarksCard";
+import { StudentFeeDuesCard } from "@/components/students/StudentFeeDuesCard";
+import { StudentHomeworkCard } from "@/components/students/StudentHomeworkCard";
+import { StudentLibraryCard } from "@/components/students/StudentLibraryCard";
+import { StudentTransportCard } from "@/components/students/StudentTransportCard";
+import { HOUSEHOLD_CHANNELS, HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
+import { diffForAudit, recordAudit } from "@/lib/auditClient";
+import { suggestSystemAdmissionForImport } from "@/lib/studentLegacyAdmission";
 import {
   BLOOD_GROUPS,
   DOC_LABELS,
@@ -20,7 +31,6 @@ import {
   STUDENT_CATEGORIES,
   alignHouseholdMobiles,
   applySharedFamilyToHousehold,
-  displayAadhaar,
   emptyStudentDocs,
   householdOf,
   isValidMobile,
@@ -263,6 +273,12 @@ export function StudentForm({
   const [mobile, setMobile] = useState("");
   const [whatsappMobile, setWhatsappMobile] = useState("");
   const [altMobile, setAltMobile] = useState("");
+  const [preferredLanguage, setPreferredLanguage] = useState("");
+  /** The office may change a family's language, but has to mean it. */
+  const [languageOverride, setLanguageOverride] = useState(false);
+  const [channelPreference, setChannelPreference] = useState("");
+  const [quietHoursStart, setQuietHoursStart] = useState("");
+  const [quietHoursEnd, setQuietHoursEnd] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
   const [locality, setLocality] = useState("");
@@ -377,6 +393,10 @@ export function StudentForm({
       setMobile(hh?.mobile ?? "");
       setWhatsappMobile(hh?.whatsappMobile || hh?.mobile || "");
       setAltMobile(hh?.altMobile ?? "");
+      setPreferredLanguage(hh?.preferredLanguage ?? "");
+      setChannelPreference(hh?.channelPreference ?? "");
+      setQuietHoursStart(hh?.quietHoursStart ?? "");
+      setQuietHoursEnd(hh?.quietHoursEnd ?? "");
       setEmail(hh?.email ?? "");
       setAddress(hh?.address ?? "");
       setLocality(hh?.locality ?? "");
@@ -446,6 +466,12 @@ export function StudentForm({
     return masters.sections.filter((s) => s.classId === classId && s.isActive);
   }, [masters, classId]);
 
+  // Advisory only — see the save handler for why this no longer blocks.
+  const curCheck = useMemo(() => {
+    if (!masters) return { ok: true, errors: [], warnings: [] };
+    return validateCurriculum({ classId, academicYearCode }, curriculum, masters);
+  }, [masters, classId, academicYearCode, curriculum]);
+
   const feeGroupsForType = useMemo(() => {
     if (!masters) return [];
     const types: FeeStudentType[] =
@@ -508,6 +534,8 @@ export function StudentForm({
     });
     const hhDraft: Household = {
       id: "draft",
+      // Local preview object, never pushed — no server version to carry.
+      revisionAt: "",
       code: "",
       guardianName,
       mobile,
@@ -521,6 +549,10 @@ export function StudentForm({
       pincode,
       altMobile,
       guardianPhotoUrl: "",
+      preferredLanguage,
+      channelPreference,
+      quietHoursStart,
+      quietHoursEnd,
     };
     return profileCompleteness(draft, hhDraft);
   }, [
@@ -557,6 +589,84 @@ export function StudentForm({
     window.setTimeout(() => setNotice(null), 2200);
   }
 
+  const dirtyRef = useRef(false);
+
+  const [liveDuplicate, setLiveDuplicate] = useState<{
+    reasons: string[];
+    matches: { id: string; fullName: string; admissionNo: string }[];
+  } | null>(null);
+
+  useEffect(() => {
+    const draftName = fullName.trim();
+    if (draftName.length < 3) {
+      setLiveDuplicate(null);
+      return;
+    }
+    const t = window.setTimeout(async () => {
+      const { listSuspectedDuplicates, DUPLICATE_REASON_LABEL } = await import(
+        "@/lib/studentDuplicates"
+      );
+      const sis = loadSis();
+      const draft = normalizeStudent({
+        id: "__draft__",
+        fullName: draftName,
+        dob,
+        fatherName,
+        admissionNo,
+        pen,
+        aadhaarNumber,
+        aadhaarLast4,
+        apaarId,
+        academicYearCode,
+      });
+      const roster = sis.students.filter((s) => s.id !== studentId);
+      const groups = listSuspectedDuplicates(
+        { ...sis, students: [...roster, draft] },
+        { academicYearCode },
+      ).filter((g) => g.students.some((s) => s.id === "__draft__"));
+      if (groups.length === 0) {
+        setLiveDuplicate(null);
+        return;
+      }
+      const reasons = [
+        ...new Set(
+          groups.flatMap((g) => g.reasons.map((r) => DUPLICATE_REASON_LABEL[r])),
+        ),
+      ];
+      const matches = groups
+        .flatMap((g) => g.students)
+        .filter((s) => s.id !== "__draft__")
+        .map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          admissionNo: s.admissionNo,
+        }));
+      setLiveDuplicate({ reasons, matches });
+    }, 500);
+    return () => window.clearTimeout(t);
+  }, [
+    fullName,
+    dob,
+    fatherName,
+    admissionNo,
+    pen,
+    aadhaarNumber,
+    aadhaarLast4,
+    apaarId,
+    academicYearCode,
+    studentId,
+  ]);
+
+  useEffect(() => {
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      if (!dirtyRef.current) return;
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
+
   function setDocFile(key: StudentDocKey, file: StudentDocFile) {
     setDocs((prev) => {
       const next = { ...prev, [key]: file };
@@ -574,100 +684,70 @@ export function StudentForm({
 
   function saveStudent(e: React.FormEvent) {
     e.preventDefault();
-    if (!masters) return;
+    if (!masters) {
+      flash("Masters are still loading — try Save again in a moment");
+      return;
+    }
     const sis = loadSis();
     if (!fullName.trim() || !admissionNo.trim() || !classId || !sectionId) {
       flash("Basic: name, admission no, class and section are required");
       setTab("basic");
       return;
     }
+    // Everything below is ADVISORY. It used to block the save: after the
+    // UDISE+ import filled PENs, an unrelated address edit was refused until
+    // a previous-school name and UDISE code were typed; a legacy record with
+    // no mobile could not be saved at all (2026-09-06). The office keeps the
+    // right to save what it has — the gaps are listed in the toast instead.
+    const saveNotes: string[] = [];
     const mobileDigits = normalizeMobile(mobile);
-    if (!isValidMobile(mobileDigits)) {
-      flash("Family: guardian mobile must be exactly 10 digits");
-      setTab("family");
-      return;
-    }
+    if (!isValidMobile(mobileDigits)) saveNotes.push("guardian mobile is not 10 digits");
     const whatsappDigits = normalizeMobile(whatsappMobile) || mobileDigits;
-    if (!isValidMobile(whatsappDigits)) {
-      flash("Family: WhatsApp number must be exactly 10 digits");
-      setTab("family");
-      return;
+    if (whatsappDigits && !isValidMobile(whatsappDigits)) {
+      saveNotes.push("WhatsApp number is not 10 digits");
     }
-    if (aadhaarVerification !== "verified_udise") {
+    {
       const full = aadhaarNumber.replace(/\D/g, "");
-      if (full && full.length !== 12) {
-        flash("Identity: Student Aadhaar must be 12 digits (or leave blank)");
-        setTab("identity");
-        return;
-      }
+      if (full && full.length !== 12) saveNotes.push("student Aadhaar is not 12 digits");
     }
     if (aadhaarLast4 && aadhaarLast4.length !== 4) {
-      flash("Identity: Aadhaar last 4 must be 4 digits");
-      setTab("identity");
-      return;
+      saveNotes.push("Aadhaar last 4 is not 4 digits");
     }
     const penClean = pen.trim();
-    if (penClean) {
-      if (!previousSchool.trim()) {
-        flash(
-          "PEN entered: previous school name is required (UDISE+ Drop Box / release)",
-        );
-        setTab("ids");
-        return;
-      }
-      if (!previousUdise.trim()) {
-        flash(
-          "PEN entered: previous school UDISE code is required (UDISE+ Drop Box / release)",
-        );
-        setTab("ids");
-        return;
-      }
+    if (penClean && !previousSchool.trim()) {
+      saveNotes.push("PEN without previous school name (UDISE+ Drop Box / release)");
     }
-    for (const [label, full, ver] of [
-      ["Father Aadhaar", fatherAadhaarNumber, fatherAadhaarVerification],
-      ["Mother Aadhaar", motherAadhaarNumber, motherAadhaarVerification],
+    if (penClean && !previousUdise.trim()) {
+      saveNotes.push("PEN without previous school UDISE code");
+    }
+    for (const [label, full] of [
+      ["father Aadhaar", fatherAadhaarNumber],
+      ["mother Aadhaar", motherAadhaarNumber],
     ] as const) {
-      if (ver === "verified_udise") continue;
       const d = full.replace(/\D/g, "");
-      if (d && d.length !== 12) {
-        flash(`Family: ${label} must be 12 digits (or leave blank)`);
-        setTab("family");
-        return;
-      }
+      if (d && d.length !== 12) saveNotes.push(`${label} is not 12 digits`);
     }
     for (const [label, val] of [
-      ["Father Aadhaar last 4", fatherAadhaarLast4],
-      ["Mother Aadhaar last 4", motherAadhaarLast4],
+      ["father Aadhaar last 4", fatherAadhaarLast4],
+      ["mother Aadhaar last 4", motherAadhaarLast4],
     ] as const) {
-      if (val && val.length !== 4) {
-        flash(`Family: ${label} must be 4 digits`);
-        setTab("family");
-        return;
-      }
+      if (val && val.length !== 4) saveNotes.push(`${label} is not 4 digits`);
     }
     for (const [label, val] of [
-      ["Father PAN", fatherPan],
-      ["Mother PAN", motherPan],
+      ["father PAN", fatherPan],
+      ["mother PAN", motherPan],
     ] as const) {
       const p = normalizePan(val);
-      if (p && !isValidPan(p)) {
-        flash(`Family: ${label} must be like ABCDE1234F`);
-        setTab("family");
-        return;
-      }
+      if (p && !isValidPan(p)) saveNotes.push(`${label} is not like ABCDE1234F`);
     }
     for (const [label, val] of [
-      ["Father mobile", fatherMobile],
-      ["Mother mobile", motherMobile],
-      ["Emergency mobile", emergencyMobile],
-      ["Alt mobile", altMobile],
+      ["father mobile", fatherMobile],
+      ["mother mobile", motherMobile],
+      ["emergency mobile", emergencyMobile],
+      ["alt mobile", altMobile],
     ] as const) {
       const d = normalizeMobile(val);
-      if (d && !isValidMobile(d)) {
-        flash(`Family: ${label} must be 10 digits or blank`);
-        setTab("family");
-        return;
-      }
+      if (d && !isValidMobile(d)) saveNotes.push(`${label} is not 10 digits`);
     }
 
     const nextAdm = admissionNo.trim().toUpperCase();
@@ -723,7 +803,38 @@ export function StudentForm({
       state: stateName.trim() || "Uttar Pradesh",
       pincode: pincode.replace(/\D/g, "").slice(0, 6),
       altMobile: normalizeMobile(altMobile),
+      preferredLanguage,
+      channelPreference,
+      quietHoursStart,
+      quietHoursEnd,
     };
+
+    // The family owns its language. When the office changes it for them, say
+    // so in the audit trail — who, for which household, from what to what.
+    // Without this the override is indistinguishable from the parent's own
+    // choice, and a family written to in the wrong language has no trail
+    // explaining why.
+    if (languageOverride) {
+      const before = households.find((h) => h.id === householdId)
+        ?.preferredLanguage ?? "";
+      if (before !== preferredLanguage) {
+        void fetch("/api/audit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            module: "students",
+            action: "edit",
+            entityType: "household_language",
+            entityId: householdId || "",
+            summary:
+              `Language for ${guardianName || "a family"} set by the office to ` +
+              `${preferredLanguage || "(not asked)"} — was ` +
+              `${before || "(not asked)"}. The family sets this themselves by ` +
+              `replying LANG on WhatsApp.`,
+          }),
+        }).catch(() => null);
+      }
+    }
 
     if (householdId && households.some((h) => h.id === householdId)) {
       households = households.map((h) =>
@@ -749,18 +860,34 @@ export function StudentForm({
 
     const nextDocs = syncPhotoDoc(docs, photoUrl.trim());
 
-    const curCheck = validateCurriculum(
-      { classId, academicYearCode },
-      curriculum,
-      masters,
-    );
-    if (!curCheck.ok) {
-      flash(curCheck.errors[0] ?? "Fix subject choices");
-      setTab("subjects");
-      return;
-    }
+    // Subject-cart completeness (NCF: exact counts, language/vocational
+    // minimums) is surfaced on the Subjects tab, not enforced here. It used
+    // to block the whole save — so an office edit to an address or a phone
+    // number was refused because a IX–X student's subject cart wasn't yet a
+    // valid combination. Masters subject offerings/tags are still being
+    // populated for this school, which made that block near-permanent for
+    // most secondary students. Kept as advisory: staff can still see and fix
+    // an incomplete cart, but it never again stops an unrelated field from
+    // being saved.
 
     const payload = normalizeStudent({
+      /*
+       * Start from the record as it stands, so a field this form does not show
+       * survives the save. The 88 fields below are what the form edits; the
+       * student has 97. The nine it never mentions were therefore reset to
+       * their defaults on every save: the parents' photographs (printed on ID
+       * cards), the RFID and biometric ids the attendance devices use, the
+       * student's login, the promotion lock and its reason — a child held back
+       * because they are under-age for the class under the UDISE MBU rule,
+       * unlocked by an unrelated edit to an address — and revisionAt, the
+       * optimistic-locking token, whose absence made every form save
+       * "unversioned": two clerks on the same child, and the second silently
+       * overwrote the first with no conflict warning.
+       *
+       * It was invisible while none of those fields reached the database (see
+       * migration 20260912100000). The moment they persist, the wipe is real.
+       */
+      ...(previousStudent ?? {}),
       id: studentId ?? newSisId("stu"),
       admissionNo: nextAdm,
       legacyErpAdmissionNo: legacyErpAdmissionNo.trim(),
@@ -793,14 +920,8 @@ export function StudentForm({
           motherAadhaarLast4.replace(/\D/g, "").slice(0, 4) || full.slice(-4)
         );
       })(),
-      fatherAadhaarNumber:
-        fatherAadhaarVerification === "verified_udise"
-          ? ""
-          : fatherAadhaarNumber.replace(/\D/g, "").slice(0, 12),
-      motherAadhaarNumber:
-        motherAadhaarVerification === "verified_udise"
-          ? ""
-          : motherAadhaarNumber.replace(/\D/g, "").slice(0, 12),
+      fatherAadhaarNumber: fatherAadhaarNumber.replace(/\D/g, "").slice(0, 12),
+      motherAadhaarNumber: motherAadhaarNumber.replace(/\D/g, "").slice(0, 12),
       fatherAadhaarVerification:
         fatherAadhaarVerification === "verified_udise"
           ? "verified_udise"
@@ -831,10 +952,7 @@ export function StudentForm({
         const full = aadhaarNumber.replace(/\D/g, "");
         return aadhaarLast4.replace(/\D/g, "").slice(0, 4) || full.slice(-4);
       })(),
-      aadhaarNumber:
-        aadhaarVerification === "verified_udise"
-          ? ""
-          : aadhaarNumber.replace(/\D/g, "").slice(0, 12),
+      aadhaarNumber: aadhaarNumber.replace(/\D/g, "").slice(0, 12),
       aadhaarVerification:
         aadhaarVerification === "verified_udise"
           ? "verified_udise"
@@ -924,6 +1042,46 @@ export function StudentForm({
       households,
       students,
     });
+    dirtyRef.current = false;
+    pushToast(
+      saveNotes.length
+        ? {
+            kind: "info",
+            message: `Saved ${payload.fullName} — still to complete: ${saveNotes.join("; ")}`,
+            durationMs: 9000,
+          }
+        : { kind: "success", message: `Saved ${payload.fullName}` },
+    );
+
+    // Audit trail — student records carry Aadhaar references, PAN, DOB and
+    // guardian contacts, so every change needs an attributable record.
+    // Recorded here rather than server-side because the roster syncs as a
+    // bulk snapshot, which cannot tell who changed what.
+    if (mode === "edit" && studentId) {
+      const { changedFields, before, after } = diffForAudit(
+        previousStudent as unknown as Record<string, unknown> | null,
+        payload as unknown as Record<string, unknown>,
+      );
+      if (changedFields.length > 0) {
+        recordAudit({
+          module: "students",
+          action: "update",
+          entityType: "student",
+          entityId: payload.id,
+          summary: `Updated ${payload.fullName} (${payload.admissionNo}) — ${changedFields.length} field(s): ${changedFields.slice(0, 8).join(", ")}`,
+          before,
+          after,
+        });
+      }
+    } else {
+      recordAudit({
+        module: "students",
+        action: "create",
+        entityType: "student",
+        entityId: payload.id,
+        summary: `Admitted ${payload.fullName} (${payload.admissionNo}) to ${academicYearCode}`,
+      });
+    }
 
     bumpStudentSeriesUses(payload, academicYearCode);
 
@@ -980,11 +1138,28 @@ export function StudentForm({
           </p>
         </div>
         {notice ? (
-          <span className="rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-1.5 text-xs font-medium text-[var(--brand-deep)]">
+          <span
+            role="status"
+            aria-live="polite"
+            className="rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-1.5 text-xs font-medium text-[var(--brand-deep)]"
+          >
             {notice}
           </span>
         ) : null}
       </div>
+
+      {/* What this child still owes. Only in edit mode: a student being
+          added has no dues, and an empty card would just be furniture. */}
+      {mode === "edit" && studentId ? (
+        <>
+          <StudentFeeDuesCard studentId={studentId} />
+          <StudentAttendanceCard studentId={studentId} />
+          <StudentExamMarksCard studentId={studentId} />
+          <StudentHomeworkCard studentId={studentId} />
+          <StudentTransportCard studentId={studentId} />
+          <StudentLibraryCard studentId={studentId} />
+        </>
+      ) : null}
 
       <ModuleTabs
         aria-label="Student form sections"
@@ -1002,6 +1177,9 @@ export function StudentForm({
 
       <form
         onSubmit={saveStudent}
+        onChange={() => {
+          dirtyRef.current = true;
+        }}
         className="mt-5 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-5"
       >
         {tab === "basic" ? (
@@ -1009,12 +1187,34 @@ export function StudentForm({
             <p className="mb-3 text-xs text-[var(--muted)]">
               Enrollment essentials for the SIS register and Fee Take.
             </p>
+            {liveDuplicate ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-950"
+              >
+                <p className="font-semibold">
+                  Possible duplicate — {liveDuplicate.reasons.join(", ")}
+                </p>
+                <p className="mt-0.5">
+                  Matches:{" "}
+                  {liveDuplicate.matches
+                    .map(
+                      (m) =>
+                        `${m.fullName}${m.admissionNo ? ` (${m.admissionNo})` : ""}`,
+                    )
+                    .join(", ")}
+                  . Check the Duplicates tab under Students before saving if
+                  this isn&apos;t a sibling.
+                </p>
+              </div>
+            ) : null}
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Admission no (system)">
+              <Field label="Admission no (system)" required>
                 <input
                   className="field"
                   value={admissionNo}
-                  onChange={(e) => setAdmissionNo(e.target.value)}
+                  onChange={(e) => setAdmissionNo(e.target.value.toUpperCase())}
                   required
                   readOnly={importedViaLegacyList && !systemAdmissionPending}
                 />
@@ -1029,16 +1229,39 @@ export function StudentForm({
                 </Field>
               ) : null}
               {systemAdmissionPending ? (
-                <p className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-                  System admission pending — duplicate name on import. Verify on{" "}
-                  <strong>Students → Roster</strong> to assign a unique number.
-                </p>
+                <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-950">
+                  <div>
+                    <span className="font-semibold">System admission pending</span> — duplicate name on import. Auto-assign a unique admission number to rectify.
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-lg bg-amber-800 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-amber-900"
+                    onClick={() => {
+                      const m = loadMasters();
+                      const sis = loadSis();
+                      const sug = suggestSystemAdmissionForImport(
+                        m,
+                        sis.students,
+                        academicYearCode || "2025-26",
+                      );
+                      if (sug) {
+                        setAdmissionNo(sug);
+                        setSystemAdmissionPending(false);
+                        flash(`Assigned system admission number: ${sug}`);
+                      } else {
+                        flash("Could not generate admission number — check Masters number series");
+                      }
+                    }}
+                  >
+                    Auto-assign Admission No.
+                  </button>
+                </div>
               ) : null}
-              <Field label="Full name">
+              <Field label="Full name" required>
                 <input
                   className="field"
                   value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
+                  onChange={(e) => setFullName(e.target.value.toUpperCase())}
                   required
                 />
               </Field>
@@ -1050,7 +1273,7 @@ export function StudentForm({
               onError={flash}
             />
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <Field label="Class">
+              <Field label="Class" required>
                 <select
                   className="field"
                   value={classId}
@@ -1083,7 +1306,7 @@ export function StudentForm({
                     ))}
                 </select>
               </Field>
-              <Field label="Section">
+              <Field label="Section" required>
                 <select
                   className="field"
                   value={sectionId}
@@ -1101,7 +1324,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={rollNo}
-                  onChange={(e) => setRollNo(e.target.value)}
+                  onChange={(e) => setRollNo(e.target.value.toUpperCase())}
                 />
               </Field>
             </div>
@@ -1183,7 +1406,7 @@ export function StudentForm({
               <input
                 className="field"
                 value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+                onChange={(e) => setNotes(e.target.value.toUpperCase())}
               />
             </Field>
             <Field label="Tags (show before name)">
@@ -1230,6 +1453,18 @@ export function StudentForm({
 
         {tab === "subjects" && masters ? (
           <div>
+            {!curCheck.ok ? (
+              <div className="mb-4 rounded-xl border border-[rgba(196,149,58,0.35)] bg-[rgba(196,149,58,0.08)] p-3">
+                <p className="text-sm font-bold text-[var(--brand-deep)]">
+                  Subject cart incomplete — advisory only, saving is not blocked
+                </p>
+                <ul className="mt-1 list-disc pl-4 text-xs text-[var(--muted)]">
+                  {curCheck.errors.map((e, i) => (
+                    <li key={i}>{e}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {pendingRequest ? (
               <div className="mb-4 rounded-xl border border-[rgba(196,149,58,0.35)] bg-[rgba(196,149,58,0.08)] p-3">
                 <p className="text-sm font-bold text-[var(--brand-deep)]">
@@ -1259,7 +1494,7 @@ export function StudentForm({
                   className="field mt-2 !py-1.5"
                   placeholder="Review note (optional)"
                   value={reviewNote}
-                  onChange={(e) => setReviewNote(e.target.value)}
+                  onChange={(e) => setReviewNote(e.target.value.toUpperCase())}
                 />
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
@@ -1391,35 +1626,35 @@ export function StudentForm({
                 <input
                   className="field"
                   value={religion}
-                  onChange={(e) => setReligion(e.target.value)}
+                  onChange={(e) => setReligion(e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Nationality">
                 <input
                   className="field"
                   value={nationality}
-                  onChange={(e) => setNationality(e.target.value)}
+                  onChange={(e) => setNationality(e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Mother tongue">
                 <input
                   className="field"
                   value={motherTongue}
-                  onChange={(e) => setMotherTongue(e.target.value)}
+                  onChange={(e) => setMotherTongue(e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Place of birth">
                 <input
                   className="field"
                   value={placeOfBirth}
-                  onChange={(e) => setPlaceOfBirth(e.target.value)}
+                  onChange={(e) => setPlaceOfBirth(e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Caste">
                 <input
                   className="field"
                   value={extra.caste}
-                  onChange={(e) => setEx("caste", e.target.value)}
+                  onChange={(e) => setEx("caste", e.target.value.toUpperCase())}
                   placeholder="e.g. Brahman, Ahir, Rajput"
                 />
               </Field>
@@ -1465,7 +1700,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.medicalNotes}
-                  onChange={(e) => setEx("medicalNotes", e.target.value)}
+                  onChange={(e) => setEx("medicalNotes", e.target.value.toUpperCase())}
                   placeholder="Allergies, chronic condition (if any)"
                 />
               </Field>
@@ -1473,7 +1708,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.secondLanguage}
-                  onChange={(e) => setEx("secondLanguage", e.target.value)}
+                  onChange={(e) => setEx("secondLanguage", e.target.value.toUpperCase())}
                   placeholder="e.g. Hindi"
                 />
               </Field>
@@ -1481,7 +1716,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.thirdLanguage}
-                  onChange={(e) => setEx("thirdLanguage", e.target.value)}
+                  onChange={(e) => setEx("thirdLanguage", e.target.value.toUpperCase())}
                   placeholder="e.g. Sanskrit"
                 />
               </Field>
@@ -1489,33 +1724,16 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.hobbies}
-                  onChange={(e) => setEx("hobbies", e.target.value)}
+                  onChange={(e) => setEx("hobbies", e.target.value.toUpperCase())}
                   placeholder="e.g. Drawing, Cricket"
                 />
               </Field>
               <Field
                 label={
-                  aadhaarVerification === "verified_udise"
-                    ? "Aadhaar — verified by UDISE+ (last 4 only)"
-                    : "Student Aadhaar (full — visible until UDISE+ verified)"
+                  "Student Aadhaar (12 digits)"
                 }
               >
-                {aadhaarVerification === "verified_udise" ? (
-                  <div className="space-y-1">
-                    <input
-                      className="field"
-                      value={displayAadhaar({
-                        last4: aadhaarLast4,
-                        verification: "verified_udise",
-                      })}
-                      readOnly
-                    />
-                    <p className="text-[11px] text-[var(--muted)]">
-                      Masked after UDISE+ verification. Change status below to
-                      re-enter if needed.
-                    </p>
-                  </div>
-                ) : (
+                {(
                   <div className="space-y-1">
                     <input
                       className="field font-mono"
@@ -1556,7 +1774,6 @@ export function StudentForm({
                       const l4 =
                         aadhaarLast4 || aadhaarNumber.replace(/\D/g, "").slice(-4);
                       setAadhaarLast4(l4);
-                      setAadhaarNumber("");
                     }
                   }}
                 >
@@ -1585,7 +1802,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={fatherName}
-                  onChange={(e) => setFatherName(e.target.value)}
+                  onChange={(e) => setFatherName(e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Father mobile">
@@ -1601,21 +1818,10 @@ export function StudentForm({
               </Field>
               <Field
                 label={
-                  fatherAadhaarVerification === "verified_udise"
-                    ? "Father Aadhaar (verified — last 4)"
-                    : "Father Aadhaar (full — for APAAR)"
+                  "Father Aadhaar (12 digits — for APAAR)"
                 }
               >
-                {fatherAadhaarVerification === "verified_udise" ? (
-                  <input
-                    className="field"
-                    readOnly
-                    value={displayAadhaar({
-                      last4: fatherAadhaarLast4,
-                      verification: "verified_udise",
-                    })}
-                  />
-                ) : (
+                {(
                   <input
                     className="field font-mono"
                     value={fatherAadhaarNumber}
@@ -1664,21 +1870,21 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.fatherOccupation}
-                  onChange={(e) => setEx("fatherOccupation", e.target.value)}
+                  onChange={(e) => setEx("fatherOccupation", e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Father qualification">
                 <input
                   className="field"
                   value={extra.fatherQualification}
-                  onChange={(e) => setEx("fatherQualification", e.target.value)}
+                  onChange={(e) => setEx("fatherQualification", e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Mother’s name">
                 <input
                   className="field"
                   value={motherName}
-                  onChange={(e) => setMotherName(e.target.value)}
+                  onChange={(e) => setMotherName(e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Mother mobile">
@@ -1694,21 +1900,10 @@ export function StudentForm({
               </Field>
               <Field
                 label={
-                  motherAadhaarVerification === "verified_udise"
-                    ? "Mother Aadhaar (verified — last 4)"
-                    : "Mother Aadhaar (full — for APAAR)"
+                  "Mother Aadhaar (12 digits — for APAAR)"
                 }
               >
-                {motherAadhaarVerification === "verified_udise" ? (
-                  <input
-                    className="field"
-                    readOnly
-                    value={displayAadhaar({
-                      last4: motherAadhaarLast4,
-                      verification: "verified_udise",
-                    })}
-                  />
-                ) : (
+                {(
                   <input
                     className="field font-mono"
                     value={motherAadhaarNumber}
@@ -1757,14 +1952,14 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.motherOccupation}
-                  onChange={(e) => setEx("motherOccupation", e.target.value)}
+                  onChange={(e) => setEx("motherOccupation", e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Mother qualification">
                 <input
                   className="field"
                   value={extra.motherQualification}
-                  onChange={(e) => setEx("motherQualification", e.target.value)}
+                  onChange={(e) => setEx("motherQualification", e.target.value.toUpperCase())}
                 />
               </Field>
               <Field label="Family income / year (₹)">
@@ -1787,7 +1982,7 @@ export function StudentForm({
                   <input
                     className="field"
                     value={extra.bankName}
-                    onChange={(e) => setEx("bankName", e.target.value)}
+                    onChange={(e) => setEx("bankName", e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="Account number">
@@ -1827,6 +2022,10 @@ export function StudentForm({
                       setMobile(hh.mobile);
                       setWhatsappMobile(hh.whatsappMobile || hh.mobile);
                       setAltMobile(hh.altMobile);
+                      setPreferredLanguage(hh.preferredLanguage);
+                      setChannelPreference(hh.channelPreference);
+                      setQuietHoursStart(hh.quietHoursStart);
+                      setQuietHoursEnd(hh.quietHoursEnd);
                       setEmail(hh.email);
                       setAddress(hh.address);
                       setLocality(hh.locality);
@@ -1853,18 +2052,18 @@ export function StudentForm({
                   <input
                     className="field"
                     value={guardianName}
-                    onChange={(e) => setGuardianName(e.target.value)}
+                    onChange={(e) => setGuardianName(e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="Guardian relation">
                   <input
                     className="field"
                     value={guardianRelation}
-                    onChange={(e) => setGuardianRelation(e.target.value)}
+                    onChange={(e) => setGuardianRelation(e.target.value.toUpperCase())}
                     placeholder="Father / Mother / Other"
                   />
                 </Field>
-                <Field label="Mobile (10 digits)">
+                <Field label="Mobile (10 digits)" required>
                   <input
                     className="field"
                     value={mobile}
@@ -1910,6 +2109,82 @@ export function StudentForm({
                   />
                 </Field>
               </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Field label="Preferred language">
+                  <select
+                    className="field"
+                    value={preferredLanguage}
+                    disabled={!languageOverride}
+                    onChange={(e) => setPreferredLanguage(e.target.value)}
+                  >
+                    <option value="">Not asked yet</option>
+                    {HOUSEHOLD_LANGUAGES.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.label} · {l.native}
+                      </option>
+                    ))}
+                  </select>
+                  {/*
+                    The FAMILY owns this. They set it themselves over WhatsApp
+                    by replying LANG, and the school writes to them in the
+                    language they chose — which is the whole point of asking.
+                    The office can still change it for a parent who asks at the
+                    counter, but deliberately: one extra click, and the change
+                    is written to the audit trail with who made it. A field
+                    anyone can quietly flip is how a family ends up being
+                    written to in a language they did not pick.
+                  */}
+                  {languageOverride ? (
+                    <p className="mt-1 text-[11px] text-[var(--warning)]">
+                      Overriding the family’s own choice — this is recorded
+                      against your name.
+                    </p>
+                  ) : (
+                    <button
+                      type="button"
+                      className="mt-1 text-[11px] underline text-[var(--muted)]"
+                      onClick={() => setLanguageOverride(true)}
+                    >
+                      Set by the family over WhatsApp (reply LANG) — override
+                      for them
+                    </button>
+                  )}
+                </Field>
+                <Field label="Preferred channel">
+                  <select
+                    className="field"
+                    value={channelPreference}
+                    onChange={(e) => setChannelPreference(e.target.value)}
+                  >
+                    <option value="">Not asked yet</option>
+                    {HOUSEHOLD_CHANNELS.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Quiet hours from">
+                  <input
+                    className="field"
+                    type="time"
+                    value={quietHoursStart}
+                    onChange={(e) => setQuietHoursStart(e.target.value)}
+                  />
+                </Field>
+                <Field label="Quiet hours until">
+                  <input
+                    className="field"
+                    type="time"
+                    value={quietHoursEnd}
+                    onChange={(e) => setQuietHoursEnd(e.target.value)}
+                  />
+                  <p className="mt-1 text-[11px] text-[var(--muted)]">
+                    Non-urgent messages (fee reminders, campaigns) wait
+                    outside this window. Attendance and safety alerts ignore it.
+                  </p>
+                </Field>
+              </div>
               <Field label="Address line (house / street)">
                 <AddressAutocompleteField
                   value={address}
@@ -1934,7 +2209,7 @@ export function StudentForm({
                   <input
                     className="field"
                     value={locality}
-                    onChange={(e) => setLocality(e.target.value)}
+                    onChange={(e) => setLocality(e.target.value.toUpperCase())}
                     placeholder="e.g. Lanka, BHU side"
                   />
                 </Field>
@@ -1942,7 +2217,7 @@ export function StudentForm({
                   <input
                     className="field"
                     value={landmark}
-                    onChange={(e) => setLandmark(e.target.value)}
+                    onChange={(e) => setLandmark(e.target.value.toUpperCase())}
                     placeholder="Near temple / crossing"
                   />
                 </Field>
@@ -1956,14 +2231,14 @@ export function StudentForm({
                   <input
                     className="field"
                     value={city}
-                    onChange={(e) => setCity(e.target.value)}
+                    onChange={(e) => setCity(e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="State">
                   <input
                     className="field"
                     value={stateName}
-                    onChange={(e) => setStateName(e.target.value)}
+                    onChange={(e) => setStateName(e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="PIN">
@@ -1975,6 +2250,23 @@ export function StudentForm({
                     }
                     inputMode="numeric"
                     maxLength={6}
+                  />
+                  {/* Offers the post office's district and state. Offers, not
+                      fills: an address dictated at the counter is not ours to
+                      overwrite, so nothing moves without a press. */}
+                  <PincodeFill
+                    pincode={pincode}
+                    onFill={(d) => {
+                      if (d.district) setCity(d.district.toUpperCase());
+                      if (d.state) setStateName(d.state.toUpperCase());
+                      // Only offer a locality when there is no doubt which
+                      // one — a PIN with twenty post offices is a picker, and
+                      // a picker is not worth putting in front of the office
+                      // for a field they can type.
+                      if (d.localities.length === 1 && !locality.trim()) {
+                        setLocality(d.localities[0]);
+                      }
+                    }}
                   />
                 </Field>
               </div>
@@ -1988,7 +2280,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.permanentAddress}
-                  onChange={(e) => setEx("permanentAddress", e.target.value)}
+                  onChange={(e) => setEx("permanentAddress", e.target.value.toUpperCase())}
                   placeholder="Leave blank if same as above"
                 />
               </Field>
@@ -1997,14 +2289,14 @@ export function StudentForm({
                   <input
                     className="field"
                     value={extra.permanentCity}
-                    onChange={(e) => setEx("permanentCity", e.target.value)}
+                    onChange={(e) => setEx("permanentCity", e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="Permanent state">
                   <input
                     className="field"
                     value={extra.permanentState}
-                    onChange={(e) => setEx("permanentState", e.target.value)}
+                    onChange={(e) => setEx("permanentState", e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="Permanent PIN">
@@ -2033,7 +2325,7 @@ export function StudentForm({
                   <input
                     className="field"
                     value={emergencyName}
-                    onChange={(e) => setEmergencyName(e.target.value)}
+                    onChange={(e) => setEmergencyName(e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="Mobile">
@@ -2058,23 +2350,22 @@ export function StudentForm({
               UDISE PEN, APAAR, SRN and previous-school details. Student Aadhaar
               verification does{" "}
               <strong className="font-semibold">not</strong> auto-create APAAR —
-              parent Aadhaar is also required on UDISE+. PEN locks once student
-              Aadhaar is verified and PEN is on file; APAAR locks only after the
-              APAAR ID is filled.
+              parent Aadhaar is also required on UDISE+. Every field here stays
+              editable — saving never waits on UDISE+.
             </p>
             {aadhaarVerification === "verified_udise" ? (
-              <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-xs text-[#0f7a4c]">
+              <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-xs text-[var(--success)]">
                 Student Aadhaar verified by UDISE+
                 {pen.trim()
-                  ? " — PEN is read-only."
+                  ? " — PEN is on file."
                   : " — generate / sync PEN from portal."}
                 {!apaarId.trim()
                   ? " APAAR still needs parent Aadhaar + generation on UDISE+ (not automatic)."
-                  : " APAAR is on file and read-only."}
+                  : " APAAR is on file."}
               </p>
             ) : null}
             {udiseAgeBelowClassAlert ? (
-              <p className="mb-3 rounded-lg border border-[#b42318] bg-[rgba(180,35,24,0.12)] px-3 py-2 text-xs font-semibold text-[#b42318]">
+              <p className="mb-3 rounded-lg border border-[var(--danger)] bg-[rgba(180,35,24,0.12)] px-3 py-2 text-xs font-semibold text-[var(--danger)]">
                 Notify school: student age is below for this class (govt MBU
                 Pending). MBU: {udiseMbuStatus || "Pending"}.
                 {udisePortalClassHint
@@ -2111,9 +2402,7 @@ export function StudentForm({
             <div className="grid gap-3 sm:grid-cols-2">
               <Field
                 label={
-                  aadhaarVerification === "verified_udise" && pen.trim()
-                    ? "PEN — no edit required"
-                    : "PEN (if already has PEN from previous school)"
+                  "PEN (leave blank if fresh UDISE+ registration)"
                 }
               >
                 <input
@@ -2128,12 +2417,6 @@ export function StudentForm({
                     if (!v.trim()) setUdiseInboundTransferPending(false);
                   }}
                   placeholder="Leave blank if fresh UDISE registration"
-                  readOnly={
-                    aadhaarVerification === "verified_udise" && !!pen.trim()
-                  }
-                  disabled={
-                    aadhaarVerification === "verified_udise" && !!pen.trim()
-                  }
                 />
               </Field>
               <Field label="PEN status">
@@ -2141,9 +2424,6 @@ export function StudentForm({
                   className="field"
                   value={penStatus}
                   onChange={(e) => setPenStatus(e.target.value as PenStatus)}
-                  disabled={
-                    aadhaarVerification === "verified_udise" && !!pen.trim()
-                  }
                 >
                   {PEN_STATUSES.map((p) => (
                     <option key={p.value || "none"} value={p.value}>
@@ -2162,21 +2442,19 @@ export function StudentForm({
                 <input
                   className="field"
                   value={apaarId}
-                  onChange={(e) => setApaarId(e.target.value)}
+                  onChange={(e) => setApaarId(e.target.value.toUpperCase())}
                   placeholder={
                     apaarId.trim()
                       ? undefined
                       : "Empty until parent Aadhaar + UDISE+ APAAR generation"
                   }
-                  readOnly={!!apaarId.trim()}
-                  disabled={!!apaarId.trim()}
                 />
               </Field>
               <Field label="SRN">
                 <input
                   className="field"
                   value={srn}
-                  onChange={(e) => setSrn(e.target.value)}
+                  onChange={(e) => setSrn(e.target.value.toUpperCase())}
                   placeholder="School registration no."
                 />
               </Field>
@@ -2190,7 +2468,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={previousSchool}
-                  onChange={(e) => setPreviousSchool(e.target.value)}
+                  onChange={(e) => setPreviousSchool(e.target.value.toUpperCase())}
                   placeholder={
                     pen.trim() ? "School that holds this PEN on UDISE+" : ""
                   }
@@ -2210,7 +2488,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={extra.previousSchoolYear}
-                  onChange={(e) => setEx("previousSchoolYear", e.target.value)}
+                  onChange={(e) => setEx("previousSchoolYear", e.target.value.toUpperCase())}
                   placeholder="e.g. 2024-25"
                 />
               </Field>
@@ -2218,7 +2496,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={previousTcNo}
-                  onChange={(e) => setPreviousTcNo(e.target.value)}
+                  onChange={(e) => setPreviousTcNo(e.target.value.toUpperCase())}
                 />
               </Field>
               <Field
@@ -2231,7 +2509,7 @@ export function StudentForm({
                 <input
                   className="field"
                   value={previousUdise}
-                  onChange={(e) => setPreviousUdise(e.target.value)}
+                  onChange={(e) => setPreviousUdise(e.target.value.toUpperCase())}
                   placeholder={
                     pen.trim() ? "e.g. 09674104900" : "UDISE code of previous school"
                   }
@@ -2257,7 +2535,7 @@ export function StudentForm({
                   <input
                     className="field"
                     value={extra.registrationNo}
-                    onChange={(e) => setEx("registrationNo", e.target.value)}
+                    onChange={(e) => setEx("registrationNo", e.target.value.toUpperCase())}
                     placeholder="e.g. 2025-2026/205"
                   />
                 </Field>
@@ -2265,28 +2543,28 @@ export function StudentForm({
                   <input
                     className="field"
                     value={extra.admissionFormNo}
-                    onChange={(e) => setEx("admissionFormNo", e.target.value)}
+                    onChange={(e) => setEx("admissionFormNo", e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="Admission class (at first admission)">
                   <input
                     className="field"
                     value={extra.admissionClass}
-                    onChange={(e) => setEx("admissionClass", e.target.value)}
+                    onChange={(e) => setEx("admissionClass", e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="TC number (issued on leaving)">
                   <input
                     className="field"
                     value={extra.tcNo}
-                    onChange={(e) => setEx("tcNo", e.target.value)}
+                    onChange={(e) => setEx("tcNo", e.target.value.toUpperCase())}
                   />
                 </Field>
                 <Field label="Transport route">
                   <input
                     className="field"
                     value={extra.transportRoute}
-                    onChange={(e) => setEx("transportRoute", e.target.value)}
+                    onChange={(e) => setEx("transportRoute", e.target.value.toUpperCase())}
                     placeholder="Bus route name (Transport module owns routing)"
                   />
                 </Field>
@@ -2299,8 +2577,10 @@ export function StudentForm({
           <div>
             <p className="mb-3 text-xs text-[var(--muted)]">
               Upload PDF or image for each document. Passport photo stays in sync
-              with Basic. Mark verified after office check. Demo stores files in
-              the browser; production uses Supabase Storage.
+              with Basic. Mark verified after office check.
+              {studentId
+                ? " Files are stored in Google Drive."
+                : " Save the student first — documents attach to a saved record."}
             </p>
             <ul className="divide-y divide-[rgba(32,48,80,0.08)] rounded-xl border border-[rgba(32,48,80,0.12)]">
               {DOC_LABELS.map((d) => (
@@ -2308,6 +2588,8 @@ export function StudentForm({
                   key={d.key}
                   label={d.label}
                   value={docs[d.key]}
+                  studentId={studentId}
+                  docKey={d.key}
                   isPhoto={d.key === "photo"}
                   onChange={(file) => setDocFile(d.key, file)}
                   onError={flash}
@@ -2369,14 +2651,23 @@ export function StudentForm({
 
 function Field({
   label,
+  required,
   children,
 }: {
   label: string;
+  required?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <label className="mt-3 block text-sm first:mt-0">
-      <span className="mb-1.5 block text-[var(--muted)]">{label}</span>
+      <span className="mb-1.5 block text-[var(--muted)]">
+        {label}
+        {required ? (
+          <span className="ml-0.5 text-[var(--danger,#b3261e)]" aria-hidden="true">
+            *
+          </span>
+        ) : null}
+      </span>
       {children}
     </label>
   );

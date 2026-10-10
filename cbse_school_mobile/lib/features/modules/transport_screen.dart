@@ -1,0 +1,457 @@
+import "package:flutter/material.dart";
+import "package:url_launcher/url_launcher.dart";
+
+import "../../core/api/api_client.dart";
+import "../../core/theme/app_theme.dart";
+import "../../core/ui/haptics.dart";
+import "pickup_pin_screen.dart";
+import "bus_live_map_screen.dart";
+import "bus_routes_screen.dart";
+import "module_shell.dart";
+import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
+
+/// The family's school transport: for each child, the bus they ride —
+/// route, stop, vehicle, driver with a call button — or, if they do not,
+/// the state of their transport request, or a way to make one.
+class TransportScreen extends StatelessWidget {
+  const TransportScreen({super.key, required this.api});
+
+  final ApiClient api;
+
+  @override
+  Widget build(BuildContext context) {
+    return ModuleShell<MyTransport>(
+      guideId: "transport",
+      title: context.l10n.transport,
+      load: api.fetchMyTransport,
+      builder: (context, mine, reload) => ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [
+          for (final child in mine.children)
+            _ChildCard(api: api, child: child, mine: mine, reload: reload),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => BusRoutesScreen(api: api)),
+            ),
+            icon: const Icon(Icons.map_outlined, size: 18),
+            label: Text(context.l10n.seeAllBusRoutesAndStops),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChildCard extends StatelessWidget {
+  const _ChildCard({
+    required this.api,
+    required this.child,
+    required this.mine,
+    required this.reload,
+  });
+
+  final ApiClient api;
+  final ChildTransportInfo child;
+  final MyTransport mine;
+  final Future<void> Function() reload;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = child.transport;
+    final r = child.request;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              child.fullName,
+              style: AppText.bodyLargeInk.copyWith(fontWeight: FontWeight.w600),
+            ),
+            Text(child.classLabel, style: AppText.bodySmallMuted),
+            const SizedBox(height: 10),
+            if (t != null) ...[
+              _Row(
+                Icons.alt_route,
+                context.l10n.busRouteLine(t.routeCode, t.routeName),
+              ),
+              _Row(
+                Icons.place_outlined,
+                context.l10n.busStopLine(t.stopName.isEmpty ? "—" : t.stopName),
+              ),
+              _Row(
+                Icons.directions_bus_outlined,
+                [
+                  t.vehicleName,
+                  t.vehicleReg,
+                ].where((x) => x.isNotEmpty).toSet().join(" · "),
+              ),
+              _Row(Icons.schedule_outlined, switch (t.serviceMode) {
+                "pickup" => context.l10n.busMorningPickupOnly,
+                "drop" => context.l10n.busAfternoonDropOnly,
+                _ => context.l10n.busPickupAndDrop,
+              }),
+              if (t.monthlyFeeLabel.isNotEmpty && t.monthlyFeeLabel != "₹0")
+                _Row(
+                  Icons.payments_outlined,
+                  context.l10n.busFeePerMonth(t.monthlyFeeLabel),
+                ),
+              if (t.suspended)
+                Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Text(
+                    context.l10n.boardingIsPausedByTheOffice,
+                    style: AppText.bodySmall.copyWith(color: AppColors.warning),
+                  ),
+                ),
+              const SizedBox(height: 8),
+              if (t.driverName.isNotEmpty || t.canCallDriver)
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.person_outline,
+                      size: 18,
+                      color: AppColors.muted,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        context.l10n.busDriverLine(
+                          t.driverName.isEmpty ? "—" : t.driverName,
+                        ),
+                        style: AppText.bodyMediumInk,
+                      ),
+                    ),
+                    if (t.canCallDriver)
+                      FilledButton.icon(
+                        onPressed: () => _call(context, t.driverMobile),
+                        icon: const Icon(Icons.call, size: 18),
+                        label: Text(context.l10n.call),
+                      ),
+                  ],
+                )
+              else
+                Text(
+                  context.l10n.driverSNumberIsNotOn,
+                  style: AppText.bodySmallMuted,
+                ),
+              const SizedBox(height: 10),
+              // The bus on a real map — the tracked buses report a position
+              // every minute; an untracked van says so on the map screen
+              // rather than hiding the button.
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: () {
+                    Haptics.tap();
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => BusLiveMapScreen(
+                          api: api,
+                          studentId: child.id,
+                          childName: child.fullName,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.location_on_outlined, size: 18),
+                  label: Text(context.l10n.busLiveBusLocation),
+                ),
+              ),
+              const SizedBox(height: 6),
+              // Where this child boards — a pin the transport office plans
+              // stops from (pickup_pin_screen.dart). One pin for every
+              // riding child of the family.
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Haptics.tap();
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => PickupPinScreen(api: api),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.push_pin_outlined, size: 18),
+                  label: Text(
+                    Localizations.localeOf(context).languageCode == "hi"
+                        ? "मेरा पिकअप पॉइंट लगाएँ"
+                        : "Set my pickup point",
+                  ),
+                ),
+              ),
+            ] else ...[
+              Text(
+                context.l10n.notUsingSchoolTransport,
+                style: AppText.bodyMediumInk,
+              ),
+              const SizedBox(height: 8),
+              if (r != null && r.isActive) ...[
+                _StatusLine(r),
+                const SizedBox(height: 4),
+                Text(
+                  context.l10n.theTransportInChargeWillCall,
+                  style: AppText.bodySmallMuted,
+                ),
+              ] else ...[
+                if (r != null) ...[_StatusLine(r), const SizedBox(height: 6)],
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton.icon(
+                    onPressed: () => _request(context),
+                    icon: const Icon(Icons.directions_bus_outlined, size: 18),
+                    label: Text(
+                      r == null
+                          ? context.l10n.busRequestSchoolTransport
+                          : context.l10n.busRequestAgain,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _call(BuildContext context, String mobile) async {
+    final digits = mobile.replaceAll(RegExp(r"\D"), "");
+    final ok = await launchUrl(Uri.parse("tel:$digits"));
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.busCouldNotStartCall(mobile))),
+      );
+    }
+  }
+
+  Future<void> _request(BuildContext context) async {
+    final sent = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => _RequestForm(api: api, child: child, mine: mine),
+    );
+    if (sent == true) {
+      Haptics.success();
+      await reload();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.requestSentTheSchoolWillGet)),
+        );
+      }
+    }
+  }
+}
+
+class _StatusLine extends StatelessWidget {
+  const _StatusLine(this.r);
+
+  final TransportRequestState r;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, tone) = switch (r.status) {
+      "contacted" => (context.l10n.busStatusContacted, ModuleTone.blue),
+      "assigned" => (context.l10n.busStatusAssigned, ModuleTone.green),
+      "declined" => (context.l10n.busStatusDeclined, ModuleTone.coral),
+      _ => (context.l10n.busStatusRequested, ModuleTone.amber),
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: tone.background,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            label,
+            style: AppText.labelMedium.copyWith(
+              color: tone.foreground,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        if (r.handlingNote.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              context.l10n.profSchoolNote(r.handlingNote),
+              style: AppText.bodySmallMuted,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _Row extends StatelessWidget {
+  const _Row(this.icon, this.text);
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: AppColors.muted),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: AppText.bodyMediumInk)),
+        ],
+      ),
+    );
+  }
+}
+
+class _RequestForm extends StatefulWidget {
+  const _RequestForm({
+    required this.api,
+    required this.child,
+    required this.mine,
+  });
+
+  final ApiClient api;
+  final ChildTransportInfo child;
+  final MyTransport mine;
+
+  @override
+  State<_RequestForm> createState() => _RequestFormState();
+}
+
+class _RequestFormState extends State<_RequestForm> {
+  late final _address = TextEditingController(text: widget.mine.address);
+  late final _locality = TextEditingController(text: widget.mine.locality);
+  late final _landmark = TextEditingController(text: widget.mine.landmark);
+  final _stop = TextEditingController();
+  final _note = TextEditingController();
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    for (final c in [_address, _locality, _landmark, _stop, _note]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    if (_busy) return;
+    if (_address.text.trim().isEmpty) {
+      Haptics.warning();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.pleaseGiveThePickupAddress)),
+      );
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await widget.api.requestTransport(
+        studentId: widget.child.id,
+        pickupAddress: _address.text.trim(),
+        locality: _locality.text.trim(),
+        landmark: _landmark.text.trim(),
+        preferredStop: _stop.text.trim(),
+        note: _note.text.trim(),
+      );
+      if (mounted) Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.couldNotReachTheSchoolServer)),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inset = MediaQuery.viewInsetsOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 16, 20, 20 + inset),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              context.l10n.busTransportForChild(widget.child.fullName),
+              style: AppText.titleMediumInk,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              context.l10n.tellTheSchoolWhereToPick,
+              style: AppText.bodySmallMuted.copyWith(height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            DictateField(
+              label: context.l10n.pickupAddress,
+              controller: _address,
+              maxLines: 2,
+              textCapitalization: TextCapitalization.sentences,
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _locality,
+              textCapitalization: TextCapitalization.words,
+              decoration: InputDecoration(
+                labelText: context.l10n.localityVillage,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _landmark,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: InputDecoration(labelText: context.l10n.landmark),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _stop,
+              textCapitalization: TextCapitalization.words,
+              decoration: InputDecoration(
+                labelText: context.l10n.preferredStopIfYouKnowOne,
+              ),
+            ),
+            const SizedBox(height: 10),
+            DictateField(
+              label: context.l10n.anythingElse,
+              controller: _note,
+              maxLines: 2,
+              textCapitalization: TextCapitalization.sentences,
+            ),
+            const SizedBox(height: 4),
+            FilledButton(
+              onPressed: _busy ? null : _send,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(46),
+              ),
+              child: Text(
+                _busy ? context.l10n.profSending : context.l10n.profSendRequest,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

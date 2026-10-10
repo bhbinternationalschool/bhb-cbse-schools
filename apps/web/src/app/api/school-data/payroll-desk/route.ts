@@ -3,9 +3,14 @@ import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
+import { deskReadGate, visibleSlices } from "@/lib/deskFeatureGate.server";
 import type { PayrollState } from "@/lib/payroll";
 import { payrollDualWriteDbEnabled } from "@/lib/payrollDbConfig";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { readStampsParam } from "@/lib/rowStampClient";
 import {
+  PAYROLL_DELETABLE_TABLES,
+  PAYROLL_STAMPED_SLICES,
   fetchPayrollDeskFromDb,
   pushPayrollDeskToDb,
 } from "@/lib/payrollNormalized.server";
@@ -13,15 +18,38 @@ import {
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["payroll-desk"], "GET");
-  if (!auth.ok) return auth.response
-  const { bundle, meta } = await fetchPayrollDeskFromDb();
+  // The Payroll grant, or the read-only "Payroll runs & payslips" function,
+  // which owns both desk keys — its reader gets the whole desk, never a
+  // cut-down copy. Writing payslips stays module-level (POST below).
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["payroll-desk"]);
+  if (gate.mode === "deny") return gate.response;
+  if (gate.mode === "feature") {
+    const seen = visibleSlices("payroll", gate);
+    if (!seen.has("runs") || !seen.has("audit")) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Reading payroll runs needs the Payroll grant or the payslips function.",
+          reason: "feature_forbidden",
+        },
+        { status: 403 },
+      );
+    }
+  }
+  const { bundle, meta, ok, stamps } = await fetchPayrollDeskFromDb();
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: "Failed to fetch payroll desk" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     ...bundle,
     runCount: bundle.runs.length,
     updatedAt: meta?.updatedAt || new Date().toISOString(),
     meta,
+    stamps,
   });
 }
 
@@ -32,7 +60,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
-  let body: Pick<PayrollState, "runs" | "audit">;
+  let body: Pick<PayrollState, "runs" | "audit"> & { deletes?: unknown; stamps?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -43,6 +71,9 @@ export async function POST(req: Request) {
     version: 2,
     runs: body.runs ?? [],
     audit: body.audit ?? [],
+  }, readNamedDeletes(body.deletes, PAYROLL_DELETABLE_TABLES), {
+    // No stamps = a tab from before 10 Oct 2026: it may add, never replace.
+    stamps: readStampsParam(body.stamps, PAYROLL_STAMPED_SLICES),
   });
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 502 });
@@ -52,5 +83,7 @@ export async function POST(req: Request) {
     ok: true,
     runCount: body.runs?.length ?? 0,
     updatedAt: new Date().toISOString(),
+    stamps: result.stamps,
+    conflicts: result.conflicts,
   });
 }

@@ -6,6 +6,7 @@ import {
   pendingApprovals,
   type AutomationModule,
   type AutomationRule,
+  type AutomationRun,
   type AutomationState,
 } from "@/lib/automation";
 import { describeCronExpr, describeIntervalMinutes } from "@/lib/automationSchedule";
@@ -23,6 +24,30 @@ import {
 } from "./automationUi";
 
 type ListTab = "active" | "paused" | "approvals" | "runs";
+
+/**
+ * What a run's numbers mean, in words.
+ *
+ * "proposed 146 · dispatched 0" is exactly right and reads as a failure.
+ * Nothing on the row said the run was simply waiting for someone to press
+ * Approve & send, so a queue of ordinary pending work looked like a broken
+ * automation. The status word carries the meaning now and the counts follow
+ * it.
+ */
+function runStateLabel(r: AutomationRun): string {
+  switch (r.status) {
+    case "proposed":
+      return "waiting for approval";
+    case "running":
+      return "approved, sending";
+    case "completed":
+      return "sent";
+    case "cancelled":
+      return "rejected";
+    default:
+      return "failed";
+  }
+}
 
 function scheduleLabel(r: AutomationRule): string {
   if (r.triggerType === "schedule" && r.cronExpr) {
@@ -47,6 +72,8 @@ export function AutomationListView({
   onDispatchApproval,
   onRejectApproval,
   onSnoozeApproval,
+  sendingIds = [],
+  evaluating = false,
 }: {
   state: AutomationState;
   readOnly: boolean;
@@ -57,6 +84,9 @@ export function AutomationListView({
   onDispatchApproval: (id: string) => void;
   onRejectApproval: (id: string) => void;
   onSnoozeApproval: (id: string) => void;
+  /** Cards whose send is in flight — their buttons must not be pressable. */
+  sendingIds?: string[];
+  evaluating?: boolean;
 }) {
   const [tab, setTab] = useState<ListTab>("active");
   const [moduleFilter, setModuleFilter] = useState<AutomationModule | "all">(
@@ -99,6 +129,17 @@ export function AutomationListView({
             <strong>approval-first</strong>; enable auto-run only after Mark
             tested. Last tick: {state.lastTickAt || "never"}
           </p>
+          <p className="mt-1 max-w-2xl text-[12px] text-[var(--muted)]">
+            Looking for what actually went out — delivery ticks, numbers to
+            fix, what WhatsApp cost? Those moved to{" "}
+            <a
+              className="font-semibold text-[var(--brand-deep)] underline"
+              href="/comms?tab=whatsapp"
+            >
+              Communications → WhatsApp
+            </a>
+            , next to sending. This screen keeps the rules, approvals and runs.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {notice ? (
@@ -118,15 +159,16 @@ export function AutomationListView({
             <button
               type="button"
               className={autoBtnOutline}
+              disabled={evaluating}
               onClick={onEvaluate}
             >
-              Run evaluation now
+              {evaluating ? "Evaluating…" : "Run evaluation now"}
             </button>
           ) : null}
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 border-b border-[rgba(32,48,80,0.1)] pb-2">
+      <div className="flex flex-wrap gap-2 border-b border-[var(--border)] pb-2">
         {(
           [
             { id: "active" as ListTab, label: `Active (${activeCount})` },
@@ -143,8 +185,8 @@ export function AutomationListView({
             type="button"
             className={`rounded-lg px-4 py-2 text-[12px] font-semibold ${
               tab === t.id
-                ? "bg-[var(--brand-deep)] text-white"
-                : "bg-[rgba(32,48,80,0.06)] text-[var(--brand-deep)]"
+                ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                : "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
             }`}
             onClick={() => setTab(t.id)}
           >
@@ -198,12 +240,12 @@ export function AutomationListView({
                   : "No paused rules."}
               </div>
             ) : (
-              <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+              <ul className="divide-y divide-[var(--border)]">
                 {filteredRules.map((r) => (
                   <li key={r.id}>
                     <button
                       type="button"
-                      className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left hover:bg-[rgba(32,48,80,0.04)]"
+                      className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left hover:bg-[var(--surface-sunken)]"
                       onClick={() => onEdit(r.id)}
                     >
                       <div className="min-w-0 flex-1">
@@ -246,7 +288,7 @@ export function AutomationListView({
               label="No pending approvals. Run evaluation on enabled rules."
             />
           ) : (
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {pending.map((a) => (
                 <li key={a.id} className="space-y-2 px-3 py-3">
                   <div>
@@ -259,24 +301,33 @@ export function AutomationListView({
                       {new Date(a.createdAt).toLocaleString()}
                     </p>
                   </div>
-                  <pre className="whitespace-pre-wrap rounded-lg bg-[rgba(32,48,80,0.04)] p-2 text-[11px]">
+                  <pre className="whitespace-pre-wrap rounded-lg bg-[var(--surface-sunken)] p-2 text-[11px]">
                     {a.previewBody}
                   </pre>
                   <p className="text-[10px] text-[var(--muted)]">
-                    Samples: {a.sampleRecipients.join(", ")}
+                    Samples: {a.sampleRecipients.join(", ") || "—"}
                   </p>
+                  {a.audienceNote ? (
+                    <p className="text-[10px] text-[var(--muted)]">
+                      {a.audienceNote}
+                    </p>
+                  ) : null}
                   {!readOnly ? (
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         className={autoBtnSuccess}
+                        disabled={sendingIds.includes(a.id)}
                         onClick={() => onDispatchApproval(a.id)}
                       >
-                        Approve & send
+                        {sendingIds.includes(a.id)
+                          ? `Sending to ${a.audienceCount}…`
+                          : "Approve & send"}
                       </button>
                       <button
                         type="button"
                         className={autoBtnDanger}
+                        disabled={sendingIds.includes(a.id)}
                         onClick={() => onRejectApproval(a.id)}
                       >
                         Reject
@@ -284,10 +335,17 @@ export function AutomationListView({
                       <button
                         type="button"
                         className={autoBtnOutline}
+                        disabled={sendingIds.includes(a.id)}
                         onClick={() => onSnoozeApproval(a.id)}
                       >
                         Snooze 24h
                       </button>
+                      {sendingIds.includes(a.id) ? (
+                        <span className="text-[10px] text-[var(--muted)]">
+                          Do not press again — one press sends to everyone on
+                          this card.
+                        </span>
+                      ) : null}
                     </div>
                   ) : null}
                 </li>
@@ -302,7 +360,7 @@ export function AutomationListView({
           {state.runs.length === 0 ? (
             <MastersEmptyRow label="No runs yet." />
           ) : (
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {state.runs.slice(0, 40).map((r) => {
                 const rule = state.rules.find((x) => x.id === r.ruleId);
                 return (
@@ -310,8 +368,11 @@ export function AutomationListView({
                     <span className="font-semibold text-[var(--brand-deep)]">
                       {rule?.name || r.ruleId}
                     </span>{" "}
-                    · {r.status} · proposed {r.stats.proposed} · dispatched{" "}
-                    {r.stats.dispatched}
+                    · {runStateLabel(r)} · {r.stats.proposed} proposed
+                    {r.status === "proposed" || r.status === "cancelled"
+                      ? ""
+                      : ` · ${r.stats.dispatched} sent`}
+                    {r.stats.failed ? ` · ${r.stats.failed} failed` : ""}
                     {r.error ? (
                       <span className="text-rose-700"> — {r.error}</span>
                     ) : null}

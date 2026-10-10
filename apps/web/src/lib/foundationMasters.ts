@@ -29,6 +29,12 @@ export type SchoolProfile = {
   udiseCode: string;
   boardMode: BoardMode;
   affiliationNo: string;
+  /**
+   * The school has applied for CBSE affiliation and it is not yet granted.
+   * Printed as "CBSE affiliation under process" — never as affiliated — and
+   * only while no real affiliation number is on file.
+   */
+  cbseAffiliationInProcess: boolean;
   schoolCode: string;
   address: string;
   city: string;
@@ -62,6 +68,44 @@ export type SchoolProfile = {
   directorStampSignatureUrl: string;
   /** School merchant UPI VPA for collections (registration / fees) */
   collectionsUpiVpa: string;
+};
+
+/** One slab in a late-payment damages table (EPF 14B-style / ESIC equivalent). */
+export type StatutoryPenaltySlab = {
+  /** Slab applies while days overdue <= this. Last slab should use a large number as "and above". */
+  maxDelayDays: number;
+  ratePctPerAnnum: number;
+};
+
+/**
+ * Establishment-level EPF/ESIC identity + rates. Penalty rates are configurable,
+ * not hardcoded, because EPFO/ESIC revise them by circular — a stored slab table
+ * beats a constant that silently goes stale.
+ */
+export type StatutoryEstablishmentConfig = {
+  epfEstablishmentId: string;
+  epfLin: string;
+  epfContributionRatePct: number;
+  applyEpfWageCeiling: boolean;
+  epfWageCeiling: number;
+  esicEmployerCode: string;
+  esicWageCeiling: number;
+  /**
+   * Low-wage exemption: staff whose monthly wages are up to this amount pay
+   * no employee ESIC share (ESI Act — daily wage up to ₹176 ≈ ₹5,000/month);
+   * the employer share is still payable. 0 = no exemption.
+   */
+  esicEmployeeExemptWageLimit: number;
+  esicEmployeeRatePct: number;
+  esicEmployerRatePct: number;
+  penalty: {
+    interestRatePctPerAnnum: number;
+    damageSlabs: StatutoryPenaltySlab[];
+    esicInterestRatePctPerAnnum: number;
+    esicDamageSlabs: StatutoryPenaltySlab[];
+    /** Free-text reference, e.g. "As per EPFO circular dated ..." — rates are estimates, not the authority's final levy. */
+    circularNote: string;
+  };
 };
 
 export type AyStatus = "current" | "closed" | "upcoming";
@@ -523,6 +567,8 @@ export type StaffDocFile = {
   mimeType: string;
   size: number;
   fileUrl: string;
+  /** Set once the file is in Drive; empty for legacy/unmigrated records. */
+  driveFileId?: string;
   uploadedAt: string;
   submittedBy?: string;
   submittedAt?: string;
@@ -557,6 +603,7 @@ export function emptyStaffDocFile(
     mimeType: "",
     size: 0,
     fileUrl: "",
+    driveFileId: "",
     uploadedAt: "",
     submittedBy: "",
     submittedAt: "",
@@ -615,6 +662,7 @@ function normalizeStaffDocFile(raw: unknown): StaffDocFile {
     mimeType: str(o.mimeType),
     size: typeof o.size === "number" ? o.size : 0,
     fileUrl: typeof o.fileUrl === "string" ? o.fileUrl : "",
+    driveFileId: typeof o.driveFileId === "string" ? o.driveFileId : "",
     uploadedAt: str(o.uploadedAt),
     submittedBy: str(o.submittedBy),
     submittedAt: str(o.submittedAt),
@@ -673,6 +721,7 @@ export type StaffDutyRole =
   | "exam_incharge"
   | "sports_incharge"
   | "discipline_incharge"
+  | "nurse_incharge"
   | "other";
 
 export type StaffDutyLink = {
@@ -700,6 +749,7 @@ export const STAFF_DUTY_ROLES: { value: StaffDutyRole; label: string }[] = [
   { value: "exam_incharge", label: "Exam in-charge" },
   { value: "sports_incharge", label: "Sports in-charge" },
   { value: "discipline_incharge", label: "Discipline in-charge" },
+  { value: "nurse_incharge", label: "Nurse / medical in-charge" },
   { value: "other", label: "Other duty" },
 ];
 
@@ -1081,6 +1131,7 @@ export type CompletenessItem = {
 
 export type FoundationSlice = {
   schoolProfile: SchoolProfile;
+  statutoryConfig: StatutoryEstablishmentConfig;
   /** Shared school day hours — default + class-group / class overrides */
   schoolTiming: SchoolTimingConfig;
   academicYears: AcademicYearMaster[];
@@ -1232,6 +1283,7 @@ export function defaultSchoolProfile(): SchoolProfile {
     udiseCode: "",
     boardMode: (TENANT.boardMode as BoardMode) || "DUAL",
     affiliationNo: TENANT.affiliationNo,
+    cbseAffiliationInProcess: false,
     schoolCode: TENANT.schoolCode,
     address: TENANT.schoolAddress,
     city: TENANT.city,
@@ -1255,6 +1307,39 @@ export function defaultSchoolProfile(): SchoolProfile {
     principalStampSignatureUrl: "",
     directorStampSignatureUrl: "",
     collectionsUpiVpa: "bhbschool@upi",
+  };
+}
+
+export function defaultStatutoryConfig(): StatutoryEstablishmentConfig {
+  return {
+    epfEstablishmentId: "",
+    epfLin: "",
+    epfContributionRatePct: 12,
+    applyEpfWageCeiling: true,
+    epfWageCeiling: 15000,
+    esicEmployerCode: "",
+    esicWageCeiling: 21000,
+    esicEmployeeExemptWageLimit: 5000,
+    esicEmployeeRatePct: 0.75,
+    esicEmployerRatePct: 3.25,
+    penalty: {
+      interestRatePctPerAnnum: 12,
+      damageSlabs: [
+        { maxDelayDays: 60, ratePctPerAnnum: 5 },
+        { maxDelayDays: 120, ratePctPerAnnum: 10 },
+        { maxDelayDays: 180, ratePctPerAnnum: 15 },
+        { maxDelayDays: 999999, ratePctPerAnnum: 25 },
+      ],
+      esicInterestRatePctPerAnnum: 12,
+      esicDamageSlabs: [
+        { maxDelayDays: 60, ratePctPerAnnum: 5 },
+        { maxDelayDays: 120, ratePctPerAnnum: 10 },
+        { maxDelayDays: 180, ratePctPerAnnum: 15 },
+        { maxDelayDays: 999999, ratePctPerAnnum: 25 },
+      ],
+      circularNote:
+        "Default slabs — confirm current rates against the latest EPFO/ESIC circular before relying on the estimate.",
+    },
   };
 }
 
@@ -1866,6 +1951,7 @@ export function defaultFoundationSlice(classes: SchoolClass[]): FoundationSlice 
 
   return {
     schoolProfile: defaultSchoolProfile(),
+    statutoryConfig: defaultStatutoryConfig(),
     schoolTiming: defaultSchoolTimingConfig(),
     academicYears,
     academicTerms,
@@ -1892,6 +1978,9 @@ export function normalizeSchoolProfile(
     udiseCode: p?.udiseCode ?? "",
     boardMode: (p?.boardMode as BoardMode) || d.boardMode,
     affiliationNo: p?.affiliationNo ?? d.affiliationNo,
+    // Carried through explicitly: a field normalize does not copy is dropped
+    // on the next save of the profile.
+    cbseAffiliationInProcess: p?.cbseAffiliationInProcess === true,
     schoolCode: p?.schoolCode ?? d.schoolCode,
     address: p?.address ?? d.address,
     city: p?.city ?? d.city,
@@ -1920,6 +2009,60 @@ export function normalizeSchoolProfile(
   };
 }
 
+function normalizePenaltySlabs(
+  raw: unknown,
+  fallback: StatutoryPenaltySlab[],
+): StatutoryPenaltySlab[] {
+  if (!Array.isArray(raw) || raw.length === 0) return fallback;
+  return raw
+    .map((s) => ({
+      maxDelayDays: Number((s as StatutoryPenaltySlab)?.maxDelayDays) || 0,
+      ratePctPerAnnum: Number((s as StatutoryPenaltySlab)?.ratePctPerAnnum) || 0,
+    }))
+    .filter((s) => s.maxDelayDays > 0);
+}
+
+export function normalizeStatutoryConfig(
+  p?: Partial<StatutoryEstablishmentConfig> | null,
+): StatutoryEstablishmentConfig {
+  const d = defaultStatutoryConfig();
+  return {
+    epfEstablishmentId: (p?.epfEstablishmentId ?? "").trim(),
+    epfLin: (p?.epfLin ?? "").trim(),
+    epfContributionRatePct:
+      Number(p?.epfContributionRatePct) || d.epfContributionRatePct,
+    applyEpfWageCeiling: p?.applyEpfWageCeiling ?? d.applyEpfWageCeiling,
+    epfWageCeiling: Number(p?.epfWageCeiling) || d.epfWageCeiling,
+    esicEmployerCode: (p?.esicEmployerCode ?? "").trim(),
+    esicWageCeiling: Number(p?.esicWageCeiling) || d.esicWageCeiling,
+    esicEmployeeExemptWageLimit:
+      p?.esicEmployeeExemptWageLimit === undefined || p?.esicEmployeeExemptWageLimit === null
+        ? d.esicEmployeeExemptWageLimit
+        : Math.max(0, Number(p.esicEmployeeExemptWageLimit) || 0),
+    esicEmployeeRatePct:
+      Number(p?.esicEmployeeRatePct) || d.esicEmployeeRatePct,
+    esicEmployerRatePct:
+      Number(p?.esicEmployerRatePct) || d.esicEmployerRatePct,
+    penalty: {
+      interestRatePctPerAnnum:
+        Number(p?.penalty?.interestRatePctPerAnnum) ||
+        d.penalty.interestRatePctPerAnnum,
+      damageSlabs: normalizePenaltySlabs(
+        p?.penalty?.damageSlabs,
+        d.penalty.damageSlabs,
+      ),
+      esicInterestRatePctPerAnnum:
+        Number(p?.penalty?.esicInterestRatePctPerAnnum) ||
+        d.penalty.esicInterestRatePctPerAnnum,
+      esicDamageSlabs: normalizePenaltySlabs(
+        p?.penalty?.esicDamageSlabs,
+        d.penalty.esicDamageSlabs,
+      ),
+      circularNote: p?.penalty?.circularNote ?? d.penalty.circularNote,
+    },
+  };
+}
+
 export function ensureFoundationOnMasters(state: MastersState): MastersState {
   const seed = defaultFoundationSlice(state.classes ?? []);
   const partial = state as MastersState & Partial<FoundationSlice>;
@@ -1930,6 +2073,7 @@ export function ensureFoundationOnMasters(state: MastersState): MastersState {
   return {
     ...state,
     schoolProfile: normalizeSchoolProfile(partial.schoolProfile),
+    statutoryConfig: normalizeStatutoryConfig(partial.statutoryConfig),
     schoolTiming: normalizeSchoolTimingConfig(partial.schoolTiming),
     academicYears: partial.academicYears?.length
       ? partial.academicYears
@@ -2159,7 +2303,7 @@ export function isPublishedHoliday(
 
 export const BOARD_MODES: { value: BoardMode; label: string }[] = [
   { value: "CBSE", label: "CBSE" },
-  { value: "UP_STATE", label: "UP State" },
+  { value: "UP_STATE", label: "UP Basic Education (state recognition)" },
   { value: "DUAL", label: "Dual (UP + CBSE path)" },
 ];
 

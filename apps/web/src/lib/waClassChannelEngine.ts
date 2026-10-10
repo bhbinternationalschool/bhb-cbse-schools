@@ -283,6 +283,37 @@ function emptyParsed(
   };
 }
 
+const EXPLICIT_POST_WORDS =
+  /(?<![\p{L}\p{M}\p{N}])(hw|homework|h\.w\.?|classwork|cw|diary|notice|circular|announce(?:ment)?|holiday|exam|unit\s*test|assessment|timings?|schedule|bell)(?![\p{L}\p{M}\p{N}])/iu;
+const QUESTION_SHAPED =
+  /[?？]\s*$|^(how|what|why|when|where|which|who|can|could|kya|kaise|kab|kahan|kyun|kyon|kaun|show|tell|my|mera|meri|mere|please\s+show|pls\s+show|sir|madam|mam)(?![\p{L}\p{M}\p{N}])/iu;
+
+/**
+ * Is this a post for the class channel — homework, a notice, a reply to a
+ * draft — rather than a teacher asking the bot something?
+ *
+ * detectClassChannelIntent turns any unrecognised sentence longer than
+ * eight characters into a NOTICE draft for the class's parents ("Reply YES
+ * to send"). That is right for "5A bring drawing book tomorrow" and wrong
+ * for "how do I see marks" — which would come back as a draft notice to a
+ * whole class. On 29 Sep 2026 teachers typed questions like that all
+ * afternoon; the command desk happened to catch them, but anything it
+ * misses must not become a message to parents.
+ *
+ * So a post needs a post word (HW, notice, exam…), a draft reply (yes / no),
+ * or a class or subject named — and never question-shaped.
+ */
+export function isLikelyClassChannelPost(rawText: string, opts?: { subjectNames?: string[] }): boolean {
+  const raw = norm(rawText);
+  // A photo or a document: the channel logs it, as it always has.
+  if (!raw) return true;
+  const p = detectClassChannelIntent(raw, opts);
+  if (p.kind === "confirm" || p.kind === "cancel" || p.kind === "members" || p.kind === "help") return true;
+  if (EXPLICIT_POST_WORDS.test(raw)) return true;
+  if (QUESTION_SHAPED.test(raw)) return false;
+  return !!(p.classHint || p.subjectHint);
+}
+
 export function classChannelHelpText(schoolName: string): string {
   return [
     `${schoolName} — Class WhatsApp channel`,

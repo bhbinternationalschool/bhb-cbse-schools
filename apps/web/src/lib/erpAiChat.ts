@@ -35,6 +35,14 @@ export type ErpAiMessage = {
   guideId?: string;
   pageLabel?: string;
   steps?: string[];
+  /** ERP command desk — a write command waiting for Confirm / Cancel. */
+  confirm?: { token: string; summary: string; yesId: string; noId: string };
+  /** The module guide offers to send what the user just said as a change request. */
+  offerRequest?: boolean;
+  /** A change request written up and waiting for the user to send it. */
+  requestCard?: { kind: "change" | "bug" | "stuck"; title: string; problem: string; wanted: string; suggestion: string };
+  /** Part of a change-request conversation (sent to the drafting route, not the chat). */
+  requestThread?: boolean;
 };
 
 export type ErpAiQuickPrompt = {
@@ -77,6 +85,13 @@ function nid() {
 
 /** Catalog of chips — filtered per user via quickPromptsForUser */
 export const ERP_AI_QUICK_PROMPT_CATALOG: ErpAiQuickPrompt[] = [
+  {
+    id: "cmd_help",
+    label: "ERP commands",
+    prompt: "commands",
+    module: "attendance",
+    action: "view",
+  },
   {
     id: "tt_build",
     label: "Build timetable",
@@ -393,7 +408,7 @@ const KNOWLEDGE: KnowledgeEntry[] = [
       "Comms covers notices, news, gallery, and class WhatsApp channels.",
     links: [
       { label: "Comms", href: "/comms" },
-      { label: "Class WhatsApp", href: "/comms?tab=channels" },
+      { label: "Class WhatsApp", href: "/comms?tab=whatsapp&wa=classes" },
     ],
     module: "notices",
   },

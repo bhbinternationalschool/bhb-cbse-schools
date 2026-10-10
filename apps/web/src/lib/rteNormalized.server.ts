@@ -11,6 +11,19 @@ import type {
 } from "@/lib/rteEws";
 import { rteDualWriteDbEnabled } from "@/lib/rteDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
+
+import {
+  countDeskRows,
+  settingsStampOf,
+  writeDeskRows,
+  writeDeskSettings,
+  type StampedDeskPushResult,
+} from "@/lib/deskStamps.server";
+import { stampsOf } from "@/lib/rowStampWrite.server";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
+
 
 export type RteDeskSyncMeta = {
   seatCount: number;
@@ -37,33 +50,6 @@ async function resolveCtx(): Promise<{
   return getServerTenantContext();
 }
 
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  const { data } = await sb.from(table).select("id").eq("tenant_id", tenantId);
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
-}
-
-async function upsertChunks(
-  sb: SupabaseClient,
-  table: string,
-  rows: Record<string, unknown>[],
-  chunk = 100,
-): Promise<{ ok: boolean; error?: string }> {
-  for (let i = 0; i < rows.length; i += chunk) {
-    const { error } = await sb.from(table).upsert(rows.slice(i, i + chunk));
-    if (error) return { ok: false, error: error.message };
-  }
-  return { ok: true };
-}
 
 function nowIso() {
   return new Date().toISOString();
@@ -199,74 +185,104 @@ function rowToSettings(r: Record<string, unknown> | null): RteSettings {
   };
 }
 
-function lastApplicationAt(apps: QuotaApplication[]): string | null {
-  if (!apps.length) return null;
-  return apps.reduce(
-    (max, a) => (a.updatedAt > max ? a.updatedAt : max),
-    apps[0].updatedAt,
-  );
-}
 
+/** The RTE tables a desk save deletes from — by named id only. */
+export const RTE_DELETABLE_TABLES = ["rte_desk_seats", "rte_desk_applications"] as const;
+/** Desk slice each deletable table stores (for function-only writers). */
+export const RTE_TABLE_SLICES: Record<string, string> = {
+  rte_desk_seats: "seats",
+  rte_desk_applications: "applications",
+};
+
+/** RTE lists saved row by row with stamps (10 Oct 2026). */
+export const RTE_STAMPED_SLICES = ["seats", "applications"] as const;
+
+/**
+ * Save the RTE desk. Stamped (`opts.stamps`): only the rows named, each at
+ * the stamp it was loaded at. Unstamped (older tabs, the blob cutover): new
+ * rows only — an empty browser's seeded quota seats can no longer replace
+ * the school's (deskStamps.server).
+ */
 export async function pushRteDeskToDb(
   state: RteState,
-): Promise<{ ok: boolean; error?: string }> {
+  deletes: NamedDeletes = {},
+  opts: { stamps?: RowStamps; settingsBase?: string | null } = {},
+): Promise<StampedDeskPushResult> {
   if (!rteDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
-  const seats = state.seats ?? [];
-  const applications = state.applications ?? [];
+  const goneSeats = new Set(deletes["rte_desk_seats"] ?? []);
+  const goneApps = new Set(deletes["rte_desk_applications"] ?? []);
+  const seats = (state.seats ?? []).filter((s) => !goneSeats.has(s.id));
+  const applications = (state.applications ?? []).filter((a) => !goneApps.has(a.id));
   const now = nowIso();
 
-  await Promise.all([
-    deleteStale(
-      sb,
-      tenantId,
-      "rte_desk_seats",
-      new Set(seats.map((s) => s.id)),
-    ),
-    deleteStale(
-      sb,
-      tenantId,
-      "rte_desk_applications",
-      new Set(applications.map((a) => a.id)),
-    ),
+  const stamped = opts.stamps !== undefined;
+  const conflicts: RowConflicts = {};
+  const stamps: RowStamps = {};
+  let kept = 0;
+  const lists: [(typeof RTE_STAMPED_SLICES)[number], string, Record<string, unknown>[]][] = [
+    ["seats", "rte_desk_seats", seats.map((x) => seatToRow(tenantId, x))],
+    ["applications", "rte_desk_applications", applications.map((a) => appToRow(tenantId, a))],
+  ];
+  for (const [slice, table, rows] of lists) {
+    const w = await writeDeskRows(sb, tenantId, table, rows, stamped ? (opts.stamps![slice] ?? {}) : undefined);
+    if (!w.ok) return w;
+    stamps[slice] = w.stamps;
+    if (w.conflicts.length) conflicts[slice] = w.conflicts;
+    kept += w.kept;
+  }
+
+  // No prune by absence. Seats and applications leave only when named.
+  for (const table of RTE_DELETABLE_TABLES) {
+    const del = await deleteNamedIds(sb, tenantId, table, deletes[table]);
+    if (!del.ok) return { ok: false, error: del.error || `${table}: delete failed` };
+  }
+
+  const set = await writeDeskSettings(
+    sb,
+    tenantId,
+    "rte_desk_settings",
+    settingsToRow(tenantId, state.settings ?? DEFAULT_SETTINGS),
+    stamped,
+    opts.settingsBase,
+  );
+  if (!set.ok) return set;
+  if (set.conflict) conflicts.settings = ["settings"];
+
+  // Counted from the tables: a stamped save carries only what changed.
+  const [seatCount, applicationCount, lastApp] = await Promise.all([
+    countDeskRows(sb, tenantId, "rte_desk_seats"),
+    countDeskRows(sb, tenantId, "rte_desk_applications"),
+    sb
+      .from("rte_desk_applications")
+      .select("updated_at")
+      .eq("tenant_id", tenantId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
-
-  const seatRows = seats.map((s) => seatToRow(tenantId, s));
-  if (seatRows.length > 0) {
-    const up = await upsertChunks(sb, "rte_desk_seats", seatRows);
-    if (!up.ok) return up;
-  }
-
-  const appRows = applications.map((a) => appToRow(tenantId, a));
-  if (appRows.length > 0) {
-    const up = await upsertChunks(sb, "rte_desk_applications", appRows);
-    if (!up.ok) return up;
-  }
-
-  const { error: settingsErr } = await sb
-    .from("rte_desk_settings")
-    .upsert(settingsToRow(tenantId, state.settings ?? DEFAULT_SETTINGS));
-  if (settingsErr) return { ok: false, error: settingsErr.message };
-
   await sb.from("rte_desk_sync_meta").upsert(
     {
       tenant_id: tenantId,
-      seat_count: seats.length,
-      application_count: applications.length,
-      last_application_at: lastApplicationAt(applications),
+      seat_count: seatCount,
+      application_count: applicationCount,
+      last_application_at: (lastApp.data as { updated_at?: string } | null)?.updated_at ?? null,
       updated_at: now,
     },
     { onConflict: "tenant_id" },
   );
 
-  return { ok: true };
+  return { ok: true, stamps, conflicts, settingsStamp: set.stamp, kept };
 }
 
 export async function fetchRteDeskFromDb(): Promise<{
   bundle: RteDeskBundle;
   meta: RteDeskSyncMeta | null;
+  stamps?: RowStamps;
+  settingsStamp?: string;
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty: RteDeskBundle = {
@@ -274,17 +290,17 @@ export async function fetchRteDeskFromDb(): Promise<{
     applications: [],
     settings: { ...DEFAULT_SETTINGS },
   };
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const [
-    { data: seatRows },
-    { data: appRows },
-    { data: settingsRow },
-    { data: metaRow },
-  ] = await Promise.all([
-    sb.from("rte_desk_seats").select("*").eq("tenant_id", tenantId),
-    sb.from("rte_desk_applications").select("*").eq("tenant_id", tenantId),
+  const [seatRes, appRes, settingsRes, metaRes] = await Promise.all([
+    // Paged: PostgREST stops at 1,000 rows and calls the cut a success.
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("rte_desk_seats").select("*").eq("tenant_id", tenantId).order("id").range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("rte_desk_applications").select("*").eq("tenant_id", tenantId).order("id").range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
     sb.from("rte_desk_settings").select("*").eq("tenant_id", tenantId).maybeSingle(),
     sb
       .from("rte_desk_sync_meta")
@@ -292,6 +308,19 @@ export async function fetchRteDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  if (seatRes.error || appRes.error || settingsRes.error || metaRes.error) {
+    console.warn(
+      "[rte-db] fetchRteDeskFromDb query error",
+      seatRes.error || appRes.error || settingsRes.error || metaRes.error,
+    );
+    return { bundle: empty, meta: null, ok: false };
+  }
+
+  const seatRows = seatRes.data;
+  const appRows = appRes.data;
+  const settingsRow = settingsRes.data;
+  const metaRow = metaRes.data;
 
   const bundle: RteDeskBundle = {
     seats: (seatRows ?? []).map((r) => rowToSeat(r as Record<string, unknown>)),
@@ -316,5 +345,14 @@ export async function fetchRteDeskFromDb(): Promise<{
       }
     : null;
 
-  return { bundle, meta };
+  return {
+    bundle,
+    meta,
+    stamps: {
+      seats: stampsOf(seatRows as Record<string, unknown>[]),
+      applications: stampsOf(appRows as Record<string, unknown>[]),
+    },
+    settingsStamp: settingsStampOf(settingsRow),
+    ok: true,
+  };
 }

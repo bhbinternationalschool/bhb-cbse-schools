@@ -3,7 +3,13 @@
  * Demo data from localStorage loaders — client-only.
  */
 
-import type { ModuleDashboardModel } from "@/components/dashboard/ModuleDashboard";
+import { engagementCtxFromChat, LEAD_QUALITY_LABEL, leadQuality, stalledLeadFlags } from "@/lib/leadQuality";
+import { loadCrmParentChat } from "@/lib/crmParentChat";
+import type {
+  DashboardTableColumn,
+  DashboardTableRow,
+  ModuleDashboardModel,
+} from "@/components/dashboard/ModuleDashboard";
 import {
   chartPt,
   dualRing,
@@ -22,13 +28,12 @@ import {
   type AdmissionStage,
 } from "@/lib/admissions";
 import {
-  bankBalancePaise,
-  dashboardSnapshot,
-  listUnifiedPayables,
-  loadAccounts,
-  totalBankBalancePaise,
-} from "@/lib/accounts";
+} from "@/lib/accountsCashBank";
+import { listUnifiedPayables } from "@/lib/accountsPayables";
+import { dashboardSnapshot } from "@/lib/accountsReports";
+import { loadAccounts } from "@/lib/accountsStore";
 import { loadAttendance, summarizeMarks } from "@/lib/attendance";
+import { attendanceCoverageNote, todayAttendanceFigures } from "@/lib/attendanceToday";
 import { loadCertificates } from "@/lib/certificates";
 import { loadExams } from "@/lib/exams";
 import { buildFeesDashboardModel, feeCollectionModeBreakupRupees } from "@/lib/feeDashboard";
@@ -36,7 +41,17 @@ import { computeFeeKpis } from "@/lib/feeFinance";
 import { buildDayBook, formatInr, loadFees } from "@/lib/fees";
 import { loadOfflineQueue } from "@/lib/fieldSurvey";
 import { loadHomework } from "@/lib/homework";
-import { isStaffActive } from "@/lib/foundationMasters";
+import {
+  isStaffActive,
+  normalizeStatutoryConfig,
+  type StaffRecord,
+} from "@/lib/foundationMasters";
+import { loadStatutoryRemit } from "@/lib/statutoryRemit";
+import {
+  computeEstimatedPenalty,
+  statutoryDueDate,
+} from "@/lib/statutoryCompliance";
+import { formatInr as formatInrRupees } from "@/lib/payroll";
 import {
   currentAcademicYearCode,
   formatInrCompact,
@@ -50,16 +65,23 @@ import {
 } from "@/lib/moduleRegistry";
 import { loadPayroll } from "@/lib/payroll";
 import { loadPtm } from "@/lib/ptm";
-import { loadPurchase } from "@/lib/purchase";
+import {
+  eventKindLabel,
+  getEventsClientCache,
+  getRsvpsClientCache,
+} from "@/lib/events";
 import { loadReportsCenterRecent } from "@/lib/reportsCenter";
+import { audienceLabel, loadSchoolComms } from "@/lib/schoolComms";
+import { applicationStatusLabel, loadRte } from "@/lib/rteEws";
 import { countActiveHouseholds, loadSis } from "@/lib/sis";
-import { loadStaffAttendance, summarizeStaffMarks } from "@/lib/staffAttendance";
+import { loadStaffAttendance, staffMarkTotals } from "@/lib/staffAttendance";
 import { loadStaffHr } from "@/lib/staffHr";
 import {
-  listActiveStoreItems,
-  listLowStockItems,
-  loadStore,
-} from "@/lib/store";
+  bellForClass,
+  loadTimetable,
+  teacherLabel,
+  teachingPeriods,
+} from "@/lib/timetable";
 import { loadStudentLeave } from "@/lib/studentLeave";
 import { loadTransport } from "@/lib/transport";
 import { loadTrust } from "@/lib/trust";
@@ -79,6 +101,7 @@ export type DashboardModuleId =
   | "attendance"
   | "homework"
   | "ptm"
+  | "events"
   | "vault"
   | "modules"
   | "payroll"
@@ -87,7 +110,10 @@ export type DashboardModuleId =
   | "reports"
   | "field"
   | "student_leave"
-  | "purchase";
+  | "purchase"
+  | "timetable"
+  | "comms"
+  | "rte";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -263,6 +289,18 @@ function admissionsDash(academicYearCode?: string): ModuleDashboardModel {
     }));
   const sourceChart = sourceRows.map((r) => chartPt(r.name, r.count));
   const funnelChart = chart.filter((p) => p.value > 0);
+  const engagement = engagementCtxFromChat(loadCrmParentChat().threads);
+  const stalledRows = state.leads
+    .flatMap((l) => {
+      const flags = stalledLeadFlags(l, {});
+      if (!flags.length) return [];
+      const q = leadQuality(l, engagement);
+      return [{ id: l.id, child: l.childName || l.enquiryNo, rule: flags[0].label, days: flags[0].days, quality: LEAD_QUALITY_LABEL[q.quality], severity: flags[0].severity }];
+    })
+    .sort((a, b) => b.severity - a.severity || b.days - a.days)
+    .map(({ severity: _s, ...r }) => r);
+  const stalledTotal = stalledRows.length;
+  const stalledPaid = stalledRows.filter((r) => r.rule === "Registration fee paid, admission not completed").length;
   return {
     title: "Admissions",
     subtitle: `Session ${academicYearCode || "all"} · enquiry funnel, follow-ups, and conversion.`,
@@ -306,6 +344,24 @@ function admissionsDash(academicYearCode?: string): ModuleDashboardModel {
         hint: `${fu.overdue} overdue · ${fu.dueToday} today`,
         tone: "coral",
         tab: "leads",
+      },
+      {
+        id: "stalled",
+        label: "Stalled leads",
+        value: String(stalledTotal),
+        hint: stalledTotal
+          ? `${stalledPaid} paid & not completed · open Leads → Stalled`
+          : "Nothing stalled by the rules",
+        tone: stalledTotal ? "coral" : "green",
+        tab: "leads",
+        detailTitle: "Stalled leads — why, and the hook for the re-engagement draft",
+        detailColumns: [
+          { key: "child", label: "Child" },
+          { key: "rule", label: "Why" },
+          { key: "days", label: "Days", align: "right" },
+          { key: "quality", label: "Quality" },
+        ],
+        detailRows: stalledRows.slice(0, 200),
       },
     ],
     chartTitle: "Admission funnel",
@@ -499,13 +555,13 @@ function staffDash(academicYearCode?: string): ModuleDashboardModel {
   const hr = loadStaffHr();
   const staff = masters.staff ?? [];
   const active = staff.filter(isStaffActive);
-  const teaching = active.filter((s) => s.stream === "teaching").length;
-  const nonTeaching = active.filter((s) => s.stream === "non_teaching").length;
-  const leaveOpen = (hr.leaveRequests ?? []).filter(
+  const teachingStaff = active.filter((s) => s.stream === "teaching");
+  const nonTeachingStaff = active.filter((s) => s.stream === "non_teaching");
+  const openLeave = (hr.leaveRequests ?? []).filter(
     (r) =>
       inAcademicYear(r, academicYearCode) &&
       (r.status === "pending" || r.status === "pending_l2"),
-  ).length;
+  );
   const byDept = new Map<string, number>();
   for (const s of active) {
     const dep = masters.departments.find((d) => d.id === s.departmentId);
@@ -515,6 +571,51 @@ function staffDash(academicYearCode?: string): ModuleDashboardModel {
   const deptRows = [...byDept.entries()]
     .map(([name, count]) => ({ id: name, name, count }))
     .sort((a, b) => b.count - a.count);
+
+  function staffRoleLabel(s: StaffRecord): string {
+    return (
+      masters.designations.find((d) => d.id === s.designationId)?.name ?? "—"
+    );
+  }
+  function staffDeptLabel(s: StaffRecord): string {
+    return masters.departments.find((d) => d.id === s.departmentId)?.name ?? "—";
+  }
+  function staffListRows(list: StaffRecord[]) {
+    return list
+      .map((s) => ({
+        id: s.id,
+        empCode: s.empCode,
+        fullName: s.fullName,
+        designation: staffRoleLabel(s),
+        department: staffDeptLabel(s),
+        mobile: s.mobile || "—",
+      }))
+      .sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }
+  const staffListColumns: DashboardTableColumn[] = [
+    { key: "empCode", label: "Code" },
+    { key: "fullName", label: "Name" },
+    { key: "designation", label: "Designation" },
+    { key: "department", label: "Department" },
+    { key: "mobile", label: "Mobile" },
+  ];
+  const leaveRows = openLeave
+    .map((r) => {
+      const s = staff.find((x) => x.id === r.staffId);
+      const type = hr.leaveTypes.find((t) => t.code === r.typeCode);
+      return {
+        id: r.id,
+        fullName: s?.fullName ?? "—",
+        empCode: s?.empCode ?? "—",
+        leaveType: type?.name ?? r.typeCode,
+        fromDate: r.fromDate,
+        toDate: r.toDate,
+        days: r.days,
+        status: r.status,
+      };
+    })
+    .sort((a, b) => a.fromDate.localeCompare(b.fromDate));
+
   return {
     title: "Staff",
     subtitle: `Session ${academicYearCode || "all"} · workforce strength, departments, and HR queues.`,
@@ -526,33 +627,48 @@ function staffDash(academicYearCode?: string): ModuleDashboardModel {
         hint: `${staff.length - active.length} inactive`,
         tone: "navy",
         tab: "roster",
-        detailTitle: "By department",
-        detailColumns: [
-          { key: "name", label: "Department" },
-          { key: "count", label: "Count", align: "right" },
-        ],
-        detailRows: deptRows,
+        detailTitle: "Active staff",
+        detailColumns: staffListColumns,
+        detailRows: staffListRows(active),
       },
       {
         id: "teaching",
         label: "Teaching",
-        value: String(teaching),
+        value: String(teachingStaff.length),
         tone: "teal",
         tab: "roster",
+        detailTitle: "Teaching staff",
+        detailColumns: staffListColumns,
+        detailRows: staffListRows(teachingStaff),
       },
       {
         id: "non",
         label: "Non-teaching",
-        value: String(nonTeaching),
+        value: String(nonTeachingStaff.length),
         tone: "sky",
         tab: "roster",
+        detailTitle: "Non-teaching staff",
+        detailColumns: staffListColumns,
+        detailRows: staffListRows(nonTeachingStaff),
       },
       {
         id: "leave",
         label: "Leave queue",
-        value: String(leaveOpen),
+        value: String(openLeave.length),
         tone: "coral",
         tab: "leave",
+        detailTitle: "Pending leave requests",
+        detailAction: "staff_leave_decide",
+        detailColumns: [
+          { key: "empCode", label: "Code" },
+          { key: "fullName", label: "Name" },
+          { key: "leaveType", label: "Leave type" },
+          { key: "fromDate", label: "From" },
+          { key: "toDate", label: "To" },
+          { key: "days", label: "Days", align: "right" },
+          { key: "status", label: "Status" },
+        ],
+        detailRows: leaveRows,
       },
     ],
     chartTitle: "Headcount by department",
@@ -567,8 +683,8 @@ function staffDash(academicYearCode?: string): ModuleDashboardModel {
       ),
       "Stream",
       [
-        chartPt("Teaching", teaching, "#0f766e"),
-        chartPt("Non-teaching", nonTeaching, "#0284c7"),
+        chartPt("Teaching", teachingStaff.length, "#0f766e"),
+        chartPt("Non-teaching", nonTeachingStaff.length, "#0284c7"),
       ],
       String(active.length),
       "staff",
@@ -588,120 +704,38 @@ function staffDash(academicYearCode?: string): ModuleDashboardModel {
   };
 }
 
-function storeDash(academicYearCode?: string): ModuleDashboardModel {
-  const store = loadStore();
-  const items = listActiveStoreItems(store);
-  const low = listLowStockItems(store);
-  const issues = store.issues.filter(
-    (i) => !i.voidedAt && inAcademicYear(i, academicYearCode),
-  );
-  const days = lastNDays(7);
-  const trend = days.map((d) => ({
-    label: dayLabel(d),
-    value: issues.filter((i) => i.issuedOn === d).length,
-  }));
-  const salesPaise = issues
-    .filter((i) => i.paymentMode === "cash" || i.paymentMode === "credit")
-    .reduce((n, i) => n + (i.totalPaise || 0), 0);
-  const byCat = new Map<string, number>();
-  for (const it of items) {
-    const cat = store.categories.find((c) => c.id === it.categoryId);
-    const label = cat?.name || "General";
-    byCat.set(label, (byCat.get(label) ?? 0) + 1);
-  }
-  const catRows = [...byCat.entries()]
-    .map(([name, count]) => ({ id: name, name, count }))
-    .sort((a, b) => b.count - a.count);
-  const cashSalesPaise = issues
-    .filter((i) => i.paymentMode === "cash")
-    .reduce((n, i) => n + (i.totalPaise || 0), 0);
-  const creditSalesPaise = issues
-    .filter((i) => i.paymentMode === "credit")
-    .reduce((n, i) => n + (i.totalPaise || 0), 0);
+/**
+ * Store and Purchase moved to the server-truth module at /inventory.
+ *
+ * These tiles used to be computed from the browser-held register. That
+ * register is gone, and deriving figures from an empty cache is exactly the
+ * failure the rebuild removed — so this points at the module's own overview
+ * rather than showing numbers it cannot stand behind.
+ */
+function movedToInventoryDash(
+  title: string,
+  subtitle: string,
+): ModuleDashboardModel {
   return {
-    title: "Store",
-    subtitle: "Stock health, issues, and sales pulse for the school store.",
+    ...emptyModel(title, subtitle),
     kpis: [
       {
-        id: "items",
-        label: "Active items",
-        value: String(items.length),
-        tone: "navy",
-        tab: "master",
-        detailTitle: "By category",
-        detailColumns: [
-          { key: "name", label: "Category" },
-          { key: "count", label: "Items", align: "right" },
-        ],
-        detailRows: catRows,
-      },
-      {
-        id: "low",
-        label: "Low stock",
-        value: String(low.length),
-        hint: "Below reorder level",
-        tone: "coral",
-        tab: "inv_report",
-        detailTitle: "Low stock items",
-        detailColumns: [
-          { key: "name", label: "Item" },
-          { key: "qty", label: "Qty", align: "right" },
-        ],
-        detailRows: low.slice(0, 40).map((i) => ({
-          id: i.id,
-          name: i.name,
-          qty: i.stockOnHand ?? 0,
-        })),
-      },
-      {
-        id: "issues",
-        label: "Issues",
-        value: String(issues.length),
-        tone: "teal",
-        tab: "issue",
-      },
-      {
-        id: "sales",
-        label: "Sales value",
-        value: formatInr(salesPaise),
+        id: "moved",
+        label: "Now in Store & purchase",
+        value: "\u2192",
+        hint: "Open Store & purchase \u2192 Reports for live figures",
         tone: "gold",
-        tab: "acct_report",
       },
-    ],
-    chartTitle: "Issues — last 7 days",
-    chartSeries: trend,
-    ...dualRingLayers(
-      "Issues by day",
-      trend,
-      "Sales mode (₹)",
-      [
-        chartPt("Cash", Math.round(cashSalesPaise / 100), "#15803d"),
-        chartPt("Credit", Math.round(creditSalesPaise / 100), "#203050"),
-      ],
-      String(issues.length),
-      "issues",
-    ),
-    tableTitle: "Low stock watchlist",
-    tableColumns: [
-      { key: "name", label: "Item" },
-      { key: "sku", label: "SKU" },
-      { key: "qty", label: "On hand", align: "right" },
-    ],
-    tableRows: low.slice(0, 30).map((i) => ({
-      id: i.id,
-      name: i.name,
-      sku: i.sku || "—",
-      qty: i.stockOnHand ?? 0,
-    })),
-    quickLinks: [
-      { label: "Stock master", tab: "master" },
-      { label: "Purchase", tab: "purchase" },
-      { label: "Sell / Issue", tab: "issue" },
-      { label: "Accounts", tab: "acct_report" },
     ],
   };
 }
 
+function storeDash(): ModuleDashboardModel {
+  return movedToInventoryDash(
+    "Store & purchase",
+    "Stock, sales and buying live in their own module now",
+  );
+}
 function transportDash(academicYearCode?: string): ModuleDashboardModel {
   const t = loadTransport();
   const routes = t.routes.filter((r) => r.isActive !== false);
@@ -800,7 +834,6 @@ function accountsDash(): ModuleDashboardModel {
   const state = loadAccounts();
   const snap = dashboardSnapshot(state);
   const todayBook = buildDayBook(todayIso());
-  const bankTotal = totalBankBalancePaise(state);
   const openAp = listUnifiedPayables(state).filter((p) => p.status === "open");
   const vendorName = (vendorId: string) =>
     state.vendors.find((v) => v.id === vendorId)?.name || vendorId || "Payable";
@@ -821,25 +854,32 @@ function accountsDash(): ModuleDashboardModel {
         tone: "green",
         tab: "daybook",
       },
+      // The money tiles are filled from the server book (see
+      // accountsServerKpis.ts). They used to paint the browser book's figures
+      // first — cash ₹0, a bank total made of master opening balances — and
+      // the office read those as the truth before the real ones arrived.
+      // Nothing is better than a wrong number, so they start blank.
       {
         id: "cash",
         label: "Cash in hand",
-        value: formatInr(snap.cashInHandPaise),
+        value: "…",
+        hint: "reading the server book",
         tone: "navy",
         tab: "cash",
       },
       {
         id: "bank",
         label: "Bank total",
-        value: formatInr(bankTotal),
+        value: "…",
+        hint: "reading the server book",
         tone: "sky",
         tab: "banks",
       },
       {
         id: "ap",
         label: "Open payables",
-        value: formatInr(snap.openApPaise),
-        hint: `${openAp.length} bill(s)`,
+        value: "…",
+        hint: "reading the server book",
         tone: "coral",
         tab: "payables",
         detailTitle: "Open payables",
@@ -859,8 +899,12 @@ function accountsDash(): ModuleDashboardModel {
     ...dualRingLayers(
       "Liquidity (₹)",
       [
-        chartPt("Cash", Math.round(snap.cashInHandPaise / 100), "#203050"),
-        chartPt("Banks", Math.round(bankTotal / 100), "#0284c7"),
+        // Cash and bank are left out rather than drawn from the desk book: a
+        // bar is as much a claim as a number, and those two were the claims
+        // that disagreed with the ledger. The tiles above carry the server
+        // figures. What is left here is what the desk genuinely knows about
+        // itself — money owed to the owner and money owed to vendors.
+        chartPt("Owner due", Math.round(snap.ownerDuePaise / 100), "#8a5a10"),
       ],
       "Flows (₹)",
       [
@@ -876,13 +920,16 @@ function accountsDash(): ModuleDashboardModel {
       { key: "bank", label: "Bank" },
       { key: "balance", label: "Balance", align: "right" },
     ],
+    // Balances filled from the server book by accountsServerKpis, for the
+    // same reason the KPI tiles above start blank: the desk's bank ledger
+    // holds fee receipts only and reads lakhs high.
     tableRows: state.bankAccounts
       .filter((b) => b.isActive)
       .map((b) => ({
         id: b.id,
         name: b.name,
         bank: b.bankName || "—",
-        balance: formatInr(bankBalancePaise(b.id, state)),
+        balance: "…",
       })),
     quickLinks: [
       { label: "Day book", tab: "daybook" },
@@ -1007,11 +1054,13 @@ function attendanceDash(academicYearCode?: string): ModuleDashboardModel {
   let staffLeave = 0;
   let staffHalf = 0;
   for (const r of staffTodayRegs) {
-    const counts = summarizeStaffMarks(r.marks || []);
-    staffPresent += counts.P ?? 0;
-    staffAbsent += counts.A ?? 0;
-    staffLeave += counts.LE ?? 0;
-    staffHalf += counts.HD ?? 0;
+    // Late (L) and half-day (HD) staff came to work. Counting only "P" showed
+    // "Staff present 0" on 6 Oct 2026 while two staff had punched in late.
+    const t = staffMarkTotals(r.marks || []);
+    staffPresent += t.present;
+    staffAbsent += t.absent;
+    staffLeave += t.leave;
+    staffHalf += t.halfDay;
   }
 
   const days = lastNDays(7);
@@ -1022,7 +1071,7 @@ function attendanceDash(academicYearCode?: string): ModuleDashboardModel {
     }
     let staff = 0;
     for (const r of staffRegisters.filter((x) => x.date === d)) {
-      staff += summarizeStaffMarks(r.marks || []).P ?? 0;
+      staff += staffMarkTotals(r.marks || []).present;
     }
     return { label: dayLabel(d), value: students + staff };
   });
@@ -1403,6 +1452,76 @@ function ptmDash(academicYearCode?: string): ModuleDashboardModel {
   };
 }
 
+function eventsDash(academicYearCode?: string): ModuleDashboardModel {
+  // Events/RSVPs are server-authoritative (Supabase, no localStorage store)
+  // — this reads whatever the Events workspace last fetched this session,
+  // not a live query, matching lib/events.ts's client-cache convention.
+  const allEvents = getEventsClientCache().filter(
+    (e) => !academicYearCode || e.academicYearCode === academicYearCode,
+  );
+  const rsvps = getRsvpsClientCache();
+  const today = todayIso();
+  const upcoming = allEvents.filter((e) => e.isActive && e.endsOn >= today);
+  const in30 = new Date(`${today}T12:00:00`);
+  in30.setDate(in30.getDate() + 30);
+  const in30Iso = in30.toISOString().slice(0, 10);
+  const thisMonth = upcoming.filter((e) => e.startsOn <= in30Iso);
+  const upcomingIds = new Set(upcoming.map((e) => e.id));
+  const pendingRsvps = rsvps.filter(
+    (r) => upcomingIds.has(r.eventId) && !r.choice,
+  ).length;
+  const chart = upcoming.slice(0, 10).map((e) => ({
+    label: e.title,
+    value: rsvps.filter((r) => r.eventId === e.id && r.choice === "yes").length,
+  }));
+  return {
+    title: "Events & calendar",
+    subtitle: `Session ${academicYearCode || "all"} · school events and WhatsApp RSVP.`,
+    kpis: [
+      {
+        id: "upcoming",
+        label: "Upcoming events",
+        value: String(upcoming.length),
+        tone: "navy",
+        tab: "calendar",
+      },
+      {
+        id: "this_month",
+        label: "This month",
+        value: String(thisMonth.length),
+        tone: "gold",
+        tab: "calendar",
+      },
+      {
+        id: "pending_rsvp",
+        label: "Pending RSVPs",
+        value: String(pendingRsvps),
+        tone: "coral",
+        tab: "rsvps",
+      },
+    ],
+    chartTitle: "RSVPs (yes) by event",
+    chartSeries: chart.length ? chart : [{ label: "—", value: 0 }],
+    tableTitle: "Upcoming events",
+    tableColumns: [
+      { key: "title", label: "Event" },
+      { key: "date", label: "Date" },
+      { key: "kind", label: "Kind" },
+    ],
+    tableRows: upcoming.slice(0, 30).map((e) => ({
+      id: e.id,
+      title: e.title,
+      date: e.startsOn,
+      kind: eventKindLabel(e.kind),
+    })),
+    quickLinks: [
+      { label: "Calendar", tab: "calendar" },
+      { label: "Events", tab: "events" },
+      { label: "RSVPs", tab: "rsvps" },
+    ],
+  };
+}
+
 function vaultDash(): ModuleDashboardModel {
   const vault = loadVault();
   const docs = vault.documents ?? [];
@@ -1591,6 +1710,74 @@ function payrollDash(academicYearCode?: string): ModuleDashboardModel {
     label: r.month || r.id.slice(-6),
     value: Math.round(runNetPaise(r.lines) / 100),
   }));
+
+  const statutoryConfig = normalizeStatutoryConfig(loadMasters().statutoryConfig);
+  const statutoryBatches = loadStatutoryRemit().batches.filter((b) =>
+    inAcademicYear(b, academicYearCode),
+  );
+  const today = new Date();
+  let pendingDues = 0;
+  let overdueDues = 0;
+  let overdueEstimatedPenalty = 0;
+  const complianceRows: DashboardTableRow[] = [];
+  for (const b of statutoryBatches) {
+    const dues: {
+      kind: "EPF" | "ESIC";
+      amount: number;
+      progress: (typeof b)["epf"];
+      slabs: typeof statutoryConfig.penalty.damageSlabs;
+      interestRate: number;
+    }[] = [
+      {
+        kind: "EPF",
+        amount: b.totalEpfEpsContribution + b.totalEdliContribution,
+        progress: b.epf,
+        slabs: statutoryConfig.penalty.damageSlabs,
+        interestRate: statutoryConfig.penalty.interestRatePctPerAnnum,
+      },
+      {
+        kind: "ESIC",
+        amount: b.esicTotal,
+        progress: b.esic,
+        slabs: statutoryConfig.penalty.esicDamageSlabs,
+        interestRate: statutoryConfig.penalty.esicInterestRatePctPerAnnum,
+      },
+    ];
+    for (const due of dues) {
+      if (due.amount <= 0) continue;
+      const paidAt = due.progress.paidAt;
+      if (!paidAt) pendingDues += 1;
+      const penalty = paidAt
+        ? null
+        : computeEstimatedPenalty(
+            statutoryDueDate(b.month),
+            today,
+            due.amount,
+            due.slabs,
+            due.interestRate,
+          );
+      if (penalty && penalty.daysOverdue > 0) {
+        overdueDues += 1;
+        overdueEstimatedPenalty += penalty.estimatedTotal;
+      }
+      const status = paidAt
+        ? "Paid"
+        : due.progress.filedAt
+          ? "Filed, unpaid"
+          : "Not filed";
+      complianceRows.push({
+        id: `${b.id}_${due.kind.toLowerCase()}`,
+        month: b.month,
+        type: due.kind,
+        amount: formatInrRupees(due.amount),
+        status,
+        daysOverdue: penalty && penalty.daysOverdue > 0 ? penalty.daysOverdue : "—",
+        estPenalty: penalty && penalty.daysOverdue > 0 ? formatInrRupees(penalty.estimatedTotal) : "—",
+      });
+    }
+  }
+  complianceRows.sort((a, b) => String(b.month).localeCompare(String(a.month)));
+
   return {
     title: "Payroll",
     subtitle: `Session ${academicYearCode || "all"} · salary runs, approvals, and net payouts.`,
@@ -1622,6 +1809,29 @@ function payrollDash(academicYearCode?: string): ModuleDashboardModel {
         value: String(paid),
         tone: "green",
         tab: "runs",
+      },
+      {
+        id: "statutory",
+        label: "EPF/ESIC compliance",
+        value: String(pendingDues),
+        hint:
+          overdueDues > 0
+            ? `${overdueDues} overdue · est. penalty ${formatInrRupees(overdueEstimatedPenalty)}`
+            : pendingDues > 0
+              ? "None overdue"
+              : "All filed & paid",
+        tone: overdueDues > 0 ? "coral" : pendingDues > 0 ? "gold" : "green",
+        tab: "govt",
+        detailTitle: "EPF/ESIC dues",
+        detailColumns: [
+          { key: "month", label: "Month" },
+          { key: "type", label: "Type" },
+          { key: "amount", label: "Amount", align: "right" },
+          { key: "status", label: "Status" },
+          { key: "daysOverdue", label: "Days overdue", align: "right" },
+          { key: "estPenalty", label: "Est. penalty", align: "right" },
+        ],
+        detailRows: complianceRows,
       },
     ],
     chartTitle: "Net payout by run (₹)",
@@ -1745,6 +1955,105 @@ function examsDash(academicYearCode?: string): ModuleDashboardModel {
   };
 }
 
+function timetableDash(academicYearCode?: string): ModuleDashboardModel {
+  const masters = loadMasters();
+  const state = loadTimetable();
+  const grids = state.grids.filter((g) => inAcademicYear(g, academicYearCode));
+  // A week's teaching periods per class, on that class's own bell. This
+  // used to be one DAY's periods per class (13 grids × 7 = 91) set against
+  // the whole week's filled slots (441), and showed "485%" (6 Oct 2026).
+  const weekdays = new Set(state.workingWeekdays.length ? state.workingWeekdays : [1, 2, 3, 4, 5, 6]);
+  let possibleSlots = 0;
+  let filledSlots = 0;
+  for (const g of grids) {
+    const periodNos = new Set(teachingPeriods(bellForClass(state, g.classId)).map((p) => p.no));
+    possibleSlots += periodNos.size * weekdays.size;
+    filledSlots += g.slots.filter(
+      (sl) => sl.teacherId && weekdays.has(sl.weekday) && periodNos.has(sl.periodNo),
+    ).length;
+  }
+  const fillPercent =
+    possibleSlots > 0 ? Math.round((filledSlots / possibleSlots) * 100) : 0;
+
+  const today = todayIso();
+  const subsToday = state.substitutions.filter((s) => s.date === today);
+  const subsUnfilled = subsToday.filter((s) => !s.substituteTeacherId).length;
+
+  const loadMap = new Map<string, number>();
+  for (const g of grids) {
+    for (const sl of g.slots) {
+      if (!sl.teacherId) continue;
+      loadMap.set(sl.teacherId, (loadMap.get(sl.teacherId) ?? 0) + 1);
+    }
+  }
+  const loadRows = [...loadMap.entries()]
+    .map(([teacherId, count]) => ({
+      id: teacherId,
+      name: teacherLabel(masters, teacherId),
+      count,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const chart = loadRows.slice(0, 10).map((r) => ({
+    label: r.name,
+    value: r.count,
+  }));
+
+  return {
+    title: "Timetable",
+    subtitle: `Session ${academicYearCode || "all"} · weekly grids, fill rate, and today's substitutions.`,
+    kpis: [
+      {
+        id: "classes",
+        label: "Class grids",
+        value: String(grids.length),
+        tone: "navy",
+        tab: "class",
+      },
+      {
+        id: "fill",
+        label: "Slots filled",
+        value: `${fillPercent}%`,
+        hint:
+          possibleSlots > 0
+            ? `${filledSlots} of ${possibleSlots} teaching periods`
+            : "No grids yet",
+        tone: fillPercent >= 90 ? "green" : fillPercent >= 60 ? "gold" : "rose",
+        tab: "auto",
+      },
+      {
+        id: "published",
+        label: "Status",
+        value: state.meta.status === "published" ? "Published" : "Draft",
+        tone: state.meta.status === "published" ? "green" : "gold",
+        tab: "publish",
+      },
+      {
+        id: "subs",
+        label: "Substitutions today",
+        value: String(subsToday.length),
+        hint: subsUnfilled > 0 ? `${subsUnfilled} unfilled` : undefined,
+        tone: subsUnfilled > 0 ? "rose" : "teal",
+        tab: "subs",
+      },
+    ],
+    chartTitle: "Periods by teacher",
+    chartSeries: chart.length ? chart : [{ label: "—", value: 0 }],
+    tableTitle: "Teacher load",
+    tableColumns: [
+      { key: "name", label: "Teacher" },
+      { key: "count", label: "Periods/week", align: "right" },
+    ],
+    tableRows: loadRows.slice(0, 30),
+    quickLinks: [
+      { label: "By class", tab: "class" },
+      { label: "By teacher", tab: "teacher" },
+      { label: "Substitutes", tab: "subs" },
+      { label: "Auto-assign", tab: "auto" },
+    ],
+  };
+}
+
 function certificatesDash(academicYearCode?: string): ModuleDashboardModel {
   const certs = loadCertificates();
   const issues = (certs.issues ?? []).filter((i) =>
@@ -1826,6 +2135,183 @@ function certificatesDash(academicYearCode?: string): ModuleDashboardModel {
         type: c.kind || "—",
         date: c.issuedOn || "—",
       })),
+  };
+}
+
+function commsDash(academicYearCode?: string): ModuleDashboardModel {
+  const comms = loadSchoolComms();
+  const notices = comms.notices.filter((n) => inAcademicYear(n, academicYearCode));
+  const news = comms.news.filter((n) => inAcademicYear(n, academicYearCode));
+  const albums = comms.albums.filter((a) => inAcademicYear(a, academicYearCode));
+
+  const publishedNotices = notices.filter((n) => n.status === "published");
+  const publishedNews = news.filter((n) => n.status === "published");
+  const publishedAlbums = albums.filter((a) => a.status === "published");
+  const pendingCount =
+    [...notices, ...news, ...albums].filter(
+      (r) => r.status === "draft" || r.status === "scheduled",
+    ).length;
+
+  const byAudience = new Map<string, number>();
+  for (const n of notices) {
+    const label = audienceLabel(n.audience);
+    byAudience.set(label, (byAudience.get(label) ?? 0) + 1);
+  }
+  const chart = [...byAudience.entries()].map(([label, value]) => ({
+    label,
+    value,
+  }));
+
+  const recent = [...notices]
+    .sort((a, b) => (b.publishedAt || b.createdAt).localeCompare(a.publishedAt || a.createdAt))
+    .slice(0, 30)
+    .map((n) => ({
+      id: n.id,
+      title: n.title || "Untitled",
+      audience: audienceLabel(n.audience),
+      status: n.status,
+    }));
+
+  return {
+    title: "Comms",
+    subtitle: `Session ${academicYearCode || "all"} · notices, news, gallery, and WhatsApp reach.`,
+    kpis: [
+      {
+        id: "notices",
+        label: "Notices published",
+        value: String(publishedNotices.length),
+        tone: "navy",
+        tab: "notices",
+      },
+      {
+        id: "news",
+        label: "News published",
+        value: String(publishedNews.length),
+        tone: "teal",
+        tab: "news",
+      },
+      {
+        id: "gallery",
+        label: "Gallery albums",
+        value: String(publishedAlbums.length),
+        tone: "gold",
+        tab: "gallery",
+      },
+      {
+        id: "pending",
+        label: "Drafts pending",
+        value: String(pendingCount),
+        hint: pendingCount > 0 ? "Draft or scheduled, not yet published" : undefined,
+        tone: pendingCount > 0 ? "rose" : "green",
+        tab: "notices",
+      },
+    ],
+    chartTitle: "Notices by audience",
+    chartSeries: chart.length ? chart : [{ label: "—", value: 0 }],
+    tableTitle: "Recent notices",
+    tableColumns: [
+      { key: "title", label: "Title" },
+      { key: "audience", label: "Audience" },
+      { key: "status", label: "Status" },
+    ],
+    tableRows: recent,
+    quickLinks: [
+      { label: "Notices", tab: "notices" },
+      { label: "News", tab: "news" },
+      { label: "Gallery", tab: "gallery" },
+      { label: "WhatsApp hub", tab: "wa_hub" },
+    ],
+  };
+}
+
+function rteDash(academicYearCode?: string): ModuleDashboardModel {
+  const rte = loadRte();
+  const seats = rte.seats.filter((s) => inAcademicYear(s, academicYearCode));
+  const applications = rte.applications.filter((a) =>
+    inAcademicYear(a, academicYearCode),
+  );
+
+  const totalSeats = seats.reduce((s, r) => s + r.total, 0);
+  const enrolled = applications.filter((a) => a.status === "enrolled").length;
+  const admitted = applications.filter(
+    (a) => a.status === "admitted" || a.status === "enrolled",
+  ).length;
+  const pending = applications.filter(
+    (a) => a.status === "govt_assigned" || a.status === "waitlist",
+  ).length;
+  const fillPercent =
+    totalSeats > 0 ? Math.round((admitted / totalSeats) * 100) : 0;
+
+  const byStatus = new Map<string, number>();
+  for (const a of applications) {
+    const label = applicationStatusLabel(a.status);
+    byStatus.set(label, (byStatus.get(label) ?? 0) + 1);
+  }
+  const chart = [...byStatus.entries()].map(([label, value]) => ({
+    label,
+    value,
+  }));
+
+  const recent = [...applications]
+    .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))
+    .slice(0, 30)
+    .map((a) => ({
+      id: a.id,
+      child: a.childName || "—",
+      type: a.type,
+      status: applicationStatusLabel(a.status),
+    }));
+
+  return {
+    title: "RTE / EWS",
+    subtitle: `Session ${academicYearCode || "all"} · mandated seats, applications, and admissions.`,
+    kpis: [
+      {
+        id: "seats",
+        label: "Seats mandated",
+        value: String(totalSeats),
+        tone: "navy",
+        tab: "dashboard",
+      },
+      {
+        id: "fill",
+        label: "Seats filled",
+        value: `${fillPercent}%`,
+        hint: `${admitted} of ${totalSeats} seats`,
+        tone: fillPercent >= 90 ? "green" : fillPercent >= 50 ? "gold" : "rose",
+        tab: "dashboard",
+      },
+      {
+        id: "pending",
+        label: "Pending decision",
+        value: String(pending),
+        hint: pending > 0 ? "Govt-assigned or waitlisted" : undefined,
+        tone: pending > 0 ? "rose" : "green",
+        tab: "applications",
+      },
+      {
+        id: "enrolled",
+        label: "Enrolled",
+        value: String(enrolled),
+        tone: "teal",
+        tab: "enrolled",
+      },
+    ],
+    chartTitle: "Applications by status",
+    chartSeries: chart.length ? chart : [{ label: "—", value: 0 }],
+    tableTitle: "Recent applications",
+    tableColumns: [
+      { key: "child", label: "Child" },
+      { key: "type", label: "Quota" },
+      { key: "status", label: "Status" },
+    ],
+    tableRows: recent,
+    quickLinks: [
+      { label: "Seats", tab: "dashboard" },
+      { label: "Govt list", tab: "applications" },
+      { label: "Enrolled", tab: "enrolled" },
+      { label: "Reports", tab: "reports" },
+    ],
   };
 }
 
@@ -2084,83 +2570,12 @@ function studentLeaveDash(academicYearCode?: string): ModuleDashboardModel {
   };
 }
 
-function purchaseDash(academicYearCode?: string): ModuleDashboardModel {
-  const purchase = loadPurchase();
-  const pos = (purchase.orders ?? []).filter((o) =>
-    inAcademicYear(o, academicYearCode),
+function purchaseDash(): ModuleDashboardModel {
+  return movedToInventoryDash(
+    "Purchase",
+    "Indents, orders, receipts and vendor bills live in Store & purchase",
   );
-  const poIds = new Set(pos.map((o) => o.id));
-  const grns = (purchase.grns ?? []).filter((g) => poIds.has(g.poId));
-  const indents = (purchase.indents ?? []).filter((i) =>
-    inAcademicYear(i, academicYearCode),
-  );
-  const chart = lastNDays(7).map((d) => ({
-    label: dayLabel(d),
-    value: grns.filter((g) => g.date === d).length,
-  }));
-  return {
-    title: "Purchase",
-    subtitle: `Session ${academicYearCode || "all"} · indents, POs, and GRN receipts.`,
-    kpis: [
-      {
-        id: "indents",
-        label: "Indents",
-        value: String(indents.length),
-        tone: "navy",
-      },
-      {
-        id: "pos",
-        label: "POs",
-        value: String(pos.length),
-        tone: "teal",
-      },
-      {
-        id: "grns",
-        label: "GRNs",
-        value: String(grns.length),
-        tone: "sky",
-      },
-      {
-        id: "store",
-        label: "Store",
-        value: "→",
-        hint: "Open store purchase",
-        tone: "gold",
-      },
-    ],
-    chartTitle: "GRNs — last 7 days",
-    chartSeries: chart,
-    ...dualRingLayers(
-      "GRNs by day",
-      chart,
-      "Procurement",
-      [
-        chartPt("Indents", indents.length, "#203050"),
-        chartPt("POs", pos.length, "#0f766e"),
-        chartPt("GRNs", grns.length, "#0284c7"),
-      ],
-      String(grns.length),
-      "grns",
-    ),
-    tableTitle: "Recent GRNs",
-    tableColumns: [
-      { key: "no", label: "GRN" },
-      { key: "po", label: "PO" },
-      { key: "date", label: "Date" },
-    ],
-    tableRows: [...grns]
-      .reverse()
-      .slice(0, 30)
-      .map((g) => ({
-        id: g.id,
-        no: g.grnNo || g.id,
-        po: g.poId || "—",
-        date: g.date || "—",
-      })),
-    quickLinks: [{ label: "Store purchase", href: "/store?tab=purchase" }],
-  };
 }
-
 export function buildModuleDashboard(
   moduleId: DashboardModuleId,
   opts?: { academicYearCode?: string },
@@ -2176,7 +2591,7 @@ export function buildModuleDashboard(
       case "staff":
         return staffDash(opts?.academicYearCode);
       case "store":
-        return storeDash(opts?.academicYearCode);
+        return storeDash();
       case "transport":
         return transportDash(opts?.academicYearCode);
       case "accounts":
@@ -2191,6 +2606,8 @@ export function buildModuleDashboard(
         return homeworkDash(opts?.academicYearCode);
       case "ptm":
         return ptmDash(opts?.academicYearCode);
+      case "events":
+        return eventsDash(opts?.academicYearCode);
       case "vault":
         return vaultDash();
       case "modules":
@@ -2208,7 +2625,13 @@ export function buildModuleDashboard(
       case "student_leave":
         return studentLeaveDash(opts?.academicYearCode);
       case "purchase":
-        return purchaseDash(opts?.academicYearCode);
+        return purchaseDash();
+      case "timetable":
+        return timetableDash(opts?.academicYearCode);
+      case "comms":
+        return commsDash(opts?.academicYearCode);
+      case "rte":
+        return rteDash(opts?.academicYearCode);
       default:
         return emptyModel("Dashboard", "Module overview");
     }
@@ -2260,25 +2683,18 @@ export function buildSchoolDashboard(
     const todayRegs = (att.registers ?? []).filter(
       (r) => inAcademicYear(r, ay) && r.date === today,
     );
-    let stuPresent = 0;
-    let stuAbsent = 0;
-    let stuLeave = 0;
-    for (const r of todayRegs) {
-      const s = summarizeMarks(r.marks || []);
-      stuPresent += s.present;
-      stuAbsent += s.absent;
-      stuLeave += s.leave;
-    }
-    const stuMarked = stuPresent + stuAbsent + stuLeave;
-    const attPct = stuMarked
-      ? Math.round((stuPresent / stuMarked) * 100)
-      : 0;
+    const todayAtt = todayAttendanceFigures(todayRegs);
+    const stuMarked = todayAtt.marked;
+    const attPct = todayAtt.pct;
+    const attCoverage = attendanceCoverageNote(
+      todayAtt,
+      new Set(activeStudents.map((s) => s.sectionId).filter(Boolean)).size,
+      activeStudents.length,
+    );
 
     const staffList = masters.staff ?? [];
     const activeStaff = staffList.filter(isStaffActive).length;
 
-    const bankBal = totalBankBalancePaise(loadAccounts());
-    const lowStock = listLowStockItems(loadStore()).length;
 
     const funnelChart = ADMISSION_STAGES.map((s) => ({
       label: s.label,
@@ -2365,7 +2781,12 @@ export function buildSchoolDashboard(
               label: "Attendance today",
               value: stuMarked ? `${attPct}%` : "—",
               hint: stuMarked
-                ? `${stuPresent} present · ${stuAbsent} absent · ${stuLeave} leave`
+                ? [
+                    `${todayAtt.present + todayAtt.late} present${todayAtt.halfDay ? ` · ${todayAtt.halfDay} half-day` : ""} · ${todayAtt.absent} absent · ${todayAtt.leave} leave`,
+                    attCoverage ? `only ${attCoverage}` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" — ")
                 : "No registers marked yet today",
               tone: "green",
               href: "/attendance",
@@ -2456,18 +2877,25 @@ export function buildSchoolDashboard(
               href: "/fees",
             },
             {
+              // Filled after mount from the server book (SchoolHomeDashboard).
+              // It used to read `totalBankBalancePaise` off the accounts desk,
+              // whose bank ledger holds fee receipts only — ₹7.62L against the
+              // ledger's ₹24k on 2026-09-06. Blank until the real figure lands.
               id: "bank",
               label: "Bank balance",
-              value: formatInr(bankBal),
+              value: "…",
+              hint: "reading the server book",
               tone: "teal",
               href: "/accounts",
             },
             {
-              id: "low-stock",
-              label: "Low stock SKUs",
-              value: String(lowStock),
+              // The count is a server read now, and this composer is
+              // synchronous. A link is honest; a stale number would not be.
+              id: "store",
+              label: "Store & purchase",
+              value: "\u2192",
               tone: "gold",
-              href: "/store",
+              href: "/inventory?tab=reports",
             },
           ],
         },

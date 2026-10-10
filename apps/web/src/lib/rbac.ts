@@ -4,11 +4,25 @@
  */
 
 import type { MastersState } from "@/lib/masters";
+import {
+  defaultMobileAccess,
+  normalizeMobileAccess,
+  type MobileAccessState,
+} from "@/lib/mobileFeatures";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { canAccessModuleHref } from "@/lib/moduleRegistry";
 import { getSessionActor } from "@/lib/sessionActor";
 import { assertSessionWritable } from "@/lib/sessionWriteGuard";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
+import {
+  RBAC_FEATURES,
+  featuresForMastersTab,
+  featuresForModule,
+  featuresForTab,
+  findFeature,
+} from "@/lib/rbacFeatures";
 
 export type RbacModule =
   | "home"
@@ -20,12 +34,16 @@ export type RbacModule =
   | "purchase"
   | "transport"
   | "accounts"
+  | "accounts_position"
   | "trust"
   | "fees"
   | "attendance"
   | "homework"
   | "timetable"
+  | "online_classes"
+  | "teaching"
   | "ptm"
+  | "events"
   | "student_leave"
   | "vault"
   | "rte"
@@ -43,7 +61,21 @@ export type RbacModule =
   | "wa_templates"
   | "wa_automation"
   | "wa_chatbot"
-  | "documents";
+  | "documents"
+  | "id_cards"
+  | "discipline"
+  | "health"
+  | "visitors"
+  | "complaints"
+  | "hostel"
+  | "canteen"
+  | "alumni"
+  | "sports"
+  | "opex_budget"
+  | "scholarships"
+  | "question_bank"
+  | "cbse_loc"
+  | "website";
 
 export type RbacAction =
   | "view"
@@ -58,6 +90,15 @@ export type RbacAction =
 
 export type PermissionGrant = {
   module: RbacModule;
+  actions: RbacAction[];
+};
+
+/**
+ * One FUNCTION inside a module (lib/rbacFeatures.ts), e.g.
+ * "masters.class_subjects" — granted without the rest of the module.
+ */
+export type FeatureGrant = {
+  feature: string;
   actions: RbacAction[];
 };
 
@@ -76,6 +117,8 @@ export type RbacRole = {
   /** Create/edit requests need another role to approve */
   makerChecker: boolean;
   permissions: PermissionGrant[];
+  /** Function-level grants inside modules the role does not hold whole. */
+  featureGrants?: FeatureGrant[];
   note: string;
 };
 
@@ -88,6 +131,28 @@ export type UserRoleAssignment = {
   /** ISO date (YYYY-MM-DD); empty = no expiry */
   expiresOn: string;
   note: string;
+};
+
+/**
+ * A permission given to ONE person, on top of whatever their roles carry.
+ *
+ * The matrix answers "what may a teacher do?". This answers "…and what may
+ * *this* teacher do?" — the office giving one person the fee counter without
+ * handing it to every teacher in the school. Deliberately narrow: no scope
+ * fields, an optional expiry, and it shows up in the access summary and the
+ * audit trail so it can never be a quiet back door.
+ */
+export type UserPermissionGrant = {
+  id: string;
+  staffId: string;
+  module: RbacModule;
+  actions: RbacAction[];
+  /** Why it was given — read back in the access summary. */
+  note: string;
+  grantedBy: string;
+  grantedAt: string;
+  /** ISO date (YYYY-MM-DD); empty = no expiry */
+  expiresOn: string;
 };
 
 export type RbacAuditEntry = {
@@ -103,6 +168,11 @@ export type RbacState = {
   roles: RbacRole[];
   assignments: UserRoleAssignment[];
   audit: RbacAuditEntry[];
+  /** Extra module rights held by one person, beyond their roles. */
+  userGrants: UserPermissionGrant[];
+  /** Which screens each role / person gets in the mobile app. Never widens
+   * the grants above — see lib/mobileFeatures.ts. */
+  mobile: MobileAccessState;
 };
 
 export type SessionLike = {
@@ -131,12 +201,24 @@ export const RBAC_MODULES: {
   { id: "purchase", label: "Purchase · PO · GRN", href: "/store?tab=purchase" },
   { id: "transport", label: "Transport", href: "/transport" },
   { id: "accounts", label: "Accounts", href: "/accounts" },
+  // Split out of `accounts` on 2026-09-20 so the office can key vouchers and
+  // run the day sheet without seeing what the school is worth. The counter
+  // needs today's collection and today's expense; the cash and bank balance,
+  // and income and expenditure for the whole session, are the management's.
+  {
+    id: "accounts_position",
+    label: "Accounts — balances & session totals",
+    href: "/accounts",
+  },
   { id: "trust", label: "Trust · Construction", href: "/trust" },
   { id: "fees", label: "Fees", href: "/fees" },
   { id: "attendance", label: "Attendance", href: "/attendance" },
   { id: "homework", label: "Homework & Diary", href: "/homework" },
   { id: "timetable", label: "Timetable", href: "/timetable" },
+  { id: "online_classes", label: "Online classes", href: "/online-classes" },
+  { id: "teaching", label: "Teaching & syllabus", href: "/teaching" },
   { id: "ptm", label: "PTM", href: "/ptm" },
+  { id: "events", label: "Events & calendar", href: "/events" },
   { id: "student_leave", label: "Student leave", href: "/attendance?tab=leave" },
   { id: "vault", label: "Document vault", href: "/vault" },
   { id: "rte", label: "RTE / EWS", href: "/admissions?tab=rte" },
@@ -153,6 +235,7 @@ export const RBAC_MODULES: {
   { id: "notices", label: "Notices / circulars", href: "/comms?tab=notices" },
   { id: "news", label: "News", href: "/comms?tab=news" },
   { id: "gallery", label: "Gallery", href: "/comms?tab=gallery" },
+  { id: "website", label: "Website", href: "/website" },
   { id: "notifications", label: "Notifications", href: "/comms?tab=inbox" },
   {
     id: "wa_templates",
@@ -176,6 +259,65 @@ export const RBAC_MODULES: {
     id: "documents",
     label: "Document maker",
     href: "/documents",
+    group: "optional",
+  },
+  {
+    id: "id_cards",
+    label: "ID cards",
+    href: "/id-cards",
+    group: "optional",
+  },
+  {
+    id: "discipline",
+    label: "Discipline / behavior",
+    href: "/discipline",
+  },
+  {
+    id: "health",
+    label: "Health / infirmary",
+    href: "/health",
+  },
+  {
+    id: "visitors",
+    label: "Visitor / gate management",
+    href: "/visitors",
+  },
+  {
+    id: "complaints",
+    label: "Complaints / grievance",
+    href: "/complaints",
+  },
+  { id: "hostel", label: "Hostel", href: "/hostel", group: "optional" },
+  { id: "canteen", label: "Canteen / POS", href: "/canteen", group: "optional" },
+  { id: "alumni", label: "Alumni", href: "/alumni", group: "optional" },
+  {
+    id: "sports",
+    label: "Sports / houses / co-curricular",
+    href: "/sports",
+    group: "optional",
+  },
+  {
+    id: "opex_budget",
+    label: "Operating budget",
+    href: "/budget",
+    group: "optional",
+  },
+  {
+    id: "scholarships",
+    label: "Scholarship disbursement",
+    href: "/scholarships",
+    group: "optional",
+  },
+  {
+    id: "question_bank",
+    label: "Question bank",
+    href: "/question-bank",
+    group: "optional",
+  },
+  {
+    id: "cbse_loc",
+    label: "CBSE LOC / registration",
+    href: "/cbse-loc",
     group: "optional",
   },
   { id: "settings", label: "Settings / RBAC", group: "admin" },
@@ -305,22 +447,40 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("purchase", ops),
         grant("transport", ["view", "edit"]),
         grant("accounts", ops),
+        grant("accounts_position", ["view", "export"]),
         grant("trust", ops),
         grant("fees", feesOps),
         grant("attendance", ops),
         grant("homework", ops),
         grant("timetable", ops),
+        grant("online_classes", ops),
+        grant("teaching", [...ops, "approve"]),
         grant("ptm", ops),
+        grant("events", ops),
         grant("student_leave", ops),
         grant("vault", ops),
         grant("rte", ops),
         grant("exams", ops),
         grant("certificates", ops),
         grant("documents", ["view", "create", "export"]),
+        grant("id_cards", ops),
+        grant("discipline", [...ops, "approve"]),
+        grant("health", ops),
+        grant("visitors", ops),
+        grant("complaints", [...ops, "approve"]),
+        grant("hostel", ["view"]),
+        grant("canteen", ["view"]),
+        grant("alumni", ["view"]),
+        grant("sports", ["view"]),
+        grant("opex_budget", ["view"]),
+        grant("scholarships", ["view"]),
+        grant("question_bank", ["view"]),
+        grant("cbse_loc", ["view"]),
         grant("compliance", ["view", "edit", "export"]),
         grant("notices", ops),
         grant("news", ops),
         grant("gallery", ops),
+        grant("website", ops),
         grant("notifications", ["view", "edit"]),
         grant("wa_templates", ops),
         grant("wa_automation", [...ops, "approve"]),
@@ -348,7 +508,10 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("attendance", ["view", "edit", "approve", "export"]),
         grant("homework", ["view", "export"]),
         grant("timetable", ["view", "create", "edit", "approve", "export"]),
+        grant("online_classes", ["view", "create", "edit", "export"]),
+        grant("teaching", ["view", "create", "edit", "export"]),
         grant("ptm", ["view", "create", "edit", "export"]),
+        grant("events", ["view", "create", "edit", "delete", "export"]),
         grant("student_leave", ["view", "create", "edit", "approve", "export"]),
         grant("vault", ["view", "export"]),
         grant("rte", ["view", "create", "edit", "export"]),
@@ -361,15 +524,48 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("staff_advances", ["view", "create", "edit", "delete", "export"]),
         grant("certificates", ops),
         grant("documents", ["view", "create", "export"]),
+        grant("id_cards", ["view", "create", "export"]),
+        grant("discipline", ["view", "create", "edit", "export"]),
+        grant("health", ["view", "create", "edit", "export"]),
+        grant("visitors", ["view", "create", "edit", "export"]),
+        grant("complaints", [...ops, "approve"]),
         grant("notices", ops),
         grant("news", ops),
         grant("gallery", ops),
+        grant("website", ops),
         grant("notifications", ["view"]),
         grant("wa_templates", ["view", "create", "edit", "export"]),
         grant("wa_automation", ["view", "create", "edit", "approve", "export"]),
         grant("wa_chatbot", ["view"]),
         grant("policies", ["view"]),
         grant("settings", ["view"]),
+      ],
+    },
+    {
+      id: "role_auditor",
+      code: "auditor",
+      name: "Auditor (read-only)",
+      isBuiltIn: true,
+      isActive: true,
+      makerChecker: false,
+      note: "For the CA at year end — reads the books, changes nothing",
+      permissions: [
+        grant("home", ["view"]),
+        // Everything the year-end pack draws on, and nothing that writes.
+        // Reports need only `view` (see /api/ledger), so an auditor can pull
+        // the trial balance, I&E, balance sheet, receipts & payments, ledger
+        // statements and the reconciliation without holding any right that
+        // could alter what they are auditing.
+        grant("accounts", ["view", "export"]),
+        grant("accounts_position", ["view", "export"]),
+        grant("fees", ["view", "export"]),
+        grant("payroll", ["view", "export"]),
+        grant("purchase", ["view", "export"]),
+        grant("store", ["view", "export"]),
+        grant("transport", ["view", "export"]),
+        grant("trust", ["view", "export"]),
+        grant("students", ["view"]),
+        grant("staff", ["view"]),
       ],
     },
     {
@@ -390,6 +586,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("notices", ["view"]),
         grant("news", ["view"]),
         grant("gallery", ["view"]),
+        grant("website", ["view"]),
         grant("notifications", ["view"]),
         grant("staff_advances", ["view", "create", "edit", "export"]),
         grant("store", ["view", "export"]),
@@ -415,6 +612,7 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("trust", ["view"]),
         grant("students", ["view"]),
         grant("staff", ["view"]),
+        grant("visitors", ["view"]),
         grant("notices", ["view"]),
         grant("notifications", ["view"]),
       ],
@@ -434,16 +632,34 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("attendance", teachOps),
         grant("homework", [...teachOps, "export"]),
         grant("timetable", ["view"]),
+        // Teachers schedule and run their own sections' online classes.
+        grant("online_classes", teachOps),
+        // Teachers log their own periods and read their own coverage;
+        // they cannot delete a log once written (audit trail) or edit
+        // the syllabus plan the school set.
+        grant("teaching", teachOps),
         grant("ptm", [...teachOps, "export"]),
+        grant("events", ["view"]),
         grant("student_leave", [...teachOps, "approve", "export"]),
         grant("vault", ["view"]),
         grant("purchase", ["view", "create"]),
         grant("exams", teachOps),
         grant("certificates", ["view"]),
+        grant("discipline", ["view", "create"]),
+        grant("health", ["view", "create"]),
+        grant("complaints", ["view", "edit"]),
         grant("notices", ["view"]),
         grant("news", ["view"]),
         grant("gallery", ["view"]),
+        grant("website", ["view"]),
         grant("notifications", ["view"]),
+      ],
+      // Director, 6 Oct 2026: teachers add / change / remove the subjects of
+      // the classes they teach (Masters → Subjects), and see the subject
+      // list — nothing else in Masters. Limited to their own classes.
+      featureGrants: [
+        { feature: "masters.class_subjects", actions: ["view", "create", "edit", "delete"] },
+        { feature: "masters.subjects", actions: ["view"] },
       ],
     },
     {
@@ -454,7 +670,18 @@ export function defaultBuiltInRoles(): RbacRole[] {
       isActive: true,
       makerChecker: false,
       note: "Self-service portal only",
-      permissions: [grant("home", ["view"])],
+      permissions: [
+        grant("home", ["view"]),
+        // "edit" is this codebase's storage-layer write gate for every
+        // module's save*() helper (create/update/delete all funnel through
+        // it — see assertModulePermission callers) — parents need it to
+        // raise a complaint ticket via createComplaintTicket. The UI only
+        // exposes ticket creation for their own resolved household; it
+        // never exposes assign/resolve, matching the same UI-level (not
+        // server-enforced per-record) scoping already accepted for
+        // role_teacher's complaints grant.
+        grant("complaints", ["view", "edit"]),
+      ],
     },
     {
       id: "role_driver",
@@ -469,6 +696,40 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("transport", ["view"]),
       ],
     },
+    {
+      id: "role_gate",
+      code: "gate",
+      name: "Gate",
+      isBuiltIn: true,
+      isActive: true,
+      makerChecker: false,
+      note: "Guard / gateman — the visitor log at the gate, and own attendance, leave and payslip",
+      permissions: [
+        grant("home", ["view"]),
+        grant("notices", ["view"]),
+        grant("notifications", ["view"]),
+        // view + create is the whole gate: see who is on campus, log someone
+        // in and out. Deliberately NOT `edit` — releasing a child on a gate
+        // pass needs `visitors.edit`, and letting somebody log visitors is
+        // not letting them hand over a child. The office grants that by name
+        // to the person who is trusted with it.
+        grant("visitors", ["view", "create"]),
+      ],
+    },
+    {
+      id: "role_support",
+      code: "support",
+      name: "Support staff",
+      isBuiltIn: true,
+      isActive: true,
+      makerChecker: false,
+      note: "Sweeper / gardener / peon — own attendance, leave and payslip only",
+      permissions: [
+        grant("home", ["view"]),
+        grant("notices", ["view"]),
+        grant("notifications", ["view"]),
+      ],
+    },
   ];
 }
 
@@ -478,6 +739,8 @@ export function defaultRbacState(): RbacState {
     roles: defaultBuiltInRoles(),
     assignments: [],
     audit: [],
+    userGrants: [],
+    mobile: defaultMobileAccess(),
   };
 }
 
@@ -493,11 +756,25 @@ function normalizeGrant(g: Partial<PermissionGrant> | null | undefined): Permiss
   return { module: mod.id, actions };
 }
 
+function normalizeFeatureGrant(
+  g: Partial<FeatureGrant> | null | undefined,
+): FeatureGrant | null {
+  const def = g?.feature ? findFeature(g.feature) : null;
+  if (!def) return null;
+  const actions = (Array.isArray(g!.actions) ? g!.actions : [])
+    .filter((a): a is RbacAction => def.actions.includes(a as RbacAction))
+    .filter((a, i, arr) => arr.indexOf(a) === i);
+  return actions.length ? { feature: def.id, actions } : null;
+}
+
 function normalizeRole(r: Partial<RbacRole> | null | undefined): RbacRole | null {
   if (!r?.id || !r.code) return null;
   const permissions = (Array.isArray(r.permissions) ? r.permissions : [])
     .map(normalizeGrant)
     .filter((g): g is PermissionGrant => !!g);
+  const featureGrants = (Array.isArray(r.featureGrants) ? r.featureGrants : [])
+    .map(normalizeFeatureGrant)
+    .filter((g): g is FeatureGrant => !!g);
   return {
     id: r.id,
     code: String(r.code).trim().toLowerCase(),
@@ -506,6 +783,7 @@ function normalizeRole(r: Partial<RbacRole> | null | undefined): RbacRole | null
     isActive: r.isActive !== false,
     makerChecker: !!r.makerChecker,
     permissions,
+    featureGrants,
     note: String(r.note || ""),
   };
 }
@@ -555,7 +833,22 @@ export function normalizeRbacState(
         mergedPerms.push({ module: g.module, actions: [...g.actions] });
       }
     }
-    roles[idx] = { ...existing, permissions: mergedPerms };
+    // Function grants arrived 6 Oct 2026. A stored built-in that has never
+    // carried the field takes the defaults once (the Teacher role's class
+    // subjects); once the office has saved the role — even with every box
+    // cleared — what they saved stands.
+    const rawRole = rolesRaw.find(
+      (r) => r && String(r.code || "").trim().toLowerCase() === b.code && r.isBuiltIn,
+    );
+    const neverHadFeatures = !rawRole || !Array.isArray(rawRole.featureGrants);
+    roles[idx] = {
+      ...existing,
+      permissions: mergedPerms,
+      featureGrants:
+        neverHadFeatures && b.featureGrants?.length
+          ? b.featureGrants.map((g) => ({ feature: g.feature, actions: [...g.actions] }))
+          : existing.featureGrants,
+    };
   }
   const assignments = (Array.isArray(raw.assignments) ? raw.assignments : [])
     .map(normalizeAssignment)
@@ -569,13 +862,100 @@ export function normalizeRbacState(
         detail: String(e?.detail || ""),
       }))
     : [];
-  return { version: 1, roles, assignments, audit };
+  return {
+    version: 1,
+    roles,
+    assignments,
+    audit,
+    userGrants: (Array.isArray(raw.userGrants) ? raw.userGrants : [])
+      .map(normalizeUserGrant)
+      .filter((g): g is UserPermissionGrant => !!g),
+    mobile: normalizeMobileAccess(raw.mobile),
+  };
+}
+
+function normalizeUserGrant(
+  g: Partial<UserPermissionGrant> | null | undefined,
+): UserPermissionGrant | null {
+  const staffId = String(g?.staffId || "").trim();
+  if (!staffId || !g?.module) return null;
+  if (!RBAC_MODULES.some((m) => m.id === g.module)) return null;
+  const actions = (Array.isArray(g.actions) ? g.actions : []).filter(
+    (a): a is RbacAction => ALL_ACTIONS.includes(a as RbacAction),
+  );
+  if (actions.length === 0) return null;
+  return {
+    id: String(g.id || nid("ug")),
+    staffId,
+    module: g.module,
+    actions: [...new Set(actions)],
+    note: String(g.note || ""),
+    grantedBy: String(g.grantedBy || ""),
+    grantedAt: String(g.grantedAt || new Date().toISOString()),
+    expiresOn: String(g.expiresOn || ""),
+  };
+}
+
+/** Live per-person grants for the staff member this session resolves to. */
+export function userGrantsFor(
+  rbac: RbacState,
+  session: SessionLike,
+  masters?: MastersState | null,
+): UserPermissionGrant[] {
+  const self = masters ? resolveStaffForRbac(session, masters) : null;
+  const staffId = self?.id || session.staffId || "";
+  if (!staffId) return [];
+  const today = new Date().toISOString().slice(0, 10);
+  return (rbac.userGrants ?? []).filter(
+    (g) => g.staffId === staffId && (!g.expiresOn || g.expiresOn >= today),
+  );
+}
+
+/** Add or replace one person's grant for a module. Empty actions removes it. */
+export function setUserGrant(
+  state: RbacState,
+  input: {
+    staffId: string;
+    module: RbacModule;
+    actions: RbacAction[];
+    note?: string;
+    grantedBy?: string;
+    expiresOn?: string;
+  },
+): RbacState {
+  const staffId = input.staffId.trim();
+  if (!staffId) return state;
+  const rest = (state.userGrants ?? []).filter(
+    (g) => !(g.staffId === staffId && g.module === input.module),
+  );
+  const actions = [...new Set(input.actions)].filter((a) =>
+    ALL_ACTIONS.includes(a),
+  );
+  if (actions.length === 0) return { ...state, userGrants: rest };
+  const grant: UserPermissionGrant = {
+    id: nid("ug"),
+    staffId,
+    module: input.module,
+    actions,
+    note: input.note || "",
+    grantedBy: input.grantedBy || "",
+    grantedAt: new Date().toISOString(),
+    expiresOn: input.expiresOn || "",
+  };
+  return { ...state, userGrants: [...rest, grant] };
+}
+
+export function removeUserGrant(state: RbacState, id: string): RbacState {
+  return {
+    ...state,
+    userGrants: (state.userGrants ?? []).filter((g) => g.id !== id),
+  };
 }
 
 export function loadRbac(): RbacState {
   if (typeof window === "undefined") return defaultRbacState();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return defaultRbacState();
     return normalizeRbacState(JSON.parse(raw) as Partial<RbacState>);
   } catch {
@@ -600,18 +980,18 @@ export function saveRbac(state: RbacState): void {
     }
   }
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(
+  writeCacheOrInvalidate(
     STORAGE_KEY,
     JSON.stringify(normalizeRbacState(state)),
   );
-  void import("@/lib/rbacPersistence").then(({ scheduleRbacSync }) => {
+  void trackServerWork(import("@/lib/rbacPersistence").then(({ scheduleRbacSync }) => {
     scheduleRbacSync(state);
-  });
+  }));
 }
 
 export function writeRbacLocalRaw(state: RbacState): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(
+  writeCacheOrInvalidate(
     STORAGE_KEY,
     JSON.stringify(normalizeRbacState(state)),
   );
@@ -668,6 +1048,10 @@ export function cloneRole(
     permissions: src.permissions.map((p) => ({
       module: p.module,
       actions: [...p.actions],
+    })),
+    featureGrants: (src.featureGrants ?? []).map((g) => ({
+      feature: g.feature,
+      actions: [...g.actions],
     })),
     note: `Cloned from ${src.name}`,
   };
@@ -826,6 +1210,144 @@ export function setRolePermission(
   );
 }
 
+/** Turn one action of one function on or off for a role. */
+export function setRoleFeaturePermission(
+  state: RbacState,
+  roleId: string,
+  featureId: string,
+  action: RbacAction,
+  enabled: boolean,
+  by: string,
+): RbacState {
+  const def = findFeature(featureId);
+  if (!def || !def.actions.includes(action)) return state;
+  const roles = state.roles.map((r) => {
+    if (r.id !== roleId) return r;
+    const grants = [...(r.featureGrants ?? [])];
+    const cur = grants.find((g) => g.feature === featureId);
+    const actions = new Set(cur?.actions ?? []);
+    if (enabled) actions.add(action);
+    else actions.delete(action);
+    const next = grants
+      .filter((g) => g.feature !== featureId)
+      .concat(actions.size ? [{ feature: featureId, actions: [...actions] }] : []);
+    return { ...r, featureGrants: next };
+  });
+  return appendRbacAudit(
+    { ...state, roles },
+    by,
+    enabled ? "grant" : "revoke",
+    `${roleId} ${featureId}.${action}`,
+  );
+}
+
+/**
+ * May this person do `action` on one function of a module?
+ *
+ * Yes when they hold the whole module (module grant — unchanged behaviour)
+ * — then never limited to their own classes. Otherwise yes when one of
+ * their roles holds the function; `ownClassesOnly` is set for class-scoped
+ * functions: a teacher changes the subjects of the classes they teach, not
+ * every class (director, 6 Oct 2026).
+ */
+export function featureAccess(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  featureId: string,
+  action: RbacAction,
+  rbac?: RbacState,
+): { allowed: boolean; ownClassesOnly: boolean } {
+  const def = findFeature(featureId);
+  if (!def) return { allowed: false, ownClassesOnly: false };
+  const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+  if (hasPermission(session, masters, def.module, action, state)) {
+    return { allowed: true, ownClassesOnly: false };
+  }
+  const roles = resolveSessionRoles(state, session, masters);
+  const granting = roles.filter((r) =>
+    (r.featureGrants ?? []).some((g) => g.feature === featureId && g.actions.includes(action)),
+  );
+  if (granting.length === 0) return { allowed: false, ownClassesOnly: false };
+  // A class-scoped function always reaches the person's own classes only —
+  // whichever role (or clone of one) carries it. Leadership and office
+  // reach every class through the server's teaching scope, and the whole
+  // school through the module grant.
+  return { allowed: true, ownClassesOnly: !!def.classScoped };
+}
+
+export function hasFeaturePermission(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  featureId: string,
+  action: RbacAction,
+  rbac?: RbacState,
+): boolean {
+  return featureAccess(session, masters, featureId, action, rbac).allowed;
+}
+
+/** Holds the whole module, or at least one function in it, for `action`. */
+export function hasAnyFeatureInModule(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  action: RbacAction,
+  rbac?: RbacState,
+): boolean {
+  if (hasPermission(session, masters, module, action, rbac)) return true;
+  return RBAC_FEATURES.some(
+    (f) => f.module === module && featureAccess(session, masters, f.id, action, rbac).allowed,
+  );
+}
+
+/**
+ * May this person open a tab of a module's screen? The whole module opens
+ * every tab; a function opens the tabs listed on it (lib/rbacFeatureCatalog).
+ */
+export function canSeeModuleTab(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  tab: string,
+  rbac?: RbacState,
+): boolean {
+  if (hasPermission(session, masters, module, "view", rbac)) return true;
+  return featuresForTab(module, tab).some((f) =>
+    (["view", "create", "edit", "delete"] as RbacAction[]).some(
+      (a) => featureAccess(session, masters, f.id, a, rbac).allowed,
+    ),
+  );
+}
+
+/**
+ * May this person change things on a tab? The module grant for `action`, or
+ * a function of that tab holding it. The server still decides per row.
+ */
+export function canWriteModuleTab(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  tab: string,
+  action: RbacAction = "edit",
+  rbac?: RbacState,
+): boolean {
+  if (hasPermission(session, masters, module, action, rbac)) return true;
+  return featuresForTab(module, tab).some(
+    (f) => featureAccess(session, masters, f.id, action, rbac).allowed,
+  );
+}
+
+/** A module screen's tab list cut to what this person may open. */
+export function visibleModuleTabs<T extends { id: string }>(
+  items: T[],
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  rbac?: RbacState,
+): T[] {
+  if (hasPermission(session, masters, module, "view", rbac)) return items;
+  return items.filter((t) => canSeeModuleTab(session, masters, module, t.id, rbac));
+}
+
 /** Modules whose reports appear in Reports Center. */
 export const REPORTS_CENTER_RBAC_MODULES: RbacModule[] = [
   "fees",
@@ -835,6 +1357,7 @@ export const REPORTS_CENTER_RBAC_MODULES: RbacModule[] = [
   "attendance",
   "homework",
   "timetable",
+  "teaching",
   "ptm",
   "student_leave",
   "vault",
@@ -881,6 +1404,7 @@ export function moduleForHref(href: string): RbacModule | null {
   }
   if (path.startsWith("/admissions")) return "admissions";
   if (path.startsWith("/staff")) return "staff";
+  if (path.startsWith("/inventory")) return "store";
   if (path.startsWith("/store")) return "store";
   if (path.startsWith("/library")) return "store";
   if (path.startsWith("/purchase")) return "purchase";
@@ -890,7 +1414,10 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/attendance")) return "attendance";
   if (path.startsWith("/homework")) return "homework";
   if (path.startsWith("/timetable")) return "timetable";
+  if (path.startsWith("/online-classes")) return "online_classes";
+  if (path.startsWith("/teaching")) return "teaching";
   if (path.startsWith("/ptm")) return "ptm";
+  if (path.startsWith("/events")) return "events";
   if (path.startsWith("/student-leave")) return "student_leave";
   if (path.startsWith("/vault")) return "vault";
   if (path.startsWith("/rte")) return "rte";
@@ -903,6 +1430,20 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/exams")) return "exams";
   if (path.startsWith("/certificates")) return "certificates";
   if (path.startsWith("/documents")) return "documents";
+  if (path.startsWith("/id-cards")) return "id_cards";
+  if (path.startsWith("/discipline")) return "discipline";
+  if (path.startsWith("/health")) return "health";
+  if (path.startsWith("/visitors")) return "visitors";
+  if (path.startsWith("/complaints")) return "complaints";
+  if (path.startsWith("/hostel")) return "hostel";
+  if (path.startsWith("/canteen")) return "canteen";
+  if (path.startsWith("/alumni")) return "alumni";
+  if (path.startsWith("/sports")) return "sports";
+  if (path.startsWith("/budget")) return "opex_budget";
+  if (path.startsWith("/scholarships")) return "scholarships";
+  if (path.startsWith("/question-bank")) return "question_bank";
+  if (path.startsWith("/cbse-loc")) return "cbse_loc";
+  if (path.startsWith("/website")) return "website";
   if (path.startsWith("/comms") || path.startsWith("/notices") || path.startsWith("/news") || path.startsWith("/gallery")) {
     const tab = params.get("tab");
     if (tab === "news" || path.startsWith("/news")) return "news";
@@ -923,7 +1464,14 @@ function assignmentActive(a: UserRoleAssignment): boolean {
 }
 
 /**
- * Infer built-in role code from session.roleCode / designation when no assignment.
+ * Infer built-in role code from session.roleCode / designation when no
+ * assignment exists. "owner" is deliberately NOT inferable here — it used
+ * to match any roleCode/designation containing "trustee" or "director",
+ * so an ordinary "Director of Admissions" or "Sports Director" designation
+ * (routine HR data, not a security decision) silently granted full owner
+ * access. isProtectedSuperAdminEmail() is now the only inferred path to
+ * owner; anyone else must get it via an explicit assignment in Masters →
+ * Roles, where a human is actually deciding to grant it.
  */
 export function inferRoleCodes(
   session: SessionLike,
@@ -935,34 +1483,51 @@ export function inferRoleCodes(
   const rc = (session.roleCode || "").toLowerCase();
   const matched: string[] = [];
 
-  if (/owner|super.?admin|trustee|director/.test(rc)) matched.push("owner");
   if (/principal|hm|head.?master|vice.?principal/.test(rc)) {
     matched.push("principal");
   }
   if (/^admin$|administrator|registrar/.test(rc)) matched.push("admin");
   if (/office|front.?office/.test(rc)) matched.push("office");
-  if (/accounts|accountant|cashier|finance/.test(rc)) {
+  // Checked before the accounts branch, and it suppresses it. A role code like
+  // "audit accountant" matches both patterns, and where a code is ambiguous
+  // the read-only reading is the safe one: an auditor wrongly given write
+  // rights can alter the books they are checking, while an accountant wrongly
+  // read-only is merely inconvenienced and says so immediately.
+  const isAuditor = /auditor|chartered.?accountant/.test(rc);
+  if (isAuditor) matched.push("auditor");
+  if (!isAuditor && /accounts|accountant|cashier|finance/.test(rc)) {
     matched.push("accounts");
   }
   if (/clerk/.test(rc)) matched.push("office");
   if (/transport|fleet/.test(rc)) matched.push("transport");
   if (/teacher|tgt|pgt|prt|faculty|lecturer/.test(rc)) matched.push("teacher");
   if (/driver/.test(rc)) matched.push("driver");
+  if (/^gate$|guard|gate.?man|watch.?man|security|chowkidar/.test(rc)) {
+    matched.push("gate");
+  }
   if (/parent|guardian/.test(rc)) matched.push("parent");
 
+  let onRoster = false;
   if (masters) {
     const self = resolveStaffForRbac(session, masters);
     if (self) {
+      onRoster = true;
       const des = masters.designations.find((d) => d.id === self.designationId);
       const blob = `${des?.code || ""} ${des?.name || ""}`.toLowerCase();
-      if (/owner|trustee|director/.test(blob)) matched.push("owner");
       if (/prin|principal|hm|head.?master|vice.?principal/.test(blob)) {
         matched.push("principal");
       }
       if (/admin|registrar/.test(blob)) matched.push("admin");
       if (/office|clerk/.test(blob)) matched.push("office");
       if (/accounts|accountant|cashier/.test(blob)) matched.push("accounts");
-      if (/driver/.test(blob)) matched.push("driver");
+      if (/driver|conductor|attend[ae]nt/.test(blob)) matched.push("driver");
+      // A guard on the roster gets the gate and nothing else. Before this
+      // they matched nothing and fell through to `support`, which holds no
+      // visitors grant, so the gate could not be put on their phone without
+      // two by-name grants.
+      if (/guard|gate.?man|watch.?man|security|chowkidar/.test(blob)) {
+        matched.push("gate");
+      }
       if (/teacher|tgt|pgt|prt|faculty/.test(blob)) matched.push("teacher");
       if (self.stream === "teaching" && matched.length === 0) {
         matched.push("teacher");
@@ -970,8 +1535,16 @@ export function inferRoleCodes(
     }
   }
 
+  // A person we DID find on the roster whose designation matches nothing —
+  // a sweeper, gardener, peon — gets the least we have, not the most. Until
+  // 2026-09-06 they fell through to the blank-login fallback below and every
+  // one of them signed in as principal.
+  if (matched.length === 0 && onRoster) {
+    return ["support"];
+  }
+
   if (matched.length === 0) {
-    // Demo blank staff login is principal
+    // Blank demo staff login (nobody on the roster matched) is principal
     if ((session.persona || "staff") === "staff") matched.push("principal");
     else if (session.persona === "parent") matched.push("parent");
     else if (session.persona === "field") matched.push("driver");
@@ -981,27 +1554,56 @@ export function inferRoleCodes(
   return [...new Set(matched)];
 }
 
+/** A role as held by the current session, plus the scope it was granted
+ * under (null = held via inferred/fallback role, i.e. no per-staff
+ * assignment record exists — unrestricted, same as historical behavior). */
+export type ScopedRole = { role: RbacRole; scope: RoleScope | null };
+
+function activeAssignmentsFor(
+  rbac: RbacState,
+  self: { id: string } | null,
+): UserRoleAssignment[] {
+  if (!self) return [];
+  return rbac.assignments.filter(
+    (a) => a.staffId === self.id && assignmentActive(a),
+  );
+}
+
+/**
+ * Like resolveSessionRoles, but keeps each role's assignment-level scope
+ * attached instead of discarding it — the input hasScopedPermission needs
+ * to enforce campus/class/department restrictions.
+ */
+export function resolveSessionRoleScopes(
+  rbac: RbacState,
+  session: SessionLike,
+  masters?: MastersState | null,
+): ScopedRole[] {
+  const self = masters ? resolveStaffForRbac(session, masters) : null;
+  const fromAssign = activeAssignmentsFor(rbac, self);
+
+  if (fromAssign.length > 0) {
+    const scoped = fromAssign
+      .map((a): ScopedRole | null => {
+        const role = rbac.roles.find((r) => r.id === a.roleId);
+        return role && role.isActive ? { role, scope: a.scope } : null;
+      })
+      .filter((x): x is ScopedRole => !!x);
+    if (scoped.length) return scoped;
+  }
+
+  const codes = inferRoleCodes(session, masters);
+  return rbac.roles
+    .filter((r) => r.isActive && codes.includes(r.code))
+    .map((role) => ({ role, scope: null }));
+}
+
 export function resolveSessionRoles(
   rbac: RbacState,
   session: SessionLike,
   masters?: MastersState | null,
 ): RbacRole[] {
-  const self = masters ? resolveStaffForRbac(session, masters) : null;
-  const fromAssign = self
-    ? rbac.assignments.filter(
-        (a) => a.staffId === self.id && assignmentActive(a),
-      )
-    : [];
-
-  if (fromAssign.length > 0) {
-    const roles = fromAssign
-      .map((a) => rbac.roles.find((r) => r.id === a.roleId))
-      .filter((r): r is RbacRole => !!r && r.isActive);
-    if (roles.length) return roles;
-  }
-
-  const codes = inferRoleCodes(session, masters);
-  return rbac.roles.filter((r) => r.isActive && codes.includes(r.code));
+  return resolveSessionRoleScopes(rbac, session, masters).map((x) => x.role);
 }
 
 export function effectivePermissions(
@@ -1031,7 +1633,100 @@ export function hasPermission(
   const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
   const roles = resolveSessionRoles(state, session, masters);
   const eff = effectivePermissions(roles);
-  return !!eff.get(module)?.has(action);
+  if (eff.get(module)?.has(action)) return true;
+  // …then anything the office gave this person alone.
+  return userGrantsFor(state, session, masters).some(
+    (g) => g.module === module && g.actions.includes(action),
+  );
+}
+
+/** The record being accessed, for scope-aware checks. Omit a field (or the
+ * whole object) when the caller doesn't know it / it doesn't apply. */
+export type EntityScope = {
+  campusId?: string | null;
+  classId?: string | null;
+  departmentId?: string | null;
+};
+
+function scopeAllows(scope: RoleScope | null, entity?: EntityScope): boolean {
+  if (!scope || !entity) return true;
+  if (
+    scope.campusIds.length &&
+    entity.campusId &&
+    !scope.campusIds.includes(entity.campusId)
+  ) {
+    return false;
+  }
+  if (
+    scope.classIds.length &&
+    entity.classId &&
+    !scope.classIds.includes(entity.classId)
+  ) {
+    return false;
+  }
+  if (
+    scope.departmentIds.length &&
+    entity.departmentId &&
+    !scope.departmentIds.includes(entity.departmentId)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Scope-aware sibling of hasPermission. Without `entity` it is identical to
+ * hasPermission (an assignment's scope only narrows access to a *specific*
+ * record — a caller that isn't asking about one gets the same module-level
+ * answer as before). Pass `entity` to also enforce the assignment's
+ * campus/class/department restriction, e.g. a teacher assigned "teacher"
+ * scoped to classIds: ["cls_vi"] is denied for entity: { classId: "cls_ix" }
+ * even though the "teacher" role itself grants students.view.
+ */
+export function hasScopedPermission(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  action: RbacAction,
+  rbac?: RbacState,
+  entity?: EntityScope,
+): boolean {
+  const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+  const scopedRoles = resolveSessionRoleScopes(state, session, masters);
+  for (const { role, scope } of scopedRoles) {
+    const grant = role.permissions.find((g) => g.module === module);
+    if (!grant?.actions.includes(action)) continue;
+    if (scopeAllows(scope, entity)) return true;
+  }
+  return userGrantsFor(state, session, masters).some(
+    (g) => g.module === module && g.actions.includes(action),
+  );
+}
+
+/**
+ * Class ids the session's assignments restrict it to, for read-side
+ * filtering (e.g. trimming a class picker to what a scoped teacher may
+ * touch). Returns null when unrestricted (no assignment scope, or any held
+ * assignment for `module` has an empty classIds — the widest grant wins).
+ */
+export function scopedClassIds(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  action: RbacAction,
+  rbac?: RbacState,
+): string[] | null {
+  const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+  const scopedRoles = resolveSessionRoleScopes(state, session, masters);
+  const restricting: string[][] = [];
+  for (const { role, scope } of scopedRoles) {
+    const grant = role.permissions.find((g) => g.module === module);
+    if (!grant?.actions.includes(action)) continue;
+    if (!scope || scope.classIds.length === 0) return null;
+    restricting.push(scope.classIds);
+  }
+  if (restricting.length === 0) return null;
+  return [...new Set(restricting.flat())];
 }
 
 export function canAccessModule(
@@ -1059,12 +1754,40 @@ export function canAccessMastersTab(
   rbac?: RbacState,
   action: RbacAction = "view",
 ): boolean {
-  return hasPermission(
-    session,
-    masters,
-    moduleForMastersTab(tab),
-    action,
-    rbac,
+  const tabModule = moduleForMastersTab(tab);
+  if (hasPermission(session, masters, tabModule, action, rbac)) return true;
+  if (!tab) return false;
+  // A function of Masters (e.g. a teacher's Class subjects) opens its tab;
+  // the WhatsApp tabs open for functions of their own modules.
+  const fns = tabModule === "masters" ? featuresForMastersTab(tab) : featuresForTab(tabModule, tab);
+  return fns.some(
+    (f) => featureAccess(session, masters, f.id, action, rbac).allowed,
+  );
+}
+
+/**
+ * Screens that show more than one module's tabs. A tab there opens for a
+ * function of any of these modules that lists it (e.g. Comms → WhatsApp
+ * for Notifications → Send WhatsApp; Students → UDISE+ for Compliance).
+ */
+const SCREEN_EXTRA_MODULES: Record<string, RbacModule[]> = {
+  "/comms": ["notices", "news", "gallery", "notifications", "wa_automation"],
+  "/students": ["compliance"],
+};
+
+/** Holds any action of a function of these modules (on `tab`, if named). */
+function holdsScreenFunction(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  modules: RbacModule[],
+  tab: string | null,
+  rbac?: RbacState,
+): boolean {
+  const fns = modules.flatMap((m) => (tab ? featuresForTab(m, tab) : featuresForModule(m)));
+  return fns.some((f) =>
+    (["view", "create", "edit", "delete", "approve"] as RbacAction[]).some(
+      (a) => featureAccess(session, masters, f.id, a, rbac).allowed,
+    ),
   );
 }
 
@@ -1075,6 +1798,16 @@ export function canAccessHref(
   rbac?: RbacState,
 ): boolean {
   const path = href.split("?")[0] || "";
+  if (path === "/masters") {
+    // A function of Masters (a teacher's Class subjects) opens the page and
+    // its own tab — not the whole module.
+    const qs = href.includes("?") ? href.split("?")[1] : "";
+    const tab = new URLSearchParams(qs).get("tab");
+    const ok = tab
+      ? canAccessMastersTab(session, masters, tab, rbac)
+      : hasAnyFeatureInModule(session, masters, "masters", "view", rbac);
+    if (ok) return canAccessModuleHref(href);
+  }
   if (path.startsWith("/reports")) {
     return (
       canAccessReportsCenter(session, masters, rbac) &&
@@ -1154,13 +1887,107 @@ export function canAccessHref(
     ) {
       return canAccessModuleHref(href);
     }
-    return false;
+    return holdsScreenFunction(session, masters, ["payroll", "staff_advances"], tab, rbac) &&
+      canAccessModuleHref(href);
   }
   const mod = moduleForHref(href);
   if (!mod) return canAccessModuleHref(href);
   if (mod === "home") return canAccessModuleHref(href);
-  if (!canAccessModule(session, masters, mod, rbac)) return false;
+  if (!canAccessModule(session, masters, mod, rbac)) {
+    // Holding a function of the module (Masters → Roles → functions) opens
+    // its page; its own tab when the link names one.
+    const qs = href.includes("?") ? href.split("?")[1] : "";
+    const tab = new URLSearchParams(qs).get("tab");
+    const modules = [mod, ...(SCREEN_EXTRA_MODULES[path.replace(/\/$/, "")] ?? [])];
+    return holdsScreenFunction(session, masters, modules, tab, rbac) && canAccessModuleHref(href);
+  }
   return canAccessModuleHref(href);
+}
+
+/* ─── Concessions: who may give one, and who may let it stand ────────────
+ *
+ * A concession is money the school agrees not to collect, so the two
+ * questions are kept apart:
+ *
+ *   GRANT   — may this person record a discount at all?
+ *   APPROVE — may this person make it effective?
+ *
+ * Owner, admin and principal can do both. Anyone else who has been given the
+ * fees module — the "assigned user" — may record one, but it stays PENDING
+ * until one of those three approves it. That is the whole point of splitting
+ * the two: a clerk can prepare the discount a parent is asking for without
+ * being able to hand it over.
+ *
+ * The check is not a UI courtesy. `grant()` and the fee counter both force
+ * the status, so hiding or not hiding a button changes nothing about what
+ * gets saved.
+ */
+
+/** Owner, admin, principal — or anyone explicitly given fees:approve. */
+export function canApproveConcession(
+  session: SessionLike,
+  masters?: MastersState | null,
+  rbac?: RbacState,
+): boolean {
+  if (isProtectedSuperAdminEmail(session.email)) return true;
+  if (hasPermission(session, masters ?? null, "fees", "approve", rbac)) {
+    return true;
+  }
+  const codes = inferRoleCodes(session, masters);
+  return codes.some((c) => c === "owner" || c === "principal" || c === "admin");
+}
+
+/**
+ * May this person date a receipt earlier than today, whatever the school's
+ * back-dating setting says?
+ *
+ * Deliberately the SAME authority as approving a concession: owner, admin,
+ * principal, or an explicit `fees:approve`. Both are "this person may
+ * overrule the counter's normal limits on money", and having two different
+ * answers to that question is how one of them quietly becomes wrong.
+ *
+ * When the school's setting allows back-dating for everybody this is not
+ * consulted — it is the override for when the setting is OFF.
+ */
+export function canBackdateReceipt(
+  session: SessionLike,
+  masters?: MastersState | null,
+  rbac?: RbacState,
+): boolean {
+  return canApproveConcession(session, masters, rbac);
+}
+
+/**
+ * May this person record a concession at all?
+ *
+ * Anyone who can approve one can obviously record one. Beyond that it takes
+ * an explicit assignment: edit rights on the fees module. Someone who merely
+ * VIEWS fees cannot give money away.
+ */
+export function canGrantConcession(
+  session: SessionLike,
+  masters?: MastersState | null,
+  rbac?: RbacState,
+): boolean {
+  if (canApproveConcession(session, masters, rbac)) return true;
+  return hasPermission(session, masters ?? null, "fees", "edit", rbac);
+}
+
+/**
+ * The status a newly recorded concession must take.
+ *
+ * `amountAllowsAuto` is the existing money test — the policy's
+ * auto-approve ceiling. It can only ever KEEP a grant pending; it can never
+ * approve one for somebody who lacks the authority, which is the rule this
+ * adds. Approval used to depend on the amount alone, so an assigned user
+ * granting ₹500 under a ₹5,000 ceiling approved it themselves.
+ */
+export function concessionGrantStatus(
+  canApprove: boolean,
+  amountAllowsAuto: boolean,
+): "approved" | "pending" {
+  if (!canApprove) return "pending";
+  return amountAllowsAuto ? "approved" : "pending";
 }
 
 /** Who may edit Roles & Permissions matrix */

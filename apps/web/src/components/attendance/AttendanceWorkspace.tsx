@@ -22,6 +22,8 @@ import {
   type AttendanceStatus,
 } from "@/lib/attendance";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { useSyncStatus } from "@/lib/useSyncStatus";
+import { retryNow } from "@/lib/syncRetryStatus";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
@@ -32,20 +34,28 @@ import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
-import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { canSeeModuleTab, loadRbac, scopedClassIds, visibleModuleTabs } from "@/lib/rbac";
+import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { MonthRegisterPanel } from "@/components/attendance/MonthRegisterPanel";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { StaffAttendancePanel } from "@/components/attendance/StaffAttendancePanel";
+import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import { AttendanceExceptionsPanel } from "@/components/attendance/AttendanceExceptionsPanel";
 import { StaffAttendanceReportsPanel } from "@/components/staff/StaffLeaveReportsPanel";
 import { StudentAttendanceReportsPanel } from "@/components/attendance/StudentAttendanceReportsPanel";
 import { StudentLeaveWorkspace } from "@/components/studentLeave/StudentLeaveWorkspace";
 import { resolveSessionStaff } from "@/lib/staffResolve";
+import {
+  isRestrictedTeacher,
+  useMyTeaching,
+} from "@/components/staff/useMyTeaching";
 
 type AttTab =
   | "dashboard"
   | "students"
+  | "month"
   | "staff"
   | "leave"
   | "exceptions"
@@ -63,6 +73,7 @@ export function AttendanceWorkspace() {
     const allowed: AttTab[] = [
       "dashboard",
       "students",
+      "month",
       "staff",
       "leave",
       "exceptions",
@@ -78,6 +89,15 @@ export function AttendanceWorkspace() {
       return;
     }
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as AttTab);
+    // Opened from a "Your classes" chip on the teacher home.
+    const qs = new URLSearchParams(window.location.search);
+    const qc = qs.get("classId");
+    const qsec = qs.get("sectionId");
+    if (qc && qsec) {
+      setClassId(qc);
+      setSectionId(qsec);
+      setMyClassAutoDone(true);
+    }
   }, []);
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
@@ -89,6 +109,7 @@ export function AttendanceWorkspace() {
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const syncStatus = useSyncStatus(["blob:attendance_state", "attendanceDesk"]);
   const [tick, setTick] = useState(0);
   const [myClassAutoDone, setMyClassAutoDone] = useState(false);
   const [overrideNote, setOverrideNote] = useState("");
@@ -99,7 +120,22 @@ export function AttendanceWorkspace() {
     return () => window.clearInterval(t);
   }, []);
 
-  const ay = session.academicYearCode || DEFAULT_AY;
+  // A teacher's own sections, from the same server answer that allows or
+  // refuses the save. Until 2026-09-29 the pickers listed every class and
+  // the save pushed this browser's whole attendance desk.
+  const { my } = useMyTeaching();
+  const teacherMode = isRestrictedTeacher(my);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!teacherMode) return;
+    if (tab !== "students" && tab !== "month" && tab !== "staff" && tab !== "leave") setTab("students");
+  }, [teacherMode, tab]);
+
+  const ay =
+    (teacherMode ? my.academicYearCode : "") ||
+    session.academicYearCode ||
+    DEFAULT_AY;
 
   function refresh() {
     setMasters(loadMasters());
@@ -110,16 +146,27 @@ export function AttendanceWorkspace() {
   useEffect(() => {
     refresh();
     void (async () => {
-      const { ensureAttendanceHydrated } = await import(
-        "@/lib/attendancePersistence"
-      );
-      const changed = await ensureAttendanceHydrated();
+      const [{ ensureAttendanceHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/attendancePersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      const changed = await withHydrationSlot(() => ensureAttendanceHydrated());
       if (changed) refresh();
     })();
   }, []);
 
   /** Sections this staff is class teacher of (for phone/tablet quick mark). */
   const myClassSections = useMemo(() => {
+    if (teacherMode) {
+      return my.teaching.map((t) => ({
+        classId: t.classId,
+        sectionId: t.sectionId,
+        label:
+          `${t.className} · ${t.sectionName}` +
+          (t.isClassTeacher ? " (class teacher)" : ""),
+      }));
+    }
     if (!masters) return [];
     const staff = resolveSessionStaff(session, masters);
     if (!staff) return [];
@@ -136,7 +183,7 @@ export function AttendanceWorkspace() {
       });
     }
     return out;
-  }, [masters, session, ay, tick]);
+  }, [masters, session, ay, tick, teacherMode, my]);
 
   useEffect(() => {
     if (myClassAutoDone || myClassSections.length === 0) return;
@@ -150,18 +197,57 @@ export function AttendanceWorkspace() {
     setMyClassAutoDone(true);
   }, [myClassSections, myClassAutoDone, classId, sectionId]);
 
+  /** Month register classes: a teacher's own; the office, every active section. */
+  const monthSections = useMemo(() => {
+    if (teacherMode) return myClassSections;
+    if (!masters) return [];
+    const order = new Map(masters.classes.map((c, i) => [c.id, i]));
+    return masters.sections
+      .filter((sec) => sec.isActive && masters.classes.some((c) => c.id === sec.classId && c.isActive))
+      .sort((a, b) => (order.get(a.classId) ?? 0) - (order.get(b.classId) ?? 0) || (a.name || "").localeCompare(b.name || ""))
+      .map((sec) => ({
+        classId: sec.classId,
+        sectionId: sec.id,
+        label: `${masters.classes.find((c) => c.id === sec.classId)?.name || "Class"} · ${sec.name || ""}`.trim(),
+      }));
+  }, [teacherMode, myClassSections, masters]);
+
   const classOptions = useMemo(() => {
     if (!masters) return [];
-    return masters.classes.filter((c) => c.isActive);
-  }, [masters]);
+    const active = masters.classes.filter((c) => c.isActive);
+    if (teacherMode) {
+      const mine = new Set(my.teaching.map((t) => t.classId));
+      return active.filter((c) => mine.has(c.id));
+    }
+    // A class-scoped assignment (Masters → Roles) restricts which classes
+    // this staff member may even pick, not just which one auto-selects —
+    // previously any teacher could hand-pick a class outside their scope.
+    const allowed = scopedClassIds(
+      session,
+      masters,
+      "attendance",
+      "edit",
+      loadRbac(),
+    );
+    return allowed ? active.filter((c) => allowed.includes(c.id)) : active;
+  }, [masters, session, teacherMode, my]);
 
   const sectionOptions = useMemo(() => {
     if (!masters || !classId) return [];
-    return masters.sections.filter((s) => s.classId === classId && s.isActive);
-  }, [masters, classId]);
+    const all = masters.sections.filter((s) => s.classId === classId && s.isActive);
+    if (!teacherMode) return all;
+    const mine = new Set(
+      my.teaching.filter((t) => t.classId === classId).map((t) => t.sectionId),
+    );
+    return all.filter((s) => mine.has(s.id));
+  }, [masters, classId, teacherMode, my]);
 
   useEffect(() => {
     if (!sectionId) return;
+    // Wait for the options to exist: before Masters (or "my classes") has
+    // loaded they are empty, and clearing here dropped a section chosen
+    // from a link.
+    if (sectionOptions.length === 0) return;
     if (!sectionOptions.some((s) => s.id === sectionId)) {
       setSectionId("");
     }
@@ -228,6 +314,51 @@ export function AttendanceWorkspace() {
     ).length;
   }, [tick, ay]);
 
+  // Someone holding only some Attendance functions (Masters → Roles) sees
+  // only their tabs. Student leave is its own module shown here, so its tab
+  // follows Student leave's grant as well as Attendance's.
+  const tabItems = useMemo(() => {
+    const all: ModuleTabItem[] = teacherMode
+      ? // A teacher's attendance: their classes, their own punch, leave.
+        // The school-wide dashboard, exceptions and staff reports are
+        // the office's.
+        [
+          { id: "students", label: "My classes", tone: "navy" },
+          { id: "month", label: "Month register", tone: "violet" },
+          { id: "staff", label: "My attendance", tone: "teal" },
+          { id: "leave", label: "Student leave", tone: "sky" },
+        ]
+      : [
+          { id: "dashboard", label: "Dashboard", tone: "navy" },
+          { id: "students", label: "Students", tone: "navy" },
+          { id: "month", label: "Month register", tone: "violet" },
+          { id: "staff", label: "Staff", tone: "teal" },
+          { id: "leave", label: "Student leave", tone: "sky" },
+          {
+            id: "exceptions",
+            label:
+              openExceptionCount > 0
+                ? `Exceptions (${openExceptionCount})`
+                : "Exceptions",
+            tone: "amber",
+          },
+          { id: "student-reports", label: "Student reports", tone: "amber" },
+          { id: "staff-reports", label: "Staff reports", tone: "violet" },
+        ];
+    const shown = visibleModuleTabs(all, session, masters, "attendance");
+    if (shown.some((t) => t.id === "leave")) return shown;
+    if (!canSeeModuleTab(session, masters, "student_leave", "leave")) return shown;
+    return all.filter((t) => t.id === "leave" || shown.includes(t));
+  }, [teacherMode, openExceptionCount, session, masters]);
+  useEffect(() => {
+    // Not before Masters load: roles are read from it, and a tab opened by
+    // link (?tab=leave) must not be thrown away on a half-known login.
+    if (!masters) return;
+    if (tabItems.length > 0 && !tabItems.some((t) => t.id === tab)) {
+      setTab(tabItems[0]!.id as AttTab);
+    }
+  }, [masters, tabItems, tab]);
+
   const recent = useMemo(() => {
     void tick;
     return listRecentRegisters(10);
@@ -288,6 +419,10 @@ export function AttendanceWorkspace() {
       setError("No active students in this section");
       return;
     }
+    if (teacherMode) {
+      void saveViaServer();
+      return;
+    }
     const campusId =
       roster[0]?.campusId || masters?.campuses?.[0]?.id || "";
     const result = upsertRegister({
@@ -326,6 +461,63 @@ export function AttendanceWorkspace() {
     );
   }
 
+  /**
+   * A teacher's save: one register, checked by the server against the
+   * teacher's own sections, written straight to the database. Nothing from
+   * this browser's copy of other classes' registers travels with it.
+   */
+  async function saveViaServer() {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/v1/attendance/mark", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          classId,
+          sectionId,
+          date,
+          remark,
+          marks: marks.map((m) => ({
+            studentId: m.studentId,
+            status: m.status,
+            note: m.note || "",
+          })),
+        }),
+      });
+      const body = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: { message?: string };
+      } | null;
+      if (!res.ok || !body?.ok) {
+        setError(
+          body?.error?.message ||
+            "Attendance was NOT saved — please check your connection and try again.",
+        );
+        return;
+      }
+      setDirty(false);
+      const s = summarizeMarks(marks);
+      flash(
+        `Saved ${classLabel(classId, sectionId)} · ${date} — P ${s.present} · A ${s.absent}`,
+      );
+      // Pull the saved register back so "Last saved" reflects the server.
+      const [{ ensureAttendanceHydrated }, { resetDeskHydrated }] =
+        await Promise.all([
+          import("@/lib/attendancePersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      resetDeskHydrated("attendance");
+      await ensureAttendanceHydrated().catch(() => false);
+      refresh();
+    } catch {
+      setError("Attendance was NOT saved — could not reach the school server.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <ErpWorkspaceShell
       title="Attendance"
@@ -338,26 +530,35 @@ export function AttendanceWorkspace() {
       }
     >
       <ModuleTabs
+        // A different tab set is a different bar: remount rather than
+        // reconcile the office's seven tabs into a teacher's three.
+        key={teacherMode ? "teacher" : "office"}
         aria-label="Attendance"
         value={tab}
         onChange={(id) => setTab(id as AttTab)}
-        items={[
-          { id: "dashboard", label: "Dashboard", tone: "navy" },
-          { id: "students", label: "Students", tone: "navy" },
-          { id: "staff", label: "Staff", tone: "teal" },
-          { id: "leave", label: "Student leave", tone: "sky" },
-          {
-            id: "exceptions",
-            label:
-              openExceptionCount > 0
-                ? `Exceptions (${openExceptionCount})`
-                : "Exceptions",
-            tone: "amber",
-          },
-          { id: "student-reports", label: "Student reports", tone: "amber" },
-          { id: "staff-reports", label: "Staff reports", tone: "violet" },
-        ]}
+        items={tabItems}
       />
+
+      {syncStatus.status === "failed" ? (
+        <p className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-[rgba(180,83,9,0.25)] bg-[rgba(180,83,9,0.08)] px-3 py-2 text-[12px] text-[#9a3412]">
+          <span>
+            ⚠ Not yet synced to server — retrying automatically
+            {syncStatus.error ? ` (${syncStatus.error})` : ""}
+          </span>
+          <button
+            type="button"
+            className="rounded-md border border-[rgba(180,83,9,0.35)] px-2 py-0.5 font-semibold hover:bg-[rgba(180,83,9,0.15)]"
+            onClick={() => {
+              retryNow("blob:attendance_state");
+              retryNow("attendanceDesk");
+            }}
+          >
+            Retry now
+          </button>
+        </p>
+      ) : syncStatus.status === "pending" || syncStatus.status === "retrying" ? (
+        <p className="mt-3 text-[12px] text-[var(--muted)]">Syncing…</p>
+      ) : null}
 
       {tab === "dashboard" ? (
         <div className="mt-5">
@@ -367,6 +568,8 @@ export function AttendanceWorkspace() {
           />
         </div>
       ) : null}
+
+      {tab === "month" ? <MonthRegisterPanel sections={monthSections} /> : null}
 
       {tab === "staff" ? (
         <div className="mt-5">
@@ -406,14 +609,14 @@ export function AttendanceWorkspace() {
         </p>
       ) : null}
       {notice ? (
-        <p className="mt-3 rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-2 text-sm text-[var(--brand-deep)]">
+        <p className="mt-3 rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-sm text-[var(--brand-deep)]">
           {notice}
         </p>
       ) : null}
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)]">
         <div className="space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 pb-24 sm:pb-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 pb-24 sm:pb-4">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <h2 className="text-sm font-bold text-[var(--brand-deep)]">
                 Mark register
@@ -442,8 +645,8 @@ export function AttendanceWorkspace() {
                         }}
                         className={`min-h-11 rounded-xl px-3.5 py-2 text-sm font-bold ${
                           active
-                            ? "bg-[var(--brand-deep)] text-white shadow-sm"
-                            : "border border-[rgba(32,48,80,0.15)] bg-[rgba(32,48,80,0.04)] text-[var(--brand-deep)]"
+                            ? "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-sm"
+                            : "border border-[var(--border)] bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
                         }`}
                       >
                         {c.label}
@@ -455,6 +658,13 @@ export function AttendanceWorkspace() {
                   Phone/tablet: All present → correct absentees → Save.
                 </p>
               </div>
+            ) : null}
+
+            {teacherMode && my.teaching.length === 0 ? (
+              <p className="mt-3 rounded-lg border border-[rgba(217,119,6,0.45)] bg-[rgba(217,119,6,0.12)] px-3 py-2 text-sm text-[var(--brand-deep)]">
+                No classes are assigned to you yet. Ask the office to add your
+                class or subjects in Staff → Duties, then reopen this page.
+              </p>
             ) : null}
 
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -561,7 +771,7 @@ export function AttendanceWorkspace() {
                   </button>
                   <button
                     type="button"
-                    className="min-h-11 min-w-[7.5rem] flex-1 rounded-xl bg-[#dc2626] px-3 py-2.5 text-sm font-bold text-white disabled:opacity-40 sm:flex-none"
+                    className="min-h-11 min-w-[7.5rem] flex-1 rounded-xl bg-[var(--tone-red-solid)] px-3 py-2.5 text-sm font-bold text-white disabled:opacity-40 sm:flex-none"
                     disabled={holidayBlocks || lockBlocksTeacher}
                     onClick={() => markAll("A")}
                   >
@@ -569,7 +779,7 @@ export function AttendanceWorkspace() {
                   </button>
                   <button
                     type="button"
-                    className="min-h-11 rounded-xl border border-[rgba(32,48,80,0.18)] px-3 py-2.5 text-sm font-semibold text-[var(--brand-deep)] disabled:opacity-40"
+                    className="min-h-11 rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm font-semibold text-[var(--brand-deep)] disabled:opacity-40"
                     disabled={holidayBlocks || lockBlocksTeacher}
                     onClick={() => {
                       setMarks(defaultMarksForRoster(roster, existing));
@@ -649,7 +859,7 @@ export function AttendanceWorkspace() {
                   </p>
                 ) : (
                   <ErpTableShell className="mt-3">
-                    <ul className="max-h-[28rem] divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
+                    <ul className="max-h-[28rem] divide-y divide-[var(--border)] overflow-y-auto">
                     {roster.map((st) => {
                       const mark =
                         marks.find((m) => m.studentId === st.id) ?? {
@@ -660,9 +870,15 @@ export function AttendanceWorkspace() {
                       return (
                         <li
                           key={st.id}
-                          className="flex flex-wrap items-center gap-2 px-3 py-2.5 sm:flex-nowrap"
+                          className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-2"
                         >
-                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                          {/* min-w-0 + flex-1 lets this shrink instead of the
+                              row ever wrapping, so on narrow screens it was
+                              being crushed to near-zero width — invisible
+                              behind the status buttons — rather than the row
+                              stacking. Explicit flex-col below sm: forces a
+                              real stack instead of relying on flex-wrap. */}
+                          <div className="flex min-w-0 items-center gap-2 sm:flex-1">
                             <span className="w-7 shrink-0 text-center text-[11px] font-bold tabular-nums text-[var(--muted)]">
                               {st.rollNo || "—"}
                             </span>
@@ -687,10 +903,10 @@ export function AttendanceWorkspace() {
                                   title={s.label}
                                   aria-pressed={active}
                                   disabled={lockBlocksTeacher}
-                                  className={`min-h-10 min-w-[2.75rem] rounded-lg px-2 py-2 text-xs font-bold disabled:opacity-40 ${
+                                  className={`min-h-11 min-w-[2.75rem] rounded-lg px-2 py-2 text-xs font-bold disabled:opacity-40 ${
                                     active
                                       ? `${tone.bg} ${tone.text}`
-                                      : "bg-[rgba(32,48,80,0.06)] text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.1)]"
+                                      : "bg-[var(--surface-sunken)] text-[var(--brand-deep)] hover:bg-[var(--border)]"
                                   }`}
                                   onClick={() => setStatus(st.id, s.code)}
                                 >
@@ -706,25 +922,39 @@ export function AttendanceWorkspace() {
                   </ErpTableShell>
                 )}
 
-                <label className="mt-3 block text-sm">
+                <div className="mt-3 block text-sm">
                   <span className="mb-1 block text-[11px] text-[var(--muted)]">
                     Day remark (optional)
                   </span>
-                  <input
-                    className="field !py-1.5"
-                    value={remark}
-                    disabled={lockBlocksTeacher}
-                    onChange={(e) => {
-                      setRemark(e.target.value);
-                      setDirty(true);
-                    }}
-                    placeholder="e.g. Class test period 3"
-                  />
-                </label>
+                  <span className="flex items-center gap-1.5">
+                    <input
+                      aria-label="Day remark"
+                      className="field !py-1.5"
+                      value={remark}
+                      disabled={lockBlocksTeacher}
+                      onChange={(e) => {
+                        setRemark(e.target.value);
+                        setDirty(true);
+                      }}
+                      placeholder="e.g. Class test period 3"
+                    />
+                    {/* 2026-09-30: the shared dictation mic — the old one was
+                        Chrome-only and hid itself on iPhones. */}
+                    <VoiceDictateButton
+                      title="Dictate the day remark"
+                      disabled={lockBlocksTeacher}
+                      value={remark}
+                      onChange={(v) => {
+                        setRemark(v);
+                        setDirty(true);
+                      }}
+                    />
+                  </span>
+                </div>
 
                 {teacherLocked && canOverrideLock ? (
                   <label className="mt-3 block text-sm">
-                    <span className="mb-1 block text-[11px] font-semibold text-[#b45309]">
+                    <span className="mb-1 block text-[11px] font-semibold text-[var(--warning)]">
                       Office override note (required)
                     </span>
                     <input
@@ -747,11 +977,11 @@ export function AttendanceWorkspace() {
                   }
                   onClick={onSave}
                 >
-                  {existing ? "Update register" : "Save register"}
+                  {saving ? "Saving…" : existing ? "Update register" : "Save register"}
                 </button>
 
                 {/* Sticky phone/tablet action bar */}
-                <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[rgba(32,48,80,0.12)] bg-[rgba(248,248,240,0.96)] p-3 backdrop-blur-md sm:hidden">
+                <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--border)] bg-[var(--card)]/95 p-3 backdrop-blur-md sm:hidden">
                   <div className="mx-auto flex max-w-lg gap-2">
                     <button
                       type="button"
@@ -765,7 +995,7 @@ export function AttendanceWorkspace() {
                     </button>
                     <button
                       type="button"
-                      className="min-h-12 flex-1 rounded-xl bg-[#dc2626] text-sm font-bold text-white disabled:opacity-40"
+                      className="min-h-12 flex-1 rounded-xl bg-[var(--tone-red-solid)] text-sm font-bold text-white disabled:opacity-40"
                       disabled={
                         !sectionId || holidayBlocks || lockBlocksTeacher
                       }
@@ -784,7 +1014,7 @@ export function AttendanceWorkspace() {
                       }
                       onClick={onSave}
                     >
-                      {dirty ? "Save*" : existing ? "Update" : "Save"}
+                      {saving ? "Saving…" : dirty ? "Save*" : existing ? "Update" : "Save"}
                     </button>
                   </div>
                 </div>
@@ -800,7 +1030,7 @@ export function AttendanceWorkspace() {
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Status key
             </h2>
@@ -821,7 +1051,7 @@ export function AttendanceWorkspace() {
             </ul>
           </div>
 
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Recent registers
             </h2>
@@ -830,14 +1060,14 @@ export function AttendanceWorkspace() {
                 No registers saved yet.
               </p>
             ) : (
-              <ul className="mt-2 max-h-80 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
+              <ul className="mt-2 max-h-80 divide-y divide-[var(--border)] overflow-y-auto">
                 {recent.map((r) => {
                   const s = summarizeMarks(r.marks);
                   return (
                     <li key={r.id} className="flex items-center gap-2">
                       <button
                         type="button"
-                        className="min-w-0 flex-1 py-2 text-left hover:bg-[rgba(32,48,80,0.03)]"
+                        className="min-w-0 flex-1 py-2 text-left hover:bg-[var(--surface-sunken)]"
                         onClick={() => {
                           setClassId(r.classId);
                           setSectionId(r.sectionId);
@@ -855,7 +1085,7 @@ export function AttendanceWorkspace() {
                       {!readOnly ? (
                         <button
                           type="button"
-                          className="shrink-0 px-2 text-[10px] font-semibold text-[#b42318]"
+                          className="shrink-0 px-2 text-[10px] font-semibold text-[var(--danger)]"
                           title="Delete register"
                           onClick={() => {
                             if (

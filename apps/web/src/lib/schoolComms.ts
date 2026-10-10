@@ -6,6 +6,9 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
+import { recordSchoolCommsDeletion } from "@/lib/schoolCommsNormalizedClient";
 
 const STORAGE_KEY = "bhb_school_comms_v1";
 
@@ -51,6 +54,16 @@ export type GalleryPhoto = {
   caption: string;
   uploadedAt: string;
   uploadedBy: string;
+  /** "video" for a class-gallery clip; anything else is a photo. */
+  mediaKind?: "photo" | "video";
+  /** Class-gallery items: the path in the private class-gallery bucket. */
+  storagePath?: string;
+  /** Class-gallery items: "pending" until checked; parents see only "ok". */
+  reviewStatus?: "pending" | "ok" | "held" | "removed";
+  /** Why the check held it (for the principal). */
+  reviewNote?: string;
+  /** Class-gallery items past their 30 days: the bucket copy is gone, Drive serves it. */
+  storageEvicted?: boolean;
 };
 
 export type GalleryAlbum = {
@@ -65,6 +78,13 @@ export type GalleryAlbum = {
   createdAt: string;
   createdBy: string;
   updatedAt: string;
+  /**
+   * Class gallery (10 Oct 2026): the sections ("classId|sectionId") whose
+   * families see this album. Empty = the whole school, as every older album.
+   */
+  sectionIds?: string[];
+  /** "Class III-A" — for the album's heading and its Drive folder. */
+  classLabel?: string;
 };
 
 export type SchoolCommsState = {
@@ -200,7 +220,12 @@ export function emptySchoolComms(): SchoolCommsState {
       {
         id: "ntc_admissions_open",
         title: "Admissions Open for Academic Session 2026-27",
-        body: "Registration forms for Pre-Nursery to Grade IX and Grade XI (Science/Commerce/Humanities) are available online on the school portal and at the reception desk.",
+        // The school is recognised by the State Government of UP for Nursery
+        // to Class VIII. This sample text advertised Grade IX and Grade XI
+        // with streams — the same overclaim that had Cashfree demanding an
+        // affiliation letter the school cannot produce. Sample data ends up
+        // in production and on screens; it does not get to invent classes.
+        body: "Registration forms for Nursery to Class VIII are available online on the school portal and at the reception desk.",
         audience: "parents",
         status: "published",
         pinned: false,
@@ -212,22 +237,23 @@ export function emptySchoolComms(): SchoolCommsState {
         updatedAt: d,
       },
     ],
-    news: [
-      {
-        id: "news_science_award",
-        title: "BHB International Wins Regional Science & Robotics Award",
-        summary: "Our Grade 10 students secured 1st position at the CBSE Regional Science Exhibition for their AI-driven water purification prototype.",
-        body: "BHB International School students won top honors at the Regional Science Exhibition. The team presented an innovative smart sensor system designed to monitor water purity in real time.",
-        coverUrl: "/brand/logo.png",
-        status: "published",
-        academicYearCode: DEFAULT_AY,
-        publishedAt: d,
-        scheduledPublishAt: "",
-        createdAt: d,
-        createdBy: "Media Cell",
-        updatedAt: d,
-      },
-    ],
+    /**
+     * No sample news.
+     *
+     * This used to seed a won award: "Our Grade 10 students secured 1st
+     * position at the CBSE Regional Science Exhibition". Three things were
+     * wrong with it. The school teaches Nursery to Class VIII, so it has no
+     * Grade 10. It is state-recognised and not CBSE-affiliated, so it does
+     * not enter CBSE events — the exact claim that had a payment gateway
+     * asking for an affiliation letter. And the award never happened at all.
+     *
+     * It was published, so it ran in the LIVE ticker on every screen in the
+     * school for weeks, and would have gone onto the public website the
+     * moment anyone ticked it on. A seed that invents an achievement is a
+     * seed that puts a lie on the school's own noticeboard; the fix is not a
+     * better fake, it is none.
+     */
+    news: [],
     albums: [
       {
         id: "alb_annual_day",
@@ -271,7 +297,7 @@ export function loadSchoolComms(): SchoolCommsState {
     return emptySchoolComms();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptySchoolComms();
     return normalize(JSON.parse(raw) as Partial<SchoolCommsState>);
   } catch {
@@ -284,7 +310,7 @@ export function writeSchoolCommsLocalRaw(state: SchoolCommsState): void {
     serverSchoolCommsCache = normalize(state);
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalize(state)));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalize(state)));
   window.dispatchEvent(new CustomEvent("bhb-school-comms"));
 }
 
@@ -300,11 +326,11 @@ export function saveSchoolComms(state: SchoolCommsState): void {
   // Publishing uses create/edit on specific modules; raw save gated by notices edit
   // when actor present — allow if any of the three modules can edit.
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalize(state)));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalize(state)));
   window.dispatchEvent(new CustomEvent("bhb-school-comms"));
-  void import("@/lib/schoolCommsPersistence").then(({ scheduleSchoolCommsSync }) => {
+  void trackServerWork(import("@/lib/schoolCommsPersistence").then(({ scheduleSchoolCommsSync }) => {
     scheduleSchoolCommsSync(state);
-  });
+  }));
 }
 
 function canEditComms(module: "notices" | "news" | "gallery"): boolean {
@@ -410,7 +436,7 @@ export function upsertNotice(input: {
     const next = { ...state, notices };
     saveSchoolComms(next);
     if (resolved.publishNow && prev.status !== "published") {
-      void pushNoticeNotifications(notice);
+      void trackServerWork(pushNoticeNotifications(notice));
     }
     return { ok: true, notice, state: next };
   }
@@ -437,7 +463,7 @@ export function upsertNotice(input: {
   };
   const next = { ...state, notices: [notice, ...state.notices] };
   saveSchoolComms(next);
-  if (resolved.publishNow) void pushNoticeNotifications(notice);
+  if (resolved.publishNow) void trackServerWork(pushNoticeNotifications(notice));
   return { ok: true, notice, state: next };
 }
 
@@ -464,7 +490,7 @@ export function setNoticeStatus(
   const next = { ...state, notices };
   saveSchoolComms(next);
   if (status === "published" && prev.status !== "published") {
-    void pushNoticeNotifications(notice);
+    void trackServerWork(pushNoticeNotifications(notice));
   }
   return { ok: true, state: next };
 }
@@ -553,7 +579,7 @@ export function upsertNews(input: {
     const next = { ...state, news };
     saveSchoolComms(next);
     if (resolved.publishNow && prev.status !== "published") {
-      void pushNewsNotifications(item);
+      void trackServerWork(pushNewsNotifications(item));
     }
     return { ok: true, item, state: next };
   }
@@ -580,7 +606,7 @@ export function upsertNews(input: {
   };
   const next = { ...state, news: [item, ...state.news] };
   saveSchoolComms(next);
-  if (resolved.publishNow) void pushNewsNotifications(item);
+  if (resolved.publishNow) void trackServerWork(pushNewsNotifications(item));
   return { ok: true, item, state: next };
 }
 
@@ -607,7 +633,7 @@ export function setNewsStatus(
   const next = { ...state, news };
   saveSchoolComms(next);
   if (status === "published" && prev.status !== "published") {
-    void pushNewsNotifications(item);
+    void trackServerWork(pushNewsNotifications(item));
   }
   return { ok: true, state: next };
 }
@@ -791,7 +817,7 @@ export function setAlbumStatus(
   const next = { ...state, albums };
   saveSchoolComms(next);
   if (status === "published" && prev.status !== "published") {
-    void import("@/lib/notifications").then(({ pushNotification }) => {
+    void trackServerWork(import("@/lib/notifications").then(({ pushNotification }) => {
       pushNotification({
         title: `Gallery · ${album.title}`,
         body: album.description || `New album from ${TENANT.nameDisplay}`,
@@ -800,7 +826,7 @@ export function setAlbumStatus(
         audience: "all",
         sourceId: album.id,
       });
-    });
+    }));
   }
   return { ok: true, state: next };
 }
@@ -813,6 +839,7 @@ export function deleteNotice(
   if (!state.notices.some((n) => n.id === id)) {
     return { ok: false, error: "Not found" };
   }
+  recordSchoolCommsDeletion("school_comms_desk_notices", [id]);
   const next = { ...state, notices: state.notices.filter((n) => n.id !== id) };
   saveSchoolComms(next);
   return { ok: true, state: next };
@@ -826,6 +853,7 @@ export function deleteNews(
   if (!state.news.some((n) => n.id === id)) {
     return { ok: false, error: "Not found" };
   }
+  recordSchoolCommsDeletion("school_comms_desk_news", [id]);
   const next = { ...state, news: state.news.filter((n) => n.id !== id) };
   saveSchoolComms(next);
   return { ok: true, state: next };
@@ -839,6 +867,11 @@ export function deleteAlbum(
   if (!state.albums.some((a) => a.id === id)) {
     return { ok: false, error: "Not found" };
   }
+  recordSchoolCommsDeletion("school_comms_desk_albums", [id]);
+  recordSchoolCommsDeletion(
+    "school_comms_desk_photos",
+    state.photos.filter((p) => p.albumId === id).map((p) => p.id),
+  );
   const next = {
     ...state,
     albums: state.albums.filter((a) => a.id !== id),
@@ -855,6 +888,7 @@ export function deleteGalleryPhoto(
   const state = loadSchoolComms();
   const photo = state.photos.find((p) => p.id === id);
   if (!photo) return { ok: false, error: "Not found" };
+  recordSchoolCommsDeletion("school_comms_desk_photos", [id]);
   const photos = state.photos.filter((p) => p.id !== id);
   let albums = state.albums;
   const alb = albums.find((a) => a.id === photo.albumId);

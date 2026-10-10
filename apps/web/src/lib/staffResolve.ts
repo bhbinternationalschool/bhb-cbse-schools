@@ -76,6 +76,98 @@ export function resolveSubjectTeachers(
   return out;
 }
 
+export type TeachingAssignmentRow = {
+  id: string;
+  kind: "class_teacher" | "subject_teacher";
+  classId: string;
+  className: string;
+  sectionId: string;
+  sectionName: string;
+  subjectId: string | null;
+  subjectName: string | null;
+  teacherId: string;
+  teacherName: string;
+  isPrimary?: boolean;
+  periodsPerWeek?: number;
+};
+
+/**
+ * Flattens every staff member's classTeacherLinks/subjectTeachingLinks into
+ * one list — the data the "who teaches this class/subject" lookup reads.
+ * No screen aggregated this before; assignments only existed one class-
+ * section or one staff member at a time.
+ */
+export function listTeachingAssignments(
+  masters: MastersState,
+  academicYearCode: string,
+): TeachingAssignmentRow[] {
+  const classById = new Map(masters.classes.map((c) => [c.id, c]));
+  const sectionById = new Map(masters.sections.map((s) => [s.id, s]));
+  const subjectById = new Map((masters.subjects ?? []).map((s) => [s.id, s]));
+  const out: TeachingAssignmentRow[] = [];
+
+  for (const staff of masters.staff ?? []) {
+    if (staff.status !== "active") continue;
+    for (const link of staff.classTeacherLinks ?? []) {
+      if (
+        link.academicYearCode &&
+        link.academicYearCode !== academicYearCode
+      ) {
+        continue;
+      }
+      const cls = classById.get(link.classId);
+      const sec = sectionById.get(link.sectionId);
+      out.push({
+        id: link.id,
+        kind: "class_teacher",
+        classId: link.classId,
+        className: cls?.name ?? "?",
+        sectionId: link.sectionId,
+        sectionName: sec?.name ?? "?",
+        subjectId: null,
+        subjectName: null,
+        teacherId: staff.id,
+        teacherName: staff.fullName,
+        isPrimary: link.isPrimary,
+      });
+    }
+    for (const link of staff.subjectTeachingLinks ?? []) {
+      if (
+        link.academicYearCode &&
+        link.academicYearCode !== academicYearCode
+      ) {
+        continue;
+      }
+      const cls = classById.get(link.classId);
+      const sec = link.sectionId ? sectionById.get(link.sectionId) : undefined;
+      const subj = subjectById.get(link.subjectId);
+      out.push({
+        id: link.id,
+        kind: "subject_teacher",
+        classId: link.classId,
+        className: cls?.name ?? "?",
+        sectionId: link.sectionId ?? "",
+        sectionName: sec?.name ?? "All sections",
+        subjectId: link.subjectId,
+        subjectName: subj?.nameEn ?? "?",
+        teacherId: staff.id,
+        teacherName: staff.fullName,
+        periodsPerWeek: link.periodsPerWeek,
+      });
+    }
+  }
+
+  out.sort((a, b) => {
+    const cls = (classById.get(a.classId)?.sortOrder ?? 0) -
+      (classById.get(b.classId)?.sortOrder ?? 0);
+    if (cls !== 0) return cls;
+    const sec = a.sectionName.localeCompare(b.sectionName);
+    if (sec !== 0) return sec;
+    return (a.subjectName ?? "").localeCompare(b.subjectName ?? "");
+  });
+  return out;
+}
+
 export function resolvePrincipal(masters: MastersState): StaffRecord | null {
   const designations = masters.designations ?? [];
   const prinDes = designations.find(

@@ -71,7 +71,7 @@ export function ParentVoiceBar({
   }
 
   return (
-    <div className="mx-auto max-w-lg px-4 pb-2">
+    <div className="mx-auto max-w-lg px-4 pb-2 md:max-w-2xl lg:max-w-3xl">
       <div className="flex items-center gap-2 rounded-xl border border-[rgba(15,118,110,0.25)] bg-[rgba(15,118,110,0.06)] px-3 py-2">
         <VoiceMicButton
           lang={lang}
@@ -82,7 +82,7 @@ export function ParentVoiceBar({
           onError={(m) => setStatus(m)}
         />
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold text-[#0f766e]">
+          <p className="text-[11px] font-semibold text-[var(--tone-teal)]">
             Voice · बोलिए
           </p>
           <p className="truncate text-[10px] text-[var(--muted)]">

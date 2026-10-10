@@ -76,13 +76,13 @@ export function WaChatbotListView({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 border-b border-[rgba(32,48,80,0.1)] pb-2">
+      <div className="flex flex-wrap gap-2 border-b border-[var(--border)] pb-2">
         <button
           type="button"
           className={`rounded-lg px-4 py-2 text-[12px] font-semibold ${
             tab === "built_in"
-              ? "bg-[var(--brand-deep)] text-white"
-              : "bg-[rgba(32,48,80,0.06)] text-[var(--brand-deep)]"
+              ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+              : "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
           }`}
           onClick={() => setTab("built_in")}
         >
@@ -92,8 +92,8 @@ export function WaChatbotListView({
           type="button"
           className={`rounded-lg px-4 py-2 text-[12px] font-semibold ${
             tab === "custom"
-              ? "bg-[var(--brand-deep)] text-white"
-              : "bg-[rgba(32,48,80,0.06)] text-[var(--brand-deep)]"
+              ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+              : "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
           }`}
           onClick={() => setTab("custom")}
         >
@@ -125,7 +125,7 @@ export function WaChatbotListView({
               : "No custom bots yet — create one or duplicate a built-in bot."}
           </div>
         ) : (
-          <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+          <ul className="divide-y divide-[var(--border)]">
             {filtered.map((f) => (
               <FlowRow
                 key={f.id}

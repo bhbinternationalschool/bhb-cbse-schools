@@ -16,17 +16,26 @@ import {
   autoArrangeSubstitutes,
   clearSubstitutionsForDate,
   listSubstitutionsForDate,
+  planSubstitutionsForTimeBlock,
+  saveTeacherTimeBlock,
   substituteCandidates,
+  substitutionSlotKey,
   type AbsentTeacher,
+  type AutoArrangeResult,
 } from "@/lib/timetableSubstitution";
+import { notifySubstitutes } from "@/lib/timetableSubstitutionAuto";
 import { isoDateWeekday } from "@/lib/examTimetable";
 import type { MastersState } from "@/lib/masters";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function SubstitutionPanel(props: {
   masters: MastersState;
   academicYearCode: string;
   canEdit: boolean;
   ayBounds: { startsOn: string; endsOn: string };
+  createdBy: string;
   onError: (msg: string) => void;
   onNotice: (msg: string) => void;
   onChanged: () => void;
@@ -37,7 +46,67 @@ export function SubstitutionPanel(props: {
   const [manualAbsent, setManualAbsent] = useState<string[]>([]);
   const [manualPick, setManualPick] = useState("");
   const [rows, setRows] = useState<TimetableSubstitution[]>([]);
+
+  // The Substitute column is a picker, not a value, so it is not a sort handle.
+  const subSort = useTableSort(
+    rows,
+    {
+      period: (row) => row.periodNo,
+      klass: (row) => classSectionLabel(masters, row.classId, row.sectionId),
+      subject: (row) => subjectLabel(masters, row.subjectId),
+      absent: (row) => teacherLabel(masters, row.absentTeacherId),
+    },
+    "period",
+    "asc",
+  );
   const [dirty, setDirty] = useState(false);
+
+  // "Free a teacher for part of the day" — a separate flow from the
+  // whole-day absent/auto-arrange state above (rows/allAbsent). One teacher,
+  // one date, one time window, required reason; its own preview/confirm.
+  const [blockStaffId, setBlockStaffId] = useState("");
+  const [blockStart, setBlockStart] = useState("09:00");
+  const [blockEnd, setBlockEnd] = useState("09:40");
+  const [blockReason, setBlockReason] = useState("");
+  const [blockPreview, setBlockPreview] = useState<AutoArrangeResult | null>(
+    null,
+  );
+  const blockSubs = useMemo(
+    () => blockPreview?.substitutions ?? [],
+    [blockPreview],
+  );
+  // The block preview is its own list, so it gets its own sort.
+  const blockSort = useTableSort(
+    blockSubs,
+    {
+      period: (s) => s.periodNo,
+      klass: (s) => classSectionLabel(masters, s.classId, s.sectionId),
+      subject: (s) => subjectLabel(masters, s.subjectId),
+      teacher: (s) =>
+        s.substituteTeacherId
+          ? teacherLabel(masters, s.substituteTeacherId)
+          : null,
+    },
+    "period",
+    "asc",
+  );
+  const [blockBusy, setBlockBusy] = useState(false);
+  const [confirmedBlock, setConfirmedBlock] = useState<{
+    teacherLabel: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    reason: string;
+    covered: {
+      periodLabel: string;
+      classSection: string;
+      subject: string;
+      substituteName: string;
+    }[];
+    uncovered: { periodLabel: string; classSection: string; subject: string }[];
+  } | null>(null);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
 
   useEffect(() => {
     setState(loadTimetable());
@@ -92,6 +161,7 @@ export function SubstitutionPanel(props: {
     setRows(saved);
     setDirty(false);
     setManualAbsent([]);
+    setBlockPreview(null);
   }, [ay, date, state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const teaching = useMemo(
@@ -102,6 +172,11 @@ export function SubstitutionPanel(props: {
   const activeStaff = useMemo(
     () => (masters.staff ?? []).filter((s) => s.status === "active"),
     [masters],
+  );
+
+  const teachingStaff = useMemo(
+    () => activeStaff.filter((s) => s.stream === "teaching"),
+    [activeStaff],
   );
 
   function refreshState() {
@@ -223,6 +298,150 @@ export function SubstitutionPanel(props: {
     props.onNotice(`Arrangement cleared for ${date}`);
   }
 
+  function onPreviewBlock() {
+    if (!blockStaffId) {
+      props.onError("Pick which teacher is unavailable.");
+      return;
+    }
+    if (!blockReason.trim()) {
+      props.onError("A reason is required.");
+      return;
+    }
+    if (blockStart >= blockEnd) {
+      props.onError("End time must be after start time.");
+      return;
+    }
+    const result = planSubstitutionsForTimeBlock({
+      masters,
+      academicYearCode: ay,
+      date,
+      staffId: blockStaffId,
+      startTime: blockStart,
+      endTime: blockEnd,
+      state: state ?? undefined,
+    });
+    setBlockPreview(result);
+    if (!result.substitutions.length) {
+      props.onNotice(
+        result.examSkipped.length
+          ? "Every period in this window is exam-blocked — nothing to arrange."
+          : "This teacher has no periods inside the chosen window — nothing to arrange.",
+      );
+    }
+  }
+
+  async function onConfirmBlock() {
+    if (!blockPreview || !blockPreview.substitutions.length) return;
+    setBlockBusy(true);
+    try {
+      const teacherName = teacherLabel(masters, blockStaffId);
+      const reasonText = blockReason.trim();
+      const startTime = blockStart;
+      const endTime = blockEnd;
+
+      const blockRes = saveTeacherTimeBlock({
+        academicYearCode: ay,
+        staffId: blockStaffId,
+        date,
+        startTime,
+        endTime,
+        reason: reasonText,
+        createdBy: props.createdBy,
+      });
+      if (!blockRes.ok) {
+        props.onError(blockRes.error);
+        return;
+      }
+
+      // Never overwrite the day's existing saved arrangement — merge in
+      // only the freshly-computed rows, same dedupe as the auto-run path.
+      const already = listSubstitutionsForDate(ay, date);
+      const alreadyCovered = new Set(already.map(substitutionSlotKey));
+      const fresh = blockPreview.substitutions.filter(
+        (s) => !alreadyCovered.has(substitutionSlotKey(s)),
+      );
+      const { saveSubstitutionsForDate } = await import(
+        "@/lib/timetableSubstitution"
+      );
+      const saveRes = saveSubstitutionsForDate(ay, date, [
+        ...already,
+        ...fresh,
+      ]);
+      if (!saveRes.ok) {
+        props.onError(saveRes.error);
+        return;
+      }
+
+      const notifyRes = await notifySubstitutes(fresh, masters, date);
+      refreshState();
+      setBlockPreview(null);
+      setBlockReason("");
+      setBlockStaffId("");
+      setAiSummary(null);
+      setConfirmedBlock({
+        teacherLabel: teacherName,
+        date,
+        startTime,
+        endTime,
+        reason: reasonText,
+        covered: fresh
+          .filter((f) => f.substituteTeacherId)
+          .map((f) => ({
+            periodLabel: `P${f.periodNo} (${periodTime(f.periodNo)})`,
+            classSection: classSectionLabel(masters, f.classId, f.sectionId),
+            subject: subjectLabel(masters, f.subjectId),
+            substituteName: teacherLabel(masters, f.substituteTeacherId),
+          })),
+        uncovered: fresh
+          .filter((f) => !f.substituteTeacherId)
+          .map((f) => ({
+            periodLabel: `P${f.periodNo} (${periodTime(f.periodNo)})`,
+            classSection: classSectionLabel(masters, f.classId, f.sectionId),
+            subject: subjectLabel(masters, f.subjectId),
+          })),
+      });
+
+      const covered = fresh.filter((f) => f.substituteTeacherId).length;
+      const uncovered = fresh.length - covered;
+      const bits = [`${covered} covered`, `${uncovered} uncovered`];
+      bits.push(
+        notifyRes.ok
+          ? `${notifyRes.sent} teacher(s) notified`
+          : `notify failed (${notifyRes.error || "unknown error"})`,
+      );
+      props.onNotice(bits.join(" · "));
+    } finally {
+      setBlockBusy(false);
+    }
+  }
+
+  async function onGetAiSummary() {
+    if (!confirmedBlock) return;
+    setAiBusy(true);
+    setAiSummary(null);
+    try {
+      const res = await fetch("/api/ai/substitution-summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(confirmedBlock),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        summary?: string;
+        error?: string;
+      };
+      if (!res.ok || !data.ok) {
+        props.onError(data.error || `HTTP ${res.status}`);
+        return;
+      }
+      setAiSummary(data.summary || "");
+    } catch (e) {
+      props.onError(String(e));
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
   const periodTime = (periodNo: number) => {
     const p = teaching.find((x) => x.no === periodNo);
     return p ? `${p.startTime}–${p.endTime}` : "";
@@ -230,7 +449,7 @@ export function SubstitutionPanel(props: {
 
   return (
     <div className="mt-5 space-y-4">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
@@ -259,7 +478,7 @@ export function SubstitutionPanel(props: {
           </label>
         </div>
 
-        <div className="mt-4 rounded-lg bg-[rgba(32,48,80,0.04)] p-3">
+        <div className="mt-4 rounded-lg bg-[var(--surface-sunken)] p-3">
           <h3 className="text-[12px] font-bold text-[var(--brand-deep)]">
             Absent on {date}
             {weekday != null ? ` (${WEEKDAY_SHORT[weekday]})` : ""}
@@ -273,7 +492,7 @@ export function SubstitutionPanel(props: {
               {allAbsent.map((a) => (
                 <li
                   key={a.staffId}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-[#dc2626]/10 px-2.5 py-1 text-[11px] font-semibold text-[#991b1b]"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-[var(--danger-soft)] px-2.5 py-1 text-[11px] font-semibold text-[#991b1b]"
                 >
                   {teacherLabel(masters, a.staffId)}
                   <span className="font-normal text-[10px]">· {a.reason}</span>
@@ -313,7 +532,7 @@ export function SubstitutionPanel(props: {
               </select>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-1 text-sm font-semibold"
+                className="rounded-lg border border-[var(--border)] px-3 py-1 text-sm font-semibold"
                 disabled={!manualPick}
                 onClick={() => {
                   if (!manualPick) return;
@@ -338,7 +557,7 @@ export function SubstitutionPanel(props: {
             </button>
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-2 text-sm font-semibold disabled:opacity-50"
+              className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold disabled:opacity-50"
               disabled={!dirty}
               onClick={onSave}
             >
@@ -347,7 +566,7 @@ export function SubstitutionPanel(props: {
             {saved.length ? (
               <button
                 type="button"
-                className="rounded-lg border border-[#dc2626]/40 px-3 py-2 text-sm font-semibold text-[#dc2626]"
+                className="rounded-lg border border-[var(--danger)]/40 px-3 py-2 text-sm font-semibold text-[var(--danger)]"
                 onClick={onClearSaved}
               >
                 Clear saved
@@ -361,7 +580,180 @@ export function SubstitutionPanel(props: {
         )}
       </div>
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      {canEdit ? (
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <h3 className="text-sm font-bold text-[var(--brand-deep)]">
+            Free a teacher for part of the day
+          </h3>
+          <p className="mt-1 max-w-2xl text-[12px] text-[var(--muted)]">
+            For school work elsewhere during school hours — not a whole-day
+            absence. Only the periods that actually fall inside the window
+            are affected; the rest of that teacher&apos;s day is untouched.
+          </p>
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            <label className="block text-sm">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Teacher
+              </span>
+              <select
+                className="field !w-auto !py-1.5"
+                value={blockStaffId}
+                onChange={(e) => {
+                  setBlockStaffId(e.target.value);
+                  setBlockPreview(null);
+                }}
+              >
+                <option value="">Select…</option>
+                {teachingStaff.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.fullName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                From
+              </span>
+              <input
+                type="time"
+                className="field !w-auto !py-1.5"
+                value={blockStart}
+                onChange={(e) => {
+                  setBlockStart(e.target.value);
+                  setBlockPreview(null);
+                }}
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                To
+              </span>
+              <input
+                type="time"
+                className="field !w-auto !py-1.5"
+                value={blockEnd}
+                onChange={(e) => {
+                  setBlockEnd(e.target.value);
+                  setBlockPreview(null);
+                }}
+              />
+            </label>
+          </div>
+          <label className="mt-3 block text-sm">
+            <span className="mb-1 block text-[11px] text-[var(--muted)]">
+              Reason (required)
+            </span>
+            <textarea
+              className="field w-full text-sm"
+              rows={2}
+              value={blockReason}
+              onChange={(e) => {
+                setBlockReason(e.target.value);
+                setBlockPreview(null);
+              }}
+              placeholder="e.g. Inspection duty at the district office"
+            />
+          </label>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold"
+              onClick={onPreviewBlock}
+            >
+              Find substitutes for this window
+            </button>
+          </div>
+
+          {blockPreview && blockPreview.substitutions.length ? (
+            <div className="mt-4">
+              <div className="overflow-x-auto">
+                <ErpTable minWidth="min-w-[560px]" className="border-collapse">
+                  <ErpTableHead>
+                    <tr>
+                      <ErpSortTh sort={blockSort} field="period" className="border border-[var(--border)] p-2">Period</ErpSortTh>
+                      <ErpSortTh sort={blockSort} field="klass" className="border border-[var(--border)] p-2">Class</ErpSortTh>
+                      <ErpSortTh sort={blockSort} field="subject" className="border border-[var(--border)] p-2">Subject</ErpSortTh>
+                      <ErpSortTh sort={blockSort} field="teacher" className="border border-[var(--border)] p-2">Substitute</ErpSortTh>
+                    </tr>
+                  </ErpTableHead>
+                  <ErpTableBody>
+                    {blockSort.rows.map((s) => (
+                      <tr key={s.id}>
+                        <td className="border border-[var(--border)] p-2 font-semibold">
+                          P{s.periodNo}
+                          <div className="text-[10px] font-normal text-[var(--muted)]">
+                            {periodTime(s.periodNo)}
+                          </div>
+                        </td>
+                        <td className="border border-[var(--border)] p-2">
+                          {classSectionLabel(masters, s.classId, s.sectionId)}
+                        </td>
+                        <td className="border border-[var(--border)] p-2">
+                          {subjectLabel(masters, s.subjectId)}
+                        </td>
+                        <td className="border border-[var(--border)] p-2">
+                          {s.substituteTeacherId ? (
+                            teacherLabel(masters, s.substituteTeacherId)
+                          ) : (
+                            <span className="text-[var(--muted)]">
+                              No free teacher
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </ErpTableBody>
+                </ErpTable>
+              </div>
+              {blockPreview.examSkipped.length ? (
+                <p className="mt-2 text-[11px] text-[var(--muted)]">
+                  {blockPreview.examSkipped.length} period(s) skipped —
+                  exam sitting already blocks them.
+                </p>
+              ) : null}
+              <button
+                type="button"
+                className="btn-accent mt-3 rounded-lg px-3 py-2 text-sm font-bold disabled:opacity-50"
+                disabled={blockBusy}
+                onClick={onConfirmBlock}
+              >
+                {blockBusy ? "Confirming…" : "Confirm & notify"}
+              </button>
+            </div>
+          ) : null}
+
+          {confirmedBlock ? (
+            <div className="mt-4 rounded-lg bg-[var(--surface-sunken)] p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-[12px] font-bold text-[var(--brand-deep)]">
+                  Last confirmed: {confirmedBlock.teacherLabel} ·{" "}
+                  {confirmedBlock.date} {confirmedBlock.startTime}–
+                  {confirmedBlock.endTime}
+                </h4>
+                <button
+                  type="button"
+                  className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50"
+                  disabled={aiBusy}
+                  onClick={onGetAiSummary}
+                >
+                  {aiBusy ? "Summarizing…" : "Get AI summary"}
+                </button>
+              </div>
+              {aiSummary ? (
+                <p className="mt-2 text-[12px] text-[var(--muted)]">
+                  <span className="font-semibold text-[var(--brand-deep)]">
+                    AI-generated, based on the above:{" "}
+                  </span>
+                  {aiSummary}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-[var(--brand-deep)]">
             Arrangement for {date}
@@ -369,10 +761,10 @@ export function SubstitutionPanel(props: {
           <span
             className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
               dirty
-                ? "bg-[rgba(217,119,6,0.15)] text-[#b45309]"
+                ? "bg-[rgba(217,119,6,0.15)] text-[var(--warning)]"
                 : saved.length
                   ? "bg-[rgba(15,122,76,0.12)] text-[var(--ok)]"
-                  : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
+                  : "bg-[var(--surface-sunken)] text-[var(--muted)]"
             }`}
           >
             {dirty ? "Unsaved changes" : saved.length ? "Saved" : "Nothing saved"}
@@ -386,54 +778,46 @@ export function SubstitutionPanel(props: {
           </p>
         ) : (
           <div className="mt-3 overflow-x-auto">
-            <table className="min-w-[720px] w-full border-collapse text-xs">
-              <thead>
-                <tr className="bg-[rgba(32,48,80,0.04)] text-left">
-                  <th className="border border-[rgba(32,48,80,0.12)] p-2">
-                    Period
-                  </th>
-                  <th className="border border-[rgba(32,48,80,0.12)] p-2">
-                    Class
-                  </th>
-                  <th className="border border-[rgba(32,48,80,0.12)] p-2">
-                    Subject
-                  </th>
-                  <th className="border border-[rgba(32,48,80,0.12)] p-2">
-                    Absent teacher
-                  </th>
-                  <th className="border border-[rgba(32,48,80,0.12)] p-2">
+            <ErpTable minWidth="min-w-[720px]" className="border-collapse">
+              <ErpTableHead>
+                <tr>
+                  <ErpSortTh sort={subSort} field="period" className="border border-[var(--border)] p-2">Period</ErpSortTh>
+                  <ErpSortTh sort={subSort} field="klass" className="border border-[var(--border)] p-2">Class</ErpSortTh>
+                  <ErpSortTh sort={subSort} field="subject" className="border border-[var(--border)] p-2">Subject</ErpSortTh>
+                  <ErpSortTh sort={subSort} field="absent" className="border border-[var(--border)] p-2">Absent teacher</ErpSortTh>
+                  <th className="border border-[var(--border)] p-2">
                     Substitute
                   </th>
-                  <th className="border border-[rgba(32,48,80,0.12)] p-2">
+                  <th className="border border-[var(--border)] p-2">
                     Note
                   </th>
                   {canEdit ? (
-                    <th className="border border-[rgba(32,48,80,0.12)] p-2" />
+                    <th className="border border-[var(--border)] p-2" />
                   ) : null}
                 </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => {
+              </ErpTableHead>
+              <ErpTableBody>
+                {subSort.rows.map((row) => {
                   const candidates = canEdit ? candidatesForRow(row) : [];
                   const knownIds = new Set(candidates.map((c) => c.staff.id));
                   return (
                     <tr key={row.id}>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2 font-semibold">
+                      <td className="border border-[var(--border)] p-2 font-semibold">
                         P{row.periodNo}
                         <div className="text-[10px] font-normal text-[var(--muted)]">
                           {periodTime(row.periodNo)}
                         </div>
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2">
+                      <td className="border border-[var(--border)] p-2">
                         {classSectionLabel(masters, row.classId, row.sectionId)}
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2">
+                      <td className="border border-[var(--border)] p-2">
                         {subjectLabel(masters, row.subjectId)}
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2 text-[#991b1b]">
+                      <td className="border border-[var(--border)] p-2 text-[#991b1b]">
                         {teacherLabel(masters, row.absentTeacherId)}
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2">
+                      <td className="border border-[var(--border)] p-2">
                         {canEdit ? (
                           <select
                             className="field !w-full !py-1 text-xs"
@@ -467,31 +851,35 @@ export function SubstitutionPanel(props: {
                           <span className="text-[var(--muted)]">Free</span>
                         )}
                       </td>
-                      <td className="border border-[rgba(32,48,80,0.12)] p-2 text-[var(--muted)]">
+                      <td className="border border-[var(--border)] p-2 text-[var(--muted)]">
                         {row.note}
                         {row.source === "manual" ? (
-                          <span className="ml-1 rounded-full bg-[rgba(32,48,80,0.08)] px-1.5 py-0.5 text-[9px] font-semibold">
+                          <span className="ml-1 rounded-full bg-[var(--surface-sunken)] px-1.5 py-0.5 text-[9px] font-semibold">
                             manual
                           </span>
                         ) : null}
                       </td>
                       {canEdit ? (
-                        <td className="border border-[rgba(32,48,80,0.12)] p-2 text-center">
-                          <button
-                            type="button"
-                            aria-label="Remove row"
-                            className="rounded px-1.5 text-sm font-bold text-[#dc2626] hover:bg-[#dc2626]/10"
-                            onClick={() => removeRow(row.id)}
-                          >
-                            ×
-                          </button>
+                        <td className="border border-[var(--border)] p-2 text-center">
+                          <RowActionMenu
+                            row={row}
+                            label="Substitution row actions"
+                            actions={[
+                              {
+                                id: "remove",
+                                label: "Remove this substitution",
+                                tone: "danger",
+                                onSelect: (x) => removeRow(x.id),
+                              },
+                            ]}
+                          />
                         </td>
                       ) : null}
                     </tr>
                   );
                 })}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           </div>
         )}
       </div>

@@ -2,11 +2,16 @@
  * Staff daily attendance — separate from student section registers.
  */
 
-import { assertModulePermission } from "@/lib/rbacGuard";
+import {
+  assertModulePermission,
+  assertSelfOrModulePermission,
+} from "@/lib/rbacGuard";
 import { ATTENDANCE_STATUSES, type AttendanceStatus } from "@/lib/attendance";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { DEFAULT_AY } from "@/lib/masters";
-import { loadStaffHr } from "@/lib/staffHr";
+import { loadStaffHr, type HalfDaySession, type LeaveRequest } from "@/lib/staffHr";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 /** How this attendance mark was captured */
 export type AttendancePunchWay =
@@ -19,7 +24,9 @@ export type AttendancePunchWay =
   | "leave_sync"
   | "rule"
   | "survey"
-  | "whatsapp";
+  | "whatsapp"
+  | "outdoor"
+  | "printed_qr";
 
 export const ATTENDANCE_PUNCH_WAYS: {
   code: AttendancePunchWay;
@@ -36,6 +43,8 @@ export const ATTENDANCE_PUNCH_WAYS: {
   { code: "rule", label: "Punch rules", short: "Rule" },
   { code: "survey", label: "Field survey", short: "Survey" },
   { code: "whatsapp", label: "WhatsApp GPS", short: "WA" },
+  { code: "outdoor", label: "Outdoor duty", short: "Outdoor" },
+  { code: "printed_qr", label: "Printed gate QR (own phone)", short: "Print QR" },
 ];
 
 export function punchWayLabel(way: string | undefined): string {
@@ -54,7 +63,7 @@ export type StaffPunchGeo = {
   accuracyM?: number;
   distanceM?: number;
   at: string;
-  source: "wa_location";
+  source: "wa_location" | "app_gps";
 };
 
 export type StaffAttendanceMark = {
@@ -69,6 +78,59 @@ export type StaffAttendanceMark = {
   punchWay: AttendancePunchWay | "";
   /** Last WhatsApp / geofenced punch audit */
   punchGeo?: StaffPunchGeo;
+};
+
+export type OutdoorDutyPurpose =
+  | "bank"
+  | "inspection"
+  | "vendor_meeting"
+  | "admission_survey"
+  | "official_errand"
+  | "other";
+
+export const OUTDOOR_DUTY_PURPOSE_LABELS: Record<OutdoorDutyPurpose, string> = {
+  bank: "Bank work",
+  inspection: "Inspection / audit",
+  vendor_meeting: "Vendor meeting",
+  admission_survey: "Admission survey",
+  official_errand: "Official errand",
+  other: "Other",
+};
+
+const OUTDOOR_DUTY_PURPOSES: OutdoorDutyPurpose[] = [
+  "bank",
+  "inspection",
+  "vendor_meeting",
+  "admission_survey",
+  "official_errand",
+  "other",
+];
+
+export type OutdoorDutyGeoPoint = {
+  lat: number;
+  lng: number;
+  accuracyM?: number;
+  at: string;
+};
+
+/** A staff member's out-of-campus official duty — check out, do the work,
+ * check back in. Bridged into the day's attendance mark (status stays
+ * "P"; note + punchWay "outdoor" carry the signal) the same way field
+ * survey sessions already do via surveyAttendanceBridge.ts, so payroll
+ * and reports that already regex-sniff "Outdoor duty" notes pick this up
+ * without any changes there. */
+export type OutdoorDutySession = {
+  id: string;
+  staffId: string;
+  purpose: OutdoorDutyPurpose;
+  destination: string;
+  note: string;
+  startedAt: string;
+  startGeo: OutdoorDutyGeoPoint | null;
+  endedAt: string | null;
+  endGeo: OutdoorDutyGeoPoint | null;
+  status: "active" | "ended";
+  createdBy: string;
 };
 
 export type StaffAttendanceRegister = {
@@ -94,12 +156,23 @@ export type StaffAttendanceSettings = {
   geofenceRadiusM: number;
   /** Reject WA pins when accuracy worse than this (0 = ignore) */
   maxLocationAccuracyM: number;
+  /**
+   * Staff who keep no attendance — the owner, and anyone the office says so
+   * of. They are left off the register entirely rather than marked absent:
+   * a director who never punches used to read as a daily absentee, which
+   * made "3 absent today" mean nothing.
+   *
+   * Role-holders (owner / admin) are excluded by `attendanceExemptStaffIds`
+   * without being listed here; this is the office's own list on top.
+   */
+  exemptStaffIds: string[];
 };
 
 export type StaffAttendanceState = {
   version: 1;
   settings: StaffAttendanceSettings;
   registers: StaffAttendanceRegister[];
+  outdoorDuty: OutdoorDutySession[];
 };
 
 const STORAGE_KEY = "bhb_staff_attendance_v1";
@@ -118,6 +191,7 @@ export function defaultAttendanceSettings(): StaffAttendanceSettings {
     allowWhatsAppPunch: true,
     geofenceRadiusM: 150,
     maxLocationAccuracyM: 120,
+    exemptStaffIds: [],
   };
 }
 
@@ -150,7 +224,39 @@ export function normalizeAttendanceSettings(
       typeof s?.maxLocationAccuracyM === "number" && s.maxLocationAccuracyM >= 0
         ? s.maxLocationAccuracyM
         : d.maxLocationAccuracyM,
+    exemptStaffIds: Array.isArray(s?.exemptStaffIds)
+      ? [...new Set(s.exemptStaffIds.filter((id): id is string => !!id))]
+      : d.exemptStaffIds,
   };
+}
+
+/**
+ * Who keeps no attendance: the office's own list, plus whoever holds owner
+ * or admin as their MAIN role.
+ *
+ * Main role only, deliberately. Both principals carry `admin` as a second
+ * role so they can fix a setting; dropping everyone with an admin role
+ * anywhere would have taken the two people who run the school off the
+ * register.
+ */
+export function attendanceExemptStaffIds(
+  settings: StaffAttendanceSettings,
+  rbac: {
+    roles: { id: string; code: string }[];
+    assignments: { staffId: string; roleId: string; isPrimary: boolean }[];
+  } | null,
+): Set<string> {
+  const out = new Set(settings.exemptStaffIds ?? []);
+  if (!rbac) return out;
+  const exemptRoleIds = new Set(
+    (rbac.roles ?? [])
+      .filter((r) => r.code === "owner" || r.code === "admin")
+      .map((r) => r.id),
+  );
+  for (const a of rbac.assignments ?? []) {
+    if (a.isPrimary && exemptRoleIds.has(a.roleId)) out.add(a.staffId);
+  }
+  return out;
 }
 
 export function emptyStaffAttendanceState(): StaffAttendanceState {
@@ -158,6 +264,43 @@ export function emptyStaffAttendanceState(): StaffAttendanceState {
     version: 1,
     settings: defaultAttendanceSettings(),
     registers: [],
+    outdoorDuty: [],
+  };
+}
+
+function normalizeGeoPoint(
+  g?: OutdoorDutyGeoPoint | null,
+): OutdoorDutyGeoPoint | null {
+  if (!g || !Number.isFinite(g.lat) || !Number.isFinite(g.lng)) return null;
+  return {
+    lat: g.lat,
+    lng: g.lng,
+    accuracyM:
+      typeof g.accuracyM === "number" && g.accuracyM >= 0
+        ? g.accuracyM
+        : undefined,
+    at: g.at || new Date().toISOString(),
+  };
+}
+
+function normalizeOutdoorDutySession(
+  s: Partial<OutdoorDutySession>,
+): OutdoorDutySession | null {
+  if (!s.staffId) return null;
+  return {
+    id: s.id || nid("od"),
+    staffId: s.staffId,
+    purpose: OUTDOOR_DUTY_PURPOSES.includes(s.purpose as OutdoorDutyPurpose)
+      ? (s.purpose as OutdoorDutyPurpose)
+      : "other",
+    destination: (s.destination || "").trim(),
+    note: (s.note || "").trim(),
+    startedAt: s.startedAt || new Date().toISOString(),
+    startGeo: normalizeGeoPoint(s.startGeo),
+    endedAt: s.endedAt || null,
+    endGeo: normalizeGeoPoint(s.endGeo),
+    status: s.status === "ended" ? "ended" : "active",
+    createdBy: s.createdBy || "",
   };
 }
 
@@ -177,7 +320,7 @@ function normalizePunchGeo(
         ? g.distanceM
         : undefined,
     at: g.at || new Date().toISOString(),
-    source: "wa_location",
+    source: g.source === "app_gps" ? "app_gps" : "wa_location",
   };
 }
 
@@ -223,6 +366,11 @@ export function normalizeStaffAttendanceState(
     registers: Array.isArray(raw.registers)
       ? raw.registers.map(normalizeRegister)
       : [],
+    outdoorDuty: Array.isArray(raw.outdoorDuty)
+      ? raw.outdoorDuty
+          .map(normalizeOutdoorDutySession)
+          .filter((s): s is OutdoorDutySession => !!s)
+      : [],
   };
 }
 
@@ -232,7 +380,7 @@ export function loadStaffAttendance(): StaffAttendanceState {
     return emptyStaffAttendanceState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyStaffAttendanceState();
     const parsed = JSON.parse(raw) as StaffAttendanceState;
     if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.registers)) {
@@ -244,27 +392,54 @@ export function loadStaffAttendance(): StaffAttendanceState {
   }
 }
 
+function persistStaffAttendanceRaw(state: StaffAttendanceState) {
+  const next = normalizeStaffAttendanceState(state);
+  if (typeof window === "undefined") {
+    writeStaffAttendanceLocalRaw(next);
+    void trackServerWork(import("@/lib/staffAttendancePersistence").then(
+      ({ scheduleStaffAttendanceSync }) => {
+        scheduleStaffAttendanceSync(next);
+      },
+    ));
+    return;
+  }
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
+  void trackServerWork(import("@/lib/staffAttendancePersistence").then(
+    ({ scheduleStaffAttendanceSync }) => {
+      scheduleStaffAttendanceSync(next);
+    },
+  ));
+}
+
 export function saveStaffAttendance(state: StaffAttendanceState) {
   if (typeof window !== "undefined") {
     if (!assertModulePermission("staff", "edit", "saveStaffAttendance")) return;
   }
+  persistStaffAttendanceRaw(state);
+}
 
-  const next = normalizeStaffAttendanceState(state);
-  if (typeof window === "undefined") {
-    writeStaffAttendanceLocalRaw(next);
-    void import("@/lib/staffAttendancePersistence").then(
-      ({ scheduleStaffAttendanceSync }) => {
-        scheduleStaffAttendanceSync(next);
-      },
-    );
-    return;
+/** Like saveStaffAttendance, but also allows a staff actor to save their
+ * OWN outdoor-duty session/mark without the "staff:edit" grant real
+ * teachers don't have — mirrors staffHr.ts's applyLeave fix. Returns
+ * whether the write actually happened. */
+function saveStaffAttendanceSelfOrModule(
+  state: StaffAttendanceState,
+  selfStaffId: string,
+): boolean {
+  if (typeof window !== "undefined") {
+    if (
+      !assertSelfOrModulePermission(
+        "staff",
+        "edit",
+        selfStaffId,
+        "outdoorDuty",
+      )
+    ) {
+      return false;
+    }
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  void import("@/lib/staffAttendancePersistence").then(
-    ({ scheduleStaffAttendanceSync }) => {
-      scheduleStaffAttendanceSync(next);
-    },
-  );
+  persistStaffAttendanceRaw(state);
+  return true;
 }
 
 export function writeStaffAttendanceLocalRaw(state: StaffAttendanceState) {
@@ -273,7 +448,7 @@ export function writeStaffAttendanceLocalRaw(state: StaffAttendanceState) {
     serverStaffAttendanceCache = next;
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
 }
 
 export function staffAttendanceStateIsEmpty(
@@ -309,6 +484,15 @@ export function findStaffRegister(
   );
 }
 
+/**
+ * A new day's register: nobody is present until they punch (or the office
+ * marks them, or approved leave says otherwise). Until 2026-09-29 every
+ * active member of staff started as "P", so the first punch of the day
+ * marked the whole school present — the director asked for no default
+ * present; attendance follows punches, the Masters rules and leave.
+ */
+export const NOT_PUNCHED_NOTE = "Not punched";
+
 export function defaultStaffMarks(
   staff: StaffRecord[],
 ): StaffAttendanceMark[] {
@@ -316,8 +500,8 @@ export function defaultStaffMarks(
     .filter((s) => s.status === "active")
     .map((s) => ({
       staffId: s.id,
-      status: "P" as AttendanceStatus,
-      note: "",
+      status: "A" as AttendanceStatus,
+      note: NOT_PUNCHED_NOTE,
       inTime: "",
       outTime: "",
       punchWay: "" as const,
@@ -346,9 +530,14 @@ export function upsertStaffMarkInState(
     input.date,
     input.academicYearCode,
   );
-  let marks = existing
+  // A register created by the day's first punch starts everyone "Not
+  // punched". Anyone on approved leave that day starts as leave instead, so
+  // the register is right before the desk ever opens it.
+  const marks = existing
     ? [...existing.marks]
-    : defaultStaffMarks(input.roster);
+    : normalizeAttendanceSettings(state.settings).syncLeaveToAttendance
+      ? applyApprovedLeaveToMarks(defaultStaffMarks(input.roster), input.date, input.academicYearCode)
+      : defaultStaffMarks(input.roster);
 
   const idx = marks.findIndex((m) => m.staffId === input.staffId);
   const base: StaffAttendanceMark =
@@ -356,8 +545,8 @@ export function upsertStaffMarkInState(
       ? marks[idx]!
       : {
           staffId: input.staffId,
-          status: "P",
-          note: "",
+          status: "A",
+          note: NOT_PUNCHED_NOTE,
           inTime: "",
           outTime: "",
           punchWay: "",
@@ -394,6 +583,59 @@ export function upsertStaffMarkInState(
 }
 
 /** Overlay approved leave onto marks for a date (LE or HD). */
+/** Every half-day-leave mark's note starts with this; the punch looks for it. */
+export const HALF_DAY_LEAVE_NOTE = "Half-day leave";
+
+/** True when this mark comes from an approved half-day leave. */
+export function isHalfDayLeaveMark(
+  m: Pick<StaffAttendanceMark, "note"> | undefined,
+): boolean {
+  return !!m && (m.note || "").startsWith(HALF_DAY_LEAVE_NOTE);
+}
+
+/**
+ * The register mark for a member of staff on approved half-day leave.
+ *
+ * Director, 6 Oct 2026: a half day counts only when the OTHER half is
+ * actually worked. Until the person punches in, the day is "A" with a note
+ * saying which half they still owe; the punch turns it into "HD". Before
+ * this an approved half-day leave was filed "HD" — counted present — even if
+ * the person never came in at all.
+ */
+export function halfDayLeaveMark(
+  cur: Pick<StaffAttendanceMark, "inTime" | "punchWay"> | undefined,
+  leave: { typeCode: string; halfDaySession?: HalfDaySession },
+): Pick<StaffAttendanceMark, "status" | "note" | "punchWay"> {
+  const session = leave.halfDaySession ?? "";
+  const off = session === "morning" ? "morning off" : session === "afternoon" ? "afternoon off" : "";
+  const other = session === "morning" ? "afternoon" : session === "afternoon" ? "morning" : "other half";
+  const head = `${HALF_DAY_LEAVE_NOTE} (${leave.typeCode}${off ? `, ${off}` : ""})`;
+  if (cur?.inTime && cur.inTime.trim()) {
+    return { status: "HD", note: `${head} · worked the ${other}`, punchWay: cur.punchWay || "leave_sync" };
+  }
+  return { status: "A", note: `${head} · not punched for the ${other}`, punchWay: "leave_sync" };
+}
+
+/** Approved half-day leave covering this staff member's date, if any. */
+export function approvedHalfDayLeaveFor(
+  staffId: string,
+  date: string,
+  academicYearCode: string,
+): LeaveRequest | null {
+  const hr = loadStaffHr();
+  return (
+    hr.leaveRequests.find(
+      (r) =>
+        r.status === "approved" &&
+        r.halfDay &&
+        r.staffId === staffId &&
+        r.academicYearCode === academicYearCode &&
+        r.fromDate <= date &&
+        r.toDate >= date,
+    ) ?? null
+  );
+}
+
 export function applyApprovedLeaveToMarks(
   marks: StaffAttendanceMark[],
   date: string,
@@ -413,12 +655,7 @@ export function applyApprovedLeaveToMarks(
     const leave = byStaff.get(m.staffId);
     if (!leave) return m;
     if (leave.halfDay) {
-      return {
-        ...m,
-        status: "HD" as const,
-        note: `Half-day leave (${leave.typeCode})`,
-        punchWay: "leave_sync" as const,
-      };
+      return { ...m, ...halfDayLeaveMark(m, leave) };
     }
     return {
       ...m,
@@ -497,7 +734,7 @@ export function upsertStaffMark(input: {
     input.date,
     input.academicYearCode,
   );
-  let marks = existing
+  const marks = existing
     ? [...existing.marks]
     : defaultStaffMarks(input.roster);
 
@@ -617,15 +854,308 @@ export function syncLeaveOntoAttendanceDate(input: {
   });
 }
 
-export function summarizeStaffMarks(marks: StaffAttendanceMark[]) {
-  const counts: Record<string, number> = {};
+/**
+ * How many marks of each STATUS CODE — `{ P: 12, A: 2, … }`.
+ *
+ * Typed as a partial record on purpose. It used to be
+ * `Record<string, number>`, whose index signature made `summary.present` a
+ * perfectly legal `number` — so the principal snapshot read
+ * `staffSum.present ?? 0` and every app in the school showed staff present
+ * as 0 while the register was full (found 2026-09-16), and the WhatsApp
+ * leadership note printed "Present undefined". Neither was a data fault and
+ * neither raised a type error.
+ *
+ * For present / absent / leave, use `staffMarkTotals` below.
+ */
+export function summarizeStaffMarks(
+  marks: StaffAttendanceMark[],
+): Partial<Record<AttendanceStatus, number>> {
+  const counts: Partial<Record<AttendanceStatus, number>> = {};
   for (const m of marks) {
     counts[m.status] = (counts[m.status] ?? 0) + 1;
   }
   return counts;
 }
 
+/**
+ * The staff register in the words the rest of the app speaks — the same
+ * shape `summarizeMarks` returns for students (lib/attendance.ts), so a
+ * reader cannot mistake one for the other.
+ *
+ * Half-day counts as present: the person came to work.
+ */
+export function staffMarkTotals(marks: StaffAttendanceMark[]): {
+  present: number;
+  absent: number;
+  late: number;
+  halfDay: number;
+  leave: number;
+  marked: number;
+} {
+  const c = summarizeStaffMarks(marks);
+  const present = (c.P ?? 0) + (c.L ?? 0) + (c.HD ?? 0);
+  const absent = c.A ?? 0;
+  const leave = c.LE ?? 0;
+  return {
+    present,
+    absent,
+    late: c.L ?? 0,
+    halfDay: c.HD ?? 0,
+    leave,
+    marked: present + absent + leave,
+  };
+}
+
 export function nowHhmm(): string {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function formatDurationMs(ms: number): string {
+  const totalMin = Math.max(0, Math.round(ms / 60000));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function mergeOutdoorNote(existing: string, line: string): string {
+  const base = (existing || "")
+    .replace(/\s*·?\s*Outdoor duty[^\n]*/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return base ? `${base} · ${line}` : line;
+}
+
+function outdoorGeoToPunchGeo(
+  g: OutdoorDutyGeoPoint | null | undefined,
+): StaffPunchGeo | undefined {
+  if (!g) return undefined;
+  return { lat: g.lat, lng: g.lng, accuracyM: g.accuracyM, at: g.at, source: "app_gps" };
+}
+
+/**
+ * An attendance mark's staffId must reference a real staff record.
+ *
+ * The chat actor manufactures a `sess_…` key when a login resolves to no
+ * staff row (reasonable for chat — a participant needs *some* stable key),
+ * and the outdoor-duty flow used to carry that key straight into a mark.
+ * Such a mark joins to nothing: invisible to the roster, to every
+ * attendance report, and to payroll. One reached production on
+ * 2026-09-04 as `sess_director_bhbinternationa`.
+ */
+export function staffIdIsOnRoster(
+  roster: StaffRecord[] | undefined,
+  staffId: string,
+): boolean {
+  if (!staffId) return false;
+  return (roster ?? []).some((s) => s.id === staffId);
+}
+
+export const NO_STAFF_RECORD_ERROR =
+  "Your login is not linked to a staff record, so attendance cannot be filed";
+
+/** Empty roster is "cannot verify", not "not a staff member" — say so
+ * rather than telling a real teacher they have no staff record. Either
+ * way the mark is refused: an unverifiable staffId must not be written. */
+export const ROSTER_UNAVAILABLE_ERROR =
+  "The staff list has not loaded yet, so attendance cannot be filed — reopen this screen and try again";
+
+function outdoorDutyActorError(
+  roster: StaffRecord[] | undefined,
+  staffId: string,
+): string | null {
+  if (!staffId) return "Could not resolve your staff record";
+  if (!(roster ?? []).length) return ROSTER_UNAVAILABLE_ERROR;
+  if (!staffIdIsOnRoster(roster, staffId)) return NO_STAFF_RECORD_ERROR;
+  return null;
+}
+
+export function activeOutdoorDutyForStaff(
+  state: StaffAttendanceState,
+  staffId: string,
+): OutdoorDutySession | null {
+  return (
+    state.outdoorDuty.find(
+      (s) => s.staffId === staffId && s.status === "active",
+    ) ?? null
+  );
+}
+
+export function listOutdoorDutyForStaff(
+  state: StaffAttendanceState,
+  staffId: string,
+): OutdoorDutySession[] {
+  return state.outdoorDuty
+    .filter((s) => s.staffId === staffId)
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+export function listActiveOutdoorDuty(
+  state: StaffAttendanceState,
+): OutdoorDutySession[] {
+  return state.outdoorDuty
+    .filter((s) => s.status === "active")
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+/** Staff checks out for official work off-campus. Self-service: works for
+ * any signed-in staff member acting on their own staffId, regardless of
+ * the "staff:edit" grant (see saveStaffAttendanceSelfOrModule above). */
+export function startOutdoorDuty(input: {
+  academicYearCode: string;
+  staffId: string;
+  purpose: OutdoorDutyPurpose;
+  destination: string;
+  note?: string;
+  startGeo?: OutdoorDutyGeoPoint | null;
+  createdBy: string;
+  roster: StaffRecord[];
+  /** Server: compute against this (fresh) state and do not save — the
+   * caller writes the one register + session itself. */
+  state?: StaffAttendanceState;
+  persist?: boolean;
+}):
+  | {
+      ok: true;
+      state: StaffAttendanceState;
+      session: OutdoorDutySession;
+      register: StaffAttendanceRegister;
+    }
+  | { ok: false; error: string } {
+  const actorError = outdoorDutyActorError(input.roster, input.staffId);
+  if (actorError) return { ok: false, error: actorError };
+  if (!input.destination.trim()) {
+    return { ok: false, error: "Destination is required" };
+  }
+  const state = input.state ?? loadStaffAttendance();
+  if (activeOutdoorDutyForStaff(state, input.staffId)) {
+    return {
+      ok: false,
+      error: "You already have an active outdoor duty — check in first",
+    };
+  }
+
+  const now = new Date().toISOString();
+  const date = now.slice(0, 10);
+  const session: OutdoorDutySession = {
+    id: nid("od"),
+    staffId: input.staffId,
+    purpose: input.purpose,
+    destination: input.destination.trim(),
+    note: (input.note || "").trim(),
+    startedAt: now,
+    startGeo: input.startGeo || null,
+    endedAt: null,
+    endGeo: null,
+    status: "active",
+    createdBy: input.createdBy,
+  };
+
+  const existingMark =
+    findStaffRegister(state, date, input.academicYearCode)?.marks.find(
+      (m) => m.staffId === input.staffId,
+    ) ?? null;
+  const note = mergeOutdoorNote(
+    existingMark?.note || "",
+    `Outdoor duty · ${OUTDOOR_DUTY_PURPOSE_LABELS[input.purpose]} · ${session.destination}`,
+  );
+  const { state: stateWithMark, register } = upsertStaffMarkInState(state, {
+    academicYearCode: input.academicYearCode,
+    date,
+    staffId: input.staffId,
+    status: "P",
+    inTime: existingMark?.inTime || nowHhmm(),
+    outTime: existingMark?.outTime,
+    note,
+    punchWay: "outdoor",
+    punchGeo: outdoorGeoToPunchGeo(input.startGeo),
+    markedBy: input.createdBy,
+    roster: input.roster,
+  });
+
+  const nextState: StaffAttendanceState = {
+    ...stateWithMark,
+    outdoorDuty: [session, ...state.outdoorDuty],
+  };
+  if (input.persist !== false && !saveStaffAttendanceSelfOrModule(nextState, input.staffId)) {
+    return { ok: false, error: "You don't have permission to do this" };
+  }
+  return { ok: true, state: nextState, session, register };
+}
+
+/** Staff checks back in on returning from official off-campus work. */
+export function endOutdoorDuty(input: {
+  academicYearCode: string;
+  sessionId: string;
+  staffId: string;
+  endGeo?: OutdoorDutyGeoPoint | null;
+  markedBy: string;
+  roster: StaffRecord[];
+  state?: StaffAttendanceState;
+  persist?: boolean;
+}):
+  | {
+      ok: true;
+      state: StaffAttendanceState;
+      session: OutdoorDutySession;
+      register: StaffAttendanceRegister;
+    }
+  | { ok: false; error: string } {
+  const actorError = outdoorDutyActorError(input.roster, input.staffId);
+  if (actorError) return { ok: false, error: actorError };
+  const state = input.state ?? loadStaffAttendance();
+  const idx = state.outdoorDuty.findIndex((s) => s.id === input.sessionId);
+  if (idx < 0) return { ok: false, error: "Outdoor duty session not found" };
+  const before = state.outdoorDuty[idx]!;
+  if (before.status !== "active") {
+    return { ok: false, error: "This session is already closed" };
+  }
+  if (before.staffId !== input.staffId) {
+    return { ok: false, error: "This outdoor duty belongs to someone else" };
+  }
+
+  const now = new Date().toISOString();
+  const session: OutdoorDutySession = {
+    ...before,
+    endedAt: now,
+    endGeo: input.endGeo || null,
+    status: "ended",
+  };
+  const outdoorDuty = [...state.outdoorDuty];
+  outdoorDuty[idx] = session;
+
+  const date = before.startedAt.slice(0, 10);
+  const existingMark =
+    findStaffRegister(state, date, input.academicYearCode)?.marks.find(
+      (m) => m.staffId === input.staffId,
+    ) ?? null;
+  const hadSchoolOut = !!(existingMark?.outTime && existingMark.outTime.trim());
+  const worked = formatDurationMs(
+    Date.parse(now) - Date.parse(before.startedAt),
+  );
+  const note = mergeOutdoorNote(
+    existingMark?.note || "",
+    hadSchoolOut
+      ? `Outdoor duty closed · ${worked} · returned to school`
+      : `Outdoor duty closed · ${worked}`,
+  );
+  const { state: stateWithMark, register } = upsertStaffMarkInState(state, {
+    academicYearCode: input.academicYearCode,
+    date,
+    staffId: input.staffId,
+    status: "P",
+    inTime: existingMark?.inTime,
+    outTime: hadSchoolOut ? existingMark!.outTime : nowHhmm(),
+    note,
+    punchWay: "outdoor",
+    punchGeo: outdoorGeoToPunchGeo(input.endGeo),
+    markedBy: input.markedBy,
+    roster: input.roster,
+  });
+
+  const nextState: StaffAttendanceState = { ...stateWithMark, outdoorDuty };
+  if (input.persist !== false && !saveStaffAttendanceSelfOrModule(nextState, input.staffId)) {
+    return { ok: false, error: "You don't have permission to do this" };
+  }
+  return { ok: true, state: nextState, session, register };
 }

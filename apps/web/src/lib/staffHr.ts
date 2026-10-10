@@ -2,9 +2,14 @@
  * Staff leave & appraisal — localStorage HR slice (separate from Masters roster).
  */
 
-import { assertModulePermission } from "@/lib/rbacGuard";
+import {
+  assertModulePermission,
+  assertSelfOrModulePermission,
+} from "@/lib/rbacGuard";
 import { DEFAULT_AY } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type LeaveTypeCode = string;
 
@@ -39,6 +44,17 @@ export type LeaveSettings = {
   gracePeriodMinutes: number;
 };
 
+/**
+ * Which half of the day a half-day leave takes off. "" = not said (requests
+ * before 6 Oct 2026, or a full-day leave). The person is expected to punch
+ * for the other half; only then does the day count as a half day (HD).
+ */
+export type HalfDaySession = "" | "morning" | "afternoon";
+
+export function normalizeHalfDaySession(v: unknown): HalfDaySession {
+  return v === "morning" || v === "afternoon" ? v : "";
+}
+
 export type LeaveRequest = {
   id: string;
   academicYearCode: string;
@@ -48,6 +64,8 @@ export type LeaveRequest = {
   toDate: string;
   days: number;
   halfDay: boolean;
+  /** Morning or afternoon off, for a half-day leave. */
+  halfDaySession?: HalfDaySession;
   reason: string;
   status: LeaveStatus;
   /** How the leave was created / last changed */
@@ -74,6 +92,27 @@ export type LeaveBalance = {
   /** Days cashed out this AY (encashment stub). */
   encashed: number;
   used: number;
+};
+
+/**
+ * One change to a member of staff's leave allotment — director, 8 Oct 2026:
+ * "someone 10 days, someone 8, add or remove days, with a record of which
+ * staff's leave went up or down". Kept forever; nothing edits or deletes a
+ * row. `days` is what was entered; before/after are the allotment itself.
+ */
+export type LeaveAllotmentMode = "set" | "add" | "remove";
+export type LeaveAllotmentChange = {
+  id: string;
+  academicYearCode: string;
+  staffId: string;
+  typeCode: LeaveTypeCode;
+  mode: LeaveAllotmentMode;
+  days: number;
+  before: number;
+  after: number;
+  reason: string;
+  changedBy: string;
+  changedAt: string;
 };
 
 export type LeaveEncashment = {
@@ -114,6 +153,39 @@ export type AppraisalRecord = {
   ratedAt: string;
 };
 
+export type StaffRequestType =
+  | "supplies"
+  | "maintenance"
+  | "vehicle"
+  | "classroom_issue"
+  | "other";
+
+export type StaffRequestStatus = "open" | "in_progress" | "resolved" | "closed";
+
+export const STAFF_REQUEST_TYPE_LABELS: Record<StaffRequestType, string> = {
+  supplies: "Stationery / supplies",
+  maintenance: "Repair / maintenance",
+  vehicle: "Vehicle / driver issue",
+  classroom_issue: "Classroom issue",
+  other: "Other",
+};
+
+export type StaffRequestTicket = {
+  id: string;
+  staffId: string;
+  raisedByName: string;
+  type: StaffRequestType;
+  subject: string;
+  description: string;
+  date: string;
+  assignedToStaffId: string;
+  status: StaffRequestStatus;
+  resolutionNote: string;
+  resolvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type StaffHrState = {
   version: 1;
   leaveSettings: LeaveSettings;
@@ -121,11 +193,18 @@ export type StaffHrState = {
   leaveRequests: LeaveRequest[];
   leaveBalances: LeaveBalance[];
   leaveEncashments: LeaveEncashment[];
+  /** Every allotment change, newest first. */
+  leaveAllotmentLog: LeaveAllotmentChange[];
   appraisalCycles: AppraisalCycle[];
   appraisals: AppraisalRecord[];
+  staffRequests: StaffRequestTicket[];
 };
 
 const STORAGE_KEY = "bhb_staff_hr_v1";
+
+/** Server-side copy — API routes hydrate it from the desk, then read/write
+ * through the same load/persist functions the browser uses. */
+let serverStaffHrCache: StaffHrState | null = null;
 
 export const DEFAULT_LEAVE_TYPES: LeaveType[] = [
   {
@@ -147,8 +226,10 @@ export const DEFAULT_LEAVE_TYPES: LeaveType[] = [
     maxCarryForward: 15,
   },
   {
-    code: "SL",
-    name: "Sick leave",
+    // Medical leave. Replaced "SL — Sick leave" on 3 Oct 2026 (director):
+    // the school calls it ML, and the two must not both exist.
+    code: "ML",
+    name: "Medical leave",
     paid: true,
     defaultDaysPerYear: 10,
     maxDaysPerMonth: 0,
@@ -248,6 +329,7 @@ function normalizeLeaveRequest(
     toDate: r.toDate || r.fromDate || "",
     days,
     halfDay: !!r.halfDay,
+    halfDaySession: r.halfDay ? normalizeHalfDaySession(r.halfDaySession) : "",
     reason: r.reason || "",
     status,
     origin:
@@ -279,6 +361,30 @@ function normalizeBalance(b: Partial<LeaveBalance>): LeaveBalance | null {
   };
 }
 
+function normalizeAllotmentChange(
+  c: Partial<LeaveAllotmentChange>,
+): LeaveAllotmentChange | null {
+  if (!c || !c.staffId || !c.typeCode) return null;
+  const mode: LeaveAllotmentMode = c.mode === "add" || c.mode === "remove" ? c.mode : "set";
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v * 2) / 2 : 0);
+  return {
+    id: c.id || nid("lal"),
+    // applyLeaveAllotment always stamps the year. A row without one stays
+    // yearless (kept, shown under no session) rather than being filed under
+    // the stale default year.
+    academicYearCode: c.academicYearCode || "",
+    staffId: c.staffId,
+    typeCode: String(c.typeCode).trim().toUpperCase(),
+    mode,
+    days: num(c.days),
+    before: num(c.before),
+    after: num(c.after),
+    reason: c.reason || "",
+    changedBy: c.changedBy || "",
+    changedAt: c.changedAt || new Date().toISOString(),
+  };
+}
+
 function normalizeEncashment(
   e: Partial<LeaveEncashment>,
 ): LeaveEncashment | null {
@@ -297,6 +403,48 @@ function normalizeEncashment(
     note: e.note || "",
     recordedBy: e.recordedBy || "",
     recordedAt: e.recordedAt || new Date().toISOString(),
+  };
+}
+
+const STAFF_REQUEST_TYPES: StaffRequestType[] = [
+  "supplies",
+  "maintenance",
+  "vehicle",
+  "classroom_issue",
+  "other",
+];
+const STAFF_REQUEST_STATUSES: StaffRequestStatus[] = [
+  "open",
+  "in_progress",
+  "resolved",
+  "closed",
+];
+
+function normalizeStaffRequestTicket(
+  t: Partial<StaffRequestTicket>,
+): StaffRequestTicket | null {
+  if (!t.staffId || !t.subject) return null;
+  const type = STAFF_REQUEST_TYPES.includes(t.type as StaffRequestType)
+    ? (t.type as StaffRequestType)
+    : "other";
+  const status = STAFF_REQUEST_STATUSES.includes(t.status as StaffRequestStatus)
+    ? (t.status as StaffRequestStatus)
+    : "open";
+  const now = new Date().toISOString();
+  return {
+    id: t.id || nid("req"),
+    staffId: t.staffId,
+    raisedByName: (t.raisedByName || "").trim(),
+    type,
+    subject: (t.subject || "").trim(),
+    description: (t.description || "").trim(),
+    date: t.date || now.slice(0, 10),
+    assignedToStaffId: t.assignedToStaffId || "",
+    status,
+    resolutionNote: (t.resolutionNote || "").trim(),
+    resolvedAt: t.resolvedAt || null,
+    createdAt: t.createdAt || now,
+    updatedAt: t.updatedAt || now,
   };
 }
 
@@ -374,8 +522,10 @@ export function emptyStaffHrState(): StaffHrState {
     leaveRequests: [],
     leaveBalances: [],
     leaveEncashments: [],
+    leaveAllotmentLog: [],
     appraisalCycles: [],
     appraisals: [],
+    staffRequests: [],
   };
 }
 
@@ -409,6 +559,11 @@ function normalizeState(raw: Partial<StaffHrState>): StaffHrState {
           .map(normalizeEncashment)
           .filter((e): e is LeaveEncashment => !!e)
       : [],
+    leaveAllotmentLog: Array.isArray(raw.leaveAllotmentLog)
+      ? raw.leaveAllotmentLog
+          .map(normalizeAllotmentChange)
+          .filter((c): c is LeaveAllotmentChange => !!c)
+      : [],
     appraisalCycles: Array.isArray(raw.appraisalCycles)
       ? raw.appraisalCycles
           .map(normalizeCycle)
@@ -419,13 +574,20 @@ function normalizeState(raw: Partial<StaffHrState>): StaffHrState {
           .map(normalizeAppraisal)
           .filter((a): a is AppraisalRecord => !!a)
       : [],
+    staffRequests: Array.isArray(raw.staffRequests)
+      ? raw.staffRequests
+          .map(normalizeStaffRequestTicket)
+          .filter((t): t is StaffRequestTicket => !!t)
+      : [],
   };
 }
 
 export function loadStaffHr(): StaffHrState {
-  if (typeof window === "undefined") return emptyStaffHrState();
+  if (typeof window === "undefined") {
+    return serverStaffHrCache ?? emptyStaffHrState();
+  }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyStaffHrState();
     const parsed = JSON.parse(raw) as StaffHrState;
     if (!parsed || parsed.version !== 1) return emptyStaffHrState();
@@ -435,26 +597,41 @@ export function loadStaffHr(): StaffHrState {
   }
 }
 
+function persistStaffHr(state: StaffHrState) {
+  if (typeof window === "undefined") {
+    // Routes push to the desk explicitly after the mutation succeeds.
+    serverStaffHrCache = normalizeState(state);
+    return;
+  }
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalizeState(state)));
+  void trackServerWork(import("@/lib/staffHrPersistence").then(({ scheduleStaffHrSync }) => {
+    scheduleStaffHrSync(state);
+  }));
+}
+
 export function saveStaffHr(state: StaffHrState) {
   if (!assertModulePermission("staff", "edit", "saveStaffHr")) return;
-
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeState(state)));
-  void import("@/lib/staffHrPersistence").then(({ scheduleStaffHrSync }) => {
-    scheduleStaffHrSync(state);
-  });
+  persistStaffHr(state);
 }
 
 export function writeStaffHrLocalRaw(state: StaffHrState) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeState(state)));
+  if (typeof window === "undefined") {
+    serverStaffHrCache = normalizeState(state);
+    return;
+  }
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalizeState(state)));
+}
+
+export function normalizeStaffHrState(raw: Partial<StaffHrState>): StaffHrState {
+  return normalizeState(raw);
 }
 
 export function staffHrStateIsEmpty(state: StaffHrState): boolean {
   return (
     (state.leaveRequests?.length ?? 0) === 0 &&
     (state.appraisals?.length ?? 0) === 0 &&
-    (state.leaveEncashments?.length ?? 0) === 0
+    (state.leaveEncashments?.length ?? 0) === 0 &&
+    (state.leaveAllotmentLog?.length ?? 0) === 0
   );
 }
 
@@ -699,6 +876,7 @@ export function applyLeave(input: {
   fromDate: string;
   toDate: string;
   halfDay?: boolean;
+  halfDaySession?: HalfDaySession;
   reason: string;
   appliedBy: string;
   /** When true, approve immediately (principal/admin direct leave). */
@@ -781,6 +959,7 @@ export function applyLeave(input: {
     toDate,
     days,
     halfDay,
+    halfDaySession: halfDay ? normalizeHalfDaySession(input.halfDaySession) : "",
     reason: input.reason.trim(),
     status,
     origin,
@@ -808,7 +987,12 @@ export function applyLeave(input: {
     if (balAfter) state = syncBalanceUsed(state, balAfter.id);
   }
 
-  saveStaffHr(state);
+  if (
+    !assertSelfOrModulePermission("staff", "edit", input.staffId, "applyLeave")
+  ) {
+    return { ok: false, error: "You don't have permission to do this" };
+  }
+  persistStaffHr(state);
   return { ok: true, state, request };
 }
 
@@ -816,6 +1000,186 @@ export function directLeave(
   input: Omit<Parameters<typeof applyLeave>[0], "direct">,
 ): ReturnType<typeof applyLeave> {
   return applyLeave({ ...input, direct: true });
+}
+
+/**
+ * Any staff member files a real, tracked operational request against
+ * their own staffId — stationery/supplies, a repair/maintenance need, a
+ * vehicle/driver issue, a classroom problem, or something uncategorized.
+ * Self-scoped: assertSelfOrModulePermission lets the actor create only
+ * for their own staffId without needing the broader "staff:edit" grant,
+ * mirroring applyLeave's self-service fix above.
+ */
+export function createStaffRequestTicket(input: {
+  staffId: string;
+  raisedByName: string;
+  type: StaffRequestType;
+  subject: string;
+  description: string;
+}): { ok: true; state: StaffHrState; ticket: StaffRequestTicket } | { ok: false; error: string } {
+  if (!input.staffId) return { ok: false, error: "Could not resolve your staff record" };
+  if (!input.subject.trim()) return { ok: false, error: "Subject is required" };
+
+  if (
+    !assertSelfOrModulePermission(
+      "staff",
+      "edit",
+      input.staffId,
+      "createStaffRequestTicket",
+    )
+  ) {
+    return { ok: false, error: "You don't have permission to do this" };
+  }
+
+  const now = new Date().toISOString();
+  const ticket: StaffRequestTicket = {
+    id: nid("req"),
+    staffId: input.staffId,
+    raisedByName: input.raisedByName.trim(),
+    type: input.type,
+    subject: input.subject.trim(),
+    description: input.description.trim(),
+    date: now.slice(0, 10),
+    assignedToStaffId: "",
+    status: "open",
+    resolutionNote: "",
+    resolvedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const state = loadStaffHr();
+  const next: StaffHrState = {
+    ...state,
+    staffRequests: [ticket, ...state.staffRequests],
+  };
+  persistStaffHr(next);
+  return { ok: true, state: next, ticket };
+}
+
+/** Admin/office triage — assign, change status, or resolve a ticket. */
+export function updateStaffRequestTicket(
+  ticketId: string,
+  patch: {
+    assignedToStaffId?: string;
+    status?: StaffRequestStatus;
+    resolutionNote?: string;
+  },
+): { ok: true; state: StaffHrState } | { ok: false; error: string } {
+  const state = loadStaffHr();
+  const idx = state.staffRequests.findIndex((t) => t.id === ticketId);
+  if (idx < 0) return { ok: false, error: "Request not found" };
+  const now = new Date().toISOString();
+  const before = state.staffRequests[idx]!;
+  const status = patch.status ?? before.status;
+  const ticket: StaffRequestTicket = {
+    ...before,
+    assignedToStaffId: patch.assignedToStaffId ?? before.assignedToStaffId,
+    status,
+    resolutionNote: patch.resolutionNote ?? before.resolutionNote,
+    resolvedAt:
+      status === "resolved" || status === "closed"
+        ? before.resolvedAt || now
+        : status !== before.status
+          ? null
+          : before.resolvedAt,
+    updatedAt: now,
+  };
+  const staffRequests = [...state.staffRequests];
+  staffRequests[idx] = ticket;
+  const next: StaffHrState = { ...state, staffRequests };
+  saveStaffHr(next);
+  return { ok: true, state: next };
+}
+
+export function listStaffRequestsForStaff(
+  state: StaffHrState,
+  staffId: string,
+): StaffRequestTicket[] {
+  return state.staffRequests
+    .filter((t) => t.staffId === staffId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/**
+ * Leave entered from the staff attendance register.
+ *
+ * Marking someone "On leave" on the register files a one-day direct
+ * (approved) leave of the chosen type, so the balance goes down exactly as
+ * it would for leave applied in HR. This reason tags those entries, so the
+ * register can find and cancel its own — never one HR filed.
+ */
+export const REGISTER_LEAVE_REASON = "Marked on leave in the staff register";
+
+/** Approved leave covering `date` for this staff member, if any. */
+export function approvedLeaveOn(
+  state: StaffHrState,
+  staffId: string,
+  date: string,
+  academicYearCode: string,
+): LeaveRequest | null {
+  return (
+    state.leaveRequests.find(
+      (r) =>
+        r.staffId === staffId &&
+        r.status === "approved" &&
+        r.academicYearCode === academicYearCode &&
+        r.fromDate <= date &&
+        r.toDate >= date,
+    ) ?? null
+  );
+}
+
+/**
+ * Undo a register-made leave for one day (the register changed the mark
+ * back to present, late, …). Kept as rejected rather than deleted, so the
+ * history shows it was entered and withdrawn; the balance is restored.
+ * Leave filed through HR is never touched here.
+ */
+export function cancelRegisterLeave(input: {
+  staffId: string;
+  date: string;
+  academicYearCode: string;
+  cancelledBy: string;
+}): { ok: true; cancelled: number } | { ok: false; error: string } {
+  let state = loadStaffHr();
+  const mine = state.leaveRequests.filter(
+    (r) =>
+      r.staffId === input.staffId &&
+      r.status === "approved" &&
+      r.academicYearCode === input.academicYearCode &&
+      r.fromDate === input.date &&
+      r.toDate === input.date &&
+      r.reason === REGISTER_LEAVE_REASON,
+  );
+  if (!mine.length) return { ok: true, cancelled: 0 };
+  if (!assertSelfOrModulePermission("staff", "edit", input.staffId, "cancelRegisterLeave")) {
+    return { ok: false, error: "You don't have permission to do this" };
+  }
+  const ids = new Set(mine.map((r) => r.id));
+  const now = new Date().toISOString();
+  state = {
+    ...state,
+    leaveRequests: state.leaveRequests.map((r) =>
+      ids.has(r.id)
+        ? {
+            ...r,
+            status: "rejected" as const,
+            decidedBy: input.cancelledBy,
+            decidedAt: now,
+            decisionNote: "Withdrawn from the staff register",
+          }
+        : r,
+    ),
+  };
+  for (const r of mine) {
+    const bal = state.leaveBalances.find(
+      (b) => b.staffId === r.staffId && b.typeCode === r.typeCode && b.academicYearCode === r.academicYearCode,
+    );
+    if (bal) state = syncBalanceUsed(state, bal.id);
+  }
+  persistStaffHr(state);
+  return { ok: true, cancelled: mine.length };
 }
 
 export function decideLeave(input: {
@@ -965,6 +1329,8 @@ export function adjustLeave(input: {
   fromDate: string;
   toDate: string;
   halfDay: boolean;
+  /** Omitted = keep the request's session. */
+  halfDaySession?: HalfDaySession;
   typeCode: LeaveTypeCode;
   reason?: string;
   adjustedBy: string;
@@ -1046,6 +1412,9 @@ export function adjustLeave(input: {
     toDate,
     days,
     halfDay,
+    halfDaySession: halfDay
+      ? normalizeHalfDaySession(input.halfDaySession ?? req.halfDaySession)
+      : "",
     reason:
       input.reason !== undefined ? input.reason.trim() : req.reason,
     origin: "adjusted",
@@ -1256,7 +1625,7 @@ export function carryForwardLeaveBalances(input: {
     return { ok: false, error: "No leave types allow carry-forward (set max on EL)" };
   }
 
-  let balances = [...state.leaveBalances];
+  const balances = [...state.leaveBalances];
   const touchedStaff = new Set<string>();
 
   for (const s of input.staff.filter((x) => x.status === "active")) {
@@ -1297,6 +1666,126 @@ export function carryForwardLeaveBalances(input: {
   return { ok: true, state: next, staffUpdated, daysCarried };
 }
 
+/**
+ * Change the allotment of one leave type for many staff at once: set it to N
+ * days, or add / remove N days. Pure — returns the next state and the
+ * records it wrote; `changeLeaveAllotment` saves it.
+ *
+ * Refused (nobody changes) if any one person would end up with less leave
+ * than they have already taken, or below zero — a partial bulk change is
+ * worse than none. A person whose allotment would not move gets no record.
+ */
+export function applyLeaveAllotment(
+  state: StaffHrState,
+  input: {
+    staffIds: string[];
+    typeCode: LeaveTypeCode;
+    academicYearCode: string;
+    mode: LeaveAllotmentMode;
+    days: number;
+    reason: string;
+    changedBy: string;
+    staff: StaffRecord[];
+    now?: string;
+  },
+):
+  | { ok: true; state: StaffHrState; changes: LeaveAllotmentChange[] }
+  | { ok: false; error: string } {
+  const ids = [...new Set(input.staffIds.filter(Boolean))];
+  if (!ids.length) return { ok: false, error: "Select at least one member of staff" };
+  const raw = Number(input.days);
+  if (!Number.isFinite(raw) || raw < 0) return { ok: false, error: "Days must be zero or more" };
+  if (Math.round(raw * 2) !== raw * 2) return { ok: false, error: "Days go in whole or half days (e.g. 8 or 8.5)" };
+  if (raw > 365) return { ok: false, error: "More than 365 days is not an allotment" };
+  if (input.mode !== "set" && raw === 0) return { ok: false, error: "Enter how many days to add or remove" };
+  const reason = (input.reason || "").trim();
+  if (!reason) return { ok: false, error: "Write a reason — it goes in the record" };
+  const type = state.leaveTypes.find((t) => t.code === String(input.typeCode).toUpperCase());
+  if (!type) return { ok: false, error: "Leave type not found" };
+
+  const ay = input.academicYearCode;
+  const withBalances = ensureBalancesForAy(state, input.staff, ay);
+  const names = new Map(input.staff.map((s) => [s.id, s.fullName]));
+  const now = input.now || new Date().toISOString();
+  const changes: LeaveAllotmentChange[] = [];
+  const nextAllotted = new Map<string, number>();
+  const blocked: string[] = [];
+  for (const id of ids) {
+    const bal = withBalances.leaveBalances.find(
+      (b) => b.staffId === id && b.typeCode === type.code && b.academicYearCode === ay,
+    );
+    const before = bal?.allotted ?? type.defaultDaysPerYear;
+    const after =
+      input.mode === "set" ? raw : input.mode === "add" ? before + raw : before - raw;
+    const used = bal?.used ?? 0;
+    const minimum = Math.max(0, used + (bal?.encashed ?? 0) - (bal?.carriedForward ?? 0));
+    if (after < minimum) {
+      blocked.push(`${names.get(id) || id} (${used} ${type.code} taken${minimum > used ? `, ${minimum - used} encashed` : ""})`);
+      continue;
+    }
+    if (after === before) continue;
+    nextAllotted.set(id, after);
+    changes.push({
+      id: nid("lal"),
+      academicYearCode: ay,
+      staffId: id,
+      typeCode: type.code,
+      mode: input.mode,
+      days: raw,
+      before,
+      after,
+      reason,
+      changedBy: input.changedBy,
+      changedAt: now,
+    });
+  }
+  if (blocked.length) {
+    return {
+      ok: false,
+      error: `Not changed — this would leave less ${type.code} than already taken for: ${blocked.join("; ")}`,
+    };
+  }
+  if (!changes.length) return { ok: false, error: `Nothing to change — the ${type.code} allotment is already that` };
+
+  const leaveBalances = withBalances.leaveBalances.map((b) =>
+    b.academicYearCode === ay && b.typeCode === type.code && nextAllotted.has(b.staffId)
+      ? { ...b, allotted: nextAllotted.get(b.staffId)! }
+      : b,
+  );
+  // A staff id with no balance row (not on the active roster) gets one.
+  for (const [staffId, allotted] of nextAllotted) {
+    if (leaveBalances.some((b) => b.staffId === staffId && b.typeCode === type.code && b.academicYearCode === ay)) continue;
+    leaveBalances.push({
+      id: nid("lb"),
+      academicYearCode: ay,
+      staffId,
+      typeCode: type.code,
+      allotted,
+      carriedForward: 0,
+      encashed: 0,
+      used: 0,
+    });
+  }
+  return {
+    ok: true,
+    state: {
+      ...withBalances,
+      leaveBalances,
+      leaveAllotmentLog: [...changes, ...(withBalances.leaveAllotmentLog ?? [])],
+    },
+    changes,
+  };
+}
+
+/** applyLeaveAllotment on the saved state, then save it. */
+export function changeLeaveAllotment(
+  input: Parameters<typeof applyLeaveAllotment>[1],
+): ReturnType<typeof applyLeaveAllotment> {
+  const res = applyLeaveAllotment(loadStaffHr(), input);
+  if (res.ok) saveStaffHr(res.state);
+  return res;
+}
+
 /** Encash unused paid leave (stub — records days; payroll amount is manual). */
 export function encashLeave(input: {
   staffId: string;
@@ -1312,7 +1801,7 @@ export function encashLeave(input: {
   if (days <= 0) return { ok: false, error: "Days must be greater than zero" };
   if (!input.staffId) return { ok: false, error: "Staff required" };
 
-  let state = loadStaffHr();
+  const state = loadStaffHr();
   const type = state.leaveTypes.find(
     (t) => t.code === input.typeCode.toUpperCase(),
   );

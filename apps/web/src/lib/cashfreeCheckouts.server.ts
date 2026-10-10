@@ -1,0 +1,513 @@
+/**
+ * One Cashfree checkout flow for everything the school collects online —
+ * fee pay-links, registration fees, event entries, tutor passes.
+ *
+ * Creating: an order on Cashfree (or a payment link when
+ * CASHFREE_CHECKOUT_MODE=links), a row in cashfree_checkouts that ties the
+ * order to what it pays for, and the school's own pay page URL for the
+ * parent to open.
+ *
+ * Settling: both the webhook and the return page call settleCashfreeCheckout,
+ * which re-verifies with Cashfree (never the payload alone) and then hands
+ * off to the module that owns the thing paid for. Each of those is
+ * idempotent, so webhook + return page racing each other is harmless.
+ */
+import "server-only";
+import { createHash } from "node:crypto";
+import {
+  captureRegistrationPayment,
+  loadAdmissions,
+  saveAdmissions,
+} from "@/lib/admissions";
+import {
+  cashfreeCheckoutMode,
+  createCashfreeLink,
+  createCashfreeOrder,
+  fetchCashfreeOrderPayment,
+  fetchCashfreePaymentStatus,
+  terminateCashfreeOrder,
+} from "@/lib/cashfree.server";
+import { cashfreePayPageUrl, isCashfreeOrderId } from "@/lib/cashfreeCheckout";
+import {
+  fallbackGatewayQuote,
+  quoteGatewayFee,
+  type GatewayMethodGroup,
+} from "@/lib/gatewayFees";
+import { loadGatewayFeePolicy } from "@/lib/gatewayFeePolicy.server";
+import { cashfreeOrderPaymentMethods } from "@/lib/gatewayMethods";
+import { ensurePaymentLinkHydrated } from "@/lib/paymentsPersistence";
+import { settlePaymentLinkWithWhatsApp } from "@/lib/paymentSettlement.server";
+import { recordPaymentGatewayEvent } from "@/lib/paymentsNormalized.server";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { getServerTenantContext } from "@/lib/serverTenant";
+
+export type CheckoutKind = "fee_link" | "registration" | "event_fee" | "tutor_pass";
+
+export type CashfreeCheckoutRow = {
+  orderId: string;
+  kind: CheckoutKind;
+  ref: string;
+  amountPaise: number;
+  /**
+   * Gateway fee the parent paid ON TOP of amountPaise. Zero whenever the
+   * school absorbs the fee, which is the default and today's behaviour.
+   * Cashfree collected amountPaise + surchargePaise.
+   */
+  surchargePaise: number;
+  /** The rail the surcharge was quoted for; empty when there was no picker. */
+  methodGroup: string;
+  paymentSessionId: string;
+  cfOrderId: string;
+  afterUrl: string;
+  status: "active" | "paid" | "expired" | "failed";
+  paymentRef: string;
+  paidAt: string | null;
+};
+
+function rowToCheckout(r: Record<string, unknown>): CashfreeCheckoutRow {
+  return {
+    orderId: String(r.order_id),
+    kind: String(r.kind) as CheckoutKind,
+    ref: String(r.ref),
+    amountPaise: Number(r.amount_paise),
+    surchargePaise: Math.max(0, Math.round(Number(r.surcharge_paise ?? 0))),
+    methodGroup: String(r.method_group ?? ""),
+    paymentSessionId: String(r.payment_session_id ?? ""),
+    cfOrderId: String(r.cf_order_id ?? ""),
+    afterUrl: String(r.after_url ?? ""),
+    status: String(r.status) as CashfreeCheckoutRow["status"],
+    paymentRef: String(r.payment_ref ?? ""),
+    paidAt: r.paid_at ? String(r.paid_at) : null,
+  };
+}
+
+export async function getCashfreeCheckout(orderId: string): Promise<CashfreeCheckoutRow | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { data } = await ctx.sb
+    .from("cashfree_checkouts")
+    .select("*")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("order_id", orderId)
+    .maybeSingle();
+  return data ? rowToCheckout(data as Record<string, unknown>) : null;
+}
+
+/** An order id Cashfree accepts, derived from ours when ours would not be. */
+function orderIdFor(preferred: string): string {
+  if (isCashfreeOrderId(preferred)) return preferred;
+  return `co_${createHash("sha1").update(preferred).digest("hex").slice(0, 24)}`;
+}
+
+export type CreateCheckoutInput = {
+  kind: CheckoutKind;
+  /** What the money is for — the pay-link id, registration payment id, participant id, tutor order id. */
+  ref: string;
+  /** Used as the Cashfree order id when it is valid for one. */
+  preferredId: string;
+  amountPaise: number;
+  /**
+   * The rail the parent chose on our pay page, when they were given the
+   * choice. It decides which configured rate the surcharge is quoted at.
+   * Omitted for a WhatsApp pay-link, which has no picker — that falls back to
+   * the policy's fallback rail, which ships as the free one so a link can
+   * never surprise a parent with a card-rate charge they did not choose.
+   */
+  methodGroup?: GatewayMethodGroup;
+  purpose: string;
+  customerId: string;
+  customerName: string;
+  customerMobile: string;
+  /** YYYY-MM-DD; the order expires end of that day IST. */
+  expiresOn?: string;
+  /** Where the parent lands after the pay page has confirmed payment. */
+  afterUrl: string;
+  origin: string;
+  notes: Record<string, string>;
+};
+
+export type CreateCheckoutResult =
+  | { ok: true; orderId: string; checkoutUrl: string; externalId: string; mode: "orders" | "links" }
+  | { ok: false; error: string };
+
+export async function createCashfreeCheckout(input: CreateCheckoutInput): Promise<CreateCheckoutResult> {
+  const origin = input.origin.replace(/\/$/, "");
+  const webhookUrl = `${origin}/api/payments/cashfree/webhook`;
+
+  // What the school has decided about who bears the fee. Reading it here, in
+  // the one funnel every online collection goes through, rather than at each
+  // of the four call sites — a rail that forgot to ask would silently absorb
+  // a fee the school meant to pass on, or worse, charge for one it did not.
+  const policy = await loadGatewayFeePolicy();
+  const quote = input.methodGroup
+    ? quoteGatewayFee({ netPaise: input.amountPaise, group: input.methodGroup, policy })
+    : fallbackGatewayQuote({ netPaise: input.amountPaise, policy });
+  const chargeablePaise = quote.chargeablePaise;
+
+  if (cashfreeCheckoutMode() === "links") {
+    const link = await createCashfreeLink({
+      linkId: input.preferredId,
+      amountPaise: chargeablePaise,
+      purpose: input.purpose,
+      customerName: input.customerName,
+      customerMobile: input.customerMobile,
+      expiresOn: input.expiresOn,
+      returnUrl: input.afterUrl,
+      webhookUrl,
+      notes: { kind: input.kind, ...input.notes },
+    });
+    if (!link.ok) console.error("[cashfree] link refused", JSON.stringify({ kind: input.kind, ref: input.ref, error: link.error }));
+    return link.ok
+      ? { ok: true, orderId: link.id, checkoutUrl: link.linkUrl, externalId: link.id, mode: "links" }
+      : link;
+  }
+
+  const orderId = orderIdFor(input.preferredId);
+  const order = await createCashfreeOrder({
+    orderId,
+    // What Cashfree collects: the fee plus any charge the parent bears. The
+    // row below still records the fee as amount_paise, because that is what
+    // the receipt is written for and what the settle-time amount check
+    // compares against.
+    amountPaise: chargeablePaise,
+    customerId: input.customerId,
+    customerName: input.customerName,
+    customerMobile: input.customerMobile,
+    note: input.purpose,
+    returnUrl: cashfreePayPageUrl(origin, orderId),
+    notifyUrl: webhookUrl,
+    tags: { kind: input.kind, ref: input.ref, ...input.notes },
+    expiresAt: input.expiresOn ? `${input.expiresOn}T23:59:59+05:30` : undefined,
+    // A parent who picked a rail was quoted for THAT rail, so the order takes
+    // only that rail. Without a choice (WhatsApp links, the web pay page) the
+    // order stays open to every rail at the fallback quote, as before.
+    paymentMethods: input.methodGroup ? cashfreeOrderPaymentMethods(input.methodGroup) : undefined,
+  });
+  if (!order.ok) {
+    // Cashfree's own words ("authentication Failed", "order_amount invalid"…).
+    // Every caller treats a refusal as an ordinary result, so this line is the
+    // only place it can be seen — ten days of refusals once went unlogged.
+    console.error("[cashfree] order refused", JSON.stringify({ kind: input.kind, ref: input.ref, error: order.error }));
+    return order;
+  }
+
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "No tenant context" };
+  const { error } = await ctx.sb.from("cashfree_checkouts").upsert(
+    {
+      order_id: orderId,
+      tenant_id: ctx.tenantId,
+      kind: input.kind,
+      ref: input.ref,
+      amount_paise: input.amountPaise,
+      surcharge_paise: quote.surchargePaise,
+      method_group: quote.surchargePaise > 0 ? quote.group : "",
+      customer_phone: input.customerMobile.replace(/\D/g, "").slice(-10),
+      payment_session_id: order.paymentSessionId,
+      cf_order_id: order.cfOrderId,
+      after_url: input.afterUrl,
+    },
+    { onConflict: "order_id" },
+  );
+  if (error) {
+    console.error("[cashfree] checkout not recorded", JSON.stringify({ kind: input.kind, ref: input.ref, error: error.message }));
+    return { ok: false, error: `Could not record checkout: ${error.message}` };
+  }
+
+  return {
+    ok: true,
+    orderId,
+    checkoutUrl: cashfreePayPageUrl(origin, orderId),
+    externalId: order.cfOrderId || orderId,
+    mode: "orders",
+  };
+}
+
+/**
+ * Take the right to settle this order, atomically, BEFORE fulfilling it.
+ *
+ * Cashfree delivers a payment more than once — on 26 Sep 2026 the same
+ * payment arrived twice, 52 milliseconds apart, and both handlers allocated
+ * the SAME receipt number (RCV-00648) because neither could see the other.
+ * Marking the checkout paid AFTER fulfilment, as this used to, cannot stop
+ * that: by then both have already collected the money.
+ *
+ * The `neq` makes the flip to "paid" the claim itself. Postgres serialises
+ * the two updates, so exactly one returns a row and exactly one settles.
+ * Returns false when somebody else holds the claim — the caller then reports
+ * `alreadyPaid` rather than collecting a second time.
+ */
+async function claimCheckoutForSettlement(orderId: string, paymentRef: string): Promise<boolean> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return false;
+  const { data } = await ctx.sb
+    .from("cashfree_checkouts")
+    .update({ status: "paid", payment_ref: paymentRef, paid_at: new Date().toISOString() })
+    .eq("tenant_id", ctx.tenantId)
+    .eq("order_id", orderId)
+    .neq("status", "paid")
+    .select("order_id");
+  return Array.isArray(data) && data.length > 0;
+}
+
+/**
+ * Give the claim back when fulfilment failed, so a retry can settle.
+ *
+ * Without this a transient failure would leave the checkout marked paid with
+ * nothing collected, and the money would never be booked — the worst of the
+ * two outcomes, because it is silent.
+ */
+async function releaseCheckoutClaim(
+  orderId: string,
+  previousStatus: CashfreeCheckoutRow["status"],
+): Promise<void> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return;
+  await ctx.sb
+    .from("cashfree_checkouts")
+    .update({ status: previousStatus === "paid" ? "active" : previousStatus, paid_at: null })
+    .eq("tenant_id", ctx.tenantId)
+    .eq("order_id", orderId);
+}
+
+export type SettleResult =
+  | { ok: true; alreadyPaid: boolean; kind: CheckoutKind; ref: string; receiptNo?: string; endsAt?: string }
+  | { ok: false; error: string; kind?: CheckoutKind; ref?: string };
+
+/**
+ * A payment for this order is reported — by the webhook or by the parent
+ * arriving back on the pay page. Verify with Cashfree, then fulfil.
+ */
+export async function settleCashfreeCheckout(opts: {
+  orderId: string;
+  /** Cashfree payment id if the caller has it; otherwise looked up. */
+  paymentRef?: string;
+  source: "webhook" | "return";
+  event?: Record<string, unknown>;
+}): Promise<SettleResult> {
+  const row = await getCashfreeCheckout(opts.orderId);
+  if (!row) return { ok: false, error: "No matching checkout for this order" };
+
+  const live = await fetchCashfreePaymentStatus(opts.orderId);
+  if (!live.ok || live.status !== "PAID") {
+    await recordPaymentGatewayEvent({
+      provider: "cashfree",
+      eventType: `${row.kind}.verification_mismatch`,
+      externalOrderId: opts.orderId,
+      externalPaymentId: opts.paymentRef || "",
+      amountPaise: row.amountPaise,
+      settlementStatus: "failed",
+      eventJson: { error: live.ok ? `Order status is ${live.status}` : live.error, source: opts.source, raw: opts.event },
+    });
+    return { ok: false, error: live.ok ? `Cashfree order is ${live.status}, not PAID` : live.error, kind: row.kind, ref: row.ref };
+  }
+
+  // WHAT CASHFREE SAYS IT TOOK, AGAINST WHAT WE ASKED FOR.
+  //
+  // Nothing compared these before, and a grossed-up order makes the gap
+  // matter: the parent is charged the fee plus the surcharge, so a payment
+  // that came to less than that would have been booked as a full receipt for
+  // the fee, leaving the school short and the fee book saying paid.
+  //
+  // Short pays are refused and recorded. Over-pays are recorded and allowed
+  // through — the money IS there, and refusing to book a receipt for a parent
+  // who paid too much would be the worse failure of the two. The event is the
+  // trail for the office to refund the difference.
+  const expectedPaise = row.amountPaise + row.surchargePaise;
+  const paidPaise = Math.round(live.amountPaidRupees * 100);
+  if (paidPaise > 0 && paidPaise !== expectedPaise) {
+    await recordPaymentGatewayEvent({
+      provider: "cashfree",
+      eventType: `${row.kind}.amount_mismatch`,
+      externalOrderId: opts.orderId,
+      externalPaymentId: opts.paymentRef || "",
+      amountPaise: paidPaise,
+      settlementStatus: paidPaise < expectedPaise ? "failed" : "received",
+      eventJson: {
+        expectedPaise,
+        feePaise: row.amountPaise,
+        surchargePaise: row.surchargePaise,
+        paidPaise,
+        methodGroup: row.methodGroup,
+        source: opts.source,
+      },
+    });
+    if (paidPaise < expectedPaise) {
+      return {
+        ok: false,
+        error: `Cashfree took ${paidPaise} paise but this order is for ${expectedPaise}`,
+        kind: row.kind,
+        ref: row.ref,
+      };
+    }
+  }
+
+  let paymentRef = opts.paymentRef || row.paymentRef;
+  if (!paymentRef) {
+    const p = await fetchCashfreeOrderPayment(opts.orderId);
+    paymentRef = p?.bankReference || p?.cfPaymentId || `CF_${opts.orderId}`;
+  }
+
+  await ensureSchoolMirrorHydrated();
+
+  // One settlement per order. See claimCheckoutForSettlement.
+  const claimed = await claimCheckoutForSettlement(opts.orderId, paymentRef);
+  let result: SettleResult = { ok: true, alreadyPaid: true, kind: row.kind, ref: row.ref };
+  if (claimed) {
+    switch (row.kind) {
+      case "fee_link": {
+        // Not `getPaymentLink(loadPayments())`: the mirror is a cache that
+        // can answer "no such link" for a link the desk table holds, and
+        // when it does, the money stays unbooked. See
+        // ensurePaymentLinkHydrated.
+        // authoritative: the desk table decides whether this link is already
+        // paid, not a cached copy. A stale `paid` in the mirror made the
+        // settlement skip a real payment as already done.
+        const link = await ensurePaymentLinkHydrated(row.ref, {
+          authoritative: true,
+        });
+        if (!link) {
+          result = { ok: false, error: "Pay-link not found", kind: row.kind, ref: row.ref };
+          break;
+        }
+        if (link.status === "paid") {
+          result = { ok: true, alreadyPaid: true, kind: row.kind, ref: row.ref, receiptNo: link.receiptNo ?? undefined };
+          break;
+        }
+        const r = await settlePaymentLinkWithWhatsApp({
+          linkId: link.id,
+          cashierName: opts.source === "webhook" ? "Cashfree webhook" : "Cashfree return",
+          upiRef: paymentRef,
+          sendWhatsApp: true,
+          // What Cashfree actually took. The receipt must come to exactly
+          // this or nothing is booked — a receipt for less than the parent
+          // paid leaves a head unpaid and the bank out by the difference.
+          expectedAmountPaise: row.amountPaise,
+          // On top of the fee, and NOT added into the check above. Cashfree
+          // took the sum; the receipt is for the fee; clearing is debited with
+          // both so it still reconciles against the settlement's gross.
+          gatewaySurchargePaise: row.surchargePaise,
+        });
+        result = r.ok
+          ? { ok: true, alreadyPaid: false, kind: row.kind, ref: row.ref, receiptNo: r.receiptNo }
+          : { ok: false, error: r.error, kind: row.kind, ref: row.ref };
+        break;
+      }
+      case "registration": {
+        const state = loadAdmissions();
+        const payment = (state.registrationPayments || []).find((p) => p.id === row.ref);
+        if (!payment) {
+          result = { ok: false, error: "No matching registration payment", kind: row.kind, ref: row.ref };
+          break;
+        }
+        if (payment.status === "paid") {
+          result = { ok: true, alreadyPaid: true, kind: row.kind, ref: row.ref, receiptNo: payment.code };
+          break;
+        }
+        // Gateway money: it waits in clearing until the settlement moves it.
+        const captured = captureRegistrationPayment(state, payment.id, paymentRef, "cashfree");
+        if (!captured.ok) {
+          result = { ok: false, error: captured.reason, kind: row.kind, ref: row.ref };
+          break;
+        }
+        saveAdmissions(captured.state);
+        result = { ok: true, alreadyPaid: false, kind: row.kind, ref: row.ref, receiptNo: payment.code };
+        break;
+      }
+      case "event_fee": {
+        const { settleEventFee } = await import("@/lib/events/interschool.server");
+        const r = await settleEventFee({ participantId: row.ref, paymentRef, orderId: opts.orderId });
+        result = r.ok
+          ? { ok: true, alreadyPaid: !!r.alreadyPaid, kind: row.kind, ref: row.ref }
+          : { ok: false, error: r.error || "Event fee settle failed", kind: row.kind, ref: row.ref };
+        break;
+      }
+      case "tutor_pass": {
+        const { activateTutorPassOrder } = await import("@/lib/tutorPasses.server");
+        const r = await activateTutorPassOrder({ id: row.ref, paymentRef });
+        result = r.ok
+          ? { ok: true, alreadyPaid: r.alreadyPaid, kind: row.kind, ref: row.ref, endsAt: r.endsAt }
+          : { ok: false, error: r.error, kind: row.kind, ref: row.ref };
+        break;
+      }
+    }
+    if (!result.ok) await releaseCheckoutClaim(opts.orderId, row.status);
+  }
+
+  await recordPaymentGatewayEvent({
+    paymentLinkId: row.kind === "fee_link" ? row.ref : null,
+    provider: "cashfree",
+    eventType: result.ok
+      ? result.alreadyPaid
+        ? `${row.kind}.already_paid`
+        : `${row.kind}.settled`
+      : `${row.kind}.settlement_failed`,
+    externalOrderId: opts.orderId,
+    externalPaymentId: paymentRef,
+    amountPaise: row.amountPaise,
+    settlementStatus: result.ok ? (result.alreadyPaid ? "ignored" : "settled") : "failed",
+    receiptNo: result.ok ? result.receiptNo ?? null : null,
+    eventJson: result.ok ? { source: opts.source, raw: opts.event } : { error: result.error, source: opts.source, raw: opts.event },
+  });
+  return result;
+}
+
+export type CloseOrdersOutcome = {
+  closed: string[];
+  /** Orders the family had already paid — the link must not stay cancelled. */
+  paid: string[];
+  errors: string[];
+};
+
+/**
+ * Close the Cashfree orders of fee links that can no longer be paid in the
+ * ERP. `linkIds` are links a clerk is cancelling right now (their DB row may
+ * not say "cancelled" yet — the desk syncs a moment later); without it, every
+ * ACTIVE fee order whose link the database already shows cancelled, paid or
+ * expired is closed (the settlement sweep runs this, and it cleans up the
+ * links cancelled before this existed).
+ */
+export async function closeOrdersForDeadLinks(linkIds?: string[]): Promise<CloseOrdersOutcome> {
+  const out: CloseOrdersOutcome = { closed: [], paid: [], errors: [] };
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ...out, errors: ["No tenant context"] };
+  let q = ctx.sb
+    .from("cashfree_checkouts")
+    .select("order_id, ref")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("kind", "fee_link")
+    .eq("status", "active");
+  if (linkIds) q = q.in("ref", linkIds.length ? linkIds : ["-"]);
+  const { data: rows, error } = await q;
+  if (error) return { ...out, errors: [error.message] };
+  let targets = (rows ?? []) as { order_id: string; ref: string }[];
+  if (!linkIds && targets.length) {
+    const { data: links, error: le } = await ctx.sb
+      .from("payment_desk_links")
+      .select("id, status")
+      .eq("tenant_id", ctx.tenantId)
+      .in("id", targets.map((t) => t.ref));
+    if (le) return { ...out, errors: [le.message] };
+    const dead = new Set(
+      ((links ?? []) as { id: string; status: string }[]).filter((l) => l.status !== "open").map((l) => l.id),
+    );
+    targets = targets.filter((t) => dead.has(t.ref));
+  }
+  for (const t of targets) {
+    const r = await terminateCashfreeOrder(t.order_id);
+    if (!r.ok) {
+      if (r.paid) out.paid.push(t.ref);
+      else out.errors.push(`${t.order_id}: ${r.error}`);
+      continue;
+    }
+    const { error: ue } = await ctx.sb
+      .from("cashfree_checkouts")
+      .update({ status: "expired" })
+      .eq("tenant_id", ctx.tenantId)
+      .eq("order_id", t.order_id)
+      .eq("status", "active");
+    if (ue) out.errors.push(`${t.order_id}: closed on Cashfree, row not updated: ${ue.message}`);
+    out.closed.push(t.ref);
+  }
+  return out;
+}

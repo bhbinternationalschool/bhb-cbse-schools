@@ -14,6 +14,7 @@ import { loadMasters } from "@/lib/masters";
 import type { DemoSession } from "@/lib/auth";
 import { TENANT } from "@/lib/types";
 import { SisParentMatchBanner } from "@/components/admissions/SisParentMatchBanner";
+import { VoiceMicButton } from "@/components/voice/VoiceMicButton";
 
 const inp =
   "w-full rounded-xl border border-[rgba(32,48,80,0.18)] bg-white px-3 py-3 text-base";
@@ -195,12 +196,17 @@ export function StaffLeadCaptureApp({ session }: { session: DemoSession }) {
           value={previousSchool}
           onChange={(e) => setPreviousSchool(e.target.value)}
         />
-        <input
-          className={inp}
-          placeholder="Note (optional)"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-        />
+        <span className="flex items-center gap-1.5">
+          <input
+            className={inp}
+            placeholder="Note (optional)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <VoiceMicButton
+            onTranscript={(t) => setNote((prev) => (prev ? `${prev} ${t}` : t))}
+          />
+        </span>
       </div>
 
       <button

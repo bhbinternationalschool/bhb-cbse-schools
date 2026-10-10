@@ -5,6 +5,10 @@
 import type { PaymentsState } from "@/lib/payments";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
 
 const META_KEY = "bhb_payments_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -41,7 +45,9 @@ export function paymentsNormalizedSyncEnabled(): boolean {
 }
 
 export function paymentsReadFromDbClientEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_PAYMENTS_READ_FROM_DB === "true";
+  const flag = process.env.NEXT_PUBLIC_PAYMENTS_READ_FROM_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 export function schedulePaymentsDeskSync(state: PaymentsState) {
@@ -70,16 +76,32 @@ async function pushPaymentsDeskApi(state: PaymentsState) {
       updatedAt?: string;
       count?: number;
       error?: string;
+      kept?: string[];
     } | null;
     if (res.ok && body?.ok) {
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         linkCount: body.count ?? state.links.length,
       });
+      // This browser held some links at an older status than the server
+      // (paid since it loaded): reload them rather than keep showing "open".
+      if (body.kept?.length) {
+        void Promise.all([import("@/lib/deskHydrateGuard"), import("@/lib/deskHydrationSchedule")]).then(
+          ([guard, sched]) => {
+            guard.resetDeskHydrated("payments");
+            return sched.ensureAllDeskHydrated();
+          },
+        );
+      }
     } else if (!res.ok) {
       console.warn("[payments-db] desk push failed", body?.error || res.status);
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("payments");
+    else recordDeskSyncFailure("payments", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("payments", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[payments-db] desk push error", e);
   }
 }
@@ -114,9 +136,9 @@ export async function fetchPaymentsDeskFromApi(): Promise<{
 
 export async function hydratePaymentsDeskFromDb(
   preferDb?: boolean,
-): Promise<{ links: PaymentsState["links"]; changed: boolean }> {
+): Promise<{ links: PaymentsState["links"]; changed: boolean; ok: boolean }> {
   const remote = await fetchPaymentsDeskFromApi();
-  if (!remote) return { links: [], changed: false };
+  if (!remote) return { links: [], changed: false, ok: false };
 
   const meta = readMeta();
   const shouldTake =
@@ -126,11 +148,11 @@ export async function hydratePaymentsDeskFromDb(
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.count > meta.linkCount;
 
-  if (!shouldTake) return { links: [], changed: false };
+  if (!shouldTake) return { links: [], changed: false, ok: true };
 
   writeMeta({
     updatedAt: remote.updatedAt,
     linkCount: remote.count,
   });
-  return { links: remote.links, changed: true };
+  return { links: remote.links, changed: true, ok: true };
 }

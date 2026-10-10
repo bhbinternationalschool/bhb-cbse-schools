@@ -25,13 +25,17 @@ import {
   type SisStudent,
   type StudentCategory,
 } from "@/lib/sis";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type CertificateKind =
   | "tc"
   | "bonafide"
   | "character"
   | "fee_clearance"
-  | "fees_paid";
+  | "fees_paid"
+  /** UIDAI's "Certificate for Aadhaar Enrolment/ Update" — printed on UIDAI's own form, not the school sheet. */
+  | "aadhaar_uidai";
 
 export const CERTIFICATE_KINDS: {
   kind: CertificateKind;
@@ -51,7 +55,31 @@ export const CERTIFICATE_KINDS: {
     label: "Fees paid (reimbursement)",
     short: "Fees paid",
   },
+  {
+    kind: "aadhaar_uidai",
+    label: "Aadhaar certificate (UIDAI format)",
+    short: "Aadhaar (UIDAI)",
+  },
 ];
+
+/**
+ * Kinds printed on an official form rather than the school's certificate
+ * sheet. The register still numbers and records them; printing opens the
+ * filled form.
+ */
+export function isUidaiFormKind(kind: CertificateKind): boolean {
+  return kind === "aadhaar_uidai";
+}
+
+/**
+ * The filled UIDAI form for a student, dated the day it was issued — its
+ * three months of validity run from that date, so a reprint keeps it.
+ */
+export function uidaiFormUrl(studentId: string, issuedOn?: string): string {
+  const q = new URLSearchParams({ student: studentId });
+  if (issuedOn && /^\d{4}-\d{2}-\d{2}$/.test(issuedOn)) q.set("date", issuedOn);
+  return `/api/v1/udise/aadhaar-certificate?${q.toString()}`;
+}
 
 /** Receipt lines frozen onto a fees-paid certificate for reimbursement. */
 export type FeesPaidReceiptRow = {
@@ -147,6 +175,10 @@ export type CertificateIssue = {
   customTitle: string;
   /** AI-drafted or edited certificate body — when set, printed instead of template */
   customBody: string;
+  /** True if customTitle/customBody's initial draft came from the AI
+   * assistant — internal provenance only, never printed on the certificate
+   * itself. A human still reviews before Issue. */
+  aiGenerated: boolean;
 };
 
 export type CertificatesState = {
@@ -324,7 +356,7 @@ export function emptyCertificatesState(): CertificatesState {
 export function loadCertificates(): CertificatesState {
   if (typeof window === "undefined") return emptyCertificatesState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyCertificatesState();
     const parsed = JSON.parse(raw) as CertificatesState;
     if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.issues)) {
@@ -362,16 +394,16 @@ export function saveCertificates(state: CertificatesState) {
   }
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/certificatesPersistence").then(({ scheduleCertificatesSync }) => {
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void trackServerWork(import("@/lib/certificatesPersistence").then(({ scheduleCertificatesSync }) => {
     scheduleCertificatesSync(state);
-  });
+  }));
 
 }
 
 export function writeCertificatesLocalRaw(state: CertificatesState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function certificatesStateIsEmpty(state: CertificatesState): boolean {
@@ -453,6 +485,7 @@ function normalizeIssue(c: CertificateIssue): CertificateIssue {
           : null,
     customTitle: c.customTitle || "",
     customBody: c.customBody || "",
+    aiGenerated: !!c.aiGenerated,
   };
 }
 
@@ -468,6 +501,8 @@ export function seriesCodeForCertificateKind(kind: CertificateKind): string {
       return "CERT_CLEARANCE";
     case "fees_paid":
       return "CERT_FEES_PAID";
+    case "aadhaar_uidai":
+      return "CERT_AADHAAR";
     default:
       return "TC";
   }
@@ -525,7 +560,9 @@ function legacyCertNo(
           ? "CHR"
           : kind === "fees_paid"
             ? "FEE"
-            : "ND";
+            : kind === "aadhaar_uidai"
+              ? "AAD"
+              : "ND";
   const ayTag = ay.replace(/[^0-9]/g, "").slice(0, 4) || "AY";
   const existing = state.issues.filter(
     (i) => i.kind === kind && i.academicYearCode === ay && !i.voidedAt,
@@ -808,6 +845,8 @@ export type IssueCertificateInput = {
   feesPaidIncludeSiblings?: boolean;
   customTitle?: string;
   customBody?: string;
+  /** True when customTitle/customBody came from the AI drafting assistant */
+  aiGenerated?: boolean;
 };
 
 export function issueCertificate(
@@ -951,6 +990,7 @@ export function issueCertificate(
     remarks: input.remarks?.trim() || "",
     customTitle: input.customTitle?.trim() || "",
     customBody: input.customBody?.trim() || "",
+    aiGenerated: !!input.aiGenerated,
     openBalancePaise: eligibility.openBalancePaise,
     duesCleared,
     overrideDues: !!input.overrideDues && eligibility.requiresOverride,

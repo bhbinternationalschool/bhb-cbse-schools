@@ -5,6 +5,8 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { formatInr } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_fee_recovery_tasks_v1";
 
@@ -53,7 +55,7 @@ export function emptyFeeRecoveryTasks(): FeeRecoveryTasksState {
 export function loadFeeRecoveryTasks(): FeeRecoveryTasksState {
   if (typeof window === "undefined") return emptyFeeRecoveryTasks();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyFeeRecoveryTasks();
     const parsed = JSON.parse(raw) as Partial<FeeRecoveryTasksState>;
     return {
@@ -69,7 +71,7 @@ export function writeFeeRecoveryTasksLocalRaw(
   state: FeeRecoveryTasksState,
 ): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function feeRecoveryTasksIsEmpty(state: FeeRecoveryTasksState): boolean {
@@ -79,10 +81,10 @@ export function feeRecoveryTasksIsEmpty(state: FeeRecoveryTasksState): boolean {
 export function saveFeeRecoveryTasks(state: FeeRecoveryTasksState): void {
   if (!assertModulePermission("fees", "edit", "saveFeeRecoveryTasks")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/feeRecoveryTasksPersistence").then((m) => {
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void trackServerWork(import("@/lib/feeRecoveryTasksPersistence").then((m) => {
     m.scheduleFeeRecoveryTasksSync(state);
-  });
+  }));
 }
 
 export {
@@ -169,7 +171,23 @@ export function listOpenParentMeetings(
     .sort((a, b) => a.scheduledOn.localeCompare(b.scheduledOn));
 }
 
-export function composeParentMeetingInvite(m: FeeRecoveryMeeting): string {
+export function composeParentMeetingInvite(m: FeeRecoveryMeeting, hindi = false): string {
+  if (hindi) {
+    return [
+      `*${TENANT.nameDisplay}*`,
+      `बकाया फीस के संबंध में मुलाक़ात`,
+      "",
+      `छात्र: ${m.studentName}${m.classLabel ? ` (${m.classLabel})` : ""}`,
+      m.admissionNo ? `प्रवेश संख्या: ${m.admissionNo}` : "",
+      `बकाया: *${formatInr(m.amountPaise)}* · ${m.overdueDays} दिन`,
+      `कृपया *${m.scheduledOn}* को स्कूल ऑफिस आकर मिलें`,
+      m.note ? `\n${m.note}` : "",
+      "",
+      "कृपया आने की पुष्टि करें। धन्यवाद 🙏",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
   return [
     `*${TENANT.nameDisplay}*`,
     `Fee recovery meeting`,

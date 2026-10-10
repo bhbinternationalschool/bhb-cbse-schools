@@ -1,8 +1,15 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — appraisal summary rows; scoring happens in the form above the table
 
 import { useEffect, useMemo, useState } from "react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { loadMasters, type MastersState } from "@/lib/masters";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 import {
   APPRAISAL_CRITERIA,
   appraisalAverage,
@@ -20,6 +27,7 @@ import {
   exportFilterReport,
 } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function StaffAppraisalPanel({ ay }: { ay: string }) {
   const session = useDemoSession();
@@ -33,6 +41,10 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
   const [scores, setScores] = useState<AppraisalScores>(defaultAppraisalScores);
   const [comment, setComment] = useState("");
 
+  const [draftText, setDraftText] = useState<string | null>(null);
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+
   function reload() {
     const m = loadMasters();
     setMasters(m);
@@ -45,9 +57,12 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
   useEffect(() => {
     reload();
     void (async () => {
-      const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
-      const did = await ensureStaffHydrated();
-      if (did) reload();
+      const [{ ensureStaffHydrated }, { withHydrationSlot }] = await Promise.all([
+        import("@/lib/staffPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      await withHydrationSlot(() => ensureStaffHydrated());
+      reload();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ay]);
@@ -66,6 +81,19 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
       .sort((a, b) => b.ratedAt.localeCompare(a.ratedAt));
   }, [hr, cycle]);
 
+  // The average sorts as a NUMBER, so "who scored lowest this cycle" is one
+  // click — the reason anybody opens this list.
+  const apprSort = useTableSort(
+    cycleAppraisals,
+    {
+      staff: (a) => staffLabel(a.staffId),
+      avg: (a) => Number(appraisalAverage(a.scores)) || 0,
+      ratedBy: (a) => a.ratedBy,
+    },
+    "staff",
+    "asc",
+  );
+
   useEffect(() => {
     if (!staffId || !hr || !cycle) return;
     const existing = hr.appraisals.find(
@@ -78,7 +106,44 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
       setScores(defaultAppraisalScores());
       setComment("");
     }
+    setDraftText(null);
+    setDraftError(null);
   }, [staffId, hr, cycle]);
+
+  async function draftComment() {
+    if (!staffId) return;
+    setDraftLoading(true);
+    setDraftError(null);
+    setDraftText(null);
+    try {
+      const res = await fetch("/api/ai/appraisal-comment-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          staffName: staffLabel(staffId),
+          cycleLabel: cycle?.label,
+          scores: APPRAISAL_CRITERIA.map((c) => ({
+            label: c.label,
+            value: scores[c.key],
+          })),
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        draft?: string;
+      };
+      if (!json.ok || !json.draft) {
+        setDraftError(json.error || "Draft failed");
+        return;
+      }
+      setDraftText(json.draft);
+    } catch (e) {
+      setDraftError(e instanceof Error ? e.message : "Draft failed");
+    } finally {
+      setDraftLoading(false);
+    }
+  }
 
   function flash(msg: string, isError = false) {
     if (isError) {
@@ -168,7 +233,7 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
   return (
     <div className="space-y-5">
       {error ? (
-        <p className="rounded-lg bg-[#fee2e2] px-3 py-2 text-sm font-medium text-[#b91c1c]">
+        <p className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-medium text-[var(--danger)]">
           {error}
         </p>
       ) : null}
@@ -178,7 +243,7 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
         </p>
       ) : null}
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             {cycle.label}
@@ -189,19 +254,19 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-lg bg-[rgba(32,48,80,0.06)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]">
+          <span className="rounded-lg bg-[var(--surface-sunken)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]">
             {cycleAppraisals.length} rated
           </span>
           <button
             type="button"
-            className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold"
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold"
             onClick={() => exportCycle("excel")}
           >
             Export Excel
           </button>
           <button
             type="button"
-            className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold"
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold"
             onClick={() => exportCycle("pdf")}
           >
             Export PDF
@@ -229,7 +294,7 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
           ) : (
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold"
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold"
               onClick={() => {
                 const res = reopenAppraisalCycle(cycle.id);
                 if (!res.ok) {
@@ -253,7 +318,7 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <form
           onSubmit={onSave}
-          className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 space-y-3"
+          className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-3"
         >
           <h3 className="text-sm font-bold text-[var(--brand-deep)]">
             Rate staff
@@ -312,9 +377,23 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
           </p>
 
           <label className="block text-sm">
-            <span className="mb-1 block text-[11px] text-[var(--muted)]">
-              Comment
-            </span>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="text-[11px] text-[var(--muted)]">Comment</span>
+              {cycle.status === "open" && staffId ? (
+                <button
+                  type="button"
+                  disabled={draftLoading}
+                  className="text-[11px] font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline disabled:opacity-50"
+                  onClick={() => void draftComment()}
+                >
+                  {draftLoading
+                    ? "Drafting…"
+                    : draftText
+                      ? "Redraft"
+                      : "Draft with AI"}
+                </button>
+              ) : null}
+            </div>
             <textarea
               className="field !py-1.5 min-h-[72px]"
               value={comment}
@@ -323,6 +402,29 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
               disabled={cycle.status === "closed"}
             />
           </label>
+
+          {draftError ? (
+            <p className="text-[11px] text-[var(--danger)]">{draftError}</p>
+          ) : null}
+          {draftText ? (
+            <div className="rounded-lg bg-[var(--surface-sunken)] p-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                  AI draft — review before using
+                </span>
+                <button
+                  type="button"
+                  className="text-[10px] font-semibold text-[var(--brand-deep)] underline"
+                  onClick={() => setComment(draftText)}
+                >
+                  Use this comment
+                </button>
+              </div>
+              <p className="mt-1 whitespace-pre-wrap text-[12px] text-[var(--ink)]">
+                {draftText}
+              </p>
+            </div>
+          ) : null}
 
           <button
             type="submit"
@@ -333,26 +435,26 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
           </button>
         </form>
 
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white overflow-hidden">
-          <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
+        <ErpTableShell exportAs="staff_appraisals" exportTitle="Staff appraisals">
+          <div className="border-b border-[var(--border)] px-4 py-3">
             <h3 className="text-sm font-bold text-[var(--brand-deep)]">
               Cycle ratings
             </h3>
           </div>
           <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead className="bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+            <ErpTable>
+              <ErpTableHead>
                 <tr>
-                  <th className="px-4 py-2">Staff</th>
-                  <th className="px-3 py-2">Avg</th>
-                  <th className="px-3 py-2">Rated by</th>
+                  <ErpSortTh sort={apprSort} field="staff" className="px-4 py-2">Staff</ErpSortTh>
+                  <ErpSortTh sort={apprSort} field="avg">Avg</ErpSortTh>
+                  <ErpSortTh sort={apprSort} field="ratedBy">Rated by</ErpSortTh>
                 </tr>
-              </thead>
-              <tbody>
-                {cycleAppraisals.map((a) => (
+              </ErpTableHead>
+              <ErpTableBody hoverable>
+                {apprSort.rows.map((a) => (
                   <tr
                     key={a.id}
-                    className="border-t border-[rgba(32,48,80,0.06)] hover:bg-[rgba(32,48,80,0.02)] cursor-pointer"
+                    className="cursor-pointer"
                     onClick={() => setStaffId(a.staffId)}
                   >
                     <td className="px-4 py-2 font-medium text-[var(--brand-deep)]">
@@ -376,10 +478,10 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
                     </td>
                   </tr>
                 ) : null}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           </div>
-        </div>
+        </ErpTableShell>
       </div>
     </div>
   );

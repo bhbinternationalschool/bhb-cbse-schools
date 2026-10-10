@@ -11,9 +11,10 @@ import {
   X,
 } from "lucide-react";
 import { HUB_GROUPS, TONE } from "@/lib/erpNav";
+import { commsTabIsOfficeOnly, commsTabOfHref } from "@/lib/commsTabAccess";
 import { defaultMasters, loadMasters } from "@/lib/masters";
 import { markModuleRegistryClientReady } from "@/lib/moduleRegistry";
-import { canAccessHref, defaultRbacState, loadRbac } from "@/lib/rbac";
+import { canAccessHref, defaultRbacState, hasPermission, loadRbac } from "@/lib/rbac";
 import { useDemoSession } from "@/components/shell/SessionContext";
 
 type NavView = "main" | "sub";
@@ -73,15 +74,15 @@ function SidebarPanel({
 
   return (
     <aside
-      className="erp-sidebar flex h-full w-[min(18rem,88vw)] flex-col border-r border-[rgba(32,48,80,0.1)] bg-[rgba(255,255,255,0.98)] backdrop-blur-md lg:w-[17.5rem]"
+      className="erp-sidebar flex h-full w-[min(18rem,88vw)] flex-col border-r border-[var(--border)] bg-[var(--shell-sidebar-bg)] backdrop-blur-md lg:w-[17.5rem]"
       aria-label="Module navigation"
     >
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.08)] px-3 py-3">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-3">
         {navView === "sub" && activeGroup ? (
           <button
             type="button"
             onClick={onBackToMain}
-            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-sm font-semibold text-[var(--brand-deep)] transition hover:bg-[rgba(32,48,80,0.06)]"
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-sm font-semibold text-[var(--brand-deep)] transition hover:bg-[var(--surface-sunken)]"
           >
             <ChevronLeft className="h-4 w-4 shrink-0" />
             Main menu
@@ -95,7 +96,7 @@ function SidebarPanel({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-[var(--muted)] transition hover:bg-[rgba(32,48,80,0.06)] hover:text-[var(--brand-deep)]"
+            className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-[var(--muted)] transition hover:bg-[var(--surface-sunken)] hover:text-[var(--brand-deep)]"
             aria-label="Close menu"
           >
             <X className="h-5 w-5" />
@@ -119,8 +120,8 @@ function SidebarPanel({
               }}
               className={`erp-sidebar-link mb-3 flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-semibold transition ${
                 homeActive
-                  ? "bg-[var(--brand-deep)] text-white shadow-[0_4px_14px_rgba(32,48,80,0.2)]"
-                  : "text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.06)]"
+                  ? "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-[0_4px_14px_rgba(32,48,80,0.2)]"
+                  : "text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
               }`}
             >
               <Home className="h-5 w-5 shrink-0" strokeWidth={2} />
@@ -142,7 +143,7 @@ function SidebarPanel({
                     <button
                       type="button"
                       onClick={() => onOpenGroup(group.id)}
-                      className={`erp-sidebar-group-btn flex w-full min-h-12 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-[rgba(32,48,80,0.05)] ${
+                      className={`erp-sidebar-group-btn flex w-full min-h-12 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-[var(--surface-sunken)] ${
                         groupHasActive
                           ? "bg-[rgba(197,160,40,0.12)] ring-1 ring-[rgba(197,160,40,0.3)]"
                           : ""
@@ -178,7 +179,7 @@ function SidebarPanel({
           </>
         ) : activeGroup ? (
           <>
-            <div className="mb-3 rounded-xl bg-[rgba(32,48,80,0.04)] px-3 py-2.5">
+            <div className="mb-3 rounded-xl bg-[var(--surface-sunken)] px-3 py-2.5">
               <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--muted)]">
                 {activeGroup.label}
               </p>
@@ -206,7 +207,7 @@ function SidebarPanel({
                       className={`erp-sidebar-link flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition ${
                         active
                           ? "bg-[rgba(197,160,40,0.16)] text-[var(--brand-deep)] ring-1 ring-[rgba(197,160,40,0.35)]"
-                          : "text-[var(--ink)] hover:bg-[rgba(32,48,80,0.05)]"
+                          : "text-[var(--ink)] hover:bg-[var(--surface-sunken)]"
                       }`}
                     >
                       <span
@@ -232,7 +233,7 @@ function SidebarPanel({
         ) : null}
       </nav>
 
-      <div className="shrink-0 border-t border-[rgba(32,48,80,0.08)] px-3 py-3">
+      <div className="shrink-0 border-t border-[var(--border)] px-3 py-3">
         <p className="text-[11px] leading-relaxed text-[var(--muted)]">
           Session {sessionYear}
         </p>
@@ -273,11 +274,15 @@ export function ErpSidebar({
     const rbac = navTick > 0 ? loadRbac() : defaultRbacState();
     return HUB_GROUPS.map((g) => ({
       ...g,
-      hubs: g.hubs.filter((h) =>
-        canAccessHref(session, masters, h.href, rbac),
+      hubs: g.hubs.filter(
+        (h) =>
+          canAccessHref(session, masters, h.href, rbac) &&
+          // Office-only Comms screens stay off a teacher's menu.
+          (!commsTabIsOfficeOnly(commsTabOfHref(h.href)) ||
+            hasPermission(session, masters, "notices", "edit", rbac)),
       ),
     })).filter((g) => g.hubs.length > 0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [session, navTick]);
 
   useEffect(() => {
@@ -333,17 +338,18 @@ export function ErpSidebar({
 
   return (
     <>
-      {/* Desktop — always visible */}
-      <div className="erp-sidebar-desktop hidden h-screen w-[17.5rem] shrink-0 lg:sticky lg:top-0 lg:block lg:self-start">
+      {/* Persistent rail from md (768px) up — tablet portrait and above get
+          the sidebar instead of the phone bottom-nav; see StaffBottomNav. */}
+      <div className="erp-sidebar-desktop hidden h-screen w-[17.5rem] shrink-0 md:sticky md:top-0 md:block md:self-start">
         <SidebarPanel {...panelProps} showClose={false} />
       </div>
 
       {/* Mobile drawer */}
       {mobileOpen ? (
-        <div className="erp-sidebar-mobile fixed inset-0 z-40 lg:hidden">
+        <div className="erp-sidebar-mobile fixed inset-0 z-40 md:hidden">
           <button
             type="button"
-            className="absolute inset-0 bg-[rgba(32,48,80,0.45)] backdrop-blur-[2px]"
+            className="absolute inset-0 bg-[var(--overlay)] backdrop-blur-[2px]"
             aria-label="Close menu overlay"
             onClick={onMobileClose}
           />
@@ -361,7 +367,7 @@ export function ErpSidebarMenuButton({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-[rgba(32,48,80,0.12)] bg-white text-[var(--brand-deep)] shadow-sm transition hover:border-[rgba(197,160,40,0.4)] lg:hidden"
+      className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)] shadow-sm transition hover:border-[rgba(197,160,40,0.4)] md:hidden"
       aria-label="Open module menu"
     >
       <PanelLeftOpen className="h-5 w-5" />

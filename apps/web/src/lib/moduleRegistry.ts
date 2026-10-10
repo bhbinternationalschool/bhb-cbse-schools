@@ -1,4 +1,6 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 /**
  * Tenant feature / module registry (§24.0).
@@ -26,7 +28,10 @@ export type RegistryModuleId =
   | "attendance"
   | "homework"
   | "timetable"
+  | "online_classes"
+  | "teaching"
   | "ptm"
+  | "events"
   | "student_leave"
   | "vault"
   | "modules"
@@ -34,9 +39,23 @@ export type RegistryModuleId =
   | "exams"
   | "certificates"
   | "comms"
+  | "website"
   | "reports"
   | "rte_ews"
-  | "documents";
+  | "documents"
+  | "id_cards"
+  | "discipline"
+  | "health"
+  | "visitors"
+  | "complaints"
+  | "hostel"
+  | "canteen"
+  | "alumni"
+  | "sports"
+  | "opex_budget"
+  | "scholarships"
+  | "question_bank"
+  | "cbse_loc";
 
 export type RegistryModuleGroup =
   | "setup"
@@ -182,6 +201,22 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
     defaultEnabled: true,
   },
   {
+    id: "online_classes",
+    label: "Online classes",
+    blurb: "Live classes over Google Meet or a pasted link, announced to the section",
+    href: "/online-classes",
+    group: "academics",
+    defaultEnabled: true,
+  },
+  {
+    id: "teaching",
+    label: "Teaching & syllabus",
+    blurb: "Period delivery logs, syllabus pacing and coverage reports",
+    href: "/teaching",
+    group: "academics",
+    defaultEnabled: true,
+  },
+  {
     id: "ptm",
     label: "PTM",
     blurb: "Parent–teacher meeting slots and feedback",
@@ -194,6 +229,14 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
     label: "Exams",
     blurb: "Marks entry, results and promotion",
     href: "/exams",
+    group: "academics",
+    defaultEnabled: true,
+  },
+  {
+    id: "events",
+    label: "Events & calendar",
+    blurb: "School events, WhatsApp RSVP and the unified academic calendar",
+    href: "/events",
     group: "academics",
     defaultEnabled: true,
   },
@@ -212,6 +255,110 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
     href: "/documents",
     group: "optional",
     defaultEnabled: true,
+  },
+  {
+    id: "id_cards",
+    label: "ID cards",
+    blurb: "Student & staff ID card batch printing with QR",
+    href: "/id-cards",
+    group: "optional",
+    defaultEnabled: true,
+  },
+  {
+    id: "discipline",
+    label: "Discipline / behavior",
+    blurb: "Incident log, escalation ladder, parent WhatsApp notify",
+    href: "/discipline",
+    group: "academics",
+    defaultEnabled: false,
+  },
+  {
+    id: "health",
+    label: "Health / infirmary",
+    blurb: "Visit log, medication & vaccination records, emergency contacts",
+    href: "/health",
+    group: "campus",
+    defaultEnabled: true,
+  },
+  {
+    id: "visitors",
+    label: "Visitor / gate management",
+    blurb: "Front-gate visitor register, QR passes, early-pickup gate passes",
+    href: "/visitors",
+    group: "campus",
+    defaultEnabled: true,
+  },
+  {
+    id: "complaints",
+    label: "Complaints / grievance",
+    blurb: "Parent-portal complaint intake, staff triage and resolution",
+    href: "/complaints",
+    group: "academics",
+    defaultEnabled: true,
+  },
+  {
+    id: "hostel",
+    label: "Hostel",
+    blurb: "On the roadmap — boarding, room allocation, mess",
+    href: "/hostel",
+    group: "optional",
+    defaultEnabled: false,
+  },
+  {
+    id: "canteen",
+    label: "Canteen / POS",
+    blurb: "On the roadmap — cashless canteen point of sale",
+    href: "/canteen",
+    group: "optional",
+    defaultEnabled: false,
+  },
+  {
+    id: "alumni",
+    label: "Alumni",
+    blurb: "On the roadmap — alumni directory and engagement",
+    href: "/alumni",
+    group: "optional",
+    defaultEnabled: false,
+  },
+  {
+    id: "sports",
+    label: "Sports / houses / co-curricular",
+    blurb: "On the roadmap — house points, teams, co-curricular records",
+    href: "/sports",
+    group: "optional",
+    defaultEnabled: false,
+  },
+  {
+    id: "opex_budget",
+    label: "Operating budget",
+    blurb: "On the roadmap — annual budget planning vs. actuals",
+    href: "/budget",
+    group: "optional",
+    defaultEnabled: false,
+  },
+  {
+    id: "scholarships",
+    label: "Scholarship disbursement",
+    blurb: "On the roadmap — scholarship awards and disbursement tracking",
+    href: "/scholarships",
+    group: "optional",
+    defaultEnabled: false,
+  },
+  {
+    id: "question_bank",
+    label: "Question bank",
+    blurb: "On the roadmap — reusable exam question repository",
+    href: "/question-bank",
+    group: "optional",
+    defaultEnabled: false,
+  },
+  {
+    id: "cbse_loc",
+    label: "CBSE LOC / registration",
+    blurb: "On the roadmap — CBSE List of Candidates and board registration",
+    href: "/cbse-loc",
+    group: "optional",
+    defaultEnabled: false,
   },
   {
     id: "library",
@@ -239,17 +386,17 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
   },
   {
     id: "store",
-    label: "Store",
-    blurb: "Stock master, sell/issue, returns and store accounts",
-    href: "/store",
+    label: "Store & purchase",
+    blurb: "Catalogue, vendors, pricing, kits, purchase and stock",
+    href: "/inventory",
     group: "finance",
     defaultEnabled: true,
   },
   {
     id: "purchase",
     label: "Purchase",
-    blurb: "Indents, POs and GRN (also under Store)",
-    href: "/store?tab=purchase",
+    blurb: "Indents, orders, goods receipt and vendor bills",
+    href: "/inventory?tab=purchase",
     group: "finance",
     defaultEnabled: true,
   },
@@ -274,6 +421,14 @@ export const REGISTRY_MODULES: RegistryModuleDef[] = [
     label: "Communications",
     blurb: "Notices, news and photo gallery",
     href: "/comms",
+    group: "academics",
+    defaultEnabled: true,
+  },
+  {
+    id: "website",
+    label: "Website",
+    blurb: "Public pages, media and what goes live",
+    href: "/website",
     group: "academics",
     defaultEnabled: true,
   },
@@ -336,7 +491,7 @@ export function loadModuleRegistry(): ModuleRegistryState {
 export function readModuleRegistryStorage(): ModuleRegistryState {
   if (typeof window === "undefined") return emptyState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyState();
     const parsed = JSON.parse(raw) as Partial<ModuleRegistryState>;
     return {
@@ -354,18 +509,18 @@ export function readModuleRegistryStorage(): ModuleRegistryState {
 export function saveModuleRegistry(state: ModuleRegistryState): void {
   if (!assertModulePermission("settings", "edit", "saveModuleRegistry")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/moduleRegistryPersistence").then(
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void trackServerWork(import("@/lib/moduleRegistryPersistence").then(
     ({ scheduleModuleRegistrySync }) => {
       scheduleModuleRegistrySync(state);
     },
-  );
+  ));
 }
 
 export function writeModuleRegistryLocalRaw(state: ModuleRegistryState): void {
   if (typeof window === "undefined") return;
   registryClientReady = true;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function moduleRegistryStateIsEmpty(
@@ -470,11 +625,29 @@ export function registryModuleForHref(href: string): RegistryModuleId | null {
     return "student_leave";
   if (path === "/homework" || path.startsWith("/homework/")) return "homework";
   if (path === "/timetable" || path.startsWith("/timetable/")) return "timetable";
+  if (path === "/online-classes" || path.startsWith("/online-classes/"))
+    return "online_classes";
+  if (path === "/teaching" || path.startsWith("/teaching/")) return "teaching";
   if (path === "/ptm" || path.startsWith("/ptm/")) return "ptm";
+  if (path === "/events" || path.startsWith("/events/")) return "events";
   if (path === "/exams" || path.startsWith("/exams/")) return "exams";
   if (path === "/certificates" || path.startsWith("/certificates/"))
     return "certificates";
   if (path === "/documents" || path.startsWith("/documents/")) return "documents";
+  if (path === "/id-cards" || path.startsWith("/id-cards/")) return "id_cards";
+  if (path === "/discipline" || path.startsWith("/discipline/")) return "discipline";
+  if (path === "/health" || path.startsWith("/health/")) return "health";
+  if (path === "/visitors" || path.startsWith("/visitors/")) return "visitors";
+  if (path === "/complaints" || path.startsWith("/complaints/")) return "complaints";
+  if (path === "/hostel" || path.startsWith("/hostel/")) return "hostel";
+  if (path === "/canteen" || path.startsWith("/canteen/")) return "canteen";
+  if (path === "/alumni" || path.startsWith("/alumni/")) return "alumni";
+  if (path === "/sports" || path.startsWith("/sports/")) return "sports";
+  if (path === "/budget" || path.startsWith("/budget/")) return "opex_budget";
+  if (path === "/scholarships" || path.startsWith("/scholarships/")) return "scholarships";
+  if (path === "/question-bank" || path.startsWith("/question-bank/")) return "question_bank";
+  if (path === "/cbse-loc" || path.startsWith("/cbse-loc/")) return "cbse_loc";
+  if (path === "/website" || path.startsWith("/website/")) return "website";
   if (
     path === "/comms" ||
     path.startsWith("/comms/") ||
@@ -486,6 +659,7 @@ export function registryModuleForHref(href: string): RegistryModuleId | null {
   }
   if (path === "/payroll" || path.startsWith("/payroll/")) return "payroll";
   if (path === "/reports" || path.startsWith("/reports/")) return "reports";
+  if (path === "/inventory" || path.startsWith("/inventory/")) return "store";
   if (path === "/purchase" || path.startsWith("/purchase/")) return "purchase";
   if (path === "/library" || path.startsWith("/library/")) return "library";
   if (path === "/store" || path.startsWith("/store/")) {

@@ -12,10 +12,16 @@ import type { StaffRecord } from "@/lib/foundationMasters";
 import { findStaffRegister, loadStaffAttendance } from "@/lib/staffAttendance";
 import { loadStaffHr } from "@/lib/staffHr";
 import { examBlocksForClassDate, isoDateWeekday } from "@/lib/examTimetable";
+import { overlaps } from "@/lib/timetableRules";
 import {
+  bellForClass,
   loadTimetable,
   normalizeSubstitution,
+  normalizeTeacherTimeBlock,
+  periodInterval,
   saveTimetable,
+  teachingPeriods,
+  type TeacherTimeBlock,
   type TimetableGrid,
   type TimetableState,
   type TimetableSubstitution,
@@ -157,7 +163,7 @@ export function affectedPeriodsForDate(input: {
           academicYearCode: input.academicYearCode,
           classId: grid.classId,
           date: input.date,
-          bellTemplate: state.bellTemplate,
+          bellTemplate: bellForClass(state, grid.classId),
         });
         examCache.set(
           grid.classId,
@@ -196,11 +202,15 @@ export function substituteCandidates(input: {
 }): SubstituteCandidate[] {
   const busy = new Set<string>();
   const dayLoad = new Map<string, number>();
+  // Busy = teaching anywhere at an overlapping CLOCK time: classes may keep
+  // different bell schedules (pre-primary), so period numbers don't line up.
+  const target = periodInterval(input.state, input.period.classId, input.period.periodNo);
   for (const g of sessionGrids(input.state, input.academicYearCode)) {
     for (const s of g.slots) {
       if (!s.teacherId || s.weekday !== input.period.weekday) continue;
       dayLoad.set(s.teacherId, (dayLoad.get(s.teacherId) || 0) + 1);
-      if (s.periodNo === input.period.periodNo) busy.add(s.teacherId);
+      const at = periodInterval(input.state, g.classId, s.periodNo);
+      if (target && at ? overlaps(target, at) : s.periodNo === input.period.periodNo) busy.add(s.teacherId);
     }
   }
 
@@ -246,6 +256,82 @@ export type AutoArrangeResult = {
 };
 
 /**
+ * Arrange substitutes for an already-resolved list of affected periods.
+ * Pure computation — the school reviews/edits, then saves explicitly.
+ * `source` tags the resulting rows: "auto" for whole-day absence-driven
+ * runs, "block" for a partial-day TeacherTimeBlock (see
+ * planSubstitutionsForTimeBlock).
+ */
+export function arrangeSubstitutesForPeriods(input: {
+  masters: MastersState;
+  state: TimetableState;
+  academicYearCode: string;
+  date: string;
+  weekday: number;
+  periods: AffectedPeriod[];
+  source?: TimetableSubstitution["source"];
+}): AutoArrangeResult {
+  const { masters, state, academicYearCode, date, weekday, periods } = input;
+  const source = input.source ?? "auto";
+  const absentSet = new Set(periods.map((p) => p.absentTeacherId));
+  const subLoad = new Map<string, number>();
+  // Substitutes already given out today, with the clock time they cover.
+  const takenAt: { teacherId: string; at: [number, number] | null; periodNo: number }[] = [];
+  const substitutions: TimetableSubstitution[] = [];
+  const uncovered: AffectedPeriod[] = [];
+  const examSkipped: AffectedPeriod[] = [];
+  const label = source === "block" ? "Reassigned" : "Auto";
+
+  for (const period of periods) {
+    if (period.examMasked) {
+      examSkipped.push(period);
+      continue;
+    }
+    const here = periodInterval(state, period.classId, period.periodNo);
+    const taken = new Set(
+      takenAt
+        .filter((t) => (here && t.at ? overlaps(here, t.at) : t.periodNo === period.periodNo))
+        .map((t) => t.teacherId),
+    );
+    const [best] = substituteCandidates({
+      masters,
+      state,
+      academicYearCode,
+      period,
+      absentTeacherIds: absentSet,
+      takenTeacherIds: taken,
+      subLoadByTeacher: subLoad,
+    });
+    const sub = normalizeSubstitution({
+      academicYearCode,
+      date,
+      weekday,
+      periodNo: period.periodNo,
+      classId: period.classId,
+      sectionId: period.sectionId,
+      subjectId: period.subjectId,
+      absentTeacherId: period.absentTeacherId,
+      substituteTeacherId: best?.staff.id || "",
+      source,
+      note: best
+        ? best.classMatch || best.subjectMatch
+          ? `${label} — subject teacher`
+          : `${label} — free teacher`
+        : "No free teacher — period left free",
+    })!;
+    substitutions.push(sub);
+    if (best) {
+      takenAt.push({ teacherId: best.staff.id, at: here, periodNo: period.periodNo });
+      subLoad.set(best.staff.id, (subLoad.get(best.staff.id) || 0) + 1);
+    } else {
+      uncovered.push(period);
+    }
+  }
+
+  return { substitutions, uncovered, examSkipped };
+}
+
+/**
  * Auto-arrange substitutes for all affected periods on `date`.
  * Pure computation — the school reviews/edits, then saves explicitly.
  */
@@ -264,56 +350,108 @@ export function autoArrangeSubstitutes(input: {
     date: input.date,
     absentTeacherIds: input.absentTeacherIds,
   });
-  const absentSet = new Set(input.absentTeacherIds);
-  const subLoad = new Map<string, number>();
-  const takenByPeriod = new Map<number, Set<string>>();
-  const substitutions: TimetableSubstitution[] = [];
-  const uncovered: AffectedPeriod[] = [];
-  const examSkipped: AffectedPeriod[] = [];
+  return arrangeSubstitutesForPeriods({
+    masters: input.masters,
+    state,
+    academicYearCode: input.academicYearCode,
+    date: input.date,
+    weekday: weekday ?? 0,
+    periods,
+  });
+}
 
-  for (const period of periods) {
-    if (period.examMasked) {
-      examSkipped.push(period);
-      continue;
-    }
-    const taken = takenByPeriod.get(period.periodNo) ?? new Set<string>();
-    takenByPeriod.set(period.periodNo, taken);
-    const [best] = substituteCandidates({
-      masters: input.masters,
-      state,
-      academicYearCode: input.academicYearCode,
-      period,
-      absentTeacherIds: absentSet,
-      takenTeacherIds: taken,
-      subLoadByTeacher: subLoad,
-    });
-    const sub = normalizeSubstitution({
-      academicYearCode: input.academicYearCode,
-      date: input.date,
-      weekday: weekday!,
-      periodNo: period.periodNo,
-      classId: period.classId,
-      sectionId: period.sectionId,
-      subjectId: period.subjectId,
-      absentTeacherId: period.absentTeacherId,
-      substituteTeacherId: best?.staff.id || "",
-      source: "auto",
-      note: best
-        ? best.classMatch || best.subjectMatch
-          ? "Auto — subject teacher"
-          : "Auto — free teacher"
-        : "No free teacher — period left free",
-    })!;
-    substitutions.push(sub);
-    if (best) {
-      taken.add(best.staff.id);
-      subLoad.set(best.staff.id, (subLoad.get(best.staff.id) || 0) + 1);
-    } else {
-      uncovered.push(period);
-    }
-  }
+/**
+ * Periods on `date` normally taught by `staffId` that fall inside
+ * [startTime, endTime) — the subset of their day affected by a
+ * TeacherTimeBlock, not the whole day. Uses the same exam-masking as
+ * affectedPeriodsForDate. Overlap is inclusive of any partial overlap: a
+ * period is affected unless it ends at/before the block starts or starts
+ * at/after the block ends.
+ */
+export function affectedPeriodsForTimeBlock(input: {
+  state?: TimetableState;
+  academicYearCode: string;
+  date: string;
+  staffId: string;
+  startTime: string;
+  endTime: string;
+}): AffectedPeriod[] {
+  const state = input.state ?? loadTimetable();
+  const periods = affectedPeriodsForDate({
+    state,
+    academicYearCode: input.academicYearCode,
+    date: input.date,
+    absentTeacherIds: [input.staffId],
+  });
+  if (!periods.length) return periods;
+  return periods.filter((p) => {
+    const bell = teachingPeriods(bellForClass(state, p.classId)).find((b) => b.no === p.periodNo);
+    if (!bell) return false;
+    return bell.startTime < input.endTime && bell.endTime > input.startTime;
+  });
+}
 
-  return { substitutions, uncovered, examSkipped };
+/**
+ * Find substitutes for just the periods of `staffId`'s day that overlap
+ * [startTime, endTime) — the partial-day counterpart to
+ * autoArrangeSubstitutes. Pure computation — does not save.
+ */
+export function planSubstitutionsForTimeBlock(input: {
+  masters: MastersState;
+  academicYearCode: string;
+  date: string;
+  staffId: string;
+  startTime: string;
+  endTime: string;
+  state?: TimetableState;
+}): AutoArrangeResult {
+  const state = input.state ?? loadTimetable();
+  const weekday = isoDateWeekday(input.date);
+  const periods = affectedPeriodsForTimeBlock({
+    state,
+    academicYearCode: input.academicYearCode,
+    date: input.date,
+    staffId: input.staffId,
+    startTime: input.startTime,
+    endTime: input.endTime,
+  });
+  return arrangeSubstitutesForPeriods({
+    masters: input.masters,
+    state,
+    academicYearCode: input.academicYearCode,
+    date: input.date,
+    weekday: weekday ?? 0,
+    periods,
+    source: "block",
+  });
+}
+
+/** Record a teacher's partial-day unavailability. Does not touch
+ * substitutions — pair with planSubstitutionsForTimeBlock +
+ * saveSubstitutionsForDate to actually arrange cover. */
+export function saveTeacherTimeBlock(
+  block: Partial<TeacherTimeBlock>,
+): { ok: true; block: TeacherTimeBlock } | { ok: false; error: string } {
+  const normalized = normalizeTeacherTimeBlock(block);
+  if (!normalized) return { ok: false, error: "Pick a teacher and date" };
+  const state = loadTimetable();
+  saveTimetable({
+    ...state,
+    teacherTimeBlocks: [...state.teacherTimeBlocks, normalized],
+  });
+  return { ok: true, block: normalized };
+}
+
+/** Identity key for "same class+section+period+day" — used to dedupe a
+ * freshly-computed batch of substitutions against what's already saved for
+ * a date, so a confirm action can safely merge instead of overwrite. */
+export function substitutionSlotKey(s: {
+  weekday: number;
+  periodNo: number;
+  classId: string;
+  sectionId: string;
+}): string {
+  return `${s.weekday}|${s.periodNo}|${s.classId}|${s.sectionId}`;
 }
 
 export function listSubstitutionsForDate(

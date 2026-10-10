@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import Link from "next/link";
 import { UserPlus } from "lucide-react";
 import {
@@ -34,6 +35,8 @@ import {
   markLost,
   markVerified,
   promoteToRegistration,
+  registrationBlockers,
+  publicRegisterAbsoluteUrl,
   relationLabel,
   saveAdmissions,
   setLeadCallerAssigned,
@@ -55,23 +58,45 @@ import {
   type GuardianRelation,
   type TransportInterest,
 } from "@/lib/admissions";
-import { listSessionYearOptions, loadMasters, type MastersState } from "@/lib/masters";
-import { STUDENT_CATEGORIES, loadSis, type SisState } from "@/lib/sis";
+import { listSessionYearOptions, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
+import { admissionDocumentHref, buildAdmissionDocumentDetails, pendingDocumentsForLead } from "@/lib/admissionDocumentLinks";
+import { leadConversionLikelihood } from "@/lib/admissionsAi";
+import { pushToast } from "@/components/shell/Toast";
+import { STUDENT_CATEGORIES, loadSis, type SisState, childrenOfHousehold} from "@/lib/sis";
 import {
   closeSuspectedLeadNotMatch,
   keepSuspectedLeadOpen,
   reconcileLeadsWithSis,
   verifySuspectedLeadWithSis,
 } from "@/lib/admissionsSisReconcile";
-import { canAccessModule, hasPermission, loadRbac } from "@/lib/rbac";
+import {
+  canAccessModule,
+  canWriteModuleTab,
+  hasAnyFeatureInModule,
+  hasPermission,
+  loadRbac,
+  visibleModuleTabs,
+} from "@/lib/rbac";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
-import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { FollowUpDialog } from "@/components/admissions/FollowUpDialog";
+import { LeadWorklistPanel } from "@/components/admissions/LeadWorklistPanel";
+import { LeadRecordBar } from "@/components/admissions/LeadRecordBar";
+import { LeadKanbanBoard } from "@/components/admissions/LeadKanbanBoard";
 import {
   ErpTable,
   ErpTableBody,
   ErpTableHead,
 } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import {
+  BulkActionBar,
+  ExportMenu,
+  RowActionMenu,
+  RowCheckbox,
+  useRowSelection,
+} from "@/components/ui/erp-grid";
 import { AddressAutocompleteField } from "@/components/maps/AddressAutocompleteField";
 import { lazyNamedTabPanel } from "@/components/ui/lazyTabPanel";
 import {
@@ -97,7 +122,23 @@ import { AdmissionRegistrationPanel } from "@/components/admissions/AdmissionReg
 import { RteWorkspace } from "@/components/rte/RteWorkspace";
 import { AdmissionCampaignsPanel } from "@/components/admissions/AdmissionCampaignsPanel";
 import { AdmissionCrmChatInbox } from "@/components/admissions/AdmissionCrmChatInbox";
+import { AdmissionsKbPanel } from "@/components/admissions/AdmissionsKbPanel";
+import { MarketingPanel } from "@/components/admissions/MarketingPanel";
+import { VillageDemographicsGrid } from "@/components/admissions/VillageDemographicsGrid";
+import { TENANT } from "@/lib/types";
+import { ReferralsPanel } from "@/components/admissions/ReferralsPanel";
+import { LeadTimeline } from "@/components/admissions/LeadTimeline";
+import { LeadExtractPanel } from "@/components/admissions/LeadExtractPanel";
+import { timelineTouchpoints, type LeadTimelineEvent } from "@/lib/leadTimeline";
+import { referralCodeFor, resolveReferralCode } from "@/lib/referrals";
+import { LeadFollowupDraftPanel } from "@/components/admissions/LeadFollowupDraftPanel";
+import { engagementCtxFromChat, LEAD_QUALITY_LABEL, leadQuality, stalledLeadFlags } from "@/lib/leadQuality";
+import { loadCrmParentChat } from "@/lib/crmParentChat";
+import { HOUSEHOLD_LANGUAGES } from "@/lib/householdPrefs";
+import { LEAD_CONCERNS, PREVIOUS_BOARDS } from "@/lib/admissionsEnquiryForm";
 import { AdmissionReportsPanel } from "@/components/admissions/AdmissionReportsPanel";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 
 type AdmTab =
   | "dashboard"
@@ -109,7 +150,38 @@ type AdmTab =
   | "rte"
   | "campaigns"
   | "crm_chat"
+  | "kb"
+  | "marketing"
+  | "village_market"
+  | "referrals"
   | "reports";
+
+/** Tabs open to everyone with the screen (lead lists or not). */
+const OPEN_TABS = new Set<string>(["dashboard", "enquiry", "survey"]);
+
+const ADM_TABS: (ModuleTabItem & { id: AdmTab })[] = [
+  { id: "dashboard", label: "Dashboard", tone: "navy" },
+  { id: "enquiry", label: "Walk-in enquiry", tone: "teal" },
+  { id: "survey", label: "Field survey", tone: "coral" },
+  { id: "leads", label: "Lead details (CRM)", tone: "navy" },
+  { id: "import", label: "Upload leads", tone: "amber" },
+  { id: "registration", label: "Registration", tone: "green" },
+  { id: "rte", label: "RTE / EWS", tone: "sky" },
+  { id: "campaigns", label: "WA campaigns", tone: "teal" },
+  { id: "crm_chat", label: "CRM parent chat", tone: "navy" },
+  { id: "kb", label: "Knowledge base", tone: "sky" },
+  { id: "marketing", label: "Marketing", tone: "coral" },
+  { id: "village_market", label: "Village market", tone: "sky" },
+  { id: "referrals", label: "Referrals & stories", tone: "amber" },
+  { id: "reports", label: "Report", tone: "green" },
+];
+/**
+ * Walk-in desk form: the household first, because the primary mobile decides
+ * whether this is a new family or a sibling of an existing one; then the
+ * children and Save. One form across both steps — inactive steps are hidden,
+ * never unmounted, so nothing typed is lost and Save sees every field.
+ */
+type EnquiryStep = "household" | "children";
 
 export function AdmissionsWorkspace() {
   const session = useDemoSession();
@@ -128,6 +200,7 @@ export function AdmissionsWorkspace() {
   const [showLeadFilters, setShowLeadFilters] = useState(false);
   const [showWaCheck, setShowWaCheck] = useState(false);
   const [tab, setTab] = useState<AdmTab>("dashboard");
+  const [enquiryStep, setEnquiryStep] = useState<EnquiryStep>("household");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -142,10 +215,36 @@ export function AdmissionsWorkspace() {
       "rte",
       "campaigns",
       "crm_chat",
+      "kb",
+      "marketing",
+      "village_market",
+      "referrals",
       "reports",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as AdmTab);
   }, []);
+
+  // Deep link from global search — open a specific lead by id.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const openLeadId = new URLSearchParams(window.location.search).get(
+      "openLead",
+    );
+    if (openLeadId) openLead(openLeadId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
+  /**
+   * The lead a follow-up is being logged against, and how it was reached.
+   * Set from the list's own action buttons, so a call can be written up
+   * without leaving the call list.
+   */
+  const [followUpFor, setFollowUpFor] = useState<{
+    lead: AdmissionLead;
+    channel: FollowUpChannel;
+  } | null>(null);
+
   const [captureYearFilter, setCaptureYearFilter] = useState<string>("all");
   const [filter, setFilter] = useState<
     | AdmissionStage
@@ -156,8 +255,17 @@ export function AdmissionsWorkspace() {
     | "overdue"
     | "unassigned"
     | "mine"
+    | "stalled"
+    | "hot"
   >("open");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** List or board, and which page of the list — CRM-style (5 Oct 2026). */
+  const [leadView, setLeadView] = useState<"list" | "kanban">("list");
+  const [leadPage, setLeadPage] = useState(0);
+  const [leadPageSize, setLeadPageSize] = useState(50);
+  const [leadDateFrom, setLeadDateFrom] = useState("");
+  const [leadDateTo, setLeadDateTo] = useState("");
+  const [localityQ, setLocalityQ] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState(() =>
     emptyAdmissionLead({ source: "walk_in", leadDate: todayYmd() }),
@@ -222,23 +330,43 @@ export function AdmissionsWorkspace() {
     let cancelled = false;
     void (async () => {
       try {
-        const { ensureAdmissionsHydrated } = await import(
-          "@/lib/admissionsPersistence"
-        );
-        const pulled = await ensureAdmissionsHydrated();
+        const [{ ensureAdmissionsHydrated }, { withHydrationSlot }] =
+          await Promise.all([
+            import("@/lib/admissionsPersistence"),
+            import("@/lib/deskHydrateGuard"),
+          ]);
+        const pulled = await withHydrationSlot(() => ensureAdmissionsHydrated());
         if (cancelled) return;
         const next = loadAdmissions();
         setState(next);
+        // The Registration tab lists this session's ADMITTED students, which
+        // come from the SIS roster — pulled here rather than trusted to the
+        // background sweep, and re-read once it lands, so a fresh login does
+        // not render the card empty (found exactly that way on 2026-08-26).
+        try {
+          const { ensureSisHydrated } = await import("@/lib/sisPersistence");
+          const sisPulled = await ensureSisHydrated();
+          if (!cancelled && sisPulled) setSis(loadSis());
+        } catch {
+          // Offline — the mount-time copy stands.
+        }
         if (pulled && next.leads.length > 0) {
           setNotice(`Synced ${next.leads.length} lead(s) from Supabase.`);
           window.setTimeout(() => setNotice(null), 6000);
         }
-      } catch {
-        /* remote optional */
+      } catch (e) {
+        console.warn("[admissions] hydrate error", e);
+        if (!cancelled) {
+          const { reportLoadFailure } = await import("@/components/shell/Toast");
+          reportLoadFailure("admissions data");
+        }
       }
     })();
 
-    const refresh = () => setState(loadAdmissions());
+    const refresh = () => {
+      setState(loadAdmissions());
+      setSis(loadSis());
+    };
     const onHydrated = () => refresh();
     window.addEventListener("storage", refresh);
     window.addEventListener("focus", refresh);
@@ -251,19 +379,46 @@ export function AdmissionsWorkspace() {
     };
   }, []);
 
-  const allowed = useMemo(() => {
-    if (!masters) return false;
-    return canAccessModule(session, masters, "admissions", loadRbac());
+  // Someone holding only some Admissions functions (director, 6 Oct 2026 —
+  // Masters → Roles) sees only their tabs. The RTE / EWS tab is the RTE
+  // module's own screen embedded here, so it follows RTE's grants.
+  const shownTabs = useMemo(() => {
+    if (!masters) return [];
+    const rbac = loadRbac();
+    const rteOk =
+      hasPermission(session, masters, "admissions", "view", rbac) ||
+      hasAnyFeatureInModule(session, masters, "rte", "view", rbac);
+    return visibleModuleTabs(ADM_TABS, session, masters, "admissions", rbac).filter(
+      (t) => t.id !== "rte" || rteOk,
+    );
   }, [masters, session]);
 
-  const canCreate = useMemo(() => {
-    if (sessionReadOnly) return false;
+  /** Holds Admissions functions but not the module itself. */
+  const functionOnly = useMemo(
+    () =>
+      !!masters &&
+      !hasPermission(session, masters, "admissions", "view", loadRbac()) &&
+      shownTabs.length > 0,
+    [masters, session, shownTabs],
+  );
+
+  const allowed = useMemo(() => {
     if (!masters) return false;
-    return (
-      hasPermission(session, masters, "admissions", "create") ||
-      hasPermission(session, masters, "admissions", "edit")
-    );
-  }, [masters, session, sessionReadOnly]);
+    return canAccessModule(session, masters, "admissions", loadRbac()) || functionOnly;
+  }, [masters, session, functionOnly]);
+
+  /** May add or change things on this tab — the module, or its function. */
+  const canWriteTab = useMemo(
+    () => (t: AdmTab) =>
+      !sessionReadOnly &&
+      !!masters &&
+      (canWriteModuleTab(session, masters, "admissions", t, "create") ||
+        canWriteModuleTab(session, masters, "admissions", t, "edit")),
+    [masters, session, sessionReadOnly],
+  );
+
+  // Leads: walk-in enquiry, CRM, upload — one function (Enquiries & leads).
+  const canCreate = useMemo(() => canWriteTab("leads"), [canWriteTab]);
 
   const isAdmissionsManager = useMemo(() => {
     const code = (session.roleCode || "").toLowerCase();
@@ -279,9 +434,12 @@ export function AdmissionsWorkspace() {
 
   const canBrowseLeadLists = useMemo(() => {
     if (isAdmissionsManager) return true;
+    // A function holder's lists are already cut to their functions by the
+    // server (admissions-desk), and their tabs by shownTabs.
+    if (functionOnly) return true;
     if (!state) return false;
     return isLeadCaller(state, session.staffId);
-  }, [state, isAdmissionsManager, session.staffId]);
+  }, [state, isAdmissionsManager, session.staffId, functionOnly]);
 
   useEffect(() => {
     if (callerOnly && filter !== "mine") setFilter("mine");
@@ -296,22 +454,39 @@ export function AdmissionsWorkspace() {
         tab === "import" ||
         tab === "campaigns" ||
         tab === "crm_chat" ||
+        tab === "kb" ||
+        tab === "marketing" ||
+        tab === "village_market" ||
+        tab === "referrals" ||
         tab === "reports")
     ) {
       setTab("enquiry");
     }
   }, [canBrowseLeadLists, tab]);
 
+  const tabItems = useMemo(
+    () => shownTabs.filter((t) => canBrowseLeadLists || OPEN_TABS.has(t.id)),
+    [shownTabs, canBrowseLeadLists],
+  );
+
+  // A function holder lands on a tab of theirs, not on one they cannot open.
+  useEffect(() => {
+    if (tabItems.length > 0 && !tabItems.some((t) => t.id === tab)) {
+      setTab(tabItems[0]!.id as AdmTab);
+    }
+  }, [tabItems, tab]);
+
   const counts = useMemo(
     () => (state ? funnelCounts(state) : null),
     [state],
   );
 
-  const selected = useMemo(() => {
-    const lead = state?.leads.find((l) => l.id === selectedId) ?? null;
-    if (lead && isConvertedShowOnly(lead.stage)) return null;
-    return lead;
-  }, [state, selectedId]);
+  // An admitted lead opens too, read-only: its page is the record of how
+  // the family came in. It used to refuse to open at all.
+  const selected = useMemo(
+    () => state?.leads.find((l) => l.id === selectedId) ?? null,
+    [state, selectedId],
+  );
 
   const classes = useMemo(
     () => (masters?.classes ?? []).filter((c) => c.isActive),
@@ -321,18 +496,28 @@ export function AdmissionsWorkspace() {
   const filtered = useMemo(() => {
     if (!state) return [];
     if (!canBrowseLeadLists) return [];
-    const me = session.fullName.trim().toLowerCase();
+    const me = (session?.fullName || "").trim().toLowerCase();
     const list = state.leads.filter((l) => {
+      const assigned = (l.assignedTo || "").trim().toLowerCase();
       if (callerOnly) {
         return (
           l.stage !== "enrolled" &&
           l.stage !== "lost" &&
-          l.assignedTo.trim().toLowerCase() === me
+          assigned === me
         );
       }
       if (
         captureYearFilter !== "all" &&
         (l.academicYearCode || "") !== captureYearFilter
+      ) {
+        return false;
+      }
+      const leadDate = String(l.leadDate || l.createdAt || "").slice(0, 10);
+      if (leadDateFrom && leadDate && leadDate < leadDateFrom) return false;
+      if (leadDateTo && leadDate && leadDate > leadDateTo) return false;
+      if (
+        localityQ.trim() &&
+        !(l.locality || "").toLowerCase().includes(localityQ.trim().toLowerCase())
       ) {
         return false;
       }
@@ -350,14 +535,20 @@ export function AdmissionsWorkspace() {
         return (
           l.stage !== "enrolled" &&
           l.stage !== "lost" &&
-          !l.assignedTo.trim()
+          !assigned
         );
+      }
+      if (filter === "stalled") {
+        return stalledLeadFlags(l, {}).length > 0;
+      }
+      if (filter === "hot") {
+        return leadQuality(l, engagementCtx).quality === "hot";
       }
       if (filter === "mine") {
         return (
           l.stage !== "enrolled" &&
           l.stage !== "lost" &&
-          l.assignedTo.trim().toLowerCase() === me
+          assigned === me
         );
       }
       if (
@@ -372,9 +563,9 @@ export function AdmissionsWorkspace() {
       return l.source === filter;
     });
     return [...list].sort((a, b) => {
-      const dateCmp = (b.leadDate || b.createdAt).localeCompare(
-        a.leadDate || a.createdAt,
-      );
+      const dateA = String(a.leadDate || a.createdAt || "");
+      const dateB = String(b.leadDate || b.createdAt || "");
+      const dateCmp = dateB.localeCompare(dateA);
       if (dateCmp !== 0) return dateCmp;
       const ba = leadFollowUpBucket(a);
       const bb = leadFollowUpBucket(b);
@@ -389,7 +580,43 @@ export function AdmissionsWorkspace() {
     captureYearFilter,
     canBrowseLeadLists,
     callerOnly,
+    leadDateFrom,
+    leadDateTo,
+    localityQ,
   ]);
+
+  // Lead date falls back to createdAt exactly as the cell does, so the column
+  // orders on the same value the clerk is reading.
+  const leadKeys = useMemo(() => filtered.map((l) => l.id), [filtered]);
+  const leadSelection = useRowSelection(leadKeys);
+  const leadSort = useTableSort(
+    filtered,
+    {
+      enquiryNo: (l) => l.enquiryNo || null,
+      leadDate: (l) => String(l.leadDate || l.createdAt || "").slice(0, 10) || null,
+      ay: (l) => l.academicYearCode || null,
+      stage: (l) => l.stage,
+      source: (l) => l.source || null,
+      child: (l) => l.childName || null,
+      guardian: (l) => l.guardianName || null,
+      counsellor: (l) => l.assignedTo || null,
+      followUp: (l) => l.nextFollowUpAt || null,
+    },
+    "leadDate",
+    "desc",
+  );
+  const leadPageCount = Math.max(1, Math.ceil(leadSort.rows.length / leadPageSize));
+  const leadPageSafe = Math.min(leadPage, leadPageCount - 1);
+  const leadPageRows = useMemo(
+    () => leadSort.rows.slice(leadPageSafe * leadPageSize, (leadPageSafe + 1) * leadPageSize),
+    [leadSort.rows, leadPageSafe, leadPageSize],
+  );
+  // A new filter starts the list from its first page.
+  useEffect(() => {
+    setLeadPage(0);
+  }, [filter, captureYearFilter, leadDateFrom, leadDateTo, localityQ, leadPageSize]);
+  /** Where the open lead sits in the list it was opened from. */
+  const selectedIndex = selected ? leadSort.rows.findIndex((l) => l.id === selected.id) : -1;
 
   // Admission-year chips (derived from enquiry dates via the Oct→Sep rule)
   const captureYears = useMemo(() => {
@@ -415,6 +642,22 @@ export function AdmissionsWorkspace() {
     () => (state ? followUpCounts(state) : null),
     [state],
   );
+  // Engagement the client can see: chat-widget threads (by mobile).
+  const engagementCtx = useMemo(
+    () => engagementCtxFromChat(loadCrmParentChat().threads),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state?.leads.length],
+  );
+  const { stalledCount, hotCount } = useMemo(() => {
+    let stalled = 0;
+    let hot = 0;
+    for (const l of state?.leads ?? []) {
+      if (l.stage === "enrolled" || l.stage === "lost") continue;
+      if (stalledLeadFlags(l, {}).length) stalled += 1;
+      if (leadQuality(l, engagementCtx).quality === "hot") hot += 1;
+    }
+    return { stalledCount: stalled, hotCount: hot };
+  }, [state?.leads, engagementCtx]);
 
   function commit(next: AdmissionsState, msg?: string) {
     setState(next);
@@ -563,6 +806,9 @@ export function AdmissionsWorkspace() {
     );
     setSelectedId(r.keeper.id);
     setFilter("all");
+    setLeadDateFrom("");
+    setLeadDateTo("");
+    setLocalityQ("");
     setShowWaCheck(true);
   }
 
@@ -595,8 +841,6 @@ export function AdmissionsWorkspace() {
             return;
           }
         }
-        setFilter("all");
-        setCaptureYearFilter("all");
         openLead(id);
       },
       onOpenStudent: (id: string) => setProfileStudentId(id),
@@ -616,18 +860,34 @@ export function AdmissionsWorkspace() {
   );
 
   function openLead(id: string) {
-    const lead = state?.leads.find((l) => l.id === id);
-    if (lead && isConvertedShowOnly(lead.stage)) {
-      setSelectedId(null);
-      setTab("leads");
-      setNotice(
-        "Admitted leads are display-only (green) — not for further working",
-      );
-      window.setTimeout(() => setNotice(null), 2800);
-      return;
+    // The lead now opens as its own page instead of under the list, so the
+    // filters only need clearing when the lead is not in the list being
+    // looked at (a deep link, a sibling) — that keeps "Back to leads" and
+    // previous / next on the list the counsellor was working.
+    if (!filtered.some((l) => l.id === id)) {
+      setFilter("all");
+      setCaptureYearFilter("all");
+      setLeadDateFrom("");
+      setLeadDateTo("");
+      setLocalityQ("");
     }
     setSelectedId(id);
     setTab("leads");
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("openLead", id);
+      window.history.replaceState(null, "", url);
+      window.scrollTo({ top: 0 });
+    }
+  }
+
+  function closeLead() {
+    setSelectedId(null);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("openLead");
+      window.history.replaceState(null, "", url);
+    }
   }
 
   function doRegister() {
@@ -908,7 +1168,7 @@ export function AdmissionsWorkspace() {
                     setFilter("overdue");
                     setTab("leads");
                   }}
-                  className="rounded-lg border border-[rgba(180,35,24,0.3)] bg-[rgba(180,35,24,0.06)] px-2.5 py-1.5 font-medium text-[#b42318]"
+                  className="rounded-lg border border-[rgba(180,35,24,0.3)] bg-[rgba(180,35,24,0.06)] px-2.5 py-1.5 font-medium text-[var(--danger)]"
                 >
                   Overdue{" "}
                   <span className="opacity-80">{fuCounts.overdue}</span>
@@ -941,7 +1201,7 @@ export function AdmissionsWorkspace() {
                   setFilter(k);
                   setTab("leads");
                 }}
-                className="rounded-lg border border-[rgba(32,48,80,0.12)] bg-white px-2.5 py-1.5 font-medium text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1.5 font-medium text-[var(--brand-deep)]"
               >
                 {stageLabel(k)}{" "}
                 <span className="text-[var(--muted)]">{n}</span>
@@ -964,6 +1224,10 @@ export function AdmissionsWorkspace() {
               next === "import" ||
               next === "campaigns" ||
               next === "crm_chat" ||
+              next === "kb" ||
+              next === "marketing" ||
+              next === "village_market" ||
+              next === "referrals" ||
               next === "reports")
           ) {
             setNotice(
@@ -974,22 +1238,7 @@ export function AdmissionsWorkspace() {
           }
           setTab(next);
         }}
-        items={[
-          { id: "dashboard", label: "Dashboard", tone: "navy" },
-          { id: "enquiry", label: "Walk-in enquiry", tone: "teal" },
-          { id: "survey", label: "Field survey", tone: "coral" },
-          ...(canBrowseLeadLists
-            ? ([
-                { id: "leads", label: "Lead details (CRM)", tone: "navy" },
-                { id: "import", label: "Upload leads", tone: "amber" },
-                { id: "registration", label: "Registration", tone: "green" },
-                { id: "rte", label: "RTE / EWS", tone: "sky" },
-                { id: "campaigns", label: "WA campaigns", tone: "teal" },
-                { id: "crm_chat", label: "CRM parent chat", tone: "navy" },
-                { id: "reports", label: "Report", tone: "green" },
-              ] as const)
-            : []),
-        ]}
+        items={tabItems}
       />
 
       {!canBrowseLeadLists ? (
@@ -1016,20 +1265,32 @@ export function AdmissionsWorkspace() {
           state={state}
           masters={masters}
           by={session.fullName}
-          canEdit={canCreate}
+          canEdit={canWriteTab("survey")}
           onCommit={commit}
-          onOpenCrm={(id) => {
-            setFilter("all");
-            setCaptureYearFilter("all");
-            openLead(id);
-          }}
+          onOpenCrm={(id) => openLead(id)}
           onOpenRegistration={() => setTab("registration")}
         />
       ) : null}
 
       {tab === "leads" ? (
         <div className="space-y-4">
-          <div className="space-y-2 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-3 py-2.5">
+          {!selected ? (
+          <>
+          {/* Before the table: the instruction. The table is a reference you
+              search; this says which leads need something and what that
+              something is. Hidden on a solo lead page, which is one lead. */}
+          {state ? (
+            <LeadWorklistPanel
+              leads={state.leads}
+              today={todayYmd()}
+              onOpenLead={(id) => openLead(id)}
+              onCall={(id) => {
+                const lead = state.leads.find((l) => l.id === id);
+                if (lead) setFollowUpFor({ lead, channel: "call" });
+              }}
+            />
+          ) : null}
+          <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -1037,8 +1298,8 @@ export function AdmissionsWorkspace() {
                   onClick={() => setShowLeadFilters((v) => !v)}
                   className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold ${
                     showLeadFilters
-                      ? "bg-[var(--brand-deep)] text-white"
-                      : "border border-[rgba(32,48,80,0.2)] bg-white text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+                      ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                      : "border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                   }`}
                 >
                   Filters {showLeadFilters ? "▴" : "▾"}
@@ -1048,8 +1309,8 @@ export function AdmissionsWorkspace() {
                   onClick={() => setShowWaCheck((v) => !v)}
                   className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold ${
                     showWaCheck
-                      ? "bg-[var(--brand-deep)] text-white"
-                      : "border border-[rgba(32,48,80,0.2)] bg-white text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+                      ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                      : "border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                   }`}
                 >
                   Mobile / WhatsApp check {showWaCheck ? "▴" : "▾"}
@@ -1071,13 +1332,30 @@ export function AdmissionsWorkspace() {
                     AY {captureYearFilter}
                   </span>
                 ) : null}
-                {filter !== "open" || captureYearFilter !== "all" ? (
+                {leadDateFrom || leadDateTo ? (
+                  <span className="rounded-full bg-[rgba(197,160,40,0.16)] px-2 py-0.5 text-[10px] font-semibold text-[var(--brand-deep)]">
+                    {leadDateFrom || "…"}–{leadDateTo || "…"}
+                  </span>
+                ) : null}
+                {localityQ.trim() ? (
+                  <span className="rounded-full bg-[rgba(197,160,40,0.16)] px-2 py-0.5 text-[10px] font-semibold text-[var(--brand-deep)]">
+                    Locality “{localityQ.trim()}”
+                  </span>
+                ) : null}
+                {filter !== "open" ||
+                captureYearFilter !== "all" ||
+                leadDateFrom ||
+                leadDateTo ||
+                localityQ.trim() ? (
                   <button
                     type="button"
-                    className="text-[10px] font-semibold text-[#b42318] underline"
+                    className="text-[10px] font-semibold text-[var(--danger)] underline"
                     onClick={() => {
                       setFilter("open");
                       setCaptureYearFilter("all");
+                      setLeadDateFrom("");
+                      setLeadDateTo("");
+                      setLocalityQ("");
                     }}
                   >
                     Reset
@@ -1088,7 +1366,7 @@ export function AdmissionsWorkspace() {
                 <button
                   type="button"
                   onClick={runSisReconcile}
-                  className="rounded-lg bg-[#0f766e] px-2.5 py-1.5 text-[11px] font-semibold text-white hover:brightness-110"
+                  className="rounded-lg bg-[var(--tone-teal-solid)] px-2.5 py-1.5 text-[11px] font-semibold text-white hover:brightness-110"
                   title="Match open leads against the student register (all sessions) and mark admitted"
                 >
                   Check admitted in SIS
@@ -1097,7 +1375,7 @@ export function AdmissionsWorkspace() {
             </div>
 
             {showLeadFilters ? (
-              <div className="space-y-2 border-t border-[rgba(32,48,80,0.08)] pt-2">
+              <div className="space-y-2 border-t border-[var(--border)] pt-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="w-full text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
                     Admission year
@@ -1107,8 +1385,8 @@ export function AdmissionsWorkspace() {
                     onClick={() => setCaptureYearFilter("all")}
                     className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                       captureYearFilter === "all"
-                        ? "bg-[var(--brand-deep)] text-white"
-                        : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
+                        ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                        : "bg-[var(--surface-sunken)] text-[var(--muted)]"
                     }`}
                   >
                     All years
@@ -1120,13 +1398,40 @@ export function AdmissionsWorkspace() {
                       onClick={() => setCaptureYearFilter(y)}
                       className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                         captureYearFilter === y
-                          ? "bg-[var(--brand-deep)] text-white"
-                          : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
+                          ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                          : "bg-[var(--surface-sunken)] text-[var(--muted)]"
                       }`}
                     >
                       {y}
                     </button>
                   ))}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="w-full text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                    Lead date
+                  </span>
+                  <input
+                    type="date"
+                    className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[11px]"
+                    value={leadDateFrom}
+                    onChange={(e) => setLeadDateFrom(e.target.value)}
+                    aria-label="Lead date from"
+                  />
+                  <span className="text-[11px] text-[var(--muted)]">–</span>
+                  <input
+                    type="date"
+                    className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[11px]"
+                    value={leadDateTo}
+                    onChange={(e) => setLeadDateTo(e.target.value)}
+                    aria-label="Lead date to"
+                  />
+                  <input
+                    className="min-w-[10rem] rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[11px]"
+                    placeholder="Locality…"
+                    value={localityQ}
+                    onChange={(e) => setLocalityQ(e.target.value)}
+                    aria-label="Filter by locality"
+                  />
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <span className="w-full text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
@@ -1138,6 +1443,8 @@ export function AdmissionsWorkspace() {
                       ["overdue", "Overdue", fuCounts?.overdue],
                       ["mine", "My leads", null],
                       ["unassigned", "Unassigned", fuCounts?.unassigned],
+                      ["stalled", "Stalled", stalledCount],
+                      ["hot", "Hot", hotCount],
                     ] as const
                   ).map(([id, label, n]) => (
                     <button
@@ -1146,12 +1453,12 @@ export function AdmissionsWorkspace() {
                       onClick={() => setFilter(id)}
                       className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                         filter === id
-                          ? "bg-[var(--brand-deep)] text-white"
+                          ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                           : id === "overdue"
-                            ? "bg-[rgba(180,35,24,0.12)] text-[#b42318]"
+                            ? "bg-[rgba(180,35,24,0.12)] text-[var(--danger)]"
                             : id === "due_today"
                               ? "bg-[rgba(180,83,9,0.14)] text-[#9a3412]"
-                              : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
+                              : "bg-[var(--surface-sunken)] text-[var(--muted)]"
                       }`}
                     >
                       {label}
@@ -1180,9 +1487,9 @@ export function AdmissionsWorkspace() {
                       onClick={() => setFilter(id as typeof filter)}
                       className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                         filter === id
-                          ? "bg-[var(--brand-deep)] text-white"
+                          ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                           : id === "open" || id === "all"
-                            ? "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
+                            ? "bg-[var(--surface-sunken)] text-[var(--muted)]"
                             : stageTagClass(id as AdmissionStage)
                       }`}
                     >
@@ -1247,6 +1554,122 @@ export function AdmissionsWorkspace() {
             ) : null}
           </div>
 
+          <div className="flex justify-end">
+            <ExportMenu
+              title="Admission leads"
+              subtitle={`${filtered.length} lead(s) in this view`}
+              fileBaseName="admission_leads"
+              columns={[
+                { key: "no", header: "Lead no" },
+                { key: "date", header: "Lead date" },
+                { key: "stage", header: "Status" },
+                { key: "source", header: "Source" },
+                { key: "child", header: "Child", width: 1.6 },
+                { key: "guardian", header: "Guardian", width: 1.6 },
+                { key: "mobile", header: "Mobile" },
+                { key: "counsellor", header: "Counsellor" },
+                { key: "followUp", header: "Next follow-up" },
+              ]}
+              rows={() =>
+                leadSort.rows.map((l) => ({
+                  no: l.enquiryNo,
+                  date: (l.leadDate || l.createdAt || "").slice(0, 10),
+                  stage: l.stage,
+                  source: l.source || "",
+                  child: l.childName || "",
+                  guardian: l.guardianName || "",
+                  mobile: l.mobile || "",
+                  counsellor: l.assignedTo || "",
+                  followUp: (l.nextFollowUpAt || "").slice(0, 10),
+                }))
+              }
+              onMessage={(msg) => {
+                setNotice(msg);
+                window.setTimeout(() => setNotice(null), 2400);
+              }}
+              compact
+            />
+          </div>
+          <BulkActionBar
+            selection={leadSelection}
+            noun="lead"
+            actions={[
+              {
+                id: "wa",
+                label: "Send WhatsApp",
+                title: "Opens WhatsApp for each selected family with a mobile (12 per click)",
+                onRun: (ids) => {
+                  const text = window.prompt(
+                    "Message to the families:",
+                    "Namaste, this is BHB International School regarding your admission enquiry.",
+                  );
+                  if (!text) return;
+                  const picked = new Set(ids);
+                  const seen = new Set<string>();
+                  let opened = 0;
+                  for (const l of filtered) {
+                    if (!picked.has(l.id) || !l.mobile || seen.has(l.mobile) || opened >= 12) continue;
+                    seen.add(l.mobile);
+                    openWaMe(l.mobile, text);
+                    opened += 1;
+                  }
+                  setNotice(`Opened WhatsApp for ${opened} famil${opened === 1 ? "y" : "ies"}`);
+                  window.setTimeout(() => setNotice(null), 2800);
+                },
+              },
+            ]}
+          />
+          {/* CRM view bar: record count, list or board, page size. */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
+              <span>
+                <b className="tabular-nums text-[var(--brand-deep)]">{filtered.length}</b> lead
+                {filtered.length === 1 ? "" : "s"} in this view
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {leadView === "list" ? (
+                <label className="flex items-center gap-1 text-xs text-[var(--muted)]">
+                  Per page
+                  <select
+                    className="field !py-1 text-xs"
+                    value={leadPageSize}
+                    onChange={(e) => setLeadPageSize(Number(e.target.value))}
+                  >
+                    {[25, 50, 100, 200].map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <div className="inline-flex overflow-hidden rounded-lg border border-[var(--border)] text-xs font-semibold" role="group" aria-label="Lead view">
+                {(["list", "kanban"] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    aria-pressed={leadView === v}
+                    onClick={() => setLeadView(v)}
+                    className={`px-3 py-1.5 ${
+                      leadView === v
+                        ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                        : "bg-[var(--card)] text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+                    }`}
+                  >
+                    {v === "list" ? "List" : "Board"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          {leadView === "kanban" ? (
+            <LeadKanbanBoard
+              leads={leadSort.rows}
+              classLabel={(l) => classes.find((c) => c.id === (l.classAdmittedId || l.classSoughtId))?.name || ""}
+              onOpen={openLead}
+            />
+          ) : (
           <MastersTableCard title="Leads">
             {filtered.length === 0 ? (
               <MastersEmptyRow label="No leads in this view — use New enquiry to capture." />
@@ -1254,19 +1677,36 @@ export function AdmissionsWorkspace() {
               <ErpTable minWidth="min-w-full">
                 <ErpTableHead>
                   <tr>
-                    <th className="px-4 py-2.5 font-bold">Lead no.</th>
-                    <th className="px-4 py-2.5 font-bold">Lead date</th>
-                    <th className="px-4 py-2.5 font-bold">Adm. year</th>
-                    <th className="px-4 py-2.5 font-bold">Status</th>
-                    <th className="px-4 py-2.5 font-bold">Source</th>
-                    <th className="px-4 py-2.5 font-bold">Child</th>
-                    <th className="px-4 py-2.5 font-bold">Guardian / mobile</th>
-                    <th className="px-4 py-2.5 font-bold">Counsellor</th>
-                    <th className="px-4 py-2.5 font-bold">Next follow-up</th>
+                    <th className="w-10 px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                      <RowCheckbox
+                        checked={leadSelection.allSelected(leadPageRows.map((r) => r.id))}
+                        indeterminate={leadSelection.someSelected(leadPageRows.map((r) => r.id))}
+                        onChange={() => leadSelection.toggleAll(leadPageRows.map((r) => r.id))}
+                        label="Select all leads shown"
+                      />
+                    </th>
+                    <ErpSortTh sort={leadSort} field="enquiryNo">Lead no.</ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="leadDate">Lead date</ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="ay">Adm. year</ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="stage">Status</ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="source">Source</ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="child">Child</ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="guardian">
+                      Guardian / mobile
+                    </ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="counsellor">
+                      Counsellor
+                    </ErpSortTh>
+                    <ErpSortTh sort={leadSort} field="followUp">
+                      Next follow-up
+                    </ErpSortTh>
+                    <th className="px-3 py-2 text-left text-[11px] font-bold uppercase">
+                      Do
+                    </th>
                   </tr>
                 </ErpTableHead>
                 <ErpTableBody>
-                  {filtered.map((l) => {
+                  {leadPageRows.map((l) => {
                     const hh = householdOf(state, l.householdId);
                     const showOnly = isConvertedShowOnly(l.stage);
                     const active =
@@ -1282,26 +1722,31 @@ export function AdmissionsWorkspace() {
                         key={l.id}
                         title={
                           showOnly
-                            ? "Admitted — display only (not for working)"
+                            ? "Admitted — opens read-only"
                             : greened
                               ? "Registered / Verified — open only to Verify or Admit"
                               : "Open to work this lead"
                         }
-                        className={`border-t border-[rgba(32,48,80,0.06)] ${
+                        className={`border-t border-[var(--border)] ${
                           showOnly
-                            ? `${rowGreen} cursor-default`
+                            ? `${rowGreen} cursor-pointer hover:brightness-95`
                             : greened
                               ? `${rowGreen} cursor-pointer hover:brightness-95`
                               : `cursor-pointer ${
                                   active
                                     ? "bg-[rgba(197,160,40,0.12)]"
-                                    : "hover:bg-[rgba(32,48,80,0.03)]"
+                                    : "hover:bg-[var(--surface-sunken)]"
                                 }`
                         }`}
-                        onClick={() => {
-                          if (!showOnly) openLead(l.id);
-                        }}
+                        onClick={() => openLead(l.id)}
                       >
+                        <td className="w-10 px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                          <RowCheckbox
+                            checked={leadSelection.isSelected(l.id)}
+                            onChange={() => leadSelection.toggle(l.id)}
+                            label={`Select lead ${l.enquiryNo}`}
+                          />
+                        </td>
                         <td className="px-3 py-2 font-mono text-[12px]">
                           {l.enquiryNo}
                           {hh ? (
@@ -1331,7 +1776,7 @@ export function AdmissionsWorkspace() {
                               title={l.sisStudentInfo || "Open admitted SIS list"}
                               className={`mt-0.5 ml-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                                 l.sisStudentStatus === "inactive"
-                                  ? "bg-[rgba(71,85,105,0.15)] text-[#334155]"
+                                  ? "bg-[rgba(71,85,105,0.15)] text-[var(--tone-slate)]"
                                   : "bg-[rgba(21,128,61,0.15)] text-[#166534]"
                               }`}
                               onClick={(e) => {
@@ -1379,7 +1824,7 @@ export function AdmissionsWorkspace() {
                           (l.sisStudentId || l.studentId) ? (
                             <button
                               type="button"
-                              className="text-left font-medium text-[#0f766e] underline-offset-2 hover:underline"
+                              className="text-left font-medium text-[var(--tone-teal)] underline-offset-2 hover:underline"
                               title="Open SIS student details"
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1433,6 +1878,123 @@ export function AdmissionsWorkspace() {
                             </span>
                           )}
                         </td>
+                        {/* What the office actually DOES to a lead, on the
+                            row itself. Working a call list means ringing the
+                            next family, not opening each one to find the
+                            buttons. Every action stops the row's own click,
+                            which opens the lead. */}
+                        <td
+                          className="px-3 py-2"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {showOnly ? (
+                            <span className="text-[10px] text-[var(--muted)]">
+                              admitted
+                            </span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {canCreate && l.mobile ? (
+                                <button
+                                  type="button"
+                                  title={`Call ${l.mobile} and write it up`}
+                                  className="rounded-lg bg-[var(--success)] px-2 py-1 text-[10px] font-bold text-white"
+                                  onClick={() =>
+                                    setFollowUpFor({ lead: l, channel: "call" })
+                                  }
+                                >
+                                  Call
+                                </button>
+                              ) : null}
+                              {canCreate ? (
+                                <button
+                                  type="button"
+                                  title="Log a follow-up without calling"
+                                  className="rounded-lg border border-[var(--border)] px-2 py-1 text-[10px] font-semibold text-[var(--brand-deep)]"
+                                  onClick={() =>
+                                    setFollowUpFor({
+                                      lead: l,
+                                      channel: "whatsapp",
+                                    })
+                                  }
+                                >
+                                  Follow-up
+                                </button>
+                              ) : null}
+                              {canCreate && l.stage === "enquiry" ? (
+                                (() => {
+                                  const blocked = registrationBlockers(
+                                    state,
+                                    l.id,
+                                  );
+                                  return (
+                                    <button
+                                      type="button"
+                                      disabled={blocked.length > 0}
+                                      title={
+                                        blocked.length
+                                          ? `Still needed: ${blocked.map((b) => b.message).join(" ")}`
+                                          : "Move this enquiry to Registered"
+                                      }
+                                      className="rounded-lg bg-[var(--brand-deep)] px-2 py-1 text-[10px] font-bold text-white disabled:opacity-40"
+                                      onClick={() => doRegisterLead(l.id)}
+                                    >
+                                      Register
+                                    </button>
+                                  );
+                                })()
+                              ) : null}
+                              {/* Opens in place. This was a new browser tab
+                                  for one build; in use it just left a trail of
+                                  tabs to close, so it opens the lead below the
+                                  list where it always did. */}
+                              <button
+                                type="button"
+                                onClick={() => openLead(l.id)}
+                                className="rounded-lg border border-[var(--border)] px-2 py-1 text-[10px] font-semibold text-[var(--muted)]"
+                              >
+                                Open
+                              </button>
+                              <RowActionMenu
+                                row={l}
+                                label={`More actions for ${l.enquiryNo}`}
+                                actions={[
+                                  { id: "open", label: "Open in CRM", onSelect: (r) => openLead(r.id) },
+                                  {
+                                    id: "wa",
+                                    label: "WhatsApp the family",
+                                    disabled: (r) => !r.mobile,
+                                    onSelect: (r) =>
+                                      openWaMe(
+                                        r.mobile,
+                                        `Namaste, this is BHB International School regarding ${r.childName || "your child"}'s admission enquiry.`,
+                                      ),
+                                  },
+                                  {
+                                    id: "call",
+                                    label: "Call & write it up",
+                                    hidden: () => !canCreate,
+                                    disabled: (r) => !r.mobile,
+                                    onSelect: (r) => setFollowUpFor({ lead: r, channel: "call" }),
+                                  },
+                                  {
+                                    id: "followup",
+                                    label: "Log a follow-up",
+                                    hidden: () => !canCreate,
+                                    onSelect: (r) => setFollowUpFor({ lead: r, channel: "whatsapp" }),
+                                  },
+                                  {
+                                    id: "register",
+                                    label: "Move to Registered",
+                                    separatorAbove: true,
+                                    hidden: (r) => !canCreate || r.stage !== "enquiry",
+                                    disabled: (r) => registrationBlockers(state, r.id).length > 0,
+                                    onSelect: (r) => doRegisterLead(r.id),
+                                  },
+                                ]}
+                              />
+                            </div>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -1440,23 +2002,63 @@ export function AdmissionsWorkspace() {
               </ErpTable>
             )}
           </MastersTableCard>
-
-          {!selected ? (
-            <p className="rounded-xl border border-dashed border-[rgba(32,48,80,0.2)] bg-white px-4 py-6 text-center text-sm text-[var(--muted)]">
-              Select an <strong>Open</strong> lead for counsellor work, or a
-              green <strong>Registered / Verified</strong> lead to Verify /
-              Admit. <strong>Admitted</strong> rows are display-only. Fee
-              collection lives under the <strong>Registration</strong> tab.
-            </p>
+          )}
+          {leadView === "list" && leadPageCount > 1 ? (
+            <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-[var(--muted)]">
+              <span className="tabular-nums">
+                {leadPageSafe * leadPageSize + 1}–{Math.min((leadPageSafe + 1) * leadPageSize, leadSort.rows.length)} of{" "}
+                {leadSort.rows.length}
+              </span>
+              <button
+                type="button"
+                disabled={leadPageSafe === 0}
+                onClick={() => setLeadPage(leadPageSafe - 1)}
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 font-semibold text-[var(--brand-deep)] disabled:opacity-40"
+              >
+                ‹ Prev
+              </button>
+              <span className="tabular-nums">
+                Page {leadPageSafe + 1} / {leadPageCount}
+              </span>
+              <button
+                type="button"
+                disabled={leadPageSafe >= leadPageCount - 1}
+                onClick={() => setLeadPage(leadPageSafe + 1)}
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 font-semibold text-[var(--brand-deep)] disabled:opacity-40"
+              >
+                Next ›
+              </button>
+            </div>
+          ) : null}
+          </>
           ) : (
+            <>
+            <LeadRecordBar
+              lead={selected}
+              classLabel={classes.find((c) => c.id === (selected.classAdmittedId || selected.classSoughtId))?.name || ""}
+              index={selectedIndex}
+              total={leadSort.rows.length}
+              readOnly={isConvertedShowOnly(selected.stage)}
+              canAct={canCreate && !isConvertedShowOnly(selected.stage)}
+              onBack={closeLead}
+              onPrev={selectedIndex > 0 ? () => openLead(leadSort.rows[selectedIndex - 1].id) : null}
+              onNext={
+                selectedIndex >= 0 && selectedIndex < leadSort.rows.length - 1
+                  ? () => openLead(leadSort.rows[selectedIndex + 1].id)
+                  : null
+              }
+              onCall={() => setFollowUpFor({ lead: selected, channel: "call" })}
+              onWhatsApp={() => setFollowUpFor({ lead: selected, channel: "whatsapp" })}
+            />
             <LeadDetail
+              key={selected.id}
               lead={selected}
               state={state}
               masters={masters}
               sis={sis}
               classes={classes}
               sectionsFor={sectionsFor}
-              canEdit={canCreate}
+              canEdit={canCreate && !isConvertedShowOnly(selected.stage)}
               agentName={session.fullName}
               onPatch={patchSelected}
               onRegister={doRegister}
@@ -1471,6 +2073,7 @@ export function AdmissionsWorkspace() {
               onAssign={doAssign}
               onLogFollowUp={doLogFollowUp}
             />
+            </>
           )}
         </div>
       ) : null}
@@ -1479,13 +2082,11 @@ export function AdmissionsWorkspace() {
         <AdmissionRegistrationPanel
           state={state}
           masters={masters}
+          sis={sis}
           by={session.fullName}
-          canEdit={canCreate}
+          canEdit={canWriteTab("registration")}
           onCommit={commit}
-          onOpenCrmLead={(id) => {
-            setFilter("all");
-            openLead(id);
-          }}
+          onOpenCrmLead={(id) => openLead(id)}
         />
       ) : null}
 
@@ -1496,13 +2097,34 @@ export function AdmissionsWorkspace() {
           admissions={state}
           masters={masters}
           by={session.fullName}
-          canEdit={canCreate}
+          canEdit={canWriteTab("campaigns")}
           onAdmissionsCommit={commit}
         />
       ) : null}
 
       {tab === "crm_chat" ? (
-        <AdmissionCrmChatInbox by={session.fullName} canEdit={canCreate} />
+        <AdmissionCrmChatInbox by={session.fullName} canEdit={canWriteTab("crm_chat")} />
+      ) : null}
+
+      {tab === "kb" ? (
+        <AdmissionsKbPanel masters={masters} canEdit={canWriteTab("kb")} by={session.fullName} />
+      ) : null}
+
+      {tab === "marketing" ? (
+        <MarketingPanel masters={masters} admissions={state} canEdit={canWriteTab("marketing")} by={session.fullName} />
+      ) : null}
+
+      {tab === "village_market" ? (
+        <VillageDemographicsGrid
+          lat={TENANT.schoolLat}
+          lon={TENANT.schoolLng}
+          academicYearCode={session.academicYearCode || ""}
+          canEdit={canWriteTab("village_market")}
+        />
+      ) : null}
+
+      {tab === "referrals" && state ? (
+        <ReferralsPanel admissions={state} sis={sis} canEdit={canWriteTab("referrals")} by={session.fullName} />
       ) : null}
 
       {tab === "reports" ? (
@@ -1523,6 +2145,45 @@ export function AdmissionsWorkspace() {
           >
             <AdmissionCaptureLinks />
           </MastersWorkCard>
+
+          <LeadExtractPanel
+            canEdit={canCreate}
+            classNames={classes.map((c) => c.name)}
+            onApply={(f, summary) => {
+              const cls = f.classSoughtLabel ? classes.find((c) => c.name.toLowerCase() === f.classSoughtLabel!.toLowerCase()) : undefined;
+              setDraft((d) => ({
+                ...d,
+                guardianName: f.guardianName ?? d.guardianName,
+                motherName: f.motherName ?? d.motherName,
+                mobile: f.mobile ?? d.mobile,
+                email: f.email ?? d.email,
+                locality: f.locality ?? d.locality,
+                address: f.address ?? d.address,
+                pincode: f.pincode ?? d.pincode,
+                previousBoard: f.previousBoard ?? d.previousBoard,
+                preferredLanguage: f.preferredLanguage ?? d.preferredLanguage,
+                concerns: f.concerns ?? d.concerns,
+                note: summary ? [d.note, `Enquiry text: ${summary}`].filter(Boolean).join(" · ") : d.note,
+              }));
+              setChildrenRows((rows) =>
+                rows.map((r, i) =>
+                  i === 0
+                    ? {
+                        ...r,
+                        childName: f.childName ?? r.childName,
+                        dob: f.dob ?? r.dob,
+                        gender: f.gender ?? r.gender,
+                        classSoughtId: cls?.id ?? r.classSoughtId,
+                        previousSchool: f.previousSchool ?? r.previousSchool,
+                        transportInterest: (f.transportInterest || r.transportInterest) as TransportInterest,
+                      }
+                    : r,
+                ),
+              );
+              setNotice("Fields applied from the pasted text — check before saving");
+              window.setTimeout(() => setNotice(null), 3000);
+            }}
+          />
 
           <p className="text-[12px] text-[var(--muted)]">
             Desk form below is for <strong>walk-in</strong> only. After save,
@@ -1550,13 +2211,33 @@ export function AdmissionsWorkspace() {
               Your role can view admissions but not create enquiries.
             </p>
           ) : (
-            <>
+            <StepTabs
+              aria-label="Walk-in enquiry steps"
+              steps={[
+                {
+                  id: "household",
+                  title: "Household",
+                  what: "Enquiry date, primary mobile (an existing number links siblings), parents, locality and address, and an optional second guardian.",
+                },
+                {
+                  id: "children",
+                  title: "Children & save",
+                  what: "Each child to enquire for (name, class sought…), then Save the enquiry and household.",
+                  badge:
+                    childrenRows.filter((c) => c.childName.trim()).length ||
+                    undefined,
+                },
+              ] satisfies StepDef<EnquiryStep>[]}
+              value={enquiryStep}
+              onChange={setEnquiryStep}
+            >
+              <div className={enquiryStep === "household" ? "" : "hidden"}>
               <MastersWorkCard
                 title="1 · Walk-in household / parents"
                 hint="Primary mobile identifies the family. Matching an existing number links this child as a sibling."
               >
                 <div className="mb-4 flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-[rgba(15,118,110,0.14)] px-2.5 py-1 text-[11px] font-semibold text-[#0f766e]">
+                  <span className="rounded-full bg-[rgba(15,118,110,0.14)] px-2.5 py-1 text-[11px] font-semibold text-[var(--tone-teal)]">
                     Source: Walk-in
                   </span>
                   <Field label="Lead / enquiry date *">
@@ -1583,7 +2264,7 @@ export function AdmissionsWorkspace() {
                       </div>
                     </div>
                   ) : (
-                    <div className="sm:col-span-2 rounded-lg border border-dashed border-[rgba(32,48,80,0.2)] bg-white px-3 py-2 text-[11px] text-[var(--muted)]">
+                    <div className="sm:col-span-2 rounded-lg border border-dashed border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[11px] text-[var(--muted)]">
                       New household will be created (code AHH-####) when you
                       save.
                     </div>
@@ -1668,7 +2349,7 @@ export function AdmissionsWorkspace() {
                     />
                   </Field>
                 </div>
-                <div className="mt-4 border-t border-[rgba(32,48,80,0.08)] pt-3">
+                <div className="mt-4 border-t border-[var(--border)] pt-3">
                   <p className="mb-2 text-[11px] font-semibold text-[var(--brand-deep)]">
                     Optional — another guardian on this household
                   </p>
@@ -1723,7 +2404,9 @@ export function AdmissionsWorkspace() {
                   </div>
                 </div>
               </MastersWorkCard>
+              </div>
 
+              <div className={enquiryStep === "children" ? "space-y-4" : "hidden"}>
               <MastersWorkCard
                 title={`2 · Children (${childrenRows.length})`}
                 hint="Add as many children as needed. Each gets their own enquiry under this household."
@@ -1732,7 +2415,7 @@ export function AdmissionsWorkspace() {
                   {childrenRows.map((row, idx) => (
                     <div
                       key={row.key}
-                      className="rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3"
+                      className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3"
                     >
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <p className="text-[12px] font-semibold text-[var(--brand-deep)]">
@@ -1750,7 +2433,7 @@ export function AdmissionsWorkspace() {
                         {childrenRows.length > 1 ? (
                           <button
                             type="button"
-                            className="text-[11px] font-semibold text-[#b42318]"
+                            className="text-[11px] font-semibold text-[var(--danger)]"
                             onClick={() =>
                               setChildrenRows((rows) =>
                                 rows.filter((r) => r.key !== row.key),
@@ -1849,7 +2532,7 @@ export function AdmissionsWorkspace() {
                   ))}
                   <button
                     type="button"
-                    className="rounded-lg border border-dashed border-[rgba(32,48,80,0.35)] bg-white px-3 py-2 text-[12px] font-semibold text-[var(--brand-deep)] hover:border-[rgba(197,160,40,0.55)]"
+                    className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[12px] font-semibold text-[var(--brand-deep)] hover:border-[rgba(197,160,40,0.55)]"
                     onClick={() =>
                       setChildrenRows((rows) => [...rows, emptyChildRow()])
                     }
@@ -1872,7 +2555,8 @@ export function AdmissionsWorkspace() {
                       : "Save enquiry + household"}
                 </button>
               </div>
-            </>
+              </div>
+            </StepTabs>
           )}
         </div>
       ) : null}
@@ -1897,6 +2581,9 @@ export function AdmissionsWorkspace() {
                 setTab("leads");
                 setFilter("all");
                 setCaptureYearFilter("all");
+                setLeadDateFrom("");
+                setLeadDateTo("");
+                setLocalityQ("");
               }}
             />
           )}
@@ -1927,12 +2614,36 @@ export function AdmissionsWorkspace() {
             );
           })()
         : null}
+      {followUpFor ? (
+        <FollowUpDialog
+          lead={{
+            id: followUpFor.lead.id,
+            enquiryNo: followUpFor.lead.enquiryNo,
+            childName: followUpFor.lead.childName,
+            guardianName: followUpFor.lead.guardianName,
+            mobile: followUpFor.lead.mobile,
+          }}
+          channel={followUpFor.channel}
+          onClose={() => setFollowUpFor(null)}
+          onSave={(draft) => {
+            const cur = loadAdmissions();
+            const r = logFollowUp(cur, followUpFor.lead.id, draft, session.fullName);
+            if (!r.ok) {
+              setNotice(r.reason);
+              window.setTimeout(() => setNotice(null), 3200);
+              return;
+            }
+            commit(r.state, "Follow-up saved");
+            setFollowUpFor(null);
+          }}
+        />
+      ) : null}
     </ErpWorkspaceShell>
   );
 }
 
 const inp =
-  "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
+  "w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm";
 
 function Field({
   label,
@@ -1948,6 +2659,20 @@ function Field({
     </label>
   );
 }
+
+/**
+ * The lead's journey, as the office actually walks it: who the child is, who
+ * the family is, then what is needed to register and admit. The order is the
+ * order of the work, not the order the fields happened to be written in.
+ */
+type LeadStep = "child" | "family" | "registration" | "followup";
+
+const LEAD_STEPS: { id: LeadStep; label: string }[] = [
+  { id: "child", label: "1 · Child" },
+  { id: "family", label: "2 · Family" },
+  { id: "registration", label: "3 · Registration" },
+  { id: "followup", label: "4 · Follow-up" },
+];
 
 function LeadDetail({
   lead,
@@ -2014,6 +2739,108 @@ function LeadDetail({
   const hh = householdOf(state, lead.householdId);
   const siblings = siblingsOfHousehold(state, lead.householdId, lead.id);
   const bucket = leadFollowUpBucket(lead);
+  const likelihood = leadConversionLikelihood(lead);
+  const quality = useMemo(
+    () => leadQuality(lead, engagementCtxFromChat(loadCrmParentChat().threads)),
+    [lead],
+  );
+  const stalled = useMemo(() => stalledLeadFlags(lead, {}), [lead]);
+  const [timelineEvents, setTimelineEvents] = useState<LeadTimelineEvent[]>([]);
+
+  const [aiSuggestion, setAiSuggestion] = useState<
+    { nextAction: string; outreachMessage: string; generationId?: string } | null
+  >(null);
+  function acceptSuggestion() {
+    if (aiSuggestion?.generationId) {
+      reportAiOutcome({ ids: [aiSuggestion.generationId], outcome: "accepted", targetType: "admission_lead", targetId: lead.id });
+      setAiSuggestion({ ...aiSuggestion, generationId: undefined });
+    }
+  }
+  /**
+   * Which step of the lead's journey is on screen.
+   *
+   * This panel was ~1,300 lines in one scroll, so the registration checklist
+   * — the thing that unblocks the Register button — was a thousand lines
+   * below the button itself. Tabs put each decision where its step is, and
+   * the blocker list above links straight to the right one.
+   */
+  const [step, setStep] = useState<LeadStep>("child");
+
+  /** The same rule the guard uses, so the screen cannot promise differently. */
+  const regBlockers = useMemo(
+    () => (lead.stage === "enquiry" ? registrationBlockers(state, lead.id) : []),
+    [state, lead.id, lead.stage],
+  );
+
+  const [aiSuggestionLoading, setAiSuggestionLoading] = useState(false);
+  const [aiSuggestionError, setAiSuggestionError] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    setAiSuggestion(null);
+    setAiSuggestionError(null);
+  }, [lead.id]);
+
+  async function suggestNextAction() {
+    setAiSuggestionLoading(true);
+    setAiSuggestionError(null);
+    setAiSuggestion(null);
+    try {
+      const days = lead.leadDate
+        ? Math.max(
+            0,
+            Math.round(
+              (Date.now() - new Date(`${lead.leadDate}T00:00:00`).getTime()) /
+                86_400_000,
+            ),
+          )
+        : 0;
+      const followUpSummary = lead.followUps
+        .slice(-3)
+        .map(
+          (f) =>
+            `${followUpChannelLabel(f.channel)}: ${followUpOutcomeLabel(f.outcome)}${f.note ? ` (${f.note})` : ""}`,
+        )
+        .join("; ");
+      const res = await fetch("/api/ai/lead-next-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          childName: lead.childName,
+          classSoughtLabel:
+            classes.find((c) => c.id === classId)?.name || "",
+          stageLabel: stageLabel(lead.stage),
+          sourceLabel: sourceLabel(lead.source),
+          daysSinceEnquiry: days,
+          followUpSummary,
+          // The family's own language, or the school's (Hindi) when unset.
+          language: waTemplateLanguageFor({
+            preferredLanguage: lead.preferredLanguage,
+          }),
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        nextAction?: string;
+        outreachMessage?: string;
+      };
+      if (!json.ok || !json.nextAction || !json.outreachMessage) {
+        setAiSuggestionError(json.error || "Suggestion failed");
+        return;
+      }
+      setAiSuggestion({
+        nextAction: json.nextAction,
+        outreachMessage: json.outreachMessage,
+        generationId: (json as { generationId?: string }).generationId,
+      });
+    } catch (e) {
+      setAiSuggestionError(e instanceof Error ? e.message : "Suggestion failed");
+    } finally {
+      setAiSuggestionLoading(false);
+    }
+  }
 
   const [sibName, setSibName] = useState("");
   const [sibDob, setSibDob] = useState("");
@@ -2053,7 +2880,7 @@ function LeadDetail({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-3">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -2070,7 +2897,41 @@ function LeadDetail({
               >
                 {sourceLabel(lead.source)}
               </span>
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
+                  likelihood.tone === "good"
+                    ? "bg-[rgba(21,128,61,0.1)] text-[var(--tone-green)]"
+                    : likelihood.tone === "warn"
+                      ? "bg-[rgba(180,131,0,0.12)] text-[#8a6400]"
+                      : "bg-[rgba(180,35,24,0.1)] text-[var(--danger)]"
+                }`}
+                title="Heuristic estimate from stage, payment, follow-up outcomes, and document completeness — not a guarantee"
+              >
+                {likelihood.label} · {likelihood.score}%
+              </span>
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
+                  quality.quality === "hot"
+                    ? "bg-[var(--danger)]/10 text-[var(--danger)]"
+                    : quality.quality === "warm"
+                      ? "bg-[var(--warning-soft)] text-[var(--warning)]"
+                      : "bg-[var(--surface-sunken)] text-[var(--muted)]"
+                }`}
+                title={
+                  quality.signals.length
+                    ? `Engagement: ${quality.signals.map((x) => x.label).join(" · ")}`
+                    : "No engagement signals yet — warm means unknown, not cold"
+                }
+              >
+                {LEAD_QUALITY_LABEL[quality.quality]} · {quality.score}
+              </span>
             </div>
+            {stalled.length ? (
+              <p className="mt-1 rounded bg-[var(--warning-soft)] px-2 py-1 text-[11px] font-semibold text-[var(--warning)]">
+                Stalled: {stalled[0].label}
+                {stalled.length > 1 ? ` (+${stalled.length - 1})` : ""} — Draft follow-up below uses this as the hook.
+              </p>
+            ) : null}
             <p className="mt-1 font-mono text-[11px] text-[var(--muted)]">
               {lead.enquiryNo}
               {lead.applicationNo ? ` · ${lead.applicationNo}` : ""}
@@ -2083,7 +2944,13 @@ function LeadDetail({
               {lead.stage === "enquiry" ? (
                 <button
                   type="button"
-                  className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-[11px] font-semibold text-white"
+                  disabled={regBlockers.length > 0}
+                  title={
+                    regBlockers.length
+                      ? `Still needed: ${regBlockers.map((b) => b.message).join(" ")}`
+                      : "Move this enquiry to Registered"
+                  }
+                  className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-40"
                   onClick={onRegister}
                 >
                   → Register
@@ -2101,7 +2968,7 @@ function LeadDetail({
               {lead.stage === "verified" || lead.stage === "applied" ? (
                 <button
                   type="button"
-                  className="rounded-lg bg-[#0f766e] px-3 py-1.5 text-[11px] font-semibold text-white"
+                  className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-1.5 text-[11px] font-semibold text-white"
                   onClick={onEnroll}
                 >
                   → Admit to SIS
@@ -2109,7 +2976,7 @@ function LeadDetail({
               ) : null}
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(180,35,24,0.35)] px-3 py-1.5 text-[11px] font-semibold text-[#b42318]"
+                className="rounded-lg border border-[rgba(180,35,24,0.35)] px-3 py-1.5 text-[11px] font-semibold text-[var(--danger)]"
                 onClick={onLost}
               >
                 Mark lost
@@ -2127,7 +2994,7 @@ function LeadDetail({
           ) : null}
         </div>
 
-        <div className="mt-3 grid gap-2 border-t border-[rgba(32,48,80,0.08)] pt-3 sm:grid-cols-2 lg:grid-cols-5 text-[11px]">
+        <div className="mt-3 grid gap-2 border-t border-[var(--border)] pt-3 sm:grid-cols-2 lg:grid-cols-5 text-[11px]">
           <div>
             <div className="text-[var(--muted)]">Lead date / year</div>
             <div className="font-medium text-[var(--brand-deep)]">
@@ -2171,6 +3038,32 @@ function LeadDetail({
           </div>
         </div>
 
+        {/* Why the button is off, said in full and kept on screen. It used to
+            be a three-second flash from the click handler, while the ticks
+            that would clear it sat a thousand lines further down the panel —
+            so a walk-in lead read as a broken button. Each line moves to the
+            step that holds the fix. */}
+        {canEdit && !locked && lead.stage === "enquiry" && regBlockers.length ? (
+          <div className="mt-3 rounded-xl border border-[var(--warning)]/40 bg-[var(--warning-soft)] px-3 py-2">
+            <p className="text-[11px] font-bold text-[var(--warning)]">
+              Before this enquiry can be registered
+            </p>
+            <ul className="mt-1 space-y-0.5">
+              {regBlockers.map((b, i) => (
+                <li key={i} className="text-[11px] text-[var(--brand-deep)]">
+                  <button
+                    type="button"
+                    className="text-left underline decoration-dotted underline-offset-2"
+                    onClick={() => setStep(b.where === "family" ? "family" : b.where === "checklist" ? "registration" : "child")}
+                  >
+                    {b.message}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         {!locked ? (
           <div className="mt-3">
             <SisParentMatchBanner
@@ -2189,7 +3082,7 @@ function LeadDetail({
         />
 
         {canEdit && !locked ? (
-          <div className="mt-3 grid gap-2 border-t border-[rgba(32,48,80,0.08)] pt-3 sm:grid-cols-2">
+          <div className="mt-3 grid gap-2 border-t border-[var(--border)] pt-3 sm:grid-cols-2">
             <Field label="Lead / enquiry date">
               <input
                 type="date"
@@ -2210,7 +3103,7 @@ function LeadDetail({
         ) : null}
 
         {canEdit && !locked ? (
-          <div className="mt-3 border-t border-[rgba(32,48,80,0.08)] pt-3">
+          <div className="mt-3 border-t border-[var(--border)] pt-3">
             <p className="mb-1.5 text-[10px] font-semibold uppercase text-[var(--muted)]">
               Change source
             </p>
@@ -2234,6 +3127,47 @@ function LeadDetail({
         ) : null}
       </div>
 
+      {/* One row of steps instead of one very long scroll. A step carrying an
+          unfinished blocker is marked, so nobody has to open all four to find
+          the one that is holding registration up. */}
+      <div className="flex flex-wrap gap-1.5">
+        {LEAD_STEPS.map((t) => {
+          const pending = regBlockers.filter(
+            (b) => (b.where === "checklist" ? "registration" : b.where) === t.id,
+          ).length;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setStep(t.id)}
+              className={`rounded-lg px-3 py-1.5 text-[11px] font-bold ${
+                step === t.id
+                  ? "bg-[var(--brand-deep)] text-white"
+                  : "border border-[var(--border)] text-[var(--muted)]"
+              }`}
+            >
+              {t.label}
+              {pending ? (
+                <span
+                  className={`ml-1.5 rounded-full px-1.5 ${
+                    step === t.id
+                      ? "bg-white/25"
+                      : "bg-[var(--warning-soft)] text-[var(--warning)]"
+                  }`}
+                  title={`${pending} thing(s) still needed here`}
+                >
+                  {pending}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Two columns from `lg` up: these cards are narrow and were stacking
+          into a scroll several screens long on a desk monitor. */}
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+      {step === "followup" ? (
       <MastersWorkCard
         title="Counsellor / calling agent"
         hint="Assign ownership, log every call or WhatsApp attempt, and set the next follow-up date. Use Due today / Overdue filters in the list."
@@ -2259,7 +3193,7 @@ function LeadDetail({
               </button>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-deep)]"
                 onClick={() => {
                   setAssignDraft(agentName);
                   onAssign(agentName);
@@ -2288,7 +3222,7 @@ function LeadDetail({
         </div>
 
         {canEdit && !locked ? (
-          <div className="rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] p-3">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
             <p className="mb-2 text-[11px] font-semibold text-[var(--brand-deep)]">
               Log follow-up attempt
             </p>
@@ -2343,14 +3277,14 @@ function LeadDetail({
             <div className="mt-2 flex flex-wrap gap-2">
               <button
                 type="button"
-                className="rounded-lg bg-[#0f766e] px-3 py-2 text-[11px] font-semibold text-white"
+                className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-2 text-[11px] font-semibold text-white"
                 onClick={submitFollowUp}
               >
                 Save follow-up
               </button>
               <a
                 href={`tel:${lead.mobile}`}
-                className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-deep)]"
               >
                 Call {lead.mobile || "—"}
               </a>
@@ -2363,7 +3297,7 @@ function LeadDetail({
                       `Hello ${lead.guardianName || "Parent"}, regarding admission enquiry for ${lead.childName || "your child"} at BHB International School.`,
                     )
                   }
-                  className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.05)]"
+                  className="rounded-lg border border-[var(--border)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                 >
                   WhatsApp Business
                 </button>
@@ -2372,53 +3306,152 @@ function LeadDetail({
           </div>
         ) : null}
 
-        <div className="mt-3">
-          <p className="mb-1.5 text-[10px] font-semibold uppercase text-[var(--muted)]">
-            Activity timeline
-          </p>
-          {(lead.followUps || []).length === 0 ? (
-            <p className="text-[12px] text-[var(--muted)]">
-              No follow-ups yet — calling agent should log the first contact.
+        {masters ? (
+          <div className="mt-3">
+            <p className="text-[10px] font-semibold uppercase text-[var(--muted)]">
+              Documents · AI drafted on letterhead
             </p>
-          ) : (
-            <ul className="space-y-2">
-              {lead.followUps.map((f) => (
-                <li
-                  key={f.id}
-                  className="rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2 text-[12px]"
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {(
+                [
+                  ["admission_offer", "Offer letter"],
+                  ["fee_structure_letter", "Fee structure"],
+                  ["welcome_packet", "Welcome packet"],
+                  ...(pendingDocumentsForLead(lead).length ? ([["admission_deficiency", "Documents pending letter"]] as const) : []),
+                ] as const
+              ).map(([type, label]) => (
+                <Link
+                  key={type}
+                  href={admissionDocumentHref(
+                    type,
+                    buildAdmissionDocumentDetails({
+                      type,
+                      lead,
+                      masters,
+                      className: classes.find((c) => c.id === classId)?.name || "",
+                    }),
+                  )}
+                  className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)]"
                 >
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="font-semibold text-[var(--brand-deep)]">
-                      {followUpChannelLabel(f.channel)} ·{" "}
-                      {followUpOutcomeLabel(f.outcome)}
-                    </span>
-                    <span className="text-[10px] text-[var(--muted)]">
-                      {f.at.slice(0, 16).replace("T", " ")}
-                      {f.by ? ` · ${f.by}` : ""}
-                    </span>
-                  </div>
-                  {f.note ? (
-                    <p className="mt-0.5 text-[var(--brand-deep)]">{f.note}</p>
-                  ) : null}
-                  {f.nextFollowUpAt ? (
-                    <p className="mt-0.5 text-[10px] text-[var(--muted)]">
-                      Next: {f.nextFollowUpAt.slice(0, 10)}
-                    </p>
-                  ) : null}
-                </li>
+                  {label} →
+                </Link>
               ))}
-            </ul>
-          )}
-        </div>
-      </MastersWorkCard>
+            </div>
+          </div>
+        ) : null}
 
-      {hh ? (
+        {canEdit && !locked ? (
+          <div className="mt-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] font-semibold uppercase text-[var(--muted)]">
+                AI suggestion
+              </p>
+
+              <button
+                type="button"
+                disabled={aiSuggestionLoading}
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                onClick={() => void suggestNextAction()}
+              >
+                {aiSuggestionLoading
+                  ? "Thinking…"
+                  : aiSuggestion
+                    ? "Re-suggest"
+                    : "Suggest next action"}
+              </button>
+            </div>
+            {aiSuggestionError ? (
+              <p className="mt-1 text-[11px] text-[var(--danger)]">
+                {aiSuggestionError}
+              </p>
+            ) : null}
+            {aiSuggestion ? (
+              <div className="mt-2 space-y-2">
+                <div className="rounded-lg bg-[var(--surface)] p-2.5">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                    Next action
+                  </span>
+                  <p className="mt-1 text-[12px] font-medium text-[var(--brand-deep)]">
+                    {aiSuggestion.nextAction}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-[var(--surface)] p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                      Outreach message
+                    </span>
+                    <button
+                      type="button"
+                      className="text-[10px] font-semibold text-[var(--brand-deep)] underline"
+                      onClick={() =>
+                        void navigator.clipboard
+                          .writeText(aiSuggestion.outreachMessage)
+                          .then(
+                            () => {
+                              acceptSuggestion();
+                              pushToast({
+                                kind: "success",
+                                message: "Outreach message copied",
+                              });
+                            },
+                            () =>
+                              pushToast({
+                                kind: "error",
+                                message: "Could not copy",
+                              }),
+                          )
+                      }
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  <p className="mt-1 whitespace-pre-wrap text-[12px] text-[var(--ink)]">
+                    {aiSuggestion.outreachMessage}
+                  </p>
+                  {lead.mobile ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        acceptSuggestion();
+                        openWaMe(lead.mobile, aiSuggestion.outreachMessage);
+                      }}
+                      className="mt-2 rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+                    >
+                      Open in WhatsApp
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {canEdit && !locked ? (
+          <LeadFollowupDraftPanel
+            lead={lead}
+            classLabel={classes.find((c) => c.id === classId)?.name || ""}
+            counsellorName={agentName}
+            registerUrl={publicRegisterAbsoluteUrl("counsellor")}
+            hook={stalled[0]?.hook || ""}
+            touchpoints={timelineTouchpoints(timelineEvents, 5)}
+            canEdit={canEdit}
+            onLogFollowUp={(input) => onLogFollowUp(input)}
+            onFlash={(message) => pushToast({ kind: "success", message })}
+            onError={(message) => pushToast({ kind: "error", message })}
+          />
+        ) : null}
+
+        <LeadTimeline lead={lead} onEvents={setTimelineEvents} />
+      </MastersWorkCard>
+      ) : null}
+
+      {hh && step === "family" ? (
         <MastersWorkCard
           title={`Household ${hh.code}`}
           hint="One family card — many guardians, many child enquiries. Enroll shares one SIS household."
         >
           <div className="mb-3 grid gap-2 sm:grid-cols-2">
-            <div className="rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2 text-[12px]">
+            <div className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-[12px]">
               <div className="text-[10px] font-semibold uppercase text-[var(--muted)]">
                 Guardians
               </div>
@@ -2441,7 +3474,7 @@ function LeadDetail({
                 )}
               </ul>
             </div>
-            <div className="rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2 text-[12px]">
+            <div className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-[12px]">
               <div className="text-[10px] font-semibold uppercase text-[var(--muted)]">
                 Children / enquiries
               </div>
@@ -2477,7 +3510,7 @@ function LeadDetail({
           </div>
 
           {canEdit ? (
-            <div className="grid gap-3 border-t border-[rgba(32,48,80,0.08)] pt-3 sm:grid-cols-2">
+            <div className="grid gap-3 border-t border-[var(--border)] pt-3 sm:grid-cols-2">
               <div>
                 <p className="mb-2 text-[11px] font-semibold text-[var(--brand-deep)]">
                   + Add sibling (same household)
@@ -2583,7 +3616,7 @@ function LeadDetail({
                   </label>
                   <button
                     type="button"
-                    className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-1.5 text-[11px] font-semibold text-[var(--brand-deep)]"
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[11px] font-semibold text-[var(--brand-deep)]"
                     onClick={() => {
                       onAddGuardian({
                         fullName: gName,
@@ -2605,12 +3638,44 @@ function LeadDetail({
         </MastersWorkCard>
       ) : null}
 
+      {step === "child" ? (
       <MastersWorkCard title="Child & class">
         {!locked && canEdit ? (
           <div className="mb-3">
             <AdmissionDocOcrPanel
               disabled={locked || !canEdit}
               onApply={(patch) => onPatch(patch)}
+              onApplyApplication={(f) => {
+                // Only overwrite with what the form actually says; class by name match.
+                const cls = f.classSought
+                  ? classes.find(
+                      (c) => c.name.trim().toLowerCase() === f.classSought.trim().toLowerCase(),
+                    )
+                  : undefined;
+                const patch: Partial<AdmissionLead> = {};
+                if (f.studentName) patch.childName = f.studentName;
+                if (f.dob) patch.dob = f.dob;
+                if (f.gender) patch.gender = f.gender;
+                if (cls) patch.classSoughtId = cls.id;
+                if (f.fatherName || f.guardianName) patch.guardianName = f.guardianName || f.fatherName;
+                if (f.motherName) patch.motherName = f.motherName;
+                if (f.mobile) patch.mobile = f.mobile;
+                if (f.email) patch.email = f.email;
+                if (f.address) patch.address = f.address;
+                if (f.pincode) patch.pincode = f.pincode;
+                if (f.previousSchool) patch.previousSchool = f.previousSchool;
+                if (f.category) patch.category = f.category;
+                if (f.aadhaarLast4) {
+                  patch.docsAadhaar = true;
+                  patch.registrationFeeNote = [lead.registrationFeeNote, `Aadhaar ····${f.aadhaarLast4} (from form)`]
+                    .filter(Boolean)
+                    .join(" · ");
+                }
+                if (f.classSought && !cls) {
+                  patch.campaignNote = [lead.campaignNote, `Form says class: ${f.classSought}`].filter(Boolean).join(" · ");
+                }
+                onPatch(patch);
+              }}
             />
           </div>
         ) : null}
@@ -2720,7 +3785,137 @@ function LeadDetail({
           </Field>
         </div>
       </MastersWorkCard>
+      ) : null}
 
+      {step === "child" ? (
+      <MastersWorkCard title="Family preferences & attribution">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Language for school messages">
+            <select
+              className={inp}
+              disabled={locked || !canEdit}
+              value={lead.preferredLanguage}
+              onChange={(e) => onPatch({ preferredLanguage: e.target.value })}
+            >
+              <option value="">Not asked</option>
+              {HOUSEHOLD_LANGUAGES.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.label} · {l.native}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Previous board (Class VI+)">
+            <select
+              className={inp}
+              disabled={locked || !canEdit}
+              value={lead.previousBoard}
+              onChange={(e) => onPatch({ previousBoard: e.target.value })}
+            >
+              <option value="">Not asked</option>
+              {PREVIOUS_BOARDS.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <div className="sm:col-span-2">
+            <span className="mb-1 block text-[11px] text-[var(--muted)]">What matters most to the family</span>
+            <div className="flex flex-wrap gap-1.5">
+              {LEAD_CONCERNS.map((c) => {
+                const on = lead.concerns.includes(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    disabled={locked || !canEdit}
+                    className={`rounded-full border px-2 py-0.5 text-[11px] ${on ? "border-[var(--brand-deep)] bg-[var(--brand-deep)] text-white" : "border-[var(--border)] text-[var(--muted)]"}`}
+                    onClick={() =>
+                      onPatch({ concerns: on ? lead.concerns.filter((x) => x !== c.id) : [...lead.concerns, c.id] })
+                    }
+                  >
+                    {c.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <Field label="Campaign id (attribution)">
+            <input
+              className={inp}
+              disabled={locked || !canEdit}
+              value={lead.campaignId}
+              onChange={(e) => onPatch({ campaignId: e.target.value.trim().slice(0, 80) })}
+              placeholder="from the ad / link, blank = unknown"
+            />
+          </Field>
+          <Field label="Referred by (parent referral code)">
+            <input
+              className={inp}
+              disabled={locked || !canEdit}
+              value={lead.referralCode}
+              placeholder="BHB-XXXX-000"
+              onChange={(e) => {
+                const code = e.target.value.toUpperCase();
+                const hh = resolveReferralCode(code, sis.households);
+                onPatch({ referralCode: code, referredByHouseholdId: hh || lead.referredByHouseholdId, ...(hh ? { source: "referral" } : {}) });
+              }}
+            />
+            {lead.referredByHouseholdId ? (
+              (() => {
+                const h = sis.households.find(
+                  (x) => x.id === lead.referredByHouseholdId,
+                );
+                // One row per child, this session — "their wards" used to
+                // repeat a name once per year the child had been enrolled.
+                const kids = childrenOfHousehold(
+                  sis,
+                  lead.referredByHouseholdId,
+                  currentAcademicYearCode(),
+                );
+                return (
+                  <p className="mt-0.5 text-[10px] text-[var(--muted)]">
+                    → <span className="font-semibold text-[var(--brand-deep)]">
+                      {h?.guardianName || lead.referredByHouseholdId}
+                    </span>
+                    {h ? ` · ${referralCodeFor(h)}` : ""}
+                    {h?.mobile ? ` · ${h.mobile}` : ""}
+                    {kids.length > 0 ? (
+                      <>
+                        <br />
+                        Their ward{kids.length > 1 ? "s" : ""}:{" "}
+                        {kids
+                          .map(
+                            (k) =>
+                              `${k.fullName} (${
+                                masters?.classes.find((c) => c.id === k.classId)
+                                  ?.name ?? "—"
+                              }, ${k.admissionNo})`,
+                          )
+                          .join(" · ")}{" "}
+                        — the referral discount lands on this child&apos;s fees.
+                      </>
+                    ) : null}
+                  </p>
+                );
+              })()
+            ) : lead.referralCode ? (
+              <p className="mt-0.5 text-[10px] text-[var(--warning)]">Code not matched to an enrolled household yet.</p>
+            ) : null}
+          </Field>
+          <Field label="Consent (DPDP)">
+            <p className="rounded-lg border border-[var(--border)] px-2 py-1.5 text-xs">
+              {lead.parentConsentAt
+                ? `Given ${new Date(lead.parentConsentAt).toLocaleString("en-IN")}${lead.parentConsentBy ? ` · ${lead.parentConsentBy}` : ""}`
+                : "Not recorded — ask before marketing messages"}
+            </p>
+          </Field>
+        </div>
+      </MastersWorkCard>
+      ) : null}
+
+      {step === "family" ? (
       <MastersWorkCard title="Parents & address (synced from household)">
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Primary guardian / father">
@@ -2805,7 +4000,9 @@ function LeadDetail({
           </Field>
         </div>
       </MastersWorkCard>
+      ) : null}
 
+      {step === "registration" ? (
       <MastersWorkCard
         title="Registration checklist"
         hint="Required before moving enquiry → Registered"
@@ -2837,6 +4034,13 @@ function LeadDetail({
             </label>
           ))}
         </div>
+        {pendingDocumentsForLead(lead).length ? (
+          <p className="mt-2 rounded bg-[var(--warning-soft)] px-2 py-1 text-[11px] text-[var(--warning)]">
+            Still due: {pendingDocumentsForLead(lead).join(" · ")} — send the &ldquo;Documents pending letter&rdquo; from the lead header.
+          </p>
+        ) : (
+          <p className="mt-2 text-[11px] text-[var(--success)]">Documents complete.</p>
+        )}
         {lead.rte ? (
           <Field label="Govt RTE application no. (official list)">
             <input
@@ -2862,6 +4066,8 @@ function LeadDetail({
           />
         </Field>
       </MastersWorkCard>
+      ) : null}
+      </div>
     </div>
   );
 }

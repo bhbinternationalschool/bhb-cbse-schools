@@ -18,9 +18,12 @@ import { deskSliceDef, deskSliceEnvReadFromDb } from "@/lib/deskSliceRegistry";
 import {
   hydrateDeskSliceFromDb,
   scheduleDeskSliceSync,
+  rememberDeskSliceKnownIds,
+  captureDeskSliceRevs,
 } from "@/lib/deskSliceNormalizedClient";
 import { mergeDeskSliceBundle } from "@/lib/deskSliceMerge";
 import { pushDeskSliceToDb } from "@/lib/deskSliceNormalized.server";
+import { trackServerWork } from "@/lib/serverWork";
 
 export function createDeskSlicePersistence<T extends { version: number }>(opts: {
   moduleId: DeskModuleId;
@@ -56,7 +59,7 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
 
   function scheduleSync(state: T) {
     if (typeof window === "undefined") {
-      void pushRemoteServer(state);
+      void trackServerWork(pushRemoteServer(state));
       return;
     }
     if (!deskSkipBlobPushClient(opts.moduleId)) blob.scheduleSync(state);
@@ -68,10 +71,12 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
 
   async function pushRemoteServer(
     state: T,
+    pushOpts?: { deletes?: Record<string, readonly string[]> },
   ): Promise<{ ok: boolean; error?: string }> {
     const desk = await pushDeskSliceToDb(
       opts.moduleId,
       state as T & Record<string, unknown>,
+      pushOpts?.deletes ? { deletes: pushOpts.deletes } : undefined,
     );
     if (!desk.ok) return { ok: false, error: desk.error };
 
@@ -88,7 +93,6 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
 
   async function ensureHydrated(): Promise<boolean> {
     if (isDeskHydrated(opts.moduleId)) return false;
-    markDeskHydrated(opts.moduleId);
 
     const readFromDb = readFromDbEnabled();
     const blobChanged = deskSkipBlobHydrateClient(opts.moduleId)
@@ -96,18 +100,41 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
       : await blob.ensureHydrated();
 
     let normChanged = false;
-    const { bundle, changed } = await hydrateDeskSliceFromDb(
+    const { bundle, changed, ok, server } = await hydrateDeskSliceFromDb(
       opts.moduleId,
       readFromDb,
     );
+    if (!ok) return false;
+
+    markDeskHydrated(opts.moduleId);
     if (changed && (opts.hasRemoteData(bundle) || readFromDb)) {
       opts.writeLocalRaw(
         mergeDeskSliceBundle(opts.loadLocal(), bundle, { preferDb: readFromDb }),
       );
       normChanged = true;
     }
+    // What the server holds, as of this load: a later save that drops one
+    // of these rows deleted it (deskSliceNormalizedClient names it).
+    rememberDeskSliceKnownIds(
+      opts.moduleId,
+      opts.loadLocal() as unknown as Record<string, unknown>,
+    );
+    // And each row's server version, against this browser's copy of it.
+    captureDeskSliceRevs(
+      opts.moduleId,
+      server,
+      opts.loadLocal() as unknown as Record<string, unknown>,
+    );
 
-    if (normChanged) scheduleSync(opts.loadLocal());
+    // Hydration must never push. Writing the merged local copy straight back
+    // is how a client with a stale cache overwrites the desk on every
+    // navigation: Cloud Run logs showed one device POSTing rbac,
+    // module_registry, erp_chat, news, gallery, comms and curriculum within
+    // two seconds of each page load, republishing whatever it happened to
+    // hold. When the desk is the source of truth the client is a cache, so
+    // local state reaches the DB only through an explicit save. This mirrors
+    // the guard already applied to masters and admissions.
+    if (normChanged && !readFromDb) scheduleSync(opts.loadLocal());
     return blobChanged || normChanged;
   }
 

@@ -1,19 +1,28 @@
 "use client";
-
 import { useEffect, useMemo, useState } from "react";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 import Link from "next/link";
 import { Accessibility } from "lucide-react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { isModuleEnabled, setModuleEnabled } from "@/lib/moduleRegistry";
 import { loadSis, type SisState } from "@/lib/sis";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
+import { visibleModuleTabs } from "@/lib/rbac";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 import {
   applicationStatusLabel,
   assignLotteryNumbers,
+  assignRteToStudent,
   deleteQuotaApplication,
   deleteQuotaSeat,
   formatPortalDob,
@@ -25,8 +34,11 @@ import {
   matrixFromGovtAllottedSeatFile,
   quotaTypeLabel,
   registrationFeeLabel,
+  removeRteFromStudent,
   RTE_REPORTS,
+  rteWaivedHeadIds,
   runRteReport,
+  setRteHeadWaiver,
   saveRteSettings,
   seedQuotaSeatsFromStrength,
   seedRteIfEmpty,
@@ -43,9 +55,13 @@ import {
   type RteReportId,
   type RteState,
 } from "@/lib/rteEws";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import type { RowAction } from "@/components/ui/erp-grid";
 
 type RteTab =
   | "dashboard"
+  | "kpis"
   | "applications"
   | "enrolled"
   | "settings"
@@ -53,6 +69,7 @@ type RteTab =
 
 const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Seats", tone: "navy" },
+  { id: "kpis", label: "Dashboard", tone: "sky" },
   { id: "applications", label: "Govt list", tone: "teal" },
   { id: "enrolled", label: "Enrolled", tone: "green" },
   { id: "settings", label: "Settings", tone: "amber" },
@@ -69,6 +86,7 @@ export function RteWorkspace({
   const ay = session.academicYearCode || DEFAULT_AY;
   const [tab, setTab] = useModuleTabQuery<RteTab>("dashboard", [
     "dashboard",
+    "kpis",
     "applications",
     "enrolled",
     "settings",
@@ -95,6 +113,11 @@ export function RteWorkspace({
   const [appGovtNo, setAppGovtNo] = useState("");
   const [govtImportRaw, setGovtImportRaw] = useState("");
   const [defaultRegFeeRs, setDefaultRegFeeRs] = useState("500");
+
+  const [assignClassId, setAssignClassId] = useState("");
+  const [assignSectionId, setAssignSectionId] = useState("");
+  const [assignStudentId, setAssignStudentId] = useState("");
+  const [expandedStudentId, setExpandedStudentId] = useState("");
 
   const [mandatedPct, setMandatedPct] = useState(25);
   const [autoWaiver, setAutoWaiver] = useState(true);
@@ -127,8 +150,11 @@ export function RteWorkspace({
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensureRteHydrated } = await import("@/lib/rtePersistence");
-      await ensureRteHydrated();
+      const [{ ensureRteHydrated }, { withHydrationSlot }] = await Promise.all([
+        import("@/lib/rtePersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      await withHydrationSlot(() => ensureRteHydrated());
       refresh();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -138,6 +164,18 @@ export function RteWorkspace({
     () => (masters?.classes ?? []).filter((c) => c.isActive !== false),
     [masters],
   );
+
+  // Someone holding only some RTE functions (director, 6 Oct 2026 — e.g.
+  // Govt list & admissions) sees only their tabs.
+  const shownTabs = useMemo(
+    () => (masters ? visibleModuleTabs(TABS, session, masters, "rte") : TABS),
+    [session, masters],
+  );
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as RteTab);
+    }
+  }, [shownTabs, tab, setTab]);
 
   const seatRows = useMemo(
     () => (state && masters && sis ? listQuotaSeatRows(state, ay, masters, sis) : []),
@@ -151,7 +189,50 @@ export function RteWorkspace({
     );
   }, [state, ay]);
 
+  // The allotted list: by lottery number as the portal sends it, or by name/class/status to find one child. S.No. is a running count, and the last two columns are actions.
+  const rteSort = useTableSort(
+    apps,
+    {
+      lottery: (a) => a.lotteryNo,
+      regId: (a) => a.govtApplicationNo,
+      student: (a) => a.childName,
+      father: (a) => a.parentName,
+      klass: (a) => a.classId,
+      gender: (a) => a.gender,
+      dob: (a) => a.dateOfBirth,
+      block: (a) => a.blockTown,
+      ward: (a) => a.gramPanchayatWard,
+      portalStatus: (a) => a.portalAdmissionStatus,
+      schoolStatus: (a) => a.status,
+    },
+    "lottery",
+    "asc",
+  );
+
   const enrolled = useMemo(() => listEnrolledRteStudents(sis ?? undefined), [sis]);
+
+  const activeFeeHeads = useMemo(
+    () =>
+      (masters?.feeHeads ?? [])
+        .filter((h) => h.isActive !== false)
+        .slice()
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.nameEn.localeCompare(b.nameEn)),
+    [masters],
+  );
+
+  const assignableStudents = useMemo(() => {
+    if (!sis || !assignClassId) return [];
+    return sis.students
+      .filter(
+        (s) =>
+          s.status === "active" &&
+          s.classId === assignClassId &&
+          (!assignSectionId || s.sectionId === assignSectionId) &&
+          s.studentType !== "RTE" &&
+          (s.academicYearCode || ay) === ay,
+      )
+      .sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }, [sis, assignClassId, assignSectionId, ay]);
 
   const fillSummary = useMemo(() => {
     const total = seatRows.reduce((s, r) => s + r.total, 0);
@@ -182,6 +263,36 @@ export function RteWorkspace({
     );
   }
 
+  /**
+   * Quota seats as a table. Filled, remaining, what SIS says and what was
+   * allotted are four numbers that only mean anything next to each other,
+   * and they were packed into one grey line where no column could be added
+   * up or sorted.
+   */
+  const seatCols: DataTableColumn<(typeof seatRows)[number]>[] = [
+    { key: "class", header: "Class", sortable: true, value: (r) => r.className },
+    { key: "type", header: "Quota", sortable: true, value: (r) => quotaTypeLabel(r.type) },
+    { key: "total", header: "Seats", align: "right", sortable: true, value: (r) => r.total },
+    { key: "filled", header: "Filled", align: "right", sortable: true, value: (r) => r.filled },
+    { key: "remaining", header: "Left", align: "right", sortable: true, value: (r) => r.remaining },
+    { key: "enrolled", header: "In SIS", align: "right", sortable: true, value: (r) => r.enrolled },
+    { key: "allotted", header: "Allotted", align: "right", sortable: true, value: (r) => r.allotted },
+  ];
+
+  const seatActions: RowAction<(typeof seatRows)[number]>[] = [
+    {
+      id: "remove", label: "Remove", tone: "danger",
+      onSelect: (row) => {
+        const r = deleteQuotaSeat(row.id);
+        if (!r.ok) setError(r.error);
+        else {
+          refresh();
+          flash("Removed");
+        }
+      },
+    },
+  ];
+
   return (
     <ErpWorkspaceShell
       embedded={embedded}
@@ -208,13 +319,13 @@ export function RteWorkspace({
       }
       toolbar={
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
             <p className="text-[11px] text-[var(--muted)]">Mandated seats</p>
             <p className="text-xl font-semibold text-[var(--brand-deep)]">
               {fillSummary.total}
             </p>
           </div>
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
             <p className="text-[11px] text-[var(--muted)]">Filled</p>
             <p className="text-xl font-semibold text-[var(--brand-deep)]">
               {fillSummary.filled}{" "}
@@ -223,7 +334,7 @@ export function RteWorkspace({
               </span>
             </p>
           </div>
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
             <p className="text-[11px] text-[var(--muted)]">
               Assigned · not admitted
             </p>
@@ -242,14 +353,14 @@ export function RteWorkspace({
       }
     >
       <ModuleTabs
-        items={TABS}
+        items={shownTabs}
         value={tab}
         onChange={(id) => setTab(id as RteTab)}
       />
 
       {tab === "dashboard" ? (
         <section className="mt-4 space-y-4">
-          <div className="flex flex-wrap gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="flex flex-wrap gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <label className="text-xs text-[var(--muted)]">
               Class
               <select
@@ -328,50 +439,32 @@ export function RteWorkspace({
             </button>
           </div>
 
-          <ul className="space-y-2">
-            {seatRows.length === 0 ? (
-              <li className="text-sm text-[var(--muted)]">
-                No seat rows yet — seed from strength or add manually.
-              </li>
-            ) : (
-              seatRows.map((row) => (
-                <li
-                  key={row.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3"
-                >
-                  <div>
-                    <p className="text-sm font-semibold text-[var(--brand-deep)]">
-                      {row.className} · {quotaTypeLabel(row.type)}
-                    </p>
-                    <p className="text-xs text-[var(--muted)]">
-                      {row.filled}/{row.total} filled · {row.remaining} left ·
-                      SIS {row.enrolled} · allotted {row.allotted}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="text-xs text-[#b42318] underline"
-                    onClick={() => {
-                      const r = deleteQuotaSeat(row.id);
-                      if (!r.ok) setError(r.error);
-                      else {
-                        refresh();
-                        flash("Removed");
-                      }
-                    }}
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))
-            )}
-          </ul>
+          <DataTable
+            columns={seatCols}
+            rows={seatRows}
+            rowKey={(r) => r.id}
+            rowActions={seatActions}
+            rowActionsLabel="Seat row actions"
+            minWidth="min-w-[720px]"
+            exportFileBaseName="rte-quota-seats"
+            exportTitle="RTE / EWS quota seats"
+            emptyTitle="No seat rows yet — seed from strength or add manually."
+          />
         </section>
+      ) : null}
+
+      {tab === "kpis" ? (
+        <div className="mt-4">
+          <ModuleDashboardHost
+            moduleId="rte"
+            onNavigateTab={(t) => setTab(t as RteTab)}
+          />
+        </div>
       ) : null}
 
       {tab === "applications" ? (
         <section className="mt-4 space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-[rgba(14,90,140,0.06)] px-4 py-3 text-sm text-[var(--brand-deep)]">
+          <div className="rounded-xl border border-[var(--border)] bg-[rgba(14,90,140,0.06)] px-4 py-3 text-sm text-[var(--brand-deep)]">
             <p className="font-semibold">Govt list ≠ admission</p>
             <p className="mt-1 text-[12px] text-[var(--muted)]">
               Import the official list assigned to this school. Status stays
@@ -381,7 +474,7 @@ export function RteWorkspace({
             </p>
           </div>
 
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               Import govt AllottedSeat list
             </h2>
@@ -518,7 +611,7 @@ export function RteWorkspace({
             </details>
           </div>
 
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               Add one (govt assigned)
             </h2>
@@ -650,51 +743,29 @@ export function RteWorkspace({
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-[rgba(32,48,80,0.1)] bg-white">
+          <ErpTableShell className="overflow-x-auto">
             {apps.length === 0 ? (
               <p className="px-4 py-6 text-sm text-[var(--muted)]">
                 No govt-assigned candidates yet — import AllottedSeat.xls.
               </p>
             ) : (
-              <table className="min-w-[1100px] w-full border-collapse text-left text-xs">
-                <thead>
-                  <tr className="border-b border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.04)] text-[11px] text-[var(--muted)]">
+              <ErpTable minWidth="min-w-[1100px]" className="border-collapse text-xs">
+                <ErpTableHead>
+                  <tr>
                     <th className="whitespace-nowrap px-2 py-2 font-medium">
                       S.No.
                     </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Lottery No
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Registration ID
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Student Name
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Father Name
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Class
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Gender
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      DOB
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Block/Town
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Grampanchayat/Ward
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      Admission Status (portal)
-                    </th>
-                    <th className="whitespace-nowrap px-2 py-2 font-medium">
-                      School status
-                    </th>
+                    <ErpSortTh sort={rteSort} field="lottery" className="whitespace-nowrap px-2 py-2 font-medium">Lottery No</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="regId" className="whitespace-nowrap px-2 py-2 font-medium">Registration ID</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="student" className="whitespace-nowrap px-2 py-2 font-medium">Student Name</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="father" className="whitespace-nowrap px-2 py-2 font-medium">Father Name</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="klass" className="whitespace-nowrap px-2 py-2 font-medium">Class</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="gender" className="whitespace-nowrap px-2 py-2 font-medium">Gender</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="dob" className="whitespace-nowrap px-2 py-2 font-medium">DOB</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="block" className="whitespace-nowrap px-2 py-2 font-medium">Block/Town</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="ward" className="whitespace-nowrap px-2 py-2 font-medium">Grampanchayat/Ward</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="portalStatus" className="whitespace-nowrap px-2 py-2 font-medium">Admission Status (portal)</ErpSortTh>
+                    <ErpSortTh sort={rteSort} field="schoolStatus" className="whitespace-nowrap px-2 py-2 font-medium">School status</ErpSortTh>
                     <th className="whitespace-nowrap px-2 py-2 font-medium">
                       Reg. fee
                     </th>
@@ -702,9 +773,9 @@ export function RteWorkspace({
                       Take admission
                     </th>
                   </tr>
-                </thead>
-                <tbody>
-                  {apps.map((a, i) => (
+                </ErpTableHead>
+                <ErpTableBody>
+                  {rteSort.rows.map((a, i) => (
                     <AppTableRow
                       key={a.id}
                       app={a}
@@ -720,50 +791,222 @@ export function RteWorkspace({
                       onError={setError}
                     />
                   ))}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable>
             )}
-          </div>
+          </ErpTableShell>
         </section>
       ) : null}
 
       {tab === "enrolled" ? (
-        <section className="mt-4">
-          <p className="mb-2 text-sm text-[var(--muted)]">
-            Active SIS students with fee type RTE or category EWS (from
-            Admissions / Students).
+        <section className="mt-4 space-y-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+            <h3 className="text-sm font-bold text-[var(--brand-deep)]">
+              Assign RTE to an existing SIS student
+            </h3>
+            <p className="mt-0.5 text-xs text-[var(--muted)]">
+              Filter by class &amp; section, pick the student — fee type
+              becomes RTE, the RTE tag is added, and the RTE fee group applies.
+            </p>
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="block text-xs text-[var(--muted)]">
+                Class
+                <select
+                  className={`${field} mt-1 block w-36`}
+                  value={assignClassId}
+                  onChange={(e) => {
+                    setAssignClassId(e.target.value);
+                    setAssignSectionId("");
+                    setAssignStudentId("");
+                  }}
+                >
+                  <option value="">Select class</option>
+                  {classes.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-xs text-[var(--muted)]">
+                Section
+                <select
+                  className={`${field} mt-1 block w-32`}
+                  value={assignSectionId}
+                  onChange={(e) => {
+                    setAssignSectionId(e.target.value);
+                    setAssignStudentId("");
+                  }}
+                >
+                  <option value="">All sections</option>
+                  {(masters.sections ?? [])
+                    .filter(
+                      (s) => s.classId === assignClassId && s.isActive !== false,
+                    )
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className="block text-xs text-[var(--muted)]">
+                Student
+                <select
+                  className={`${field} mt-1 block w-64`}
+                  value={assignStudentId}
+                  onChange={(e) => setAssignStudentId(e.target.value)}
+                >
+                  <option value="">
+                    {assignClassId ? "Select student" : "Choose class first"}
+                  </option>
+                  {assignableStudents.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.fullName} · {s.admissionNo}
+                      {s.fatherName ? ` · ${s.fatherName}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className={btn}
+                disabled={!assignStudentId}
+                onClick={() => {
+                  const r = assignRteToStudent({
+                    studentId: assignStudentId,
+                    by: session.fullName,
+                  });
+                  if (!r.ok) {
+                    setError(r.error);
+                    return;
+                  }
+                  setAssignStudentId("");
+                  refresh();
+                  flash(`${r.student.fullName} is now RTE`);
+                }}
+              >
+                Assign RTE
+              </button>
+            </div>
+          </div>
+
+          <p className="text-sm text-[var(--muted)]">
+            Active SIS students with fee type RTE or category EWS. Tick the fee
+            heads the school will still charge — an unticked head is waived
+            100% for that student (applied automatically at Fee Take).
           </p>
           <ul className="space-y-2">
             {enrolled.length === 0 ? (
               <li className="text-sm text-[var(--muted)]">
-                None yet — enroll with RTE flag in Admissions.
+                None yet — assign above or enroll with RTE flag in Admissions.
               </li>
             ) : (
-              enrolled.map((s) => (
-                <li
-                  key={s.id}
-                  className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3 text-sm"
-                >
-                  <span className="font-semibold text-[var(--brand-deep)]">
-                    {s.fullName}
-                  </span>
-                  <span className="text-[var(--muted)]">
-                    {" "}
-                    ·{" "}
-                    {masters.classes.find((c) => c.id === s.classId)?.name ||
-                      "—"}{" "}
-                    · {s.studentType}
-                    {s.category ? ` · ${s.category}` : ""}
-                  </span>
-                </li>
-              ))
+              enrolled.map((s) => {
+                const waived = rteWaivedHeadIds(masters, s.id);
+                const open = expandedStudentId === s.id;
+                return (
+                  <li
+                    key={s.id}
+                    className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="font-semibold text-[var(--brand-deep)]">
+                          {s.fullName}
+                        </span>
+                        <span className="text-[var(--muted)]">
+                          {" "}
+                          ·{" "}
+                          {masters.classes.find((c) => c.id === s.classId)
+                            ?.name || "—"}{" "}
+                          · {s.studentType}
+                          {s.category ? ` · ${s.category}` : ""}
+                          {waived.size > 0
+                            ? ` · ${waived.size} head${waived.size === 1 ? "" : "s"} waived`
+                            : ""}
+                        </span>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          className={btnOutline}
+                          onClick={() =>
+                            setExpandedStudentId(open ? "" : s.id)
+                          }
+                        >
+                          {open ? "Hide fee heads" : "Fee heads"}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#dc2626] hover:bg-[#dc2626]/10"
+                          onClick={() => {
+                            if (
+                              !window.confirm(
+                                `Remove RTE from ${s.fullName}? Fee type reverts and all RTE head waivers are dropped.`,
+                              )
+                            ) {
+                              return;
+                            }
+                            const r = removeRteFromStudent({
+                              studentId: s.id,
+                              by: session.fullName,
+                            });
+                            if (!r.ok) {
+                              setError(r.error);
+                              return;
+                            }
+                            refresh();
+                            flash(`RTE removed from ${s.fullName}`);
+                          }}
+                        >
+                          Remove RTE
+                        </button>
+                      </div>
+                    </div>
+                    {open ? (
+                      <div className="mt-3 grid grid-cols-1 gap-1.5 border-t border-[var(--border)] pt-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {activeFeeHeads.map((h) => {
+                          const charged = !waived.has(h.id);
+                          return (
+                            <label
+                              key={h.id}
+                              className="flex items-center gap-2 text-sm text-[var(--brand-deep)]"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={charged}
+                                onChange={(e) => {
+                                  void setRteHeadWaiver({
+                                    studentId: s.id,
+                                    feeHeadId: h.id,
+                                    waived: !e.target.checked,
+                                    by: session.fullName,
+                                    academicYearCode: ay,
+                                  }).then((r) => {
+                                    if (!r.ok) setError(r.error);
+                                    refresh();
+                                  });
+                                }}
+                              />
+                              <span className={charged ? "" : "line-through opacity-60"}>
+                                {h.nameEn}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })
             )}
           </ul>
         </section>
       ) : null}
 
       {tab === "settings" ? (
-        <section className="mt-4 max-w-lg space-y-3 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+        <section className="mt-4 max-w-lg space-y-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <label className="block text-xs text-[var(--muted)]">
             Mandated quota %
             <input
@@ -797,7 +1040,7 @@ export function RteWorkspace({
           >
             Save settings
           </button>
-          <hr className="border-[rgba(32,48,80,0.1)]" />
+          <hr className="border-[var(--border)]" />
           <p className="text-sm text-[var(--muted)]">
             Module enable / disable is controlled from Modules registry
             (default OFF).
@@ -835,7 +1078,7 @@ export function RteWorkspace({
             {RTE_REPORTS.map((r) => (
               <li
                 key={r.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
               >
                 <div>
                   <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -957,7 +1200,7 @@ function AppTableRow({
 
   return (
     <>
-      <tr className="border-b border-[rgba(32,48,80,0.08)] hover:bg-[rgba(32,48,80,0.02)]">
+      <tr className="hover:bg-[var(--surface-sunken)]">
         <td className={td}>{displaySerial}</td>
         <td className={td}>{app.lotteryNo || "—"}</td>
         <td className={`${td} font-medium`}>{app.govtApplicationNo || "—"}</td>
@@ -977,82 +1220,76 @@ function AppTableRow({
         </td>
         <td className={`${td} max-w-[120px] whitespace-normal`}>{feeText}</td>
         <td className="px-2 py-2 align-top">
-          <div className="flex min-w-[140px] flex-col gap-1">
-            {canAdmit ? (
-              <>
-                <button
-                  type="button"
-                  className={btn}
-                  onClick={() => setShowAdmit((v) => !v)}
-                >
-                  {showAdmit ? "Cancel" : "Take admission"}
-                </button>
-                <button
-                  type="button"
-                  className={btnOutline}
-                  onClick={() => setStatus("waitlist")}
-                >
-                  Waitlist
-                </button>
-                <button
-                  type="button"
-                  className="text-left text-[11px] text-[#b42318] underline"
-                  onClick={() => setStatus("rejected")}
-                >
-                  Reject
-                </button>
-              </>
-            ) : null}
-            {needsFee ? (
-              <button
-                type="button"
-                className={btnOutline}
-                onClick={() => {
-                  const r = markRteRegistrationFeePaid(app.id);
+          {/*
+            The same "…" as every other list (director, 19 Sep 2026).
+            "Take admission" still opens the fee panel below the row — a
+            menu item can start a form; it just should not BE the form.
+          */}
+          <RowActionMenu
+            row={app}
+            label="Application actions"
+            actions={[
+              {
+                id: "admit",
+                label: showAdmit ? "Close the admission panel" : "Take admission",
+                hidden: () => !canAdmit,
+                onSelect: () => setShowAdmit((v) => !v),
+              },
+              {
+                id: "waitlist",
+                label: "Move to the waitlist",
+                hidden: () => !canAdmit,
+                onSelect: () => setStatus("waitlist"),
+              },
+              {
+                id: "fee-paid",
+                label: "Mark the registration fee paid",
+                hidden: () => !needsFee,
+                onSelect: (a) => {
+                  const r = markRteRegistrationFeePaid(a.id);
                   if (!r.ok) return onError(r.error);
                   onRefresh();
                   onFlash("Registration fee marked paid");
-                }}
-              >
-                Mark fee paid
-              </button>
-            ) : null}
-            {isAdmitted && !needsFee ? (
-              <button
-                type="button"
-                className={btn}
-                onClick={() => {
-                  const r = sendAllottedRteToSis({
-                    applicationId: app.id,
-                    by: actorName,
-                  });
+                },
+              },
+              {
+                id: "to-sis",
+                label: "Send to SIS",
+                hidden: () => !(isAdmitted && !needsFee),
+                onSelect: (a) => {
+                  const r = sendAllottedRteToSis({ applicationId: a.id, by: actorName });
                   if (!r.ok) return onError(r.error);
                   onRefresh();
                   onFlash(`SIS ${r.admissionNo} · RTE/EWS tags`);
-                }}
-              >
-                Send to SIS
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="text-left text-[11px] text-[#b42318] underline"
-              onClick={() => {
-                const r = deleteQuotaApplication(app.id);
-                if (!r.ok) onError(r.error);
-                else {
-                  onRefresh();
-                  onFlash("Deleted");
-                }
-              }}
-            >
-              Delete
-            </button>
-          </div>
+                },
+              },
+              {
+                id: "reject",
+                label: "Reject",
+                tone: "danger",
+                separatorAbove: true,
+                hidden: () => !canAdmit,
+                onSelect: () => setStatus("rejected"),
+              },
+              {
+                id: "delete",
+                label: "Delete this application",
+                tone: "danger",
+                onSelect: (a) => {
+                  const r = deleteQuotaApplication(a.id);
+                  if (!r.ok) onError(r.error);
+                  else {
+                    onRefresh();
+                    onFlash("Deleted");
+                  }
+                },
+              },
+            ]}
+          />
         </td>
       </tr>
       {showAdmit && canAdmit ? (
-        <tr className="border-b border-[rgba(32,48,80,0.08)] bg-[rgba(32,48,80,0.03)]">
+        <tr className="border-b border-[var(--border)] bg-[var(--surface-sunken)]">
           <td colSpan={14} className="px-3 py-3">
             <p className="text-xs font-medium text-[var(--brand-deep)]">
               Confirm school admission for {app.childName} — registration fee?

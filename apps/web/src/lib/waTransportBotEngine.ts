@@ -4,13 +4,15 @@
 
 import { loadTransport } from "@/lib/transport";
 import { TENANT } from "@/lib/types";
+import { generateTutorText } from "@/lib/aiLlm.server";
+import {
+  TRANSPORT_BOT_PROMPTS,
+  type TransportBotQuickId,
+} from "@/lib/waTransportBotPrompts";
 
-export type TransportBotQuickId =
-  | "route"
-  | "students"
-  | "breakdown"
-  | "human"
-  | "menu";
+// Re-exported for server-side callers; client code must import from
+// waTransportBotPrompts directly (this module is server-only via aiLlm.server).
+export { TRANSPORT_BOT_PROMPTS, type TransportBotQuickId };
 
 export type TransportDriverContext = {
   driverName: string;
@@ -19,18 +21,6 @@ export type TransportDriverContext = {
   routeName: string;
   studentCount: number;
 };
-
-export const TRANSPORT_BOT_PROMPTS: {
-  id: TransportBotQuickId;
-  label: string;
-  waKeyword: string;
-}[] = [
-  { id: "route", label: "My route", waKeyword: "ROUTE" },
-  { id: "students", label: "Students on bus", waKeyword: "STUDENTS" },
-  { id: "breakdown", label: "Breakdown / delay", waKeyword: "BREAKDOWN" },
-  { id: "human", label: "Talk to transport desk", waKeyword: "HUMAN" },
-  { id: "menu", label: "Main menu", waKeyword: "MENU" },
-];
 
 export function resolveTransportDriverContext(
   mobile10: string,
@@ -141,4 +131,55 @@ export function replyTransportBotIntent(
         ].join("\n"),
       };
   }
+}
+
+/**
+ * LLM fallback for driver messages the keyword matcher doesn't recognize —
+ * grounded ONLY in this driver's own route/vehicle data. Drivers may be on
+ * the road acting on this, so it must never guess at operational details
+ * (other routes, schedules, school policy) it wasn't given, and it must
+ * never handle anything that sounds like an emergency — that stays on the
+ * existing BREAKDOWN/HUMAN escalation path. Returns null on any failure.
+ */
+async function tryTransportAiFallback(
+  text: string,
+  ctx: TransportDriverContext,
+): Promise<string | null> {
+  const system = `You are a WhatsApp assistant for a school bus driver at ${TENANT.nameDisplay}.
+You may ONLY discuss the driver's own route/vehicle data given below (route name, vehicle, student count) and the existing commands (ROUTE, STUDENTS, BREAKDOWN, HUMAN).
+You do NOT know other routes, schedules, traffic conditions, or transport policy — never guess at them.
+If this sounds like an emergency, breakdown, or accident, tell them to reply *BREAKDOWN* immediately instead of answering.
+For anything else outside the data given, tell them to reply *HUMAN* to talk to the transport desk.
+Keep the reply under 300 characters, plain text (no markdown headers).`;
+
+  const userMessage = `Driver: ${ctx.driverName} · Vehicle: ${ctx.vehicleReg} (${ctx.vehicleName}) · Route: ${ctx.routeName} · Students on route: ${ctx.studentCount}
+Message: "${text}"`;
+
+  try {
+    const r = await generateTutorText({ system, userMessage });
+    if (!r.ok) return null;
+    return r.text.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Same as replyTransportBotIntent, but tries an LLM fallback for genuinely
+ * unrecognized free text instead of always showing the quick-command menu. */
+export async function replyTransportBotIntentWithAi(
+  intent: TransportBotQuickId | "unknown",
+  text: string,
+  ctx: TransportDriverContext,
+): Promise<{ text: string; escalate: boolean }> {
+  const base = replyTransportBotIntent(intent, ctx);
+  const trimmed = text.trim();
+  if (
+    intent === "unknown" &&
+    trimmed.length > 3 &&
+    !/^(hi|hello|namaste|hey|start|menu|main)$/i.test(trimmed)
+  ) {
+    const aiReply = await tryTransportAiFallback(text, ctx);
+    if (aiReply) return { text: aiReply, escalate: false };
+  }
+  return base;
 }

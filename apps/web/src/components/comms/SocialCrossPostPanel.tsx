@@ -69,7 +69,7 @@ export function SocialCrossPostPrefsPanel({ compact }: Props) {
 
   if (compact) {
     return (
-      <div className="rounded-xl border border-dashed border-[rgba(32,48,80,0.18)] bg-[rgba(32,48,80,0.02)] p-3">
+      <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface-sunken)] p-3">
         <label className="flex items-center gap-2 text-sm font-medium text-[var(--brand-deep)]">
           <input
             type="checkbox"
@@ -105,7 +105,7 @@ export function SocialCrossPostPrefsPanel({ compact }: Props) {
   }
 
   return (
-    <div className="space-y-4 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+    <div className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
       <div>
         <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
           Social cross-post

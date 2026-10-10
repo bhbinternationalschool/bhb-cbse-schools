@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   moduleLabel,
+  qualityTone,
   statusTone,
   type WaTemplate,
   type WaTemplateLanguage,
@@ -36,6 +37,7 @@ export function WaTemplatesListView({
   syncing,
   onSyncMeta,
   onCreate,
+  onOpenNumbers,
   onEdit,
 }: {
   state: WaTemplatesState;
@@ -44,6 +46,7 @@ export function WaTemplatesListView({
   syncing: boolean;
   onSyncMeta: () => void;
   onCreate: () => void;
+  onOpenNumbers: () => void;
   onEdit: (id: string) => void;
 }) {
   const [tab, setTab] = useState<ListTab>("approved");
@@ -100,6 +103,14 @@ export function WaTemplatesListView({
           ) : null}
           <button
             type="button"
+            className={waBtnTeal}
+            onClick={onOpenNumbers}
+            title="Which of the school's numbers each module sends from"
+          >
+            Numbers
+          </button>
+          <button
+            type="button"
             disabled={readOnly}
             className={waBtnTeal}
             onClick={onCreate}
@@ -117,13 +128,13 @@ export function WaTemplatesListView({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 border-b border-[rgba(32,48,80,0.1)] pb-2">
+      <div className="flex flex-wrap gap-2 border-b border-[var(--border)] pb-2">
         <button
           type="button"
           className={`rounded-lg px-4 py-2 text-[12px] font-semibold ${
             tab === "approved"
-              ? "bg-[var(--brand-deep)] text-white"
-              : "bg-[rgba(32,48,80,0.06)] text-[var(--brand-deep)]"
+              ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+              : "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
           }`}
           onClick={() => setTab("approved")}
         >
@@ -133,8 +144,8 @@ export function WaTemplatesListView({
           type="button"
           className={`rounded-lg px-4 py-2 text-[12px] font-semibold ${
             tab === "drafts"
-              ? "bg-[var(--brand-deep)] text-white"
-              : "bg-[rgba(32,48,80,0.06)] text-[var(--brand-deep)]"
+              ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+              : "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
           }`}
           onClick={() => setTab("drafts")}
         >
@@ -199,12 +210,12 @@ export function WaTemplatesListView({
               : "No drafts or pending templates."}
           </div>
         ) : (
-          <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+          <ul className="divide-y divide-[var(--border)]">
             {filtered.map((t) => (
               <li key={t.id}>
                 <button
                   type="button"
-                  className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left hover:bg-[rgba(32,48,80,0.04)]"
+                  className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left hover:bg-[var(--surface-sunken)]"
                   onClick={() => onEdit(t.id)}
                 >
                   <div className="min-w-0 flex-1">
@@ -220,6 +231,14 @@ export function WaTemplatesListView({
                       <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-600">
                         {t.language}
                       </span>
+                      {t.quality !== "UNKNOWN" ? (
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${qualityTone(t.quality)}`}
+                          title={`Meta quality rating: ${t.quality}`}
+                        >
+                          {t.quality} quality
+                        </span>
+                      ) : null}
                       {t.carousel.length > 0 ? (
                         <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-800">
                           carousel×{t.carousel.length}
@@ -248,4 +267,4 @@ export function WaTemplatesListView({
 }
 
 const waBtnTeal =
-  "rounded-lg bg-[#0f766e] px-4 py-2 text-[12px] font-semibold text-white disabled:opacity-50";
+  "rounded-lg bg-[var(--tone-teal-solid)] px-4 py-2 text-[12px] font-semibold text-white disabled:opacity-50";

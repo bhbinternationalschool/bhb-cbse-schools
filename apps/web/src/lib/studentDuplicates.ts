@@ -8,7 +8,9 @@
  */
 
 import { saveSis, type SisState, type SisStudent } from "@/lib/sis";
+import { recordSisDeletion, recordSisMerge } from "@/lib/sisNormalizedClient";
 import { normalizeSessionCode } from "@/lib/studentImport";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type DuplicateReason =
   | "admissionNo"
@@ -338,10 +340,18 @@ export function mergeStudents(
     students: survivors,
     households: state.households.filter((h) => usedHouseholds.has(h.id)),
   };
+  // State the merge before pushing. The roster push only upserts, so until
+  // 2026-08-18 the dropped duplicates stayed in sis_students and came
+  // straight back on the next hydrate — and nothing that pointed at them
+  // (fee receipt lines, attendance, exams, homework, PTM, leave, library,
+  // store, payment links, concessions, curriculum, leads, chat) was ever
+  // moved. The server now folds all of that into the kept student and
+  // deletes the dropped rows in one transaction (sis_merge_students).
+  recordSisMerge({ keepId, dropIds: [...dropSet] });
   saveSis(next);
-  void import("@/lib/sisPersistence").then(({ flushSisSync }) => {
-    flushSisSync().catch(console.error);
-  });
+  void trackServerWork(import("@/lib/sisPersistence").then(({ pushSisState, flushSisSync }) => {
+    pushSisState(next).then(() => flushSisSync()).catch(console.error);
+  }));
   return { ok: true, state: next, merged: drops.length };
 }
 
@@ -361,9 +371,16 @@ export function removeDuplicateStudents(
     students: survivors,
     households: state.households.filter((h) => usedHouseholds.has(h.id)),
   };
-  saveSis(next);
-  void import("@/lib/sisPersistence").then(({ flushSisSync }) => {
-    flushSisSync().catch(console.error);
+  // Same rule as mergeStudents — deletions must be stated, not inferred.
+  recordSisDeletion({
+    studentIds: [...dropSet].filter((id) => state.students.some((s) => s.id === id)),
+    householdIds: state.households
+      .filter((h) => !usedHouseholds.has(h.id))
+      .map((h) => h.id),
   });
+  saveSis(next);
+  void trackServerWork(import("@/lib/sisPersistence").then(({ pushSisState, flushSisSync }) => {
+    pushSisState(next).then(() => flushSisSync()).catch(console.error);
+  }));
   return next;
 }

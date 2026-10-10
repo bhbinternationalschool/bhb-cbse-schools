@@ -1,81 +1,177 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Landmark } from "lucide-react";
 import {
   AccountsMastersPanel,
 } from "@/components/accounts/AccountsMastersPanel";
 import {
+  ExpenseHeadsPanel,
+  SpendTagsPanel,
+} from "@/components/accounts/LedgerEntryPanels";
+import { UnpostedEntriesBanner } from "@/components/accounts/UnpostedEntriesBanner";
+import { DeskSyncBanner } from "@/components/accounts/DeskSyncBanner";
+import {
+  BankReconPanel,
+  GatewaySettlementPanel,
+  LedgerBookPanel,
+  LedgerReportsPanel,
+} from "@/components/accounts/LedgerPanels";
+import { GatewayFeePolicyPanel } from "@/components/accounts/GatewayFeePolicyPanel";
+import { PayoutSwitchPanel } from "@/components/payments/PayoutSwitchPanel";
+import { VendorHistoryPanel } from "@/components/accounts/VendorHistoryPanel";
+import {
+  ChequesPanel,
+  LegacyBookNotice,
+  MultiLineExpensePanel,
+  QuickExpensePanel,
+  VoucherEntryPanel,
+} from "@/components/accounts/LedgerEntryPanels";
+import {
   BanksPanel,
   BillsPanel,
-  BooksPanel,
-  CashBookPanel,
-  DayBookPanel,
   DayCloseAccountsPanel,
-  ExpensesPanel,
   OwnerLoansPanel,
-  ReportsPanel,
 } from "@/components/accounts/AccountsPanels";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
+import { ClosingBalancePanel } from "@/components/accounts/ClosingBalancePanel";
+import { DaySheetPanel } from "@/components/accounts/DaySheetPanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
+import { SkeletonModulePage } from "@/components/ui/skeleton";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import {
   loadAccounts,
   seedAccountsIfEmpty,
-  type AccountsState,
-} from "@/lib/accounts";
+} from "@/lib/accountsStore";
+import type { AccountsState } from "@/lib/accountsTypes";
 import { dayCloseNeedsAttention } from "@/lib/fees";
 
 type AccountsTab =
   | "dashboard"
-  | "daybook"
-  | "cash"
-  | "banks"
+  | "book"
+  | "vouchers"
+  | "bookreports"
+  | "recon"
   | "masters"
-  | "expenses"
   | "bills"
   | "owner"
-  | "books"
   | "dayclose"
-  | "reports";
+  | "daysheet"
+  | "closing";
+
+/**
+ * Where a retired browser-book tab now lives in the server book. Deep links
+ * and dashboard cards still point at the old ids; they land on the
+ * replacement instead of a dead tab.
+ */
+const LEGACY_TAB_MAP: Record<string, AccountsTab> = {
+  daybook: "vouchers",
+  cash: "bookreports",
+  banks: "bookreports",
+  expenses: "vouchers",
+  books: "bookreports",
+  reports: "bookreports",
+};
 
 const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
-  { id: "daybook", label: "Day book", tone: "teal" },
-  { id: "cash", label: "Cash", tone: "green" },
-  { id: "banks", label: "Banks", tone: "sky" },
+  { id: "book", label: "Server book", tone: "green" },
+  { id: "vouchers", label: "Vouchers", tone: "green" },
+  { id: "bookreports", label: "Book reports", tone: "green" },
+  { id: "recon", label: "Bank recon", tone: "green" },
   { id: "masters", label: "Masters", tone: "violet" },
-  { id: "expenses", label: "Expenses", tone: "amber" },
   { id: "bills", label: "Bills & AP", tone: "violet" },
   { id: "owner", label: "Owner loans", tone: "coral" },
-  { id: "books", label: "Books", tone: "slate" },
+  { id: "daysheet", label: "Day sheet", tone: "green" },
   { id: "dayclose", label: "Day close", tone: "rose" },
-  { id: "reports", label: "Reports", tone: "navy" },
+  { id: "closing", label: "Closing balances", tone: "rose" },
+];
+
+/**
+ * Accounts masters, in the order an entry needs them: the bank and cash
+ * accounts money moves through, the heads an expense is booked to, the
+ * tags saying what it was for, then the chart, categories and vendors.
+ */
+type AccountsMastersStep = "banks" | "heads" | "tags" | "chart";
+
+const ACCOUNTS_MASTERS_STEPS: StepDef<AccountsMastersStep>[] = [
+  {
+    id: "banks",
+    title: "Bank & cash accounts",
+    what: "The school's bank accounts and cash drawers — where every receipt lands and every payment comes from.",
+  },
+  {
+    id: "heads",
+    title: "Expense heads",
+    what: "What money is spent on: a category (Utilities) holding sub-heads (Electricity, Diesel). Every expense voucher is booked to one.",
+  },
+  {
+    id: "tags",
+    title: "Spend tags",
+    what: "What an expense was FOR — Bus-1, Hostel, Annual Function — so a report can say what Bus-1 cost, split by fuel, EMI and service.",
+  },
+  {
+    id: "chart",
+    title: "Accounts, categories & vendors",
+    what: "The account list, expense categories and sub-categories, and the vendors bills are paid to.",
+  },
 ];
 
 export function AccountsWorkspace() {
   const session = useDemoSession();
+  // Running the projection is a bulk write to the book; the button only
+  // renders for someone the API would let through anyway.
+  const canApprove = hasPermission(session, null, "accounts", "approve");
+  /**
+   * What the school is worth, as against what the counter did today. Cash and
+   * bank balances, and income and expenditure for the session, are management
+   * figures — the office keys vouchers and runs the day sheet without them.
+   * The API enforces the same split, so hiding a tab is a courtesy, not the
+   * control.
+   */
+  const canSeePosition = hasPermission(session, null, "accounts_position", "view");
   const [tab, setTab] = useState<AccountsTab>("dashboard");
+  // Someone holding only some Accounts functions (voucher entry, bank recon,
+  // …) sees only their tabs; the ledger route enforces the same split.
+  const shownTabs = useMemo(() => visibleModuleTabs(TABS, session, null, "accounts"), [session]);
+  useEffect(() => {
+    // The module holder's landing tab is unchanged; only a function holder,
+    // whose tab bar may not include the dashboard, is moved to one they hold.
+    if (hasPermission(session, null, "accounts", "view")) return;
+    const open = shownTabs.filter(
+      (t) => canSeePosition || !["dashboard", "book", "bookreports", "recon", "closing"].includes(t.id),
+    );
+    if (open.length > 0 && !open.some((t) => t.id === tab)) {
+      setTab(open[0]!.id as AccountsTab);
+    }
+  }, [session, shownTabs, tab, canSeePosition]);
+  const [mastersStep, setMastersStep] = useState<AccountsMastersStep>("banks");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const raw = new URLSearchParams(window.location.search).get("tab");
     const allowed: AccountsTab[] = [
       "dashboard",
-      "daybook",
-      "cash",
-      "banks",
+      "book",
+      "vouchers",
+      "bookreports",
+      "recon",
       "masters",
-      "expenses",
       "bills",
       "owner",
-      "books",
       "dayclose",
-      "reports",
+      "daysheet",
+      "closing",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as AccountsTab);
+    else if (raw && LEGACY_TAB_MAP[raw]) setTab(LEGACY_TAB_MAP[raw]);
   }, []);
+  // Until the school's desk has been pulled (below), seedAccountsIfEmpty only
+  // reads — it neither seeds nor saves, so a fresh browser cannot push a
+  // seeded chart and cash pools over the real ones.
   const [state, setState] = useState<AccountsState | null>(() =>
     typeof window !== "undefined" ? seedAccountsIfEmpty() : null,
   );
@@ -84,6 +180,12 @@ export function AccountsWorkspace() {
   const [tick, setTick] = useState(0);
 
   const actorName = session.fullName || "Accounts user";
+  const [entryTick, setEntryTick] = useState(0);
+  /** Vouchers sub-tab. The four forms are alternatives, not steps; Quick is
+   *  the everyday one, so it opens first. */
+  const [voucherForm, setVoucherForm] = useState<
+    "quick" | "multi" | "voucher" | "cheques"
+  >("quick");
 
   function flash(message: string) {
     setNotice(message);
@@ -110,10 +212,11 @@ export function AccountsWorkspace() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensureAccountsHydrated } = await import(
+      const { withHydrationSlot } = await import("@/lib/deskHydrateGuard");
+      const { ensureAccountsSeeded } = await import(
         "@/lib/accountsPersistence"
       );
-      await ensureAccountsHydrated();
+      await withHydrationSlot(() => ensureAccountsSeeded());
       refresh();
     })();
   }, []);
@@ -132,7 +235,9 @@ export function AccountsWorkspace() {
 
   const dayCloseBadge = dayCloseNeedsAttention() ? "!" : undefined;
 
-  const tabsWithBadge = TABS.map((t) =>
+  // Tabs that show a balance or a session total at all.
+  const POSITION_TABS = new Set(["dashboard", "book", "bookreports", "recon", "closing"]);
+  const tabsWithBadge = shownTabs.filter((t) => canSeePosition || !POSITION_TABS.has(t.id)).map((t) =>
     t.id === "dayclose" ? { ...t, badge: dayCloseBadge } : t,
   );
 
@@ -161,34 +266,139 @@ export function AccountsWorkspace() {
         aria-label="Accounts sections"
       />
 
+      <DeskSyncBanner
+        onRetry={async () => {
+          const { retryAccountsDeskSync } = await import("@/lib/accountsNormalizedClient");
+          const { loadAccounts: load } = await import("@/lib/accountsStore");
+          const ok = await retryAccountsDeskSync(load());
+          refresh();
+          return ok;
+        }}
+      />
+
+      <UnpostedEntriesBanner onRefresh={refresh} />
+
       {!state ? (
-        <p className="mt-6 text-sm text-[var(--muted)]">Loading accounts…</p>
+        <div className="mt-6">
+          <SkeletonModulePage />
+        </div>
       ) : tab === "dashboard" ? (
         <ModuleDashboardHost
           moduleId="accounts"
           refreshKey={tick}
-          onNavigateTab={(t) => setTab(t as AccountsTab)}
+          // Dashboard cards still name retired tabs; land them on the
+          // server-book replacement instead of a blank screen.
+          onNavigateTab={(t) => setTab(LEGACY_TAB_MAP[t] ?? (t as AccountsTab))}
         />
-      ) : tab === "daybook" ? (
-        <DayBookPanel {...panelProps} />
-      ) : tab === "cash" ? (
-        <CashBookPanel {...panelProps} />
-      ) : tab === "banks" ? (
-        <BanksPanel {...panelProps} />
+      ) : tab === "book" ? (
+        <LedgerBookPanel canApprove={canApprove} />
+      ) : tab === "vouchers" ? (
+        <div className="mt-4 space-y-4">
+          <ModuleTabs
+            size="md"
+            aria-label="Voucher entry forms"
+            value={voucherForm}
+            onChange={(id) => setVoucherForm(id as typeof voucherForm)}
+            items={[
+              { id: "quick", label: "Quick", tone: "navy" },
+              { id: "multi", label: "Multi-line", tone: "teal" },
+              { id: "voucher", label: "Voucher entry", tone: "amber" },
+              { id: "cheques", label: "Cheques", tone: "violet" },
+            ]}
+          />
+          {/* Inactive forms stay mounted (hidden) so typed-but-unsaved
+              input survives a sub-tab switch. */}
+          <div className={voucherForm === "quick" ? "" : "hidden"}>
+          <QuickExpensePanel
+            banks={(state.bankAccounts ?? [])
+              .filter((b) => b.isActive !== false)
+              .map((b) => ({ id: b.id, name: b.name }))}
+            actor={actorName}
+            onPosted={() => setEntryTick((n) => n + 1)}
+          />
+          </div>
+          {/* Between the one-head quick form and the raw double-entry
+              screen: the everyday pile of expenses from one trip. */}
+          <div className={voucherForm === "multi" ? "" : "hidden"}>
+          <MultiLineExpensePanel
+            banks={(state.bankAccounts ?? [])
+              .filter((b) => b.isActive !== false)
+              .map((b) => ({ id: b.id, name: b.name }))}
+            actor={actorName}
+            onPosted={() => setEntryTick((n) => n + 1)}
+          />
+          </div>
+          <div className={voucherForm === "voucher" ? "" : "hidden"}>
+          <VoucherEntryPanel
+            banks={(state.bankAccounts ?? [])
+              .filter((b) => b.isActive !== false)
+              .map((b) => ({ id: b.id, name: b.name }))}
+            actor={actorName}
+            onPosted={() => setEntryTick((n) => n + 1)}
+          />
+          </div>
+          <div className={voucherForm === "cheques" ? "" : "hidden"}>
+          <ChequesPanel
+            banks={(state.bankAccounts ?? [])
+              .filter((b) => b.isActive !== false)
+              .map((b) => ({ id: b.id, name: b.name }))}
+            actor={actorName}
+            refreshKey={entryTick}
+          />
+          </div>
+        </div>
+      ) : tab === "bookreports" ? (
+        <LedgerReportsPanel />
+      ) : tab === "recon" ? (
+        <>
+          <BankReconPanel
+            banks={(state.bankAccounts ?? [])
+              .filter((b) => b.isActive !== false)
+              .map((b) => ({ id: b.id, name: b.name }))}
+          />
+          {/* Same job, one step earlier: the gateway's settlements are what
+              the bank credits will turn out to be, so they belong beside the
+              statement rather than in a tab of their own. */}
+          <GatewaySettlementPanel />
+          {/* Beside the settlements deliberately: the fee this sets is the same
+              fee the settlements above deduct, and the reconciliation inside it
+              reads off those very rows. Putting it in a settings tab would
+              separate the decision from its only evidence. */}
+          <GatewayFeePolicyPanel />
+          <PayoutSwitchPanel />
+        </>
       ) : tab === "masters" ? (
-        <AccountsMastersPanel {...panelProps} />
-      ) : tab === "expenses" ? (
-        <ExpensesPanel {...panelProps} />
+        <StepTabs
+          className="mt-4"
+          aria-label="Accounts masters steps"
+          steps={ACCOUNTS_MASTERS_STEPS}
+          value={mastersStep}
+          onChange={setMastersStep}
+        >
+          {mastersStep === "banks" ? <BanksPanel {...panelProps} /> : null}
+          {mastersStep === "heads" ? <ExpenseHeadsPanel /> : null}
+          {mastersStep === "tags" ? <SpendTagsPanel /> : null}
+          {mastersStep === "chart" ? <AccountsMastersPanel {...panelProps} /> : null}
+        </StepTabs>
       ) : tab === "bills" ? (
-        <BillsPanel {...panelProps} />
+        <>
+          <BillsPanel {...panelProps} />
+          {/* The store's bills and the expense book's vendors are different
+              sets — a fuel dealer never raises a purchase order. Both belong
+              on the payables tab. */}
+          <VendorHistoryPanel />
+        </>
       ) : tab === "owner" ? (
-        <OwnerLoansPanel {...panelProps} />
-      ) : tab === "books" ? (
-        <BooksPanel {...panelProps} />
+        <>
+          <LegacyBookNotice tab="Owner loans — use the owner-loan presets in Vouchers" />
+          <OwnerLoansPanel {...panelProps} />
+        </>
+      ) : tab === "daysheet" ? (
+        <DaySheetPanel {...panelProps} />
       ) : tab === "dayclose" ? (
         <DayCloseAccountsPanel {...panelProps} />
-      ) : tab === "reports" ? (
-        <ReportsPanel {...panelProps} />
+      ) : tab === "closing" ? (
+        <ClosingBalancePanel {...panelProps} />
       ) : null}
     </ErpWorkspaceShell>
   );

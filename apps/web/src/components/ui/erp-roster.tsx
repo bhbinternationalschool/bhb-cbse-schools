@@ -1,30 +1,66 @@
 "use client";
 
-import type { ReactNode } from "react";
+import Link from "next/link";
+import { useRef, type CSSProperties, type ReactNode } from "react";
+import { Breadcrumbs, type BreadcrumbItem } from "@/components/ui/breadcrumbs";
+import { ErpSparkline, type ErpChartRow } from "@/components/ui/erp-chart-lazy";
 import { cn } from "@/lib/utils";
+import { ExportMenu } from "@/components/ui/erp-grid";
 
 export type ErpMetricTone = "green" | "rose" | "sky" | "violet" | "amber" | "navy";
 
+// "title" is the same accent blue across every tone — it equals --chart-1,
+// so route it through the token rather than a repeated literal. The icon
+// colors below are a genuine categorical tone system (unrelated to
+// danger/success semantics), so they're left as-is.
+const METRIC_TITLE_CLASS = "text-[var(--chart-1)]";
 const METRIC_TONES: Record<
   ErpMetricTone,
   { title: string; icon: string }
 > = {
-  green: { title: "text-[#2563eb]", icon: "bg-[#dcfce7] text-[#15803d]" },
-  rose: { title: "text-[#2563eb]", icon: "bg-[#fee2e2] text-[#b91c1c]" },
-  sky: { title: "text-[#2563eb]", icon: "bg-[#dbeafe] text-[#1d4ed8]" },
-  violet: { title: "text-[#2563eb]", icon: "bg-[#ede9fe] text-[#6d28d9]" },
-  amber: { title: "text-[#2563eb]", icon: "bg-[#fef3c7] text-[#b45309]" },
-  navy: { title: "text-[#2563eb]", icon: "bg-[rgba(32,48,80,0.1)] text-[var(--brand-deep)]" },
+  green: { title: METRIC_TITLE_CLASS, icon: "bg-[#dcfce7] text-[var(--tone-green)]" },
+  rose: { title: METRIC_TITLE_CLASS, icon: "bg-[#fee2e2] text-[#b91c1c]" },
+  sky: { title: METRIC_TITLE_CLASS, icon: "bg-[var(--info-soft)] text-[var(--info)]" },
+  violet: { title: METRIC_TITLE_CLASS, icon: "bg-[#ede9fe] text-[var(--tone-violet)]" },
+  amber: { title: METRIC_TITLE_CLASS, icon: "bg-[var(--warning-soft)] text-[var(--warning)]" },
+  navy: { title: METRIC_TITLE_CLASS, icon: "bg-[rgba(32,48,80,0.1)] text-[var(--brand-deep)]" },
 };
 
-/** KPI card with icon circle — staff roster style */
+export type ErpMetricDelta = {
+  value: string;
+  direction: "up" | "down" | "flat";
+  /** Whether "up" is the good direction (default true — flip for e.g. "absent today"). */
+  positiveIsUp?: boolean;
+};
+
+const DELTA_ARROW: Record<ErpMetricDelta["direction"], string> = {
+  up: "▲",
+  down: "▼",
+  flat: "→",
+};
+
+function deltaTone(delta: ErpMetricDelta): "success" | "danger" | "muted" {
+  if (delta.direction === "flat") return "muted";
+  const positiveIsUp = delta.positiveIsUp ?? true;
+  const good = delta.direction === "up" ? positiveIsUp : !positiveIsUp;
+  return good ? "success" : "danger";
+}
+
+/** KPI card with icon circle — staff roster style. Pass `href` to navigate
+ * (renders as a Link) or `onClick` for in-page behavior (e.g. a drill-down
+ * drawer); `href` takes priority when both are given. Optional `delta`
+ * (a small up/down/flat indicator) and `spark` (a lazy-loaded trend line,
+ * rendered under the value) are additive — omit both for the original look. */
 export function ErpMetricCard({
   title,
   value,
   tone = "sky",
   icon,
   hint,
+  delta,
+  spark,
   footer,
+  href,
   onClick,
   className,
 }: {
@@ -33,31 +69,52 @@ export function ErpMetricCard({
   tone?: ErpMetricTone;
   icon?: ReactNode;
   hint?: string;
+  delta?: ErpMetricDelta;
+  spark?: ErpChartRow[];
   footer?: ReactNode;
+  href?: string;
   onClick?: () => void;
   className?: string;
 }) {
   const t = METRIC_TONES[tone];
-  const Comp = onClick ? "button" : "div";
+  const interactive = !!href || !!onClick;
 
-  return (
-    <Comp
-      type={onClick ? "button" : undefined}
-      onClick={onClick}
-      className={cn(
-        "erp-metric-card flex w-full items-center justify-between gap-3 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white px-5 py-4 text-left shadow-sm transition",
-        onClick &&
-          "hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-gold)] focus-visible:ring-offset-2",
-        className,
-      )}
-    >
+  const cardClassName = cn(
+    "erp-metric-card flex w-full items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] px-5 py-4 text-left shadow-[var(--shadow-1)] transition-[transform,box-shadow] duration-[var(--motion-base)] ease-[var(--ease-out-soft)]",
+    interactive &&
+      "hover:-translate-y-0.5 hover:shadow-[var(--shadow-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2",
+    className,
+  );
+
+  const deltaCls =
+    delta &&
+    {
+      success: "text-[var(--success)]",
+      danger: "text-[var(--danger)]",
+      muted: "text-[var(--muted)]",
+    }[deltaTone(delta)];
+
+  const content = (
+    <>
       <div className="min-w-0">
         <div className={cn("text-sm font-semibold", t.title)}>{title}</div>
-        <div className="mt-1 text-3xl font-bold tabular-nums text-[#0f172a]">
-          {value}
+        <div className="mt-1 flex items-baseline gap-2">
+          <span className="text-3xl font-bold tabular-nums text-[var(--foreground)]">
+            {value}
+          </span>
+          {delta ? (
+            <span className={cn("text-xs font-semibold tabular-nums", deltaCls)}>
+              {DELTA_ARROW[delta.direction]} {delta.value}
+            </span>
+          ) : null}
         </div>
         {hint ? (
           <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
+        ) : null}
+        {spark && spark.length > 1 ? (
+          <div className="mt-1.5">
+            <ErpSparkline rows={spark} />
+          </div>
         ) : null}
         {footer}
       </div>
@@ -71,6 +128,21 @@ export function ErpMetricCard({
           {icon}
         </span>
       ) : null}
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link href={href} className={cardClassName}>
+        {content}
+      </Link>
+    );
+  }
+
+  const Comp = onClick ? "button" : "div";
+  return (
+    <Comp type={onClick ? "button" : undefined} onClick={onClick} className={cardClassName}>
+      {content}
     </Comp>
   );
 }
@@ -107,11 +179,11 @@ export function ErpChartCard({
   return (
     <div
       className={cn(
-        "erp-panel rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4 shadow-sm",
+        "erp-panel rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow-1)]",
         className,
       )}
     >
-      <h2 className="text-base font-semibold text-[#2563eb]">{title}</h2>
+      <h2 className="text-base font-semibold text-[var(--chart-1)]">{title}</h2>
       <div className="mt-3">{children}</div>
     </div>
   );
@@ -157,7 +229,7 @@ export function ErpPanel({
     <div
       id={id}
       className={cn(
-        "erp-panel rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4 shadow-sm sm:p-5",
+        "erp-panel rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow-1)] sm:p-5",
         className,
       )}
     >
@@ -189,20 +261,20 @@ export function ErpToolbarBtn({
   className?: string;
 }) {
   const cls = cn(
-    "inline-flex items-center gap-2 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-3.5 py-2 text-sm font-semibold text-[var(--brand-deep)] shadow-sm transition hover:border-[rgba(37,99,235,0.35)] hover:bg-[#eff6ff]",
+    "inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3.5 py-2 text-sm font-semibold text-[var(--brand-deep)] shadow-[var(--shadow-1)] transition-colors duration-[var(--motion-fast)] hover:border-[rgba(37,99,235,0.35)] hover:bg-[var(--surface-sunken)]",
     className,
   );
   if (href) {
     return (
       <a href={href} className={cls}>
-        <span className="text-[#2563eb]">{icon}</span>
+        <span className="text-[var(--chart-1)]">{icon}</span>
         {label}
       </a>
     );
   }
   return (
     <button type="button" onClick={onClick} className={cls}>
-      <span className="text-[#2563eb]">{icon}</span>
+      <span className="text-[var(--chart-1)]">{icon}</span>
       {label}
     </button>
   );
@@ -222,24 +294,94 @@ export function ErpToolbar({
   );
 }
 
-/** Table shell — roster list style */
+/** Table shell — roster list style. `density` sets --erp-row-py for
+ * consumers that opt in via `py-[var(--erp-row-py)]` on their own cells;
+ * it has no effect otherwise, so existing tables are unaffected. */
 export function ErpTableShell({
   children,
+  density = "comfortable",
   className,
+  style,
+  exportAs,
+  exportTitle,
 }: {
   children: ReactNode;
+  density?: "compact" | "comfortable";
   className?: string;
+  style?: CSSProperties;
+  /**
+   * File base name for an "Export data" menu (Excel / CSV / PDF) of the rows
+   * this shell is showing. The export reads the rendered table — header
+   * cells become columns, body cells become values — so a screen gets the
+   * standard's export with one prop and no column mapping. Screens with a
+   * richer, typed export keep their own ExportMenu and leave this unset.
+   */
+  exportAs?: string;
+  exportTitle?: string;
 }) {
+  const shellRef = useRef<HTMLDivElement>(null);
   return (
     <div
+      ref={shellRef}
       className={cn(
-        "erp-table-shell overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.12)] bg-white shadow-sm",
+        "erp-table-shell overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-1)]",
         className,
       )}
+      style={{
+        ["--erp-row-py" as string]: density === "compact" ? "0.375rem" : "0.625rem",
+        ...style,
+      }}
     >
+      {exportAs ? (
+        <div className="flex justify-end border-b border-[var(--border)] px-3 py-1.5">
+          <ExportMenu
+            compact
+            title={exportTitle || exportAs.replace(/[_-]+/g, " ")}
+            fileBaseName={exportAs}
+            columns={domTableColumns(shellRef)}
+            rows={() => domTableRows(shellRef)}
+          />
+        </div>
+      ) : null}
       {children}
     </div>
   );
+}
+
+/* Read a rendered table as export data. Header cells give the columns; a
+ * blank header or one that says Actions / Do is a button column and is
+ * skipped. Body cells give the values, as the office sees them. */
+function domHeaders(ref: { current: HTMLDivElement | null }) {
+  const table = ref.current?.querySelector("table");
+  const ths = table ? Array.from(table.querySelectorAll("thead th")) : [];
+  return ths
+    .map((th, index) => ({
+      index,
+      header: (th.textContent || "").replace(/\s+/g, " ").trim(),
+    }))
+    .filter((c) => c.header && !/^(actions?|do)$/i.test(c.header))
+    .map((c) => ({ key: `c${c.index}`, header: c.header, index: c.index }));
+}
+function domTableColumns(ref: { current: HTMLDivElement | null }) {
+  // Resolved when the menu opens, so an empty first paint costs nothing.
+  return domHeaders(ref).map(({ key, header }) => ({ key, header }));
+}
+function domTableRows(ref: { current: HTMLDivElement | null }) {
+  const table = ref.current?.querySelector("table");
+  if (!table) return [];
+  const cols = domHeaders(ref);
+  const out: Record<string, string>[] = [];
+  for (const tr of Array.from(table.querySelectorAll("tbody tr"))) {
+    const tds = Array.from(tr.querySelectorAll("td"));
+    if (tds.length === 0 || (tds.length === 1 && tds[0]!.hasAttribute("colspan"))) continue;
+    const row: Record<string, string> = {};
+    for (const c of cols) {
+      const td = tds[c.index] as HTMLElement | undefined;
+      row[c.key] = td ? (td.innerText || td.textContent || "").replace(/\s+/g, " ").trim() : "";
+    }
+    out.push(row);
+  }
+  return out;
 }
 
 export function ErpTable({
@@ -260,17 +402,50 @@ export function ErpTable({
   );
 }
 
-export function ErpTableHead({ children }: { children: ReactNode }) {
+export function ErpTableHead({
+  children,
+  sticky = false,
+}: {
+  children: ReactNode;
+  /** Pins the header while the table body scrolls; the table's own
+   * ancestor needs `overflow-y-auto` with a bounded height for this to
+   * take effect. Off by default — opt in per table. */
+  sticky?: boolean;
+}) {
   return (
-    <thead className="border-b border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] text-[11px] uppercase tracking-wide text-muted-foreground">
+    <thead
+      className={cn(
+        "border-b border-[var(--border)] bg-[var(--surface-sunken)] text-[11px] uppercase tracking-wide text-muted-foreground",
+        sticky && "sticky top-0 z-10",
+      )}
+    >
       {children}
     </thead>
   );
 }
 
-export function ErpTableBody({ children }: { children: ReactNode }) {
+export function ErpTableBody({
+  children,
+  zebra = false,
+  hoverable = false,
+}: {
+  children: ReactNode;
+  /** Stripes even rows with --surface-sunken. Off by default. */
+  zebra?: boolean;
+  /** Tints the row under the pointer. Off by default. */
+  hoverable?: boolean;
+}) {
   return (
-    <tbody className="divide-y divide-[rgba(32,48,80,0.08)]">{children}</tbody>
+    <tbody
+      className={cn(
+        "divide-y divide-[var(--border)]",
+        zebra && "[&>tr:nth-child(even)]:bg-[var(--surface-sunken)]",
+        hoverable &&
+          "[&>tr]:transition-colors [&>tr]:duration-[var(--motion-fast)] [&>tr:hover]:bg-[var(--surface-sunken)]",
+      )}
+    >
+      {children}
+    </tbody>
   );
 }
 
@@ -288,8 +463,8 @@ export function ErpStatusBadge({
       className={cn(
         "rounded-md px-2 py-0.5 text-[10px] font-black uppercase",
         active
-          ? "bg-[rgba(21,128,61,0.12)] text-[#15803d]"
-          : "bg-[rgba(32,48,80,0.08)] text-muted-foreground",
+          ? "bg-[var(--success-soft)] text-[var(--success)]"
+          : "bg-[var(--surface-sunken)] text-muted-foreground",
       )}
     >
       {active ? activeLabel : inactiveLabel}
@@ -303,18 +478,23 @@ export function ErpModuleHeader({
   icon,
   actions,
   notice,
+  breadcrumbs,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
   icon?: ReactNode;
   actions?: ReactNode;
   notice?: ReactNode;
+  breadcrumbs?: BreadcrumbItem[];
 }) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
+        {breadcrumbs && breadcrumbs.length > 0 ? (
+          <Breadcrumbs items={breadcrumbs} className="mb-1.5" />
+        ) : null}
         <h1 className="flex items-center gap-2 text-2xl font-semibold text-[var(--brand-deep)]">
-          {icon ? <span className="text-[#2563eb]">{icon}</span> : null}
+          {icon ? <span className="text-[var(--chart-1)]">{icon}</span> : null}
           {title}
         </h1>
         {subtitle ? (

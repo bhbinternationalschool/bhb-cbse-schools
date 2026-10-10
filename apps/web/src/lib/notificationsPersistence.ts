@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "notifications";
 
@@ -41,7 +42,7 @@ export function resetNotificationsPersistenceCache() {
 
 export function scheduleNotificationsSync(state: NotificationsState) {
   if (typeof window === "undefined") {
-    void pushNotificationsRemoteServer(state);
+    void trackServerWork(pushNotificationsRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("notifications")) blob.scheduleSync(state);
@@ -71,7 +72,6 @@ export async function pushNotificationsRemoteServer(
 
 export async function ensureNotificationsHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = notificationsReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("notifications")
@@ -79,7 +79,12 @@ export async function ensureNotificationsHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateNotificationsDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateNotificationsDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (changed && (bundle.items.length > 0 || readFromDb)) {
     writeNotificationsLocalRaw(
       mergeDbDeskIntoNotificationsState(loadNotifications(), bundle, {
@@ -89,7 +94,9 @@ export async function ensureNotificationsHydrated(): Promise<boolean> {
     normChanged = true;
   }
 
-  if (normChanged) scheduleNotificationsSync(loadNotifications());
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+
+  if (normChanged && !readFromDb) scheduleNotificationsSync(loadNotifications());
   return blobChanged || normChanged;
 }
 

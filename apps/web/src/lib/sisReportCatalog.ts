@@ -31,6 +31,7 @@ import {
   studentToRegisterExportRow,
 } from "@/lib/studentRegisterExport";
 import { tagLabelsForStudent } from "@/lib/studentTags";
+import { actorMayExport } from "@/lib/rbacGuard";
 import { TENANT } from "@/lib/types";
 import {
   computeStudentUdiseGaps,
@@ -213,9 +214,18 @@ export function filterSisStudents(
   const status = filters.status ?? "active";
   let rows = sis.students.slice();
 
-  if (filters.academicYearCode) {
+  // A report is about the children the school teaches NOW unless a year is
+  // named. Leaving this conditional is why the UDISE compliance register —
+  // the sheet the office actually works from — printed 717 rows for 239
+  // children: SIS keeps one row per child per session and marks them all
+  // active. Pass "all" to deliberately report across sessions.
+  const reportAy =
+    filters.academicYearCode === "all"
+      ? ""
+      : filters.academicYearCode || currentAcademicYearCode();
+  if (reportAy) {
     rows = rows.filter(
-      (s) => s.academicYearCode === filters.academicYearCode,
+      (s) => !s.academicYearCode || s.academicYearCode === reportAy,
     );
   }
   if (status !== "all") {
@@ -752,6 +762,12 @@ export function runSisReport(
   id: SisReportId,
   filters: SisReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Every format here is a file download of children's records (names,
+  // DOB, category, Aadhaar-bearing registers). "students.view" — which
+  // every teacher holds — used to be enough.
+  if (!actorMayExport("students", "runSisReport")) {
+    return { ok: false, error: "Your role can view students but not download student reports" };
+  }
   const masters = filters.masters ?? loadMasters();
   const sis = filters.sis ?? loadSis();
   const students = filterSisStudents(sis, masters, filters);

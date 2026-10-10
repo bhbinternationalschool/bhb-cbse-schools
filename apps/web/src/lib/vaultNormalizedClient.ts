@@ -5,6 +5,22 @@
 import type { VaultState } from "@/lib/vault";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+import { afterStampedDeskSave, captureDeskStamps, stampedDeskBody } from "@/lib/deskStampsClient";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+
+const VAULT_SLICES = ["documents"] as const;
+
+const VAULT_DESK = "vault";
+
+/** Documents the user deleted; the next push deletes them by id. */
+export function recordVaultDocumentDeletion(ids: string[]) {
+  recordDeskDeletion(VAULT_DESK, "vault_desk_documents", ids);
+}
 
 const META_KEY = "bhb_vault_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -61,13 +77,19 @@ export function scheduleVaultDeskSync(state: VaultState) {
 }
 
 async function pushVaultDeskApi(state: VaultState) {
+  const sentDeletes = pendingDeskDeletes(VAULT_DESK);
+  const holder = { documents: state.documents, settings: state.settings } as Record<string, unknown>;
+  // Only the documents this browser changed, each with the stamp it loaded.
+  const sent = stampedDeskBody("vault", holder, VAULT_SLICES);
+  if (!sent.anything && !Object.values(sentDeletes).some((ids) => ids?.length)) return;
   try {
     const res = await fetch("/api/school-data/vault-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        documents: state.documents,
-        settings: state.settings,
+        ...sent.body,
+        // Deletions are named, never inferred from what this browser lacks.
+        deletes: sentDeletes,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -75,8 +97,13 @@ async function pushVaultDeskApi(state: VaultState) {
       updatedAt?: string;
       documentCount?: number;
       error?: string;
+      stamps?: RowStamps;
+      conflicts?: RowConflicts;
+      settingsStamp?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(VAULT_DESK, sentDeletes);
+      afterStampedDeskSave("vault", holder, VAULT_SLICES, sent, body);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         documentCount: body.documentCount ?? state.documents.length,
@@ -84,7 +111,12 @@ async function pushVaultDeskApi(state: VaultState) {
     } else if (!res.ok) {
       console.warn("[vault-db] desk push failed", body?.error || res.status);
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("vault");
+    else recordDeskSyncFailure("vault", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("vault", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[vault-db] desk push error", e);
   }
 }
@@ -93,6 +125,8 @@ export async function fetchVaultDeskFromApi(): Promise<{
   bundle: Pick<VaultState, "documents" | "settings">;
   updatedAt: string;
   documentCount: number;
+  stamps?: RowStamps;
+  settingsStamp?: string;
 } | null> {
   if (!vaultNormalizedSyncEnabled()) return null;
   try {
@@ -106,6 +140,8 @@ export async function fetchVaultDeskFromApi(): Promise<{
       settings?: VaultState["settings"];
       updatedAt?: string;
       documentCount?: number;
+      stamps?: RowStamps;
+      settingsStamp?: string;
     };
     if (!Array.isArray(body.documents)) return null;
     return {
@@ -115,6 +151,8 @@ export async function fetchVaultDeskFromApi(): Promise<{
       },
       updatedAt: body.updatedAt || "",
       documentCount: body.documentCount ?? body.documents.length,
+      stamps: body.stamps,
+      settingsStamp: body.settingsStamp,
     };
   } catch {
     return null;
@@ -125,13 +163,13 @@ type VaultDeskBundle = Pick<VaultState, "documents" | "settings">;
 
 export async function hydrateVaultDeskFromDb(
   preferDb?: boolean,
-): Promise<{ bundle: VaultDeskBundle; changed: boolean }> {
+): Promise<{ bundle: VaultDeskBundle; changed: boolean; ok: boolean }> {
   const remote = await fetchVaultDeskFromApi();
   const empty: VaultDeskBundle = {
     documents: [],
     settings: { digestMobiles: "" },
   };
-  if (!remote) return { bundle: empty, changed: false };
+  if (!remote) return { bundle: empty, changed: false, ok: false };
 
   const meta = readMeta();
   const shouldTake =
@@ -141,12 +179,14 @@ export async function hydrateVaultDeskFromDb(
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.documentCount > meta.documentCount;
 
-  if (!shouldTake) return { bundle: empty, changed: false };
+  if (!shouldTake) return { bundle: empty, changed: false, ok: true };
 
   writeMeta({
     updatedAt: remote.updatedAt,
     documentCount: remote.documentCount,
   });
+  // The documents as the server holds them are the base of the next save.
+  captureDeskStamps("vault", remote.bundle as Record<string, unknown>, VAULT_SLICES, remote.stamps, remote.settingsStamp);
 
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

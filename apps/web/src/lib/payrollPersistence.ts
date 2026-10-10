@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "payroll";
 
@@ -36,7 +37,7 @@ const blob = createDomainBlobPersistence<PayrollState>({
 export const payrollRemoteEnabled = blob.remoteEnabled;
 export const schedulePayrollSync = (state: PayrollState) => {
   if (typeof window === "undefined") {
-    void pushPayrollRemoteServer(state);
+    void trackServerWork(pushPayrollRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("payroll")) blob.scheduleSync(state);
@@ -44,7 +45,6 @@ export const schedulePayrollSync = (state: PayrollState) => {
 };
 export const ensurePayrollHydrated = async () => {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = payrollReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("payroll")
@@ -52,14 +52,20 @@ export const ensurePayrollHydrated = async () => {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydratePayrollDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydratePayrollDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (changed && (bundle.runs.length > 0 || readFromDb)) {
     writePayrollLocalRaw(
       mergeDbDeskIntoPayrollState(loadPayroll(), bundle, { preferDb: readFromDb }),
     );
     normChanged = true;
   }
-  if (normChanged) schedulePayrollSync(loadPayroll());
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+  if (normChanged && !readFromDb) schedulePayrollSync(loadPayroll());
   return blobChanged || normChanged;
 };
 

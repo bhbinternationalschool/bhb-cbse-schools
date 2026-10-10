@@ -9,7 +9,16 @@ import { getServerTenantContext } from "@/lib/serverTenant";
 
 export type WaBotSliceKey = keyof Pick<
   WaBotPersistBundle,
-  "crm" | "sis" | "survey" | "classChannel" | "unified" | "hub" | "staffAtt"
+  | "crm"
+  | "sis"
+  | "survey"
+  | "classChannel"
+  | "unified"
+  | "hub"
+  | "staffAtt"
+  | "complaints"
+  | "commands"
+  | "tutor"
 >;
 
 export const WA_BOT_SLICE_KEYS: WaBotSliceKey[] = [
@@ -20,6 +29,9 @@ export const WA_BOT_SLICE_KEYS: WaBotSliceKey[] = [
   "unified",
   "hub",
   "staffAtt",
+  "complaints",
+  "commands",
+  "tutor",
 ];
 
 export type WaThreadsDeskSyncMeta = {
@@ -55,6 +67,9 @@ function emptyBundle(): WaBotPersistBundle {
     unified: null,
     hub: null,
     staffAtt: null,
+    complaints: null,
+    commands: null,
+    tutor: null,
   };
 }
 
@@ -74,6 +89,47 @@ function countThreadsInBundle(bundle: WaBotPersistBundle): number {
     n += countThreadsInPayload(bundle[key]);
   }
   return n;
+}
+
+/**
+ * Write ONE bot slice. saveWaBotSlice used to push the whole bundle for a
+ * change to one slice: a prune SELECT, eight upserts and the sync meta, per
+ * WhatsApp message. On 2026-09-29, when ~15 staff messaged the bot while
+ * signing in to the ERP, that was ~1,400 writes in five minutes on the same
+ * one-CPU web server the staff were waiting on. One slice, one upsert.
+ */
+export async function pushWaThreadsSliceToDb(
+  key: WaBotSliceKey,
+  payload: unknown,
+  bundle: WaBotPersistBundle,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!waThreadsDualWriteDbEnabled()) return { ok: true };
+  if (payload == null) return { ok: true };
+  const ctx = await resolveCtx();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const { sb, tenantId } = ctx;
+  const now = nowIso();
+  const { error } = await sb.from("wa_desk_bot_slices").upsert({
+    tenant_id: tenantId,
+    slice_key: key,
+    payload,
+    updated_at: now,
+  });
+  if (error) {
+    console.error("[wa-threads] slice upsert FAILED", key, error.message);
+    return { ok: false, error: `${key}: ${error.message}` };
+  }
+  await sb.from("wa_desk_sync_meta").upsert(
+    {
+      tenant_id: tenantId,
+      slice_count: WA_BOT_SLICE_KEYS.filter((k) => bundle[k] != null).length,
+      thread_count: countThreadsInBundle(bundle),
+      last_updated_at: bundle.updatedAt || now,
+      updated_at: now,
+    },
+    { onConflict: "tenant_id" },
+  );
+  return { ok: true };
 }
 
 export async function pushWaThreadsDeskToDb(
@@ -97,29 +153,28 @@ export async function pushWaThreadsDeskToDb(
     });
   }
 
-  const { data: existing } = await sb
-    .from("wa_desk_bot_slices")
-    .select("slice_key")
-    .eq("tenant_id", tenantId);
-  const keep = new Set(rows.map((r) => String(r.slice_key)));
-  const stale = (existing ?? [])
-    .map((r) => String((r as { slice_key: string }).slice_key))
-    .filter((k) => !keep.has(k));
-  if (stale.length > 0) {
-    await sb
-      .from("wa_desk_bot_slices")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .in("slice_key", stale);
-  }
-
+  // No prune. A slice this bundle does not carry is a slice it does not hold
+  // — not a conversation history to delete. This deleted every slice the
+  // bundle lacked, and wiped the table when it carried none.
   if (rows.length > 0) {
-    const { error } = await sb.from("wa_desk_bot_slices").upsert(rows);
-    if (error) return { ok: false, error: error.message };
-  } else {
-    await sb.from("wa_desk_bot_slices").delete().eq("tenant_id", tenantId);
+    // One upsert per slice, not one for the bundle. On 2026-09-04 and again
+    // on 2026-09-11 a single slice the table would not accept (a CHECK that
+    // lagged the code) made the bundle upsert fail as a whole, and every
+    // bot conversation stopped persisting until somebody noticed. A bad
+    // slice must cost that slice, not the school's WhatsApp history.
+    const failed: string[] = [];
+    for (const row of rows) {
+      const { error } = await sb.from("wa_desk_bot_slices").upsert(row);
+      if (error) {
+        failed.push(`${String(row.slice_key)}: ${error.message}`);
+        console.error("[wa-threads] slice upsert FAILED", row.slice_key, error.message);
+      }
+    }
+    if (failed.length === rows.length) return { ok: false, error: failed.join(" · ") };
+    if (failed.length) console.error("[wa-threads] bundle saved WITHOUT", failed.join(" · "));
   }
 
+  if (rows.length === 0) return { ok: true };
   const threadCount = countThreadsInBundle(bundle);
   await sb.from("wa_desk_sync_meta").upsert(
     {
@@ -138,13 +193,15 @@ export async function pushWaThreadsDeskToDb(
 export async function fetchWaThreadsDeskFromDb(): Promise<{
   bundle: WaThreadsDeskBundle;
   meta: WaThreadsDeskSyncMeta | null;
+  /** false = the read failed; the bundle is NOT a confirmed empty desk. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty = emptyBundle();
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const [{ data: sliceRows }, { data: metaRow }] = await Promise.all([
+  const [{ data: sliceRows, error: sliceErr }, { data: metaRow, error: metaErr }] = await Promise.all([
     sb.from("wa_desk_bot_slices").select("*").eq("tenant_id", tenantId),
     sb
       .from("wa_desk_sync_meta")
@@ -152,6 +209,13 @@ export async function fetchWaThreadsDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  // A failed read used to come back as an empty bundle, indistinguishable
+  // from a desk with no conversations.
+  if (sliceErr || metaErr) {
+    console.error("[wa-threads] fetch failed", sliceErr?.message, metaErr?.message);
+    return { bundle: empty, meta: null, ok: false };
+  }
 
   const bundle: WaBotPersistBundle = { ...empty };
   let latestAt = "";
@@ -170,6 +234,7 @@ export async function fetchWaThreadsDeskFromDb(): Promise<{
   bundle.updatedAt = latestAt || metaRow?.updated_at || nowIso();
 
   return {
+    ok: true,
     bundle,
     meta: metaRow
       ? {

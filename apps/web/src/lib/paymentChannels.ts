@@ -1,11 +1,11 @@
+import { listBanksForPaymentMode } from "@/lib/accountsLookups";
+import { loadAccounts } from "@/lib/accountsStore";
 import {
-  BANK_PAYMENT_MODE_LABELS,
   BANK_PAYMENT_MODES,
-  listBanksForPaymentMode,
-  loadAccounts,
+  BANK_PAYMENT_MODE_LABELS,
   type AccountsState,
   type PaymentMode,
-} from "@/lib/accounts";
+} from "@/lib/accountsTypes";
 import { TENDER_MODES, type TenderMode } from "@/lib/fees";
 
 export type PaymentChannelGroup = {
@@ -100,6 +100,17 @@ function bankOptionLabel(b: {
   if (b.bankName) bits.push(b.bankName);
   if (b.accountNo) bits.push(b.accountNo.slice(-4));
   return bits.join(" · ");
+}
+
+/**
+ * A tender mode as the accounts desk knows it. IMPS has no bank-mode of its
+ * own and is treated as NEFT, which is how the bank masters are configured.
+ * Anything unmapped falls back to UPI rather than to cash: guessing "cash"
+ * for an electronic payment would put it in the drawer, which is worse than
+ * putting it in the wrong bank.
+ */
+export function paymentModeForTender(mode: TenderMode): PaymentMode {
+  return TENDER_TO_PAYMENT[mode] ?? "upi";
 }
 
 const TENDER_TO_PAYMENT: Partial<Record<TenderMode, PaymentMode>> = {

@@ -1,9 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { IndianRupee } from "lucide-react";
 import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
+import type { AccountsState } from "@/lib/accountsTypes";
+import {
+  canApproveConcession,
+  canBackdateReceipt,
+  canSeeModuleTab,
+  hasPermission,
+} from "@/lib/rbac";
+import {
+  DEFAULT_FEE_BACKDATE_POLICY,
+  earliestCollectionDate,
+  feeBackdateVerdict,
+} from "@/lib/feeBackdate";
 import {
   decodeTenderChannel,
   encodeTenderChannel,
@@ -12,6 +25,8 @@ import {
 import {
   allocateCollectionToDues,
   collectPayment,
+  type InjectedStoreDue,
+  type VoucherLine,
   computeHouseholdDues,
   formatInr,
   householdSiblingIds,
@@ -20,7 +35,10 @@ import {
   dayCloseNeedsAttention,
   openFeeDues,
   openChargeVoucherCount,
+  formatManualBookRef,
   isCollectionDateLocked,
+  leafNumber,
+  paperRefOf,
   deliverWhatsAppFeeReceipt,
   previewLastSessionTransfer,
   searchFeeStudents,
@@ -35,7 +53,14 @@ import {
   type TenderMode,
   type VoucherTender,
 } from "@/lib/fees";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import {
+  loadMasters,
+  academicYearStartOn,
+  currentAcademicYearCode,
+  CONCESSION_GROUNDS,
+  type ConcessionGround,
+  type MastersState,
+} from "@/lib/masters";
 import {
   householdWhatsApp,
   isValidMobile,
@@ -47,6 +72,7 @@ import {
   type SisStudent,
 } from "@/lib/sis";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
+import { WaNumberGapBanner } from "@/components/comms/WaNumberGapBanner";
 import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
@@ -59,35 +85,42 @@ import { FeeAdjustmentsBadge } from "@/components/fees/FeeAdjustmentsPanel";
 import {
   buildPerLineDiscountSlices,
   FEE_ADJUST_AUTO_LIMIT_PAISE,
+  linkAdjustmentsToVoucher,
   postCounterDiscountWaivers,
+  voidFeeAdjustment,
   type CounterDiscountSlice,
 } from "@/lib/feeAdjustments";
+import { projectDuesAfterDiscount, splitDiscountSlices, storeSaleIdOf } from "@/lib/feeStoreDiscount";
 import { FutureConcessionModal } from "@/components/fees/FutureConcessionModal";
 import {
   applyFutureConcessionsFromCounter,
+  changeStandingDiscount,
+  isRecurringAcademicFeeHead,
+  laterSameHeadDueKeys,
   listFutureConcessionCandidates,
   type FutureConcessionCandidate,
 } from "@/lib/counterConcession";
 import { lazyNamedTabPanel } from "@/components/ui/lazyTabPanel";
-import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
+import {
+  useDemoSession,
+  useSessionReadOnly,
+} from "@/components/shell/SessionContext";
 import {
   buildEnrichedPaymentSharePayload,
   buildPaymentShareUrl,
   composeWhatsAppPaymentLinkMessage,
   createPaymentLink,
   openPaymentLinkCount,
-  whatsAppPaymentLinkUrl,
 } from "@/lib/payments";
-import {
-  scheduleClientSchoolMirrorSync,
-} from "@/lib/schoolDataMirror";
+import { attachGatewayCheckout } from "@/lib/paymentGatewayClient";
+import { StoreSellInline } from "@/components/fees/StoreSellInline";
+import { StorePurchasesPanel } from "@/components/fees/StorePurchasesPanel";
+import { scheduleClientSchoolMirrorSync } from "@/lib/schoolDataMirror";
 import {
   buildFeeAgreementDoc,
   downloadFeeAgreementPdf,
 } from "@/lib/feeAgreementPdf";
-import {
-  ModuleTabButton,
-} from "@/components/ui/ModuleTabs";
+import { ModuleTabButton } from "@/components/ui/ModuleTabs";
 import { MODULE_TAB_CONTAINER_CLASS } from "@/components/ui/modern-tab-bar";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpPanel, ErpTableShell } from "@/components/ui/erp-roster";
@@ -100,13 +133,68 @@ import { SisParentWaInbox } from "@/components/fees/SisParentWaInbox";
 import { FeeAdjustmentsPanel } from "@/components/fees/FeeAdjustmentsPanel";
 import { FeeReportsPanel } from "@/components/fees/FeeFinancePanels";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { TransportRiderChip } from "@/components/transport/TransportRiderChip";
+import { openWaMe } from "@/lib/waMe";
+import { ReceiptWaStatus } from "@/components/fees/ReceiptWaStatus";
+import { ReceiptDeliveryPanel } from "@/components/fees/ReceiptDeliveryPanel";
+import { ReceiptRepairDialog } from "@/components/fees/ReceiptRepairDialog";
+import { CashgramRefundPanel } from "@/components/fees/CashgramRefundPanel";
+
+/**
+ * The search box owns its keystrokes. Typing re-renders ONLY this input;
+ * the workspace re-renders once per debounce tick instead of per key —
+ * the difference between this feeling like the store counter's search
+ * and feeling stuck.
+ */
+function FeeSearchInput({
+  onDebounced,
+  autoFocus,
+  resetSignal = 0,
+}: {
+  onDebounced: (q: string) => void;
+  autoFocus?: boolean;
+  /**
+   * Bumped by the parent when a student is picked, so the box empties and
+   * the match list collapses. The box owns its own text (that is the whole
+   * point of this component), so the parent cannot clear it directly.
+   */
+  resetSignal?: number;
+}) {
+  const [value, setValue] = useState("");
+  useEffect(() => {
+    if (resetSignal > 0) setValue("");
+  }, [resetSignal]);
+  /*
+    Arriving from a student's profile with ?q=<admission no>.
+
+    Read after mount rather than as the initial state: the server renders
+    this input empty, and seeding it during render would be a hydration
+    mismatch on a controlled field. Read from location instead of
+    useSearchParams so this page needs no Suspense boundary.
+  */
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) setValue(q);
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => onDebounced(value), 200);
+    return () => clearTimeout(t);
+  }, [value, onDebounced]);
+  return (
+    <input
+      className="field"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      placeholder="Child, father, mother, mobile, adm no, class…"
+      autoComplete="off"
+      autoFocus={autoFocus}
+    />
+  );
+}
+
 const ChargeVouchersPanel = lazyNamedTabPanel(
   () => import("@/components/fees/ChargeVouchersPanel"),
   "ChargeVouchersPanel",
-);
-const TransportFeeSchedulePanel = lazyNamedTabPanel(
-  () => import("@/components/fees/TransportFeeSchedulePanel"),
-  "TransportFeeSchedulePanel",
 );
 
 function FeeAgreementPdfLogo({ className = "" }: { className?: string }) {
@@ -141,6 +229,7 @@ function FeeAgreementPdfLogo({ className = "" }: { className?: string }) {
 type Tab =
   | "collect"
   | "receipts"
+  | "delivery"
   | "cheques"
   | "manual"
   | "paylinks"
@@ -193,13 +282,81 @@ export function FeeTakeWorkspace() {
   const readOnly = useSessionReadOnly();
   const ay = session.academicYearCode;
   const [tab, setTab] = useState<Tab>("dashboard");
+  // Someone holding only some Fees functions (reports, receipt delivery, …)
+  // sees only their tabs. Collecting, voiding and adjustments write the fee
+  // desk, which stays with the Fees grant — no function opens those tabs.
+  const feesWhole = hasPermission(session, null, "fees", "view");
+  const showTab = (id: string) => feesWhole || canSeeModuleTab(session, null, "fees", id);
+  const FEE_TAB_ORDER: Tab[] = [
+    "dashboard",
+    "collect",
+    "receipts",
+    "delivery",
+    "cheques",
+    "manual",
+    "paylinks",
+    "wa_sis",
+    "dayclose",
+    "adjustments",
+    "vouchers",
+    "reports",
+  ];
+  const firstShownTab = feesWhole ? null : (FEE_TAB_ORDER.find((t) => showTab(t)) ?? null);
+  useEffect(() => {
+    if (!feesWhole && firstShownTab && !showTab(tab)) setTab(firstShownTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feesWhole, firstShownTab, tab]);
+  const showDefaulters = feesWhole || ["list", "policy", "autopay"].some((t) => showTab(t));
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
-  const [query, setQuery] = useState("");
+  // The search box owns its keystrokes (FeeSearchInput above) — only the
+  // debounced value lives here, so typing never re-renders this whole
+  // workspace. That per-key full re-render is what made Find student feel
+  // slow next to the store counter's search.
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+
+  /**
+   * May the person at this counter make a concession effective?
+   *
+   * Only owner / admin / principal. Anyone else may still tick "also apply
+   * to future months" — the grant is simply recorded pending, and shows on
+   * the parent's next bill only once it has been approved.
+   */
+  const mayApproveConcession = useMemo(
+    () => (session ? canApproveConcession(session, masters) : false),
+    [session, masters],
+  );
+  /**
+   * Same authority as approving a concession: owner, admin, principal. It
+   * lets them date a receipt earlier than today even when the school has
+   * back-dating switched off, so a genuine mistake is corrected rather than
+   * voided and re-issued.
+   */
+  const mayBackdate = useMemo(
+    () => (session ? canBackdateReceipt(session, masters) : false),
+    [session, masters],
+  );
+  /**
+   * The floor the date box offers. Showing the limit is the point — the old
+   * box accepted any date at all and said nothing, so a typo in the year was
+   * indistinguishable from a decision.
+   */
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [hits, setHits] = useState<StudentSearchHit[]>([]);
+  const [searchResetSignal, setSearchResetSignal] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * Which children's fee DETAILS are on screen — one at a time by default:
+   * tapping a sibling card switches the visible list to that child. Ticks
+   * are family-wide and SURVIVE the switch: every child's card shows their
+   * ticked total, the collect summary counts them all, and the receipt
+   * lists every line — nothing ticked is ever invisible, just collapsed.
+   * "Open all" widens the view to every child when the office wants it.
+   */
+  const [activeStudentIds, setActiveStudentIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [includeFuture, setIncludeFuture] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   /** Rupees to collect at counter — defaults to full selected balance; lower for partial pay */
@@ -209,6 +366,58 @@ export function FeeTakeWorkspace() {
     Record<string, string>
   >({});
   const [counterDiscountReason, setCounterDiscountReason] = useState("");
+  /**
+   * WHY this family gets the discount.
+   *
+   * The note beside it was optional, so it was usually blank, and a blank one
+   * became the string "Counter concession" — which is where the discount was
+   * applied, not why it was owed. 108 of the 149 live grants say exactly that,
+   * leaving 99 of the 120 children on a concession with no recorded ground.
+   * Nothing can recover those; this is what stops the next hundred.
+   */
+  const [counterDiscountGround, setCounterDiscountGround] = useState<
+    ConcessionGround | ""
+  >("");
+  /**
+   * Dues whose discount the clerk has chosen to make recurring.
+   *
+   * Starts empty and stays empty unless someone ticks: a discount belongs to
+   * the month in hand until the office says it repeats. The old flow inferred
+   * this from a pre-ticked modal AFTER collect, which is how a single month's
+   * discount became a standing Masters rule nobody chose.
+   */
+  /**
+   * Lines this screen filled in by itself, keyed by the line that caused it.
+   *
+   * Ticking "make recurring" on April copies April's discount onto the later
+   * months of the same head already in the basket — otherwise the clerk sees
+   * May at full price, discounts it by hand, and ends up with two discounts
+   * on one month. Remembering what was auto-filled is what lets unticking
+   * take it back out again without touching a figure the clerk typed.
+   */
+  const [autoFilledBy, setAutoFilledBy] = useState<
+    Record<string, { value: string; keys: string[] }>
+  >({});
+
+  const [recurringDueKeys, setRecurringDueKeys] = useState<Set<string>>(
+    new Set(),
+  );
+  /**
+   * Lines ticked to be DISCOUNTED but not collected today.
+   *
+   * The counter often settles one head while agreeing a reduction on another
+   * the parent is not paying for yet — ₹100 off August transport while only
+   * tuition is taken. Without this a discount could only go on a head being
+   * collected, so the clerk had to either take money they were not given or
+   * leave Fee Take and edit Masters.
+   *
+   * These lines contribute their discount and nothing else: they are out of
+   * the collect total, out of the allocation, and off the receipt.
+   */
+  // Per-line "discount only" was removed with its checkbox: a discount now
+  // always belongs to the line it is typed on. Recording a discount without
+  // collecting is still possible — set the amount to zero and post it.
+
   const [futureConcessionPrompt, setFutureConcessionPrompt] = useState<{
     candidates: FutureConcessionCandidate[];
     selected: Set<string>;
@@ -216,13 +425,87 @@ export function FeeTakeWorkspace() {
   const [tenderLines, setTenderLines] = useState<TenderLine[]>([]);
   const [composer, setComposer] = useState<TenderComposer>(emptyComposer);
   const [collectionDate, setCollectionDate] = useState(todayIso);
+  const earliestDate = useMemo(
+    () =>
+      earliestCollectionDate({
+        today: todayIso(),
+        sessionStartOn: academicYearStartOn(ay) ?? "",
+        policy: masters?.feeBackdatePolicy ?? DEFAULT_FEE_BACKDATE_POLICY,
+        mayOverride: mayBackdate,
+      }),
+    [ay, masters, mayBackdate],
+  );
+  const collectionDateProblem = useMemo(() => {
+    const v = feeBackdateVerdict({
+      collectionDate,
+      today: todayIso(),
+      sessionStartOn: academicYearStartOn(ay) ?? "",
+      policy: masters?.feeBackdatePolicy ?? DEFAULT_FEE_BACKDATE_POLICY,
+      mayOverride: mayBackdate,
+      dayClosed: isCollectionDateLocked(collectionDate),
+    });
+    return v.ok ? "" : v.reason;
+  }, [collectionDate, ay, masters, mayBackdate]);
+  /**
+   * Accounts desk state, HYDRATED here rather than assumed. The payment-mode
+   * dropdown is built from the bank accounts, and this browser only has them
+   * after a pull from the server — which used to happen only when the
+   * Accounts (or Transport) module was opened first, so a counter machine
+   * that went straight to Fee Take offered nothing but cash.
+   */
+  const [accountsState, setAccountsState] = useState<AccountsState | null>(
+    null,
+  );
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const { ensureAccountsHydrated } =
+          await import("@/lib/accountsPersistence");
+        await ensureAccountsHydrated();
+      } catch {
+        // Offline or first load — fall through to whatever is cached locally.
+      }
+      // Transport dues are billed HERE, on the counter — so the counter pulls
+      // the transport desk itself instead of trusting some other module to
+      // have done it. A changed pull re-ticks the dues so a student already
+      // on screen gains their transport line.
+      try {
+        const { ensureTransportHydrated } =
+          await import("@/lib/transportPersistence");
+        const changed = await ensureTransportHydrated();
+        if (live && changed) refresh();
+      } catch {
+        // Same fallback as accounts.
+      }
+      const { loadAccounts } = await import("@/lib/accountsStore");
+      if (live) setAccountsState(loadAccounts());
+      // ensureAccountsHydrated marks the module hydrated the moment the FIRST
+      // caller enters it, so when the app shell kicked hydration off just
+      // before us, our call returns while that pull is still in flight — and
+      // a single read here would freeze an empty store into the dropdown
+      // (observed live: bank in localStorage at 6s, dropdown stuck on cash).
+      // Re-read on a short ladder until the store shows substance.
+      for (const delay of [1500, 3500, 8000, 15000]) {
+        await new Promise((r) => setTimeout(r, delay));
+        if (!live) return;
+        const next = loadAccounts();
+        if (next.bankAccounts.length > 0 || next.coaAccounts.length > 0) {
+          setAccountsState(next);
+          if (next.bankAccounts.length > 0) break;
+        }
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
   const [schoolReceiptNo, setSchoolReceiptNo] = useState("");
   const [note, setNote] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [collectError, setCollectError] = useState<string | null>(null);
   const [receipts, setReceipts] = useState<CollectionVoucher[]>([]);
-  const [previewReceiptId, setPreviewReceiptId] = useState<string | null>(
-    null,
-  );
+  const [previewReceiptId, setPreviewReceiptId] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [mounted, setMounted] = useState(false);
 
@@ -233,7 +516,7 @@ export function FeeTakeWorkspace() {
     setMasters(m);
     setSis(s);
     setHits(
-      searchFeeStudents(query, s, m, f, {
+      searchFeeStudents(debouncedQuery, s, m, f, {
         classId,
         sectionId,
         academicYearCode: ay,
@@ -259,27 +542,25 @@ export function FeeTakeWorkspace() {
       const { ensureSisHydrated } = await import("@/lib/sisPersistence");
       const { ensureFeesHydrated } = await import("@/lib/feesPersistence");
       const { hydrateFeesStore } = await import("@/lib/fees");
-      const { ensurePaymentsHydrated } = await import(
-        "@/lib/paymentsPersistence"
-      );
+      const { ensurePaymentsHydrated } =
+        await import("@/lib/paymentsPersistence");
+      const { withHydrationSlot } = await import("@/lib/deskHydrateGuard");
       await Promise.all([
-        ensureSisHydrated(),
-        ensureFeesHydrated(),
-        ensurePaymentsHydrated(),
+        withHydrationSlot(() => ensureSisHydrated()),
+        withHydrationSlot(() => ensureFeesHydrated()),
+        withHydrationSlot(() => ensurePaymentsHydrated()),
       ]);
       await hydrateFeesStore();
-      const { applyCollectionWipeSignalIfNeeded } = await import(
-        "@/lib/feeCollectionWipe"
-      );
+      const { applyCollectionWipeSignalIfNeeded } =
+        await import("@/lib/feeCollectionWipe");
       const wipe = await applyCollectionWipeSignalIfNeeded();
       if (wipe.wiped) {
         flash(
           `Cleared ${wipe.removedVouchers} local receipt(s) — ready for re-import`,
         );
       }
-      const { applyFeeDiscountSeedNow } = await import(
-        "@/lib/feeDiscountImportHydrate"
-      );
+      const { applyFeeDiscountSeedNow } =
+        await import("@/lib/feeDiscountImportHydrate");
       const discount = applyFeeDiscountSeedNow();
       if (discount.applied > 0) {
         flash(
@@ -293,10 +574,12 @@ export function FeeTakeWorkspace() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const raw = new URLSearchParams(window.location.search).get("tab");
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get("tab");
     const allowed: Tab[] = [
       "collect",
       "receipts",
+      "delivery",
       "cheques",
       "manual",
       "paylinks",
@@ -310,19 +593,50 @@ export function FeeTakeWorkspace() {
     if (raw && (allowed as string[]).includes(raw)) {
       setTab(raw as Tab);
     }
+    // Deep link from global search — open a specific receipt by voucher id.
+    const openReceipt = params.get("openReceipt");
+    if (openReceipt) {
+      setTab("receipts");
+      setPreviewReceiptId(openReceipt);
+    }
   }, []);
+
+  // The fees blob is a multi-megabyte localStorage parse — doing it PER
+  // KEYSTROKE is what made the search feel hung. Parse once per data tick.
+  const feesForSearch = useMemo(() => {
+    void tick;
+    return loadFees();
+  }, [tick]);
 
   useEffect(() => {
     if (!sis || !masters) return;
-    setHits(
-      searchFeeStudents(query, sis, masters, loadFees(), {
-        classId,
-        sectionId,
-        academicYearCode: ay,
-        includeFuture,
-      }),
-    );
-  }, [query, classId, sectionId, sis, masters, tick, ay, includeFuture]);
+    // One letter matches half the roster and costs a full scan — wait for
+    // two, unless a class filter narrows the field.
+    if (debouncedQuery.trim().length < 2 && !classId) {
+      setHits([]);
+      return;
+    }
+    // Transition: the roster scan may take a frame — never block a keystroke.
+    startTransition(() => {
+      setHits(
+        searchFeeStudents(debouncedQuery, sis, masters, feesForSearch, {
+          classId,
+          sectionId,
+          academicYearCode: ay,
+          includeFuture,
+        }),
+      );
+    });
+  }, [
+    debouncedQuery,
+    classId,
+    sectionId,
+    sis,
+    masters,
+    feesForSearch,
+    ay,
+    includeFuture,
+  ]);
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
@@ -349,6 +663,185 @@ export function FeeTakeWorkspace() {
     return sis.students.find((s) => s.id === selectedId) ?? null;
   }, [sis, selectedId]);
 
+  // Store credit sales for this household, read live from the store module.
+  // Not mirrored into the fee tables: the fees client rebuilds those wholesale
+  // and would delete anything it did not produce itself.
+  const [storeDues, setStoreDues] = useState<InjectedStoreDue[]>([]);
+  const [storeDuesError, setStoreDuesError] = useState("");
+  const [unsettledStore, setUnsettledStore] = useState<
+    { saleNo: string; saleId: string; amountPaise: number; receiptNo: string }[]
+  >([]);
+
+  useEffect(() => {
+    if (!sis || !selectedStudent) {
+      setStoreDues([]);
+      return;
+    }
+    const ids = householdSiblingIds(sis, selectedStudent).map((m) => m.id);
+    let alive = true;
+    void fetch(
+      `/api/inventory/sales?view=dues&studentIds=${encodeURIComponent(ids.join(","))}`,
+      { cache: "no-store" },
+    )
+      .then((r) => r.json())
+      .then(
+        (body: { ok?: boolean; dues?: InjectedStoreDue[]; error?: string }) => {
+          if (!alive) return;
+          if (body.ok === false) {
+            // Say the store could not be reached rather than showing no dues,
+            // which would read as "this family owes the store nothing".
+            setStoreDuesError(body.error || "Store dues could not be loaded");
+            setStoreDues([]);
+            return;
+          }
+          setStoreDuesError("");
+          setStoreDues(body.dues ?? []);
+        },
+      )
+      .catch(() => {
+        if (!alive) return;
+        setStoreDuesError("Store dues could not be loaded");
+        setStoreDues([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [sis, selectedStudent, tick]);
+
+  /**
+   * Push the store portion of a receipt into the store.
+   *
+   * Anything that does not land is listed for the clerk to retry rather than
+   * logged and forgotten — an unsettled store line means the family is still
+   * shown as owing money they have already paid.
+   */
+  /**
+   * A voided fee receipt gives the store its due back: the collections it
+   * made are reversed, the slip stops saying PAID, and the family sees the
+   * store line owing again. Without this the store kept the money on paper
+   * while the parent had it in hand.
+   */
+  async function reverseStoreLinesForReceipt(receiptNo: string) {
+    try {
+      const res = await fetch("/api/inventory/sales", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "reverse-collect",
+          receiptNo,
+          reason: `Fee receipt ${receiptNo} voided`,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        reversal?: { reversed: number; amountPaise: number };
+        error?: string;
+      };
+      if (!res.ok || body.ok === false) {
+        throw new Error(body.error || "Store refused the reversal");
+      }
+      const n = body.reversal?.reversed ?? 0;
+      if (n > 0) {
+        flash(
+          `Store collection returned — ${n} sale${n === 1 ? "" : "s"} back to unpaid`,
+        );
+      }
+    } catch (e) {
+      flash(
+        `Receipt voided, but the store collection could not be returned (${e instanceof Error ? e.message : "error"}) — fix it on the Store counter`,
+      );
+    }
+    setTick((t) => t + 1);
+  }
+
+  /**
+   * Store discounts given at this counter, told to the store: the sale's own
+   * discount rises and its balance falls (books: Dr Store income / Cr
+   * receivable). Keyed by the receipt number — repeat-safe, and a voided
+   * receipt takes them back. A failure is listed for the clerk, like an
+   * unsettled collection.
+   */
+  async function discountStoreLines(ref: string, slices: { dueKey: string; amountPaise: number; label: string }[]) {
+    const failures: { saleNo: string; saleId: string; amountPaise: number; receiptNo: string }[] = [];
+    for (const sl of slices) {
+      const saleId = storeSaleIdOf(sl.dueKey);
+      if (!saleId || sl.amountPaise <= 0) continue;
+      try {
+        const res = await fetch("/api/inventory/sales", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "discount",
+            saleId,
+            amountPaise: sl.amountPaise,
+            reason: `Counter discount · ${counterDiscountReason.trim() || "Counter concession"}`,
+            externalRef: ref,
+          }),
+        });
+        const body = (await res.json().catch(() => ({}))) as { ok?: boolean };
+        if (!res.ok || body.ok === false) throw new Error("refused");
+      } catch {
+        failures.push({ saleNo: `${sl.label} (discount)`, saleId, amountPaise: sl.amountPaise, receiptNo: ref });
+      }
+    }
+    if (failures.length > 0) setUnsettledStore((prev) => [...prev, ...failures]);
+    return failures.length === 0;
+  }
+
+  async function settleStoreLines(
+    receiptNo: string,
+    lines: VoucherLine[],
+    discounts: { dueKey: string; amountPaise: number; label: string }[] = [],
+  ) {
+    // Discount before cash: the cash is the discounted amount, and the store
+    // refuses a collection larger than what it still shows owing.
+    if (discounts.length > 0) await discountStoreLines(receiptNo, discounts);
+    const storeLines = lines.filter(
+      (l) => l.kind === "store" && l.amountPaise > 0,
+    );
+    if (storeLines.length === 0) return;
+
+    const failures: {
+      saleNo: string;
+      saleId: string;
+      amountPaise: number;
+      receiptNo: string;
+    }[] = [];
+
+    for (const line of storeLines) {
+      const saleId = line.dueKey.split(":")[2] || "";
+      if (!saleId) continue;
+      try {
+        const res = await fetch("/api/inventory/sales", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "collect",
+            saleId,
+            amountPaise: line.amountPaise,
+            mode: "cash",
+            reference: receiptNo,
+            externalRef: receiptNo,
+          }),
+        });
+        const body = (await res.json()) as { ok?: boolean };
+        if (!res.ok || body.ok === false) throw new Error("refused");
+      } catch {
+        failures.push({
+          saleNo: line.storeIssueNo || saleId,
+          saleId,
+          amountPaise: line.amountPaise,
+          receiptNo,
+        });
+      }
+    }
+
+    if (failures.length > 0) {
+      setUnsettledStore((prev) => [...prev, ...failures]);
+    }
+    setTick((t) => t + 1);
+  }
+
   const householdBundle = useMemo(() => {
     if (!sis || !masters || !selectedStudent) return [];
     const fees = loadFees();
@@ -358,9 +851,9 @@ export function FeeTakeWorkspace() {
       sis,
       masters,
       fees,
-      { includeFuture, includePaid: true },
+      { includeFuture, includePaid: true, storeDues },
     ).filter((row) => members.some((m) => m.id === row.student.id));
-  }, [sis, masters, selectedStudent, includeFuture, tick]);
+  }, [sis, masters, selectedStudent, includeFuture, storeDues, tick]);
 
   const lastSessionPreviews = useMemo(() => {
     if (!sis || !masters || !selectedStudent) return [];
@@ -375,6 +868,25 @@ export function FeeTakeWorkspace() {
     0,
   );
 
+  /**
+   * The children whose fees are on the counter right now. Falls back to the
+   * picked student when the active set does not match this household — that
+   * happens for one render after switching families, and an empty right
+   * panel would read as "this child has no dues", which is not what we know.
+   */
+  const activeBundle = useMemo(() => {
+    const onCounter = householdBundle.filter((row) =>
+      activeStudentIds.has(row.student.id),
+    );
+    if (onCounter.length > 0) return onCounter;
+    return householdBundle.filter((row) => row.student.id === selectedId);
+  }, [householdBundle, activeStudentIds, selectedId]);
+
+  /**
+   * The SELECTION domain — every child of the family. A tick keeps counting
+   * whichever child's list happens to be open on screen; the visible list
+   * (activeBundle) only decides what is displayed, never what is collected.
+   */
   const allDues = useMemo(
     () => householdBundle.flatMap((row) => row.dues),
     [householdBundle],
@@ -397,6 +909,21 @@ export function FeeTakeWorkspace() {
     [selectedDues, lineDiscountRupees],
   );
 
+  // Only heads that actually repeat can be offered as recurring — the same
+  // test collect uses, so the tick never promises something collect refuses.
+  const recurringEligible = useMemo(() => {
+    if (!masters || !sis) return new Set<string>();
+    return new Set(
+      listFutureConcessionCandidates(
+        discountSlices,
+        selectedDues,
+        masters,
+        householdBundle.map((r) => r.student),
+        ay,
+      ).map((c) => c.dueKey),
+    );
+  }, [discountSlices, selectedDues, masters, sis, householdBundle, ay]);
+
   const counterDiscountPaise = discountSlices.reduce(
     (s, x) => s + x.amountPaise,
     0,
@@ -404,18 +931,9 @@ export function FeeTakeWorkspace() {
 
   const netAfterDiscount = Math.max(0, collectTotal - counterDiscountPaise);
 
-  const lineDiscountsKey = useMemo(
-    () =>
-      Object.entries(lineDiscountRupees)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([k, v]) => `${k}:${v}`)
-        .join("|"),
-    [lineDiscountRupees],
-  );
-
   useEffect(() => {
-    setTenderLines([]);
-    setComposer(emptyComposer());
+    // Selection changed: prune discounts down to what is still ticked, and a
+    // fresh selection restarts the discount reason.
     setLineDiscountRupees((prev) => {
       const next: Record<string, string> = {};
       for (const key of selectedKeys) {
@@ -423,21 +941,83 @@ export function FeeTakeWorkspace() {
       }
       return next;
     });
+    setAutoFilledBy({});
     setCounterDiscountReason("");
     setFutureConcessionPrompt(null);
-    if (collectTotal > 0) {
-      setCollectAmountRupees(String(collectTotal / 100));
-    } else {
-      setCollectAmountRupees("");
-    }
-  }, [selectionKey, collectTotal]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey]);
 
   useEffect(() => {
-    if (collectTotal <= 0) return;
-    setCollectAmountRupees(String(netAfterDiscount / 100));
+    // ONE rule for the amount box: it always restates the NET of what is
+    // ticked. It used to be two effects — gross on selection change, net on
+    // discount change — so reselecting heads while discounts stood left the
+    // box on the gross figure while the banner showed net. Banner right,
+    // box wrong: the exact bug the counter kept hitting.
     setTenderLines([]);
     setComposer(emptyComposer());
-  }, [lineDiscountsKey]);
+    setCollectAmountRupees(
+      netAfterDiscount > 0 ? String(netAfterDiscount / 100) : "",
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey, netAfterDiscount]);
+
+  /**
+   * The later months of the same head, for the same child, already in this
+   * basket — the lines a recurring discount should fill in.
+   *
+   * Later only: a discount the clerk is making recurring from April is a
+   * statement about April onward, and quietly rewriting a March line sitting
+   * in the same basket would be a different decision than the one they made.
+   */
+  /** Copy a line's discount onto the basket's later months of the same head. */
+  function spreadRecurringDiscount(sourceDueKey: string, rupees: string) {
+    const value = rupees.trim();
+    if (!value) return;
+    const targets = laterSameHeadDueKeys(selectedDues, sourceDueKey);
+    if (targets.length === 0) return;
+
+    // Worked out BEFORE the updater rather than inside it: a state updater
+    // may be called more than once for one event, and appending to a list
+    // from in there would record the same line twice.
+    const filled = targets.filter(
+      // Never overwrite a figure the clerk typed themselves.
+      (key) => !lineDiscountRupees[key]?.trim(),
+    );
+    if (filled.length === 0) return;
+
+    setLineDiscountRupees((prev) => {
+      const next = { ...prev };
+      for (const key of filled) next[key] = value;
+      return next;
+    });
+    // The value is remembered too, so undoing can tell an untouched
+    // auto-filled line from one the clerk has since edited.
+    setAutoFilledBy((prev) => ({
+      ...prev,
+      [sourceDueKey]: { value, keys: filled },
+    }));
+  }
+
+  /** Take back exactly what this line put in, and nothing else. */
+  function unspreadRecurringDiscount(sourceDueKey: string) {
+    const filled = autoFilledBy[sourceDueKey];
+    if (!filled || filled.keys.length === 0) return;
+    setLineDiscountRupees((prev) => {
+      const next = { ...prev };
+      for (const key of filled.keys) {
+        // Only take back what is still exactly what was put there. Once the
+        // clerk changes a figure it is theirs, and unticking the line it came
+        // from must not quietly delete their number.
+        if (next[key] === filled.value) delete next[key];
+      }
+      return next;
+    });
+    setAutoFilledBy((prev) => {
+      const next = { ...prev };
+      delete next[sourceDueKey];
+      return next;
+    });
+  }
 
   const collectTarget = useMemo(() => {
     if (netAfterDiscount <= 0) return 0;
@@ -447,6 +1027,18 @@ export function FeeTakeWorkspace() {
   }, [collectAmountRupees, netAfterDiscount]);
   const isPartialCollect =
     collectTarget > 0 && collectTarget < netAfterDiscount;
+
+  /**
+   * What a payment link would ask the parent for.
+   *
+   * The button and the handler MUST read the same figure. They did not: the
+   * caption said `collectTotal`, the gross of the ticked heads, while the
+   * link itself carried the discounted amount — so a counter showing a
+   * ₹3,000 discount offered to "Send UPI link · ₹8,000" and then sent one
+   * for ₹5,000. Both numbers were defensible on their own; together they
+   * were a receipt waiting to be disputed.
+   */
+  const payLinkPaise = collectTarget > 0 ? collectTarget : netAfterDiscount;
   const tenderSum = tenderLines.reduce(
     (sum, t) => sum + Math.round((Number(t.amount) || 0) * 100),
     0,
@@ -499,6 +1091,21 @@ export function FeeTakeWorkspace() {
     window.setTimeout(() => setNotice(null), 2800);
   }
 
+  /**
+   * A refused collection, said where the money is.
+   *
+   * flash() puts the reason in the workspace header pill and clears it after
+   * 2.8s. The collect button sits at the bottom of a long scrolled page, so a
+   * refusal — a duplicate school receipt no., a day-closed date — appeared
+   * off-screen and was gone before the counter could scroll to it. The button
+   * looked dead instead of refusing for a stated reason. This one stays until
+   * the next attempt.
+   */
+  function failCollect(msg: string) {
+    setCollectError(msg);
+    flash(msg);
+  }
+
   function resetPaymentFields() {
     setTenderLines([]);
     setComposer(emptyComposer());
@@ -507,6 +1114,59 @@ export function FeeTakeWorkspace() {
     setNote("");
     setLineDiscountRupees({});
     setCounterDiscountReason("");
+  }
+
+  /**
+   * Change the standing discount on a head, from this month onward.
+   *
+   * "This month" is the first due of that head that has not gone past — not
+   * the line the clerk happens to be looking at. Clicking Change while
+   * scrolled to April must not reprice April: that month is billed, often
+   * collected, and its receipt would stop matching the money taken.
+   */
+  function changeHeadDiscount(due: FeeDueLine, rupees: string) {
+    if (!masters || !sis) return;
+    const student = sis.students.find((st) => st.id === due.studentId);
+    if (!student || !due.feeHeadId) return;
+
+    const monthStart = `${todayIso().slice(0, 7)}-01`;
+    const sameHead = allDues
+      .filter(
+        (d) => d.studentId === due.studentId && d.feeHeadId === due.feeHeadId,
+      )
+      .map((d) => d.dueOn)
+      .filter(Boolean)
+      .sort();
+    const fromDueOn =
+      sameHead.find((dueOn) => dueOn >= monthStart) ??
+      sameHead[sameHead.length - 1] ??
+      todayIso();
+
+    const paise = Math.round(
+      (Number(rupees.replace(/[^\d.]/g, "")) || 0) * 100,
+    );
+    const res = changeStandingDiscount({
+      studentId: due.studentId,
+      studentName: student.fullName,
+      feeHeadId: due.feeHeadId,
+      feeHeadName: due.feeHeadName || "this head",
+      newDiscountPaise: paise,
+      fromDueOn,
+      academicYearCode: ay,
+      reason: counterDiscountReason.trim(),
+      ground: counterDiscountGround,
+      by: session.fullName,
+    });
+    if (!res.ok) {
+      flash(res.error);
+      return;
+    }
+    refresh();
+    flash(
+      paise > 0
+        ? `${due.feeHeadName} discount is ${formatInr(paise)} from ${fromDueOn} — earlier months keep what they were billed`
+        : `${due.feeHeadName} discount removed from ${fromDueOn} — earlier months unchanged`,
+    );
   }
 
   function freshSelectedDues() {
@@ -518,7 +1178,10 @@ export function FeeTakeWorkspace() {
       sis,
       masters,
       fees,
-      { includeFuture, includePaid: true },
+      // Store dues too: without them a ticked store line vanished here, the
+      // payment had nothing to settle, and no store due was ever collected
+      // at this counter (0 of 214 store payments, found 10 Oct 2026).
+      { includeFuture, includePaid: true, storeDues },
     )
       .filter((row) => members.some((m) => m.id === row.student.id))
       .flatMap((b) => b.dues)
@@ -527,8 +1190,26 @@ export function FeeTakeWorkspace() {
 
   function pickStudent(hit: StudentSearchHit) {
     setSelectedId(hit.student.id);
+    setActiveStudentIds(new Set([hit.student.id]));
     setSelectedKeys(new Set());
     resetPaymentFields();
+    // Empty the search box and hide the match list straight away, rather
+    // than after the 200ms debounce — the list is no longer hidden by the
+    // selection itself, so it must be cleared explicitly.
+    setDebouncedQuery("");
+    setSearchResetSignal((n) => n + 1);
+  }
+
+  /**
+   * Open or close a child on the counter. Closing also drops that child's
+   * ticked fee lines: leaving them in the selection would collect money for
+   * a student whose fees are no longer on screen.
+   */
+  function toggleActiveStudent(studentId: string) {
+    // Switch, don't accumulate: one child's details at a time. The previous
+    // child's ticks stay selected — their card badge and the collect summary
+    // keep showing them ("Open all" restores the everyone-at-once view).
+    setActiveStudentIds(new Set([studentId]));
   }
 
   function toggleDue(due: FeeDueLine) {
@@ -635,6 +1316,27 @@ export function FeeTakeWorkspace() {
 
   function patchComposer(patch: Partial<TenderComposer>) {
     setComposer((prev) => ({ ...prev, ...patch }));
+    // Split-tender rebalance: typing a later mode's amount pulls that much
+    // out of the FIRST added line, so the total tracks the collect target
+    // (e.g. ₹1000 cash auto-filled, type ₹300 UPI → cash becomes ₹700).
+    if (patch.amount !== undefined && tenderLines.length > 0) {
+      const typedPaise = Math.round((Number(patch.amount) || 0) * 100);
+      setTenderLines((prev) => {
+        if (prev.length === 0) return prev;
+        const othersPaise = prev
+          .slice(1)
+          .reduce((s, t) => s + Math.round((Number(t.amount) || 0) * 100), 0);
+        const firstPaise = Math.max(
+          0,
+          collectTarget - othersPaise - typedPaise,
+        );
+        const firstAmount = String(firstPaise / 100);
+        if (prev[0]!.amount === firstAmount) return prev;
+        return prev.map((t, i) =>
+          i === 0 ? { ...t, amount: firstAmount } : t,
+        );
+      });
+    }
   }
 
   function addTenderLine() {
@@ -707,7 +1409,7 @@ export function FeeTakeWorkspace() {
       toAy,
     });
     if (!result.ok) {
-      flash(result.error);
+      failCollect(result.error);
       return;
     }
     setSis(loadSis());
@@ -720,19 +1422,25 @@ export function FeeTakeWorkspace() {
 
   function onCollect() {
     if (!selectedStudent || !sis || !masters) return;
+    setCollectError(null);
 
     const discountOnly = collectTarget <= 0 && counterDiscountPaise > 0;
 
     if (collectTarget <= 0 && !discountOnly) {
-      flash("Enter a collection amount");
+      failCollect("Enter a collection amount");
       return;
     }
     if (!discountOnly && tenderSum !== collectTarget) {
-      flash(
+      failCollect(
         isPartialCollect
           ? `Payments must equal partial amount (${formatInr(collectTarget)})`
           : `Payments must equal selected dues (${formatInr(collectTarget)})`,
       );
+      return;
+    }
+
+    if (counterDiscountPaise > 0 && !counterDiscountGround) {
+      failCollect("Choose why this discount is being given");
       return;
     }
 
@@ -744,11 +1452,24 @@ export function FeeTakeWorkspace() {
         householdBundle.map((r) => r.student),
         ay,
       );
-      if (candidates.length > 0 && !futureConcessionPrompt) {
+      // The clerk has already answered this on the line itself. The prompt is
+      // only for candidates that CLASH — a head that already carries a
+      // Masters concession — because that is the case which needs explaining
+      // before it is stacked. Everything else follows the tick, and an
+      // unticked line simply does not recur.
+      const chosen = candidates.filter((c) => recurringDueKeys.has(c.dueKey));
+      const clashing = chosen.filter((c) => c.existing.length > 0);
+      if (clashing.length > 0 && !futureConcessionPrompt) {
         setFutureConcessionPrompt({
-          candidates,
-          selected: new Set(candidates.map((c) => c.key)),
+          candidates: clashing,
+          // Never pre-ticked: stacking onto a head that already has a
+          // discount must be a deliberate act after reading what it does.
+          selected: new Set(),
         });
+        return;
+      }
+      if (chosen.length > 0) {
+        executeCollect(new Set(chosen.map((c) => c.key)));
         return;
       }
     }
@@ -761,59 +1482,109 @@ export function FeeTakeWorkspace() {
     setFutureConcessionPrompt(null);
 
     let futureConcessionMsg = "";
+    let waiverAdjustmentIds: string[] = [];
+    // A store due's discount goes to the store (after the receipt, under its
+    // number); only fee heads get a fee waiver. See lib/feeStoreDiscount.
+    const { fee: feeSlices, store: storeSlices } = splitDiscountSlices(discountSlices);
+    const nameOf = (id: string) => sis.students.find((s) => s.id === id)?.fullName ?? "Student";
+    // Nothing is saved until the whole collection checks out: on 10 Oct 2026
+    // the discount was saved, the collection then failed, and the waivers
+    // stayed with no receipt and no payment.
+    if (collectTarget > 0) {
+      const check = allocateCollectionToDues(
+        projectDuesAfterDiscount(freshSelectedDues(), discountSlices),
+        tenderSum,
+        nameOf,
+      );
+      if (!check.ok) {
+        failCollect(check.error);
+        return;
+      }
+    }
+    const undoWaivers = () => {
+      for (const id of waiverAdjustmentIds) voidFeeAdjustment(id, session.fullName);
+      waiverAdjustmentIds = [];
+      refresh();
+    };
 
-    if (counterDiscountPaise > 0) {
+    // Both artefacts are posted, and that is correct now that grants are
+    // judged against the due's own month: the waiver settles the month being
+    // collected, and the recurring grant starts at the NEXT installment.
+    // Before that gating existed the grant reached backwards and the month
+    // showed twice the discount typed.
+    if (feeSlices.length > 0) {
       const waiverResult = postCounterDiscountWaivers({
-        slices: discountSlices,
+        slices: feeSlices,
         reason: counterDiscountReason.trim() || "Counter concession",
         createdBy: session.fullName,
         academicYearCode: ay,
       });
       if (!waiverResult.ok) {
-        flash(waiverResult.error);
+        failCollect(waiverResult.error);
         return;
       }
-
-      if (applyFutureKeys.size > 0 && masters) {
-        const candidates = listFutureConcessionCandidates(
-          discountSlices,
-          selectedDues,
-          masters,
-          householdBundle.map((r) => r.student),
-          ay,
-        );
-        const futureResult = applyFutureConcessionsFromCounter({
-          candidates,
-          applyKeys: applyFutureKeys,
-          reason: counterDiscountReason.trim() || "Counter concession",
-          academicYearCode: ay,
-        });
-        if (!futureResult.ok) {
-          flash(futureResult.error);
-          return;
-        }
-        const bits: string[] = [];
-        if (futureResult.granted > 0) {
-          bits.push(
-            `${futureResult.granted} future grant${futureResult.granted === 1 ? "" : "s"} approved`,
-          );
-        }
-        if (futureResult.pending > 0) {
-          bits.push(
-            `${futureResult.pending} pending Principal in Concessions`,
-          );
-        }
-        if (futureResult.skipped > 0) {
-          bits.push(`${futureResult.skipped} already on file`);
-        }
-        if (bits.length > 0) futureConcessionMsg = ` · ${bits.join(" · ")}`;
-      }
+      waiverAdjustmentIds = waiverResult.adjustmentIds;
 
       refresh();
     }
 
+    // Future-month grants apply AFTER the receipt exists (paid path), so
+    // each grant carries its source receipt and dies with it on void. The
+    // discount-only path has no receipt — grants apply immediately there.
+    const applyFutureGrants = (voucher?: { id: string; receiptNo: string }) => {
+      if (applyFutureKeys.size === 0 || !masters || counterDiscountPaise <= 0) {
+        return;
+      }
+      const candidates = listFutureConcessionCandidates(
+        discountSlices,
+        selectedDues,
+        masters,
+        householdBundle.map((r) => r.student),
+        ay,
+      );
+      const futureResult = applyFutureConcessionsFromCounter({
+        candidates,
+        applyKeys: applyFutureKeys,
+        reason: counterDiscountReason.trim() || "Counter concession",
+        ground: counterDiscountGround,
+        academicYearCode: ay,
+        sourceVoucherId: voucher?.id,
+        sourceReceiptNo: voucher?.receiptNo,
+        // Same rule as Masters: a clerk who cannot approve a grant there
+        // must not be able to approve one by ticking a box here.
+        canApprove: mayApproveConcession,
+      });
+      if (!futureResult.ok) {
+        futureConcessionMsg = ` · future grants failed: ${futureResult.error}`;
+        return;
+      }
+      const bits: string[] = [];
+      if (futureResult.granted > 0) {
+        bits.push(
+          `${futureResult.granted} future grant${futureResult.granted === 1 ? "" : "s"} approved`,
+        );
+      }
+      if (futureResult.pending > 0) {
+        bits.push(`${futureResult.pending} pending Principal in Concessions`);
+      }
+      // A refused head must say so in full. "1 already on file" reads as
+      // housekeeping; the clerk needs to know a discount they just granted
+      // did NOT take, and which existing one is in the way.
+      if (futureResult.blocked.length > 0) {
+        bits.push(futureResult.blocked.join(" · "));
+      }
+      if (futureResult.skipped > futureResult.blocked.length) {
+        bits.push(
+          `${futureResult.skipped - futureResult.blocked.length} already on file`,
+        );
+      }
+      if (bits.length > 0) futureConcessionMsg = ` · ${bits.join(" · ")}`;
+    };
+
     if (collectTarget <= 0) {
       if (counterDiscountPaise > 0) {
+        if (storeSlices.length > 0) void discountStoreLines(`DISC-${Date.now()}`, storeSlices);
+        applyFutureGrants();
         setSelectedKeys(new Set());
         setCollectAmountRupees("");
         setLineDiscountRupees({});
@@ -826,17 +1597,13 @@ export function FeeTakeWorkspace() {
       }
       return;
     }
-    const nameById = new Map(
-      sis.students.map((s) => [s.id, s.fullName] as const),
-    );
-    const duesForCollect = freshSelectedDues();
-    const alloc = allocateCollectionToDues(
-      duesForCollect,
-      tenderSum,
-      (id) => nameById.get(id) ?? "Student",
-    );
+    // Fee waivers are in the dues now; store discounts are not yet (they go
+    // to the store with the receipt), so they are projected here.
+    const duesForCollect = projectDuesAfterDiscount(freshSelectedDues(), storeSlices);
+    const alloc = allocateCollectionToDues(duesForCollect, tenderSum, nameOf);
     if (!alloc.ok) {
-      flash(alloc.error);
+      undoWaivers();
+      failCollect(alloc.error);
       return;
     }
     const lines = alloc.lines;
@@ -847,8 +1614,7 @@ export function FeeTakeWorkspace() {
       instrumentDate: t.instrumentDate,
       bankName: t.bankName,
       bankAccountId: t.bankAccountId || undefined,
-      realisation:
-        t.mode === "cheque" ? "subject_to_clearance" : "cleared",
+      realisation: t.mode === "cheque" ? "subject_to_clearance" : "cleared",
     }));
 
     const primaryTxn =
@@ -880,15 +1646,41 @@ export function FeeTakeWorkspace() {
       transactionId: primaryTxn,
       schoolReceiptNo,
       note: [note.trim(), discountNote, chequeNote].filter(Boolean).join(" · "),
+      backdatePolicy: masters?.feeBackdatePolicy,
+      mayBackdate,
     });
     if (!result.ok) {
+      undoWaivers();
       flash(result.error);
       return;
     }
+    // The receipt exists now, so any store portion is told to the store.
+    //
+    // Order matters. The receipt is written first: if the store call fails the
+    // money is still recorded and the parent has their receipt, and the store
+    // simply still shows the due. Doing it the other way round could take the
+    // money with nothing to show for it. The call carries the receipt number,
+    // and the store settles once per receipt, so a retry is safe.
+    void settleStoreLines(result.voucher.receiptNo, lines, storeSlices);
+
+    // Bind this receipt's counter waivers to it, so voiding takes them back.
+    linkAdjustmentsToVoucher(waiverAdjustmentIds, result.voucher.id);
+
+    applyFutureGrants({
+      id: result.voucher.id,
+      receiptNo: result.voucher.receiptNo,
+    });
+
     setSelectedKeys(new Set());
     setCollectAmountRupees("");
+    setRecurringDueKeys(new Set());
     resetPaymentFields();
     refresh();
+    // The receipt just posted into the accounts desk — re-read it so the
+    // payment-mode dropdown never goes stale for the next student.
+    void import("@/lib/accountsStore").then(({ loadAccounts }) =>
+      setAccountsState(loadAccounts()),
+    );
     flash(
       (counterDiscountPaise > 0
         ? isPartialCollect
@@ -899,9 +1691,39 @@ export function FeeTakeWorkspace() {
           : `Collected ${result.voucher.receiptNo}`) + futureConcessionMsg,
     );
     setPreviewReceiptId(result.voucher.id);
+
+    // Tell the family, without the cashier having to remember.
+    //
+    // Fired after the receipt is on screen and deliberately NOT awaited: the
+    // counter must not wait on Meta to serve the next parent. The server is
+    // idempotent per receipt, so a retry cannot message a family twice, and
+    // a failure is recorded there rather than thrown at the desk — the money
+    // is already collected and the receipt already printed.
+    void fetch("/api/fees/receipt-wa", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ voucherId: result.voucher.id }),
+    })
+      .then((r) => r.json())
+      .then((r: { sent?: boolean; reason?: string; error?: string }) => {
+        // Say something whatever happens EXCEPT a clean send. The first
+        // version only spoke when `reason` was present, so a 404 body — which
+        // carries `error` — said nothing at all, and two real receipts on
+        // 2026-09-09 were never messaged with no sign of it anywhere.
+        if (!r?.sent) {
+          flash(
+            `Receipt made · WhatsApp not sent: ${r?.reason || r?.error || "no reply from the server"}`,
+          );
+        }
+      })
+      .catch((e: unknown) =>
+        flash(
+          `Receipt made · WhatsApp not sent: ${e instanceof Error ? e.message : "request failed"}`,
+        ),
+      );
   }
 
-  function onSendUpiLink() {
+  async function onSendUpiLink() {
     if (!selectedStudent || !sis || !masters) return;
     const selectedDues = householdBundle.flatMap((b) =>
       b.dues.filter((d) => selectedKeys.has(d.dueKey)),
@@ -910,22 +1732,51 @@ export function FeeTakeWorkspace() {
       flash("Select dues to include on the payment link");
       return;
     }
+
+    // The link must ask for what the COUNTER is showing, not the gross
+    // balance of the ticked heads. A discount entered here, or an amount
+    // typed into the collect box, used to be ignored entirely: the clerk
+    // granted the discount, sent the link, and the parent was billed the
+    // undiscounted figure.
+    const discountByKey = new Map(
+      discountSlices.map((x) => [x.dueKey, x.amountPaise]),
+    );
+    const linkDues = selectedDues
+      // A head ticked for discount only is not being collected at all, so
+      // it has no place on a payment request.
+      .map((d) => ({
+        ...d,
+        balancePaise: Math.max(
+          0,
+          d.balancePaise - (discountByKey.get(d.dueKey) ?? 0),
+        ),
+      }))
+      .filter((d) => d.balancePaise > 0);
+
+    if (linkDues.length === 0) {
+      flash("Nothing left to pay on the selected heads");
+      return;
+    }
+
+    const targetPaise = payLinkPaise;
+    if (targetPaise <= 0) {
+      flash("Nothing left to pay on the selected heads");
+      return;
+    }
     const className =
-      masters.classes.find((c) => c.id === selectedStudent.classId)?.name ??
-      "";
+      masters.classes.find((c) => c.id === selectedStudent.classId)?.name ?? "";
     const sectionName =
-      masters.sections.find((s) => s.id === selectedStudent.sectionId)
-        ?.name ?? "";
-    const classLabel = sectionName
-      ? `${className}-${sectionName}`
-      : className;
+      masters.sections.find((s) => s.id === selectedStudent.sectionId)?.name ??
+      "";
+    const classLabel = sectionName ? `${className}-${sectionName}` : className;
 
     const created = createPaymentLink({
       householdId: selectedStudent.householdId,
       studentId: selectedStudent.id,
       studentName: selectedStudent.fullName,
       classLabel,
-      dues: selectedDues,
+      dues: linkDues,
+      targetPaise,
       createdBy: session.fullName,
       academicYearCode: selectedStudent.academicYearCode || ay,
       note: note.trim(),
@@ -935,33 +1786,35 @@ export function FeeTakeWorkspace() {
       return;
     }
 
+    const attached = await attachGatewayCheckout(created.link);
+    const link = attached.link;
     const payload = buildEnrichedPaymentSharePayload(
-      created.link,
+      link,
       TENANT.nameDisplay,
       masters,
     );
     const url = buildPaymentShareUrl(payload);
-    const hh = sis.households.find(
-      (h) => h.id === selectedStudent.householdId,
-    );
+    const hh = sis.households.find((h) => h.id === selectedStudent.householdId);
     const mobile = householdWhatsApp(hh);
     if (mobile && isValidMobile(mobile)) {
       const msg = composeWhatsAppPaymentLinkMessage(
-        created.link,
+        link,
         url,
         TENANT.nameDisplay,
+        attached.attached,
+        waTemplateLanguageFor(hh ?? {}) === "hi",
       );
-      window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
+      openWaMe(mobile, msg, undefined, { module: "fees" });
       flash(
-        `UPI link ${created.link.code} · ${formatInr(created.link.amountPaise)} — WhatsApp opened`,
+        `${attached.attached ? "Checkout" : "UPI"} link ${link.code} · ${formatInr(link.amountPaise)} — WhatsApp opened`,
       );
     } else {
       void navigator.clipboard.writeText(url).then(
         () =>
           flash(
-            `UPI link ${created.link.code} copied — set WhatsApp on household to send`,
+            `${attached.attached ? "Checkout" : "UPI"} link ${link.code} copied — set WhatsApp on household to send`,
           ),
-        () => flash(`Created ${created.link.code}: ${url}`),
+        () => flash(`Created ${link.code}: ${url}`),
       );
     }
     setSelectedKeys(new Set());
@@ -970,9 +1823,24 @@ export function FeeTakeWorkspace() {
   }
 
   function onVoid(id: string) {
-    if (!window.confirm("Void this receipt? Dues will reopen.")) return;
+    const voucher = receipts.find((v) => v.id === id);
+    const hadStore = !!voucher?.lines.some((l) => l.kind === "store");
+    if (
+      !window.confirm(
+        hadStore
+          ? "Void this receipt? Dues will reopen and the store items on it go back to ISSUED (unpaid)."
+          : "Void this receipt? Dues will reopen.",
+      )
+    ) {
+      return;
+    }
     voidVoucher(id);
     if (previewReceiptId === id) setPreviewReceiptId(null);
+    // The store took this money on the strength of the receipt; the receipt
+    // is gone, so the money goes back and the slip returns to ISSUED.
+    if (hadStore && voucher) {
+      void reverseStoreLinesForReceipt(voucher.receiptNo);
+    }
     refresh();
     flash("Receipt voided");
   }
@@ -985,122 +1853,177 @@ export function FeeTakeWorkspace() {
       notice={notice}
       toolbar={
         <div className={MODULE_TAB_CONTAINER_CLASS}>
-          <ModuleTabButton
-            active={tab === "dashboard"}
-            onClick={() => setTab("dashboard")}
-            tone="navy"
-            size="md"
-          >
-            Dashboard
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "collect"}
-            onClick={() => setTab("collect")}
-            tone="green"
-            size="md"
-          >
-            Collect
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "receipts"}
-            onClick={() => setTab("receipts")}
-            tone="teal"
-            size="md"
-          >
-            Receipts
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "cheques"}
-            onClick={() => setTab("cheques")}
-            tone="amber"
-            size="md"
-          >
-            Cheques
-            {mounted && openChequeCount > 0 ? ` (${openChequeCount})` : ""}
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "manual"}
-            onClick={() => setTab("manual")}
-            tone="slate"
-            size="md"
-          >
-            Manual book
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "paylinks"}
-            onClick={() => setTab("paylinks")}
-            tone="sky"
-            size="md"
-          >
-            Pay links
-            {mounted && openPayLinkCount > 0 ? ` (${openPayLinkCount})` : ""}
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "wa_sis"}
-            onClick={() => setTab("wa_sis")}
-            tone="teal"
-            size="md"
-          >
-            WA parents
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "dayclose"}
-            onClick={() => setTab("dayclose")}
-            tone="coral"
-            size="md"
-          >
-            Day close{mounted && dayClosePending ? " ●" : ""}
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "adjustments"}
-            onClick={() => setTab("adjustments")}
-            tone="violet"
-            size="md"
-          >
-            Adjustments
-            {mounted ? <FeeAdjustmentsBadge /> : null}
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "vouchers"}
-            onClick={() => setTab("vouchers")}
-            tone="rose"
-            size="md"
-          >
-            Vouchers
-            {mounted && openChargeCount > 0 ? ` (${openChargeCount})` : ""}
-          </ModuleTabButton>
-          <ModuleTabButton
-            active={tab === "reports"}
-            onClick={() => setTab("reports")}
-            tone="green"
-            size="md"
-          >
-            Reports
-          </ModuleTabButton>
-          <Link
-            href="/fees/defaulters"
-            className="inline-flex items-center rounded-lg bg-[rgba(180,35,24,0.12)] px-3 py-2 text-sm font-bold text-[#b42318] transition hover:bg-[rgba(180,35,24,0.2)]"
-          >
-            Defaulters
-          </Link>
+          {showTab("dashboard") ? (
+            <ModuleTabButton
+              active={tab === "dashboard"}
+              onClick={() => setTab("dashboard")}
+              tone="navy"
+              size="md"
+            >
+              Dashboard
+            </ModuleTabButton>
+          ) : null}
+          {showTab("collect") ? (
+            <ModuleTabButton
+              active={tab === "collect"}
+              onClick={() => setTab("collect")}
+              tone="green"
+              size="md"
+            >
+              Collect
+            </ModuleTabButton>
+          ) : null}
+          {showTab("receipts") ? (
+            <ModuleTabButton
+              active={tab === "receipts"}
+              onClick={() => setTab("receipts")}
+              tone="teal"
+              size="md"
+            >
+              Receipts
+            </ModuleTabButton>
+          ) : null}
+          {showTab("delivery") ? (
+            <ModuleTabButton
+              active={tab === "delivery"}
+              onClick={() => setTab("delivery")}
+              tone="teal"
+              size="md"
+            >
+              Delivered
+            </ModuleTabButton>
+          ) : null}
+          {showTab("cheques") ? (
+            <ModuleTabButton
+              active={tab === "cheques"}
+              onClick={() => setTab("cheques")}
+              tone="amber"
+              size="md"
+            >
+              Cheques
+              {mounted && openChequeCount > 0 ? ` (${openChequeCount})` : ""}
+            </ModuleTabButton>
+          ) : null}
+          {showTab("manual") ? (
+            <ModuleTabButton
+              active={tab === "manual"}
+              onClick={() => setTab("manual")}
+              tone="slate"
+              size="md"
+            >
+              Manual book
+            </ModuleTabButton>
+          ) : null}
+          {showTab("paylinks") ? (
+            <ModuleTabButton
+              active={tab === "paylinks"}
+              onClick={() => setTab("paylinks")}
+              tone="sky"
+              size="md"
+            >
+              Pay links
+              {mounted && openPayLinkCount > 0 ? ` (${openPayLinkCount})` : ""}
+            </ModuleTabButton>
+          ) : null}
+          {showTab("wa_sis") ? (
+            <ModuleTabButton
+              active={tab === "wa_sis"}
+              onClick={() => setTab("wa_sis")}
+              tone="teal"
+              size="md"
+            >
+              WA parents
+            </ModuleTabButton>
+          ) : null}
+          {showTab("dayclose") ? (
+            <ModuleTabButton
+              active={tab === "dayclose"}
+              onClick={() => setTab("dayclose")}
+              tone="coral"
+              size="md"
+            >
+              Day close{mounted && dayClosePending ? " ●" : ""}
+            </ModuleTabButton>
+          ) : null}
+          {showTab("adjustments") ? (
+            <ModuleTabButton
+              active={tab === "adjustments"}
+              onClick={() => setTab("adjustments")}
+              tone="violet"
+              size="md"
+            >
+              Adjustments
+              {mounted ? <FeeAdjustmentsBadge /> : null}
+            </ModuleTabButton>
+          ) : null}
+          {showTab("vouchers") ? (
+            <ModuleTabButton
+              active={tab === "vouchers"}
+              onClick={() => setTab("vouchers")}
+              tone="rose"
+              size="md"
+            >
+              Vouchers
+              {mounted && openChargeCount > 0 ? ` (${openChargeCount})` : ""}
+            </ModuleTabButton>
+          ) : null}
+          {showTab("reports") ? (
+            <ModuleTabButton
+              active={tab === "reports"}
+              onClick={() => setTab("reports")}
+              tone="green"
+              size="md"
+            >
+              Reports
+            </ModuleTabButton>
+          ) : null}
+          {showDefaulters ? (
+            <Link
+              href="/fees/defaulters"
+              className="inline-flex items-center rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-bold text-[var(--danger)] transition hover:brightness-95"
+            >
+              Defaulters
+            </Link>
+          ) : null}
         </div>
       }
     >
       {tab === "collect" ? (
         <div className="mt-6 space-y-5">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          {/* Families with no WhatsApp number. The counter is the one place a
+              parent stands still long enough to be asked, so the reminder
+              lives here: scoped to the family at the desk when one is open,
+              and a collapsed count of the rest when none is. */}
+          <WaNumberGapBanner
+            sis={sis}
+            masters={masters}
+            studentIds={
+              selectedStudent
+                ? householdBundle.length > 0
+                  ? householdBundle.map((b) => b.student.id)
+                  : [selectedStudent.id]
+                : undefined
+            }
+            title={
+              selectedStudent
+                ? "This parent is NOT on WhatsApp — take their number now"
+                : undefined
+            }
+            onSaved={() => {
+              refresh();
+              flash("WhatsApp number saved for this family");
+            }}
+          />
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,0.7fr)_minmax(0,0.7fr)]">
               <label className="block text-sm">
                 <span className="mb-1.5 block text-[var(--muted)]">
                   Find student
                 </span>
-                <input
-                  className="field"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Name, admission no, or mobile…"
-                  autoComplete="off"
+                <FeeSearchInput
+                  onDebounced={setDebouncedQuery}
                   autoFocus={mounted}
+                  resetSignal={searchResetSignal}
                 />
               </label>
               <label className="block text-sm">
@@ -1122,7 +2045,9 @@ export function FeeTakeWorkspace() {
                 </select>
               </label>
               <label className="block text-sm">
-                <span className="mb-1.5 block text-[var(--muted)]">Section</span>
+                <span className="mb-1.5 block text-[var(--muted)]">
+                  Section
+                </span>
                 <select
                   className="field"
                   value={sectionId}
@@ -1155,7 +2080,9 @@ export function FeeTakeWorkspace() {
                   sectionOptions.find((s) => s.id === sectionId)?.name
                     ? `Sec ${sectionOptions.find((s) => s.id === sectionId)?.name}`
                     : "",
-                  query.trim() ? `Search “${query.trim()}”` : "",
+                  debouncedQuery.trim()
+                    ? `Search “${debouncedQuery.trim()}”`
+                    : "",
                 ])}
                 fileBaseName="fee_take_students"
                 columns={[
@@ -1183,33 +2110,69 @@ export function FeeTakeWorkspace() {
               />
             </div>
 
-            {/* Compact match strip — replaces left list */}
-            {(query.trim() || classId || sectionId) && !selectedStudent ? (
+            {/* Compact match strip — replaces left list.
+                Deliberately NOT gated on `!selectedStudent`: it used to be,
+                which meant that once a child was open the counter had to
+                press "Change student" before a search would show anything.
+                Picking a student clears the box (see pickStudent), so this
+                only reappears when the clerk actually types again. */}
+            {debouncedQuery.trim() || classId || sectionId ? (
               <div className="mt-3">
                 <p className="mb-2 text-[11px] text-[var(--muted)]">
                   {hits.length} match{hits.length === 1 ? "" : "es"} — pick one
                   to open household
                 </p>
                 {hits.length === 0 ? (
-                  <p className="rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-3 text-sm text-[var(--muted)]">
+                  <p className="rounded-lg bg-[var(--surface-sunken)] px-3 py-3 text-sm text-[var(--muted)]">
                     No students match. Check fee group on SIS if balances look
                     empty.
                   </p>
                 ) : (
-                  <ul className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">
+                  <ul className="max-h-56 space-y-1 overflow-y-auto pr-1">
                     {hits.map((h) => (
                       <li key={h.student.id}>
                         <button
                           type="button"
                           onClick={() => pickStudent(h)}
-                          className="rounded-lg border border-[rgba(32,48,80,0.14)] bg-[rgba(32,48,80,0.03)] px-3 py-2 text-left hover:border-[rgba(197,160,40,0.45)] hover:bg-[rgba(197,160,40,0.1)]"
+                          className="flex w-full flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-left hover:border-[rgba(197,160,40,0.45)] hover:bg-[rgba(197,160,40,0.1)]"
                         >
-                          <div className="text-sm font-semibold text-[var(--brand-deep)]">
+                          <span className="text-sm font-semibold text-[var(--brand-deep)]">
                             <StudentNameLabel student={h.student} />
-                          </div>
-                          <div className="text-[11px] text-[var(--muted)]">
-                            {h.classLabel} · {formatInr(h.balancePaise)}
-                          </div>
+                          </span>
+                          <span className="text-[11px] text-[var(--muted)]">
+                            {h.classLabel} · {h.student.admissionNo}
+                          </span>
+                          {/* Father's name on EVERY row. Two children of the
+                              same class share a first name often enough that
+                              the class and admission number alone do not tell
+                              the counter which one is standing there; the
+                              match-reason chip below only appears when the
+                              father is why the row matched. */}
+                          {h.student.fatherName ? (
+                            <span className="text-[11px] font-medium text-[var(--brand-mid)]">
+                              s/o d/o {h.student.fatherName}
+                            </span>
+                          ) : null}
+                          {/* Why this row is here — a hit on the mother's
+                              name or a sibling's mobile is not obvious from
+                              the child's name alone. */}
+                          {(h.matchReasons ?? []).map((r) => (
+                            <span
+                              key={r}
+                              className="rounded-full border border-[var(--border)] bg-[var(--card)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted)]"
+                            >
+                              {r}
+                            </span>
+                          ))}
+                          <span
+                            className={`ml-auto text-xs font-bold tabular-nums ${
+                              h.balancePaise > 0
+                                ? "text-[var(--danger)]"
+                                : "text-[var(--success)]"
+                            }`}
+                          >
+                            {formatInr(h.balancePaise)}
+                          </span>
                         </button>
                       </li>
                     ))}
@@ -1218,8 +2181,61 @@ export function FeeTakeWorkspace() {
               </div>
             ) : null}
 
+            {storeDuesError && selectedStudent ? (
+              <p className="mt-3 rounded-lg border border-[var(--warning)] bg-[var(--warning-soft)] px-3 py-2 text-xs text-[var(--warning)]">
+                {storeDuesError}. Any store dues this family has are not shown
+                below — collect them in Store &amp; purchase until this clears.
+              </p>
+            ) : null}
+
+            {unsettledStore.length > 0 ? (
+              <div className="mt-3 rounded-lg border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2 text-xs text-[var(--danger)]">
+                <p className="font-semibold">
+                  Collected on the receipt, but the store was not told
+                </p>
+                <ul className="mt-1 space-y-0.5">
+                  {unsettledStore.map((u) => (
+                    <li key={`${u.receiptNo}-${u.saleId}`}>
+                      {u.saleNo} · {formatInr(u.amountPaise)} · receipt{" "}
+                      {u.receiptNo}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1">
+                  The family has paid and has their receipt. Until this is
+                  retried the store still shows the amount owing — do not
+                  collect it again.
+                </p>
+                <button
+                  type="button"
+                  className="mt-1.5 rounded-md border border-[var(--danger)] px-2 py-1 font-semibold"
+                  onClick={() => {
+                    const pending = [...unsettledStore];
+                    setUnsettledStore([]);
+                    void Promise.all(
+                      pending.map((u) =>
+                        settleStoreLines(u.receiptNo, [
+                          {
+                            dueKey: `store:${selectedStudent?.id ?? ""}:${u.saleId}`,
+                            studentId: selectedStudent?.id ?? "",
+                            studentName: "",
+                            label: u.saleNo,
+                            kind: "store",
+                            amountPaise: u.amountPaise,
+                            storeIssueNo: u.saleNo,
+                          } as VoucherLine,
+                        ]),
+                      ),
+                    );
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : null}
+
             {selectedStudent ? (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-[rgba(32,48,80,0.08)] pt-3">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-[var(--border)] pt-3">
                 <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
                   <div className="text-sm text-[var(--brand-deep)]">
                     <span className="font-semibold">
@@ -1227,6 +2243,15 @@ export function FeeTakeWorkspace() {
                     </span>
                     <span className="text-[var(--muted)]">
                       {" "}
+                      {(() => {
+                        const parent =
+                          selectedStudent.fatherName ||
+                          sis?.households.find(
+                            (h) => h.id === selectedStudent.householdId,
+                          )?.guardianName ||
+                          "";
+                        return parent ? `· ${parent} ` : "";
+                      })()}
                       · {selectedStudent.admissionNo} · household open
                       {householdBundle.length > 1
                         ? ` · ${householdBundle.length} siblings`
@@ -1308,7 +2333,7 @@ export function FeeTakeWorkspace() {
           </div>
 
           {!selectedStudent ? (
-            <div className="rounded-xl border border-dashed border-[rgba(32,48,80,0.2)] bg-white px-6 py-16 text-center">
+            <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)] px-6 py-16 text-center">
               <p className="text-base font-semibold text-[var(--brand-deep)]">
                 Search to start Fee Take
               </p>
@@ -1336,8 +2361,28 @@ export function FeeTakeWorkspace() {
               collectTotal={collectTotal}
               counterDiscountPaise={counterDiscountPaise}
               discountSlices={discountSlices}
+              accountsState={accountsState}
               netAfterDiscount={netAfterDiscount}
               lineDiscountRupees={lineDiscountRupees}
+              recurringEligible={recurringEligible}
+              recurringChosen={recurringDueKeys}
+              onChangeHeadDiscount={changeHeadDiscount}
+              onToggleRecurring={(dueKey, on) => {
+                setRecurringDueKeys((prev) => {
+                  const next = new Set(prev);
+                  if (on) next.add(dueKey);
+                  else next.delete(dueKey);
+                  return next;
+                });
+                // The months already on screen follow the tick immediately,
+                // rather than waiting for the next billing to show it.
+                if (on)
+                  spreadRecurringDiscount(
+                    dueKey,
+                    lineDiscountRupees[dueKey] ?? "",
+                  );
+                else unspreadRecurringDiscount(dueKey);
+              }}
               onLineDiscount={(dueKey, rupees) => {
                 setLineDiscountRupees((prev) => {
                   const next = { ...prev };
@@ -1345,9 +2390,17 @@ export function FeeTakeWorkspace() {
                   else next[dueKey] = rupees;
                   return next;
                 });
+                // Ticking first and typing second must behave the same as
+                // typing first and ticking second.
+                if (recurringDueKeys.has(dueKey)) {
+                  if (rupees.trim()) spreadRecurringDiscount(dueKey, rupees);
+                  else unspreadRecurringDiscount(dueKey);
+                }
               }}
               counterDiscountReason={counterDiscountReason}
               onCounterDiscountReason={setCounterDiscountReason}
+              counterDiscountGround={counterDiscountGround}
+              onCounterDiscountGround={setCounterDiscountGround}
               collectTarget={collectTarget}
               isPartialCollect={isPartialCollect}
               collectAmountRupees={collectAmountRupees}
@@ -1368,6 +2421,9 @@ export function FeeTakeWorkspace() {
               tenderSum={tenderSum}
               remainingPaise={remainingPaise}
               collectionDate={collectionDate}
+              earliestDate={earliestDate}
+              maxCollectionDate={todayIso()}
+              collectionDateProblem={collectionDateProblem}
               schoolReceiptNo={schoolReceiptNo}
               note={note}
               onPatchComposer={patchComposer}
@@ -1378,17 +2434,37 @@ export function FeeTakeWorkspace() {
               onSchoolReceiptNo={setSchoolReceiptNo}
               onNote={setNote}
               onCollect={onCollect}
-              onSendUpiLink={onSendUpiLink}
+              collectError={collectError}
+              onSendUpiLink={() => void onSendUpiLink()}
               masters={masters}
               cashierName={session.fullName}
               priorReceipts={householdReceipts}
+              storeTick={tick}
               readOnly={readOnly}
               onOpenReceipt={setPreviewReceiptId}
               transferPreviews={lastSessionPreviews}
               onTransferLastSession={onTransferLastSessionDues}
+              activeBundle={activeBundle}
+              activeStudentIds={activeStudentIds}
+              onToggleActiveStudent={toggleActiveStudent}
+              onOpenAllSiblings={() =>
+                setActiveStudentIds(
+                  new Set(householdBundle.map((r) => r.student.id)),
+                )
+              }
+              onStoreSold={(saleNo, totalPaise) => {
+                // refresh() re-reads store dues (the loader keys on tick), so
+                // the new due appears in the fee lines ready to be ticked.
+                refresh();
+                flash(
+                  `Store sale ${saleNo} · ${formatInr(totalPaise)} added — tick it below to collect with the fees`,
+                );
+              }}
             />
           )}
         </div>
+      ) : tab === "delivery" ? (
+        <ReceiptDeliveryPanel onOpenReceipt={setPreviewReceiptId} />
       ) : tab === "receipts" ? (
         <ReceiptsPanel
           receipts={receipts}
@@ -1528,12 +2604,12 @@ function FeeSummaryChip({
   > = {
     paid: {
       box: "border-[#86efac] bg-[#f0fdf4]",
-      label: "text-[#15803d]",
+      label: "text-[var(--tone-green)]",
       value: "text-[#14532d]",
     },
     current: {
       box: "border-[#fcd34d] bg-[#fffbeb]",
-      label: "text-[#b45309]",
+      label: "text-[var(--warning)]",
       value: "text-[#92400e]",
     },
     total: {
@@ -1543,22 +2619,24 @@ function FeeSummaryChip({
     },
     refund: {
       box: "border-[#7dd3fc] bg-[#f0f9ff]",
-      label: "text-[#0369a1]",
+      label: "text-[var(--tone-sky)]",
       value: "text-[#0c4a6e]",
     },
     voucher: {
       box: "border-[#c4b5fd] bg-[#f5f3ff]",
-      label: "text-[#6d28d9]",
+      label: "text-[var(--tone-violet)]",
       value: "text-[#4c1d95]",
     },
   };
   const s = styles[tone];
   return (
-    <div className={`rounded-xl border px-3 py-2.5 ${s.box}`}>
-      <div className={`text-xs font-bold uppercase tracking-wide sm:text-sm ${s.label}`}>
+    <div className={`rounded-lg border px-2.5 py-1.5 ${s.box}`}>
+      <div
+        className={`text-[10px] font-bold uppercase tracking-wide ${s.label}`}
+      >
         {label}
       </div>
-      <div className={`mt-0.5 text-lg font-semibold tabular-nums sm:text-xl ${s.value}`}>
+      <div className={`mt-0.5 text-sm font-bold tabular-nums ${s.value}`}>
         {formatInr(value)}
       </div>
     </div>
@@ -1582,11 +2660,18 @@ function CollectPanel({
   collectTotal,
   counterDiscountPaise,
   discountSlices,
+  accountsState,
   netAfterDiscount,
   lineDiscountRupees,
   onLineDiscount,
+  recurringEligible,
+  recurringChosen,
+  onToggleRecurring,
+  onChangeHeadDiscount,
   counterDiscountReason,
   onCounterDiscountReason,
+  counterDiscountGround,
+  onCounterDiscountGround,
   collectTarget,
   isPartialCollect,
   collectAmountRupees,
@@ -1603,21 +2688,37 @@ function CollectPanel({
   onAddTender,
   onRemoveTender,
   onFillRemaining,
+  earliestDate,
+  maxCollectionDate,
+  collectionDateProblem,
   onCollectionDate,
   onSchoolReceiptNo,
   onNote,
   onCollect,
+  collectError,
   onSendUpiLink,
   masters,
   cashierName,
   priorReceipts,
+  storeTick,
   onOpenReceipt,
   transferPreviews,
   onTransferLastSession,
   readOnly = false,
+  activeBundle,
+  activeStudentIds,
+  onToggleActiveStudent,
+  onOpenAllSiblings,
+  onStoreSold,
 }: {
   student: SisStudent;
   householdBundle: { student: SisStudent; dues: FeeDueLine[] }[];
+  /** Subset of householdBundle currently open on the counter. */
+  activeBundle: { student: SisStudent; dues: FeeDueLine[] }[];
+  activeStudentIds: Set<string>;
+  onToggleActiveStudent: (studentId: string) => void;
+  onOpenAllSiblings: () => void;
+  onStoreSold: (saleNo: string, totalPaise: number) => void;
   selectedKeys: Set<string>;
   includeFuture: boolean;
   onIncludeFuture: (v: boolean) => void;
@@ -1632,11 +2733,18 @@ function CollectPanel({
   collectTotal: number;
   counterDiscountPaise: number;
   discountSlices: CounterDiscountSlice[];
+  accountsState: AccountsState | null;
   netAfterDiscount: number;
   lineDiscountRupees: Record<string, string>;
   onLineDiscount: (dueKey: string, rupees: string) => void;
+  recurringEligible: Set<string>;
+  recurringChosen: Set<string>;
+  onToggleRecurring: (dueKey: string, on: boolean) => void;
+  onChangeHeadDiscount: (due: FeeDueLine, rupees: string) => void;
   counterDiscountReason: string;
   onCounterDiscountReason: (v: string) => void;
+  counterDiscountGround: ConcessionGround | "";
+  onCounterDiscountGround: (v: ConcessionGround | "") => void;
   collectTarget: number;
   isPartialCollect: boolean;
   collectAmountRupees: string;
@@ -1647,6 +2755,11 @@ function CollectPanel({
   tenderSum: number;
   remainingPaise: number;
   collectionDate: string;
+  /** Floor of the date box — today, or 1 April when back-dating is allowed. */
+  earliestDate: string;
+  maxCollectionDate: string;
+  /** Why this date is refused, in words, or "" when it is fine. */
+  collectionDateProblem: string;
   schoolReceiptNo: string;
   note: string;
   onPatchComposer: (patch: Partial<TenderComposer>) => void;
@@ -1657,10 +2770,13 @@ function CollectPanel({
   onSchoolReceiptNo: (v: string) => void;
   onNote: (v: string) => void;
   onCollect: () => void;
+  /** Why the last collection attempt was refused — shown at the button. */
+  collectError: string | null;
   onSendUpiLink: () => void;
   masters: MastersState | null;
   cashierName: string;
   priorReceipts: CollectionVoucher[];
+  storeTick: number;
   onOpenReceipt: (id: string) => void;
   transferPreviews: LastSessionTransferPreview[];
   onTransferLastSession: () => void;
@@ -1673,6 +2789,29 @@ function CollectPanel({
   const modeMeta = TENDER_MODES.find((m) => m.value === composerMode);
   const hasUncleared = tenderLines.some((t) => t.mode === "cheque");
   const siblingCount = householdBundle.length;
+
+  /**
+   * Children who are ticked but NOT on screen.
+   *
+   * Ticks are family-wide while the fee list shows one child at a time, so a
+   * sibling's ticks keep counting from behind a collapsed card. The office
+   * then types the visible child's amount, it does not match the family total,
+   * and the collect button sits there disabled saying "Still need ..." — which
+   * reads as "the button is broken for this child". Only families with more
+   * than one child can hit it, which is why it looks student-specific.
+   */
+  const offScreenTicked = useMemo(() => {
+    if (siblingCount <= 1) return [];
+    return householdBundle
+      .filter((row) => !activeStudentIds.has(row.student.id))
+      .map((row) => ({
+        student: row.student,
+        paise: row.dues
+          .filter((d) => selectedKeys.has(d.dueKey))
+          .reduce((sum, d) => sum + d.balancePaise, 0),
+      }))
+      .filter((r) => r.paise > 0);
+  }, [householdBundle, activeStudentIds, selectedKeys, siblingCount]);
   const allHouseholdDues = householdBundle.flatMap((r) => r.dues);
 
   const feeSummary = useMemo(() => {
@@ -1743,6 +2882,17 @@ function CollectPanel({
     householdBundle,
   ]);
 
+  // Computed once, used by BOTH the panel button and the sticky mobile bar.
+  // It lived inside an IIFE next to the desktop button; the mobile bar would
+  // have had to restate the expression, and two independent definitions of
+  // "is this payment complete" is how they drift apart. One value, one rule.
+  const discountOnly = collectTarget <= 0 && counterDiscountPaise > 0;
+  /** Must match `payLinkPaise` in the workspace — same rule, same inputs. */
+  const linkAmountPaise = collectTarget > 0 ? collectTarget : netAfterDiscount;
+  const matched =
+    discountOnly ||
+    (collectTarget > 0 && tenderSum === collectTarget && tenderSum > 0);
+
   function classLabel(s: SisStudent) {
     const c = masters?.classes.find((x) => x.id === s.classId)?.name ?? "—";
     const sec = masters?.sections.find((x) => x.id === s.sectionId)?.name ?? "";
@@ -1758,13 +2908,13 @@ function CollectPanel({
 
   return (
     <div className="fee-collect-ui space-y-4">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3.5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-bold text-[var(--brand-deep)] sm:text-xl">
-              Household fees
+            <h2 className="text-base font-bold text-[var(--brand-deep)]">
+              Household Fee Collection
             </h2>
-            <p className="mt-0.5 text-sm text-[var(--muted)] sm:text-base">
+            <p className="mt-0.5 text-xs text-[var(--muted)]">
               {siblingCount} student{siblingCount === 1 ? "" : "s"}
               {siblingCount > 1 ? " (siblings)" : ""} · open dues{" "}
               <span
@@ -1772,7 +2922,7 @@ function CollectPanel({
                   householdBundle.some((r) =>
                     openFeeDues(r.dues).some((d) => d.dueOn <= today),
                   )
-                    ? "text-[#dc2626]"
+                    ? "text-[var(--danger)]"
                     : "text-[var(--brand-deep)]"
                 }`}
               >
@@ -1782,7 +2932,9 @@ function CollectPanel({
               selected{" "}
               <span
                 className={`font-semibold ${
-                  collectTarget > 0 ? "text-[#16a34a]" : "text-[var(--muted)]"
+                  collectTarget > 0
+                    ? "text-[var(--success)]"
+                    : "text-[var(--muted)]"
                 }`}
               >
                 {formatInr(collectTarget)}
@@ -1799,12 +2951,12 @@ function CollectPanel({
                   discount)
                 </span>
               ) : null}
-              <span className="mt-0.5 block font-normal text-sm leading-snug">
-                Grouped by month — tick a month or only the heads to clear
+              <span className="mt-0.5 block font-normal text-xs text-[var(--muted)]">
+                Grouped by month — tick a month or individual fee heads to clear
               </span>
             </p>
           </div>
-          <label className="flex max-w-[14rem] items-start gap-2 text-sm text-[var(--muted)] sm:text-base">
+          <label className="flex max-w-[13rem] items-start gap-2 text-xs text-[var(--muted)]">
             <input
               type="checkbox"
               className="mt-0.5"
@@ -1813,7 +2965,7 @@ function CollectPanel({
             />
             <span>
               Include future months
-              <span className="mt-0.5 block font-normal text-sm leading-snug">
+              <span className="mt-0.5 block font-normal text-[11px] text-[var(--muted)]">
                 Off = only through this month
               </span>
             </span>
@@ -1847,9 +2999,14 @@ function CollectPanel({
             tone="voucher"
           />
         </div>
+        <CashgramRefundPanel
+          key={student.householdId}
+          householdId={student.householdId}
+          readOnly={readOnly}
+        />
 
         {canTransfer.length > 0 ? (
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(220,38,38,0.25)] bg-[rgba(220,38,38,0.06)] px-3 py-2.5 text-xs text-[var(--brand-deep)]">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--danger)]/25 bg-[var(--danger-soft)] px-3 py-2 text-xs text-[var(--brand-deep)]">
             <div>
               <strong>Last session dues:</strong>{" "}
               {canTransfer.length === 1
@@ -1864,7 +3021,7 @@ function CollectPanel({
             </div>
             <button
               type="button"
-              className="rounded-lg border border-[rgba(220,38,38,0.35)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#b91c1c]"
+              className="rounded-lg border border-[var(--danger)]/35 bg-[var(--card)] px-2.5 py-1 text-[11px] font-semibold text-[var(--danger)]"
               onClick={onTransferLastSession}
             >
               Transfer to current session
@@ -1875,703 +3032,908 @@ function CollectPanel({
             Last session transfer: {transferHint}
           </p>
         ) : null}
-
-        <div className="mt-3 flex flex-wrap gap-2">
-          {siblingCount > 1 ? (
-            <MiniBtn onClick={onSelectAllSiblings}>
-              Select all siblings
-            </MiniBtn>
-          ) : (
-            <MiniBtn onClick={onSelectAllSiblings}>Select all dues</MiniBtn>
-          )}
-          <MiniBtn onClick={onSelectOverdue}>Select all overdue</MiniBtn>
-          <MiniBtn onClick={onClear}>Clear all</MiniBtn>
-        </div>
-
-        <div
-          className={`mt-4 grid max-h-[min(70vh,40rem)] gap-3 overflow-auto ${
-            siblingCount > 1
-              ? "sm:grid-cols-2 xl:grid-cols-[repeat(auto-fit,minmax(17rem,1fr))]"
-              : "grid-cols-1"
-          }`}
-        >
-          {householdBundle.every((r) => openFeeDues(r.dues).length === 0) &&
-          householdBundle.every((r) => r.dues.length === 0) ? (
-            <p className="text-sm text-[var(--muted)] sm:col-span-full">
-              No open dues
-              {!student.feeGroupId
-                ? " — assign a fee group on the student profile"
-                : ""}
-              .
-            </p>
-          ) : (
-            householdBundle.map((row) => {
-              const openDues = openFeeDues(row.dues);
-              const dueKeys = openDues.map((d) => d.dueKey);
-              const selectedForStudent = openDues.filter((d) =>
-                selectedKeys.has(d.dueKey),
-              );
-              const allSelected =
-                dueKeys.length > 0 &&
-                dueKeys.every((k) => selectedKeys.has(k));
-              const someSelected =
-                !allSelected && selectedForStudent.length > 0;
-              const rowTotal = openDues.reduce(
-                (s, d) => s + d.balancePaise,
-                0,
-              );
-              const rowSelected = selectedForStudent.reduce(
-                (s, d) => s + d.balancePaise,
-                0,
-              );
-              const hasOverdue = openDues.some((d) => d.dueOn <= today);
-              const isFocus = row.student.id === student.id;
-              const isSibling = !isFocus && siblingCount > 1;
-
-              return (
-                <div
-                  key={row.student.id}
-                  className={`flex min-h-0 flex-col rounded-xl border p-3 ${
-                    isFocus
-                      ? "border-[rgba(197,160,40,0.45)] bg-[rgba(197,160,40,0.06)]"
-                      : "border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.02)]"
-                  }`}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <label className="flex min-w-0 cursor-pointer items-start gap-2.5">
-                      <input
-                        type="checkbox"
-                        className="mt-1.5"
-                        checked={allSelected}
-                        ref={(el) => {
-                          if (el) el.indeterminate = someSelected;
-                        }}
-                        onChange={() => onToggleStudentAll(row.student.id)}
-                        disabled={openDues.length === 0}
-                      />
-                      <div className="min-w-0">
-                        <div className="text-sm font-bold text-[var(--brand-deep)]">
-                          <StudentNameLabel student={row.student} />
-                          {isSibling ? (
-                            <span className="ml-2 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
-                              Sibling
-                            </span>
-                          ) : siblingCount > 1 ? (
-                            <span className="ml-2 text-sm font-semibold uppercase tracking-wide text-[var(--brand-gold)]">
-                              Opened
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="mt-0.5 text-sm text-[var(--muted)] sm:text-base">
-                          {row.student.admissionNo} · {classLabel(row.student)}
-                        </div>
-                        <div className="text-sm text-[var(--muted)]">
-                          {feeGroupLabel(row.student)}
-                        </div>
-                      </div>
-                    </label>
-                    <div className="text-right">
-                      <div
-                        className={`text-base font-bold sm:text-lg ${
-                          hasOverdue
-                            ? "text-[#dc2626]"
-                            : rowTotal === 0 && row.dues.length > 0
-                              ? "text-[#15803d]"
-                              : "text-[var(--brand-deep)]"
-                        }`}
-                      >
-                        {formatInr(rowTotal)}
-                      </div>
-                      <div
-                        className={`text-sm font-semibold sm:text-base ${
-                          rowSelected > 0
-                            ? "text-[#16a34a]"
-                            : "text-[var(--muted)]"
-                        }`}
-                      >
-                        {selectedForStudent.length}/{openDues.length} open ·{" "}
-                        {formatInr(rowSelected)}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    <MiniBtn
-                      onClick={() => onToggleStudentAll(row.student.id)}
-                    >
-                      {allSelected ? "Unselect" : "Select child"}
-                    </MiniBtn>
-                    <MiniBtn
-                      onClick={() => onSelectStudentOverdue(row.student.id)}
-                    >
-                      Overdue
-                    </MiniBtn>
-                    {someSelected || allSelected ? (
-                      <MiniBtn onClick={() => onClearStudent(row.student.id)}>
-                        Clear
-                      </MiniBtn>
-                    ) : null}
-                  </div>
-
-                  {row.dues.length === 0 ? (
-                    <p className="mt-2 text-sm text-[var(--muted)] sm:text-base">
-                      No fee lines for this student
-                    </p>
-                  ) : (
-                    <>
-                      <TransportFeeSchedulePanel
-                        studentId={row.student.id}
-                        academicYearCode={row.student.academicYearCode}
-                        dues={row.dues}
-                      />
-                      <DueBreakupPicker
-                      dues={row.dues}
-                      selectedKeys={selectedKeys}
-                      today={today}
-                      onToggle={onToggle}
-                      onToggleMonth={onToggleMonth}
-                      lineDiscountRupees={lineDiscountRupees}
-                      onLineDiscount={onLineDiscount}
-                    />
-                    </>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
       </div>
 
-      <div
-        className="relative overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.14)] shadow-[0_12px_40px_rgba(32,48,80,0.1)]"
-        style={{
-          background:
-            "linear-gradient(165deg, #203050 0%, #2a3d66 42%, #1a2740 100%)",
-        }}
-      >
-        <div
-          className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-full bg-[rgba(197,160,40,0.18)] blur-2xl"
-          aria-hidden
-        />
-        <div
-          className="pointer-events-none absolute -bottom-16 left-10 h-44 w-44 rounded-full bg-[rgba(197,160,40,0.12)] blur-3xl"
-          aria-hidden
-        />
-        <div className="relative p-4 sm:p-5">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#f0d878] sm:text-base">
-                Counter collection
-              </p>
-              <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                <span className="text-4xl font-extrabold tracking-tight text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.35)] sm:text-5xl">
-                  {formatInr(collectTarget)}
+      {/* ── Counter layout, store-counter style ──────────────────────────
+             LEFT   = who + what: the family's children, then their fees
+             RIGHT  = the money: a sticky payment column, always in view
+             (approved design 2026-08-27 — mirrors the store counter's
+             1fr/right-aside shape; phones still get the sticky bottom bar)
+      ── */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] items-start">
+        <div className="min-w-0 space-y-4">
+          {/* ── LEFT COLUMN: children of this family ── */}
+          <div className="space-y-3 min-w-0">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
+              <div className="mb-2.5 flex items-center justify-between gap-2 border-b border-[var(--border)] pb-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--brand-deep)]">
+                  {siblingCount > 1
+                    ? `Children in this family (${siblingCount})`
+                    : "Student"}
                 </span>
-                {isPartialCollect ? (
-                  <span className="text-base font-semibold text-[#f0d878] sm:text-lg">
-                    partial · {formatInr(netAfterDiscount)} net
-                  </span>
-                ) : counterDiscountPaise > 0 ? (
-                  <span className="text-base font-semibold text-[#f0d878] sm:text-lg">
-                    after {formatInr(counterDiscountPaise)} discount
-                  </span>
-                ) : siblingCount > 1 ? (
-                  <span className="rounded-full bg-[#c5a028] px-2.5 py-0.5 text-xs font-bold text-[#1a2740] sm:text-sm">
-                    Household · {siblingCount} students
-                  </span>
-                ) : (
-                  <span className="text-base font-semibold text-[#f0d878] sm:text-lg">
-                    to collect
-                  </span>
-                )}
-              </div>
-            </div>
-            <label className="block text-base">
-              <span className="mb-1 block text-sm font-medium text-white/75">
-                Collection date
-              </span>
-              <input
-                className="field !border-white/20 !bg-white/95 !py-2 !text-base !text-[var(--brand-deep)] sm:!text-lg"
-                type="date"
-                value={collectionDate}
-                onChange={(e) => onCollectionDate(e.target.value)}
-                required
-              />
-              {isCollectionDateLocked(collectionDate) ? (
-                <span className="mt-1 block text-sm font-semibold leading-snug text-[#fca5a5]">
-                  This date is day-closed — pick another date or reject handover
-                </span>
-              ) : null}
-            </label>
-            <label className="block min-w-[10rem] text-base sm:min-w-[12rem]">
-              <span className="mb-1 block text-sm font-medium text-white/75">
-                School receipt no.
-              </span>
-              <input
-                className="field !border-white/20 !bg-white/95 !py-2 !text-base !text-[var(--brand-deep)] sm:!text-lg"
-                value={schoolReceiptNo}
-                onChange={(e) => onSchoolReceiptNo(e.target.value)}
-                placeholder="Optional · e.g. FEE-BOOK-A/4521"
-                autoComplete="off"
-              />
-              <span className="mt-1 block text-sm leading-snug text-white/65">
-                Same pool as Manual book leaves — duplicates blocked. Prefer
-                Manual book tab for full paper postings.
-              </span>
-            </label>
-          </div>
-
-          {collectTotal > 0 && counterDiscountPaise > 0 ? (
-            <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.35)] bg-[rgba(255,255,255,0.06)] px-3 py-3 backdrop-blur-sm sm:px-4">
-              <p className="text-sm font-bold uppercase tracking-[0.12em] text-[#f0d878]">
-                Head-wise discount summary
-              </p>
-              <ul className="mt-2 space-y-1 text-sm text-white/90 sm:text-base">
-                {discountSlices.map((s) => (
-                  <li
-                    key={s.dueKey}
-                    className="flex justify-between gap-2 rounded-md bg-white/5 px-2 py-1"
-                  >
-                    <span className="min-w-0 truncate">{s.label}</span>
-                    <span className="shrink-0 font-bold text-[#f0d878]">
-                      −{formatInr(s.amountPaise)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <label className="mt-3 block text-base">
-                <span className="mb-1 block text-sm font-medium text-white/75">
-                  Reason for discount
-                </span>
-                <input
-                  className="field w-full !border-white/25 !bg-white !py-2.5 !text-base !text-[var(--brand-deep)]"
-                  value={counterDiscountReason}
-                  onChange={(e) => onCounterDiscountReason(e.target.value)}
-                  placeholder="e.g. Security deposit relaxed on management approval"
-                  autoComplete="off"
-                />
-              </label>
-              <p className="mt-2 text-sm leading-snug text-white/65">
-                Waivers post on collect · auto-limit{" "}
-                {formatInr(FEE_ADJUST_AUTO_LIMIT_PAISE)} per head
-              </p>
-            </div>
-          ) : null}
-
-          {collectTotal > 0 ? (
-            <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.45)] bg-[rgba(255,255,255,0.08)] px-3 py-3 backdrop-blur-sm sm:px-4">
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <label className="block min-w-[11rem] flex-1 text-base">
-                  <span className="mb-1 flex items-center gap-2 text-sm font-bold uppercase tracking-[0.12em] text-[#f0d878] sm:text-base">
-                    Amount to collect
-                    {isPartialCollect ? (
-                      <span className="rounded-full bg-[#c5a028] px-2 py-0.5 text-xs font-extrabold tracking-wide text-[#1a2740] sm:text-sm">
-                        Partial
-                      </span>
-                    ) : null}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl font-bold text-white/80">₹</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      max={netAfterDiscount / 100}
-                      className="field w-full !border-white/25 !bg-white !py-3 !text-2xl !font-bold !text-[var(--brand-deep)] sm:!text-3xl"
-                      value={collectAmountRupees}
-                      onChange={(e) => onCollectAmount(e.target.value)}
-                      placeholder="0"
-                      aria-label="Amount to collect in rupees"
-                    />
-                  </div>
-                  <span className="mt-1 block text-sm leading-snug text-white/70 sm:text-base">
-                    {counterDiscountPaise > 0
-                      ? `Net due ${formatInr(netAfterDiscount)} after discount — lower for partial pay`
-                      : `Selected dues ${formatInr(collectTotal)} — lower for partial payment (oldest months first)`}
-                  </span>
-                </label>
-                {isPartialCollect ? (
+                {siblingCount > 1 ? (
                   <button
                     type="button"
-                    className="rounded-lg border border-white/25 bg-white/10 px-3 py-2.5 text-sm font-bold text-white hover:bg-white/15 sm:text-base"
-                    onClick={onFillFullSelected}
+                    className="text-xs font-semibold text-[var(--brand-mid)] hover:underline"
+                    onClick={onOpenAllSiblings}
                   >
-                    Use full {formatInr(netAfterDiscount)}
+                    Open all
                   </button>
                 ) : null}
               </div>
-              {allocationPreview && allocationPreview.length > 0 ? (
-                <div className="mt-3 border-t border-white/10 pt-3">
-                  <p className="text-sm font-bold uppercase tracking-wide text-white/65">
-                    Will apply to
-                  </p>
-                  <ul className="mt-1.5 max-h-32 space-y-1 overflow-y-auto text-sm text-white/90 sm:text-base">
-                    {allocationPreview.map((l) => (
-                      <li
-                        key={`${l.dueKey}-${l.amountPaise}`}
-                        className="flex justify-between gap-2 rounded-md bg-white/5 px-2 py-1"
+
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                {householdBundle.map((row) => {
+                  const openDs = openFeeDues(row.dues);
+                  const rDue = openDs.reduce((s, d) => s + d.balancePaise, 0);
+                  const rOver = openDs.some((d) => d.dueOn <= today);
+                  const on = activeStudentIds.has(row.student.id);
+                  const pickedForStudent = openDs.filter((d) =>
+                    selectedKeys.has(d.dueKey),
+                  );
+                  const pickedPaise = pickedForStudent.reduce(
+                    (s, d) => s + d.balancePaise,
+                    0,
+                  );
+                  const pickedDiscount = discountSlices.reduce(
+                    (s, x) =>
+                      x.studentId === row.student.id ? s + x.amountPaise : s,
+                    0,
+                  );
+                  const pickedNet = Math.max(0, pickedPaise - pickedDiscount);
+                  return (
+                    <button
+                      key={row.student.id}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => onToggleActiveStudent(row.student.id)}
+                      className={`relative rounded-xl border-2 p-2.5 text-left transition active:scale-[0.99] ${
+                        on
+                          ? "border-[var(--brand-gold)] bg-[rgba(197,160,40,0.08)]"
+                          : "border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[rgba(197,160,40,0.45)]"
+                      }`}
+                    >
+                      <span
+                        className={`absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full border text-[11px] font-bold ${
+                          on
+                            ? "border-[var(--brand-gold)] bg-[var(--brand-gold)] text-white"
+                            : "border-[var(--border)] bg-[var(--card)] text-transparent"
+                        }`}
+                        aria-hidden
                       >
-                        <span className="min-w-0 truncate">{l.label}</span>
-                        <span className="shrink-0 font-bold tabular-nums text-[#f0d878]">
-                          {formatInr(l.amountPaise)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {/* Added payments */}
-          {tenderLines.length > 0 ? (
-            <ul className="mt-4 space-y-2">
-              {tenderLines.map((t, i) => (
-                <li
-                  key={t.key}
-                  className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-white/15 bg-white/10 px-3 py-2.5 backdrop-blur-sm"
-                >
-                  <div className="min-w-0 text-base sm:text-lg">
-                    <div className="font-semibold text-white">
-                      <span className="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--brand-gold)] text-xs font-bold text-[var(--brand-deep)] sm:text-sm">
-                        {i + 1}
+                        ✓
                       </span>
-                      {tenderChannelLabel(
-                        encodeTenderChannel(t.mode, t.bankAccountId),
-                      )}{" "}
-                      ·{" "}
-                      {formatInr(Math.round((Number(t.amount) || 0) * 100))}
-                    </div>
-                    <div className="mt-0.5 text-sm text-white/75 sm:text-base">
-                      {[t.ref, t.instrumentDate, t.bankName]
-                        .filter(Boolean)
-                        .join(" · ")}
-                      {t.mode === "cheque"
-                        ? " · Subject to realisation"
-                        : ""}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="rounded-lg bg-white/10 px-3 py-1.5 text-sm font-semibold text-[#ffb4a8] hover:bg-white/15 sm:text-base"
-                    onClick={() => onRemoveTender(t.key)}
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-
-          {/* Single-row composer — locked when amount already fully matched */}
-          {collectTarget > 0 && tenderSum >= collectTarget ? (
-            <div className="mt-4 rounded-xl border border-[rgba(60,160,100,0.45)] bg-[rgba(60,160,100,0.12)] px-3 py-2.5 text-base font-semibold text-[#b8f0cc] sm:text-lg">
-              Amount fully matched — remove a payment if you need to change modes.
-            </div>
-          ) : (
-          <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.35)] bg-[rgba(248,248,240,0.97)] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <div className="text-sm font-extrabold uppercase tracking-[0.14em] text-[var(--brand-deep)] sm:text-base">
-                {tenderLines.length === 0 ? "Add payment" : "Add another"}
+                      <div className="pr-6 text-sm font-bold text-[var(--brand-deep)]">
+                        <StudentNameLabel student={row.student} />
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                        {classLabel(row.student)} · {row.student.admissionNo}
+                      </div>
+                      <div
+                        className={`mt-1.5 text-base font-bold tabular-nums ${
+                          rOver
+                            ? "text-[var(--danger)]"
+                            : rDue > 0
+                              ? "text-[var(--brand-deep)]"
+                              : "text-[var(--success)]"
+                        }`}
+                      >
+                        {formatInr(rDue)}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                            rOver
+                              ? "bg-[var(--danger-soft)] text-[var(--danger)]"
+                              : rDue > 0
+                                ? "bg-[rgba(197,160,40,0.18)] text-[var(--brand-deep)]"
+                                : "bg-[var(--success-soft)] text-[var(--success)]"
+                          }`}
+                        >
+                          {rOver
+                            ? "Overdue"
+                            : rDue > 0
+                              ? `${openDs.length} open`
+                              : "All clear"}
+                        </span>
+                        {pickedPaise > 0 ? (
+                          <span className="rounded-full bg-[var(--success-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--success)]">
+                            ticked {formatInr(pickedNet)}
+                            {pickedDiscount > 0
+                              ? ` (−${formatInr(pickedDiscount)})`
+                              : ""}
+                          </span>
+                        ) : null}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-              {remainingPaise > 0 && composer.channel ? (
-                <button
-                  type="button"
-                  className="rounded-full bg-[rgba(197,160,40,0.2)] px-3 py-1 text-sm font-bold text-[var(--brand-deep)] sm:text-base"
-                  onClick={onFillRemaining}
-                >
-                  Use remaining {formatInr(remainingPaise)}
-                </button>
+
+              {siblingCount > 1 ? (
+                <p className="mt-2.5 border-t border-dashed border-[var(--border)] pt-2 text-[11px] leading-snug text-[var(--muted)]">
+                  Tap a child to see their fees — one at a time. Ticks are
+                  remembered when you switch: each card&apos;s green badge shows
+                  what stays selected, and the total collects them all.
+                </p>
               ) : null}
             </div>
 
-            <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
-              <label className="block min-w-0 flex-1 text-base lg:max-w-[14rem]">
-                <span className="mb-1 block text-sm font-medium text-[var(--muted)] sm:text-base">
-                  Mode & account
+            <div className="flex flex-wrap gap-1.5">
+              {siblingCount > 1 ? (
+                <MiniBtn onClick={onSelectAllSiblings}>
+                  Tick all open fees
+                </MiniBtn>
+              ) : (
+                <MiniBtn onClick={onSelectAllSiblings}>Select all dues</MiniBtn>
+              )}
+              <MiniBtn onClick={onSelectOverdue}>Tick overdue</MiniBtn>
+              <MiniBtn onClick={onClear}>Clear all</MiniBtn>
+            </div>
+
+            {/* Sell store items to the child on the counter — the due joins
+              these fee lines and is paid on the same receipt. */}
+            <StoreSellInline
+              studentId={activeBundle[0]?.student.id ?? student.id}
+              studentName={
+                activeBundle[0]?.student.fullName ?? student.fullName
+              }
+              classId={activeBundle[0]?.student.classId ?? student.classId}
+              sectionId={
+                activeBundle[0]?.student.sectionId ?? student.sectionId
+              }
+              readOnly={readOnly}
+              onSold={onStoreSold}
+            />
+          </div>
+
+          {/* ── RIGHT COLUMN: fees of the children on the counter ── */}
+          <div className="space-y-3 min-w-0">
+            <div className="max-h-[min(70vh,44rem)] space-y-3 overflow-y-auto pr-1">
+              {activeBundle.every((r) => openFeeDues(r.dues).length === 0) &&
+              activeBundle.every((r) => r.dues.length === 0) ? (
+                <p className="text-xs text-[var(--muted)]">
+                  No open dues
+                  {!student.feeGroupId
+                    ? " — assign a fee group on the student profile"
+                    : ""}
+                  .
+                </p>
+              ) : (
+                activeBundle.map((row) => {
+                  const openDues = openFeeDues(row.dues);
+                  const dueKeys = openDues.map((d) => d.dueKey);
+                  const selectedForStudent = openDues.filter((d) =>
+                    selectedKeys.has(d.dueKey),
+                  );
+                  const allSelected =
+                    dueKeys.length > 0 &&
+                    dueKeys.every((k) => selectedKeys.has(k));
+                  const someSelected =
+                    !allSelected && selectedForStudent.length > 0;
+                  const rowTotal = openDues.reduce(
+                    (s, d) => s + d.balancePaise,
+                    0,
+                  );
+                  const rowSelected = selectedForStudent.reduce(
+                    (s, d) => s + d.balancePaise,
+                    0,
+                  );
+                  const rowDiscount = discountSlices.reduce(
+                    (s, x) =>
+                      x.studentId === row.student.id ? s + x.amountPaise : s,
+                    0,
+                  );
+                  const rowSelectedNet = Math.max(0, rowSelected - rowDiscount);
+                  const hasOverdue = openDues.some((d) => d.dueOn <= today);
+
+                  return (
+                    <div
+                      key={row.student.id}
+                      className="flex min-h-0 flex-col rounded-xl border border-[rgba(197,160,40,0.45)] bg-[var(--card)] p-3"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[var(--border)] pb-2">
+                        <div className="flex min-w-0 flex-col items-start gap-1">
+                          <label className="flex min-w-0 cursor-pointer items-start gap-2.5">
+                            <input
+                              type="checkbox"
+                              className="mt-1"
+                              checked={allSelected}
+                              ref={(el) => {
+                                if (el) el.indeterminate = someSelected;
+                              }}
+                              onChange={() =>
+                                onToggleStudentAll(row.student.id)
+                              }
+                              disabled={openDues.length === 0}
+                            />
+                            <div className="min-w-0">
+                              <div className="text-sm font-bold text-[var(--brand-deep)]">
+                                <StudentNameLabel student={row.student} />
+                              </div>
+                              <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                                {classLabel(row.student)} ·{" "}
+                                {row.student.admissionNo} ·{" "}
+                                {feeGroupLabel(row.student)}
+                              </div>
+                            </div>
+                          </label>
+                          <TransportRiderChip
+                            studentId={row.student.id}
+                            academicYearCode={row.student.academicYearCode}
+                            dues={row.dues}
+                          />
+                        </div>
+                        <div className="text-right">
+                          <div
+                            className={`text-sm font-bold ${
+                              hasOverdue
+                                ? "text-[var(--danger)]"
+                                : rowTotal === 0 && row.dues.length > 0
+                                  ? "text-[var(--success)]"
+                                  : "text-[var(--brand-deep)]"
+                            }`}
+                          >
+                            {formatInr(rowTotal)}
+                          </div>
+                          <div
+                            className={`text-xs font-semibold ${
+                              rowSelected > 0
+                                ? "text-[var(--success)]"
+                                : "text-[var(--muted)]"
+                            }`}
+                          >
+                            {selectedForStudent.length}/{openDues.length} open ·{" "}
+                            {formatInr(rowSelectedNet)}
+                            {rowDiscount > 0
+                              ? ` (−${formatInr(rowDiscount)})`
+                              : ""}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <MiniBtn
+                          onClick={() => onToggleStudentAll(row.student.id)}
+                        >
+                          {allSelected ? "Unselect" : "Select child"}
+                        </MiniBtn>
+                        <MiniBtn
+                          onClick={() => onSelectStudentOverdue(row.student.id)}
+                        >
+                          Overdue
+                        </MiniBtn>
+                        {someSelected || allSelected ? (
+                          <MiniBtn
+                            onClick={() => onClearStudent(row.student.id)}
+                          >
+                            Clear
+                          </MiniBtn>
+                        ) : null}
+                      </div>
+
+                      {row.dues.length === 0 ? (
+                        <p className="mt-2 text-xs text-[var(--muted)]">
+                          No fee lines for this student
+                        </p>
+                      ) : (
+                        <DueBreakupPicker
+                          dues={row.dues}
+                          selectedKeys={selectedKeys}
+                          today={today}
+                          onToggle={onToggle}
+                          onToggleMonth={onToggleMonth}
+                          lineDiscountRupees={lineDiscountRupees}
+                          recurringEligible={recurringEligible}
+                          recurringChosen={recurringChosen}
+                          onToggleRecurring={onToggleRecurring}
+                          onChangeHeadDiscount={onChangeHeadDiscount}
+                          onLineDiscount={onLineDiscount}
+                        />
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ── THE MONEY: sticky right column ── */}
+        <aside className="min-w-0 space-y-4 lg:sticky lg:top-3">
+          <div
+            className="relative overflow-hidden rounded-2xl border border-[var(--border)] shadow-[0_12px_40px_rgba(32,48,80,0.1)]"
+            style={{
+              background:
+                "linear-gradient(165deg, #203050 0%, #2a3d66 42%, #1a2740 100%)",
+            }}
+          >
+            <div
+              className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-full bg-[rgba(197,160,40,0.18)] blur-2xl"
+              aria-hidden
+            />
+            <div
+              className="pointer-events-none absolute -bottom-16 left-10 h-44 w-44 rounded-full bg-[rgba(197,160,40,0.12)] blur-3xl"
+              aria-hidden
+            />
+            <div className="relative p-3.5 sm:p-4">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-[#f0d878]">
+                    Counter collection
+                  </p>
+                  <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <span className="text-2xl font-bold tracking-tight text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.35)] sm:text-3xl">
+                      {formatInr(collectTarget)}
+                    </span>
+                    {isPartialCollect ? (
+                      <span className="text-xs font-semibold text-[#f0d878]">
+                        partial · {formatInr(netAfterDiscount)} net
+                      </span>
+                    ) : counterDiscountPaise > 0 ? (
+                      <span className="text-xs font-semibold text-[#f0d878]">
+                        after {formatInr(counterDiscountPaise)} discount
+                      </span>
+                    ) : siblingCount > 1 ? (
+                      <span className="rounded-full bg-[var(--brand-accent)] px-2 py-0.5 text-[11px] font-bold text-[#1a2740]">
+                        Household · {siblingCount} students
+                      </span>
+                    ) : (
+                      <span className="text-xs font-semibold text-[#f0d878]">
+                        to collect
+                      </span>
+                    )}
+                  </div>
+                  {offScreenTicked.length > 0 ? (
+                    <div className="mt-1.5 rounded-lg bg-[rgba(197,160,40,0.22)] px-2 py-1.5 text-[11px] leading-snug text-white">
+                      Includes{" "}
+                      {offScreenTicked.map((r, i) => (
+                        <span key={r.student.id}>
+                          {i > 0 ? " · " : ""}
+                          <strong>{formatInr(r.paise)}</strong> ticked for{" "}
+                          {r.student.fullName}
+                        </span>
+                      ))}{" "}
+                      — not on screen.
+                      <button
+                        type="button"
+                        className="ml-1 rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-bold text-[#1a2740] hover:bg-white"
+                        onClick={() =>
+                          offScreenTicked.forEach((r) =>
+                            onClearStudent(r.student.id),
+                          )
+                        }
+                      >
+                        Untick them
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+                <label className="block text-xs">
+                  <span className="mb-1 block text-xs font-medium text-white/75">
+                    Collection date
+                  </span>
+                  <input
+                    className={COLLECT_FIELD}
+                    type="date"
+                    value={collectionDate}
+                    min={earliestDate}
+                    max={maxCollectionDate}
+                    onChange={(e) => onCollectionDate(e.target.value)}
+                    required
+                  />
+                  {collectionDateProblem ? (
+                    <span className="mt-1 block text-[11px] font-semibold leading-snug text-[#fca5a5]">
+                      {collectionDateProblem}
+                    </span>
+                  ) : null}
+                </label>
+                <label className="block min-w-[9rem] text-xs sm:min-w-[11rem]">
+                  <span className="mb-1 block text-xs font-medium text-white/75">
+                    School receipt no.
+                  </span>
+                  <input
+                    className={COLLECT_FIELD}
+                    value={schoolReceiptNo}
+                    onChange={(e) => onSchoolReceiptNo(e.target.value)}
+                    placeholder="Optional · e.g. FEE-BOOK-A/4521"
+                    autoComplete="off"
+                  />
+                </label>
+              </div>
+
+              <label className="mt-3 block text-xs">
+                <span className="mb-1 flex flex-wrap items-baseline gap-x-2 text-xs font-medium text-white/75">
+                  Note
+                  <span className="text-[11px] font-normal text-white/50">
+                    optional · kept with the receipt, not printed on it
+                  </span>
                 </span>
-                <PaymentChannelSelect
-                  className="field !border-[rgba(32,48,80,0.18)] !py-2 !text-base sm:!text-lg"
-                  variant="tender"
-                  value={composer.channel}
-                  onChange={(channel) =>
-                    onPatchComposer({
-                      channel,
-                      ref: "",
-                      bankName: "",
-                      amount: "",
-                      instrumentDate: collectionDate || todayIso(),
-                    })
-                  }
+                <textarea
+                  className={COLLECT_FIELD}
+                  rows={2}
+                  value={note}
+                  onChange={(e) => onNote(e.target.value)}
+                  placeholder="e.g. paid by uncle · balance promised by the 10th"
+                  autoComplete="off"
+                  /*
+                   * Capped so a long note can never push out what the system
+                   * appends after it. The stored note is
+                   * `note · Counter discount … · Cheque realisation subject to
+                   * clearance` (~91 characters), and compactFeesForStorage
+                   * truncates the whole field at 280 when localStorage is under
+                   * pressure — from the END. A cheque warning cut in half is
+                   * worse than no note at all, so the free text is bounded
+                   * where the two together always fit.
+                   */
+                  maxLength={180}
                 />
+                {note.length > 150 ? (
+                  <span className="mt-1 block text-[11px] text-white/60">
+                    {180 - note.length} characters left
+                  </span>
+                ) : null}
               </label>
 
-              {composer.channel && modeMeta ? (
-                <>
-                  {modeMeta.needsRef ? (
-                    <label className="block min-w-0 flex-[1.2] text-base">
-                      <span className="mb-1 block text-sm font-medium text-[var(--muted)] sm:text-base">
-                        {modeMeta.refLabel}
-                      </span>
-                      <input
-                        className="field !border-[rgba(32,48,80,0.18)] !py-2 !text-base sm:!text-lg"
-                        value={composer.ref}
-                        onChange={(e) =>
-                          onPatchComposer({ ref: e.target.value })
-                        }
-                        placeholder={modeMeta.refLabel}
-                        autoComplete="off"
-                      />
-                    </label>
-                  ) : null}
-
-                  {modeMeta.needsBank ? (
-                    <label className="block min-w-0 flex-1 text-base">
-                      <span className="mb-1 block text-sm font-medium text-[var(--muted)] sm:text-base">
-                        Instrument bank
-                      </span>
-                      <input
-                        className="field !border-[rgba(32,48,80,0.18)] !py-2 !text-base sm:!text-lg"
-                        value={composer.bankName}
-                        onChange={(e) =>
-                          onPatchComposer({ bankName: e.target.value })
-                        }
-                        placeholder="Bank name"
-                        autoComplete="off"
-                      />
-                    </label>
-                  ) : null}
-
-                  {modeMeta.needsInstrumentDate ? (
-                    <label className="block min-w-0 text-base lg:w-[9.5rem]">
-                      <span className="mb-1 block text-sm font-medium text-[var(--muted)] sm:text-base">
-                        Date
-                      </span>
-                      <input
-                        className="field !border-[rgba(32,48,80,0.18)] !py-2 !text-base sm:!text-lg"
-                        type="date"
-                        value={composer.instrumentDate}
-                        onChange={(e) =>
-                          onPatchComposer({ instrumentDate: e.target.value })
-                        }
-                      />
-                    </label>
-                  ) : null}
-
-                  <label className="block min-w-0 text-base lg:w-[8.5rem]">
-                    <span className="mb-1 block text-sm font-medium text-[var(--muted)] sm:text-base">
-                      Amount (₹)
+              {collectTotal > 0 && counterDiscountPaise > 0 ? (
+                <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.35)] bg-[rgba(255,255,255,0.06)] px-3 py-3 backdrop-blur-sm sm:px-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#f0d878]">
+                    Head-wise discount summary
+                  </p>
+                  <ul className="mt-2 space-y-1 text-xs text-white/90">
+                    {discountSlices.map((s) => {
+                      const due = allHouseholdDues.find(
+                        (d) => d.dueKey === s.dueKey,
+                      );
+                      const student = householdBundle.find(
+                        (r) => r.student.id === s.studentId,
+                      )?.student;
+                      // Where this discount can go beyond this month, say so
+                      // — and when it cannot, say WHY, so the office is never
+                      // left wondering why no future-months question came.
+                      const futureHint =
+                        due?.kind === "academic" &&
+                        due.feeHeadId &&
+                        masters &&
+                        student &&
+                        isRecurringAcademicFeeHead(
+                          masters,
+                          student,
+                          due.feeHeadId,
+                          student.academicYearCode || "",
+                        )
+                          ? "future months offered on Collect"
+                          : due?.kind === "transport"
+                            ? "for future months, set a transport discount on the Transport roster"
+                            : due?.kind === "academic"
+                              ? "one-time head — nothing to extend"
+                              : "";
+                      return (
+                        <li
+                          key={s.dueKey}
+                          className="rounded-md bg-white/5 px-2 py-1"
+                        >
+                          <div className="flex justify-between gap-2">
+                            <span className="min-w-0 truncate">{s.label}</span>
+                            <span className="shrink-0 font-bold text-[#f0d878]">
+                              −{formatInr(s.amountPaise)}
+                            </span>
+                          </div>
+                          {futureHint ? (
+                            <div className="text-[10px] text-white/60">
+                              {futureHint}
+                            </div>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <label className="mt-3 block text-xs">
+                    <span className="mb-1 block text-xs font-medium text-white/75">
+                      Why is this discount given?
+                    </span>
+                    <select
+                      className={`${COLLECT_FIELD} w-full !border-white/25 !bg-white !py-2`}
+                      value={counterDiscountGround}
+                      onChange={(e) =>
+                        onCounterDiscountGround(
+                          e.target.value as ConcessionGround | "",
+                        )
+                      }
+                    >
+                      <option value="">Choose a ground…</option>
+                      {CONCESSION_GROUNDS.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="mt-3 block text-xs">
+                    <span className="mb-1 block text-xs font-medium text-white/75">
+                      Note (optional)
                     </span>
                     <input
-                      className="field !border-[rgba(197,160,40,0.45)] !bg-[rgba(197,160,40,0.08)] !py-2 !text-lg font-semibold sm:!text-xl"
-                      inputMode="decimal"
-                      value={composer.amount}
-                      onChange={(e) =>
-                        onPatchComposer({
-                          amount: e.target.value.replace(/[^\d.]/g, ""),
-                        })
-                      }
-                      placeholder="0"
+                      className={`${COLLECT_FIELD} w-full !border-white/25 !bg-white !py-2`}
+                      value={counterDiscountReason}
+                      onChange={(e) => onCounterDiscountReason(e.target.value)}
+                      placeholder="e.g. Security deposit relaxed on management approval"
                       autoComplete="off"
                     />
                   </label>
+                </div>
+              ) : null}
 
+              {collectTotal > 0 ? (
+                <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.45)] bg-[rgba(255,255,255,0.08)] px-3 py-3 backdrop-blur-sm sm:px-4">
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <label className="block min-w-[11rem] flex-1 text-xs">
+                      <span className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-[#f0d878]">
+                        Amount to collect
+                        {isPartialCollect ? (
+                          <span className="rounded-full bg-[var(--brand-accent)] px-2 py-0.5 text-[10px] font-extrabold text-[#1a2740]">
+                            Partial
+                          </span>
+                        ) : null}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl font-bold text-white/80">
+                          ₹
+                        </span>
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          max={netAfterDiscount / 100}
+                          className={`${COLLECT_FIELD} w-full !border-white/25 !bg-white !py-2 !text-xl !font-bold`}
+                          value={collectAmountRupees}
+                          onChange={(e) => onCollectAmount(e.target.value)}
+                          placeholder="0"
+                          aria-label="Amount to collect in rupees"
+                        />
+                      </div>
+                    </label>
+                    {isPartialCollect ? (
+                      <button
+                        type="button"
+                        className="rounded-lg border border-white/25 bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/15"
+                        onClick={onFillFullSelected}
+                      >
+                        Use full {formatInr(netAfterDiscount)}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Added payments */}
+              {tenderLines.length > 0 ? (
+                <ul className="mt-4 space-y-2">
+                  {tenderLines.map((t, i) => (
+                    <li
+                      key={t.key}
+                      className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-white/15 bg-white/10 px-3 py-2.5 backdrop-blur-sm"
+                    >
+                      <div className="min-w-0 text-xs">
+                        <div className="font-semibold text-white">
+                          <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--brand-gold)] text-[10px] font-bold text-[var(--brand-deep)]">
+                            {i + 1}
+                          </span>
+                          {tenderChannelLabel(
+                            encodeTenderChannel(t.mode, t.bankAccountId),
+                          )}{" "}
+                          ·{" "}
+                          {formatInr(Math.round((Number(t.amount) || 0) * 100))}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs font-semibold text-white/90 hover:bg-white/20"
+                        onClick={() => onRemoveTender(t.key)}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+
+              {collectTarget > 0 ? (
+                <div className="mt-4 rounded-xl border border-[rgba(197,160,40,0.35)] bg-[rgba(248,248,240,0.97)] p-3 shadow-sm">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs font-extrabold uppercase tracking-wider text-[var(--brand-deep)]">
+                      {tenderLines.length === 0 ? "Add payment" : "Add another"}
+                    </div>
+                    {remainingPaise > 0 && composer.channel ? (
+                      <button
+                        type="button"
+                        className="rounded-full bg-[rgba(197,160,40,0.2)] px-2.5 py-0.5 text-xs font-bold text-[var(--brand-deep)]"
+                        onClick={onFillRemaining}
+                      >
+                        Use remaining {formatInr(remainingPaise)}
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <label className="block text-xs">
+                      <span className="mb-1 block text-xs font-medium text-[var(--muted)]">
+                        Mode & account
+                      </span>
+                      <PaymentChannelSelect
+                        className="field !border-[rgba(32,48,80,0.18)] !bg-white !py-1.5 !text-xs !text-[#203050]"
+                        variant="tender"
+                        accounts={accountsState ?? undefined}
+                        value={composer.channel}
+                        onChange={(channel) =>
+                          onPatchComposer({
+                            channel,
+                            ref: "",
+                            bankName: "",
+                            // First mode auto-fills the full collect amount;
+                            // later modes auto-fill whatever is still uncovered.
+                            amount:
+                              remainingPaise > 0
+                                ? String(remainingPaise / 100)
+                                : "",
+                            instrumentDate: collectionDate || todayIso(),
+                          })
+                        }
+                      />
+                    </label>
+
+                    {composer.channel && modeMeta ? (
+                      <div className="flex flex-wrap items-end gap-2">
+                        {modeMeta.needsRef ? (
+                          <label className="block flex-1 text-xs">
+                            <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                              {modeMeta.refLabel}
+                            </span>
+                            <input
+                              className="field !bg-white !py-1.5 !text-xs !text-[#203050] placeholder:!text-[#20305066]"
+                              value={composer.ref}
+                              onChange={(e) =>
+                                onPatchComposer({ ref: e.target.value })
+                              }
+                              placeholder={modeMeta.refLabel}
+                              autoComplete="off"
+                            />
+                          </label>
+                        ) : null}
+
+                        <label className="block w-28 text-xs">
+                          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                            Amount (₹)
+                          </span>
+                          <input
+                            className="field !border-[rgba(197,160,40,0.45)] !bg-white !py-1.5 !text-xs font-bold !text-[#203050] placeholder:!text-[#20305066]"
+                            inputMode="decimal"
+                            value={composer.amount}
+                            onChange={(e) =>
+                              onPatchComposer({ amount: e.target.value })
+                            }
+                            placeholder="0"
+                          />
+                        </label>
+
+                        <button
+                          type="button"
+                          className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-bold text-white hover:opacity-95"
+                          onClick={onAddTender}
+                        >
+                          Add line
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {collectError ? (
+                <p className="mt-3 rounded-lg border border-[#fca5a5] bg-[rgba(239,68,68,0.15)] px-3 py-2 text-[11px] font-semibold leading-snug text-[#fecaca]">
+                  {collectError}
+                </p>
+              ) : null}
+
+              {(() => {
+                return (
                   <button
                     type="button"
-                    className="rounded-xl bg-[#c5a028] px-5 py-3 text-base font-extrabold text-[#152238] shadow-[0_4px_14px_rgba(197,160,40,0.4)] hover:bg-[#f0d878] lg:shrink-0 sm:text-lg"
-                    onClick={onAddTender}
+                    className={`mt-4 w-full rounded-xl px-4 py-3 text-sm font-extrabold uppercase tracking-wide transition active:scale-[0.99] disabled:cursor-not-allowed ${
+                      matched
+                        ? "bg-[#22c55e] text-white shadow-lg hover:bg-[#16a34a]"
+                        : "bg-[#ef4444] text-white hover:bg-[var(--tone-red-solid)] disabled:opacity-90"
+                    }`}
+                    disabled={!matched || readOnly}
+                    onClick={onCollect}
                   >
-                    Add
+                    {readOnly
+                      ? "Session closed — read-only"
+                      : discountOnly
+                        ? `Post discount · ${formatInr(counterDiscountPaise)}`
+                        : matched
+                          ? isPartialCollect
+                            ? `Collect partial · ${formatInr(collectTarget)}`
+                            : counterDiscountPaise > 0
+                              ? `Collect · ${formatInr(collectTarget)} (incl. discount)`
+                              : "Collect & print receipt"
+                          : collectTarget <= 0
+                            ? "Enter amount to collect"
+                            : tenderSum <= 0
+                              ? "Add payment to match amount"
+                              : tenderSum < collectTarget
+                                ? `Still need ${formatInr(collectTarget - tenderSum)}`
+                                : `Reduce by ${formatInr(tenderSum - collectTarget)}`}
                   </button>
-                </>
-              ) : null}
-            </div>
-
-            {composerMode === "cheque" ? (
-              <p className="mt-2 rounded-lg bg-[rgba(197,160,40,0.2)] px-3 py-2 text-sm font-semibold text-[var(--brand-deep)] sm:text-base">
-                Cheque will be marked: realisation subject to clearance
-              </p>
-            ) : null}
-          </div>
-          )}
-
-          {hasUncleared ? (
-            <p className="mt-3 rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-2.5 text-sm font-semibold text-[var(--brand-gold-soft)] sm:text-base">
-              Receipt will show: cheque realisation subject to clearance.
-            </p>
-          ) : null}
-
-          {(() => {
-            const matched = collectTarget > 0 && tenderSum === collectTarget;
-            const short =
-              collectTarget > 0 && tenderSum > 0 && tenderSum < collectTarget;
-            const over = collectTarget > 0 && tenderSum > collectTarget;
-            const gap = Math.abs(collectTarget - tenderSum);
-            return (
-              <div
-                className={`mt-4 rounded-xl px-3 py-3 text-lg font-bold sm:text-xl ${
-                  matched
-                    ? "bg-[rgba(60,160,100,0.22)] text-[#b8f0cc]"
-                    : short || over
-                      ? "bg-[rgba(180,60,60,0.28)] text-[#ffc9c2]"
-                      : "bg-white/10 text-white/70"
-                }`}
-              >
-                Payments {formatInr(tenderSum)}
-                {isPartialCollect && collectTarget > 0
-                  ? ` · target ${formatInr(collectTarget)}`
-                  : ""}
-                {short ? ` · still need ${formatInr(gap)}` : ""}
-                {over ? ` · ${formatInr(gap)} more than required` : ""}
-                {matched ? (isPartialCollect ? " · partial matched ✓" : " · matched ✓") : ""}
-              </div>
-            );
-          })()}
-
-          <label className="mt-4 block text-base">
-            <span className="mb-1.5 block text-sm font-medium text-white/75 sm:text-base">
-              Notes
-            </span>
-            <input
-              className="field !border-white/20 !bg-white/95 !py-2 !text-base !text-[var(--brand-deep)] sm:!text-lg"
-              value={note}
-              onChange={(e) => onNote(e.target.value)}
-              placeholder="Optional note on receipt"
-              autoComplete="off"
-            />
-          </label>
-
-          {(() => {
-            const discountOnly =
-              collectTarget <= 0 && counterDiscountPaise > 0;
-            const matched =
-              discountOnly ||
-              (collectTarget > 0 &&
-                tenderSum === collectTarget &&
-                tenderSum > 0);
-            return (
+                );
+              })()}
               <button
                 type="button"
-                className={`mt-4 w-full rounded-xl px-4 py-4 text-lg font-extrabold uppercase tracking-wide transition active:scale-[0.99] disabled:cursor-not-allowed sm:text-xl ${
-                  matched
-                    ? "bg-[#22c55e] text-white shadow-[0_0_0_2px_rgba(255,255,255,0.35),0_10px_28px_rgba(34,197,94,0.55)] hover:bg-[#16a34a] hover:shadow-[0_0_0_2px_rgba(255,255,255,0.5),0_12px_32px_rgba(34,197,94,0.65)]"
-                    : "bg-[#ef4444] text-white shadow-[0_0_0_2px_rgba(255,255,255,0.2),0_10px_28px_rgba(239,68,68,0.4)] hover:bg-[#dc2626] disabled:bg-[#ef4444] disabled:opacity-90 disabled:shadow-[0_0_0_2px_rgba(255,255,255,0.15)]"
-                }`}
-                disabled={!matched || readOnly}
-                onClick={onCollect}
+                className="mt-2 w-full rounded-xl border-2 border-[#128C7E] bg-[#128C7E]/15 px-4 py-2.5 text-xs font-bold text-[var(--tone-teal)] hover:bg-[#128C7E]/25 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={linkAmountPaise <= 0 || readOnly}
+                onClick={onSendUpiLink}
               >
-                {readOnly
-                  ? "Session closed — read-only"
-                  : discountOnly
-                    ? `Post discount · ${formatInr(counterDiscountPaise)}`
-                    : matched
-                      ? isPartialCollect
-                        ? `Collect partial · ${formatInr(collectTarget)}`
-                        : counterDiscountPaise > 0
-                          ? `Collect · ${formatInr(collectTarget)} (incl. discount)`
-                          : "Collect & print receipt"
-                      : collectTarget <= 0
-                        ? "Enter amount to collect"
-                        : tenderSum <= 0
-                          ? "Add payment to match amount"
-                          : tenderSum < collectTarget
-                            ? `Still need ${formatInr(collectTarget - tenderSum)}`
-                            : `Reduce by ${formatInr(tenderSum - collectTarget)}`}
+                {linkAmountPaise > 0
+                  ? `Send UPI link · ${formatInr(linkAmountPaise)}`
+                  : "Select dues for UPI link"}
               </button>
-            );
-          })()}
-          <button
-            type="button"
-            className="mt-2 w-full rounded-xl border-2 border-[#128C7E] bg-[#128C7E]/15 px-4 py-3.5 text-base font-bold text-[#0f766e] hover:bg-[#128C7E]/25 disabled:cursor-not-allowed disabled:opacity-50 sm:text-lg"
-            disabled={collectTotal <= 0 || readOnly}
-            onClick={onSendUpiLink}
-          >
-            {collectTotal > 0
-              ? `Send UPI link · ${formatInr(collectTotal)}`
-              : "Select dues for UPI link"}
-          </button>
-          <p className="mt-2 text-center text-sm text-white/75 sm:text-base">
-            Collecting as{" "}
-            <span className="font-semibold text-[#f0d878]">{cashierName}</span>
-          </p>
-        </div>
+              <p className="mt-2 text-center text-xs text-white/75">
+                Collecting as{" "}
+                <span className="font-semibold text-[#f0d878]">
+                  {cashierName}
+                </span>
+              </p>
+            </div>
+          </div>
+
+          {/* Store purchases — issued vs paid, in the fee record */}
+          <StorePurchasesPanel
+            studentIds={householdBundle.map((r) => r.student.id)}
+            nameById={
+              new Map(
+                householdBundle.map(
+                  (r) => [r.student.id, r.student.fullName] as const,
+                ),
+              )
+            }
+            tick={storeTick}
+          />
+
+          {/* Earlier receipts */}
+          <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]">
+            <div className="border-b border-[var(--border)] px-4 py-3">
+              <h2 className="text-xs font-bold text-[var(--brand-deep)]">
+                Earlier receipts
+              </h2>
+              <p className="text-[11px] text-[var(--muted)]">
+                Household history · view / print / WhatsApp
+              </p>
+            </div>
+            {priorReceipts.length === 0 ? (
+              <p className="px-4 py-4 text-xs text-[var(--muted)]">
+                No earlier receipts for this household yet.
+              </p>
+            ) : (
+              <ul className="max-h-64 divide-y divide-[var(--border)] overflow-y-auto">
+                {priorReceipts.map((v) => {
+                  const voided = !!v.voidedAt;
+                  const names = Array.from(
+                    new Set(v.lines.map((l) => l.studentName)),
+                  );
+                  const modes = Array.from(
+                    new Set(v.tenders.map((t) => tenderModeLabel(t.mode))),
+                  );
+                  return (
+                    <li
+                      key={v.id}
+                      className={`flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 ${
+                        voided ? "opacity-60" : ""
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-bold text-[var(--brand-deep)]">
+                            {v.receiptNo}
+                          </span>
+                          {voided ? (
+                            <span className="rounded bg-[rgba(180,60,60,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--danger)]">
+                              Void
+                            </span>
+                          ) : (
+                            <span className="rounded bg-[rgba(15,122,76,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--ok)]">
+                              Paid
+                            </span>
+                          )}
+                          {paperRefOf(v) ? (
+                            <span className="rounded bg-[rgba(197,160,40,0.16)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--brand-deep)]">
+                              Book {paperRefOf(v)}
+                            </span>
+                          ) : null}
+                          {/* The UTR is what a parent quotes from their bank app,
+                          so it belongs on the row that a UTR search returns. */}
+                          {v.tenders
+                            .map((t) => t.ref?.trim())
+                            .filter(Boolean)
+                            .slice(0, 2)
+                            .map((ref) => (
+                              <span
+                                key={ref}
+                                className="font-mono text-[10px] text-[var(--muted)]"
+                                title="Transaction reference"
+                              >
+                                {ref}
+                              </span>
+                            ))}
+                          {v.whatsappSentAt && !voided ? (
+                            <span className="rounded bg-[#128C7E]/12 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#128C7E]">
+                              WA
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
+                          {v.collectionDate} · {names.join(", ")} ·{" "}
+                          {modes.join(" + ")} · by {v.cashierName}
+                        </p>
+                      </div>
+                      <div className="text-sm font-bold tabular-nums text-[var(--brand-deep)]">
+                        {formatInr(v.totalPaise)}
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+                        onClick={() => onOpenReceipt(v.id)}
+                      >
+                        Open
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </aside>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-        <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
-          <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-            Earlier receipts
-          </h2>
-          <p className="text-xs text-[var(--muted)]">
-            Household history · open to view / print / WhatsApp
-          </p>
+      {/* ── Sticky collect bar, phones only ──────────────────────────────
+          The page stacks on a phone: sibling tabs, then every month's dues,
+          then the household card, and only then the Collect button. A clerk
+          taking a payment had to scroll past all of it, and back up again to
+          check the amount.
+
+          This keeps the amount and the action in the thumb zone the whole
+          time. It is the SAME onCollect and the same disabled rule as the
+          button in the panel — deliberately not a second code path, because
+          two ways to take money is how they drift apart. Hidden on lg where
+          the panel button is already visible. */}
+      <div className="sticky bottom-0 z-20 -mx-3 mt-4 border-t border-[var(--border)] bg-[var(--card)]/95 px-3 py-2.5 backdrop-blur lg:hidden">
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
+              {isPartialCollect ? "Partial collection" : "Amount to collect"}
+            </div>
+            <div className="truncate text-lg font-bold text-[var(--brand-deep)]">
+              {formatInr(collectTarget)}
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={!matched || readOnly}
+            onClick={onCollect}
+            className={`min-h-12 shrink-0 rounded-xl px-5 text-sm font-extrabold uppercase tracking-wide transition active:scale-[0.99] disabled:cursor-not-allowed ${
+              matched && !readOnly
+                ? "bg-[var(--ok)] text-white shadow-lg"
+                : "bg-[var(--surface-sunken)] text-[var(--muted)]"
+            }`}
+          >
+            {readOnly
+              ? "Closed"
+              : matched
+                ? "Collect"
+                : tenderSum < collectTarget && tenderSum > 0
+                  ? `Need ${formatInr(collectTarget - tenderSum)}`
+                  : "Add payment"}
+          </button>
         </div>
-        {priorReceipts.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-[var(--muted)]">
-            No earlier receipts for this household yet.
-          </p>
-        ) : (
-          <ul className="max-h-64 divide-y divide-[rgba(32,48,80,0.08)] overflow-y-auto">
-            {priorReceipts.map((v) => {
-              const voided = !!v.voidedAt;
-              const names = Array.from(
-                new Set(v.lines.map((l) => l.studentName)),
-              );
-              const modes = Array.from(
-                new Set(v.tenders.map((t) => tenderModeLabel(t.mode))),
-              );
-              return (
-                <li
-                  key={v.id}
-                  className={`flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 ${
-                    voided ? "opacity-60" : ""
-                  }`}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-bold text-[var(--brand-deep)]">
-                        {v.receiptNo}
-                      </span>
-                      {voided ? (
-                        <span className="rounded bg-[rgba(180,60,60,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--danger)]">
-                          Void
-                        </span>
-                      ) : (
-                        <span className="rounded bg-[rgba(15,122,76,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--ok)]">
-                          Paid
-                        </span>
-                      )}
-                      {v.schoolReceiptNo ? (
-                        <span className="text-[11px] text-[var(--muted)]">
-                          Book {v.schoolReceiptNo}
-                        </span>
-                      ) : null}
-                      {v.whatsappSentAt && !voided ? (
-                        <span className="rounded bg-[#128C7E]/12 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#128C7E]">
-                          WA
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
-                      {v.collectionDate} · {names.join(", ")} ·{" "}
-                      {modes.join(" + ")} · by {v.cashierName}
-                    </p>
-                  </div>
-                  <div className="text-sm font-bold tabular-nums text-[var(--brand-deep)]">
-                    {formatInr(v.totalPaise)}
-                  </div>
-                  <button
-                    type="button"
-                    className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
-                    onClick={() => onOpenReceipt(v.id)}
-                  >
-                    Open
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
       </div>
     </div>
   );
@@ -2615,7 +3977,7 @@ function WhatsAppInline({
 
   if (!editing) {
     return (
-      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.03)] px-2 py-1">
+      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-2 py-1">
         <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
           WhatsApp
         </span>
@@ -2690,6 +4052,18 @@ function WhatsAppInline({
   );
 }
 
+/**
+ * The collect card's fields, which live on a navy panel rather than on the
+ * page background — so they override the shared `field` styles.
+ *
+ * Written once because it appeared five times. The dark-mode `#05080f` has no
+ * design token: it is the near-black these controls sit on inside the card,
+ * and substituting --surface would lighten all five at once. One literal in
+ * one place is the honest version of five copies.
+ */
+const COLLECT_FIELD =
+  "field !border-white/20 !bg-white/95 !py-1.5 !text-xs !text-[var(--brand-deep)] dark:!bg-[#05080f] dark:!text-white dark:!font-bold dark:!border-white/30 dark:placeholder:!text-white/40";
+
 function ReceiptPreviewModal({
   voucher,
   sis,
@@ -2721,6 +4095,40 @@ function ReceiptPreviewModal({
   }, [voucher.id, household?.id, household?.whatsappMobile, household?.mobile]);
 
   useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  /**
+   * The office prints with Cmd+P / File → Print as often as with the Print
+   * button — and browser print applies none of the isolation classes, so the
+   * whole Fee Take page went to paper (seen in the wild: an 11-page PDF for
+   * one receipt). While THIS modal is open, any print — button or browser —
+   * isolates the receipt sheet: `beforeprint` fires for both paths.
+   */
+  useEffect(() => {
+    const target = () => document.getElementById(`receipt-${voucher.id}`);
+    const isolate = () => {
+      document.body.classList.add("printing-fee-receipt");
+      target()?.classList.add("print-target");
+    };
+    const release = () => {
+      document.body.classList.remove("printing-fee-receipt");
+      target()?.classList.remove("print-target");
+    };
+    window.addEventListener("beforeprint", isolate);
+    window.addEventListener("afterprint", release);
+    return () => {
+      release();
+      window.removeEventListener("beforeprint", isolate);
+      window.removeEventListener("afterprint", release);
+    };
+  }, [voucher.id]);
+
+  useEffect(() => {
     let cancelled = false;
     async function buildRemainQr() {
       if (!sis || !masters || !voucher.householdId) {
@@ -2729,12 +4137,27 @@ function ReceiptPreviewModal({
         setRemainUrl(null);
         return;
       }
+      // Dues UP TO the running month, not the whole session.
+      //
+      // With includeFuture the QR asked for every month the year will ever
+      // bill — ₹1,38,525 on a receipt for ₹5,000 — which is not a bill the
+      // school has issued and not a sum any parent owes today. The figure a
+      // "pay remaining dues" code should carry is what is outstanding NOW.
+      //
+      // Concessions and counter waivers are already off: `balancePaise` is
+      // what `computeStudentDues` arrives at after both.
       const rows = computeHouseholdDues(
         voucher.householdId,
         sis,
         masters,
         loadFees(),
-        { includeFuture: true },
+        // Scoped to the running session: without it the household's older
+        // student records are summed in too, and the QR asks for years the
+        // family has already left behind.
+        {
+          includeFuture: false,
+          academicYearCode: currentAcademicYearCode(masters),
+        },
       );
       const open = openFeeDues(rows.flatMap((r) => r.dues)).filter(
         (d) => d.balancePaise > 0,
@@ -2774,6 +4197,36 @@ function ReceiptPreviewModal({
       cancelled = true;
     };
   }, [voucher.id, voucher.householdId, voucher.receiptNo, sis, masters]);
+
+  // The parent's referral QR — their own code, so an enquiry scanned from
+  // this receipt is attributed back to them.
+  const [referralQr, setReferralQr] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function buildReferralQr() {
+      const hh = sis?.households.find((h) => h.id === voucher.householdId);
+      if (!hh) {
+        setReferralQr(null);
+        return;
+      }
+      const { referralCodeFor } = await import("@/lib/referrals");
+      const QRCode = (await import("qrcode")).default;
+      const url = `https://${TENANT.publicPortal}/apply?ref=${encodeURIComponent(
+        referralCodeFor(hh),
+      )}`;
+      const dataUrl = await QRCode.toDataURL(url, {
+        width: 180,
+        margin: 0,
+        errorCorrectionLevel: "M",
+        color: { dark: "#203050", light: "#ffffff" },
+      });
+      if (!cancelled) setReferralQr(dataUrl);
+    }
+    void buildReferralQr();
+    return () => {
+      cancelled = true;
+    };
+  }, [voucher.householdId, sis]);
 
   async function sendWhatsApp() {
     setWaError(null);
@@ -2824,13 +4277,21 @@ function ReceiptPreviewModal({
 
   return (
     <div
+      // NOT a Base UI dialog, deliberately. Look at the print: classes — this
+      // overlay turns itself static and transparent so the receipt inside it
+      // prints as an ordinary page. A portalled popup carries its own fixed
+      // positioning, and getting that to print correctly cannot be checked
+      // from a headless browser. Receipts printing wrongly is a mistake this
+      // school has already paid for once (blank sheets from dark mode,
+      // 2026-08-30), so this one is converted only with a real printer in
+      // front of someone. Every other overlay moved on 2026-09-06.
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[rgba(15,22,40,0.55)] p-4 print:static print:bg-transparent print:p-0"
       role="dialog"
       aria-modal="true"
       aria-label="Receipt print preview"
     >
       <div className="my-4 w-full max-w-2xl print:my-0 print:max-w-none">
-        <div className="print-hide mb-3 space-y-3 rounded-xl bg-white px-4 py-3 shadow-lg">
+        <div className="print-hide mb-3 space-y-3 rounded-xl bg-[var(--card)] px-4 py-3 shadow-lg">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <p className="text-sm font-bold text-[var(--brand-deep)]">
@@ -2845,6 +4306,14 @@ function ReceiptPreviewModal({
                   </span>
                 ) : null}
               </p>
+              {/* Inside the print-hide card on purpose: the counter's own
+                  remark is for the office, and the family's printed copy
+                  should not carry it. */}
+              {voucher.note ? (
+                <p className="mt-1 max-w-prose text-xs italic text-[var(--muted)]">
+                  {voucher.note}
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
               <button
@@ -2864,7 +4333,7 @@ function ReceiptPreviewModal({
               </button>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.2)] px-4 py-2 text-xs font-semibold text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] px-4 py-2 text-xs font-semibold text-[var(--brand-deep)]"
                 onClick={onClose}
               >
                 Close
@@ -2873,7 +4342,7 @@ function ReceiptPreviewModal({
           </div>
 
           {!voucher.voidedAt ? (
-            <div className="flex flex-wrap items-end gap-2 border-t border-[rgba(32,48,80,0.08)] pt-3">
+            <div className="flex flex-wrap items-end gap-2 border-t border-[var(--border)] pt-3">
               <label className="min-w-[11rem] flex-1 text-sm">
                 <span className="mb-1 block text-[11px] text-[var(--muted)]">
                   WhatsApp number
@@ -2882,9 +4351,7 @@ function ReceiptPreviewModal({
                   className="field !py-1.5"
                   inputMode="numeric"
                   value={waDraft}
-                  onChange={(e) =>
-                    setWaDraft(normalizeMobile(e.target.value))
-                  }
+                  onChange={(e) => setWaDraft(normalizeMobile(e.target.value))}
                   placeholder="10-digit mobile"
                   maxLength={10}
                 />
@@ -2897,8 +4364,18 @@ function ReceiptPreviewModal({
           ) : null}
 
           {waError ? (
-            <p className="text-xs font-semibold text-[#dc2626]">{waError}</p>
+            <p className="text-xs font-semibold text-[var(--danger)]">
+              {waError}
+            </p>
           ) : null}
+          {/*
+            The receipt now goes out on its own, so the question at this
+            point is no longer "shall I send it" but "did they get it".
+          */}
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-[var(--muted)]">WhatsApp:</span>
+            <ReceiptWaStatus voucherId={voucher.id} />
+          </div>
           {waNotice ? (
             <p className="text-xs font-semibold text-[#128C7E]">{waNotice}</p>
           ) : null}
@@ -2909,6 +4386,7 @@ function ReceiptPreviewModal({
           sis={sis}
           masters={masters}
           remainingPayQrDataUrl={remainQr}
+          referralQrDataUrl={referralQr}
           remainingPayAmountPaise={remainAmt}
           remainingPayUrl={remainUrl}
         />
@@ -2936,6 +4414,40 @@ function ReceiptsPanel({
   const [parentQ, setParentQ] = useState("");
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
+  const [modeFilter, setModeFilter] = useState<"" | TenderMode>("");
+  const [concessionFilter, setConcessionFilter] = useState<
+    "" | "with" | "without"
+  >("");
+  const [collectorQ, setCollectorQ] = useState("");
+  /**
+   * One box for every number a receipt can be found by: our receipt no., the
+   * paper book number written on it, the UTR / UPI ref of any tender, and the
+   * transaction id. The counter is usually holding exactly one of these — a
+   * parent quoting a UTR from their bank app, or a paper stub — and had no way
+   * to get from it to the receipt.
+   */
+  const [refQ, setRefQ] = useState("");
+  /** Paper-book register: only receipts carrying a book number. */
+  const [paperOnly, setPaperOnly] = useState(false);
+  /** The receipt being re-attached, when one is. */
+  const [repairing, setRepairing] = useState<string | null>(null);
+
+  /**
+   * A receipt that cannot say what it settled.
+   *
+   * Either it has no lines — it clears nothing, and every month it paid reads
+   * unpaid — or its lines do not add up to the money collected, which means
+   * some of them were lost. Both are repairable; a receipt that ties is left
+   * alone.
+   */
+  function needsRepair(v: CollectionVoucher): boolean {
+    if (v.voidedAt) return false;
+    if (v.totalPaise <= 0) return false;
+    if (v.lines.length === 0) return true;
+    return v.lines.reduce((n, l) => n + l.amountPaise, 0) !== v.totalPaise;
+  }
+  const [leafFrom, setLeafFrom] = useState("");
+  const [leafTo, setLeafTo] = useState("");
 
   const guardianOf = (householdId: string) =>
     sis?.households.find((h) => h.id === householdId)?.guardianName ?? "";
@@ -2997,6 +4509,58 @@ function ReceiptsPanel({
         if (!classHit) return false;
       }
 
+      if (modeFilter && !v.tenders.some((t) => t.mode === modeFilter)) {
+        return false;
+      }
+
+      if (concessionFilter) {
+        const hasConcession = v.lines.some((l) => (l.concessionPaise ?? 0) > 0);
+        if (concessionFilter === "with" && !hasConcession) return false;
+        if (concessionFilter === "without" && hasConcession) return false;
+      }
+
+      if (
+        collectorQ.trim() &&
+        !v.cashierName.toLowerCase().includes(collectorQ.trim().toLowerCase())
+      ) {
+        return false;
+      }
+
+      const paperNo = paperRefOf(v);
+
+      if (paperOnly && !paperNo) return false;
+
+      // Serial range over the book. Compared numerically when both ends and
+      // the stub are numbers — "9" must not sort after "10" — and as text
+      // otherwise, so lettered series still filter sensibly.
+      if (leafFrom || leafTo) {
+        if (!paperNo) return false;
+        const n = leafNumber(paperNo);
+        const a = leafNumber(leafFrom);
+        const b = leafNumber(leafTo);
+        if (n != null && (a != null || b != null)) {
+          if (a != null && n < a) return false;
+          if (b != null && n > b) return false;
+        } else {
+          const key = paperNo.toUpperCase();
+          if (leafFrom && key < leafFrom.toUpperCase()) return false;
+          if (leafTo && key > leafTo.toUpperCase()) return false;
+        }
+      }
+
+      const rq = refQ.trim().toLowerCase();
+      if (rq) {
+        const haystack = [
+          v.receiptNo,
+          paperNo,
+          v.transactionId ?? "",
+          ...v.tenders.map((t) => t.ref ?? ""),
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(rq)) return false;
+      }
+
       return true;
     });
   }, [
@@ -3007,6 +4571,13 @@ function ReceiptsPanel({
     parentQ,
     classId,
     sectionId,
+    modeFilter,
+    concessionFilter,
+    collectorQ,
+    refQ,
+    paperOnly,
+    leafFrom,
+    leafTo,
     sis,
   ]);
 
@@ -3021,6 +4592,16 @@ function ReceiptsPanel({
     sectionOptions.find((s) => s.id === sectionId)?.name
       ? `Sec ${sectionOptions.find((s) => s.id === sectionId)?.name}`
       : "",
+    modeFilter ? `Mode ${tenderModeLabel(modeFilter)}` : "",
+    concessionFilter === "with"
+      ? "With concession"
+      : concessionFilter === "without"
+        ? "No concession"
+        : "",
+    collectorQ.trim() ? `Collector “${collectorQ.trim()}”` : "",
+    refQ.trim() ? `Ref “${refQ.trim()}”` : "",
+    paperOnly ? "Paper book only" : "",
+    leafFrom || leafTo ? `Serial ${leafFrom || "…"}–${leafTo || "…"}` : "",
   ]);
 
   function clearFilters() {
@@ -3030,10 +4611,29 @@ function ReceiptsPanel({
     setParentQ("");
     setClassId("");
     setSectionId("");
+    setModeFilter("");
+    setConcessionFilter("");
+    setCollectorQ("");
+    setRefQ("");
+    setPaperOnly(false);
+    setLeafFrom("");
+    setLeafTo("");
   }
 
   const hasFilters =
-    dateFrom || dateTo || studentQ || parentQ || classId || sectionId;
+    dateFrom ||
+    dateTo ||
+    studentQ ||
+    parentQ ||
+    classId ||
+    sectionId ||
+    modeFilter ||
+    concessionFilter ||
+    collectorQ ||
+    refQ ||
+    paperOnly ||
+    leafFrom ||
+    leafTo;
 
   if (receipts.length === 0) {
     return (
@@ -3065,9 +4665,7 @@ function ReceiptsPanel({
             rows={filtered.map((v) => {
               const students = [...new Set(v.lines.map((l) => l.studentName))];
               const modes = [
-                ...new Set(
-                  v.tenders.map((t) => tenderModeLabel(t.mode)),
-                ),
+                ...new Set(v.tenders.map((t) => tenderModeLabel(t.mode))),
               ];
               return {
                 receipt: v.receiptNo || v.id,
@@ -3088,7 +4686,7 @@ function ReceiptsPanel({
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
             />
           </label>
           <label className="block text-xs font-semibold text-[var(--muted)]">
@@ -3097,7 +4695,7 @@ function ReceiptsPanel({
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
             />
           </label>
           <label className="block text-xs font-semibold text-[var(--muted)]">
@@ -3107,7 +4705,7 @@ function ReceiptsPanel({
               value={studentQ}
               onChange={(e) => setStudentQ(e.target.value)}
               placeholder="Name or adm no."
-              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
             />
           </label>
           <label className="block text-xs font-semibold text-[var(--muted)]">
@@ -3117,7 +4715,7 @@ function ReceiptsPanel({
               value={parentQ}
               onChange={(e) => setParentQ(e.target.value)}
               placeholder="Guardian or mobile"
-              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
             />
           </label>
           <label className="block text-xs font-semibold text-[var(--muted)]">
@@ -3128,7 +4726,7 @@ function ReceiptsPanel({
                 setClassId(e.target.value);
                 setSectionId("");
               }}
-              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
             >
               <option value="">All classes</option>
               {classOptions.map((c) => (
@@ -3144,7 +4742,7 @@ function ReceiptsPanel({
               value={sectionId}
               onChange={(e) => setSectionId(e.target.value)}
               disabled={!classId}
-              className="mt-1 w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-2.5 py-2 text-sm disabled:opacity-50"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm disabled:opacity-50"
             >
               <option value="">All sections</option>
               {sectionOptions.map((s) => (
@@ -3154,6 +4752,103 @@ function ReceiptsPanel({
               ))}
             </select>
           </label>
+          <label className="block text-xs font-semibold text-[var(--muted)]">
+            Mode
+            <select
+              value={modeFilter}
+              onChange={(e) => setModeFilter(e.target.value as "" | TenderMode)}
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
+            >
+              <option value="">All modes</option>
+              {TENDER_MODES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-xs font-semibold text-[var(--muted)]">
+            Concession
+            <select
+              value={concessionFilter}
+              onChange={(e) =>
+                setConcessionFilter(e.target.value as "" | "with" | "without")
+              }
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
+            >
+              <option value="">All receipts</option>
+              <option value="with">With concession</option>
+              <option value="without">No concession</option>
+            </select>
+          </label>
+          <label className="block text-xs font-semibold text-[var(--muted)]">
+            Collector
+            <input
+              type="search"
+              value={collectorQ}
+              onChange={(e) => setCollectorQ(e.target.value)}
+              placeholder="Cashier name"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-xs font-semibold text-[var(--muted)] sm:col-span-2">
+            Receipt no. / UTR / paper book no.
+            <input
+              type="search"
+              value={refQ}
+              onChange={(e) => setRefQ(e.target.value)}
+              placeholder="RCV-00118 · UTR / UPI ref · 1376 · FEE-BOOK-A/4521"
+              className="mt-1 w-full rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm"
+            />
+          </label>
+        </div>
+
+        {/* Paper-book register: the office reconciles the printed book against
+            what the system holds, so it needs the book's own view — stubs only,
+            in serial order, over a date range. */}
+        <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-[rgba(197,160,40,0.35)] bg-[rgba(197,160,40,0.06)] px-2.5 py-2">
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--brand-deep)]">
+            <input
+              type="checkbox"
+              checked={paperOnly}
+              onChange={(e) => setPaperOnly(e.target.checked)}
+            />
+            Paper book only
+          </label>
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            Serial from
+            <input
+              value={leafFrom}
+              onChange={(e) => setLeafFrom(e.target.value)}
+              placeholder="1370"
+              className="mt-0.5 w-24 rounded-lg border border-[var(--border)] px-2 py-1 text-sm"
+            />
+          </label>
+          <label className="block text-[11px] font-semibold text-[var(--muted)]">
+            to
+            <input
+              value={leafTo}
+              onChange={(e) => setLeafTo(e.target.value)}
+              placeholder="1399"
+              className="mt-0.5 w-24 rounded-lg border border-[var(--border)] px-2 py-1 text-sm"
+            />
+          </label>
+          {paperOnly || leafFrom || leafTo ? (
+            <button
+              type="button"
+              className="rounded-lg border border-[var(--border)] px-2 py-1 text-[11px] font-semibold"
+              onClick={() => {
+                setPaperOnly(false);
+                setLeafFrom("");
+                setLeafTo("");
+              }}
+            >
+              Clear book filter
+            </button>
+          ) : null}
+          <span className="text-[11px] text-[var(--muted)]">
+            Missing stubs in a range are the ones to chase in the book.
+          </span>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
@@ -3178,7 +4873,7 @@ function ReceiptsPanel({
             No receipts match these filters.
           </p>
         ) : (
-          <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+          <ul className="divide-y divide-[var(--border)]">
             {filtered.map((v) => {
               const voided = !!v.voidedAt;
               const students = Array.from(
@@ -3235,7 +4930,27 @@ function ReceiptsPanel({
                     </div>
                   </button>
                   {!voided ? (
-                    <div className="flex justify-end gap-2 border-t border-[rgba(32,48,80,0.06)] px-4 py-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border)] px-4 py-2">
+                      {/* Only where the receipt cannot say what it settled:
+                          no lines at all, or lines that do not add up to the
+                          money collected. Everywhere else this button would
+                          be an invitation to rewrite a correct receipt. */}
+                      {needsRepair(v) ? (
+                        <>
+                          <span className="mr-auto text-[11px] font-semibold text-[var(--warning)]">
+                            {v.lines.length === 0
+                              ? "No months attached — this receipt clears nothing"
+                              : `Lines add to ${formatInr(v.lines.reduce((n, l) => n + l.amountPaise, 0))}, not ${formatInr(v.totalPaise)}`}
+                          </span>
+                          <button
+                            type="button"
+                            className="rounded-lg border border-[var(--warning)] px-3 py-1.5 text-xs font-semibold text-[var(--warning)]"
+                            onClick={() => setRepairing(v.id)}
+                          >
+                            Re-attach
+                          </button>
+                        </>
+                      ) : null}
                       <button
                         type="button"
                         className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
@@ -3258,6 +4973,25 @@ function ReceiptsPanel({
           </ul>
         )}
       </ErpTableShell>
+
+      {repairing
+        ? (() => {
+            const v = receipts.find((r) => r.id === repairing);
+            if (!v) return null;
+            return (
+              <ReceiptRepairDialog
+                voucher={v}
+                sis={sis}
+                masters={masters}
+                onClose={() => setRepairing(null)}
+                onRepaired={(m) => {
+                  setRepairing(null);
+                  window.alert(m);
+                }}
+              />
+            );
+          })()
+        : null}
     </div>
   );
 }
@@ -3272,7 +5006,7 @@ function MiniBtn({
   return (
     <button
       type="button"
-      className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-sm font-semibold text-[var(--brand-deep)] sm:text-base"
+      className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold text-[var(--brand-deep)] sm:text-base"
       onClick={onClick}
     >
       {children}

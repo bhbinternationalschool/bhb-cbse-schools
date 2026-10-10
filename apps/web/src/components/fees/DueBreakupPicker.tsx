@@ -33,6 +33,10 @@ export function DueBreakupPicker({
   onToggleMonth,
   lineDiscountRupees,
   onLineDiscount,
+  recurringEligible,
+  recurringChosen,
+  onToggleRecurring,
+  onChangeHeadDiscount,
 }: {
   dues: FeeDueLine[];
   selectedKeys: Set<string>;
@@ -42,9 +46,24 @@ export function DueBreakupPicker({
   /** Per dueKey counter discount (₹) — only on selected heads */
   lineDiscountRupees?: Record<string, string>;
   onLineDiscount?: (dueKey: string, rupees: string) => void;
+  /** Dues whose head repeats monthly, so a discount on it could recur. */
+  recurringEligible?: Set<string>;
+  /** Dues the clerk has chosen to make recurring. */
+  recurringChosen?: Set<string>;
+  onToggleRecurring?: (dueKey: string, on: boolean) => void;
+  /** Lines discounted but not collected today. */
+  /** Change the standing Masters discount on this head, from this month on. */
+  onChangeHeadDiscount?: (due: FeeDueLine, rupees: string) => void;
 }) {
   const groups = useMemo(() => groupDuesByMonth(dues), [dues]);
   const currentMonthKey = today.slice(0, 7);
+  // Which lines take their discount as a percentage; the % typed per line.
+  // The pipeline stays rupees-only — % just computes them from the balance.
+  const [pctMode, setPctMode] = useState<Set<string>>(new Set());
+  /** Which head's standing discount is being edited, and to what. */
+  const [editingHead, setEditingHead] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [pctValue, setPctValue] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set([currentMonthKey]),
   );
@@ -143,7 +162,7 @@ export function DueBreakupPicker({
                   <span
                     className={`block text-sm font-bold sm:text-base ${
                       monthAllPaid
-                        ? "text-[#15803d]"
+                        ? "text-[var(--tone-green)]"
                         : "text-[var(--brand-deep)]"
                     }`}
                   >
@@ -157,7 +176,7 @@ export function DueBreakupPicker({
                   <span
                     className={`block text-sm sm:text-sm ${
                       monthAllPaid
-                        ? "font-semibold text-[#15803d]"
+                        ? "font-semibold text-[var(--tone-green)]"
                         : monthOverdue
                           ? "font-semibold text-[#dc2626]"
                           : "text-[var(--muted)]"
@@ -183,7 +202,7 @@ export function DueBreakupPicker({
                   <span
                     className={`block text-sm font-bold sm:text-base ${
                       monthAllPaid
-                        ? "text-[#15803d]"
+                        ? "text-[var(--tone-green)]"
                         : monthOverdue
                           ? "text-[#dc2626]"
                           : "text-[var(--brand-deep)]"
@@ -236,39 +255,39 @@ export function DueBreakupPicker({
                             aria-label={`${headTitle} paid`}
                           />
                           <div className="min-w-0 flex-1">
-                            <div className="text-sm font-medium text-[#15803d] sm:text-base">
+                            <div className="text-sm font-medium text-[var(--tone-green)] sm:text-base">
                               {headTitle}
-                              <span className="ml-1.5 rounded bg-[#16a34a]/15 px-1.5 py-0.5 text-sm font-bold uppercase tracking-wide text-[#15803d]">
+                              <span className="ml-1.5 rounded bg-[#16a34a]/15 px-1.5 py-0.5 text-sm font-bold uppercase tracking-wide text-[var(--tone-green)]">
                                 Paid
                               </span>
                               {d.kind === "special" ? (
-                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[#15803d]/80">
+                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--tone-green)]/80">
                                   Special
                                 </span>
                               ) : null}
                               {d.kind === "voucher" ? (
-                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[#15803d]/80">
+                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--tone-green)]/80">
                                   Voucher
                                 </span>
                               ) : null}
                               {d.kind === "plan" ? (
-                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[#15803d]/80">
+                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--tone-green)]/80">
                                   Plan
                                 </span>
                               ) : null}
                               {d.kind === "store" ? (
-                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[#15803d]/80">
+                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--tone-green)]/80">
                                   Store
                                 </span>
                               ) : null}
                               {d.kind === "transport" ? (
-                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[#15803d]/80">
+                                <span className="ml-1.5 text-sm font-semibold uppercase tracking-wide text-[var(--tone-green)]/80">
                                   Bus
                                 </span>
                               ) : null}
                             </div>
                             {d.kind === "store" && d.storeItems.length > 0 ? (
-                              <ul className="mt-1 space-y-0.5 text-sm text-[#15803d]/90">
+                              <ul className="mt-1 space-y-0.5 text-sm text-[var(--tone-green)]/90">
                                 {d.storeItems.map((it, idx) => (
                                   <li key={`${d.dueKey}-p-${idx}`}>
                                     {it.name}
@@ -278,13 +297,13 @@ export function DueBreakupPicker({
                                 ))}
                               </ul>
                             ) : d.kind === "transport" && d.transport ? (
-                              <div className="text-sm font-semibold text-[#15803d] sm:text-sm">
+                              <div className="text-sm font-semibold text-[var(--tone-green)] sm:text-sm">
                                 {d.transport.routeCode} · {d.transport.busNo} ·{" "}
                                 {d.transport.stopName} · paid{" "}
                                 {formatInr(d.paidPaise)}
                               </div>
                             ) : (
-                              <div className="text-sm font-semibold text-[#15803d] sm:text-sm">
+                              <div className="text-sm font-semibold text-[var(--tone-green)] sm:text-sm">
                                 Paid {formatInr(d.paidPaise)}
                                 {d.concessionPaise
                                   ? ` · −${formatInr(d.concessionPaise)} concession`
@@ -293,7 +312,7 @@ export function DueBreakupPicker({
                               </div>
                             )}
                             {d.concessionDetails?.length ? (
-                              <ul className="mt-1 space-y-0.5 text-sm font-medium text-[#15803d]/85">
+                              <ul className="mt-1 space-y-0.5 text-sm font-medium text-[var(--tone-green)]/85">
                                 {d.concessionDetails.map((c) => (
                                   <li key={`${d.dueKey}-paid-${c.grantId}`}>
                                     Discount · {formatConcessionDetailLine(c)}
@@ -302,7 +321,7 @@ export function DueBreakupPicker({
                               </ul>
                             ) : null}
                           </div>
-                          <div className="shrink-0 text-sm font-bold text-[#15803d] sm:text-base">
+                          <div className="shrink-0 text-sm font-bold text-[var(--tone-green)] sm:text-base">
                             {formatInr(0)}
                           </div>
                         </div>
@@ -425,6 +444,76 @@ export function DueBreakupPicker({
                                     : ""}
                                 </li>
                               ) : null}
+                              {/* Change the standing rate without leaving the
+                                  counter. Only offered where a Masters grant
+                                  is what is discounting the head — a counter
+                                  waiver has no rule to change, and RTE is not
+                                  the counter's to edit. */}
+                              {onChangeHeadDiscount &&
+                              d.concessionDetails?.some((c) => c.grantId) ? (
+                                <li>
+                                  {editingHead === d.dueKey ? (
+                                    <span className="flex flex-wrap items-center gap-1.5">
+                                      <span className="text-[var(--muted)]">
+                                        New amount ₹
+                                      </span>
+                                      <input
+                                        autoFocus
+                                        className="w-20 rounded border border-[var(--border)] px-1.5 py-0.5 text-sm"
+                                        value={editingValue}
+                                        onChange={(e) =>
+                                          setEditingValue(e.target.value)
+                                        }
+                                        placeholder="0"
+                                      />
+                                      <button
+                                        type="button"
+                                        className="rounded bg-[var(--brand-deep)] px-2 py-0.5 text-xs font-bold text-white"
+                                        onClick={() => {
+                                          onChangeHeadDiscount(d, editingValue);
+                                          setEditingHead(null);
+                                          setEditingValue("");
+                                        }}
+                                      >
+                                        Save
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="rounded border px-2 py-0.5 text-xs"
+                                        onClick={() => setEditingHead(null)}
+                                      >
+                                        Cancel
+                                      </button>
+                                      <span className="text-[11px] text-[var(--muted)]">
+                                        applies from this month · 0 removes it ·
+                                        earlier months keep what they were billed
+                                      </span>
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="text-xs font-semibold text-[var(--brand-mid)] underline"
+                                      onClick={() => {
+                                        setEditingHead(d.dueKey);
+                                        setEditingValue(
+                                          String(
+                                            Math.round(
+                                              (d.concessionDetails ?? [])
+                                                .filter((c) => c.grantId)
+                                                .reduce(
+                                                  (n, c) => n + c.amountPaise,
+                                                  0,
+                                                ) / 100,
+                                            ),
+                                          ),
+                                        );
+                                      }}
+                                    >
+                                      Change this discount
+                                    </button>
+                                  )}
+                                </li>
+                              ) : null}
                             </ul>
                           ) : null}
                         </div>
@@ -462,38 +551,116 @@ export function DueBreakupPicker({
                           <span className="text-sm font-semibold text-[var(--brand-deep)]">
                             Discount on {headTitle}
                           </span>
-                          <div className="flex items-center gap-1">
-                            <span className="text-sm font-bold text-[var(--muted)]">
-                              ₹
-                            </span>
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              max={d.balancePaise / 100}
-                              className="field w-28 !py-1.5 !text-base !font-semibold"
-                              value={lineDiscountRupees?.[d.dueKey] ?? ""}
-                              onChange={(e) =>
-                                onLineDiscount(
-                                  d.dueKey,
-                                  e.target.value.replace(/[^\d.]/g, ""),
-                                )
+                          <div className="flex overflow-hidden rounded-lg border border-[rgba(32,48,80,0.18)]">
+                            <button
+                              type="button"
+                              className={`px-2 py-1 text-xs font-bold ${
+                                !pctMode.has(d.dueKey)
+                                  ? "bg-[var(--brand-deep)] text-white"
+                                  : "bg-[var(--card)] text-[var(--muted)]"
+                              }`}
+                              onClick={() =>
+                                setPctMode((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(d.dueKey);
+                                  return next;
+                                })
                               }
-                              placeholder="0"
-                              aria-label={`Discount on ${headTitle}`}
-                            />
+                            >
+                              ₹
+                            </button>
+                            <button
+                              type="button"
+                              className={`px-2 py-1 text-xs font-bold ${
+                                pctMode.has(d.dueKey)
+                                  ? "bg-[var(--brand-deep)] text-white"
+                                  : "bg-[var(--card)] text-[var(--muted)]"
+                              }`}
+                              onClick={() =>
+                                setPctMode((prev) => new Set(prev).add(d.dueKey))
+                              }
+                            >
+                              %
+                            </button>
                           </div>
+                          {pctMode.has(d.dueKey) ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                inputMode="decimal"
+                                className="field w-20 !py-1.5 !text-base !font-semibold"
+                                value={pctValue[d.dueKey] ?? ""}
+                                onChange={(e) => {
+                                  const raw = e.target.value.replace(/[^\d.]/g, "");
+                                  const pct = Math.min(100, Number(raw) || 0);
+                                  setPctValue((prev) => ({ ...prev, [d.dueKey]: raw }));
+                                  // The books always record rupees — % is an
+                                  // input convenience computed off this line.
+                                  const rupees =
+                                    raw.trim() === ""
+                                      ? ""
+                                      : String(
+                                          Math.round((d.balancePaise * pct) / 100) / 100,
+                                        );
+                                  onLineDiscount(d.dueKey, rupees);
+                                }}
+                                placeholder="0"
+                                aria-label={`Discount percent on ${headTitle}`}
+                              />
+                              <span className="text-sm font-bold text-[var(--muted)]">%</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <span className="text-sm font-bold text-[var(--muted)]">₹</span>
+                              <input
+                                inputMode="decimal"
+                                className="field w-28 !py-1.5 !text-base !font-semibold"
+                                value={lineDiscountRupees?.[d.dueKey] ?? ""}
+                                onChange={(e) =>
+                                  onLineDiscount(
+                                    d.dueKey,
+                                    e.target.value.replace(/[^\d.]/g, ""),
+                                  )
+                                }
+                                placeholder="0"
+                                aria-label={`Discount on ${headTitle}`}
+                              />
+                            </div>
+                          )}
                           {discountPaise > 0 ? (
                             <span className="text-sm font-semibold text-[#16a34a]">
-                              −{formatInr(discountPaise)} · collect{" "}
-                              {formatInr(netPaise)}
+                              −{formatInr(discountPaise)}
+                              {pctMode.has(d.dueKey) && pctValue[d.dueKey]
+                                ? ` (${pctValue[d.dueKey]}%)`
+                                : ""}{" "}
+                              · collect {formatInr(netPaise)}
                             </span>
-                          ) : (
-                            <span className="text-sm text-[var(--muted)]">
-                              Recurring heads can be saved for future months at
-                              collect
-                            </span>
-                          )}
+                          ) : null}
+                          {/* ONE decision per discounted line.
+                              There used to be two ticks here — "collecting
+                              this today" and "this month only" — and between
+                              them the clerk had to work out which combination
+                              meant what, on the screen where money is taken.
+                              Off is the safe reading and the common case: the
+                              discount is for the month in hand. On extends it
+                              forward, fills the later months already on
+                              screen, and saves the rate to Masters.
+                              The label does not change with the state; the
+                              tick carries that, and a caption that rewords
+                              itself made the two look like four. */}
+                          {discountPaise > 0 &&
+                          recurringEligible?.has(d.dueKey) &&
+                          onToggleRecurring ? (
+                            <label className="flex items-center gap-1.5 text-sm text-[var(--brand-deep)]">
+                              <input
+                                type="checkbox"
+                                checked={recurringChosen?.has(d.dueKey) ?? false}
+                                onChange={(e) =>
+                                  onToggleRecurring(d.dueKey, e.target.checked)
+                                }
+                              />
+                              Also apply to future months
+                            </label>
+                          ) : null}
                         </div>
                       ) : null}
                     </li>

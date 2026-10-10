@@ -3,6 +3,7 @@ import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
+import { deskReadGate, visibleSlices } from "@/lib/deskFeatureGate.server";
 import type { PaymentLink } from "@/lib/payments";
 import { paymentsDualWriteDbEnabled } from "@/lib/paymentsDbConfig";
 import {
@@ -14,9 +15,28 @@ export const runtime = "nodejs";
 
 /** GET — pull payment links from normalized desk tables */
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["payment-links"], "GET");
-  if (!auth.ok) return auth.response
-  const { links, meta } = await fetchPaymentDeskFromDb();
+  // The Fees grant, or the read-only fee reports function (it owns "links").
+  // Writing stays module-level: a link is settled only off the stored copy,
+  // so no function lifts rows from a browser into this desk.
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["payment-links"]);
+  if (gate.mode === "deny") return gate.response;
+  if (gate.mode === "feature" && !visibleSlices("fees", gate).has("links")) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Reading pay links needs the Fees grant or the fee reports function.",
+        reason: "feature_forbidden",
+      },
+      { status: 403 },
+    );
+  }
+  const { links, meta, ok } = await fetchPaymentDeskFromDb();
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: "Payment desk fetch failed — tenant/db unavailable" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     links,
@@ -59,6 +79,9 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     count: result.linkCount,
+    // Links this browser held at an older status (e.g. still "open" after
+    // the payment came in): kept as stored; the browser reloads them.
+    kept: result.kept ?? [],
     updatedAt: new Date().toISOString(),
   });
 }

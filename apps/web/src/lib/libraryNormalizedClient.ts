@@ -5,6 +5,23 @@
 import type { LibraryState } from "@/lib/library";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+import { afterStampedDeskSave, captureDeskStamps, stampedDeskBody } from "@/lib/deskStampsClient";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+
+const LIBRARY_DESK = "library";
+
+/** Titles, copies or procurement documents the user deleted; the next push deletes them by id. */
+export function recordLibraryDeletion(
+  table: "library_desk_titles" | "library_desk_copies" | "library_desk_procurement_docs",
+  ids: string[],
+) {
+  recordDeskDeletion(LIBRARY_DESK, table, ids);
+}
 
 const META_KEY = "bhb_library_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -52,17 +69,28 @@ export function scheduleLibraryDeskSync(state: LibraryState) {
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
+const LIBRARY_SLICES = ["titles", "copies", "issues", "procurementDocs"] as const;
+
 async function pushLibraryDeskApi(state: LibraryState) {
+  const sentDeletes = pendingDeskDeletes(LIBRARY_DESK);
+  const holder = {
+    titles: state.titles,
+    copies: state.copies,
+    issues: state.issues,
+    procurementDocs: state.procurementDocs,
+    settings: state.settings,
+  } as Record<string, unknown>;
+  // Only the rows this browser changed, each with the stamp it loaded.
+  const sent = stampedDeskBody("library", holder, LIBRARY_SLICES);
+  if (!sent.anything && !Object.values(sentDeletes).some((ids) => ids?.length)) return;
   try {
     const res = await fetch("/api/school-data/library-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        titles: state.titles,
-        copies: state.copies,
-        issues: state.issues,
-        procurementDocs: state.procurementDocs,
-        settings: state.settings,
+        ...sent.body,
+        // Deletions are named, never inferred from what this browser lacks.
+        deletes: sentDeletes,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -70,14 +98,24 @@ async function pushLibraryDeskApi(state: LibraryState) {
       updatedAt?: string;
       titleCount?: number;
       error?: string;
+      stamps?: RowStamps;
+      conflicts?: RowConflicts;
+      settingsStamp?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(LIBRARY_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         titleCount: body.titleCount ?? state.titles.length,
       });
+      afterStampedDeskSave("library", holder, LIBRARY_SLICES, sent, body);
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("library");
+    else recordDeskSyncFailure("library", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("library", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[library-db] desk push error", e);
   }
 }
@@ -95,6 +133,8 @@ export async function fetchLibraryDeskFromApi() {
       settings?: LibraryState["settings"];
       updatedAt?: string;
       titleCount?: number;
+      stamps?: RowStamps;
+      settingsStamp?: string;
     };
     if (!Array.isArray(body.titles)) return null;
     return {
@@ -112,6 +152,8 @@ export async function fetchLibraryDeskFromApi() {
       },
       updatedAt: body.updatedAt || "",
       titleCount: body.titleCount ?? body.titles.length,
+      stamps: body.stamps,
+      settingsStamp: body.settingsStamp,
     };
   } catch {
     return null;
@@ -134,6 +176,7 @@ export async function hydrateLibraryDeskFromDb(preferDb?: boolean) {
       },
     },
     changed: false,
+    ok: false,
   };
   if (!remote) return empty;
 
@@ -145,8 +188,10 @@ export async function hydrateLibraryDeskFromDb(preferDb?: boolean) {
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.titleCount > meta.titleCount;
 
-  if (!shouldTake) return empty;
+  if (!shouldTake) return { ...empty, bundle: remote.bundle, ok: true };
 
   writeMeta({ updatedAt: remote.updatedAt, titleCount: remote.titleCount });
-  return { bundle: remote.bundle, changed: true };
+  // The rows as the server holds them are the base of the next save.
+  captureDeskStamps("library", remote.bundle as Record<string, unknown>, LIBRARY_SLICES, remote.stamps, remote.settingsStamp);
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

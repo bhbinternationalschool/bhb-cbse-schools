@@ -5,6 +5,22 @@
 import type { PayrollState } from "@/lib/payroll";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+import { afterStampedDeskSave, captureDeskStamps, stampedDeskBody } from "@/lib/deskStampsClient";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+
+const PAYROLL_SLICES = ["runs", "audit"] as const;
+
+const PAYROLL_DESK = "payroll";
+
+/** A draft/pending run the user deleted; the next push deletes it by id. */
+export function recordPayrollRunDeletion(runId: string) {
+  recordDeskDeletion(PAYROLL_DESK, "payroll_desk_runs", [runId]);
+}
 
 const META_KEY = "bhb_payroll_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -55,25 +71,40 @@ export function schedulePayrollDeskSync(state: PayrollState) {
 }
 
 async function pushPayrollDeskApi(state: PayrollState) {
+  const sentDeletes = pendingDeskDeletes(PAYROLL_DESK);
+  const holder = { runs: state.runs, audit: state.audit } as Record<string, unknown>;
+  // Only the runs (and new audit rows) this browser changed, with their stamps.
+  const sent = stampedDeskBody("payroll", holder, PAYROLL_SLICES);
+  if (!sent.anything && !Object.values(sentDeletes).some((ids) => ids?.length)) return;
   try {
     const res = await fetch("/api/school-data/payroll-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ runs: state.runs, audit: state.audit }),
+      // Deletions are named, never inferred from what this browser lacks.
+      body: JSON.stringify({ ...sent.body, deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
       updatedAt?: string;
       runCount?: number;
       error?: string;
+      stamps?: RowStamps;
+      conflicts?: RowConflicts;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(PAYROLL_DESK, sentDeletes);
+      afterStampedDeskSave("payroll", holder, PAYROLL_SLICES, sent, body);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         runCount: body.runCount ?? state.runs.length,
       });
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("payroll");
+    else recordDeskSyncFailure("payroll", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("payroll", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[payroll-db] desk push error", e);
   }
 }
@@ -87,6 +118,7 @@ export async function fetchPayrollDeskFromApi() {
       ok?: boolean;
       updatedAt?: string;
       runCount?: number;
+      stamps?: RowStamps;
     };
     if (!Array.isArray(body.runs)) return null;
     return {
@@ -96,6 +128,7 @@ export async function fetchPayrollDeskFromApi() {
       },
       updatedAt: body.updatedAt || "",
       runCount: body.runCount ?? body.runs.length,
+      stamps: body.stamps,
     };
   } catch {
     return null;
@@ -107,6 +140,7 @@ export async function hydratePayrollDeskFromDb(preferDb?: boolean) {
   const empty = {
     bundle: { runs: [] as PayrollState["runs"], audit: [] as PayrollState["audit"] },
     changed: false,
+    ok: false,
   };
   if (!remote) return empty;
 
@@ -118,8 +152,10 @@ export async function hydratePayrollDeskFromDb(preferDb?: boolean) {
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.runCount > meta.runCount;
 
-  if (!shouldTake) return empty;
+  if (!shouldTake) return { ...empty, bundle: remote.bundle, ok: true };
 
   writeMeta({ updatedAt: remote.updatedAt, runCount: remote.runCount });
-  return { bundle: remote.bundle, changed: true };
+  // The runs as the server holds them are the base of the next save.
+  captureDeskStamps("payroll", remote.bundle as Record<string, unknown>, PAYROLL_SLICES, remote.stamps);
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

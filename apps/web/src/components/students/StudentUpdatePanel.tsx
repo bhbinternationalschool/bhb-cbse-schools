@@ -32,6 +32,16 @@ import {
   StudentNameLabel,
 } from "@/components/students/StudentAvatar";
 import { InlinePhotoCapture } from "@/components/students/InlinePhotoCapture";
+import { useDemoSession } from "@/components/shell/SessionContext";
+import { normalizeSessionCode } from "@/lib/studentImport";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type UpdateTool =
   | "details"
@@ -78,17 +88,31 @@ function StudentPicker({
   sis,
   masters,
   selectedId,
+  sessionCode,
   onSelect,
 }: {
   sis: SisState;
   masters: MastersState;
   selectedId: string;
+  /** The session shown in the header — searches are scoped to it by default. */
+  sessionCode: string;
   onSelect: (s: SisStudent | null) => void;
 }) {
   const [query, setQuery] = useState("");
+  // Off by default. sis.students holds one row per student per session, so an
+  // unscoped search returns the same child several times over and invites
+  // editing last year's record while believing you are on this year's.
+  const [allSessions, setAllSessions] = useState(false);
+  const wantSession = normalizeSessionCode(sessionCode || "");
+
   const hits = useMemo(() => {
     const q = query.trim().toLowerCase();
     let rows = sis.students.filter((s) => s.status === "active");
+    if (!allSessions && wantSession) {
+      rows = rows.filter(
+        (s) => normalizeSessionCode(s.academicYearCode || "") === wantSession,
+      );
+    }
     if (q) {
       rows = rows.filter(
         (s) =>
@@ -103,7 +127,7 @@ function StudentPicker({
       .slice()
       .sort((a, b) => a.fullName.localeCompare(b.fullName))
       .slice(0, 10);
-  }, [sis, query]);
+  }, [sis, query, allSessions, wantSession]);
 
   const selected = sis.students.find((s) => s.id === selectedId) ?? null;
 
@@ -138,6 +162,19 @@ function StudentPicker({
           </button>
         </div>
       ) : null}
+      {!selected ? (
+        <label className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
+          <input
+            type="checkbox"
+            checked={allSessions}
+            onChange={(e) => setAllSessions(e.target.checked)}
+          />
+          <span>
+            Search other sessions too
+            {!allSessions && wantSession ? ` (showing ${wantSession} only)` : ""}
+          </span>
+        </label>
+      ) : null}
       {!selected && query.trim() ? (
         <ul className="mt-2 max-h-48 overflow-auto rounded-lg border border-[rgba(32,48,80,0.08)]">
           {hits.map((s) => (
@@ -157,6 +194,12 @@ function StudentPicker({
                   </div>
                   <div className="text-[11px] text-[var(--muted)]">
                     {s.admissionNo} · {classLabel(s, masters)}
+                    {normalizeSessionCode(s.academicYearCode || "") !==
+                    wantSession ? (
+                      <span className="ml-1 rounded bg-[color-mix(in_srgb,var(--danger)_14%,transparent)] px-1 font-bold text-[var(--danger)]">
+                        {s.academicYearCode || "no session"}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               </button>
@@ -180,6 +223,7 @@ export function StudentUpdatePanel({
   tick?: number;
   onChanged?: (sis: SisState) => void;
 }) {
+  const session = useDemoSession();
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
   const [tool, setTool] = useState<UpdateTool>("details");
@@ -242,8 +286,16 @@ export function StudentUpdatePanel({
 
   const photoRoster = useMemo(() => {
     if (!sis || !masters || !photoClassId) return [] as SisStudent[];
+    const wantSession = normalizeSessionCode(session.academicYearCode || "");
     let rows = sis.students.filter((s) => {
       if (s.status !== "active") return false;
+      // Same reasoning as the picker: a class roster must not mix sessions.
+      if (
+        wantSession &&
+        normalizeSessionCode(s.academicYearCode || "") !== wantSession
+      ) {
+        return false;
+      }
       if (s.classId === photoClassId) return true;
       const sec = masters.sections.find((x) => x.id === s.sectionId);
       return sec?.classId === photoClassId;
@@ -271,7 +323,32 @@ export function StudentUpdatePanel({
         if (ra && rb && ra !== rb) return ra - rb;
         return a.fullName.localeCompare(b.fullName);
       });
-  }, [sis, masters, photoClassId, photoSectionId, photoQuery]);
+  }, [sis, masters, photoClassId, photoSectionId, photoQuery, session.academicYearCode]);
+
+  // The photo columns are capture boxes, not values; name and class are the handles.
+  const photoSort = useTableSort(
+    photoRoster,
+    {
+      student: (s) => s.fullName,
+      klass: (s) => (masters ? classLabel(s, masters) : ""),
+    },
+    "student",
+    "asc",
+  );
+
+  // Parent photos: a photo column sorts "missing" first, so the gaps surface.
+  const parentPhotoSort = useTableSort(
+    photoRoster,
+    {
+      student: (s) => s.fullName,
+      father: (s) => (s.fatherPhotoUrl ? 1 : 0),
+      mother: (s) => (s.motherPhotoUrl ? 1 : 0),
+      guardian: (s) =>
+        sis && householdOf(sis, s.householdId)?.guardianPhotoUrl ? 1 : 0,
+    },
+    "student",
+    "asc",
+  );
 
   function flash(msg: string) {
     setNotice(msg);
@@ -565,18 +642,19 @@ export function StudentUpdatePanel({
               No active students in this class / section.
             </p>
           ) : tool === "student_images" ? (
-            <div className="overflow-x-auto rounded-lg border border-[rgba(32,48,80,0.08)]">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+            <ErpTableShell className="overflow-x-auto" exportAs="student_update_sheet" exportTitle="Student update sheet">
+              <ErpTable>
+                <ErpTableHead>
                   <tr>
                     <th className="px-3 py-2 font-semibold">#</th>
-                    <th className="px-3 py-2 font-semibold">Student</th>
-                    <th className="px-3 py-2 font-semibold">Class</th>
+                    <ErpSortTh sort={photoSort} field="student" className="px-3 py-2 font-semibold">Student</ErpSortTh>
+                    <ErpSortTh sort={photoSort} field="klass" className="px-3 py-2 font-semibold">Class</ErpSortTh>
                     <th className="px-3 py-2 font-semibold">Photo</th>
+                    <th className="w-10 px-2 py-2" aria-label="Actions" />
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-[rgba(32,48,80,0.06)]">
-                  {photoRoster.map((s, i) => (
+                </ErpTableHead>
+                <ErpTableBody>
+                  {photoSort.rows.map((s, i) => (
                     <tr key={s.id}>
                       <td className="px-3 py-2 text-xs text-[var(--muted)]">
                         {s.rollNo || i + 1}
@@ -600,24 +678,28 @@ export function StudentUpdatePanel({
                           onError={(msg) => setError(msg)}
                         />
                       </td>
+                      <td className="px-2 py-1.5 text-right">
+                        <RowActionMenu row={s} label="Student actions" actions={[{ id: "open", label: "Open student profile", onSelect: (x) => { window.location.href = `/students/${encodeURIComponent(String(x.id))}/edit`; } }]} />
+                      </td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </ErpTableBody>
+              </ErpTable>
+            </ErpTableShell>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-[rgba(32,48,80,0.08)]">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+            <ErpTableShell className="overflow-x-auto">
+              <ErpTable>
+                <ErpTableHead>
                   <tr>
-                    <th className="px-3 py-2 font-semibold">Student</th>
-                    <th className="px-3 py-2 font-semibold">Father</th>
-                    <th className="px-3 py-2 font-semibold">Mother</th>
-                    <th className="px-3 py-2 font-semibold">Guardian</th>
+                    <ErpSortTh sort={parentPhotoSort} field="student" className="px-3 py-2 font-semibold">Student</ErpSortTh>
+                    <ErpSortTh sort={parentPhotoSort} field="father" className="px-3 py-2 font-semibold">Father</ErpSortTh>
+                    <ErpSortTh sort={parentPhotoSort} field="mother" className="px-3 py-2 font-semibold">Mother</ErpSortTh>
+                    <ErpSortTh sort={parentPhotoSort} field="guardian" className="px-3 py-2 font-semibold">Guardian</ErpSortTh>
+                    <th className="w-10 px-2 py-2" aria-label="Actions" />
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-[rgba(32,48,80,0.06)]">
-                  {photoRoster.map((s) => {
+                </ErpTableHead>
+                <ErpTableBody>
+                  {parentPhotoSort.rows.map((s) => {
                     const hh = householdOf(sis, s.householdId);
                     return (
                       <tr key={s.id}>
@@ -664,12 +746,15 @@ export function StudentUpdatePanel({
                             onError={(msg) => setError(msg)}
                           />
                         </td>
+                        <td className="px-2 py-1.5 text-right">
+                          <RowActionMenu row={s} label="Student actions" actions={[{ id: "open", label: "Open student profile", onSelect: (x) => { window.location.href = `/students/${encodeURIComponent(String(x.id))}/edit`; } }]} />
+                        </td>
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+                </ErpTableBody>
+              </ErpTable>
+            </ErpTableShell>
           )}
 
           {photoClassId ? (
@@ -750,6 +835,7 @@ export function StudentUpdatePanel({
                 sis={sis}
                 masters={masters}
                 selectedId={selectedId}
+                sessionCode={session.academicYearCode}
                 onSelect={onSelectStudent}
               />
             </div>

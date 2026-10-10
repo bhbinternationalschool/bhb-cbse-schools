@@ -2,6 +2,7 @@
  * Shared API route authorization — staff session, RBAC, mirror sync secret, cron guards.
  */
 
+import { timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 import type { DemoSession } from "@/lib/auth";
 import {
@@ -10,10 +11,12 @@ import {
   type ApiAuthContext,
 } from "@/lib/api/v1/auth";
 import { ApiError } from "@/lib/api/v1/errors";
+import { featuresForRoute } from "@/lib/rbacFeatures";
 import type { DeskModuleId } from "@/lib/deskCutover";
 import { defaultMasters, DEFAULT_AY } from "@/lib/masters";
 import {
   defaultRbacState,
+  featureAccess,
   hasPermission,
   type RbacAction,
   type RbacModule,
@@ -37,10 +40,22 @@ export function isProductionEnv(): boolean {
   return process.env.NODE_ENV === "production";
 }
 
+/** Constant-time string comparison — use for all secret/token checks. */
+export function timingSafeStringEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  if (bufA.length !== bufB.length) return false;
+  try {
+    return timingSafeEqual(bufA, bufB);
+  } catch {
+    return false;
+  }
+}
+
 export function hasMirrorSyncSecret(req: Request): boolean {
   const secret = process.env.MIRROR_SYNC_SECRET?.trim();
   const header = req.headers.get("x-mirror-secret")?.trim();
-  return !!(secret && header && header === secret);
+  return !!(secret && header && timingSafeStringEqual(header, secret));
 }
 
 function authFailure(status: number, error: string): RouteAuthFailure {
@@ -107,7 +122,11 @@ export function requireJobSecret(
     /^Bearer\s+/i,
     "",
   );
-  return secrets.some((s) => hdr === s || bearer === s);
+  return secrets.some(
+    (s) =>
+      (hdr && timingSafeStringEqual(hdr, s)) ||
+      (bearer && timingSafeStringEqual(bearer, s)),
+  );
 }
 
 export async function requireStaffApi(
@@ -139,8 +158,61 @@ export async function requireStaffPermission(
     assertPermission(base.ctx, module, action);
     return base;
   } catch (e) {
+    // A function of the module that lists this route (lib/rbacFeatureCatalog)
+    // stands in for the module grant here — and only here.
+    if (holdsRouteFeature(base.ctx, module, action, request)) return base;
     return authFailure(403, e instanceof ApiError ? e.message : "Forbidden");
   }
+}
+
+function holdsRouteFeature(
+  ctx: ApiAuthContext,
+  module: RbacModule,
+  action: RbacAction,
+  request: Request,
+): boolean {
+  let pathname = "";
+  try {
+    pathname = new URL(request.url).pathname;
+  } catch {
+    return false;
+  }
+  // Desk stores are never opened whole by a function: their routes merge
+  // a function holder's save slice by slice (lib/deskFeatureGate.server).
+  if (pathname.startsWith("/api/school-data/")) return false;
+  return featuresForRoute(module, pathname).some(
+    (f) => featureAccess(ctx.session, ctx.masters, f.id, action, ctx.rbac).allowed,
+  );
+}
+
+/**
+ * Staff + ANY ONE of several module grants.
+ *
+ * For work that belongs to more than one desk. Collecting a parent's
+ * WhatsApp number happens at the fee counter and on the student roster;
+ * demanding the Automation grant for it is why the school's ten unreachable
+ * families stayed unreachable — the people who meet those parents could not
+ * open the screen that knew.
+ *
+ * Still one 403 with one message, naming the desks that would do.
+ */
+export async function requireAnyStaffPermission(
+  request: Request,
+  grants: readonly { module: RbacModule; action: RbacAction }[],
+): Promise<RouteAuthResult> {
+  const base = await requireStaffApi(request);
+  if (!base.ok) return base;
+  if (base.viaMirrorSecret) return base;
+  for (const g of grants) {
+    try {
+      assertPermission(base.ctx, g.module, g.action);
+      return base;
+    } catch {
+      // Try the next desk.
+    }
+  }
+  const names = grants.map((g) => `${g.module} (${g.action})`).join(" or ");
+  return authFailure(403, `Forbidden — needs ${names}`);
 }
 
 /** School-data desk routes — staff + module RBAC (mirror secret bypasses RBAC). */
@@ -178,6 +250,7 @@ export const SCHOOL_DATA_DESK_RBAC: Record<string, RbacModule> = {
   "school-comms-desk": "notices",
   "sis-roster": "students",
   "staff-attendance-registers": "attendance",
+  "statutory-desk": "payroll",
   "store-desk": "store",
   "student-leave-desk": "student_leave",
   "timetable-desk": "timetable",
@@ -194,6 +267,7 @@ export const DESK_SLICE_RBAC: Partial<Record<DeskModuleId, RbacModule>> = {
   wa_templates: "wa_templates",
   staff_hr: "staff",
   staff_advances: "staff_advances",
+  staff_agreements: "staff",
   module_registry: "settings",
   fee_recovery_tasks: "fees",
   automation: "wa_automation",
@@ -203,6 +277,7 @@ export const DESK_SLICE_RBAC: Partial<Record<DeskModuleId, RbacModule>> = {
 
 export async function requireWaStaffApi(
   request: Request,
+  opts: { allowTeachers?: boolean } = {},
 ): Promise<RouteAuthResult> {
   const base = await requireStaffApi(request);
   if (!base.ok) return base;
@@ -220,6 +295,17 @@ export async function requireWaStaffApi(
   );
   if (!allowed) {
     return authFailure(403, "Missing communications or admissions access");
+  }
+  // "notices.view" let every teacher read every parent's WhatsApp thread
+  // and reply on it. The school's inbox is the office's: a teacher (not
+  // school-wide) is refused unless the route scopes to their own classes
+  // itself (class channels).
+  if (!opts.allowTeachers) {
+    const { staffSectionScope } = await import("@/lib/api/v1/staffScope");
+    const scope = await staffSectionScope(base.ctx).catch(() => null);
+    if (!scope?.unrestricted) {
+      return authFailure(403, "The school's WhatsApp inbox is handled by the office");
+    }
   }
   return base;
 }

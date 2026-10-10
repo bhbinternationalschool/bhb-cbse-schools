@@ -7,6 +7,12 @@ import {
   MastersTableCard,
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
 import { loadMasters } from "@/lib/masters";
 import {
   RULE_STEP_DEFS,
@@ -25,9 +31,16 @@ import {
   type RuleStepKind,
   type StaffAttendanceRulesState,
 } from "@/lib/staffAttendanceRules";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function StaffAttendanceRulesPanel() {
   const [state, setState] = useState<StaffAttendanceRulesState | null>(null);
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("staff_attendance_rules", () => {
+    setState(loadAttendanceRules());
+  });
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,8 +49,26 @@ export function StaffAttendanceRulesPanel() {
 
   const [selectedStaff, setSelectedStaff] = useState<Set<string>>(new Set());
   const [assignRuleId, setAssignRuleId] = useState("");
+  /** Assign's own message, shown beside the button — the page-top banner is out of sight down here. */
+  const [assignMsg, setAssignMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const roster = useMemo(() => activeStaffSorted(loadMasters().staff ?? []), [state]);
+
+  // Which staff have no rule yet is the question this screen exists for, so
+  // "Assigned rule" sorts — an empty one comes first ascending, which is the
+  // list somebody assigning rules wants in front of them.
+  const ruleSort = useTableSort(
+    roster,
+    {
+      staff: (s) => s.fullName,
+      rule: (s) => {
+        const asg = state?.assignments.find((a) => a.staffId === s.id);
+        return state?.rules.find((r) => r.id === asg?.ruleId)?.code ?? "";
+      },
+    },
+    "staff",
+    "asc",
+  );
 
   function reload() {
     migrateLegacyTimingIntoMasters();
@@ -132,22 +163,22 @@ export function StaffAttendanceRulesPanel() {
   function onAssign() {
     const result = assignRuleToStaff([...selectedStaff], assignRuleId);
     if (!result.ok) {
-      flash(result.error, true);
+      setAssignMsg({ ok: false, text: result.error });
       return;
     }
     setState(result.state);
-    flash(`Assigned rule to ${selectedStaff.size} staff`);
+    setAssignMsg({ ok: true, text: `Assigned ${result.state.rules.find((r) => r.id === assignRuleId)?.code ?? "rule"} to ${selectedStaff.size} staff` });
     setSelectedStaff(new Set());
   }
 
   function onClearSelected() {
     if (selectedStaff.size === 0) {
-      flash("Select staff to clear", true);
+      setAssignMsg({ ok: false, text: "Select staff to clear" });
       return;
     }
     const next = clearStaffRuleAssignments([...selectedStaff]);
     setState(next);
-    flash(`Cleared rules for ${selectedStaff.size} staff`);
+    setAssignMsg({ ok: true, text: `Cleared rules for ${selectedStaff.size} staff` });
     setSelectedStaff(new Set());
   }
 
@@ -176,7 +207,7 @@ export function StaffAttendanceRulesPanel() {
         </p>
       ) : null}
 
-      <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-3 text-sm text-[var(--muted)]">
+      <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--muted)]">
         School day hours are set in{" "}
         <strong className="text-[var(--brand-deep)]">Masters → School</strong>
         . Late threshold (minutes) comes from{" "}
@@ -188,16 +219,16 @@ export function StaffAttendanceRulesPanel() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <MastersTableCard title="Attendance rules" maxHeight="max-h-[min(60vh,520px)]">
-          <div className="border-b border-[rgba(32,48,80,0.08)] px-3 py-2">
+          <div className="border-b border-[var(--border)] px-3 py-2">
             <button
               type="button"
-              className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+              className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
               onClick={startCreate}
             >
               + New rule
             </button>
           </div>
-          <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+          <ul className="divide-y divide-[var(--border)]">
             {state.rules.map((r) => (
               <li
                 key={r.id}
@@ -324,7 +355,7 @@ export function StaffAttendanceRulesPanel() {
                   return (
                     <div
                       key={def.kind}
-                      className="rounded-lg border border-[rgba(32,48,80,0.1)] p-2.5"
+                      className="rounded-lg border border-[var(--border)] p-2.5"
                     >
                       <label className="flex items-start gap-2 text-sm font-semibold text-[var(--brand-deep)]">
                         <input
@@ -428,14 +459,14 @@ export function StaffAttendanceRulesPanel() {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+                  className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)]"
                   onClick={onSaveRule}
                 >
                   {editing ? "Save rule" : "Create rule"}
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
                   onClick={() => setDraft(null)}
                 >
                   Cancel
@@ -468,44 +499,49 @@ export function StaffAttendanceRulesPanel() {
           </label>
           <button
             type="button"
-            className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+            className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+            disabled={!assignRuleId || selectedStaff.size === 0}
+            title={!assignRuleId ? "Choose a rule first" : selectedStaff.size === 0 ? "Tick the staff first" : undefined}
             onClick={onAssign}
           >
             Assign to selected ({selectedStaff.size})
           </button>
           <button
             type="button"
-            className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
             onClick={onClearSelected}
           >
             Clear selected
           </button>
           <button
             type="button"
-            className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
             onClick={() => toggleAllStaff(selectedStaff.size !== roster.length)}
           >
             {selectedStaff.size === roster.length ? "Unselect all" : "Select all"}
           </button>
         </div>
+        {assignMsg ? (
+          <p className={`mb-3 rounded-lg px-3 py-2 text-xs font-medium ${assignMsg.ok ? "bg-[rgba(21,128,61,0.08)] text-[var(--success)]" : "bg-[var(--danger-soft)] text-[var(--danger)]"}`} role="status">
+            {assignMsg.text}
+          </p>
+        ) : null}
 
-        <div className="max-h-[min(48vh,380px)] overflow-auto rounded-lg border border-[rgba(32,48,80,0.1)]">
-          <table className="min-w-full text-left text-sm">
-            <thead className="sticky top-0 bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+        <ErpTableShell className="max-h-[min(48vh,380px)] overflow-auto" exportAs="staff_attendance_rules" exportTitle="Staff attendance rules">
+          <ErpTable minWidth="min-w-full">
+            <ErpTableHead sticky>
               <tr>
                 <th className="px-3 py-2 w-10" />
-                <th className="px-3 py-2">Staff</th>
-                <th className="px-3 py-2">Assigned rule</th>
+                <ErpSortTh sort={ruleSort} field="staff">Staff</ErpSortTh>
+                <ErpSortTh sort={ruleSort} field="rule">Assigned rule</ErpSortTh>
+                <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
-            </thead>
-            <tbody>
-              {roster.map((s) => {
+            </ErpTableHead>
+            <ErpTableBody hoverable>
+              {ruleSort.rows.map((s) => {
                 const asg = state.assignments.find((a) => a.staffId === s.id);
                 return (
-                  <tr
-                    key={s.id}
-                    className="border-t border-[rgba(32,48,80,0.06)] hover:bg-[rgba(32,48,80,0.02)]"
-                  >
+                  <tr key={s.id}>
                     <td className="px-3 py-2">
                       <input
                         type="checkbox"
@@ -518,6 +554,9 @@ export function StaffAttendanceRulesPanel() {
                     </td>
                     <td className="px-3 py-2 text-xs text-[var(--muted)]">
                       {asg ? ruleName(asg.ruleId) : "—"}
+                    </td>
+                    <td className="px-2 py-1.5 text-right">
+                      <RowActionMenu row={s} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.id))}/edit`; } }]} />
                     </td>
                   </tr>
                 );
@@ -532,9 +571,9 @@ export function StaffAttendanceRulesPanel() {
                   </td>
                 </tr>
               ) : null}
-            </tbody>
-          </table>
-        </div>
+            </ErpTableBody>
+          </ErpTable>
+        </ErpTableShell>
       </MastersWorkCard>
     </div>
   );

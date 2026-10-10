@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { verifySessionCookieEdge } from "@/lib/sessionCookieEdge";
 
 const PROTECTED_PREFIXES = [
   "/home",
@@ -10,6 +11,7 @@ const PROTECTED_PREFIXES = [
   "/library",
   "/admissions",
   "/store",
+  "/inventory",
   "/transport",
   "/accounts",
   "/trust",
@@ -33,18 +35,25 @@ const PROTECTED_PREFIXES = [
   "/field",
 ];
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const needsAuth = PROTECTED_PREFIXES.some(
     (p) => pathname === p || pathname.startsWith(`${p}/`),
   );
   if (!needsAuth) return NextResponse.next();
 
-  const session = request.cookies.get("bhb_demo_session")?.value;
+  const raw = request.cookies.get("bhb_demo_session")?.value;
+  // Presence alone used to be enough to reach page shells — a cookie
+  // edited in devtools (or just copy-pasted) would render before any
+  // deeper RBAC check ran. Verify the HMAC here so a forged cookie is
+  // rejected at the edge instead.
+  const session = await verifySessionCookieEdge(raw);
   if (!session) {
     const login = new URL("/login", request.url);
     login.searchParams.set("next", pathname);
-    return NextResponse.redirect(login);
+    const res = NextResponse.redirect(login);
+    if (raw) res.cookies.delete("bhb_demo_session");
+    return res;
   }
   return NextResponse.next();
 }
@@ -60,6 +69,7 @@ export const config = {
     "/library/:path*",
     "/admissions/:path*",
     "/store/:path*",
+    "/inventory/:path*",
     "/transport/:path*",
     "/accounts/:path*",
     "/trust/:path*",

@@ -125,6 +125,7 @@ export async function ingestGoogleLead(
       email: parsed.email,
       note,
       campaignNote,
+      campaignId: parsed.campaignId,
       leadDate: new Date().toISOString().slice(0, 10),
     },
     "Google Lead Form",

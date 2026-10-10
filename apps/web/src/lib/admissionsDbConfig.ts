@@ -5,8 +5,11 @@ export function admissionsDualWriteDbEnabled(): boolean {
 }
 
 export function admissionsReadFromDbEnabled(): boolean {
-  if (typeof window !== "undefined") {
-    return process.env.NEXT_PUBLIC_ADMISSIONS_READ_FROM_DB === "true";
-  }
-  return process.env.ADMISSIONS_READ_FROM_DB === "true";
+  const flag = (
+    typeof window !== "undefined"
+      ? process.env.NEXT_PUBLIC_ADMISSIONS_READ_FROM_DB
+      : process.env.ADMISSIONS_READ_FROM_DB
+  )?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }

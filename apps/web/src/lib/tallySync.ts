@@ -18,6 +18,8 @@ import {
 } from "@/lib/salarySetup";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 export type TallyJvSide = "debit" | "credit";
 
 export type TallyJvLine = {
@@ -77,7 +79,7 @@ function nid(prefix: string) {
 export function loadTallySync(): TallySyncState {
   if (typeof window === "undefined") return { version: 1, records: [] };
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return { version: 1, records: [] };
     const parsed = JSON.parse(raw) as Partial<TallySyncState>;
     return {
@@ -92,7 +94,18 @@ export function loadTallySync(): TallySyncState {
 export function saveTallySync(state: TallySyncState) {
   if (!assertModulePermission("payroll", "edit", "saveTallySync")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("tally_sync", state)));
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeTallySyncLocalRaw(state: TallySyncState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 export function listTallySync(limit = 40): TallySyncRecord[] {

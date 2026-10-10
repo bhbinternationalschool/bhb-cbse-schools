@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { buildIvrResponse, ivrHealth } from "@/lib/ivrsFlow.server";
+import { requireJobSecret } from "@/lib/apiRouteAuth.server";
 
 export const runtime = "nodejs";
 
@@ -30,9 +31,7 @@ function parseBody(
 }
 
 export async function GET(req: Request) {
-  const secret = process.env.IVRS_WEBHOOK_SECRET?.trim();
-  const key = req.headers.get("x-ivrs-secret")?.trim();
-  if (secret && key !== secret) {
+  if (!requireJobSecret(req, ["IVRS_WEBHOOK_SECRET"], ["x-ivrs-secret"])) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   return NextResponse.json({
@@ -43,9 +42,7 @@ export async function GET(req: Request) {
 
 /** Exotel / Twilio-style IVRS webhook — returns XML */
 export async function POST(req: Request) {
-  const secret = process.env.IVRS_WEBHOOK_SECRET?.trim();
-  const key = req.headers.get("x-ivrs-secret")?.trim();
-  if (secret && key !== secret) {
+  if (!requireJobSecret(req, ["IVRS_WEBHOOK_SECRET"], ["x-ivrs-secret"])) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 

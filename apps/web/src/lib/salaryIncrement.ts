@@ -7,6 +7,7 @@
 import type { StaffStream } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
 import {
+  additionalFromLink,
   computeStructureAmounts,
   loadSalarySetup,
   resolveStructureForStaff,
@@ -16,6 +17,8 @@ import {
 } from "@/lib/salarySetup";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 export type IncrementCycle = "april" | "anniversary" | "hold_month";
 export type IncrementMode = "percent" | "fixed";
 
@@ -161,14 +164,14 @@ export function loadIncrementState(): IncrementState {
     return { version: 1, policy: defaultIncrementPolicy(), batches: [] };
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) {
       const seed: IncrementState = {
         version: 1,
         policy: defaultIncrementPolicy(),
         batches: [],
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(seed));
       return seed;
     }
     const parsed = JSON.parse(raw) as Partial<IncrementState>;
@@ -213,7 +216,18 @@ function normalizeBatch(b: Partial<IncrementBatch>): IncrementBatch {
 export function saveIncrementState(state: IncrementState) {
   if (!assertModulePermission("payroll", "edit", "saveIncrementState")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("salary_increment", state)));
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeIncrementStateLocalRaw(state: IncrementState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 export function monthsOfService(joiningDate: string, asOf: string): number {
@@ -328,6 +342,8 @@ export function buildIncrementDraft(input: {
       structure,
       link?.basicOverride || 0,
       link?.statutoryCover || "both",
+      input.masters.statutoryConfig,
+      additionalFromLink(link),
     );
     const oldBasic = amounts.basic;
     const service = monthsOfService(staff.joiningDate, effectiveFrom);
@@ -491,6 +507,8 @@ export function previewStaffIncrement(input: {
     structure,
     link?.basicOverride || 0,
     link?.statutoryCover || "both",
+    input.masters.statutoryConfig,
+    additionalFromLink(link),
   );
   const oldBasic = amounts.basic;
   if (oldBasic <= 0) {
@@ -766,6 +784,14 @@ export function applyIncrementBatch(
       structureId: existing?.structureId || line.structureId,
       basicOverride: line.newBasic,
       statutoryCover: existing?.statutoryCover || "both",
+      // Increments move basic only; the additional amount is left as set.
+      // This is exactly how a hand-typed PF/ESIC top-up went stale before
+      // 2026-09-20 — a raise moved the basic, the typed top-up stayed put and
+      // the staff member quietly went short. statutoryGrossUp carries through
+      // instead, and recomputes itself off the new basic's own deductions.
+      additionalAmount: existing?.additionalAmount || 0,
+      additionalLabel: existing?.additionalLabel || "",
+      statutoryGrossUp: existing?.statutoryGrossUp === true,
       effectiveFrom: batch.effectiveFrom,
       salaryAccountNote: existing?.salaryAccountNote || "",
     };

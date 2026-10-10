@@ -227,7 +227,7 @@ export function SocialCredentialsPanel({ onSaved }: Props) {
   const telegramOk = !pub?.telegramBotTokenSet || !!pub.telegramChannelId;
 
   return (
-    <div className="space-y-4 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+    <div className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--brand-deep)]">
@@ -243,10 +243,10 @@ export function SocialCredentialsPanel({ onSaved }: Props) {
           <span
             className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
               metaConnected && telegramOk
-                ? "bg-[rgba(22,163,74,0.12)] text-[#15803d]"
+                ? "bg-[rgba(22,163,74,0.12)] text-[var(--success)]"
                 : metaConnected
                   ? "bg-[rgba(197,160,40,0.15)] text-[#92400e]"
-                  : "bg-[rgba(180,35,24,0.1)] text-[#b42318]"
+                  : "bg-[rgba(180,35,24,0.1)] text-[var(--danger)]"
             }`}
           >
             {metaConnected ? "Facebook OK" : "Facebook not connected"}
@@ -259,7 +259,7 @@ export function SocialCredentialsPanel({ onSaved }: Props) {
           Facebook & Instagram
         </p>
         {pub?.facebookPageName && pub.metaConnectedVia === "oauth" ? (
-          <p className="mt-1 text-xs text-[#15803d]">
+          <p className="mt-1 text-xs text-[var(--success)]">
             Connected Page: {pub.facebookPageName}
             {pub.instagramBusinessId ? " · Instagram linked" : ""}
           </p>
@@ -295,7 +295,7 @@ export function SocialCredentialsPanel({ onSaved }: Props) {
       </div>
 
       {pub?.pendingPages && pub.pendingPages.length > 0 ? (
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.03)] p-3">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
           <p className="text-sm font-medium text-[var(--brand-deep)]">
             Choose a Facebook Page
           </p>
@@ -357,7 +357,7 @@ export function SocialCredentialsPanel({ onSaved }: Props) {
           <label className="block text-xs text-[var(--muted)] sm:col-span-2">
             Telegram bot token
             {pub?.telegramBotTokenSet ? (
-              <span className="ml-2 text-[#15803d]">saved {pub.telegramBotTokenHint}</span>
+              <span className="ml-2 text-[var(--success)]">saved {pub.telegramBotTokenHint}</span>
             ) : null}
             <input
               type="password"
@@ -419,7 +419,7 @@ export function SocialCredentialsPanel({ onSaved }: Props) {
         ) : null}
       </div>
 
-      <div className="border-t border-[rgba(32,48,80,0.08)] pt-4">
+      <div className="border-t border-[var(--border)] pt-4">
         <p className="text-sm font-medium text-[var(--brand-deep)]">Test post</p>
         <p className="mt-1 text-xs text-[var(--muted)]">
           Send a short test message to confirm each channel works.
@@ -447,12 +447,12 @@ export function SocialCredentialsPanel({ onSaved }: Props) {
       </div>
 
       {notice ? (
-        <p className="rounded-lg bg-[rgba(22,163,74,0.12)] px-3 py-2 text-sm text-[#15803d]">
+        <p className="rounded-lg bg-[rgba(22,163,74,0.12)] px-3 py-2 text-sm text-[var(--success)]">
           {notice}
         </p>
       ) : null}
       {error ? (
-        <p className="rounded-lg bg-[rgba(180,35,24,0.1)] px-3 py-2 text-sm text-[#b42318]">
+        <p className="rounded-lg bg-[rgba(180,35,24,0.1)] px-3 py-2 text-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}

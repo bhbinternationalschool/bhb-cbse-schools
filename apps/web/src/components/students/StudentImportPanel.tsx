@@ -1,16 +1,19 @@
 "use client";
 
+import { recordAudit } from "@/lib/auditClient";
 import { useEffect, useMemo, useState } from "react";
 import {
   STUDENT_TYPES,
   type FeeStudentType,
   type MastersState,
+  currentAcademicYearCode,
 } from "@/lib/masters";
 import {
   clearAllStudents,
   isLikelyDemoRoster,
   saveSis,
   type SisState,
+  studentsInSession,
 } from "@/lib/sis";
 import {
   applyStudentImport,
@@ -44,7 +47,16 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
   const session = useDemoSession();
   const sessions = useMemo(() => listImportSessions(masters), [masters]);
   const liveAy = session.academicYearCode;
+  // SIS keeps one row per child per session, so `students.length` is a ROW
+  // count, not a headcount — 717 rows for 239 children here. The delete
+  // really does remove every row, so that number stays; what was missing is
+  // the number a reader expects, shown beside it.
+  const childCount = studentsInSession(sis, currentAcademicYearCode()).length;
+
   const [open, setOpen] = useState(sis.students.length === 0);
+  const [wipeConfirmOpen, setWipeConfirmOpen] = useState(false);
+  const [wipeConfirmText, setWipeConfirmText] = useState("");
+  const WIPE_PHRASE = "DELETE ALL STUDENTS";
   const [csvText, setCsvText] = useState("");
   const [fileName, setFileName] = useState("");
   const [targetSession, setTargetSession] = useState(liveAy);
@@ -165,6 +177,27 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
         pushSisState(result.state).then(() => flushSisSync()).catch(console.error);
       });
       setPreview(result);
+      // A bulk import can create or rewrite hundreds of student records in
+      // one click — the highest-impact action in the module, and the one
+      // most likely to need explaining afterwards.
+      recordAudit({
+        module: "students",
+        action: "import",
+        entityType: "student_roster",
+        summary:
+          `Imported ${result.created} new, updated ${result.updated}` +
+          (result.skipped ? `, skipped ${result.skipped}` : "") +
+          (result.errors.length ? `, ${result.errors.length} error(s)` : "") +
+          (fileName ? ` from ${fileName}` : " from pasted CSV"),
+        after: {
+          created: result.created,
+          updated: result.updated,
+          skipped: result.skipped,
+          errors: result.errors.length,
+          rosterSizeAfter: result.state.students.length,
+          source: fileName || "pasted-csv",
+        },
+      });
       onApplied(
         result.state,
         `Imported ${result.created} new, updated ${result.updated}` +
@@ -199,17 +232,32 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
   }
 
   async function wipeRoster() {
-    const ok = window.confirm(
-      "Clear ALL students and households from this browser?\n\nAlso clears remote Supabase roster if configured. Fee receipts are kept.",
-    );
-    if (!ok) return;
+    // A single window.confirm() was the whole guard on an action that
+    // deletes every student AND wipes the remote production roster
+    // (wipeRemoteSisRoster). It sat one click from the harmless "Show/Hide
+    // import" toggle in the same row — an easy mis-click, and native
+    // confirm dialogs are exactly what experienced staff click through on
+    // autopilot. Replaced with type-the-phrase confirmation showing the
+    // live count of students about to be destroyed, moved out of the
+    // always-visible toolbar into the import section, and audit-logged.
+    const studentCount = sis.students.length;
     setBusy(true);
     try {
       const next = clearAllStudents();
       const { wipeRemoteSisRoster } = await import("@/lib/sisPersistence");
       await wipeRemoteSisRoster();
+      recordAudit({
+        module: "students",
+        action: "delete",
+        entityType: "student",
+        entityId: "ALL",
+        summary: `Cleared entire roster — ${studentCount} student(s) removed (local + remote)`,
+        before: { studentCount },
+      });
       onApplied(next, "Roster cleared — ready for CSV import");
       setOpen(true);
+      setWipeConfirmOpen(false);
+      setWipeConfirmText("");
     } finally {
       setBusy(false);
     }
@@ -244,7 +292,7 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
               ? " Demo roster still present — clear before live data."
               : sis.students.length === 0
                 ? " Roster is empty."
-                : ` ${sis.students.length} student(s) on file.`}
+                : ` ${childCount} child(ren) this session, ${sis.students.length} record(s) on file across all sessions.`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -254,14 +302,6 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
             onClick={() => setOpen((o) => !o)}
           >
             {open ? "Hide" : "Show"} import
-          </button>
-          <button
-            type="button"
-            disabled={busy || sis.students.length === 0}
-            className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-800 disabled:opacity-40"
-            onClick={() => void wipeRoster()}
-          >
-            Clear all students
           </button>
         </div>
       </div>
@@ -482,6 +522,66 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
               {busy ? "Importing…" : "Import students"}
             </button>
           </div>
+
+          {sis.students.length > 0 ? (
+            <div className="mt-6 rounded-xl border-2 border-red-300 bg-red-50 p-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-red-800">
+                Danger zone
+              </p>
+              <p className="mt-1 text-xs text-red-800">
+                Erases all {sis.students.length} student record(s) across
+                every session ({childCount} children this session) — this
+                browser and the remote database. Fee receipts are kept;
+                everything else is gone. There is no undo from this screen.
+              </p>
+              {!wipeConfirmOpen ? (
+                <button
+                  type="button"
+                  className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-800"
+                  onClick={() => setWipeConfirmOpen(true)}
+                >
+                  Clear all students…
+                </button>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  <label className="block text-xs font-semibold text-red-900">
+                    Type <span className="font-mono">{WIPE_PHRASE}</span> to
+                    confirm deleting {sis.students.length} student(s):
+                  </label>
+                  <input
+                    type="text"
+                    className="field w-full font-mono text-xs"
+                    value={wipeConfirmText}
+                    onChange={(e) => setWipeConfirmText(e.target.value)}
+                    placeholder={WIPE_PHRASE}
+                    autoFocus
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={busy || wipeConfirmText !== WIPE_PHRASE}
+                      className="rounded-lg bg-red-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                      onClick={() => void wipeRoster()}
+                    >
+                      {busy
+                        ? "Erasing…"
+                        : `Permanently erase ${sis.students.length} student(s)`}
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+                      onClick={() => {
+                        setWipeConfirmOpen(false);
+                        setWipeConfirmText("");
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -21,6 +21,14 @@ import {
   type AttendanceDeskAncillary,
 } from "@/lib/attendanceDeskAncillary.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import {
+  deleteChildrenNotKept,
+  deleteNamedIds,
+  type NamedDeletes,
+} from "@/lib/deskNamedDeletes.server";
+import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
+import { replaceChildRows } from "./replaceChildRows.server";
+import { stampsOf, writeStampedRows } from "@/lib/rowStampWrite.server";
 
 export type AttendanceDeskSyncMeta = {
   registerCount: number;
@@ -57,21 +65,6 @@ async function resolveCtx(): Promise<{
   tenantId: string;
 } | null> {
   return getServerTenantContext();
-}
-
-async function deleteStale(
-  sb: SupabaseClient,
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  const { data } = await sb.from(table).select("id").eq("tenant_id", tenantId);
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
 }
 
 function registerToRows(
@@ -138,7 +131,16 @@ function rowToRegister(
 
 export async function pushAttendanceRegistersToDb(
   registers: AttendanceRegister[],
-): Promise<{ ok: boolean; count: number; error?: string }> {
+  deleteIds: readonly string[] = [],
+  /**
+   * A browser's save: the registers it changed and the `updated_at` each
+   * was changed from ("" = new). Only those are written — a register and
+   * its marks only while the stored register is still at that stamp; the
+   * rest come back as conflicts. Without it (blob backfill, a browser on an
+   * older build) every register is written as before.
+   */
+  stamps?: Record<string, string>,
+): Promise<{ ok: boolean; count: number; error?: string; stamps?: Record<string, string>; conflicts?: string[] }> {
   if (!attendanceDualWriteDbEnabled()) {
     return { ok: true, count: 0 };
   }
@@ -147,120 +149,224 @@ export async function pushAttendanceRegistersToDb(
   const { sb, tenantId } = ctx;
   const now = new Date().toISOString();
 
-  const active = registers ?? [];
-  await deleteStale(
-    sb,
-    tenantId,
-    "attendance_desk_registers",
-    new Set(active.map((r) => r.id)),
-  );
-
-  if (!active.length) {
-    await sb.from("attendance_desk_sync_meta").upsert(
-      {
-        tenant_id: tenantId,
-        register_count: 0,
-        last_marked_at: null,
-        updated_at: now,
-      },
-      { onConflict: "tenant_id" },
+  const gone = new Set(deleteIds);
+  // No stale copy over a newer register (2026-10-09): every register the
+  // office tab held was upserted with its marks, so a class teacher's
+  // marking on the app, or a mark changed by approved leave, after the tab
+  // loaded was put back to the tab's old marks on its next save.
+  const named = (registers ?? []).filter((r) => !gone.has(r.id) && (!stamps || r.id in stamps));
+  // One register per section, year and date (a unique key). When the stored
+  // one for that slot has a different id — a teacher marked it from the app
+  // after this browser last read — the stored register stands and this copy
+  // is skipped. The old prune settled the same collision by deleting the
+  // stored one, the teacher's.
+  const slotKey = (section: string, ay: string, date: string) => `${section}|${ay}|${date}`;
+  const dates = [...new Set(named.map((r) => r.date).filter(Boolean))];
+  const storedBySlot = new Map<string, string>();
+  if (dates.length) {
+    const { rows, error } = await fetchByIds<{
+      id: string;
+      section_id: string;
+      academic_year_code: string;
+      attendance_date: string;
+    }>(dates, (chunk, from, to) =>
+      sb
+        .from("attendance_desk_registers")
+        .select("id, section_id, academic_year_code, attendance_date")
+        .eq("tenant_id", tenantId)
+        .in("attendance_date", chunk)
+        .order("id")
+        .range(from, to),
     );
-    return { ok: true, count: 0 };
+    if (error) return { ok: false, count: 0, error };
+    for (const r of rows) {
+      storedBySlot.set(slotKey(r.section_id, r.academic_year_code, String(r.attendance_date).slice(0, 10)), r.id);
+    }
+  }
+  const active = named.filter((r) => {
+    const stored = storedBySlot.get(slotKey(r.sectionId, r.academicYearCode, r.date));
+    if (stored && stored !== r.id) {
+      console.warn(
+        `[attendance-db] kept stored register ${stored} for ${r.sectionId} ${r.date}; skipped this copy (${r.id})`,
+      );
+      return false;
+    }
+    return true;
+  });
+  // Marks go with their register (on delete cascade).
+  const delRegs = await deleteNamedIds(sb, tenantId, "attendance_desk_registers", [...gone]);
+  if (!delRegs.ok) return { ok: false, count: 0, error: delRegs.error };
+
+  // Attendance is history. A push is NOT a statement that these are the only
+  // registers that exist — not even for the dates it covers.
+  //
+  // This first deleted every register the client lacked (2026-08-11: a
+  // phone with a dropped cache erased the previous day), then every register
+  // it lacked ON THE DATES IT COVERED. That still erased teachers' registers
+  // for today, saved through /api/v1/attendance/mark or by leave approval
+  // after the office tab last read. A register leaves only when the user
+  // deleted it, named — see deleteNamedIds below.
+  let written = active;
+  let newStamps: Record<string, string> | undefined;
+  const conflicts: string[] = [];
+  if (stamps) {
+    // The header is the register's version: written conditionally first;
+    // only registers whose header landed get their marks written.
+    const w = await writeStampedRows(
+      sb,
+      "attendance_desk_registers",
+      tenantId,
+      active.map((r) => registerToRows(tenantId, r).header),
+      stamps,
+    );
+    if (!w.ok) return { ok: false, count: 0, error: w.error };
+    newStamps = w.stamps;
+    conflicts.push(...w.conflicts);
+    written = active.filter((r) => r.id in w.stamps);
+    if (conflicts.length) console.warn("[attendance-db] kept newer registers over a stale copy", conflicts);
   }
 
   const headers: Record<string, unknown>[] = [];
   const marks: Record<string, unknown>[] = [];
-  let lastMarkedAt: string | null = null;
-
-  for (const r of active) {
+  for (const r of written) {
     const { header, marks: mrows } = registerToRows(tenantId, r);
     headers.push(header);
     marks.push(...mrows);
-    if (!lastMarkedAt || String(header.marked_at) > lastMarkedAt) {
-      lastMarkedAt = String(header.marked_at);
-    }
   }
 
   const chunk = 200;
-  for (let i = 0; i < headers.length; i += chunk) {
+  for (let i = 0; !stamps && i < headers.length; i += chunk) {
     const { error } = await sb
       .from("attendance_desk_registers")
       .upsert(headers.slice(i, i + chunk));
     if (error) return { ok: false, count: 0, error: error.message };
   }
 
-  const regIds = new Set(active.map((r) => r.id));
-  const { data: existingMarks } = await sb
-    .from("attendance_desk_marks")
-    .select("id, register_id")
-    .eq("tenant_id", tenantId);
-  const staleMarkIds = (existingMarks ?? [])
-    .filter((m) => regIds.has(String(m.register_id)))
-    .map((m) => String(m.id));
-  if (staleMarkIds.length) {
-    await sb.from("attendance_desk_marks").delete().in("id", staleMarkIds);
-  }
-
+  // Marks are written first, then a register's marks that its new copy no
+  // longer lists are removed — only for registers that arrived WITH marks.
+  // This used to delete every mark of every pushed register and then insert:
+  // a failed insert left registers with no marks at all.
   for (let i = 0; i < marks.length; i += 500) {
     const { error } = await sb
       .from("attendance_desk_marks")
       .upsert(marks.slice(i, i + 500));
     if (error) return { ok: false, count: 0, error: error.message };
   }
-
-  await sb.from("attendance_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      register_count: active.length,
-      last_marked_at: lastMarkedAt,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
+  const keepMarks = new Set(marks.map((m) => String((m as { id: string }).id)));
+  const delMarks = await deleteChildrenNotKept(
+    sb,
+    tenantId,
+    "attendance_desk_marks",
+    "register_id",
+    written.filter((r) => (r.marks ?? []).length > 0).map((r) => r.id),
+    keepMarks,
   );
+  if (!delMarks.ok) return { ok: false, count: 0, error: delMarks.error };
 
-  return { ok: true, count: active.length };
+  // Counts from the database, not from this copy (it may be partly written).
+  // An empty save used to set the count to 0.
+  await touchAttendanceMeta(sb, tenantId, now).catch(() => undefined);
+
+  return { ok: true, count: written.length, stamps: newStamps, conflicts };
+}
+
+/** Recount the desk meta from the registers, so a hydrate sees the change. */
+async function touchAttendanceMeta(sb: SupabaseClient, tenantId: string, now: string): Promise<void> {
+  const [all, latest] = await Promise.all([
+    sb.from("attendance_desk_registers").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+    sb
+      .from("attendance_desk_registers")
+      .select("marked_at")
+      .eq("tenant_id", tenantId)
+      .order("marked_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  const row: Record<string, unknown> = { tenant_id: tenantId, updated_at: now };
+  // A failed count leaves the old figure alone rather than writing a zero.
+  if (!all.error && typeof all.count === "number") row.register_count = all.count;
+  if (!latest.error) row.last_marked_at = (latest.data as { marked_at?: string } | null)?.marked_at ?? null;
+  await sb.from("attendance_desk_sync_meta").upsert(row, { onConflict: "tenant_id" });
 }
 
 export async function fetchAttendanceRegistersFromDb(): Promise<{
   registers: AttendanceRegister[];
   meta: AttendanceDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
+  ok: boolean;
+  /** Each register's `updated_at` — what a browser's save is stamped with. */
+  stamps: Record<string, string>;
 }> {
   const ctx = await resolveCtx();
-  if (!ctx) return { registers: [], meta: null };
+  if (!ctx) return { registers: [], meta: null, ok: false, stamps: {} };
   const { sb, tenantId } = ctx;
 
-  const { data: headers, error: hErr } = await sb
-    .from("attendance_desk_registers")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .order("attendance_date", { ascending: false });
+  // Paged, ordered by id for stable pages; sorted by date afterwards so the
+  // callers still see newest first. 483 registers today, 1,000 by early 2027.
+  const headersRes = await fetchAllPages<Record<string, unknown>>((from, to) =>
+    sb
+      .from("attendance_desk_registers")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  const hErr = headersRes.error ? { message: headersRes.error } : null;
+  const headers = headersRes.rows.sort((a, b) =>
+    String(b.attendance_date ?? "").localeCompare(String(a.attendance_date ?? "")),
+  );
 
-  if (hErr || !headers?.length) {
-    const { data: metaRow } = await sb
+  if (hErr) {
+    console.warn("[attendance-db] fetch failed", hErr.message);
+    return { registers: [], meta: null, ok: false, stamps: {} };
+  }
+
+  if (!headers?.length) {
+    const { data: metaRow, error: metaErr } = await sb
       .from("attendance_desk_sync_meta")
       .select(META_SELECT)
       .eq("tenant_id", tenantId)
       .maybeSingle();
+    if (metaErr) {
+      console.warn("[attendance-db] meta fetch failed", metaErr.message);
+      return { registers: [], meta: null, ok: false, stamps: {} };
+    }
     return {
       registers: [],
       meta: mapMetaRow(metaRow as Record<string, unknown> | null),
+      ok: true,
+      stamps: {},
     };
   }
 
   const ids = headers.map((h) => h.id as string);
 
-  const [{ data: markRows }, { data: metaRow }] = await Promise.all([
-    sb
-      .from("attendance_desk_marks")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .in("register_id", ids),
+  // Every mark of every register: chunked by register id and paged. One
+  // request for all of them hydrated 1,000 of 10,315 marks (2026-09-06) —
+  // whole days read as unmarked on every machine that loaded from the server.
+  const [markRes, { data: metaRow, error: metaErr }] = await Promise.all([
+    fetchByIds<Record<string, unknown>>(ids, (chunk, from, to) =>
+      sb
+        .from("attendance_desk_marks")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .in("register_id", chunk)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
     sb
       .from("attendance_desk_sync_meta")
       .select(META_SELECT)
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+  const markRows = markRes.rows;
+  const mErr = markRes.error ? { message: markRes.error } : null;
+
+  if (mErr || metaErr) {
+    console.warn("[attendance-db] fetch failed", mErr?.message, metaErr?.message);
+    return { registers: [], meta: null, ok: false, stamps: {} };
+  }
 
   const marksByRegister = new Map<string, Record<string, unknown>[]>();
   for (const row of markRows ?? []) {
@@ -280,17 +386,94 @@ export async function fetchAttendanceRegistersFromDb(): Promise<{
   return {
     registers,
     meta: mapMetaRow(metaRow as Record<string, unknown> | null),
+    ok: true,
+    stamps: stampsOf(headers),
   };
 }
 
+/**
+ * One section's register for one date, read straight from the database.
+ *
+ * For a server write that changes a single mark (approved student leave,
+ * 2026-09-29): this instance's in-memory desk can be minutes old, and
+ * pushing a register rebuilt from it would put back every other child's
+ * stale mark. `ok: false` means the read failed — never "no register".
+ * `ambiguous` means more than one register row matched; the caller must not
+ * guess which one the school reads.
+ */
+export async function fetchAttendanceRegisterFromDb(
+  academicYearCode: string,
+  sectionId: string,
+  date: string,
+): Promise<
+  | { ok: true; register: AttendanceRegister | null; ambiguous: boolean }
+  | { ok: false; error: string }
+> {
+  const ctx = await resolveCtx();
+  if (!ctx) return { ok: false, error: "No tenant" };
+  const { sb, tenantId } = ctx;
+  const { data: headers, error: hErr } = await sb
+    .from("attendance_desk_registers")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("academic_year_code", academicYearCode)
+    .eq("section_id", sectionId)
+    .eq("attendance_date", date)
+    .limit(2);
+  if (hErr) return { ok: false, error: hErr.message };
+  if (!headers?.length) return { ok: true, register: null, ambiguous: false };
+  if (headers.length > 1) return { ok: true, register: null, ambiguous: true };
+  const header = headers[0] as Record<string, unknown>;
+
+  // A class is far under 1,000 children; paged anyway so a register can
+  // never come back with a silently truncated mark list (2026-09-06).
+  const markRes = await fetchAllPages<Record<string, unknown>>((from, to) =>
+    sb
+      .from("attendance_desk_marks")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("register_id", String(header.id))
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  if (markRes.error) return { ok: false, error: markRes.error };
+  return {
+    ok: true,
+    register: rowToRegister(header, markRes.rows),
+    ambiguous: false,
+  };
+}
+
+/** The attendance tables a desk save deletes from — by named id only. */
+export const ATTENDANCE_DELETABLE_TABLES = [
+  "attendance_desk_registers",
+  "attendance_desk_absent_nudges",
+  "attendance_desk_exceptions",
+] as const;
+/** Desk slice each deletable table stores (for function-only writers). */
+export const ATTENDANCE_TABLE_SLICES: Record<string, string> = {
+  attendance_desk_registers: "registers",
+  attendance_desk_absent_nudges: "absentNudges",
+  attendance_desk_exceptions: "exceptions",
+};
+
 export async function pushAttendanceDeskToDb(
   state: Pick<AttendanceState, "registers"> & Partial<AttendanceDeskAncillary>,
+  deletes: NamedDeletes = {},
+  /** A browser's register stamps (see pushAttendanceRegistersToDb). */
+  stamps?: Record<string, string>,
 ): Promise<{
   ok: boolean;
   error?: string;
   registerCount: number;
+  stamps?: Record<string, string>;
+  conflicts?: string[];
 }> {
-  const regResult = await pushAttendanceRegistersToDb(state.registers ?? []);
+  const regResult = await pushAttendanceRegistersToDb(
+    state.registers ?? [],
+    deletes["attendance_desk_registers"] ?? [],
+    stamps,
+  );
   if (!regResult.ok) {
     return {
       ok: false,
@@ -303,7 +486,7 @@ export async function pushAttendanceDeskToDb(
     policy: state.policy ?? DEFAULT_ATTENDANCE_POLICY,
     absentNudges: state.absentNudges ?? [],
     exceptions: state.exceptions ?? [],
-  });
+  }, deletes);
   if (!ancillaryResult.ok) {
     return {
       ok: false,
@@ -312,21 +495,24 @@ export async function pushAttendanceDeskToDb(
     };
   }
 
-  return { ok: true, registerCount: regResult.count };
+  return { ok: true, registerCount: regResult.count, stamps: regResult.stamps, conflicts: regResult.conflicts };
 }
 
 export type AttendanceDeskSnapshot = {
   registers: AttendanceRegister[];
+  stamps: Record<string, string>;
   ancillary: AttendanceDeskAncillary;
   meta: AttendanceDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
+  ok: boolean;
 };
 
 export async function fetchAttendanceDeskFromDb(): Promise<AttendanceDeskSnapshot> {
-  const [{ registers, meta }, ancillary] = await Promise.all([
+  const [{ registers, meta, ok, stamps }, ancillary] = await Promise.all([
     fetchAttendanceRegistersFromDb(),
     fetchAttendanceDeskAncillaryFromDb(),
   ]);
-  return { registers, ancillary, meta };
+  return { registers, ancillary, meta, ok, stamps };
 }
 
 /** Push a single register after API mark (incremental). */
@@ -344,15 +530,16 @@ export async function pushAttendanceRegisterToDb(
     .upsert(header);
   if (hErr) return { ok: false, error: hErr.message };
 
-  await sb
-    .from("attendance_desk_marks")
-    .delete()
-    .eq("register_id", register.id);
-
-  if (marks.length) {
-    const { error: mErr } = await sb.from("attendance_desk_marks").upsert(marks);
-    if (mErr) return { ok: false, error: mErr.message };
-  }
+  // One transaction: a failed insert rolls the delete back, so a register
+  // cannot end up with its whole day's attendance deleted and nothing put
+  // back. Two statements is how the fee book lost every line on 2026-09-06.
+  const marksWrite = await replaceChildRows(sb, {
+    table: "attendance_desk_marks",
+    tenantId,
+    match: { register_id: register.id },
+    rows: marks,
+  });
+  if (!marksWrite.ok) return { ok: false, error: marksWrite.error };
 
   const now = new Date().toISOString();
   await sb.from("attendance_desk_sync_meta").upsert(

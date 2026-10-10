@@ -3,7 +3,9 @@
  * school reminder settings, WhatsApp parent nudges + Aadhaar enrolment guidance.
  */
 
+import { samePersonName } from "@/lib/apaarConsent";
 import {
+  isRealPortalId,
   displayAadhaar,
   hasStoredAadhaar,
   householdOf,
@@ -20,6 +22,8 @@ import {
 import { loadMasters, type MastersState } from "@/lib/masters";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { TENANT } from "@/lib/types";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 const SETTINGS_KEY = "bhb_udise_compliance_v1";
 
@@ -99,10 +103,27 @@ export type UdiseComplianceRow = {
   nearestCenterMapsUrl: string;
 };
 
-/** Indian mobile → tel:+91… for direct dial from phone / softphone. */
+/**
+ * Indian mobile → tel:+91… for direct dial from a phone or softphone.
+ *
+ * NOT normalizeMobile(), which keeps the FIRST ten digits: on "919140132524"
+ * that yields 9191401325 — a different, perfectly valid-looking number. A
+ * wrong number in a school's calling list is worse than no number, so a
+ * country code or a trunk 0 is stripped from the front first, and anything
+ * still not a ten-digit Indian mobile returns "" rather than a link that
+ * dials a stranger.
+ *
+ * No number in this roster carries a country code today; this is here so
+ * that the day somebody pastes one, it dials the right family.
+ */
 export function telHrefForMobile(mobile: string): string {
-  const d = normalizeMobile(mobile);
-  if (!isValidMobile(d)) return "";
+  let d = String(mobile || "").replace(/\D/g, "");
+  if (d.length > 10 && d.startsWith("91")) d = d.slice(2);
+  if (d.length === 11 && d.startsWith("0")) d = d.slice(1);
+  // An Indian mobile begins 6-9. This rejects the placeholder "0000000000"
+  // that a few household records carry, which isValidMobile accepts as ten
+  // digits and which would otherwise print as a link that dials nothing.
+  if (!isValidMobile(d) || !/^[6-9]/.test(d)) return "";
   return `tel:+91${d}`;
 }
 
@@ -139,7 +160,7 @@ function defaultSettings(): UdiseComplianceSettings {
 export function loadUdiseComplianceSettings(): UdiseComplianceSettings {
   if (typeof window === "undefined") return defaultSettings();
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
+    const raw = readCache(SETTINGS_KEY);
     if (!raw) return defaultSettings();
     const p = JSON.parse(raw) as Partial<UdiseComplianceSettings>;
     return {
@@ -167,9 +188,20 @@ export function saveUdiseComplianceSettings(
     Math.min(90, Number(next.reminderIntervalDays) || 7),
   );
   if (typeof window !== "undefined") {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    writeCacheOrInvalidate(SETTINGS_KEY, JSON.stringify(next));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("udise_compliance", { settings: next })));
   }
   return next;
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeUdiseComplianceSettingsLocalRaw(state: { settings: UdiseComplianceSettings }): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(SETTINGS_KEY, JSON.stringify(state.settings));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 export function gapLabel(code: UdiseGapCode): string {
@@ -194,11 +226,7 @@ export function gapLabel(code: UdiseGapCode): string {
 }
 
 function hasPen(s: SisStudent): boolean {
-  const pen = (s.pen || "").trim();
-  if (!pen || /^na$/i.test(pen) || /^\*+$/.test(pen)) return false;
-  // "0" / "000" is a common import placeholder — not a real PEN.
-  if (/^0+$/.test(pen)) return false;
-  return true;
+  return isRealPortalId(s.pen);
 }
 
 /** True when student has a UDISE+ Student PEN (registered on portal / SDMS). */
@@ -279,10 +307,12 @@ export function listUdisePortalSearchRows(
  */
 export function udiseEntryStatusLabel(s: SisStudent): string {
   if (hasPen(s)) {
-    if (s.aadhaarVerification === "verified_udise" && (s.apaarId || "").trim()) {
-      return "Entered · verified";
-    }
-    return "Entered (PEN present)";
+    // Keyed off the APAAR alone. It used to also require
+    // `aadhaarVerification === "verified_udise"`, a field with no database
+    // column before 2026-09-06 — so every student read back as merely
+    // "Entered" however complete the portal record was.
+    if (hasApaar(s)) return "Entered · UDISE OK";
+    return "Entered · APAAR missing";
   }
   switch (s.penStatus) {
     case "to_register":
@@ -423,25 +453,71 @@ export function udiseRegisteredSummary(rows: UdiseRegisteredRow[]) {
 }
 
 function hasApaar(s: SisStudent): boolean {
-  const a = (s.apaarId || "").trim();
-  if (!a) return false;
-  if (/^na$/i.test(a)) return false;
-  if (/^\*+$/.test(a)) return false;
-  return true;
+  return isRealPortalId(s.apaarId);
 }
 
-/** Fully compliant — drop from open UDISE+ worklist. */
+/**
+ * The parent answered NO to APAAR (lib/apaarConsent). APAAR is voluntary;
+ * PEN is not. So a declined APAAR is a settled answer, not a gap — the
+ * child is complete once the PEN exists, and the family is never chased
+ * for APAAR (or for a parent's Aadhaar, which only APAAR needs) again.
+ */
+function apaarDeclined(s: SisStudent): boolean {
+  return !hasApaar(s) && s.apaarConsent === "refused";
+}
+
+export type UdisePenApaarCode = "ok" | "pen_only" | "apaar_only" | "none";
+
+/**
+ * What the UDISE+ portal has issued for this child, as one label.
+ *
+ * The two ids ARE the compliance: a PEN means the child is on the portal, an
+ * APAAR means the portal accepted the child's and the parents' Aadhaar and
+ * minted the academic account. Nothing else is left to chase once both exist.
+ *
+ * Shown in front of the student everywhere the roster is listed, and derived
+ * on every render — never stored — so a re-import that fills a PEN moves the
+ * label the moment it applies.
+ */
+export function udisePenApaarStatus(s: SisStudent): {
+  code: UdisePenApaarCode;
+  label: string;
+} {
+  const pen = hasPen(s);
+  const apaar = hasApaar(s);
+  if (pen && apaar) return { code: "ok", label: "UDISE OK" };
+  if (pen) return { code: "pen_only", label: "PEN ok · APAAR missing" };
+  if (apaar) return { code: "apaar_only", label: "APAAR ok · PEN missing" };
+  // Named rather than left blank (director, 2026-09-06). A blank row reads as
+  // "not looked at yet"; these 43 children have been looked at and the answer
+  // is that the portal holds nothing for them, which is the whole backlog.
+  return { code: "none", label: "No PEN · No APAAR" };
+}
+
+/**
+ * Fully compliant — drop from the open UDISE+ worklist.
+ *
+ * PEN + APAAR, and nothing more. This used to demand four other things, and
+ * on 2026-09-06 that put all 237 active students on the worklist while 100 of
+ * them held both ids. Two of the four could never be satisfied:
+ * `aadhaarVerification` and `udiseInboundTransferPending` had no column in
+ * sis_students until that day's `profile` migration, so every hydrate read
+ * them back as unset no matter what the office had entered.
+ *
+ * The other two were the real modelling error. A student Aadhaar (verified or
+ * not) and a parent Aadhaar are what the PORTAL needs in order to ISSUE an
+ * APAAR. Once the APAAR exists, the portal has already checked them and the
+ * school has nothing left to collect — so requiring them afterwards is asking
+ * the office to chase paperwork for an account that is already open. They
+ * remain gaps, loudly, while the ids are still missing: see
+ * computeStudentUdiseGaps.
+ */
 export function isUdiseFullyCompliant(
   s: SisStudent,
-  settings?: UdiseComplianceSettings,
+  _settings?: UdiseComplianceSettings,
 ): boolean {
-  const cfg = settings ?? loadUdiseComplianceSettings();
-  if (s.aadhaarVerification !== "verified_udise") return false;
-  if (!hasPen(s)) return false;
-  if (!hasApaar(s)) return false;
-  if (cfg.parentAadhaarRequiredForApaar && !hasParentAadhaar(s)) return false;
-  if (s.udiseInboundTransferPending) return false;
-  return true;
+  // PEN is required of every child; APAAR only with the parent's consent.
+  return hasPen(s) && (hasApaar(s) || apaarDeclined(s));
 }
 
 function hasParentAadhaar(s: SisStudent): boolean {
@@ -463,20 +539,33 @@ export function computeStudentUdiseGaps(
 ): UdiseGapCode[] {
   const cfg = settings ?? loadUdiseComplianceSettings();
   const gaps: UdiseGapCode[] = [];
-  if (
-    !hasStoredAadhaar({ number: s.aadhaarNumber, last4: s.aadhaarLast4 }) &&
-    s.aadhaarVerification !== "verified_udise"
-  ) {
+
+  // Both ids issued: the portal has everything it needed and there is nothing
+  // to call a parent about. Reported as no gaps rather than as a shorter list,
+  // so every counter, export and call list agrees with the "UDISE OK" badge.
+  if (hasPen(s) && (hasApaar(s) || apaarDeclined(s))) return gaps;
+
+  const aadhaarOnFile = hasStoredAadhaar({
+    number: s.aadhaarNumber,
+    last4: s.aadhaarLast4,
+  });
+  if (!aadhaarOnFile) {
     gaps.push("student_aadhaar");
-  } else if (
-    s.aadhaarVerification !== "verified_udise" &&
-    hasStoredAadhaar({ number: s.aadhaarNumber, last4: s.aadhaarLast4 })
-  ) {
+  } else if (s.aadhaarVerification !== "verified_udise") {
     gaps.push("student_aadhaar_unverified");
   }
   if (!hasPen(s)) gaps.push("pen");
-  if (!hasApaar(s)) gaps.push("apaar");
-  if (cfg.parentAadhaarRequiredForApaar && !hasParentAadhaar(s)) {
+  if (!hasApaar(s) && !apaarDeclined(s)) gaps.push("apaar");
+  // Parent Aadhaar is for the APAAR alone (the consenting parent's own ID —
+  // the director's rule, 21 Sep 2026), so it is a gap only once the parent
+  // has said YES and while the APAAR is still missing. Before an answer the
+  // family is asked for consent, not for a parent's card.
+  if (
+    cfg.parentAadhaarRequiredForApaar &&
+    !hasApaar(s) &&
+    s.apaarConsent === "given" &&
+    !hasParentAadhaar(s)
+  ) {
     gaps.push("parent_aadhaar");
   }
   if (s.udiseAgeBelowClassAlert) {
@@ -486,6 +575,59 @@ export function computeStudentUdiseGaps(
     gaps.push("inbound_transfer");
   }
   return gaps;
+}
+
+/** The consent's giver ("<name> · WhatsApp …") has their own Aadhaar in the record. */
+function consenterAadhaarOnFile(s: SisStudent): boolean {
+  const who = String(s.apaarConsentBy || "").split(" · ")[0]!.trim();
+  if (!who) return true;
+  const has = (full: string, l4: string) => /\d{4}/.test(String(full || "").replace(/\D/g, "")) || /\d{4}/.test(String(l4 || ""));
+  return (
+    (has(s.fatherAadhaarNumber, s.fatherAadhaarLast4) && samePersonName(s.fatherName, who)) ||
+    (has(s.motherAadhaarNumber, s.motherAadhaarLast4) && samePersonName(s.motherName, who))
+  );
+}
+
+/**
+ * What the PARENT still has to give before the school can create the APAAR
+ * ID: the consenting parent's own Aadhaar (the director's rule, 21 Sep 2026 —
+ * "for APAAR ask the parent's ID, not the student's").
+ *
+ * The child's Aadhaar and the PEN are deliberately not here. They belong to
+ * the PEN / UDISE+ record, which every child needs whether or not the family
+ * consents to APAAR, and are tracked and asked for on that side.
+ */
+export type ApaarWaitingFor = "parent_aadhaar";
+
+/**
+ * Can the office create this child's APAAR ID on UDISE+ today?
+ *
+ * Consent is the parent's half. The portal also needs the child's PEN (the
+ * school's own job on UDISE+) and an Aadhaar it has VALIDATED — the name,
+ * date of birth and gender on UDISE+ matching UIDAI. So a "yes" with no
+ * Aadhaar card, or with one the portal rejected, is not yet an APAAR ID: the
+ * parent is told what is missing (lib/apaarConsent) and the office sees
+ * "waiting for …", not "create on portal".
+ */
+export function apaarReadiness(
+  s: SisStudent,
+  settings?: UdiseComplianceSettings,
+): { ready: boolean; waitingFor: ApaarWaitingFor[]; needsPen: boolean } {
+  const cfg = settings ?? loadUdiseComplianceSettings();
+  const waitingFor: ApaarWaitingFor[] = [];
+  const needsPen = !hasPen(s);
+  if (hasApaar(s)) return { ready: false, waitingFor, needsPen };
+  void cfg;
+  if (!hasParentAadhaar(s)) waitingFor.push("parent_aadhaar");
+  else if (s.apaarConsent === "given" && !consenterAadhaarOnFile(s)) {
+    // A card is on file, but not the consenting parent's own (the guardian
+    // said yes; the father's card is what we hold).
+    waitingFor.push("parent_aadhaar");
+  }
+  // The portal makes an APAAR ID on top of a PEN (itself built on the
+  // child's validated Aadhaar), so "ready" also needs one — but that is the
+  // PEN side's work, shown on its own.
+  return { ready: s.apaarConsent === "given" && waitingFor.length === 0 && !needsPen, waitingFor, needsPen };
 }
 
 function priorityOf(gaps: UdiseGapCode[]): number {

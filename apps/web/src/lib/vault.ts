@@ -10,6 +10,9 @@ import {
   exportFilterReport,
   type ReportColumn,
 } from "@/lib/reportExport";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
+import { recordVaultDocumentDeletion } from "@/lib/vaultNormalizedClient";
 
 const STORAGE_KEY = "bhb_vault_v1";
 
@@ -101,7 +104,7 @@ export function loadVault(): VaultState {
     return emptyVaultState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyVaultState();
     const parsed = JSON.parse(raw) as Partial<VaultState>;
     return {
@@ -123,10 +126,10 @@ export function saveVault(state: VaultState): void {
   if (!assertModulePermission("vault", "edit", "saveVault")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/vaultPersistence").then(({ scheduleVaultSync }) => {
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void trackServerWork(import("@/lib/vaultPersistence").then(({ scheduleVaultSync }) => {
     scheduleVaultSync(state);
-  });
+  }));
 
 }
 
@@ -135,7 +138,7 @@ export function writeVaultLocalRaw(state: VaultState) {
     serverVaultCache = state;
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function vaultStateIsEmpty(state: VaultState): boolean {
@@ -246,6 +249,7 @@ export function deleteVaultDocument(
   if (!state.documents.some((d) => d.id === id)) {
     return { ok: false, error: "Not found" };
   }
+  if (typeof window !== "undefined") recordVaultDocumentDeletion([id]);
   saveVault({
     ...state,
     documents: state.documents.filter((d) => d.id !== id),

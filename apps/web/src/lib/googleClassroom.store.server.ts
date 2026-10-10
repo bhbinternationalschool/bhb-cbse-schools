@@ -1,11 +1,24 @@
 /**
- * Google Classroom — OAuth tokens + course mappings (server disk).
+ * Google per-staff connections + Classroom course mappings.
+ *
+ * Connections live in Postgres (public.google_staff_connections) since
+ * 2026-09-09. They were in .data/google_classroom.json before, which Cloud
+ * Run's filesystem forgets on every deploy — every teacher's Google grant
+ * died with each release and nobody noticed because Classroom sync was
+ * rarely used. Online classes create Meet rooms on the teacher's own
+ * account, so a grant that vanishes weekly is not acceptable there.
+ *
+ * Course mappings stay on disk for now: they are Classroom-only, tiny, and
+ * the Classroom feature is dormant. The disk store is also still read as
+ * a fallback for a connection the table does not have yet.
  */
 
 import { promises as fs } from "fs";
 import path from "path";
+import { getServerTenantContext } from "@/lib/serverTenant";
 
 const DATA_FILE = path.join(process.cwd(), ".data", "google_classroom.json");
+const TABLE = "google_staff_connections";
 
 export type ClassroomStaffConnection = {
   staffKey: string;
@@ -14,6 +27,8 @@ export type ClassroomStaffConnection = {
   refreshToken: string;
   expiresAt: string;
   connectedAt: string;
+  /** Space-separated scopes Google granted. '' for legacy disk rows. */
+  scopes: string;
 };
 
 export type ClassroomCourseMapping = {
@@ -60,7 +75,7 @@ export async function loadClassroomStore(): Promise<ClassroomStore> {
         version: 1,
         updatedAt: parsed.updatedAt || nowIso(),
         connections: Array.isArray(parsed.connections)
-          ? parsed.connections
+          ? parsed.connections.map((c) => ({ ...c, scopes: c.scopes || "" }))
           : [],
         mappings: Array.isArray(parsed.mappings) ? parsed.mappings : [],
         lastSyncAt: parsed.lastSyncAt || "",
@@ -92,23 +107,89 @@ export function staffConnectionKey(opts: {
   return opts.staffId || opts.email || opts.fullName || "unknown";
 }
 
+type Row = {
+  staff_key: string;
+  email: string;
+  access_token: string;
+  refresh_token: string;
+  expires_at: string;
+  scopes: string;
+  connected_at: string;
+};
+
+function fromRow(r: Row): ClassroomStaffConnection {
+  return {
+    staffKey: r.staff_key,
+    email: r.email || "",
+    accessToken: r.access_token || "",
+    refreshToken: r.refresh_token || "",
+    expiresAt: r.expires_at,
+    connectedAt: r.connected_at,
+    scopes: r.scopes || "",
+  };
+}
+
 export async function getStaffConnection(
   staffKey: string,
 ): Promise<ClassroomStaffConnection | null> {
+  const ctx = await getServerTenantContext();
+  if (ctx) {
+    const { data, error } = await ctx.sb
+      .from(TABLE)
+      .select("*")
+      .eq("tenant_id", ctx.tenantId)
+      .eq("staff_key", staffKey)
+      .maybeSingle();
+    if (!error && data) return fromRow(data as Row);
+  }
   const store = await loadClassroomStore();
   return store.connections.find((c) => c.staffKey === staffKey) || null;
 }
 
+/** Every connected staff member — the office's "who can host a Meet" view. */
+export async function listStaffConnections(): Promise<ClassroomStaffConnection[]> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return [];
+  const { data, error } = await ctx.sb
+    .from(TABLE)
+    .select("*")
+    .eq("tenant_id", ctx.tenantId)
+    .limit(1000);
+  if (error || !data) return [];
+  return (data as Row[]).map(fromRow);
+}
+
 export async function upsertStaffConnection(
-  conn: Omit<ClassroomStaffConnection, "connectedAt"> & {
+  conn: Omit<ClassroomStaffConnection, "connectedAt" | "scopes"> & {
     connectedAt?: string;
+    scopes?: string;
   },
 ): Promise<ClassroomStaffConnection> {
-  const store = await loadClassroomStore();
   const row: ClassroomStaffConnection = {
     ...conn,
     connectedAt: conn.connectedAt || nowIso(),
+    scopes: conn.scopes ?? "",
   };
+  const ctx = await getServerTenantContext();
+  if (ctx) {
+    const { error } = await ctx.sb.from(TABLE).upsert(
+      {
+        tenant_id: ctx.tenantId,
+        staff_key: row.staffKey,
+        email: row.email,
+        access_token: row.accessToken,
+        refresh_token: row.refreshToken,
+        expires_at: row.expiresAt,
+        scopes: row.scopes,
+        connected_at: row.connectedAt,
+        updated_at: nowIso(),
+      },
+      { onConflict: "tenant_id,staff_key" },
+    );
+    if (!error) return row;
+    console.warn("[google-staff] upsert failed", error.message);
+  }
+  const store = await loadClassroomStore();
   const i = store.connections.findIndex((c) => c.staffKey === conn.staffKey);
   if (i >= 0) store.connections[i] = row;
   else store.connections.push(row);
@@ -117,6 +198,14 @@ export async function upsertStaffConnection(
 }
 
 export async function removeStaffConnection(staffKey: string): Promise<void> {
+  const ctx = await getServerTenantContext();
+  if (ctx) {
+    await ctx.sb
+      .from(TABLE)
+      .delete()
+      .eq("tenant_id", ctx.tenantId)
+      .eq("staff_key", staffKey);
+  }
   const store = await loadClassroomStore();
   store.connections = store.connections.filter((c) => c.staffKey !== staffKey);
   await saveClassroomStore(store);

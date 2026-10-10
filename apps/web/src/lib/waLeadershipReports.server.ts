@@ -8,14 +8,12 @@ import {
   loadAdmissions,
   type AdmissionStage,
 } from "@/lib/admissions";
-import { totalBankBalancePaise, loadAccounts } from "@/lib/accounts";
 import { loadAttendance, summarizeMarks } from "@/lib/attendance";
 import { computeFeeKpis } from "@/lib/feeFinance";
 import { formatInr, loadFees } from "@/lib/fees";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { loadSis } from "@/lib/sis";
-import { loadStaffAttendance, summarizeStaffMarks } from "@/lib/staffAttendance";
-import { listLowStockItems, loadStore } from "@/lib/store";
+import { loadStaffAttendance, staffMarkTotals } from "@/lib/staffAttendance";
 import { loadTransport } from "@/lib/transport";
 import { TENANT } from "@/lib/types";
 
@@ -24,7 +22,38 @@ function todayIso(): string {
 }
 
 /** Compact WhatsApp report for director / leadership. */
-export function composeLeadershipWhatsAppReport(): string {
+/**
+ * Low stock is an optional input, not a value this function fetches.
+ *
+ * The store's on-hand figures now live server-side and are read
+ * asynchronously, and this composer is synchronous with synchronous callers
+ * all the way up. Rather than make the whole chain async for one line — or
+ * print "0 low-stock SKUs" when the truth is "not looked up", which is the
+ * defect class this rebuild exists to remove — the line is simply omitted
+ * unless a caller supplies the number.
+ */
+/**
+ * The bank balance this report may print.
+ *
+ * Read from the server book, never from the accounts desk. `loadAccounts()`
+ * returns EMPTY on the server, so `totalBankBalancePaise` off it reported a
+ * flat ₹0 here — a wrong number sent to the director's phone every time, and
+ * fed to the ERP assistant as fact. See dailyBrief.server.ts, which documents
+ * the same trap for the rest of this file's inputs.
+ */
+export async function leadershipBankBalancePaise(): Promise<number | null> {
+  const today = todayIso();
+  const d = new Date(today);
+  const fyFrom = `${d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1}-04-01`;
+  const { ledgerPosition } = await import("@/lib/ledger/controls.server");
+  const pos = await ledgerPosition({ asOf: today, fyFrom });
+  // Unknown is not zero: a failed read prints no Bank line at all.
+  return pos.ok ? pos.bankPaise : null;
+}
+
+export function composeLeadershipWhatsAppReport(
+  opts: { lowStockSkus?: number; bankBalancePaise?: number | null } = {},
+): string {
   const masters = loadMasters();
   const ay = currentAcademicYearCode(masters);
   const today = todayIso();
@@ -68,9 +97,11 @@ export function composeLeadershipWhatsAppReport(): string {
   let staffPresent = 0;
   let staffMarked = 0;
   if (staffReg) {
-    const sm = summarizeStaffMarks(staffReg.marks || []);
+    // Was staffMarkTotals(...).present — undefined, so this line read
+    // "Present undefined · Absent undefined" in the owner's note.
+    const sm = staffMarkTotals(staffReg.marks || []);
     staffPresent = sm.present;
-    staffMarked = sm.present + sm.absent + sm.leave;
+    staffMarked = sm.marked;
   }
   const staffPct = staffMarked
     ? Math.round((staffPresent / staffMarked) * 100)
@@ -78,8 +109,14 @@ export function composeLeadershipWhatsAppReport(): string {
 
   const activeStaff = (masters.staff ?? []).filter((s) => s.status === "active")
     .length;
-  const bankBal = totalBankBalancePaise(loadAccounts());
-  const lowStock = listLowStockItems(loadStore()).length;
+  // Supplied by the caller, and only for someone allowed to see a balance —
+  // this report goes to any staff member who types REPORTS. When it is not
+  // supplied the line is omitted rather than printed as zero.
+  const bankBal =
+    typeof opts.bankBalancePaise === "number" && Number.isFinite(opts.bankBalancePaise)
+      ? opts.bankBalancePaise
+      : null;
+  const lowStock = opts.lowStockSkus;
   const transport = loadTransport();
   const activeRoutes = (transport.routes ?? []).filter((r) => r.isActive !== false)
     .length;
@@ -100,8 +137,10 @@ export function composeLeadershipWhatsAppReport(): string {
     `Enrolled ${funnel.enrolled || 0} · follow-ups due ${fu.overdue || 0}`,
     "",
     `*Transport* — ${activeRoutes} routes · ${activeBuses} buses`,
-    `*Store* — ${lowStock} low-stock SKUs`,
-    `*Bank* — ${formatInr(bankBal)}`,
+    ...(typeof lowStock === "number"
+      ? [`*Store* — ${lowStock} low-stock SKUs`]
+      : []),
+    ...(bankBal === null ? [] : [`*Bank* — ${formatInr(bankBal)}`]),
     "",
     "Reply *FEE* · *ADMISSIONS* · *STAFF* · *MENU*",
   ];
@@ -142,7 +181,7 @@ export function composeStaffAttendanceWhatsAppSnapshot(): string {
   if (!reg) {
     return `*Staff attendance* — ${today}\n\nNo register marked yet today. Desk: Attendance → Staff.`;
   }
-  const sm = summarizeStaffMarks(reg.marks || []);
+  const sm = staffMarkTotals(reg.marks || []);
   const total = sm.present + sm.absent + sm.leave;
   return [
     `*Staff attendance* — ${today}`,

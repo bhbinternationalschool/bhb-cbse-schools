@@ -25,9 +25,19 @@ import {
   type UdisePortalSearchRow,
   type UdiseRegisteredRow,
   type UdiseUnregisteredRow,
+  apaarReadiness,
 } from "@/lib/udiseCompliance";
+import type { SisStudent } from "@/lib/sis";
 import { UdisePenApaarImportPanel } from "@/components/students/UdisePenApaarImportPanel";
-import { UdiseBridgePanel } from "@/components/students/UdiseBridgePanel";
+import { UdiseRobotPanel } from "@/components/students/UdiseRobotPanel";
+import { OfficeRobotInstallCard } from "@/components/students/OfficeRobotInstallCard";
+import { UdiseClassSheetsCard } from "@/components/students/UdiseClassSheetsCard";
+import { UdisePortalSyncCard } from "@/components/students/UdisePortalSyncCard";
+import { UdiseSchoolAnswersCard } from "@/components/students/UdiseSchoolAnswersCard";
+import { UdiseSchoolFinanceCard } from "@/components/students/UdiseSchoolFinanceCard";
+import { UdiseSchoolProfileCard } from "@/components/students/UdiseSchoolProfileCard";
+import { UdiseTeacherSyncCard } from "@/components/students/UdiseTeacherSyncCard";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import {
   UdiseStudentListModal,
   type UdiseListRow,
@@ -35,10 +45,21 @@ import {
 import type { ReportColumn } from "@/lib/reportExport";
 import { runSisReport } from "@/lib/sisReportCatalog";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { hasFeaturePermission } from "@/lib/rbac";
+import { ComplianceFactsPanel } from "@/components/students/ComplianceFactsPanel";
 import { currentAcademicYearCode } from "@/lib/masters";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type FilterGap = "all" | UdiseGapCode | "due" | "call" | "unregistered";
-type ViewMode = "worklist" | "call" | "unregistered";
+type ViewMode = "worklist" | "call" | "unregistered" | "facts";
 
 const GAP_COLUMNS: ReportColumn[] = [
   { key: "student", header: "Student", width: 2 },
@@ -142,6 +163,26 @@ function matchesUdiseQuery(
   return needle.split(/\s+/).every((tok) => hay.includes(tok));
 }
 
+/**
+ * The APAAR cell: the ID when it exists, else the parent's WhatsApp answer
+ * (lib/apaarConsent) and, for a "yes", whether the office can create the ID
+ * now or what it is still waiting for. "Declined" is final — not to chase.
+ */
+function apaarCell(s: SisStudent): string {
+  if (s.apaarId) return s.apaarId;
+  const on = s.apaarConsentAt ? ` ${new Date(s.apaarConsentAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })}` : "";
+  if (s.apaarConsent === "refused") return `Parent declined${on}`;
+  if (s.apaarConsent !== "given") return "—";
+  // A "yes" is not yet an APAAR ID: the portal needs a PEN and an Aadhaar it
+  // has validated. Say which, so the list is also the call list.
+  const { ready, waitingFor, needsPen } = apaarReadiness(s);
+  if (ready) return `Consent ✓${on} — READY: create on portal`;
+  const label: Record<string, string> = { parent_aadhaar: "parent Aadhaar" };
+  if (waitingFor.length) return `Consent ✓${on} — waiting: ${waitingFor.map((w) => label[w] ?? w).join(", ")}`;
+  // Only the PEN is missing — the school's own step, shown in the PEN column.
+  return needsPen ? `Consent ✓${on} — after PEN is made` : `Consent ✓${on}`;
+}
+
 function gapRowsToList(rows: UdiseComplianceRow[]): UdiseListRow[] {
   return rows.map((r) => ({
     _studentId: r.student.id,
@@ -151,7 +192,7 @@ function gapRowsToList(rows: UdiseComplianceRow[]): UdiseListRow[] {
     entryStatus: udiseEntryStatusLabel(r.student),
     missing: r.missingLabels.join("; "),
     pen: r.student.pen || "—",
-    apaar: r.student.apaarId || "—",
+    apaar: apaarCell(r.student),
     aadhaar: r.aadhaarDisplay,
     mobile: r.primaryCallMobile || "—",
   }));
@@ -165,7 +206,7 @@ function registeredRowsToList(rows: UdiseRegisteredRow[]): UdiseListRow[] {
     classLabel: r.classLabel,
     entryStatus: udiseEntryStatusLabel(r.student),
     pen: r.pen || "—",
-    apaar: r.apaarId || "—",
+    apaar: r.apaarId || apaarCell(r.student),
     aadhaar: r.aadhaarDisplay,
     verified: r.aadhaarVerified ? "Yes" : "No",
     compliant: r.compliant ? "Yes" : "No",
@@ -198,6 +239,24 @@ function unregisteredRowsToList(rows: UdiseUnregisteredRow[]): UdiseListRow[] {
   }));
 }
 
+type UdiseStep = "setup" | "portal" | "sheets" | "worklist" | "teachers" | "profile";
+
+/**
+ * The UDISE+ page, step by step (director, 8 Oct 2026: "the page is becoming
+ * longer — split it in tabs"). Layout only: every step stays mounted (hidden
+ * when not shown), so a half-ticked review or half-typed figures survive a
+ * tab change.
+ */
+const UDISE_STEPS: StepDef<UdiseStep>[] = [
+  { id: "setup", title: "Robot & setup", what: "Install the robot in this Chrome, see today's to-do, and confirm the school answers once." },
+  { id: "portal", title: "Students: portal ↔ ERP", what: "What UDISE+ knows that the ERP is missing or has different — tick and apply; PEN finder, transfers, Dropbox." },
+  { id: "sheets", title: "Class sheets", what: "Height, weight, blood group and the other details only the class can collect." },
+  { id: "worklist", title: "Compliance worklist", what: "PEN, APAAR and Aadhaar gaps child by child; import the portal export; call and remind families." },
+  { id: "teachers", title: "Teachers", what: "UDISE+ Teacher module vs ERP Staff — bring details in, add missing staff." },
+  { id: "profile", title: "School profile", what: "The school's UDISE+ profile sections, and 1(c) receipts & expenditure." },
+];
+const UDISE_STEP_KEY = "bhb.udise.step";
+
 export function UdiseComplianceWorkspace({
   tick = 0,
   onChanged,
@@ -211,6 +270,10 @@ export function UdiseComplianceWorkspace({
   const [settings, setSettings] = useState<UdiseComplianceSettings>(
     loadUdiseComplianceSettings,
   );
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("udise_compliance", () => {
+    setSettings(loadUdiseComplianceSettings());
+  });
   const ay =
     session.academicYearCode ||
     (masters ? currentAcademicYearCode(masters) : "");
@@ -277,6 +340,17 @@ export function UdiseComplianceWorkspace({
     return list.filter((r) => matchesUdiseQuery(r.student, query));
   }, [rows, filter, query]);
 
+  // The gap columns hold lists and call buttons; name and class are the handles.
+  const udiseSort = useTableSort(
+    visible,
+    {
+      student: (row) => row.student.fullName,
+      klass: (row) => row.classLabel,
+    },
+    "student",
+    "asc",
+  );
+
   const callList = useMemo(() => {
     const base =
       filter === "due"
@@ -292,6 +366,18 @@ export function UdiseComplianceWorkspace({
   const visibleUnregistered = useMemo(
     () => unregistered.filter((r) => matchesUdiseQuery(r.student, query)),
     [unregistered, query],
+  );
+
+  // Sorting by Reason groups the children blocked for the same cause.
+  const unregSort = useTableSort(
+    visibleUnregistered,
+    {
+      student: (row) => row.student.fullName,
+      klass: (row) => row.classLabel,
+      reason: (row) => row.reason,
+    },
+    "student",
+    "asc",
   );
 
   function flash(msg: string) {
@@ -458,6 +544,25 @@ export function UdiseComplianceWorkspace({
     );
   }
 
+  // The step this viewer last worked on (a per-browser convenience only).
+  const [udiseStep, setUdiseStep] = useState<UdiseStep>("setup");
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem(UDISE_STEP_KEY) as UdiseStep | null;
+      if (v && UDISE_STEPS.some((x) => x.id === v)) setUdiseStep(v);
+    } catch {
+      // Private window / blocked storage: start at step 1.
+    }
+  }, []);
+  const pickUdiseStep = (v: UdiseStep) => {
+    setUdiseStep(v);
+    try {
+      window.localStorage.setItem(UDISE_STEP_KEY, v);
+    } catch {
+      // Not remembered — fine.
+    }
+  };
+
   if (!sis || !masters) {
     return (
       <p className="mt-4 text-sm text-[var(--muted)]">Loading UDISE+…</p>
@@ -466,28 +571,52 @@ export function UdiseComplianceWorkspace({
 
   return (
     <div className="mt-4 space-y-4">
+      <StepTabs aria-label="UDISE+ work, step by step" steps={UDISE_STEPS} value={udiseStep} onChange={pickUdiseStep} />
+
+      <div className={udiseStep === "setup" ? "space-y-3" : "hidden"}>
+        <OfficeRobotInstallCard />
+        <UdiseRobotPanel sis={sis} masters={masters} academicYearCode={ay} />
+        <UdiseSchoolAnswersCard />
+      </div>
+      <div className={udiseStep === "portal" ? "space-y-3" : "hidden"}>
+        <UdisePortalSyncCard />
+      </div>
+      <div className={udiseStep === "sheets" ? "space-y-3" : "hidden"}>
+        <UdiseClassSheetsCard sis={sis} masters={masters} academicYearCode={ay} />
+      </div>
+      <div className={udiseStep === "teachers" ? "space-y-3" : "hidden"}>
+        <UdiseTeacherSyncCard />
+      </div>
+      <div className={udiseStep === "profile" ? "space-y-3" : "hidden"}>
+        <UdiseSchoolProfileCard />
+        <UdiseSchoolFinanceCard />
+      </div>
+
+      <div className={udiseStep === "worklist" ? "space-y-4" : "hidden"}>
+
       <div className="rounded-xl border border-[rgba(180,35,24,0.25)] bg-[rgba(180,35,24,0.06)] px-4 py-3">
         <p className="text-sm font-semibold text-[#8b1a12]">
           High priority — UDISE+ compliance
         </p>
         <p className="mt-1 text-xs text-[var(--muted)]">
-          Track missing Student Aadhaar, PEN, APAAR, and Parent Aadhaar (required
-          for APAAR). Verifying student Aadhaar alone does not create APAAR —
-          parent Aadhaar must also be on UDISE+, then generate APAAR and re-sync.
-          Fully compliant students leave this worklist. Remind parents on
-          WhatsApp every {settings.reminderIntervalDays} day(s). Full Aadhaar
-          stays visible until verified on UDISE+; then only last 4. PEN locks
-          when verified + PEN present; APAAR locks only once APAAR ID is filled.
+          A child is done when the portal has issued <strong>both</strong> ids —
+          PEN and APAAR. Those students show “UDISE OK” in the register and
+          leave this worklist. Everything else here is what it takes to get
+          there: a student Aadhaar, then a parent Aadhaar, then generate the
+          APAAR on UDISE+ and re-import. Parent Aadhaar stops being chased once
+          the APAAR exists. Remind parents on WhatsApp every{" "}
+          {settings.reminderIntervalDays} day(s). Counts refresh on every
+          import — nothing here is stored.
         </p>
       </div>
 
       {notice ? (
-        <p className="rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[#0f7a4c]">
+        <p className="rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[var(--success)]">
           {notice}
         </p>
       ) : null}
       {error ? (
-        <p className="rounded-lg bg-[rgba(180,35,24,0.08)] px-3 py-2 text-sm text-[#b42318]">
+        <p className="rounded-lg bg-[rgba(180,35,24,0.08)] px-3 py-2 text-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}
@@ -497,8 +626,8 @@ export function UdiseComplianceWorkspace({
           type="button"
           className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
             view === "worklist"
-              ? "bg-[var(--brand-deep)] text-white"
-              : "border border-[rgba(32,48,80,0.2)] bg-white text-[var(--brand-deep)]"
+              ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+              : "border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)]"
           }`}
           onClick={() => {
             setView("worklist");
@@ -512,7 +641,7 @@ export function UdiseComplianceWorkspace({
           className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
             view === "unregistered"
               ? "bg-[#8a5a10] text-white"
-              : "border border-[rgba(32,48,80,0.2)] bg-white text-[var(--brand-deep)]"
+              : "border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)]"
           }`}
           onClick={() => {
             setView("unregistered");
@@ -525,8 +654,8 @@ export function UdiseComplianceWorkspace({
           type="button"
           className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
             view === "call"
-              ? "bg-[#0f7a4c] text-white"
-              : "border border-[rgba(32,48,80,0.2)] bg-white text-[var(--brand-deep)]"
+              ? "bg-[var(--success)] text-white"
+              : "border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)]"
           }`}
           onClick={() => {
             setView("call");
@@ -537,7 +666,19 @@ export function UdiseComplianceWorkspace({
         </button>
         <button
           type="button"
-          className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-medium text-white"
+          className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+            view === "facts"
+              ? "bg-[var(--brand-deep)] text-white"
+              : "border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)]"
+          }`}
+          onClick={() => setView("facts")}
+          title="Infrastructure, safety certificates, teacher-training log, committees — for MPD / affiliation narratives"
+        >
+          School facts
+        </button>
+        <button
+          type="button"
+          className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-medium text-[var(--primary-foreground)]"
           onClick={() => {
             const r = runSisReport("udise_compliance", {
               format: "excel",
@@ -553,7 +694,7 @@ export function UdiseComplianceWorkspace({
         </button>
         <button
           type="button"
-          className="rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--brand-deep)]"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-medium text-[var(--brand-deep)]"
           onClick={() => {
             const r = runSisReport("udise_compliance", {
               format: "pdf",
@@ -569,7 +710,7 @@ export function UdiseComplianceWorkspace({
         </button>
         <button
           type="button"
-          className="rounded-lg border border-[#0f7a4c] bg-white px-3 py-1.5 text-xs font-medium text-[#0f7a4c]"
+          className="rounded-lg border border-[var(--success)] bg-[var(--card)] px-3 py-1.5 text-xs font-medium text-[var(--success)]"
           onClick={exportCallListCsv}
         >
           {view === "unregistered"
@@ -578,7 +719,7 @@ export function UdiseComplianceWorkspace({
         </button>
         <button
           type="button"
-          className="rounded-lg border border-[#8a5a10] bg-white px-3 py-1.5 text-xs font-medium text-[#8a5a10]"
+          className="rounded-lg border border-[#8a5a10] bg-[var(--card)] px-3 py-1.5 text-xs font-medium text-[#8a5a10]"
           onClick={() =>
             setKpiModal({
               title: "UDISE+ Global Search sheet — not on portal",
@@ -597,7 +738,7 @@ export function UdiseComplianceWorkspace({
         </button>
         <button
           type="button"
-          className="rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--brand-deep)]"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-medium text-[var(--brand-deep)]"
           onClick={() =>
             setKpiModal({
               title: "UDISE+ Global Search sheet — all active students",
@@ -622,7 +763,7 @@ export function UdiseComplianceWorkspace({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search UDISE+ students — name, adm no, PEN, APAAR, Aadhaar, parent…"
-            className="w-full rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-2 pr-8 text-sm"
+            className="w-full rounded-lg border border-[var(--border)] px-3 py-2 pr-8 text-sm"
           />
           {query ? (
             <button
@@ -761,7 +902,7 @@ export function UdiseComplianceWorkspace({
                 ? "border-[rgba(138,90,16,0.35)] bg-[rgba(138,90,16,0.08)]"
                 : kpi.tone === "green"
                   ? "border-[rgba(15,122,76,0.3)] bg-[rgba(15,122,76,0.06)]"
-                  : "border-[rgba(32,48,80,0.1)] bg-white"
+                  : "border-[var(--border)] bg-[var(--card)]"
             }`}
           >
             <p className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
@@ -772,7 +913,7 @@ export function UdiseComplianceWorkspace({
                 kpi.tone === "amber"
                   ? "text-[#8a5a10]"
                   : kpi.tone === "green"
-                    ? "text-[#0f7a4c]"
+                    ? "text-[var(--success)]"
                     : "text-[var(--brand-deep)]"
               }`}
             >
@@ -783,7 +924,7 @@ export function UdiseComplianceWorkspace({
         ))}
       </div>
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
           Reminder settings
         </h2>
@@ -794,7 +935,7 @@ export function UdiseComplianceWorkspace({
               type="number"
               min={1}
               max={90}
-              className="mt-0.5 block w-24 rounded-lg border border-[rgba(32,48,80,0.15)] px-2 py-1.5 text-sm"
+              className="mt-0.5 block w-24 rounded-lg border border-[var(--border)] px-2 py-1.5 text-sm"
               value={settings.reminderIntervalDays}
               onChange={(e) =>
                 setSettings((s) => ({
@@ -807,7 +948,7 @@ export function UdiseComplianceWorkspace({
           <label className="text-xs text-[var(--muted)]">
             School / area for nearest Aadhaar centre
             <input
-              className="mt-0.5 block min-w-[220px] rounded-lg border border-[rgba(32,48,80,0.15)] px-2 py-1.5 text-sm"
+              className="mt-0.5 block min-w-[220px] rounded-lg border border-[var(--border)] px-2 py-1.5 text-sm"
               value={settings.schoolAreaHint}
               onChange={(e) =>
                 setSettings((s) => ({ ...s, schoolAreaHint: e.target.value }))
@@ -829,14 +970,14 @@ export function UdiseComplianceWorkspace({
           </label>
           <button
             type="button"
-            className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-sm font-medium text-white"
+            className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-sm font-medium text-[var(--primary-foreground)]"
             onClick={saveSettings}
           >
             Save settings
           </button>
           <button
             type="button"
-            className="rounded-lg border border-[rgba(32,48,80,0.2)] bg-white px-3 py-1.5 text-sm"
+            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm"
             onClick={sendDueBatch}
           >
             WhatsApp all due ({summary.dueReminders})
@@ -845,7 +986,7 @@ export function UdiseComplianceWorkspace({
         <label className="mt-3 block text-xs text-[var(--muted)]">
           Extra line on WhatsApp
           <input
-            className="mt-0.5 block w-full max-w-xl rounded-lg border border-[rgba(32,48,80,0.15)] px-2 py-1.5 text-sm"
+            className="mt-0.5 block w-full max-w-xl rounded-lg border border-[var(--border)] px-2 py-1.5 text-sm"
             value={settings.customNote}
             onChange={(e) =>
               setSettings((s) => ({ ...s, customNote: e.target.value }))
@@ -874,16 +1015,6 @@ export function UdiseComplianceWorkspace({
           </a>
         </p>
       </div>
-
-      <UdiseBridgePanel
-        academicYearCode={ay}
-        onApplied={(next, message) => {
-          saveSis(next);
-          setSis(next);
-          onChanged?.(next, message);
-          flash(message);
-        }}
-      />
 
       <UdisePenApaarImportPanel
         masters={masters}
@@ -920,13 +1051,13 @@ export function UdiseComplianceWorkspace({
               (id === "call" && view === "call") ||
               (id === "unregistered" && view === "unregistered")
                 ? id === "mbu_age_below_class"
-                  ? "bg-[#b42318] text-white"
+                  ? "bg-[var(--danger)] text-white"
                   : id === "call"
-                    ? "bg-[#0f7a4c] text-white"
+                    ? "bg-[var(--success)] text-white"
                     : id === "unregistered"
                       ? "bg-[#8a5a10] text-white"
-                      : "bg-[var(--brand-deep)] text-white"
-                : "border border-[rgba(32,48,80,0.15)] bg-white text-[var(--brand-deep)]"
+                      : "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                : "border border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)]"
             }`}
             onClick={() => {
               setFilter(id);
@@ -945,7 +1076,12 @@ export function UdiseComplianceWorkspace({
         ))}
       </div>
 
-      {view === "unregistered" ? (
+      {view === "facts" ? (
+        // The Compliance grant, or Compliance → Compliance facts on its own.
+        <ComplianceFactsPanel
+          canEdit={hasFeaturePermission(session, masters, "compliance.facts", "edit")}
+        />
+      ) : view === "unregistered" ? (
         <div className="space-y-3">
           <div className="rounded-xl border border-[rgba(138,90,16,0.35)] bg-[rgba(138,90,16,0.08)] px-4 py-3">
             <p className="text-sm font-semibold text-[#8a5a10]">
@@ -960,31 +1096,28 @@ export function UdiseComplianceWorkspace({
             </p>
           </div>
           {visibleUnregistered.length === 0 ? (
-            <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-8 text-center text-sm text-[var(--muted)]">
+            <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
               {query.trim()
                 ? `No "Not on UDISE+" student matches “${query.trim()}”.`
                 : "All active SIS students have a UDISE+ PEN — none pending registration."}
             </p>
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-[rgba(32,48,80,0.1)] bg-white">
-              <table className="min-w-[900px] w-full border-collapse text-left text-xs">
-                <thead>
-                  <tr className="border-b border-[rgba(32,48,80,0.1)] bg-[rgba(138,90,16,0.08)] text-[var(--muted)]">
+            <ErpTableShell className="overflow-x-auto">
+              <ErpTable minWidth="min-w-[900px]" className="border-collapse">
+                <ErpTableHead>
+                  <tr>
                     <th className="px-2 py-2 font-medium">#</th>
-                    <th className="px-2 py-2 font-medium">Student</th>
-                    <th className="px-2 py-2 font-medium">Class</th>
+                    <ErpSortTh sort={unregSort} field="student" className="px-2 py-2 font-medium">Student</ErpSortTh>
+                    <ErpSortTh sort={unregSort} field="klass" className="px-2 py-2 font-medium">Class</ErpSortTh>
                     <th className="px-2 py-2 font-medium">Aadhaar</th>
-                    <th className="px-2 py-2 font-medium">Reason</th>
+                    <ErpSortTh sort={unregSort} field="reason" className="px-2 py-2 font-medium">Reason</ErpSortTh>
                     <th className="px-2 py-2 font-medium">Parents</th>
                     <th className="px-2 py-2 font-medium">Call</th>
                   </tr>
-                </thead>
-                <tbody>
-                  {visibleUnregistered.map((row, i) => (
-                    <tr
-                      key={row.student.id}
-                      className="border-b border-[rgba(32,48,80,0.06)] align-top hover:bg-[rgba(32,48,80,0.02)]"
-                    >
+                </ErpTableHead>
+                <ErpTableBody hoverable>
+                  {unregSort.rows.map((row, i) => (
+                    <tr key={row.student.id} className="align-top">
                       <td className="px-2 py-2 text-[var(--muted)]">{i + 1}</td>
                       <td className="px-2 py-2">
                         <Link
@@ -1017,7 +1150,7 @@ export function UdiseComplianceWorkspace({
                           {row.primaryCallTelHref ? (
                             <a
                               href={row.primaryCallTelHref}
-                              className="rounded-lg bg-[#0f7a4c] px-2 py-1 text-center text-[11px] font-semibold text-white"
+                              className="rounded-lg bg-[var(--success)] px-2 py-1 text-center text-[11px] font-semibold text-white"
                             >
                               Call {row.callContacts[0]?.label ?? ""}
                             </a>
@@ -1041,9 +1174,9 @@ export function UdiseComplianceWorkspace({
                       </td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </ErpTableBody>
+              </ErpTable>
+            </ErpTableShell>
           )}
         </div>
       ) : view === "call" ? (
@@ -1060,7 +1193,7 @@ export function UdiseComplianceWorkspace({
             ).
           </p>
           {callList.length === 0 ? (
-            <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-8 text-center text-sm text-[var(--muted)]">
+            <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
               No incomplete students with a call number in this filter.
             </p>
           ) : (
@@ -1073,8 +1206,8 @@ export function UdiseComplianceWorkspace({
                     key={row.student.id}
                     className={`rounded-xl border p-3 ${
                       mbuAlert
-                        ? "border-[#b42318] bg-[rgba(180,35,24,0.08)]"
-                        : "border-[rgba(32,48,80,0.1)] bg-white"
+                        ? "border-[var(--danger)] bg-[var(--danger-soft)]"
+                        : "border-[var(--border)] bg-[var(--card)]"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -1083,7 +1216,7 @@ export function UdiseComplianceWorkspace({
                           href={`/students/${row.student.id}/edit`}
                           className={`font-semibold underline-offset-2 hover:underline ${
                             mbuAlert
-                              ? "text-[#b42318]"
+                              ? "text-[var(--danger)]"
                               : "text-[var(--brand-deep)]"
                           }`}
                         >
@@ -1096,7 +1229,7 @@ export function UdiseComplianceWorkspace({
                       {primary?.telHref ? (
                         <a
                           href={primary.telHref}
-                          className="shrink-0 rounded-lg bg-[#0f7a4c] px-3 py-1.5 text-[12px] font-semibold text-white"
+                          className="shrink-0 rounded-lg bg-[var(--success)] px-3 py-1.5 text-[12px] font-semibold text-white"
                         >
                           Call
                         </a>
@@ -1116,7 +1249,7 @@ export function UdiseComplianceWorkspace({
                           <a
                             key={`${c.label}-${c.mobile}`}
                             href={c.telHref}
-                            className="rounded-md border border-[rgba(32,48,80,0.15)] bg-white px-2 py-0.5 text-[10px] font-medium text-[var(--brand-deep)]"
+                            className="rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-0.5 text-[10px] font-medium text-[var(--brand-deep)]"
                           >
                             Call {c.label}
                           </a>
@@ -1126,7 +1259,7 @@ export function UdiseComplianceWorkspace({
                     <div className="mt-2 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        className="rounded-lg border border-[rgba(32,48,80,0.2)] px-2 py-1 text-[10px] font-medium text-[var(--brand-deep)] disabled:opacity-40"
+                        className="rounded-lg border border-[var(--border)] px-2 py-1 text-[10px] font-medium text-[var(--brand-deep)] disabled:opacity-40"
                         disabled={!row.whatsappMobile}
                         onClick={() => sendReminder(row)}
                       >
@@ -1148,45 +1281,41 @@ export function UdiseComplianceWorkspace({
           )}
         </div>
       ) : (
-      <div className="overflow-x-auto rounded-xl border border-[rgba(32,48,80,0.1)] bg-white">
+      <ErpTableShell className="overflow-x-auto">
         {visible.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-[var(--muted)]">
             No open UDISE+ gaps in this filter — good.
           </p>
         ) : (
-          <table className="min-w-[1000px] w-full border-collapse text-left text-xs">
-            <thead>
-              <tr className="border-b border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.04)] text-[var(--muted)]">
+          <ErpTable minWidth="min-w-[1000px]" className="border-collapse">
+            <ErpTableHead>
+              <tr>
                 <th className="px-2 py-2 font-medium">Priority</th>
-                <th className="px-2 py-2 font-medium">Student</th>
-                <th className="px-2 py-2 font-medium">Class / UDISE+</th>
+                <ErpSortTh sort={udiseSort} field="student" className="px-2 py-2 font-medium">Student</ErpSortTh>
+                <ErpSortTh sort={udiseSort} field="klass" className="px-2 py-2 font-medium">Class / UDISE+</ErpSortTh>
                 <th className="px-2 py-2 font-medium">Missing</th>
                 <th className="px-2 py-2 font-medium">Aadhaar / validation</th>
                 <th className="px-2 py-2 font-medium">Parents</th>
                 <th className="px-2 py-2 font-medium">PEN / APAAR</th>
                 <th className="px-2 py-2 font-medium">Call / Remind</th>
               </tr>
-            </thead>
-            <tbody>
-              {visible.map((row) => {
+            </ErpTableHead>
+            <ErpTableBody hoverable>
+              {udiseSort.rows.map((row) => {
                 const mbuAlert = row.missing.includes("mbu_age_below_class");
                 return (
                 <tr
                   key={row.student.id}
-                  className={`border-b border-[rgba(32,48,80,0.06)] align-top ${
-                    mbuAlert
-                      ? "bg-[rgba(180,35,24,0.12)]"
-                      : "hover:bg-[rgba(32,48,80,0.02)]"
-                  }`}
+                  className={`align-top ${mbuAlert ? "bg-[rgba(180,35,24,0.12)]" : ""}`}
                 >
                   <td className="px-2 py-2">
                     <span
                       className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold ${
                         mbuAlert || row.priority >= 90
-                          ? "bg-[#b42318] text-white"
+                          ? "bg-[var(--danger)] text-white"
                           : row.priority >= 60
                             ? "bg-[rgba(180,120,24,0.15)] text-[#8a5a10]"
-                            : "bg-[rgba(32,48,80,0.08)] text-[var(--muted)]"
+                            : "bg-[var(--surface-sunken)] text-[var(--muted)]"
                       }`}
                     >
                       {mbuAlert
@@ -1207,7 +1336,7 @@ export function UdiseComplianceWorkspace({
                     <Link
                       href={`/students/${row.student.id}/edit`}
                       className={`font-semibold underline-offset-2 hover:underline ${
-                        mbuAlert ? "text-[#b42318]" : "text-[var(--brand-deep)]"
+                        mbuAlert ? "text-[var(--danger)]" : "text-[var(--brand-deep)]"
                       }`}
                     >
                       {row.student.fullName}
@@ -1216,7 +1345,7 @@ export function UdiseComplianceWorkspace({
                       {row.student.admissionNo}
                     </span>
                     {mbuAlert ? (
-                      <span className="mt-1 block text-[10px] font-bold text-[#b42318]">
+                      <span className="mt-1 block text-[10px] font-bold text-[var(--danger)]">
                         Notify: age below for class ·{" "}
                         {row.student.udiseMbuStatus || "MBU Pending"}
                       </span>
@@ -1270,50 +1399,60 @@ export function UdiseComplianceWorkspace({
                     <div>APAAR: {row.student.apaarId || "—"}</div>
                   </td>
                   <td className="px-2 py-2">
-                    <div className="flex min-w-[120px] flex-col gap-1">
-                      {row.primaryCallTelHref ? (
-                        <a
-                          href={row.primaryCallTelHref}
-                          className="rounded-lg bg-[#0f7a4c] px-2 py-1 text-center text-[11px] font-semibold text-white"
-                        >
-                          Call {row.callContacts[0]?.label ?? ""}
-                        </a>
-                      ) : (
-                        <span className="text-[10px] text-[#8b1a12]">
-                          No phone on file
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        className="rounded-lg bg-[var(--brand-deep)] px-2 py-1 text-[11px] font-medium text-white disabled:opacity-40"
-                        disabled={!row.whatsappMobile}
-                        onClick={() => sendReminder(row)}
-                      >
-                        WhatsApp
-                      </button>
-                      <a
-                        className="text-[10px] text-[var(--brand-deep)] underline"
-                        href={row.nearestCenterMapsUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Nearest Aadhaar centre
-                      </a>
+                    {/*
+                      The same "…" as every other list (director, 19 Sep
+                      2026). Call, WhatsApp and the Aadhaar centre used to
+                      be three differently-shaped controls stacked in the
+                      cell; the actions are the same, the gesture is now
+                      the one used everywhere else.
+                    */}
+                    <div className="flex min-w-[120px] items-center gap-2">
                       {row.lastReminded ? (
                         <span className="text-[10px] text-[var(--muted)]">
                           Last: {row.lastReminded.slice(0, 10)}
                         </span>
                       ) : null}
+                      <RowActionMenu
+                        row={row}
+                        label="Row actions"
+                        className="ml-auto"
+                        actions={[
+                          {
+                            id: "call",
+                            label: `Call ${row.callContacts[0]?.label ?? "family"}`,
+                            hidden: (r) => !r.primaryCallTelHref,
+                            onSelect: (r) => {
+                              window.location.href = r.primaryCallTelHref;
+                            },
+                          },
+                          {
+                            id: "whatsapp",
+                            label: "Send the WhatsApp reminder",
+                            disabled: (r) => !r.whatsappMobile,
+                            onSelect: (r) => sendReminder(r),
+                          },
+                          {
+                            id: "centre",
+                            label: "Nearest Aadhaar centre",
+                            separatorAbove: true,
+                            onSelect: (r) => {
+                              window.open(r.nearestCenterMapsUrl, "_blank", "noreferrer");
+                            },
+                          },
+                        ]}
+                      />
                     </div>
                   </td>
                 </tr>
                 );
               })}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         )}
-      </div>
+      </ErpTableShell>
       )}
+
+      </div>
 
       {kpiModal ? (
         <UdiseStudentListModal

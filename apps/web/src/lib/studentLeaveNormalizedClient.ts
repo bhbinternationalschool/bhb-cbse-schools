@@ -5,6 +5,19 @@
 import type { StudentLeaveState } from "@/lib/studentLeave";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+
+const STUDENT_LEAVE_DESK = "student_leave";
+
+/** A leave request the office deleted; the next push deletes it by id. */
+export function recordStudentLeaveDeletion(id: string) {
+  if (typeof window === "undefined") return;
+  recordDeskDeletion(STUDENT_LEAVE_DESK, "student_leave_desk_requests", [id]);
+}
 
 const META_KEY = "bhb_student_leave_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -61,19 +74,33 @@ export function scheduleStudentLeaveDeskSync(state: StudentLeaveState) {
 }
 
 async function pushStudentLeaveDeskApi(state: StudentLeaveState) {
+  const sentDeletes = pendingDeskDeletes(STUDENT_LEAVE_DESK);
   try {
     const res = await fetch("/api/school-data/student-leave-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requests: state.requests }),
+      // Deletions are named, never inferred from what this browser lacks.
+      body: JSON.stringify({ requests: state.requests, deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
       updatedAt?: string;
       requestCount?: number;
       error?: string;
+      kept?: string[];
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(STUDENT_LEAVE_DESK, sentDeletes);
+      // Requests decided or withdrawn elsewhere were not overwritten by this
+      // copy: reload the desk so they show as they are.
+      if (body.kept?.length) {
+        void Promise.all([import("@/lib/deskHydrateGuard"), import("@/lib/deskHydrationSchedule")]).then(
+          ([guard, sched]) => {
+            guard.resetDeskHydrated("student_leave");
+            return sched.ensureAllDeskHydrated();
+          },
+        );
+      }
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         requestCount: body.requestCount ?? state.requests.length,
@@ -81,7 +108,12 @@ async function pushStudentLeaveDeskApi(state: StudentLeaveState) {
     } else if (!res.ok) {
       console.warn("[student-leave-db] desk push failed", body?.error || res.status);
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("student_leave");
+    else recordDeskSyncFailure("student_leave", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("student_leave", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[student-leave-db] desk push error", e);
   }
 }
@@ -118,10 +150,15 @@ type StudentLeaveDeskBundle = Pick<StudentLeaveState, "requests">;
 
 export async function hydrateStudentLeaveDeskFromDb(
   preferDb?: boolean,
-): Promise<{ bundle: StudentLeaveDeskBundle; changed: boolean }> {
+): Promise<{
+  bundle: StudentLeaveDeskBundle;
+  changed: boolean;
+  /** false = fetch failed / not authenticated; bundle is NOT a confirmed empty state. */
+  ok: boolean;
+}> {
   const remote = await fetchStudentLeaveDeskFromApi();
   const empty: StudentLeaveDeskBundle = { requests: [] };
-  if (!remote) return { bundle: empty, changed: false };
+  if (!remote) return { bundle: empty, changed: false, ok: false };
 
   const meta = readMeta();
   const shouldTake =
@@ -131,12 +168,12 @@ export async function hydrateStudentLeaveDeskFromDb(
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.requestCount > meta.requestCount;
 
-  if (!shouldTake) return { bundle: empty, changed: false };
+  if (!shouldTake) return { bundle: empty, changed: false, ok: true };
 
   writeMeta({
     updatedAt: remote.updatedAt,
     requestCount: remote.requestCount,
   });
 
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

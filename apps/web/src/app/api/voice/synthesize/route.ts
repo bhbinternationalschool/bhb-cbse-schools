@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDemoSession } from "@/lib/auth";
-import { googleTextToSpeech } from "@/lib/googleSpeech.server";
+import { textToSpeech } from "@/lib/speech.server";
 
 export const runtime = "nodejs";
 
@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "text required" }, { status: 400 });
   }
 
-  const result = await googleTextToSpeech({
+  const result = await textToSpeech({
     text,
     languageCode: body.languageCode || "hi-IN",
   });
@@ -35,5 +35,6 @@ export async function POST(req: Request) {
     ok: true,
     audioBase64: result.audioBase64,
     mimeType: result.mimeType,
+    engine: result.engine,
   });
 }

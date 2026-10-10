@@ -1,7 +1,21 @@
 "use client";
 
+import { PRINT_LETTERHEAD_CSS, printLetterheadHtml, printWhenImagesReady } from "@/lib/printLetterheadHtml";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  Cell,
+  LabelList,
+  Pie,
+  PieChart as RechartsPieChart,
+  ResponsiveContainer,
+  XAxis,
+} from "recharts";
 import {
   ErpMetricCard,
   ErpMetricGrid,
@@ -17,6 +31,7 @@ import {
   LineChart,
   PieChart,
   Printer,
+  MessageCircle,
   Table2,
   X,
   ChevronRight,
@@ -25,6 +40,8 @@ import {
   TrendingUp,
   AlertTriangle,
 } from "lucide-react";
+import { ErpTable, ErpTableBody } from "@/components/ui/erp-roster";
+import { StaffLeaveDecideList } from "@/components/dashboard/StaffLeaveDecideList";
 
 export type DashboardTone =
   | "navy"
@@ -73,6 +90,8 @@ export type DashboardKpi = {
   detailTitle?: string;
   detailColumns?: DashboardTableColumn[];
   detailRows?: DashboardTableRow[];
+  /** Live actions in the detail drawer instead of the static rows. */
+  detailAction?: "staff_leave_decide";
 };
 
 export type DashboardQuickLink = {
@@ -88,10 +107,24 @@ export type DashboardKpiSection = {
   kpis: DashboardKpi[];
 };
 
+/**
+ * A per-row action on a dashboard table.
+ *
+ * Declared as data, not as a callback: the models are built in plain libs
+ * (feeDashboard, moduleDashboards) that have no business opening a WhatsApp
+ * window. The lib names the intent and carries whatever the action needs on
+ * the row; ModuleDashboardHost, which is a client component, does the work.
+ */
+export type DashboardRowAction = {
+  kind: "whatsapp-defaulter";
+  label: string;
+};
+
 export type DashboardTableBlock = {
   title: string;
   columns: DashboardTableColumn[];
   rows: DashboardTableRow[];
+  rowAction?: DashboardRowAction;
 };
 
 export type ChartView = "bar" | "pie" | "trend";
@@ -114,12 +147,21 @@ export type DashboardChartBlock = {
   center?: DashboardChartCenter;
   /** Preferred initial view (defaults to bar; use trend for time series). */
   defaultView?: ChartView;
+  /** Period switch — same shape the primary chart already uses. */
+  ranges?: DashboardChartRange[];
+  rangeDefault?: string;
 };
 
 export type DashboardChartRange = {
   id: string;
   label: string;
   title: string;
+  /**
+   * Ring centre for this period. Without it a ring switched to "Today" kept
+   * the session total in the middle — the chart said one thing and the number
+   * inside it said another.
+   */
+  center?: DashboardChartCenter;
   series: DashboardChartPoint[];
 };
 
@@ -150,7 +192,7 @@ export type ModuleDashboardModel = {
   quickLinks?: DashboardQuickLink[];
 };
 
-function dashboardToneToMetric(tone: DashboardTone): ErpMetricTone {
+export function dashboardToneToMetric(tone: DashboardTone): ErpMetricTone {
   const map: Record<DashboardTone, ErpMetricTone> = {
     navy: "navy",
     gold: "amber",
@@ -164,7 +206,7 @@ function dashboardToneToMetric(tone: DashboardTone): ErpMetricTone {
   return map[tone] ?? "sky";
 }
 
-function kpiIconForTone(tone: DashboardTone) {
+export function kpiIconForTone(tone: DashboardTone) {
   switch (tone) {
     case "green":
       return <TrendingUp className="h-7 w-7" />;
@@ -186,51 +228,51 @@ const TONE_STYLES: Record<
   { chip: string; value: string; ring: string; bar: string }
 > = {
   navy: {
-    chip: "bg-[rgba(32,48,80,0.1)] text-[var(--brand-deep)]",
+    chip: "bg-[var(--surface-sunken)] text-[var(--brand-deep)]",
     value: "text-[var(--brand-deep)]",
     ring: "hover:ring-[var(--brand-deep)]/30 focus-visible:ring-[var(--brand-deep)]",
     bar: "#203050",
   },
   gold: {
-    chip: "bg-[rgba(197,160,40,0.18)] text-[#8a6d12]",
-    value: "text-[#8a6d12]",
-    ring: "hover:ring-[#c5a028]/40 focus-visible:ring-[#c5a028]",
+    chip: "bg-[rgba(197,160,40,0.18)] text-[var(--tone-amber)]",
+    value: "text-[var(--tone-amber)]",
+    ring: "hover:ring-[var(--brand-accent)]/40 focus-visible:ring-[var(--brand-accent)]",
     bar: "#c5a028",
   },
   teal: {
-    chip: "bg-[rgba(15,118,110,0.12)] text-[#0f766e]",
-    value: "text-[#0f766e]",
-    ring: "hover:ring-[#0f766e]/30 focus-visible:ring-[#0f766e]",
+    chip: "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]",
+    value: "text-[var(--tone-teal)]",
+    ring: "hover:ring-[var(--tone-teal)]/30 focus-visible:ring-[var(--tone-teal)]",
     bar: "#0f766e",
   },
   rose: {
-    chip: "bg-[rgba(190,24,93,0.12)] text-[#9d174d]",
-    value: "text-[#9d174d]",
-    ring: "hover:ring-[#9d174d]/30 focus-visible:ring-[#9d174d]",
+    chip: "bg-[rgba(190,24,93,0.12)] text-[var(--tone-rose)]",
+    value: "text-[var(--tone-rose)]",
+    ring: "hover:ring-[var(--tone-rose)]/30 focus-visible:ring-[var(--tone-rose)]",
     bar: "#9d174d",
   },
   green: {
-    chip: "bg-[rgba(22,163,74,0.12)] text-[#15803d]",
-    value: "text-[#15803d]",
-    ring: "hover:ring-[#15803d]/30 focus-visible:ring-[#15803d]",
+    chip: "bg-[rgba(22,163,74,0.12)] text-[var(--tone-green)]",
+    value: "text-[var(--tone-green)]",
+    ring: "hover:ring-[var(--tone-green)]/30 focus-visible:ring-[var(--tone-green)]",
     bar: "#15803d",
   },
   sky: {
-    chip: "bg-[rgba(2,132,199,0.12)] text-[#0369a1]",
-    value: "text-[#0369a1]",
+    chip: "bg-[rgba(2,132,199,0.12)] text-[var(--tone-sky)]",
+    value: "text-[var(--tone-sky)]",
     ring: "hover:ring-[#0284c7]/30 focus-visible:ring-[#0284c7]",
     bar: "#0284c7",
   },
   coral: {
-    chip: "bg-[rgba(234,88,12,0.12)] text-[#c2410c]",
-    value: "text-[#c2410c]",
+    chip: "bg-[rgba(234,88,12,0.12)] text-[var(--tone-coral)]",
+    value: "text-[var(--tone-coral)]",
     ring: "hover:ring-[#ea580c]/30 focus-visible:ring-[#ea580c]",
     bar: "#ea580c",
   },
   slate: {
-    chip: "bg-[rgba(71,85,105,0.12)] text-[#334155]",
-    value: "text-[#334155]",
-    ring: "hover:ring-[#334155]/30 focus-visible:ring-[#334155]",
+    chip: "bg-[rgba(71,85,105,0.12)] text-[var(--tone-slate)]",
+    value: "text-[var(--tone-slate)]",
+    ring: "hover:ring-[var(--tone-slate)]/30 focus-visible:ring-[var(--tone-slate)]",
     bar: "#334155",
   },
 };
@@ -270,7 +312,7 @@ function ChartHoverTooltip({
   if (!point) return null;
   const modes = point.modeBreakup?.filter((m) => m.value > 0) ?? [];
   return (
-    <div className="pointer-events-none absolute left-1/2 top-2 z-10 w-max max-w-[min(18rem,90vw)] -translate-x-1/2 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-3 py-2.5 text-left shadow-lg">
+    <div className="pointer-events-none absolute left-1/2 top-2 z-10 w-max max-w-[min(18rem,90vw)] -translate-x-1/2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-left shadow-lg">
       <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
         {point.date
           ? new Date(`${point.date}T12:00:00`).toLocaleDateString("en-IN", {
@@ -284,7 +326,7 @@ function ChartHoverTooltip({
         {formatRupees(point.value)}
       </p>
       {modes.length > 0 ? (
-        <ul className="mt-2 space-y-1 border-t border-[rgba(32,48,80,0.08)] pt-2 text-xs">
+        <ul className="mt-2 space-y-1 border-t border-[var(--border)] pt-2 text-xs">
           {modes.map((m) => (
             <li
               key={m.label}
@@ -311,102 +353,78 @@ function withColors(series: DashboardChartPoint[]): DashboardChartPoint[] {
   }));
 }
 
+/**
+ * All-zero series: say so instead of drawing. Recharts 3 loops ("Maximum
+ * update depth exceeded") on some all-zero charts, which took the whole
+ * Exams page down on 2026-09-30 (no mark sheets yet → every bar 0) — and a
+ * row of empty bars says nothing anyway.
+ */
+function NoChartData() {
+  return (
+    <div className="flex h-[220px] items-center justify-center rounded-xl border border-dashed border-[var(--border)] text-sm text-[var(--muted)]">
+      Nothing recorded yet
+    </div>
+  );
+}
+
+const allZero = (series: DashboardChartPoint[]) => series.every((p) => !(p.value > 0));
+
 function BarChartSvg({ series }: { series: DashboardChartPoint[] }) {
-  const data = withColors(series).slice(0, 31);
-  const max = Math.max(1, ...data.map((d) => d.value));
+  if (allZero(series)) return <NoChartData />;
+  return <BarChartDrawn series={series} />;
+}
+
+function BarChartDrawn({ series }: { series: DashboardChartPoint[] }) {
+  const data = useMemo(() => withColors(series).slice(0, 31), [series]);
   const [hovered, setHovered] = useState<number | null>(null);
-  const w = 560;
-  const h = 220;
-  const padL = 36;
-  const padB = 48;
-  const padT = 16;
-  const padR = 12;
-  const innerW = w - padL - padR;
-  const innerH = h - padT - padB;
-  const gap = data.length > 14 ? 4 : 8;
-  const barW = data.length ? (innerW - gap * (data.length - 1)) / data.length : 0;
+  const dense = data.length > 14;
 
   return (
     <div className="relative">
       <ChartHoverTooltip
         point={hovered != null ? data[hovered] ?? null : null}
       />
-      <svg viewBox={`0 0 ${w} ${h}`} className="h-auto w-full" role="img" aria-label="Bar chart">
-      <line
-        x1={padL}
-        y1={padT}
-        x2={padL}
-        y2={h - padB}
-        stroke="rgba(32,48,80,0.15)"
-        strokeWidth={1}
-      />
-      <line
-        x1={padL}
-        y1={h - padB}
-        x2={w - padR}
-        y2={h - padB}
-        stroke="rgba(32,48,80,0.15)"
-        strokeWidth={1}
-      />
-      {data.map((d, i) => {
-        const bh = (d.value / max) * innerH;
-        const x = padL + i * (barW + gap);
-        const y = padT + innerH - bh;
-        const active = hovered === i;
-        return (
-          <g
-            key={`${d.label}-${i}`}
-            onMouseEnter={() => setHovered(i)}
-            onMouseLeave={() => setHovered(null)}
-            className="cursor-pointer"
-          >
-            <rect
-              x={x}
-              y={y}
-              width={Math.max(barW, 4)}
-              height={Math.max(bh, 2)}
-              rx={6}
-              fill={d.color}
-              opacity={active ? 1 : hovered == null ? 1 : 0.45}
-              className="module-dash-bar"
-            />
-            {active && bh > 0 ? (
-              <rect
-                x={x - 1}
-                y={y - 1}
-                width={Math.max(barW, 4) + 2}
-                height={Math.max(bh, 2) + 2}
-                rx={7}
-                fill="none"
-                stroke="#c5a028"
-                strokeWidth={2}
-              />
-            ) : null}
-            {data.length <= 14 ? (
-              <text
-                x={x + barW / 2}
-                y={y - 6}
-                textAnchor="middle"
-                className="fill-[var(--brand-deep)]"
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={data} margin={{ top: 20, right: 12, left: 0, bottom: dense ? 8 : 0 }}>
+          <XAxis
+            dataKey="label"
+            tick={{ fontSize: dense ? 9 : 10, fill: "var(--muted)" }}
+            tickLine={false}
+            axisLine={{ stroke: "var(--border)" }}
+            interval={0}
+            angle={dense ? -28 : 0}
+            textAnchor={dense ? "end" : "middle"}
+            height={dense ? 40 : 20}
+            tickFormatter={(label: string) =>
+              label.length > 10 ? `${label.slice(0, 9)}…` : label
+            }
+          />
+          <Bar dataKey="value" radius={[6, 6, 0, 0]} isAnimationActive={false}>
+            {!dense ? (
+              <LabelList
+                dataKey="value"
+                position="top"
+                formatter={(label) => formatCompact(Number(label))}
+                fill="var(--brand-deep)"
                 fontSize={10}
                 fontWeight={700}
-              >
-                {formatCompact(d.value)}
-              </text>
+              />
             ) : null}
-            <text
-              x={x + barW / 2}
-              y={h - padB + 16}
-              textAnchor="middle"
-              className="fill-[var(--muted)]"
-              fontSize={data.length > 14 ? 9 : 10}
-            >
-              {d.label.length > 10 ? `${d.label.slice(0, 9)}…` : d.label}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+            {data.map((d, i) => (
+              <Cell
+                key={`${d.label}-${i}`}
+                fill={d.color}
+                opacity={hovered == null || hovered === i ? 1 : 0.45}
+                stroke={hovered === i ? "#c5a028" : "none"}
+                strokeWidth={hovered === i ? 2 : 0}
+                className="cursor-pointer"
+                onMouseEnter={() => setHovered(i)}
+                onMouseLeave={() => setHovered(null)}
+              />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -420,51 +438,16 @@ const MULTI_RING_LAYOUT: RingGeom[] = [
 
 const SINGLE_RING_LAYOUT: RingGeom = { outerR: 88, innerR: 52 };
 
-type DonutSlice = DashboardChartPoint & {
-  path: string;
-  pct: number;
-  ringIndex: number;
-  sliceIndex: number;
-  strokeW: number;
-};
-
 function ringGeom(ringCount: number, ringIndex: number): RingGeom {
   if (ringCount <= 1) return SINGLE_RING_LAYOUT;
   return MULTI_RING_LAYOUT[ringIndex] ?? MULTI_RING_LAYOUT[MULTI_RING_LAYOUT.length - 1]!;
 }
 
-function buildDonutSlices(
-  series: DashboardChartPoint[],
-  geom: RingGeom,
-  ringIndex: number,
-  cx = 120,
-  cy = 110,
-): DonutSlice[] {
-  const data = withColors(series).filter((d) => d.value > 0).slice(0, 6);
-  const total = data.reduce((s, d) => s + d.value, 0) || 1;
-  const midR = (geom.outerR + geom.innerR) / 2;
-  const strokeW = geom.outerR - geom.innerR;
-  const gap = data.length > 1 ? 0.06 : 0;
-  let angle = -Math.PI / 2;
-
-  return data.map((d, sliceIndex) => {
-    const sweep = (d.value / total) * Math.PI * 2;
-    const start = angle + gap / 2;
-    const end = angle + sweep - gap / 2;
-    angle += sweep;
-    const pct = Math.round((d.value / total) * 100);
-    const large = end - start > Math.PI ? 1 : 0;
-    const x1 = cx + midR * Math.cos(start);
-    const y1 = cy + midR * Math.sin(start);
-    const x2 = cx + midR * Math.cos(end);
-    const y2 = cy + midR * Math.sin(end);
-    const path =
-      sweep >= Math.PI * 2 - 0.02
-        ? `M ${cx} ${cy - midR} A ${midR} ${midR} 0 1 1 ${cx - 0.01} ${cy - midR}`
-        : `M ${x1} ${y1} A ${midR} ${midR} 0 ${large} 1 ${x2} ${y2}`;
-    return { ...d, path, pct, ringIndex, sliceIndex, strokeW };
-  });
-}
+type DonutRingData = {
+  id: string;
+  label: string;
+  series: DashboardChartPoint[];
+};
 
 function DonutChartSvg({
   rings,
@@ -473,129 +456,130 @@ function DonutChartSvg({
   rings: DashboardChartRing[];
   center?: DashboardChartCenter;
 }) {
-  const activeRings = rings.filter((r) => r.series.some((p) => p.value > 0));
-  const displayRings =
-    activeRings.length > 0
-      ? activeRings
+  // Memoised on `rings`: Recharts 3 re-registers a <Pie> whenever its
+  // `data` array is a new object, and that registration re-renders the
+  // chart — so arrays rebuilt on every render loop forever ("Maximum update
+  // depth exceeded"). It took down the whole Exams page on 2026-09-30, whose
+  // rings were all zero: every render handed each Pie a fresh empty [].
+  const displayRings: DonutRingData[] = useMemo(() => {
+    const active = rings.filter((r) => r.series.some((p) => p.value > 0));
+    return active.length > 0
+      ? active
       : [{ id: "empty", label: "", series: [{ label: "—", value: 0 }] }];
+  }, [rings]);
   const ringCount = displayRings.length;
-  const [hover, setHover] = useState<{
-    ring: number;
-    index: number;
-  } | null>(null);
+  const [hover, setHover] = useState<{ ring: number; index: number } | null>(null);
 
-  const allSlices = displayRings.flatMap((ring, ringIndex) =>
-    buildDonutSlices(ring.series, ringGeom(ringCount, ringIndex), ringIndex),
+  const coloredRings = useMemo(
+    () =>
+      displayRings.map((ring) => ({
+        ...ring,
+        series: withColors(ring.series).filter((p) => p.value > 0).slice(0, 6),
+      })),
+    [displayRings],
   );
+  // Nothing to draw → no Recharts at all, just an empty ring.
+  const nothingToDraw = coloredRings.every((r) => r.series.length === 0);
 
   const outerTotal =
     displayRings[0]?.series.reduce((s, p) => s + (p.value > 0 ? p.value : 0), 0) ||
     1;
   const centerValue = center?.value ?? formatCompact(outerTotal);
   const centerLabel = center?.label ?? "total";
-  const holeR =
-    ringCount > 1
-      ? (MULTI_RING_LAYOUT[MULTI_RING_LAYOUT.length - 1]?.innerR ?? 26) - 2
-      : SINGLE_RING_LAYOUT.innerR - 2;
 
-  function sliceOpacity(slice: DonutSlice): number {
+  function sliceOpacity(ringIndex: number, index: number): number {
     if (!hover) return 1;
-    if (hover.ring === slice.ringIndex && hover.index === slice.sliceIndex) {
-      return 1;
-    }
-    if (hover.ring === 0 && slice.ringIndex === 1) {
-      const outerSlice = displayRings[0]?.series[hover.index];
+    if (hover.ring === ringIndex && hover.index === index) return 1;
+    if (hover.ring === 0 && ringIndex === 1) {
+      const outerPoint = coloredRings[0]?.series[hover.index];
       const linked =
-        outerSlice?.modeBreakup
-          ?.filter((m) => m.value > 0)
-          .map((m) => m.label) ?? [];
+        outerPoint?.modeBreakup?.filter((m) => m.value > 0).map((m) => m.label) ?? [];
       if (linked.length > 0) {
-        return linked.includes(slice.label) ? 1 : 0.18;
+        const thisLabel = coloredRings[ringIndex]?.series[index]?.label;
+        return thisLabel != null && linked.includes(thisLabel) ? 1 : 0.18;
       }
     }
-    if (hover.ring !== slice.ringIndex) return 0.32;
+    if (hover.ring !== ringIndex) return 0.32;
     return 0.32;
   }
 
-  const hoveredSlice =
-    hover != null
-      ? allSlices.find(
-          (s) => s.ringIndex === hover.ring && s.sliceIndex === hover.index,
-        ) ?? null
-      : null;
+  const hoveredPoint = hover ? coloredRings[hover.ring]?.series[hover.index] : null;
+  const hoveredRingTotal = hover
+    ? coloredRings[hover.ring]?.series.reduce((s, p) => s + p.value, 0) || 1
+    : 1;
 
   return (
     <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-start">
-      <div className="relative shrink-0">
-        {hoveredSlice ? (
-          <div className="pointer-events-none absolute left-1/2 top-0 z-10 w-max max-w-[min(16rem,90vw)] -translate-x-1/2 -translate-y-1 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-3 py-2 text-center shadow-lg">
+      <div className="relative mx-auto shrink-0" style={{ width: 240, height: 220 }}>
+        {hoveredPoint ? (
+          <div className="pointer-events-none absolute left-1/2 top-0 z-10 w-max max-w-[min(16rem,90vw)] -translate-x-1/2 -translate-y-1 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-center shadow-lg">
             <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
-              {displayRings[hoveredSlice.ringIndex]?.label || hoveredSlice.label}
+              {coloredRings[hover!.ring]?.label || hoveredPoint.label}
             </p>
             <p className="font-display text-base font-bold text-[var(--brand-deep)]">
-              {hoveredSlice.label}
+              {hoveredPoint.label}
             </p>
             <p className="tabular-nums text-sm font-semibold text-[var(--ink)]">
-              {formatCompact(hoveredSlice.value)} · {hoveredSlice.pct}%
+              {formatCompact(hoveredPoint.value)} ·{" "}
+              {Math.round((hoveredPoint.value / hoveredRingTotal) * 100)}%
             </p>
           </div>
         ) : null}
-        <svg
-          viewBox="0 0 240 220"
-          className="h-auto w-full max-w-[280px]"
-          role="img"
-          aria-label="Multi-ring donut chart"
-        >
-          {allSlices.map((s, i) => (
-            <path
-              key={`${s.ringIndex}-${s.label}-${i}`}
-              d={s.path}
-              fill="none"
-              stroke={s.color}
-              strokeWidth={s.strokeW}
-              strokeLinecap="round"
-              opacity={sliceOpacity(s)}
-              className="module-dash-slice transition-opacity duration-150"
-              onMouseEnter={() =>
-                setHover({ ring: s.ringIndex, index: s.sliceIndex })
-              }
-              onMouseLeave={() => setHover(null)}
-            >
-              <title>{`${s.label}: ${s.value} (${s.pct}%)`}</title>
-            </path>
-          ))}
-          <circle
-            cx={120}
-            cy={110}
-            r={holeR}
-            fill="var(--brand-cream)"
-            className="drop-shadow-sm"
+        {nothingToDraw ? (
+          <div
+            aria-hidden
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-[18px] border-[var(--surface-sunken)]"
+            style={{ width: 180, height: 180 }}
           />
-          <text
-            x={120}
-            y={106}
-            textAnchor="middle"
-            className="fill-[var(--brand-deep)]"
-            fontSize={ringCount > 1 ? 15 : 18}
-            fontWeight={800}
+        ) : (
+        <ResponsiveContainer width="100%" height="100%">
+          <RechartsPieChart>
+            {coloredRings.map((ring, ringIndex) => {
+              const geom = ringGeom(ringCount, ringIndex);
+              return (
+                <Pie
+                  key={ring.id}
+                  data={ring.series}
+                  dataKey="value"
+                  nameKey="label"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={geom.innerR}
+                  outerRadius={geom.outerR}
+                  paddingAngle={ring.series.length > 1 ? 2 : 0}
+                  stroke="none"
+                  isAnimationActive={false}
+                >
+                  {ring.series.map((p, i) => (
+                    <Cell
+                      key={`${ring.id}-${p.label}-${i}`}
+                      fill={p.color}
+                      opacity={sliceOpacity(ringIndex, i)}
+                      className="cursor-pointer transition-opacity duration-150"
+                      onMouseEnter={() => setHover({ ring: ringIndex, index: i })}
+                      onMouseLeave={() => setHover(null)}
+                    />
+                  ))}
+                </Pie>
+              );
+            })}
+          </RechartsPieChart>
+        </ResponsiveContainer>
+        )}
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <span
+            className="font-display font-extrabold text-[var(--brand-deep)]"
+            style={{ fontSize: ringCount > 1 ? 15 : 18 }}
           >
             {centerValue}
-          </text>
-          <text
-            x={120}
-            y={124}
-            textAnchor="middle"
-            className="fill-[var(--muted)]"
-            fontSize={10}
-          >
-            {centerLabel}
-          </text>
-        </svg>
+          </span>
+          <span className="text-[10px] text-[var(--muted)]">{centerLabel}</span>
+        </div>
       </div>
       <div className="w-full space-y-4">
-        {displayRings.map((ring, ringIndex) => {
-          const ringSlices = allSlices.filter((s) => s.ringIndex === ringIndex);
-          if (!ringSlices.length) return null;
+        {coloredRings.map((ring, ringIndex) => {
+          if (!ring.series.length) return null;
+          const ringTotal = ring.series.reduce((s, p) => s + p.value, 0) || 1;
           return (
             <div key={ring.id}>
               {ring.label ? (
@@ -604,28 +588,26 @@ function DonutChartSvg({
                 </p>
               ) : null}
               <ul className="space-y-2 text-sm">
-                {ringSlices.map((s, i) => (
+                {ring.series.map((p, i) => (
                   <li
-                    key={`${ring.id}-${s.label}-${i}`}
+                    key={`${ring.id}-${p.label}-${i}`}
                     className="flex cursor-default items-center gap-2"
-                    onMouseEnter={() =>
-                      setHover({ ring: ringIndex, index: s.sliceIndex })
-                    }
+                    onMouseEnter={() => setHover({ ring: ringIndex, index: i })}
                     onMouseLeave={() => setHover(null)}
                   >
                     <span
                       className="h-3 w-3 shrink-0 rounded-full"
-                      style={{ background: s.color }}
+                      style={{ background: p.color }}
                       aria-hidden
                     />
                     <span className="min-w-0 flex-1 truncate font-medium text-[var(--ink)]">
-                      {s.label}
+                      {p.label}
                     </span>
                     <span className="tabular-nums text-[15px] font-bold text-[var(--brand-deep)]">
-                      {formatCompact(s.value)}
+                      {formatCompact(p.value)}
                     </span>
                     <span className="w-10 text-right tabular-nums text-[var(--muted)]">
-                      {s.pct}%
+                      {Math.round((p.value / ringTotal) * 100)}%
                     </span>
                   </li>
                 ))}
@@ -645,94 +627,70 @@ function PieChartSvg({ series }: { series: DashboardChartPoint[] }) {
 }
 
 function TrendChartSvg({ series }: { series: DashboardChartPoint[] }) {
-  const data = withColors(series).slice(0, 31);
-  const max = Math.max(1, ...data.map((d) => d.value));
-  const min = Math.min(0, ...data.map((d) => d.value));
-  const span = Math.max(1, max - min);
+  if (allZero(series)) return <NoChartData />;
+  return <TrendChartDrawn series={series} />;
+}
+
+function TrendChartDrawn({ series }: { series: DashboardChartPoint[] }) {
+  const data = useMemo(() => withColors(series).slice(0, 31), [series]);
   const [hovered, setHovered] = useState<number | null>(null);
-  const w = 560;
-  const h = 220;
-  const padL = 36;
-  const padB = 48;
-  const padT = 20;
-  const padR = 16;
-  const innerW = w - padL - padR;
-  const innerH = h - padT - padB;
-
-  const points = data.map((d, i) => {
-    const x =
-      data.length === 1
-        ? padL + innerW / 2
-        : padL + (i / (data.length - 1)) * innerW;
-    const y = padT + innerH - ((d.value - min) / span) * innerH;
-    return { ...d, x, y };
-  });
-
-  const line = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
-  const area =
-    points.length > 0
-      ? `${line} L ${points[points.length - 1].x} ${h - padB} L ${points[0].x} ${h - padB} Z`
-      : "";
+  const gradientId = useId();
+  const dense = data.length > 14;
 
   return (
     <div className="relative">
       <ChartHoverTooltip
         point={hovered != null ? data[hovered] ?? null : null}
       />
-      <svg viewBox={`0 0 ${w} ${h}`} className="h-auto w-full" role="img" aria-label="Trend chart">
-      <defs>
-        <linearGradient id="moduleDashTrendFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#203050" stopOpacity={0.28} />
-          <stop offset="100%" stopColor="#203050" stopOpacity={0.02} />
-        </linearGradient>
-      </defs>
-      <line
-        x1={padL}
-        y1={h - padB}
-        x2={w - padR}
-        y2={h - padB}
-        stroke="rgba(32,48,80,0.15)"
-      />
-      {area ? <path d={area} fill="url(#moduleDashTrendFill)" /> : null}
-      {line ? (
-        <path
-          d={line}
-          fill="none"
-          stroke="#203050"
-          strokeWidth={3}
-          strokeLinejoin="round"
-          strokeLinecap="round"
-          className="module-dash-trend"
-        />
-      ) : null}
-      {points.map((p, i) => (
-        <g
-          key={`${p.label}-${i}`}
-          onMouseEnter={() => setHovered(i)}
-          onMouseLeave={() => setHovered(null)}
-          className="cursor-pointer"
-        >
-          <circle
-            cx={p.x}
-            cy={p.y}
-            r={hovered === i ? 7 : 5}
-            fill="#c5a028"
-            stroke="#203050"
-            strokeWidth={2}
-            opacity={hovered == null || hovered === i ? 1 : 0.45}
+      <ResponsiveContainer width="100%" height={220}>
+        <AreaChart data={data} margin={{ top: 20, right: 16, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#203050" stopOpacity={0.28} />
+              <stop offset="100%" stopColor="#203050" stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <XAxis
+            dataKey="label"
+            tick={{ fontSize: dense ? 9 : 10, fill: "var(--muted)" }}
+            tickLine={false}
+            axisLine={{ stroke: "var(--border)" }}
+            tickFormatter={(label: string) =>
+              label.length > 8 ? `${label.slice(0, 7)}…` : label
+            }
           />
-          <text
-            x={p.x}
-            y={h - padB + 16}
-            textAnchor="middle"
-            className="fill-[var(--muted)]"
-            fontSize={data.length > 14 ? 9 : 10}
-          >
-            {p.label.length > 8 ? `${p.label.slice(0, 7)}…` : p.label}
-          </text>
-        </g>
-      ))}
-    </svg>
+          <Area
+            type="linear"
+            dataKey="value"
+            stroke="#203050"
+            strokeWidth={3}
+            fill={`url(#${gradientId})`}
+            isAnimationActive={false}
+            dot={(props: { cx?: number; cy?: number; index?: number }) => {
+              const { cx, cy, index } = props;
+              if (cx == null || cy == null || index == null) {
+                return <g key={`dot-${index}`} />;
+              }
+              const active = hovered === index;
+              return (
+                <circle
+                  key={`dot-${index}`}
+                  cx={cx}
+                  cy={cy}
+                  r={active ? 7 : 5}
+                  fill="#c5a028"
+                  stroke="#203050"
+                  strokeWidth={2}
+                  opacity={hovered == null || active ? 1 : 0.45}
+                  className="cursor-pointer"
+                  onMouseEnter={() => setHovered(index)}
+                  onMouseLeave={() => setHovered(null)}
+                />
+              );
+            }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -751,7 +709,7 @@ function ChartToggle({
   ];
   return (
     <div
-      className="inline-flex rounded-xl border border-[rgba(32,48,80,0.12)] bg-[rgba(248,248,240,0.9)] p-1"
+      className="inline-flex rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-1"
       role="group"
       aria-label="Chart type"
     >
@@ -765,8 +723,8 @@ function ChartToggle({
             aria-pressed={active}
             className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition ${
               active
-                ? "bg-[var(--brand-deep)] text-white shadow-sm"
-                : "text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.08)]"
+                ? "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-sm"
+                : "text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
             }`}
           >
             {o.icon}
@@ -816,6 +774,8 @@ function DashboardTable({
   empty = "No records yet.",
   onRowClick,
   sortable = false,
+  rowAction,
+  onRowAction,
 }: {
   title: string;
   columns: DashboardTableColumn[];
@@ -824,6 +784,9 @@ function DashboardTable({
   onRowClick?: (row: DashboardTableRow) => void;
   /** Click column headers to sort (KPI detail lists). */
   sortable?: boolean;
+  /** Optional per-row button in a trailing cell. */
+  rowAction?: DashboardRowAction;
+  onRowAction?: (kind: DashboardRowAction["kind"], row: DashboardTableRow) => void;
 }) {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -847,17 +810,17 @@ function DashboardTable({
 
   return (
     <section className="module-dash-panel overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-3 sm:px-5">
+      <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 sm:px-5">
         <Table2 className="h-5 w-5 text-[#2563eb]" aria-hidden />
         <h3 className="text-base font-semibold text-[#2563eb]">
           {title}
         </h3>
-        <span className="ml-auto rounded-full bg-white/80 px-3 py-1 text-sm font-bold tabular-nums text-[var(--brand-deep)]">
+        <span className="ml-auto rounded-full bg-[var(--card)]/80 px-3 py-1 text-sm font-bold tabular-nums text-[var(--brand-deep)]">
           {rows.length}
         </span>
       </div>
       <div className="max-h-[28rem] overflow-auto">
-        <table className="w-full min-w-[28rem] border-collapse text-left">
+        <ErpTable minWidth="min-w-[28rem]" className="border-collapse">
           <thead className="sticky top-0 z-[1] bg-[#f0efe6]">
             <tr>
               {columns.map((c) => {
@@ -896,13 +859,18 @@ function DashboardTable({
                   </th>
                 );
               })}
+              {rowAction ? (
+                <th className="px-4 py-3 text-right text-[12px] font-bold uppercase tracking-[0.06em] text-[var(--muted)]">
+                  <span className="sr-only">{rowAction.label}</span>
+                </th>
+              ) : null}
             </tr>
           </thead>
-          <tbody>
+          <ErpTableBody>
             {rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={columns.length}
+                  colSpan={columns.length + (rowAction ? 1 : 0)}
                   className="px-4 py-8 text-center text-base text-[var(--muted)]"
                 >
                   {empty}
@@ -913,8 +881,8 @@ function DashboardTable({
                 <tr
                   key={row.id}
                   onClick={() => onRowClick?.(row)}
-                  className={`border-t border-[rgba(32,48,80,0.06)] transition hover:bg-[rgba(197,160,40,0.08)] ${
-                    idx % 2 === 0 ? "bg-white" : "bg-[rgba(248,248,240,0.65)]"
+                  className={`transition hover:bg-[rgba(197,160,40,0.08)] ${
+                    idx % 2 === 0 ? "bg-[var(--card)]" : "bg-[var(--surface-sunken)]"
                   } ${onRowClick ? "cursor-pointer" : ""}`}
                 >
                   {columns.map((c) => (
@@ -929,11 +897,29 @@ function DashboardTable({
                       {row[c.key] ?? "—"}
                     </td>
                   ))}
+                  {rowAction ? (
+                    <td className="px-4 py-3.5 text-right">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          // The row itself may open a drawer; the action is
+                          // its own decision.
+                          e.stopPropagation();
+                          onRowAction?.(rowAction.kind, row);
+                        }}
+                        title={rowAction.label}
+                        aria-label={`${rowAction.label} — ${row.name ?? row.id}`}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--success-soft)] text-[var(--success)] transition hover:brightness-95"
+                      >
+                        <MessageCircle className="h-5 w-5" aria-hidden />
+                      </button>
+                    </td>
+                  ) : null}
                 </tr>
               ))
             )}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </div>
     </section>
   );
@@ -968,27 +954,21 @@ function KpiDetailDrawer({
         th, td { border: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; }
         th { background: #f8fafc; }
         td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        ${PRINT_LETTERHEAD_CSS}
       </style></head><body>
+      ${printLetterheadHtml()}
       ${node.innerHTML}
       </body></html>`);
     w.document.close();
-    w.focus();
-    w.print();
+    printWhenImagesReady(w);
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(32,48,80,0.45)] p-3 sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      onClick={onClose}
-    >
-      <div
-        className="module-dash-drawer max-h-[88vh] w-full max-w-2xl overflow-auto rounded-2xl bg-[var(--brand-cream)] shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="sticky top-0 flex items-start gap-3 border-b border-[rgba(32,48,80,0.1)] bg-[var(--brand-cream)] px-5 py-4">
+    // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
+    // had none of them, so Tab left the open card for the page behind it.
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogPopup aria-labelledby={titleId} className="module-dash-drawer max-h-[88vh] w-full max-w-2xl overflow-auto rounded-2xl bg-[var(--brand-cream)] shadow-2xl">
+        <div className="sticky top-0 flex items-start gap-3 border-b border-[var(--border)] bg-[var(--brand-cream)] px-5 py-4">
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
               KPI detail
@@ -1009,20 +989,22 @@ function KpiDetailDrawer({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[rgba(32,48,80,0.15)] text-[var(--brand-deep)] hover:bg-white"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--border)] text-[var(--brand-deep)] hover:bg-[var(--card)]"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
         <div className="p-4 sm:p-5">
-          {kpi.detailColumns && kpi.detailRows ? (
+          {kpi.detailAction === "staff_leave_decide" ? (
+            <StaffLeaveDecideList />
+          ) : kpi.detailColumns && kpi.detailRows ? (
             <>
               <div className="mb-3 flex flex-wrap items-center justify-end gap-2 print:hidden">
                 <button
                   type="button"
                   onClick={handlePrint}
-                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[rgba(32,48,80,0.15)] bg-white px-3.5 text-sm font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
+                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3.5 text-sm font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                 >
                   <Printer className="h-4 w-4" />
                   Print list
@@ -1049,7 +1031,7 @@ function KpiDetailDrawer({
               </div>
             </>
           ) : (
-            <p className="rounded-xl border border-dashed border-[rgba(32,48,80,0.2)] bg-white/70 px-4 py-8 text-center text-base text-[var(--muted)]">
+            <p className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)]/70 px-4 py-8 text-center text-base text-[var(--muted)]">
               Open the related workspace tab for full records.
             </p>
           )}
@@ -1060,7 +1042,7 @@ function KpiDetailDrawer({
                 onOpenTab(kpi.tab!);
                 onClose();
               }}
-              className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--brand-deep)] px-4 text-base font-bold text-white hover:bg-[var(--brand-mid)]"
+              className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--primary)] px-4 text-base font-bold text-[var(--primary-foreground)] hover:opacity-90"
             >
               Open {kpi.label}
               <ChevronRight className="h-5 w-5" />
@@ -1072,15 +1054,15 @@ function KpiDetailDrawer({
                 onOpenHref(kpi.href!);
                 onClose();
               }}
-              className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--brand-deep)] px-4 text-base font-bold text-white hover:bg-[var(--brand-mid)]"
+              className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--primary)] px-4 text-base font-bold text-[var(--primary-foreground)] hover:opacity-90"
             >
               Open {kpi.label}
               <ChevronRight className="h-5 w-5" />
             </button>
           ) : null}
         </div>
-      </div>
-    </div>
+      </DialogPopup>
+    </Dialog>
   );
 }
 
@@ -1108,6 +1090,7 @@ function ChartPanel({
   const activeRange =
     ranges?.find((r) => r.id === rangeId) ?? ranges?.[0] ?? null;
   const panelTitle = activeRange?.title ?? title;
+  const activeCenter = activeRange?.center ?? center;
   const data = (activeRange?.series ?? series).length
     ? activeRange?.series ?? series
     : [{ label: "—", value: 0 }];
@@ -1123,9 +1106,25 @@ function ChartPanel({
           {panelTitle}
         </h3>
         <div className="flex flex-wrap items-center gap-2">
-          {ranges && ranges.length > 1 ? (
+          {/* Four or more periods stop fitting as buttons on a phone, and a
+              row of five reads as a toolbar rather than a choice. Past three,
+              the same ranges become a select. */}
+          {ranges && ranges.length > 3 ? (
+            <select
+              className="min-h-10 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-3 text-sm font-semibold text-[var(--brand-deep)]"
+              value={rangeId}
+              onChange={(e) => setRangeId(e.target.value)}
+              aria-label="Chart range"
+            >
+              {ranges.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          ) : ranges && ranges.length > 1 ? (
             <div
-              className="inline-flex rounded-xl border border-[rgba(32,48,80,0.12)] bg-[rgba(248,248,240,0.9)] p-1"
+              className="inline-flex rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-1"
               role="group"
               aria-label="Chart range"
             >
@@ -1139,8 +1138,8 @@ function ChartPanel({
                     aria-pressed={active}
                     className={`min-h-10 rounded-lg px-3 text-sm font-semibold transition ${
                       active
-                        ? "bg-[var(--brand-deep)] text-white shadow-sm"
-                        : "text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.08)]"
+                        ? "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-sm"
+                        : "text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                     }`}
                   >
                     {r.label}
@@ -1152,10 +1151,10 @@ function ChartPanel({
           <ChartToggle value={chartView} onChange={setChartView} />
         </div>
       </div>
-      <div className="min-h-[220px] rounded-xl bg-[rgba(248,248,240,0.65)] p-2 sm:p-3">
+      <div className="min-h-[220px] rounded-xl bg-[var(--surface-sunken)] p-2 sm:p-3">
         {chartView === "bar" ? <BarChartSvg series={data} /> : null}
         {chartView === "pie" ? (
-          <DonutChartSvg rings={pieRings} center={center} />
+          <DonutChartSvg rings={pieRings} center={activeCenter} />
         ) : null}
         {chartView === "trend" ? <TrendChartSvg series={data} /> : null}
       </div>
@@ -1172,11 +1171,16 @@ export function ModuleDashboardView({
   model,
   onNavigateTab,
   onTableRowClick,
+  onTableRowAction,
   variant = "module",
 }: {
   model: ModuleDashboardModel;
   onNavigateTab?: (tab: string) => void;
   onTableRowClick?: (row: DashboardTableRow) => void;
+  onTableRowAction?: (
+    kind: DashboardRowAction["kind"],
+    row: DashboardTableRow,
+  ) => void;
   variant?: "module" | "school";
 }) {
   const router = useRouter();
@@ -1256,7 +1260,7 @@ export function ModuleDashboardView({
                 const footer = (
                   <>
                     {kpi.breakdown && kpi.breakdown.length > 0 ? (
-                      <ul className="mt-2 space-y-0.5 border-t border-[rgba(32,48,80,0.08)] pt-2">
+                      <ul className="mt-2 space-y-0.5 border-t border-[var(--border)] pt-2">
                         {kpi.breakdown.map((b) => (
                           <li
                             key={b.label}
@@ -1318,6 +1322,8 @@ export function ModuleDashboardView({
                 rings={c.rings}
                 center={c.center}
                 defaultView={c.defaultView || "trend"}
+                ranges={c.ranges}
+                defaultRangeId={c.rangeDefault}
               />
             ))
           : null}
@@ -1338,6 +1344,8 @@ export function ModuleDashboardView({
               columns={t.columns}
               rows={t.rows}
               onRowClick={onTableRowClick}
+              rowAction={t.rowAction}
+              onRowAction={onTableRowAction}
             />
           ))}
         </div>

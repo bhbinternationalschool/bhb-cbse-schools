@@ -25,6 +25,8 @@ export type BigQuerySyncTableResult = {
   durationMs: number;
   ok: boolean;
   error?: string;
+  /** Dated snapshot taken before this table was overwritten, if one was. */
+  snapshot?: string | null;
 };
 
 export type BigQuerySyncRunResult = {
@@ -124,6 +126,71 @@ async function deleteTenantRowsFromBq(
   });
 }
 
+/**
+ * How far a table is allowed to shrink in one sync before the sync refuses.
+ *
+ * The mirror is a full replace: delete this tenant's rows, insert the new set.
+ * That faithfully copies a catastrophe. On 2026-09-06 the fee lines table in
+ * Postgres was emptied, the 20:30 sync dutifully wrote 0 rows to BigQuery, and
+ * the last good copy of 1,913 fee lines was gone from the one place anybody
+ * would look for a backup. What actually saved the data was BigQuery TIME
+ * TRAVEL — a storage-engine side effect with a seven-day horizon, not
+ * something anyone had designed as a safety net.
+ *
+ * So the sync now stops instead of copying a collapse. A table that has lost
+ * more than this fraction of its rows since the last sync is refused, loudly,
+ * and the mirror keeps yesterday's copy until a person looks at it.
+ */
+const COLLAPSE_FLOOR = 0.5;
+
+/** Tables this small are noisy — a genuine 2-row table halving is not news. */
+const COLLAPSE_MIN_ROWS = 20;
+
+async function bqRowCount(bqTable: string, tenantSlug: string): Promise<number | null> {
+  const bq = getBigQueryClient();
+  const datasetId = bigQueryDatasetId();
+  const [exists] = await bq.dataset(datasetId).table(bqTable).exists();
+  if (!exists) return null;
+  const [rows] = await bq.query({
+    query: `select count(*) as n from \`${bigQueryProjectId()}.${datasetId}.${bqTable}\` where tenant_slug = @tenantSlug`,
+    params: { tenantSlug },
+    location: process.env.BIGQUERY_LOCATION || "asia-south1",
+  });
+  const n = (rows?.[0] as { n?: number | string } | undefined)?.n;
+  return n === undefined ? null : Number(n);
+}
+
+/**
+ * A dated, immutable copy taken BEFORE the mirror is overwritten.
+ *
+ * A mirror is not a backup: it is only ever as good as its last write, and its
+ * last write is exactly what you cannot trust after an incident. A BigQuery
+ * table snapshot costs delta storage only, cannot be overwritten by the next
+ * sync, and expires on its own after 35 days.
+ *
+ * Best-effort by design — a failed snapshot must not stop the sync, only be
+ * reported. Losing today's snapshot is a smaller problem than a mirror that
+ * silently stops updating.
+ */
+async function snapshotBeforeOverwrite(bqTable: string): Promise<string | null> {
+  const bq = getBigQueryClient();
+  const projectId = bigQueryProjectId();
+  const datasetId = bigQueryDatasetId();
+  const [exists] = await bq.dataset(datasetId).table(bqTable).exists();
+  if (!exists) return null;
+
+  const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const snap = `${bqTable}__snap_${day}`;
+  await bq.query({
+    query:
+      `create snapshot table if not exists \`${projectId}.${datasetId}.${snap}\` ` +
+      `clone \`${projectId}.${datasetId}.${bqTable}\` ` +
+      `options (expiration_timestamp = timestamp_add(current_timestamp(), interval 35 day))`,
+    location: process.env.BIGQUERY_LOCATION || "asia-south1",
+  });
+  return snap;
+}
+
 async function ensureBqTable(
   bqTable: string,
   sample?: Record<string, unknown>,
@@ -203,6 +270,37 @@ async function syncOneTable(opts: {
       serializeRow(r, opts.tenantSlug, opts.syncedAt),
     );
 
+    // Refuse to copy a collapse. See COLLAPSE_FLOOR.
+    const before = await bqRowCount(opts.def.bqTable, opts.tenantSlug);
+    if (
+      before !== null &&
+      before >= COLLAPSE_MIN_ROWS &&
+      rows.length < before * COLLAPSE_FLOOR
+    ) {
+      return {
+        ...base,
+        ok: false,
+        rowCount: rows.length,
+        durationMs: Date.now() - started,
+        error:
+          `REFUSED: ${opts.def.pgTable} has ${rows.length} rows but the mirror holds ${before}. ` +
+          `That is a collapse, not a sync — the mirror keeps its copy. Check Postgres before ` +
+          `re-running; on 2026-09-06 this exact shape overwrote the last good copy of 1,913 fee lines.`,
+      };
+    }
+
+    // A dated copy the next sync cannot touch, taken before anything is
+    // overwritten. Best-effort: never let it stop the sync.
+    let snapshot: string | null = null;
+    try {
+      snapshot = await snapshotBeforeOverwrite(opts.def.bqTable);
+    } catch (e) {
+      console.warn(
+        `[bq-sync] snapshot of ${opts.def.bqTable} failed (continuing): ` +
+          (e instanceof Error ? e.message : String(e)),
+      );
+    }
+
     await deleteTenantRowsFromBq(opts.def.bqTable, opts.tenantSlug);
     await insertRowsBq(opts.def.bqTable, rows);
 
@@ -210,6 +308,7 @@ async function syncOneTable(opts: {
       ...base,
       rowCount: rows.length,
       durationMs: Date.now() - started,
+      snapshot,
     };
   } catch (e) {
     return {

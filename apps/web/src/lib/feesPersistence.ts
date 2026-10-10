@@ -16,11 +16,7 @@ import {
 import { mergeDbDeskIntoFeesState } from "@/lib/feesNormalizedMerge";
 import { feesReadFromDbEnabled } from "@/lib/feesDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
-import {
-  isDeskHydrated,
-  markDeskHydrated,
-  resetDeskHydrated,
-} from "@/lib/deskHydrateGuard";
+import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
 
 const MODULE = "fees";
 
@@ -54,7 +50,12 @@ export function scheduleFeesSync(state: FeesState) {
  */
 export async function ensureFeesHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
+  // Collapse concurrent callers onto one fetch. The fee counter mounts
+  // several components that each ask for this in the same tick.
+  return dedupeHydration(MODULE, hydrateFeesOnce);
+}
+
+async function hydrateFeesOnce(): Promise<boolean> {
 
   const readFromDb = feesReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("fees")
@@ -62,7 +63,16 @@ export async function ensureFeesHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { vouchers, ancillary, changed } = await hydrateFeesDeskFromDb(readFromDb);
+  const { vouchers, ancillary, changed, ok } = await hydrateFeesDeskFromDb(readFromDb);
+  if (!ok) {
+    if (typeof window !== "undefined" && feesRemoteEnabled()) {
+      const { reportLoadFailure } = await import("@/components/shell/Toast");
+      reportLoadFailure("fee records");
+    }
+    return false;
+  }
+
+  markDeskHydrated(MODULE);
   const hasAncillary =
     ancillary.cheques.length > 0 ||
     ancillary.manualBooks.length > 0 ||
@@ -81,7 +91,14 @@ export async function ensureFeesHydrated(): Promise<boolean> {
     normChanged = true;
   }
 
-  if (normChanged) {
+  // Hydration is pull-only. Re-pushing here re-ran the open-dues
+  // delete-all-then-insert (~2 000 rows) and the full voucher upsert on every
+  // fees hydrate — 107 POST /fees-vouchers a day at a 20.8 s median, with
+  // deadlocks on fee_desk_open_dues when two browsers overlapped (audit
+  // 2026-08-18). Edits reach the DB through saveFees() only. When the desk
+  // is not the source of truth (legacy blob mode) the local merge still has
+  // to be published, so keep that one path.
+  if (normChanged && !readFromDb) {
     scheduleFeesSync(loadFees());
   }
 

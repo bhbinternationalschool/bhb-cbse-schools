@@ -12,16 +12,43 @@ import {
 } from "@/lib/staffAttendance.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { findStaffByMobile } from "@/lib/waRoleResolver";
+import { cleanPunchCode } from "@/lib/punchCode";
+import { punchCodeIsValid } from "@/lib/punchCode.server";
+import { punchWindowMessage, punchWindowState } from "@/lib/punchSchedule";
 import {
+  composeStaffAttCodePunchSuccess,
   composeStaffAttHumanReply,
-  composeStaffAttPunchSuccess,
+  staffAttAskCodeText,
+  staffAttCodeExpiredText,
+  staffAttLocationRetiredText,
   detectStaffAttBotIntent,
-  staffAttAskLocationText,
+  isEarlyOutConfirm,
+  parseStaffAttLanguage,
   staffAttBotWelcomeText,
+  staffAttCancelText,
+  staffAttEarlyOutWarningText,
+  staffAttLanguageConfirmText,
+  staffAttLanguageMenuText,
+  staffAttLocationLateText,
+  staffAttSendLocationText,
+  type StaffAttLang,
 } from "@/lib/waStaffAttendanceBotEngine";
+import { expectedWindowForTiming } from "@/lib/schoolTiming";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
 
-export type WaStaffAttPending = { kind: "punch_in" } | { kind: "punch_out" };
+export type WaStaffAttPending =
+  | { kind: "punch_in" }
+  | { kind: "punch_out"; early?: boolean }
+  /** OUT requested inside school timing — waiting for YES / CANCEL */
+  | { kind: "punch_out_confirm"; end: string }
+  /**
+   * The code was valid; waiting for a live location from inside the school
+   * (3 Oct 2026). `codeOkAt` bounds the wait: LOCATION_AFTER_CODE_MS.
+   */
+  | { kind: "await_location"; punch: "in" | "out"; codeOkAt: string; early?: boolean };
+
+/** How long after a valid code its location may arrive. */
+const LOCATION_AFTER_CODE_MS = 3 * 60_000;
 
 export type WaStaffAttBotThread = {
   id: string;
@@ -31,6 +58,16 @@ export type WaStaffAttBotThread = {
   staffId: string;
   staffName: string;
   pending: WaStaffAttPending | null;
+  /** "" until the staff picks — first contact asks once, LANG changes it */
+  language?: StaffAttLang | "";
+  /**
+   * When the language menu was last put in front of this person. Asking is
+   * capped at once per thread: the menu used to REPLACE the reply, so a
+   * staff member who answered with anything other than 1 or 2 — a command,
+   * another IN — was asked again, and again. Live threads show that loop
+   * running for days without a single punch being taken.
+   */
+  languageAskedAt?: string;
   status: "bot" | "needs_staff" | "closed";
   messages: { id: string; role: string; text: string; at: string }[];
   updatedAt: string;
@@ -124,14 +161,70 @@ function openThread(
   };
 }
 
+function nowHhmmIstLocal(): string {
+  const ist = new Date(Date.now() + 330 * 60_000);
+  return ist.toISOString().slice(11, 16);
+}
+
+/** Is a check-out right now inside school timing? Returns the end time when yes. */
+function earlyOutWindow(): { early: boolean; now: string; end: string } {
+  const masters = loadMasters();
+  const timing = masters.schoolTiming?.default;
+  const now = nowHhmmIstLocal();
+  if (!timing) return { early: false, now, end: "" };
+  const today = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+  const win = expectedWindowForTiming(timing, today);
+  if (!win.isWorking) return { early: false, now, end: win.end };
+  return { early: now < win.end, now, end: win.end };
+}
+
+/** How long a "1 — English / 2 — हिंदी" question stays answerable. */
+const LANGUAGE_ASK_OPEN_MS = 15 * 60_000;
+
+/**
+ * Does this turn belong to the attendance bot?
+ *
+ * It runs before the ERP command desk, so a "yes" here takes the message
+ * away from every command. Two rules keep that honest: the keyword test is
+ * whole-message (see detectStaffAttBotIntent), and a pending punch no
+ * longer claims everything.
+ *
+ * A pending punch waits for a location pin, not for the rest of the day.
+ * `if (hasPending) return true` meant one IN with no pin following it took
+ * the command desk away from that person entirely, until they thought to
+ * send CANCEL. The pending still survives — it just stops eating messages
+ * that are not aimed at it.
+ */
 export function shouldRouteStaffAttendance(opts: {
   text: string;
   location?: { lat: number; lng: number } | null;
   hasPending?: boolean;
+  /**
+   * This bot asked "1 — English / 2 — हिंदी" a few minutes ago and has no
+   * answer yet. Without it the 1 went to whatever else reads a bare digit —
+   * on 29 Sep the command desk's help list, which answered the language
+   * choice with a description of the absent list.
+   */
+  languageAskOpen?: boolean;
 }): boolean {
-  if (opts.hasPending) return true;
   if (opts.location) return true;
-  return detectStaffAttBotIntent(opts.text) !== "unknown";
+  if (detectStaffAttBotIntent(opts.text) !== "unknown") return true;
+  if (opts.languageAskOpen && parseStaffAttLanguage(opts.text) !== null) return true;
+  if (opts.hasPending) {
+    // YES/CANCEL for an early checkout, a 1/2 answering the language menu
+    // that rode along with the punch reply, and the office screen's code.
+    return (
+      isEarlyOutConfirm(opts.text) ||
+      parseStaffAttLanguage(opts.text) !== null ||
+      isBareCode(opts.text)
+    );
+  }
+  return false;
+}
+
+/** A message that is only the six digits ("482913", "482 913"). */
+function isBareCode(text: string): boolean {
+  return /^\s*\d{3}[\s-]?\d{3}\s*$/.test(text || "");
 }
 
 export async function handleWaStaffAttendanceInbound(opts: {
@@ -147,6 +240,12 @@ export async function handleWaStaffAttendanceInbound(opts: {
     accuracyM?: number;
   };
   fromUnified?: boolean;
+  /**
+   * The unified bot already knows what this is — "Show my attendance" read
+   * by detectOwnAttendanceAsk — and says so, instead of this bot guessing
+   * from wording it deliberately matches only whole-message.
+   */
+  forceIntent?: "in" | "out" | "status";
 }): Promise<{
   handled: boolean;
   replied: boolean;
@@ -154,6 +253,8 @@ export async function handleWaStaffAttendanceInbound(opts: {
   replyText: string;
   stub: boolean;
   error?: string;
+  /** A punch was recorded by this message. */
+  punched?: "in" | "out";
 }> {
   await ensureSchoolMirrorHydrated();
   const mobile10 = waNormalizeLocal10(opts.fromWaId);
@@ -174,12 +275,19 @@ export async function handleWaStaffAttendanceInbound(opts: {
   let thread = opened.thread;
 
   const text = (opts.text || "").trim();
-  const intent = detectStaffAttBotIntent(text);
-  const routed = shouldRouteStaffAttendance({
-    text,
-    location: opts.location,
-    hasPending: !!thread.pending,
-  });
+  const intent = opts.forceIntent ?? detectStaffAttBotIntent(text);
+  const askedAtMs = Date.parse(thread.languageAskedAt || "");
+  const routed =
+    !!opts.forceIntent ||
+    shouldRouteStaffAttendance({
+      text,
+      location: opts.location,
+      hasPending: !!thread.pending,
+      languageAskOpen:
+        !thread.language &&
+        Number.isFinite(askedAtMs) &&
+        Date.now() - askedAtMs < LANGUAGE_ASK_OPEN_MS,
+    });
 
   if (!routed && opts.fromUnified) {
     return {
@@ -203,65 +311,183 @@ export async function handleWaStaffAttendanceInbound(opts: {
 
   let replyText = "";
   let escalate = false;
+  let punched: "in" | "out" | undefined;
   let pending = thread.pending;
+  let language: StaffAttLang | "" = thread.language || "";
+  // Appended to whatever the bot was going to say, never sent instead of
+  // it. A first punch must still punch.
+  let languageAsk = "";
+  let languageAskedAt = thread.languageAskedAt || "";
 
-  if (intent === "cancel") {
+  // One-time language choice (remembered on the thread; LANG re-asks).
+  if (!language) {
+    const picked = parseStaffAttLanguage(text);
+    if (picked) {
+      language = picked;
+      replyText = `${staffAttLanguageConfirmText(picked)}\n\n${staffAttBotWelcomeText(staff.fullName, picked)}`;
+    } else if (!languageAskedAt) {
+      languageAsk = staffAttLanguageMenuText(staff.fullName);
+      languageAskedAt = nowIso();
+    }
+    // Asked already and still no pick: English, and stop asking. They can
+    // send LANG whenever they want to choose.
+  } else if (intent === "lang") {
+    const picked = parseStaffAttLanguage(text.replace(/^lang\s*/i, ""));
+    if (picked) {
+      language = picked;
+      replyText = staffAttLanguageConfirmText(picked);
+    } else {
+      language = "";
+      replyText = staffAttLanguageMenuText(staff.fullName);
+    }
+  }
+  const lang: StaffAttLang = language || "en";
+
+  if (replyText) {
+    // language step handled above
+  } else if (intent === "cancel") {
     pending = null;
-    replyText = "Attendance step cancelled. Reply *IN*, *OUT*, or *STATUS*.";
+    replyText = staffAttCancelText(lang);
   } else if (intent === "human") {
     pending = null;
     escalate = true;
-    replyText = composeStaffAttHumanReply();
+    replyText = composeStaffAttHumanReply(lang);
   } else if (intent === "status" || intent === "attend") {
     pending = null;
     replyText =
       intent === "attend"
-        ? staffAttBotWelcomeText(staff.fullName)
+        ? staffAttBotWelcomeText(staff.fullName, lang)
         : await staffAttendanceStatusForWa(staff.id);
-  } else if (opts.location && pending) {
-    const kind = pending.kind === "punch_in" ? "in" : "out";
-    const result = await applyWhatsAppStaffPunch({
-      staff,
-      mobile10,
-      kind,
-      geo: {
-        lat: opts.location.lat,
-        lng: opts.location.lng,
-        accuracyM: opts.location.accuracyM,
-        name: opts.location.name,
-        address: opts.location.address,
-      },
-    });
-    pending = null;
-    if (!result.ok) {
-      replyText = result.error;
+  } else if (pending?.kind === "punch_out_confirm") {
+    if (!opts.location && isEarlyOutConfirm(text)) {
+      pending = { kind: "punch_out", early: true };
+      replyText = staffAttAskCodeText("out", lang);
     } else {
-      replyText = composeStaffAttPunchSuccess({
-        kind: result.kind,
-        time: result.time,
-        distanceM: result.distanceM,
-        staffName: staff.fullName,
-        altMobile: result.altMobile,
-      });
+      // Anything else — including a location sent without confirming —
+      // repeats the warning; the punch is NOT taken until YES.
+      const win = earlyOutWindow();
+      replyText = staffAttEarlyOutWarningText({ now: win.now, end: pending.end, lang });
     }
-  } else if (opts.location && !pending) {
-    replyText =
-      "Reply *IN* or *OUT* first, then share your location pin.";
+  } else if (opts.location && pending?.kind === "await_location") {
+    // The second half of a punch: the code was right, and now the phone
+    // shows where it is. Only inside the school (director, 3 Oct 2026).
+    const age = Date.now() - Date.parse(pending.codeOkAt || "");
+    if (!Number.isFinite(age) || age > LOCATION_AFTER_CODE_MS) {
+      pending = { kind: pending.punch === "in" ? "punch_in" : "punch_out", ...(pending.early ? { early: true } : {}) };
+      replyText = staffAttLocationLateText(lang);
+    } else {
+      const { campusGeofenceFromSettings, validateStaffPunchLocation } = await import("@/lib/staffGeofence.server");
+      const { fetchStaffAttendanceSettingsFromDb } = await import("@/lib/staffAttendanceDeskAncillary.server");
+      const fence = campusGeofenceFromSettings(await fetchStaffAttendanceSettingsFromDb());
+      const where = validateStaffPunchLocation(
+        {
+          lat: opts.location.lat,
+          lng: opts.location.lng,
+          accuracyM: opts.location.accuracyM,
+          name: opts.location.name,
+          address: opts.location.address,
+        },
+        fence,
+      );
+      if (!where.ok) {
+        // Kept waiting: a second, live location inside the time still counts.
+        replyText = where.reason || staffAttLocationRetiredText(lang);
+      } else {
+        const kind = pending.punch;
+        const early = pending.early === true;
+        const win = earlyOutWindow();
+        const result = await applyWhatsAppStaffPunch({
+          staff,
+          mobile10,
+          kind,
+          presence: "qr",
+          earlyOutNote: early ? `early checkout ${win.now} (school till ${win.end})` : undefined,
+        });
+        pending = null;
+        if (!result.ok) {
+          replyText = result.error;
+        } else {
+          punched = result.kind;
+          replyText = composeStaffAttCodePunchSuccess({
+            kind: result.kind,
+            time: result.time,
+            staffName: staff.fullName,
+            altMobile: result.altMobile,
+            earlyOut: early,
+            schoolEnd: win.end,
+            lang,
+          });
+        }
+      }
+    }
+  } else if (opts.location) {
+    // A pin on its own can be dropped anywhere on the map, so it never
+    // punches: the office screen's code comes first, then the location.
+    replyText = staffAttLocationRetiredText(lang);
+  } else if (
+    (pending && isBareCode(text)) ||
+    ((intent === "in" || intent === "out") && cleanPunchCode(text))
+  ) {
+    const kind: "in" | "out" =
+      intent === "in" || intent === "out" ? intent : pending?.kind === "punch_in" ? "in" : "out";
+    const early = pending?.kind === "punch_out" && pending.early === true;
+    const win = earlyOutWindow();
+    // Lazy: punchOptions.server is server-only, and this bot is also loaded by
+    // the chat self-tests, which cannot import a server-only module.
+    const { loadPunchOptions } = await import("@/lib/punchOptions.server");
+    const gateOptions = await loadPunchOptions();
+    const gateWindow = punchWindowState(gateOptions, Date.now());
+    if (kind === "out" && win.early && !early) {
+      // Leaving while school runs: the same warning as before, then a
+      // fresh code after YES (this one will have expired by then).
+      pending = { kind: "punch_out_confirm", end: win.end };
+      replyText = staffAttEarlyOutWarningText({ now: win.now, end: win.end, lang });
+    } else if (!gateWindow.open) {
+      // Out of the gate's hours (director, 5 Oct 2026) — no code works.
+      pending = null;
+      replyText = punchWindowMessage(gateOptions, gateWindow);
+    } else if (!punchCodeIsValid(cleanPunchCode(text))) {
+      pending = { kind: kind === "in" ? "punch_in" : "punch_out", ...(early ? { early: true } : {}) };
+      replyText = staffAttCodeExpiredText(lang);
+    } else {
+      // The code proves the screen was seen in the last minute; the phone
+      // must still show it is inside the school (director, 3 Oct 2026).
+      pending = {
+        kind: "await_location",
+        punch: kind,
+        codeOkAt: new Date().toISOString(),
+        ...(early ? { early: true } : {}),
+      };
+      replyText = staffAttSendLocationText(kind, lang);
+    }
   } else if (intent === "in") {
     pending = { kind: "punch_in" };
-    replyText = staffAttAskLocationText("in");
+    replyText = staffAttAskCodeText("in", lang);
   } else if (intent === "out") {
-    pending = { kind: "punch_out" };
-    replyText = staffAttAskLocationText("out");
+    // Checking out while school is still running → alert + confirm first.
+    const win = earlyOutWindow();
+    if (win.early) {
+      pending = { kind: "punch_out_confirm", end: win.end };
+      replyText = staffAttEarlyOutWarningText({ now: win.now, end: win.end, lang });
+    } else {
+      pending = { kind: "punch_out" };
+      replyText = staffAttAskCodeText("out", lang);
+    }
   } else if (!text && !opts.location) {
-    replyText = staffAttBotWelcomeText(staff.fullName);
+    replyText = staffAttBotWelcomeText(staff.fullName, lang);
   } else {
-    replyText = staffAttBotWelcomeText(staff.fullName);
+    replyText = staffAttBotWelcomeText(staff.fullName, lang);
+  }
+
+  if (languageAsk) {
+    replyText = replyText ? `${replyText}\n\n${languageAsk}` : languageAsk;
   }
 
   thread = {
     ...thread,
     pending,
+    language,
+    languageAskedAt,
     status: escalate ? "needs_staff" : "bot",
     updatedAt: nowIso(),
     messages: [
@@ -293,5 +519,41 @@ export async function handleWaStaffAttendanceInbound(opts: {
     replyText,
     stub: !send.ok,
     error: send.ok ? undefined : send.error,
+    punched,
+  };
+}
+
+/** How long a punch waiting for its pin counts as open work. */
+const PUNCH_OPEN_MS = 20 * 60_000;
+
+/**
+ * The punch this number started and has not finished — IN or OUT waiting
+ * for a location pin, or an early OUT waiting for YES — or null.
+ */
+export async function staffAttendanceOpenWorkFor(
+  fromWaId: string,
+): Promise<{ kind: "punch"; what: string; how: string } | null> {
+  const mobile10 = waNormalizeLocal10(fromWaId);
+  const store = await readStore();
+  const thread = store.threads.find((t) => t.mobile === mobile10 && t.status !== "closed");
+  const pending = thread?.pending;
+  if (!thread || !pending) return null;
+  const at = Date.parse(thread.updatedAt || "");
+  if (!Number.isFinite(at) || Date.now() - at > PUNCH_OPEN_MS) return null;
+  const how = "send the *6-digit code* shown on the office QR screen";
+  if (pending.kind === "punch_out_confirm") {
+    return { kind: "punch", what: "your early check-out", how: "reply *YES* to check out now" };
+  }
+  if (pending.kind === "await_location") {
+    return {
+      kind: "punch",
+      what: `your punch ${pending.punch.toUpperCase()} — waiting for your location`,
+      how: "send your *current location* (📎 → Location → Send your current location)",
+    };
+  }
+  return {
+    kind: "punch",
+    what: pending.kind === "punch_in" ? "your punch IN — waiting for the code" : "your punch OUT — waiting for the code",
+    how,
   };
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import type { MastersState } from "@/lib/masters";
 import {
   applySessionGapActions,
@@ -8,6 +9,8 @@ import {
   type SessionGapRow,
 } from "@/lib/studentImport";
 import type { SisState } from "@/lib/sis";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Props = {
   masters: MastersState;
@@ -38,9 +41,28 @@ export function SessionImportGapDialog({
   onClose,
   onApplied,
 }: Props) {
+
+  // Sorting by class groups the children a teacher can confirm together.
+  const gapSort = useTableSort(
+    missing,
+    {
+      student: (row) => row.fullName,
+      klass: (row) => classLabel(row.classId, row.sectionId, masters),
+    },
+    "student",
+    "asc",
+  );
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   const [choices, setChoices] = useState<Record<string, SessionGapAction>>(
     () =>
-      Object.fromEntries(missing.map((m) => [m.studentId, "leave" as const])),
+      Object.fromEntries(gapSort.rows.map((m) => [m.studentId, "leave" as const])),
   );
   const [busy, setBusy] = useState(false);
 
@@ -93,13 +115,10 @@ export function SessionImportGapDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(32,48,80,0.45)] p-3 sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="session-gap-title"
-    >
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white shadow-lg">
+    // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
+    // had none of them, so Tab left the open card for the page behind it.
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogPopup aria-labelledby="session-gap-title" className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white shadow-lg">
         <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
           <h2
             id="session-gap-title"
@@ -151,22 +170,19 @@ export function SessionImportGapDialog({
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto px-2 py-2 sm:px-4">
-          <table className="w-full text-left text-xs">
-            <thead className="sticky top-0 bg-white text-[10px] uppercase tracking-wide text-[var(--muted)]">
+          <ErpTable className="text-xs">
+            <ErpTableHead sticky>
               <tr>
-                <th className="px-2 py-2 font-semibold">Student</th>
-                <th className="px-2 py-2 font-semibold">Class</th>
+                <ErpSortTh sort={gapSort} field="student" className="px-2 py-2 font-semibold">Student</ErpSortTh>
+                <ErpSortTh sort={gapSort} field="klass" className="px-2 py-2 font-semibold">Class</ErpSortTh>
                 <th className="px-2 py-2 font-semibold">Action</th>
               </tr>
-            </thead>
-            <tbody>
-              {missing.map((row) => {
+            </ErpTableHead>
+            <ErpTableBody>
+              {gapSort.rows.map((row) => {
                 const action = choices[row.studentId] ?? "leave";
                 return (
-                  <tr
-                    key={row.studentId}
-                    className="border-t border-[rgba(32,48,80,0.06)]"
-                  >
+                  <tr key={row.studentId}>
                     <td className="px-2 py-2 align-top">
                       <div className="font-medium text-[var(--brand-deep)]">
                         {row.fullName}
@@ -210,8 +226,8 @@ export function SessionImportGapDialog({
                   </tr>
                 );
               })}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[rgba(32,48,80,0.08)] px-4 py-3">
@@ -232,7 +248,7 @@ export function SessionImportGapDialog({
             {busy ? "Saving…" : "Apply choices"}
           </button>
         </div>
-      </div>
-    </div>
+      </DialogPopup>
+    </Dialog>
   );
 }

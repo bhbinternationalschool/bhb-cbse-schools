@@ -10,6 +10,7 @@ import {
   type StaffAttendanceState,
 } from "@/lib/staffAttendance";
 import {
+  captureStaffAttendanceStamps,
   hydrateStaffAttendanceDeskFromDb,
   scheduleStaffAttendanceDeskSync,
 } from "@/lib/staffAttendanceNormalizedClient";
@@ -21,6 +22,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "staff_attendance";
 
@@ -41,7 +43,7 @@ export function resetStaffAttendancePersistenceCache() {
 
 export function scheduleStaffAttendanceSync(state: StaffAttendanceState) {
   if (typeof window === "undefined") {
-    void pushStaffAttendanceRemoteServer(state);
+    void trackServerWork(pushStaffAttendanceRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("staff_attendance")) {
@@ -77,7 +79,6 @@ export async function pushStaffAttendanceRemoteServer(
 
 export async function ensureStaffAttendanceHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = staffAttendanceReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("staff_attendance")
@@ -85,8 +86,13 @@ export async function ensureStaffAttendanceHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { registers, ancillary, changed } =
+  const { registers, ancillary, changed, ok, stamps } =
     await hydrateStaffAttendanceDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (changed && (registers.length > 0 || ancillary.settings || readFromDb)) {
     const merged = mergeDbDeskIntoStaffAttendanceState(
       loadStaffAttendance(),
@@ -96,8 +102,13 @@ export async function ensureStaffAttendanceHydrated(): Promise<boolean> {
     writeStaffAttendanceLocalRaw(merged);
     normChanged = true;
   }
+  // Which version of each register this browser now holds: its saves send
+  // only registers changed since, stamped, so they can't undo a punch.
+  captureStaffAttendanceStamps(stamps, loadStaffAttendance());
 
-  if (normChanged) {
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+
+  if (normChanged && !readFromDb) {
     scheduleStaffAttendanceSync(loadStaffAttendance());
   }
 
@@ -132,9 +143,10 @@ export async function ensureStaffAttendanceHydratedServer(): Promise<boolean> {
 
   const dbDesk = await fetchStaffAttendanceDeskFromDb();
   if (
-    dbDesk.registers.length > 0 ||
-    dbDesk.ancillary.settings ||
-    staffAttendanceReadFromDbEnabled()
+    dbDesk.ok &&
+    (dbDesk.registers.length > 0 ||
+      dbDesk.ancillary.settings ||
+      staffAttendanceReadFromDbEnabled())
   ) {
     state = mergeDbDeskIntoStaffAttendanceState(
       state,

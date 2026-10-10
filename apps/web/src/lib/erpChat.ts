@@ -22,6 +22,8 @@ import type { SessionLike } from "@/lib/rbac";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import type { SisState } from "@/lib/sis";
 import type { StaffRecord } from "@/lib/foundationMasters";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type ErpChatThreadKind =
   | "staff_dm"
@@ -273,12 +275,12 @@ export function mergeErpChatStates(
 export function loadErpChat(): ErpChatState {
   if (typeof window === "undefined") return emptyErpChatState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (raw) return normalizeErpChatState(JSON.parse(raw));
     const legacy = localStorage.getItem(LEGACY_KEY);
     if (legacy) {
       const migrated = normalizeErpChatState(JSON.parse(legacy));
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(migrated));
       return migrated;
     }
     return emptyErpChatState();
@@ -290,17 +292,17 @@ export function loadErpChat(): ErpChatState {
 export function saveErpChat(state: ErpChatState) {
   if (typeof window === "undefined") return;
   const next = normalizeErpChatState(state);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   window.dispatchEvent(new Event(ERP_CHAT_EVENT));
   window.dispatchEvent(new Event("bhb-staff-chat"));
-  void import("@/lib/erpChatPersistence").then(({ scheduleErpChatSync }) => {
+  void trackServerWork(import("@/lib/erpChatPersistence").then(({ scheduleErpChatSync }) => {
     scheduleErpChatSync(next);
-  });
+  }));
 }
 
 export function writeErpChatLocalRaw(state: ErpChatState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(
+  writeCacheOrInvalidate(
     STORAGE_KEY,
     JSON.stringify(normalizeErpChatState(state)),
   );

@@ -14,6 +14,7 @@ import { WaTemplateVariablesPicker } from "@/components/masters/WaTemplateVariab
 import { AutomationSchedulePicker } from "./AutomationSchedulePicker";
 import { AutomationAudiencePicker } from "./AutomationAudiencePicker";
 import { AutomationSetupHelper } from "./AutomationSetupHelper";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 import {
   autoBtnOutline,
   autoBtnTeal,
@@ -61,7 +62,7 @@ export function AutomationCreateView({
   const [actionType, setActionType] =
     useState<AutomationActionType>("whatsapp_template");
   const [templateFamilyKey, setTemplateFamilyKey] = useState("");
-  const [templateLanguage, setTemplateLanguage] = useState<"en" | "hi">("en");
+  const [templateLanguage, setTemplateLanguage] = useState<"en" | "hi">(SCHOOL_DEFAULT_WA_LANGUAGE);
   const [audienceSummary, setAudienceSummary] = useState("");
 
   const templates = loadWaTemplates().templates;
@@ -129,7 +130,7 @@ export function AutomationCreateView({
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-3 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+        <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <label className="block text-[11px] font-semibold text-[var(--muted)]">
             Rule name
             <input
@@ -270,7 +271,7 @@ export function AutomationCreateView({
 
         <div className="lg:sticky lg:top-4 lg:self-start space-y-3">
           {linkedTemplate ? (
-            <div className="rounded-lg border border-[rgba(32,48,80,0.1)] bg-white p-3">
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
               <p className="text-[11px] font-semibold text-[var(--brand-deep)]">
                 Linked template: {linkedTemplate.name}
               </p>

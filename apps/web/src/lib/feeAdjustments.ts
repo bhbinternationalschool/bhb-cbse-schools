@@ -15,6 +15,9 @@ import {
 } from "@/lib/masters";
 import { openFeeDues, type FeeDueLine } from "@/lib/fees";
 import { loadSis, saveSis, type SisStudent } from "@/lib/sis";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
+import { bulkWaiverPlan, newWaiverBatchId, type WaivableLine } from "@/lib/feeAdjustmentsMerge";
 
 export type FeeAdjustmentType =
   | "waiver"
@@ -66,6 +69,21 @@ export type FeeAdjustment = {
   decidedAt: string | null;
   decidedBy: string;
   decisionNote: string;
+  /**
+   * The receipt this adjustment was posted with, when it came from a counter
+   * discount. Voiding that receipt cancels the waiver too — without this the
+   * discount survived its own receipt and every retry stacked another one
+   * (found 2026-08-29: one arrear carried four ₹200 waivers from three
+   * voided attempts, so the line read as over-waived and even showed a
+   * phantom refund).
+   */
+  sourceVoucherId: string;
+  /**
+   * Shared by every line of one bulk waiver ("waive all" / "waive the
+   * selected lines"), so the Principal approves or rejects it as the one
+   * decision it is. Empty for an adjustment made on its own.
+   */
+  batchId?: string;
 };
 
 /** Accounts may post without Principal up to this (₹10,000). */
@@ -77,13 +95,46 @@ function id(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/**
+ * Parsed adjustments, keyed by the exact text they were parsed from.
+ *
+ * `loadFeeAdjustments` is called far more often than it looks: once per
+ * student for the waiver map, and once per DUE LINE inside
+ * `stopFutureBlocks` — so building one fee counter search re-parsed this
+ * blob several hundred times. The parse and the normalise pass were the
+ * whole cost; the read itself is nothing.
+ *
+ * The cache key IS the stored string, so this cannot serve stale data: any
+ * write changes the text, which misses the cache. That makes it a pure
+ * speed-up with no staleness window — deliberately not a timed cache,
+ * because a counter that shows yesterday's waiver is worse than a slow one.
+ */
+let adjustCache: { raw: string; rows: FeeAdjustment[] } | null = null;
+
+/**
+ * The server's copy of the posted adjustments.
+ *
+ * There is no localStorage on Cloud Run, so until 2026-09-16 every
+ * server-side reader saw no adjustments at all: a "stop future fees"
+ * decision did not stop anything the reminders quoted, and an ad-hoc charge
+ * was never asked for. Counter discounts survived only because PR #200
+ * reads those back off the receipt itself (`counterWaiversByDueKey`), which
+ * is exactly the hole this closes for the rest of them.
+ *
+ * Filled by `ensureFeeAdjustmentsHydratedServer` from module_local_state.
+ */
+let memoryAdjustments: FeeAdjustment[] | null = null;
+
 export function loadFeeAdjustments(): FeeAdjustment[] {
-  if (typeof window === "undefined") return [];
+  if (typeof window === "undefined") return memoryAdjustments ?? [];
   try {
-    const raw = localStorage.getItem(ADJUST_KEY);
+    const raw = readCache(ADJUST_KEY);
     if (!raw) return [];
+    if (adjustCache && adjustCache.raw === raw) return adjustCache.rows;
     const parsed = JSON.parse(raw) as FeeAdjustment[];
-    return Array.isArray(parsed) ? parsed.map(normalizeAdjustment) : [];
+    const rows = Array.isArray(parsed) ? parsed.map(normalizeAdjustment) : [];
+    adjustCache = { raw, rows };
+    return rows;
   } catch {
     return [];
   }
@@ -93,7 +144,23 @@ export function saveFeeAdjustments(rows: FeeAdjustment[]) {
   if (!assertModulePermission("fees", "edit", "saveFeeAdjustments")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(ADJUST_KEY, JSON.stringify(rows));
+  writeCacheOrInvalidate(ADJUST_KEY, JSON.stringify(rows));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("fee_adjustments", { rows: rows })));
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeFeeAdjustmentsLocalRaw(state: { rows: FeeAdjustment[] }): void {
+  const rows = Array.isArray(state.rows) ? state.rows.map(normalizeAdjustment) : [];
+  // The server keeps the rows in memory; the browser keeps its cache.
+  if (typeof window === "undefined") {
+    memoryAdjustments = rows;
+    return;
+  }
+  try {
+    writeCacheOrInvalidate(ADJUST_KEY, JSON.stringify(state.rows));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 function normalizeAdjustment(a: Partial<FeeAdjustment>): FeeAdjustment {
@@ -118,6 +185,8 @@ function normalizeAdjustment(a: Partial<FeeAdjustment>): FeeAdjustment {
     decidedAt: a.decidedAt ?? null,
     decidedBy: a.decidedBy || "",
     decisionNote: a.decisionNote || "",
+    sourceVoucherId: a.sourceVoucherId || "",
+    ...(a.batchId ? { batchId: a.batchId } : {}),
   };
 }
 
@@ -290,6 +359,7 @@ export function createFeeAdjustment(input: {
     decidedAt: pending ? null : new Date().toISOString(),
     decidedBy: pending ? "" : input.createdBy,
     decisionNote: pending ? "" : "Auto-posted within Accounts limit",
+    sourceVoucherId: "",
   };
 
   const rows = loadFeeAdjustments();
@@ -341,10 +411,10 @@ export function postCounterDiscountWaivers(input: {
   createdBy: string;
   academicYearCode: string;
 }):
-  | { ok: true; totalPaise: number }
+  | { ok: true; totalPaise: number; adjustmentIds: string[] }
   | { ok: false; error: string } {
   if (input.slices.length === 0) {
-    return { ok: true, totalPaise: 0 };
+    return { ok: true, totalPaise: 0, adjustmentIds: [] };
   }
   const reason = input.reason.trim();
   if (!reason) {
@@ -359,6 +429,7 @@ export function postCounterDiscountWaivers(input: {
     }
   }
   let total = 0;
+  const adjustmentIds: string[] = [];
   for (const slice of input.slices) {
     const result = createFeeAdjustment({
       studentId: slice.studentId,
@@ -381,8 +452,57 @@ export function postCounterDiscountWaivers(input: {
       };
     }
     total += slice.amountPaise;
+    adjustmentIds.push(result.adjustment.id);
   }
-  return { ok: true, totalPaise: total };
+  return { ok: true, totalPaise: total, adjustmentIds };
+}
+
+/**
+ * Tie counter waivers to the receipt they were given with, so voiding it
+ * takes the discount back too.
+ */
+export function linkAdjustmentsToVoucher(
+  adjustmentIds: string[],
+  voucherId: string,
+): void {
+  if (adjustmentIds.length === 0 || !voucherId) return;
+  const ids = new Set(adjustmentIds);
+  const rows = loadFeeAdjustments();
+  let changed = false;
+  const next = rows.map((r) => {
+    if (!ids.has(r.id) || r.sourceVoucherId === voucherId) return r;
+    changed = true;
+    return { ...r, sourceVoucherId: voucherId };
+  });
+  if (changed) saveFeeAdjustments(next);
+}
+
+/**
+ * Cancel the counter waivers a now-voided receipt carried. Cancelled, not
+ * deleted: the row stays visible in Adjustments with why it went.
+ */
+export function cancelAdjustmentsForVoucher(input: {
+  voucherId: string;
+  receiptNo: string;
+}): number {
+  const rows = loadFeeAdjustments();
+  let count = 0;
+  const stamp = new Date().toISOString();
+  const next = rows.map((r) => {
+    if (r.sourceVoucherId !== input.voucherId || r.status === "voided") {
+      return r;
+    }
+    count += 1;
+    return {
+      ...r,
+      status: "voided" as FeeAdjustmentStatus,
+      decidedAt: stamp,
+      decisionNote:
+        `Auto-voided — receipt ${input.receiptNo} voided ${stamp.slice(0, 10)}`,
+    };
+  });
+  if (count > 0) saveFeeAdjustments(next);
+  return count;
 }
 
 function applyChangeGroup(student: SisStudent, toFeeGroupId: string) {
@@ -512,6 +632,126 @@ export function settleLeavingStudent(input: {
   });
 
   return { ok: true, created };
+}
+
+/**
+ * Waive many due lines of one student at once — every head, this month's
+ * and the future's, or whichever the office ticked.
+ *
+ * WHY (director, 21 Sep 2026): "select all heads and future payment also to
+ * waive off all at once if we want to remove all fee and also student
+ * should be active if school want". The form waived one line at a time,
+ * and the only all-at-once button was "Leave settle", which also marks the
+ * child inactive — wrong for a child who stays in school free (RTE, staff
+ * ward, management decision).
+ *
+ * The rules:
+ *  - One reason for the whole waiver, required, and on every line.
+ *  - The Principal limit applies to the TOTAL (see bulkWaiverPlan): past it,
+ *    every line waits for approval, as one batch.
+ *  - The student's status is the office's choice, and staying active is the
+ *    default. Marking inactive is a separate, explicit tick.
+ *  - Saved once, not once per line; and refused outright if this login may
+ *    not edit fees — `saveFeeAdjustments` returns silently in that case, and
+ *    a waiver the office was told was posted but never saved is the worst
+ *    outcome of all.
+ */
+export function createBulkWaiver(input: {
+  studentId: string;
+  lines: WaivableLine[];
+  reasonCode: FeeAdjustmentReason;
+  reason: string;
+  createdBy: string;
+  /** Leave false to keep the student active with nothing due. */
+  markInactive: boolean;
+  todayIso?: string;
+}):
+  | { ok: true; created: number; pending: boolean; totalPaise: number; batchId: string }
+  | { ok: false; error: string } {
+  if (!input.studentId) return { ok: false, error: "Student required" };
+  if (!input.reason.trim()) return { ok: false, error: "Reason is required" };
+  if (!assertModulePermission("fees", "edit", "createBulkWaiver")) {
+    return { ok: false, error: "This login cannot edit fees — nothing was waived" };
+  }
+  const sis = loadSis();
+  const student = sis.students.find((s) => s.id === input.studentId);
+  if (!student) return { ok: false, error: "Student not found" };
+
+  const today = input.todayIso || new Date().toISOString().slice(0, 10);
+  const plan = bulkWaiverPlan(input.lines, new Set(input.lines.map((l) => l.dueKey)), {
+    limitPaise: FEE_ADJUST_AUTO_LIMIT_PAISE,
+    todayIso: today,
+  });
+  if (!plan.lines.length) return { ok: false, error: "Select at least one due line to waive" };
+
+  const ay = student.academicYearCode || currentAcademicYearCode();
+  const batchId = newWaiverBatchId();
+  const now = new Date().toISOString();
+  const reason = input.reason.trim();
+  const newRows: FeeAdjustment[] = plan.lines.map((l) => ({
+    id: id("fadj"),
+    studentId: input.studentId,
+    academicYearCode: ay,
+    type: "waiver",
+    dueKey: l.dueKey,
+    label: `Waive · ${l.label}`,
+    amountPaise: Math.max(0, Math.round(l.balancePaise)),
+    reasonCode: input.reasonCode,
+    reason,
+    status: plan.needsApproval ? "pending_approval" : "posted",
+    stopAfterDate: null,
+    fromFeeGroupId: student.feeGroupId,
+    toFeeGroupId: null,
+    feeHeadId: null,
+    dueOn: l.dueOn || null,
+    createdAt: now,
+    createdBy: input.createdBy,
+    decidedAt: plan.needsApproval ? null : now,
+    decidedBy: plan.needsApproval ? "" : input.createdBy,
+    decisionNote: plan.needsApproval ? "" : "Auto-posted within Accounts limit (bulk waiver)",
+    sourceVoucherId: "",
+    batchId,
+  }));
+
+  const rows = loadFeeAdjustments();
+  saveFeeAdjustments([...newRows, ...rows]);
+
+  if (input.markInactive) {
+    saveSis({
+      ...sis,
+      students: sis.students.map((s) =>
+        s.id === input.studentId ? { ...s, status: "inactive" as const } : s,
+      ),
+    });
+  }
+  return { ok: true, created: newRows.length, pending: plan.needsApproval, totalPaise: plan.totalPaise, batchId };
+}
+
+/** Approve or reject every waiting line of one bulk waiver, as one decision. */
+export function decideFeeAdjustmentBatch(input: {
+  batchId: string;
+  approve: boolean;
+  decidedBy: string;
+  note?: string;
+}): { ok: true; decided: number } | { ok: false; error: string } {
+  if (!input.batchId) return { ok: false, error: "No batch" };
+  const rows = loadFeeAdjustments();
+  const now = new Date().toISOString();
+  let decided = 0;
+  const next = rows.map((r) => {
+    if (r.batchId !== input.batchId || r.status !== "pending_approval") return r;
+    decided += 1;
+    return {
+      ...r,
+      status: input.approve ? ("posted" as const) : ("rejected" as const),
+      decidedAt: now,
+      decidedBy: input.decidedBy,
+      decisionNote: input.note?.trim() || (input.approve ? "Approved (bulk waiver)" : "Rejected (bulk waiver)"),
+    };
+  });
+  if (!decided) return { ok: false, error: "Nothing in this waiver is waiting for approval" };
+  saveFeeAdjustments(next);
+  return { ok: true, decided };
 }
 
 export function pendingApprovalCount(): number {

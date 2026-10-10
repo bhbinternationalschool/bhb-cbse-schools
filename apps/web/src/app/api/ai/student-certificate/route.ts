@@ -17,6 +17,7 @@ import {
 } from "@/lib/studentCertificateAi";
 import type { SchoolDocumentLanguage } from "@/lib/schoolDocumentAi";
 import { normalizeSchoolProfile } from "@/lib/foundationMasters";
+import { schoolRecognitionLine } from "@/lib/schoolIdentity";
 
 export const runtime = "nodejs";
 
@@ -93,7 +94,7 @@ export async function POST(req: Request) {
     schoolName: profile.legalName,
     displayName: profile.displayName,
     city: profile.city,
-    affiliationNo: profile.affiliationNo,
+    recognition: schoolRecognitionLine(masters),
     udiseCode: profile.udiseCode,
     studentContext,
     purpose,
@@ -139,6 +140,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     engine: result.engine,
+    generationId: result.generationId,
     title: picked.title,
     body: picked.body,
     remarks: result.doc.remarks,

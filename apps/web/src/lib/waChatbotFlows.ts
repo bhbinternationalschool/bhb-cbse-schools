@@ -9,9 +9,11 @@ import { SURVEY_BOT_QUICK_PROMPTS } from "@/lib/surveyFieldBotEngine";
 import {
   STAFF_BOT_OFFICE_PROMPTS,
   STAFF_BOT_OWNER_PROMPTS,
-} from "@/lib/waStaffBotEngine";
-import { TRANSPORT_BOT_PROMPTS } from "@/lib/waTransportBotEngine";
+} from "@/lib/waStaffBotPrompts";
+import { TRANSPORT_BOT_PROMPTS } from "@/lib/waTransportBotPrompts";
 import { VISITOR_PURPOSE_OPTIONS } from "@/lib/waUnifiedBotEngine";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_wa_chatbot_flows_v1";
 
@@ -315,7 +317,7 @@ export function defaultWaChatbotFlowsState(): WaChatbotFlowsState {
 export function loadWaChatbotFlows(): WaChatbotFlowsState {
   if (typeof window === "undefined") return defaultWaChatbotFlowsState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return defaultWaChatbotFlowsState();
     const parsed = JSON.parse(raw) as WaChatbotFlowsState;
     if (!parsed?.flows?.length) return defaultWaChatbotFlowsState();
@@ -338,11 +340,12 @@ export function writeWaChatbotFlowsLocalRaw(state: WaChatbotFlowsState) {
     ...state,
     flows: state.flows.filter((f) => f.status !== "built_in"),
   };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(toSave));
 }
 
 export function saveWaChatbotFlows(state: WaChatbotFlowsState) {
   writeWaChatbotFlowsLocalRaw(state);
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("wa_chatbot_flows", state)));
 }
 
 export function audienceLabel(a: WaChatbotAudience): string {

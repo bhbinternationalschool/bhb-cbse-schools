@@ -1,0 +1,267 @@
+import "package:flutter/material.dart";
+
+import "../../core/api/api_client.dart";
+import "../../core/theme/app_theme.dart";
+import "../../core/ui/motion.dart";
+import "../../core/ui/spacing.dart";
+import "../../core/i18n/locale_controller.dart";
+import "../../core/guide/screen_guides.dart";
+
+/// Shared chrome for module screens: navy app bar, pull-to-refresh list,
+/// one loading/error/empty pattern so every module behaves the same way.
+class ModuleShell<T> extends StatefulWidget {
+  const ModuleShell({
+    super.key,
+    required this.title,
+    this.subtitle,
+    required this.load,
+    required this.builder,
+    this.emptyIcon = Icons.inbox_outlined,
+    this.emptyText,
+    this.isEmpty,
+    this.floatingActionButton,
+    this.bottomBar,
+    this.guideId,
+  });
+
+  /// The screen's guide (core/guide). Adds the ? button and lets the
+  /// "same error twice" watch know which screen the user is on.
+  final String? guideId;
+
+  final String title;
+  final String? subtitle;
+  final Future<T> Function() load;
+  final Widget Function(
+    BuildContext context,
+    T data,
+    Future<void> Function() reload,
+  )
+  builder;
+  final IconData emptyIcon;
+
+  /// Null shows the generic "Nothing here yet." in the app's language.
+  final String? emptyText;
+  final bool Function(T data)? isEmpty;
+  final Widget Function(
+    BuildContext context,
+    T data,
+    Future<void> Function() reload,
+  )?
+  floatingActionButton;
+
+  /// Sticky footer under the list — a pay button, say. Only shown once data
+  /// has loaded and the screen is not in its empty state.
+  final Widget Function(
+    BuildContext context,
+    T data,
+    Future<void> Function() reload,
+  )?
+  bottomBar;
+
+  @override
+  State<ModuleShell<T>> createState() => _ModuleShellState<T>();
+}
+
+class _ModuleShellState<T> extends State<ModuleShell<T>> {
+  T? _data;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _error = null);
+    try {
+      final data = await widget.load();
+      if (mounted) setState(() => _data = data);
+    } on ApiException catch (e) {
+      // The server said something specific — a permission, a missing record.
+      if (mounted) setState(() => _error = e.message);
+    } catch (_) {
+      // Anything else is a transport failure; the raw exception text
+      // ("SocketException … errno = 111") means nothing to a parent.
+      if (mounted) {
+        setState(
+          () => _error = context.l10n.homeCouldNotReachServerCheckConnection,
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = _data;
+    return Scaffold(
+      appBar: AppBar(
+        title: widget.subtitle == null
+            ? Text(widget.title, style: AppText.titleMedium)
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(widget.title, style: AppText.titleMedium),
+                  Text(
+                    widget.subtitle!,
+                    style: AppText.labelMedium.copyWith(
+                      color: Color(0xFFB8C0D4),
+                    ),
+                  ),
+                ],
+              ),
+        // Every inner screen gets the language switch here, so a gateman or
+        // driver can flip the app without first finding a settings page in a
+        // language he cannot read.
+        actions: [
+          if (widget.guideId != null)
+            ScreenGuideButton(guideId: widget.guideId!, screenLabel: widget.title),
+          const LanguageToggle(onLight: true),
+        ],
+      ),
+      floatingActionButton: data == null
+          ? null
+          : widget.floatingActionButton?.call(context, data, _load),
+      bottomNavigationBar: data == null || (widget.isEmpty?.call(data) ?? false)
+          ? null
+          : widget.bottomBar?.call(context, data, _load),
+      // States crossfade rather than snapping: the spinner dissolves into
+      // the list, an error slides in over the spinner, and a pull-to-refresh
+      // that changes nothing leaves the list exactly where it was.
+      body: AppCrossfade(
+        child: data == null
+            ? Center(
+                key: ValueKey(_error == null ? "loading" : "error"),
+                child: _error == null
+                    ? const CircularProgressIndicator(color: AppColors.primary)
+                    : Padding(
+                        padding: Insets.state,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.cloud_off_outlined,
+                              size: 40,
+                              color: AppColors.muted,
+                            ),
+                            const SizedBox(height: 12),
+                            Text(_error!, textAlign: TextAlign.center),
+                            const SizedBox(height: 12),
+                            FilledButton(
+                              onPressed: _load,
+                              child: Text(context.l10n.retry),
+                            ),
+                          ],
+                        ),
+                      ),
+              )
+            : (widget.isEmpty?.call(data) ?? false)
+            ? RefreshIndicator(
+                key: const ValueKey("empty"),
+                onRefresh: _load,
+                color: AppColors.primary,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: [
+                    SizedBox(
+                      height: MediaQuery.sizeOf(context).height * 0.6,
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              widget.emptyIcon,
+                              size: 44,
+                              color: AppColors.muted,
+                            ),
+                            const SizedBox(height: 12),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 32,
+                              ),
+                              child: Text(
+                                widget.emptyText ??
+                                    context.l10n.homeNothingHereYet,
+                                textAlign: TextAlign.center,
+                                style: AppText.bodyMediumMuted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : RefreshIndicator(
+                key: const ValueKey("content"),
+                onRefresh: _load,
+                color: AppColors.primary,
+                child: widget.builder(context, data, _load),
+              ),
+      ),
+    );
+  }
+}
+
+/// Honest "not live yet" sheet for modules whose data the school has not
+/// started capturing — never fake numbers, per the ERP's ground rules.
+void showComingSoon(BuildContext context, String module, String reason) {
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (context) => SafeArea(
+      child: Padding(
+        padding: Insets.sheet,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.hourglass_empty, size: 36, color: AppColors.muted),
+            const SizedBox(height: 12),
+            Text(
+              context.l10n.homeModuleComingSoon(module),
+              style: AppText.titleSmallInk,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              reason,
+              textAlign: TextAlign.center,
+              style: AppText.bodySmallMuted,
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+String formatDateLabel(String isoDate) {
+  final d = DateTime.tryParse(isoDate);
+  if (d == null) return isoDate;
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  return "${d.day} ${months[d.month - 1]} ${d.year}";
+}
+
+String formatTimeLabel(String iso) {
+  final d = DateTime.tryParse(iso);
+  if (d == null) return "";
+  final h12 = d.hour % 12 == 0 ? 12 : d.hour % 12;
+  final mm = d.minute.toString().padLeft(2, "0");
+  return "$h12:$mm ${d.hour < 12 ? "AM" : "PM"}";
+}

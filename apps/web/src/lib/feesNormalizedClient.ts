@@ -6,6 +6,18 @@ import type { FeesState } from "@/lib/fees";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.types";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+
+const FEES_DESK = "fees";
+
+/** A day-close session the desk replaced; the next push deletes it by id. */
+export function recordFeeDayCloseDeletion(ids: string[]) {
+  recordDeskDeletion(FEES_DESK, "fee_desk_day_closes", ids);
+}
 
 const META_KEY = "bhb_fees_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -50,22 +62,9 @@ export function feesNormalizedSyncEnabled(): boolean {
 }
 
 export function feesReadFromDbClientEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_FEES_READ_FROM_DB === "true";
-}
-
-/** @deprecated use scheduleFeesDeskSync */
-export function scheduleFeesNormalizedSync(vouchers: FeesState["vouchers"]) {
-  scheduleFeesDeskSync({
-    version: 1,
-    vouchers: vouchers ?? [],
-    cheques: [],
-    manualBooks: [],
-    dayCloses: [],
-    installmentPlans: [],
-    planAllocations: [],
-    carriedForwardDues: [],
-    chargeVouchers: [],
-  });
+  const flag = process.env.NEXT_PUBLIC_FEES_READ_FROM_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 export function scheduleFeesDeskSync(state: FeesState) {
@@ -83,6 +82,7 @@ export function scheduleFeesDeskSync(state: FeesState) {
 }
 
 async function pushFeesDeskApi(state: FeesState) {
+  const sentDeletes = pendingDeskDeletes(FEES_DESK);
   try {
     const res = await fetch("/api/school-data/fees-vouchers", {
       method: "POST",
@@ -98,6 +98,8 @@ async function pushFeesDeskApi(state: FeesState) {
         chargeVouchers: state.chargeVouchers ?? [],
         rebuildOpenDues: true,
         academicYearCode: state.vouchers[0]?.academicYearCode,
+        // Deletions are named, never inferred from what this browser lacks.
+        deletes: sentDeletes,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -108,6 +110,7 @@ async function pushFeesDeskApi(state: FeesState) {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(FEES_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         voucherCount: body.count ?? state.vouchers.length,
@@ -116,7 +119,12 @@ async function pushFeesDeskApi(state: FeesState) {
     } else if (!res.ok) {
       console.warn("[fees-db] desk push failed", body?.error || res.status);
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("fees");
+    else recordDeskSyncFailure("fees", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("fees", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[fees-db] desk push error", e);
   }
 }
@@ -166,6 +174,7 @@ export async function hydrateFeesDeskFromDb(
   vouchers: FeesState["vouchers"];
   ancillary: FeeDeskAncillary;
   changed: boolean;
+  ok: boolean;
 }> {
   const remote = await fetchFeesDeskFromApi();
   if (!remote) {
@@ -181,6 +190,7 @@ export async function hydrateFeesDeskFromDb(
         chargeVouchers: [],
       },
       changed: false,
+      ok: false,
     };
   }
 
@@ -193,7 +203,7 @@ export async function hydrateFeesDeskFromDb(
     remote.count > meta.voucherCount;
 
   if (!shouldTake) {
-    return { vouchers: [], ancillary: remote.ancillary, changed: false };
+    return { vouchers: [], ancillary: remote.ancillary, changed: false, ok: true };
   }
 
   writeMeta({
@@ -205,11 +215,6 @@ export async function hydrateFeesDeskFromDb(
     vouchers: remote.vouchers,
     ancillary: remote.ancillary,
     changed: true,
+    ok: true,
   };
-}
-
-/** @deprecated use hydrateFeesDeskFromDb */
-export async function hydrateFeesVouchersFromDb(preferDb?: boolean) {
-  const r = await hydrateFeesDeskFromDb(preferDb);
-  return { vouchers: r.vouchers, changed: r.changed };
 }

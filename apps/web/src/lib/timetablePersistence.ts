@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "timetable";
 
@@ -41,7 +42,7 @@ export function resetTimetablePersistenceCache() {
 
 export function scheduleTimetableSync(state: TimetableState) {
   if (typeof window === "undefined") {
-    void pushTimetableRemoteServer(state);
+    void trackServerWork(pushTimetableRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("timetable")) blob.scheduleSync(state);
@@ -71,7 +72,6 @@ export async function pushTimetableRemoteServer(
 
 export async function ensureTimetableHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = timetableReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("timetable")
@@ -79,7 +79,12 @@ export async function ensureTimetableHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateTimetableDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateTimetableDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (
     changed &&
     (bundle.bellTemplate.length > 0 ||
@@ -94,7 +99,9 @@ export async function ensureTimetableHydrated(): Promise<boolean> {
     normChanged = true;
   }
 
-  if (normChanged) scheduleTimetableSync(loadTimetable());
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+
+  if (normChanged && !readFromDb) scheduleTimetableSync(loadTimetable());
   return blobChanged || normChanged;
 }
 

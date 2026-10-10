@@ -1,3 +1,4 @@
+/* ratchet-allow: raw_table — matches <table> while PARSING imported HTML; this module renders nothing */
 /**
  * RTE / EWS / scholarship seats (§21c).
  * Demo store: localStorage `bhb_rte_ews_v1`.
@@ -5,7 +6,17 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { DEFAULT_AY, loadMasters, resolveFeeGroupId, suggestFeeStudentType, type MastersState } from "@/lib/masters";
+import {
+  DEFAULT_AY,
+  loadMasters,
+  normalizeConcessionGrant,
+  normalizeConcessionRule,
+  resolveFeeGroupId,
+  saveMasters,
+  suggestFeeStudentType,
+  type MastersState,
+  currentAcademicYearCode,
+} from "@/lib/masters";
 import {
   describeFilters,
   exportFilterReport,
@@ -21,9 +32,15 @@ import {
   suggestSrn,
   type SisState,
   type SisStudent,
+  studentsInSession,
+  isPlaceholderMobile,
 } from "@/lib/sis";
 import { ensureRteEwsTagIds } from "@/lib/studentTags";
 import { TENANT } from "@/lib/types";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { recordRteDeletion } from "@/lib/rteNormalizedClient";
 
 const STORAGE_KEY = "bhb_rte_ews_v1";
 
@@ -221,7 +238,7 @@ function normalizeState(raw: Partial<RteState> | null): RteState {
 export function loadRte(): RteState {
   if (typeof window === "undefined") return emptyRteState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyRteState();
     return normalizeState(JSON.parse(raw) as Partial<RteState>);
   } catch {
@@ -233,16 +250,16 @@ export function saveRte(state: RteState): void {
   if (!assertModulePermission("rte", "edit", "saveRte")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/rtePersistence").then(({ scheduleRteSync }) => {
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void trackServerWork(import("@/lib/rtePersistence").then(({ scheduleRteSync }) => {
     scheduleRteSync(state);
-  });
+  }));
 
 }
 
 export function writeRteLocalRaw(state: RteState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function rteStateIsEmpty(state: RteState): boolean {
@@ -268,8 +285,9 @@ export function countEnrolledQuota(
   sis?: SisState,
 ): number {
   const state = sis ?? loadSis();
-  return state.students.filter((s) => {
-    if (s.status !== "active") return false;
+  // `ay` was accepted and never used, so a statutory quota count ran about
+  // three times high — every year's row for every child.
+  return studentsInSession(state, ay).filter((s) => {
     if (s.classId !== classId) return false;
     if (type === "RTE") return s.studentType === "RTE";
     if (type === "EWS") return s.category === "EWS" || s.studentType === "RTE";
@@ -337,8 +355,10 @@ export function suggestSeatTotal(
   sis?: SisState,
 ): number {
   const state = sis ?? loadSis();
-  const strength = state.students.filter(
-    (s) => s.status === "active" && s.classId === classId,
+  // Unscoped this counted every year's row, so the suggested RTE seat count
+  // came out roughly three times the class's real strength.
+  const strength = studentsInSession(state, currentAcademicYearCode()).filter(
+    (s) => s.classId === classId,
   ).length;
   if (strength <= 0) return 0;
   return Math.max(1, Math.ceil((strength * mandatedPct) / 100));
@@ -390,6 +410,7 @@ export function deleteQuotaSeat(
   if (!state.seats.some((s) => s.id === id)) {
     return { ok: false, error: "Seat row not found" };
   }
+  if (typeof window !== "undefined") recordRteDeletion("rte_desk_seats", [id]);
   saveRte({ ...state, seats: state.seats.filter((s) => s.id !== id) });
   return { ok: true };
 }
@@ -576,6 +597,7 @@ export function deleteQuotaApplication(
   if (!state.applications.some((a) => a.id === id)) {
     return { ok: false, error: "Application not found" };
   }
+  if (typeof window !== "undefined") recordRteDeletion("rte_desk_applications", [id]);
   saveRte({
     ...state,
     applications: state.applications.filter((a) => a.id !== id),
@@ -1336,7 +1358,7 @@ export function sendAllottedRteToSis(input: {
     return { ok: false, error: "Assign a section (Masters) before SIS send" };
   }
 
-  let sis = loadSis();
+  const sis = loadSis();
   const admissionDate = todayIso();
   const admissionNo = suggestAdmissionNo(sis.students);
   const srn = suggestSrn(sis.students);
@@ -1358,9 +1380,10 @@ export function sendAllottedRteToSis(input: {
     "";
   const mobile = (app.mobile || "").replace(/\D/g, "").slice(-10);
   let households = [...sis.households];
-  let householdId =
-    households.find((h) => h.mobile.replace(/\D/g, "").slice(-10) === mobile)
-      ?.id || "";
+  // A missing or placeholder number groups nobody (see isPlaceholderMobile).
+  let householdId = isPlaceholderMobile(mobile)
+    ? ""
+    : households.find((h) => h.mobile.replace(/\D/g, "").slice(-10) === mobile)?.id || "";
   if (!householdId) {
     const hh = normalizeHousehold({
       id: newSisId("hh"),
@@ -1459,13 +1482,222 @@ export function listReadyForSis(state?: RteState): QuotaApplication[] {
 
 export function listEnrolledRteStudents(sis?: SisState) {
   const state = sis ?? loadSis();
-  return state.students
+  // A government-facing register: one row per child, this session.
+  return studentsInSession(state, currentAcademicYearCode())
     .filter(
       (s) =>
-        s.status === "active" &&
         (s.studentType === "RTE" || s.category === "EWS"),
     )
     .sort((a, b) => a.fullName.localeCompare(b.fullName));
+}
+
+/* ─── Assign / remove RTE directly on SIS students ─── */
+
+/** Mark an existing SIS student as RTE (fee type + tag + RTE fee group). */
+export function assignRteToStudent(input: {
+  studentId: string;
+  by: string;
+}): { ok: true; student: SisStudent } | { ok: false; error: string } {
+  const before = loadSis();
+  const st = before.students.find((s) => s.id === input.studentId);
+  if (!st) return { ok: false, error: "Student not found" };
+  if (st.studentType === "RTE") {
+    return { ok: false, error: "Student is already RTE" };
+  }
+  // May create the RTE/EWS tags (saves SIS) — reload after.
+  const tagIds = ensureRteEwsTagIds({ category: st.category });
+  const masters = loadMasters();
+  const ayCode = st.academicYearCode || DEFAULT_AY;
+  const feeGroupId =
+    resolveFeeGroupId(masters, {
+      studentType: "RTE",
+      classId: st.classId,
+      academicYearCode: ayCode,
+      preferPublished: true,
+    }) || st.feeGroupId;
+
+  const sis = loadSis();
+  const students = sis.students.map((s) =>
+    s.id === st.id
+      ? {
+          ...s,
+          studentType: "RTE" as const,
+          feeGroupId,
+          tagIds: Array.from(new Set([...(s.tagIds ?? []), ...tagIds])),
+          notes: [s.notes, `RTE assigned by ${input.by} on ${todayIso()}`]
+            .filter(Boolean)
+            .join(" · "),
+        }
+      : s,
+  );
+  saveSis({ ...sis, students });
+  return { ok: true, student: students.find((s) => s.id === st.id)! };
+}
+
+/** Take RTE/EWS off a student — fee type reverts, tags and waivers drop. */
+export function removeRteFromStudent(input: {
+  studentId: string;
+  by: string;
+}): { ok: true } | { ok: false; error: string } {
+  const sis = loadSis();
+  const st = sis.students.find((s) => s.id === input.studentId);
+  if (!st) return { ok: false, error: "Student not found" };
+  if (st.studentType !== "RTE" && st.category !== "EWS") {
+    return { ok: false, error: "Student is not RTE / EWS" };
+  }
+
+  const ayCode = st.academicYearCode || DEFAULT_AY;
+  const joinedYear = (st.joinedOn || "").slice(0, 4);
+  const revertType =
+    st.studentType === "RTE"
+      ? joinedYear && joinedYear < ayCode.slice(0, 4)
+        ? ("PROMOTE" as const)
+        : suggestFeeStudentType(st.joinedOn || "", ayCode)
+      : st.studentType;
+
+  const masters = loadMasters();
+  const feeGroupId =
+    resolveFeeGroupId(masters, {
+      studentType: revertType,
+      classId: st.classId,
+      academicYearCode: ayCode,
+      preferPublished: true,
+    }) || st.feeGroupId;
+
+  const rteTagIds = new Set(
+    (sis.tags ?? [])
+      .filter((t) => t.code === "RTE" || t.code === "EWS")
+      .map((t) => t.id),
+  );
+  const students = sis.students.map((s) =>
+    s.id === st.id
+      ? {
+          ...s,
+          studentType: revertType,
+          category:
+            s.category === "EWS" ? ("" as SisStudent["category"]) : s.category,
+          feeGroupId,
+          tagIds: (s.tagIds ?? []).filter((id) => !rteTagIds.has(id)),
+          notes: [s.notes, `RTE removed by ${input.by} on ${todayIso()}`]
+            .filter(Boolean)
+            .join(" · "),
+        }
+      : s,
+  );
+  saveSis({ ...sis, students });
+
+  const existing = masters.concessionGrants ?? [];
+  const kept = existing.filter(
+    (g) =>
+      !(g.studentId === st.id && g.id.startsWith(RTE_WAIVER_GRANT_PREFIX)),
+  );
+  if (kept.length !== existing.length) {
+    void trackServerWork(saveMasters({ ...masters, concessionGrants: kept }));
+  }
+  return { ok: true };
+}
+
+/* ─── Per-student, per-head RTE fee waivers ───
+ * One 100% concession rule per fee head (created lazily), one approved grant
+ * per student per waived head. Fee Take's dues engine applies them like any
+ * other concession, so "untick a head" simply means "grant its waiver". */
+
+const RTE_WAIVER_GRANT_PREFIX = "cg_rtew_";
+
+function rteWaiverRuleId(feeHeadId: string): string {
+  return `cnc_rtew_${feeHeadId}`;
+}
+
+function rteWaiverGrantId(studentId: string, feeHeadId: string): string {
+  return `${RTE_WAIVER_GRANT_PREFIX}${studentId}_${feeHeadId}`;
+}
+
+/** Fee-head ids currently waived for this student via RTE per-head grants. */
+export function rteWaivedHeadIds(
+  masters: MastersState,
+  studentId: string,
+): Set<string> {
+  const byRule = new Map(masters.concessions.map((c) => [c.id, c]));
+  const out = new Set<string>();
+  for (const g of masters.concessionGrants ?? []) {
+    if (g.studentId !== studentId || g.status !== "approved") continue;
+    if (!g.id.startsWith(RTE_WAIVER_GRANT_PREFIX)) continue;
+    for (const headId of byRule.get(g.concessionId)?.feeHeadIds ?? []) {
+      out.add(headId);
+    }
+  }
+  return out;
+}
+
+/** Tick = charge the head (no waiver); untick = waive it 100% for this student. */
+export async function setRteHeadWaiver(input: {
+  studentId: string;
+  feeHeadId: string;
+  waived: boolean;
+  by: string;
+  academicYearCode?: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const masters = loadMasters();
+  const head = masters.feeHeads.find((h) => h.id === input.feeHeadId);
+  if (!head) return { ok: false, error: "Fee head not found" };
+
+  let concessions = masters.concessions;
+  let rule = concessions.find((c) => c.id === rteWaiverRuleId(input.feeHeadId));
+  if (!rule && input.waived) {
+    rule = normalizeConcessionRule({
+      id: rteWaiverRuleId(input.feeHeadId),
+      code: `RTEW_${(head.code || head.nameEn).replace(/\W+/g, "_").toUpperCase()}`.slice(0, 24),
+      name: `RTE waiver — ${head.nameEn}`,
+      kind: "rte_ews",
+      academicYearCode: input.academicYearCode || DEFAULT_AY,
+      mode: "percent",
+      value: 100,
+      siblingTiers: [],
+      feeHeadIds: [input.feeHeadId],
+      autoApproveMaxPaise: null,
+      documentationRequired: false,
+      incompatibleCodes: [],
+      notes: "Per-head RTE waiver (RTE module)",
+      isActive: true,
+    });
+    concessions = [...concessions, rule];
+  }
+
+  const grantId = rteWaiverGrantId(input.studentId, input.feeHeadId);
+  const existing = masters.concessionGrants ?? [];
+  let concessionGrants = existing;
+  if (input.waived) {
+    if (!existing.some((g) => g.id === grantId)) {
+      concessionGrants = [
+        ...existing,
+        normalizeConcessionGrant({
+          id: grantId,
+          concessionId: rule!.id,
+          studentId: input.studentId,
+          status: "approved",
+          reason: `RTE — head not charged (by ${input.by})`,
+          effectiveFrom: todayIso(),
+          effectiveTo: null,
+          createdAt: nowIso(),
+          siblingChildNo: null,
+        }),
+      ];
+    }
+  } else {
+    concessionGrants = existing.filter((g) => g.id !== grantId);
+  }
+
+  if (
+    concessions === masters.concessions &&
+    concessionGrants === existing
+  ) {
+    return { ok: true };
+  }
+  const saved = await saveMasters({ ...masters, concessions, concessionGrants });
+  if (!saved.ok) {
+    return { ok: false, error: `Masters save blocked (${saved.reason})` };
+  }
+  return { ok: true };
 }
 
 export function quotaTypeLabel(t: QuotaType): string {
@@ -1525,9 +1757,27 @@ export function sortGovtAllottedApps(apps: QuotaApplication[]): QuotaApplication
   });
 }
 
+/**
+ * Whether this browser has pulled the RTE desk from the server at least once
+ * in this page session. Not isDeskHydrated: that is a 15 s TTL, and a failed
+ * pull is not a pull.
+ */
+let rteDeskPulled = false;
+export function markRteDeskPulled() {
+  rteDeskPulled = true;
+}
+
 export function seedRteIfEmpty(ay?: string): RteState {
   const existing = loadRte();
   if (existing.seats.length > 0 || existing.applications.length > 0) {
+    return existing;
+  }
+  // An empty BROWSER is not an empty desk. The workspace ran this before its
+  // pull, minting quota seats with fresh ids for every class and pushing
+  // them at once — which deleted every stored seat while the desk pruned,
+  // and adds a duplicate set now that it does not. In a browser that syncs,
+  // seed only once the desk has been pulled and is still empty.
+  if (typeof window !== "undefined" && isSupabaseConfigured() && !rteDeskPulled) {
     return existing;
   }
   const year = ay || DEFAULT_AY;

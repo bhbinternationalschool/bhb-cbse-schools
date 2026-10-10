@@ -1,6 +1,8 @@
 "use client";
 
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { useMemo, useState } from "react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import {
   cancelInstallmentPlan,
   createInstallmentPlan,
@@ -23,9 +25,9 @@ import {
   isValidMobile,
   loadSis,
 } from "@/lib/sis";
-import { whatsAppPaymentLinkUrl } from "@/lib/payments";
 import { TENANT } from "@/lib/types";
 import type { LiveDefaulter } from "@/lib/playbook";
+import { openWaMe } from "@/lib/waMe";
 
 export function InstallmentPlanDialog({
   row,
@@ -38,6 +40,8 @@ export function InstallmentPlanDialog({
   onClose: () => void;
   onSaved: (msg: string) => void;
 }) {
+  // Escape belongs to the dialog now.
+
   const fees = loadFees();
   const existing = activePlanForStudent(
     fees.installmentPlans,
@@ -130,9 +134,10 @@ function CreatePlanPanel({
         studentName: row.fullName,
         classLabel: row.classLabel,
         plan: result.plan,
+        hindi: waTemplateLanguageFor(householdOf(sis, row.householdId) ?? {}) === "hi",
       });
       if (mobile && isValidMobile(mobile)) {
-        window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
+        openWaMe(mobile, msg, undefined, { module: "fees" });
       } else {
         void navigator.clipboard.writeText(msg);
       }
@@ -143,11 +148,12 @@ function CreatePlanPanel({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
-      <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-5 shadow-xl"
-        role="dialog"
+    // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
+    // had none of them, so Tab left the open form for the page behind it.
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogPopup
         aria-labelledby="plan-title"
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-5 shadow-xl"
       >
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -309,8 +315,8 @@ function CreatePlanPanel({
             </div>
           </>
         )}
-      </div>
-    </div>
+      </DialogPopup>
+    </Dialog>
   );
 }
 
@@ -347,9 +353,10 @@ function ActivePlanPanel({
       studentName: row.fullName,
       classLabel: row.classLabel,
       plan,
+      hindi: waTemplateLanguageFor(householdOf(sis, row.householdId) ?? {}) === "hi",
     });
     if (mobile && isValidMobile(mobile)) {
-      window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
+      openWaMe(mobile, msg, undefined, { module: "fees" });
       onSaved(`Plan ${plan.code} sent on WhatsApp`);
     } else {
       void navigator.clipboard.writeText(msg).then(
@@ -397,7 +404,7 @@ function ActivePlanPanel({
                 <span>
                   {s.label} · {s.dueOn}
                   {done ? (
-                    <span className="ml-2 text-[10px] font-bold uppercase text-[#15803d]">
+                    <span className="ml-2 text-[10px] font-bold uppercase text-[var(--tone-green)]">
                       Paid
                     </span>
                   ) : null}

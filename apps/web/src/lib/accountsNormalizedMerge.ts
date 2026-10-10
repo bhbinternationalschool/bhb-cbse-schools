@@ -1,4 +1,4 @@
-import type { AccountsState } from "@/lib/accounts";
+import type { AccountsState } from "@/lib/accountsTypes";
 import { accountsReadFromDbEnabled } from "@/lib/accountsDbConfig";
 import type { AccountsDeskBundle } from "@/lib/accountsNormalized.server";
 

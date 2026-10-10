@@ -6,11 +6,21 @@
 import { promises as fs } from "fs";
 import path from "path";
 import {
+  ADMISSION_SOURCE_LABELS,
+  ADMISSION_SOURCE_LABELS_HI,
+  stageLabelForBotHi,
+  composeAdmissionOffer,
+  composeAdmissionRegisterStep,
   detectCrmBotIntent,
+  isCrmKeywordOrGreeting,
   replyCrmBotIntent,
 } from "@/lib/crmAdmissionBotEngine";
+import { signAdmissionLinkToken } from "@/lib/admissionLinkToken.server";
 import { TENANT } from "@/lib/types";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
+import { generateTutorText } from "@/lib/aiLlm.server";
+import { answerAdmissionsQuestion } from "@/lib/admissionsKb.server";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 
 export type WaCrmBotChannel = "whatsapp";
 
@@ -59,6 +69,23 @@ function publicRegisterUrl(): string {
     "",
   );
   return `https://${host.replace(/\/$/, "")}/register?src=wa_bot`;
+}
+
+/**
+ * The same form, but carrying a signed token for this family — so the
+ * submit converts their existing enquiry instead of filing a second lead
+ * for a child the school already has on file. Falls back to the plain
+ * link if the token cannot be signed (no secret configured), because a
+ * parent who cannot register at all is worse than a possible duplicate.
+ */
+function personalRegisterUrl(householdId: string, mobile10: string): string {
+  const token = signAdmissionLinkToken({ householdId, mobile10 });
+  if (!token) return publicRegisterUrl();
+  const host = (TENANT.publicPortal || "bhbinternational.school").replace(
+    /^https?:\/\//,
+    "",
+  );
+  return `https://${host.replace(/\/$/, "")}/register?src=wa_bot&lead=${encodeURIComponent(token)}`;
 }
 
 async function readStore(): Promise<WaCrmBotStore> {
@@ -208,6 +235,46 @@ export async function staffReplyWaCrmBot(opts: {
 }
 
 /**
+ * LLM fallback for admissions-enquiry messages the keyword matcher doesn't
+ * recognize — grounded ONLY in this contact's own enquiry record (if any)
+ * and the public registration link, never a specific fee/date/policy it
+ * wasn't given. Returns null on any failure — caller keeps the existing
+ * hardcoded fallback, this is a graceful upgrade, not a hard dependency.
+ */
+async function tryAiFallbackReply(
+  text: string,
+  lead: {
+    childName: string;
+    enquiryNo: string;
+    applicationNo: string;
+    stageLabel: string;
+  } | null,
+  hindi = false,
+): Promise<string | null> {
+  const system = `You are a WhatsApp assistant for prospective-parent admissions enquiries at ${TENANT.nameDisplay}.
+You may ONLY discuss the enquiry record given below (child's name, enquiry number, stage/status, next steps) and share the public registration link.
+You do NOT know this school's fees, admission dates, seat availability, curriculum, medium of instruction, transport, uniform, or any other policy or factual detail — even if it seems like common knowledge for a school, do not state it, confirm it, or guess at it.
+For ANY question outside the enquiry record above, reply that you don't have that information and to reply *HUMAN* to talk to the admissions office — do not attempt to answer it a different way.
+Keep the reply under 300 characters, warm and simple, plain text (no markdown headers), in ${hindi ? "simple Hindi (Devanagari script)" : "simple English"}.`;
+
+  const userMessage = `Enquiry on file: ${
+    lead
+      ? `${lead.childName || "child"} · ${lead.enquiryNo}${lead.applicationNo ? ` · ${lead.applicationNo}` : ""} · stage: ${lead.stageLabel}`
+      : "none yet"
+  }
+Public registration link: ${publicRegisterUrl()}
+Parent's message: "${text}"`;
+
+  try {
+    const r = await generateTutorText({ system, userMessage });
+    if (!r.ok) return null;
+    return r.text.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Handle one inbound parent WhatsApp text for CRM admissions bot.
  */
 export async function handleWaCrmBotInbound(opts: {
@@ -219,6 +286,13 @@ export async function handleWaCrmBotInbound(opts: {
   fromUnified?: boolean;
   visitorName?: string;
   forceEscalate?: boolean;
+  /**
+   * Log to the admissions inbox and escalate, but send nothing: the caller
+   * sends its own reply. Without it a vendor or a visitor was told
+   * "Connecting you to the Admissions desk" AND the caller's own message —
+   * two billed messages, the first of them wrong.
+   */
+  logOnly?: boolean;
 }): Promise<{
   replied: boolean;
   escalate: boolean;
@@ -284,44 +358,172 @@ export async function handleWaCrmBotInbound(opts: {
       if (ingested.created) leadCreatedEnquiryNo = ingested.enquiryNo;
     }
   }
+  // Not yet on the school register: no confirmed SIS match and not
+  // enrolled. Only these families are offered admission — a parent whose
+  // child is already a student must never be told to register again.
+  const awaitingAdmission =
+    !!leadRow && leadRow.stage !== "enrolled" && leadRow.sisMatch !== "admitted";
+
+  const registerUrl =
+    awaitingAdmission && leadRow?.householdId
+      ? personalRegisterUrl(leadRow.householdId, mobile10)
+      : publicRegisterUrl();
+
+  // Every lead this family has on file. The offer quotes the family's
+  // FIRST enquiry date, which is also what the registration form shows —
+  // quoting the matched lead's own date instead had the bot and the form
+  // naming two different days for the same enquiry.
+  const familyLeads = leadRow
+    ? admissionsState.leads
+        .filter((l) => l.householdId === leadRow.householdId && l.stage !== "lost")
+        .sort((a, b) => (a.leadDate || "").localeCompare(b.leadDate || ""))
+    : [];
+
+  // The family's own language if the enquiry recorded one, else the school's
+  // default (Hindi). A parent who writes in Devanagari is answered in Hindi
+  // whatever the record says.
+  const hindi =
+    /[\u0900-\u097F]/.test(text) ||
+    waTemplateLanguageFor({ preferredLanguage: leadRow?.preferredLanguage }) === "hi";
+
   const leadCtx = leadRow
     ? {
         childName: leadRow.childName,
         enquiryNo: leadRow.enquiryNo,
         applicationNo: leadRow.applicationNo,
-        stageLabel: stageLabel(leadRow.stage),
+        stageLabel: hindi ? stageLabelForBotHi(leadRow.stage) : stageLabel(leadRow.stage),
+        enquiryDate: familyLeads[0]?.leadDate || leadRow.leadDate,
+        sourceLabel: hindi
+          ? ADMISSION_SOURCE_LABELS_HI[leadRow.source] || "पूछताछ"
+          : ADMISSION_SOURCE_LABELS[leadRow.source] || "Enquiry",
+        feeAmountLabel:
+          leadRow.registrationFeeAmountPaise > 0
+            ? `₹${(leadRow.registrationFeeAmountPaise / 100).toLocaleString("en-IN")}`
+            : undefined,
+        siblingNames: familyLeads
+          .filter((l) => l.childName.trim())
+          .map((l) => l.childName),
       }
     : null;
   const bot = replyCrmBotIntent(intent, {
-    registerUrl: publicRegisterUrl(),
+    registerUrl,
     lead: leadCtx,
+    hindi,
   });
   let replyText = bot.text;
-  if (opts.fromUnified && intent === "unknown" && !opts.forceEscalate) {
+
+  // "YES" / "NO" only mean admission right after we asked — otherwise
+  // they are just words in a sentence and the normal matcher handles them.
+  const answer = /^(yes|y|haan|haa|ha|ok|okay|sure)\b|^(हाँ|हां|हा|जी हाँ|ठीक है)/i.test(text)
+    ? "yes"
+    : /^(no|nahi|nahin|not now|later)\b|^(नहीं|नही|अभी नहीं)/i.test(text)
+      ? "no"
+      : null;
+  // Set once the admission offer (or its answer) has composed the reply,
+  // so the generic menu lines below don't overwrite it.
+  let handledAdmissionOffer = false;
+  if (answer && awaitingAdmission && leadCtx && intent === "unknown") {
     replyText =
-      "Reply *FEE* · *REGISTER* · *DOCS* · *STATUS* · *VISIT* · *HUMAN* — or *MENU* for the main school menu.";
+      answer === "yes"
+        ? composeAdmissionRegisterStep(registerUrl, leadCtx.feeAmountLabel, hindi)
+        : hindi
+          ? [
+              "ठीक है — हमने अभी के लिए यह दर्ज कर लिया है।",
+              "",
+              "यदि आप मन बदलें, तो कभी भी *REGISTER* लिखें।",
+              "एडमिशन ऑफिस से बात करने के लिए *HUMAN* लिखें।",
+            ].join("\n")
+          : [
+              "Understood — we have noted that for now.",
+              "",
+              "If you change your mind, reply *REGISTER* any time.",
+              "Reply *HUMAN* to talk to the admissions office.",
+            ].join("\n");
+    handledAdmissionOffer = true;
+  } else if (isGreeting && awaitingAdmission && leadCtx && !opts.forceEscalate) {
+    replyText = composeAdmissionOffer(leadCtx, registerUrl, hindi);
+    handledAdmissionOffer = true;
   }
-  if (isGreeting && leadRow && !opts.fromUnified) {
-    replyText = [
-      `Namaste${opts.profileName ? ` ${opts.profileName}` : ""} — *${TENANT.nameDisplay} Admissions*.`,
-      leadRow.childName
-        ? `We have your enquiry for *${leadRow.childName}* (${stageLabel(leadRow.stage)}).`
-        : `We have enquiry *${leadRow.enquiryNo}* on file.`,
-      "",
-      "Reply: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN",
-    ].join("\n");
+  if (
+    opts.fromUnified &&
+    intent === "unknown" &&
+    !opts.forceEscalate &&
+    !handledAdmissionOffer
+  ) {
+    replyText = hindi
+      ? "लिखें *FEE* · *REGISTER* · *DOCS* · *STATUS* · *VISIT* · *HUMAN* — या स्कूल के मुख्य मेनू के लिए *MENU*।"
+      : "Reply *FEE* · *REGISTER* · *DOCS* · *STATUS* · *VISIT* · *HUMAN* — or *MENU* for the main school menu.";
   }
-  if (leadCreatedEnquiryNo && intent === "unknown" && !opts.forceEscalate && !isGreeting) {
-    replyText = [
-      `Thank you for contacting *${TENANT.nameDisplay} Admissions*.`,
-      `We created enquiry *${leadCreatedEnquiryNo}* for this WhatsApp number.`,
-      "",
-      "Reply: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN",
-      `Register online: ${publicRegisterUrl()}`,
-    ].join("\n");
+  if (isGreeting && leadRow && !opts.fromUnified && !handledAdmissionOffer) {
+    replyText = hindi
+      ? [
+          `नमस्ते${opts.profileName ? ` ${opts.profileName} जी` : ""} 🙏 — *${TENANT.nameDisplay} एडमिशन*।`,
+          leadRow.childName
+            ? `*${leadRow.childName}* के एडमिशन की आपकी पूछताछ दर्ज है (${stageLabelForBotHi(leadRow.stage)})।`
+            : `पूछताछ *${leadRow.enquiryNo}* दर्ज है।`,
+          "",
+          "लिखें: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN",
+        ].join("\n")
+      : [
+          `Namaste${opts.profileName ? ` ${opts.profileName}` : ""} — *${TENANT.nameDisplay} Admissions*.`,
+          leadRow.childName
+            ? `We have your enquiry for *${leadRow.childName}* (${stageLabel(leadRow.stage)}).`
+            : `We have enquiry *${leadRow.enquiryNo}* on file.`,
+          "",
+          "Reply: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN",
+        ].join("\n");
+  }
+  if (
+    leadCreatedEnquiryNo &&
+    intent === "unknown" &&
+    !opts.forceEscalate &&
+    !isGreeting &&
+    !handledAdmissionOffer
+  ) {
+    replyText = hindi
+      ? [
+          `*${TENANT.nameDisplay} एडमिशन* से संपर्क करने के लिए धन्यवाद 🙏`,
+          `इस WhatsApp नंबर के लिए पूछताछ *${leadCreatedEnquiryNo}* दर्ज कर ली गई है।`,
+          "",
+          "लिखें: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN",
+          `ऑनलाइन रजिस्ट्रेशन: ${publicRegisterUrl()}`,
+        ].join("\n")
+      : [
+          `Thank you for contacting *${TENANT.nameDisplay} Admissions*.`,
+          `We created enquiry *${leadCreatedEnquiryNo}* for this WhatsApp number.`,
+          "",
+          "Reply: FEE · REGISTER · DOCS · STATUS · VISIT · HUMAN",
+          `Register online: ${publicRegisterUrl()}`,
+        ].join("\n");
   }
   if (leadRow?.guardianName && !thread.parentName) {
     thread = { ...thread, parentName: leadRow.guardianName };
+  }
+  // A typed sentence (not an exact keyword / button / greeting / HUMAN):
+  // 1. office-approved admissions KB — grounded answer or nothing;
+  // 2. for still-unknown intents, the enquiry-record-only fallback;
+  // 3. otherwise the keyword reply already in replyText stands.
+  if (
+    !isGreeting &&
+    !leadCreatedEnquiryNo &&
+    !opts.forceEscalate &&
+    !handledAdmissionOffer &&
+    intent !== "human" &&
+    !isCrmKeywordOrGreeting(text)
+  ) {
+    const kb = await answerAdmissionsQuestion({
+      question: text,
+      channel: "wa",
+      language: hindi ? "hi" : "en",
+      lead: leadCtx,
+      registerUrl: publicRegisterUrl(),
+    });
+    if (kb.grounded) {
+      replyText = kb.reply;
+    } else if (intent === "unknown") {
+      const aiReply = await tryAiFallbackReply(text, leadCtx, hindi);
+      if (aiReply) replyText = aiReply;
+    }
   }
 
   const botMsg: WaCrmBotMsg = {
@@ -351,23 +553,30 @@ export async function handleWaCrmBotInbound(opts: {
   };
   await writeStore(store);
 
-  // Push WhatsApp profile name onto matching CRM leads for campaign {{guardianName}}
+  // Push WhatsApp profile name onto matching CRM leads for campaign
+  // {{guardianName}}.
+  //
+  // Used to read via getSchoolMirrorSync().admissions — a stale,
+  // multi-MB copy of the whole leads table (see the egress
+  // investigation) — and write back via setMirrorSlice(), which only
+  // patches the server's in-memory mirror. Admissions writes are already
+  // skip-gated from ever reaching school_mirror_state once
+  // ADMISSIONS_READ_FROM_DB is on, so that write never actually reached
+  // admission_desk_leads: this backfill has likely been a silent no-op
+  // for as long as that flag's been set. Talks to the real table
+  // directly now, both ways, and only touches the 0-2 leads whose mobile
+  // or whatsapp number matches this thread — never the whole table.
   if ((opts.profileName || "").trim()) {
     try {
-      const { getSchoolMirrorSync, setMirrorSlice } = await import(
-        "@/lib/schoolDataMirror"
-      );
-      const {
-        applyWhatsAppNamesToLeads,
-        normalizeAdmissionsState,
-      } = await import("@/lib/admissions");
-      const mirror = getSchoolMirrorSync();
-      if (mirror.admissions) {
-        const adm = normalizeAdmissionsState(
-          mirror.admissions as Parameters<typeof normalizeAdmissionsState>[0],
-        );
+      const { applyWhatsAppNamesToLeads, defaultAdmissionsState } =
+        await import("@/lib/admissions");
+      const { findAdmissionLeadCandidatesByMobile, pushAdmissionLeadToDb } =
+        await import("@/lib/admissionsNormalized.server");
+      const candidates = await findAdmissionLeadCandidatesByMobile(mobile10);
+      if (candidates.length > 0) {
+        const before = { ...defaultAdmissionsState(), leads: candidates };
         const applied = applyWhatsAppNamesToLeads(
-          adm,
+          before,
           [
             {
               mobile: mobile10,
@@ -378,12 +587,19 @@ export async function handleWaCrmBotInbound(opts: {
           { alsoUpdateGuardianName: false },
         );
         if (applied.updated > 0) {
-          setMirrorSlice("admissions", applied.state);
+          const changed = applied.state.leads.filter(
+            (l, i) => l !== before.leads[i],
+          );
+          await Promise.all(changed.map((l) => pushAdmissionLeadToDb(l)));
         }
       }
     } catch {
-      /* mirror optional on some hosts */
+      /* admissions push optional — never block the WA reply */
     }
+  }
+
+  if (opts.logOnly) {
+    return { replied: false, escalate: bot.escalate, replyText, stub: false };
   }
 
   const send = await sendWhatsAppText({
@@ -401,124 +617,12 @@ export async function handleWaCrmBotInbound(opts: {
   };
 }
 
-/** Parse Meta Cloud API webhook payload → inbound texts / locations */
-export function parseMetaWebhookInbound(body: unknown): {
-  fromWaId: string;
-  text: string;
-  waMessageId?: string;
-  profileName?: string;
-  location?: { lat: number; lng: number; name?: string; address?: string };
-  mediaNote?: string;
-}[] {
-  const out: {
-    fromWaId: string;
-    text: string;
-    waMessageId?: string;
-    profileName?: string;
-    location?: { lat: number; lng: number; name?: string; address?: string };
-    mediaNote?: string;
-  }[] = [];
-  const root = body as {
-    entry?: {
-      changes?: {
-        value?: {
-          contacts?: { profile?: { name?: string }; wa_id?: string }[];
-          messages?: {
-            from?: string;
-            id?: string;
-            type?: string;
-            text?: { body?: string };
-            button?: { text?: string; payload?: string };
-            image?: { caption?: string; id?: string; mime_type?: string };
-            document?: {
-              caption?: string;
-              filename?: string;
-              id?: string;
-              mime_type?: string;
-            };
-            video?: { caption?: string; id?: string; mime_type?: string };
-            audio?: { id?: string; mime_type?: string };
-            location?: {
-              latitude?: number;
-              longitude?: number;
-              name?: string;
-              address?: string;
-            };
-            interactive?: {
-              type?: string;
-              button_reply?: { id?: string; title?: string };
-              list_reply?: { id?: string; title?: string };
-            };
-          }[];
-        };
-      }[];
-    }[];
-  };
+// The inbound parser and its types now live in a pure module so they can be
+// unit-tested without importing the AI client. Re-exported here because the
+// webhook route and others import them from this path.
+export type { WaInboundMediaRef, WaInboundFlowResponse } from "@/lib/waInboundParse";
+export { parseMetaWebhookInbound } from "@/lib/waInboundParse";
 
-  for (const entry of root.entry || []) {
-    for (const change of entry.changes || []) {
-      const value = change.value;
-      if (!value?.messages) continue;
-      const name = value.contacts?.[0]?.profile?.name || "";
-      for (const msg of value.messages) {
-        let text = "";
-        let mediaNote: string | undefined;
-        let location:
-          | { lat: number; lng: number; name?: string; address?: string }
-          | undefined;
-        if (msg.type === "text") text = msg.text?.body || "";
-        else if (msg.type === "button")
-          text = msg.button?.payload || msg.button?.text || "";
-        else if (msg.type === "interactive") {
-          text =
-            msg.interactive?.button_reply?.id ||
-            msg.interactive?.button_reply?.title ||
-            msg.interactive?.list_reply?.id ||
-            msg.interactive?.list_reply?.title ||
-            "";
-        } else if (msg.type === "image") {
-          text = msg.image?.caption || "";
-          mediaNote = `image${msg.image?.mime_type ? ` (${msg.image.mime_type})` : ""}`;
-        } else if (msg.type === "document") {
-          text =
-            msg.document?.caption ||
-            msg.document?.filename ||
-            "Document";
-          mediaNote = `document:${msg.document?.filename || msg.document?.id || ""}`;
-        } else if (msg.type === "video") {
-          text = msg.video?.caption || "";
-          mediaNote = "video";
-        } else if (msg.type === "audio") {
-          text = "";
-          mediaNote = "audio";
-        } else if (msg.type === "location" && msg.location) {
-          const lat = Number(msg.location.latitude);
-          const lng = Number(msg.location.longitude);
-          if (Number.isFinite(lat) && Number.isFinite(lng)) {
-            location = {
-              lat,
-              lng,
-              name: msg.location.name || undefined,
-              address: msg.location.address || undefined,
-            };
-            text = "";
-          } else continue;
-        } else continue;
-        if (!msg.from) continue;
-        if (!text && !mediaNote && !location) continue;
-        out.push({
-          fromWaId: msg.from,
-          text: text || (mediaNote ? `MEDIA ${mediaNote}` : ""),
-          waMessageId: msg.id,
-          profileName: name,
-          location,
-          mediaNote,
-        });
-      }
-    }
-  }
-  return out;
-}
 
 export function parseGenericBspInbound(body: unknown): {
   fromWaId: string;

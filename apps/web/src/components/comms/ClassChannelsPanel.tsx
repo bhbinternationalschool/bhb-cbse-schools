@@ -1,11 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { applyClassChannelDraftToErp } from "@/lib/waClassChannelApply";
 import { loadMasters } from "@/lib/masters";
 import { TENANT } from "@/lib/types";
+import { composeClassGroupMessage, waShareUrl } from "@/lib/classGroupMessage";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+import { ClassGroupMoveCard } from "@/components/comms/ClassGroupMoveCard";
+import { UnknownLoginsCard } from "@/components/comms/UnknownLoginsCard";
+import { ParentLinksCard } from "@/components/comms/ParentLinksCard";
 
 type Channel = {
   id: string;
@@ -66,7 +70,16 @@ export function ClassChannelsPanel() {
 
   const subjects = loadMasters().subjects ?? [];
 
+  // Read through a ref so `refresh` keeps one identity for the life of the
+  // panel — it used to depend on selectedChannelId, which re-ran the effect
+  // below (and re-armed its interval) every time the selection changed.
+  const selectedRef = useRef(selectedChannelId);
+  selectedRef.current = selectedChannelId;
+  const inFlight = useRef(false);
+
   const refresh = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     try {
       const res = await fetch("/api/wa/class-channel");
       if (!res.ok) return;
@@ -83,9 +96,12 @@ export function ClassChannelsPanel() {
       setChannels(ch);
       setDrafts(Array.isArray(json.drafts) ? json.drafts : []);
       setThreads(Array.isArray(json.threads) ? json.threads : []);
-      if (!selectedChannelId && ch[0]) setSelectedChannelId(ch[0].id);
+      if (!selectedRef.current && ch[0]) setSelectedChannelId(ch[0].id);
 
-      // Auto-apply confirmed drafts into ERP modules
+      // Fallback only. The ERP write now happens server-side the moment a
+      // draft is confirmed (see applyDraftToErpServer), which marks the
+      // draft "applied"; anything still sitting at "confirmed" is either
+      // from before that existed or failed there, so it is retried here.
       for (const d of json.drafts || []) {
         if (d.status !== "confirmed") continue;
         const channel = ch.find((c) => c.id === d.channelId);
@@ -104,19 +120,26 @@ export function ClassChannelsPanel() {
       }
     } catch {
       /* */
+    } finally {
+      inFlight.current = false;
     }
-  }, [selectedChannelId]);
+  }, []);
 
+  // One load on mount, then a poll every 60 s while the tab is visible. The
+  // server rebuilds channels itself when its copy is empty, so the panel no
+  // longer fires a POST sync on every mount.
   useEffect(() => {
-    void (async () => {
-      await refresh();
-      if (channels.length === 0) {
-        await syncMembers();
-      }
-    })();
-    const t = window.setInterval(() => void refresh(), 15_000);
-    return () => window.clearInterval(t);
-  }, [refresh, channels.length]);
+    void refresh();
+    const tick = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    const t = window.setInterval(tick, 60_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [refresh]);
 
   function flash(msg: string) {
     setNotice(msg);
@@ -160,12 +183,17 @@ export function ClassChannelsPanel() {
         error?: string;
         draft?: Draft;
         broadcast?: { sent: number; stub: number };
+        erp?: { status: "applied" | "skipped" | "failed"; detail?: string; error?: string };
       };
       if (!res.ok) {
         setError(json.error || "Confirm failed");
         return;
       }
-      if (json.draft) {
+      // The server writes the ERP record itself now and returns what
+      // happened. Only retry from the browser when it could not — writing
+      // here as well would file the same homework twice.
+      let erp = json.erp ?? null;
+      if (json.draft && (!erp || erp.status === "failed")) {
         const channel = channels.find((c) => c.id === json.draft!.channelId);
         if (channel) {
           const applied = applyClassChannelDraftToErp(json.draft, channel);
@@ -178,14 +206,27 @@ export function ClassChannelsPanel() {
                 draftId: json.draft.id,
               }),
             });
+            erp = { status: "applied", detail: applied.detail };
+          } else if (!erp) {
+            erp = { status: "failed", error: applied.error };
           }
         }
       }
       await refresh();
       const bc = json.broadcast;
-      flash(
-        `Published · WA ${bc?.sent ?? 0} sent${bc?.stub ? `, ${bc.stub} stub` : ""} · ERP updated`,
-      );
+      // Say which of the two writes actually happened. "ERP updated" used
+      // to be printed whether or not anything reached the ERP.
+      const erpBit =
+        erp?.status === "applied"
+          ? "ERP updated"
+          : erp?.status === "skipped"
+            ? "nothing to file in the ERP"
+            : erp
+              ? `ERP write failed (${erp.error || "unknown"})`
+              : "ERP pending";
+      const line = `Published · WA ${bc?.sent ?? 0} sent${bc?.stub ? `, ${bc.stub} stub` : ""} · ${erpBit}`;
+      if (erp?.status === "failed") setError(line);
+      else flash(line);
     } finally {
       setBusy(false);
     }
@@ -247,7 +288,10 @@ export function ClassChannelsPanel() {
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+      <ClassGroupMoveCard />
+      <ParentLinksCard />
+      <UnknownLoginsCard />
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
           Class WhatsApp channels
         </h2>
@@ -259,7 +303,7 @@ export function ClassChannelsPanel() {
         </p>
         <p className="mt-2 text-[11px] text-[var(--muted)]">
           Outbound API:{" "}
-          <span className={configured ? "text-[#15803d]" : "text-[#b42318]"}>
+          <span className={configured ? "text-[var(--success)]" : "text-[var(--danger)]"}>
             {configured ? "configured" : "stub / not configured"}
           </span>
           {help ? ` · ${help}` : ""}
@@ -274,7 +318,7 @@ export function ClassChannelsPanel() {
             Rebuild membership
           </button>
         </div>
-        <pre className="mt-3 overflow-x-auto rounded-lg bg-[rgba(32,48,80,0.05)] p-3 text-[11px] leading-relaxed text-[var(--brand-deep)]">
+        <pre className="mt-3 overflow-x-auto rounded-lg bg-[var(--surface-sunken)] p-3 text-[11px] leading-relaxed text-[var(--brand-deep)]">
 {`Teacher examples:
 HW 8A Maths: Ex 4.1 Q1-10 Due: 2026-07-21
 NOTICE 8A: Bring art kit tomorrow
@@ -286,12 +330,12 @@ Then reply: YES`}
       </div>
 
       {notice ? (
-        <p className="rounded-lg bg-[rgba(22,163,74,0.12)] px-3 py-2 text-sm text-[#15803d]">
+        <p className="rounded-lg bg-[rgba(22,163,74,0.12)] px-3 py-2 text-sm text-[var(--success)]">
           {notice}
         </p>
       ) : null}
       {error ? (
-        <p className="rounded-lg bg-[rgba(180,35,24,0.1)] px-3 py-2 text-sm text-[#b42318]">
+        <p className="rounded-lg bg-[rgba(180,35,24,0.1)] px-3 py-2 text-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}
@@ -319,8 +363,8 @@ Then reply: YES`}
                     onClick={() => setSelectedChannelId(c.id)}
                     className={`block w-full rounded-xl border px-3 py-2 text-left ${
                       selectedChannelId === c.id
-                        ? "border-[var(--brand-deep)] bg-[rgba(32,48,80,0.06)]"
-                        : "border-[rgba(32,48,80,0.1)] bg-white"
+                        ? "border-[var(--brand-deep)] bg-[var(--surface-sunken)]"
+                        : "border-[var(--border)] bg-[var(--card)]"
                     }`}
                   >
                     <p className="text-sm font-semibold text-[var(--brand-deep)]">
@@ -335,7 +379,7 @@ Then reply: YES`}
             )}
           </div>
           {selected ? (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
               <p className="text-xs font-bold text-[var(--brand-deep)]">
                 Members · {selected.label}
               </p>
@@ -372,7 +416,7 @@ Then reply: YES`}
                   key={d.id}
                   className="rounded-xl border border-[rgba(197,160,40,0.35)] bg-[rgba(197,160,40,0.08)] p-3"
                 >
-                  <p className="text-[10px] font-bold uppercase text-[#8a6d12]">
+                  <p className="text-[10px] font-bold uppercase text-[var(--tone-amber)]">
                     {d.kind} · {ch?.label || d.channelId}
                   </p>
                   <h4 className="mt-1 text-sm font-semibold text-[var(--brand-deep)]">
@@ -403,13 +447,45 @@ Then reply: YES`}
                     >
                       Cancel
                     </button>
+                    {(() => {
+                      // The move off personal class groups: the same post for the old group.
+                      const text = composeClassGroupMessage({
+                        kind: d.kind === "homework" ? "homework" : d.kind === "event" ? "event" : "notice",
+                        classLabel: ch?.label || "",
+                        date: (d.createdAt || "").slice(0, 10),
+                        subject: d.subjectName,
+                        title: d.title,
+                        bodyEn: d.body,
+                        dueAt: d.kind === "event" ? d.eventDate : d.dueAt,
+                        schoolName: TENANT.nameDisplay || TENANT.shortName,
+                      });
+                      return (
+                        <>
+                          <button
+                            type="button"
+                            className={btnOutline}
+                            onClick={() =>
+                              void navigator.clipboard
+                                .writeText(text)
+                                .then(() => flash("Copied — paste it in the class WhatsApp group"))
+                                .catch(() => setError("Could not copy — use “Share to WhatsApp”."))
+                            }
+                          >
+                            Copy for class group
+                          </button>
+                          <a className={btnOutline} href={waShareUrl(text)} target="_blank" rel="noreferrer">
+                            Share to WhatsApp
+                          </a>
+                        </>
+                      );
+                    })()}
                   </div>
                 </article>
               );
             })
           )}
 
-          <div className="space-y-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3">
+          <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
             <p className="text-xs font-bold text-[var(--brand-deep)]">
               Office draft (optional)
             </p>
@@ -483,7 +559,7 @@ Then reply: YES`}
           {threads.slice(0, 6).map((t) => (
             <div
               key={t.id}
-              className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3"
+              className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3"
             >
               <p className="text-sm font-semibold text-[var(--brand-deep)]">
                 {t.staffName} · {t.mobile}

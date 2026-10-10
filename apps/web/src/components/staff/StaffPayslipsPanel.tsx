@@ -47,7 +47,7 @@ export function StaffPayslipsPanel() {
   return (
     <div className="space-y-4">
       {manager ? (
-        <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-3 text-sm text-[var(--muted)]">
+        <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--muted)]">
           Run payroll and view all payslips in{" "}
           <Link
             href="/payroll"
@@ -72,7 +72,7 @@ export function StaffPayslipsPanel() {
           {slips.map(({ run, line }) => (
             <div
               key={run.id}
-              className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4"
+              className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4"
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>

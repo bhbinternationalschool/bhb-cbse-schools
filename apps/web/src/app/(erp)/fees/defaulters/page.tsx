@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { DefaultersPlaybook } from "@/components/fees/DefaultersPlaybook";
+import { DefaultersTabs } from "@/components/fees/DefaultersTabs";
 
 export const metadata: Metadata = { title: "Defaulters" };
 
 export default function DefaultersPage() {
-  return <DefaultersPlaybook />;
+  return <DefaultersTabs />;
 }

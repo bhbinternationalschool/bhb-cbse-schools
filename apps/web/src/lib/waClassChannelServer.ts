@@ -3,11 +3,28 @@
  * Teachers post → draft → YES confirms → fills ERP modules + broadcasts to parents/teachers.
  */
 
+import { matchSubject } from "@/lib/classChannelSubject";
 import { promises as fs } from "fs";
 import path from "path";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { listSectionParentContacts } from "@/lib/homework";
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
+import {
+  renderTemplateBody,
+  templateForFamily,
+  templatesByLanguage,
+  type PickedTemplate,
+} from "@/lib/erpCommands";
+import { heldExpiryFor } from "@/lib/waTemplateAutopilot";
+import { seedTemplateText } from "@/lib/waTemplates";
+import {
+  composeFillBlanksReply,
+  composeNoticeParentPreview,
+  composeNoticeSentReceipt,
+  flattenTemplateParam,
+  hasUnfilledBlank,
+} from "@/lib/classNoticeWa";
 import { loadSis } from "@/lib/sis";
 import {
   resolveClassTeachers,
@@ -22,6 +39,7 @@ import {
 } from "@/lib/waClassChannelEngine";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
 import type { StaffRecord } from "@/lib/foundationMasters";
+import { generateTutorText } from "@/lib/aiLlm.server";
 
 export type ClassChannelMemberRole =
   | "class_teacher"
@@ -48,6 +66,10 @@ export type ClassChannelDraft = {
   dueAt: string;
   eventDate: string;
   mediaNote: string;
+  /** The same message in Hindi, written when the draft was expanded. */
+  bodyHi?: string;
+  /** "Ch 6 — Multiples and Factors" when the shorthand resolved to a chapter. */
+  chapterHint?: string;
   status: "pending" | "confirmed" | "cancelled" | "applied";
   createdAt: string;
   createdByStaffId: string;
@@ -192,22 +214,6 @@ function matchClassSection(
   };
 }
 
-function matchSubject(
-  masters: MastersState,
-  hint: string,
-): { id: string; name: string } | null {
-  if (!hint) return null;
-  const subjects = masters.subjects ?? [];
-  const h = hint.toLowerCase();
-  const hit = subjects.find((s) => {
-    const en = (s.nameEn || "").toLowerCase();
-    const code = (s.code || "").toLowerCase();
-    return en === h || en.includes(h) || code === h;
-  });
-  if (!hit) return null;
-  return { id: hit.id, name: hit.nameEn || hit.code || hit.id };
-}
-
 export function buildChannelMembers(
   masters: MastersState,
   classId: string,
@@ -254,6 +260,35 @@ export function buildChannelMembers(
   return members;
 }
 
+/** Membership fingerprint — what a sync is allowed to change. `updatedAt`
+ * is deliberately left out so an unchanged roster never counts as a change. */
+function channelFingerprint(channels: ClassChannel[]): string {
+  return JSON.stringify(
+    channels
+      .map((c) => ({
+        id: c.id,
+        label: c.label,
+        classId: c.classId,
+        sectionId: c.sectionId,
+        members: c.members,
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+  );
+}
+
+let lastSyncAt = 0;
+const SYNC_MAX_AGE_MS = 10 * 60 * 1000;
+
+/**
+ * Rebuild every section's channel from Staff duties + the SIS roster.
+ *
+ * Writes only when membership actually changed. Before this, every call
+ * re-saved the whole WhatsApp bot bundle (all eight slices → desk table,
+ * jsonb blob, disk) even when nothing moved — and the panel called it on
+ * every 15-second poll, twice per request. That is what made the Class WA
+ * tab feel stuck: each poll held the server for a full roster walk plus
+ * three writes, and a tab click (a server round trip) queued behind it.
+ */
 export async function syncClassChannels(
   ay = DEFAULT_AY,
 ): Promise<ClassChannel[]> {
@@ -264,26 +299,52 @@ export async function syncClassChannels(
     const cls = (masters.classes ?? []).find((c) => c.id === s.classId);
     return !!cls;
   });
+  const byId = new Map(store.channels.map((c) => [c.id, c]));
   const next: ClassChannel[] = [];
   for (const sec of sections) {
     const cls = (masters.classes ?? []).find((c) => c.id === sec.classId);
     if (!cls) continue;
     const id = `ch_${ay}_${sec.id}`;
-    const prev = store.channels.find((c) => c.id === id);
-    next.push({
-      id,
-      academicYearCode: ay,
-      classId: cls.id,
-      sectionId: sec.id,
-      label: `${cls.name || cls.id} · ${sec.name || ""}`.trim(),
-      members: buildChannelMembers(masters, cls.id, sec.id, ay),
-      updatedAt: nowIso(),
-    });
-    void prev;
+    const prev = byId.get(id);
+    const members = buildChannelMembers(masters, cls.id, sec.id, ay);
+    const label = `${cls.name || cls.id} · ${sec.name || ""}`.trim();
+    const unchanged =
+      prev &&
+      prev.label === label &&
+      JSON.stringify(prev.members) === JSON.stringify(members);
+    next.push(
+      unchanged
+        ? prev
+        : {
+            id,
+            academicYearCode: ay,
+            classId: cls.id,
+            sectionId: sec.id,
+            label,
+            members,
+            updatedAt: nowIso(),
+          },
+    );
+  }
+  lastSyncAt = Date.now();
+  if (channelFingerprint(next) === channelFingerprint(store.channels)) {
+    return store.channels;
   }
   store.channels = next;
   await writeStore(store);
   return next;
+}
+
+/** Sync at most once per 10 minutes per server instance; the office's
+ * "Rebuild" button and an inbound teacher message still force it. */
+export async function syncClassChannelsIfStale(
+  ay = DEFAULT_AY,
+): Promise<ClassChannel[]> {
+  const store = await readStore();
+  if (store.channels.length > 0 && Date.now() - lastSyncAt < SYNC_MAX_AGE_MS) {
+    return store.channels;
+  }
+  return syncClassChannels(ay);
 }
 
 export function findTeacherByMobile(
@@ -450,8 +511,197 @@ function composeBroadcast(draft: ClassChannelDraft, channel: ClassChannel): stri
     .join("\n");
 }
 
+/** The heading parents see above the teacher's words: what it is and for which class. */
+function noticeHeading(draft: ClassChannelDraft, channel: ClassChannel): string {
+  const what =
+    draft.kind === "holiday"
+      ? "Holiday"
+      : draft.kind === "exam"
+        ? "Exam update"
+        : draft.kind === "timing"
+          ? "School timing"
+          : "Notice";
+  return `${what} · ${channel.label.replace(" · ", " ")}`;
+}
+
+/** The teacher's words as one template-safe line, with any date the parser read. */
+function noticeBodyFor(draft: ClassChannelDraft): string {
+  const words = [draft.body || draft.title, draft.eventDate ? `Date: ${draft.eventDate}` : ""]
+    .filter(Boolean)
+    .join("\n");
+  return `${flattenTemplateParam(words)} — ${draft.createdByName}`;
+}
+
+type ClassNoticePlan =
+  | { ok: false; error: string; families: number }
+  | {
+      ok: true;
+      families: number;
+      byLangMobiles: Record<string, string[]>;
+      byLang: Record<string, PickedTemplate | null>;
+      /** Languages some families read whose template is not approved yet. */
+      waiting: { lang: string; families: number }[];
+      vars: Record<string, string>;
+      rendered: string;
+      languages: string;
+    };
+
+/**
+ * Who gets a class notice and in which approved template: every family of
+ * the section with a WhatsApp number, bucketed by the language each reads.
+ * Both the teacher's preview and the send come from this, so what they
+ * approve is what goes. A language whose template is not approved yet is
+ * named in `waiting`: those families' notice is held and goes the moment
+ * Meta approves it (waTemplateAutopilot.server.ts).
+ */
+async function planClassNotice(draft: ClassChannelDraft, channel: ClassChannel): Promise<ClassNoticePlan> {
+  await ensureSchoolMirrorHydrated();
+  const sis = loadSis();
+  const contacts = listSectionParentContacts(channel.sectionId, channel.academicYearCode, sis);
+  const byLangMobiles: Record<string, string[]> = {};
+  for (const c of contacts) {
+    if (!c.mobile) continue;
+    const hh = sis.households.find((h) => h.id === c.householdId);
+    (byLangMobiles[waTemplateLanguageFor(hh ?? {})] ??= []).push(c.mobile);
+  }
+  const { approvedTemplatesServer } = await import("@/lib/waTemplatesRead.server");
+  const read = await approvedTemplatesServer("comms");
+  if (!read.ok) return { ok: false, error: read.error, families: contacts.length };
+  const tpls = templatesByLanguage(read.templates, ["comms_notice"]);
+  const vars: Record<string, string> = {
+    schoolName: TENANT.nameDisplay,
+    noticeTitle: flattenTemplateParam(noticeHeading(draft, channel), 60),
+    noticeBody: noticeBodyFor(draft),
+    guardianName: "Parent",
+    childName: "your child",
+  };
+  const langName = (k: string) => (k === "en" ? "English" : "Hindi");
+  const languages = Object.entries(byLangMobiles)
+    .filter(([, v]) => v.length)
+    .map(([k, v]) => `${v.length} ${langName(k)}`)
+    .join(", ");
+  const waiting = Object.entries(byLangMobiles)
+    .filter(([k, v]) => v.length && !tpls.byLang[k as "en" | "hi"])
+    .map(([k, v]) => ({ lang: langName(k), families: v.length }));
+  // The frame shown to the teacher: an approved one, else the catalogue's.
+  const frame =
+    tpls.rawReady?.body ||
+    read.templates.find((t) => t.familyKey === "comms_notice" && t.language === "hi")?.body ||
+    read.templates.find((t) => t.familyKey === "comms_notice")?.body ||
+    seedTemplateText("comms_notice", "hi")?.body ||
+    "";
+  return {
+    ok: true,
+    families: contacts.length,
+    byLangMobiles,
+    byLang: tpls.byLang,
+    waiting,
+    vars,
+    rendered: renderTemplateBody(frame, vars),
+    languages,
+  };
+}
+
+export type ClassNoticeSendResult = {
+  /** "unavailable" = the templates could not be read; nothing was sent. */
+  mode: "template" | "text" | "none" | "unavailable";
+  families: number;
+  sent: number;
+  failed: number;
+  optedOut: number;
+  /** Families whose notice is held for their language's template. */
+  held: number;
+  heldUntil: string;
+};
+
+/**
+ * A notice to every family of the class: through the approved template in
+ * each family's language. Where that language's template is not approved
+ * yet, plain text is tried (it reaches a family that wrote in within 24
+ * hours) and everyone it could not reach is held — sent automatically when
+ * Meta approves, dropped if the day the notice is about comes first.
+ */
+async function sendClassNoticeToParents(draft: ClassChannelDraft, channel: ClassChannel): Promise<ClassNoticeSendResult> {
+  const plan = await planClassNotice(draft, channel);
+  const families = plan.families;
+  const empty = { sent: 0, failed: 0, optedOut: 0, held: 0, heldUntil: "" };
+  if (!families) return { mode: "none", families: 0, ...empty };
+  if (!plan.ok) return { mode: "unavailable", families, ...empty };
+  const { buildWaTemplateBodyComponent } = await import("@/lib/waSend");
+  const { broadcastTemplateToMobiles } = await import("@/lib/waBroadcast.server");
+  const { publicOrigin } = await import("@/lib/birthday.server");
+  const res: ClassNoticeSendResult = { mode: "template", families, ...empty };
+  const toHold: Record<string, string[]> = {};
+  let usedText = false;
+  for (const [lang, group] of Object.entries(plan.byLangMobiles)) {
+    if (!group.length) continue;
+    const tpl = templateForFamily(plan.byLang, lang, null);
+    if (tpl) {
+      const one = await broadcastTemplateToMobiles({
+        mobiles: group,
+        template: {
+          name: tpl.metaName,
+          language: tpl.language,
+          components: [buildWaTemplateBodyComponent(tpl.variables, plan.vars)],
+        },
+        module: "notices",
+        originUrl: publicOrigin(),
+      });
+      res.sent += one.sent;
+      res.failed += one.failed;
+      res.optedOut += one.skippedOptOut;
+      continue;
+    }
+    usedText = true;
+    const body = composeBroadcast(draft, channel);
+    for (const m of group) {
+      const r = await sendWhatsAppText({ toMobile: m, body });
+      if (r.ok) res.sent += 1;
+      else (toHold[lang] ??= []).push(m);
+    }
+  }
+  if (usedText && !Object.values(plan.byLang).some(Boolean)) res.mode = "text";
+  const waitingCount = Object.values(toHold).reduce((n, l) => n + l.length, 0);
+  if (waitingCount) {
+    const expiresAt = heldExpiryFor(`${draft.title} ${draft.body}`, new Date(), draft.eventDate);
+    const { holdTemplateSend } = await import("@/lib/waTemplateAutopilot.server");
+    const held = await holdTemplateSend({
+      familyKey: "comms_notice",
+      module: "notices",
+      label: noticeHeading(draft, channel),
+      recipients: toHold,
+      vars: plan.vars,
+      requestedByName: draft.createdByName,
+      requestedByMobile: draft.createdByMobile,
+      expiresAt,
+      // The teacher's receipt already says it; one message, not two.
+      ack: false,
+    }).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : "hold failed" }));
+    if (held.ok) {
+      res.held = held.held;
+      res.heldUntil = expiresAt;
+    } else {
+      console.error("[class-channel] could not hold notice", held.error);
+      res.failed += waitingCount;
+    }
+  }
+  return res;
+}
+
+/**
+ * Send the draft to the channel.
+ *
+ * `who` exists because homework takes a different road to the parents.
+ * This function sends PLAIN TEXT, which Meta delivers only inside a
+ * family's 24-hour window — so for every parent who had not messaged the
+ * school that day it silently failed, counted itself as a "stub", and the
+ * teacher was told the class had been informed. Homework now goes to
+ * families through `sendHomeworkWhatsApp`, which falls back to the approved
+ * template when the window is shut, and this sends only the co-teachers.
+ */
 export async function broadcastClassChannelDraft(
   draftId: string,
+  who: "everyone" | "staff_only" | "parents_only" = "everyone",
 ): Promise<{ ok: true; sent: number; stub: number } | { ok: false; error: string }> {
   const store = await readStore();
   const draft = store.drafts.find((d) => d.id === draftId);
@@ -463,12 +713,14 @@ export async function broadcastClassChannelDraft(
   if (!channel) return { ok: false, error: "Channel not found" };
 
   const body = composeBroadcast(draft, channel);
-  const targets = channel.members.filter((m) => m.role === "parent");
-  // Also notify co-teachers except author
-  for (const m of channel.members) {
-    if (m.role === "parent") continue;
-    if (m.mobile === draft.createdByMobile) continue;
-    if (!targets.some((t) => t.mobile === m.mobile)) targets.push(m);
+  const targets = who === "staff_only" ? [] : channel.members.filter((m) => m.role === "parent");
+  if (who !== "parents_only") {
+    // Also notify co-teachers except author
+    for (const m of channel.members) {
+      if (m.role === "parent") continue;
+      if (m.mobile === draft.createdByMobile) continue;
+      if (!targets.some((t) => t.mobile === m.mobile)) targets.push(m);
+    }
   }
 
   let sent = 0;
@@ -478,7 +730,7 @@ export async function broadcastClassChannelDraft(
     if (r.ok) sent += 1;
     else stub += 1;
   }
-  draft.broadcastCount = sent + stub;
+  draft.broadcastCount += sent + stub;
   await writeStore(store);
   return { ok: true, sent, stub };
 }
@@ -491,6 +743,10 @@ export async function confirmClassChannelDraft(input: {
       ok: true;
       draft: ClassChannelDraft;
       broadcast: { sent: number; stub: number };
+      /** How the ERP write went — see `applyDraftToErpServer`. */
+      erp: ClassChannelErpApply;
+      /** A notice's delivery to the families; null for other drafts. */
+      parents: ClassNoticeSendResult | null;
     }
   | { ok: false; error: string }
 > {
@@ -500,22 +756,138 @@ export async function confirmClassChannelDraft(input: {
   if (draft.status === "cancelled") {
     return { ok: false, error: "Draft was cancelled" };
   }
+  if (draft.status === "confirmed" || draft.status === "applied") {
+    // A second YES must never message every family again.
+    return { ok: false, error: "This was already sent." };
+  }
   draft.status = "confirmed";
   draft.confirmedAt = nowIso();
   // clear pending on threads
+  const clearedThreadIds: string[] = [];
   for (const t of store.threads) {
-    if (t.pendingDraftId === draft.id) t.pendingDraftId = "";
+    if (t.pendingDraftId === draft.id) {
+      t.pendingDraftId = "";
+      clearedThreadIds.push(t.id);
+    }
   }
   await writeStore(store);
-  const bc = await broadcastClassChannelDraft(draft.id);
+  // Homework reaches the families from the ERP write below, through the
+  // approved template, so it is not also text-broadcast here — that would
+  // message twice every parent whose window happens to be open.
+  const homeworkPath = draft.erpTarget === "homework";
+  // A notice reaches the families through the approved notice template
+  // (sendClassNoticeToParents); plain text would reach only the few who
+  // wrote to the school in the last 24 hours.
+  const noticePath = draft.erpTarget === "notice";
+  let parents: ClassNoticeSendResult | null = null;
+  if (noticePath) {
+    const channel = store.channels.find((c) => c.id === draft.channelId);
+    parents = channel
+      ? await sendClassNoticeToParents(draft, channel).catch((e: unknown) => {
+          console.error("[class-channel] notice to parents failed", e);
+          return { mode: "template" as const, families: 0, sent: 0, failed: 0, optedOut: 0, held: 0, heldUntil: "" };
+        })
+      : null;
+    if (parents?.mode === "unavailable") {
+      // Nothing went out: put the draft back so the teacher's next YES sends it.
+      const back = await readStore();
+      const d = back.drafts.find((x) => x.id === draft.id);
+      if (d) {
+        d.status = "pending";
+        d.confirmedAt = "";
+      }
+      for (const t of back.threads) {
+        if (clearedThreadIds.includes(t.id) && !t.pendingDraftId) t.pendingDraftId = draft.id;
+      }
+      await writeStore(back);
+      return {
+        ok: false,
+        error: "Couldn't reach the school's WhatsApp templates just now, so nothing was sent. Reply YES again in a minute.",
+      };
+    }
+  }
+  const bc = await broadcastClassChannelDraft(draft.id, homeworkPath || noticePath ? "staff_only" : "everyone");
+  // The ERP write happens here, not in a browser effect: parents have just
+  // been messaged, and a homework post they can see must exist in the
+  // school's own record whether or not anyone opens Comms today.
+  const erp = await applyDraftToErpServer(draft.id);
+  if (homeworkPath && erp.status !== "applied") {
+    // The ERP write is what messages the families on the homework path, so
+    // if it failed nobody has heard. Text is worse than the template — it
+    // only reaches an open window — but it is what there is.
+    await broadcastClassChannelDraft(draft.id, "parents_only").catch(() => undefined);
+  }
+  const fresh = await readStore();
+  const latest = fresh.drafts.find((d) => d.id === draft.id) ?? draft;
   if (!bc.ok) {
-    return { ok: true, draft, broadcast: { sent: 0, stub: 0 } };
+    return { ok: true, draft: latest, broadcast: { sent: 0, stub: 0 }, erp, parents };
   }
   return {
     ok: true,
-    draft,
+    draft: latest,
     broadcast: { sent: bc.sent, stub: bc.stub },
+    erp,
+    parents,
   };
+}
+
+export type ClassChannelErpApply =
+  /** Written to the ERP and the draft marked applied. */
+  | { status: "applied"; detail: string }
+  /** Nothing to write — a question or a chat message with no ERP mapping. */
+  | { status: "skipped"; detail: string }
+  /** Tried and failed; the draft stays `confirmed` for the browser retry. */
+  | { status: "failed"; error: string };
+
+/**
+ * Write a confirmed draft into homework / notices and mark it applied.
+ *
+ * Marking it applied is what stops the browser panel writing it a second
+ * time: `ClassChannelsPanel` only applies drafts still marked `confirmed`,
+ * so a failure here leaves that fallback intact rather than losing the
+ * record entirely.
+ */
+export async function applyDraftToErpServer(
+  draftId: string,
+): Promise<ClassChannelErpApply> {
+  const store = await readStore();
+  const draft = store.drafts.find((d) => d.id === draftId);
+  if (!draft) return { status: "failed", error: "Draft not found" };
+  if (draft.status === "applied") {
+    return { status: "skipped", detail: "Already applied" };
+  }
+  if (draft.status !== "confirmed") {
+    return { status: "failed", error: "Draft not confirmed" };
+  }
+  if (draft.erpTarget === "none") {
+    return { status: "skipped", detail: "No ERP module mapping" };
+  }
+  const channel = store.channels.find((c) => c.id === draft.channelId);
+  if (!channel) return { status: "failed", error: "Channel not found" };
+
+  const { applyClassChannelDraftServer } = await import(
+    "@/lib/waClassChannelApply.server"
+  );
+  let res;
+  try {
+    res = await applyClassChannelDraftServer(draft, {
+      classId: channel.classId,
+      sectionId: channel.sectionId,
+      academicYearCode: channel.academicYearCode,
+    });
+  } catch (e) {
+    const error = e instanceof Error ? e.message : "ERP write failed";
+    console.warn("[class-channel] erp apply threw", error);
+    return { status: "failed", error };
+  }
+  if (!res.ok) {
+    console.warn("[class-channel] erp apply failed", res.error);
+    return { status: "failed", error: res.error };
+  }
+  if (!res.applied) return { status: "skipped", detail: res.detail };
+
+  await markClassChannelDraftApplied(draftId);
+  return { status: "applied", detail: res.detail };
 }
 
 export async function cancelClassChannelDraft(
@@ -542,8 +914,34 @@ export async function markClassChannelDraftApplied(
   await writeStore(store);
 }
 
+/** The newest pending draft id across all of this number's class threads. */
+function pendingDraftForMobile(store: { threads: { mobile: string; pendingDraftId?: string | null }[]; drafts: { id: string; status: string; createdAt: string }[] }, mobile: string): string {
+  const ids = new Set(store.threads.filter((t) => t.mobile === mobile && t.pendingDraftId).map((t) => String(t.pendingDraftId)));
+  const pending = store.drafts.filter((d) => ids.has(d.id) && d.status === "pending").sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return pending[0]?.id ?? "";
+}
+
+/**
+ * The class-channel draft this teacher's number is waiting to confirm, or
+ * null. Used to know whether a plain "yes" is for that draft or for
+ * something else, and to tell a teacher who asks something new to finish it.
+ */
+export async function classChannelPendingDraftFor(
+  fromWaId: string,
+): Promise<{ id: string; title: string; label: string; createdAt: string } | null> {
+  const mobile = waNormalizeLocal10(fromWaId);
+  const store = await readStore();
+  for (const t of store.threads) {
+    if (t.mobile !== mobile || !t.pendingDraftId) continue;
+    const d = store.drafts.find((x) => x.id === t.pendingDraftId && x.status === "pending");
+    if (!d) continue;
+    const ch = store.channels.find((c) => c.id === d.channelId);
+    return { id: d.id, title: d.title, label: ch?.label ?? "", createdAt: d.createdAt };
+  }
+  return null;
+}
+
 export async function listClassChannelState() {
-  await syncClassChannels();
   const store = await readStore();
   return {
     channels: store.channels,
@@ -556,6 +954,35 @@ export async function listClassChannelState() {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, 80),
   };
+}
+
+/**
+ * LLM fallback for teacher messages that don't parse as a class-channel
+ * command. Only ever called when there's no draft in progress. Points to
+ * the existing HW/NOTICE/HELP syntax only — never invents class rosters,
+ * schedules, or school policy, and the caller always appends the exact
+ * command syntax hint after this reply so the format guidance is never
+ * lost even if the AI answer alone isn't actionable enough.
+ */
+async function tryClassChannelAiFallback(
+  text: string,
+  teacherName: string,
+): Promise<string | null> {
+  const system = `You are a WhatsApp assistant for a teacher's class-channel bot at ${TENANT.nameDisplay} (broadcasts homework/notices to a class's parents).
+You may ONLY explain the existing commands: HW <section> <subject>: <text> (homework), NOTICE <section>: <text>, MEMBERS (channel member count), CONFIRM (publish a pending draft), CANCEL (discard it), HELP.
+You do NOT know class rosters, schedules, subjects, or school policy — never guess at them.
+Keep the reply under 250 characters, plain text (no markdown headers).`;
+
+  const userMessage = `Teacher: ${teacherName}
+Message: "${text}"`;
+
+  try {
+    const r = await generateTutorText({ system, userMessage });
+    if (!r.ok) return null;
+    return r.text.trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function handleWaClassChannelInbound(msg: {
@@ -571,7 +998,7 @@ export async function handleWaClassChannelInbound(msg: {
   stub?: boolean;
   error?: string;
 }> {
-  await syncClassChannels();
+  await syncClassChannelsIfStale();
   const masters = loadMasters();
   const ay = DEFAULT_AY;
   const staff = findTeacherByMobile(masters, msg.fromWaId);
@@ -636,7 +1063,10 @@ export async function handleWaClassChannelInbound(msg: {
     const teachers = ch.members.filter((m) => m.role !== "parent").length;
     replyText = `${ch.label}\nTeachers: ${teachers}\nParents (WhatsApp): ${parents}\nTotal members: ${ch.members.length}`;
   } else if (parsed.kind === "confirm") {
-    const draftId = thread.pendingDraftId;
+    // YES names no class, so `thread` is the teacher's first section. The
+    // draft may be for any of their sections (9 Oct 2026: a draft for a
+    // teacher's second class answered "No pending draft").
+    const draftId = pendingDraftForMobile(store, mobile) || thread.pendingDraftId;
     if (!draftId) {
       replyText = "No pending draft. Send HW / NOTICE / … first.";
     } else {
@@ -648,7 +1078,29 @@ export async function handleWaClassChannelInbound(msg: {
       if (!conf.ok) {
         replyText = conf.error;
       } else {
-        replyText = `Published · notified ~${conf.broadcast.sent + conf.broadcast.stub} contacts (${conf.broadcast.sent} sent${conf.broadcast.stub ? `, ${conf.broadcast.stub} stub` : ""}).\nERP will pick this up in Class channels / Homework / Notices.`;
+        // Say what actually happened to the ERP record. "Will pick this
+        // up" was the old wording, and it was only true if somebody
+        // opened Comms in a browser afterwards.
+        const erpLine =
+          conf.erp.status === "applied"
+            ? `Saved in the ERP · ${conf.erp.detail}.`
+            : conf.erp.status === "skipped"
+              ? "Nothing to file in the ERP for this one."
+              : `⚠️ Parents were told, but the ERP record could not be saved (${conf.erp.error}). The office can retry it in Comms → Class channels.`;
+        const ch = store.channels.find((c) => c.id === conf.draft.channelId);
+        replyText = conf.parents
+          ? composeNoticeSentReceipt({
+              classLabel: (ch?.label || "the class").replace(" · ", " "),
+              families: conf.parents.families,
+              sent: conf.parents.sent,
+              failed: conf.parents.failed,
+              optedOut: conf.parents.optedOut,
+              mode: conf.parents.mode === "unavailable" ? "template" : conf.parents.mode,
+              held: conf.parents.held,
+              heldUntil: conf.parents.heldUntil,
+              erpLine: conf.erp.status === "applied" ? `Saved in the ERP · ${conf.erp.detail}.` : conf.erp.status === "failed" ? `⚠️ The ERP record could not be saved (${conf.erp.error}). The office can retry it in Comms → Class channels.` : "",
+            })
+          : `Published · notified ~${conf.broadcast.sent + conf.broadcast.stub} contacts (${conf.broadcast.sent} sent${conf.broadcast.stub ? `, ${conf.broadcast.stub} stub` : ""}).\n${erpLine}`;
         const fresh = await readStore();
         const th = fresh.threads.find((t) => t.id === thread.id);
         if (th) {
@@ -676,8 +1128,9 @@ export async function handleWaClassChannelInbound(msg: {
       }
     }
   } else if (parsed.kind === "cancel") {
-    if (thread.pendingDraftId) {
-      await cancelClassChannelDraft(thread.pendingDraftId);
+    const cancelId = pendingDraftForMobile(store, mobile) || thread.pendingDraftId;
+    if (cancelId) {
+      await cancelClassChannelDraft(cancelId);
       replyText = "Draft cancelled.";
     } else {
       replyText = "No pending draft to cancel.";
@@ -717,7 +1170,9 @@ export async function handleWaClassChannelInbound(msg: {
         }
       }
 
-      if (
+      if (hasUnfilledBlank(msg.text || "")) {
+        replyText = composeFillBlanksReply((msg.text || "").trim());
+      } else if (
         (parsed.kind === "homework" || parsed.kind === "classwork") &&
         !subjectId
       ) {
@@ -744,19 +1199,72 @@ export async function handleWaClassChannelInbound(msg: {
           broadcastCount: 0,
           erpTarget: erpTargetFor(parsed.kind),
         };
+        // Written out for parents before the teacher is shown it, so what
+        // they confirm is what the parents will read. Homework and classwork
+        // only — a notice or a holiday has no chapter to resolve.
+        let expandNote = "";
+        if (draft.kind === "homework" || draft.kind === "classwork") {
+          try {
+            const { expandHomeworkForParents } = await import("@/lib/homeworkExpand.server");
+            const x = await expandHomeworkForParents({
+              classLabel: ch.label,
+              className: ch.label,
+              subjectLabel: subjectName,
+              teacherText: draft.body,
+              dueAt: draft.dueAt,
+            });
+            draft.title = x.title || draft.title;
+            draft.body = x.bodyEn;
+            draft.bodyHi = x.bodyHi;
+            draft.chapterHint = x.chapterHint;
+            expandNote = x.note;
+          } catch (e) {
+            // The teacher's own words go out unchanged. A homework post is
+            // never worth losing to an expansion that would not run.
+            console.warn("[class-channel] homework not expanded", (e as Error)?.message);
+          }
+        }
         store.drafts.unshift(draft);
         thread.pendingDraftId = draft.id;
         thread.channelId = ch.id;
-        replyText = composeDraftPreview(draft, ch);
+        replyText = [composeDraftPreview(draft, ch), expandNote].filter(Boolean).join("\n\n");
+        if (draft.erpTarget === "notice") {
+          // The parents' message itself, exactly, so YES approves what goes.
+          try {
+            const plan = await planClassNotice(draft, ch);
+            if (plan.ok) {
+              replyText = composeNoticeParentPreview({
+                kindLabel: kindTitle(draft.kind).toUpperCase(),
+                classLabel: ch.label.replace(" · ", " "),
+                rendered: plan.rendered,
+                families: plan.families,
+                languages: plan.languages,
+                waiting: plan.waiting,
+              });
+            }
+          } catch (e) {
+            console.warn("[class-channel] notice preview failed", (e as Error)?.message);
+          }
+        }
       }
     }
   } else {
-    replyText = [
+    const syntaxHint = [
       "Could not understand. Try:",
       "HW 8A Maths: …",
       "NOTICE 8A: …",
       "Or send HELP",
     ].join("\n");
+    replyText = syntaxHint;
+    // Only when there's no draft in progress — never let a free-text AI
+    // reply interfere with an active HW/NOTICE compose-and-confirm flow.
+    if (!thread.pendingDraftId && (msg.text || "").trim().length > 3) {
+      const aiReply = await tryClassChannelAiFallback(
+        msg.text || "",
+        staff.fullName,
+      );
+      if (aiReply) replyText = `${aiReply}\n\n${syntaxHint}`;
+    }
   }
 
   thread.messages.push({
@@ -808,7 +1316,7 @@ export async function officeCreateClassChannelDraft(input: {
   byStaffId?: string;
   byName: string;
 }): Promise<{ ok: true; draft: ClassChannelDraft } | { ok: false; error: string }> {
-  await syncClassChannels();
+  await syncClassChannelsIfStale();
   const store = await readStore();
   const channel = store.channels.find((c) => c.id === input.channelId);
   if (!channel) return { ok: false, error: "Channel not found" };

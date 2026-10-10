@@ -7,11 +7,13 @@ import {
   GraduationCap,
   IndianRupee,
   Megaphone,
+  MessageSquareWarning,
   MoreHorizontal,
   Newspaper,
   Images,
   UserRound,
 } from "lucide-react";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { TENANT } from "@/lib/types";
 
 export type ParentNavTab =
@@ -23,7 +25,8 @@ export type ParentNavTab =
   | "subjects"
   | "news"
   | "gallery"
-  | "profile";
+  | "profile"
+  | "complaints";
 
 type PrimaryId = "fees" | "homework" | "notices" | "ptm" | "more";
 
@@ -47,6 +50,7 @@ const MORE_ITEMS: { tab: ParentNavTab; label: string; icon: typeof Newspaper }[]
     { tab: "gallery", label: "Gallery", icon: Images },
     { tab: "leave", label: "Leave", icon: Calendar },
     { tab: "subjects", label: "Subjects", icon: GraduationCap },
+    { tab: "complaints", label: "Complaints", icon: MessageSquareWarning },
   ];
 
 export function ParentBottomNav({
@@ -103,6 +107,12 @@ export function ParentBottomNav({
                 </button>
               );
             })}
+          </div>
+          <div className="mt-2 flex items-center justify-between rounded-xl border border-[rgba(32,48,80,0.1)] px-3 py-2">
+            <span className="text-sm font-semibold text-[var(--brand-deep)]">
+              Appearance
+            </span>
+            <ThemeToggle />
           </div>
           {onSignOut ? (
             <button

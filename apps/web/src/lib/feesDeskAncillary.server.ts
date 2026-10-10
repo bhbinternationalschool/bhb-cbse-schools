@@ -7,13 +7,16 @@ import type {
   ChargeVoucher,
   ChequeInstrument,
   DayCloseSession,
-  FeesState,
   ManualBookSeries,
 } from "@/lib/fees";
 import type { InstallmentPlan, PlanAllocation } from "@/lib/installmentPlans";
 import type { FeeDeskAncillary } from "@/lib/feesDeskAncillary.types";
 import { feesDualWriteDbEnabled } from "@/lib/feesDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { replaceChildRows } from "./replaceChildRows.server";
+import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 
 export type { FeeDeskAncillary };
 
@@ -33,27 +36,93 @@ async function ctx() {
   return getServerTenantContext();
 }
 
-async function deleteStale(
-  sb: Awaited<ReturnType<typeof ctx>> extends infer C
-    ? C extends { sb: infer S }
-      ? S
-      : never
-    : never,
+/** The only fee-ancillary table a desk save deletes from — by named id. */
+export const FEE_ANCILLARY_DELETABLE_TABLES = ["fee_desk_day_closes"] as const;
+
+type Row = Record<string, unknown>;
+const at = (v: unknown) => {
+  const t = Date.parse(String(v ?? ""));
+  return Number.isFinite(t) ? t : -Infinity;
+};
+const CHEQUE_RANK: Record<string, number> = { received: 0, deposited: 1, cleared: 2, bounced: 2 };
+const closeActionAt = (r: Row) => Math.max(at(r.created_at), at(r.submitted_at), at(r.resolved_at));
+
+/**
+ * Whether the stored row is further along than this copy of it — a copy
+ * that must not be written (2026-10-10). Every save upserted every row it
+ * held, and the payload is often the server's cached desk (gateway
+ * settlement, the staff app's collect, refunds): a cheque cleared at the
+ * counter went back to "received", a voided charge came back, a cancelled
+ * plan became active again, a submitted day close went back to draft.
+ */
+export const FEE_STALE_RULES: Record<string, { cols: string; stale: (stored: Row, mine: Row) => boolean }> = {
+  // received → deposited → cleared | bounced; never backwards, and the two
+  // ends are final.
+  fee_desk_cheques: {
+    cols: "id, status",
+    stale: (s, m) => {
+      const a = CHEQUE_RANK[String(s.status)] ?? 0;
+      const b = CHEQUE_RANK[String(m.status)] ?? 0;
+      return a > b || (a === 2 && s.status !== m.status);
+    },
+  },
+  // draft → submitted → approved | rejected → (resubmitted). The latest
+  // action wins; approved is final.
+  fee_desk_day_closes: {
+    cols: "id, status, created_at, submitted_at, resolved_at",
+    stale: (s, m) => (s.status === "approved" && m.status !== "approved") || closeActionAt(s) > closeActionAt(m),
+  },
+  // Voided stays voided.
+  fee_desk_charge_vouchers: { cols: "id, voided_at", stale: (s, m) => !!s.voided_at && !m.voided_at },
+  fee_desk_carried_forward: { cols: "id, voided_at", stale: (s, m) => !!s.voided_at && !m.voided_at },
+  // Completed ↔ active is real (voiding a receipt reopens a plan);
+  // cancelled is final.
+  fee_desk_installment_plans: { cols: "id, status", stale: (s, m) => s.status === "cancelled" && m.status !== "cancelled" },
+};
+
+/** `rows` without those whose stored copy is further along. A failed read writes nothing. */
+export async function withoutStale(
+  sb: SupabaseClient,
   tenantId: string,
   table: string,
-  keepIds: Set<string>,
-) {
-  const { data } = await sb.from(table).select("id").eq("tenant_id", tenantId);
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
+  rows: Row[],
+): Promise<{ ok: true; rows: Row[]; kept: string[] } | { ok: false; error: string }> {
+  const rule = FEE_STALE_RULES[table];
+  if (!rule || !rows.length) return { ok: true, rows, kept: [] };
+  const stored = await fetchByIds<Row>(rows.map((r) => String(r.id)), (chunk, from, to) =>
+    sb.from(table).select(rule.cols).eq("tenant_id", tenantId).in("id", chunk).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{
+      data: Row[] | null;
+      error: { message: string } | null;
+    }>,
+  );
+  if (stored.error) return { ok: false, error: `${table}: could not read the stored rows (${stored.error}) — nothing was written` };
+  const byId = new Map(stored.rows.map((r) => [String(r.id), r]));
+  const kept: string[] = [];
+  const out = rows.filter((r) => {
+    const cur = byId.get(String(r.id));
+    if (cur && rule.stale(cur, r)) {
+      kept.push(String(r.id));
+      return false;
+    }
+    return true;
+  });
+  if (kept.length) console.warn(`[fees-db] ${table}: kept ${kept.length} stored row(s) further along than this copy`);
+  return { ok: true, rows: out, kept };
 }
 
+/**
+ * No prune by absence. Each of these tables used to lose every row the
+ * payload lacked — and the payload is often the SERVER's cached copy (gateway
+ * settlement, the staff app's collect, refunds), which watches only vouchers
+ * for change. Cheques, plans, charge vouchers and carried-forward dues are
+ * only ever voided or have their status changed, so nothing is deleted for
+ * them. A day close replaced by a newer session for the same date and
+ * counter is named. A voided receipt's plan allocations are removed because
+ * the payload says the receipt is voided — scoped to those receipt ids.
+ */
 export async function pushFeeDeskAncillaryToDb(
   ancillary: FeeDeskAncillary,
+  opts: { deletes?: NamedDeletes; voidedVoucherIds?: readonly string[] } = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (!feesDualWriteDbEnabled()) return { ok: true };
   const c = await ctx();
@@ -62,7 +131,6 @@ export async function pushFeeDeskAncillaryToDb(
   const now = new Date().toISOString();
 
   const cheques = ancillary.cheques ?? [];
-  await deleteStale(sb, tenantId, "fee_desk_cheques", new Set(cheques.map((x) => x.id)));
   if (cheques.length) {
     const rows = cheques.map((ch: ChequeInstrument) => ({
       id: ch.id,
@@ -86,12 +154,13 @@ export async function pushFeeDeskAncillaryToDb(
       cheque_json: {},
       updated_at: now,
     }));
-    const { error } = await sb.from("fee_desk_cheques").upsert(rows, { onConflict: "id" });
+    const fresh = await withoutStale(sb, tenantId, "fee_desk_cheques", rows);
+    if (!fresh.ok) return fresh;
+    const { error } = await sb.from("fee_desk_cheques").upsert(fresh.rows, { onConflict: "id" });
     if (error) return { ok: false, error: error.message };
   }
 
   const books = ancillary.manualBooks ?? [];
-  await deleteStale(sb, tenantId, "fee_desk_manual_books", new Set(books.map((x) => x.id)));
   if (books.length) {
     const rows = books.map((b: ManualBookSeries) => ({
       id: b.id,
@@ -105,8 +174,8 @@ export async function pushFeeDeskAncillaryToDb(
     if (error) return { ok: false, error: error.message };
   }
 
-  const closes = ancillary.dayCloses ?? [];
-  await deleteStale(sb, tenantId, "fee_desk_day_closes", new Set(closes.map((x) => x.id)));
+  const goneCloses = new Set(opts.deletes?.["fee_desk_day_closes"] ?? []);
+  const closes = (ancillary.dayCloses ?? []).filter((d) => !goneCloses.has(d.id));
   if (closes.length) {
     const rows = closes.map((d: DayCloseSession) => ({
       id: d.id,
@@ -133,17 +202,16 @@ export async function pushFeeDeskAncillaryToDb(
       },
       updated_at: now,
     }));
-    const { error } = await sb.from("fee_desk_day_closes").upsert(rows, { onConflict: "id" });
+    const fresh = await withoutStale(sb, tenantId, "fee_desk_day_closes", rows);
+    if (!fresh.ok) return fresh;
+    const { error } = await sb.from("fee_desk_day_closes").upsert(fresh.rows, { onConflict: "id" });
     if (error) return { ok: false, error: error.message };
   }
 
+  const delCloses = await deleteNamedIds(sb, tenantId, "fee_desk_day_closes", [...goneCloses]);
+  if (!delCloses.ok) return delCloses;
+
   const charges = ancillary.chargeVouchers ?? [];
-  await deleteStale(
-    sb,
-    tenantId,
-    "fee_desk_charge_vouchers",
-    new Set(charges.map((x) => x.id)),
-  );
   const chargeLineRows: Record<string, unknown>[] = [];
   for (const cv of charges) {
     for (const line of cv.lines ?? []) {
@@ -158,6 +226,7 @@ export async function pushFeeDeskAncillaryToDb(
       });
     }
   }
+  const skippedCharges = new Set<string>();
   if (charges.length) {
     const rows = charges.map((cv: ChargeVoucher) => ({
       id: cv.id,
@@ -178,31 +247,36 @@ export async function pushFeeDeskAncillaryToDb(
       voided_by: cv.voidedBy || "",
       updated_at: now,
     }));
+    const fresh = await withoutStale(sb, tenantId, "fee_desk_charge_vouchers", rows);
+    if (!fresh.ok) return fresh;
+    for (const id of fresh.kept) skippedCharges.add(id);
     const { error } = await sb
       .from("fee_desk_charge_vouchers")
-      .upsert(rows, { onConflict: "id" });
+      .upsert(fresh.rows, { onConflict: "id" });
     if (error) return { ok: false, error: error.message };
   }
-  if (chargeLineRows.length) {
-    const cvIds = charges.map((c) => c.id);
-    await sb
-      .from("fee_desk_charge_voucher_lines")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .in("charge_voucher_id", cvIds);
-    const { error } = await sb
-      .from("fee_desk_charge_voucher_lines")
-      .upsert(chargeLineRows, { onConflict: "id" });
-    if (error) return { ok: false, error: error.message };
+  // A charge whose stored copy is further along keeps its stored lines too.
+  const lineRows = chargeLineRows.filter((l) => !skippedCharges.has(String(l.charge_voucher_id)));
+  if (lineRows.length) {
+    // One transaction. A charge voucher stripped of its lines is a charge
+    // with an amount and nothing saying what was charged for.
+    const write = await replaceChildRows(sb, {
+      table: "fee_desk_charge_voucher_lines",
+      tenantId,
+      // Only charges that arrived WITH lines. Matching every charge in the
+      // payload wiped the stored lines of any charge sent without its lines
+      // (a compacted or stale copy) — the receipt-lines wipe, again.
+      match: {
+        charge_voucher_id: charges
+          .filter((c) => (c.lines ?? []).length > 0 && !skippedCharges.has(c.id))
+          .map((c) => c.id),
+      },
+      rows: lineRows,
+    });
+    if (!write.ok) return { ok: false, error: write.error };
   }
 
   const plans = ancillary.installmentPlans ?? [];
-  await deleteStale(
-    sb,
-    tenantId,
-    "fee_desk_installment_plans",
-    new Set(plans.map((x) => x.id)),
-  );
   if (plans.length) {
     const rows = plans.map((p: InstallmentPlan) => ({
       id: p.id,
@@ -214,19 +288,21 @@ export async function pushFeeDeskAncillaryToDb(
       plan_json: p,
       updated_at: now,
     }));
+    const fresh = await withoutStale(sb, tenantId, "fee_desk_installment_plans", rows);
+    if (!fresh.ok) return fresh;
     const { error } = await sb
       .from("fee_desk_installment_plans")
-      .upsert(rows, { onConflict: "id" });
+      .upsert(fresh.rows, { onConflict: "id" });
     if (error) return { ok: false, error: error.message };
   }
 
-  const allocs = ancillary.planAllocations ?? [];
-  await deleteStale(
-    sb,
-    tenantId,
-    "fee_desk_plan_allocations",
-    new Set(allocs.map((x) => x.id)),
-  );
+  // A voided receipt no longer pays anything towards a plan. The UI drops
+  // its allocations; the payload says which receipts are voided, so their
+  // allocations are removed — and only theirs. Written first, removed
+  // second: the two sets never overlap (allocations of voided receipts are
+  // not written), and a failed write then happens before anything is gone.
+  const voided = new Set(opts.voidedVoucherIds ?? []);
+  const allocs = (ancillary.planAllocations ?? []).filter((a) => !voided.has(a.voucherId));
   if (allocs.length) {
     const rows = allocs.map((a: PlanAllocation) => ({
       id: a.id,
@@ -237,19 +313,25 @@ export async function pushFeeDeskAncillaryToDb(
       amount_paise: a.amountPaise,
       created_at: a.createdAt,
     }));
+    // Made with the receipt and never changed — only ever added.
     const { error } = await sb
       .from("fee_desk_plan_allocations")
-      .upsert(rows, { onConflict: "id" });
+      .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
     if (error) return { ok: false, error: error.message };
+  }
+  if (voided.size) {
+    const ids = [...voided];
+    for (let i = 0; i < ids.length; i += 100) {
+      const { error } = await sb
+        .from("fee_desk_plan_allocations")
+        .delete()
+        .eq("tenant_id", tenantId)
+        .in("voucher_id", ids.slice(i, i + 100));
+      if (error) return { ok: false, error: `fee_desk_plan_allocations: ${error.message}` };
+    }
   }
 
   const carried = ancillary.carriedForwardDues ?? [];
-  await deleteStale(
-    sb,
-    tenantId,
-    "fee_desk_carried_forward",
-    new Set(carried.map((x) => x.id)),
-  );
   if (carried.length) {
     const rows = carried.map((c: CarriedForwardDue) => ({
       id: c.id,
@@ -269,50 +351,75 @@ export async function pushFeeDeskAncillaryToDb(
       },
       updated_at: now,
     }));
+    const fresh = await withoutStale(sb, tenantId, "fee_desk_carried_forward", rows);
+    if (!fresh.ok) return fresh;
     const { error } = await sb
       .from("fee_desk_carried_forward")
-      .upsert(rows, { onConflict: "id" });
+      .upsert(fresh.rows, { onConflict: "id" });
     if (error) return { ok: false, error: error.message };
   }
 
-  await sb.from("fee_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      cheque_count: cheques.length,
-      charge_voucher_count: charges.filter((c) => !c.voidedAt).length,
-      ancillary_updated_at: now,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
-  );
+  // Counts from the tables, not from this copy (it may be partly written).
+  const [chq, chg] = await Promise.all([
+    sb.from("fee_desk_cheques").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+    sb
+      .from("fee_desk_charge_vouchers")
+      .select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenantId)
+      .is("voided_at", null),
+  ]);
+  const meta: Record<string, unknown> = { tenant_id: tenantId, ancillary_updated_at: now, updated_at: now };
+  // A failed count leaves the old figure alone rather than writing a zero.
+  if (!chq.error && typeof chq.count === "number") meta.cheque_count = chq.count;
+  if (!chg.error && typeof chg.count === "number") meta.charge_voucher_count = chg.count;
+  await sb.from("fee_desk_sync_meta").upsert(meta, { onConflict: "tenant_id" });
 
   return { ok: true };
 }
 
-export async function fetchFeeDeskAncillaryFromDb(): Promise<FeeDeskAncillary> {
+export async function fetchFeeDeskAncillaryFromDb(): Promise<{
+  ancillary: FeeDeskAncillary;
+  /** false = a read failed; the lists are unknown, NOT empty. */
+  ok: boolean;
+  error?: string;
+}> {
   const c = await ctx();
-  if (!c) return emptyAncillary();
+  if (!c) return { ancillary: emptyAncillary(), ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = c;
 
-  const [
-    { data: chequeRows },
-    { data: bookRows },
-    { data: closeRows },
-    { data: chargeRows },
-    { data: chargeLineRows },
-    { data: planRows },
-    { data: allocRows },
-    { data: carriedRows },
-  ] = await Promise.all([
-    sb.from("fee_desk_cheques").select("*").eq("tenant_id", tenantId),
-    sb.from("fee_desk_manual_books").select("*").eq("tenant_id", tenantId),
-    sb.from("fee_desk_day_closes").select("*").eq("tenant_id", tenantId),
-    sb.from("fee_desk_charge_vouchers").select("*").eq("tenant_id", tenantId),
-    sb.from("fee_desk_charge_voucher_lines").select("*").eq("tenant_id", tenantId),
-    sb.from("fee_desk_installment_plans").select("*").eq("tenant_id", tenantId),
-    sb.from("fee_desk_plan_allocations").select("*").eq("tenant_id", tenantId),
-    sb.from("fee_desk_carried_forward").select("*").eq("tenant_id", tenantId),
+  // Paged: PostgREST stops at 1,000 rows and calls it success. Cheques, plan
+  // allocations and day closes grow with every receipt, and a list cut at a
+  // thousand reached the browser short. Errors are kept: the server's own
+  // fee pushes (settlement, the staff app's collect) start from this read.
+  const page = (table: string) =>
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from(table).select("*").eq("tenant_id", tenantId).order("id").range(from, to),
+    );
+  const results = await Promise.all([
+    page("fee_desk_cheques"),
+    page("fee_desk_manual_books"),
+    page("fee_desk_day_closes"),
+    page("fee_desk_charge_vouchers"),
+    page("fee_desk_charge_voucher_lines"),
+    page("fee_desk_installment_plans"),
+    page("fee_desk_plan_allocations"),
+    page("fee_desk_carried_forward"),
   ]);
+  const failed = results.find((r) => r.error);
+  if (failed?.error) {
+    console.error("[fees-db] ancillary fetch failed", failed.error);
+    return { ancillary: emptyAncillary(), ok: false, error: failed.error };
+  }
+  const [
+    chequeRows,
+    bookRows,
+    closeRows,
+    chargeRows,
+    chargeLineRows,
+    planRows,
+    allocRows,
+    carriedRows,
+  ] = results.map((r) => r.rows);
 
   const linesByCharge = new Map<string, ChargeVoucher["lines"]>();
   for (const row of chargeLineRows ?? []) {
@@ -328,7 +435,7 @@ export async function fetchFeeDeskAncillaryFromDb(): Promise<FeeDeskAncillary> {
     linesByCharge.set(cid, list);
   }
 
-  return {
+  const ancillary: FeeDeskAncillary = {
     cheques: (chequeRows ?? []).map(
       (r): ChequeInstrument => ({
         id: String(r.id),
@@ -432,6 +539,7 @@ export async function fetchFeeDeskAncillaryFromDb(): Promise<FeeDeskAncillary> {
       };
     }),
   };
+  return { ancillary, ok: true };
 }
 
 export async function rebuildFeeOpenDuesCache(
@@ -445,6 +553,13 @@ export async function rebuildFeeOpenDuesCache(
     "@/lib/schoolDataMirror.server"
   );
   await ensureSchoolMirrorHydrated();
+  // Forced, not TTL-gated: this table is what the reminders and the pay
+  // links quote, so it is rebuilt from the transport desk and the posted
+  // adjustments as they stand right now, never from a 60-second-old copy.
+  const { ensureFeeDuesInputsHydrated } = await import(
+    "@/lib/feeDuesInputs.server"
+  );
+  await ensureFeeDuesInputsHydrated({ force: true });
 
   const { loadMasters, currentAcademicYearCode } = await import("@/lib/masters");
   const { loadSis } = await import("@/lib/sis");
@@ -458,8 +573,13 @@ export async function rebuildFeeOpenDuesCache(
   const now = new Date().toISOString();
 
   const rows: Record<string, unknown>[] = [];
+  // The Play review family's fictional dues do not belong in the school's
+  // cached figure — they were ₹25,400 of it on 2026-09-12.
+  const { isReviewDemoStudent, reviewDemoHouseholdIds } = await import("@/lib/reviewDemoRecords");
+  const demoHouseholds = reviewDemoHouseholdIds(sis);
   for (const student of sis.students) {
     if (student.status !== "active") continue;
+    if (isReviewDemoStudent(student) || (student.householdId && demoHouseholds.has(student.householdId))) continue;
     if (student.academicYearCode && student.academicYearCode !== ay) continue;
     const dues = computeStudentDues(student, masters, fees, {
       includeFuture: false,
@@ -483,56 +603,79 @@ export async function rebuildFeeOpenDuesCache(
     }
   }
 
-  await sb
-    .from("fee_desk_open_dues")
-    .delete()
-    .eq("tenant_id", tenantId)
-    .eq("academic_year_code", ay);
-
-  if (rows.length > 0) {
-    const chunk = 500;
-    for (let i = 0; i < rows.length; i += chunk) {
-      const { error } = await sb
-        .from("fee_desk_open_dues")
-        .upsert(rows.slice(i, i + chunk));
-      if (error) return { ok: false, count: 0, error: error.message };
-    }
+  // One transaction on the server (fee_desk_replace_open_dues, migration
+  // 20260818060000): rows absent from the payload are deleted, present rows
+  // upserted only where they differ, sync meta updated — all or nothing.
+  // The previous delete-all-then-upsert here ignored the delete's error,
+  // deadlocked when two browsers pushed together, and left readers a window
+  // where every due read as zero (audit 2026-08-18).
+  const { data, error } = await sb.rpc("fee_desk_replace_open_dues", {
+    p_tenant_id: tenantId,
+    p_academic_year_code: ay,
+    p_rows: rows.map((r) => {
+      const { tenant_id, academic_year_code, updated_at, ...rest } = r;
+      void tenant_id; void academic_year_code; void updated_at;
+      return rest;
+    }),
+  });
+  if (error) {
+    console.warn("[fees] open-dues rebuild failed", error.message);
+    return { ok: false, count: 0, error: error.message };
   }
-
-  await sb.from("fee_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      open_dues_count: rows.length,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
-  );
-
-  return { ok: true, count: rows.length };
+  const result = (data ?? {}) as { count?: number };
+  return { ok: true, count: Number(result.count ?? rows.length) };
 }
 
-export async function fetchOpenDuesSummary(academicYearCode?: string): Promise<{
-  count: number;
+export type OpenDuesSummary = {
+  rows: number;
+  students: number;
+  families: number;
   totalBalancePaise: number;
-}> {
+  /** When the dues cache was last rebuilt; "" = never / unknown. */
+  rebuiltAt: string;
+};
+
+/**
+ * What the school is owed, as the REMINDERS see it.
+ *
+ * Summed by `fee_open_dues_summary` (migration 20260916130000), not here.
+ * This used to select every row and add them up in Node — and PostgREST
+ * caps a reply at 1,000 rows while the table holds 1,140, so the total was
+ * quietly short by whatever the last 140 carried.
+ *
+ * This is the figure the WhatsApp reminders and the /pay/due links work
+ * from, which is why both dashboards now show it rather than each computing
+ * its own: the office was reading two different totals on two screens, and
+ * neither was the one the parent was being asked to pay.
+ */
+export async function fetchOpenDuesSummary(
+  academicYearCode?: string,
+): Promise<OpenDuesSummary> {
+  const empty: OpenDuesSummary = {
+    rows: 0,
+    students: 0,
+    families: 0,
+    totalBalancePaise: 0,
+    rebuiltAt: "",
+  };
   const c = await ctx();
-  if (!c) return { count: 0, totalBalancePaise: 0 };
-  let q = c.sb
-    .from("fee_desk_open_dues")
-    .select("balance_paise")
-    .eq("tenant_id", c.tenantId)
-    .gt("balance_paise", 0);
-  if (academicYearCode) {
-    q = q.eq("academic_year_code", academicYearCode);
+  if (!c) return empty;
+  const { data, error } = await c.sb.rpc("fee_open_dues_summary", {
+    p_tenant_id: c.tenantId,
+    p_academic_year_code: academicYearCode ?? null,
+  });
+  if (error) {
+    console.warn("[fees] open-dues summary failed", error.message);
+    return empty;
   }
-  const { data } = await q;
-  const rows = data ?? [];
+  const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+  if (!row) return empty;
   return {
-    count: rows.length,
-    totalBalancePaise: rows.reduce(
-      (s, r) => s + Number(r.balance_paise || 0),
-      0,
-    ),
+    rows: Number(row.rows_count ?? 0),
+    students: Number(row.student_count ?? 0),
+    families: Number(row.family_count ?? 0),
+    totalBalancePaise: Number(row.total_balance_paise ?? 0),
+    rebuiltAt: row.rebuilt_at ? String(row.rebuilt_at) : "",
   };
 }
 

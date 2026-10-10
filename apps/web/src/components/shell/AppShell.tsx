@@ -9,13 +9,15 @@ import { SessionSelector } from "./SessionSelector";
 import { UniversalSearchBar } from "./UniversalSearchBar";
 import { NotificationBell } from "./NotificationBell";
 import { StaffInternalChatButton } from "./StaffInternalChatButton";
+import { StaffBroadcastButton } from "@/components/staff/StaffBroadcastButton";
 import { CommsRunningStrip } from "./CommsRunningStrip";
 import { ErpAiChatbot } from "./ErpAiChatbot";
 import { ErpSidebar, ErpSidebarMenuButton } from "./ErpSidebar";
 import { UserAccountMenu } from "./UserAccountMenu";
 import { PwaInstallBanner } from "@/components/pwa/PwaInstallBanner";
+import { UpdateBar } from "@/components/pwa/UpdateBar";
 import { StaffBottomNav } from "@/components/pwa/StaffBottomNav";
-import { staffPwaInstallCopy } from "@/lib/pwaApps";
+import { STAFF_PLAY_TEST_URL, staffPwaInstallCopy } from "@/lib/pwaApps";
 import { useMobileAppShell, usePwaStandalone } from "@/lib/pwaStandalone";
 import { TENANT } from "@/lib/types";
 import type { DemoSession } from "@/lib/auth";
@@ -33,6 +35,7 @@ import {
 import { applyFeeDiscountSeedNow } from "@/lib/feeDiscountImportHydrate";
 import { consumeFreshLoginSession, flushAllDeskSyncPending, resetAllWorkspacePersistenceCaches } from "@/lib/workspaceClientSession";
 import { useWorkspaceInactivityLogout } from "./useWorkspaceInactivityLogout";
+import { ToastHost } from "./Toast";
 
 export function AppShell({
   session,
@@ -57,6 +60,112 @@ export function AppShell({
   useEffect(() => {
     setWorkspaceBootstrapPending(true);
     return () => setWorkspaceBootstrapPending(false);
+  }, []);
+
+  // Last line of defence: a promise nobody handled must still be visible.
+  //
+  // The four gates in front of this (typed results, the no-void ratchet,
+  // useSaveMutation, and the push paths' own toasts) all depend on someone
+  // having written the handling. This one does not. On 2026-08-09 a rejected
+  // save reached a console.warn and the user was told the opposite; a
+  // failure the user never sees is worse than a crash.
+  useEffect(() => {
+    function onUnhandled(e: PromiseRejectionEvent) {
+      const detail =
+        e.reason instanceof Error
+          ? e.reason.message
+          : typeof e.reason === "string"
+            ? e.reason
+            : "Unexpected error";
+      console.error("[unhandled rejection]", e.reason);
+      void import("@/components/shell/Toast").then(({ pushToast }) => {
+        pushToast({
+          kind: "error",
+          message: `Something failed and was not reported properly: ${detail}. If you were saving, check the change was kept.`,
+          durationMs: 0,
+        });
+      });
+    }
+    window.addEventListener("unhandledrejection", onUnhandled);
+    return () => window.removeEventListener("unhandledrejection", onUnhandled);
+  }, []);
+
+  // A push that gave up must be visible. Until 2026-08-18 "bhb-sync-error"
+  // had no listener anywhere and the retry ladder's terminal "failed" state
+  // was rendered only inside the Attendance workspace; every other module's
+  // failed save ended in a console.warn while the screen said nothing.
+  useEffect(() => {
+    const labels: Record<string, string> = {
+      sis: "student records",
+      ptm: "PTM",
+      admissions: "admissions",
+      rbac: "roles & permissions",
+      attendance: "attendance registers",
+      staff_attendance: "the staff register",
+      module_registry: "module settings",
+      wa_templates: "WhatsApp templates",
+      automation: "automation rules",
+      staff_hr: "staff HR",
+      staff_advances: "staff advances",
+      staff_agreements: "staff agreements",
+      certificates: "certificates",
+      exam_papers: "exam papers",
+      fee_recovery_tasks: "fee recovery tasks",
+      erp_chat: "chat",
+      staff_chat: "staff chat",
+      trust: "trust projects",
+      transport: "transport",
+    };
+    function onSyncError(e: Event) {
+      const d = (e as CustomEvent<{ id?: string; label?: string; error?: string }>).detail;
+      const what = d?.label || labels[d?.id ?? ""] || d?.id || "this module";
+      void import("@/components/shell/Toast").then(({ pushToast }) => {
+        pushToast({
+          kind: "error",
+          message: `Your change to ${what} was NOT saved to the server (${d?.error || "sync failed"}). It is still on this computer — keep the page open and try saving again, or it will be lost on logout.`,
+          durationMs: 0,
+        });
+      });
+    }
+    function onSyncStatus(e: Event) {
+      const d = (e as CustomEvent<{ key: string; state: { status: string; error?: string } }>).detail;
+      if (d?.state?.status !== "failed") return;
+      const key = d.key
+        .replace(/^blob:/, "")
+        .replace(/^module_state:/, "")
+        .replace(/_state$/, "")
+        .replace(/_/g, " ");
+      void import("@/components/shell/Toast").then(({ pushToast }) => {
+        pushToast({
+          kind: "error",
+          message: `Saving ${key} to the server failed after several retries (${d.state.error || "sync failed"}). Your change is still on this computer — try again before logging out.`,
+          durationMs: 0,
+        });
+      });
+    }
+    // A save refused row by row because those rows changed elsewhere first
+    // (per-row versions, sliceRevMerge). The desk is reloaded with the newer
+    // copy; the person has to look and re-apply — say so, plainly.
+    function onDeskConflict(e: Event) {
+      const d = (e as CustomEvent<{ id?: string; count?: number }>).detail;
+      const what = labels[d?.id ?? ""] || d?.id || "this module";
+      const n = d?.count ?? 1;
+      void import("@/components/shell/Toast").then(({ pushToast }) => {
+        pushToast({
+          kind: "error",
+          message: `${n === 1 ? "One change" : `${n} changes`} to ${what} were NOT saved: someone else changed ${n === 1 ? "that entry" : "those entries"} first. The screen now shows the current version — please check it and make your change again.`,
+          durationMs: 0,
+        });
+      });
+    }
+    window.addEventListener("bhb-desk-conflict", onDeskConflict);
+    window.addEventListener("bhb-sync-error", onSyncError);
+    window.addEventListener("bhb:sync-status", onSyncStatus);
+    return () => {
+      window.removeEventListener("bhb-desk-conflict", onDeskConflict);
+      window.removeEventListener("bhb-sync-error", onSyncError);
+      window.removeEventListener("bhb:sync-status", onSyncStatus);
+    };
   }, []);
 
   useEffect(() => {
@@ -94,18 +203,12 @@ export function AppShell({
 
       void (async () => {
         try {
-          const {
-            ensureClientSchoolMirrorHydrated,
-            startDeskHydrationBackground,
-          } = await import("@/lib/schoolDataMirrorClientHydrate");
-          const { pushFullSchoolMirrorToServer } = await import(
-            "@/lib/schoolDataMirror"
+          // The old whole-school "mirror" copy is no longer read or written
+          // by any screen (every slice moved to its own desk), so login no
+          // longer waits on fetching it and throwing it away (10 Oct 2026).
+          const { startDeskHydrationBackground } = await import(
+            "@/lib/schoolDataMirrorClientHydrate"
           );
-
-          const mirrorChanged = await ensureClientSchoolMirrorHydrated();
-          if (mirrorChanged) {
-            window.dispatchEvent(new CustomEvent("bhb-desk-hydrated"));
-          }
 
           const boot = await bootstrapWorkspaceSession(
             pathname,
@@ -117,7 +220,6 @@ export function AppShell({
             return;
           }
 
-          pushFullSchoolMirrorToServer();
           startDeskHydrationBackground(pathname);
           window.dispatchEvent(new CustomEvent("bhb-desk-hydrated"));
         } catch {
@@ -171,15 +273,37 @@ export function AppShell({
   }, [session.academicYearCode, readOnly]);
 
   useEffect(() => {
+    // Toasts, not window.alert.
+    //
+    // window.alert BLOCKS the page and has to be dismissed by hand. These
+    // events fire per attempted action, so a read-only session produced a
+    // modal on every tap — the director reported dismissing it "many times".
+    // A refusal should be visible, not obstructive: the user already knows
+    // what they tried to do, and stopping them from doing anything else
+    // teaches nothing.
+    //
+    // Deduplicated too: the same refusal repeated within a few seconds is one
+    // fact, not several.
+    let lastMessage = "";
+    let lastAt = 0;
+    async function notify(message: string) {
+      const now = Date.now();
+      if (message === lastMessage && now - lastAt < 5000) return;
+      lastMessage = message;
+      lastAt = now;
+      const { pushToast } = await import("@/components/shell/Toast");
+      pushToast({ kind: "error", message, durationMs: 6000 });
+    }
+
     function onReadonly(e: Event) {
       const detail = (e as CustomEvent<{ academicYearCode?: string }>).detail;
       const code = detail?.academicYearCode || session.academicYearCode;
-      window.alert(
-        `Session ${code} is closed (read-only). Switch to the current session to make changes.`,
+      void notify(
+        `Session ${code} is closed, so this cannot be changed. Switch to the current session to make edits.`,
       );
     }
     function onRbacDenied() {
-      window.alert(
+      void notify(
         "You do not have permission for this action. Ask an admin to update Roles & permissions.",
       );
     }
@@ -240,7 +364,7 @@ export function AppShell({
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
           <header
-            className={`sticky top-0 z-20 border-b border-[rgba(32,48,80,0.1)] bg-[rgba(248,248,240,0.92)] backdrop-blur-md ${
+            className={`sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--shell-header-bg)] backdrop-blur-md ${
               mobileApp ? "bhb-staff-app-header" : ""
             }`}
           >
@@ -277,6 +401,7 @@ export function AppShell({
                 <SessionSelector currentCode={session.academicYearCode} />
               ) : null}
               <StaffInternalChatButton />
+              <StaffBroadcastButton />
               <NotificationBell persona="staff" />
               {readOnly ? (
                 <span className="hidden rounded-md bg-[rgba(197,160,40,0.18)] px-2 py-1 text-[11px] font-medium text-[var(--brand-deep)] lg:inline">
@@ -292,12 +417,14 @@ export function AppShell({
           </div>
           <CommsRunningStrip audience="staff" />
         </header>
+        <UpdateBar />
         {!standalone ? (
           <PwaInstallBanner
             appId="staff"
             title={staffPwa.title}
             subtitle={staffPwa.subtitle}
             iosHint={staffPwa.iosHint}
+            androidPlayUrl={STAFF_PLAY_TEST_URL}
             className="px-4 pt-2 sm:px-6"
           />
         ) : null}
@@ -318,6 +445,7 @@ export function AppShell({
           <StaffBottomNav onOpenMenu={() => setMobileNavOpen(true)} />
         ) : null}
         <ErpAiChatbot />
+        <ToastHost />
         </div>
       </div>
     </SessionProvider>

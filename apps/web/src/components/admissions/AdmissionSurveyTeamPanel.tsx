@@ -6,25 +6,25 @@ import {
   addExternalToSurveyTeam,
   addStaffToSurveyTeam,
   addSurveyExternal,
-  formatSurveyHours,
   removeSurveyTeamMember,
   setSurveyTeamAssigned,
+  setSurveyTeamStartMode,
   setSurveyTeamLeader,
-  surveyDayAnalytics,
 } from "@/lib/fieldSurvey";
 import {
   isLeadCaller,
   setLeadCallerAssigned,
-  todayYmd,
   type AdmissionsState,
 } from "@/lib/admissions";
 import { activeStaffSorted } from "@/lib/staffAttendanceRules";
 import type { MastersState } from "@/lib/masters";
 import {
-  MastersEmptyRow,
-  MastersTableCard,
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { SurveyDaysBoard } from "@/components/admissions/SurveyDaysBoard";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -44,7 +44,6 @@ export function AdmissionSurveyTeamPanel({
     () => activeStaffSorted(masters.staff ?? []),
     [masters.staff],
   );
-  const analytics = useMemo(() => surveyDayAnalytics(state), [state]);
   const onTeamIds = useMemo(
     () =>
       new Set(
@@ -62,13 +61,7 @@ export function AdmissionSurveyTeamPanel({
   const [extMobile, setExtMobile] = useState("");
   const [extNote, setExtNote] = useState("");
   const [pickExternalId, setPickExternalId] = useState("");
-  const [analyticsDate, setAnalyticsDate] = useState(todayYmd());
   const [callerStaffId, setCallerStaffId] = useState("");
-
-  const dayAnalytics = useMemo(
-    () => surveyDayAnalytics(state, analyticsDate),
-    [state, analyticsDate],
-  );
 
   const callerIds = state.leadCallerStaffIds || [];
   const staffNotCallers = staff.filter((s) => !callerIds.includes(s.id));
@@ -130,6 +123,20 @@ export function AdmissionSurveyTeamPanel({
       !state.surveyTeam.some(
         (m) => m.kind === "external" && m.externalId === e.id,
       ),
+  );
+
+  // Sorting by App shows at a glance who has not signed in yet — the reason
+  // this list is checked before a survey day.
+  const teamSort = useTableSort(
+    state.surveyTeam,
+    {
+      name: (m) => m.fullName,
+      type: (m) => m.kind,
+      role: (m) => m.role,
+      app: (m) => (m.assigned ? 1 : 0),
+    },
+    "name",
+    "asc",
   );
 
   return (
@@ -217,7 +224,7 @@ export function AdmissionSurveyTeamPanel({
               />
               <button
                 type="button"
-                className="mt-2 rounded-lg bg-[#9a3412] px-3 py-2 text-[12px] font-semibold text-white"
+                className="mt-2 rounded-lg bg-[var(--tone-brick-solid)] px-3 py-2 text-[12px] font-semibold text-white"
                 onClick={createExternal}
               >
                 Add external + assign
@@ -254,22 +261,20 @@ export function AdmissionSurveyTeamPanel({
             No survey team yet — add staff or outside workers above.
           </p>
         ) : (
-          <table className="min-w-full text-left text-sm">
-            <thead className="text-[11px] text-[var(--muted)]">
+          <ErpTable>
+            <ErpTableHead>
               <tr>
-                <th className="px-2 py-2">Name</th>
-                <th className="px-2 py-2">Type</th>
-                <th className="px-2 py-2">Role</th>
-                <th className="px-2 py-2">App</th>
+                <ErpSortTh sort={teamSort} field="name" className="px-2 py-2">Name</ErpSortTh>
+                <ErpSortTh sort={teamSort} field="type" className="px-2 py-2">Type</ErpSortTh>
+                <ErpSortTh sort={teamSort} field="role" className="px-2 py-2">Role</ErpSortTh>
+                <ErpSortTh sort={teamSort} field="app" className="px-2 py-2">App</ErpSortTh>
+                <th className="px-2 py-2">Day starts</th>
                 <th className="px-2 py-2">Actions</th>
               </tr>
-            </thead>
-            <tbody>
-              {state.surveyTeam.map((m) => (
-                <tr
-                  key={m.id}
-                  className="border-t border-[rgba(32,48,80,0.06)]"
-                >
+            </ErpTableHead>
+            <ErpTableBody>
+              {teamSort.rows.map((m) => (
+                <tr key={m.id}>
                   <td className="px-2 py-2 text-[12px]">
                     <span className="font-medium text-[var(--brand-deep)]">
                       {m.fullName}
@@ -302,58 +307,60 @@ export function AdmissionSurveyTeamPanel({
                       <span className="text-[var(--muted)]">Hidden</span>
                     )}
                   </td>
+                  <td className="px-2 py-2 text-[11px]">
+                    {m.startMode === "school" ? "At school (gate QR)" : "In the field (GPS)"}
+                  </td>
                   <td className="px-2 py-2">
                     {canEdit ? (
-                      <div className="flex flex-wrap gap-2 text-[10px]">
-                        <button
-                          type="button"
-                          className="underline"
-                          onClick={() =>
-                            onCommit(
-                              setSurveyTeamAssigned(state, m.id, !m.assigned),
-                              m.assigned
-                                ? `${m.fullName} removed from app`
-                                : `${m.fullName} assigned — app shows Start`,
-                            )
-                          }
-                        >
-                          {m.assigned ? "Unassign" : "Assign"}
-                        </button>
-                        {m.role !== "leader" ? (
-                          <button
-                            type="button"
-                            className="underline"
-                            onClick={() =>
+                      <RowActionMenu
+                        row={m}
+                        label={`Actions for ${m.fullName}`}
+                        actions={[
+                          {
+                            id: "assign",
+                            label: m.assigned ? "Unassign from the app" : "Assign to the app",
+                            onSelect: (x) =>
                               onCommit(
-                                setSurveyTeamLeader(state, m.id),
-                                `${m.fullName} is team leader`,
-                              )
-                            }
-                          >
-                            Make leader
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="text-[#b42318] underline"
-                          onClick={() =>
-                            onCommit(
-                              removeSurveyTeamMember(state, m.id),
-                              `${m.fullName} removed from team`,
-                            )
-                          }
-                        >
-                          Remove
-                        </button>
-                      </div>
+                                setSurveyTeamAssigned(state, x.id, !x.assigned),
+                                x.assigned
+                                  ? `${x.fullName} removed from app`
+                                  : `${x.fullName} assigned — app shows Start`,
+                              ),
+                          },
+                          {
+                            id: "start_mode",
+                            label: m.startMode === "school" ? "Starts in the field instead" : "Starts at school instead",
+                            onSelect: (x) => {
+                              const next = x.startMode === "school" ? "field" : "school";
+                              onCommit(
+                                setSurveyTeamStartMode(state, x.id, next),
+                                `${x.fullName} now starts ${next === "school" ? "at school with the gate QR" : "in the field with live GPS"}`,
+                              );
+                            },
+                          },
+                          {
+                            id: "leader",
+                            label: "Make team leader",
+                            hidden: (x) => x.role === "leader",
+                            onSelect: (x) => onCommit(setSurveyTeamLeader(state, x.id), `${x.fullName} is team leader`),
+                          },
+                          {
+                            id: "remove",
+                            label: "Remove from team",
+                            tone: "danger",
+                            separatorAbove: true,
+                            onSelect: (x) => onCommit(removeSurveyTeamMember(state, x.id), `${x.fullName} removed from team`),
+                          },
+                        ]}
+                      />
                     ) : (
                       "—"
                     )}
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         )}
       </MastersWorkCard>
 
@@ -417,7 +424,7 @@ export function AdmissionSurveyTeamPanel({
                   {canEdit ? (
                     <button
                       type="button"
-                      className="text-[10px] text-[#b42318] underline"
+                      className="text-[10px] text-[var(--danger)] underline"
                       onClick={() =>
                         onCommit(
                           setLeadCallerAssigned(state, id, false),
@@ -435,141 +442,7 @@ export function AdmissionSurveyTeamPanel({
         )}
       </MastersWorkCard>
 
-      <MastersTableCard title="Per-survey analytics (by day)">
-        <p className="mb-3 rounded-lg border border-[rgba(32,48,80,0.1)] bg-white px-3 py-2 text-[11px] text-[var(--muted)]">
-          <strong className="text-[var(--brand-deep)]">Salary rule:</strong>{" "}
-          School IN → survey Start/End counts as full Present (outdoor duty).
-          If they go home without school OUT, survey End closes attendance
-          OUT. If they return and punch school OUT, that OUT is kept. Missing
-          End stays Present and is flagged for HR — no auto LWP. Outside
-          survey-only staff are not on payroll.
-        </p>
-        <div className="mb-3 flex flex-wrap items-end gap-3">
-          <label className="text-[11px] font-semibold text-[var(--muted)]">
-            Survey date
-            <input
-              type="date"
-              className={`${inp} mt-1`}
-              value={analyticsDate}
-              onChange={(e) => setAnalyticsDate(e.target.value)}
-            />
-          </label>
-          <div className="flex flex-wrap gap-2 text-[11px]">
-            <span className="rounded-lg border border-[rgba(32,48,80,0.12)] bg-white px-2.5 py-1.5">
-              Sessions{" "}
-              <strong>{dayAnalytics.sessions}</strong>
-            </span>
-            <span className="rounded-lg border border-[rgba(32,48,80,0.12)] bg-white px-2.5 py-1.5">
-              On field{" "}
-              <strong>{dayAnalytics.active}</strong>
-            </span>
-            <span className="rounded-lg border border-[rgba(32,48,80,0.12)] bg-white px-2.5 py-1.5">
-              Ended{" "}
-              <strong>{dayAnalytics.ended}</strong>
-            </span>
-            <span className="rounded-lg border border-[rgba(32,48,80,0.12)] bg-white px-2.5 py-1.5">
-              Worked{" "}
-              <strong>{formatSurveyHours(dayAnalytics.totalWorkedMs)}</strong>
-            </span>
-            <span className="rounded-lg border border-[rgba(32,48,80,0.12)] bg-white px-2.5 py-1.5">
-              Breaks{" "}
-              <strong>{formatSurveyHours(dayAnalytics.totalBreakMs)}</strong>
-            </span>
-            <span className="rounded-lg border border-[rgba(32,48,80,0.12)] bg-white px-2.5 py-1.5">
-              Captures{" "}
-              <strong>{dayAnalytics.captures}</strong>
-            </span>
-          </div>
-        </div>
-
-        {dayAnalytics.byAgent.length === 0 ? (
-          <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
-            No survey sessions this day — agents can Start via WhatsApp (START CODE + location pin) or /field/survey.
-          </div>
-        ) : (
-          <table className="min-w-full text-left text-sm">
-            <thead className="text-[11px] text-[var(--muted)]">
-              <tr>
-                <th className="px-2 py-2">Agent</th>
-                <th className="px-2 py-2">Status</th>
-                <th className="px-2 py-2">Worked</th>
-                <th className="px-2 py-2">Break</th>
-                <th className="px-2 py-2">Captures</th>
-                <th className="px-2 py-2">Salary day</th>
-                <th className="px-2 py-2">Start GPS</th>
-                <th className="px-2 py-2">End GPS</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dayAnalytics.byAgent.map((a) => (
-                <tr
-                  key={`${a.memberId}-${a.agentName}`}
-                  className="border-t border-[rgba(32,48,80,0.06)]"
-                >
-                  <td className="px-2 py-2 text-[12px] font-medium">
-                    {a.agentName}
-                  </td>
-                  <td className="px-2 py-2 text-[11px] capitalize">
-                    {a.status.replace("_", " ")}
-                  </td>
-                  <td className="px-2 py-2 text-[12px]">
-                    {formatSurveyHours(a.workedMs)}
-                  </td>
-                  <td className="px-2 py-2 text-[12px]">
-                    {formatSurveyHours(a.breakMs)}
-                  </td>
-                  <td className="px-2 py-2 text-[12px]">{a.captures}</td>
-                  <td className="px-2 py-2 text-[11px]">
-                    <span
-                      className={
-                        a.salaryCode === "open_hr_review"
-                          ? "font-semibold text-[#9a3412]"
-                          : a.salaryCode === "external_na"
-                            ? "text-[var(--muted)]"
-                            : "font-semibold text-[#166534]"
-                      }
-                    >
-                      {a.salaryLabel}
-                    </span>
-                  </td>
-                  <td className="px-2 py-2 font-mono text-[10px]">
-                    {a.startLabel}
-                  </td>
-                  <td className="px-2 py-2 font-mono text-[10px]">
-                    {a.endLabel}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-
-        {dayAnalytics.byBeat.length > 0 ? (
-          <div className="mt-4 border-t border-[rgba(32,48,80,0.08)] pt-3">
-            <p className="mb-2 text-[11px] font-semibold text-[var(--brand-deep)]">
-              By beat
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {dayAnalytics.byBeat.map((b) => (
-                <span
-                  key={b.beatId || b.beatName}
-                  className="rounded-lg bg-[rgba(154,52,18,0.1)] px-2.5 py-1.5 text-[11px] text-[#9a3412]"
-                >
-                  {b.beatName} · {b.sessions} sess ·{" "}
-                  {formatSurveyHours(b.workedMs)} · {b.captures} leads
-                </span>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {analytics.date === todayYmd() && analytics.active > 0 ? (
-          <p className="mt-3 text-[11px] text-[var(--muted)]">
-            {analytics.active} survey still open today — End survey on the agent
-            app locks hours + end location for salary outdoor close.
-          </p>
-        ) : null}
-      </MastersTableCard>
+      <SurveyDaysBoard canEdit={canEdit} />
     </div>
   );
 }

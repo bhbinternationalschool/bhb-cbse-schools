@@ -1,4 +1,4 @@
-import { assertModulePermission } from "@/lib/rbacGuard";
+import { assertModulePermission, holdsMastersFeatureWrite } from "@/lib/rbacGuard";
 import type { FoundationSlice } from "@/lib/foundationMasters";
 import {
   ensureFoundationOnMasters,
@@ -6,6 +6,11 @@ import {
   normalizeMastersStaffRoster,
 } from "@/lib/foundationMasters";
 import { ensureFoundationFeeStructure202627 } from "@/lib/feeStructureFoundation202627";
+import {
+  DEFAULT_FEE_BACKDATE_POLICY,
+  normalizeFeeBackdatePolicy,
+  type FeeBackdatePolicy,
+} from "@/lib/feeBackdate";
 import { ensurePrimaryFeeStructure202627 } from "@/lib/feeStructurePrimary202627";
 import { ensureMiddleFeeStructure202627 } from "@/lib/feeStructureMiddle202627";
 import { ensureSecondaryFeeStructure202627 } from "@/lib/feeStructureSecondary202627";
@@ -23,6 +28,10 @@ import {
   setMirrorSlice,
 } from "@/lib/schoolDataMirror";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { readCache, writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
+import { resolveAcademicYear, fallbackAcademicYear } from "@/lib/academicYearResolve";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type Campus = {
   id: string;
@@ -324,11 +333,66 @@ export type ConcessionRule = {
 };
 
 /** Demo / pending student grants until Fee Take owns this */
+/**
+ * WHY a family gets a discount — the thing the school could not answer.
+ *
+ * On 2026-09-08 all 149 approved grants had a `reason` filled in, so the field
+ * looked complete. 108 of them read "Fee Take · Counter concession · from
+ * Tuition Fee · April · receipt RCV-00096": that is WHERE the discount was
+ * applied, not why the family qualifies. For 99 of the 120 children receiving
+ * one, nobody had written down the ground.
+ *
+ * A free-text box did not fail because people are careless; it failed because
+ * a blank one still saves. This is a short list, it is required, and it is a
+ * column rather than prose so the school can finally ask "how many staff wards
+ * do we support?" and get an answer.
+ *
+ * `other` is deliberately present and deliberately last. Forcing a wrong
+ * category is worse than recording an honest "something else" with a note.
+ */
+export const CONCESSION_GROUNDS = [
+  { id: "sibling", label: "Sibling already studying here" },
+  { id: "staff_ward", label: "Staff ward" },
+  { id: "hardship", label: "Family hardship" },
+  { id: "merit", label: "Merit / scholarship" },
+  { id: "rte_ews", label: "RTE / EWS" },
+  { id: "director", label: "Director's discretion" },
+  { id: "correction", label: "Correcting a billing error" },
+  { id: "other", label: "Other (say what in the note)" },
+] as const;
+
+export type ConcessionGround = (typeof CONCESSION_GROUNDS)[number]["id"];
+
+export function concessionGroundLabel(id: string): string {
+  return CONCESSION_GROUNDS.find((g) => g.id === id)?.label ?? "Not recorded";
+}
+
+/**
+ * The ground a concession RULE already declares, if it declares one.
+ *
+ * A rule of kind `sibling` grants a sibling discount — reading the ground off
+ * it is not a guess, it is the rule speaking. But only for an exact match:
+ * `transport` and any custom kind the school invented say nothing about why a
+ * family qualifies, so they come back empty and the person granting must say.
+ */
+export function concessionGroundFromKind(kind: string): ConcessionGround | "" {
+  const k = (kind || "").trim().toLowerCase();
+  return CONCESSION_GROUNDS.some((g) => g.id === k)
+    ? (k as ConcessionGround)
+    : "";
+}
+
 export type ConcessionGrant = {
   id: string;
   concessionId: string;
   studentId: string;
   status: "pending" | "approved" | "rejected";
+  /**
+   * The ground. Empty on every grant made before 2026-09-08 — that absence is
+   * a real finding and must stay visible, so it is NOT back-filled with a
+   * guess.
+   */
+  ground: ConcessionGround | "";
   reason: string;
   effectiveFrom: string;
   effectiveTo: string | null;
@@ -354,6 +418,8 @@ export type MastersState = {
   lateFeeRules: LateFeeRule[];
   /** School rules for mid-year join billing */
   midYearFeePolicy: MidYearFeePolicy;
+  /** May counter staff date a receipt earlier than today? See lib/feeBackdate. */
+  feeBackdatePolicy: FeeBackdatePolicy;
   students: DemoStudent[];
   specialFees: SpecialFee[];
   specialFeeAssignments: SpecialFeeAssignment[];
@@ -526,7 +592,19 @@ const LEGACY_KEYS = [
   "bhb_masters_v2",
   "bhb_masters_v1",
 ];
-export const DEFAULT_AY = "2025-26";
+
+/** Absolute last resort when Masters defines no academic years at all —
+ * computed from today's date (April-anchored Indian school year), never
+ * hardcoded. A stale hardcoded year is what ran the school four months
+ * into a closed session on 2026-08-10 (see academicYearResolve.ts, which
+ * currentAcademicYearCode below now defers to for the real answer). */
+function computeDefaultAy(now: Date = new Date()): string {
+  const month = now.getMonth() + 1;
+  const startYear = month >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+  const endYY = String((startYear + 1) % 100).padStart(2, "0");
+  return `${startYear}-${endYY}`;
+}
+export const DEFAULT_AY = computeDefaultAy();
 
 export type SessionYearOption = {
   code: string;
@@ -535,8 +613,14 @@ export type SessionYearOption = {
 };
 
 /**
- * Active “current” academic year from Masters (Academics tab).
- * Falls back to DEFAULT_AY when masters are unavailable (SSR / empty).
+ * Active academic year from Masters (Academics tab), decided from the
+ * calendar via resolveAcademicYear — the same logic already used
+ * server-side to stamp login session cookies (workspaceSession.server.ts).
+ * A `status: "current"` flag someone forgot to move when a session ended
+ * is exactly the class of bug that ran the school four months into a
+ * closed year on 2026-08-10; date comparison catches that, a bare status
+ * check (this function's old behaviour) does not.
+ * Falls back to DEFAULT_AY only when masters are unavailable (SSR / empty).
  */
 export function currentAcademicYearCode(
   state?: MastersState | null,
@@ -545,10 +629,9 @@ export function currentAcademicYearCode(
     state ??
     (typeof window !== "undefined" ? loadMasters() : null);
   if (!m?.academicYears?.length) return DEFAULT_AY;
-  const cur = m.academicYears.find(
-    (y) => y.status === "current" && y.isActive !== false,
-  );
-  return cur?.code ?? DEFAULT_AY;
+  const resolved = resolveAcademicYear(m.academicYears, new Date().toISOString());
+  if (resolved.code) return resolved.code;
+  return fallbackAcademicYear(m.academicYears) ?? DEFAULT_AY;
 }
 
 /** Years for header Session selector and import pickers — from Masters. */
@@ -559,7 +642,12 @@ export function listSessionYearOptions(
     state ??
     (typeof window !== "undefined" ? loadMasters() : null);
   if (!m?.academicYears?.length) {
-    return [{ code: DEFAULT_AY, label: DEFAULT_AY, status: "current" }];
+    // Nothing is known, so claim nothing. This used to return DEFAULT_AY
+    // labelled `status: "current"`, which is what rendered "2025-26 · Current"
+    // in the header on a desk that had never loaded a single academic year.
+    // The selector falls back to the session's own code when this is empty,
+    // which shows what the session actually is instead of asserting a year.
+    return [];
   }
   return m.academicYears
     .filter((y) => y.isActive !== false)
@@ -1287,6 +1375,7 @@ export function defaultMasters(): MastersState {
     installments,
     lateFeeRules,
     midYearFeePolicy: DEFAULT_MID_YEAR_FEE_POLICY,
+    feeBackdatePolicy: DEFAULT_FEE_BACKDATE_POLICY,
     students,
     specialFees,
     specialFeeAssignments: [],
@@ -1323,6 +1412,7 @@ export function emptyMastersShell(): MastersState {
     installments: [],
     lateFeeRules: [],
     midYearFeePolicy: DEFAULT_MID_YEAR_FEE_POLICY,
+    feeBackdatePolicy: DEFAULT_FEE_BACKDATE_POLICY,
     students: [],
     specialFees: [],
     specialFeeAssignments: [],
@@ -1531,7 +1621,8 @@ export function rebuildDemoRoster(masters: MastersState): MastersState {
 export function ensureStudentClassLinks(masters: MastersState): MastersState {
   const classIds = new Set(masters.classes.map((c) => c.id));
   const students = masters.students ?? [];
-  if (students.length === 0) return masters;
+  // No classes means Masters has not loaded yet, not that every class is gone.
+  if (students.length === 0 || classIds.size === 0) return masters;
 
   const valid = students.filter(
     (s) =>
@@ -1588,6 +1679,17 @@ export function preferMonthlyIfQuarterlyStub(state: MastersState): MastersState 
 }
 
 function ensureClassRoster(state: MastersState): MastersState {
+  // An empty roster means "not loaded", not "no classes". Filling it in from
+  // CLASS_GROUPS mints a fresh id per class, and those ids are what students,
+  // leads and fee lines would then be written against — pointing at a
+  // generation no other device or the server has ever seen.
+  //
+  // This is reachable with a partly-hydrated state (say fee heads arrived but
+  // classes did not), which the guard in ensureFeeSetup does not catch, so it
+  // is checked again here. Backfilling a MISSING class into a roster that
+  // already exists is still fine; conjuring the whole roster is not.
+  if (!state.classes?.length && isSupabaseConfigured()) return state;
+
   let classes = (state.classes ?? []).map((c, i) => normalizeSchoolClass(c, i));
   let sections = [...(state.sections ?? [])];
 
@@ -1712,7 +1814,7 @@ function ensureFeeHeads(state: MastersState): MastersState {
   const categories = resolveFeeHeadCategories(state);
   // Ensure every head category exists in the catalog
   const codes = new Set(categories.map((c) => c.code));
-  let nextCats = [...categories];
+  const nextCats = [...categories];
   for (const h of heads) {
     const code = (h.category || "misc").toLowerCase();
     if (!codes.has(code)) {
@@ -1735,7 +1837,88 @@ function ensureFeeHeads(state: MastersState): MastersState {
   };
 }
 
+/**
+ * Has this masters state actually been loaded, or is it just empty?
+ *
+ * A state with no classes, no fee heads and no subjects has not been
+ * hydrated yet. It is NOT "a school that has no classes" — a real school
+ * that had deleted everything would still be a case for showing nothing,
+ * never for inventing a curriculum.
+ */
+function mastersLooksUnhydrated(state: MastersState): boolean {
+  return (
+    !state.classes?.length &&
+    !state.feeHeads?.length &&
+    !state.subjects?.length
+  );
+}
+
+/**
+ * Lists a browser must never invent on a real tenant (10 Oct 2026). A
+ * teacher's phone gets a reduced Masters (classes, subjects, holidays — no
+ * fees), so "empty" there means "not sent", not "not set up". Filling those
+ * gaps minted a whole school with random ids — a generic subject list and
+ * NCF IX–X offerings among them — and the next save replaced the school's
+ * subjects twice in one day. The server sets up defaults; the browser keeps
+ * exactly what it was given.
+ */
+const NEVER_SEEDED_ON_TENANT = [
+  "subjects",
+  "classSubjects",
+  "seniorStreams",
+  "feeGroups",
+  "feeStructureLines",
+  "feeHeads",
+  "installments",
+  "concessions",
+  "specialFees",
+  "specialFeeAssignments",
+  "lateFeeRules",
+  "academicYears",
+  "academicTerms",
+  "holidays",
+] as const;
+
 function ensureFeeSetup(state: MastersState): MastersState {
+  const out = ensureFeeSetupInner(state);
+  if (!isSupabaseConfigured()) return out;
+  const given = state as unknown as Record<string, unknown>;
+  const kept = { ...out } as unknown as Record<string, unknown>;
+  for (const key of NEVER_SEEDED_ON_TENANT) {
+    const was = given[key];
+    // The subject list and class links are the server's, row for row — no
+    // NCF top-up, no default list. Other lists keep their normalisation, but
+    // one that arrived empty stays empty.
+    if (key === "subjects" || key === "classSubjects" || key === "seniorStreams") {
+      kept[key] = Array.isArray(was) ? was : [];
+    } else if (!Array.isArray(was) || was.length === 0) {
+      kept[key] = Array.isArray(was) ? was : [];
+    }
+  }
+  return kept as unknown as MastersState;
+}
+
+function ensureFeeSetupInner(state: MastersState): MastersState {
+  // Absent is not a default.
+  //
+  // On a cold client this function used to fabricate an entire school:
+  // `defaultMasters()` supplies `full.classes` when the roster is empty, and
+  // ensureClassRoster then mints any class still missing — each with a fresh
+  // random id. The result is a complete 15-class generation the server has
+  // never seen, written straight to localStorage by loadMasters(), which
+  // then fails guardMastersOverwrite as a `regenerated` push and leaves the
+  // device frozen on ids that exist nowhere else.
+  //
+  // That is what a cleared browser produced against production on
+  // 2026-08-10: ids cls_kwlp6sqz… while the database held cls_p7bw8cpc…, and
+  // clearing storage — the workaround staff had been told to use — made it
+  // worse rather than better.
+  //
+  // With Supabase configured there is a real roster to hydrate; seeding one
+  // locally can only conflict with it. Demo mode has nothing to hydrate
+  // from, so it still gets a usable school.
+  if (mastersLooksUnhydrated(state) && isSupabaseConfigured()) return state;
+
   let next = { ...state, version: 2 as const };
   if (!next.feeGroups?.length || !next.feeStructureLines?.length) {
     const full = defaultMasters();
@@ -1756,6 +1939,7 @@ function ensureFeeSetup(state: MastersState): MastersState {
   next = {
     ...next,
     midYearFeePolicy: normalizeMidYearFeePolicy(next.midYearFeePolicy),
+    feeBackdatePolicy: normalizeFeeBackdatePolicy(next.feeBackdatePolicy),
   };
   next = {
     ...next,
@@ -1842,13 +2026,13 @@ export function loadMasters(): MastersState {
     return shouldSeedEmptyMastersShell() ? emptyMastersShell() : defaultMasters();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (raw) {
       const parsed = ensureFeeSetup(JSON.parse(raw) as MastersState);
       const migrated = migrateDemoStaffToTeacherRoster(parsed);
       const normalized = normalizeMastersStaffRoster(migrated);
       if (normalized !== migrated || migrated !== parsed) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+        writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalized));
       }
       return normalized;
     }
@@ -1858,11 +2042,16 @@ export function loadMasters(): MastersState {
       // One-time upgrade: turn on full Apr–Mar monthly calendar
       let merged = ensureFeeSetup(JSON.parse(legacy) as MastersState);
       merged = applyInstallmentPattern(merged, "monthly", DEFAULT_AY);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(merged));
       return merged;
     }
-    const seed = shouldSeedEmptyMastersShell() ? emptyMastersShell() : defaultMasters();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
+    // Cold browser on a real tenant: return the empty shell WITHOUT storing
+    // it. Persisting it made "no cache" indistinguishable from "a tenant with
+    // no classes" for every writer that ran before hydration finished
+    // (2026-08-18). Hydration writes the real masters; demo mode still seeds.
+    if (shouldSeedEmptyMastersShell()) return emptyMastersShell();
+    const seed = defaultMasters();
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(seed));
     return seed;
   } catch {
     return shouldSeedEmptyMastersShell() ? emptyMastersShell() : defaultMasters();
@@ -1879,55 +2068,122 @@ function shouldSeedEmptyMastersShell(): boolean {
   return isSupabaseConfigured();
 }
 
-export function saveMasters(state: MastersState) {
-  if (!assertModulePermission("masters", "edit", "saveMasters")) return;
-  persistMastersClient(state);
+/**
+ * Save masters and report whether the write actually reached the database.
+ *
+ * Returns the real outcome so a caller can stop assuming success. Callers
+ * that ignore the promise behave exactly as before. `blocked` means the
+ * write never left the browser (RBAC or a closed session) — previously
+ * indistinguishable from a successful save, so the UI reported "saved"
+ * either way.
+ */
+export function saveMasters(
+  state: MastersState,
+): Promise<MastersSaveOutcome> {
+  // Someone holding only a FUNCTION of Masters (a teacher's Class
+  // subjects) may push too: the server lifts in only the slices those
+  // functions own and refuses any row outside them (mastersChangeAuth).
+  if (!holdsMastersFeatureWrite() && !assertModulePermission("masters", "edit", "saveMasters")) {
+    return Promise.resolve({ ok: false, reason: "blocked" });
+  }
+  return persistMastersClient(state);
 }
+
+export type MastersSaveOutcome =
+  | { ok: true; reason?: "unchanged" }
+  | { ok: false; reason: string };
 
 /** System imports (fee discounts seed) — bypass RBAC / closed-session guards. */
-export function persistMastersSystemImport(state: MastersState) {
+export function persistMastersSystemImport(
+  state: MastersState,
+): Promise<MastersSaveOutcome> {
   if (typeof window === "undefined") {
     setMirrorSlice("masters", state);
-    return;
+    return Promise.resolve({ ok: true });
   }
-  persistMastersClient(state);
+  return persistMastersClient(state);
 }
 
-function persistMastersClient(state: MastersState) {
+async function persistMastersClient(
+  state: MastersState,
+): Promise<MastersSaveOutcome> {
   if (typeof window === "undefined") {
     setMirrorSlice("masters", state);
-    void import("@/lib/staffPersistence").then(({ scheduleStaffSync }) => {
+    void trackServerWork(import("@/lib/staffPersistence").then(({ scheduleStaffSync }) => {
       scheduleStaffSync(state);
-    });
-    return;
+    }));
+    return { ok: true };
+  }
+  // Same protection as writeMastersLocalRaw: a save that would leave the
+  // browser with no classes (or a foreign id generation) keeps the stored
+  // classes. The server refuses such a push anyway; this keeps the browser
+  // from displaying — and re-pushing — the empty copy in the meantime.
+  {
+    const rawPrev = readCache(STORAGE_KEY);
+    if (rawPrev) {
+      try {
+        const stored = JSON.parse(rawPrev) as Partial<MastersState>;
+        const storedIds = (stored.classes ?? []).map((c) => c.id);
+        const incomingIds = (state.classes ?? []).map((c) => c.id);
+        if (storedIds.length > 0) {
+          const verdict = guardMastersOverwrite(storedIds, incomingIds);
+          if (!verdict.allow) {
+            console.warn(`[masters] save kept stored classes — ${verdict.message}`);
+            state = {
+              ...state,
+              classes: stored.classes ?? [],
+              sections: stored.sections ?? state.sections,
+              classSubjects: stored.classSubjects ?? state.classSubjects,
+              subjects: stored.subjects ?? state.subjects,
+            };
+          }
+        }
+      } catch {
+        /* unreadable cache — proceed with the incoming state */
+      }
+    }
   }
   const serialized = JSON.stringify({ ...state, version: 2 });
-  const prev = localStorage.getItem(STORAGE_KEY);
-  if (prev === serialized) return;
+  const prev = readCache(STORAGE_KEY);
+  if (prev === serialized) return { ok: true, reason: "unchanged" };
 
   try {
-    localStorage.setItem(STORAGE_KEY, serialized);
+    writeCacheOrInvalidate(STORAGE_KEY, serialized);
   } catch (e) {
     console.warn("[masters] localStorage quota exceeded — using server DB persistence", e);
   }
   writeMastersMirrorMeta(new Date().toISOString());
-  void import("@/lib/staffPersistence").then(
+  void trackServerWork(import("@/lib/staffPersistence").then(
     ({ scheduleStaffSync, stripStaffFromMastersForBlob }) => {
       scheduleClientSchoolMirrorSync({
         masters: stripStaffFromMastersForBlob(state),
       });
       scheduleStaffSync(state);
     },
-  );
-  void import("@/lib/mastersNormalizedClient").then(
-    ({ touchMastersDeskLocalMeta }) => {
-      touchMastersDeskLocalMeta(state);
-    },
-  );
-  void import("@/lib/mastersPersistence").then(({ scheduleMastersSync }) => {
-    scheduleMastersSync(state);
-  });
+  ));
+  // Deliberately does NOT touch the desk meta. `bhb_masters_desk_db_meta_v1`
+  // holds the desk revision this client last saw, and it is sent back as
+  // `baseUpdatedAt` for optimistic locking (mastersNormalizedClient.ts).
+  // Stamping it with a local clock here made the client claim to have
+  // hydrated at a revision that never existed on the server, so every save
+  // after the first was refused 409 "stale" — masters became unsavable in
+  // production on 2026-08-10. That key is now only ever written from a
+  // server response: the push result, a hydrate, or the wipe signal.
+  // Awaited, not fire-and-forget: the caller needs the real outcome.
+  // scheduleMastersSync queues the state synchronously, so flushing straight
+  // after is safe and turns the debounced push into an awaitable one.
+  const { scheduleMastersSync } = await import("@/lib/mastersPersistence");
+  scheduleMastersSync(state);
   window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
+
+  const { flushMastersDeskSyncPending } = await import(
+    "@/lib/mastersNormalizedClient"
+  );
+  const pushed = await flushMastersDeskSyncPending();
+  // `null` = nothing was queued (Supabase unconfigured / demo mode). The
+  // local write stands; there is no remote write to have failed.
+  if (!pushed) return { ok: true };
+  return pushed.ok ? { ok: true } : { ok: false, reason: pushed.reason };
 }
 
 const MASTERS_MIRROR_META = "bhb_masters_mirror_meta_v1";
@@ -1986,6 +2242,12 @@ export type RemovalCheck = {
   /** Shown under disabled Remove, and in confirm when allowed */
   suggestion: string;
   confirmMessage: string;
+  /**
+   * Rows that will be deleted along with the entity — not blockers, but
+   * the user is told before confirming. Silently orphaning these is the
+   * defect this field exists to prevent.
+   */
+  cascades?: string[];
 };
 
 function lateRuleUsesHead(rule: LateFeeRule, feeHeadId: string): boolean {
@@ -2102,33 +2364,73 @@ export function checkClassRemoval(
 ): RemovalCheck {
   const name = state.classes.find((c) => c.id === classId)?.name ?? "this class";
   const blockers: string[] = [];
-  const sectionN = state.sections.filter((s) => s.classId === classId).length;
-  if (sectionN > 0) blockers.push(`${sectionN} section(s)`);
+  const sections = state.sections.filter((s) => s.classId === classId);
+  if (sections.length > 0) {
+    blockers.push(
+      `${sections.length} section(s) (${sections.map((s) => s.name).join(", ")})`,
+    );
+  }
   const studentN = (state.students ?? []).filter(
     (s) => s.classId === classId,
   ).length;
   if (studentN > 0) blockers.push(`${studentN} student(s)`);
-  const groupN = state.feeGroups.filter((g) =>
-    g.classIds.includes(classId),
-  ).length;
-  if (groupN > 0) blockers.push(`${groupN} fee group(s)`);
-  const assignN = (state.specialFeeAssignments ?? []).filter((a) =>
+  const groups = state.feeGroups.filter((g) => g.classIds.includes(classId));
+  if (groups.length > 0) {
+    blockers.push(
+      `${groups.length} fee group(s) (${groups.map((g) => g.name).join(", ")})`,
+    );
+  }
+  const assignments = (state.specialFeeAssignments ?? []).filter((a) =>
     a.classIds.includes(classId),
-  ).length;
-  if (assignN > 0) blockers.push(`${assignN} special-fee assignment(s)`);
+  );
+  if (assignments.length > 0) {
+    const names = assignments
+      .map(
+        (a) =>
+          state.specialFees?.find((f) => f.id === a.specialFeeId)?.name ??
+          "special fee",
+      )
+      .join(", ");
+    blockers.push(`${assignments.length} special-fee assignment(s) (${names})`);
+  }
+
+  // Things that are cleaned up with the class rather than blocking it.
+  // They are still announced: a class carrying 25 subject links should
+  // not disappear without the user knowing those go too.
+  const cascades: string[] = [];
+  const subjectLinks = (state.classSubjects ?? []).filter(
+    (l) => l.classId === classId,
+  );
+  if (subjectLinks.length > 0) {
+    cascades.push(`${subjectLinks.length} subject link(s)`);
+  }
+  const staffLinks = (state.staff ?? []).reduce(
+    (n, s) =>
+      n +
+      (s.classTeacherLinks ?? []).filter((l) => l.classId === classId).length +
+      (s.subjectTeachingLinks ?? []).filter((l) => l.classId === classId)
+        .length,
+    0,
+  );
+  if (staffLinks > 0) cascades.push(`${staffLinks} teacher assignment(s)`);
 
   if (blockers.length > 0) {
     return {
       canRemove: false,
       blockers,
-      suggestion: `Linked data present (${blockers.join("; ")}). Remove sections / unlink fee groups & assignments first, or use Inactivate.`,
+      cascades,
+      suggestion: `Linked data present — ${blockers.join("; ")}. Unlink these in Masters → Fees (fee groups & special fees) and remove sections first, or use Inactivate to hide the class everywhere while keeping its history.`,
       confirmMessage: `Remove class “${name}”?`,
     };
   }
   return {
     canRemove: true,
     blockers: [],
-    suggestion: "Prefer Inactivate if the class may return. Removal cannot be undone.",
+    cascades,
+    suggestion:
+      cascades.length > 0
+        ? `Also deletes ${cascades.join(" and ")}. Prefer Inactivate if the class may return — removal cannot be undone.`
+        : "Prefer Inactivate if the class may return. Removal cannot be undone.",
     confirmMessage: `Remove class “${name}”?`,
   };
 }
@@ -2405,11 +2707,37 @@ export function removeClass(
   if (!check.canRemove) {
     return { ok: false, reason: check.suggestion };
   }
+  // Cascade rather than orphan. Dropping only the class row leaves its
+  // subject links and teacher assignments pointing at an id that no
+  // longer exists — rows nothing renders, nothing can clean up, and that
+  // quietly inflate every "what is unassigned" count.
   return {
     ok: true,
     state: {
       ...state,
       classes: state.classes.filter((c) => c.id !== classId),
+      classSubjects: (state.classSubjects ?? []).filter(
+        (l) => l.classId !== classId,
+      ),
+      staff: (state.staff ?? []).map((s) => {
+        const classLinks = (s.classTeacherLinks ?? []).filter(
+          (l) => l.classId !== classId,
+        );
+        const subjectLinks = (s.subjectTeachingLinks ?? []).filter(
+          (l) => l.classId !== classId,
+        );
+        if (
+          classLinks.length === (s.classTeacherLinks ?? []).length &&
+          subjectLinks.length === (s.subjectTeachingLinks ?? []).length
+        ) {
+          return s;
+        }
+        return {
+          ...s,
+          classTeacherLinks: classLinks,
+          subjectTeachingLinks: subjectLinks,
+        };
+      }),
     },
   };
 }
@@ -2422,11 +2750,32 @@ export function removeSection(
   if (!check.canRemove) {
     return { ok: false, reason: check.suggestion };
   }
+  // Same cascade rule as removeClass: a teacher assignment pointing at a
+  // deleted section is invisible to every screen but still counted.
   return {
     ok: true,
     state: {
       ...state,
       sections: state.sections.filter((s) => s.id !== sectionId),
+      staff: (state.staff ?? []).map((s) => {
+        const classLinks = (s.classTeacherLinks ?? []).filter(
+          (l) => l.sectionId !== sectionId,
+        );
+        const subjectLinks = (s.subjectTeachingLinks ?? []).filter(
+          (l) => l.sectionId !== sectionId,
+        );
+        if (
+          classLinks.length === (s.classTeacherLinks ?? []).length &&
+          subjectLinks.length === (s.subjectTeachingLinks ?? []).length
+        ) {
+          return s;
+        }
+        return {
+          ...s,
+          classTeacherLinks: classLinks,
+          subjectTeachingLinks: subjectLinks,
+        };
+      }),
     },
   };
 }
@@ -2592,6 +2941,11 @@ export function normalizeConcessionGrant(
     id: g.id,
     concessionId: g.concessionId ?? "",
     studentId: g.studentId ?? "",
+    // Not back-filled. A grant made before grounds were recorded reads
+    // "Not recorded", and that is the honest answer.
+    ground: CONCESSION_GROUNDS.some((x) => x.id === g.ground)
+      ? (g.ground as ConcessionGround)
+      : "",
     status:
       g.status === "approved" || g.status === "rejected"
         ? g.status
@@ -2657,6 +3011,42 @@ export function normalizeAcademicYearCode(code: string): string {
   const full = t.match(/^(20\d{2})-(20\d{2})$/);
   if (full) return `${full[1]}-${full[2]!.slice(2)}`;
   return t;
+}
+
+/**
+ * The last day of an academic session — 31 March of its closing year.
+ *
+ * "2026-27" → "2027-03-31". Returns null for anything it cannot read with
+ * certainty, because the caller uses this as a concession's END DATE: a
+ * wrong date here either cuts a family's discount off early or extends it,
+ * and both are worse than leaving the grant as it was.
+ */
+/**
+ * 1 April of a session — the mirror of `academicYearEndOn`.
+ *
+ * Used as the floor for back-dating a receipt: a payment dated before its own
+ * session lands in a book that has already been closed and reported, and will
+ * never reconcile against it.
+ */
+export function academicYearStartOn(code: string): string | null {
+  const norm = normalizeAcademicYearCode(code);
+  const m = norm.match(/^(20\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const startYear = Number(m[1]);
+  if (Number(m[2]) !== (startYear + 1) % 100) return null;
+  return `${startYear}-04-01`;
+}
+
+export function academicYearEndOn(code: string): string | null {
+  const norm = normalizeAcademicYearCode(code);
+  const m = norm.match(/^(20\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const startYear = Number(m[1]);
+  const endYY = Number(m[2]);
+  // The closing year must be the one that follows: 2026-27, never 2026-29.
+  const expected = (startYear + 1) % 100;
+  if (endYY !== expected) return null;
+  return `${startYear + 1}-03-31`;
 }
 
 export function isAllSessionsConcession(rule: ConcessionRule): boolean {

@@ -1,3 +1,5 @@
+/* ratchet-allow: unguarded_replace — prune of stale slice keys only; see the note
+   in mastersNormalized.server.ts. A failed upsert loses nothing. */
 /**
  * Timetable desk — Supabase slice rows (timetable_desk_slices).
  */
@@ -33,6 +35,9 @@ export type TimetableDeskBundle = Pick<
   TimetableState,
   | "workingWeekdays"
   | "bellTemplate"
+  | "extraBellTemplates"
+  | "classTeacherAllClassIds"
+  | "subjectRules"
   | "grids"
   | "publishedGrids"
   | "substitutions"
@@ -57,6 +62,9 @@ function emptyBundle(): TimetableDeskBundle {
   return {
     workingWeekdays: [],
     bellTemplate: [],
+    extraBellTemplates: [],
+    classTeacherAllClassIds: null,
+    subjectRules: [],
     grids: [],
     publishedGrids: [],
     substitutions: [],
@@ -80,6 +88,9 @@ function stateToSlices(state: TimetableState): {
       payload: {
         workingWeekdays: state.workingWeekdays ?? [],
         bellTemplate: state.bellTemplate ?? [],
+        extraBellTemplates: state.extraBellTemplates ?? [],
+        classTeacherAllClassIds: state.classTeacherAllClassIds ?? null,
+        subjectRules: state.subjectRules ?? [],
         meta: state.meta ?? emptyBundle().meta,
       },
     },
@@ -99,6 +110,9 @@ function slicesToBundle(
       ? (sliceMap.config as {
           workingWeekdays?: number[];
           bellTemplate?: TimetableDeskBundle["bellTemplate"];
+          extraBellTemplates?: TimetableDeskBundle["extraBellTemplates"];
+          classTeacherAllClassIds?: TimetableDeskBundle["classTeacherAllClassIds"];
+          subjectRules?: TimetableDeskBundle["subjectRules"];
           meta?: TimetableDeskBundle["meta"];
         })
       : null;
@@ -109,6 +123,11 @@ function slicesToBundle(
     bellTemplate: Array.isArray(config?.bellTemplate)
       ? config.bellTemplate
       : empty.bellTemplate,
+    extraBellTemplates: Array.isArray(config?.extraBellTemplates) ? config.extraBellTemplates : [],
+    classTeacherAllClassIds: Array.isArray(config?.classTeacherAllClassIds)
+      ? config.classTeacherAllClassIds
+      : null,
+    subjectRules: Array.isArray(config?.subjectRules) ? config.subjectRules : [],
     meta: config?.meta ?? empty.meta,
     grids: Array.isArray(sliceMap.grids)
       ? (sliceMap.grids as TimetableDeskBundle["grids"])
@@ -124,12 +143,71 @@ function slicesToBundle(
 
 export async function pushTimetableDeskToDb(
   state: TimetableState,
-): Promise<{ ok: boolean; error?: string }> {
+  opts?: { versioned?: boolean; baseUpdatedAt?: string | null },
+): Promise<{ ok: boolean; error?: string; updatedAt?: string; conflict?: "stale" | "unversioned" }> {
   if (!timetableDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
   const now = nowIso();
+
+  // A browser's save replaces the whole timetable, so it may only land on
+  // the version it loaded (10 Oct 2026). The revision is claimed first, in
+  // one conditional update: of two saves made from the same copy, exactly
+  // one moves it, and the other is refused before it writes anything.
+  if (opts?.versioned) {
+    const base = opts.baseUpdatedAt || "";
+    let claimed = false;
+    if (base) {
+      const { data, error } = await sb
+        .from("timetable_desk_sync_meta")
+        .update({ updated_at: now, last_updated_at: now })
+        .eq("tenant_id", tenantId)
+        .eq("updated_at", base)
+        .select("tenant_id");
+      if (error) return { ok: false, error: error.message };
+      claimed = (data ?? []).length === 1;
+    }
+    if (!claimed) {
+      const { data: row, error } = await sb
+        .from("timetable_desk_sync_meta")
+        .select("tenant_id")
+        .eq("tenant_id", tenantId)
+        .maybeSingle();
+      if (error) return { ok: false, error: error.message };
+      if (row) {
+        return base
+          ? { ok: false, conflict: "stale", error: "The timetable was changed on another device after this one loaded it." }
+          : { ok: false, conflict: "unversioned", error: "This device had not loaded the saved timetable, so it cannot replace it." };
+      }
+      // No revision on file yet (first ever save): nothing to protect.
+    }
+  }
+  // A browser still running the code from before these settings existed
+  // sends no such keys; keep what the database holds instead of writing
+  // them away (5 Oct 2026: extra bell schedules, class-teacher-takes-all,
+  // subject rules).
+  const loose = state as Partial<TimetableState>;
+  if (
+    loose.extraBellTemplates === undefined ||
+    loose.classTeacherAllClassIds === undefined ||
+    loose.subjectRules === undefined
+  ) {
+    const { data: cfgRow } = await sb
+      .from("timetable_desk_slices")
+      .select("payload")
+      .eq("tenant_id", tenantId)
+      .eq("slice_key", "config")
+      .maybeSingle();
+    const cfg = slicesToBundle({ config: (cfgRow as { payload?: unknown } | null)?.payload });
+    state = {
+      ...state,
+      extraBellTemplates: loose.extraBellTemplates ?? cfg.extraBellTemplates,
+      classTeacherAllClassIds:
+        loose.classTeacherAllClassIds === undefined ? cfg.classTeacherAllClassIds : loose.classTeacherAllClassIds,
+      subjectRules: loose.subjectRules ?? cfg.subjectRules,
+    };
+  }
   const slices = stateToSlices(state);
 
   const rows = slices.map(({ key, payload }) => ({
@@ -177,19 +255,20 @@ export async function pushTimetableDeskToDb(
     { onConflict: "tenant_id" },
   );
 
-  return { ok: true };
+  return { ok: true, updatedAt: now };
 }
 
 export async function fetchTimetableDeskFromDb(): Promise<{
   bundle: TimetableDeskBundle;
   meta: TimetableDeskSyncMeta | null;
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   const empty = emptyBundle();
-  if (!ctx) return { bundle: empty, meta: null };
+  if (!ctx) return { bundle: empty, meta: null, ok: false };
   const { sb, tenantId } = ctx;
 
-  const [{ data: sliceRows }, { data: metaRow }] = await Promise.all([
+  const [sliceRes, metaRes] = await Promise.all([
     sb.from("timetable_desk_slices").select("*").eq("tenant_id", tenantId),
     sb
       .from("timetable_desk_sync_meta")
@@ -197,6 +276,17 @@ export async function fetchTimetableDeskFromDb(): Promise<{
       .eq("tenant_id", tenantId)
       .maybeSingle(),
   ]);
+
+  if (sliceRes.error || metaRes.error) {
+    console.warn(
+      "[timetable-db] fetchTimetableDeskFromDb query error",
+      sliceRes.error || metaRes.error,
+    );
+    return { bundle: empty, meta: null, ok: false };
+  }
+
+  const sliceRows = sliceRes.data;
+  const metaRow = metaRes.data;
 
   const sliceMap: Partial<Record<TimetableSliceKey, unknown>> = {};
   for (const row of sliceRows ?? []) {
@@ -226,5 +316,5 @@ export async function fetchTimetableDeskFromDb(): Promise<{
       }
     : null;
 
-  return { bundle, meta };
+  return { bundle, meta, ok: true };
 }

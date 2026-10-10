@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — hold ledger rows carry no staff id; the run detail is where holds are worked
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -18,6 +19,14 @@ import {
 import { loadMasters, type MastersState } from "@/lib/masters";
 import { formatInr, loadPayroll } from "@/lib/payroll";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function JuneHoldPanel() {
   const session = useDemoSession();
@@ -28,6 +37,8 @@ export function JuneHoldPanel() {
     normalizeSalaryHoldSettings(null),
   );
   const [tick, setTick] = useState(0);
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("salary_hold", () => setTick((t) => t + 1));
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -125,6 +136,19 @@ export function JuneHoldPanel() {
       h.status === "forfeited_incomplete_year",
   );
 
+  // Held salary, newest month first.
+  const holdSort = useTableSort(
+    openHolds,
+    {
+      staff: (h) => h.fullName,
+      month: (h) => h.month,
+      amount: (h) => h.amount,
+      status: (h) => h.status,
+    },
+    "month",
+    "desc",
+  );
+
   return (
     <div className="space-y-4">
       <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-3 text-sm text-[var(--muted)]">
@@ -135,7 +159,7 @@ export function JuneHoldPanel() {
         <p className="text-sm font-medium text-[var(--brand-deep)]">{notice}</p>
       ) : null}
       {error ? (
-        <p className="text-sm font-medium text-[#b42318]">{error}</p>
+        <p className="text-sm font-medium text-[var(--danger)]">{error}</p>
       ) : null}
 
       <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
@@ -276,26 +300,23 @@ export function JuneHoldPanel() {
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-        <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
+      <ErpTableShell exportAs="june_holds" exportTitle="Open June holds">
+        <div className="border-b border-[var(--border)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
           Open June holds ({openHolds.length})
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-[rgba(32,48,80,0.1)] text-[11px] text-[var(--muted)]">
-                <th className="px-3 py-2 font-medium">Staff</th>
-                <th className="px-3 py-2 font-medium">Month</th>
-                <th className="px-3 py-2 font-medium">Amount</th>
-                <th className="px-3 py-2 font-medium">Status</th>
+          <ErpTable minWidth="min-w-[640px]">
+            <ErpTableHead>
+              <tr>
+                <ErpSortTh sort={holdSort} field="staff" className="px-3 py-2 font-medium">Staff</ErpSortTh>
+                <ErpSortTh sort={holdSort} field="month" className="px-3 py-2 font-medium">Month</ErpSortTh>
+                <ErpSortTh sort={holdSort} field="amount" align="right" className="px-3 py-2 font-medium">Amount</ErpSortTh>
+                <ErpSortTh sort={holdSort} field="status" className="px-3 py-2 font-medium">Status</ErpSortTh>
               </tr>
-            </thead>
-            <tbody>
-              {openHolds.map((h) => (
-                <tr
-                  key={h.id}
-                  className="border-b border-[rgba(32,48,80,0.06)]"
-                >
+            </ErpTableHead>
+            <ErpTableBody>
+              {holdSort.rows.map((h) => (
+                <tr key={h.id}>
                   <td className="px-3 py-2">
                     <div className="font-semibold text-[var(--brand-deep)]">
                       {h.fullName}
@@ -322,10 +343,10 @@ export function JuneHoldPanel() {
                   </td>
                 </tr>
               ) : null}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
-      </div>
+      </ErpTableShell>
 
       <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
         <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
@@ -356,7 +377,7 @@ export function JuneHoldPanel() {
                   {s.status === "pending_super_admin" && isSuper ? (
                     <button
                       type="button"
-                      className="rounded-lg bg-[#15803d] px-2.5 py-1 text-[11px] font-semibold text-white"
+                      className="rounded-lg bg-[var(--tone-green-solid)] px-2.5 py-1 text-[11px] font-semibold text-white"
                       onClick={() => {
                         const r = superAdminReleaseHolds({
                           settlementId: s.id,

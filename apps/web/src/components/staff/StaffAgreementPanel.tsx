@@ -1,6 +1,8 @@
 "use client";
 
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { useEffect, useMemo, useState } from "react";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import {
   Download,
   FileText,
@@ -12,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { loadMasters, type MastersState } from "@/lib/masters";
-import { hasPermission } from "@/lib/rbac";
+import { canWriteModuleTab } from "@/lib/rbac";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import {
   agreementStatusLabel,
@@ -48,6 +50,8 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type Mode = "hr" | "self";
 type AiLanguage = "en" | "hi" | "both";
@@ -73,6 +77,8 @@ export function StaffAgreementPanel({
     useState<AgreementTemplateId>("appointment_letter");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftBody, setDraftBody] = useState("");
+  const [draftIsAi, setDraftIsAi] = useState(false);
+  const [draftGenerationId, setDraftGenerationId] = useState("");
 
   const [aiDetails, setAiDetails] = useState("");
   const [aiLanguage, setAiLanguage] = useState<AiLanguage>("both");
@@ -100,10 +106,12 @@ export function StaffAgreementPanel({
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensureStaffAgreementsHydrated } = await import(
-        "@/lib/staffAgreementPersistence"
-      );
-      await ensureStaffAgreementsHydrated();
+      const [{ ensureStaffAgreementsHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/staffAgreementPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await withHydrationSlot(() => ensureStaffAgreementsHydrated());
       setTick((t) => t + 1);
     })();
   }, []);
@@ -115,7 +123,8 @@ export function StaffAgreementPanel({
 
   const canEdit = useMemo(() => {
     if (!masters) return false;
-    return hasPermission(session, masters, "staff", "edit");
+    // Staff edit, or Staff → Employment agreements (director, 6 Oct 2026).
+    return canWriteModuleTab(session, masters, "staff", "agreements");
   }, [masters, session]);
 
   const effectiveMode: Mode =
@@ -139,6 +148,20 @@ export function StaffAgreementPanel({
     }
     return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [agreements, fixedStaffId, effectiveMode, sessionStaff]);
+
+  // Newest agreement first; status groups the unsigned ones together.
+  const agrSort = useTableSort(
+    visible,
+    {
+      agreementNo: (r) => r.agreementNo,
+      staff: (r) => r.staffName,
+      template: (r) => r.title,
+      status: (r) => r.status,
+      created: (r) => r.createdAt,
+    },
+    "created",
+    "desc",
+  );
 
   const editingAgreement = useMemo(() => {
     if (!editingId) return null;
@@ -176,7 +199,7 @@ export function StaffAgreementPanel({
     title?: string;
     body?: string;
     changeRequest?: string;
-  }): Promise<{ title: string; body: string } | null> {
+  }): Promise<{ title: string; body: string; generationId: string } | null> {
     setAiLoading(true);
     setError(null);
     try {
@@ -199,6 +222,7 @@ export function StaffAgreementPanel({
         error?: string;
         title?: string;
         body?: string;
+        generationId?: string;
       };
       if (!res.ok || data.error) {
         flash(data.error || "AI generation failed", true);
@@ -207,6 +231,7 @@ export function StaffAgreementPanel({
       return {
         title: data.title || "Employment Agreement",
         body: data.body || "",
+        generationId: data.generationId || "",
       };
     } catch {
       flash("Network error — try again", true);
@@ -228,6 +253,8 @@ export function StaffAgreementPanel({
     setTemplateId("custom");
     setDraftTitle(result.title);
     setDraftBody(result.body);
+    setDraftIsAi(true);
+    setDraftGenerationId(result.generationId);
     flash("CBSE-style AI draft ready — review, edit, then create draft");
   }
 
@@ -247,15 +274,21 @@ export function StaffAgreementPanel({
       actorStaffId: sessionStaff?.id,
       title: draftTitle || undefined,
       bodyTemplate: draftBody || undefined,
+      aiGenerated: draftIsAi,
     });
     setBusy(false);
     if (!r.ok) {
       flash(r.error, true);
       return;
     }
+    if (draftIsAi && draftGenerationId) {
+      reportAiOutcome({ ids: [draftGenerationId], outcome: "accepted", targetType: "staff_agreement" });
+      setDraftGenerationId("");
+    }
     flash("Agreement created (draft)");
     setDraftTitle("");
     setDraftBody("");
+    setDraftIsAi(false);
     startEdit(r.agreement);
     setTick((t) => t + 1);
   }
@@ -294,7 +327,7 @@ export function StaffAgreementPanel({
       body: editBody,
       changeRequest:
         aiReviseNote.trim() ||
-        "Align with CBSE affiliation norms and standard clauses used by reputed CBSE private schools in India. Expand any thin sections.",
+        "Align with standard clauses used by reputed private schools in India. Expand any thin sections.",
     });
     if (!result) return;
     if (
@@ -431,7 +464,7 @@ export function StaffAgreementPanel({
         <p className="text-sm font-medium text-emerald-700">{notice}</p>
       ) : null}
       {error ? (
-        <p className="text-sm font-medium text-[#b42318]">{error}</p>
+        <p className="text-sm font-medium text-[var(--danger)]">{error}</p>
       ) : null}
 
       {effectiveMode === "self" && pendingSelf ? (
@@ -440,7 +473,7 @@ export function StaffAgreementPanel({
           description="Read the terms, accept consent, and sign below."
         >
           <div className="space-y-4">
-            <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-4">
               <h3 className="text-sm font-bold text-[var(--brand-deep)]">
                 {pendingSelf.title}
               </h3>
@@ -461,11 +494,13 @@ export function StaffAgreementPanel({
 
             <StaffImageField
               label="Your signature"
+              visibility="private"
+              pathPrefix={`staff/${sessionStaff?.id || "unknown"}/signature`}
               value={signatureUrl}
               onChange={setSignatureUrl}
               onError={(m) => flash(m, true)}
               aspect="wide"
-              hint="Draw or upload signature · under 800 KB"
+              hint="Draw on paper and photograph it, or upload"
             />
 
             <button
@@ -587,6 +622,7 @@ export function StaffAgreementPanel({
                     if (id !== "custom") {
                       setDraftTitle("");
                       setDraftBody("");
+                      setDraftIsAi(false);
                     }
                   }}
                 >
@@ -676,22 +712,24 @@ export function StaffAgreementPanel({
         </ErpPanel>
       ) : null}
 
-      <ErpTableShell>
+      <ErpTableShell exportAs="staff_agreements" exportTitle="Staff agreements">
+        <div className="overflow-x-auto">
         <ErpTable>
           <ErpTableHead>
             <tr>
-              <th className="px-4 py-3 font-bold">Agreement No.</th>
-              <th className="px-4 py-3 font-bold">Staff</th>
-              <th className="px-4 py-3 font-bold">Template</th>
-              <th className="px-4 py-3 font-bold">Status</th>
-              <th className="px-4 py-3 font-bold">Created</th>
+              <ErpSortTh sort={agrSort} field="agreementNo" className="px-4 py-3">Agreement No.</ErpSortTh>
+              <ErpSortTh sort={agrSort} field="staff" className="px-4 py-3">Staff</ErpSortTh>
+              <ErpSortTh sort={agrSort} field="template" className="px-4 py-3">Template</ErpSortTh>
+              <ErpSortTh sort={agrSort} field="status" className="px-4 py-3">Status</ErpSortTh>
+              <ErpSortTh sort={agrSort} field="created" className="px-4 py-3">Created</ErpSortTh>
               <th className="px-4 py-3 font-bold">Hash</th>
               <th className="px-4 py-3 font-bold" />
+              <th className="w-10 px-2 py-2" aria-label="Actions" />
             </tr>
           </ErpTableHead>
           <ErpTableBody>
-            {visible.map((row) => (
-              <tr key={row.id} className="hover:bg-[rgba(32,48,80,0.02)]">
+            {agrSort.rows.map((row) => (
+              <tr key={row.id} className="hover:bg-[var(--surface-sunken)]">
                 <td className="px-4 py-3 font-mono text-xs font-semibold text-[var(--brand-deep)]">
                   {row.agreementNo || "—"}
                 </td>
@@ -706,6 +744,14 @@ export function StaffAgreementPanel({
                 </td>
                 <td className="px-4 py-3 text-sm">
                   {templateLabel(row.templateId)}
+                  {row.aiGenerated ? (
+                    <span
+                      className="ml-1.5 rounded-full bg-[rgba(197,160,40,0.15)] px-1.5 py-0.5 text-[9px] font-semibold text-[#8a6400]"
+                      title="Initial draft came from the AI drafting assistant — reviewed and signed by humans before it takes effect"
+                    >
+                      AI-drafted
+                    </span>
+                  ) : null}
                   <br />
                   <span className="text-[10px] text-[var(--muted)]">
                     {row.title}
@@ -821,6 +867,9 @@ export function StaffAgreementPanel({
                     ) : null}
                   </div>
                 </td>
+                <td className="px-2 py-1.5 text-right">
+                  <RowActionMenu row={row} label="Agreement actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
+                </td>
               </tr>
             ))}
             {visible.length === 0 ? (
@@ -835,21 +884,18 @@ export function StaffAgreementPanel({
             ) : null}
           </ErpTableBody>
         </ErpTable>
+        </div>
       </ErpTableShell>
 
       {editingId && editingAgreement?.status === "draft" && canEdit ? (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/45 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="agreement-editor-title"
-          onClick={() => closeEditor()}
-        >
-          <div
-            className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+        // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
+        // had none of them, so Tab left the open editor for the page behind.
+        <Dialog open onOpenChange={(next) => !next && closeEditor()}>
+          <DialogPopup
+            aria-labelledby="agreement-editor-title"
+            className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-[var(--card)] shadow-2xl"
           >
-            <div className="flex items-start justify-between gap-3 border-b border-[rgba(32,48,80,0.1)] px-5 py-4">
+            <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
               <div>
                 <h2
                   id="agreement-editor-title"
@@ -860,10 +906,16 @@ export function StaffAgreementPanel({
                 <p className="mt-1 text-xs text-[var(--muted)]">
                   Save before sending. Use AI below to align with CBSE school employment norms.
                 </p>
+                {editingAgreement.aiGenerated ? (
+                  <p className="mt-1 text-[11px] font-semibold text-[#8a6400]">
+                    This draft started from AI-generated text — review every clause
+                    before sending for signature.
+                  </p>
+                ) : null}
               </div>
               <button
                 type="button"
-                className="rounded-lg p-1 text-[var(--muted)] hover:bg-[rgba(32,48,80,0.06)]"
+                className="rounded-lg p-1 text-[var(--muted)] hover:bg-[var(--surface-sunken)]"
                 aria-label="Close editor"
                 onClick={() => closeEditor()}
               >
@@ -903,12 +955,12 @@ export function StaffAgreementPanel({
                 />
               </label>
 
-              <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
                 <p className="text-xs font-semibold text-[var(--brand-deep)]">
-                  AI assist (CBSE alignment)
+                  AI assist
                 </p>
                 <p className="mt-1 text-[11px] text-[var(--muted)]">
-                  Revises your draft to match clauses used in CBSE-affiliated schools — child
+                  Revises your draft to match clauses used in reputed private schools — child
                   safety, POCSO, conduct, notice period, disciplinary action, etc.
                 </p>
                 <label className="mt-2 block text-[11px] font-semibold text-[var(--muted)]">
@@ -944,7 +996,7 @@ export function StaffAgreementPanel({
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2 border-t border-[rgba(32,48,80,0.1)] px-5 py-4">
+            <div className="flex flex-wrap gap-2 border-t border-[var(--border)] px-5 py-4">
               <button type="button" className={btn} onClick={onSaveDraft}>
                 Save draft
               </button>
@@ -960,8 +1012,8 @@ export function StaffAgreementPanel({
                 Close
               </button>
             </div>
-          </div>
-        </div>
+          </DialogPopup>
+        </Dialog>
       ) : null}
     </div>
   );

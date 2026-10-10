@@ -1,0 +1,954 @@
+import "package:flutter/material.dart";
+
+import "../../core/popups/app_popups.dart";
+import "../../core/ui/running_strip.dart";
+import "../../core/guide/screen_guides.dart";
+import "../../core/api/api_client.dart";
+import "../../core/theme/app_theme.dart";
+import "command_bar.dart";
+import "../modules/homework_screen.dart";
+import "../modules/module_shell.dart";
+import "../modules/notices_screen.dart";
+import "../modules/bus_routes_screen.dart";
+import "transport_requests_screen.dart";
+import "attendance_screen.dart";
+import "broadcast_screen.dart";
+import "admission_leads_screen.dart";
+import "documents_screen.dart";
+import "fee_counter_screen.dart";
+import "fee_defaulters_screen.dart";
+import "my_collections_screen.dart";
+import "survey_screen.dart";
+import "visitor_gate_screen.dart";
+import "leave_approvals_screen.dart";
+import "marks_screen.dart";
+import "staff_complaints_screen.dart";
+import "staff_leave_screen.dart";
+import "staff_roster_screen.dart";
+import "student_leave_queue_screen.dart";
+import "timetable_screen.dart";
+import "waiting_card.dart";
+import "../modules/chat_inbox_screen.dart";
+import "principal_lists.dart";
+import "section_picker.dart";
+import "self_attendance_screen.dart";
+import "students_screen.dart";
+import "../../core/i18n/locale_controller.dart";
+
+String _greeting() {
+  final h = DateTime.now().hour;
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+/// School-wide live snapshot for principal / owner / director roles —
+/// fees, attendance, staff, admissions and alerts from
+/// /api/v1/principal/snapshot (all real aggregates, refreshed on pull).
+class PrincipalHomeScreen extends StatefulWidget {
+  const PrincipalHomeScreen({
+    super.key,
+    required this.api,
+    required this.onLogout,
+    this.openRoute,
+  });
+
+  final ApiClient api;
+  final VoidCallback onLogout;
+
+  /// Deep link from a notification tap, consumed once the snapshot loads.
+  final String? openRoute;
+
+  @override
+  State<PrincipalHomeScreen> createState() => _PrincipalHomeScreenState();
+}
+
+class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
+  PrincipalSnapshot? _snap;
+  StaffSummary? _staff;
+  String? _name;
+  String? _error;
+  int _refresh = 0;
+  bool _deepLinkDone = false;
+  StaffFeatureSet _features = const StaffFeatureSet.empty();
+
+  Future<void> _push(Widget screen) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+    if (mounted) setState(() => _refresh += 1);
+  }
+
+  void _openWaiting(String kind) {
+    switch (kind) {
+      case "staff_leave":
+        _push(LeaveApprovalsScreen(api: widget.api));
+      case "student_leave":
+        _push(StudentLeaveQueueScreen(api: widget.api));
+      case "complaints":
+        _push(StaffComplaintsScreen(api: widget.api));
+      case "documents":
+        _push(DocumentsScreen(api: widget.api));
+    }
+  }
+
+  void _consumeDeepLink() {
+    final raw = widget.openRoute;
+    if (raw == null || _deepLinkDone) return;
+    _deepLinkDone = true;
+    switch (Uri.tryParse(raw)?.path ?? raw) {
+      case "/leave-approvals":
+        _push(LeaveApprovalsScreen(api: widget.api));
+      case "/student-leave":
+        _push(StudentLeaveQueueScreen(api: widget.api));
+      case "/complaints":
+        _push(StaffComplaintsScreen(api: widget.api));
+      case "/documents":
+        _push(DocumentsScreen(api: widget.api));
+      case "/leave":
+        _push(StaffLeaveScreen(api: widget.api));
+      case "/chat":
+        _push(ChatInboxScreen(api: widget.api));
+      case "/notices":
+        _push(NoticesScreen(api: widget.api));
+      case "/attendance":
+        _markAttendance();
+      case "/homework":
+        _postHomework();
+    }
+  }
+
+  /// Class/section picker over the school-wide class list (from
+  /// /api/v1/staff/summary, which lists every active class for any staff).
+  Future<(String, String, String)?> _pickSection() async {
+    var staff = _staff;
+    if (staff == null) {
+      try {
+        staff = await widget.api.fetchStaffSummary();
+        if (mounted) setState(() => _staff = staff);
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(context.l10n.couldNotLoadTheClassList)),
+          );
+        }
+        return null;
+      }
+    }
+    if (!mounted) return null;
+    final classes = staff.classes;
+    return showModalBottomSheet<(String, String, String)>(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => SectionPicker(classes: classes),
+    );
+  }
+
+  Future<void> _markAttendance() async {
+    final target = await _pickSection();
+    if (target == null || !mounted) return;
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => AttendanceScreen(
+          api: widget.api,
+          classId: target.$1,
+          sectionId: target.$2,
+          date: _snap?.attendanceDate.isNotEmpty == true
+              ? _snap!.attendanceDate
+              : DateTime.now().toIso8601String().substring(0, 10),
+          title: target.$3,
+        ),
+      ),
+    );
+    if (changed == true) _load();
+  }
+
+  Future<void> _postHomework() async {
+    final target = await _pickSection();
+    if (target == null || !mounted) return;
+    _push(
+      HomeworkScreen(
+        api: widget.api,
+        subtitle: target.$3,
+        classId: target.$1,
+        sectionId: target.$2,
+        canPost: true,
+      ),
+    );
+  }
+
+  Future<void> _openStudents() async {
+    final target = await _pickSection();
+    if (target == null || !mounted) return;
+    _push(
+      StudentsScreen(
+        api: widget.api,
+        classId: target.$1,
+        sectionId: target.$2,
+        date: _snap?.attendanceDate ?? "",
+        title: target.$3,
+      ),
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // The school's pop-up for staff, if any — once per app open (core/popups).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) AppPopups.maybeShow(context, widget.api);
+    });
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _error = null);
+    try {
+      final name = await widget.api.guardianName();
+      final snap = await widget.api.fetchPrincipalSnapshot();
+      if (!mounted) return;
+      setState(() {
+        _snap = snap;
+        _name = name;
+        _refresh += 1;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _consumeDeepLink();
+      });
+      try {
+        final f = await widget.api.fetchStaffFeatures();
+        if (mounted) setState(() => _features = f);
+      } catch (_) {
+        /* keep whatever we had */
+      }
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = "Could not reach the school server.");
+      }
+    }
+  }
+
+  Future<void> _signOut() async {
+    await widget.api.signOut();
+    if (mounted) widget.onLogout();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final snap = _snap;
+    if (snap == null) {
+      return Scaffold(
+        body: Center(
+          child: _error == null
+              ? const CircularProgressIndicator(color: AppColors.primary)
+              : Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(_error!, textAlign: TextAlign.center),
+                      const SizedBox(height: 12),
+                      FilledButton(
+                        onPressed: _load,
+                        child: Text(context.l10n.retry),
+                      ),
+                      TextButton(
+                        onPressed: _signOut,
+                        child: Text(context.l10n.signOut),
+                      ),
+                    ],
+                  ),
+                ),
+        ),
+      );
+    }
+
+    final attTotal =
+        snap.studentPresent + snap.studentAbsent + snap.studentLeave;
+
+    return Scaffold(
+      body: RefreshIndicator(
+        onRefresh: _load,
+        color: AppColors.primary,
+        child: ListView(
+          padding: EdgeInsets.zero,
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            Container(
+              decoration: const BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.vertical(
+                  bottom: Radius.circular(28),
+                ),
+              ),
+              padding: EdgeInsets.fromLTRB(
+                20,
+                MediaQuery.paddingOf(context).top + 18,
+                12,
+                24,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _greeting(),
+                          style: AppText.bodySmall.copyWith(
+                            color: AppColors.accentSoft,
+                          ),
+                        ),
+                        Text(
+                          _name ?? "Principal",
+                          overflow: TextOverflow.ellipsis,
+                          style: AppText.titleMedium.copyWith(
+                            color: Colors.white,
+                          ),
+                        ),
+                        Text(
+                          "School snapshot · ${snap.academicYearCode}",
+                          style: AppText.bodySmall.copyWith(
+                            color: Color(0xFFB8C0D4),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const ScreenGuideButton(
+                    guideId: "principal-home",
+                    screenLabel: "Home",
+                  ),
+                  IconButton(
+                    tooltip: context.l10n.signOut,
+                    onPressed: _signOut,
+                    icon: const Icon(Icons.logout, color: Colors.white),
+                  ),
+                ],
+              ),
+            ),
+            // Notices and news scrolling across, as on the web ERP.
+            RunningStrip(
+              api: widget.api,
+              onOpen: () => _push(NoticesScreen(api: widget.api)),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  StaffCommandBar(
+                    api: widget.api,
+                    suggestions: const ["COMMANDS"],
+                  ),
+                  WaitingCard(
+                    api: widget.api,
+                    onOpen: _openWaiting,
+                    refreshKey: _refresh,
+                  ),
+                  const SizedBox(height: 8),
+                  const _SectionTitle("Fees"),
+                  Row(
+                    children: [
+                      _Stat(
+                        label: "Collected today",
+                        value: formatInrPaise(snap.todayCollectionPaise),
+                        color: AppColors.success,
+                      ),
+                      const SizedBox(width: 8),
+                      _Stat(
+                        label: "This month",
+                        value: formatInrPaise(snap.mtdCollectionPaise),
+                        color: AppColors.primary,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _Stat(
+                        label: "Open dues",
+                        value: formatInrPaise(snap.openDuesPaise),
+                        color: AppColors.warning,
+                        onTap: () => _push(
+                          FeeDefaultersScreen(
+                            api: widget.api,
+                            canCollect: _features.has("fee_take"),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _Stat(
+                        label: "Students with dues",
+                        value: "${snap.defaulterHouseholds}",
+                        color: AppColors.danger,
+                        onTap: () => _push(
+                          FeeDefaultersScreen(
+                            api: widget.api,
+                            canCollect: _features.has("fee_take"),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (snap.todayByMode.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "Today, by payment mode",
+                              style: AppText.bodySmallMuted,
+                            ),
+                            const SizedBox(height: 6),
+                            for (final m in snap.todayByMode)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 2,
+                                ),
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Expanded(child: Text(m.label)),
+                                    Text(
+                                      formatInrPaise(m.paise),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (snap.storeDuesPaise != null &&
+                      snap.storeDuesPaise! > 0) ...[
+                    const SizedBox(height: 8),
+                    Card(
+                      child: ListTile(
+                        dense: true,
+                        title: Text(
+                          "Books / uniform owed: ${formatInrPaise(snap.storeDuesPaise!)}",
+                        ),
+                        subtitle: Text(
+                          "${snap.storeDueStudents} children · paid at the school counter, not in the fee link",
+                          style: AppText.bodySmallMuted,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 18),
+                  const _SectionTitle("Students"),
+                  Row(
+                    children: [
+                      _Stat(
+                        label: "On roll",
+                        value: "${snap.activeStudents}",
+                        color: AppColors.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      _Stat(
+                        label: "Present today",
+                        value: "${snap.studentPresent}",
+                        color: AppColors.success,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  _SectionTitle(
+                    "Student attendance · ${snap.attendanceDate.isEmpty ? "today" : formatDateLabel(snap.attendanceDate)}",
+                  ),
+                  if (attTotal == 0)
+                    Card(
+                      child: ListTile(
+                        dense: true,
+                        title: Text(
+                          context.l10n.noSectionsMarkedYetToday,
+                          style: AppText.bodySmallMuted,
+                        ),
+                        subtitle: Text(context.l10n.tapToSeeRegistersBySection),
+                        trailing: const Icon(Icons.chevron_right, size: 18),
+                        onTap: () => _push(RegistersScreen(api: widget.api)),
+                      ),
+                    )
+                  else ...[
+                    Row(
+                      children: [
+                        _Stat(
+                          label: "Present",
+                          value: "${snap.studentPresent}",
+                          color: AppColors.success,
+                          onTap: () => _push(RegistersScreen(api: widget.api)),
+                        ),
+                        const SizedBox(width: 8),
+                        _Stat(
+                          label: "Absent",
+                          value: "${snap.studentAbsent}",
+                          color: AppColors.danger,
+                          onTap: () => _push(RegistersScreen(api: widget.api)),
+                        ),
+                        const SizedBox(width: 8),
+                        _Stat(
+                          label: "Marked",
+                          value: "${snap.studentMarkedPct}%",
+                          color: AppColors.primary,
+                          onTap: () => _push(RegistersScreen(api: widget.api)),
+                        ),
+                      ],
+                    ),
+                    if (snap.registersPending > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: _AlertRow(
+                          icon: Icons.pending_actions,
+                          text:
+                              "${snap.registersPending} section registers not marked yet",
+                          onTap: () => _push(RegistersScreen(api: widget.api)),
+                        ),
+                      ),
+                  ],
+                  const SizedBox(height: 18),
+                  const _SectionTitle("Staff"),
+                  Row(
+                    children: [
+                      _Stat(
+                        label: "Active staff",
+                        value: "${snap.staffActive}",
+                        color: AppColors.primary,
+                        onTap: () =>
+                            _push(StaffAttendanceTodayScreen(api: widget.api)),
+                      ),
+                      const SizedBox(width: 8),
+                      _Stat(
+                        label: "Present today",
+                        value: "${snap.staffPresent}",
+                        color: AppColors.success,
+                        onTap: () =>
+                            _push(StaffAttendanceTodayScreen(api: widget.api)),
+                      ),
+                      const SizedBox(width: 8),
+                      _Stat(
+                        label: "Absent",
+                        value: "${snap.staffAbsent}",
+                        color: AppColors.danger,
+                        onTap: () =>
+                            _push(StaffAttendanceTodayScreen(api: widget.api)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  const _SectionTitle("Admissions"),
+                  Row(
+                    children: [
+                      _Stat(
+                        label: "Pipeline leads",
+                        value: "${snap.admissionsPipeline}",
+                        color: AppColors.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      _Stat(
+                        label: "Enrolled",
+                        value: "${snap.admissionsEnrolled}",
+                        color: AppColors.success,
+                      ),
+                      const SizedBox(width: 8),
+                      _Stat(
+                        label: "Follow-ups due",
+                        value: "${snap.followUpsDue}",
+                        color: AppColors.warning,
+                        onTap: () => _push(FollowUpsScreen(api: widget.api)),
+                      ),
+                    ],
+                  ),
+                  if (snap.vaultExpiring30d > 0 || snap.lowStockSkus > 0) ...[
+                    const SizedBox(height: 18),
+                    const _SectionTitle("Alerts"),
+                    if (snap.vaultExpiring30d > 0)
+                      _AlertRow(
+                        icon: Icons.folder_special_outlined,
+                        text:
+                            "${snap.vaultExpiring30d} documents expiring within 30 days",
+                      ),
+                    if (snap.lowStockSkus > 0)
+                      _AlertRow(
+                        icon: Icons.inventory_2_outlined,
+                        text: "${snap.lowStockSkus} store items low on stock",
+                      ),
+                  ],
+                  const SizedBox(height: 18),
+                  const _SectionTitle("Actions"),
+                  const SizedBox(height: 6),
+                  GridView.count(
+                    crossAxisCount: 3,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    childAspectRatio: 1.05,
+                    children: [
+                      _Action(
+                        icon: Icons.directions_bus_outlined,
+                        label: "Transport requests",
+                        tone: ModuleTone.pink,
+                        onTap: () =>
+                            _push(TransportRequestsScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.campaign_outlined,
+                        label: "Broadcast",
+                        tone: ModuleTone.coral,
+                        onTap: () => _push(BroadcastScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.event_busy_outlined,
+                        label: "Staff leave",
+                        tone: ModuleTone.amber,
+                        onTap: () =>
+                            _push(LeaveApprovalsScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.event_outlined,
+                        label: "Leave requests",
+                        tone: ModuleTone.blue,
+                        onTap: () =>
+                            _push(StudentLeaveQueueScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.report_problem_outlined,
+                        label: "Complaints",
+                        tone: ModuleTone.coral,
+                        onTap: () =>
+                            _push(StaffComplaintsScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.folder_open_outlined,
+                        label: "Documents",
+                        tone: ModuleTone.purple,
+                        onTap: () => _push(DocumentsScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.grading_outlined,
+                        label: "Marks",
+                        tone: ModuleTone.amber,
+                        onTap: () async {
+                          var staff = _staff;
+                          staff ??= await widget.api.fetchStaffSummary();
+                          if (!mounted) return;
+                          _push(
+                            MarksScreen(
+                              api: widget.api,
+                              classes: staff.classes,
+                            ),
+                          );
+                        },
+                      ),
+                      _Action(
+                        icon: Icons.calendar_view_week_outlined,
+                        label: "Timetable",
+                        tone: ModuleTone.blue,
+                        onTap: () => _push(TimetableScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.chat_bubble_outline,
+                        label: "Messages",
+                        tone: ModuleTone.teal,
+                        onTap: () => _push(ChatInboxScreen(api: widget.api)),
+                      ),
+                      if (_features.has("fee_take"))
+                        _Action(
+                          icon: Icons.point_of_sale_outlined,
+                          label: "Collect fees",
+                          tone: ModuleTone.green,
+                          onTap: () => _push(FeeCounterScreen(api: widget.api)),
+                        ),
+                      if (_features.has("fee_collections"))
+                        _Action(
+                          icon: Icons.account_balance_wallet_outlined,
+                          label: "My collections",
+                          tone: ModuleTone.teal,
+                          onTap: () =>
+                              _push(MyCollectionsScreen(api: widget.api)),
+                        ),
+                      if (_features.has("admission_leads"))
+                        _Action(
+                          icon: Icons.how_to_reg_outlined,
+                          label: "Admission leads",
+                          tone: ModuleTone.blue,
+                          onTap: () =>
+                              _push(AdmissionLeadsScreen(api: widget.api)),
+                        ),
+                      if (_features.has("field_survey"))
+                        _Action(
+                          icon: Icons.map_outlined,
+                          label: "Field survey",
+                          tone: ModuleTone.amber,
+                          onTap: () => _push(SurveyScreen(api: widget.api)),
+                        ),
+                      if (_features.has("visitor_gate"))
+                        _Action(
+                          icon: Icons.meeting_room_outlined,
+                          label: "Visitor gate",
+                          tone: ModuleTone.purple,
+                          onTap: () =>
+                              _push(VisitorGateScreen(api: widget.api)),
+                        ),
+                      _Action(
+                        icon: Icons.contact_phone_outlined,
+                        label: "Staff contacts",
+                        tone: ModuleTone.green,
+                        onTap: () => _push(StaffRosterScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.beach_access_outlined,
+                        label: "My leave",
+                        tone: ModuleTone.gray,
+                        onTap: () => _push(StaffLeaveScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.fact_check_outlined,
+                        label: "Mark attendance",
+                        tone: ModuleTone.teal,
+                        onTap: _markAttendance,
+                      ),
+                      _Action(
+                        icon: Icons.menu_book_outlined,
+                        label: "Post homework",
+                        tone: ModuleTone.blue,
+                        onTap: _postHomework,
+                      ),
+                      _Action(
+                        icon: Icons.groups_outlined,
+                        label: "Students",
+                        tone: ModuleTone.blue,
+                        onTap: _openStudents,
+                      ),
+                      _Action(
+                        icon: Icons.currency_rupee,
+                        label: "Fee defaulters",
+                        tone: ModuleTone.coral,
+                        onTap: () => _push(
+                          FeeDefaultersScreen(
+                            api: widget.api,
+                            canCollect: _features.has("fee_take"),
+                          ),
+                        ),
+                      ),
+                      _Action(
+                        icon: Icons.badge_outlined,
+                        label: "Staff today",
+                        tone: ModuleTone.teal,
+                        onTap: () =>
+                            _push(StaffAttendanceTodayScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.person_add_alt_outlined,
+                        label: "Admissions",
+                        tone: ModuleTone.blue,
+                        onTap: () => _push(FollowUpsScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.newspaper_outlined,
+                        label: "Notices",
+                        tone: ModuleTone.coral,
+                        onTap: () => _push(NoticesScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.directions_bus_outlined,
+                        label: "Transport",
+                        tone: ModuleTone.blue,
+                        onTap: () => _push(BusRoutesScreen(api: widget.api)),
+                      ),
+                      _Action(
+                        icon: Icons.where_to_vote_outlined,
+                        label: "My GPS punch",
+                        tone: ModuleTone.teal,
+                        onTap: () =>
+                            _push(SelfAttendanceScreen(api: widget.api)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    context.l10n.figuresUpdateLiveFromTheSchool,
+                    style: AppText.labelMediumMuted,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        text,
+        style: AppText.bodyLargeInk.copyWith(fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+}
+
+class _Stat extends StatelessWidget {
+  const _Stat({
+    required this.label,
+    required this.value,
+    required this.color,
+    this.onTap,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    value,
+                    style: AppText.titleLarge.copyWith(color: color),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(label, style: AppText.labelSmallMuted),
+                    ),
+                    if (onTap != null)
+                      const Icon(
+                        Icons.chevron_right,
+                        size: 14,
+                        color: AppColors.muted,
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Action extends StatelessWidget {
+  const _Action({
+    required this.icon,
+    required this.label,
+    required this.tone,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final ModuleTone tone;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: tone.background,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: tone.foreground, size: 22),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                style: AppText.labelMediumInk,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AlertRow extends StatelessWidget {
+  const _AlertRow({required this.icon, required this.text, this.onTap});
+
+  final IconData icon;
+  final String text;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: const Color(0xFFF5EDD4),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: const Color(0xFF854F0B)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  text,
+                  style: AppText.bodySmall.copyWith(color: Color(0xFF854F0B)),
+                ),
+              ),
+              if (onTap != null)
+                const Icon(
+                  Icons.chevron_right,
+                  size: 16,
+                  color: Color(0xFF854F0B),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

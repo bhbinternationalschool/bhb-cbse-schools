@@ -10,6 +10,8 @@ import type {
 } from "@/lib/attendance";
 import { attendanceDualWriteDbEnabled } from "@/lib/attendanceDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
 
 export type AttendanceDeskAncillary = Pick<
   AttendanceState,
@@ -37,23 +39,9 @@ async function ctx() {
   return getServerTenantContext();
 }
 
-async function deleteStale(
-  sb: NonNullable<Awaited<ReturnType<typeof ctx>>>["sb"],
-  tenantId: string,
-  table: string,
-  keepIds: Set<string>,
-) {
-  const { data } = await sb.from(table).select("id").eq("tenant_id", tenantId);
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
-  }
-}
-
 export async function pushAttendanceDeskAncillaryToDb(
   ancillary: AttendanceDeskAncillary,
+  deletes: NamedDeletes = {},
 ): Promise<{ ok: boolean; error?: string }> {
   if (!attendanceDualWriteDbEnabled()) return { ok: true };
   const c = await ctx();
@@ -61,8 +49,26 @@ export async function pushAttendanceDeskAncillaryToDb(
   const { sb, tenantId } = c;
   const now = new Date().toISOString();
 
+  // No stale copy over a newer one (2026-10-10). Every attendance save
+  // rewrote the policy, the nudges and the exceptions from the browser's
+  // copy: a tab holding last week's cut-off put it back the moment anyone
+  // marked a register, and a resolved exception came back open.
+  //  - The policy is written only when it was changed after the stored one
+  //    (its own updatedAt), or when none is stored.
+  //  - Nudges are a log of messages sent: only ever added.
+  //  - A resolved exception stays resolved.
   const policy = ancillary.policy ?? defaultPolicy();
-  const { error: pErr } = await sb.from("attendance_desk_policy").upsert(
+  const { data: storedPolicy, error: spErr } = await sb
+    .from("attendance_desk_policy")
+    .select("updated_at")
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (spErr) return { ok: false, error: `Could not read the stored attendance policy: ${spErr.message}` };
+  const policyAt = Date.parse(policy.updatedAt || "");
+  const writePolicy =
+    !storedPolicy ||
+    (Number.isFinite(policyAt) && policyAt > Date.parse(String((storedPolicy as { updated_at?: string }).updated_at || "")));
+  const { error: pErr } = !writePolicy ? { error: null } : await sb.from("attendance_desk_policy").upsert(
     {
       tenant_id: tenantId,
       teacher_cutoff_time: policy.teacherCutoffTime || "10:30",
@@ -72,19 +78,21 @@ export async function pushAttendanceDeskAncillaryToDb(
         40,
         Math.max(1, Number(policy.absentNudgeMaxOpen) || 12),
       ),
-      updated_at: now,
+      updated_at: policy.updatedAt || now,
     },
     { onConflict: "tenant_id" },
   );
   if (pErr) return { ok: false, error: pErr.message };
 
-  const nudges = (ancillary.absentNudges ?? []).slice(0, 500);
-  await deleteStale(
-    sb,
-    tenantId,
-    "attendance_desk_absent_nudges",
-    new Set(nudges.map((x) => x.id)),
-  );
+  // No prune by absence. The browser keeps 500 nudges and rebuilds open
+  // exceptions under fresh ids; saves used to delete everything else. Now a
+  // nudge goes with the register the user deleted, and an exception the
+  // rebuild superseded (or a duplicate dispute) is named — see attendance.ts.
+  const goneNudges = new Set(deletes["attendance_desk_absent_nudges"] ?? []);
+  const goneExceptions = new Set(deletes["attendance_desk_exceptions"] ?? []);
+  const nudges = (ancillary.absentNudges ?? [])
+    .filter((n) => !goneNudges.has(n.id))
+    .slice(0, 500);
   if (nudges.length) {
     const rows = nudges.map((n: AbsentNudgeLog) => ({
       id: n.id,
@@ -103,19 +111,38 @@ export async function pushAttendanceDeskAncillaryToDb(
     }));
     const { error } = await sb
       .from("attendance_desk_absent_nudges")
-      .upsert(rows, { onConflict: "id" });
+      .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
     if (error) return { ok: false, error: error.message };
   }
 
-  const exceptions = ancillary.exceptions ?? [];
-  await deleteStale(
-    sb,
-    tenantId,
-    "attendance_desk_exceptions",
-    new Set(exceptions.map((x) => x.id)),
-  );
+  // One row per id: the same exception twice in a batch fails the upsert.
+  const exceptions = [
+    ...new Map(
+      (ancillary.exceptions ?? [])
+        .filter((e) => !goneExceptions.has(e.id))
+        .map((e) => [e.id, e] as const),
+    ).values(),
+  ];
+  // A resolved exception stays resolved: a copy holding it open is not written.
+  const resolved = new Set<string>();
   if (exceptions.length) {
-    const rows = exceptions.map((e: AttendanceException) => ({
+    const read = await fetchByIds<{ id: string; status: string }>(
+      exceptions.map((e) => e.id),
+      (chunk, from, to) =>
+        sb
+          .from("attendance_desk_exceptions")
+          .select("id, status")
+          .eq("tenant_id", tenantId)
+          .in("id", chunk)
+          .order("id", { ascending: true })
+          .range(from, to),
+    );
+    if (read.error) return { ok: false, error: `Could not read the stored exceptions: ${read.error}` };
+    for (const r of read.rows) if (r.status === "resolved") resolved.add(String(r.id));
+  }
+  const writeExceptions = exceptions.filter((e) => e.status === "resolved" || !resolved.has(e.id));
+  if (writeExceptions.length) {
+    const rows = writeExceptions.map((e: AttendanceException) => ({
       id: e.id,
       tenant_id: tenantId,
       kind: e.kind,
@@ -140,46 +167,80 @@ export async function pushAttendanceDeskAncillaryToDb(
     if (error) return { ok: false, error: error.message };
   }
 
-  const openCount = exceptions.filter((e) => e.status !== "resolved").length;
-  await sb.from("attendance_desk_sync_meta").upsert(
-    {
-      tenant_id: tenantId,
-      ancillary_updated_at: now,
-      nudge_count: nudges.length,
-      exception_count: exceptions.length,
-      open_exception_count: openCount,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
-  );
+  for (const [table, ids] of [
+    ["attendance_desk_absent_nudges", goneNudges],
+    ["attendance_desk_exceptions", goneExceptions],
+  ] as const) {
+    const del = await deleteNamedIds(sb, tenantId, table, [...ids]);
+    if (!del.ok) return del;
+  }
+
+  // Counts from the tables, not from this copy (it may be partly written).
+  const count = (table: string) =>
+    sb.from(table).select("id", { count: "exact", head: true }).eq("tenant_id", tenantId);
+  const [nc, ec, oc] = await Promise.all([
+    count("attendance_desk_absent_nudges"),
+    count("attendance_desk_exceptions"),
+    count("attendance_desk_exceptions").eq("status", "open"),
+  ]);
+  const meta: Record<string, unknown> = { tenant_id: tenantId, ancillary_updated_at: now, updated_at: now };
+  // A failed count leaves the old figure alone rather than writing a zero.
+  const ok = (r: { error: unknown; count: number | null }) => !r.error && typeof r.count === "number";
+  if (ok(nc)) meta.nudge_count = nc.count;
+  if (ok(ec)) meta.exception_count = ec.count;
+  if (ok(oc)) meta.open_exception_count = oc.count;
+  await sb.from("attendance_desk_sync_meta").upsert(meta, { onConflict: "tenant_id" });
 
   return { ok: true };
 }
 
 export async function fetchAttendanceDeskAncillaryFromDb(): Promise<AttendanceDeskAncillary> {
+  return (await readAttendanceDeskAncillary()).ancillary;
+}
+
+/**
+ * The ancillary as stored, and whether every part of it was read. The
+ * plain fetch above reads a failed table as empty — fine for a screen, not
+ * for a save that merges onto it (a function holder's push to
+ * school-data/attendance-registers), which must write nothing then.
+ */
+export async function readAttendanceDeskAncillary(): Promise<{
+  ok: boolean;
+  ancillary: AttendanceDeskAncillary;
+}> {
   const c = await ctx();
-  if (!c) return emptyAncillary();
+  if (!c) return { ok: false, ancillary: emptyAncillary() };
   const { sb, tenantId } = c;
 
-  const [{ data: policyRow }, { data: nudgeRows }, { data: exceptionRows }] =
-    await Promise.all([
-      sb
-        .from("attendance_desk_policy")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .maybeSingle(),
-      sb
-        .from("attendance_desk_absent_nudges")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .order("sent_at", { ascending: false })
-        .limit(500),
+  const [
+    { data: policyRow, error: policyErr },
+    { data: nudgeRows, error: nudgeErr },
+    { rows: exceptionRows, error: exceptionErr },
+  ] = await Promise.all([
+    sb
+      .from("attendance_desk_policy")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+    sb
+      .from("attendance_desk_absent_nudges")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .order("sent_at", { ascending: false })
+      .limit(500),
+    // Paged: the push prunes exceptions to the ids it is given, and
+    // PostgREST stops at 1,000 rows.
+    fetchAllPages<Record<string, unknown>>((from, to) =>
       sb
         .from("attendance_desk_exceptions")
         .select("*")
         .eq("tenant_id", tenantId)
-        .order("created_at", { ascending: false }),
-    ]);
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+  ]);
+  const ok = !policyErr && !nudgeErr && !exceptionErr;
 
   const policy: AttendancePolicy = policyRow
     ? {
@@ -189,10 +250,11 @@ export async function fetchAttendanceDeskAncillaryFromDb(): Promise<AttendanceDe
         lockTeachersAfterCutoff: !!policyRow.lock_teachers_after_cutoff,
         absentNudgeEnabled: !!policyRow.absent_nudge_enabled,
         absentNudgeMaxOpen: Number(policyRow.absent_nudge_max_open) || 12,
+        updatedAt: String(policyRow.updated_at || ""),
       }
     : defaultPolicy();
 
-  return {
+  const ancillary: AttendanceDeskAncillary = {
     policy,
     absentNudges: (nudgeRows ?? []).map(
       (r): AbsentNudgeLog => ({
@@ -227,6 +289,7 @@ export async function fetchAttendanceDeskAncillaryFromDb(): Promise<AttendanceDe
       }),
     ),
   };
+  return { ok, ancillary };
 }
 
 export async function fetchOpenExceptionCount(): Promise<number> {

@@ -30,6 +30,19 @@ export function mergeDbDeskIntoTimetableState(
       : state.bellTemplate.length
         ? state.bellTemplate
         : bundle.bellTemplate,
+    extraBellTemplates: preferDb
+      ? bundle.extraBellTemplates ?? []
+      : state.extraBellTemplates?.length
+        ? state.extraBellTemplates
+        : bundle.extraBellTemplates ?? [],
+    classTeacherAllClassIds: preferDb
+      ? bundle.classTeacherAllClassIds ?? null
+      : state.classTeacherAllClassIds ?? bundle.classTeacherAllClassIds ?? null,
+    subjectRules: preferDb
+      ? bundle.subjectRules ?? []
+      : state.subjectRules?.length
+        ? state.subjectRules
+        : bundle.subjectRules ?? [],
     grids: preferDb
       ? bundle.grids
       : state.grids.length >= bundle.grids.length
@@ -45,6 +58,10 @@ export function mergeDbDeskIntoTimetableState(
       : state.substitutions.length >= bundle.substitutions.length
         ? state.substitutions
         : bundle.substitutions,
+    // The DB bundle never carries this field (no migration for it — see
+    // TeacherTimeBlock's doc comment in lib/timetable.ts) — always keep
+    // the local value.
+    teacherTimeBlocks: state.teacherTimeBlocks,
     meta: bundle.meta?.status ? bundle.meta : state.meta,
   };
 

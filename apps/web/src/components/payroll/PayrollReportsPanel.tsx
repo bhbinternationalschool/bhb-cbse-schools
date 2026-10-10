@@ -117,7 +117,7 @@ export function PayrollReportsPanel({
           </p>
         ) : null}
         {error ? (
-          <p className="mt-2 text-sm font-medium text-[#b42318]">{error}</p>
+          <p className="mt-2 text-sm font-medium text-[var(--danger)]">{error}</p>
         ) : null}
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

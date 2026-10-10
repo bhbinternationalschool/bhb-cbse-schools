@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — a staff member's own advances, read-only by design
 
 import { useEffect, useMemo, useState } from "react";
 import { loadMasters } from "@/lib/masters";
@@ -22,6 +23,13 @@ import {
   PrintablePayslip,
   printPayslipsBatch,
 } from "@/components/payroll/PrintPayslipsPanel";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 /** Staff-facing payslips: month filter + print. */
 export function StaffMyPayslips({ staffId }: { staffId: string }) {
@@ -44,22 +52,8 @@ export function StaffMyPayslips({ staffId }: { staffId: string }) {
     return slips.filter((s) => s.run.month === month);
   }, [slips, month]);
 
-  const school = useMemo(() => {
-    const m = loadMasters();
-    const name =
-      m.schoolProfile?.displayName ||
-      m.schoolProfile?.legalName ||
-      "BHB International School";
-    const addr = [
-      m.schoolProfile?.address,
-      m.schoolProfile?.city,
-      m.schoolProfile?.state,
-      m.schoolProfile?.pincode,
-    ]
-      .filter(Boolean)
-      .join(", ");
-    return { name, addr };
-  }, [tick]);
+  // Re-read when the slips refresh, so a Masters edit reaches the letterhead.
+  const masters = useMemo(() => loadMasters(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setTick((n) => n + 1);
@@ -131,8 +125,7 @@ export function StaffMyPayslips({ staffId }: { staffId: string }) {
               <StaffPayslipSummary run={run} line={line} />
             </div>
             <PrintablePayslip
-              schoolName={school.name}
-              schoolAddr={school.addr}
+              masters={masters}
               run={run}
               line={line}
             />
@@ -185,6 +178,19 @@ export function StaffMyAdvances({ staffId }: { staffId: string }) {
     return staffId ? advancesForStaff(staffId) : [];
   }, [staffId, tick]);
 
+  // A staff member's own advances, newest first.
+  const myAdvSort = useTableSort(
+    list,
+    {
+      given: (a) => a.givenDate,
+      source: (a) => a.source,
+      amount: (a) => a.amount,
+      recovered: (a) => recoveredTotal(a),
+    },
+    "given",
+    "desc",
+  );
+
   useEffect(() => {
     setTick((n) => n + 1);
   }, []);
@@ -213,26 +219,23 @@ export function StaffMyAdvances({ staffId }: { staffId: string }) {
         </p>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
-        <table className="min-w-full text-left text-xs">
-          <thead>
-            <tr className="border-b border-[rgba(32,48,80,0.1)] text-[var(--muted)]">
-              <th className="px-3 py-2 font-semibold">Given</th>
-              <th className="px-3 py-2 font-semibold">Source</th>
-              <th className="px-3 py-2 font-semibold">Amount</th>
-              <th className="px-3 py-2 font-semibold">Recovered</th>
+      <ErpTableShell className="overflow-x-auto" exportAs="my_advances" exportTitle="My advances">
+        <ErpTable className="text-xs">
+          <ErpTableHead>
+            <tr>
+              <ErpSortTh sort={myAdvSort} field="given" className="px-3 py-2 font-semibold">Given</ErpSortTh>
+              <ErpSortTh sort={myAdvSort} field="source" className="px-3 py-2 font-semibold">Source</ErpSortTh>
+              <ErpSortTh sort={myAdvSort} field="amount" align="right" className="px-3 py-2 font-semibold">Amount</ErpSortTh>
+              <ErpSortTh sort={myAdvSort} field="recovered" align="right" className="px-3 py-2 font-semibold">Recovered</ErpSortTh>
               <th className="px-3 py-2 font-semibold">Balance</th>
               <th className="px-3 py-2 font-semibold">How recovered</th>
             </tr>
-          </thead>
-          <tbody>
-            {list.map((a) => {
+          </ErpTableHead>
+          <ErpTableBody>
+            {myAdvSort.rows.map((a) => {
               const bal = outstandingOf(a);
               return (
-                <tr
-                  key={a.id}
-                  className="border-b border-[rgba(32,48,80,0.06)] align-top"
-                >
+                <tr key={a.id} className="align-top">
                   <td className="px-3 py-2">
                     {a.givenDate}
                     {a.note ? (
@@ -287,9 +290,9 @@ export function StaffMyAdvances({ staffId }: { staffId: string }) {
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
-      </div>
+          </ErpTableBody>
+        </ErpTable>
+      </ErpTableShell>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import {
   type PtmState,
 } from "@/lib/ptm";
 import {
+  capturePtmStamps,
   hydratePtmDeskFromDb,
   schedulePtmDeskSync,
 } from "@/lib/ptmNormalizedClient";
@@ -21,6 +22,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "ptm";
 
@@ -41,7 +43,7 @@ export function resetPtmPersistenceCache() {
 
 export function schedulePtmSync(state: PtmState) {
   if (typeof window === "undefined") {
-    void pushPtmRemoteServer(state);
+    void trackServerWork(pushPtmRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("ptm")) {
@@ -52,9 +54,18 @@ export function schedulePtmSync(state: PtmState) {
 
 export async function pushPtmRemoteServer(
   state: PtmState,
+  /** The rows this writer changed (only those are written) and any it deleted. */
+  change?: {
+    only: Partial<Record<"events" | "slots" | "bookings" | "feedback", string[]>>;
+    deletes?: Record<string, string[]>;
+  },
 ): Promise<{ ok: boolean; error?: string }> {
   const { pushPtmDeskToDb } = await import("@/lib/ptmNormalized.server");
-  const desk = await pushPtmDeskToDb(state);
+  const desk = await pushPtmDeskToDb(
+    state,
+    change?.deletes ?? {},
+    change ? { only: change.only } : {},
+  );
   if (!desk.ok) return { ok: false, error: desk.error };
 
   const { deskSkipBlobPush } = await import("@/lib/deskCutover");
@@ -77,7 +88,6 @@ export async function pushPtmRemoteServer(
  */
 export async function ensurePtmHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = ptmReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("ptm")
@@ -85,7 +95,12 @@ export async function ensurePtmHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydratePtmDeskFromDb(readFromDb);
+  const { bundle, changed, ok, stamps } = await hydratePtmDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   const hasDesk =
     bundle.events.length > 0 ||
     bundle.slots.length > 0 ||
@@ -97,8 +112,13 @@ export async function ensurePtmHydrated(): Promise<boolean> {
     writePtmLocalRaw(merged);
     normChanged = true;
   }
+  // Which version of each row this browser now holds: its saves send only
+  // rows changed since, stamped, so they can't overwrite newer ones.
+  capturePtmStamps(stamps, loadPtm());
 
-  if (normChanged) {
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+
+  if (normChanged && !readFromDb) {
     schedulePtmSync(loadPtm());
   }
 

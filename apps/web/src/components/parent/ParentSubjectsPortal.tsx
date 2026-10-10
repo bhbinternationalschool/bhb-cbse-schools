@@ -13,6 +13,7 @@ import {
   type CurriculumRequest,
   type Household,
   type SisStudent,
+  childrenOfHousehold,
 } from "@/lib/sis";
 import {
   curriculumChoiceMode,
@@ -58,9 +59,10 @@ export function ParentSubjectsPortal({
       setActiveId(null);
       return;
     }
-    const kids = sis.students.filter(
-      (s) => s.householdId === hh.id && s.status === "active",
-    );
+    // One row per child, this session. SIS keeps a row per child per year and
+    // leaves them all active, so the unscoped filter showed a family their own
+    // child once for every year they had been enrolled.
+    const kids = childrenOfHousehold(sis, hh.id, DEFAULT_AY);
     setChildren(kids);
     const aid = activeId && kids.some((k) => k.id === activeId)
       ? activeId
@@ -87,8 +89,11 @@ export function ParentSubjectsPortal({
 
   useEffect(() => {
     void (async () => {
-      const { ensureSisHydrated } = await import("@/lib/sisPersistence");
-      await ensureSisHydrated();
+      const [{ ensureSisHydrated }, { withHydrationSlot }] = await Promise.all([
+        import("@/lib/sisPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      await withHydrationSlot(() => ensureSisHydrated());
       reload();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

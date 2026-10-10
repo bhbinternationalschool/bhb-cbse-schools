@@ -7,19 +7,34 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   normalizeHousehold,
   normalizeStudent,
+  normalizeStudentDocs,
   emptyStudentDocs,
   type Household,
   type SisState,
   type SisStudent,
   type StudentDocs,
   type StudentDocKey,
+  studentProfileExtras,
+  studentProfileFromRow,
+  normalizeStudentTag,
+  normalizeClassUpgrade,
+  type StudentTag,
+  type ClassUpgradeRecord,
+  studentsInSession,
 } from "@/lib/sis";
+import { currentAcademicYearCode } from "@/lib/masters";
 import { sisDualWriteDbEnabled } from "@/lib/sisDbConfig";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
+import { normalizePhotoConsent } from "@/lib/photoConsent";
 
 export type SisRemoteBundle = {
   households: Household[];
   students: SisStudent[];
+  /** Tag definitions and the post-admission move history — their own tables
+   *  since 2026-09-12; before that they lived in one browser. */
+  tags: StudentTag[];
+  classUpgrades: ClassUpgradeRecord[];
   householdUpdatedAt: Record<string, string>;
   studentUpdatedAt: Record<string, string>;
 };
@@ -31,7 +46,7 @@ export type SisSyncMeta = {
   updatedAt: string;
 };
 
-type HouseholdRow = {
+export type HouseholdRow = {
   id: string;
   code: string | null;
   guardian_name: string | null;
@@ -45,10 +60,24 @@ type HouseholdRow = {
   state: string | null;
   pincode: string | null;
   alt_mobile: string | null;
+  preferred_language?: string | null;
+  channel_preference?: string | null;
+  quiet_hours_start?: string | null;
+  quiet_hours_end?: string | null;
+  geo_lat?: number | null;
+  geo_lng?: number | null;
+  geo_place_id?: string | null;
+  geo_formatted_address?: string | null;
+  geo_geocoded_at?: string | null;
+  geo_source?: string | null;
+  geo_confidence?: string | null;
+  geo_address_key?: string | null;
+  photo_consent?: string | null;
+  guardian_photo_url?: string | null;
   updated_at: string;
 };
 
-type StudentRow = {
+export type StudentRow = {
   id: string;
   admission_no: string | null;
   full_name: string | null;
@@ -92,8 +121,113 @@ type StudentRow = {
   docs: unknown;
   notes: string | null;
   photo_url: string | null;
+  /** Non-column fields — see STUDENT_PROFILE_KEYS. */
+  profile?: unknown;
   updated_at: string;
 };
+
+export type StudentTagRow = {
+  id: string;
+  code: string | null;
+  name: string | null;
+  color: string | null;
+  is_active: boolean | null;
+  created_at: string | null;
+  updated_at: string;
+};
+
+export type ClassUpgradeRow = {
+  id: string;
+  student_id: string | null;
+  student_name: string | null;
+  admission_no: string | null;
+  from_class_id: string | null;
+  from_section_id: string | null;
+  to_class_id: string | null;
+  to_section_id: string | null;
+  from_fee_group_id: string | null;
+  to_fee_group_id: string | null;
+  from_student_type: string | null;
+  to_student_type: string | null;
+  reason: string | null;
+  effective_on: string | null;
+  created_at: string | null;
+  created_by: string | null;
+  updated_at: string;
+};
+
+export function rowToStudentTag(row: StudentTagRow): StudentTag {
+  return normalizeStudentTag({
+    id: row.id,
+    code: row.code ?? "",
+    name: row.name ?? "",
+    color: row.color ?? "",
+    // A retired tag must come back retired: `?? true` would revive it.
+    isActive: row.is_active !== false,
+    createdAt: row.created_at ?? "",
+  });
+}
+
+export function studentTagToRow(t: StudentTag, tenantId: string, now: string) {
+  return {
+    id: t.id,
+    tenant_id: tenantId,
+    code: t.code,
+    name: t.name,
+    color: t.color,
+    is_active: t.isActive,
+    created_at: t.createdAt,
+    updated_at: now,
+  };
+}
+
+export function rowToClassUpgrade(row: ClassUpgradeRow): ClassUpgradeRecord {
+  return normalizeClassUpgrade({
+    id: row.id,
+    studentId: row.student_id ?? "",
+    studentName: row.student_name ?? "",
+    admissionNo: row.admission_no ?? "",
+    fromClassId: row.from_class_id ?? "",
+    fromSectionId: row.from_section_id ?? "",
+    toClassId: row.to_class_id ?? "",
+    toSectionId: row.to_section_id ?? "",
+    fromFeeGroupId: row.from_fee_group_id,
+    toFeeGroupId: row.to_fee_group_id,
+    fromStudentType: row.from_student_type ?? "",
+    toStudentType: row.to_student_type ?? "",
+    reason: row.reason ?? "",
+    effectiveOn: row.effective_on ?? "",
+    createdAt: row.created_at ?? "",
+    createdBy: row.created_by ?? "",
+  });
+}
+
+export function classUpgradeToRow(
+  u: ClassUpgradeRecord,
+  tenantId: string,
+  now: string,
+) {
+  return {
+    id: u.id,
+    tenant_id: tenantId,
+    student_id: u.studentId,
+    student_name: u.studentName,
+    admission_no: u.admissionNo,
+    from_class_id: u.fromClassId,
+    from_section_id: u.fromSectionId,
+    to_class_id: u.toClassId,
+    to_section_id: u.toSectionId,
+    from_fee_group_id: u.fromFeeGroupId,
+    to_fee_group_id: u.toFeeGroupId,
+    from_student_type: u.fromStudentType,
+    to_student_type: u.toStudentType,
+    reason: u.reason,
+    effective_on: u.effectiveOn,
+    created_at: u.createdAt,
+    created_by: u.createdBy,
+    updated_at: now,
+  };
+}
 
 const DATA_URL_MAX = 8_000;
 
@@ -122,8 +256,20 @@ function photoForRemote(photoUrl: string): string {
   return photoUrl;
 }
 
-function rowToHousehold(row: HouseholdRow): Household {
+/** The profile bag with oversized inline images left out. */
+function profileForRemote(bag: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...bag };
+  for (const key of ["fatherPhotoUrl", "motherPhotoUrl"] as const) {
+    const v = out[key];
+    if (typeof v === "string" && !photoForRemote(v)) delete out[key];
+  }
+  return out;
+}
+
+export function rowToHousehold(row: HouseholdRow): Household {
   return normalizeHousehold({
+    // Optimistic-locking token: the version this record was read at.
+    revisionAt: row.updated_at,
     id: row.id,
     code: row.code ?? "",
     guardianName: row.guardian_name ?? "",
@@ -137,11 +283,36 @@ function rowToHousehold(row: HouseholdRow): Household {
     state: row.state ?? "",
     pincode: row.pincode ?? "",
     altMobile: row.alt_mobile ?? "",
+    preferredLanguage: row.preferred_language ?? "",
+    channelPreference: row.channel_preference ?? "",
+    quietHoursStart: row.quiet_hours_start ?? "",
+    quietHoursEnd: row.quiet_hours_end ?? "",
+    photoConsent: normalizePhotoConsent(row.photo_consent),
+    guardianPhotoUrl: row.guardian_photo_url ?? "",
+    // Geo is optional throughout: a household with no pin must come back with
+    // geoLat undefined, not 0, or every un-geocoded family lands off the
+    // coast of Africa and the nearest-stop maths quietly answers for them.
+    ...(typeof row.geo_lat === "number" && typeof row.geo_lng === "number"
+      ? {
+          geoLat: row.geo_lat,
+          geoLng: row.geo_lng,
+          geoPlaceId: row.geo_place_id ?? undefined,
+          geoFormattedAddress: row.geo_formatted_address ?? undefined,
+          geoGeocodedAt: row.geo_geocoded_at ?? undefined,
+          geoSource: (row.geo_source as Household["geoSource"]) ?? undefined,
+          geoConfidence: (row.geo_confidence as Household["geoConfidence"]) ?? undefined,
+          geoAddressKey: row.geo_address_key ?? undefined,
+        }
+      : {}),
   });
 }
 
-function rowToStudent(row: StudentRow): SisStudent {
+export function rowToStudent(row: StudentRow): SisStudent {
   return normalizeStudent({
+    // Non-column fields first; the columns below win where both exist.
+    ...studentProfileFromRow(row.profile),
+    // Optimistic-locking token: the version this record was read at.
+    revisionAt: row.updated_at,
     id: row.id,
     admissionNo: row.admission_no ?? "",
     fullName: row.full_name ?? "",
@@ -189,7 +360,8 @@ function rowToStudent(row: StudentRow): SisStudent {
   });
 }
 
-function householdToRow(h: Household, tenantId: string, now: string) {
+/** One household as a sis_households row. Exported for the same round-trip test. */
+export function householdToRow(h: Household, tenantId: string, now: string) {
   return {
     id: h.id,
     tenant_id: tenantId,
@@ -205,11 +377,37 @@ function householdToRow(h: Household, tenantId: string, now: string) {
     state: h.state,
     pincode: h.pincode,
     alt_mobile: h.altMobile,
+    preferred_language: h.preferredLanguage,
+    channel_preference: h.channelPreference,
+    quiet_hours_start: h.quietHoursStart,
+    quiet_hours_end: h.quietHoursEnd,
+    // normalizeHousehold has already dropped a pin whose address fingerprint
+    // no longer matches, so whatever survives to here is a pin that still
+    // describes where the family lives. Nulls when there is none — never 0,
+    // which is a real place in the Gulf of Guinea.
+    geo_lat: typeof h.geoLat === "number" ? h.geoLat : null,
+    geo_lng: typeof h.geoLng === "number" ? h.geoLng : null,
+    geo_place_id: h.geoPlaceId ?? null,
+    geo_formatted_address: h.geoFormattedAddress ?? null,
+    geo_geocoded_at: h.geoGeocodedAt ?? null,
+    geo_source: h.geoSource ?? null,
+    geo_confidence: h.geoConfidence ?? null,
+    geo_address_key: h.geoAddressKey ?? null,
+    // "" is the family's real answer (never asked) and must be stored as such,
+    // not left null-and-ambiguous.
+    photo_consent: h.photoConsent ?? "",
+    guardian_photo_url: photoForRemote(h.guardianPhotoUrl ?? ""),
     updated_at: now,
   };
 }
 
-function studentToRow(s: SisStudent, tenantId: string, now: string) {
+/**
+ * One student as a sis_students row. Exported for `sisRoundTrip.selftest`,
+ * which fills every SisStudent field and asserts rowToStudent gives it back —
+ * the check that would have caught the 52 fields this function silently
+ * dropped before 2026-09-06.
+ */
+export function studentToRow(s: SisStudent, tenantId: string, now: string) {
   const joined =
     s.joinedOn && /^\d{4}-\d{2}-\d{2}/.test(s.joinedOn) ? s.joinedOn : null;
   const dob = s.dob && /^\d{4}-\d{2}-\d{2}/.test(s.dob) ? s.dob : null;
@@ -258,28 +456,172 @@ function studentToRow(s: SisStudent, tenantId: string, now: string) {
     docs: stripHeavyUrls(s.docs),
     notes: s.notes,
     photo_url: photoForRemote(s.photoUrl),
+    // Everything SisStudent carries that has no column of its own — full
+    // Aadhaar numbers, verification, UDISE+ flags, address, bank, health.
+    // Dropped silently before 2026-09-06 (see the migration of that date).
+    // The two parent photographs can arrive as data URLs from the bulk photo
+    // import, so they get the same size rule as photo_url: a big one is left
+    // out of the row rather than pushed into jsonb, where 700 of them would
+    // make the roster payload unmanageable.
+    profile: profileForRemote(studentProfileExtras(s)),
     updated_at: now,
   };
 }
 
+/**
+ * Fraction of a table this is allowed to delete in one push before it
+ * refuses. A genuine bulk removal above this threshold should be done
+ * deliberately, not as a side effect of a sync.
+ */
+const MAX_PRUNE_FRACTION = 0.2;
+
+/**
+ * Delete rows absent from the pushed snapshot.
+ *
+ * DANGEROUS BY NATURE: it deletes on the basis of "not in this payload",
+ * so a caller that sends a partial roster deletes everything else. That
+ * has already cost this project real data — a 3-record test payload
+ * removed 708 students and 190 households from production. It is now
+ * opt-in (`pruneMissing`) and additionally refuses any prune that would
+ * remove more than MAX_PRUNE_FRACTION of the table, which is the shape
+ * every accidental wipe takes.
+ */
 async function deleteStale(
   sb: SupabaseClient,
   tenantId: string,
   table: "sis_households" | "sis_students",
   keepIds: Set<string>,
-) {
-  const { data } = await sb.from(table).select("id").eq("tenant_id", tenantId);
-  const stale = (data ?? [])
-    .map((r) => String((r as { id: string }).id))
-    .filter((id) => !keepIds.has(id));
-  if (stale.length > 0) {
-    await sb.from(table).delete().in("id", stale);
+): Promise<{ deleted: number; refused?: string }> {
+  const { data, error } = await sb
+    .from(table)
+    .select("id")
+    .eq("tenant_id", tenantId);
+  if (error) {
+    console.warn(`[sis-db] prune skipped for ${table}:`, error.message);
+    return { deleted: 0, refused: error.message };
   }
+
+  const existing = (data ?? []).map((r) => String((r as { id: string }).id));
+  const stale = existing.filter((id) => !keepIds.has(id));
+  if (stale.length === 0) return { deleted: 0 };
+
+  // An empty or tiny payload against a populated table is never a real
+  // "the user deleted these" — it is a partial/failed sync. Refuse it.
+  if (keepIds.size === 0 && existing.length > 0) {
+    const refused = `refused to prune all ${existing.length} row(s) from ${table} for an empty payload`;
+    console.error(`[sis-db] ${refused}`);
+    return { deleted: 0, refused };
+  }
+  const fraction = stale.length / Math.max(existing.length, 1);
+  if (fraction > MAX_PRUNE_FRACTION) {
+    const refused =
+      `refused to prune ${stale.length} of ${existing.length} row(s) from ${table} ` +
+      `(${Math.round(fraction * 100)}% > ${MAX_PRUNE_FRACTION * 100}% cap) — ` +
+      `likely a partial sync, not a deletion`;
+    console.error(`[sis-db] ${refused}`);
+    return { deleted: 0, refused };
+  }
+
+  const { error: delErr } = await sb.from(table).delete().in("id", stale);
+  if (delErr) {
+    console.warn(`[sis-db] prune failed for ${table}:`, delErr.message);
+    return { deleted: 0, refused: delErr.message };
+  }
+  return { deleted: stale.length };
+}
+
+/**
+ * The one household a mobile number belongs to, read straight from the
+ * desk tables — plus that household's students.
+ *
+ * For callers that must not mistake "my cached copy doesn't have it" for
+ * "this number is not a parent" (the WhatsApp bot). Matches the same
+ * fields findHouseholdByWaMobile checks against the mirror: the
+ * household's own three numbers, then either parent's number on a
+ * student row. Returns null only when the roster genuinely has no match;
+ * a failed read returns null too but logs, so the caller can stay silent
+ * rather than assert.
+ */
+export async function fetchSisHouseholdByMobileFromDb(
+  mobile10: string,
+): Promise<{ household: Household; students: SisStudent[] } | null> {
+  const ctx = await resolveCtx();
+  if (!ctx) {
+    console.warn("[sis-db] no tenant context — cannot verify household");
+    return null;
+  }
+  const { sb, tenantId } = ctx;
+  // Numbers are stored bare-10 today, but a stray country code should not
+  // decide whether a parent is recognised.
+  const variants = [mobile10, `91${mobile10}`, `0${mobile10}`];
+  const orFilter = (fields: string[]) =>
+    fields.flatMap((f) => variants.map((v) => `${f}.eq.${v}`)).join(",");
+
+  const hhRes = await sb
+    .from("sis_households")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .or(orFilter(["mobile", "whatsapp_mobile", "alt_mobile"]))
+    .limit(1);
+  if (hhRes.error) {
+    console.warn("[sis-db] household lookup failed", hhRes.error.message);
+    return null;
+  }
+
+  let householdRow = (hhRes.data ?? [])[0] as HouseholdRow | undefined;
+
+  if (!householdRow) {
+    const stuRes = await sb
+      .from("sis_students")
+      .select("household_id")
+      .eq("tenant_id", tenantId)
+      .eq("status", "active")
+      .or(orFilter(["father_mobile", "mother_mobile"]))
+      .limit(1);
+    if (stuRes.error) {
+      console.warn("[sis-db] student lookup failed", stuRes.error.message);
+      return null;
+    }
+    const householdId = (stuRes.data ?? [])[0]?.household_id as
+      | string
+      | undefined;
+    if (!householdId) return null;
+
+    const byIdRes = await sb
+      .from("sis_households")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("id", householdId)
+      .limit(1);
+    if (byIdRes.error) {
+      console.warn("[sis-db] household by id failed", byIdRes.error.message);
+      return null;
+    }
+    householdRow = (byIdRes.data ?? [])[0] as HouseholdRow | undefined;
+    if (!householdRow) return null;
+  }
+
+  const kidsRes = await sb
+    .from("sis_students")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("household_id", householdRow.id);
+  if (kidsRes.error) {
+    console.warn("[sis-db] household students failed", kidsRes.error.message);
+    return null;
+  }
+
+  return {
+    household: rowToHousehold(householdRow),
+    students: ((kidsRes.data ?? []) as StudentRow[]).map(rowToStudent),
+  };
 }
 
 export async function fetchSisFromDb(): Promise<{
   bundle: SisRemoteBundle;
   meta: SisSyncMeta | null;
+  /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   const ctx = await resolveCtx();
   if (!ctx) {
@@ -287,46 +629,115 @@ export async function fetchSisFromDb(): Promise<{
       bundle: {
         households: [],
         students: [],
+        tags: [],
+        classUpgrades: [],
         householdUpdatedAt: {},
         studentUpdatedAt: {},
       },
       meta: null,
+      ok: false,
     };
   }
   const { sb, tenantId } = ctx;
 
-  const [hhRes, stuRes, metaRes] = await Promise.all([
-    sb.from("sis_households").select("*").eq("tenant_id", tenantId),
-    sb.from("sis_students").select("*").eq("tenant_id", tenantId),
+  // Paged: PostgREST caps a request at 1,000 rows and calls the cut a success.
+  // 717 student rows today (one per enrolled year, not per child), so the
+  // roster — the register, the fee counter's search, every desk that reads a
+  // child's details — is one intake away from silently loading a prefix of
+  // itself. See lib/supabase/pageAll.ts.
+  const [hhRes, stuRes, metaRes, tagRes, upgRes] = await Promise.all([
+    fetchAllPages<HouseholdRow>((from, to) =>
+      sb
+        .from("sis_households")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllPages<StudentRow>((from, to) =>
+      sb
+        .from("sis_students")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
     sb.from("sis_sync_meta").select("*").eq("tenant_id", tenantId).maybeSingle(),
+    // Tag definitions and the move history. Small tables, paged anyway: the
+    // 1,000-row cap applies to every reader, and history only grows.
+    fetchAllPages<StudentTagRow>((from, to) =>
+      sb
+        .from("sis_student_tags")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllPages<ClassUpgradeRow>((from, to) =>
+      sb
+        .from("sis_class_upgrades")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
   ]);
 
   if (hhRes.error || stuRes.error) {
+    console.warn(
+      "[sis-db] fetch failed",
+      hhRes.error ?? undefined,
+      stuRes.error ?? undefined,
+    );
     return {
       bundle: {
         households: [],
         students: [],
+        tags: [],
+        classUpgrades: [],
         householdUpdatedAt: {},
         studentUpdatedAt: {},
       },
       meta: null,
+      ok: false,
     };
   }
 
   const householdUpdatedAt: Record<string, string> = {};
   const studentUpdatedAt: Record<string, string> = {};
-  const households = ((hhRes.data ?? []) as HouseholdRow[]).map((row) => {
+  const households = hhRes.rows.map((row) => {
     householdUpdatedAt[row.id] = row.updated_at;
     return rowToHousehold(row);
   });
-  const students = ((stuRes.data ?? []) as StudentRow[]).map((row) => {
+  const students = stuRes.rows.map((row) => {
     studentUpdatedAt[row.id] = row.updated_at;
     return rowToStudent(row);
   });
 
+  // A read failure on either of these must not be dressed up as "the school
+  // has no tags": an empty list is what the merge treats as "nothing remote,
+  // keep what the browser holds", and that is the right answer for a failed
+  // read too — but it is worth saying out loud in the log.
+  if (tagRes.error || upgRes.error) {
+    console.warn(
+      "[sis-db] tags / class-upgrade history read failed",
+      tagRes.error ?? undefined,
+      upgRes.error ?? undefined,
+    );
+  }
+  const tags = tagRes.rows.map(rowToStudentTag);
+  const classUpgrades = upgRes.rows.map(rowToClassUpgrade);
+
   const metaRow = metaRes.data;
   return {
-    bundle: { households, students, householdUpdatedAt, studentUpdatedAt },
+    bundle: {
+      households,
+      students,
+      tags,
+      classUpgrades,
+      householdUpdatedAt,
+      studentUpdatedAt,
+    },
     meta: metaRow
       ? {
           householdCount: metaRow.household_count as number,
@@ -335,12 +746,527 @@ export async function fetchSisFromDb(): Promise<{
           updatedAt: String(metaRow.updated_at),
         }
       : null,
+    ok: true,
+  };
+}
+
+export type StudentDocsLookup = { docs: StudentDocs; householdId: string };
+
+/**
+ * Single-student docs lookup — for the Drive document serve/upload routes
+ * (docs/GOOGLE_DRIVE_DOCUMENTS_PLAN.md §Phase 3/4), which need one record's
+ * docs (and householdId, for parent-ownership checks), not the whole
+ * roster fetchSisFromDb pulls. Respects the same identity-split gate as
+ * the bulk fetchers: in split mode `studentId` is an enrollment id, and
+ * docs/household_id live on the joined identity row.
+ */
+export async function fetchSisStudentDocsById(
+  studentId: string,
+): Promise<StudentDocsLookup | null> {
+  const ctx = await resolveCtx();
+  if (!ctx) return null;
+  const { sb, tenantId } = ctx;
+
+  if (sisIdentitySplitEnabled()) {
+    const { data, error } = await sb
+      .from("sis_enrollments")
+      .select("sis_student_identities!inner(docs,household_id)")
+      .eq("tenant_id", tenantId)
+      .eq("id", studentId)
+      .maybeSingle();
+    if (error || !data) return null;
+    const identity = (
+      data as unknown as {
+        sis_student_identities: { docs: unknown; household_id: string | null };
+      }
+    ).sis_student_identities;
+    return {
+      docs: normalizeStudentDocs(
+        identity?.docs as Partial<Record<StudentDocKey, unknown>> | undefined,
+      ),
+      householdId: identity?.household_id ?? "",
+    };
+  }
+
+  const { data, error } = await sb
+    .from("sis_students")
+    .select("docs,household_id")
+    .eq("tenant_id", tenantId)
+    .eq("id", studentId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return {
+    docs: normalizeStudentDocs(
+      data.docs as Partial<Record<StudentDocKey, unknown>> | undefined,
+    ),
+    householdId: data.household_id ?? "",
+  };
+}
+
+/**
+ * OPT-IN via SIS_IDENTITY_SPLIT, off by default. See
+ * docs/SIS_IDENTITY_ENROLLMENT_SPLIT_PLAN.md — Phase 3.
+ *
+ * Rollback is removing the variable. Phases 0-2 (snapshot, new tables,
+ * verified backfill) already ran; this only decides which table the GET
+ * route reads FROM. sis_students is untouched either way, and nothing
+ * writes to sis_student_identities / sis_enrollments outside the Phase 2
+ * migration yet — that's Phase 4.
+ */
+export function sisIdentitySplitEnabled(): boolean {
+  const flag = process.env.SIS_IDENTITY_SPLIT?.trim().toLowerCase();
+  return flag === "true" || flag === "1";
+}
+
+type IdentityRow = {
+  id: string;
+  admission_no: string | null;
+  full_name: string | null;
+  gender: string | null;
+  dob: string | null;
+  father_name: string | null;
+  mother_name: string | null;
+  father_mobile: string | null;
+  mother_mobile: string | null;
+  father_aadhaar_last4: string | null;
+  mother_aadhaar_last4: string | null;
+  father_pan: string | null;
+  mother_pan: string | null;
+  guardian_relation: string | null;
+  emergency_name: string | null;
+  emergency_mobile: string | null;
+  household_id: string | null;
+  blood_group: string | null;
+  religion: string | null;
+  category: string | null;
+  nationality: string | null;
+  mother_tongue: string | null;
+  place_of_birth: string | null;
+  aadhaar_last4: string | null;
+  pen: string | null;
+  pen_status: string | null;
+  apaar_id: string | null;
+  srn: string | null;
+  previous_school: string | null;
+  previous_tc_no: string | null;
+  previous_udise: string | null;
+  docs: unknown;
+  notes: string | null;
+  photo_url: string | null;
+  /** Non-column fields — see STUDENT_PROFILE_KEYS (migration 20260912110000). */
+  profile?: unknown;
+};
+
+type EnrollmentRow = {
+  id: string;
+  academic_year_code: string | null;
+  class_id: string | null;
+  section_id: string | null;
+  campus_id: string | null;
+  roll_no: string | null;
+  fee_group_id: string | null;
+  student_type: string | null;
+  status: string | null;
+  joined_on: string | null;
+  updated_at: string;
+  sis_student_identities: IdentityRow;
+};
+
+/**
+ * Compose the same SisStudent shape rowToStudent produces, from an
+ * enrollment joined to its identity. One row per enrollment — same
+ * multi-year-rows-per-student shape the app already relies on (the client
+ * filters by academicYearCode itself; this does not change that). Field
+ * mapping matches rowToStudent exactly, verified against it with a
+ * field-by-field SQL diff across all 719 live rows before this was written
+ * (see the plan doc, Phase 3 results) — 0 unexpected mismatches.
+ *
+ * id is the enrollment's own id, not the original sis_students.id it was
+ * backfilled from — deliberately: what a student "id" should mean once
+ * other tables (fees, attendance, exams) start keying off identity vs
+ * enrollment is a Phase 4 decision, not this one. This function only
+ * proves the join reconstructs the data correctly.
+ */
+function identityEnrollmentToStudent(row: EnrollmentRow): SisStudent {
+  const i = row.sis_student_identities;
+  return normalizeStudent({
+    // Non-column fields first; the columns below win where both exist —
+    // the same order as rowToStudent. Without this the split read blanks
+    // every profile field (full Aadhaar numbers, occupation, UDISE+ flags …)
+    // the moment SIS_IDENTITY_SPLIT is switched on.
+    ...studentProfileFromRow(i.profile),
+    revisionAt: row.updated_at,
+    id: row.id,
+    admissionNo: i.admission_no ?? "",
+    fullName: i.full_name ?? "",
+    gender: (i.gender as SisStudent["gender"]) ?? "",
+    dob: i.dob ?? "",
+    // Inverted from rowToStudent's rule deliberately: sis_students.status
+    // is only ever "active"/"inactive", so defaulting to "active" is safe
+    // there. sis_enrollments.status also holds "promoted" (Phase 4, once
+    // a child's been moved to a later year's enrollment) — an unrecognized
+    // value must read as not-current, not as active by default.
+    status: row.status === "active" ? "active" : "inactive",
+    campusId: row.campus_id ?? "",
+    classId: row.class_id ?? "",
+    sectionId: row.section_id ?? "",
+    rollNo: row.roll_no ?? "",
+    academicYearCode: row.academic_year_code ?? "",
+    studentType: (row.student_type as SisStudent["studentType"]) ?? "NEW",
+    feeGroupId: row.fee_group_id,
+    joinedOn: row.joined_on ?? "",
+    fatherName: i.father_name ?? "",
+    motherName: i.mother_name ?? "",
+    fatherMobile: i.father_mobile ?? "",
+    motherMobile: i.mother_mobile ?? "",
+    fatherAadhaarLast4: i.father_aadhaar_last4 ?? "",
+    motherAadhaarLast4: i.mother_aadhaar_last4 ?? "",
+    fatherPan: i.father_pan ?? "",
+    motherPan: i.mother_pan ?? "",
+    guardianRelation: i.guardian_relation ?? "",
+    emergencyName: i.emergency_name ?? "",
+    emergencyMobile: i.emergency_mobile ?? "",
+    householdId: i.household_id ?? "",
+    bloodGroup: i.blood_group ?? "",
+    religion: i.religion ?? "",
+    category: (i.category as SisStudent["category"]) ?? "",
+    nationality: i.nationality ?? "Indian",
+    motherTongue: i.mother_tongue ?? "",
+    placeOfBirth: i.place_of_birth ?? "",
+    aadhaarLast4: i.aadhaar_last4 ?? "",
+    pen: i.pen ?? "",
+    penStatus: (i.pen_status as SisStudent["penStatus"]) ?? "",
+    apaarId: i.apaar_id ?? "",
+    srn: i.srn ?? "",
+    previousSchool: i.previous_school ?? "",
+    previousTcNo: i.previous_tc_no ?? "",
+    previousUdise: i.previous_udise ?? "",
+    docs: (i.docs as SisStudent["docs"]) ?? undefined,
+    notes: i.notes ?? "",
+    photoUrl: i.photo_url ?? "",
+    curriculum: null,
+  });
+}
+
+/**
+ * Same shape as fetchSisFromDb, sourced from sis_student_identities +
+ * sis_enrollments instead of sis_students. Phase 3 of the identity split —
+ * see docs/SIS_IDENTITY_ENROLLMENT_SPLIT_PLAN.md. Gated by
+ * sisIdentitySplitEnabled(); the caller decides whether to use this or the
+ * classic path.
+ */
+export async function fetchSisFromDbViaIdentitySplit(): Promise<{
+  bundle: SisRemoteBundle;
+  meta: SisSyncMeta | null;
+  ok: boolean;
+}> {
+  const ctx = await resolveCtx();
+  if (!ctx) {
+    return {
+      bundle: {
+        households: [],
+        students: [],
+        tags: [],
+        classUpgrades: [],
+        householdUpdatedAt: {},
+        studentUpdatedAt: {},
+      },
+      meta: null,
+      ok: false,
+    };
+  }
+  const { sb, tenantId } = ctx;
+
+  // Paged for the same reason as fetchSisFromDb above.
+  const [hhRes, enrRes, metaRes, tagRes, upgRes] = await Promise.all([
+    fetchAllPages<HouseholdRow>((from, to) =>
+      sb
+        .from("sis_households")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllPages<EnrollmentRow>((from, to) =>
+      sb
+        .from("sis_enrollments")
+        .select("*, sis_student_identities!inner(*)")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    sb.from("sis_sync_meta").select("*").eq("tenant_id", tenantId).maybeSingle(),
+    // Tags and the move history are not part of the identity/enrollment split:
+    // they hang off the student id either way, so the same two tables serve
+    // both read paths. Omitting them here is how a flag flip loses data
+    // (sis_student_identities.profile, migration 20260912110000).
+    fetchAllPages<StudentTagRow>((from, to) =>
+      sb
+        .from("sis_student_tags")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllPages<ClassUpgradeRow>((from, to) =>
+      sb
+        .from("sis_class_upgrades")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+  ]);
+
+  if (hhRes.error || enrRes.error) {
+    console.warn(
+      "[sis-db] identity-split fetch failed",
+      hhRes.error ?? undefined,
+      enrRes.error ?? undefined,
+    );
+    return {
+      bundle: {
+        households: [],
+        students: [],
+        tags: [],
+        classUpgrades: [],
+        householdUpdatedAt: {},
+        studentUpdatedAt: {},
+      },
+      meta: null,
+      ok: false,
+    };
+  }
+
+  const householdUpdatedAt: Record<string, string> = {};
+  const studentUpdatedAt: Record<string, string> = {};
+  const households = hhRes.rows.map((row) => {
+    householdUpdatedAt[row.id] = row.updated_at;
+    return rowToHousehold(row);
+  });
+  const students = enrRes.rows.map((row) => {
+    studentUpdatedAt[row.id] = row.updated_at;
+    return identityEnrollmentToStudent(row);
+  });
+
+  const metaRow = metaRes.data;
+  return {
+    bundle: {
+      households,
+      students,
+      tags: tagRes.rows.map(rowToStudentTag),
+      classUpgrades: upgRes.rows.map(rowToClassUpgrade),
+      householdUpdatedAt,
+      studentUpdatedAt,
+    },
+    meta: metaRow
+      ? {
+          householdCount: metaRow.household_count as number,
+          studentCount: metaRow.student_count as number,
+          activeStudentCount: metaRow.active_student_count as number,
+          updatedAt: String(metaRow.updated_at),
+        }
+      : null,
+    ok: true,
+  };
+}
+
+export type SisPushConflict = {
+  table: string;
+  id: string;
+  stored: string;
+};
+
+export type SisPushResult = {
+  ok: boolean;
+  error?: string;
+  householdCount: number;
+  studentCount: number;
+  /**
+   * Records another user saved after this client last read them. They were
+   * NOT written — the newer server copy is kept and the caller should tell
+   * the user to reload rather than silently losing the other person's work.
+   */
+  conflicts?: SisPushConflict[];
+  /** True when the atomic, conflict-guarded path was used. */
+  guarded?: boolean;
+  /**
+   * Authoritative `updated_at` per record id after the push. The client
+   * must re-stamp its local copies with these, otherwise the next push of
+   * a record it just changed carries the pre-write version and conflicts
+   * with itself.
+   */
+  studentVersions?: Record<string, string>;
+  householdVersions?: Record<string, string>;
+};
+
+/**
+ * Postgres/PostgREST codes meaning "this function is not there yet".
+ *
+ * These, and only these, justify the legacy fallback: the migration has not
+ * reached this database, so the guarded path cannot run and the pre-guard
+ * behaviour is the honest best available.
+ */
+const RPC_ABSENT_CODES = new Set([
+  "PGRST202", // not found in PostgREST's schema cache
+  "PGRST203", // ambiguous overload — signature drift
+  "42883", // undefined_function
+]);
+
+/**
+ * Atomic + conflict-guarded push via the `sis_push_guarded` RPC.
+ *
+ * Returns null ONLY when the function is absent (see RPC_ABSENT_CODES), so a
+ * deploy that lands the code before the migration still works. Every other
+ * error returns a FAILED result, because falling back means silently
+ * reverting to last-write-wins.
+ *
+ * It previously returned null on any error at all, and that is exactly what
+ * went wrong: the `authenticator` role sets statement_timeout=8s, this
+ * function takes ~17s at 904 records, so every push in production timed out,
+ * fell through to the legacy upsert, and rewrote all 904 rows. updated_at
+ * churned on the whole roster, every other device's revision tokens were
+ * invalidated, and the next push reported 903 conflicts on a roster nobody
+ * had touched. Optimistic locking was off for the entire SIS module and
+ * nothing said so — the fallback logged console.warn and returned success.
+ *
+ * "Never worse than the old behaviour" was the wrong frame. The old
+ * behaviour was last-write-wins, and quietly resuming it while the UI
+ * reports a clean save is worse than refusing: the director cannot see it,
+ * and two staff editing at once lose each other's work with no trace.
+ *
+ * So: absent → fall back. Present but failing → say so and write nothing.
+ */
+/**
+ * Upsert the tag definitions. Chunked like the roster: PostgREST is asked for
+ * one request per 200 rows rather than one per school.
+ */
+async function pushSisTags(
+  sb: SupabaseClient,
+  tenantId: string,
+  tags: StudentTag[],
+  now: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (tags.length === 0) return { ok: true };
+  const rows = tags.map((tag) => studentTagToRow(tag, tenantId, now));
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await sb
+      .from("sis_student_tags")
+      .upsert(rows.slice(i, i + 200), { onConflict: "id" });
+    if (error) {
+      console.error("[sis-db] student tags push failed", error.message);
+      return { ok: false, error: error.message };
+    }
+  }
+  return { ok: true };
+}
+
+/** Upsert the post-admission move history. Append-only; never pruned. */
+async function pushSisClassUpgrades(
+  sb: SupabaseClient,
+  tenantId: string,
+  upgrades: ClassUpgradeRecord[],
+  now: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (upgrades.length === 0) return { ok: true };
+  const rows = upgrades.map((u) => classUpgradeToRow(u, tenantId, now));
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await sb
+      .from("sis_class_upgrades")
+      .upsert(rows.slice(i, i + 200), { onConflict: "id" });
+    if (error) {
+      console.error("[sis-db] class upgrade history push failed", error.message);
+      return { ok: false, error: error.message };
+    }
+  }
+  return { ok: true };
+}
+
+async function pushSisGuarded(
+  sb: SupabaseClient,
+  tenantId: string,
+  households: Household[],
+  students: SisStudent[],
+  now: string,
+): Promise<SisPushResult | null> {
+  const { data, error } = await sb.rpc("sis_push_guarded", {
+    p_tenant_id: tenantId,
+    p_households: households.map((h) => ({
+      row: householdToRow(h, tenantId, now),
+      base: h.revisionAt || null,
+    })),
+    p_students: students.map((s) => ({
+      row: studentToRow(s, tenantId, now),
+      base: s.revisionAt || null,
+    })),
+  });
+
+  if (error) {
+    const code = (error as { code?: string }).code ?? "";
+    if (RPC_ABSENT_CODES.has(code)) {
+      console.warn(
+        `[sis-db] sis_push_guarded not present (${code}) — using the legacy ` +
+          "upsert. This is last-write-wins: concurrent edits overwrite each " +
+          "other. Apply the migration.",
+        error.message,
+      );
+      return null;
+    }
+
+    // Present but failing. Refuse rather than silently dropping the guard.
+    const timedOut = code === "57014";
+    console.error(
+      "[sis-db] sis_push_guarded failed — push REFUSED, nothing written:",
+      { code, message: error.message, students: students.length },
+    );
+    return {
+      ok: false,
+      error: timedOut
+        ? `The roster is too large to save safely in one request (${students.length} students timed out). ` +
+          "Nothing was saved. Please report this — saving cannot proceed until it is fixed."
+        : `Save refused: ${error.message}. Nothing was written.`,
+      householdCount: 0,
+      studentCount: 0,
+    };
+  }
+
+  const result = (data ?? {}) as {
+    applied_households?: number;
+    applied_students?: number;
+    unchanged?: number;
+    unversioned?: number;
+    conflicts?: SisPushConflict[];
+    student_versions?: Record<string, string>;
+    household_versions?: Record<string, string>;
+  };
+  const conflicts = Array.isArray(result.conflicts) ? result.conflicts : [];
+  if (conflicts.length > 0) {
+    console.warn(
+      `[sis-db] ${conflicts.length} record(s) skipped — changed by another user since this client last read them`,
+    );
+  }
+  return {
+    ok: true,
+    householdCount: result.applied_households ?? 0,
+    studentCount: result.applied_students ?? 0,
+    conflicts,
+    guarded: true,
+    studentVersions: result.student_versions ?? {},
+    householdVersions: result.household_versions ?? {},
   };
 }
 
 export async function pushSisToDb(
-  state: Pick<SisState, "households" | "students">,
-): Promise<{ ok: boolean; error?: string; householdCount: number; studentCount: number }> {
+  state: Pick<SisState, "households" | "students"> &
+    Partial<Pick<SisState, "tags" | "classUpgrades">>,
+  /**
+   * `pruneMissing` deletes stored records absent from this payload. Only
+   * pass it when `state` is genuinely the complete roster — a partial
+   * payload with this set will delete everything else (subject to the
+   * safety cap in deleteStale). Routine syncs must leave it off.
+   */
+  opts?: { pruneMissing?: boolean },
+): Promise<SisPushResult> {
   if (!sisDualWriteDbEnabled()) {
     return { ok: true, householdCount: 0, studentCount: 0 };
   }
@@ -359,6 +1285,40 @@ export async function pushSisToDb(
   const households = state.households ?? [];
   const students = state.students ?? [];
 
+  // Tags and the move history first, and outside the guarded RPC: they are
+  // upsert-only (the app retires a tag with isActive rather than deleting it,
+  // and history is append-only), so there is nothing here for a version guard
+  // to protect and nothing that can be pruned by absence. Doing them first
+  // means a student's tagIds can never reach the database before the tag that
+  // names them.
+  const tagResult = await pushSisTags(sb, tenantId, state.tags ?? [], now);
+  if (!tagResult.ok) {
+    return {
+      ok: false,
+      error: tagResult.error,
+      householdCount: 0,
+      studentCount: 0,
+    };
+  }
+  const upgradeResult = await pushSisClassUpgrades(
+    sb,
+    tenantId,
+    state.classUpgrades ?? [],
+    now,
+  );
+  if (!upgradeResult.ok) {
+    return {
+      ok: false,
+      error: upgradeResult.error,
+      householdCount: 0,
+      studentCount: 0,
+    };
+  }
+
+  const guarded = await pushSisGuarded(sb, tenantId, households, students, now);
+  if (guarded) return guarded;
+
+  // ── Legacy fallback: non-atomic, last-write-wins ──────────────────
   const householdRows = households.map((h) => householdToRow(h, tenantId, now));
   if (householdRows.length > 0) {
     const { error } = await sb
@@ -391,7 +1351,30 @@ export async function pushSisToDb(
     }
   }
 
-  const activeCount = students.filter((s) => s.status === "active").length;
+  // Off unless the caller explicitly declares this payload is a complete
+  // roster snapshot. A sync must never delete records just because they
+  // are absent from whatever the client happened to send.
+  if (opts?.pruneMissing) {
+    await deleteStale(
+      sb,
+      tenantId,
+      "sis_students",
+      new Set(students.map((s) => s.id)),
+    );
+    await deleteStale(
+      sb,
+      tenantId,
+      "sis_households",
+      new Set(households.map((h) => h.id)),
+    );
+  }
+
+  // The number an operator reads to confirm a sync looks right, so it must be
+  // a headcount and not a row count: SIS keeps one row per child per session.
+  const activeCount = studentsInSession(
+    { students } as SisState,
+    currentAcademicYearCode(),
+  ).length;
   await sb.from("sis_sync_meta").upsert(
     {
       tenant_id: tenantId,
@@ -408,6 +1391,121 @@ export async function pushSisToDb(
     householdCount: households.length,
     studentCount: students.length,
   };
+}
+
+/**
+ * Delete specific students/households by id.
+ *
+ * Until now a removal never reached the database at all: `removeStudent`
+ * filtered the roster locally and the push only ever upserted, so the row
+ * survived and the "deleted" student reappeared on the next hydrate.
+ *
+ * This is deliberately id-scoped rather than the `pruneMissing` path in
+ * `pushSisToDb`. Prune infers deletions from whatever the client happened
+ * to send, so a truncated or partially-hydrated payload silently erases the
+ * difference — the failure `test:sis-prune` exists to prevent. An explicit
+ * id list cannot do that: it deletes exactly what the user removed.
+ */
+export async function deleteSisRecordsInDb(input: {
+  studentIds?: string[];
+  householdIds?: string[];
+}): Promise<{
+  ok: boolean;
+  error?: string;
+  deletedStudents: number;
+  deletedHouseholds: number;
+}> {
+  const studentIds = (input.studentIds ?? []).filter(Boolean);
+  const householdIds = (input.householdIds ?? []).filter(Boolean);
+  if (studentIds.length === 0 && householdIds.length === 0) {
+    return { ok: true, deletedStudents: 0, deletedHouseholds: 0 };
+  }
+
+  const ctx = await resolveCtx();
+  if (!ctx) {
+    return {
+      ok: false,
+      error: "Supabase tenant not configured",
+      deletedStudents: 0,
+      deletedHouseholds: 0,
+    };
+  }
+  const { sb, tenantId } = ctx;
+
+  let deletedStudents = 0;
+  if (studentIds.length > 0) {
+    const { data, error } = await sb
+      .from("sis_students")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .in("id", studentIds)
+      .select("id");
+    if (error) {
+      return {
+        ok: false,
+        error: error.message,
+        deletedStudents: 0,
+        deletedHouseholds: 0,
+      };
+    }
+    deletedStudents = data?.length ?? 0;
+  }
+
+  // Households only after their students are gone, so a failure mid-way
+  // leaves an empty household rather than orphaned students.
+  let deletedHouseholds = 0;
+  if (householdIds.length > 0) {
+    const { data, error } = await sb
+      .from("sis_households")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .in("id", householdIds)
+      .select("id");
+    if (error) {
+      return {
+        ok: false,
+        error: error.message,
+        deletedStudents,
+        deletedHouseholds: 0,
+      };
+    }
+    deletedHouseholds = data?.length ?? 0;
+  }
+
+  return { ok: true, deletedStudents, deletedHouseholds };
+}
+
+/**
+ * Fold duplicate student rows into one kept row, moving every linked record
+ * with them, in one server-side transaction (sis_merge_students, migration
+ * 20260818070000). Each instruction is applied independently; the first
+ * failure stops the batch and is reported so the client keeps retrying it.
+ */
+export async function mergeSisStudentsInDb(
+  merges: { keepId: string; dropIds: string[] }[],
+): Promise<{ ok: boolean; error?: string; applied: number; summaries: unknown[] }> {
+  const list = (merges ?? []).filter(
+    (m) => m && m.keepId && Array.isArray(m.dropIds) && m.dropIds.length > 0,
+  );
+  if (list.length === 0) return { ok: true, applied: 0, summaries: [] };
+  const ctx = await resolveCtx();
+  if (!ctx) {
+    return { ok: false, error: "Supabase tenant not configured", applied: 0, summaries: [] };
+  }
+  const summaries: unknown[] = [];
+  for (const m of list) {
+    const { data, error } = await ctx.sb.rpc("sis_merge_students", {
+      p_tenant_id: ctx.tenantId,
+      p_keep_id: m.keepId,
+      p_drop_ids: m.dropIds.filter((id) => id && id !== m.keepId),
+    });
+    if (error) {
+      console.warn("[sis-db] merge failed", m.keepId, error.message);
+      return { ok: false, error: error.message, applied: summaries.length, summaries };
+    }
+    summaries.push(data);
+  }
+  return { ok: true, applied: summaries.length, summaries };
 }
 
 export async function wipeSisRosterInDb(): Promise<{ ok: boolean; error?: string }> {

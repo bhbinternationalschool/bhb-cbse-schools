@@ -11,16 +11,23 @@ import {
 import {
   DOC_ACCEPT,
   DOC_LABELS,
-  DOC_MAX_BYTES,
   docHasFile,
   docStatusLabel,
-  emptyDocFile,
   loadSis,
   type Household,
   type SisStudent,
   type StudentDocFile,
   type StudentDocKey,
+  childrenOfHousehold,
 } from "@/lib/sis";
+import { DEFAULT_AY } from "@/lib/masters";
+import { useDocLocalPreview } from "@/lib/useDocLocalPreview";
+import {
+  getExistingPushSubscription,
+  pushSupported,
+  subscribeToPush,
+  unsubscribeFromPush,
+} from "@/lib/pushSubscribe";
 
 function statusTone(status: StudentDocFile["status"]) {
   if (status === "verified") return "text-emerald-700";
@@ -41,6 +48,9 @@ export function ParentProfileDocsPortal({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pushState, setPushState] = useState<
+    "unknown" | "unsupported" | "off" | "on" | "busy"
+  >("unknown");
   const [hhDraft, setHhDraft] = useState({
     guardianName: "",
     altMobile: "",
@@ -86,9 +96,10 @@ export function ParentProfileDocsPortal({
       state: hh.state,
       pincode: hh.pincode,
     });
-    const kids = sis.students.filter(
-      (s) => s.householdId === hh.id && s.status === "active",
-    );
+    // One row per child, this session. SIS keeps a row per child per year and
+    // leaves them all active, so the unscoped filter showed a family their own
+    // child once for every year they had been enrolled.
+    const kids = childrenOfHousehold(sis, hh.id, DEFAULT_AY);
     setChildren(kids);
     const aid =
       activeId && kids.some((k) => k.id === activeId)
@@ -101,6 +112,34 @@ export function ParentProfileDocsPortal({
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guardianDisplayName, householdId]);
+
+  useEffect(() => {
+    if (!pushSupported()) {
+      setPushState("unsupported");
+      return;
+    }
+    getExistingPushSubscription().then((sub) => {
+      setPushState(sub ? "on" : "off");
+    });
+  }, []);
+
+  async function togglePush() {
+    setPushState("busy");
+    if (pushState === "on") {
+      await unsubscribeFromPush();
+      setPushState("off");
+      flash("Notifications turned off on this device");
+      return;
+    }
+    const r = await subscribeToPush();
+    if (!r.ok) {
+      setError(r.error || "Could not enable notifications");
+      setPushState("off");
+      return;
+    }
+    setPushState("on");
+    flash("Notifications enabled on this device");
+  }
 
   const child = useMemo(
     () => children.find((c) => c.id === activeId) ?? null,
@@ -121,49 +160,21 @@ export function ParentProfileDocsPortal({
     reload();
   }
 
-  async function onPickDoc(key: StudentDocKey, file: File | null) {
-    if (!household || !child || !file) return;
-    const okType =
-      file.type === "application/pdf" || file.type.startsWith("image/");
-    if (!okType) {
-      setError("Use PDF or image (JPG/PNG/WebP)");
+  function onDocUploaded(key: StudentDocKey, next: StudentDocFile) {
+    if (!household || !child) return;
+    const r = submitStudentDocForVerification({
+      householdId: household.id,
+      studentId: child.id,
+      docKey: key,
+      file: next,
+      submittedBy: guardianDisplayName || household.guardianName,
+    });
+    if (!r.ok) {
+      setError(r.error);
       return;
     }
-    if (key === "photo" && !file.type.startsWith("image/")) {
-      setError("Passport photo must be an image");
-      return;
-    }
-    if (file.size > DOC_MAX_BYTES) {
-      setError(`File must be under ${Math.round(DOC_MAX_BYTES / 1000)} KB`);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result !== "string") return;
-      const next: StudentDocFile = {
-        ...emptyDocFile("pending"),
-        fileName: file.name,
-        mimeType: file.type || "application/octet-stream",
-        size: file.size,
-        fileUrl: reader.result,
-        uploadedAt: new Date().toISOString(),
-      };
-      const r = submitStudentDocForVerification({
-        householdId: household.id,
-        studentId: child.id,
-        docKey: key,
-        file: next,
-        submittedBy: guardianDisplayName || household.guardianName,
-      });
-      if (!r.ok) {
-        setError(r.error);
-        return;
-      }
-      flash(`${DOC_LABELS.find((d) => d.key === key)?.label} sent for verification`);
-      reload();
-    };
-    reader.onerror = () => setError("Could not read file");
-    reader.readAsDataURL(file);
+    flash(`${DOC_LABELS.find((d) => d.key === key)?.label} sent for verification`);
+    reload();
   }
 
   if (!household) {
@@ -185,6 +196,29 @@ export function ParentProfileDocsPortal({
         <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800">
           {error}
         </p>
+      ) : null}
+
+      {pushState !== "unsupported" ? (
+        <section className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3">
+          <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
+            Notifications
+          </h2>
+          <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+            Get a device notification for fee receipts, in addition to WhatsApp.
+          </p>
+          <button
+            type="button"
+            className={`${pushState === "on" ? btnOutline : btn} mt-3`}
+            disabled={pushState === "busy" || pushState === "unknown"}
+            onClick={() => void togglePush()}
+          >
+            {pushState === "on"
+              ? "Notifications on — turn off"
+              : pushState === "busy"
+                ? "Working…"
+                : "Enable notifications"}
+          </button>
+        </section>
       ) : null}
 
       <section className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3">
@@ -261,8 +295,10 @@ export function ParentProfileDocsPortal({
                 key={key}
                 label={label}
                 docKey={key}
+                studentId={child.id}
                 value={child.docs[key]}
-                onPick={(f) => void onPickDoc(key, f)}
+                onUploaded={(next) => onDocUploaded(key, next)}
+                onError={setError}
               />
             ))}
           </div>
@@ -277,19 +313,82 @@ export function ParentProfileDocsPortal({
 function DocRow({
   label,
   docKey,
+  studentId,
   value,
-  onPick,
+  onUploaded,
+  onError,
 }: {
   label: string;
   docKey: StudentDocKey;
+  studentId: string;
   value: StudentDocFile;
-  onPick: (file: File | null) => void;
+  onUploaded: (next: StudentDocFile) => void;
+  onError: (message: string) => void;
 }) {
   const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
   const has = docHasFile(value);
   const isImage =
     value.mimeType.startsWith("image/") ||
     value.fileUrl.startsWith("data:image/");
+  const preview = useDocLocalPreview(value.fileUrl, value.uploadedAt);
+
+  async function acceptFile(file: File | null) {
+    if (!file) return;
+    const okType =
+      file.type === "application/pdf" || file.type.startsWith("image/");
+    if (!okType) {
+      onError("Use PDF or image (JPG/PNG/WebP)");
+      return;
+    }
+    if (docKey === "photo" && !file.type.startsWith("image/")) {
+      onError("Passport photo must be an image");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const formData = new FormData();
+      formData.append("subject", "student");
+      formData.append("subjectId", studentId);
+      formData.append("docKey", docKey);
+      formData.append("file", file);
+      const res = await fetch("/api/documents/upload", {
+        method: "POST",
+        credentials: "same-origin",
+        body: formData,
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        fileUrl?: string;
+        fileName?: string;
+        mimeType?: string;
+        size?: number;
+        driveFileId?: string;
+        uploadedAt?: string;
+      };
+      if (!res.ok || !body.ok || !body.fileUrl) {
+        onError(body.error || "Upload failed");
+        return;
+      }
+      const uploadedAt = body.uploadedAt || new Date().toISOString();
+      preview.setFromFile(file, `${body.fileUrl}|${uploadedAt}`);
+      onUploaded({
+        status: "pending",
+        fileName: body.fileName || file.name,
+        mimeType: body.mimeType || file.type || "application/octet-stream",
+        size: body.size ?? file.size,
+        fileUrl: body.fileUrl,
+        driveFileId: body.driveFileId || "",
+        uploadedAt,
+      });
+    } catch {
+      onError("Upload failed — check your connection and try again");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-2.5">
@@ -307,10 +406,11 @@ function DocRow({
         </div>
         <button
           type="button"
-          className="shrink-0 rounded-lg border border-[rgba(32,48,80,0.15)] px-2 py-1 text-[11px] font-semibold"
+          className="shrink-0 rounded-lg border border-[rgba(32,48,80,0.15)] px-2 py-1 text-[11px] font-semibold disabled:opacity-50"
+          disabled={busy}
           onClick={() => ref.current?.click()}
         >
-          {has ? "Replace & submit" : "Upload & submit"}
+          {busy ? "Uploading…" : has ? "Replace & submit" : "Upload & submit"}
         </button>
         <input
           ref={ref}
@@ -318,7 +418,7 @@ function DocRow({
           accept={docKey === "photo" ? "image/*" : DOC_ACCEPT}
           className="hidden"
           onChange={(e) => {
-            onPick(e.target.files?.[0] ?? null);
+            void acceptFile(e.target.files?.[0] ?? null);
             e.target.value = "";
           }}
         />
@@ -326,13 +426,13 @@ function DocRow({
       {has && isImage ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={value.fileUrl}
+          src={preview.viewUrl}
           alt=""
           className="mt-2 h-16 w-16 rounded-md object-cover"
         />
       ) : has ? (
         <a
-          href={value.fileUrl}
+          href={preview.viewUrl}
           target="_blank"
           rel="noreferrer"
           className="mt-1 inline-block text-[11px] font-semibold text-[var(--brand-deep)] underline"

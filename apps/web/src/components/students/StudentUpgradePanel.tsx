@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — an append-only change log; entries are never edited
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -9,18 +10,22 @@ import {
   resolveFeeGroupId,
   type FeeStudentType,
   type MastersState,
+  currentAcademicYearCode,
 } from "@/lib/masters";
 import {
   loadSis,
   studentTypeShort,
   type SisState,
   type SisStudent,
+  studentsInSession,
 } from "@/lib/sis";
 import {
   listClassUpgrades,
   upgradeStudentClass,
 } from "@/lib/classUpgrade";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type UpgradeMode = "section" | "class" | "type";
 
@@ -83,7 +88,9 @@ export function StudentUpgradePanel({
   const hits = useMemo(() => {
     if (!sis || !masters) return [] as SisStudent[];
     const q = query.trim().toLowerCase();
-    let rows = sis.students.filter((s) => s.status === "active");
+    // One row per child, this session — SIS keeps a row per child per year
+    // and marks them all active.
+    let rows = studentsInSession(sis, currentAcademicYearCode(masters));
     if (q) {
       rows = rows.filter(
         (s) =>
@@ -146,6 +153,18 @@ export function StudentUpgradePanel({
   const history = useMemo(
     () => (sis ? listClassUpgrades(sis).slice(0, 40) : []),
     [sis],
+  );
+
+  // Upgrade history, newest first; the change columns show a from → to pair, so they sort on where the child came FROM.
+  const upgSort = useTableSort(
+    history,
+    {
+      when: (u) => u.effectiveOn,
+      student: (u) => u.studentName,
+      reason: (u) => u.reason,
+    },
+    "when",
+    "desc",
   );
 
   function flash(msg: string) {
@@ -392,7 +411,7 @@ export function StudentUpgradePanel({
                       ? "bg-[#0284c7] text-white shadow-[0_3px_12px_rgba(2,132,199,0.35)]"
                       : tone === "amber"
                         ? "bg-[#b8860b] text-white shadow-[0_3px_12px_rgba(184,134,11,0.4)]"
-                        : "bg-[#6d28d9] text-white shadow-[0_3px_12px_rgba(109,40,217,0.35)]"
+                        : "bg-[var(--tone-violet-solid)] text-white shadow-[0_3px_12px_rgba(109,40,217,0.35)]"
                     : "text-[var(--muted)] hover:bg-white hover:text-[var(--brand-deep)]"
                 }`}
               >
@@ -638,7 +657,7 @@ export function StudentUpgradePanel({
         </section>
       </div>
 
-      <section className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
           Upgrade history
         </h3>
@@ -648,20 +667,20 @@ export function StudentUpgradePanel({
           </p>
         ) : (
           <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="text-[11px] uppercase tracking-wide text-[var(--muted)]">
+            <ErpTable>
+              <ErpTableHead>
                 <tr>
-                  <th className="px-2 py-1.5 font-semibold">When</th>
-                  <th className="px-2 py-1.5 font-semibold">Student</th>
+                  <ErpSortTh sort={upgSort} field="when" className="px-2 py-1.5 font-semibold">When</ErpSortTh>
+                  <ErpSortTh sort={upgSort} field="student" className="px-2 py-1.5 font-semibold">Student</ErpSortTh>
                   <th className="px-2 py-1.5 font-semibold">Change</th>
                   <th className="px-2 py-1.5 font-semibold">Class / section</th>
                   <th className="px-2 py-1.5 font-semibold">Type</th>
                   <th className="px-2 py-1.5 font-semibold">Fee</th>
-                  <th className="px-2 py-1.5 font-semibold">Reason</th>
+                  <ErpSortTh sort={upgSort} field="reason" className="px-2 py-1.5 font-semibold">Reason</ErpSortTh>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-[rgba(32,48,80,0.06)]">
-                {history.map((u) => {
+              </ErpTableHead>
+              <ErpTableBody>
+                {upgSort.rows.map((u) => {
                   const sectionOnly =
                     u.fromClassId === u.toClassId &&
                     u.fromSectionId !== u.toSectionId;
@@ -738,8 +757,8 @@ export function StudentUpgradePanel({
                     </tr>
                   );
                 })}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           </div>
         )}
       </section>

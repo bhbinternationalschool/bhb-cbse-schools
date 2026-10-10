@@ -55,6 +55,9 @@ function payloadFromServerLink(
 
 export default function PaySharePage() {
   const [payload, setPayload] = useState<PaymentSharePayload | null>(null);
+  // Named payment rails for this amount, from Cashfree. Null means it could
+  // not be asked, and the generic line is shown instead of a claim.
+  const [payMethods, setPayMethods] = useState<{ group: string; label: string }[] | null>(null);
   const [serverLink, setServerLink] = useState<ServerLink | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
@@ -64,7 +67,13 @@ export default function PaySharePage() {
     upiRef: string;
   } | null>(null);
 
-  const razorpayMode = !!serverLink?.gatewayCheckoutUrl;
+  const gatewayCheckoutMode = !!serverLink?.gatewayCheckoutUrl;
+  const gatewayName =
+    serverLink?.gatewayMode === "cashfree"
+      ? "Cashfree"
+      : serverLink?.gatewayMode === "razorpay"
+        ? "Razorpay"
+        : "secure checkout";
 
   const refreshPaidStatus = useCallback(async (linkId: string, code?: string) => {
     const q = new URLSearchParams({ linkId });
@@ -102,7 +111,11 @@ export default function PaySharePage() {
           setError("Could not open this payment link. Ask the school to resend.");
           return;
         }
-        const json = (await res.json()) as { link?: ServerLink };
+        const json = (await res.json()) as {
+          link?: ServerLink;
+          payMethods?: { group: string; label: string }[] | null;
+        };
+        setPayMethods(json.payMethods ?? null);
         const link = json.link;
         if (!link) {
           setError("Payment link not found.");
@@ -160,7 +173,7 @@ export default function PaySharePage() {
   }, [refreshPaidStatus]);
 
   useEffect(() => {
-    if (!payload || done || razorpayMode) {
+    if (!payload || done || gatewayCheckoutMode) {
       setQrDataUrl(null);
       return;
     }
@@ -185,15 +198,15 @@ export default function PaySharePage() {
     return () => {
       cancelled = true;
     };
-  }, [payload, done, razorpayMode]);
+  }, [payload, done, gatewayCheckoutMode]);
 
   useEffect(() => {
-    if (!payload || done || !razorpayMode) return;
+    if (!payload || done || !gatewayCheckoutMode) return;
     const id = window.setInterval(() => {
       void refreshPaidStatus(payload.linkId);
     }, 4000);
     return () => window.clearInterval(id);
-  }, [payload, done, razorpayMode, refreshPaidStatus]);
+  }, [payload, done, gatewayCheckoutMode, refreshPaidStatus]);
 
   const expired = useMemo(() => {
     if (!payload) return false;
@@ -300,7 +313,7 @@ export default function PaySharePage() {
           </p>
           <p className="mt-1 text-[11px] text-[var(--muted)]">
             Valid till {payload.expiresOn}
-            {razorpayMode ? " · Razorpay auto-receipt" : ""}
+            {gatewayCheckoutMode ? ` · ${gatewayName} auto-receipt` : ""}
           </p>
         </div>
 
@@ -327,7 +340,7 @@ export default function PaySharePage() {
 
         {done ? (
           <div className="mt-6 rounded-xl bg-[rgba(22,163,74,0.1)] px-4 py-4 text-center">
-            <p className="text-sm font-bold text-[#15803d]">Payment received</p>
+            <p className="text-sm font-bold text-[var(--tone-green)]">Payment received</p>
             <p className="mt-1 text-xs text-[var(--brand-deep)]">
               Receipt {done.receiptNo}
             </p>
@@ -341,18 +354,33 @@ export default function PaySharePage() {
           </div>
         ) : (
           <>
-            {razorpayMode && serverLink?.gatewayCheckoutUrl ? (
+            {gatewayCheckoutMode && serverLink?.gatewayCheckoutUrl ? (
               <div className="mt-5 space-y-3">
                 <a
                   href={serverLink.gatewayCheckoutUrl}
                   className="btn-accent flex w-full items-center justify-center rounded-xl px-4 py-3.5 text-sm font-extrabold"
                 >
-                  Pay {formatInr(payload.amountPaise)} via Razorpay
+                  Pay {formatInr(payload.amountPaise)} via {gatewayName}
                 </a>
                 <p className="text-center text-[10px] leading-relaxed text-[var(--muted)]">
-                  UPI / card / netbanking. Ledger &amp; WhatsApp receipt update
-                  automatically — no confirm button needed.
+                  {/* Named from the account rather than hard-coded: "UPI / card
+                      / netbanking" left out EMI, Pay Later and wallets that
+                      have been on the checkout all along, which for an annual
+                      fee is the one option a family most needs to know exists.
+                      Falls back to the generic wording when Cashfree could not
+                      be asked — never a list we are not sure of. */}
+                  {payMethods && payMethods.length > 0
+                    ? payMethods.map((m) => m.label).join(" · ")
+                    : "UPI / card / netbanking"}
+                  . Ledger &amp; WhatsApp receipt update automatically — no
+                  confirm button needed.
                 </p>
+                {payMethods?.some((m) => m.group === "emi" || m.group === "pay_later") ? (
+                  <p className="text-center text-[11px] font-semibold text-[var(--brand-deep)]">
+                    You can pay this in instalments — choose EMI on the payment
+                    screen.
+                  </p>
+                ) : null}
               </div>
             ) : (
               <>
@@ -394,7 +422,7 @@ export default function PaySharePage() {
                   </p>
                 ) : null}
                 {expired ? (
-                  <p className="mt-3 text-center text-sm text-[#b45309]">
+                  <p className="mt-3 text-center text-sm text-[var(--warning)]">
                     This link has expired. Ask the school for a new one.
                   </p>
                 ) : (

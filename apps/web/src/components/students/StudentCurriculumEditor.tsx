@@ -88,26 +88,28 @@ export function StudentCurriculumEditor({
   );
 
   const validation = validateCurriculum(student, curriculum, masters);
-  const progress = cartProgress(choiceMode, cartSubjects);
+  const clsName =
+    masters.classes.find((c) => c.id === student.classId)?.name ?? "—";
+  const progress = cartProgress(choiceMode, cartSubjects, {
+    className: clsName,
+    academicYearCode: curriculum.academicYearCode || student.academicYearCode,
+  });
 
   const enrolledIds = useMemo(
     () => new Set(cartSubjects.map((s) => s.id)),
     [cartSubjects],
   );
 
-  const clsName =
-    masters.classes.find((c) => c.id === student.classId)?.name ?? "—";
-
   function toggleInCart(id: string) {
     if (disabled) return;
     const on = curriculum.chosenSubjectIds.includes(id);
-    let next = on
+    const next = on
       ? curriculum.chosenSubjectIds.filter((x) => x !== id)
       : [...curriculum.chosenSubjectIds, id];
 
-    if (choiceMode === "middle_options") {
-      if (!on && next.length > 2) next = [...next.slice(0, 1), id];
-    }
+    // Same rule as addSubject: full is full. Refuse a new pick rather than
+    // silently dropping one already chosen to make room for it.
+    if (choiceMode === "middle_options" && !on && next.length > 2) return;
     if (isCart && !on && progress.target && next.length > progress.target) {
       return;
     }
@@ -117,15 +119,21 @@ export function StudentCurriculumEditor({
   function addSubject(id: string) {
     if (!canEdit) return;
     if (curriculum.chosenSubjectIds.includes(id)) return;
-    let next = [...curriculum.chosenSubjectIds, id];
-    if (choiceMode === "middle_options" && next.length > 2) {
-      next = next.slice(-2);
-    }
-    if (isCart && progress.target && next.length > progress.target) {
-      next = [...next.slice(0, progress.target - 1), id];
-    }
+    const next = [...curriculum.chosenSubjectIds, id];
+    if (choiceMode === "middle_options" && next.length > 2) return;
+    // A full cart (12 for IX-X, 6 main for XI-XII) refuses a new pick — it must
+    // never silently drop an already-chosen subject to make room. That
+    // silent swap was the bug: staff building a 7-subject cart from empty
+    // never hit this path (cart isn't full at 1-2 picks), but anyone
+    // topping up an existing cart would watch their last pick vanish with
+    // no explanation each time they added one more.
+    if (isCart && progress.target && next.length > progress.target) return;
     onChange({ ...curriculum, chosenSubjectIds: next });
-    setAddingTag(null);
+    // Deliberately does NOT close the "+ Add" picker — see its key prop:
+    // collapsing back to a button after every single pick meant adding the
+    // 3 required languages took 3 separate "+ Add" clicks with no visual
+    // cue that more could be added, which read as "only allows 1 / picking
+    // another replaces it."
   }
 
   function removeSubject(id: string) {
@@ -147,14 +155,7 @@ export function StudentCurriculumEditor({
     );
   }
 
-  const modeHint =
-    choiceMode === "none"
-      ? "Fixed stage curriculum — office can still add if needed."
-      : choiceMode === "middle_options"
-        ? "Cores from class map · choose up to 2 options."
-        : choiceMode === "secondary_cart"
-          ? "Shopping cart · exactly 7 subjects · ≥3 languages · ≥1 skill/voc."
-          : "Shopping cart · exactly 6 subjects · ≥2 languages · ≥1 native language.";
+  const modeHint = progress.hint;
 
   return (
     <div className="space-y-3">
@@ -173,12 +174,17 @@ export function StudentCurriculumEditor({
         {progress.target != null ? (
           <span
             className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${
-              progress.count === progress.target
-                ? "bg-[rgba(15,118,110,0.12)] text-[#0f766e]"
+              validation.ok
+                ? "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]"
                 : "bg-[rgba(32,48,80,0.08)] text-[var(--brand-mid)]"
             }`}
+            title={progress.min != null ? `${progress.min}–${progress.target} main subjects` : `up to ${progress.target}`}
           >
-            Cart {progress.count}/{progress.target}
+            {choiceMode === "senior_cart"
+              ? `Main ${progress.count} · ${progress.min}–${progress.target}`
+              : choiceMode === "middle_options"
+                ? `Options ${curriculum.chosenSubjectIds.length}/${progress.target}`
+                : `Subjects ${progress.count}`}
           </span>
         ) : null}
       </div>
@@ -186,18 +192,16 @@ export function StudentCurriculumEditor({
       {(isCart || choiceMode === "middle_options") && progress.target != null ? (
         <div className="flex flex-wrap gap-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
           <span>
-            Lang {progress.languages}
-            {choiceMode === "secondary_cart"
-              ? "/3+"
-              : choiceMode === "senior_cart"
-                ? "/2+"
-                : ""}
+            Languages {progress.languages}
+            {progress.languagesRequired != null ? `/${progress.languagesRequired}` : ""}
           </span>
+          {progress.indianRequired > 1 ? (
+            <span>
+              Indian {progress.nativeLanguages}/{progress.indianRequired}
+            </span>
+          ) : null}
           {choiceMode === "secondary_cart" ? (
             <span>Skill {progress.skill}/1+</span>
-          ) : null}
-          {choiceMode === "senior_cart" ? (
-            <span>Native {progress.nativeLanguages}/1+</span>
           ) : null}
           {choiceMode === "senior_cart" && progress.labHeavy > 0 ? (
             <span>Lab-heavy {progress.labHeavy}</span>
@@ -322,6 +326,11 @@ export function StudentCurriculumEditor({
                     {addingTag === tag.id ? (
                       <>
                         <select
+                          // Remounts on every pick, forcing the uncontrolled
+                          // select back to the "Add…" placeholder instead of
+                          // sticking on the subject just chosen — the visual
+                          // cue that another pick is still possible.
+                          key={inBucket.length}
                           className="field !py-1 text-xs"
                           defaultValue=""
                           onChange={(e) => {
@@ -371,7 +380,7 @@ export function StudentCurriculumEditor({
                           </span>{" "}
                           {s.nameEn}
                           {sub ? (
-                            <span className="ml-1.5 rounded bg-[rgba(15,118,110,0.1)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[#0f766e]">
+                            <span className="ml-1.5 rounded bg-[rgba(15,118,110,0.1)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--tone-teal)]">
                               {sub}
                             </span>
                           ) : null}
@@ -487,6 +496,7 @@ function FixedStageAdd({
             </p>
             {addingTag === group.id ? (
               <select
+                key={enrolledIds.size}
                 className="field !py-1 text-xs"
                 defaultValue=""
                 onChange={(e) => {

@@ -14,9 +14,18 @@ import {
   formatInr,
   loadFees,
   openFeeDues,
+  type FeesState,
 } from "@/lib/fees";
-import { loadMasters } from "@/lib/masters";
-import { loadSis } from "@/lib/sis";
+import { loadMasters, type MastersState } from "@/lib/masters";
+import { loadSis, type SisState } from "@/lib/sis";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import {
+  gateForHold,
+  standingDecisionFor,
+  holdDecisionsSnapshot,
+} from "@/lib/holdDecisionsCache";
+import { resolveHold, type HoldVerdict } from "@/lib/holdResolve";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_holds_v1";
 /** Demo Principal PIN — changeable in local storage via setPrincipalPin. */
@@ -54,6 +63,7 @@ export const ENFORCED_HOLDS: HoldCode[] = [
   "HOLD_TRANSPORT",
   "HOLD_CERT",
   "HOLD_TC",
+  "HOLD_ADMIT_CARD",
 ];
 
 export type HoldOverride = {
@@ -98,6 +108,17 @@ export type HoldCheck =
       overdueDays: number;
       overdueAmountPaise: number;
       override?: HoldOverride;
+      /** Which source settled it — see holdResolve.ts. */
+      basis?: HoldVerdict["basis"];
+      /**
+       * False when the server's standing decisions had not loaded when this
+       * was asked. The answer is still "allowed", because refusing a child at
+       * a bus door over a slow fetch is the worse failure — but a screen that
+       * cares can say "not checked yet" rather than implying it was.
+       */
+      decisionsKnown?: boolean;
+      /** Why this child was let through, when somebody decided it. */
+      allowReason?: string;
     }
   | {
       allowed: false;
@@ -107,6 +128,8 @@ export type HoldCheck =
       overdueDays: number;
       overdueAmountPaise: number;
       message: string;
+      basis?: HoldVerdict["basis"];
+      decisionsKnown?: boolean;
     };
 
 function id(prefix: string) {
@@ -138,7 +161,7 @@ function normalizeReportCardHoldStage(
 export function loadHolds(): HoldsState {
   if (typeof window === "undefined") return emptyState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyState();
     const parsed = JSON.parse(raw) as HoldsState;
     return {
@@ -164,9 +187,20 @@ export function saveHolds(state: HoldsState) {
 
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+    void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("fee_holds", state)));
   } catch (e) {
     console.warn("[holds] localStorage quota exceeded", e);
+  }
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeHoldsLocalRaw(state: HoldsState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
   }
 }
 
@@ -235,17 +269,34 @@ export function addCalendarDays(isoDate: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * Already-loaded stores for a batch of hold checks.
+ *
+ * `studentHoldContext` parses the SIS, masters and fee blobs from
+ * localStorage on every call. A screen that checks 33 children — the exam
+ * desk's report-card list, a section's result sheet — paid that parse 33
+ * times over, ~1.6 MB of JSON per child, which is most of why those tabs
+ * took seconds to open. Callers that loop pass the stores once.
+ */
+export type HoldDeps = {
+  sis?: SisState;
+  masters?: MastersState;
+  fees?: FeesState;
+  holds?: HoldsState;
+};
+
 /** Overdue stage for a student from live Fee Take dues (incl. plan EMIs). */
 export function studentHoldContext(
   studentId: string,
   asOf = todayIso(),
+  deps?: HoldDeps,
 ): StudentHoldContext | null {
-  const sis = loadSis();
+  const sis = deps?.sis ?? loadSis();
   const student = sis.students.find((s) => s.id === studentId);
   if (!student) return null;
 
-  const masters = loadMasters();
-  const fees = loadFees();
+  const masters = deps?.masters ?? loadMasters();
+  const fees = deps?.fees ?? loadFees();
   const dues = computeStudentDues(student, masters, fees, {
     asOf,
     includeFuture: true,
@@ -275,11 +326,11 @@ export function studentHoldContext(
   }
 
   const stage = resolveStage(overdueDays);
-  const holds = loadHolds();
+  const holds = deps?.holds ?? loadHolds();
+  // Which services this child is actually being refused today. Derived from
+  // the gate, not from the stage, so it cannot drift from enforcement.
   const activeHolds = (Object.keys(HOLD_FROM_STAGE) as HoldCode[])
-    .filter(
-      (code) => stageRank(stage) >= stageRank(holdFromStage(code, holds)),
-    )
+    .filter((code) => stageRank(stage) >= stageRank(holdFromStage(code, holds)))
     .map((code) => ({
       code,
       label: HOLD_LABELS[code],
@@ -320,8 +371,9 @@ export function checkHold(
   studentId: string,
   holdCode: HoldCode,
   asOf = todayIso(),
+  deps?: HoldDeps,
 ): HoldCheck {
-  const ctx = studentHoldContext(studentId, asOf);
+  const ctx = studentHoldContext(studentId, asOf, deps);
   if (!ctx) {
     return {
       allowed: false,
@@ -334,37 +386,58 @@ export function checkHold(
     };
   }
 
-  const from = holdFromStage(holdCode);
-  const triggered = stageRank(ctx.stage) >= stageRank(from);
-  if (!triggered) {
-    return {
-      allowed: true,
-      stage: ctx.stage,
-      overdueDays: ctx.overdueDays,
-      overdueAmountPaise: ctx.overdueAmountPaise,
-    };
-  }
-
   const override = findActiveOverride(
-    loadHolds(),
+    deps?.holds ?? loadHolds(),
     studentId,
     holdCode,
     asOf,
   );
-  if (override) {
+  const snap = holdDecisionsSnapshot();
+
+  // The gate's settings come from the school's policy when it has loaded. If
+  // it has not, fall back to the constant the engine has always used, so a
+  // slow fetch cannot silently switch every gate off.
+  const gate = gateForHold(holdCode) ?? {
+    holdCode,
+    mode: "auto" as const,
+    fromStage: holdFromStage(holdCode),
+    minAmountPaise: 0,
+    minOverdueDays: 0,
+  };
+
+  const verdict = resolveHold({
+    holdCode,
+    label: HOLD_LABELS[holdCode],
+    gate,
+    facts: {
+      studentId,
+      stage: ctx.stage,
+      overdueDays: ctx.overdueDays,
+      overdueAmountPaise: ctx.overdueAmountPaise,
+    },
+    standing: standingDecisionFor(studentId, holdCode),
+    decisionsKnown: snap.known,
+    pinOverrideUntil: override ? override.expiresOn : null,
+    stageText: ctx.stageLabel,
+    amountText:
+      ctx.overdueAmountPaise > 0 ? formatInr(ctx.overdueAmountPaise) : "",
+  });
+
+  if (verdict.allowed) {
     return {
       allowed: true,
       stage: ctx.stage,
       overdueDays: ctx.overdueDays,
       overdueAmountPaise: ctx.overdueAmountPaise,
-      override,
+      ...(verdict.basis === "pin_override" && override ? { override } : {}),
+      basis: verdict.basis,
+      decisionsKnown: verdict.decisionsKnown,
+      ...(verdict.basis === "standing_allow"
+        ? { allowReason: verdict.message }
+        : {}),
     };
   }
 
-  const amount =
-    ctx.overdueAmountPaise > 0
-      ? ` · ${formatInr(ctx.overdueAmountPaise)} overdue`
-      : "";
   return {
     allowed: false,
     code: holdCode,
@@ -372,7 +445,9 @@ export function checkHold(
     stage: ctx.stage,
     overdueDays: ctx.overdueDays,
     overdueAmountPaise: ctx.overdueAmountPaise,
-    message: `${HOLD_LABELS[holdCode]} held at ${ctx.stageLabel} (${ctx.overdueDays < 0 ? "upcoming" : `${ctx.overdueDays}d overdue`}${amount}). Principal PIN override required.`,
+    message: verdict.message,
+    basis: verdict.basis,
+    decisionsKnown: verdict.decisionsKnown,
   };
 }
 
@@ -492,13 +567,52 @@ export function listPolicyHoldRows(
   asOf = todayIso(),
 ): PolicyHoldRow[] {
   const state = loadHolds();
+
+  // The child's bill is read ONCE. checkHold would recompute it per hold code
+  // — nine times for one child, each rebuilding the whole fee book — and this
+  // screen is on the desk where slowness has been complained about before.
+  const ctx = studentHoldContext(studentId, asOf);
+  const snap = holdDecisionsSnapshot();
+
   return holds.map((h) => {
     const override =
       findActiveOverride(state, studentId, h.code, asOf) ?? null;
+
+    // Resolve exactly as the gate does, so this screen and the counter that
+    // actually turns a child away cannot disagree. When they disagreed, the
+    // office read "held" beside a counter letting the child through, and
+    // trusted the wrong one.
+    const verdict = ctx
+      ? resolveHold({
+          holdCode: h.code,
+          label: h.label,
+          gate:
+            gateForHold(h.code) ?? {
+              holdCode: h.code,
+              mode: "auto" as const,
+              fromStage: holdFromStage(h.code, state),
+              minAmountPaise: 0,
+              minOverdueDays: 0,
+            },
+          facts: {
+            studentId,
+            stage: ctx.stage,
+            overdueDays: ctx.overdueDays,
+            overdueAmountPaise: ctx.overdueAmountPaise,
+          },
+          standing: standingDecisionFor(studentId, h.code),
+          decisionsKnown: snap.known,
+          pinOverrideUntil: override ? override.expiresOn : null,
+        })
+      : null;
+
     let status: PolicyHoldRow["status"] = "clear";
-    if (h.active) {
-      status = override ? "unheld" : "held";
-    } else if (override) {
+    if (verdict && !verdict.allowed) {
+      status = "held";
+    } else if (
+      override ||
+      verdict?.basis === "standing_allow"
+    ) {
       status = "unheld";
     }
     return {
@@ -526,12 +640,40 @@ export function listActiveOverrides(
 
 /** Hold code for a certificate kind (fee_clearance uses dues-clear, not hold). */
 export function holdCodeForCertificate(
-  kind: "tc" | "bonafide" | "character" | "fees_paid" | "fee_clearance",
+  kind: "tc" | "bonafide" | "character" | "fees_paid" | "fee_clearance" | "aadhaar_uidai",
 ): HoldCode | null {
+  // A child's Aadhaar is an identity document, not a school favour: a fee
+  // hold never stands between a family and it.
+  if (kind === "aadhaar_uidai") return null;
   if (kind === "tc") return "HOLD_TC";
   if (kind === "fee_clearance") return null;
   if (kind === "bonafide" || kind === "character" || kind === "fees_paid") {
     return "HOLD_CERT";
   }
   return null;
+}
+
+/**
+ * One hold verdict per student, with the stores parsed once for the whole
+ * batch instead of once per child. Same answer as calling `checkHold` in a
+ * loop — this is only the loop with the loads hoisted out of it.
+ */
+export function checkHoldsForStudents(
+  studentIds: readonly string[],
+  holdCode: HoldCode,
+  asOf = todayIso(),
+): Map<string, HoldCheck> {
+  const out = new Map<string, HoldCheck>();
+  if (studentIds.length === 0) return out;
+  const deps: HoldDeps = {
+    sis: loadSis(),
+    masters: loadMasters(),
+    fees: loadFees(),
+    holds: loadHolds(),
+  };
+  for (const id of studentIds) {
+    if (out.has(id)) continue;
+    out.set(id, checkHold(id, holdCode, asOf, deps));
+  }
+  return out;
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { recordAudit } from "@/lib/auditClient";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -23,6 +24,7 @@ import {
 } from "@/lib/studentDuplicates";
 import { StudentAvatar } from "@/components/students/StudentAvatar";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { formatDobLong } from "@/lib/dobFormat";
 
 export function StudentDuplicatesPanel({
   tick = 0,
@@ -99,6 +101,26 @@ export function StudentDuplicatesPanel({
       return;
     }
     const keeper = g.students.find((s) => s.id === keep);
+    recordAudit({
+      module: "students",
+      action: "merge",
+      entityType: "student",
+      entityId: keep,
+      summary: `Merged ${res.merged} duplicate record(s) into ${keeper?.fullName ?? "student"} (${keeper?.admissionNo ?? keep}) — matched on ${g.reasons.join(", ")}`,
+      before: {
+        droppedIds: dropIds,
+        dropped: g.students
+          .filter((s) => s.id !== keep)
+          .map((s) => ({
+            id: s.id,
+            fullName: s.fullName,
+            admissionNo: s.admissionNo,
+          })),
+        matchReasons: g.reasons,
+        score: g.score,
+      },
+      after: { keptId: keep, keptAdmissionNo: keeper?.admissionNo },
+    });
     flash(
       `Merged ${res.merged} record${res.merged === 1 ? "" : "s"} into ${
         keeper?.fullName ?? "student"
@@ -116,6 +138,19 @@ export function StudentDuplicatesPanel({
     )
       return;
     const next = removeDuplicateStudents(sis, [s.id]);
+    recordAudit({
+      module: "students",
+      action: "delete",
+      entityType: "student",
+      entityId: s.id,
+      summary: `Removed duplicate ${s.fullName} (${s.admissionNo}) — matched on ${g.reasons.join(", ")}`,
+      before: {
+        fullName: s.fullName,
+        admissionNo: s.admissionNo,
+        academicYearCode: s.academicYearCode,
+        matchReasons: g.reasons,
+      },
+    });
     flash(`Removed duplicate ${s.fullName}.`, next);
   }
 
@@ -151,7 +186,7 @@ export function StudentDuplicatesPanel({
       </div>
 
       {notice ? (
-        <div className="rounded-lg bg-[rgba(15,118,110,0.12)] px-3 py-2 text-sm font-medium text-[#0f766e]">
+        <div className="rounded-lg bg-[rgba(15,118,110,0.12)] px-3 py-2 text-sm font-medium text-[var(--tone-teal)]">
           {notice}
         </div>
       ) : null}
@@ -186,7 +221,7 @@ export function StudentDuplicatesPanel({
                       className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${
                         g.score >= 90
                           ? "bg-[rgba(192,57,43,0.14)] text-[#c0392b]"
-                          : "bg-[rgba(196,149,58,0.16)] text-[var(--brand-gold)]"
+                          : "bg-[rgba(196,149,58,0.16)] text-[var(--warning)]"
                       }`}
                     >
                       {g.score}% match
@@ -244,7 +279,7 @@ export function StudentDuplicatesPanel({
                               {s.fullName}
                             </span>
                             {isKeep ? (
-                              <span className="rounded bg-[rgba(15,118,110,0.14)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#0f766e]">
+                              <span className="rounded bg-[rgba(15,118,110,0.14)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--tone-teal)]">
                                 Keep
                               </span>
                             ) : null}
@@ -259,7 +294,7 @@ export function StudentDuplicatesPanel({
                             {s.rollNo ? ` · Roll ${s.rollNo}` : ""}
                           </div>
                           <div className="mt-0.5 text-[11px] text-[var(--muted)]">
-                            {s.dob ? `DOB ${s.dob}` : "DOB —"}
+                            {s.dob ? `DOB ${formatDobLong(s.dob)}` : "DOB —"}
                             {s.fatherName ? ` · F: ${s.fatherName}` : ""}
                             {s.pen ? ` · PEN ${s.pen}` : ""}
                             {` · ${countDocsWithFiles(s.docs)}/7 docs`}

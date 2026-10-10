@@ -18,6 +18,9 @@ import {
   registrationCollectedPaise,
   registrationFeeHeads,
   registrationPayAbsoluteUrl,
+} from "@/lib/admissions";
+import { fetchRegistrationCheckoutUrl } from "@/lib/paymentGatewayClient";
+import {
   setLeadRegistrationFee,
   takeRegistrationPayment,
   waiveRegistrationFee,
@@ -25,20 +28,33 @@ import {
   type RegistrationFeePayment,
 } from "@/lib/admissions";
 import { formatInr, TENDER_MODES, type TenderMode } from "@/lib/fees";
+import {
+  channelsForPaymentMode,
+  decodePaymentChannel,
+  encodePaymentChannel,
+  paymentModeForTender,
+} from "@/lib/paymentChannels";
+import { useAccountsDesk } from "@/lib/useAccountsDesk";
 import { type MastersState } from "@/lib/masters";
+import { type SisState, type SisStudent } from "@/lib/sis";
+import { useDemoSession } from "@/components/shell/SessionContext";
 import { TENANT } from "@/lib/types";
 import {
   MastersEmptyRow,
   MastersTableCard,
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { SisParentMatchBanner } from "@/components/admissions/SisParentMatchBanner";
-
-function waUrl(mobile: string, message: string): string {
-  const digits = mobile.replace(/\D/g, "");
-  const phone = digits.length === 10 ? `91${digits}` : digits;
-  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-}
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import { BulkActionBar, RowActionMenu, RowCheckbox, useRowSelection } from "@/components/ui/erp-grid";
+import { openWaMe } from "@/lib/waMe";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -49,6 +65,28 @@ type SiblingDraft = {
   classSoughtId: string;
   feeAmountInr: string;
 };
+
+/**
+ * The selected child's registration, in the order the office does it: the
+ * registration fee is taken (or waived) first, then the child is sent to the
+ * student record, which mints the admission no. and SRN. Picking a child from
+ * the queue or this year's list happens above the steps; picking another
+ * child starts again at step 1.
+ */
+type RegStep = "take" | "send";
+
+const REG_STEPS: StepDef<RegStep>[] = [
+  {
+    id: "take",
+    title: "Take registration",
+    what: "Registration fee for the selected child — fee head and amount, then collect by any mode (partial OK), QR + WhatsApp, or waive.",
+  },
+  {
+    id: "send",
+    title: "Send to student record",
+    what: "Verify documents if pending, then create the student in Students (SIS) with admission no., SRN and today's admission date.",
+  },
+];
 
 function emptySiblingDraft(feeDefault: string): SiblingDraft {
   return {
@@ -62,6 +100,7 @@ function emptySiblingDraft(feeDefault: string): SiblingDraft {
 export function AdmissionRegistrationPanel({
   state,
   masters,
+  sis,
   by,
   canEdit,
   onCommit,
@@ -69,16 +108,126 @@ export function AdmissionRegistrationPanel({
 }: {
   state: AdmissionsState;
   masters: MastersState;
+  sis: SisState;
   by: string;
   canEdit: boolean;
   onCommit: (next: AdmissionsState, msg?: string) => void;
   onOpenCrmLead: (id: string) => void;
 }) {
+  const sessionAy = useDemoSession().academicYearCode;
   const queue = useMemo(() => listRegistrationQueue(state), [state]);
+
+  // Sorting by Payment brings the unpaid registrations together — the list the desk works through.
+  const queueSort = useTableSort(
+    queue,
+    {
+      leadNo: (l) => l.enquiryNo,
+      child: (l) => l.childName,
+      fee: (l) => l.registrationFeeAmountPaise,
+      payment: (l) => l.registrationPaymentStatus,
+    },
+    "leadNo",
+    "asc",
+  );
+
+  /**
+   * Children ADMITTED this session, straight from the roster. Most walked in
+   * and were admitted without ever being a CRM lead, so the registration fee
+   * had nowhere to be taken. Each row links to (or creates) a registration
+   * record; the money is captured by the same take-fee flow as the queue, and
+   * it survives re-login because the server never prunes registration
+   * payments or paid/enrolled leads.
+   */
+  const yearAdmissions = useMemo(() => {
+    const ayStart = `${sessionAy.slice(0, 4)}-04-01`;
+    const rows: {
+      student: SisStudent;
+      lead: (typeof state.leads)[number] | null;
+    }[] = [];
+    for (const s of sis.students ?? []) {
+      if (s.academicYearCode !== sessionAy) continue;
+      if (s.status && s.status !== "active") continue;
+      // The admission number carries its own vintage (BHB-2026-27-…): that
+      // outranks joinedOn, which promotions also stamp — without this, every
+      // promoted old student "joined" this session.
+      const vintage = /BHB-(\d{4}-\d{2})/.exec(s.admissionNo || "")?.[1] ?? "";
+      const isNew = vintage
+        ? vintage === sessionAy
+        : (s.joinedOn || "") >= ayStart;
+      if (!isNew) continue;
+      const lead =
+        state.leads.find((l) => l.sisStudentId === s.id) ??
+        state.leads.find(
+          (l) => l.admissionNo && l.admissionNo === s.admissionNo,
+        ) ??
+        null;
+      rows.push({ student: s, lead });
+    }
+    return rows.sort((a, b) =>
+      a.student.fullName.localeCompare(b.student.fullName),
+    );
+  }, [sis.students, state, sessionAy]);
+
+  function startRegistrationFor(s: SisStudent) {
+    const mobile = (s.fatherMobile || s.motherMobile || "").replace(/\D/g, "").slice(-10);
+    if (mobile.length !== 10) {
+      onCommit(state, "This student has no 10-digit parent mobile — add it in Students first");
+      return;
+    }
+    const r = createFamilyRegistrationsFromDesk(
+      state,
+      {
+        guardianName: s.fatherName || "Guardian",
+        mobile,
+        source: "walk_in",
+        children: [
+          {
+            childName: s.fullName,
+            classSoughtId: s.classId,
+            feeHeadId: feeHeads[0]?.id || "",
+            feeAmountPaise: Math.round(Number(amountInr || "500") * 100) || 50000,
+          },
+        ],
+        feeHeadName: feeHeads[0]?.name,
+      },
+      by,
+    );
+    if (!r.ok) {
+      onCommit(state, r.reason);
+      return;
+    }
+    // Tie the new registration to the admitted student, so the row above and
+    // the roster agree on who this is — and so the prune guard protects it.
+    const created = r.leads[0];
+    const linked = {
+      ...r.state,
+      leads: r.state.leads.map((l) =>
+        l.id === created.id
+          ? { ...l, sisStudentId: s.id, admissionNo: s.admissionNo }
+          : l,
+      ),
+    };
+    onCommit(linked, `${s.fullName} added to registration — take the fee below`);
+    setSelectedId(created.id);
+    setCollectFocusIds([created.id]);
+  }
   const feeHeads = useMemo(() => registrationFeeHeads(masters), [masters]);
   const classes = useMemo(
     () => (masters.classes ?? []).filter((c) => c.isActive),
     [masters],
+  );
+  const admissionsSort = useTableSort(
+    yearAdmissions,
+    {
+      student: ({ student: s }) => s.fullName,
+      klass: ({ student: s }) =>
+        classes.find((c) => c.id === s.classId)?.name ?? null,
+      father: ({ student: s }) => s.fatherName || null,
+      // Money received so far; a registration never started has no figure.
+      regFee: ({ lead }) =>
+        lead ? registrationCollectedPaise(state, lead.id) : null,
+    },
+    "student",
   );
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -90,11 +239,21 @@ export function AdmissionRegistrationPanel({
   /** After family save — land on take-fee with these sibling lead ids */
   const [collectFocusIds, setCollectFocusIds] = useState<string[]>([]);
   const takeFeeRef = useRef<HTMLDivElement | null>(null);
+  /** Step is per selected child: a newly picked child starts at "take". */
+  const [regStepFor, setRegStepFor] = useState<{
+    id: string | null;
+    step: RegStep;
+  }>({ id: null, step: "take" });
+  const regStep: RegStep =
+    regStepFor.id === selectedId ? regStepFor.step : "take";
 
   const [feeHeadId, setFeeHeadId] = useState(feeHeads[0]?.id || "");
   const [amountInr, setAmountInr] = useState("500");
   const [collectInr, setCollectInr] = useState("");
   const [collectMode, setCollectMode] = useState<TenderMode>("cash");
+  const [collectOn, setCollectOn] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
   const [collectRef, setCollectRef] = useState("");
   const [collectBank, setCollectBank] = useState("");
   const [qrUrl, setQrUrl] = useState<string | null>(null);
@@ -186,6 +345,18 @@ export function AdmissionRegistrationPanel({
     return listLeadRegistrationPayments(state, selected.id);
   }, [state, selected?.id]);
 
+  // Registration payments: amount sorts by paise, status groups the voided ones.
+  const payListSort = useTableSort(
+    leadPayments,
+    {
+      code: (p) => p.code,
+      amount: (p) => p.amountPaise,
+      status: (p) => p.status,
+    },
+    "code",
+    "asc",
+  );
+
   const modeMeta = TENDER_MODES.find((m) => m.value === collectMode);
 
   const openPayment = useMemo(() => {
@@ -204,16 +375,23 @@ export function AdmissionRegistrationPanel({
       return;
     }
     const portal = `https://${TENANT.publicPortal}`;
-    const url = registrationPayAbsoluteUrl(portal, openPayment);
-    setLastPayUrl(url);
+    const fallbackUrl = registrationPayAbsoluteUrl(portal, openPayment);
     let cancelled = false;
-    void QRCode.toDataURL(url, {
-      width: 180,
-      margin: 1,
-      color: { dark: "#203050", light: "#ffffff" },
-    }).then((d) => {
+    async function resolveUrl() {
+      // Prefer the live gateway checkout (auto-captures on payment);
+      // fall back to the demo pay page when no gateway is configured.
+      const checkout = await fetchRegistrationCheckoutUrl(openPayment!.id);
+      const url = checkout || fallbackUrl;
+      if (cancelled) return;
+      setLastPayUrl(url);
+      const d = await QRCode.toDataURL(url, {
+        width: 180,
+        margin: 1,
+        color: { dark: "#203050", light: "#ffffff" },
+      });
       if (!cancelled) setQrUrl(d);
-    });
+    }
+    void resolveUrl();
     return () => {
       cancelled = true;
     };
@@ -254,13 +432,14 @@ export function AdmissionRegistrationPanel({
     }
     const r = takeRegistrationPayment(next, selected.id, by, {
       amountPaise: paise,
+      paidOn: collectOn || undefined,
       tenders: [
         {
           mode: collectMode,
           amountPaise: paise,
           ref: collectRef.trim(),
           bankName: collectBank.trim(),
-          instrumentDate: new Date().toISOString().slice(0, 10),
+          instrumentDate: collectOn || new Date().toISOString().slice(0, 10),
         },
       ],
     });
@@ -367,11 +546,9 @@ export function AdmissionRegistrationPanel({
       url,
       TENANT.nameDisplay,
     );
-    window.open(
-      waUrl(payment.mobile || selected?.mobile || "", msg),
-      "_blank",
-      "noopener",
-    );
+    openWaMe(payment.mobile || selected?.mobile || "", msg, undefined, {
+      module: "admissions",
+    });
   }
 
   function onCapture() {
@@ -406,11 +583,9 @@ export function AdmissionRegistrationPanel({
       TENANT.nameDisplay,
       by,
     );
-    window.open(
-      waUrl(r.payment.mobile || selected?.mobile || "", receipt),
-      "_blank",
-      "noopener",
-    );
+    openWaMe(r.payment.mobile || selected?.mobile || "", receipt, undefined, {
+      module: "admissions",
+    });
   }
 
   function onWaive() {
@@ -542,6 +717,9 @@ export function AdmissionRegistrationPanel({
       rows.map((row) => ({ ...row, feeAmountInr: amountInr || "0" })),
     );
   }
+
+  const admKeys = useMemo(() => yearAdmissions.map(({ student }) => student.id), [yearAdmissions]);
+  const admSel = useRowSelection(admKeys);
 
   return (
     <div className="space-y-4">
@@ -726,7 +904,7 @@ export function AdmissionRegistrationPanel({
                 ? ""
                 : "s"}{" "}
               · total registration fee{" "}
-              <span className="text-[#0f766e]">
+              <span className="text-[var(--tone-teal)]">
                 {formatInr(familyFeeTotalPaise)}
               </span>
             </p>
@@ -741,7 +919,7 @@ export function AdmissionRegistrationPanel({
           </div>
           <button
             type="button"
-            className="mt-3 rounded-lg bg-[#0f766e] px-3 py-2 text-[11px] font-semibold text-white"
+            className="mt-3 rounded-lg bg-[var(--tone-teal-solid)] px-3 py-2 text-[11px] font-semibold text-white"
             onClick={onSaveNew}
           >
             Save & take fee →
@@ -773,25 +951,191 @@ export function AdmissionRegistrationPanel({
       ) : null}
 
       {!(selected && collectFocusIds.length > 0) ? (
+      <>
+      <MastersTableCard
+        title={`This year's admissions — ${sessionAy} (${yearAdmissions.length})`}
+      >
+        <p className="px-4 pt-2 text-xs text-[var(--muted)]">
+          Admitted on the roster this session. Take their registration fee
+          here — a row without a registration yet gets one in one click, then
+          the normal take-fee applies.
+        </p>
+        <BulkActionBar
+          selection={admSel}
+          noun="admission"
+          actions={[
+            {
+              id: "wa",
+              label: "Send WhatsApp",
+              title: "Opens WhatsApp for each selected family with a mobile (12 per click)",
+              onRun: (ids) => {
+                const text = window.prompt(
+                  "Message to the families:",
+                  "Namaste, this is BHB International School regarding your child's admission.",
+                );
+                if (!text) return;
+                const picked = new Set(ids);
+                const seen = new Set<string>();
+                let opened = 0;
+                for (const { student } of yearAdmissions) {
+                  const mob = student.fatherMobile || student.motherMobile || "";
+                  if (!picked.has(student.id) || !mob || seen.has(mob) || opened >= 12) continue;
+                  seen.add(mob);
+                  openWaMe(mob, text, undefined, { module: "admissions" });
+                  opened += 1;
+                }
+                admSel.clear();
+              },
+            },
+          ]}
+        />
+        <ErpTableShell density="compact" className="overflow-x-auto">
+          <ErpTable minWidth="min-w-[760px]">
+            <ErpTableHead>
+              <tr>
+                <th className="w-10 px-2 py-2">
+                  <RowCheckbox
+                    checked={admSel.allSelected(admKeys)}
+                    indeterminate={admSel.someSelected(admKeys)}
+                    onChange={() => admSel.toggleAll(admKeys)}
+                    label="Select all admissions shown"
+                  />
+                </th>
+                <ErpSortTh sort={admissionsSort} field="student" className="px-3 py-2 text-left font-medium">Student</ErpSortTh>
+                <ErpSortTh sort={admissionsSort} field="klass" className="px-3 py-2 text-left font-medium">Class</ErpSortTh>
+                <ErpSortTh sort={admissionsSort} field="father" className="px-3 py-2 text-left font-medium">Father · mobile</ErpSortTh>
+                <ErpSortTh sort={admissionsSort} field="regFee" align="right" className="px-3 py-2 text-right font-medium">Reg. fee</ErpSortTh>
+                <th className="px-3 py-2 text-right font-medium" />
+              </tr>
+            </ErpTableHead>
+            <ErpTableBody hoverable>
+              {yearAdmissions.length === 0 ? (
+                <MastersEmptyRow colSpan={5} label="No admissions recorded this session yet" />
+              ) : (
+                admissionsSort.rows.map(({ student: s, lead }) => {
+                  const cls =
+                    classes.find((c) => c.id === s.classId)?.name ?? "—";
+                  const collected = lead
+                    ? registrationCollectedPaise(state, lead.id)
+                    : 0;
+                  const balance = lead ? registrationBalancePaise(state, lead) : 0;
+                  return (
+                    <tr key={s.id}>
+                      <td className="w-10 px-2 py-2">
+                        <RowCheckbox
+                          checked={admSel.isSelected(s.id)}
+                          onChange={() => admSel.toggle(s.id)}
+                          label={`Select ${s.fullName}`}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="text-sm font-medium">{s.fullName}</div>
+                        <div className="text-[11px] text-[var(--muted)]">
+                          {s.admissionNo}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-sm">{cls}</td>
+                      <td className="px-3 py-2 text-xs">
+                        {s.fatherName || "—"}
+                        <div className="text-[11px] text-[var(--muted)]">
+                          {s.fatherMobile || s.motherMobile || "no mobile"}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right text-sm tabular-nums">
+                        {!lead ? (
+                          <span className="text-[var(--muted)]">not started</span>
+                        ) : balance <= 0 && collected > 0 ? (
+                          <span className="font-semibold text-emerald-600">
+                            {formatInr(collected)} paid
+                          </span>
+                        ) : collected > 0 ? (
+                          <span className="font-semibold text-amber-600">
+                            {formatInr(balance)} due
+                          </span>
+                        ) : (
+                          <span className="font-semibold text-[var(--danger)]">
+                            {formatInr(balance)} due
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                        {!lead && canEdit ? (
+                          <button
+                            type="button"
+                            className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-[11px] font-semibold text-[var(--primary-foreground)]"
+                            onClick={() => startRegistrationFor(s)}
+                          >
+                            Start registration
+                          </button>
+                        ) : lead ? (
+                          <span className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold"
+                              onClick={() => {
+                                setSelectedId(lead.id);
+                                setCollectFocusIds([lead.id]);
+                                takeFeeRef.current?.scrollIntoView({
+                                  behavior: "smooth",
+                                  block: "start",
+                                });
+                              }}
+                            >
+                              {balance > 0 ? "Take fee" : "Open"}
+                            </button>
+                            <RowActionMenu
+                              row={lead}
+                              label="Registration actions"
+                              actions={[
+                                {
+                                  id: "open",
+                                  label: "Open registration",
+                                  onSelect: (l) => {
+                                    setSelectedId(l.id);
+                                    setCollectFocusIds([l.id]);
+                                    takeFeeRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                  },
+                                },
+                                {
+                                  id: "wa",
+                                  label: "WhatsApp the family",
+                                  disabled: (l) => !l.mobile,
+                                  onSelect: (l) =>
+                                    openWaMe(String(String(l.mobile ?? "").replace(/\D/g, "")), "", undefined, { module: "admissions" }),
+                                },
+                              ]}
+                            />
+                          </span>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </ErpTableBody>
+          </ErpTable>
+        </ErpTableShell>
+      </MastersTableCard>
+
       <MastersTableCard title="Registration queue — from Lead CRM">
         {queue.length === 0 ? (
           <div className="px-4 py-10 text-center text-sm text-[var(--muted)]">
             No Registered / Verified leads — Register from Lead CRM or use New registration.
           </div>
         ) : (
-          <table className="min-w-full text-left text-sm">
-            <thead className="text-[11px] text-[var(--muted)]">
+          <ErpTable>
+            <ErpTableHead>
               <tr>
-                <th className="px-3 py-2">Lead no.</th>
-                <th className="px-3 py-2">Child</th>
+                <ErpSortTh sort={queueSort} field="leadNo" className="px-3 py-2">Lead no.</ErpSortTh>
+                <ErpSortTh sort={queueSort} field="child" className="px-3 py-2">Child</ErpSortTh>
                 <th className="px-3 py-2">Parent / mobile</th>
-                <th className="px-3 py-2">Fee</th>
-                <th className="px-3 py-2">Payment</th>
+                <ErpSortTh sort={queueSort} field="fee" align="right" className="px-3 py-2">Fee</ErpSortTh>
+                <ErpSortTh sort={queueSort} field="payment" className="px-3 py-2">Payment</ErpSortTh>
                 <th className="px-3 py-2">House / siblings</th>
               </tr>
-            </thead>
-            <tbody>
-              {queue.map((l) => {
+            </ErpTableHead>
+            <ErpTableBody hoverable>
+              {queueSort.rows.map((l) => {
                 const hh = householdOf(state, l.householdId);
                 const groups = l.householdId
                   ? groupLeadsByParent(state, l.householdId)
@@ -800,10 +1144,8 @@ export function AdmissionRegistrationPanel({
                 return (
                   <tr
                     key={l.id}
-                    className={`cursor-pointer border-t border-[rgba(32,48,80,0.06)] ${
-                      active
-                        ? "bg-[rgba(21,128,61,0.12)]"
-                        : "hover:bg-[rgba(32,48,80,0.03)]"
+                    className={`cursor-pointer ${
+                      active ? "bg-[rgba(21,128,61,0.12)]" : ""
                     }`}
                     onClick={() => {
                       setCollectFocusIds([]);
@@ -832,7 +1174,7 @@ export function AdmissionRegistrationPanel({
                     </td>
                     <td className="px-3 py-2 text-[11px] font-semibold">
                       {l.registrationPaymentStatus === "paid" ? (
-                        <span className="text-[#15803d]">Paid</span>
+                        <span className="text-[var(--tone-green)]">Paid</span>
                       ) : l.registrationPaymentStatus === "partial" ? (
                         <span className="text-[#9a3412]">Partial</span>
                       ) : l.registrationPaymentStatus === "pending" ? (
@@ -854,14 +1196,22 @@ export function AdmissionRegistrationPanel({
                   </tr>
                 );
               })}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         )}
       </MastersTableCard>
+      </>
       ) : null}
 
       {selected ? (
         <div className="space-y-4" ref={collectFocusIds.length === 0 ? takeFeeRef : undefined}>
+          <StepTabs
+            aria-label="Registration steps"
+            steps={REG_STEPS}
+            value={regStep}
+            onChange={(step) => setRegStepFor({ id: selectedId, step })}
+          >
+          {regStep === "take" ? (
           <MastersWorkCard
             title={`1 · Take registration — ${selected.childName}`}
             hint={
@@ -930,7 +1280,7 @@ export function AdmissionRegistrationPanel({
                 className={
                   selected.registrationPaymentStatus === "paid" ||
                   selected.registrationFeePaid
-                    ? "text-[#15803d]"
+                    ? "text-[var(--tone-green)]"
                     : selected.registrationPaymentStatus === "waived"
                       ? "text-[var(--muted)]"
                       : "text-[#9a3412]"
@@ -1027,6 +1377,15 @@ export function AdmissionRegistrationPanel({
                   </select>
                 </label>
                 <label className="text-[11px] font-semibold text-[var(--muted)]">
+                  Received on
+                  <input
+                    type="date"
+                    className={`${inp} mt-1`}
+                    value={collectOn}
+                    onChange={(e) => setCollectOn(e.target.value)}
+                  />
+                </label>
+                <label className="text-[11px] font-semibold text-[var(--muted)]">
                   {modeMeta?.refLabel || "Ref"}
                   <input
                     className={`${inp} mt-1`}
@@ -1055,7 +1414,7 @@ export function AdmissionRegistrationPanel({
                     </button>
                     <button
                       type="button"
-                      className="rounded-lg bg-[#0f766e] px-3 py-2 text-[11px] font-semibold text-white"
+                      className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-2 text-[11px] font-semibold text-white"
                       onClick={onCreateUpi}
                     >
                       QR + WhatsApp
@@ -1073,7 +1432,7 @@ export function AdmissionRegistrationPanel({
                     </button>
                     <button
                       type="button"
-                      className="rounded-lg bg-[#0f766e] px-3 py-2 text-[11px] font-semibold text-white"
+                      className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-2 text-[11px] font-semibold text-white"
                       onClick={onCreateUpi}
                     >
                       QR + WhatsApp (this amount)
@@ -1084,23 +1443,20 @@ export function AdmissionRegistrationPanel({
             ) : null}
 
             {leadPayments.length > 0 ? (
-              <div className="mt-3 overflow-x-auto rounded-lg border border-[rgba(32,48,80,0.1)]">
-                <table className="min-w-full text-left text-[11px]">
-                  <thead className="bg-[rgba(32,48,80,0.04)] text-[var(--muted)]">
+              <ErpTableShell className="mt-3 overflow-x-auto">
+                <ErpTable className="text-[11px]">
+                  <ErpTableHead>
                     <tr>
-                      <th className="px-2 py-1.5 font-semibold">Code</th>
-                      <th className="px-2 py-1.5 font-semibold">Amount</th>
+                      <ErpSortTh sort={payListSort} field="code" className="px-2 py-1.5 font-semibold">Code</ErpSortTh>
+                      <ErpSortTh sort={payListSort} field="amount" align="right" className="px-2 py-1.5 font-semibold">Amount</ErpSortTh>
                       <th className="px-2 py-1.5 font-semibold">Mode</th>
-                      <th className="px-2 py-1.5 font-semibold">Status</th>
+                      <ErpSortTh sort={payListSort} field="status" className="px-2 py-1.5 font-semibold">Status</ErpSortTh>
                       <th className="px-2 py-1.5 font-semibold">R receipt</th>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {leadPayments.map((p) => (
-                      <tr
-                        key={p.id}
-                        className="border-t border-[rgba(32,48,80,0.08)]"
-                      >
+                  </ErpTableHead>
+                  <ErpTableBody>
+                    {payListSort.rows.map((p) => (
+                      <tr key={p.id}>
                         <td className="px-2 py-1.5 font-mono">{p.code}</td>
                         <td className="px-2 py-1.5">{formatInr(p.amountPaise)}</td>
                         <td className="px-2 py-1.5">
@@ -1116,9 +1472,9 @@ export function AdmissionRegistrationPanel({
                         </td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </ErpTableBody>
+                </ErpTable>
+              </ErpTableShell>
             ) : null}
 
             {openPayment ? (
@@ -1142,7 +1498,7 @@ export function AdmissionRegistrationPanel({
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      className="rounded-lg bg-[#15803d] px-3 py-1.5 text-[11px] font-semibold text-white"
+                      className="rounded-lg bg-[var(--tone-green-solid)] px-3 py-1.5 text-[11px] font-semibold text-white"
                       onClick={() => onWhatsApp(openPayment)}
                     >
                       WhatsApp to parent
@@ -1159,7 +1515,9 @@ export function AdmissionRegistrationPanel({
               </div>
             ) : null}
           </MastersWorkCard>
+          ) : null}
 
+          {regStep === "send" ? (
           <MastersWorkCard
             title="2 · Send to student record"
             hint="Creates the student in Students (SIS) with Admission no., SRN, and admission date = today (send date). Parent-wise household for siblings."
@@ -1187,7 +1545,7 @@ export function AdmissionRegistrationPanel({
               {canEdit ? (
                 <button
                   type="button"
-                  className="rounded-lg bg-[#166534] px-4 py-2.5 text-[12px] font-semibold text-white"
+                  className="rounded-lg bg-[var(--tone-green-deep-solid)] px-4 py-2.5 text-[12px] font-semibold text-white"
                   onClick={onAdmit}
                 >
                   Send to student record
@@ -1210,6 +1568,8 @@ export function AdmissionRegistrationPanel({
               ) : null}
             </div>
           </MastersWorkCard>
+          ) : null}
+          </StepTabs>
 
           {parentGroups.length > 0 ? (
             <MastersWorkCard

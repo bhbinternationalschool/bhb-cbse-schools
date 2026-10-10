@@ -10,6 +10,7 @@ import {
   type AttendanceState,
 } from "@/lib/attendance";
 import {
+  captureAttendanceStamps,
   hydrateAttendanceDeskFromDb,
   scheduleAttendanceDeskSync,
 } from "@/lib/attendanceNormalizedClient";
@@ -21,6 +22,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "attendance";
 
@@ -41,7 +43,7 @@ export function resetAttendancePersistenceCache() {
 
 export function scheduleAttendanceSync(state: AttendanceState) {
   if (typeof window === "undefined") {
-    void pushAttendanceRemoteServer(state);
+    void trackServerWork(pushAttendanceRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("attendance")) {
@@ -79,7 +81,6 @@ export async function pushAttendanceRemoteServer(
  */
 export async function ensureAttendanceHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = attendanceReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("attendance")
@@ -87,8 +88,11 @@ export async function ensureAttendanceHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { registers, ancillary, changed } =
+  const { registers, ancillary, changed, ok, stamps } =
     await hydrateAttendanceDeskFromDb(readFromDb);
+  if (!ok) return false;
+
+  markDeskHydrated(MODULE);
   const hasAncillary =
     ancillary.absentNudges.length > 0 || ancillary.exceptions.length > 0;
   if (
@@ -102,8 +106,14 @@ export async function ensureAttendanceHydrated(): Promise<boolean> {
     writeAttendanceLocalRaw(merged);
     normChanged = true;
   }
+  // Which version of each register this browser now holds: its saves send
+  // only registers changed since, stamped, so they can't overwrite newer ones.
+  captureAttendanceStamps(stamps, loadAttendance());
 
-  if (normChanged) {
+  // Hydration is pull-only under desk-as-truth — see feesPersistence.ts for
+  // the measured cost of pushing here (audit 2026-08-18). Legacy blob mode
+  // still publishes the merge.
+  if (normChanged && !readFromDb) {
     scheduleAttendanceSync(loadAttendance());
   }
 

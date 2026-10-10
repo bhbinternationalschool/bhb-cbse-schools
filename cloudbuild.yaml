@@ -11,24 +11,82 @@ substitutions:
   _NEXT_PUBLIC_APP_URL: https://bhbinternational.school
   _NEXT_PUBLIC_DEMO_AUTH: "true"
   # Server-only runtime (from apps/web/.env.local via deploy-online.sh)
-  _SUPABASE_SERVICE_ROLE_KEY: ""
-  _WHATSAPP_TOKEN: ""
+  #
+  # SUPABASE_SERVICE_ROLE_KEY, WHATSAPP_TOKEN, WHATSAPP_VERIFY_TOKEN,
+  # GOOGLE_MAPS_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY,
+  # GOOGLE_OAUTH_CLIENT_SECRET, CRON_SECRET, WA_DISPATCH_SECRET, and
+  # MIRROR_SYNC_SECRET moved to Secret Manager on 2026-08-12 (see the
+  # --set-secrets line in the deploy step) and are declared there directly —
+  # no longer substitution values, so they are NOT declared here. Cloud Build
+  # rejects any --substitutions key that isn't referenced somewhere in this
+  # file, so if deploy-online.sh is ever changed to pass one of these ten
+  # again, the build will fail with "not matched in the template" rather
+  # than silently reintroducing the plaintext-credential leak this replaced.
   _WHATSAPP_PHONE_ID: ""
-  _WHATSAPP_VERIFY_TOKEN: ""
   _WHATSAPP_WABA_ID: ""
   _WHATSAPP_DEFAULT_COUNTRY_CODE: "91"
   _WHATSAPP_GRAPH_VERSION: "v21.0"
-  _GOOGLE_MAPS_API_KEY: ""
-  _GEMINI_API_KEY: ""
-  _OPENAI_API_KEY: ""
   _AI_TUTOR_MODEL: "gpt-4o-mini"
-  _AI_PREFERRED_ENGINE: "auto"
+  # Gemini primary since 2026-08-18 (cheaper, same GCP project, better Indic
+  # text); OpenAI stays as automatic fallback. Every deploy re-applies this
+  # value, so changing it on the service alone is undone by the next build.
+  _AI_PREFERRED_ENGINE: "gemini"
+  # The school's daily AI ceiling (lib/aiBudget.server.ts; code defaults are
+  # 3,000 calls and 2,000,000 tokens). Raised on 2026-09-16 by the director
+  # for the half-yearly exams (16–26 Sep), when every family is offered a
+  # free tutor day: one exam day was estimated at ~1,500 tutor questions and
+  # ~3.75M tokens, which the defaults would have cut off for the whole school
+  # — tutor, WhatsApp bot and staff AI alike. At Gemini 3.6 Flash prices a
+  # fully used 10M-token day is about $14 (≈₹1,200); spend is what is used,
+  # not the ceiling. Every deploy re-applies these, so change them here.
+  _AI_DAILY_CALLS_PER_TENANT: "10000"
+  _AI_DAILY_TOKENS_PER_TENANT: "10000000"
   _GOOGLE_OAUTH_CLIENT_ID: ""
-  _GOOGLE_OAUTH_CLIENT_SECRET: ""
-  _CRON_SECRET: ""
-  _WA_DISPATCH_SECRET: ""
-  _MIRROR_SYNC_SECRET: ""
   _PROTECTED_SUPER_ADMIN_EMAILS: "director@bhbinternational.school,ashishsingh80@gmail.com,ashu.dube21@gmail.com"
+  # VAPID public key — not secret (it's meant to ship in the client bundle),
+  # so it's a substitution like NEXT_PUBLIC_SUPABASE_URL, not Secret Manager.
+  # The matching private key IS secret — see VAPID_PRIVATE_KEY below.
+  _NEXT_PUBLIC_VAPID_PUBLIC_KEY: ""
+  # Tata Fleet Edge webhook config — not secret (an IP allowlist and a
+  # notify phone number, not credentials), same substitution treatment as
+  # PROTECTED_SUPER_ADMIN_EMAILS above.
+  _FLEET_EDGE_ALLOWED_IPS: ""
+  _FLEET_EDGE_SOS_NOTIFY_MOBILE: ""
+  # Google Play reviewer sign-in for the parent app: the demo family's mobile,
+  # its fixed code, and the household it opens. Supplied from
+  # apps/web/.env.local at submit time; blank here means the review login is
+  # off. The code is a password for ONE fictional family and nothing else —
+  # see the demo-household note. Keeping it here is what stops a deploy from
+  # quietly locking the reviewer out, which it did every time until 2026-09-16.
+  _REVIEW_LOGIN_MOBILE: ""
+  _REVIEW_LOGIN_CODE: ""
+  _REVIEW_LOGIN_HOUSEHOLD_ID: ""
+  # Cashfree PG (2026-08-27). The mode flag is baked into the client bundle
+  # (build-arg) AND set at runtime — a runtime-only NEXT_PUBLIC var is inert
+  # in the browser. App ID is the public client id (not secret); the secret
+  # key lives in Secret Manager — see CASHFREE_SECRET_KEY in --set-secrets.
+  # Payouts (salary / vendor transfers) likewise: CASHFREE_PAYOUT_CLIENT_SECRET
+  # and CASHFREE_PAYOUT_PUBLIC_KEY (the 2FA .pem) are in --set-secrets. Until
+  # 8 Oct 2026 neither was on the service at all, so every payout call and
+  # every payout webhook (HMAC keyed with the client secret) failed. Both
+  # secrets must EXIST in Secret Manager before a deploy that names them.
+  # Who gets told when fee receipts lose their breakdown. Comma-separated
+  # mobiles. Left empty here and supplied from apps/web/.env.local at submit
+  # time, like the SOS list — the check falls back to
+  # FLEET_EDGE_SOS_NOTIFY_MOBILE when this is blank, so it is never silent.
+  #
+  # It belongs in THIS file, not in `gcloud run services update`: anything set
+  # only on the service is one deploy away from reverting (that is how the
+  # Gemini-primary decision was silently undone on 2026-08-18).
+  _FEE_INTEGRITY_NOTIFY_MOBILE: ""
+  _NEXT_PUBLIC_PAYMENT_GATEWAY: ""
+  _CASHFREE_APP_ID: ""
+  _CASHFREE_ENV: "production"
+  _CASHFREE_VERIFICATION_APP_ID: ""
+  _CASHFREE_VERIFICATION_ENV: "production"
+  _CASHFREE_PAYOUT_CLIENT_ID: ""
+  _CASHFREE_PAYOUT_ENV: "sandbox"
+  _CASHFREE_PAYOUTS_ARMED: "false"
 
 steps:
   - name: gcr.io/cloud-builders/docker
@@ -52,6 +110,10 @@ steps:
       - NEXT_PUBLIC_SCHOOL_NAME=BHB International School
       - --build-arg
       - NEXT_PUBLIC_TENANT_SLUG=bhb-international
+      - --build-arg
+      - NEXT_PUBLIC_VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}
+      - --build-arg
+      - NEXT_PUBLIC_PAYMENT_GATEWAY=${_NEXT_PUBLIC_PAYMENT_GATEWAY}
       - .
 
   - name: gcr.io/cloud-builders/docker
@@ -72,16 +134,81 @@ steps:
       - --allow-unauthenticated
       - --port=3000
       - --memory=2Gi
-      - --cpu=2
-      - --min-instances=1
+      # 1, not 2 (2026-09-15). Measured p99 over three days: CPU 18% of two
+      # vCPU, memory 40% of 2 GiB. CPU is ~90% of the Cloud Run line under
+      # instance-based billing, so this halves it; memory stays at 2 GiB for
+      # PDF / spreadsheet spikes.
+      - --cpu=1
+      # 0, not 1. A warm 2 vCPU / 2 GiB instance billed around the clock was
+      # the largest single line on the GCP bill, for a school ERP used in
+      # office hours. The trade is a few seconds of cold start on the first
+      # request after an idle spell.
+      #
+      # This lives here rather than being set with `gcloud run services
+      # update`, because every deploy re-applies these flags — a value set only
+      # on the service is one deploy away from silently reverting. That is
+      # exactly what happened on 2026-08-22: min-instances was set to 0, and
+      # the next deploy put it straight back to 1.
+      - --min-instances=0
       - --max-instances=20
-      - --set-env-vars=^|^NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}|NEXT_PUBLIC_DEMO_AUTH=${_NEXT_PUBLIC_DEMO_AUTH}|NEXT_PUBLIC_SUPABASE_URL=${_NEXT_PUBLIC_SUPABASE_URL}|NEXT_PUBLIC_SUPABASE_ANON_KEY=${_NEXT_PUBLIC_SUPABASE_ANON_KEY}|NEXT_PUBLIC_SCHOOL_NAME=BHB International School|NEXT_PUBLIC_TENANT_SLUG=bhb-international|NODE_ENV=production|SUPABASE_SERVICE_ROLE_KEY=${_SUPABASE_SERVICE_ROLE_KEY}|CRON_SECRET=${_CRON_SECRET}|WA_DISPATCH_SECRET=${_WA_DISPATCH_SECRET}|MIRROR_SYNC_SECRET=${_MIRROR_SYNC_SECRET}|WHATSAPP_TOKEN=${_WHATSAPP_TOKEN}|WHATSAPP_PHONE_ID=${_WHATSAPP_PHONE_ID}|WHATSAPP_VERIFY_TOKEN=${_WHATSAPP_VERIFY_TOKEN}|WHATSAPP_WABA_ID=${_WHATSAPP_WABA_ID}|WHATSAPP_DEFAULT_COUNTRY_CODE=${_WHATSAPP_DEFAULT_COUNTRY_CODE}|WHATSAPP_GRAPH_VERSION=${_WHATSAPP_GRAPH_VERSION}|GOOGLE_MAPS_API_KEY=${_GOOGLE_MAPS_API_KEY}|GEMINI_API_KEY=${_GEMINI_API_KEY}|OPENAI_API_KEY=${_OPENAI_API_KEY}|AI_TUTOR_MODEL=${_AI_TUTOR_MODEL}|AI_PREFERRED_ENGINE=${_AI_PREFERRED_ENGINE}|GOOGLE_OAUTH_CLIENT_ID=${_GOOGLE_OAUTH_CLIENT_ID}|GOOGLE_OAUTH_CLIENT_SECRET=${_GOOGLE_OAUTH_CLIENT_SECRET}|PROTECTED_SUPER_ADMIN_EMAILS=${_PROTECTED_SUPER_ADMIN_EMAILS}
+      # 20 requests per instance, not Cloud Run's default 80 (2026-09-29).
+      # One Node process on one vCPU: when 13 staff signed in together while
+      # the WhatsApp bot was saving on every message, every page queued
+      # behind the same CPU and the ERP "froze". A burst now starts another
+      # instance instead. Billing is per request (--cpu-throttling), so the
+      # extra instances cost only while the burst lasts.
+      - --concurrency=20
+      # Request-based billing (2026-09-16). CPU is allocated only while a
+      # request is being handled, and an idle instance costs nothing.
+      #
+      # This used to be --no-cpu-throttling, so that work started without
+      # awaiting it (after() in the WhatsApp webhook, `void push…()` after a
+      # save) could finish after the reply. That billed CPU for the whole life
+      # of every instance: ₹375–409/day on 12–13 Sep with no app users.
+      #
+      # It is safe now because the reply itself waits for that work:
+      # lib/serverWorkTracker.server.ts (PR #217) holds res.end until every
+      # tracked task has settled, capped at 25 s. If Cloud Run logs ever show
+      # "[serverWork] reply released after … still running", that task needs
+      # a queue, not a longer hold.
+      - --cpu-throttling
+      # SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET, WA_DISPATCH_SECRET,
+      # MIRROR_SYNC_SECRET, WHATSAPP_TOKEN, WHATSAPP_VERIFY_TOKEN,
+      # GOOGLE_MAPS_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, and
+      # GOOGLE_OAUTH_CLIENT_SECRET moved to Secret Manager on 2026-08-12 (the
+      # plain value was readable via `gcloud run services describe`). This
+      # step used to push all ten back as literal strings on every deploy,
+      # which Cloud Run refuses once a var is secret-backed — "Cannot update
+      # environment variable [...] because it has already been set with a
+      # different type." They now go through --set-secrets below instead.
+      - --set-env-vars=^|^NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}|NEXT_PUBLIC_DEMO_AUTH=${_NEXT_PUBLIC_DEMO_AUTH}|NEXT_PUBLIC_SUPABASE_URL=${_NEXT_PUBLIC_SUPABASE_URL}|NEXT_PUBLIC_SUPABASE_ANON_KEY=${_NEXT_PUBLIC_SUPABASE_ANON_KEY}|NEXT_PUBLIC_SCHOOL_NAME=BHB International School|NEXT_PUBLIC_TENANT_SLUG=bhb-international|NODE_ENV=production|WHATSAPP_PHONE_ID=${_WHATSAPP_PHONE_ID}|WHATSAPP_WABA_ID=${_WHATSAPP_WABA_ID}|WHATSAPP_DEFAULT_COUNTRY_CODE=${_WHATSAPP_DEFAULT_COUNTRY_CODE}|WHATSAPP_GRAPH_VERSION=${_WHATSAPP_GRAPH_VERSION}|AI_TUTOR_MODEL=${_AI_TUTOR_MODEL}|AI_PREFERRED_ENGINE=${_AI_PREFERRED_ENGINE}|AI_DAILY_CALLS_PER_TENANT=${_AI_DAILY_CALLS_PER_TENANT}|AI_DAILY_TOKENS_PER_TENANT=${_AI_DAILY_TOKENS_PER_TENANT}|GOOGLE_OAUTH_CLIENT_ID=${_GOOGLE_OAUTH_CLIENT_ID}|PROTECTED_SUPER_ADMIN_EMAILS=${_PROTECTED_SUPER_ADMIN_EMAILS}|NEXT_PUBLIC_VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}|VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}|FLEET_EDGE_ALLOWED_IPS=${_FLEET_EDGE_ALLOWED_IPS}|FLEET_EDGE_SOS_NOTIFY_MOBILE=${_FLEET_EDGE_SOS_NOTIFY_MOBILE}|FEE_INTEGRITY_NOTIFY_MOBILE=${_FEE_INTEGRITY_NOTIFY_MOBILE}|NEXT_PUBLIC_PAYMENT_GATEWAY=${_NEXT_PUBLIC_PAYMENT_GATEWAY}|CASHFREE_APP_ID=${_CASHFREE_APP_ID}|CASHFREE_ENV=${_CASHFREE_ENV}|CASHFREE_VERIFICATION_APP_ID=${_CASHFREE_VERIFICATION_APP_ID}|CASHFREE_VERIFICATION_ENV=${_CASHFREE_VERIFICATION_ENV}|CASHFREE_PAYOUT_CLIENT_ID=${_CASHFREE_PAYOUT_CLIENT_ID}|CASHFREE_PAYOUT_ENV=${_CASHFREE_PAYOUT_ENV}|CASHFREE_PAYOUTS_ARMED=${_CASHFREE_PAYOUTS_ARMED}|REVIEW_LOGIN_MOBILE=${_REVIEW_LOGIN_MOBILE}|REVIEW_LOGIN_CODE=${_REVIEW_LOGIN_CODE}|REVIEW_LOGIN_HOUSEHOLD_ID=${_REVIEW_LOGIN_HOUSEHOLD_ID}
+      - --set-secrets=^|^SUPABASE_SERVICE_ROLE_KEY=school-erp-supabase-service-role-key:latest|CRON_SECRET=school-erp-cron-secret:latest|WA_DISPATCH_SECRET=school-erp-wa-dispatch-secret:latest|MIRROR_SYNC_SECRET=school-erp-mirror-sync-secret:latest|WHATSAPP_TOKEN=school-erp-whatsapp-token:latest|WHATSAPP_VERIFY_TOKEN=school-erp-whatsapp-verify-token:latest|GOOGLE_MAPS_API_KEY=school-erp-google-maps-api-key:latest|GEMINI_API_KEY=school-erp-gemini-api-key:latest|OPENAI_API_KEY=school-erp-openai-api-key:latest|GOOGLE_OAUTH_CLIENT_SECRET=school-erp-google-oauth-client-secret:latest|DIRECT_URL=school-erp-direct-url:latest|VAPID_PRIVATE_KEY=school-erp-vapid-private-key:latest|WA_APP_SECRET=school-erp-wa-app-secret:latest|SARVAM_API_KEY=school-erp-sarvam-api-key:latest|GMAIL_SA_KEY_JSON=school-erp-gmail-sa-key:latest|CASHFREE_SECRET_KEY=school-erp-cashfree-secret-key:latest|CASHFREE_PAYOUT_CLIENT_SECRET=school-erp-cashfree-payout-client-secret:latest|CASHFREE_PAYOUT_PUBLIC_KEY=school-erp-cashfree-payout-public-key:latest|GOOGLE_CALENDAR_API_KEY=school-erp-google-calendar-key:latest|YOUTUBE_API_KEY=school-erp-youtube-api-key:latest|BHASHINI_USER_ID=school-erp-bhashini-user-id:latest|BHASHINI_ULCA_API_KEY=school-erp-bhashini-ulca-api-key:latest|BHASHINI_INFERENCE_API_KEY=school-erp-bhashini-inference-api-key:latest
+
+  # Desk-cutover runtime flags. Applied as an additive env update from the
+  # COMMITTED deploy/desk-cutover-runtime.env — the trigger has no .env.local,
+  # so this is where those ~114 flags come from. This mirrors exactly what
+  # scripts/deploy-online.sh does after a local build; the values are all
+  # "true" (cutover complete) and match the live service.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        VARS=$$(grep -E '^[A-Za-z0-9_]+=' deploy/desk-cutover-runtime.env | paste -sd '@' -)
+        if [ -n "$$VARS" ]; then
+          gcloud run services update ${_SERVICE} \
+            --project=$PROJECT_ID --region=${_REGION} \
+            --update-env-vars="^@^$${VARS}"
+        fi
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest
 
-timeout: 1800s
+# Default pool (e2-standard-2), no machineType. E2_HIGHCPU_8 has no free tier:
+# ~8.4 min a build cost ~₹13.7, 61% of the Oct 2026 bill. The default pool's
+# 2,500 free build-minutes a month cover it; builds take longer, hence the
+# hour. Same 8 GB of RAM, so the Next build has the memory it had.
+timeout: 3600s
 options:
   logging: CLOUD_LOGGING_ONLY
-  machineType: E2_HIGHCPU_8

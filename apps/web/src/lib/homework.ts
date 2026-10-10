@@ -17,6 +17,9 @@ import {
   exportFilterReport,
   type ReportColumn,
 } from "@/lib/reportExport";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
+import { recordHomeworkDiaryDeletion } from "@/lib/homeworkNormalizedClient";
 
 const STORAGE_KEY = "bhb_homework_v1";
 
@@ -47,8 +50,17 @@ export type HomeworkPost = {
   dueAt: string;
   requiresSubmit: boolean;
   aiTutorHint: string;
+  /** Optional teacher-entered reference answer/rubric — grounds the AI grading assist on submitted photos; never shown to students/parents. */
+  referenceAnswer: string;
   status: HomeworkPostStatus;
   createdAt: string;
+  /**
+   * When this post was last created, edited or withdrawn. A save skips a
+   * post the database holds at a later time, so an older copy can't put an
+   * edit or a withdrawal back. "" on a copy from before this existed (or a
+   * sample): such a copy never overwrites a stored post.
+   */
+  updatedAt?: string;
   /** When parents were last WhatsApp-notified for this post */
   whatsappNotifiedAt: string;
   whatsappNotifiedCount: number;
@@ -70,6 +82,8 @@ export type DiaryEntry = {
   bodyEn: string;
   bodyHi: string;
   createdAt: string;
+  /** When this entry was last created or edited — see HomeworkPost.updatedAt. */
+  updatedAt?: string;
 };
 
 export type HomeworkSubmission = {
@@ -81,6 +95,25 @@ export type HomeworkSubmission = {
   submittedAt: string;
   teacherAckAt: string;
   teacherAckBy: string;
+  /**
+   * How it arrived. "whatsapp" when the family photographed the work and
+   * sent it to the school's number; "app" for the parent app's own upload,
+   * which is every row written before September 2026.
+   *
+   * These four fields must stay on the type even though the desk UI barely
+   * shows them: `pushHomeworkDeskToDb` upserts whole rows, so a field the
+   * desk does not carry is a field the next desk save sets back to its
+   * default — which is how this codebase has erased a book of records
+   * before. See homeworkSubmission.server.ts.
+   */
+  channel?: "app" | "whatsapp";
+  /** The four characters the teacher replies with. "" once answered. */
+  replyCode?: string;
+  /** What the teacher wrote back, in their own words, and when. */
+  teacherRemark?: string;
+  remarkAt?: string;
+  /** Where the photograph was filed. */
+  driveNote?: string;
 };
 
 export type HomeworkSeen = {
@@ -169,8 +202,10 @@ function normalizePost(p: Partial<HomeworkPost>): HomeworkPost {
     dueAt: p.dueAt || "",
     requiresSubmit: !!p.requiresSubmit,
     aiTutorHint: p.aiTutorHint || "",
+    referenceAnswer: p.referenceAnswer || "",
     status: p.status === "withdrawn" ? "withdrawn" : "published",
     createdAt: p.createdAt || nowIso(),
+    updatedAt: p.updatedAt || "",
     whatsappNotifiedAt: p.whatsappNotifiedAt || "",
     whatsappNotifiedCount:
       typeof p.whatsappNotifiedCount === "number" ? p.whatsappNotifiedCount : 0,
@@ -193,6 +228,7 @@ function normalizeDiary(d: Partial<DiaryEntry>): DiaryEntry {
     bodyEn: d.bodyEn || "",
     bodyHi: d.bodyHi || "",
     createdAt: d.createdAt || nowIso(),
+    updatedAt: d.updatedAt || "",
   };
 }
 
@@ -206,6 +242,14 @@ function normalizeSubmission(s: Partial<HomeworkSubmission>): HomeworkSubmission
     submittedAt: s.submittedAt || nowIso(),
     teacherAckAt: s.teacherAckAt || "",
     teacherAckBy: s.teacherAckBy || "",
+    // Carried, not dropped. This normaliser sits between the read and the
+    // push: a field it forgets is a field every desk save erases from the
+    // database, which is how a whole book of fee lines went once.
+    channel: s.channel === "whatsapp" ? "whatsapp" : "app",
+    replyCode: s.replyCode || "",
+    teacherRemark: s.teacherRemark || "",
+    remarkAt: s.remarkAt || "",
+    driveNote: s.driveNote || "",
   };
 }
 
@@ -226,7 +270,7 @@ export function loadHomework(): HomeworkState {
     return emptyHomeworkState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyHomeworkState();
     return normalizeState(JSON.parse(raw) as Partial<HomeworkState>);
   } catch {
@@ -239,13 +283,13 @@ export function saveHomework(state: HomeworkState): void {
 
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[homework] localStorage quota exceeded — relying on server DB sync", e);
   }
-  void import("@/lib/homeworkPersistence").then(({ scheduleHomeworkSync }) => {
+  void trackServerWork(import("@/lib/homeworkPersistence").then(({ scheduleHomeworkSync }) => {
     scheduleHomeworkSync(state);
-  });
+  }));
 }
 
 export function writeHomeworkLocalRaw(state: HomeworkState) {
@@ -254,7 +298,7 @@ export function writeHomeworkLocalRaw(state: HomeworkState) {
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[homework] localStorage quota exceeded — relying on server DB sync", e);
   }
@@ -298,6 +342,7 @@ export function seedHomeworkIfEmpty(ay?: string): HomeworkState {
         dueAt: date,
         requiresSubmit: true,
         aiTutorHint: subject.code,
+        referenceAnswer: "",
         status: "published",
         createdAt: nowIso(),
         whatsappNotifiedAt: "",
@@ -338,6 +383,7 @@ export type CreatePostInput = {
   dueAt?: string;
   requiresSubmit?: boolean;
   aiTutorHint?: string;
+  referenceAnswer?: string;
   attachments?: HomeworkAttachment[];
 };
 
@@ -364,6 +410,7 @@ export function createHomeworkPost(
     id: nid("hw"),
     status: "published",
     createdAt: nowIso(),
+    updatedAt: nowIso(),
     attachments: input.attachments || [],
   });
   const next = { ...state, posts: [post, ...state.posts] };
@@ -426,6 +473,7 @@ export function importClassroomHomeworkPosts(
       status: "published",
       source: "google_classroom",
       createdAt: nowIso(),
+      updatedAt: nowIso(),
       attachments: item.attachments || [],
       aiTutorHint: "",
     });
@@ -453,7 +501,7 @@ export function withdrawHomeworkPost(
   const i = state.posts.findIndex((p) => p.id === postId);
   if (i < 0) return { ok: false, error: "Post not found" };
   const posts = [...state.posts];
-  posts[i] = { ...posts[i], status: "withdrawn" };
+  posts[i] = { ...posts[i], status: "withdrawn", updatedAt: nowIso() };
   saveHomework({ ...state, posts });
   return { ok: true };
 }
@@ -475,6 +523,7 @@ export function updateHomeworkPost(
     attachments: input.attachments ?? prev.attachments,
     status: prev.status,
     createdAt: prev.createdAt,
+    updatedAt: nowIso(),
   });
   const posts = [...state.posts];
   posts[i] = post;
@@ -509,6 +558,7 @@ export function createDiaryEntry(
     ...input,
     id: nid("dy"),
     createdAt: nowIso(),
+    updatedAt: nowIso(),
   });
   saveHomework({ ...state, diary: [entry, ...state.diary] });
   return { ok: true, entry };
@@ -529,6 +579,7 @@ export function updateDiaryEntry(
     ...prev,
     ...input,
     createdAt: prev.createdAt,
+    updatedAt: nowIso(),
   });
   const diary = [...state.diary];
   diary[i] = entry;
@@ -543,6 +594,7 @@ export function deleteDiaryEntry(
   if (!state.diary.some((d) => d.id === entryId)) {
     return { ok: false, error: "Diary entry not found" };
   }
+  recordHomeworkDiaryDeletion(entryId);
   saveHomework({
     ...state,
     diary: state.diary.filter((d) => d.id !== entryId),
@@ -1001,10 +1053,33 @@ export function runHomeworkReport(
     homework?: HomeworkState;
     masters?: MastersState;
     sis?: SisState;
+    /**
+     * "classId|sectionId" keys a teacher may report on. Absent = the whole
+     * school (office). Until 2026-09-29 a teacher's Reports Centre export
+     * covered every class — and "missing homework days" listed every
+     * section in the school.
+     */
+    sectionKeys?: Set<string>;
   },
 ): { ok: true; message: string } | { ok: false; error: string } {
-  const hw = filters.homework ?? loadHomework();
-  const masters = filters.masters ?? loadMasters();
+  const keys = filters.sectionKeys;
+  const inScope = (classId: string, sectionId: string) =>
+    !keys || keys.has(`${classId}|${sectionId}`);
+  const rawHw = filters.homework ?? loadHomework();
+  const hw: HomeworkState = keys
+    ? {
+        ...rawHw,
+        posts: rawHw.posts.filter((p) => inScope(p.classId, p.sectionId)),
+        diary: rawHw.diary.filter((d) => inScope(d.classId, d.sectionId)),
+      }
+    : rawHw;
+  const rawMasters = filters.masters ?? loadMasters();
+  const masters: MastersState = keys
+    ? {
+        ...rawMasters,
+        sections: rawMasters.sections.filter((s) => inScope(s.classId, s.id)),
+      }
+    : rawMasters;
   const sis = filters.sis ?? loadSis();
   const note = describeFilters([
     `AY ${filters.academicYearCode}`,

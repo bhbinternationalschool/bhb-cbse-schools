@@ -6,6 +6,7 @@ import { ParentFeesPortal } from "@/components/parent/ParentFeesPortal";
 import { ParentHomeworkPortal } from "@/components/parent/ParentHomeworkPortal";
 import { ParentPtmPortal } from "@/components/parent/ParentPtmPortal";
 import { ParentStudentLeavePortal } from "@/components/parent/ParentStudentLeavePortal";
+import { ParentComplaintsPortal } from "@/components/parent/ParentComplaintsPortal";
 import { ParentSubjectsPortal } from "@/components/parent/ParentSubjectsPortal";
 import { ParentCommsPortal } from "@/components/parent/ParentCommsPortal";
 import { ParentProfileDocsPortal } from "@/components/parent/ParentProfileDocsPortal";
@@ -13,6 +14,7 @@ import { NotificationBell } from "@/components/shell/NotificationBell";
 import { CommsRunningStrip } from "@/components/shell/CommsRunningStrip";
 import { ParentVoiceBar } from "@/components/parent/ParentVoiceBar";
 import { PwaInstallBanner } from "@/components/pwa/PwaInstallBanner";
+import { UpdateBar } from "@/components/pwa/UpdateBar";
 import { ParentBottomNav } from "@/components/pwa/ParentBottomNav";
 import { parentPwaInstallCopy } from "@/lib/pwaApps";
 import { useMobileAppShell, usePwaStandalone } from "@/lib/pwaStandalone";
@@ -27,7 +29,8 @@ type PortalTab =
   | "notices"
   | "news"
   | "gallery"
-  | "profile";
+  | "profile"
+  | "complaints";
 
 export function ParentPortalClient({
   guardianName,
@@ -53,7 +56,8 @@ export function ParentPortalClient({
         raw === "leave" ||
         raw === "subjects" ||
         raw === "fees" ||
-        raw === "profile"
+        raw === "profile" ||
+        raw === "complaints"
       ) {
         setPortalTab(raw);
       }
@@ -99,6 +103,7 @@ export function ParentPortalClient({
     ["ptm", "PTM"],
     ["leave", "Leave"],
     ["subjects", "Subjects"],
+    ["complaints", "Complaints"],
   ] as const;
 
   const title =
@@ -108,7 +113,9 @@ export function ParentPortalClient({
         ? "PTM"
         : portalTab === "leave"
           ? "Leave"
-          : portalTab === "notices"
+          : portalTab === "complaints"
+            ? "Complaints"
+            : portalTab === "notices"
             ? "Notices"
             : portalTab === "news"
               ? "News"
@@ -128,7 +135,7 @@ export function ParentPortalClient({
         />
         <div className="px-4 pt-2">
           {mobileApp ? (
-            <div className="mx-auto flex max-w-lg items-center justify-between gap-3 pb-2">
+            <div className="mx-auto flex max-w-lg items-center justify-between gap-3 pb-2 md:max-w-2xl lg:max-w-3xl">
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
                   BHB Parent
@@ -144,11 +151,11 @@ export function ParentPortalClient({
             </div>
           ) : (
             <>
-              <div className="mx-auto flex max-w-lg items-center justify-end gap-2 pb-1">
+              <div className="mx-auto flex max-w-lg items-center justify-end gap-2 pb-1 md:max-w-2xl lg:max-w-3xl">
                 <ErpChatButton />
                 <NotificationBell persona="parent" parentName={guardianName} />
               </div>
-              <div className="mx-auto flex max-w-lg gap-1 overflow-x-auto rounded-lg bg-[rgba(32,48,80,0.06)] p-1">
+              <div className="mx-auto flex max-w-lg gap-1 overflow-x-auto rounded-lg bg-[rgba(32,48,80,0.06)] p-1 md:max-w-2xl lg:max-w-3xl">
                 {tabs.map(([id, label]) => (
                   <button
                     key={id}
@@ -166,6 +173,7 @@ export function ParentPortalClient({
               </div>
             </>
           )}
+          <UpdateBar />
           {!standalone ? (
             <PwaInstallBanner appId="parent" {...parentPwaInstallCopy()} />
           ) : null}
@@ -184,7 +192,7 @@ export function ParentPortalClient({
         </div>
       ) : (
         <div
-          className={`mx-auto min-h-screen max-w-lg ${
+          className={`mx-auto min-h-screen max-w-lg md:max-w-2xl lg:max-w-3xl ${
             mobileApp ? "bhb-parent-app-content pb-4" : "pb-16"
           }`}
         >
@@ -210,6 +218,9 @@ export function ParentPortalClient({
           ) : null}
           {portalTab === "leave" ? (
             <ParentStudentLeavePortal guardianDisplayName={guardianName} />
+          ) : null}
+          {portalTab === "complaints" ? (
+            <ParentComplaintsPortal guardianDisplayName={guardianName} />
           ) : null}
           {portalTab === "profile" ? (
             <ParentProfileDocsPortal

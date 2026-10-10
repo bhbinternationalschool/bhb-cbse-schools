@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchPlaceDetails } from "@/lib/mapsPlaces";
+import { mapsRateLimited } from "@/lib/mapsRateLimit";
 
 export async function GET(req: NextRequest) {
+  if (mapsRateLimited(req)) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
   const placeId = req.nextUrl.searchParams.get("placeId")?.trim() || "";
   const session = req.nextUrl.searchParams.get("session")?.trim() || "";
 

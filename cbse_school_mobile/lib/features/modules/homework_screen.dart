@@ -1,0 +1,314 @@
+import "package:flutter/material.dart";
+
+import "../../core/api/api_client.dart";
+import "../../core/theme/app_theme.dart";
+import "module_shell.dart";
+import "tutor_screen.dart";
+import "../../core/i18n/locale_controller.dart";
+import "../modules/dictate_field.dart";
+
+/// Homework feed for one section. Parents pass [studentId]; teachers pass
+/// [classId]+[sectionId] and get a compose button.
+class HomeworkScreen extends StatelessWidget {
+  const HomeworkScreen({
+    super.key,
+    required this.api,
+    required this.subtitle,
+    this.studentId,
+    this.classId,
+    this.sectionId,
+    this.canPost = false,
+    this.child,
+  });
+
+  final ApiClient api;
+  final String subtitle;
+
+  /// The child this feed belongs to, when a parent opened it — enables
+  /// "Ask tutor" on each item, with the assignment as the tutor's context.
+  final ParentChild? child;
+  final String? studentId;
+  final String? classId;
+  final String? sectionId;
+  final bool canPost;
+
+  @override
+  Widget build(BuildContext context) {
+    return ModuleShell<HomeworkFeed>(
+      guideId: "homework",
+      title: context.l10n.modHomeworkTitle,
+      subtitle: subtitle,
+      load: () => api.fetchHomeworkFeed(
+        studentId: studentId,
+        classId: classId,
+        sectionId: sectionId,
+      ),
+      emptyIcon: Icons.menu_book_outlined,
+      emptyText: canPost
+          ? context.l10n.modHomeworkEmptyTeacher
+          : context.l10n.modHomeworkEmptyParent,
+      isEmpty: (feed) => feed.items.isEmpty,
+      floatingActionButton: !canPost
+          ? null
+          : (context, feed, reload) => FloatingActionButton.extended(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              onPressed: () async {
+                final posted = await showModalBottomSheet<bool>(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.white,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(24),
+                    ),
+                  ),
+                  builder: (context) => _ComposeSheet(
+                    api: api,
+                    classId: classId!,
+                    sectionId: sectionId!,
+                    subjects: feed.subjects,
+                  ),
+                );
+                if (posted == true) reload();
+              },
+              icon: const Icon(Icons.add),
+              label: Text(context.l10n.postHomework),
+            ),
+      builder: (context, feed, _) => ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [
+          for (final item in feed.items)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: item.isDiary
+                                ? ModuleTone.amber.background
+                                : ModuleTone.purple.background,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            item.isDiary
+                                ? context.l10n.modDiaryLabel
+                                : item.subjectName.isEmpty
+                                ? context.l10n.modHomeworkLabel
+                                : item.subjectName,
+                            style: AppText.labelSmall.copyWith(
+                              color: item.isDiary
+                                  ? ModuleTone.amber.foreground
+                                  : ModuleTone.purple.foreground,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          formatDateLabel(item.date),
+                          style: AppText.labelMediumMuted,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      item.title,
+                      style: AppText.bodyMediumInk.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (item.body.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        item.body,
+                        style: AppText.bodySmallInk.copyWith(height: 1.4),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            [
+                              if (item.teacherName.isNotEmpty) item.teacherName,
+                              if ((item.dueAt ?? "").isNotEmpty)
+                                context.l10n.modHomeworkDueOn(
+                                  formatDateLabel(item.dueAt!),
+                                ),
+                            ].join(" · "),
+                            style: AppText.labelMediumMuted,
+                          ),
+                        ),
+                        if (child != null)
+                          TextButton.icon(
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => TutorScreen(
+                                  api: api,
+                                  context: TutorContext(
+                                    child: child!,
+                                    subjectLabel: item.subjectName,
+                                    homeworkTitle: item.title,
+                                    homeworkBody: item.body,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                            ),
+                            icon: const Icon(Icons.school_outlined, size: 16),
+                            label: Text(
+                              context.l10n.askTutor,
+                              style: AppText.bodySmall,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ComposeSheet extends StatefulWidget {
+  const _ComposeSheet({
+    required this.api,
+    required this.classId,
+    required this.sectionId,
+    required this.subjects,
+  });
+
+  final ApiClient api;
+  final String classId;
+  final String sectionId;
+  final List<SubjectRef> subjects;
+
+  @override
+  State<_ComposeSheet> createState() => _ComposeSheetState();
+}
+
+class _ComposeSheetState extends State<_ComposeSheet> {
+  final _title = TextEditingController();
+  final _body = TextEditingController();
+  String? _subjectId;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _body.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_saving) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await widget.api.postHomework(
+        classId: widget.classId,
+        sectionId: widget.sectionId,
+        subjectId: _subjectId ?? "",
+        title: _title.text.trim(),
+        bodyEn: _body.text.trim(),
+      );
+      if (mounted) Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = e.message;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = context.l10n.modHomeworkCouldNotPost;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(context.l10n.postHomework, style: AppText.titleMediumInk),
+          const SizedBox(height: 14),
+          DropdownButtonFormField<String>(
+            initialValue: _subjectId,
+            isExpanded: true,
+            decoration: InputDecoration(hintText: context.l10n.subject),
+            items: [
+              for (final s in widget.subjects)
+                DropdownMenuItem(value: s.id, child: Text(s.name)),
+            ],
+            onChanged: (v) => setState(() => _subjectId = v),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _title,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: InputDecoration(hintText: context.l10n.title),
+          ),
+          const SizedBox(height: 10),
+          DictateField(
+            controller: _body,
+            maxLines: 4,
+            textCapitalization: TextCapitalization.sentences,
+            hint: context.l10n.homeworkDetailsForParents,
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _error!,
+              style: AppText.bodySmall.copyWith(color: AppColors.danger),
+            ),
+          ],
+          const SizedBox(height: 14),
+          FilledButton(
+            onPressed: _saving ? null : _submit,
+            child: _saving
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text(context.l10n.publish),
+          ),
+        ],
+      ),
+    );
+  }
+}

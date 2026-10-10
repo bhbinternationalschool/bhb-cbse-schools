@@ -2,6 +2,9 @@
  * WhatsApp Business send helpers — Meta Cloud API and/or generic BSP URL.
  */
 
+import { isWithin24HourWindow, sendBlockFor } from "@/lib/waContactState.server";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
+
 export function waDigitsToE164India(mobile: string): string {
   const d = (mobile || "").replace(/\D/g, "");
   if (d.length === 10) return `91${d}`;
@@ -16,7 +19,7 @@ export function waNormalizeLocal10(from: string): string {
   return d.slice(-10);
 }
 
-function metaAccessToken(): string {
+export function metaAccessToken(): string {
   return (
     process.env.WA_META_ACCESS_TOKEN ||
     process.env.WHATSAPP_TOKEN ||
@@ -24,7 +27,19 @@ function metaAccessToken(): string {
   );
 }
 
-function metaPhoneNumberId(): string {
+/**
+ * The number a send goes out FROM.
+ *
+ * `fromPhoneNumberId` is the school's routing decision, resolved in Masters
+ * (per template, else per module, else the school default). It falls back to
+ * the single env-configured number so that a school which has never opened
+ * the Numbers screen keeps working exactly as before.
+ */
+export function resolvePhoneNumberId(fromPhoneNumberId?: string): string {
+  return (fromPhoneNumberId || "").trim() || metaPhoneNumberId();
+}
+
+export function metaPhoneNumberId(): string {
   return (
     process.env.WA_PHONE_NUMBER_ID ||
     process.env.WHATSAPP_PHONE_ID ||
@@ -32,7 +47,7 @@ function metaPhoneNumberId(): string {
   );
 }
 
-function metaGraphVersion(): string {
+export function metaGraphVersion(): string {
   return (
     process.env.WA_GRAPH_API_VERSION ||
     process.env.WHATSAPP_GRAPH_VERSION ||
@@ -45,10 +60,12 @@ export function waOutboundConfigured(): boolean {
   return !!(process.env.WA_BSP_TOKEN && process.env.WA_BSP_URL);
 }
 
-export async function sendWhatsAppText(opts: {
+async function sendWhatsAppTextRaw(opts: {
   toMobile: string;
   body: string;
   clientMessageId?: string;
+  /** Meta phone_number_id to send FROM; env default when absent. */
+  fromPhoneNumberId?: string;
 }): Promise<{ ok: boolean; providerId?: string; error?: string; mode: string }> {
   const to = waDigitsToE164India(opts.toMobile);
   const text = (opts.body || "").slice(0, 4096);
@@ -58,8 +75,20 @@ export async function sendWhatsAppText(opts: {
   if (!text) {
     return { ok: false, error: "Empty body", mode: "none" };
   }
+  {
+    // Opted out, or known not to be on WhatsApp — see sendBlockFor.
+    const blocked = await sendBlockFor(to);
+    if (blocked) return { ok: false, error: blocked.error, mode: "none" };
+  }
+  if (!(await isWithin24HourWindow(to))) {
+    return {
+      ok: false,
+      error: "Outside Meta's 24h session window — send an approved template instead",
+      mode: "none",
+    };
+  }
 
-  const phoneNumberId = metaPhoneNumberId();
+  const phoneNumberId = resolvePhoneNumberId(opts.fromPhoneNumberId);
   const metaToken = metaAccessToken();
   if (phoneNumberId && metaToken) {
     const version = metaGraphVersion();
@@ -154,17 +183,267 @@ export async function sendWhatsAppText(opts: {
   };
 }
 
+/**
+ * Send a real map pin.
+ *
+ * A parent who writes "लोकेशन भेजें" wants something they can tap and drive
+ * to, not a line of text. The text reply carries the address and a maps
+ * link; this puts the pin in the chat beside it.
+ *
+ * Meta-only: a location message is a Cloud API type, and the generic BSP
+ * shape for it is not standard. A failure is not worth failing the reply
+ * over — the address and the link have already been sent.
+ */
+async function sendWhatsAppLocationRaw(opts: {
+  toMobile: string;
+  latitude: number;
+  longitude: number;
+  name?: string;
+  address?: string;
+  fromPhoneNumberId?: string;
+}): Promise<{ ok: boolean; providerId?: string; error?: string; mode: string }> {
+  const to = waDigitsToE164India(opts.toMobile);
+  if (!to || to.length < 10) return { ok: false, error: "Invalid destination", mode: "none" };
+  if (!Number.isFinite(opts.latitude) || !Number.isFinite(opts.longitude)) {
+    return { ok: false, error: "No coordinates", mode: "none" };
+  }
+  {
+    // Opted out, or known not to be on WhatsApp — see sendBlockFor.
+    const blocked = await sendBlockFor(to);
+    if (blocked) return { ok: false, error: blocked.error, mode: "none" };
+  }
+  if (!(await isWithin24HourWindow(to))) {
+    return {
+      ok: false,
+      error: "Outside Meta's 24h session window",
+      mode: "none",
+    };
+  }
+
+  const phoneNumberId = resolvePhoneNumberId(opts.fromPhoneNumberId);
+  const metaToken = metaAccessToken();
+  if (!phoneNumberId || !metaToken) {
+    return { ok: false, mode: "stub", error: "Meta credentials missing" };
+  }
+
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/${metaGraphVersion()}/${phoneNumberId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${metaToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to,
+          type: "location",
+          location: {
+            latitude: opts.latitude,
+            longitude: opts.longitude,
+            name: (opts.name || "").slice(0, 1000),
+            address: (opts.address || "").slice(0, 1000),
+          },
+        }),
+      },
+    );
+    const json = (await res.json().catch(() => ({}))) as {
+      messages?: { id?: string }[];
+      error?: { message?: string };
+    };
+    if (!res.ok) {
+      return {
+        ok: false,
+        mode: "meta",
+        error: json.error?.message || `Meta HTTP ${res.status}`,
+      };
+    }
+    return { ok: true, mode: "meta", providerId: json.messages?.[0]?.id || "ok" };
+  } catch (e) {
+    return {
+      ok: false,
+      mode: "meta",
+      error: e instanceof Error ? e.message : "Meta send failed",
+    };
+  }
+}
+
+/** Send a WhatsApp Flow (interactive multi-step in-chat form). Meta-only —
+ * Flows are a Cloud API feature, no generic-BSP fallback makes sense here. */
+/**
+ * Send a file as a WhatsApp document inside the 24-hour session window.
+ *
+ * Two calls: upload the bytes to Meta's media store (private, no public URL
+ * needed) and send a document message by media id. Used for reports a staff
+ * member asked the command desk for — they have just written to the school,
+ * so the window is open. Meta's document limit is 100 MB; ours is far lower
+ * (a report is a few hundred KB).
+ */
+async function sendWhatsAppDocumentRaw(opts: {
+  toMobile: string;
+  bytes: Buffer;
+  filename: string;
+  mimeType?: string;
+  caption?: string;
+  fromPhoneNumberId?: string;
+}): Promise<{ ok: boolean; providerId?: string; mediaId?: string; error?: string; mode: string }> {
+  const to = waDigitsToE164India(opts.toMobile);
+  if (!to || to.length < 10) return { ok: false, error: "Invalid destination", mode: "none" };
+  {
+    const blocked = await sendBlockFor(to);
+    if (blocked) return { ok: false, error: blocked.error, mode: "none" };
+  }
+  if (!(await isWithin24HourWindow(to))) {
+    return { ok: false, error: "Outside Meta's 24h session window — a document needs an open conversation", mode: "none" };
+  }
+  const phoneNumberId = resolvePhoneNumberId(opts.fromPhoneNumberId);
+  const metaToken = metaAccessToken();
+  if (!phoneNumberId || !metaToken) return { ok: false, error: "WhatsApp (Meta) is not configured for documents", mode: "none" };
+  if (opts.bytes.length > 16 * 1024 * 1024) return { ok: false, error: "Document is larger than 16 MB", mode: "meta" };
+  const version = metaGraphVersion();
+  const mimeType = opts.mimeType || "application/pdf";
+  try {
+    const form = new FormData();
+    form.append("messaging_product", "whatsapp");
+    form.append("type", mimeType);
+    form.append("file", new Blob([new Uint8Array(opts.bytes)], { type: mimeType }), opts.filename);
+    const up = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/media`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${metaToken}` },
+      body: form,
+    });
+    const upJson = (await up.json().catch(() => ({}))) as { id?: string; error?: { message?: string } };
+    if (!up.ok || !upJson.id) {
+      return { ok: false, error: upJson.error?.message || `Meta media upload HTTP ${up.status}`, mode: "meta" };
+    }
+    const res = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${metaToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "document",
+        document: { id: upJson.id, filename: opts.filename.slice(0, 240), ...(opts.caption ? { caption: opts.caption.slice(0, 1024) } : {}) },
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { messages?: { id?: string }[]; error?: { message?: string } };
+    if (!res.ok) return { ok: false, error: json.error?.message || `Meta HTTP ${res.status}`, mediaId: upJson.id, mode: "meta" };
+    return { ok: true, providerId: json.messages?.[0]?.id || "ok", mediaId: upJson.id, mode: "meta" };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Document send failed", mode: "meta" };
+  }
+}
+
+async function sendWaFlowMessageRaw(opts: {
+  toMobile: string;
+  flowId: string;
+  flowToken: string;
+  headerText: string;
+  bodyText: string;
+  footerText?: string;
+  ctaText: string;
+  screenId: string;
+}): Promise<{ ok: boolean; providerId?: string; error?: string; mode: string }> {
+  const to = waDigitsToE164India(opts.toMobile);
+  if (!to || to.length < 10) {
+    return { ok: false, error: "Invalid destination", mode: "none" };
+  }
+  if (!opts.flowId) {
+    return { ok: false, error: "Missing flowId — flow not published yet", mode: "none" };
+  }
+  {
+    // Opted out, or known not to be on WhatsApp — see sendBlockFor.
+    const blocked = await sendBlockFor(to);
+    if (blocked) return { ok: false, error: blocked.error, mode: "none" };
+  }
+  if (!(await isWithin24HourWindow(to))) {
+    return {
+      ok: false,
+      error: "Outside Meta's 24h session window",
+      mode: "none",
+    };
+  }
+
+  const phoneNumberId = metaPhoneNumberId();
+  const metaToken = metaAccessToken();
+  if (!phoneNumberId || !metaToken) {
+    return {
+      ok: false,
+      mode: "stub",
+      error: "Configure WHATSAPP_TOKEN + WHATSAPP_PHONE_ID",
+    };
+  }
+  const version = metaGraphVersion();
+  const url = `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${metaToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "interactive",
+        interactive: {
+          type: "flow",
+          header: { type: "text", text: opts.headerText },
+          body: { text: opts.bodyText },
+          footer: opts.footerText ? { text: opts.footerText } : undefined,
+          action: {
+            name: "flow",
+            parameters: {
+              flow_message_version: "3",
+              flow_token: opts.flowToken,
+              flow_id: opts.flowId,
+              flow_cta: opts.ctaText,
+              flow_action: "navigate",
+              flow_action_payload: { screen: opts.screenId },
+            },
+          },
+        },
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      messages?: { id?: string }[];
+      error?: { message?: string };
+    };
+    if (!res.ok) {
+      return {
+        ok: false,
+        mode: "meta",
+        error: json.error?.message || `Meta HTTP ${res.status}`,
+      };
+    }
+    return {
+      ok: true,
+      mode: "meta",
+      providerId: json.messages?.[0]?.id || "ok",
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      mode: "meta",
+      error: e instanceof Error ? e.message : "Meta flow send failed",
+    };
+  }
+}
+
 export type WaTemplateComponent = {
   type: "header" | "body" | "button" | "carousel";
   sub_type?: string;
   index?: number;
   parameters?: {
-    type: "text" | "image" | "document" | "video" | "payload";
+    type: "text" | "image" | "document" | "video" | "payload" | "coupon_code";
     text?: string;
     image?: { link: string };
     document?: { link: string; filename?: string };
     video?: { link: string };
     payload?: string;
+    coupon_code?: string;
   }[];
   cards?: {
     card_index: number;
@@ -175,12 +454,14 @@ export type WaTemplateComponent = {
 /**
  * Send a Meta-approved WhatsApp template (incl. media header / carousel components).
  */
-export async function sendWhatsAppTemplate(opts: {
+async function sendWhatsAppTemplateRaw(opts: {
   toMobile: string;
   name: string;
   language: string;
   components?: WaTemplateComponent[];
   clientMessageId?: string;
+  /** Meta phone_number_id to send FROM; env default when absent. */
+  fromPhoneNumberId?: string;
 }): Promise<{ ok: boolean; providerId?: string; error?: string; mode: string }> {
   const to = waDigitsToE164India(opts.toMobile);
   if (!to || to.length < 10) {
@@ -189,10 +470,15 @@ export async function sendWhatsAppTemplate(opts: {
   if (!opts.name) {
     return { ok: false, error: "Missing template name", mode: "none" };
   }
+  {
+    // Opted out, or known not to be on WhatsApp — see sendBlockFor.
+    const blocked = await sendBlockFor(to);
+    if (blocked) return { ok: false, error: blocked.error, mode: "none" };
+  }
 
-  const phoneNumberId = metaPhoneNumberId();
+  const phoneNumberId = resolvePhoneNumberId(opts.fromPhoneNumberId);
   const metaToken = metaAccessToken();
-  const languageCode = (opts.language || "en").slice(0, 5);
+  const languageCode = (opts.language || SCHOOL_DEFAULT_WA_LANGUAGE).slice(0, 5);
 
   if (phoneNumberId && metaToken) {
     const version = metaGraphVersion();
@@ -295,6 +581,144 @@ export async function sendWhatsAppTemplate(opts: {
   };
 }
 
+/**
+ * Pure — whether a failed primary send is worth retrying against a fallback
+ * number. Only synchronous, number-specific failures qualify: a `"stub"`
+ * failure means the provider isn't configured at all, and a different
+ * number can't fix that. Opt-out/24h-window/Meta-rejection failures ARE
+ * worth retrying — that state is per-number, so a fallback may be in a
+ * completely different state than the primary.
+ */
+export function shouldRetryWithFallback(opts: {
+  primaryResult: { ok: boolean; mode: string };
+  primaryMobile: string;
+  fallbackMobile?: string;
+}): boolean {
+  if (opts.primaryResult.ok) return false;
+  if (opts.primaryResult.mode === "stub") return false;
+  const fallback = waDigitsToE164India(opts.fallbackMobile || "");
+  if (!fallback || fallback.length < 10) return false;
+  const primary = waDigitsToE164India(opts.primaryMobile);
+  if (fallback === primary) return false;
+  return true;
+}
+
+/**
+ * Send to `primaryMobile`; on a qualifying synchronous failure (see
+ * `shouldRetryWithFallback`), retry the same message against
+ * `fallbackMobile` — e.g. a household's `altMobile` when the primary
+ * WhatsApp number is opted out, outside the 24h session window, invalid,
+ * or rejected by Meta. Covers synchronous failures only — a message Meta
+ * accepts but later fails to deliver (reported async via the delivery
+ * webhook) is not retried here.
+ */
+/* ── Every send is logged (wa_messages) ────────────────────────────
+ * The five senders below are the only way this app puts a message on
+ * WhatsApp (plus lib/waInteractive's buttons, which log themselves), so
+ * logging here records homework, receipts, reminders, broadcasts, bot and
+ * staff replies alike — the ERP's chat view reads this (director, 9 Oct
+ * 2026). The *Raw functions do the sending, unchanged.
+ */
+
+async function logged<R extends { ok: boolean; providerId?: string; error?: string; mode: string }>(
+  send: Promise<R>,
+  entry: { to: string; kind: string; body?: string; templateName?: string; templateParams?: string[]; phoneNumberId?: string },
+): Promise<R> {
+  const result = await send;
+  const { logWaOutbound } = await import("@/lib/waMessageLog.server");
+  await logWaOutbound({ ...entry, result });
+  return result;
+}
+
+export async function sendWhatsAppText(opts: Parameters<typeof sendWhatsAppTextRaw>[0]) {
+  return logged(sendWhatsAppTextRaw(opts), { to: opts.toMobile, kind: "text", body: opts.body, phoneNumberId: opts.fromPhoneNumberId });
+}
+
+export async function sendWhatsAppLocation(opts: Parameters<typeof sendWhatsAppLocationRaw>[0]) {
+  return logged(sendWhatsAppLocationRaw(opts), {
+    to: opts.toMobile,
+    kind: "location",
+    body: [opts.name, opts.address, `${opts.latitude},${opts.longitude}`].filter(Boolean).join(" · "),
+    phoneNumberId: opts.fromPhoneNumberId,
+  });
+}
+
+export async function sendWhatsAppDocument(opts: Parameters<typeof sendWhatsAppDocumentRaw>[0]) {
+  return logged(sendWhatsAppDocumentRaw(opts), {
+    to: opts.toMobile,
+    kind: "document",
+    body: [`📄 ${opts.filename}`, opts.caption].filter(Boolean).join("\n"),
+    phoneNumberId: opts.fromPhoneNumberId,
+  });
+}
+
+export async function sendWaFlowMessage(opts: Parameters<typeof sendWaFlowMessageRaw>[0]) {
+  return logged(sendWaFlowMessageRaw(opts), { to: opts.toMobile, kind: "flow", body: [opts.headerText, opts.bodyText].filter(Boolean).join("\n") });
+}
+
+export async function sendWhatsAppTemplate(opts: Parameters<typeof sendWhatsAppTemplateRaw>[0]) {
+  const { templateParamsOf } = await import("@/lib/waMessageLog.server");
+  return logged(sendWhatsAppTemplateRaw(opts), {
+    to: opts.toMobile,
+    kind: "template",
+    templateName: opts.name,
+    templateParams: templateParamsOf(opts.components),
+    phoneNumberId: opts.fromPhoneNumberId,
+  });
+}
+
+export async function sendWaWithFailover(opts: {
+  primaryMobile: string;
+  fallbackMobile?: string;
+  body?: string;
+  template?: {
+    name: string;
+    language: string;
+    components?: WaTemplateComponent[];
+  };
+  clientMessageId?: string;
+  /** Which of the school's numbers to send FROM; env default when absent. */
+  fromPhoneNumberId?: string;
+}): Promise<{
+  ok: boolean;
+  providerId?: string;
+  error?: string;
+  mode: string;
+  usedFallback: boolean;
+  primaryError?: string;
+}> {
+  const send = (toMobile: string) =>
+    opts.template
+      ? sendWhatsAppTemplate({
+          toMobile,
+          name: opts.template.name,
+          language: opts.template.language,
+          components: opts.template.components,
+          clientMessageId: opts.clientMessageId,
+          fromPhoneNumberId: opts.fromPhoneNumberId,
+        })
+      : sendWhatsAppText({
+          toMobile,
+          body: opts.body || "",
+          clientMessageId: opts.clientMessageId,
+          fromPhoneNumberId: opts.fromPhoneNumberId,
+        });
+
+  const primaryResult = await send(opts.primaryMobile);
+  if (
+    !shouldRetryWithFallback({
+      primaryResult,
+      primaryMobile: opts.primaryMobile,
+      fallbackMobile: opts.fallbackMobile,
+    })
+  ) {
+    return { ...primaryResult, usedFallback: false };
+  }
+
+  const fallbackResult = await send(opts.fallbackMobile!);
+  return { ...fallbackResult, usedFallback: true, primaryError: primaryResult.error };
+}
+
 /** Build Meta body component from named vars + ordered variable keys. */
 export function buildWaTemplateBodyComponent(
   variableKeys: string[],
@@ -304,8 +728,39 @@ export function buildWaTemplateBodyComponent(
     type: "body",
     parameters: variableKeys.map((key) => ({
       type: "text" as const,
-      text: String(vars[key] ?? "").slice(0, 1024) || "—",
+      // Meta refuses a parameter with a line break, a tab or more than four
+      // spaces in a row (error 132018) — for every recipient at once.
+      text:
+        String(vars[key] ?? "")
+          .replace(/\s*[\r\n\t]+\s*/g, " ")
+          .replace(/ {5,}/g, "    ")
+          .trim()
+          .slice(0, 1024) || "—",
     })),
+  };
+}
+
+/** Build the mandatory OTP button component for an AUTHENTICATION template
+ * send — required whenever the template was created with an OTP button
+ * (Meta rejects the send otherwise: "template has buttons but request
+ * doesn't include them").
+ *
+ * Meta offers two different OTP button implementations, and they take
+ * different parameter shapes:
+ *   - sub_type "copy_code" — a quick-action button, parameter type
+ *     "coupon_code"
+ *   - sub_type "url" — a URL button whose target has a {{1}} placeholder
+ *     (Meta's own "https://www.whatsapp.com/otp/code/?...&code={{1}}"
+ *     pattern), parameter type "text"
+ * bhb_parent_login_otp (confirmed directly against Meta's template API,
+ * 2026-08-15) uses the second — sending "copy_code" against it fails with
+ * Meta error #132018 "issue with parameters in your template". */
+export function buildWaOtpCopyCodeButtonComponent(code: string): WaTemplateComponent {
+  return {
+    type: "button",
+    sub_type: "url",
+    index: 0,
+    parameters: [{ type: "text", text: code.slice(0, 15) }],
   };
 }
 

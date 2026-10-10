@@ -1,55 +1,81 @@
 "use client";
+/* ratchet-allow: raw_table — the <table> here is inside an HTML string written into a print popup, not JSX — there is no component to shell */
 
+import { PRINT_LETTERHEAD_CSS, printLetterheadHtml, printWhenImagesReady } from "@/lib/printLetterheadHtml";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { DayClosePanel } from "@/components/fees/DayClosePanel";
 import {
-  approveExpenseVoucher,
-  applyDayCloseHandover,
+  serverBankBalancePaise,
+  useServerBookPosition,
+} from "@/lib/accountsServerBook";
+import {
   bankBalancePaise,
-  BANK_PAYMENT_MODE_LABELS,
-  BANK_PAYMENT_MODES,
-  cancelExpenseVoucher,
+  bankMovementExists,
   cashInHandPaise,
-  createExpenseVoucher,
-  createOwnerLoan,
-  createVendorBill,
-  dashboardSnapshot,
   deleteBankAccount,
-  getExpenseCategory,
-  isExpenseVoucherCancelled,
-  listExpenseSubcategories,
-  listJournals,
-  listLinkedVendorsForExpense,
-  listOwnerLoanDue,
-  listRootExpenseCategories,
-  listUnifiedPayables,
-  markBillPaid,
-  nextExpenseVoucherNo,
-  payExpenseVoucher,
-  payUnifiedPayable,
   postBankMovement,
   postCashMovement,
-  postInterTrusteeTransfer,
-  postJournal,
   recordBankDeposit,
   recordOwnerCashHandover,
-  recordOwnerLoanPayment,
-  runRecurringExpensesForMonth,
-  saveAccounts,
-  sessionExpenseCategoryTotals,
-  setFiscalYearStatus,
-  syncTransportPayables,
   totalBankBalancePaise,
-  trialBalance,
-  profitAndLoss,
-  balanceSheet,
   upsertBankAccount,
+} from "@/lib/accountsCashBank";
+import {
+  sessionExpenseCategoryTotals,
   upsertExpenseCategory,
-  upsertRecurringRule,
+} from "@/lib/accountsExpenseCategories";
+import {
+  approveExpenseVoucher,
+  cancelExpenseVoucher,
+  createExpenseVoucher,
+  payExpenseVoucher,
+} from "@/lib/accountsExpenseVouchers";
+import {
+  listJournals,
+  postJournal,
+  setFiscalYearStatus,
+} from "@/lib/accountsJournal";
+import {
+  createOwnerLoan,
+  listOwnerLoanDue,
+  postInterTrusteeTransfer,
+  recordOwnerLoanPayment,
   upsertTrustee,
+} from "@/lib/accountsLoans";
+import {
+  getExpenseCategory,
+  listExpenseSubcategories,
+  listLinkedVendorsForExpense,
+  listRootExpenseCategories,
+  nextExpenseVoucherNo,
+  resolveBankForPaymentMode,
+} from "@/lib/accountsLookups";
+import {
+  isExpenseVoucherCancelled,
   vendorBillLineTotalPaise,
-  vendorOutstandingBalancePaise,
+} from "@/lib/accountsNormalize";
+import {
+  listUnifiedPayables,
+  payUnifiedPayable,
+  syncTransportPayables,
+} from "@/lib/accountsPayables";
+import { applyDayCloseHandover } from "@/lib/accountsPostings";
+import {
+  runRecurringExpensesForMonth,
+  upsertRecurringRule,
+} from "@/lib/accountsRecurring";
+import {
+  balanceSheet,
+  dashboardSnapshot,
+  profitAndLoss,
+  trialBalance,
+} from "@/lib/accountsReports";
+import { saveAccounts } from "@/lib/accountsStore";
+import {
+  BANK_PAYMENT_MODES,
+  BANK_PAYMENT_MODE_LABELS,
   VENDOR_BILL_UNITS,
   type AccountsState,
   type ExpensePaymentSplit,
@@ -58,7 +84,12 @@ import {
   type JournalLine,
   type OwnerLoanType,
   type PaymentMode,
-} from "@/lib/accounts";
+} from "@/lib/accountsTypes";
+import {
+  createVendorBill,
+  markBillPaid,
+  vendorOutstandingBalancePaise,
+} from "@/lib/accountsVendors";
 import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
 import {
   decodePaymentChannel,
@@ -88,6 +119,8 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 
 export type AccountsPanelProps = {
   state: AccountsState;
@@ -181,7 +214,9 @@ function printExpenseVoucher(v: ExpenseVoucher, state: AccountsState) {
       th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
       th { background: #f4f6f9; }
       h2 { font-size: 14px; margin: 20px 0 6px; }
+      ${PRINT_LETTERHEAD_CSS}
     </style></head><body>
+    ${printLetterheadHtml()}
     <h1>Expense voucher ${v.voucherNo || v.id.slice(-8)}</h1>
     <div class="meta">Date: ${v.date} · Paid on: ${v.paidOn || "—"} · Status: ${v.paymentStatus}</div>
     <div class="meta">${v.narration || ""}</div>
@@ -198,22 +233,23 @@ function printExpenseVoucher(v: ExpenseVoucher, state: AccountsState) {
       <tfoot><tr><th colspan="3">Paid</th><th style="text-align:right">${formatInr(v.paidPaise)}</th></tr></tfoot>
     </table>
     </body></html>`;
-  const win = window.open("", "_blank", "noopener,noreferrer");
+  // No "noopener": with it window.open returns null, and this returned
+  // before printing anything.
+  const win = window.open("", "_blank");
   if (!win) return;
   win.document.write(html);
   win.document.close();
-  win.focus();
-  win.print();
+  printWhenImagesReady(win);
 }
 
 const CARD =
-  "rounded-2xl border border-[rgba(32,48,80,0.12)] bg-white p-4";
+  "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
 const FIELD =
-  "w-full rounded-xl border border-[rgba(32,48,80,0.18)] px-3 py-2 text-sm";
+  "w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm";
 const BTN =
-  "rounded-xl bg-[#0f2744] px-4 py-2 text-sm font-medium text-white disabled:opacity-50";
+  "rounded-xl bg-[var(--primary)] px-4 py-2 text-sm font-medium text-[var(--primary-foreground)] disabled:opacity-50";
 const BTN_OUTLINE =
-  "rounded-lg border border-[rgba(32,48,80,0.18)] px-3 py-1.5 text-xs font-bold text-[var(--brand-deep)]";
+  "rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-bold text-[var(--brand-deep)]";
 
 const PAYMENT_MODES: PaymentMode[] = [
   "cash",
@@ -248,12 +284,59 @@ function StatCard({
   );
 }
 
-export function DashboardPanel({ state, onRefresh }: AccountsPanelProps) {
+export function DashboardPanel({ state, onRefresh, tick }: AccountsPanelProps) {
   void onRefresh;
   const snap = dashboardSnapshot(state);
   const dayClosePending = dayCloseNeedsAttention();
   const bankTotal = totalBankBalancePaise(state);
-  const todayBook = useMemo(() => buildDayBook(todayIso()), []);
+  const [backfillBusy, setBackfillBusy] = useState(false);
+  const [backfillNote, setBackfillNote] = useState<string | null>(null);
+
+  const doStoreBankBackfill = async () => {
+    if (backfillBusy) return;
+    setBackfillBusy(true);
+    setBackfillNote(null);
+    try {
+      const { runStoreBankBackfill } = await import(
+        "@/lib/accountsStoreBankBackfill"
+      );
+      const out = await runStoreBankBackfill();
+      if (!out.ok) {
+        setBackfillNote(out.error);
+        return;
+      }
+      const r = out.result;
+      const parts: string[] = [];
+      parts.push(
+        r.applied === 0
+          ? "Nothing new to bring in."
+          : `${r.applied} store movement(s) added — ${formatInr(Math.abs(r.appliedPaise))} ${r.appliedPaise < 0 ? "out of" : "into"} the bank book.`,
+      );
+      if (r.skippedExisting > 0)
+        parts.push(`${r.skippedExisting} already there.`);
+      if (r.unknownBank > 0)
+        parts.push(`${r.unknownBank} name a bank this desk does not have.`);
+      if (r.failed.length > 0)
+        parts.push(`${r.failed.length} could not be written (${r.failed[0]!.reason}).`);
+      setBackfillNote([...parts, ...out.notes].join(" "));
+    } catch {
+      setBackfillNote("Could not bring in the store's bank history.");
+    } finally {
+      setBackfillBusy(false);
+    }
+  };
+  // Recompute when the desk changes, not once at mount.
+  //
+  // The dependency list was empty, so this froze at whatever it read when the
+  // panel first rendered. buildDayBook already drops voided receipts — it
+  // filters on `!v.voidedAt` — but a receipt voided after the panel mounted
+  // kept showing in today's collection until the page was reloaded, which
+  // reads as the void not having worked.
+  //
+  // `tick` is the workspace's refresh counter and `state` changes when the
+  // void posts its reversal to accounts; either one is enough on its own, and
+  // both together mean no route in leaves it stale.
+  const todayBook = useMemo(() => buildDayBook(todayIso()), [tick, state]);
   const openApCount = listUnifiedPayables(state).length;
   const ownerDueCount = listOwnerLoanDue(todayIso(), state).length;
 
@@ -292,13 +375,34 @@ export function DashboardPanel({ state, onRefresh }: AccountsPanelProps) {
           <div className="text-xs text-[var(--muted)]">
             {state.bankAccounts.filter((b) => b.isActive).length} active account(s)
           </div>
+          {/* Store banked and paid through the server module, which never
+              wrote the desk bank book, so this tile counted fee receipts
+              coming in and nothing going out. New payments mirror themselves;
+              this brings over the history. Safe to press twice — every
+              movement is keyed by its store payment row and one already here
+              is skipped. */}
+          <button
+            type="button"
+            className="mt-2 text-[11px] font-semibold text-[var(--brand-mid)] underline decoration-dotted underline-offset-2 disabled:opacity-60"
+            disabled={backfillBusy}
+            onClick={() => void doStoreBankBackfill()}
+          >
+            {backfillBusy
+              ? "Bringing store payments in…"
+              : "Bring in store bank payments"}
+          </button>
+          {backfillNote ? (
+            <p className="mt-1 max-w-md text-[11px] text-[var(--muted)]">
+              {backfillNote}
+            </p>
+          ) : null}
         </div>
         {dayClosePending ? (
-          <span className="rounded-lg bg-[rgba(197,160,40,0.2)] px-3 py-1.5 text-xs font-bold text-[#8a6d12]">
+          <span className="rounded-lg bg-[rgba(197,160,40,0.2)] px-3 py-1.5 text-xs font-bold text-[var(--tone-amber)]">
             Day close pending approval
           </span>
         ) : (
-          <span className="rounded-lg bg-[#16a34a]/15 px-3 py-1.5 text-xs font-bold text-[#15803d]">
+          <span className="rounded-lg bg-[var(--success-soft)] px-3 py-1.5 text-xs font-bold text-[var(--success)]">
             Day close up to date
           </span>
         )}
@@ -415,17 +519,17 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
         <h3 className="text-sm font-bold text-[var(--brand-deep)]">
           Fee collections by mode
         </h3>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Mode</th>
               <th className="pb-2">Tenders</th>
               <th className="pb-2 text-right">Amount</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {book.modeTotals.map((m) => (
-              <tr key={m.mode} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={m.mode}>
                 <td className="py-2">{tenderModeLabel(m.mode)}</td>
                 <td className="py-2">{m.tenderCount}</td>
                 <td className="py-2 text-right font-medium">{formatInr(m.paise)}</td>
@@ -438,8 +542,8 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
 
       <section className={CARD}>
@@ -449,18 +553,18 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
         <p className="mt-0.5 text-[11px] text-[var(--muted)]">
           Paid vouchers on this date — cash / UPI / bank breakdown.
         </p>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Voucher</th>
               <th className="pb-2">Category lines</th>
               <th className="pb-2">Payment splits</th>
               <th className="pb-2 text-right">Paid</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {paidExpenses.map((v) => (
-              <tr key={v.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={v.id}>
                 <td className="py-2 align-top font-mono text-xs">
                   {v.voucherNo || v.id.slice(-8)}
                   <div className="mt-0.5 font-sans text-[10px] text-[var(--muted)]">
@@ -504,25 +608,25 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
 
       <section className={CARD}>
         <h3 className="text-sm font-bold text-[var(--brand-deep)]">
           Expenses · cash/bank ledger
         </h3>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Type</th>
               <th className="pb-2">Detail</th>
               <th className="pb-2 text-right">Amount</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {unpaidExpenses.map((v) => (
-              <tr key={v.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={v.id}>
                 <td className="py-2">Expense (unpaid)</td>
                 <td className="py-2">
                   {v.voucherNo} ·{" "}
@@ -534,7 +638,7 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
               </tr>
             ))}
             {cashMoves.map((e) => (
-              <tr key={e.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={e.id}>
                 <td className="py-2">
                   Cash {e.direction}
                   {e.sourceType === "expense_voucher" ? " · expense" : ""}
@@ -544,7 +648,7 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
               </tr>
             ))}
             {bankMoves.map((e) => (
-              <tr key={e.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={e.id}>
                 <td className="py-2">
                   Bank {e.direction === "dr" ? "Dr" : "Cr"}
                   {e.sourceType === "expense_voucher" ? " · expense" : ""}
@@ -560,8 +664,8 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
 
       <section className={CARD}>
@@ -572,19 +676,19 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
           Sales, returns, vendor bills &amp; AP — feeds trial balance, P&amp;L
           and balance sheet.
         </p>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Source</th>
               <th className="pb-2">Narration</th>
               <th className="pb-2 text-right">Amount</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {storeJournals.map((j) => {
               const amt = j.lines.reduce((n, l) => n + l.debitPaise, 0);
               return (
-                <tr key={j.id} className="border-t border-[rgba(32,48,80,0.08)]">
+                <tr key={j.id}>
                   <td className="py-2">{j.sourceType.replace(/_/g, " ")}</td>
                   <td className="py-2">{j.narration || j.voucherNo}</td>
                   <td className="py-2 text-right">{formatInr(amt)}</td>
@@ -598,8 +702,8 @@ export function DayBookPanel({ state }: AccountsPanelProps) {
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );
@@ -761,7 +865,7 @@ export function CashBookPanel({
           <button type="button" className={BTN} onClick={deposit}>
             Record deposit
           </button>
-          <hr className="border-[rgba(32,48,80,0.08)]" />
+          <hr className="border-[var(--border)]" />
           <input
             className={FIELD}
             placeholder="Handover amount ₹"
@@ -813,7 +917,7 @@ export function CashBookPanel({
               </ErpTableHead>
               <ErpTableBody>
                 {ledger.map((e) => (
-                  <tr key={e.id} className="hover:bg-[rgba(32,48,80,0.02)]">
+                  <tr key={e.id} className="hover:bg-[var(--surface-sunken)]">
                     <td className="px-4 py-2">{e.date}</td>
                     <td className="px-4 py-2">
                       {state.cashPools.find((p) => p.id === e.poolId)?.name}
@@ -849,6 +953,10 @@ export function BanksPanel({
     ...BANK_PAYMENT_MODES,
   ]);
   const [isActive, setIsActive] = useState(true);
+  // Balances come from the server book, never from the desk's own bank
+  // ledger — that ledger holds fee receipts only and reads several lakh high
+  // (see lib/accountsServerBook.ts).
+  const serverBook = useServerBookPosition();
 
   function resetForm() {
     setEditId("");
@@ -934,16 +1042,46 @@ export function BanksPanel({
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {state.bankAccounts.map((b) => (
-          <button
-            key={b.id}
-            type="button"
-            className={`${CARD} text-left ${editId === b.id ? "ring-2 ring-[var(--brand-gold)]" : ""} ${b.isActive === false ? "opacity-60" : ""}`}
-            onClick={() => loadBank(b.id)}
-          >
+          /*
+            The card stays clickable — that is the fast path — and the "…"
+            sits beside it rather than inside it, because a button inside a
+            button is not a thing a browser will render (director's row-menu
+            standard, 19 Sep 2026).
+          */
+          <div key={b.id} className="relative">
+            <RowActionMenu
+              row={b}
+              label="Bank actions"
+              className="absolute right-2 top-2 z-10"
+              actions={[
+                {
+                  id: "edit",
+                  label: "Edit this account",
+                  onSelect: (row) => loadBank(row.id),
+                },
+                {
+                  id: "delete",
+                  label: "Delete this account",
+                  tone: "danger",
+                  separatorAbove: true,
+                  onSelect: (row) => {
+                    // removeBank acts on the loaded account, so the row is
+                    // loaded first and the confirm names it.
+                    loadBank(row.id);
+                    window.setTimeout(() => removeBank(), 0);
+                  },
+                },
+              ]}
+            />
+            <button
+              type="button"
+              className={`${CARD} w-full text-left ${editId === b.id ? "ring-2 ring-[var(--brand-gold)]" : ""} ${b.isActive === false ? "opacity-60" : ""}`}
+              onClick={() => loadBank(b.id)}
+            >
             <div className="flex items-start justify-between gap-2">
               <div className="font-semibold text-[var(--brand-deep)]">{b.name}</div>
               {b.isActive === false ? (
-                <span className="rounded bg-[rgba(32,48,80,0.08)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--muted)]">
+                <span className="rounded bg-[var(--surface-sunken)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--muted)]">
                   Inactive
                 </span>
               ) : null}
@@ -953,7 +1091,17 @@ export function BanksPanel({
               {b.ifsc ? ` · ${b.ifsc}` : ""}
             </div>
             <div className="mt-2 text-lg font-bold">
-              {formatInr(bankBalancePaise(b.id, state))}
+              {(() => {
+                const paise = serverBankBalancePaise(serverBook.position, b.id);
+                if (paise !== null) return formatInr(paise);
+                // Never the desk figure as a stand-in: an em dash says "not
+                // known yet", a wrong number says something false.
+                return (
+                  <span className="text-[var(--muted)]">
+                    {serverBook.status === "loading" ? "…" : "—"}
+                  </span>
+                );
+              })()}
             </div>
             <div className="mt-2 flex flex-wrap gap-1">
               {b.paymentModes.map((mode) => (
@@ -965,7 +1113,8 @@ export function BanksPanel({
                 </span>
               ))}
             </div>
-          </button>
+            </button>
+          </div>
         ))}
         {state.bankAccounts.length === 0 ? (
           <div className={`${CARD} text-sm text-[var(--muted)]`}>
@@ -1041,7 +1190,7 @@ export function BanksPanel({
                   className={`rounded-xl border px-3 py-2 text-xs font-bold uppercase ${
                     on
                       ? "border-[#1565c0] bg-[#1565c0]/10 text-[#1565c0]"
-                      : "border-[rgba(32,48,80,0.15)] bg-white text-[var(--muted)]"
+                      : "border-[var(--border)] bg-[var(--card)] text-[var(--muted)]"
                   }`}
                   onClick={() => toggleMode(mode)}
                 >
@@ -1074,6 +1223,20 @@ export function ExpensesPanel({
   onError,
   actorName,
 }: AccountsPanelProps) {
+
+  /** Recurring expenses as a table: the day, what it costs, what it is. */
+  const recurringCols: DataTableColumn<(typeof state.recurringRules)[number]>[] = [
+    { key: "day", header: "Day", align: "right", sortable: true, value: (r) => r.dayOfMonth },
+    {
+      key: "amount", header: "Amount", align: "right", sortable: true,
+      value: (r) => r.amountPaise,
+      render: (r) => formatInr(r.amountPaise),
+    },
+    {
+      key: "category", header: "Category", sortable: true,
+      value: (r) => getExpenseCategory(r.categoryId, state)?.name ?? "—",
+    },
+  ];
   const rootCategories = useMemo(
     () => listRootExpenseCategories(state),
     [state.expenseCategories],
@@ -1357,6 +1520,23 @@ export function ExpensesPanel({
     (v) => !isExpenseVoucherCancelled(v),
   );
 
+  // Sort before the 30-row cut below, not after — sorting a slice would only
+  // reorder the first page and hide the rows the clerk is looking for.
+  const voucherSort = useTableSort(
+    openVouchers,
+    {
+      date: (v) => v.date,
+      voucherNo: (v) => v.voucherNo || null,
+      lines: (v) => v.lines.length || 1,
+      status: (v) => v.paymentStatus,
+      total: (v) => v.grandTotalPaise || v.amountPaise,
+      paid: (v) => v.paidPaise,
+      due: (v) => v.duePaise,
+    },
+    "date",
+    "desc",
+  );
+
   function cancelVoucher(voucherId: string) {
     const reason = window.prompt("Reason for cancellation (required):");
     if (!reason?.trim()) {
@@ -1408,7 +1588,7 @@ export function ExpensesPanel({
         </div>
 
         {totals.paid > 0 ? (
-          <div className="space-y-2 rounded-lg border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.03)] p-3">
+          <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 className="text-xs font-bold text-[var(--brand-deep)]">
                 Payment modes (split cash + UPI / bank)
@@ -1433,7 +1613,7 @@ export function ExpensesPanel({
                   return (
                     <div
                       key={s.key}
-                      className="space-y-1 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white p-2"
+                      className="space-y-1 rounded-lg border border-[var(--border)] bg-[var(--card)] p-2"
                     >
                       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
                         <div>
@@ -1536,9 +1716,9 @@ export function ExpensesPanel({
         ) : null}
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-xs">
-            <thead>
-              <tr className="text-left text-[var(--muted)]">
+          <ErpTable minWidth="min-w-[900px]" className="text-xs">
+            <ErpTableHead>
+              <tr>
                 <th className="pb-2 pr-2">Category</th>
                 <th className="pb-2 pr-2">Sub-category</th>
                 <th className="pb-2 pr-2">Vendor</th>
@@ -1550,8 +1730,8 @@ export function ExpensesPanel({
                 <th className="pb-2 pr-2 text-right">Due ₹</th>
                 <th className="pb-2" />
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {lines.map((l) => {
                 const subs = l.categoryId
                   ? listExpenseSubcategories(l.categoryId, state)
@@ -1564,7 +1744,7 @@ export function ExpensesPanel({
                     )
                   : [];
                 return (
-                  <tr key={l.id} className="border-t border-[rgba(32,48,80,0.08)]">
+                  <tr key={l.id}>
                     <td className="py-1 pr-2">
                       <select
                         className={FIELD}
@@ -1721,9 +1901,9 @@ export function ExpensesPanel({
                   </tr>
                 );
               })}
-            </tbody>
+            </ErpTableBody>
             <tfoot>
-              <tr className="border-t-2 border-[rgba(32,48,80,0.15)] font-bold">
+              <tr className="border-t-2 border-[var(--border)] font-bold">
                 <td colSpan={3} className="py-2 text-right text-[var(--muted)]">
                   Totals
                 </td>
@@ -1735,7 +1915,7 @@ export function ExpensesPanel({
                 <td />
               </tr>
             </tfoot>
-          </table>
+          </ErpTable>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -1764,20 +1944,17 @@ export function ExpensesPanel({
             Paid vouchers on this date (category & sub-category totals).
           </p>
           <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[480px] text-sm">
-              <thead>
-                <tr className="text-left text-[var(--muted)]">
+            <ErpTable minWidth="min-w-[480px]">
+              <ErpTableHead>
+                <tr>
                   <th className="pb-2">Category</th>
                   <th className="pb-2">Sub-category</th>
                   <th className="pb-2 text-right">Amount</th>
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {sessionTotals.map((row) => (
-                  <tr
-                    key={`${row.categoryId}:${row.subcategoryId}`}
-                    className="border-t border-[rgba(32,48,80,0.08)]"
-                  >
+                  <tr key={`${row.categoryId}:${row.subcategoryId}`}>
                     <td className="py-2">{row.categoryName}</td>
                     <td className="py-2">{row.subcategoryName}</td>
                     <td className="py-2 text-right font-medium">
@@ -1785,7 +1962,7 @@ export function ExpensesPanel({
                     </td>
                   </tr>
                 ))}
-              </tbody>
+              </ErpTableBody>
               <tfoot>
                 <tr className="border-t-2 font-bold">
                   <td colSpan={2} className="py-2 text-right">
@@ -1798,7 +1975,7 @@ export function ExpensesPanel({
                   </td>
                 </tr>
               </tfoot>
-            </table>
+            </ErpTable>
           </div>
         </section>
       ) : null}
@@ -1836,19 +2013,19 @@ export function ExpensesPanel({
             <ErpTable minWidth="min-w-[720px]">
               <ErpTableHead>
                 <tr>
-                  <th className="px-4 py-2.5 font-bold">Date</th>
-                  <th className="px-4 py-2.5 font-bold">Voucher</th>
-                  <th className="px-4 py-2.5 font-bold">Lines</th>
-                  <th className="px-4 py-2.5 font-bold">Status</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Total</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Paid</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Due</th>
+                  <ErpSortTh sort={voucherSort} field="date">Date</ErpSortTh>
+                  <ErpSortTh sort={voucherSort} field="voucherNo">Voucher</ErpSortTh>
+                  <ErpSortTh sort={voucherSort} field="lines">Lines</ErpSortTh>
+                  <ErpSortTh sort={voucherSort} field="status">Status</ErpSortTh>
+                  <ErpSortTh sort={voucherSort} field="total" align="right">Total</ErpSortTh>
+                  <ErpSortTh sort={voucherSort} field="paid" align="right">Paid</ErpSortTh>
+                  <ErpSortTh sort={voucherSort} field="due" align="right">Due</ErpSortTh>
                   <th className="px-4 py-2.5 font-bold">Actions</th>
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {openVouchers.slice(0, 30).map((v) => (
-                  <tr key={v.id} className="hover:bg-[rgba(32,48,80,0.02)]">
+                {voucherSort.rows.slice(0, 30).map((v) => (
+                  <tr key={v.id} className="hover:bg-[var(--surface-sunken)]">
                     <td className="px-4 py-2">{v.date}</td>
                     <td className="px-4 py-2 font-mono text-xs">{v.voucherNo || v.id.slice(-8)}</td>
                     <td className="px-4 py-2 text-xs text-[var(--muted)]">
@@ -1861,54 +2038,49 @@ export function ExpensesPanel({
                     <td className="px-4 py-2 text-right">{formatInr(v.paidPaise)}</td>
                     <td className="px-4 py-2 text-right">{formatInr(v.duePaise)}</td>
                     <td className="px-4 py-2">
-                    <div className="flex flex-wrap gap-1">
-                      {v.paymentStatus === "pending_approval" ? (
-                        <button
-                          type="button"
-                          className={BTN_OUTLINE}
-                          onClick={() => {
-                            const r = approveExpenseVoucher(v.id, actorName);
+                    {/* The row-menu standard, 19 Sep 2026: four buttons
+                        whose set changed with the voucher's state became one
+                        "…" that is always in the same place. */}
+                    <RowActionMenu
+                      row={v}
+                      label="Voucher actions"
+                      actions={[
+                        {
+                          id: "approve",
+                          label: "Approve",
+                          hidden: (row) => row.paymentStatus !== "pending_approval",
+                          onSelect: (row) => {
+                            const r = approveExpenseVoucher(row.id, actorName);
                             if (!r.ok) onError(r.error);
                             else {
                               onFlash("Approved");
                               onRefresh();
                             }
-                          }}
-                        >
-                          Approve
-                        </button>
-                      ) : null}
-                      {v.paymentStatus === "draft" ||
-                      v.paymentStatus === "partial" ? (
-                        <button
-                          type="button"
-                          className={BTN_OUTLINE}
-                          onClick={() =>
-                            payVoucher(v.id, v.mode, v.duePaise)
-                          }
-                        >
-                          Pay due
-                        </button>
-                      ) : null}
-                      {!isExpenseVoucherCancelled(v) ? (
-                        <button
-                          type="button"
-                          className={BTN_OUTLINE}
-                          onClick={() => cancelVoucher(v.id)}
-                        >
-                          Cancel
-                        </button>
-                      ) : null}
-                      {v.paidPaise > 0 ? (
-                        <button
-                          type="button"
-                          className={BTN_OUTLINE}
-                          onClick={() => printExpenseVoucher(v, state)}
-                        >
-                          Print
-                        </button>
-                      ) : null}
-                    </div>
+                          },
+                        },
+                        {
+                          id: "pay",
+                          label: "Pay what is due",
+                          hidden: (row) =>
+                            !(row.paymentStatus === "draft" || row.paymentStatus === "partial"),
+                          onSelect: (row) => payVoucher(row.id, row.mode, row.duePaise),
+                        },
+                        {
+                          id: "print",
+                          label: "Print the voucher",
+                          hidden: (row) => !(row.paidPaise > 0),
+                          onSelect: (row) => printExpenseVoucher(row, state),
+                        },
+                        {
+                          id: "cancel",
+                          label: "Cancel this voucher",
+                          tone: "danger",
+                          separatorAbove: true,
+                          hidden: (row) => isExpenseVoucherCancelled(row),
+                          onSelect: (row) => cancelVoucher(row.id),
+                        },
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}
@@ -1957,16 +2129,516 @@ export function ExpensesPanel({
             Generate for month
           </button>
         </div>
-        <ul className="text-sm text-[var(--muted)]">
-          {state.recurringRules.map((r) => (
-            <li key={r.id}>
-              Day {r.dayOfMonth} · {formatInr(r.amountPaise)} ·{" "}
-              {getExpenseCategory(r.categoryId, state)?.name}
-            </li>
-          ))}
-        </ul>
+        <DataTable
+          columns={recurringCols}
+          rows={state.recurringRules}
+          rowKey={(r) => r.id}
+          minWidth="min-w-[420px]"
+          emptyTitle="No recurring expenses set"
+        />
       </section>
     </div>
+  );
+}
+
+/* ─── Store vendor dues, straight from the ledger ──────────── */
+
+type StoreVendorDue = {
+  vendorId: string;
+  name: string;
+  gstin: string;
+  phone: string;
+  contactPerson: string;
+  paymentTermsDays: number;
+  ledgerDuePaise: number;
+  billsOpenPaise: number;
+  openBillCount: number;
+  oldestBillDate: string;
+};
+
+/** One open store bill, as `listVendorBills` returns it. */
+type StoreVendorBill = {
+  id: string;
+  billNo: string;
+  supplierInvoiceNo: string;
+  grnNo: string;
+  billDate: string;
+  dueDate: string;
+  totalPaise: number;
+  paidPaise: number;
+  balancePaise: number;
+  status: string;
+  overdueDays: number;
+};
+
+/**
+ * What the school owes its store suppliers, read from account 2000.
+ *
+ * Separate from "Unified payables" above on purpose. That list is built from
+ * the browser's own accounts state; this one is the ledger's answer, and the
+ * two are not the same source. Showing them apart means a supplier who appears
+ * in one and not the other is visible rather than quietly merged away.
+ *
+ * The store's own open-bill total is shown beside the ledger balance. They
+ * should agree to the paisa; when they do not, a bill moved on one side only,
+ * and that is worth a look rather than an average.
+ */
+function StoreVendorDues() {
+  const [rows, setRows] = useState<StoreVendorDue[] | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [openVendor, setOpenVendor] = useState<string | null>(null);
+  const [billsByVendor, setBillsByVendor] = useState<
+    Record<string, StoreVendorBill[]>
+  >({});
+  const [billsBusy, setBillsBusy] = useState(false);
+  const [pay, setPay] = useState<{
+    billId: string;
+    billNo: string;
+    vendorId: string;
+    balancePaise: number;
+    amount: string;
+    mode: string;
+    paidOn: string;
+    reference: string;
+  } | null>(null);
+  const [paying, setPaying] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/ledger", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "vendor-dues" }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        dues?: StoreVendorDue[];
+        error?: string;
+      };
+      if (!res.ok || !json.ok) {
+        setError(json.error || "Could not read vendor dues");
+        setRows(null);
+      } else {
+        setError("");
+        setRows(json.dues ?? []);
+      }
+    } catch {
+      setError("Could not reach the server");
+      setRows(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const loadBills = async (vendorId: string) => {
+    setBillsBusy(true);
+    try {
+      const res = await fetch("/api/ledger", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "vendor-bills", vendorId }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        bills?: StoreVendorBill[];
+        error?: string;
+      };
+      if (res.ok && json.ok) {
+        setBillsByVendor((m) => ({ ...m, [vendorId]: json.bills ?? [] }));
+      } else {
+        setNotice(json.error || "Could not read this vendor's bills");
+      }
+    } catch {
+      setNotice("Could not reach the server");
+    } finally {
+      setBillsBusy(false);
+    }
+  };
+
+  const toggleVendor = (vendorId: string) => {
+    if (openVendor === vendorId) {
+      setOpenVendor(null);
+      return;
+    }
+    setOpenVendor(vendorId);
+    setPay(null);
+    void loadBills(vendorId);
+  };
+
+  const submitPay = async () => {
+    if (!pay || paying) return;
+    const amountPaise = paiseFromInr(pay.amount);
+    if (amountPaise <= 0) {
+      setNotice("Enter the amount to pay");
+      return;
+    }
+    setPaying(true);
+    try {
+      const res = await fetch("/api/ledger", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "pay-vendor-bill",
+          billId: pay.billId,
+          amountPaise,
+          mode: pay.mode,
+          paidOn: pay.paidOn || undefined,
+          reference: pay.reference.trim(),
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        balancePaise?: number;
+        paymentNo?: string;
+        ledgerVoucherNo?: string;
+        error?: string;
+      };
+      if (!res.ok || !json.ok) {
+        setNotice(json.error || "Payment failed");
+        return;
+      }
+      // Mirror the payment into the DESK bank book.
+      //
+      // The store pays through inv_pay_vendor_bill, which writes the server
+      // book (Dr 2000 / Cr tender) and nothing else. The desk's own bank
+      // ledger never saw a store payment, so the Accounts dashboard's "Bank
+      // balances" counted fee receipts coming IN and not one rupee going OUT
+      // — 170 debits, zero credits, while the book carried 3.06 lakh of bank
+      // payments the desk had never heard of.
+      //
+      // Written here rather than in the RPC on purpose: a desk push deletes
+      // accounts_desk_bank_ledger rows whose ids it does not carry, so a row
+      // inserted server-side would be destroyed by the next browser sync.
+      //
+      // Never allowed to disturb the payment itself — that has already
+      // committed on the server, and a desk-side problem must not report a
+      // successful payment as failed.
+      let deskNote = "";
+      if (pay.mode !== "cash") {
+        try {
+          const source = json.paymentNo || `${pay.billId}:${amountPaise}`;
+          if (!bankMovementExists("inv_vendor_payment", source)) {
+            const bankId = resolveBankForPaymentMode(pay.mode as PaymentMode);
+            if (bankId) {
+              const moved = postBankMovement({
+                bankId,
+                date: pay.paidOn || undefined,
+                direction: "cr",
+                amountPaise,
+                mode: pay.mode as PaymentMode,
+                sourceType: "inv_vendor_payment",
+                sourceId: source,
+                narration: `Vendor payment · ${pay.billNo}`,
+                transactionRef: pay.reference.trim(),
+              });
+              if (!moved.ok) deskNote = ` · bank book not updated: ${moved.error}`;
+            } else {
+              deskNote =
+                ` · no bank is set up for ${pay.mode}, so the desk bank book was not updated`;
+            }
+          }
+        } catch {
+          deskNote = " · the desk bank book could not be updated";
+        }
+      }
+
+      setNotice(
+        `Paid ${formatInr(amountPaise)} against ${pay.billNo} — ` +
+          `${formatInr(json.balancePaise ?? 0)} still outstanding` +
+          (json.ledgerVoucherNo ? ` · voucher ${json.ledgerVoucherNo}` : "") +
+          deskNote,
+      );
+      const vendorId = pay.vendorId;
+      setPay(null);
+      await Promise.all([load(), loadBills(vendorId)]);
+    } catch {
+      setNotice("Could not reach the server");
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  const owing = (rows ?? []).filter((r) => r.ledgerDuePaise !== 0);
+  const totalPaise = owing.reduce((n, r) => n + r.ledgerDuePaise, 0);
+
+  return (
+    <section className={CARD}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-bold text-[var(--brand-deep)]">
+            Store vendors
+          </h3>
+          <p className="text-[11px] text-[var(--muted)]">
+            Every vendor created in Store → Vendors, with what the ledger says
+            the school owes. Click a vendor to see and pay its open bills —
+            the payment settles the store bill and posts to the books in one
+            step.
+          </p>
+        </div>
+        <button type="button" className={BTN_OUTLINE} onClick={() => void load()}>
+          Refresh
+        </button>
+      </div>
+
+      {error ? (
+        <p className="rounded-lg border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2 text-xs text-[var(--danger)]">
+          {error}
+        </p>
+      ) : null}
+
+      {notice ? (
+        <p className="mb-2 rounded-lg border border-[var(--border)] bg-[var(--accent)] px-3 py-1.5 text-xs text-[var(--brand-deep)]">
+          {notice}
+        </p>
+      ) : null}
+
+      {loading && !rows ? (
+        <p className="py-3 text-sm text-[var(--muted)]">Loading vendor dues…</p>
+      ) : null}
+
+      {rows && rows.length === 0 ? (
+        <p className="py-3 text-sm text-[var(--muted)]">
+          No store vendors yet. Create them in Store → Vendors; they appear
+          here immediately, and their bills become payable here as soon as a
+          goods receipt raises one.
+        </p>
+      ) : null}
+
+      {rows && rows.length > 0 ? (
+        <>
+          <ErpTable minWidth="min-w-full">
+            <ErpTableHead>
+              <tr>
+                <th className="pb-2 text-left">Vendor</th>
+                <th className="pb-2 text-left">Contact</th>
+                <th className="pb-2 text-left">GSTIN</th>
+                <th className="pb-2 text-right">Owed (books)</th>
+                <th className="pb-2 text-right">Open bills</th>
+                <th className="pb-2 text-left">Oldest</th>
+                <th className="pb-2 text-right">Action</th>
+              </tr>
+            </ErpTableHead>
+            <ErpTableBody>
+              {rows.map((r) => {
+                const agrees = r.ledgerDuePaise === r.billsOpenPaise;
+                const expanded = openVendor === r.vendorId;
+                const bills = billsByVendor[r.vendorId] ?? [];
+                return (
+                  <Fragment key={r.vendorId}>
+                    <tr>
+                      <td className="py-2 font-semibold">
+                        {r.name}
+                        {r.paymentTermsDays > 0 ? (
+                          <span className="ml-1 text-[11px] font-normal text-[var(--muted)]">
+                            {r.paymentTermsDays}d terms
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="py-2 text-[var(--muted)]">
+                        {r.phone || r.contactPerson || "—"}
+                      </td>
+                      <td className="py-2 text-[var(--muted)]">{r.gstin || "—"}</td>
+                      <td className="py-2 text-right font-semibold">
+                        {formatInr(r.ledgerDuePaise)}
+                      </td>
+                      <td
+                        className={`py-2 text-right ${
+                          agrees ? "text-[var(--muted)]" : "text-[var(--danger)]"
+                        }`}
+                        title={
+                          agrees
+                            ? undefined
+                            : "The store's bills and the ledger disagree — a bill moved on one side only"
+                        }
+                      >
+                        {formatInr(r.billsOpenPaise)}
+                        {r.openBillCount > 0 ? (
+                          <span className="ml-1 text-[11px] text-[var(--muted)]">
+                            ({r.openBillCount})
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="py-2 text-[var(--muted)]">
+                        {r.oldestBillDate || "—"}
+                      </td>
+                      <td className="py-2 text-right">
+                        <button
+                          type="button"
+                          className={BTN_OUTLINE}
+                          onClick={() => toggleVendor(r.vendorId)}
+                        >
+                          {expanded
+                            ? "Close"
+                            : r.openBillCount > 0
+                              ? "Bills / pay"
+                              : "Bills"}
+                        </button>
+                      </td>
+                    </tr>
+                    {expanded ? (
+                      <tr>
+                        <td colSpan={7} className="pb-3">
+                          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-2">
+                            {billsBusy && !bills.length ? (
+                              <p className="px-1 py-2 text-xs text-[var(--muted)]">
+                                Loading bills…
+                              </p>
+                            ) : bills.length === 0 ? (
+                              <p className="px-1 py-2 text-xs text-[var(--muted)]">
+                                No open bills. A bill is raised in Store when
+                                goods are received against this vendor.
+                              </p>
+                            ) : (
+                              <ul className="space-y-2">
+                                {bills.map((b) => (
+                                  <li
+                                    key={b.id}
+                                    className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-2"
+                                  >
+                                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                                      <span className="font-semibold text-[var(--brand-deep)]">
+                                        {b.billNo}
+                                        {b.supplierInvoiceNo
+                                          ? ` · inv ${b.supplierInvoiceNo}`
+                                          : ""}
+                                        {b.grnNo ? ` · ${b.grnNo}` : ""}
+                                      </span>
+                                      <span className="text-[var(--muted)]">
+                                        {b.billDate}
+                                        {b.overdueDays > 0 ? (
+                                          <span className="ml-1 font-semibold text-[var(--danger)]">
+                                            {b.overdueDays}d overdue
+                                          </span>
+                                        ) : null}
+                                      </span>
+                                      <span>
+                                        {formatInr(b.totalPaise)} billed ·{" "}
+                                        {formatInr(b.paidPaise)} paid ·{" "}
+                                        <strong>
+                                          {formatInr(b.balancePaise)} due
+                                        </strong>
+                                      </span>
+                                      {pay?.billId !== b.id ? (
+                                        <button
+                                          type="button"
+                                          className={BTN}
+                                          disabled={b.balancePaise <= 0}
+                                          onClick={() =>
+                                            setPay({
+                                              billId: b.id,
+                                              billNo: b.billNo,
+                                              vendorId: r.vendorId,
+                                              balancePaise: b.balancePaise,
+                                              amount: (b.balancePaise / 100).toFixed(2),
+                                              mode: "bank",
+                                              paidOn: new Date()
+                                                .toISOString()
+                                                .slice(0, 10),
+                                              reference: "",
+                                            })
+                                          }
+                                        >
+                                          Pay
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                    {pay?.billId === b.id ? (
+                                      <div className="mt-2 flex flex-wrap items-end gap-2 border-t border-[var(--border)] pt-2">
+                                        <label className="text-[11px] text-[var(--muted)]">
+                                          Amount (₹)
+                                          <input
+                                            className={FIELD}
+                                            value={pay.amount}
+                                            onChange={(e) =>
+                                              setPay({ ...pay, amount: e.target.value })
+                                            }
+                                          />
+                                        </label>
+                                        <label className="text-[11px] text-[var(--muted)]">
+                                          Paid on
+                                          <input
+                                            type="date"
+                                            className={FIELD}
+                                            value={pay.paidOn}
+                                            onChange={(e) =>
+                                              setPay({ ...pay, paidOn: e.target.value })
+                                            }
+                                          />
+                                        </label>
+                                        <label className="text-[11px] text-[var(--muted)]">
+                                          Mode
+                                          <select
+                                            className={FIELD}
+                                            value={pay.mode}
+                                            onChange={(e) =>
+                                              setPay({ ...pay, mode: e.target.value })
+                                            }
+                                          >
+                                            <option value="bank">Bank</option>
+                                            <option value="upi">UPI</option>
+                                            <option value="neft">NEFT</option>
+                                            <option value="rtgs">RTGS</option>
+                                            <option value="cheque">Cheque</option>
+                                            <option value="cash">Cash</option>
+                                          </select>
+                                        </label>
+                                        <label className="text-[11px] text-[var(--muted)]">
+                                          Reference
+                                          <input
+                                            className={FIELD}
+                                            placeholder="UTR / cheque no."
+                                            value={pay.reference}
+                                            onChange={(e) =>
+                                              setPay({ ...pay, reference: e.target.value })
+                                            }
+                                          />
+                                        </label>
+                                        <button
+                                          type="button"
+                                          className={BTN}
+                                          disabled={paying}
+                                          onClick={() => void submitPay()}
+                                        >
+                                          {paying
+                                            ? "Paying…"
+                                            : `Pay ${formatInr(paiseFromInr(pay.amount))}`}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className={BTN_OUTLINE}
+                                          disabled={paying}
+                                          onClick={() => setPay(null)}
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    ) : null}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
+            </ErpTableBody>
+          </ErpTable>
+          <p className="mt-2 text-right text-sm font-bold text-[var(--brand-deep)]">
+            Total owed: {formatInr(totalPaise)}
+          </p>
+        </>
+      ) : null}
+    </section>
   );
 }
 
@@ -2031,6 +2703,19 @@ export function BillsPanel({
   }, []);
 
   const payables = listUnifiedPayables(state);
+
+  // Balance is amount minus paid, computed per row — sort the arithmetic, not
+  // the formatted "₹1,200" the cell shows.
+  const payableSort = useTableSort(
+    payables,
+    {
+      due: (p) => p.dueOn || null,
+      source: (p) => p.sourceType,
+      balance: (p) => Math.max(0, p.amountPaise - p.paidPaise),
+      note: (p) => p.note || null,
+    },
+    "due",
+  );
 
   function billLineTotalPaise(l: BillLineDraft) {
     return vendorBillLineTotalPaise({
@@ -2131,6 +2816,10 @@ export function BillsPanel({
 
   return (
     <div className="mt-4 space-y-4">
+      {/* Server-truth vendors first: this is where store suppliers are
+          seen and paid. The forms below are the browser-book side. */}
+      <StoreVendorDues />
+
       <section className={`${CARD} space-y-4`}>
         <h3 className="text-sm font-bold text-[var(--brand-deep)]">
           Vendor bill entry
@@ -2204,9 +2893,9 @@ export function BillsPanel({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1100px] text-xs">
-            <thead>
-              <tr className="text-left text-[var(--muted)]">
+          <ErpTable minWidth="min-w-[1100px]" className="text-xs">
+            <ErpTableHead>
+              <tr>
                 <th className="pb-2 pr-2">Date</th>
                 <th className="pb-2 pr-2">Item</th>
                 <th className="pb-2 pr-2 text-right">Qty</th>
@@ -2218,10 +2907,10 @@ export function BillsPanel({
                 <th className="pb-2 pr-2 text-right">Line total</th>
                 <th className="pb-2" />
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {billLines.map((l) => (
-                <tr key={l.id} className="border-t border-[rgba(32,48,80,0.08)]">
+                <tr key={l.id}>
                   <td className="py-1 pr-2">
                     <input
                       type="date"
@@ -2323,8 +3012,8 @@ export function BillsPanel({
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
 
         <div className="flex flex-wrap items-end gap-3">
@@ -2365,6 +3054,7 @@ export function BillsPanel({
         </div>
       </section>
 
+
       <section className={CARD}>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-[var(--brand-deep)]">
@@ -2402,21 +3092,23 @@ export function BillsPanel({
             </select>
           ) : null}
         </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
-              <th className="pb-2">Due</th>
-              <th className="pb-2">Source</th>
-              <th className="pb-2 text-right">Balance</th>
-              <th className="pb-2">Note</th>
+        <ErpTable minWidth="min-w-full">
+          <ErpTableHead>
+            <tr>
+              <ErpSortTh sort={payableSort} field="due">Due</ErpSortTh>
+              <ErpSortTh sort={payableSort} field="source">Source</ErpSortTh>
+              <ErpSortTh sort={payableSort} field="balance" align="right">
+                Balance
+              </ErpSortTh>
+              <ErpSortTh sort={payableSort} field="note">Note</ErpSortTh>
               <th className="pb-2" />
             </tr>
-          </thead>
-          <tbody>
-            {payables.map((p) => {
+          </ErpTableHead>
+          <ErpTableBody>
+            {payableSort.rows.map((p) => {
               const bal = Math.max(0, p.amountPaise - p.paidPaise);
               return (
-                <tr key={p.id} className="border-t border-[rgba(32,48,80,0.08)]">
+                <tr key={p.id}>
                   <td className="py-2">{p.dueOn}</td>
                   <td className="py-2">{p.sourceType}</td>
                   <td className="py-2 text-right">{formatInr(bal)}</td>
@@ -2449,8 +3141,8 @@ export function BillsPanel({
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );
@@ -2656,25 +3348,34 @@ export function OwnerLoansPanel({
             </select>
           ) : null}
         </div>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Due</th>
               <th className="pb-2">#</th>
               <th className="pb-2 text-right">Amount</th>
               <th className="pb-2">Actions</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {dueRows.map((r) => (
-              <tr key={r.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={r.id}>
                 <td className="py-2">{r.dueOn}</td>
                 <td className="py-2">{r.installmentNo}</td>
                 <td className="py-2 text-right">{formatInr(r.amountPaise)}</td>
                 <td className="py-2">
-                  <button type="button" className={BTN_OUTLINE} onClick={() => payEmi(r.id)}>
-                    Pay EMI
-                  </button>
+                  {/* The row-menu standard, 19 Sep 2026. */}
+                  <RowActionMenu
+                    row={r}
+                    label="EMI actions"
+                    actions={[
+                      {
+                        id: "pay",
+                        label: "Pay this EMI",
+                        onSelect: (row) => payEmi(row.id),
+                      },
+                    ]}
+                  />
                 </td>
               </tr>
             ))}
@@ -2685,26 +3386,26 @@ export function OwnerLoansPanel({
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
 
       <section className={CARD}>
         <h3 className="text-sm font-bold text-[var(--brand-deep)]">
           Loans & schedule
         </h3>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Trustee</th>
               <th className="pb-2">Type</th>
               <th className="pb-2 text-right">Principal</th>
               <th className="pb-2">Status</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {state.ownerLoans.map((l) => (
-              <tr key={l.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={l.id}>
                 <td className="py-2">
                   {state.trustees.find((t) => t.id === l.trusteeId)?.name}
                 </td>
@@ -2713,34 +3414,34 @@ export function OwnerLoansPanel({
                 <td className="py-2">{l.status}</td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
 
       <section className={CARD}>
         <h3 className="text-sm font-bold text-[var(--brand-deep)]">
           Cash handovers to owner
         </h3>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Date</th>
               <th className="pb-2 text-right">Amount</th>
               <th className="pb-2">Received by</th>
               <th className="pb-2">Purpose</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {state.ownerCashHandovers.slice(0, 20).map((h) => (
-              <tr key={h.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={h.id}>
                 <td className="py-2">{h.date}</td>
                 <td className="py-2 text-right">{formatInr(h.amountPaise)}</td>
                 <td className="py-2">{h.receivedBy}</td>
                 <td className="py-2 text-[var(--muted)]">{h.purpose}</td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );
@@ -2775,6 +3476,16 @@ export function BooksPanel({
   const pl = useMemo(() => profitAndLoss(plFrom, plTo, state), [plFrom, plTo, state]);
   const bs = useMemo(() => balanceSheet(bsAsOf, state), [bsAsOf, state]);
   const journals = listJournals(state).slice(0, 20);
+
+  /**
+   * Recent journals as a table. Date, narration and line count were one grey
+   * run-on line; a book is read by date, and a list could not be sorted by it.
+   */
+  const journalCols: DataTableColumn<(typeof journals)[number]>[] = [
+    { key: "date", header: "Date", sortable: true, value: (j) => j.date },
+    { key: "narration", header: "Narration", sortable: true, value: (j) => j.narration || j.sourceType },
+    { key: "lines", header: "Lines", align: "right", sortable: true, value: (j) => j.lines.length },
+  ];
 
   function postJv() {
     const lines: JournalLine[] = jvLines
@@ -2822,24 +3533,24 @@ export function BooksPanel({
           <h3 className="text-sm font-bold text-[var(--brand-deep)]">
             Chart of accounts
           </h3>
-          <table className="mt-3 w-full text-sm">
-            <thead>
-              <tr className="text-left text-[var(--muted)]">
+          <ErpTable minWidth="min-w-full" className="mt-3">
+            <ErpTableHead>
+              <tr>
                 <th className="pb-2">Code</th>
                 <th className="pb-2">Name</th>
                 <th className="pb-2">Group</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {state.coaAccounts.map((c) => (
-                <tr key={c.id} className="border-t border-[rgba(32,48,80,0.08)]">
+                <tr key={c.id}>
                   <td className="py-2 font-mono">{c.code}</td>
                   <td className="py-2">{c.name}</td>
                   <td className="py-2">{c.group}</td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
           {state.fiscalYears.length > 0 ? (
             <div className="mt-4 space-y-2 text-sm">
               <div className="font-semibold text-[var(--brand-deep)]">
@@ -2848,7 +3559,7 @@ export function BooksPanel({
               {state.fiscalYears.map((fy) => (
                 <div
                   key={fy.code}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] px-3 py-2"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] px-3 py-2"
                 >
                   <div>
                     <div className="font-medium">
@@ -2964,13 +3675,15 @@ export function BooksPanel({
             </button>
           </div>
           <h4 className="text-sm font-semibold text-[var(--brand-deep)]">Recent journals</h4>
-          <ul className="text-sm text-[var(--muted)]">
-            {journals.map((j) => (
-              <li key={j.id}>
-                {j.date} · {j.narration || j.sourceType} · {j.lines.length} line(s)
-              </li>
-            ))}
-          </ul>
+          <DataTable
+            columns={journalCols}
+            rows={journals}
+            rowKey={(j) => j.id}
+            minWidth="min-w-[560px]"
+            exportFileBaseName="recent-journals"
+            exportTitle="Recent journals"
+            emptyTitle="No journals yet"
+          />
         </section>
       ) : null}
 
@@ -2980,19 +3693,19 @@ export function BooksPanel({
             <span className="mb-1 block text-[11px] text-[var(--muted)]">As of</span>
             <input type="date" className={FIELD} value={tbAsOf} onChange={(e) => setTbAsOf(e.target.value)} />
           </label>
-          <table className="mt-3 w-full text-sm">
-            <thead>
-              <tr className="text-left text-[var(--muted)]">
+          <ErpTable minWidth="min-w-full" className="mt-3">
+            <ErpTableHead>
+              <tr>
                 <th className="pb-2">Code</th>
                 <th className="pb-2">Account</th>
                 <th className="pb-2 text-right">Debit</th>
                 <th className="pb-2 text-right">Credit</th>
                 <th className="pb-2 text-right">Balance</th>
               </tr>
-            </thead>
-            <tbody>
+            </ErpTableHead>
+            <ErpTableBody>
               {tb.filter((r) => r.debitPaise || r.creditPaise).map((r) => (
-                <tr key={r.coaId} className="border-t border-[rgba(32,48,80,0.08)]">
+                <tr key={r.coaId}>
                   <td className="py-2">{r.code}</td>
                   <td className="py-2">{r.name}</td>
                   <td className="py-2 text-right">{formatInr(r.debitPaise)}</td>
@@ -3000,8 +3713,8 @@ export function BooksPanel({
                   <td className="py-2 text-right">{formatInr(Math.abs(r.balancePaise))}</td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </section>
       ) : null}
 
@@ -3013,7 +3726,7 @@ export function BooksPanel({
           </div>
           <div className="mt-3 grid gap-4 sm:grid-cols-2">
             <div>
-              <h4 className="text-sm font-bold text-[#15803d]">Income</h4>
+              <h4 className="text-sm font-bold text-[var(--success)]">Income</h4>
               <ul className="mt-2 text-sm">
                 {pl.incomeLines.map((l) => (
                   <li key={l.coaId} className="flex justify-between">
@@ -3024,7 +3737,7 @@ export function BooksPanel({
               </ul>
             </div>
             <div>
-              <h4 className="text-sm font-bold text-[#dc2626]">Expense</h4>
+              <h4 className="text-sm font-bold text-[var(--danger)]">Expense</h4>
               <ul className="mt-2 text-sm">
                 {pl.expenseLines.map((l) => (
                   <li key={l.coaId} className="flex justify-between">
@@ -3223,12 +3936,12 @@ export function ReportsPanel({
         {ACCOUNTS_REPORT_CATEGORIES.map((category) => (
           <section
             key={category.id}
-            className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white"
+            className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)]"
           >
             <h2 className={`${category.headerClass} px-4 py-3 text-sm font-bold text-white`}>
               {category.title}
             </h2>
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)] px-4">
+            <ul className="divide-y divide-[var(--border)] px-4">
               {ACCOUNTS_REPORTS.filter((r) => r.category === category.id).map(
                 (report) => (
                   <li

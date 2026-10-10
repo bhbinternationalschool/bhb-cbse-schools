@@ -32,8 +32,15 @@ SUPABASE_URL="$(get_env NEXT_PUBLIC_SUPABASE_URL)"
 SUPABASE_ANON="$(get_env NEXT_PUBLIC_SUPABASE_ANON_KEY)"
 # Production deploy URL — never read localhost from .env.local
 APP_URL="${NEXT_PUBLIC_APP_URL_OVERRIDE:-https://bhbinternational.school}"
-DEMO_AUTH="${NEXT_PUBLIC_DEMO_AUTH_OVERRIDE:-$(get_env NEXT_PUBLIC_DEMO_AUTH)}"
-DEMO_AUTH="${DEMO_AUTH:-false}"
+# Demo auth mints parent/staff sessions with NO credential check — it must
+# NEVER be on in production. This used to default from .env.local (which is
+# 'true' for local dev), so any deploy that forgot the override silently
+# reopened the hole (it did, twice, on 2026-08-13). Production now defaults
+# OFF; enabling demo requires an explicit NEXT_PUBLIC_DEMO_AUTH_OVERRIDE=true.
+DEMO_AUTH="${NEXT_PUBLIC_DEMO_AUTH_OVERRIDE:-false}"
+if [[ "$DEMO_AUTH" != "false" ]]; then
+  echo "WARNING: deploying with demo auth ENABLED (NEXT_PUBLIC_DEMO_AUTH=$DEMO_AUTH) — anyone can sign in without credentials."
+fi
 
 # Optional server runtime secrets (WhatsApp, Supabase admin, job guards)
 SUPABASE_SERVICE_ROLE_KEY="$(get_env SUPABASE_SERVICE_ROLE_KEY)"
@@ -53,6 +60,35 @@ AI_TUTOR_MODEL="$(get_env AI_TUTOR_MODEL)"
 AI_PREFERRED_ENGINE="$(get_env AI_PREFERRED_ENGINE)"
 GOOGLE_OAUTH_CLIENT_ID="$(get_env GOOGLE_OAUTH_CLIENT_ID)"
 GOOGLE_OAUTH_CLIENT_SECRET="$(get_env GOOGLE_OAUTH_CLIENT_SECRET)"
+NEXT_PUBLIC_VAPID_PUBLIC_KEY="$(get_env NEXT_PUBLIC_VAPID_PUBLIC_KEY)"
+FLEET_EDGE_ALLOWED_IPS="$(get_env FLEET_EDGE_ALLOWED_IPS)"
+FLEET_EDGE_SOS_NOTIFY_MOBILE="$(get_env FLEET_EDGE_SOS_NOTIFY_MOBILE)"
+FEE_INTEGRITY_NOTIFY_MOBILE="$(get_env FEE_INTEGRITY_NOTIFY_MOBILE)"
+NEXT_PUBLIC_PAYMENT_GATEWAY="$(get_env NEXT_PUBLIC_PAYMENT_GATEWAY)"
+CASHFREE_APP_ID="$(get_env CASHFREE_APP_ID)"
+CASHFREE_ENV="$(get_env CASHFREE_ENV)"
+# Bank-account verification is a SEPARATE Cashfree product with its own App
+# ID and secret. Reusing CASHFREE_APP_ID here fails with an unhelpful
+# secret-invalid error, which is why it gets its own pair. Blank = the
+# feature is simply off, which is the right default for anyone else.
+CASHFREE_VERIFICATION_APP_ID="$(get_env CASHFREE_VERIFICATION_APP_ID)"
+CASHFREE_VERIFICATION_ENV="$(get_env CASHFREE_VERIFICATION_ENV)"
+# Payouts is a THIRD Cashfree product, again with its own credentials, plus a
+# 2FA public key because Cloud Run has no static IP to allowlist. ARMED is a
+# separate switch from the keys: the V2 request shapes have not been confirmed
+# against a live call, so having the keys must not be enough to move money.
+CASHFREE_PAYOUT_CLIENT_ID="$(get_env CASHFREE_PAYOUT_CLIENT_ID)"
+CASHFREE_PAYOUT_ENV="$(get_env CASHFREE_PAYOUT_ENV)"
+CASHFREE_PAYOUTS_ARMED="$(get_env CASHFREE_PAYOUTS_ARMED)"
+# Google Play's reviewer signs in as the demo family without a WhatsApp OTP.
+# These lived ONLY on the live service, typed in by hand, so every deploy
+# replaced the env list and silently locked the reviewer out — found again on
+# 2026-09-16, when `/api/auth/otp/verify` answered 401 an hour after a deploy.
+# Blank here = the review login is simply off, which is the right default for
+# anyone else's checkout.
+REVIEW_LOGIN_MOBILE="$(get_env REVIEW_LOGIN_MOBILE)"
+REVIEW_LOGIN_CODE="$(get_env REVIEW_LOGIN_CODE)"
+REVIEW_LOGIN_HOUSEHOLD_ID="$(get_env REVIEW_LOGIN_HOUSEHOLD_ID)"
 
 WHATSAPP_DEFAULT_COUNTRY_CODE="${WHATSAPP_DEFAULT_COUNTRY_CODE:-91}"
 WHATSAPP_GRAPH_VERSION="${WHATSAPP_GRAPH_VERSION:-v21.0}"
@@ -96,7 +132,7 @@ else
   echo "Gemini: not configured — ERP assistant uses offline guides only"
 fi
 if [[ -n "$OPENAI_API_KEY" ]]; then
-  echo "OpenAI: API key present (${AI_TUTOR_MODEL:-gpt-4o-mini}, engine ${AI_PREFERRED_ENGINE:-auto})"
+  echo "OpenAI: API key present (${AI_TUTOR_MODEL:-gpt-4o-mini}, engine ${AI_PREFERRED_ENGINE:-gemini})"
 else
   echo "OpenAI: not configured — AI uses Gemini only when both keys not set"
 fi
@@ -105,8 +141,55 @@ if [[ -n "$GOOGLE_OAUTH_CLIENT_ID" && -n "$GOOGLE_OAUTH_CLIENT_SECRET" ]]; then
 else
   echo "Google OAuth: not configured — Classroom tab will show setup instructions"
 fi
+if [[ -n "$NEXT_PUBLIC_VAPID_PUBLIC_KEY" ]]; then
+  echo "Web Push: VAPID public key present (private key must be in Secret Manager as school-erp-vapid-private-key)"
+else
+  echo "Web Push: not configured — push notifications will stay off"
+fi
+if [[ -n "$FLEET_EDGE_ALLOWED_IPS" ]]; then
+  echo "Fleet Edge: source IP allowlist enforced ($FLEET_EDGE_ALLOWED_IPS)"
+else
+  echo "Fleet Edge: no IP allowlist set — webhook accepts any source (fail-open until confirmed)"
+fi
+if [[ -n "$FLEET_EDGE_SOS_NOTIFY_MOBILE" ]]; then
+  echo "Fleet Edge: SOS/first-seen WhatsApp notify configured"
+else
+  echo "Fleet Edge: SOS_NOTIFY_MOBILE not set — DriverSOSAlert will log but notify no one"
+fi
+if [[ "$NEXT_PUBLIC_PAYMENT_GATEWAY" == "cashfree" && -n "$CASHFREE_APP_ID" ]]; then
+  echo "Cashfree: gateway active, env ${CASHFREE_ENV:-production} (secret key must be in Secret Manager as school-erp-cashfree-secret-key)"
+  if [[ -n "$CASHFREE_VERIFICATION_APP_ID" ]]; then
+    echo "Cashfree: bank verification active, env ${CASHFREE_VERIFICATION_ENV:-production}"
+    echo "  NOTE: CASHFREE_VERIFICATION_SECRET_KEY is deliberately NOT in cloudbuild.yaml's"
+    echo "  --set-secrets. A secret named there that does not exist in Secret Manager fails"
+    echo "  the WHOLE deploy, and this feature is off by default, so it must not be able to."
+    echo "  To turn it on: create the secret, then add it to --set-secrets in cloudbuild.yaml:"
+    echo "    printf %s \"<verification secret>\" | gcloud secrets create school-erp-cashfree-verification-secret-key --data-file=-"
+  else
+    echo "Cashfree: bank verification OFF (set CASHFREE_VERIFICATION_APP_ID to enable)"
+  fi
+  if [[ "$CASHFREE_PAYOUTS_ARMED" == "true" ]]; then
+    echo "Cashfree: PAYOUTS ARMED, env ${CASHFREE_PAYOUT_ENV:-sandbox} — real transfers can be sent"
+  else
+    echo "Cashfree: payouts NOT armed (no transfer can be sent; salary still uses the NEFT bank file)"
+  fi
+  if [[ -n "$CASHFREE_PAYOUT_CLIENT_ID" ]]; then
+    echo "  Payouts secrets are deliberately NOT in cloudbuild.yaml --set-secrets:"
+    echo "  a secret named there that does not exist fails the WHOLE deploy. Create them,"
+    echo "  then add them to --set-secrets yourself:"
+    echo "    school-erp-cashfree-payout-client-secret  -> CASHFREE_PAYOUT_CLIENT_SECRET"
+    echo "    school-erp-cashfree-payout-public-key     -> CASHFREE_PAYOUT_PUBLIC_KEY"
+  fi
+else
+  echo "Cashfree: not active (NEXT_PUBLIC_PAYMENT_GATEWAY=${NEXT_PUBLIC_PAYMENT_GATEWAY:-unset}) — pay-links fall back to Razorpay/demo"
+fi
 if [[ -n "$CRON_SECRET" ]]; then
-  echo "Cron guard: CRON_SECRET present (scheduled comms + automation)"
+  if [[ -n "$REVIEW_LOGIN_MOBILE" && -n "$REVIEW_LOGIN_CODE" && -n "$REVIEW_LOGIN_HOUSEHOLD_ID" ]]; then
+  echo "Play review login: configured (demo family signs in without an OTP)"
+else
+  echo "Play review login: NOT SET — a Play reviewer cannot sign in after this deploy"
+fi
+echo "Cron guard: CRON_SECRET present (scheduled comms + automation)"
 else
   echo "Cron guard: CRON_SECRET missing — set in .env.local before production go-live"
 fi
@@ -144,9 +227,44 @@ if [[ "${SKIP_WA_SUBSCRIBE:-}" != "1" ]] && grep -q "WHATSAPP_TOKEN=." "$ENV_FIL
   (cd "$ROOT/apps/web" && npm run wa:subscribe) || echo "WABA subscribe warning — continue deploy"
 fi
 
+# Non-interactive auth via a deploy service-account key, when one is present.
+# The whole point is that a build no longer dies on an expired user token: a
+# key does not expire the way an interactive login does. The key is a
+# long-lived credential, so it lives OUTSIDE the repo (default below) and is
+# never committed — check DEPLOY_SA_KEY points somewhere git cannot see.
+#
+# Set DEPLOY_SA_KEY to override, or drop the key at the default path. With no
+# key present the script falls back to the interactive login exactly as before.
+DEPLOY_SA_KEY="${DEPLOY_SA_KEY:-$HOME/.config/bhb-deploy/deploy-sa.json}"
+# "File exists" is not "file is a key". A failed `keys create` (the org policy
+# iam.disableServiceAccountKeyCreation blocks minting — discovered 2026-08-25,
+# and the cause of the 2026-08-23 zero-byte trap) leaves an EMPTY file behind,
+# and hard-exiting on it turned every later deploy into a silent failure. An
+# empty or non-JSON file now falls back to the interactive login with a
+# warning instead.
+if [[ -f "$DEPLOY_SA_KEY" ]] && ! python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$DEPLOY_SA_KEY" 2>/dev/null; then
+  echo "WARNING: $DEPLOY_SA_KEY exists but is empty or not valid JSON — ignoring it."
+  echo "         (Key minting is blocked by org policy iam.disableServiceAccountKeyCreation;"
+  echo "          see docs/DEPLOY_SERVICE_ACCOUNT.md. Falling back to interactive login.)"
+  DEPLOY_SA_KEY="/nonexistent-deploy-key"
+fi
+if [[ -f "$DEPLOY_SA_KEY" ]]; then
+  case "$DEPLOY_SA_KEY" in
+    "$ROOT"/*)
+      echo "Refusing to use a deploy key inside the repo ($DEPLOY_SA_KEY)."
+      echo "Move it outside the working tree so it can never be committed or shipped."
+      exit 1
+      ;;
+  esac
+  echo "Authenticating with deploy service-account key…"
+  gcloud auth activate-service-account --key-file="$DEPLOY_SA_KEY" --project="$PROJECT_ID"     || { echo "Deploy key present but activation failed — is it valid?"; exit 1; }
+fi
+
 if ! gcloud auth print-access-token >/dev/null 2>&1; then
   echo ""
-  echo "gcloud auth expired. Run this in your terminal, then re-run deploy:"
+  echo "gcloud auth expired and no deploy key found at $DEPLOY_SA_KEY."
+  echo "Either drop the deploy service-account key there (see docs/DEPLOY_SERVICE_ACCOUNT.md),"
+  echo "or run an interactive login, then re-run deploy:"
   echo "  gcloud auth login director@bhbinternational.school --update-adc"
   echo "  gcloud config set project $PROJECT_ID"
   echo "  ./scripts/deploy-online.sh"
@@ -154,7 +272,10 @@ if ! gcloud auth print-access-token >/dev/null 2>&1; then
 fi
 
 gcloud config set project "$PROJECT_ID" >/dev/null
-gcloud config set account "${GCLOUD_ACCOUNT:-director@bhbinternational.school}" >/dev/null 2>&1 || true
+# Don't stomp the active account when a deploy key was activated above.
+if [[ ! -f "$DEPLOY_SA_KEY" ]]; then
+  gcloud config set account "${GCLOUD_ACCOUNT:-director@bhbinternational.school}" >/dev/null 2>&1 || true
+fi
 
 SUBSTITUTIONS="^@^"
 SUBSTITUTIONS+="_NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}"
@@ -162,23 +283,37 @@ SUBSTITUTIONS+="@_NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON}"
 SUBSTITUTIONS+="@_NEXT_PUBLIC_APP_URL=${APP_URL}"
 SUBSTITUTIONS+="@_NEXT_PUBLIC_DEMO_AUTH=${DEMO_AUTH}"
 SUBSTITUTIONS+="@_REGION=${REGION}"
-SUBSTITUTIONS+="@_SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}"
-SUBSTITUTIONS+="@_WHATSAPP_TOKEN=${WHATSAPP_TOKEN}"
+# SUPABASE_SERVICE_ROLE_KEY, WHATSAPP_TOKEN, WHATSAPP_VERIFY_TOKEN,
+# GOOGLE_MAPS_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY,
+# GOOGLE_OAUTH_CLIENT_SECRET, CRON_SECRET, WA_DISPATCH_SECRET, and
+# MIRROR_SYNC_SECRET are deliberately NOT passed as substitutions — they
+# moved to Secret Manager and cloudbuild.yaml no longer declares these
+# substitution keys, so passing them here would fail the build with "key
+# ... not matched in the template" (Cloud Build rejects any --substitutions
+# value for a key the config doesn't reference).
 SUBSTITUTIONS+="@_WHATSAPP_PHONE_ID=${WHATSAPP_PHONE_ID}"
-SUBSTITUTIONS+="@_WHATSAPP_VERIFY_TOKEN=${WHATSAPP_VERIFY_TOKEN}"
 SUBSTITUTIONS+="@_WHATSAPP_WABA_ID=${WHATSAPP_WABA_ID}"
 SUBSTITUTIONS+="@_WHATSAPP_DEFAULT_COUNTRY_CODE=${WHATSAPP_DEFAULT_COUNTRY_CODE}"
 SUBSTITUTIONS+="@_WHATSAPP_GRAPH_VERSION=${WHATSAPP_GRAPH_VERSION}"
-SUBSTITUTIONS+="@_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
-SUBSTITUTIONS+="@_GEMINI_API_KEY=${GEMINI_API_KEY}"
-SUBSTITUTIONS+="@_OPENAI_API_KEY=${OPENAI_API_KEY}"
 SUBSTITUTIONS+="@_AI_TUTOR_MODEL=${AI_TUTOR_MODEL:-gpt-4o-mini}"
-SUBSTITUTIONS+="@_AI_PREFERRED_ENGINE=${AI_PREFERRED_ENGINE:-auto}"
+# Default gemini (decision 2026-08-18) — "auto" here silently undid it once.
+SUBSTITUTIONS+="@_AI_PREFERRED_ENGINE=${AI_PREFERRED_ENGINE:-gemini}"
 SUBSTITUTIONS+="@_GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}"
-SUBSTITUTIONS+="@_GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}"
-SUBSTITUTIONS+="@_CRON_SECRET=${CRON_SECRET}"
-SUBSTITUTIONS+="@_WA_DISPATCH_SECRET=${WA_DISPATCH_SECRET}"
-SUBSTITUTIONS+="@_MIRROR_SYNC_SECRET=${MIRROR_SYNC_SECRET}"
+SUBSTITUTIONS+="@_NEXT_PUBLIC_VAPID_PUBLIC_KEY=${NEXT_PUBLIC_VAPID_PUBLIC_KEY}"
+SUBSTITUTIONS+="@_FLEET_EDGE_ALLOWED_IPS=${FLEET_EDGE_ALLOWED_IPS}"
+SUBSTITUTIONS+="@_FLEET_EDGE_SOS_NOTIFY_MOBILE=${FLEET_EDGE_SOS_NOTIFY_MOBILE}"
+SUBSTITUTIONS+="@_FEE_INTEGRITY_NOTIFY_MOBILE=${FEE_INTEGRITY_NOTIFY_MOBILE}"
+SUBSTITUTIONS+="@_NEXT_PUBLIC_PAYMENT_GATEWAY=${NEXT_PUBLIC_PAYMENT_GATEWAY}"
+SUBSTITUTIONS+="@_CASHFREE_APP_ID=${CASHFREE_APP_ID}"
+SUBSTITUTIONS+="@_CASHFREE_ENV=${CASHFREE_ENV:-production}"
+SUBSTITUTIONS+="@_CASHFREE_VERIFICATION_APP_ID=${CASHFREE_VERIFICATION_APP_ID}"
+SUBSTITUTIONS+="@_CASHFREE_VERIFICATION_ENV=${CASHFREE_VERIFICATION_ENV:-production}"
+SUBSTITUTIONS+="@_CASHFREE_PAYOUT_CLIENT_ID=${CASHFREE_PAYOUT_CLIENT_ID}"
+SUBSTITUTIONS+="@_CASHFREE_PAYOUT_ENV=${CASHFREE_PAYOUT_ENV:-sandbox}"
+SUBSTITUTIONS+="@_CASHFREE_PAYOUTS_ARMED=${CASHFREE_PAYOUTS_ARMED:-false}"
+SUBSTITUTIONS+="@_REVIEW_LOGIN_MOBILE=${REVIEW_LOGIN_MOBILE}"
+SUBSTITUTIONS+="@_REVIEW_LOGIN_CODE=${REVIEW_LOGIN_CODE}"
+SUBSTITUTIONS+="@_REVIEW_LOGIN_HOUSEHOLD_ID=${REVIEW_LOGIN_HOUSEHOLD_ID}"
 
 gcloud builds submit "$ROOT" \
   --project="$PROJECT_ID" \
@@ -206,15 +341,21 @@ if [[ -n "${BIGQUERY_PROJECT_ID:-}" ]]; then
   BQ_LOCATION="${BIGQUERY_LOCATION:-asia-south1}"
   BQ_TENANT="${BIGQUERY_TENANT_SLUG:-bhb-international}"
   BQ_UPDATE="BIGQUERY_PROJECT_ID=${BIGQUERY_PROJECT_ID}|BIGQUERY_DATASET=${BQ_DATASET}|BIGQUERY_LOCATION=${BQ_LOCATION}|BIGQUERY_TENANT_SLUG=${BQ_TENANT}"
-  if [[ -n "${DIRECT_URL:-}" ]]; then
-    BQ_UPDATE="${BQ_UPDATE}|DIRECT_URL=${DIRECT_URL}"
-  fi
+  # DIRECT_URL is deliberately absent here — it moved to Secret Manager on
+  # 2026-08-12 and is already applied by cloudbuild.yaml's --set-secrets in
+  # the main deploy step above. Pushing it again as a plain value here hits
+  # the same "already been set with a different type" error that broke this
+  # whole script until this file was updated.
   gcloud run services update school-erp-web \
     --project="$PROJECT_ID" \
     --region="$REGION" \
     --update-env-vars="^|^${BQ_UPDATE}" \
     >/dev/null
 fi
+
+echo ""
+echo "Syncing school-erp-lite (GPS pushes + night ticks, per-request billing)…"
+bash "$ROOT/scripts/sync-lite-service.sh" || echo "WARNING: school-erp-lite sync failed — the main service still works; re-run scripts/sync-lite-service.sh"
 
 echo ""
 echo "Deploy submitted. When green:"

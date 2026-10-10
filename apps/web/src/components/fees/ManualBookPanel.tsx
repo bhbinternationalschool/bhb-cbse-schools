@@ -28,6 +28,8 @@ import {
   type VoucherTender,
 } from "@/lib/fees";
 import { loadMasters, type MastersState } from "@/lib/masters";
+import { canBackdateReceipt } from "@/lib/rbac";
+import { useDemoSession } from "@/components/shell/SessionContext";
 import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { DueBreakupPicker } from "@/components/fees/DueBreakupPicker";
@@ -82,6 +84,17 @@ export function ManualBookPanel({
   onOpenReceipt: (voucherId: string) => void;
 }) {
   const [masters, setMasters] = useState<MastersState | null>(null);
+  const session = useDemoSession();
+  /**
+   * A paper receipt is back-dated almost by definition — it records money
+   * taken before somebody got to a computer. So this panel is exactly where
+   * the school's setting has to be honoured rather than assumed: without
+   * passing it, every manual entry would be refused as a back-date.
+   */
+  const mayBackdate = useMemo(
+    () => (session ? canBackdateReceipt(session, masters) : false),
+    [session, masters],
+  );
   const [sis, setSis] = useState<SisState | null>(null);
   const [seriesCode, setSeriesCode] = useState("FEE-BOOK-A");
   const [leaf, setLeaf] = useState("");
@@ -382,6 +395,8 @@ export function ManualBookPanel({
       collectionDate: paperDate,
       transactionDate: paperDate,
       source: "manual_book",
+      backdatePolicy: masters?.feeBackdatePolicy,
+      mayBackdate,
       manualBookSeries: seriesCode,
       manualBookLeaf: leaf,
       allowBackdate: opts?.allowBackdate,
@@ -735,7 +750,7 @@ export function ManualBookPanel({
                                 Sibling
                               </span>
                             ) : siblingCount > 1 ? (
-                              <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--brand-gold)]">
+                              <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--tone-amber)]">
                                 Opened
                               </span>
                             ) : null}
@@ -755,7 +770,7 @@ export function ManualBookPanel({
                             hasOverdue
                               ? "text-[#dc2626]"
                               : rowTotal === 0 && row.dues.length > 0
-                                ? "text-[#15803d]"
+                                ? "text-[var(--tone-green)]"
                                 : "text-[var(--brand-deep)]"
                           }`}
                         >

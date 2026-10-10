@@ -6,6 +6,7 @@
  *   cd apps/web && npx tsx scripts/seed-accounts-desk.ts
  */
 
+import { defaultCoaAccounts } from "../src/lib/accountsNormalize";
 import {
   BANK_PAYMENT_MODES,
   COA_EXP_ACADEMIC,
@@ -15,14 +16,13 @@ import {
   COA_EXP_TRANSPORT_BATTA,
   COA_EXP_UTILITIES,
   COA_STORE_PURCHASES,
-  defaultCoaAccounts,
   type AccountsState,
   type BankAccount,
   type CashPool,
   type ExpenseCategory,
   type FiscalYear,
   type Trustee,
-} from "../src/lib/accounts";
+} from "../src/lib/accountsTypes";
 import {
   fetchAccountsDeskFromDb,
   pushAccountsDeskToDb,

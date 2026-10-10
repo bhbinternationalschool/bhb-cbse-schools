@@ -4,7 +4,18 @@
  * Demo store: localStorage `bhb_admissions_v1`.
  */
 
+import { recordDeskDeletion } from "@/lib/deskNamedDeletes";
 import { assertModulePermission } from "@/lib/rbacGuard";
+import {
+  carryOverFromSibling,
+  carryOverHousehold,
+  carryOverNote,
+} from "@/lib/siblingCarryOver";
+import { normalizePhotoConsent, type PhotoConsent } from "@/lib/photoConsent";
+import { sanitizeStoredMediaUrl } from "@/lib/media";
+import { normalizeHouseholdLanguage } from "@/lib/householdPrefs";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { stripEmptyList } from "@/lib/wirePayload";
 import {
   currentAcademicYearCode,
   DEFAULT_AY,
@@ -29,6 +40,7 @@ import {
   suggestAdmissionNo,
   suggestSrn,
   type SisStudent,
+  isPlaceholderMobile,
 } from "@/lib/sis";
 import { ensureRteEwsTagIds } from "@/lib/studentTags";
 import { TENANT } from "@/lib/types";
@@ -38,6 +50,7 @@ import {
   tenderModeLabel,
   type TenderMode,
 } from "@/lib/fees";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type AdmissionStage =
   | "enquiry"
@@ -98,6 +111,11 @@ export type AdmissionHousehold = {
   guardians: AdmissionGuardian[];
   /** Set on first child enroll — siblings reuse this SIS household */
   sisHouseholdId: string;
+  /**
+   * Whether this family agreed to photographs being published.
+   * "" = never asked, which is NOT agreement. See lib/photoConsent.ts.
+   */
+  photoConsent?: PhotoConsent;
   note: string;
   createdAt: string;
   updatedAt: string;
@@ -109,6 +127,7 @@ export type FollowUpChannel =
   | "whatsapp"
   | "visit"
   | "sms"
+  | "email"
   | "other";
 
 /** Call / visit disposition logged by counsellor */
@@ -120,7 +139,9 @@ export type FollowUpOutcome =
   | "interested"
   | "not_interested"
   | "visit_scheduled"
-  | "wrong_number";
+  | "wrong_number"
+  /** One-way message sent (WhatsApp / SMS / email) — no reply yet */
+  | "message_sent";
 
 export type AdmissionFollowUp = {
   id: string;
@@ -145,6 +166,15 @@ export type AdmissionLead = {
   source: AdmissionSource;
   childName: string;
   dob: string;
+  /**
+   * Age in whole years as the parent stated it, when no birth date was given.
+   *
+   * Kept SEPARATE from `dob` and never converted into one. At a doorstep a
+   * parent says "chaar saal ka hai", not a date; deriving 2022-08-24 from
+   * that would turn an approximation into a fact the office would later read
+   * off a form as though the family had confirmed it. 0 means not stated.
+   */
+  ageYearsApprox: number;
   gender: string;
   classSoughtId: string;
   classAdmittedId: string;
@@ -171,6 +201,18 @@ export type AdmissionLead = {
   siblingInSchool: boolean;
   referredByStaffId: string;
   campaignNote: string;
+  /** Ad-platform campaign id (Google lead form campaign_id, UTM campaign) — "" = unknown */
+  campaignId: string;
+  /** Family's preferred language for school messages (HouseholdLanguage code); "" = not asked */
+  preferredLanguage: string;
+  /** Board of the previous school for Class VI+ enquiries; "" = not asked */
+  previousBoard: string;
+  /** What the family said matters most (transport, fees, academics…) — drives follow-up drafts */
+  concerns: string[];
+  /** Enrolled household that referred this family (parent referral); "" = none */
+  referredByHouseholdId: string;
+  /** Referral code as typed / on the link (resolved to referredByHouseholdId by the CRM); "" = none */
+  referralCode: string;
   declarationAccepted: boolean;
   registrationFeePaid: boolean;
   registrationFeeNote: string;
@@ -239,7 +281,17 @@ export type AdmissionLead = {
   /** Field survey beat id (from beat master) */
   surveyBeatId: string;
   /** Compressed photo from tablet capture (data URL) */
-  surveyPhotoDataUrl: string;
+  /**
+   * URL of the survey photo, never the image itself.
+   *
+   * This was `surveyPhotoDataUrl` and held base64. At ~200 KB a photo it
+   * would have put a single lead well past the size of the entire 919-lead
+   * list, inside `lead_json`, which every admissions read carried. The field
+   * was never populated in production — 0 of 919 rows — so it was changed
+   * before it could cost anything. sanitizeSurveyPhotoUrl() refuses a data:
+   * URL so it cannot regress by accident.
+   */
+  surveyPhotoUrl: string;
   parentConsentAt: string;
   parentConsentBy: string;
   createdAt: string;
@@ -292,6 +344,12 @@ export type SurveyTeamMember = {
   role: "leader" | "agent";
   /** When true, member sees Survey Start on their app */
   assigned: boolean;
+  /**
+   * Where their survey day starts (director, 5 Oct 2026): "school" = scan the
+   * gate QR inside the campus first; "field" = start anywhere with live GPS.
+   * Set per person by the office.
+   */
+  startMode: "school" | "field";
   createdAt: string;
 };
 
@@ -339,6 +397,12 @@ export type RegistrationTender = {
   ref: string;
   bankName: string;
   instrumentDate: string;
+  /**
+   * Set only when a payment gateway captured this money. It settles a cycle
+   * later, net of fees, so the ledger holds it in clearing rather than
+   * claiming a bank balance that does not exist yet.
+   */
+  gatewayProvider?: string;
 };
 
 export type RegistrationFeePayment = {
@@ -404,15 +468,15 @@ export const ADMISSION_STAGES: {
 export function stageTagClass(stage: AdmissionStage): string {
   switch (stage) {
     case "enquiry":
-      return "bg-[rgba(71,85,105,0.14)] text-[#334155]";
+      return "bg-[rgba(71,85,105,0.14)] text-[var(--tone-slate)]";
     case "applied":
-      return "bg-[rgba(21,128,61,0.16)] text-[#15803d]";
+      return "bg-[rgba(21,128,61,0.16)] text-[var(--tone-green)]";
     case "verified":
-      return "bg-[rgba(21,128,61,0.16)] text-[#15803d]";
+      return "bg-[rgba(21,128,61,0.16)] text-[var(--tone-green)]";
     case "enrolled":
       return "bg-[rgba(21,128,61,0.22)] text-[#166534]";
     case "lost":
-      return "bg-[rgba(180,35,24,0.12)] text-[#b42318]";
+      return "bg-[rgba(180,35,24,0.12)] text-[var(--danger)]";
     default:
       return "bg-[rgba(32,48,80,0.08)] text-[var(--brand-deep)]";
   }
@@ -440,7 +504,7 @@ export function convertedLeadRowClass(stage: AdmissionStage): string {
 export function sourceTagClass(source: AdmissionSource): string {
   switch (source) {
     case "walk_in":
-      return "bg-[rgba(15,118,110,0.12)] text-[#0f766e]";
+      return "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]";
     case "field_survey":
       return "bg-[rgba(180,83,9,0.12)] text-[#9a3412]";
     case "website":
@@ -448,11 +512,11 @@ export function sourceTagClass(source: AdmissionSource): string {
     case "google":
       return "bg-[rgba(66,133,244,0.14)] text-[#1a73e8]";
     case "referral":
-      return "bg-[rgba(21,128,61,0.12)] text-[#15803d]";
+      return "bg-[rgba(21,128,61,0.12)] text-[var(--tone-green)]";
     case "social":
       return "bg-[rgba(126,34,206,0.1)] text-[#7e22ce]";
     case "phone":
-      return "bg-[rgba(71,85,105,0.14)] text-[#334155]";
+      return "bg-[rgba(71,85,105,0.14)] text-[var(--tone-slate)]";
     case "whatsapp":
       return "bg-[rgba(37,211,102,0.14)] text-[#128c7e]";
     default:
@@ -468,6 +532,7 @@ export const FOLLOW_UP_CHANNELS: {
   { value: "whatsapp", label: "WhatsApp" },
   { value: "visit", label: "Campus visit" },
   { value: "sms", label: "SMS" },
+  { value: "email", label: "Email" },
   { value: "other", label: "Other" },
 ];
 
@@ -483,6 +548,7 @@ export const FOLLOW_UP_OUTCOMES: {
   { value: "visit_scheduled", label: "School visit scheduled" },
   { value: "not_interested", label: "Not interested" },
   { value: "wrong_number", label: "Wrong number" },
+  { value: "message_sent", label: "Message sent" },
 ];
 
 export function followUpChannelLabel(c: FollowUpChannel): string {
@@ -516,11 +582,11 @@ export function leadFollowUpBucket(lead: AdmissionLead): LeadFollowUpBucket {
 export function followUpBucketClass(bucket: LeadFollowUpBucket): string {
   switch (bucket) {
     case "overdue":
-      return "bg-[rgba(180,35,24,0.12)] text-[#b42318]";
+      return "bg-[rgba(180,35,24,0.12)] text-[var(--danger)]";
     case "due_today":
       return "bg-[rgba(180,83,9,0.14)] text-[#9a3412]";
     case "scheduled":
-      return "bg-[rgba(15,118,110,0.12)] text-[#0f766e]";
+      return "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]";
     default:
       return "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]";
   }
@@ -700,6 +766,11 @@ export function emptyAdmissionLead(
     source: partial?.source || "walk_in",
     childName: cleanRepeatedName(partial?.childName || ""),
     dob: partial?.dob || "",
+    ageYearsApprox: (() => {
+      const n = Number(partial?.ageYearsApprox ?? 0);
+      // A child's stated age above 25 is a typo or the parent's own age.
+      return Number.isFinite(n) && n > 0 && n <= 25 ? Math.round(n * 10) / 10 : 0;
+    })(),
     gender: partial?.gender || "",
     classSoughtId: partial?.classSoughtId || "",
     classAdmittedId: partial?.classAdmittedId || "",
@@ -725,6 +796,18 @@ export function emptyAdmissionLead(
     siblingInSchool: !!partial?.siblingInSchool,
     referredByStaffId: partial?.referredByStaffId || "",
     campaignNote: partial?.campaignNote || "",
+    campaignId: String(partial?.campaignId || "").trim().slice(0, 80),
+    preferredLanguage: normalizeHouseholdLanguage(partial?.preferredLanguage),
+    previousBoard: String(partial?.previousBoard || "").trim().slice(0, 40),
+    concerns: Array.isArray(partial?.concerns)
+      ? Array.from(
+          new Set(
+            partial!.concerns.map((c) => String(c || "").trim().toLowerCase().slice(0, 40)).filter(Boolean),
+          ),
+        ).slice(0, 12)
+      : [],
+    referredByHouseholdId: String(partial?.referredByHouseholdId || "").trim().slice(0, 40),
+    referralCode: String(partial?.referralCode || "").trim().toUpperCase().slice(0, 20),
     declarationAccepted: !!partial?.declarationAccepted,
     registrationFeePaid: !!partial?.registrationFeePaid,
     registrationFeeNote: partial?.registrationFeeNote || "",
@@ -791,7 +874,7 @@ export function emptyAdmissionLead(
       normalizeMobile(partial?.parentGroupKey || partial?.mobile || "") ||
       "",
     surveyBeatId: partial?.surveyBeatId || "",
-    surveyPhotoDataUrl: partial?.surveyPhotoDataUrl || "",
+    surveyPhotoUrl: sanitizeSurveyPhotoUrl(partial?.surveyPhotoUrl),
     parentConsentAt: partial?.parentConsentAt || "",
     parentConsentBy: partial?.parentConsentBy || "",
     createdAt: partial?.createdAt || now,
@@ -803,7 +886,28 @@ export function emptyAdmissionLead(
 export function normalizeAdmissionLead(
   raw: Partial<AdmissionLead> | null | undefined,
 ): AdmissionLead {
-  return emptyAdmissionLead(raw || undefined);
+  const lead = emptyAdmissionLead(raw || undefined);
+
+  // Carry the provenance marker through normalization.
+  //
+  // emptyAdmissionLead builds a fresh object literal field by field — it never
+  // spreads `...raw` — so every key it does not name is dropped. `__partial`
+  // is not a data field, so it was being silently discarded here, and that
+  // quietly disabled the entire projection safety net:
+  //
+  //   projected list  -> lead marked __partial
+  //   user saves      -> normalizeAdmissionsState strips the marker
+  //   push            -> server sees no stub, merges nothing
+  //   result          -> the stub overwrites the record, 59 fields blanked
+  //                      on every lead
+  //
+  // The marker has to survive exactly as far as the write path that reads it.
+  // Found before the flag was ever turned on, by walking the components rather
+  // than trusting that the guard would fire.
+  if ((raw as { __partial?: boolean } | null | undefined)?.__partial) {
+    (lead as { __partial?: boolean }).__partial = true;
+  }
+  return lead;
 }
 
 export function normalizeAdmissionHousehold(
@@ -889,6 +993,14 @@ function emptySurveyTeamMember(
     empCode: partial?.empCode || "",
     role: partial?.role === "leader" ? "leader" : "agent",
     assigned: partial?.assigned !== false,
+    // Staff report at school by default; an outsider usually lives in the
+    // villages they survey.
+    startMode:
+      partial?.startMode === "school" || partial?.startMode === "field"
+        ? partial.startMode
+        : kind === "staff"
+          ? "school"
+          : "field",
     createdAt: partial?.createdAt || new Date().toISOString(),
   };
 }
@@ -1237,6 +1349,24 @@ function refreshLeadRegistrationPaymentStatus(
   });
 }
 
+/**
+ * Admissions, held in memory, independent of localStorage.
+ *
+ * The same rule SIS needed, and admissions needed it MORE: at 2.37 MB it is
+ * the largest module in the app. A browser caps an origin at roughly 5 MB, so
+ * the cache write can simply fail — and then loadAdmissions() read
+ * localStorage, found nothing, and returned zero leads while the database
+ * held 919 and the server was sending every one of them.
+ *
+ * This was fixed for SIS on 2026-08-10 and not for admissions in the same
+ * change, so the blank screen moved from one module to the other instead of
+ * going away. The two modules are the only large ones; both need it.
+ *
+ * Memory is the record for the session. localStorage is a best-effort copy
+ * for the next page load, and losing it must cost a reload, never the data.
+ */
+let memoryAdmissionsState: AdmissionsState | null = null;
+
 export function loadAdmissions(): AdmissionsState {
   if (typeof window === "undefined") {
     if (serverAdmissionsCache) return serverAdmissionsCache;
@@ -1249,14 +1379,116 @@ export function loadAdmissions(): AdmissionsState {
     return defaultAdmissionsState();
   }
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultAdmissionsState();
+    const raw = readCache(STORAGE_KEY);
+    // A cache too small to hold 2.37 MB must not read as "no leads".
+    if (!raw) return memoryAdmissionsState ?? defaultAdmissionsState();
     return normalizeAdmissionsState(
       JSON.parse(raw) as Partial<AdmissionsState>,
     );
   } catch {
-    return defaultAdmissionsState();
+    return memoryAdmissionsState ?? defaultAdmissionsState();
   }
+}
+
+/**
+ * Keep image data out of lead rows.
+ *
+ * A survey photo belongs in object storage with a URL on the lead. A `data:`
+ * URL is the image itself — roughly 200 KB of base64 for one compressed
+ * photo, which is more than the entire 919-lead list projection, carried
+ * inside `lead_json` on every admissions read and every localStorage write.
+ *
+ * objectStorage.uploadSchoolObject has a `local` mode that RETURNS a data URL
+ * when no bucket is configured. That is fine for an on-screen preview and
+ * must never be persisted, so the check is here at the boundary rather than
+ * trusting each caller to remember which mode it got back.
+ */
+/**
+ * Refuse to overwrite a complete lead with a projected one.
+ *
+ * Stage 6 replaces the 2.37 MB whole-table read with a projection: only the
+ * ~20 promoted columns, not `lead_json`. rowToLead() already rebuilds a lead
+ * from those columns when lead_json is absent — but AdmissionLead has 79
+ * fields and 59 of them live ONLY in lead_json: dob, gender, address,
+ * motherName, email, the document checklist, the admission details.
+ *
+ * So a projected lead is a stub. Saving one back would blank 59 fields on a
+ * real child's record. That is the same shape as the failure that orphaned
+ * 711 students today — a partial value overwriting a complete one — and it is
+ * the reason the projection cannot simply be switched on.
+ *
+ * This lands BEFORE detail-on-demand, deliberately. Nothing produces partial
+ * leads yet, so today it changes nothing; it means the read-path work can
+ * proceed without the possibility of silently destroying records.
+ */
+/**
+ * Get the complete lead before editing it.
+ *
+ * The admissions list is projected — 20 of 79 fields — so a lead taken
+ * straight from it is a stub. Anything that opens a lead for editing must
+ * call this first, or the form shows blank dob, address, documents and 55
+ * other fields, and the user "corrects" them by filling in nothing.
+ *
+ * Returns the lead unchanged when it is already complete, so this is safe to
+ * call unconditionally and costs one request only when it is needed.
+ *
+ * Throws on a read failure rather than returning the stub. Editing a record
+ * you could not read is how fields get blanked — the server-side merge in
+ * restorePartialLeads is the backstop, but the user should not be shown empty
+ * fields and asked to trust them.
+ */
+export async function ensureFullLead(
+  lead: AdmissionLead,
+): Promise<AdmissionLead> {
+  if (!isPartialLead(lead)) return lead;
+
+  const res = await fetch(
+    `/api/school-data/admissions-desk?leadId=${encodeURIComponent(lead.id)}`,
+    { cache: "no-store" },
+  );
+  const body = (await res.json().catch(() => null)) as {
+    ok?: boolean;
+    lead?: AdmissionLead;
+    error?: string;
+  } | null;
+
+  if (!res.ok || !body?.ok || !body.lead) {
+    throw new Error(
+      body?.error ??
+        `Could not load the full record for this lead (${res.status}).`,
+    );
+  }
+  return body.lead;
+}
+
+export function isPartialLead(lead: unknown): boolean {
+  return !!(lead as { __partial?: boolean })?.__partial;
+}
+
+/**
+ * Merge a projected lead over the copy already held, keeping every field the
+ * projection did not carry. Returns the existing record untouched when the
+ * incoming one is a stub and nothing is known to be newer.
+ */
+export function mergeProjectedLead(
+  existing: AdmissionLead | undefined,
+  incoming: AdmissionLead,
+): AdmissionLead {
+  if (!existing) return incoming;
+  if (!isPartialLead(incoming)) return incoming;
+  // Projection wins only for the columns it actually carries; everything else
+  // is preserved from the full record.
+  const merged = { ...existing } as Record<string, unknown>;
+  for (const [k, v] of Object.entries(incoming)) {
+    if (k === "__partial") continue;
+    if (v !== undefined && v !== null && v !== "") merged[k] = v;
+  }
+  return merged as AdmissionLead;
+}
+
+export function sanitizeSurveyPhotoUrl(value?: string | null): string {
+  // One rule for every stored image in the app; see lib/media.ts.
+  return sanitizeStoredMediaUrl(value, "admissions survey photo");
 }
 
 export function saveAdmissions(state: AdmissionsState): void {
@@ -1268,16 +1500,22 @@ export function saveAdmissions(state: AdmissionsState): void {
 
   if (typeof window === "undefined") {
     writeAdmissionsLocalRaw(normalized);
-    void import("@/lib/admissionsPersistence").then(({ scheduleAdmissionsSync }) => {
+    void trackServerWork(import("@/lib/admissionsPersistence").then(({ scheduleAdmissionsSync }) => {
       scheduleAdmissionsSync(normalized);
-    });
+    }));
     return;
   }
-  writeAdmissionsLocalRaw(normalized);
+  // The database write is scheduled FIRST, and never depends on the cache.
+  //
+  // These three lines used to run in the opposite order, and on a phone that
+  // silently cost the save: writeAdmissionsLocalRaw threw QuotaExceededError
+  // on a 2.37 MB payload, so neither sync below ever ran. A full cache stopped
+  // the record from being written at all. See lib/browserStorage.ts.
   scheduleClientSchoolMirrorSync({ admissions: normalized });
-  void import("@/lib/admissionsPersistence").then(({ scheduleAdmissionsSync }) => {
+  void trackServerWork(import("@/lib/admissionsPersistence").then(({ scheduleAdmissionsSync }) => {
     scheduleAdmissionsSync(normalized);
-  });
+  }));
+  writeAdmissionsLocalRaw(normalized);
 }
 
 /** Hydrate path — localStorage only, no cloud schedule. */
@@ -1288,7 +1526,27 @@ export function writeAdmissionsLocalRaw(state: AdmissionsState): void {
     setMirrorSlice("admissions", normalized);
     return;
   }
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  // Caching only. A browser that cannot hold 2.37 MB drops the entry and the
+  // module re-reads from the database — which is the intended behaviour under
+  // the no-offline decision anyway. It must not throw: this is called from
+  // saveAdmissions, and an exception here used to abort the save.
+  // Memory first and unconditionally, so a cache that cannot hold this
+  // still leaves the leads readable for the rest of the session.
+  memoryAdmissionsState = normalized;
+  // Cache the wire shape — the same lossless strip the admissions-desk route
+  // sends (rebuildable-empty fields dropped; normalizeAdmissionsState puts
+  // them back on read). 2.6 M chars measured on 2026-09-06, the largest
+  // entry after SIS on an origin already over Chrome's ~5.2 M-char cap.
+  writeCacheOrInvalidate(
+    STORAGE_KEY,
+    JSON.stringify({
+      ...normalized,
+      leads: stripEmptyList(normalized.leads as unknown as Record<string, unknown>[]),
+      households: stripEmptyList(
+        normalized.households as unknown as Record<string, unknown>[],
+      ),
+    }),
+  );
 }
 
 export function admissionsStateIsEmpty(state: AdmissionsState): boolean {
@@ -1373,7 +1631,8 @@ export function findHouseholdByMobile(
   mobile: string,
 ): AdmissionHousehold | undefined {
   const m = normalizeMobile(mobile);
-  if (m.length !== 10) return undefined;
+  // A placeholder number is not a family — see isPlaceholderMobile.
+  if (m.length !== 10 || isPlaceholderMobile(m)) return undefined;
   return state.households.find(
     (h) =>
       h.primaryMobile === m ||
@@ -1640,6 +1899,8 @@ export function addSiblingEnquiry(
   child: {
     childName: string;
     dob?: string;
+    /** Parent-stated age in years when no birth date is known. */
+    ageYearsApprox?: number;
     gender?: string;
     classSoughtId: string;
     previousSchool?: string;
@@ -1672,6 +1933,7 @@ export function addSiblingEnquiry(
     source: child.source || "walk_in",
     childName,
     dob: child.dob || "",
+    ageYearsApprox: child.ageYearsApprox || 0,
     gender: child.gender || "",
     classSoughtId: child.classSoughtId,
     previousSchool: child.previousSchool || "",
@@ -1884,35 +2146,98 @@ export function followUpCounts(state: AdmissionsState): {
   return { overdue, dueToday, unassigned };
 }
 
-export function promoteToRegistration(
+/**
+ * What is still stopping this lead moving to Registered.
+ *
+ * Exported so the SCREEN and the GUARD read the same rule. Before this, the
+ * button called promoteToRegistration, got a refusal, and flashed it for
+ * three seconds — while the tick that would fix it sat a thousand lines
+ * further down the panel. A walk-in lead therefore looked like a broken
+ * button rather than an unfinished checklist.
+ *
+ * Each blocker names the field it is about, so the screen can send someone
+ * straight to it instead of asking them to hunt.
+ */
+export type RegistrationBlocker = {
+  /** The lead field to fix, when there is one. */
+  field?: keyof AdmissionLead;
+  /** Which step of the panel holds the fix. */
+  where: "child" | "family" | "checklist";
+  message: string;
+};
+
+export function registrationBlockers(
   state: AdmissionsState,
   leadId: string,
-): { ok: true; state: AdmissionsState } | { ok: false; reason: string } {
+): RegistrationBlocker[] {
   const lead = state.leads.find((l) => l.id === leadId);
-  if (!lead) return { ok: false, reason: "Lead not found" };
+  if (!lead) return [{ where: "child", message: "Lead not found" }];
+
+  const out: RegistrationBlocker[] = [];
   if (lead.stage !== "enquiry" && lead.stage !== "applied") {
-    return { ok: false, reason: "Only enquiry can move to registration" };
+    out.push({
+      where: "child",
+      // enquiry and applied are the only stages before registration; a lead
+      // past them has already been through it.
+      message: `This lead is already at “${lead.stage}” — registration is behind it.`,
+    });
+    // Nothing below is worth listing: the stage alone settles it.
+    return out;
   }
+
   const hh = householdOf(state, lead.householdId);
   const mother =
     lead.motherName.trim() ||
     motherFromHousehold(hh || emptyAdmissionHousehold())?.fullName ||
     "";
   if (!mother.trim()) {
-    return {
-      ok: false,
-      reason: "Add mother (or mother-relation guardian) on the household before registration",
-    };
+    out.push({
+      field: "motherName",
+      where: "family",
+      message: "Add the mother’s name (or a mother-relation guardian on the household).",
+    });
   }
   if (!lead.declarationAccepted) {
-    return { ok: false, reason: "Parent declaration must be accepted" };
+    out.push({
+      field: "declarationAccepted",
+      where: "checklist",
+      message: "Tick “Parent declaration accepted”.",
+    });
   }
-  if (!lead.docsBirthCert || !lead.docsPhoto) {
-    return {
-      ok: false,
-      reason: "Birth certificate and photo checklist must be marked",
-    };
+  if (!lead.docsBirthCert) {
+    out.push({
+      field: "docsBirthCert",
+      where: "checklist",
+      message: "Tick “Birth certificate”.",
+    });
   }
+  if (!lead.docsPhoto) {
+    out.push({
+      field: "docsPhoto",
+      where: "checklist",
+      message: "Tick “Passport photo”.",
+    });
+  }
+  return out;
+}
+
+export function promoteToRegistration(
+  state: AdmissionsState,
+  leadId: string,
+): { ok: true; state: AdmissionsState } | { ok: false; reason: string } {
+  const lead = state.leads.find((l) => l.id === leadId);
+  if (!lead) return { ok: false, reason: "Lead not found" };
+  // Same rule the screen shows, so the two can never drift apart.
+  const blockers = registrationBlockers(state, leadId);
+  if (blockers.length) {
+    return { ok: false, reason: blockers.map((b) => b.message).join(" ") };
+  }
+
+  const hh = householdOf(state, lead.householdId);
+  const mother =
+    lead.motherName.trim() ||
+    motherFromHousehold(hh || emptyAdmissionHousehold())?.fullName ||
+    "";
 
   let nextState = state;
   let applicationNo = lead.applicationNo;
@@ -2294,15 +2619,18 @@ export function enrollLead(
   const primary = admHh ? primaryGuardian(admHh) : undefined;
   const mother = admHh ? motherFromHousehold(admHh) : undefined;
   /** Parent-wise: each guardian mobile is its own SIS household */
-  const parentMobile =
+  const rawParentMobile =
     normalizeMobile(lead.parentGroupKey || lead.mobile) ||
     normalizeMobile(admHh?.primaryMobile || "");
+  // "" when the number is a placeholder: then nothing below can match, and
+  // the child gets a family of their own (see isPlaceholderMobile).
+  const parentMobile = isPlaceholderMobile(rawParentMobile) ? "" : rawParentMobile;
 
   let sisHouseholdId = "";
   let households = [...sis.households];
 
   // Same parent already admitted → reuse that SIS household
-  const sameParentLead = state.leads.find(
+  const sameParentLead = !parentMobile ? undefined : state.leads.find(
     (l) =>
       l.id !== lead.id &&
       l.stage === "enrolled" &&
@@ -2324,6 +2652,7 @@ export function enrollLead(
   // Only reuse admission HH → SIS link if that HH mobile matches this parent
   if (
     !sisHouseholdId &&
+    !!parentMobile &&
     admHh?.sisHouseholdId &&
     households.some((h) => h.id === admHh.sisHouseholdId) &&
     normalizeMobile(admHh.primaryMobile) === parentMobile
@@ -2350,15 +2679,57 @@ export function enrollLead(
       pincode: lead.pincode || admHh?.pincode || "",
       altMobile:
         admHh?.guardians.find((g) => !g.isPrimary && g.mobile)?.mobile || "",
+      // Carried across from registration, where the family was actually
+      // asked. Losing it here would silently downgrade a "yes" to
+      // "never asked" the moment the child enrolled — and the website reads
+      // the SIS household, not this one.
+      photoConsent: normalizePhotoConsent(admHh?.photoConsent),
     });
-    households = [...households, hh];
+
+    // A brand-new household, but the parents may already be known to the
+    // school under a different mobile. Where BOTH parent names match a family
+    // on roll, take their address and email rather than leaving the office to
+    // type it again. Contact NUMBERS are never copied: the mobile is how a
+    // household is identified here, so sharing one would merge two families
+    // and send another household's fee reminders to the wrong phone.
+    const twinHh = (() => {
+      const f = normParentName(lead.guardianName || "");
+      const m = normParentName(lead.motherName || "");
+      if (f.length < 3 || m.length < 3) return undefined;
+      const twin = sis.students.find(
+        (s2) =>
+          s2.status === "active" &&
+          normParentName(s2.fatherName) === f &&
+          normParentName(s2.motherName) === m,
+      );
+      return twin
+        ? households.find((h) => h.id === twin.householdId)
+        : undefined;
+    })();
+    const filled = carryOverHousehold({ household: hh, donor: twinHh });
+    households = [...households, filled.household];
     sisHouseholdId = hh.id;
   }
 
+  /*
+   * Who the father is, and whose phone the lead's key mobile is.
+   *
+   * `primary` is whichever guardian the registration marked primary — often
+   * the mother. Falling back to it for "father" wrote her name and, worse,
+   * her mobile into the father's fields; so did falling back to the lead's own
+   * mobile when the registering parent was the mother. A number nobody said
+   * belongs to the father must not be recorded as his (see
+   * alignHouseholdMobiles for the same rule on the student form).
+   */
   const father =
-    admHh?.guardians.find((g) => g.relation === "father") || primary;
+    admHh?.guardians.find((g) => g.relation === "father") ||
+    (primary?.relation === "father" ? primary : undefined);
   const motherG =
     mother || admHh?.guardians.find((g) => g.relation === "mother");
+  const leadMobileIsMothers =
+    (!!motherG?.mobile && normalizeMobile(motherG.mobile) === parentMobile) ||
+    (!!lead.motherName.trim() &&
+      normParentName(lead.guardianName) === normParentName(lead.motherName));
 
   const rteTagIds = lead.rte
     ? ensureRteEwsTagIds({
@@ -2385,10 +2756,15 @@ export function enrollLead(
     studentType,
     feeGroupId: feeGroupId || null,
     joinedOn: admissionDate,
-    fatherName: father?.fullName || lead.guardianName,
+    fatherName:
+      father?.fullName || (leadMobileIsMothers ? "" : lead.guardianName),
     motherName: motherG?.fullName || lead.motherName,
-    fatherMobile: father?.mobile || parentMobile,
-    motherMobile: motherG?.mobile || "",
+    fatherMobile:
+      normalizeMobile(father?.mobile ?? "") ||
+      (leadMobileIsMothers ? "" : parentMobile),
+    motherMobile:
+      normalizeMobile(motherG?.mobile ?? "") ||
+      (leadMobileIsMothers ? parentMobile : ""),
     householdId: sisHouseholdId,
     category: (["GEN", "OBC", "SC", "ST", "EWS"].includes(lead.category)
       ? lead.category
@@ -2402,10 +2778,56 @@ export function enrollLead(
       : "",
   });
 
+  /*
+   * A second child of the same family should not need the parents' details
+   * typed again. The trustworthy signal is the household: by this point the
+   * school has already decided this child belongs to an existing family, via
+   * a sibling link or a matching mobile. Where that decision was made only on
+   * the parents' NAMES, identity numbers are held back — two families in one
+   * village really can share both names, and a wrong Aadhaar travels into
+   * UDISE where nobody would catch it.
+   *
+   * Only blanks are filled: whatever the office typed on this child's form is
+   * what they meant.
+   */
+  const familySiblings = sis.students
+    .filter(
+      (s2) =>
+        s2.status === "active" &&
+        s2.householdId &&
+        s2.householdId === sisHouseholdId,
+    )
+    // Most recently joined first: the newest sibling's record is the one the
+    // office filled in most lately, and so the likeliest to be current.
+    .sort((a, b) => String(b.joinedOn ?? "").localeCompare(String(a.joinedOn ?? "")));
+
+  const nameTwins =
+    familySiblings.length === 0 && student.fatherName && student.motherName
+      ? sis.students.filter(
+          (s2) =>
+            s2.status === "active" &&
+            normParentName(s2.fatherName) === normParentName(student.fatherName) &&
+            normParentName(s2.motherName) === normParentName(student.motherName),
+        )
+      : [];
+
+  const carry = carryOverFromSibling({
+    student,
+    siblings: familySiblings.length ? familySiblings : nameTwins,
+    confidence: familySiblings.length ? "household" : "names_only",
+  });
+  const note = carryOverNote(carry);
+  const enrolledStudent = note
+    ? {
+        ...carry.student,
+        notes: [carry.student.notes, note].filter(Boolean).join(" · "),
+      }
+    : carry.student;
+
   saveSis({
     ...sis,
     households,
-    students: [...sis.students, student],
+    students: [...sis.students, enrolledStudent],
   });
 
   let next = state;
@@ -2972,7 +3394,11 @@ export function createFieldSurveyEnquiry(
       assignedTo: by,
     },
     by || "Field survey",
-    { allowMissingClass: !draft.classSoughtId, publicSubmit: false },
+    // Deliberately optional: a surveyor walking a beat often does not know
+    // the class yet, and losing the lead is worse than losing the class.
+    // Spelled as a literal, not `!draft.classSoughtId` — deriving the flag
+    // from the condition it guards makes the check unable to ever fire.
+    { allowMissingClass: true, publicSubmit: false },
   );
   if (!r.ok) return r;
   return { ok: true, state: r.state, lead: r.lead };
@@ -3002,12 +3428,48 @@ export function createRegistrationFromDesk(
       leadDate: draft.leadDate || today(),
     },
     by,
-    { allowMissingClass: !draft.classSoughtId },
+    // A paid registration always has a class: the only caller,
+    // createFamilyRegistrationsFromDesk, refuses the whole family first
+    // ("Class required for child N"). Enforced here too so the invariant
+    // survives a future second caller.
+    { allowMissingClass: false },
   );
   if (!created.ok) return created;
 
-  let next = created.state;
-  let lead = created.lead;
+  return applyRegistrationToLead(created.state, created.lead.id, draft);
+}
+
+/**
+ * Promote an existing lead to a registration: checklist, fee head and
+ * amount, application number, stage.
+ *
+ * Split out of createRegistrationFromDesk so a lead that already exists —
+ * a WhatsApp enquiry the parent is now converting through the registration
+ * link — travels the identical path instead of being filed a second time
+ * under a new id. Registering twice is not a harmless duplicate: each copy
+ * carries its own registration fee, so the family shows a second amount
+ * due and the desk queue lists the same child twice.
+ */
+export function applyRegistrationToLead(
+  state: AdmissionsState,
+  leadId: string,
+  draft: Partial<AdmissionLead> & {
+    feeHeadId: string;
+    feeHeadName: string;
+    feeAmountPaise: number;
+  },
+):
+  | { ok: true; state: AdmissionsState; lead: AdmissionLead }
+  | { ok: false; reason: string } {
+  let next = state;
+  let lead = next.leads.find((l) => l.id === leadId) || null;
+  if (!lead) return { ok: false, reason: "Lead not found" };
+  if (lead.stage === "enrolled") {
+    return {
+      ok: false,
+      reason: "This child is already enrolled — contact the school office",
+    };
+  }
 
   // Soft-complete checklist for desk registration if provided
   next = updateLead(next, lead.id, {
@@ -3015,10 +3477,12 @@ export function createRegistrationFromDesk(
     docsBirthCert: draft.docsBirthCert ?? true,
     docsPhoto: draft.docsPhoto ?? true,
     motherName: draft.motherName || lead.motherName || "—",
+    classSoughtId: draft.classSoughtId || lead.classSoughtId,
     registrationFeeHeadId: draft.feeHeadId,
     registrationFeeAmountPaise: draft.feeAmountPaise,
     parentGroupKey: normalizeMobile(draft.mobile || lead.mobile),
   });
+  lead = next.leads.find((l) => l.id === leadId)!;
 
   const promo = promoteToRegistration(next, lead.id);
   if (!promo.ok) {
@@ -3053,8 +3517,133 @@ export function createRegistrationFromDesk(
     });
   }
 
-  lead = next.leads.find((l) => l.id === lead.id)!;
-  return { ok: true, state: next, lead };
+  const registered = next.leads.find((l) => l.id === leadId);
+  if (!registered) return { ok: false, reason: "Lead lost during registration" };
+  return { ok: true, state: next, lead: registered };
+}
+
+/**
+ * Register a family that already has enquiries on file — the path behind
+ * the registration link the WhatsApp bot sends an existing lead.
+ *
+ * Each submitted child is matched to an existing lead in this household
+ * by name and converted in place; only a genuinely new sibling creates a
+ * new lead. Nothing here files a second record for a child the school
+ * already knows about, which is the whole point of sending a tokenised
+ * link rather than a bare /register URL.
+ */
+export function registerExistingFamily(
+  state: AdmissionsState,
+  input: {
+    householdId: string;
+    guardianName: string;
+    motherName?: string;
+    mobile: string;
+    children: FamilyRegistrationChildDraft[];
+    feeHeadName?: string;
+    campaignNote?: string;
+  },
+  by: string,
+):
+  | { ok: true; state: AdmissionsState; leads: AdmissionLead[] }
+  | { ok: false; reason: string } {
+  const household = householdOf(state, input.householdId);
+  if (!household) return { ok: false, reason: "Family record not found" };
+
+  const guardianName = (input.guardianName || "").trim();
+  if (!guardianName) {
+    return { ok: false, reason: "Parent / guardian name is required" };
+  }
+  const mobile = normalizeMobile(input.mobile || "");
+  if (mobile.length !== 10) {
+    return { ok: false, reason: "Parent mobile must be 10 digits" };
+  }
+
+  const children = (input.children || [])
+    .map((c) => ({
+      ...c,
+      childName: (c.childName || "").trim(),
+      classSoughtId: c.classSoughtId || "",
+      feeHeadId: c.feeHeadId || "",
+      feeAmountPaise: Math.max(0, Math.round(Number(c.feeAmountPaise) || 0)),
+    }))
+    .filter((c) => c.childName);
+  if (children.length === 0) return { ok: false, reason: "Add at least one child" };
+
+  const names = children.map((c) => c.childName.toLowerCase());
+  if (new Set(names).size !== names.length) {
+    return { ok: false, reason: "Sibling names must be unique in this family" };
+  }
+  for (const c of children) {
+    if (!c.classSoughtId) {
+      return { ok: false, reason: `Class required for ${c.childName}` };
+    }
+    if (!c.feeHeadId) {
+      return { ok: false, reason: `Fee head required for ${c.childName}` };
+    }
+  }
+
+  const feeHeadName = input.feeHeadName || "Registration fee";
+  const note = input.campaignNote || "Parent self-register · WhatsApp link";
+  let next = state;
+  const out: AdmissionLead[] = [];
+  // A lead already claimed by one submitted child must not be matched
+  // again by the next one.
+  const claimed = new Set<string>();
+
+  for (const child of children) {
+    const existing = next.leads.find(
+      (l) =>
+        l.householdId === input.householdId &&
+        !claimed.has(l.id) &&
+        l.stage !== "lost" &&
+        l.childName.trim().toLowerCase() === child.childName.toLowerCase(),
+    );
+
+    let leadId: string;
+    if (existing) {
+      leadId = existing.id;
+    } else {
+      const sib = addSiblingEnquiry(
+        next,
+        input.householdId,
+        {
+          childName: child.childName,
+          classSoughtId: child.classSoughtId,
+          dob: child.dob,
+          gender: child.gender,
+          campaignNote: note,
+        },
+        by,
+      );
+      if (!sib.ok) return sib;
+      next = sib.state;
+      leadId = sib.lead.id;
+    }
+    claimed.add(leadId);
+
+    const applied = applyRegistrationToLead(next, leadId, {
+      guardianName,
+      motherName: input.motherName,
+      mobile,
+      classSoughtId: child.classSoughtId,
+      dob: child.dob,
+      gender: child.gender,
+      feeHeadId: child.feeHeadId,
+      feeHeadName,
+      feeAmountPaise: child.feeAmountPaise,
+    });
+    if (!applied.ok) return applied;
+    next = applied.state;
+    next = updateLead(next, leadId, {
+      campaignNote: [applied.lead.campaignNote, note]
+        .filter(Boolean)
+        .join(" · "),
+    });
+    out.push(next.leads.find((l) => l.id === leadId)!);
+  }
+
+  return { ok: true, state: next, leads: out };
 }
 
 export type FamilyRegistrationChildDraft = {
@@ -3237,6 +3826,15 @@ export function createFamilyRegistrationsFromPublic(
     children: FamilyRegistrationChildDraft[];
     feeHeadName?: string;
     campaignSrc?: string;
+    /** Parent ticked the DPDP consent box */
+    consent?: boolean;
+    /**
+     * Parent ticked the SEPARATE, optional photographs box. `false` here is a
+     * real answer — they were asked and declined — and is recorded as such,
+     * not left blank. Blank is reserved for families nobody has asked.
+     */
+    photoConsent?: boolean;
+    preferredLanguage?: string;
   },
   by = "Parent self-register",
 ):
@@ -3276,12 +3874,31 @@ export function createFamilyRegistrationsFromPublic(
   const note = input.campaignSrc
     ? `Parent self-register · ${input.campaignSrc}`
     : "Parent self-register · /register";
+  const consentAt = input.consent ? new Date().toISOString() : "";
   for (const lead of r.leads) {
     next = updateLead(next, lead.id, {
       campaignNote: [lead.campaignNote, note].filter(Boolean).join(" · "),
       source,
+      ...(consentAt ? { declarationAccepted: true, parentConsentAt: consentAt, parentConsentBy: "parent (public register)" } : {}),
+      ...(input.preferredLanguage ? { preferredLanguage: input.preferredLanguage } : {}),
     });
   }
+  // The family was asked, so their answer is recorded either way — a tick is
+  // "granted", an untouched box is "refused". Neither is left blank: blank
+  // means nobody asked, and that distinction is the whole point of opt-in.
+  next = {
+    ...next,
+    households: next.households.map((h) =>
+      h.id === r.householdId
+        ? {
+            ...h,
+            photoConsent: (input.photoConsent ? "granted" : "refused") as PhotoConsent,
+            updatedAt: new Date().toISOString(),
+          }
+        : h,
+    ),
+  };
+
   return {
     ok: true,
     state: next,
@@ -3346,6 +3963,8 @@ export function takeRegistrationPayment(
       bankName?: string;
       instrumentDate?: string;
     }[];
+    /** The date the money was actually received; today when absent. */
+    paidOn?: string;
     note?: string;
     feeHeadName?: string;
   },
@@ -3421,7 +4040,9 @@ export function takeRegistrationPayment(
     mobile: lead.mobile,
     childName: lead.childName,
     createdBy: by,
-    paidAt: new Date().toISOString(),
+    paidAt: input.paidOn
+      ? new Date(`${input.paidOn}T12:00:00`).toISOString()
+      : new Date().toISOString(),
     upiRef:
       refs ||
       `${primary.mode.toUpperCase()}-${Date.now().toString(36).toUpperCase()}`,
@@ -3589,6 +4210,13 @@ export function captureRegistrationPayment(
   state: AdmissionsState,
   paymentId: string,
   upiRef: string,
+  /**
+   * The gateway that captured it, when one did. Most callers are counter
+   * collection — a clerk taking cash or a UPI into the school's own QR — and
+   * that money really is in the bank, so the default is empty and only the
+   * gateway webhook passes a provider.
+   */
+  gatewayProvider = "",
 ):
   | { ok: true; state: AdmissionsState; payment: RegistrationFeePayment }
   | { ok: false; reason: string } {
@@ -3610,14 +4238,18 @@ export function captureRegistrationPayment(
           mode: (t.mode || "upi") as TenderMode,
           ref: t.ref || ref,
           instrumentDate: t.instrumentDate || new Date().toISOString().slice(0, 10),
+          gatewayProvider: gatewayProvider || t.gatewayProvider || "",
         }))
       : [
-          normalizeRegistrationTender({
-            mode: "upi",
-            amountPaise: payment.amountPaise,
-            ref,
-            instrumentDate: new Date().toISOString().slice(0, 10),
-          }),
+          {
+            ...normalizeRegistrationTender({
+              mode: "upi",
+              amountPaise: payment.amountPaise,
+              ref,
+              instrumentDate: new Date().toISOString().slice(0, 10),
+            }),
+            gatewayProvider,
+          },
         ];
   const updated: RegistrationFeePayment = {
     ...payment,
@@ -3696,6 +4328,48 @@ export function waiveRegistrationFee(
   });
   out = applyRegistrationLedgerSync(out, leadId, by, payment.id);
   return out;
+}
+
+/**
+ * Fee Take voided an R-series receipt — the CRM must stop saying "paid".
+ * Looks the payment up by its posted fee voucher id; reopens it and
+ * refreshes the lead's registration status. Safe to call for any voided
+ * voucher: a non-registration receipt simply finds no payment.
+ */
+export function revertRegistrationPaymentForVoidedReceipt(
+  feeVoucherId: string,
+): boolean {
+  if (!feeVoucherId) return false;
+  const state = loadAdmissions();
+  const payment = (state.registrationPayments || []).find(
+    (p) => p.feeVoucherId === feeVoucherId && p.status === "paid",
+  );
+  if (!payment) return false;
+  let next: AdmissionsState = {
+    ...state,
+    registrationPayments: (state.registrationPayments || []).map((p) =>
+      p.id === payment.id
+        ? {
+            ...p,
+            status: "open" as const,
+            paidAt: "",
+            note: [
+              p.note,
+              `R receipt ${p.feeReceiptNo || ""} voided at Fee Take`.trim(),
+            ]
+              .filter(Boolean)
+              .join(" · "),
+          }
+        : p,
+    ),
+  };
+  next = refreshLeadRegistrationPaymentStatus(
+    next,
+    payment.leadId,
+    `R receipt ${payment.feeReceiptNo || payment.code} voided — balance reopened`,
+  );
+  saveAdmissions(next);
+  return true;
 }
 
 export type RegistrationPaySharePayload = {
@@ -3818,6 +4492,9 @@ export function composeRegistrationReceiptWhatsApp(
 export function whatsAppUrl(mobile: string, message: string): string {
   const digits = mobile.replace(/\D/g, "");
   const phone = digits.length === 10 ? `91${digits}` : digits;
+  // personal-whatsapp-allow: the one caller is the PUBLIC /register form,
+  // where this runs on the parent's own device to hand them their own
+  // receipt. No staff account is involved and /api/wa/dispatch would 401.
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 
@@ -3863,7 +4540,11 @@ export function setLeadCallerAssigned(
   if (!id) return state;
   const set = new Set(state.leadCallerStaffIds || []);
   if (assigned) set.add(id);
-  else set.delete(id);
+  else {
+    set.delete(id);
+    // Named, so the save removes it — a save never deletes by absence.
+    if (typeof window !== "undefined") recordDeskDeletion("admissions", "admission_lead_callers", [id]);
+  }
   return { ...state, leadCallerStaffIds: [...set] };
 }
 
@@ -3897,7 +4578,10 @@ export function createStaffMobileEnquiry(
       nextFollowUpAt: draft.nextFollowUpAt || today(),
     },
     by,
-    { allowMissingClass: !draft.classSoughtId },
+    // Staff capturing a lead on their phone: the class picker is labelled
+    // "Class (optional)", so blank is a supported answer, not an accident.
+    // Literal rather than `!draft.classSoughtId` — see createFieldSurveyEnquiry.
+    { allowMissingClass: true },
   );
 }
 

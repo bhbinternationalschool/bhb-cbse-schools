@@ -20,10 +20,36 @@ import {
   fetchStaffRemoteServer,
   mergeStaffRemoteIntoMasters,
 } from "@/lib/staffPersistence";
+import { mergeDeskMastersOverBlob } from "@/lib/mastersMergePolicy";
 
 let lastHydrateMs = 0;
 let inFlightPromise: Promise<boolean> | null = null;
 const HYDRATE_TTL_MS = 45_000;
+/** Fingerprint of the mirror's Supabase sources at the last full hydrate —
+ * when the probe still matches, the multi-MB re-pull is skipped entirely
+ * (the in-memory mirror is provably current). See lib/deskProbeCache.server. */
+let lastProbe = "";
+const MIRROR_PROBE_TABLES = [
+  "sis_students",
+  "sis_households",
+  "sis_enrollments",
+  "sis_staff",
+  "sis_student_identities",
+  "admission_desk_leads",
+  "admission_desk_households",
+  "admission_desk_registration_payments",
+  "fee_desk_vouchers",
+  "fee_desk_voucher_lines",
+  "payment_desk_links",
+  "masters_desk_slices",
+  "masters_desk_settings",
+  // Both added 2026-09-16 with the transport / adjustments hydrate below:
+  // a bus fee or a posted waiver must invalidate the mirror the same way a
+  // receipt does, or the probe would hold the old dues for 45 seconds
+  // after the transport desk changed them.
+  "transport_desk_slices",
+  "module_local_state",
+];
 
 function nowIso() {
   return new Date().toISOString();
@@ -41,7 +67,17 @@ function mirrorLooksEmpty(bundle: SchoolMirrorBundle): boolean {
     !!sis &&
     ((sis.households?.length ?? 0) > 0 || (sis.students?.length ?? 0) > 0);
   const hasStaff = (masters?.staff?.length ?? 0) > 0;
+  const hasClasses = (masters?.classes?.length ?? 0) > 0;
   const hasLeads = admissionsLeadCount(admissions) > 0;
+  // Staff can merge in successfully on a cold instance's first hydrate
+  // while the desk-tables classes/sections read lags behind (e.g. a
+  // transient timing hiccup) — hasStaff alone then reads "not empty" and
+  // the 45s TTL guard skips retrying, so every request in that window
+  // (attendance, homework, class WA channels, ...) works off zero classes.
+  // Classes are load-bearing everywhere, so treat their absence as "looks
+  // empty" regardless of what else came through, forcing a retry on the
+  // very next call instead of caching the broken state for 45 seconds.
+  if (!hasClasses) return true;
   return !hasSis && !hasStaff && !hasLeads;
 }
 
@@ -64,12 +100,33 @@ export async function hydrateSchoolMirrorFromRemote(
 
   inFlightPromise = (async () => {
     try {
+      // Egress guard: a ~200-byte probe decides whether anything below is
+      // worth pulling. Unchanged sources → refresh the TTL stamp and keep
+      // the in-memory mirror. Probe unavailable → hydrate as always.
+      // Taken BEFORE the pull so a write landing mid-pull changes the next
+      // probe (an extra re-pull, never staleness).
+      let prePullProbe = "";
+      if (!opts?.force) {
+        try {
+          const { deskProbe } = await import("@/lib/deskProbeCache.server");
+          prePullProbe = (await deskProbe(MIRROR_PROBE_TABLES, "probe:school_mirror")) || "";
+        } catch {
+          prePullProbe = "";
+        }
+        if (prePullProbe && lastProbe && prePullProbe === lastProbe && !mirrorLooksEmpty(cur)) {
+          lastHydrateMs = Date.now();
+          return false;
+        }
+      }
       const remoteBlob = await fetchServerBlob<SchoolMirrorBundle>(
         "school_mirror_state",
       );
       const { sisReadFromDbEnabled } = await import("@/lib/sisDbConfig");
       const { feesReadFromDbEnabled } = await import("@/lib/feesDbConfig");
       const { paymentsReadFromDbEnabled } = await import("@/lib/paymentsDbConfig");
+      const { admissionsReadFromDbEnabled } = await import(
+        "@/lib/admissionsDbConfig"
+      );
       let next: SchoolMirrorBundle = {
         version: 1,
         updatedAt: remoteBlob.updatedAt || cur.updatedAt || nowIso(),
@@ -83,7 +140,20 @@ export async function hydrateSchoolMirrorFromRemote(
           ? cur.payments
           : (remoteBlob.state?.payments ?? cur.payments),
         masters: remoteBlob.state?.masters ?? cur.masters,
-        admissions: remoteBlob.state?.admissions ?? cur.admissions,
+        // Was unconditional — the only slice with no freshness guard.
+        // admission_desk_leads has been the real admissions store for a
+        // while now (ADMISSIONS_READ_FROM_DB); this stops anything reading
+        // mirror.admissions (waCrmBotServer.ts's WhatsApp-name backfill is
+        // the one confirmed live consumer) from silently working off a
+        // stale blob copy once that flag is on. Matches the sis/fees/
+        // payments pattern exactly — it does not shrink what's fetched
+        // from Supabase, only which value gets used afterward. Shrinking
+        // the stored blob itself is a separate, larger change: it needs
+        // waCrmBotServer.ts's admissions dependency re-pointed at
+        // fetchAdmissionDeskFromDb first, not just this route.
+        admissions: admissionsReadFromDbEnabled()
+          ? cur.admissions
+          : (remoteBlob.state?.admissions ?? cur.admissions),
       };
 
       const { ensureSisHydratedServer } = await import("@/lib/sisPersistence");
@@ -112,6 +182,32 @@ export async function hydrateSchoolMirrorFromRemote(
         }
       }
 
+      // Masters must come from the desk tables when the cutover is on,
+      // for the same reason sis/fees/payments do above. Without this the
+      // server keeps serving the pre-cutover blob copy, whose class,
+      // section, campus and fee-group ids were replaced when masters were
+      // re-seeded. Everything server-side that resolves a class — the
+      // WhatsApp bot, class-channel sync — then works in a dead id space
+      // while the browser and the desk tables use the live one, and any
+      // server write reintroduces the stale ids.
+      const { mastersReadFromDbEnabled } = await import("@/lib/mastersDbConfig");
+      if (mastersReadFromDbEnabled()) {
+        const { fetchMastersDeskFromDb, deskBundleToMastersState } =
+          await import("@/lib/mastersNormalized.server");
+        const { bundle: mastersBundle } = await fetchMastersDeskFromDb();
+        const deskMasters = deskBundleToMastersState(mastersBundle);
+        if ((deskMasters.classes?.length ?? 0) > 0) {
+          next = {
+            ...next,
+            masters: mergeDeskMastersOverBlob(
+              next.masters as MastersState | null,
+              deskMasters,
+            ),
+            updatedAt: nowIso(),
+          };
+        }
+      }
+
       const mastersBase =
         (next.masters as MastersState | null) &&
         Array.isArray((next.masters as MastersState).classes)
@@ -131,24 +227,45 @@ export async function hydrateSchoolMirrorFromRemote(
         };
       }
 
+      const { fetchSisFromDb } = await import("@/lib/sisNormalized.server");
+      const { bundle: sisBundle } = await fetchSisFromDb();
+      if (sisBundle.students.length > 0 || sisBundle.households.length > 0) {
+        next = {
+          ...next,
+          sis: {
+            version: 1,
+            households: sisBundle.households,
+            students: sisBundle.students,
+            audit: [],
+          },
+          updatedAt: nowIso(),
+        };
+      }
+
       const [admissionsRemote] = await Promise.all([
         fetchAdmissionsRemoteServer(),
       ]);
 
-      const { admissionsReadFromDbEnabled } = await import("@/lib/admissionsDbConfig");
-      const mirrorAdmissions = next.admissions as AdmissionsState | null;
-      const mirrorLeads = admissionsLeadCount(mirrorAdmissions);
-      const blobLeads = admissionsLeadCount(admissionsRemote);
-      if (
-        !admissionsReadFromDbEnabled() &&
-        blobLeads > 0 &&
-        admissionsRemote
-      ) {
+      if (admissionsRemote && !admissionsStateIsEmpty(admissionsRemote)) {
         next = { ...next, admissions: admissionsRemote, updatedAt: nowIso() };
-      } else if (admissionsReadFromDbEnabled() && admissionsRemote) {
-        next = { ...next, admissions: admissionsRemote, updatedAt: nowIso() };
-      } else if (mirrorLeads === 0 && !next.admissions) {
-        next = { ...next, admissions: defaultAdmissionsState() };
+      }
+
+      // The two desks a fee calculation needs that do NOT live in the mirror
+      // bundle — transport and fee adjustments — keep their own module-level
+      // memory, so they are hydrated alongside it rather than merged into
+      // `next`. Without them every server-side dues figure was wrong in two
+      // directions at once; see lib/feeDuesInputs.server.ts for what that
+      // cost the school.
+      try {
+        const { ensureFeeDuesInputsHydrated } = await import(
+          "@/lib/feeDuesInputs.server"
+        );
+        await ensureFeeDuesInputsHydrated({ force: true });
+      } catch (e) {
+        console.warn(
+          "[schoolMirror] fee dues inputs hydrate failed:",
+          e instanceof Error ? e.message : e,
+        );
       }
 
       if (!next.fees) next = { ...next, fees: emptyFeesState() };
@@ -157,27 +274,9 @@ export async function hydrateSchoolMirrorFromRemote(
       if (!next.sis) next = { ...next, sis: emptySisState() };
       if (!next.admissions) next = { ...next, admissions: defaultAdmissionsState() };
 
-      const { ensureAttendanceHydratedServer } = await import(
-        "@/lib/attendancePersistence"
-      );
-      await ensureAttendanceHydratedServer();
-
-      const { ensureExamsHydratedServer } = await import("@/lib/examsPersistence");
-      await ensureExamsHydratedServer();
-
-      const { ensureAdmissionsHydratedServer } = await import(
-        "@/lib/admissionsPersistence"
-      );
-      await ensureAdmissionsHydratedServer();
-
-      const { loadAdmissions } = await import("@/lib/admissions");
-      const hydratedAdmissions = loadAdmissions();
-      if (!admissionsStateIsEmpty(hydratedAdmissions)) {
-        next = { ...next, admissions: hydratedAdmissions, updatedAt: nowIso() };
-      }
-
       replaceSchoolMirror(next);
       lastHydrateMs = Date.now();
+      lastProbe = prePullProbe;
       return true;
     } finally {
       inFlightPromise = null;

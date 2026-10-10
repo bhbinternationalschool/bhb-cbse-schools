@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "vault";
 
@@ -41,7 +42,7 @@ export function resetVaultPersistenceCache() {
 
 export function scheduleVaultSync(state: VaultState) {
   if (typeof window === "undefined") {
-    void pushVaultRemoteServer(state);
+    void trackServerWork(pushVaultRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("vault")) {
@@ -73,7 +74,6 @@ export async function pushVaultRemoteServer(
 
 export async function ensureVaultHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = vaultReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("vault")
@@ -81,7 +81,12 @@ export async function ensureVaultHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateVaultDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateVaultDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (changed && (bundle.documents.length > 0 || readFromDb)) {
     const merged = mergeDbDeskIntoVaultState(loadVault(), bundle, {
       preferDb: readFromDb,
@@ -90,7 +95,9 @@ export async function ensureVaultHydrated(): Promise<boolean> {
     normChanged = true;
   }
 
-  if (normChanged) {
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+
+  if (normChanged && !readFromDb) {
     scheduleVaultSync(loadVault());
   }
 

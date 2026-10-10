@@ -2,9 +2,34 @@
  * Client → server sync for normalized accounts desk.
  */
 
-import type { AccountsState } from "@/lib/accounts";
+import type { AccountsState } from "@/lib/accountsTypes";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import { trackDeskPush } from "@/lib/deskSyncStatus";
+import {
+  confirmDeskDeletes,
+  pendingDeskDeletes,
+  recordDeskDeletion,
+} from "@/lib/deskNamedDeletes";
+
+/** Name the accounts desk uses in deskNamedDeletes. */
+const ACCOUNTS_DESK = "accounts";
+
+/**
+ * The user deleted a master row (bank account, chart head, expense category,
+ * vendor). A save no longer deletes what it leaves out, so the deletion has to
+ * be said; it rides every push until the server confirms it.
+ */
+export function recordAccountsDeletion(
+  table:
+    | "accounts_desk_bank_accounts"
+    | "accounts_desk_coa_accounts"
+    | "accounts_desk_expense_categories"
+    | "accounts_desk_vendors",
+  id: string,
+) {
+  recordDeskDeletion(ACCOUNTS_DESK, table, [id]);
+}
 
 const META_KEY = "bhb_accounts_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -79,12 +104,28 @@ function deskPayload(state: AccountsState) {
   };
 }
 
+/**
+ * Push the accounts desk to the server, and record whether it landed.
+ *
+ * The previous version lost a failure two ways: the `catch` fired only when
+ * the request threw, and a response that was merely not ok fell past the
+ * success branch having done nothing — no write, no log, no error. A role
+ * without server-side `accounts:edit` therefore produced a screen that said
+ * "saved" and a server that never heard about it.
+ *
+ * The outcome now goes through trackDeskPush, which records it and raises
+ * `bhb-desk-sync-failed` for the workspace to surface. The server's own error
+ * message is passed through rather than replaced with a generic one: "Your
+ * role cannot write accounts" is actionable and "save failed" is not.
+ */
 async function pushAccountsDeskApi(state: AccountsState) {
-  try {
+  await trackDeskPush("accounts", async () => {
+    const sentDeletes = pendingDeskDeletes(ACCOUNTS_DESK);
     const res = await fetch("/api/school-data/accounts-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(deskPayload(state)),
+      // Deletions are named, never inferred from what this browser lacks.
+      body: JSON.stringify({ ...deskPayload(state), deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
@@ -92,15 +133,31 @@ async function pushAccountsDeskApi(state: AccountsState) {
       coaCount?: number;
       error?: string;
     } | null;
+
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(ACCOUNTS_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         coaCount: body.coaCount ?? state.coaAccounts.length,
       });
+      return { ok: true, status: res.status };
     }
-  } catch (e) {
-    console.warn("[accounts-db] desk push error", e);
-  }
+    return { ok: false, status: res.status, error: body?.error };
+  });
+}
+
+/**
+ * Push what the desk holds right now.
+ *
+ * Retry deliberately re-pushes current state rather than replaying a stored
+ * payload: a desk push carries the whole module, and the freshest version is
+ * both smaller to reason about and the one the operator actually wants saved.
+ */
+export async function retryAccountsDeskSync(state: AccountsState): Promise<boolean> {
+  if (!accountsNormalizedSyncEnabled() || typeof window === "undefined") return false;
+  await pushAccountsDeskApi(state);
+  const { deskSyncState } = await import("@/lib/deskSyncStatus");
+  return deskSyncState("accounts").consecutiveFailures === 0;
 }
 
 export async function fetchAccountsDeskFromApi() {
@@ -124,7 +181,25 @@ export async function fetchAccountsDeskFromApi() {
   }
 }
 
-export async function hydrateAccountsDeskFromDb(preferDb?: boolean) {
+/**
+ * True when this browser's desk is missing something the server has — a
+ * bank account, or the chart of accounts. Such a copy must take the server's,
+ * whatever the timestamps say: on 8 Oct 2026 a browser whose saved desk had
+ * lost both bank accounts (a full or cleared localStorage) kept its own copy
+ * for good, because its last save stamped it newer than the server, and the
+ * Masters screen showed no banks.
+ */
+export function localDeskIsMissingRemote(
+  local: Pick<AccountsState, "bankAccounts" | "coaAccounts"> | null | undefined,
+  remote: Pick<AccountsState, "bankAccounts" | "coaAccounts">,
+): boolean {
+  if (!local) return false;
+  const have = new Set((local.bankAccounts ?? []).map((b) => b.id));
+  if ((remote.bankAccounts ?? []).some((b) => !have.has(b.id))) return true;
+  return (local.coaAccounts ?? []).length === 0 && (remote.coaAccounts ?? []).length > 0;
+}
+
+export async function hydrateAccountsDeskFromDb(preferDb?: boolean, local?: AccountsState) {
   const remote = await fetchAccountsDeskFromApi();
   const emptyBundle = deskPayload({
     version: 1,
@@ -149,7 +224,7 @@ export async function hydrateAccountsDeskFromDb(preferDb?: boolean) {
     fiscalYears: [],
     settings: { expenseApprovalPaise: 1_000_000, pettyThresholdPaise: 200_000 },
   });
-  const empty = { bundle: emptyBundle, changed: false };
+  const empty = { bundle: emptyBundle, changed: false, fetched: false };
   if (!remote) return empty;
 
   const meta = readMeta();
@@ -158,10 +233,11 @@ export async function hydrateAccountsDeskFromDb(preferDb?: boolean) {
     accountsReadFromDbClientEnabled() ||
     meta.coaCount === 0 ||
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
-    remote.coaCount > meta.coaCount;
+    remote.coaCount > meta.coaCount ||
+    localDeskIsMissingRemote(local, remote.bundle);
 
-  if (!shouldTake) return empty;
+  if (!shouldTake) return { ...empty, fetched: true };
 
   writeMeta({ updatedAt: remote.updatedAt, coaCount: remote.coaCount });
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, fetched: true };
 }

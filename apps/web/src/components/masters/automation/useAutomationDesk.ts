@@ -3,20 +3,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { ensureAutomationHydrated } from "@/lib/automationPersistence";
 import {
-  decideApproval,
-  evaluateAutomationTick,
   loadAutomation,
-  markApprovalDispatched,
   markRuleTested,
+  normalizeAutomationState,
   saveAutomation,
   setRuleEnabled,
   setRuleExecutionMode,
   updateAutomationRule,
   updateRuleSchedule,
+  writeAutomationLocalRaw,
   type AutomationApprovalItem,
   type AutomationState,
 } from "@/lib/automation";
-import { loadWaTemplates } from "@/lib/waTemplates";
 import {
   useDemoSession,
   useSessionReadOnly,
@@ -29,6 +27,18 @@ export function useAutomationDesk() {
     typeof window !== "undefined" ? loadAutomation() : null,
   );
   const [notice, setNotice] = useState<string | null>(null);
+  /*
+    Cards whose send is in flight, and whether a tick is running.
+
+    First line of defence for the fault of 11 September 2026: "Approve &
+    send" pressed seven times on one card, ~10s apart, sent 146 families
+    the same fee reminder seven times. The server now refuses the second
+    caller outright (wa_send_claims), and this stops the second press from
+    ever being made — a button that stays green while 146 messages are
+    going out is an invitation to press it again.
+  */
+  const [sendingIds, setSendingIds] = useState<string[]>([]);
+  const [evaluating, setEvaluating] = useState(false);
   const by = session.fullName || session.roleCode || "masters";
 
   const refresh = useCallback(() => {
@@ -59,59 +69,144 @@ export function useAutomationDesk() {
     return true;
   }
 
-  async function dispatchApproval(item: AutomationApprovalItem) {
+  /**
+   * Decide one card on the server, which also sends it.
+   *
+   * The browser cannot see which templates Meta has approved (an unhydrated
+   * `loadWaTemplates()` reports none), so deciding here used to fall back to
+   * free text — invisible to any family outside the 24-hour window. The
+   * route resolves the approved template per family language instead.
+   */
+  async function decideApprovalServer(
+    approvalId: string,
+    decision: "approved" | "rejected" | "snoozed",
+    snoozeHours?: number,
+  ) {
     if (!state) return;
-    const templates = loadWaTemplates();
-    const tpl = templates.templates.find(
-      (t) =>
-        t.familyKey === item.templateFamilyKey &&
-        t.language === item.templateLanguage &&
-        t.status === "approved",
-    );
-    const messages = item.dispatchPayload.map((p) => ({
-      messageId: `auto_${item.id}_${p.mobile}`,
-      mobile: p.mobile,
-      body: p.body,
-      ...(tpl
-        ? {
-            template: {
-              name: tpl.metaName,
-              language: tpl.metaLanguage || tpl.language,
-              variables: p.variables || {},
-              variableKeys: tpl.variables,
-            },
-          }
-        : {}),
-    }));
-
+    if (readOnly) {
+      flash("Session is closed — automation is read-only");
+      return;
+    }
+    if (sendingIds.includes(approvalId)) {
+      flash("This card is already being sent — please wait", 4000);
+      return;
+    }
+    setSendingIds((ids) => [...ids, approvalId]);
     try {
-      const res = await fetch("/api/wa/dispatch", {
+      const res = await fetch("/api/wa/automation/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages }),
+        body: JSON.stringify({ approvalId, decision, snoozeHours }),
       });
-      const json = (await res.json()) as { ok?: boolean; error?: string };
-      commit(
-        markApprovalDispatched(
-          decideApproval(state, item.id, "approved", by),
-          item.id,
-          !!json.ok,
-          json.error || "",
-        ),
-        json.ok
-          ? "Approved & dispatched (or stubbed)"
-          : json.error || "Dispatch failed",
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        sent?: number;
+        failed?: number;
+        deferred?: number;
+        simulated?: number;
+        state?: AutomationState;
+      };
+      if (json.state) {
+        const next = normalizeAutomationState(json.state);
+        writeAutomationLocalRaw(next);
+        setState(next);
+      }
+      if (!res.ok || !json.state) {
+        flash(json.error || "Could not update this card", 5000);
+        return;
+      }
+      if (decision === "rejected") return flash("Rejected");
+      if (decision === "snoozed") return flash("Snoozed 24h");
+      if (json.simulated && !json.sent) {
+        flash(
+          json.error ||
+            "Nothing was sent — no WhatsApp provider is configured. The card is still waiting.",
+          6000,
+        );
+        return;
+      }
+      const parts = [
+        `${json.sent ?? 0} sent`,
+        json.failed ? `${json.failed} failed` : "",
+        json.deferred ? `${json.deferred} held for quiet hours` : "",
+      ].filter(Boolean);
+      flash(
+        json.error ? `${parts.join(" · ")} — ${json.error}` : parts.join(" · "),
+        5000,
       );
     } catch (e) {
-      commit(
-        markApprovalDispatched(
-          decideApproval(state, item.id, "approved", by),
-          item.id,
-          false,
-          e instanceof Error ? e.message : "Dispatch failed",
-        ),
-        "Dispatch error",
-      );
+      flash(e instanceof Error ? e.message : "Dispatch failed", 5000);
+    } finally {
+      setSendingIds((ids) => ids.filter((id) => id !== approvalId));
+    }
+  }
+
+  async function dispatchApproval(item: AutomationApprovalItem) {
+    await decideApprovalServer(item.id, "approved");
+  }
+
+  /**
+   * Run the tick on the SERVER and take back what it persisted.
+   *
+   * Evaluating in the browser cannot read the roster, the fee ledger or the
+   * admissions pipeline, so it could only ever propose a made-up audience.
+   * The route resolves the real recipients, raises the cards, sends whatever
+   * is already approved, and saves — this just adopts the result.
+   */
+  async function evaluateTick(forceRuleIds?: string[]) {
+    if (readOnly) {
+      flash("Session is closed — automation is read-only");
+      return;
+    }
+    if (evaluating) {
+      flash("An evaluation is already running — please wait", 4000);
+      return;
+    }
+    setEvaluating(true);
+    try {
+      const res = await fetch("/api/wa/automation/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(forceRuleIds?.length ? { forceRuleIds } : {}),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        sent?: number;
+        failed?: number;
+        simulated?: number;
+        staleCards?: number;
+        pendingApprovals?: number;
+        audienceErrors?: { ruleId: string; error: string }[];
+        state?: AutomationState;
+      };
+      if (!res.ok || !json.ok || !json.state) {
+        flash(json.error || "Evaluation failed", 5000);
+        return;
+      }
+      const next = normalizeAutomationState(json.state);
+      // Written raw: the server has already persisted this, and a normal
+      // save would schedule a push of what we just read back.
+      writeAutomationLocalRaw(next);
+      setState(next);
+      const parts = [
+        `${json.pendingApprovals ?? 0} awaiting approval`,
+        json.sent ? `${json.sent} sent` : "",
+        json.failed ? `${json.failed} failed` : "",
+        json.simulated && !json.sent
+          ? `${json.simulated} stubbed — no WhatsApp provider configured`
+          : "",
+        json.staleCards ? `${json.staleCards} card(s) too old to send` : "",
+        json.audienceErrors?.length
+          ? `${json.audienceErrors.length} rule(s) had no audience`
+          : "",
+      ].filter(Boolean);
+      flash(`Evaluation ran — ${parts.join(" · ")}`, 5000);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Evaluation failed", 5000);
+    } finally {
+      setEvaluating(false);
     }
   }
 
@@ -120,18 +215,14 @@ export function useAutomationDesk() {
     readOnly,
     state,
     notice,
+    sendingIds,
+    evaluating,
     by,
     commit,
     flash,
     refresh,
     dispatchApproval,
-    evaluateTick: (forceRuleIds?: string[]) => {
-      if (!state) return;
-      commit(
-        evaluateAutomationTick(state, { forceRuleIds }),
-        "Evaluation ran — check Approvals",
-      );
-    },
+    evaluateTick,
     setEnabled: (ruleId: string, enabled: boolean) => {
       if (!state) return;
       commit(
@@ -171,11 +262,7 @@ export function useAutomationDesk() {
       status: "rejected" | "snoozed",
       snoozeHours?: number,
     ) => {
-      if (!state) return;
-      commit(
-        decideApproval(state, approvalId, status, by, snoozeHours),
-        status === "rejected" ? "Rejected" : "Snoozed 24h",
-      );
+      void decideApprovalServer(approvalId, status, snoozeHours);
     },
   };
 }

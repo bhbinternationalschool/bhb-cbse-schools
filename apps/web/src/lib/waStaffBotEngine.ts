@@ -7,37 +7,24 @@ import {
   composeAdmissionsWhatsAppSnapshot,
   composeFeeWhatsAppSnapshot,
   composeLeadershipWhatsAppReport,
+  leadershipBankBalancePaise,
   composeStaffAttendanceWhatsAppSnapshot,
 } from "@/lib/waLeadershipReports.server";
+import { generateTutorText } from "@/lib/aiLlm.server";
+import {
+  STAFF_BOT_OFFICE_PROMPTS,
+  STAFF_BOT_OWNER_PROMPTS,
+  staffBotMenuText,
+  type StaffBotQuickId,
+} from "@/lib/waStaffBotPrompts";
 
-export type StaffBotQuickId =
-  | "reports"
-  | "admissions"
-  | "staff"
-  | "fee"
-  | "meeting"
-  | "timing"
-  | "human"
-  | "menu";
-
-export const STAFF_BOT_OWNER_PROMPTS: {
-  id: StaffBotQuickId;
-  label: string;
-  waKeyword: string;
-}[] = [
-  { id: "reports", label: "Today summary", waKeyword: "REPORTS" },
-  { id: "admissions", label: "Admissions / leads", waKeyword: "ADMISSIONS" },
-  { id: "staff", label: "Staff snapshot", waKeyword: "STAFF" },
-  { id: "fee", label: "Fee collection", waKeyword: "FEE" },
-  { id: "meeting", label: "Meeting / visit", waKeyword: "MEETING" },
-  { id: "timing", label: "School timing", waKeyword: "TIMING" },
-  { id: "human", label: "Talk to office", waKeyword: "HUMAN" },
-  { id: "menu", label: "Main menu", waKeyword: "MENU" },
-];
-
-export const STAFF_BOT_OFFICE_PROMPTS = STAFF_BOT_OWNER_PROMPTS.filter(
-  (p) => p.id !== "reports",
-);
+// Re-exported for server-side callers; client code imports waStaffBotPrompts.
+export {
+  STAFF_BOT_OFFICE_PROMPTS,
+  STAFF_BOT_OWNER_PROMPTS,
+  staffBotMenuText,
+  type StaffBotQuickId,
+};
 
 export function detectStaffBotIntent(text: string): StaffBotQuickId | "unknown" {
   const upper = (text || "").trim().toUpperCase();
@@ -132,22 +119,62 @@ export function replyStaffBotIntent(
   }
 }
 
-export function staffBotMenuText(ctx: {
-  fullName: string;
-  isOwner: boolean;
-}): string {
-  const prompts = ctx.isOwner
-    ? STAFF_BOT_OWNER_PROMPTS
-    : STAFF_BOT_OFFICE_PROMPTS;
-  const role = ctx.isOwner ? "Leadership" : "Staff";
-  return [
-    `*${role} desk* — ${ctx.fullName || "Team"}`,
-    "",
-    "Reply with a keyword:",
-    ...prompts
-      .filter((p) => p.id !== "menu")
-      .map((q) => `• *${q.waKeyword}* — ${q.label}`),
-    "",
-    "Type *MENU* anytime for this list · *MAIN* for school main menu.",
-  ].join("\n");
+/**
+ * LLM fallback for staff/leadership messages the keyword matcher doesn't
+ * recognize. Staff already have full ERP access, so this only points them
+ * to the right quick-command — it must never invent a live number, name, or
+ * date since staff may act on it operationally. Returns null on any
+ * failure — caller keeps the existing menu, this is a graceful upgrade.
+ */
+async function tryStaffAiFallback(
+  text: string,
+  ctx: { fullName: string; isOwner: boolean },
+): Promise<string | null> {
+  const system = `You are a WhatsApp assistant for school staff/leadership at ${TENANT.nameDisplay}.
+You do NOT have access to live school data (headcounts, amounts, names, dates) — you may only tell staff which existing quick-reply keyword to use: REPORTS, ADMISSIONS, STAFF, FEE, MEETING, TIMING, HUMAN, or MENU.
+Never invent or guess a number, name, or date yourself.
+If none of those keywords fit the question, tell them to reply *HUMAN* or open the ERP app.
+Keep the reply under 300 characters, plain text (no markdown headers).`;
+
+  const userMessage = `Staff member: ${ctx.fullName || "Team member"} (${ctx.isOwner ? "owner/leadership" : "staff"})
+Message: "${text}"`;
+
+  try {
+    const r = await generateTutorText({ system, userMessage });
+    if (!r.ok) return null;
+    return r.text.trim() || null;
+  } catch {
+    return null;
+  }
 }
+
+/** Same as replyStaffBotIntent, but tries an LLM fallback for genuinely
+ * unrecognized free text instead of always showing the quick-command menu. */
+export async function replyStaffBotIntentWithAi(
+  intent: StaffBotQuickId | "unknown",
+  text: string,
+  ctx: { fullName: string; isOwner: boolean },
+): Promise<{ text: string; escalate: boolean }> {
+  // The leadership report carries a bank balance, so it is fetched here —
+  // where we can await — and only for the owner. Everyone else gets the same
+  // report without that line.
+  if (intent === "reports") {
+    const bankBalancePaise = ctx.isOwner ? await leadershipBankBalancePaise() : null;
+    return {
+      escalate: false,
+      text: composeLeadershipWhatsAppReport({ bankBalancePaise }),
+    };
+  }
+  const base = replyStaffBotIntent(intent, ctx);
+  const trimmed = text.trim();
+  if (
+    intent === "unknown" &&
+    trimmed.length > 3 &&
+    !/^(hi|hello|namaste|hey|start|menu|main)$/i.test(trimmed)
+  ) {
+    const aiReply = await tryStaffAiFallback(text, ctx);
+    if (aiReply) return { text: aiReply, escalate: false };
+  }
+  return base;
+}
+

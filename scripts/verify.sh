@@ -1,0 +1,608 @@
+#!/usr/bin/env bash
+#
+# Local stand-in for the CI merge gate.
+#
+# GitHub Actions cannot currently run on this repo — every workflow dies at
+# startup with zero jobs — so nothing checks a change before it reaches main
+# or production. This runs the same steps .github/workflows/ci.yml would, in
+# one command, so a change can be verified without Actions.
+#
+#   npm run verify              typecheck, lint, self-tests, production build
+#   SKIP_BUILD=1 npm run verify  everything except the build (~2 min faster)
+#
+# Unlike CI this does NOT run `npm ci` — it checks the tree you have rather
+# than reinstalling from the lockfile. Run `npm ci` yourself if dependencies
+# changed.
+#
+# Every step runs even after one fails, so a single pass shows you everything
+# that is broken rather than only the first thing. Exits non-zero if any step
+# failed.
+#
+# To run it automatically before every push:
+#   printf '#!/bin/sh\nnpm run verify\n' > .git/hooks/pre-push
+#   chmod +x .git/hooks/pre-push
+
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+CI_FILE=".github/workflows/ci.yml"
+LOG_DIR="$(mktemp -d)"
+trap 'rm -rf "$LOG_DIR"' EXIT
+
+PASSED=0
+FAILED=()
+
+bold() { printf '\033[1m%s\033[0m\n' "$1"; }
+green() { printf '\033[32m%s\033[0m\n' "$1"; }
+red() { printf '\033[31m%s\033[0m\n' "$1"; }
+
+# run <label> <command...>
+run() {
+  local label="$1"
+  shift
+  local log="$LOG_DIR/$(printf '%s' "$label" | tr -c 'a-zA-Z0-9' '_').log"
+  printf '  %-52s' "$label"
+  if "$@" >"$log" 2>&1; then
+    green "PASS"
+    PASSED=$((PASSED + 1))
+  else
+    red "FAIL"
+    FAILED+=("$label|$log")
+  fi
+}
+
+# The self-tests CI runs, in CI's order. Kept in sync by the drift check below.
+SELFTESTS=(
+  test:session-cookie
+  test:masters-write-guard
+  test:masters-revision-guard
+  test:masters-revision-lifecycle
+  test:masters-revision-everywhere
+  test:masters-cold-client
+  test:masters-freeze
+  test:session-year
+  test:academic-year-resolve
+  test:workspace-policy
+  test:tone-tokens
+  test:masters-read-failure
+  test:save-full-cache
+  test:sis-memory-fallback
+  test:tenant-wipe-expiry
+  test:data-contract
+  test:projection
+  test:read-client
+  test:survey-photo
+  test:media-contract
+  test:website
+  test:partial-lead
+  test:wire-payload
+  test:projected-lead-write
+  test:hydrate-failure-safety
+  test:sis-revision
+  test:sis-contacts
+  test:sis-round-trip
+  test:sis-prune
+  test:attendance-prune
+  test:prune-floor
+  test:desk-named-deletes
+  test:sis-delete
+  test:sis-guard-fallback
+  test:audit-redaction
+  test:student-filters
+  test:masters-merge
+  test:accounts
+  test:playbook
+  test:erp-chat
+  test:wa-templates-automation
+  test:wa-template-seeds
+  test:wa-relay
+  test:wa-unified-menus-hindi
+  test:parent-messages-hindi
+  test:parent-bot-real-chats
+  test:staff-wa-real-chats
+  test:staff-onboarding
+  test:staff-leave-wa
+  test:staff-register-leave
+  test:staff-half-day-session
+  test:class-notice-wa
+  test:wa-template-autopilot
+  test:pin-review
+  test:due-pay-link
+  test:fee-dues-server-inputs
+  test:fee-store-dues-line
+  test:ledger-monthly-cash
+  test:app-home-numbers
+  test:exam-paper-transliterate
+  test:school-location-reply
+  test:weekly-child-digest
+  test:exam-eve
+  test:tutor-guide
+  test:wa-markdown
+  test:wa-parent-guide
+  test:parent-bot-day-app
+  test:comms-tab-access
+  test:fee-store-discount
+  test:masters-subject-guard
+  test:subject-requests
+  test:udise-nudge
+  test:apaar-consent
+  test:aadhaar-certificate
+  test:staff-chat-bare
+  test:job-desk
+  test:admissions-library-rte-ptm-exams-no-prune
+  test:fee-adjustments-merge
+  test:wa-threads-trust-no-prune
+  test:parent-bot-clarify
+  test:office-backlog
+  test:comms-attendance-leave-no-prune
+  test:automation-send-rules
+  test:fee-family-reminder
+  test:fleet-keep-rule
+  test:server-work-tracker
+  test:concession-review-ai
+  test:collections-weekly-ai
+  test:erp-ask
+  test:erp-reports
+  test:fleet-live
+  test:udise-doc-intake
+  test:homework-expand
+  test:homework-page-scan
+  test:homework-submission
+  test:exam-drill
+  test:drill-skills
+  test:fee-server-persistence
+  test:accounts-fees-paged-reads
+  test:exam-seating
+  test:roster-name-case
+  test:review-demo-records
+  test:wa-template-shape-sync
+  test:pdf-letterhead-assets
+  test:brief-call-link
+  test:fee-student-search
+  test:household-dues-ay
+  test:refreshment-chart
+  test:vendor-payment-bank
+  test:store-bank-backfill
+  test:daybook-voided
+  test:controls-noise
+  test:expense-spread
+  test:vehicle-fuel
+  test:expense-voucher-draft
+  test:fee-push-line-safety
+  test:prod-write-guard
+  test:fee-integrity
+  test:wa-receipt-template
+  test:wa-language-gate
+  test:sis-bot-fee-replies
+  test:wa-known-parent-role
+  test:wa-inbound-parse
+  test:wa-bot-silence
+  test:sis-bot-thread-merge
+  test:job-applications
+  test:online-classes
+  test:online-class-qa
+  test:puter-ai
+  test:open-lookups
+  test:free-routing
+  test:bhashini
+  test:ncf-official
+  test:student-curriculum
+  test:subject-masters
+  test:upi-pay
+  test:upi-proof-match
+  test:expense-range
+  test:payroll-paid-on
+  test:masters-change-auth
+  test:timetable-free-grid
+  test:udise-teacher-apaar
+  test:udise-teacher-sync
+  test:login-unknown-numbers
+  test:desk-probe-allowlist
+  test:full-storage-loaders
+  test:cashfree-settlements
+  test:holiday-calendar-view
+  test:student-working-days
+  test:leave-allotment
+  test:class-group-message
+  test:comms-reach
+  test:wa-timeline
+  test:parents-on-app
+  test:wa-sender-routing
+  test:receipt-repair
+  test:projection-double-post
+  test:holiday-import
+  test:payment-link-amount
+  test:accounts-no-prune
+  test:app-popups
+  test:app-popup-preview
+  test:app-popup-text
+  test:app-popups-on-roll
+  test:parent-family-inactive
+  test:parent-number-link
+  test:module-requests
+  test:weekly-holiday-range
+  test:push-voice
+  test:udise-national-code-placeholder
+  test:install-platform
+  test:homework-no-prune
+  test:accounts-seed-after-pull
+  test:ptm-rte-seed-after-pull
+  test:class-channel-subject
+  test:review-demo-hidden
+  test:payment-link-reuse
+  test:student-leave-status-guard
+  test:ptm-row-stamps
+  test:desk-stamps
+  test:attendance-row-stamps
+  test:fee-extras-forward-only
+  test:admissions-field-ops-merge
+  test:homework-newer-wins
+  test:notifications-readers-only-grow
+  test:attendance-side-lists-forward-only
+  test:school-comms-newer-wins
+  test:class-gallery
+  test:class-media-link
+  test:staff-attendance-row-stamps
+  test:admissions-row-stamps
+  test:payment-link-status-guard
+  test:attendance-today
+  test:sis-wire-payload
+  test:print-palette
+  test:receipt-head-grouping
+  test:concession-student-list
+  test:future-concession-start
+  test:concession-authority
+  test:substitution-auto
+  test:timetable-substitution
+  test:transport-sibling-gaps
+  test:transport-stop-distance
+  test:transport-start-month
+  test:transport-misrouted
+  test:transport-amend
+  test:table-sort
+  test:transport-fee-policy
+  test:transport-nearest-stops
+  test:transport-shortfall
+  test:transport-afternoon-waves
+  test:transport-shifts
+  test:transport-phone-empty-desk
+  test:transport-seats
+  test:boarding-suggest
+  test:defaulter-hold-policy
+  test:hold-resolve
+  test:live-bus-marker
+  test:transport-pin-intake
+  test:storage-quota
+  test:transport-boarding
+  test:transport-crew-access
+  test:transport-crew
+  test:transport-stop-links
+  test:transport-concession
+  test:transport-by-class
+  test:transport-staff-riders
+  test:fleet-edge-link
+  test:fleet-edge-push
+  test:fleet-edge-fuel
+  test:boarding-point-audit
+  test:halt-clustering
+  test:transport-parent-messages
+  test:ebook-access
+  test:village-market
+  test:lead-score
+  test:fuel-expense-line
+  test:vendor-history
+  test:site-seo
+  test:approval-gate
+  test:photo-consent
+  test:registration-blockers
+  test:sibling-carry-over
+  test:sibling-separate
+  test:udise-upload-store
+  test:udise-student-details
+  test:udise-compliance
+  test:udise-robot
+  test:udise-portal-api
+  test:udise-portal-fill
+  test:udise-portal-student-sync
+  test:udise-school-finance
+  test:udise-school-profile
+  test:student-measurements
+  test:udise-portal-add
+  test:udise-portal-reconcile
+  test:lead-worklist
+  test:student-import
+  test:fees-payments-no-prune
+  test:student-import-mid-year
+  test:payroll-statutory-vault-no-prune
+  test:cash-pool-orphans
+  test:academic-risk
+  test:admissions-ai
+  test:admissions-enquiry-form
+  test:admissions-kb
+  test:birthday-cards
+  test:collections-ai
+  test:concession-per-due
+  test:concession-ground
+  test:fee-backdate
+  test:receipt-auto-wa
+  test:review-login
+  test:desk-sync-status
+  test:duty-roster
+  test:email
+  test:exam-invigilation
+  test:exams
+  test:exam-date-sheet
+  test:exams-sheet-safety
+  test:exam-schemes
+  test:exam-readiness
+  test:exam-report-templates
+  test:exam-paper-question-types
+  test:exam-paper-print-layout
+  test:ai-school-status
+  test:exam-formula-catalog
+  test:household-prefs
+  test:item-analytics
+  test:item-score-import
+  test:exam-paper-import
+  test:answer-key-parse
+  test:desk-shrink-guard
+  test:desk-slice-no-prune
+  test:desk-slice-client-deletes
+  test:nucleus-manifest
+  test:nucleus-capture
+  test:nucleus-handoff
+  test:lead-extract-ai
+  test:lead-followup-ai
+  test:lead-quality
+  test:lead-timeline
+  test:ledger
+  test:closing-balance
+  test:accounts-position-rbac
+  test:voucher-filter
+  test:voucher-amend
+  test:lesson-plan-ai
+  test:marketing-content-ai
+  test:module-filters
+  test:outdoor-duty-persistence
+  test:outdoor-duty-staff-id
+  test:payroll-register
+  test:ptm-brief-ai
+  test:parent-tickets
+  test:school-whatsapp
+  test:upload-validation
+  test:parent-profile
+  test:tutor-access
+  test:chapter-standards
+  test:answer-book
+  test:syllabus-from-books
+  test:tutor-syllabus
+  test:masters-staff-slices
+  test:drive-archive
+  test:receipt-pdf
+  test:fee-due-future
+  test:ai-stream
+  test:tutor-plans
+  test:tutor-video-sources
+  test:smart-teach
+  test:nucleus-progress
+  test:nucleus-reminder
+  test:nucleus-assessments
+  test:staff-home-kind
+  test:staff-teaching-scope
+  test:staff-month-calendar
+  test:staff-roster-redact
+  test:sis-class-teacher
+  test:punch-code
+  test:wa-language-gate
+  test:answer-sheet-ai
+  test:voice-dictation
+  test:punch-devices
+  test:punch-attempts
+  test:punch-schedule
+  test:survey-day
+  test:timetable-rules
+  test:module-state-merge
+  test:staff-day-status
+  test:payroll-no-register
+  test:mobile-features
+  test:cashfree-checkout
+  test:gateway-fees
+  test:gateway-methods
+  test:cashfree-refund
+  test:fee-autopay
+  test:secure-id
+  test:payouts
+  test:cashgram
+  test:diksha-index
+  test:teacher-contact
+  test:question-bank
+  test:rbac-infer
+  test:rbac-scope
+  test:rbac-user-grants
+  test:visitor-gate
+  test:play-billing
+  test:ai-content-report
+  test:fleet-live-position
+  test:parent-bus-reply
+  test:voice-note
+  test:wa-dedupe
+  test:parent-dues-fallback
+  test:receipt-lookup
+  test:referrals
+  test:report-export
+  test:report-remark-ai
+  test:salary-additional
+  test:salary-gross-up
+  test:school-receipt-no
+  test:session-cookie-edge
+  test:staff-geo
+  test:punch-screen-geofence
+  test:app-min-build
+  test:canva-birthday
+  test:standing-discount-change
+  test:syllabus-outcomes-import
+  test:transport-overlap-billing
+  test:masters-transport-no-prune
+  test:slice-cas
+  test:slice-rev-merge
+  test:slice-rev-server
+  test:slice-rev-client
+  test:wa-contact-state
+  test:wa-delivery-log
+  test:wa-meta-account-alerts
+  test:wa-sequences
+  test:wa-staff-att-bot
+  test:erp-commands
+  test:wa-real-chats-oct
+  test:class-channel-apply
+  # Added 2026-09-12, in CI's order, after the drift check below reported that
+  # ci.yml had been running these for weeks while this script did not:
+  # WhatsApp failure reasons, household numbers, audience specs, the tutor and
+  # staff-link bots, the leave command, the daily brief, automation approvals
+  # and scheduling, the number gap, the four parent-app student readers,
+  # transport tracking, usage cost and command templates. Every one passes on a
+  # clean checkout; none needs a server or a key.
+  test:wa-failure-reason
+  test:wa-household-numbers
+  test:wa-audience-spec
+  test:wa-audience-households
+  test:wa-tutor-bot
+  test:wa-student-link
+  test:leave-command
+  test:daily-brief
+  test:automation-approvals
+  test:automation-schedule
+  test:server-fallback-saves
+  test:wa-number-gap
+  test:session-scoped-students
+  test:counter-discount-settled
+  test:student-attendance
+  test:student-homework
+  test:student-transport
+  test:student-library
+  test:wa-transport-track
+  test:wa-usage-cost
+  test:wa-command-templates
+)
+
+bold "Verifying $(git rev-parse --short HEAD 2>/dev/null || echo 'working tree') on $(git branch --show-current 2>/dev/null || echo '?')"
+echo
+
+bold "Static checks"
+run "typecheck" npm run typecheck
+run "lint" npm run lint
+echo
+
+bold "Self-tests"
+for t in "${SELFTESTS[@]}"; do
+  run "$t" npm run "$t" -w web
+done
+echo
+
+if [ "${SKIP_BUILD:-}" = "1" ]; then
+  bold "Production build — skipped (SKIP_BUILD=1)"
+else
+  bold "Production build"
+  # Placeholder values, exactly as CI does: the build must not need real
+  # secrets, and if it starts to, that itself is worth knowing.
+  run "next build" env \
+    NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=placeholder-anon-key \
+    npm run build
+fi
+echo
+
+# ── Ratchets: the patterns being retired may not regrow ────────────────
+# The migration runs for months across 39 modules. Without this, the
+# patterns removed in one module quietly reappear in another and the whole
+# exercise nets to zero. See scripts/ratchets.txt.
+if ! bash "$ROOT/scripts/check-ratchets.sh"; then
+  FAILED+=("ratchets|")
+fi
+echo
+
+# ── Drift check: this script must cover every self-test CI runs ────────
+# A test added to CI but not here would give false confidence locally.
+if [ -f "$CI_FILE" ]; then
+  MISSING=()
+  while read -r t; do
+    [ -z "$t" ] && continue
+    case " ${SELFTESTS[*]} " in
+      *" $t "*) ;;
+      *) MISSING+=("$t") ;;
+    esac
+  done < <(grep -oE 'npm run (test:[a-z0-9:-]+)' "$CI_FILE" | awk '{print $3}' | sort -u)
+
+  if [ ${#MISSING[@]} -gt 0 ]; then
+    red "Drift: $CI_FILE runs self-tests this script does not:"
+    printf '  - %s\n' "${MISSING[@]}"
+    echo "  Add them to SELFTESTS in scripts/verify.sh."
+    FAILED+=("ci-drift|")
+  fi
+fi
+
+# ── Orphan check: a self-test nothing runs ─────────────────────────────
+# The check above catches a test CI runs and this script does not. It cannot
+# catch the worse case: a `test:*` script written, committed, and wired into
+# NEITHER, which reports nothing and is mistaken for coverage. Found on
+# 2026-09-02 with three such tests, all passing, none ever executed by the
+# suite that says "all checks passed".
+# Self-tests that legitimately run nowhere in this suite, each with its reason.
+# An entry here is a claim someone has to defend, which is the point.
+#
+# (There were two of these arrays until 2026-09-12, a merge artefact: bash keeps
+# the last assignment, so the first was dead code listing one entry where the
+# live one lists three.)
+NOT_IN_SUITE=(
+  # Drives a real HTTP endpoint, so it needs the dev server listening. This
+  # suite must pass on a clean checkout with nothing running.
+  test:wa-webhook
+  # Walks real children through the real transport desk and the real Fleet
+  # Edge feed. Needs the database, and a `server-only` stub for tsx (see the
+  # script header). Run by hand when the wording or the gating changes.
+  test:parent-bus-live
+  # Sends real audio to Gemini: needs GEMINI_API_KEY and a network, and costs
+  # a call per run. The decisions around it are covered by test:voice-note;
+  # this answers the one question a self-test cannot — whether the model
+  # hears words at all. Run it by hand when the prompt or model changes.
+  test:voice-note-live
+)
+
+ORPHANS=()
+while read -r t; do
+  [ -z "$t" ] && continue
+  case " ${SELFTESTS[*]} ${NOT_IN_SUITE[*]} " in
+    *" $t "*) ;;
+    *) ORPHANS+=("$t") ;;
+  esac
+done < <(node -e '
+  const s = require("./apps/web/package.json").scripts || {};
+  for (const k of Object.keys(s)) if (k.startsWith("test:")) console.log(k);
+' 2>/dev/null | sort -u)
+
+if [ ${#ORPHANS[@]} -gt 0 ]; then
+  red "Orphaned self-tests — defined in package.json, run by nothing:"
+  printf '  - %s\n' "${ORPHANS[@]}"
+  echo "  Add them to SELFTESTS in scripts/verify.sh and to $CI_FILE."
+  FAILED+=("orphan-selftests|")
+fi
+
+# ── Summary ───────────────────────────────────────────────────────────
+echo
+if [ ${#FAILED[@]} -eq 0 ]; then
+  green "All $PASSED checks passed."
+  exit 0
+fi
+
+red "${#FAILED[@]} check(s) failed, $PASSED passed:"
+for entry in "${FAILED[@]}"; do
+  label="${entry%%|*}"
+  log="${entry#*|}"
+  echo
+  bold "  ✗ $label"
+  [ -n "$log" ] && [ -f "$log" ] && sed 's/^/    /' "$log" | tail -25
+done
+echo
+exit 1

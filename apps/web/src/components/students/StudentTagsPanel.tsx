@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { loadMasters, type MastersState } from "@/lib/masters";
-import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
+import { loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
+import { loadSis, type SisState, type SisStudent, studentsInSession} from "@/lib/sis";
 import {
   TAG_COLORS,
   createStudentTag,
@@ -11,6 +11,14 @@ import {
   updateStudentTag,
 } from "@/lib/studentTags";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function StudentTagsPanel({
   tick = 0,
@@ -44,7 +52,9 @@ export function StudentTagsPanel({
 
   const students = useMemo(() => {
     if (!sis || !masters) return [] as SisStudent[];
-    let rows = sis.students.filter((s) => s.status === "active");
+    // One row per child, this session — SIS keeps a row per child per year
+    // and marks them all active.
+    let rows = studentsInSession(sis, currentAcademicYearCode(masters));
     if (classId) {
       rows = rows.filter(
         (s) =>
@@ -67,6 +77,17 @@ export function StudentTagsPanel({
       .sort((a, b) => a.fullName.localeCompare(b.fullName))
       .slice(0, 80);
   }, [sis, masters, classId, query]);
+
+  // Tag assignment is a control, not a value, so only name and class sort.
+  const tagSort = useTableSort(
+    students,
+    {
+      student: (s) => s.fullName,
+      klass: (s) => masters?.classes.find((c) => c.id === s.classId)?.name ?? "",
+    },
+    "student",
+    "asc",
+  );
 
   function flash(msg: string) {
     setNotice(msg);
@@ -235,17 +256,19 @@ export function StudentTagsPanel({
         </select>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.1)] bg-white">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+      <ErpTableShell exportAs="student_tags" exportTitle="Student tags">
+        <div className="overflow-x-auto">
+        <ErpTable>
+          <ErpTableHead>
             <tr>
-              <th className="px-3 py-2 font-semibold">Student</th>
-              <th className="px-3 py-2 font-semibold">Class</th>
+              <ErpSortTh sort={tagSort} field="student" className="px-3 py-2 font-semibold">Student</ErpSortTh>
+              <ErpSortTh sort={tagSort} field="klass" className="px-3 py-2 font-semibold">Class</ErpSortTh>
               <th className="px-3 py-2 font-semibold">Assign tags</th>
+              <th className="w-10 px-2 py-2" aria-label="Actions" />
             </tr>
-          </thead>
-          <tbody className="divide-y divide-[rgba(32,48,80,0.06)]">
-            {students.map((s) => {
+          </ErpTableHead>
+          <ErpTableBody>
+            {tagSort.rows.map((s) => {
               const cls =
                 masters.classes.find((c) => c.id === s.classId)?.name ?? "—";
               const sec =
@@ -283,17 +306,21 @@ export function StudentTagsPanel({
                       })}
                     </div>
                   </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <RowActionMenu row={s} label="Student actions" actions={[{ id: "open", label: "Open student profile", onSelect: (x) => { window.location.href = `/students/${encodeURIComponent(String(x.id))}/edit`; } }]} />
+                  </td>
                 </tr>
               );
             })}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
+        </div>
         {!students.length ? (
           <p className="px-3 py-6 text-center text-sm text-[var(--muted)]">
             No students match.
           </p>
         ) : null}
-      </div>
+      </ErpTableShell>
     </div>
   );
 }

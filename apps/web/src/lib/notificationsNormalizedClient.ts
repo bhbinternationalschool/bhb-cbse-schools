@@ -5,6 +5,19 @@
 import type { NotificationsState } from "@/lib/notifications";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+
+const NOTIFICATIONS_DESK = "notifications";
+
+/** Notifications the admin cleared; the next push deletes them by id. */
+export function recordNotificationsDeletion(ids: string[]) {
+  if (typeof window === "undefined" || ids.length === 0) return;
+  recordDeskDeletion(NOTIFICATIONS_DESK, "notifications_desk_items", ids);
+}
 
 const META_KEY = "bhb_notifications_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -54,11 +67,13 @@ export function scheduleNotificationsDeskSync(state: NotificationsState) {
 }
 
 async function pushNotificationsDeskApi(state: NotificationsState) {
+  const sentDeletes = pendingDeskDeletes(NOTIFICATIONS_DESK);
   try {
     const res = await fetch("/api/school-data/notifications-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items: state.items }),
+      // Deletions are named, never inferred from what this browser lacks.
+      body: JSON.stringify({ items: state.items, deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
@@ -67,6 +82,7 @@ async function pushNotificationsDeskApi(state: NotificationsState) {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(NOTIFICATIONS_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         itemCount: body.itemCount ?? state.items.length,
@@ -74,7 +90,12 @@ async function pushNotificationsDeskApi(state: NotificationsState) {
     } else if (!res.ok) {
       console.warn("[notifications-db] desk push failed", body?.error || res.status);
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("notifications");
+    else recordDeskSyncFailure("notifications", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("notifications", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[notifications-db] desk push error", e);
   }
 }
@@ -84,23 +105,25 @@ export async function hydrateNotificationsDeskFromDb(
 ): Promise<{
   bundle: { items: NotificationsState["items"] };
   changed: boolean;
+  /** false = fetch failed / not authenticated; bundle is NOT a confirmed empty state. */
+  ok: boolean;
 }> {
   if (!isSupabaseConfigured()) {
-    return { bundle: { items: [] }, changed: false };
+    return { bundle: { items: [] }, changed: false, ok: false };
   }
   try {
     const res = await fetch("/api/school-data/notifications-desk", {
       method: "GET",
       cache: "no-store",
     });
-    if (!res.ok) return { bundle: { items: [] }, changed: false };
+    if (!res.ok) return { bundle: { items: [] }, changed: false, ok: false };
     const body = (await res.json()) as {
       items?: NotificationsState["items"];
       updatedAt?: string;
       itemCount?: number;
     };
     if (!Array.isArray(body.items)) {
-      return { bundle: { items: [] }, changed: false };
+      return { bundle: { items: [] }, changed: false, ok: false };
     }
 
     const meta = readMeta();
@@ -112,15 +135,15 @@ export async function hydrateNotificationsDeskFromDb(
       (body.updatedAt && body.updatedAt >= meta.updatedAt) ||
       remoteCount > meta.itemCount;
 
-    if (!shouldTake) return { bundle: { items: [] }, changed: false };
+    if (!shouldTake) return { bundle: { items: [] }, changed: false, ok: true };
 
     writeMeta({
       updatedAt: body.updatedAt || new Date().toISOString(),
       itemCount: remoteCount,
     });
 
-    return { bundle: { items: body.items }, changed: true };
+    return { bundle: { items: body.items }, changed: true, ok: true };
   } catch {
-    return { bundle: { items: [] }, changed: false };
+    return { bundle: { items: [] }, changed: false, ok: false };
   }
 }

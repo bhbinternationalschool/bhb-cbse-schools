@@ -1,0 +1,95 @@
+import "package:flutter/material.dart";
+
+import "../../core/api/api_client.dart";
+import "../../core/theme/app_theme.dart";
+import "../modules/module_shell.dart";
+import "student_note_sheet.dart";
+import "../../core/i18n/locale_controller.dart";
+
+/// Read-only section roster for teachers — names, rolls, and today's
+/// attendance status when the register is marked.
+class StudentsScreen extends StatelessWidget {
+  const StudentsScreen({
+    super.key,
+    required this.api,
+    required this.classId,
+    required this.sectionId,
+    required this.date,
+    required this.title,
+  });
+
+  final ApiClient api;
+  final String classId;
+  final String sectionId;
+  final String date;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return ModuleShell<AttendanceRoster>(
+      guideId: "students",
+      title: "Students · $title",
+      load: () => api.fetchAttendanceRoster(
+        classId: classId,
+        sectionId: sectionId,
+        date: date,
+      ),
+      emptyIcon: Icons.school_outlined,
+      emptyText: context.l10n.noActiveStudentsInThisSection,
+      isEmpty: (roster) => roster.students.isEmpty,
+      builder: (context, roster, _) => ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [
+          Text(
+            "${roster.students.length} students · attendance ${roster.attendanceMarked ? "marked" : "not marked"} today · tap a student for a merit, discipline or sick-room note",
+            style: AppText.bodySmallMuted,
+          ),
+          const SizedBox(height: 10),
+          for (final s in roster.students)
+            Card(
+              child: ListTile(
+                dense: true,
+                onTap: () => showStudentNoteSheet(
+                  context,
+                  api: api,
+                  student: s,
+                  classLabel: title,
+                ),
+                leading: CircleAvatar(
+                  radius: 17,
+                  backgroundColor: ModuleTone.teal.background,
+                  child: Text(
+                    s.rollNo.isEmpty ? "–" : s.rollNo,
+                    style: AppText.bodySmall.copyWith(
+                      color: ModuleTone.teal.foreground,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                title: Text(
+                  s.fullName,
+                  style: AppText.bodyMediumInk.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                trailing: s.status == null
+                    ? null
+                    : Text(
+                        s.status!,
+                        style: AppText.bodyMedium.copyWith(
+                          color: switch (s.status) {
+                            "P" => AppColors.success,
+                            "A" => AppColors.danger,
+                            _ => AppColors.warning,
+                          },
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}

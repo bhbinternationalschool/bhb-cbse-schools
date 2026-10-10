@@ -55,6 +55,12 @@ export async function ensureFeesHydratedServer(): Promise<boolean> {
   }
 
   const dbDesk = await fetchFeeDeskFromDb();
+  // A failed read is not an empty fee desk: merging it with preferDb emptied
+  // the server's fee copy, and settlement and the staff app's collect then
+  // computed — and pushed — from that.
+  if (!dbDesk.ok) {
+    console.error("[fees] server hydrate: fee desk read failed — keeping the server copy as is");
+  }
   const hasAncillary =
     dbDesk.ancillary.cheques.length > 0 ||
     dbDesk.ancillary.manualBooks.length > 0 ||
@@ -64,9 +70,8 @@ export async function ensureFeesHydratedServer(): Promise<boolean> {
     dbDesk.ancillary.planAllocations.length > 0 ||
     dbDesk.ancillary.carriedForwardDues.length > 0;
   if (
-    dbDesk.vouchers.length > 0 ||
-    hasAncillary ||
-    feesReadFromDbEnabled()
+    dbDesk.ok &&
+    (dbDesk.vouchers.length > 0 || hasAncillary || feesReadFromDbEnabled())
   ) {
     state = mergeDbDeskIntoFeesState(
       state,

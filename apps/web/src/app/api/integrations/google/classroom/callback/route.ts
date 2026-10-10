@@ -10,6 +10,12 @@ export const runtime = "nodejs";
 
 const STATE_COOKIE = "bhb_google_oauth_state";
 const STAFF_COOKIE = "bhb_google_oauth_staff";
+const RETURN_COOKIE = "bhb_google_oauth_return";
+
+const RETURN_TARGETS: Record<string, string> = {
+  classroom: "/homework?tab=classroom",
+  "online-classes": "/online-classes",
+};
 
 function appBase(): string {
   return (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(
@@ -28,13 +34,18 @@ export async function GET(req: Request) {
   const jar = await cookies();
   const expectedState = jar.get(STATE_COOKIE)?.value;
   const staffKey = jar.get(STAFF_COOKIE)?.value;
+  const returnTo =
+    RETURN_TARGETS[jar.get(RETURN_COOKIE)?.value || ""] ||
+    RETURN_TARGETS.classroom;
+  const sep = returnTo.includes("?") ? "&" : "?";
 
   jar.delete(STATE_COOKIE);
   jar.delete(STAFF_COOKIE);
+  jar.delete(RETURN_COOKIE);
 
   const failRedirect = (msg: string) =>
     NextResponse.redirect(
-      `${appBase()}/homework?tab=classroom&error=${encodeURIComponent(msg)}`,
+      `${appBase()}${returnTo}${sep}error=${encodeURIComponent(msg)}`,
     );
 
   if (oauthError) {
@@ -67,9 +78,10 @@ export async function GET(req: Request) {
     accessToken: tokens.tokens.access_token,
     refreshToken: tokens.tokens.refresh_token,
     expiresAt,
+    // What Google actually granted — a user may untick a scope on the
+    // consent screen, and Meet creation must know before it tries.
+    scopes: tokens.tokens.scope || "",
   });
 
-  return NextResponse.redirect(
-    `${appBase()}/homework?tab=classroom&connected=1`,
-  );
+  return NextResponse.redirect(`${appBase()}${returnTo}${sep}connected=1`);
 }

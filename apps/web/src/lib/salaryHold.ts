@@ -20,6 +20,8 @@ import {
 
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { isSuperAdminSession } from "@/lib/superAdmin";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 export type JuneHoldStatus =
   | "held"
   | "forfeited_incomplete_year"
@@ -148,7 +150,7 @@ export function loadSalaryHold(): SalaryHoldState {
     };
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) {
       const seed: SalaryHoldState = {
         version: 1,
@@ -156,7 +158,7 @@ export function loadSalaryHold(): SalaryHoldState {
         holds: [],
         settlements: [],
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(seed));
       return seed;
     }
     const parsed = JSON.parse(raw) as Partial<SalaryHoldState>;
@@ -179,7 +181,18 @@ export function loadSalaryHold(): SalaryHoldState {
 export function saveSalaryHold(state: SalaryHoldState) {
   if (!assertModulePermission("payroll", "edit", "saveSalaryHold")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("salary_hold", state)));
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeSalaryHoldLocalRaw(state: SalaryHoldState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 export function monthIsHoldMonth(
@@ -295,7 +308,7 @@ export function syncHoldsFromPayrollRun(input: {
   if (!monthIsHoldMonth(input.month, cfg)) return state;
 
   const year = Number(input.month.split("-")[0]);
-  let holds = [...state.holds];
+  const holds = [...state.holds];
 
   for (const line of input.lines) {
     if (!line.juneHold || line.netPay <= 0) continue;
@@ -417,7 +430,7 @@ export function openExitSettlement(input: {
   };
 
   // Update hold statuses
-  let holds = state.holds.map((h) => {
+  const holds = state.holds.map((h) => {
     if (juneHoldIds.includes(h.id)) {
       return {
         ...h,

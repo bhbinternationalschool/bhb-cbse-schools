@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "homework";
 
@@ -41,7 +42,7 @@ export function resetHomeworkPersistenceCache() {
 
 export function scheduleHomeworkSync(state: HomeworkState) {
   if (typeof window === "undefined") {
-    void pushHomeworkRemoteServer(state);
+    void trackServerWork(pushHomeworkRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("homework")) {
@@ -77,7 +78,6 @@ export async function pushHomeworkRemoteServer(
  */
 export async function ensureHomeworkHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = homeworkReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("homework")
@@ -85,7 +85,10 @@ export async function ensureHomeworkHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateHomeworkDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateHomeworkDeskFromDb(readFromDb);
+  if (!ok) return false;
+
+  markDeskHydrated(MODULE);
   const hasDesk =
     bundle.posts.length > 0 ||
     bundle.diary.length > 0 ||
@@ -98,7 +101,9 @@ export async function ensureHomeworkHydrated(): Promise<boolean> {
     normChanged = true;
   }
 
-  if (normChanged) {
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+
+  if (normChanged && !readFromDb) {
     scheduleHomeworkSync(loadHomework());
   }
 

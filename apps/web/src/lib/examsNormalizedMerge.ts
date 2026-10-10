@@ -22,7 +22,17 @@ function preferRemoteDb(
 export function mergeDbDeskIntoExamsState(
   state: ExamsState,
   bundle: ExamDeskBundle,
-  opts?: { preferDb?: boolean },
+  opts?: {
+    preferDb?: boolean;
+    /**
+     * Sheets this browser saved that the server has not confirmed yet
+     * (examsSheetSync.pendingExamSheetIds). The local copy of these wins
+     * over the server's, and one the server does not have at all is kept.
+     * Without this, a hydrate after a failed push threw the unsent marks
+     * away and the teacher never knew.
+     */
+    keepLocalSheetIds?: Set<string>;
+  },
 ): ExamsState {
   const localSheets = state.sheets ?? [];
   const remoteSheets = bundle.sheets ?? [];
@@ -30,7 +40,8 @@ export function mergeDbDeskIntoExamsState(
     bundle.terms.length > 0 ||
     bundle.subjects.length > 0 ||
     remoteSheets.length > 0 ||
-    bundle.promotions.length > 0;
+    bundle.promotions.length > 0 ||
+    (bundle.rooms?.length ?? 0) > 0;
 
   if (!hasRemoteData) return state;
 
@@ -48,6 +59,12 @@ export function mergeDbDeskIntoExamsState(
   if (!takeSheets) {
     for (const s of localSheets) {
       if (!sheetById.has(s.id)) sheetById.set(s.id, s);
+    }
+  }
+  const keep = opts?.keepLocalSheetIds;
+  if (keep && keep.size > 0) {
+    for (const s of localSheets) {
+      if (keep.has(s.id)) sheetById.set(s.id, s);
     }
   }
 
@@ -74,5 +91,12 @@ export function mergeDbDeskIntoExamsState(
     policy: bundle.policy ?? state.policy,
     promotions:
       bundle.promotions.length > 0 ? bundle.promotions : state.promotions,
+    // Same rule as the date sheet: the server's copy when it has one,
+    // otherwise whatever this browser holds. Leaving these out of the merge
+    // would drop the rooms on every hydrate and take the seating plan built
+    // on them with it.
+    rooms: (bundle.rooms?.length ?? 0) > 0 ? bundle.rooms : state.rooms ?? [],
+    seating:
+      (bundle.seating?.length ?? 0) > 0 ? bundle.seating : state.seating ?? [],
   };
 }

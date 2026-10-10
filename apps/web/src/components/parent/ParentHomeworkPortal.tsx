@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import { resolveParentHousehold } from "@/lib/parentPortal";
-import { loadSis, type Household, type SisStudent } from "@/lib/sis";
+import { loadSis, type Household, type SisStudent, childrenOfHousehold} from "@/lib/sis";
 import {
   isSeen,
   listFeedForStudent,
@@ -57,9 +57,10 @@ export function ParentHomeworkPortal({
       setHw(seedHomeworkIfEmpty(DEFAULT_AY));
       return;
     }
-    const kids = sis.students.filter(
-      (s) => s.householdId === hh.id && s.status === "active",
-    );
+    // One row per child, this session. SIS keeps a row per child per year and
+    // leaves them all active, so the unscoped filter showed a family their own
+    // child once for every year they had been enrolled.
+    const kids = childrenOfHousehold(sis, hh.id, DEFAULT_AY);
     setChildren(kids);
     const aid =
       activeId && kids.some((k) => k.id === activeId)
@@ -104,7 +105,7 @@ export function ParentHomeworkPortal({
   return (
     <div className="px-4 pb-8 pt-3">
       {notice ? (
-        <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[#0f7a4c]">
+        <p className="mb-3 rounded-lg bg-[rgba(15,122,76,0.1)] px-3 py-2 text-sm text-[var(--success)]">
           {notice}
         </p>
       ) : null}
@@ -144,7 +145,7 @@ export function ParentHomeworkPortal({
                 key={d.id}
                 className="rounded-xl border border-[rgba(197,160,40,0.3)] bg-[#fffbeb] px-3 py-3"
               >
-                <p className="text-[10px] font-bold uppercase tracking-wide text-[#8a6d12]">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--tone-amber)]">
                   Class diary · {d.date}
                 </p>
                 <p className="mt-1 text-sm font-semibold text-[var(--brand-deep)]">
@@ -249,6 +250,7 @@ export function ParentHomeworkPortal({
                   )}
                 </div>
                 <HomeworkTutorChat
+                  studentId={child.id}
                   context={{
                     childName: child.fullName,
                     className:
@@ -264,7 +266,7 @@ export function ParentHomeworkPortal({
                   <div className="mt-3 space-y-2 rounded-lg bg-[rgba(32,48,80,0.04)] p-2">
                     {sub ? (
                       <div className="space-y-1">
-                        <p className="text-xs text-[#0f7a4c]">
+                        <p className="text-xs text-[var(--success)]">
                           Submitted {sub.submittedAt.slice(0, 10)}
                           {sub.teacherAckAt ? " · teacher acknowledged" : ""}
                         </p>

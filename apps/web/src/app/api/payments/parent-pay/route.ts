@@ -6,12 +6,14 @@ import { NextResponse } from "next/server";
 import { getPaymentLink, loadPayments } from "@/lib/payments";
 import { settlePaymentLinkWithWhatsApp } from "@/lib/paymentSettlement.server";
 import { authorizePaymentLinkAccess } from "@/lib/apiRouteAuth.server";
-import { ensureSchoolMirrorLoaded } from "@/lib/schoolDataMirror.server";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { fetchEligibleMethodGroups } from "@/lib/gatewayFeePolicy.server";
+import { GATEWAY_METHOD_LABELS, type GatewayMethodGroup } from "@/lib/gatewayFees";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  await ensureSchoolMirrorLoaded();
+  await ensureSchoolMirrorHydrated();
   const url = new URL(req.url);
   const linkId = url.searchParams.get("linkId") || "";
   const code = url.searchParams.get("code") || "";
@@ -25,7 +27,27 @@ export async function GET(req: Request) {
   const access = await authorizePaymentLinkAccess(req, link, { code });
   if (!access.ok) return access.response;
 
+  // WHICH WAYS THIS PARENT CAN ACTUALLY PAY, for this amount.
+  //
+  // The share page said "UPI / card / netbanking" in hard-coded text. The
+  // account has had Cardless EMI, card EMI on nine banks, Pay Later, UPI
+  // Credit Line and four wallets enabled all along, and Cashfree's checkout
+  // has been offering them — but no parent could know that until they were
+  // already on the payment screen, so for an annual fee the most useful option
+  // on the list was the one nobody was told about.
+  //
+  // Asked per amount because EMI and Pay Later carry issuer minimums: naming
+  // EMI on a ₹200 book charge no bank will finance is worse than not naming it.
+  // Null means Cashfree could not be asked, and the page falls back to its
+  // generic line rather than claiming a list it does not have.
+  const groups = link.gatewayCheckoutUrl
+    ? await fetchEligibleMethodGroups(link.amountPaise)
+    : null;
+
   return NextResponse.json({
+    payMethods: groups
+      ? groups.map((g: GatewayMethodGroup) => ({ group: g, label: GATEWAY_METHOD_LABELS[g] }))
+      : null,
     link: {
       id: link.id,
       code: link.code,
@@ -44,7 +66,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  await ensureSchoolMirrorLoaded();
+  await ensureSchoolMirrorHydrated();
   let body: { linkId?: string; code?: string; upiRef?: string; sendWhatsApp?: boolean };
   try {
     body = (await req.json()) as typeof body;

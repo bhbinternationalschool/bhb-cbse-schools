@@ -1,16 +1,28 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { AppPopupsPanel } from "@/components/comms/AppPopupsPanel";
+import { ParentsOnAppPanel } from "@/components/comms/ParentsOnAppPanel";
+import { commsTabIsOfficeOnly } from "@/lib/commsTabAccess";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Images, Megaphone } from "lucide-react";
+import { canAccessHref, hasPermission, loadRbac } from "@/lib/rbac";
+import { loadMasters } from "@/lib/masters";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
+import { CommsReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
-import { ClassChannelsPanel } from "@/components/comms/ClassChannelsPanel";
 import { SocialCredentialsPanel } from "@/components/comms/SocialCredentialsPanel";
+import { AnswerBookPanel } from "@/components/comms/AnswerBookPanel";
+import { EmailIntegrationPanel } from "@/components/comms/EmailIntegrationPanel";
 import { SocialCrossPostPrefsPanel } from "@/components/comms/SocialCrossPostPanel";
-import { WaChatHubPanel } from "@/components/comms/WaChatHubPanel";
+import {
+  WaWorkspacePanel,
+  waWorkspaceTabFrom,
+  type WaWorkspaceTab,
+} from "@/components/comms/WaWorkspacePanel";
 import {
   addGalleryPhoto,
   audienceLabel,
@@ -58,24 +70,78 @@ import {
 import { TENANT } from "@/lib/types";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import type { RowAction } from "@/components/ui/erp-grid";
+import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 
 type CommsTab =
+  | "dashboard"
   | "notices"
   | "news"
   | "gallery"
   | "social"
+  | "email"
   | "inbox"
-  | "channels"
-  | "wa_hub";
+  | "whatsapp"
+  | "answers"
+  | "popups"
+  | "onapp"
+  | "reports";
 
 const TABS: ModuleTabItem[] = [
+  { id: "dashboard", label: "Dashboard", tone: "navy" },
   { id: "notices", label: "Notices", tone: "navy" },
   { id: "news", label: "News", tone: "teal" },
   { id: "gallery", label: "Gallery", tone: "amber" },
   { id: "social", label: "Social", tone: "rose" },
-  { id: "channels", label: "Class WA", tone: "violet" },
-  { id: "wa_hub", label: "WhatsApp hub", tone: "teal" },
+  { id: "email", label: "Email", tone: "sky" },
+  { id: "whatsapp", label: "WhatsApp", tone: "teal" },
   { id: "inbox", label: "Inbox", tone: "slate" },
+  { id: "answers", label: "Answer book", tone: "teal" },
+  { id: "popups", label: "App pop-ups", tone: "amber" },
+  { id: "onapp", label: "Parents on app", tone: "teal" },
+  { id: "reports", label: "Reports", tone: "coral" },
+];
+
+/**
+ * The four tab names that used to be top-level Comms tabs, and the WhatsApp
+ * section each now opens.
+ *
+ * Kept because these went out in links, bookmarks and at least one training
+ * note: /comms?tab=wa_send must keep working, and land on the send screen
+ * rather than on the first WhatsApp section.
+ */
+const LEGACY_WA_TABS: Record<string, WaWorkspaceTab> = {
+  wa_send: "send",
+  wa_hub: "chats",
+  channels: "classes",
+  household_log: "log",
+};
+
+type SocialStep = "connect" | "rules" | "queue";
+
+/**
+ * Nothing cross-posts until an account is connected, and the rules decide
+ * what goes out on Publish — so connect, then set the rules, then watch the
+ * queue and log. The two settings panels keep their own unsaved input, so
+ * inactive steps are hidden, not unmounted.
+ */
+const SOCIAL_STEPS: StepDef<SocialStep>[] = [
+  {
+    id: "connect",
+    title: "Connect accounts",
+    what: "Connect the school Facebook Page and Instagram account (or enter tokens by hand), and add Telegram.",
+  },
+  {
+    id: "rules",
+    title: "Cross-post rules",
+    what: "Whether news, gallery albums and public notices cross-post on Publish by default, and to which platforms.",
+  },
+  {
+    id: "queue",
+    title: "Queue & log",
+    what: "Scheduled items waiting to publish, and the recent cross-posts that went out.",
+  },
 ];
 
 function tabFromSearch(raw: string | null, path: string): CommsTab {
@@ -83,22 +149,31 @@ function tabFromSearch(raw: string | null, path: string): CommsTab {
   if (path.startsWith("/gallery")) return "gallery";
   if (path.startsWith("/notices")) return "notices";
   if (
+    raw === "dashboard" ||
     raw === "news" ||
     raw === "gallery" ||
     raw === "social" ||
+    raw === "email" ||
     raw === "inbox" ||
     raw === "notices" ||
-    raw === "channels" ||
-    raw === "wa_hub"
+    raw === "whatsapp" ||
+    raw === "answers" ||
+    raw === "popups" ||
+    raw === "onapp" ||
+    raw === "reports"
   ) {
     return raw;
   }
+  if (raw && raw in LEGACY_WA_TABS) return "whatsapp";
   return "notices";
 }
 
 export function CommsWorkspace() {
   const session = useDemoSession();
   const readOnly = useSessionReadOnly();
+  // Writing an answer and approving one are different acts: an approved
+  // answer is the school speaking to every parent who asks it next.
+  const canApproveAnswers = hasPermission(session, null, "wa_chatbot", "approve");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -113,6 +188,57 @@ export function CommsWorkspace() {
   const [noticeMsg, setNoticeMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [listQuery, setListQuery] = useState("");
+  const [kbStats, setKbStats] = useState<{
+    chunkCount: number;
+    embeddingsConfigured: boolean;
+  } | null>(null);
+  const [kbSyncBusy, setKbSyncBusy] = useState(false);
+  const [kbSyncMsg, setKbSyncMsg] = useState<string | null>(null);
+
+  const refreshKbStats = useCallback(() => {
+    fetch("/api/ai/kb-sync")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (json?.ok) {
+          setKbStats({
+            chunkCount: json.chunkCount,
+            embeddingsConfigured: json.embeddingsConfigured,
+          });
+        }
+      })
+      .catch(() => null);
+  }, []);
+
+  useEffect(() => {
+    refreshKbStats();
+  }, [refreshKbStats]);
+
+  async function syncKb() {
+    setKbSyncBusy(true);
+    setKbSyncMsg(null);
+    try {
+      const res = await fetch("/api/ai/kb-sync", { method: "POST" });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        indexed?: number;
+        skipped?: number;
+        removed?: number;
+      };
+      if (!res.ok || !json.ok) {
+        setKbSyncMsg(json.error || "Sync failed");
+        return;
+      }
+      setKbSyncMsg(
+        `Synced ${json.indexed} notice(s)${json.skipped ? `, ${json.skipped} skipped` : ""}${json.removed ? `, ${json.removed} removed` : ""}.`,
+      );
+      refreshKbStats();
+    } catch (e) {
+      setKbSyncMsg(e instanceof Error ? e.message : "Sync failed");
+    } finally {
+      setKbSyncBusy(false);
+    }
+  }
 
   // Notice form
   const [nTitle, setNTitle] = useState("");
@@ -139,6 +265,7 @@ export function CommsWorkspace() {
   const [uploading, setUploading] = useState(false);
   const [socialLogs, setSocialLogs] = useState<SocialCrossPostLogEntry[]>([]);
   const [socialBusy, setSocialBusy] = useState(false);
+  const [socialStep, setSocialStep] = useState<SocialStep>("connect");
 
   const actor = session.fullName || "Office";
   const recipientKey = currentStaffRecipientKey();
@@ -239,14 +366,18 @@ export function CommsWorkspace() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [{ ensureSchoolCommsHydrated }, { ensureNotificationsHydrated }] =
-        await Promise.all([
-          import("@/lib/schoolCommsPersistence"),
-          import("@/lib/notificationsPersistence"),
-        ]);
+      const [
+        { ensureSchoolCommsHydrated },
+        { ensureNotificationsHydrated },
+        { withHydrationSlot },
+      ] = await Promise.all([
+        import("@/lib/schoolCommsPersistence"),
+        import("@/lib/notificationsPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
       await Promise.all([
-        ensureSchoolCommsHydrated(),
-        ensureNotificationsHydrated(),
+        withHydrationSlot(() => ensureSchoolCommsHydrated()),
+        withHydrationSlot(() => ensureNotificationsHydrated()),
       ]);
       if (!cancelled) reload();
     })();
@@ -259,14 +390,52 @@ export function CommsWorkspace() {
       cancelled = true;
       window.removeEventListener("bhb-notifications", onNf);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount hydrate
+
   }, []);
+
+  // Deep-link from Events "View photos" — auto-select the album named in
+  // ?album= instead of leaving the parent to hunt through the album list.
+  useEffect(() => {
+    const albumParam = searchParams.get("album");
+    if (albumParam) setActiveAlbumId(albumParam);
+  }, [searchParams]);
+
+  /*
+    The Comms screen serves five modules (Notices, News, Gallery,
+    Notifications, and WA chatbot answers). Someone who holds only some of
+    them, or only some of their functions (Masters → Roles), sees the tabs
+    they may open — exactly the ones the page gate (ErpModuleGate) lets
+    through, so a tab never leads to "Access restricted". Read in an effect:
+    roles and masters live in this browser's storage, not on the server.
+  */
+  const [shownTabs, setShownTabs] = useState<ModuleTabItem[]>(TABS);
+  useEffect(() => {
+    const masters = loadMasters();
+    const rbac = loadRbac();
+    const office = hasPermission(session, masters, "notices", "edit", rbac);
+    const base = hasPermission(session, masters, "notices", "view", rbac)
+      ? TABS
+      : TABS.filter((t) => canAccessHref(session, masters, `/comms?tab=${t.id}`, rbac));
+    // Office tabs (WhatsApp chats, pop-ups, Parents on app…) need notices ·
+    // edit; a teacher's view grant reads notices, news and the gallery.
+    setShownTabs(office ? base : base.filter((t) => !commsTabIsOfficeOnly(t.id)));
+  }, [session]);
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as CommsTab);
+    }
+  }, [shownTabs, tab]);
 
   function setTab(next: CommsTab) {
     const url = new URL(window.location.href);
     url.pathname = "/comms";
     url.searchParams.set("tab", next);
-    router.replace(`${url.pathname}?${url.searchParams.toString()}`);
+    // history.replaceState keeps useSearchParams in sync (Next ≥ 14.1) with
+    // no server round trip. router.replace() asked the server for the page
+    // again on every click, so a tab switch waited behind whatever request
+    // the server was busy with — which is exactly how the Class WA tab
+    // "hung until you clicked another module".
+    window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}`);
     setListQuery("");
   }
 
@@ -315,6 +484,191 @@ export function CommsWorkspace() {
     () => (comms ? listScheduledComms(comms) : []),
     [comms],
   );
+
+  /* ------------------------------------------------------------------ */
+  /* Notices, the schedule and the cross-post log, as tables             */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * A notice board is a register: who it went to, whether it is published,
+   * when. As cards, the office could not sort by status, see at a glance
+   * which drafts were still unpublished, or hand anyone a file of what was
+   * sent this term.
+   *
+   * The news list stays cards. A story leads with its cover photograph, and
+   * a table would drop the one thing the website shows.
+   */
+  // Visible on every row (director, 10 Oct 2026: "there is no option for
+  // notices to edit/remove or stop showing") — the ⋯ menu had them, but
+  // nobody found it. Stopping = archived: the apps, the running strip and
+  // the website show only published notices.
+  type NoticeRow = (typeof noticesFiltered)[number];
+  function noticeStatusLabel(n: NoticeRow): string {
+    if (n.status === "published") return "Showing";
+    if (n.status === "archived") return "Stopped";
+    return n.scheduledPublishAt ? "Scheduled" : "Draft";
+  }
+  function publishNoticeRow(n: NoticeRow) {
+    const r = setNoticeStatus(n.id, "published");
+    if (r.ok) {
+      setComms(r.state);
+      flash(n.status === "archived" ? "Showing again" : "Published");
+      const notice = r.state.notices.find((x) => x.id === n.id);
+      // A notice brought back is not news again — no second cross-post.
+      if (notice && n.status !== "archived") crossPostNotice(notice);
+    } else setError(r.error);
+  }
+  function stopNoticeRow(n: NoticeRow) {
+    const r = setNoticeStatus(n.id, "archived");
+    if (r.ok) {
+      setComms(r.state);
+      flash("Stopped — no longer shown to parents or staff");
+    } else setError(r.error);
+  }
+  function deleteNoticeRow(n: NoticeRow) {
+    if (!window.confirm(`Delete "${n.title}"? This cannot be undone. (To only hide it, use Stop showing.)`)) return;
+    const r = deleteNotice(n.id);
+    if (r.ok) {
+      setComms(r.state);
+      if (editNoticeId === n.id) resetNoticeForm();
+      flash("Notice deleted");
+    } else setError(r.error);
+  }
+
+  const noticeCols: DataTableColumn<(typeof noticesFiltered)[number]>[] = [
+    {
+      key: "title", header: "Notice", sortable: true,
+      value: (n) => n.title,
+      render: (n) => (
+        <span>
+          <span className="font-semibold text-[var(--brand-deep)]">
+            {n.pinned ? "📌 " : ""}
+            {n.title}
+          </span>
+          <span className="line-clamp-2 whitespace-pre-wrap text-[11px] text-[var(--muted)]">
+            {n.body}
+          </span>
+        </span>
+      ),
+    },
+    { key: "audience", header: "Audience", value: (n) => audienceLabel(n.audience), sortable: true },
+    {
+      key: "status", header: "Status", sortable: true,
+      value: (n) => noticeStatusLabel(n),
+      render: (n) => {
+        const label = noticeStatusLabel(n);
+        const tone =
+          label === "Showing" ? "text-[var(--tone-teal)]" : label === "Stopped" ? "text-[var(--danger)]" : "text-[var(--muted)]";
+        return <span className={`text-[11px] font-semibold ${tone}`}>{label}</span>;
+      },
+    },
+    {
+      key: "published", header: "Published", sortable: true,
+      value: (n) => n.publishedAt || "",
+      render: (n) =>
+        n.publishedAt ? (
+          new Date(n.publishedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })
+        ) : (
+          <span className="text-[var(--muted)]">—</span>
+        ),
+    },
+    ...(readOnly
+      ? []
+      : [
+          {
+            key: "actions",
+            header: "Actions",
+            value: () => "",
+            render: (n: NoticeRow) => (
+              <span className="flex flex-wrap gap-1.5">
+                <button type="button" className="rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold text-[var(--brand-deep)]" onClick={() => beginEditNotice(n)}>
+                  Edit
+                </button>
+                {n.status === "published" ? (
+                  <button type="button" className="rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold text-[var(--brand-deep)]" onClick={() => stopNoticeRow(n)}>
+                    Stop showing
+                  </button>
+                ) : (
+                  <button type="button" className="rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold text-[var(--tone-teal)]" onClick={() => publishNoticeRow(n)}>
+                    {n.status === "archived" ? "Show again" : "Publish"}
+                  </button>
+                )}
+                <button type="button" className="rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold text-[var(--danger)]" onClick={() => deleteNoticeRow(n)}>
+                  Delete
+                </button>
+              </span>
+            ),
+          } satisfies DataTableColumn<NoticeRow>,
+        ]),
+  ];
+
+  const noticeActions: RowAction<(typeof noticesFiltered)[number]>[] = [
+    { id: "edit", label: "Edit", hidden: () => readOnly, onSelect: (n) => beginEditNotice(n) },
+    {
+      id: "publish",
+      label: "Publish / show again",
+      hidden: (n) => readOnly || n.status === "published",
+      onSelect: (n) => publishNoticeRow(n),
+    },
+    {
+      id: "archive",
+      label: "Stop showing",
+      hidden: (n) => readOnly || n.status !== "published",
+      onSelect: (n) => stopNoticeRow(n),
+    },
+    {
+      id: "social", label: "Post to social",
+      hidden: (n) =>
+        socialBusy || n.status !== "published" || !(n.audience === "all" || n.audience === "parents"),
+      onSelect: (n) => crossPostNotice(n, true),
+    },
+    {
+      id: "delete", label: "Delete", tone: "danger", separatorAbove: true,
+      hidden: () => readOnly,
+      onSelect: (n) => deleteNoticeRow(n),
+    },
+  ];
+
+  const scheduledCols: DataTableColumn<(typeof scheduledItems)[number]>[] = [
+    { key: "title", header: "Item", value: (i) => i.title, sortable: true },
+    { key: "kind", header: "Kind", value: (i) => i.kind, sortable: true },
+    {
+      key: "when", header: "Goes out", sortable: true,
+      value: (i) => i.scheduledPublishAt,
+      render: (i) => new Date(i.scheduledPublishAt).toLocaleString(),
+    },
+  ];
+
+  const socialLogCols: DataTableColumn<SocialCrossPostLogEntry>[] = [
+    { key: "title", header: "Content", value: (l) => l.title || l.contentId, sortable: true },
+    { key: "platform", header: "Platform", value: (l) => l.platform, sortable: true },
+    {
+      key: "status", header: "Status", sortable: true,
+      value: (l) => l.status,
+      render: (l) => (
+        <span>
+          {l.status}
+          {l.error ? (
+            <span className="block text-[11px] text-[var(--danger)]">{l.error}</span>
+          ) : null}
+        </span>
+      ),
+    },
+    {
+      key: "postedAt", header: "Posted", sortable: true,
+      value: (l) => l.postedAt,
+      render: (l) => new Date(l.postedAt).toLocaleString(),
+    },
+    {
+      key: "link", header: "",
+      render: (l) =>
+        l.postUrl ? (
+          <a href={l.postUrl} target="_blank" rel="noreferrer" className="text-[11px] text-[var(--tone-teal)]">
+            View post
+          </a>
+        ) : null,
+    },
+  ];
   const notifications = useMemo(
     () =>
       inbox
@@ -567,7 +921,13 @@ export function CommsWorkspace() {
       error={error}
       notice={noticeMsg}
     >
-      <ModuleTabs items={TABS} value={tab} onChange={(id) => setTab(id as CommsTab)} />
+      <ModuleTabs items={shownTabs} value={tab} onChange={(id) => setTab(id as CommsTab)} />
+
+      {tab === "dashboard" ? (
+        <div className="mt-6">
+          <ModuleDashboardHost moduleId="comms" onNavigateTab={(t) => setTab(t as CommsTab)} />
+        </div>
+      ) : null}
 
       {tab === "notices" ||
       tab === "news" ||
@@ -594,7 +954,7 @@ export function CommsWorkspace() {
 
       {tab === "notices" ? (
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-          <section className="space-y-3 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <section className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               {editNoticeId ? "Edit notice" : "New notice"}
             </h2>
@@ -663,94 +1023,43 @@ export function CommsWorkspace() {
             </div>
           </section>
           <section className="space-y-2">
+            {!readOnly ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[11px] text-[var(--muted)]">
+                <span>
+                  AI knowledge base — {kbStats ? `${kbStats.chunkCount} notice(s) indexed` : "…"}
+                  {kbStats && !kbStats.embeddingsConfigured
+                    ? " (OPENAI_API_KEY not configured)"
+                    : ""}
+                  {" — grounds the parent WhatsApp bot & AI assistant on published notices."}
+                </span>
+                <button
+                  type="button"
+                  disabled={kbSyncBusy || (kbStats ? !kbStats.embeddingsConfigured : false)}
+                  className="rounded-lg border border-[var(--border)] px-2 py-1 font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                  onClick={() => void syncKb()}
+                >
+                  {kbSyncBusy ? "Syncing…" : "Sync published notices to AI"}
+                </button>
+                {kbSyncMsg ? <span>{kbSyncMsg}</span> : null}
+              </div>
+            ) : null}
             {noticesFiltered.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">
                 {listQuery ? "No notices match your search." : "No notices yet."}
               </p>
             ) : (
               <ErpTableShell>
-                <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
-                {noticesFiltered.map((n) => (
-                  <li key={n.id} className="p-3">
-                <article>
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
-                        {n.pinned ? "📌 " : ""}
-                        {n.title}
-                      </h3>
-                      <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-                        {audienceLabel(n.audience)} · {n.status}
-                        {n.publishedAt
-                          ? ` · ${new Date(n.publishedAt).toLocaleString()}`
-                          : ""}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      <DeskListActions
-                        readOnly={readOnly}
-                        onEdit={() => beginEditNotice(n)}
-                        onDelete={() => {
-                          const r = deleteNotice(n.id);
-                          if (r.ok) {
-                            setComms(r.state);
-                            if (editNoticeId === n.id) resetNoticeForm();
-                            flash("Notice deleted");
-                          } else setError(r.error);
-                        }}
-                        deleteConfirm={`Delete notice "${n.title}"?`}
-                      />
-                      {!readOnly && n.status !== "published" ? (
-                        <button
-                          type="button"
-                          className="text-[11px] font-semibold text-[#0f766e]"
-                          onClick={() => {
-                            const r = setNoticeStatus(n.id, "published");
-                            if (r.ok) {
-                              setComms(r.state);
-                              flash("Published");
-                              const notice = r.state.notices.find((x) => x.id === n.id);
-                              if (notice) crossPostNotice(notice);
-                            } else setError(r.error);
-                          }}
-                        >
-                          Publish
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="text-[11px] font-semibold text-[var(--muted)]"
-                          onClick={() => {
-                            const r = setNoticeStatus(n.id, "archived");
-                            if (r.ok) {
-                              setComms(r.state);
-                              flash("Archived");
-                            } else setError(r.error);
-                          }}
-                        >
-                          Archive
-                        </button>
-                      )}
-                      {n.status === "published" &&
-                      (n.audience === "all" || n.audience === "parents") ? (
-                        <button
-                          type="button"
-                          className="text-[11px] font-semibold text-[#7c3aed]"
-                          disabled={socialBusy}
-                          onClick={() => crossPostNotice(n, true)}
-                        >
-                          Post to social
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                  <p className="mt-2 whitespace-pre-wrap text-sm text-[var(--brand-deep)]">
-                    {n.body}
-                  </p>
-                </article>
-                  </li>
-                ))}
-                </ul>
+                <DataTable
+                  columns={noticeCols}
+                  rows={noticesFiltered}
+                  rowKey={(n) => n.id}
+                  rowActions={noticeActions}
+                  rowActionsLabel="Notice actions"
+                  minWidth="min-w-[860px]"
+                  exportFileBaseName="notices"
+                  exportTitle="Notices"
+                  emptyTitle="No notices"
+                />
               </ErpTableShell>
             )}
           </section>
@@ -759,7 +1068,7 @@ export function CommsWorkspace() {
 
       {tab === "news" ? (
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-          <section className="space-y-3 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <section className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               {editNewsId ? "Edit news" : "New story"}
             </h2>
@@ -821,7 +1130,7 @@ export function CommsWorkspace() {
               </p>
             ) : (
               <ErpTableShell>
-                <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                <ul className="divide-y divide-[var(--border)]">
                 {newsFiltered.map((n) => (
                   <li key={n.id}>
                 <article
@@ -857,7 +1166,7 @@ export function CommsWorkspace() {
                       {!readOnly && n.status !== "published" ? (
                         <button
                           type="button"
-                          className="text-[11px] font-semibold text-[#0f766e]"
+                          className="text-[11px] font-semibold text-[var(--tone-teal)]"
                           onClick={() => {
                             const r = setNewsStatus(n.id, "published");
                             if (r.ok) {
@@ -902,7 +1211,7 @@ export function CommsWorkspace() {
 
       {tab === "gallery" ? (
         <div className="space-y-5">
-          <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
             <p className="w-full text-sm font-semibold text-[var(--brand-deep)]">
               {editAlbumId ? "Edit album" : "New album"}
             </p>
@@ -961,15 +1270,15 @@ export function CommsWorkspace() {
                 className={`overflow-hidden rounded-xl border text-left transition ${
                   activeAlbumId === a.id
                     ? "border-[var(--brand-deep)] ring-2 ring-[var(--brand-gold)]"
-                    : "border-[rgba(32,48,80,0.1)]"
-                } bg-white`}
+                    : "border-[var(--border)]"
+                } bg-[var(--card)]`}
               >
                 <button
                   type="button"
                   onClick={() => setActiveAlbumId(a.id)}
                   className="w-full text-left"
                 >
-                  <div className="flex h-28 items-center justify-center bg-[rgba(32,48,80,0.06)]">
+                  <div className="flex h-28 items-center justify-center bg-[var(--surface-sunken)]">
                     {a.coverUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={a.coverUrl} alt="" className="h-full w-full object-cover" />
@@ -1004,7 +1313,7 @@ export function CommsWorkspace() {
           </div>
 
           {activeAlbumId ? (
-            <section className="space-y-3 rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+            <section className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
                   Album photos
@@ -1051,7 +1360,7 @@ export function CommsWorkspace() {
               ) : (
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
                   {albumPhotos.map((p) => (
-                    <figure key={p.id} className="relative overflow-hidden rounded-lg bg-[rgba(32,48,80,0.05)]">
+                    <figure key={p.id} className="relative overflow-hidden rounded-lg bg-[var(--surface-sunken)]">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={p.url} alt={p.caption} className="aspect-square w-full object-cover" />
                       {p.caption ? (
@@ -1062,7 +1371,7 @@ export function CommsWorkspace() {
                       {!readOnly ? (
                         <button
                           type="button"
-                          className="absolute right-1 top-1 rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold text-[#b42318]"
+                          className="absolute right-1 top-1 rounded bg-[var(--card)]/90 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--danger)]"
                           onClick={() => {
                             if (!window.confirm("Remove this photo?")) return;
                             const r = deleteGalleryPhoto(p.id);
@@ -1084,11 +1393,28 @@ export function CommsWorkspace() {
         </div>
       ) : null}
 
+      {tab === "email" ? (
+        <EmailIntegrationPanel canEdit={!readOnly} />
+      ) : null}
+
+      {tab === "popups" ? <AppPopupsPanel canEdit={!readOnly} /> : null}
+      {tab === "onapp" ? <ParentsOnAppPanel /> : null}
+
       {tab === "social" ? (
-        <div className="space-y-5">
+        <StepTabs
+          aria-label="Social steps"
+          steps={SOCIAL_STEPS}
+          value={socialStep}
+          onChange={setSocialStep}
+        >
+        <div className={socialStep === "connect" ? "" : "hidden"}>
           <SocialCredentialsPanel onSaved={reloadSocialLogs} />
+        </div>
+        <div className={socialStep === "rules" ? "" : "hidden"}>
           <SocialCrossPostPrefsPanel />
-          <section className="rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+        </div>
+        <div className={socialStep === "queue" ? "space-y-5" : "hidden"}>
+          <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
               Scheduled queue
             </h2>
@@ -1099,26 +1425,17 @@ export function CommsWorkspace() {
               <p className="mt-3 text-sm text-[var(--muted)]">No scheduled posts.</p>
             ) : (
               <ErpTableShell className="mt-3">
-                <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
-                {scheduledItems.map((item) => (
-                  <li
-                    key={`${item.kind}-${item.id}`}
-                    className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm"
-                  >
-                    <span className="font-medium text-[var(--brand-deep)]">
-                      {item.title}
-                    </span>
-                    <span className="text-[11px] text-[var(--muted)]">
-                      {item.kind} ·{" "}
-                      {new Date(item.scheduledPublishAt).toLocaleString()}
-                    </span>
-                  </li>
-                ))}
-                </ul>
+                <DataTable
+                  columns={scheduledCols}
+                  rows={scheduledItems}
+                  rowKey={(item) => `${item.kind}-${item.id}`}
+                  minWidth="min-w-[620px]"
+                  emptyTitle="Nothing scheduled"
+                />
               </ErpTableShell>
             )}
           </section>
-          <section className="rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+          <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
                 Recent cross-posts
@@ -1133,47 +1450,33 @@ export function CommsWorkspace() {
               </p>
             ) : (
               <ErpTableShell>
-                <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
-                {socialLogs.map((log) => (
-                  <li
-                    key={`${log.contentId}-${log.platform}-${log.postedAt}`}
-                    className="px-4 py-2.5 text-sm"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="font-medium text-[var(--brand-deep)]">
-                        {log.title || log.contentId}
-                      </span>
-                      <span className="text-[11px] text-[var(--muted)]">
-                        {log.platform} · {log.status} ·{" "}
-                        {new Date(log.postedAt).toLocaleString()}
-                      </span>
-                    </div>
-                    {log.postUrl ? (
-                      <a
-                        href={log.postUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-1 inline-block text-[11px] text-[#0f766e]"
-                      >
-                        View post
-                      </a>
-                    ) : null}
-                    {log.error ? (
-                      <p className="mt-1 text-[11px] text-[#b42318]">{log.error}</p>
-                    ) : null}
-                  </li>
-                ))}
-                </ul>
+                <DataTable
+                  columns={socialLogCols}
+                  rows={socialLogs}
+                  rowKey={(log) => `${log.contentId}-${log.platform}-${log.postedAt}`}
+                  minWidth="min-w-[720px]"
+                  emptyTitle="No cross-posts yet"
+                />
               </ErpTableShell>
             )}
           </section>
         </div>
+        </StepTabs>
       ) : null}
 
-      {tab === "channels" ? <ClassChannelsPanel /> : null}
+      {tab === "whatsapp" ? (
+        <WaWorkspacePanel
+          readOnly={readOnly}
+          by={session.fullName}
+          initialTab={waWorkspaceTabFrom(
+            LEGACY_WA_TABS[searchParams.get("tab") || ""] ??
+              searchParams.get("wa"),
+          )}
+        />
+      ) : null}
 
-      {tab === "wa_hub" ? (
-        <WaChatHubPanel by={session.fullName} canEdit={!readOnly} />
+      {tab === "answers" ? (
+        <AnswerBookPanel canEdit={!readOnly} canApprove={!readOnly && canApproveAnswers} />
       ) : null}
 
       {tab === "inbox" ? (
@@ -1221,7 +1524,7 @@ export function CommsWorkspace() {
                   className={`block w-full rounded-xl border px-3 py-2.5 text-left ${
                     unread
                       ? "border-[rgba(197,160,40,0.4)] bg-[rgba(197,160,40,0.08)]"
-                      : "border-[rgba(32,48,80,0.1)] bg-white"
+                      : "border-[var(--border)] bg-[var(--card)]"
                   }`}
                 >
                   <div className="flex justify-between gap-2">
@@ -1241,6 +1544,12 @@ export function CommsWorkspace() {
             })
           )}
         </section>
+      ) : null}
+
+      {tab === "reports" ? (
+        <div className="mt-2">
+          <CommsReportsRunner />
+        </div>
       ) : null}
     </ErpWorkspaceShell>
   );

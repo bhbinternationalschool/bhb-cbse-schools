@@ -43,33 +43,20 @@ export const resetErpChatPersistenceCache = desk.resetCache;
 /** Soft poll: pull remote and merge if newer. */
 export async function pollErpChatRemote(): Promise<boolean> {
   if (!desk.remoteEnabled()) return false;
+  if (typeof window === "undefined") return false;
   try {
-    const { createBrowserSupabase, isSupabaseConfigured } = await import(
-      "@/lib/supabase/client"
+    const res = await fetch(
+      "/api/school-data/domain-blob?table=erp_chat_state",
+      { method: "GET", credentials: "same-origin", cache: "no-store" },
     );
-    const { TENANT } = await import("@/lib/types");
-    if (!isSupabaseConfigured()) return false;
-    const sb = createBrowserSupabase();
-    if (!sb) return false;
-    const { data: tenant } = await sb
-      .from("tenants")
-      .select("id")
-      .eq("slug", TENANT.slug)
-      .maybeSingle();
-    if (!tenant?.id) return false;
-    const { data, error } = await sb
-      .from("erp_chat_state")
-      .select("state, updated_at")
-      .eq("tenant_id", tenant.id)
-      .maybeSingle();
-    if (error || !data?.state) return false;
+    if (!res.ok) return false;
+    const body = (await res.json()) as { ok?: boolean; state?: unknown };
+    if (!body.ok || !body.state) return false;
     const before = JSON.stringify(loadErpChat());
-    blobWriteLocal(normalizeErpChatState(data.state));
+    blobWriteLocal(normalizeErpChatState(body.state));
     const after = JSON.stringify(loadErpChat());
     if (before !== after) {
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new Event("bhb-erp-chat"));
-      }
+      window.dispatchEvent(new Event("bhb-erp-chat"));
       return true;
     }
     return false;

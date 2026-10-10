@@ -27,6 +27,7 @@ import {
   loadWaCampaigns,
   openEnquiryFilters,
   previewCampaignSample,
+  pruneSequenceQueue,
   publicRegisterUrl,
   refreshListCounts,
   resolveAudienceLeads,
@@ -50,11 +51,85 @@ import {
   MastersTableCard,
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import type { CampaignMessage } from "@/lib/waCampaigns";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { SequencesPanel } from "@/components/admissions/SequencesPanel";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
+import { openWaMe } from "@/lib/waMe";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
 
-type PanelTab = "lists" | "campaigns" | "queue";
+type PanelTab = "lists" | "campaigns" | "sequences" | "queue";
+
+/**
+ * A campaign needs a saved audience list, and the queue needs an enqueued or
+ * scheduled campaign — so lists, then campaigns, then queue & dispatch.
+ * Sequences (timed drips on a list) are a separate track and come last.
+ * Dispatch and the per-message log stay one step: the log is what a
+ * dispatch just did.
+ */
+function campaignSteps(
+  lists: number,
+  campaigns: number,
+  sequences: number,
+): StepDef<PanelTab>[] {
+  return [
+    {
+      id: "lists",
+      title: "Audience lists",
+      what: "Filter CRM leads and save the filter as a reusable audience list.",
+      badge: lists,
+    },
+    {
+      id: "campaigns",
+      title: "Campaigns",
+      what: "Pick a list and a template, set a schedule, then Enqueue or Schedule the messages.",
+      badge: campaigns,
+    },
+    {
+      id: "queue",
+      title: "Queue & dispatch",
+      what: "Send the due messages (live via WhatsApp when configured, otherwise stub or open WhatsApp) and see each message's status for the selected campaign.",
+    },
+    {
+      id: "sequences",
+      title: "Sequences",
+      what: "Optional: a timed series of messages to a list, from a start date or an event date.",
+      badge: sequences,
+    },
+  ];
+}
+
+const CAMPAIGN_MESSAGE_COLUMNS: DataTableColumn<CampaignMessage>[] = [
+  { key: "childName", header: "Child", value: (m) => m.childName, sortable: true },
+  {
+    key: "mobile",
+    header: "Mobile",
+    value: (m) => m.mobile,
+    sortable: true,
+    render: (m) => <span className="font-mono">{m.mobile}</span>,
+  },
+  { key: "status", header: "Status", value: (m) => m.status, sortable: true },
+  {
+    key: "open",
+    header: "Open",
+    render: (m) =>
+      m.mobile ? (
+        <button
+          type="button"
+          className="font-semibold underline"
+          onClick={() => openWaMe(m.mobile, m.body, undefined, { module: "admissions" })}
+        >
+          WhatsApp
+        </button>
+      ) : (
+        m.error || "—"
+      ),
+  },
+];
 
 export function AdmissionCampaignsPanel({
   admissions,
@@ -70,6 +145,8 @@ export function AdmissionCampaignsPanel({
   onAdmissionsCommit: (next: AdmissionsState, msg?: string) => void;
 }) {
   const [wa, setWa] = useState<WaCampaignsState>(() => loadWaCampaigns());
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration("wa_campaigns", () => { setWa(loadWaCampaigns()); });
   const [panel, setPanel] = useState<PanelTab>("lists");
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -242,8 +319,13 @@ export function AdmissionCampaignsPanel({
   function onDispatch(openWaMe: boolean) {
     if (!canEdit) return;
     void (async () => {
+      // Sequence steps: drop families who enrolled / were lost / said no
+      // since the step was queued. Persist only when something changed.
+      const pruned = pruneSequenceQueue(wa, admissions);
+      if (pruned.skipped) commitWa(pruned.wa, `${pruned.skipped} sequence message(s) skipped — family moved on`);
+      const waNow = pruned.wa;
       if (openWaMe) {
-        const r = dispatchDueCampaigns(wa, { openWaMe: true });
+        const r = dispatchDueCampaigns(waNow, { openWaMe: true });
         commitWa(r.wa, r.note);
         for (const url of r.opened) {
           window.open(url, "_blank", "noopener,noreferrer");
@@ -252,7 +334,7 @@ export function AdmissionCampaignsPanel({
       }
 
       // Prefer live Meta/BSP when configured; otherwise stub-mark for demo
-      const prepared = dispatchDueCampaigns(wa, { stubMarkSent: false });
+      const prepared = dispatchDueCampaigns(waNow, { stubMarkSent: false });
       if (prepared.pending.length === 0) {
         commitWa(prepared.wa, prepared.note);
         return;
@@ -264,7 +346,7 @@ export function AdmissionCampaignsPanel({
         );
         const live = !!health?.whatsappOutbound;
         if (!live) {
-          const stub = dispatchDueCampaigns(wa, { stubMarkSent: true });
+          const stub = dispatchDueCampaigns(waNow, { stubMarkSent: true });
           commitWa(stub.wa, stub.note);
           return;
         }
@@ -282,7 +364,7 @@ export function AdmissionCampaignsPanel({
                 ? {
                     template: {
                       name: m.templateName,
-                      language: m.templateLanguage || "en",
+                      language: m.templateLanguage || SCHOOL_DEFAULT_WA_LANGUAGE,
                     },
                   }
                 : {}),
@@ -305,7 +387,7 @@ export function AdmissionCampaignsPanel({
           return;
         }
         if (body.mode === "stub" || body.mode === "dry_run") {
-          const stub = dispatchDueCampaigns(wa, { stubMarkSent: true });
+          const stub = dispatchDueCampaigns(waNow, { stubMarkSent: true });
           commitWa(
             stub.wa,
             `API returned ${body.mode} — ${stub.note}`,
@@ -356,29 +438,16 @@ export function AdmissionCampaignsPanel({
         </p>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        {(
-          [
-            ["lists", "Audience lists"],
-            ["campaigns", "Campaigns"],
-            ["queue", "Queue & dispatch"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setPanel(id)}
-            className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${
-              panel === id
-                ? "bg-[var(--brand-deep)] text-white"
-                : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
+      <StepTabs
+        aria-label="WhatsApp campaign steps"
+        steps={campaignSteps(
+          wa.lists.length,
+          wa.campaigns.length,
+          wa.sequences.length,
+        )}
+        value={panel}
+        onChange={setPanel}
+      >
       {panel === "lists" ? (
         <div className="grid gap-4 lg:grid-cols-2">
           <MastersWorkCard
@@ -608,7 +677,7 @@ export function AdmissionCampaignsPanel({
               {canEdit ? (
                 <button
                   type="button"
-                  className="rounded-lg bg-[#0f766e] px-3 py-2 text-[11px] font-semibold text-white"
+                  className="rounded-lg bg-[var(--tone-teal-solid)] px-3 py-2 text-[11px] font-semibold text-white"
                   onClick={onSaveList}
                 >
                   Save audience list
@@ -796,6 +865,8 @@ export function AdmissionCampaignsPanel({
                   registryLanguage:
                     approvedTemplates.find((t) => t.id === campRegistryId)
                       ?.language || "",
+                  sequenceId: "",
+                  sequenceStep: 0,
                 })}
               </div>
               {canEdit ? (
@@ -844,7 +915,7 @@ export function AdmissionCampaignsPanel({
                         <div className="flex flex-wrap gap-1.5">
                           <button
                             type="button"
-                            className="rounded-md bg-[#0f766e] px-2 py-1 text-[10px] font-semibold text-white"
+                            className="rounded-md bg-[var(--tone-teal-solid)] px-2 py-1 text-[10px] font-semibold text-white"
                             onClick={() => onEnqueue(c.id)}
                           >
                             Enqueue
@@ -891,6 +962,20 @@ export function AdmissionCampaignsPanel({
         </div>
       ) : null}
 
+      {/* Hidden, not unmounted: a sequence being drafted lives in
+          SequencesPanel's own state. */}
+      <div className={panel === "sequences" ? "" : "hidden"}>
+        <SequencesPanel
+          wa={wa}
+          admissions={admissions}
+          by={by}
+          canEdit={canEdit}
+          commitWa={commitWa}
+          onAdmissionsCommit={onAdmissionsCommit}
+          onError={(m) => setNotice(m)}
+        />
+      </div>
+
       {panel === "queue" ? (
         <div className="space-y-4">
           <MastersWorkCard
@@ -909,7 +994,7 @@ export function AdmissionCampaignsPanel({
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg bg-[#15803d] px-3 py-2 text-[11px] font-semibold text-white"
+                    className="rounded-lg bg-[var(--tone-green-solid)] px-3 py-2 text-[11px] font-semibold text-white"
                     onClick={() => onDispatch(true)}
                   >
                     Dispatch + open WhatsApp (≤{WA_ME_BATCH_CAP})
@@ -930,53 +1015,36 @@ export function AdmissionCampaignsPanel({
               <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
                 Select a campaign, then Enqueue.
               </div>
-            ) : selectedMessages.length === 0 ? (
-              <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
-                No messages — click Enqueue on the campaign.
-              </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-left text-[12px]">
-                  <thead className="text-[10px] text-[var(--muted)]">
-                    <tr>
-                      <th className="px-3 py-2">Child</th>
-                      <th className="px-3 py-2">Mobile</th>
-                      <th className="px-3 py-2">Status</th>
-                      <th className="px-3 py-2">Open</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedMessages.map((m) => (
-                      <tr
-                        key={m.id}
-                        className="border-t border-[rgba(32,48,80,0.06)]"
-                      >
-                        <td className="px-3 py-2">{m.childName}</td>
-                        <td className="px-3 py-2 font-mono">{m.mobile}</td>
-                        <td className="px-3 py-2">{m.status}</td>
-                        <td className="px-3 py-2">
-                          {m.waMeUrl ? (
-                            <a
-                              href={m.waMeUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="font-semibold underline"
-                            >
-                              WhatsApp
-                            </a>
-                          ) : (
-                            m.error || "—"
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                columns={CAMPAIGN_MESSAGE_COLUMNS}
+                rows={selectedMessages}
+                rowKey={(m) => m.id}
+                emptyTitle="No messages yet"
+                emptyDescription="Click Enqueue on the campaign to build the send queue."
+                exportFileBaseName={`campaign-messages-${selectedCampaign.name}`}
+                exportTitle={`Messages · ${selectedCampaign.name}`}
+                minWidth="min-w-full"
+                rowActions={[
+                  {
+                    id: "wa",
+                    label: "Open in WhatsApp",
+                    disabled: (m) => !m.mobile,
+                    onSelect: (m) =>
+                      openWaMe(m.mobile, m.body, undefined, { module: "admissions" }),
+                  },
+                  {
+                    id: "copy",
+                    label: "Copy mobile",
+                    onSelect: (m) => void navigator.clipboard.writeText(m.mobile),
+                  },
+                ]}
+              />
             )}
           </MastersTableCard>
         </div>
       ) : null}
+      </StepTabs>
     </div>
   );
 }

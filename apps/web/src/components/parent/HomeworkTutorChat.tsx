@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { speakText } from "@/lib/voiceClient";
+import { consumeAiStream } from "@/lib/aiStream";
 import type { HomeworkTutorContext } from "@/lib/homeworkTutor.types";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
@@ -9,9 +10,12 @@ type Turn = { role: "user" | "assistant"; content: string };
 
 export function HomeworkTutorChat({
   context,
+  studentId,
   onError,
 }: {
   context: HomeworkTutorContext;
+  /** The child this panel is for — the tutor is pinned to their class and pass. */
+  studentId?: string;
   onError?: (msg: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -41,26 +45,41 @@ export function HomeworkTutorChat({
     try {
       const res = await fetch("/api/ai/tutor", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+        },
         body: JSON.stringify({
           message,
           history: nextHistory.slice(0, -1),
           context,
+          studentId,
         }),
       });
-      const json = (await res.json()) as {
-        ok?: boolean;
-        reply?: string;
-        error?: string;
-        engine?: string;
-      };
-      if (!res.ok || !json.ok || !json.reply) {
-        onError?.(json.error || "Tutor unavailable");
+      // The reply grows in place as the tutor writes it; the final event
+      // carries the whole text, which replaces whatever was assembled.
+      let partial = "";
+      let finished = false;
+      let failed: string | null = null;
+      await consumeAiStream<{ engine?: string; reply?: string }>(res, (ev) => {
+        if (ev.type === "delta") {
+          partial += ev.text;
+          setHistory([...nextHistory, { role: "assistant", content: partial }]);
+        } else if (ev.type === "done") {
+          finished = true;
+          if (ev.engine) setEngine(ev.engine);
+          setHistory([
+            ...nextHistory,
+            { role: "assistant", content: ev.reply || partial },
+          ]);
+        } else {
+          failed = ev.error;
+        }
+      });
+      if (!finished) {
+        onError?.(failed || "Tutor unavailable");
         setHistory(history);
-        return;
       }
-      if (json.engine) setEngine(json.engine);
-      setHistory([...nextHistory, { role: "assistant", content: json.reply }]);
     } catch {
       onError?.("Could not reach tutor");
       setHistory(history);
@@ -75,7 +94,7 @@ export function HomeworkTutorChat({
     <div className="mt-2">
       <button
         type="button"
-        className="text-xs font-semibold text-[#6d28d9] underline"
+        className="text-xs font-semibold text-[var(--tone-violet)] underline"
         onClick={() => setOpen((v) => !v)}
       >
         {open ? "Hide tutor hints" : "Get tutor hints"}
@@ -134,7 +153,7 @@ export function HomeworkTutorChat({
             <button
               type="button"
               disabled={busy || !input.trim()}
-              className="shrink-0 rounded-lg bg-[#6d28d9] px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+              className="shrink-0 rounded-lg bg-[var(--tone-violet-solid)] px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
               onClick={() => void send()}
             >
               {busy ? "…" : "Ask"}

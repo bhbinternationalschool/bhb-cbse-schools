@@ -21,6 +21,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "student_leave";
 
@@ -41,7 +42,7 @@ export function resetStudentLeavePersistenceCache() {
 
 export function scheduleStudentLeaveSync(state: StudentLeaveState) {
   if (typeof window === "undefined") {
-    void pushStudentLeaveRemoteServer(state);
+    void trackServerWork(pushStudentLeaveRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("student_leave")) {
@@ -52,25 +53,27 @@ export function scheduleStudentLeaveSync(state: StudentLeaveState) {
 
 export async function pushStudentLeaveRemoteServer(
   state: StudentLeaveState,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; kept?: string[] }> {
   const { pushStudentLeaveDeskToDb } = await import(
     "@/lib/studentLeaveNormalized.server"
   );
   const desk = await pushStudentLeaveDeskToDb(state);
   if (!desk.ok) return { ok: false, error: desk.error };
+  const kept = desk.kept ?? [];
 
   const { deskSkipBlobPush } = await import("@/lib/deskCutover");
-  if (deskSkipBlobPush("student_leave")) return { ok: true };
+  if (deskSkipBlobPush("student_leave")) return { ok: true, kept };
 
   const { fetchServerBlob, pushServerBlob } = await import("@/lib/serverBlob");
   const remote = await fetchServerBlob<StudentLeaveState>("student_leave_state");
   const remoteCount = remote.state?.requests?.length ?? 0;
   const nextCount = state.requests?.length ?? 0;
   if (nextCount < remoteCount && remote.state) {
-    return { ok: true };
+    return { ok: true, kept };
   }
 
-  return pushServerBlob("student_leave_state", state);
+  const blobRes = await pushServerBlob("student_leave_state", state);
+  return { ...blobRes, kept };
 }
 
 /**
@@ -79,7 +82,6 @@ export async function pushStudentLeaveRemoteServer(
  */
 export async function ensureStudentLeaveHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = studentLeaveReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("student_leave")
@@ -87,7 +89,12 @@ export async function ensureStudentLeaveHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateStudentLeaveDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateStudentLeaveDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (changed && (bundle.requests.length > 0 || readFromDb)) {
     const merged = mergeDbDeskIntoStudentLeaveState(loadStudentLeave(), bundle, {
       preferDb: readFromDb,
@@ -96,9 +103,12 @@ export async function ensureStudentLeaveHydrated(): Promise<boolean> {
     normChanged = true;
   }
 
-  if (normChanged) {
-    scheduleStudentLeaveSync(loadStudentLeave());
-  }
+  // Pull-only — hydrate must not re-push (audit 2026-08-18). It used to
+  // re-publish the merge whenever the read-from-DB flag was off, i.e. push
+  // the whole desk (a pruning replace) every time a page merely loaded. That
+  // was dormant because nothing on the web called this until the Student
+  // leave desk started to on 2026-09-29; a teacher's push is now refused
+  // outright, and the office's is a load-time echo it never asked for.
 
   return blobChanged || normChanged;
 }

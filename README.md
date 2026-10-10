@@ -50,7 +50,9 @@ SQL: `…masters.sql`, `…fee_setup.sql`, `…special_fees.sql`.
 
 ```bash
 docker build -t bhb-erp -f apps/web/Dockerfile .
-# deploy image to Cloud Run; map erp.bhbinternational.school
+# deploy image to Cloud Run; map bhbinternational.school (Cloud Run's automatic
+# domain mapping isn't supported in asia-southeast1 — the root domain mapping
+# already works and is what production actually uses)
 ```
 
 ## Packages

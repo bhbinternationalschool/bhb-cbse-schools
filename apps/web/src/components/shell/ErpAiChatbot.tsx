@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { consumeAiStream } from "@/lib/aiStream";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import {
   erpAiStorageKey,
@@ -26,6 +27,7 @@ import {
   type ErpAiPageGuide,
 } from "@/lib/erpAiPageGuides";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { soundsLikeChangeRequest } from "@/lib/moduleRequests";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import {
   inferRoleCodes,
@@ -129,6 +131,10 @@ export function ErpAiChatbot() {
   const [engineLabel, setEngineLabel] = useState("AI");
   const [voiceLang, setVoiceLang] = useState<VoiceLang>("auto");
   const [voiceReply, setVoiceReply] = useState(true);
+  /** An error the user seems stuck on, offered as "Stuck? I can help". */
+  const [stuckOffer, setStuckOffer] = useState<string | null>(null);
+  /** True while the user is describing a change for the director. */
+  const [requestMode, setRequestMode] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -141,6 +147,8 @@ export function ErpAiChatbot() {
     origY: 0,
   });
   const lastGuideInjected = useRef<string | null>(null);
+  const recentErrors = useRef<{ message: string; at: number; path: string }[]>([]);
+  const stuckReported = useRef(new Set<string>());
 
   const ctx: ErpAiChatContext = useMemo(
     () => ({ session, masters }),
@@ -248,6 +256,165 @@ export function ErpAiChatbot() {
     [storageKey],
   );
 
+  // The stuck watch (director, 9 Oct 2026): the same error twice, or two
+  // errors within three minutes on one screen, and the guide offers help —
+  // and the screen is counted in the director's inbox of stuck points.
+  useEffect(() => {
+    function onToast(e: Event) {
+      const d = (e as CustomEvent<{ kind?: string; message?: string }>).detail;
+      if (d?.kind !== "error" || !d.message) return;
+      const now = Date.now();
+      const path = pathname || "/";
+      const recent = recentErrors.current.filter((x) => x.path === path && now - x.at < 10 * 60_000);
+      const repeated = recent.some((x) => x.message === d.message);
+      const burst = recent.filter((x) => now - x.at < 3 * 60_000).length >= 1;
+      recentErrors.current = [...recent, { message: d.message, at: now, path }].slice(-10);
+      if (!repeated && !burst) return;
+      setStuckOffer(d.message);
+      const key = `${path}|${d.message}`;
+      if (stuckReported.current.has(key)) return;
+      stuckReported.current.add(key);
+      void fetch("/api/erp-ai/stuck", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pathname: path, tab: tab || "", message: d.message }),
+      }).catch(() => null);
+    }
+    window.addEventListener("bhb-toast", onToast);
+    return () => window.removeEventListener("bhb-toast", onToast);
+  }, [pathname, tab]);
+
+  useEffect(() => {
+    setStuckOffer(null);
+    setRequestMode(false);
+  }, [pathname]);
+
+  /** Open the guide on the error the user is stuck on, with this screen's fixes. */
+  function helpWithStuck() {
+    if (!masters || !stuckOffer) return;
+    const tips = pageGuide?.stuckTips?.length
+      ? pageGuide.stuckTips
+      : [
+          "Read the message: it usually names the field or step that is missing.",
+          "Reload the page once — a lost connection shows the same error until the screen re-reads.",
+          "If it still fails, ask me here what you were trying to do, step by step.",
+        ];
+    const msg: ErpAiMessage = {
+      id: `stuck_${Date.now()}`,
+      role: "assistant",
+      at: new Date().toISOString(),
+      text: `I saw this error${pageGuide ? ` on **${pageGuide.pageLabel}**` : ""}:\n“${stuckOffer}”\n\nWhat usually fixes it:`,
+      steps: tips,
+      offerRequest: true,
+    };
+    setOpen(true);
+    setMinimized(false);
+    setStuckOffer(null);
+    push([...messages, msg]);
+  }
+
+  /** Start describing a change for the director; `seed` is what the user already said. */
+  function startRequest(seed?: string) {
+    if (!masters) return;
+    setOpen(true);
+    setMinimized(false);
+    setRequestMode(true);
+    if (seed) {
+      // What they already said is the start of the request.
+      let marked = false;
+      const list = [...messages]
+        .reverse()
+        .map((m) => {
+          if (!marked && m.role === "user" && m.text === seed) {
+            marked = true;
+            return { ...m, requestThread: true };
+          }
+          return m;
+        })
+        .reverse();
+      void draftRequest(marked ? list : [...list, { ...makeUserMessage(seed), requestThread: true }]);
+      return;
+    }
+    push([
+      ...messages,
+      {
+        id: `req_${Date.now()}`,
+        role: "assistant",
+        at: new Date().toISOString(),
+        requestThread: true,
+        text: `What would you like changed${pageGuide ? ` on **${pageGuide.pageLabel}**` : ""}? Tell me in your own words — what is missing or wrong, and what you want instead. I'll write it up for the director.`,
+      },
+    ]);
+  }
+
+  /** Ask the drafting route: one clarifying question, or the request card. */
+  async function draftRequest(list: ErpAiMessage[]) {
+    push(list);
+    setTyping(true);
+    const thread = list.filter((m) => m.requestThread).map((m) => ({ role: m.role, text: m.text }));
+    try {
+      const res = await fetch("/api/erp-ai/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "draft", history: thread, pathname, tab: tab || "", pageLabel: pageGuide?.pageLabel || "" }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        draft?: { ready: boolean; question?: string } & Partial<NonNullable<ErpAiMessage["requestCard"]>>;
+      };
+      const at = new Date().toISOString();
+      let reply: ErpAiMessage;
+      if (!res.ok || !body.ok || !body.draft) {
+        reply = { id: `req_err_${Date.now()}`, role: "assistant", at, requestThread: true, text: body.error || "I couldn't write that up just now — please try again in a minute." };
+      } else if (!body.draft.ready) {
+        reply = { id: `req_q_${Date.now()}`, role: "assistant", at, requestThread: true, text: body.draft.question || "Could you tell me a bit more?" };
+      } else {
+        const d = body.draft;
+        reply = {
+          id: `req_card_${Date.now()}`,
+          role: "assistant",
+          at,
+          requestThread: true,
+          text: "Here's what I'll send to the director. Check it, then press **Send**.",
+          requestCard: {
+            kind: d.kind === "bug" || d.kind === "stuck" ? d.kind : "change",
+            title: d.title || "",
+            problem: d.problem || "",
+            wanted: d.wanted || "",
+            suggestion: d.suggestion || "",
+          },
+        };
+      }
+      push([...list, reply]);
+    } finally {
+      setTyping(false);
+    }
+  }
+
+  async function submitRequest(card: NonNullable<ErpAiMessage["requestCard"]>) {
+    setTyping(true);
+    const thread = messages.filter((m) => m.requestThread).map((m) => ({ role: m.role, text: m.text }));
+    try {
+      const res = await fetch("/api/erp-ai/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "submit", card, history: thread, pathname, tab: tab || "", pageLabel: pageGuide?.pageLabel || "" }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      const at = new Date().toISOString();
+      push([
+        ...messages.map((m) => (m.requestCard ? { ...m, requestCard: undefined, text: `${m.text}\n\n**${m.requestCard.title}**` } : m)),
+        res.ok && body.ok
+          ? { id: `req_sent_${Date.now()}`, role: "assistant", at, text: "✅ Sent to the director. Once it is approved it will be built, and you'll see the change on this screen." }
+          : { id: `req_fail_${Date.now()}`, role: "assistant", at, requestThread: true, text: body.error || "Not sent — please try again." },
+      ]);
+      if (res.ok && body.ok) setRequestMode(false);
+    } finally {
+      setTyping(false);
+    }
+  }
+
   const posRef = useRef(pos);
   posRef.current = pos;
 
@@ -288,10 +455,19 @@ export function ErpAiChatbot() {
     setProactiveGuide(null);
   }
 
-  function ask(text: string) {
+  /**
+   * Send a line to the assistant. `shownAs` labels the user bubble when the
+   * wire text is a button id (a command confirm card's cmd_yes_… token).
+   */
+  function ask(text: string, shownAs?: string) {
     const trimmed = text.trim();
     if (!trimmed || typing || !masters) return;
-    const user = makeUserMessage(trimmed);
+    if (requestMode) {
+      setDraft("");
+      void draftRequest([...messages, { ...makeUserMessage(trimmed), requestThread: true }]);
+      return;
+    }
+    const user = makeUserMessage(shownAs || trimmed);
     const withUser = [...messages, user];
     push(withUser);
     setDraft("");
@@ -305,11 +481,19 @@ export function ErpAiChatbot() {
       }));
 
     void (async () => {
-      let reply: ErpAiMessage;
+      let reply: ErpAiMessage | null = null;
+      // While the model writes, its words land in a provisional bubble that
+      // is not persisted; the "done" event replaces it with the real message
+      // (links and all), which is what gets stored.
+      const draftId = `msg_draft_${Date.now()}`;
+      let partial = "";
       try {
         const res = await fetch("/api/erp-ai", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+          },
           body: JSON.stringify({
             message: trimmed,
             history: history.slice(0, -1),
@@ -317,27 +501,39 @@ export function ErpAiChatbot() {
             tab: tab || undefined,
           }),
         });
-        const json = (await res.json().catch(() => ({}))) as {
+        await consumeAiStream<{
           message?: ErpAiMessage;
           geminiConfigured?: boolean;
           llmConfigured?: boolean;
           engine?: string;
-          error?: string;
-        };
-        if (res.ok && json.message) {
-          reply = json.message;
-          if (json.llmConfigured ?? json.geminiConfigured) {
-            setLlmOn(true);
-            if (json.engine && json.engine !== "local") {
-              setEngineLabel(engineDisplayLabel(json.engine));
+        }>(res, (ev) => {
+          if (ev.type === "delta") {
+            if (!partial) setTyping(false);
+            partial += ev.text;
+            setMessages([
+              ...withUser,
+              {
+                id: draftId,
+                role: "assistant",
+                at: new Date().toISOString(),
+                text: partial,
+              },
+            ]);
+          } else if (ev.type === "done" && ev.message) {
+            reply = ev.message;
+            if (ev.llmConfigured ?? ev.geminiConfigured) {
+              setLlmOn(true);
+              if (ev.engine && ev.engine !== "local") {
+                setEngineLabel(engineDisplayLabel(ev.engine));
+              }
             }
           }
-        } else {
-          reply = replyErpAiChat(trimmed, { session, masters });
-        }
+        });
       } catch {
-        reply = replyErpAiChat(trimmed, { session, masters });
+        /* fall through to the local engine */
       }
+      if (!reply) reply = replyErpAiChat(trimmed, { session, masters });
+      if (soundsLikeChangeRequest(trimmed)) reply = { ...reply, offerRequest: true };
 
       const withReply = [...withUser, reply];
       push(withReply);
@@ -429,11 +625,25 @@ export function ErpAiChatbot() {
         className="erp-ai-shell fixed z-50 select-none"
         style={shellStyle}
       >
-        {showHint && proactiveGuide ? (
+        {stuckOffer ? (
           <div className="erp-ai-hint-bubble mb-2 ml-auto flex max-w-[220px] flex-col items-end gap-1 text-right">
             <button
               type="button"
-              className="rounded-2xl rounded-br-sm border border-[rgba(197,160,40,0.45)] bg-white px-3 py-2 text-[11px] font-semibold leading-snug text-[var(--brand-deep)] shadow-lg"
+              className="rounded-2xl rounded-br-sm border border-[var(--danger)]/40 bg-[var(--card)] px-3 py-2 text-[11px] font-semibold leading-snug text-[var(--brand-deep)] shadow-lg"
+              onClick={helpWithStuck}
+            >
+              🛟 Stuck? I can help
+            </button>
+            <button type="button" className="text-[9px] text-[var(--muted)] hover:underline" onClick={() => setStuckOffer(null)}>
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+        {!stuckOffer && showHint && proactiveGuide ? (
+          <div className="erp-ai-hint-bubble mb-2 ml-auto flex max-w-[220px] flex-col items-end gap-1 text-right">
+            <button
+              type="button"
+              className="rounded-2xl rounded-br-sm border border-[rgba(197,160,40,0.45)] bg-[var(--card)] px-3 py-2 text-[11px] font-semibold leading-snug text-[var(--brand-deep)] shadow-lg"
               onClick={() => openPanel(true)}
             >
               ✨ {proactiveHintLabel(proactiveGuide)}
@@ -490,6 +700,12 @@ export function ErpAiChatbot() {
         width: minimized ? FAB_W : PANEL_W,
         height: minimized ? FAB_H : PANEL_H,
       }}
+      // NOT a Base UI dialog, deliberately. This panel is dragged around the
+      // screen, minimised to a bubble, and read alongside the page it is
+      // answering about — so it must not trap focus or lock the page behind
+      // it, which is exactly what a modal does. Every other overlay in the
+      // app moved onto ui/dialog on 2026-09-06; this one stays a plain
+      // positioned panel because it is not modal in the first place.
       role="dialog"
       aria-label="ERP AI assistant"
     >
@@ -529,7 +745,7 @@ export function ErpAiChatbot() {
         <div className="flex shrink-0 gap-0.5">
           <button
             type="button"
-            className="rounded-lg px-2 py-1 text-[10px] font-semibold text-white/85 hover:bg-white/10"
+            className="rounded-lg px-2 py-1 text-[10px] font-semibold text-white/85 hover:bg-[var(--card)]/10"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={clearChat}
           >
@@ -537,7 +753,7 @@ export function ErpAiChatbot() {
           </button>
           <button
             type="button"
-            className="rounded-lg px-2 py-1 text-[11px] font-semibold hover:bg-white/10"
+            className="rounded-lg px-2 py-1 text-[11px] font-semibold hover:bg-[var(--card)]/10"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => setMinimized((v) => !v)}
             aria-label={minimized ? "Expand" : "Minimize"}
@@ -546,7 +762,7 @@ export function ErpAiChatbot() {
           </button>
           <button
             type="button"
-            className="rounded-lg px-2 py-1 text-[11px] font-semibold hover:bg-white/10"
+            className="rounded-lg px-2 py-1 text-[11px] font-semibold hover:bg-[var(--card)]/10"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => {
               setOpen(false);
@@ -560,9 +776,9 @@ export function ErpAiChatbot() {
       </header>
 
       {!minimized ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-2xl border border-t-0 border-[rgba(32,48,80,0.14)] bg-[linear-gradient(180deg,#faf9f6_0%,#fff_35%)] shadow-[0_18px_50px_rgba(32,48,80,0.28)]">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-2xl border border-t-0 border-[var(--border)] bg-[var(--surface)] shadow-[0_18px_50px_rgba(32,48,80,0.28)]">
           <div className="flex-1 space-y-2.5 overflow-y-auto px-3 py-3">
-            {messages.map((m) => (
+            {messages.map((m, mi) => (
               <div
                 key={m.id}
                 className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
@@ -575,7 +791,7 @@ export function ErpAiChatbot() {
                   }`}
                 >
                   {m.role === "assistant" ? (
-                    <div className="rounded-2xl rounded-bl-md border border-[rgba(32,48,80,0.1)] bg-white px-3 py-2.5 text-[12px] leading-relaxed text-[var(--brand-deep)] shadow-sm">
+                    <div className="rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-[12px] leading-relaxed text-[var(--brand-deep)] shadow-sm">
                       {m.guideId ? (
                         <p className="mb-1 text-[9px] font-bold uppercase tracking-wider text-[#1565c0]">
                           ✨ Page guide · {m.pageLabel}
@@ -587,7 +803,7 @@ export function ErpAiChatbot() {
                           {m.steps.map((step, idx) => (
                             <li
                               key={idx}
-                              className="flex gap-2 rounded-lg bg-[rgba(32,48,80,0.04)] px-2 py-1.5 text-[11px] leading-snug"
+                              className="flex gap-2 rounded-lg bg-[var(--surface-sunken)] px-2 py-1.5 text-[11px] leading-snug"
                             >
                               <span
                                 className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
@@ -607,6 +823,85 @@ export function ErpAiChatbot() {
                           onClick={() => dismissGuide(m.guideId!)}
                         >
                           Got it — thanks
+                        </button>
+                      ) : null}
+                      {m.confirm && !typing && mi === messages.length - 1 ? (
+                        <div className="mt-2.5 flex gap-1.5">
+                          <button
+                            type="button"
+                            className="flex-1 rounded-lg py-1.5 text-[11px] font-bold text-white"
+                            style={{ background: TENANT.primaryColor }}
+                            onClick={() => ask(m.confirm!.yesId, "Confirm")}
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            type="button"
+                            className="flex-1 rounded-lg border border-[var(--border)] py-1.5 text-[11px] font-bold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+                            onClick={() => ask(m.confirm!.noId, "Cancel")}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : null}
+                      {m.requestCard ? (
+                        <div className="mt-2.5 space-y-1.5 rounded-lg border border-[rgba(197,160,40,0.45)] bg-[rgba(197,160,40,0.08)] p-2 text-[11px] leading-snug">
+                          <p className="font-bold">
+                            {m.requestCard.kind === "bug" ? "🐞" : m.requestCard.kind === "stuck" ? "🛟" : "💡"} {m.requestCard.title}
+                          </p>
+                          {m.requestCard.problem ? (
+                            <p>
+                              <span className="font-semibold">Problem: </span>
+                              {m.requestCard.problem}
+                            </p>
+                          ) : null}
+                          {m.requestCard.wanted ? (
+                            <p>
+                              <span className="font-semibold">Wanted: </span>
+                              {m.requestCard.wanted}
+                            </p>
+                          ) : null}
+                          <p>
+                            <span className="font-semibold">Change: </span>
+                            {m.requestCard.suggestion}
+                          </p>
+                          {!typing && mi === messages.length - 1 ? (
+                            <div className="flex gap-1.5 pt-1">
+                              <button
+                                type="button"
+                                className="flex-1 rounded-lg py-1.5 text-[11px] font-bold text-white"
+                                style={{ background: TENANT.primaryColor }}
+                                onClick={() => void submitRequest(m.requestCard!)}
+                              >
+                                Send to director
+                              </button>
+                              <button
+                                type="button"
+                                className="flex-1 rounded-lg border border-[var(--border)] py-1.5 text-[11px] font-bold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+                                onClick={() => {
+                                  setRequestMode(false);
+                                  push([...messages.map((x) => (x.id === m.id ? { ...x, requestCard: undefined } : x)), { id: `req_cancel_${Date.now()}`, role: "assistant", at: new Date().toISOString(), text: "Okay — not sent." }]);
+                                }}
+                              >
+                                Don&apos;t send
+                              </button>
+                            </div>
+                          ) : null}
+                          {!typing && mi === messages.length - 1 ? (
+                            <p className="text-[10px] text-[var(--muted)]">Want it different? Type the correction below and I&apos;ll rewrite it.</p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {m.offerRequest && !requestMode && !typing && mi === messages.length - 1 ? (
+                        <button
+                          type="button"
+                          className="mt-2.5 w-full rounded-lg border border-[rgba(197,160,40,0.45)] bg-[rgba(197,160,40,0.12)] py-1.5 text-[10px] font-bold text-[var(--brand-deep)] hover:bg-[rgba(197,160,40,0.22)]"
+                          onClick={() => {
+                            const lastUser = [...messages].reverse().find((x) => x.role === "user");
+                            startRequest(m.id.startsWith("stuck_") ? undefined : lastUser?.text);
+                          }}
+                        >
+                          💡 Send this to the director as a change request
                         </button>
                       ) : null}
                       {m.links?.length ? (
@@ -634,7 +929,7 @@ export function ErpAiChatbot() {
             ))}
             {(typing || analyzing) && !messages.some((m) => m.guideId && analyzing) ? (
               <div className="flex justify-start">
-                <div className="rounded-2xl rounded-bl-md border border-[rgba(32,48,80,0.1)] bg-white px-3 py-2 text-[11px] text-[var(--muted)] shadow-sm">
+                <div className="rounded-2xl rounded-bl-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[11px] text-[var(--muted)] shadow-sm">
                   {analyzing ? "Reading this screen" : "Thinking"}
                   <span className="ml-0.5 inline-flex gap-0.5">
                     <span className="erp-ai-dot" />
@@ -653,7 +948,7 @@ export function ErpAiChatbot() {
             <div ref={bottomRef} />
           </div>
 
-          <div className="border-t border-[rgba(32,48,80,0.08)] bg-white/95 px-2.5 py-2 backdrop-blur-sm">
+          <div className="border-t border-[var(--border)] bg-[var(--card)]/95 px-2.5 py-2 backdrop-blur-sm">
             {proactiveGuide && showHint ? (
               <button
                 type="button"
@@ -668,13 +963,41 @@ export function ErpAiChatbot() {
                 ✨ {proactiveHintLabel(proactiveGuide)} — tap for step-by-step
               </button>
             ) : null}
-            {chips.length ? (
+            {stuckOffer ? (
+              <button
+                type="button"
+                className="mb-2 w-full rounded-xl border border-[var(--danger)]/30 bg-[var(--danger-soft)] px-2.5 py-2 text-left text-[10px] font-semibold text-[var(--danger)]"
+                onClick={helpWithStuck}
+              >
+                🛟 Stuck on “{stuckOffer.slice(0, 60)}”? Tap for help
+              </button>
+            ) : null}
+            <div className="mb-2 flex items-center justify-between gap-2">
+              {requestMode ? (
+                <>
+                  <span className="text-[10px] font-semibold text-[var(--brand-deep)]">💡 Describing a change for the director</span>
+                  <button type="button" className="text-[10px] text-[var(--muted)] hover:underline" onClick={() => setRequestMode(false)}>
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="rounded-full border border-[rgba(197,160,40,0.45)] bg-[rgba(197,160,40,0.12)] px-2.5 py-1 text-[10px] font-bold text-[var(--brand-deep)] hover:bg-[rgba(197,160,40,0.22)]"
+                  onClick={() => startRequest()}
+                  disabled={typing || !masters}
+                >
+                  💡 Suggest a change to this screen
+                </button>
+              )}
+            </div>
+            {!requestMode && chips.length ? (
               <div className="mb-2 flex gap-1.5 overflow-x-auto pb-0.5">
                 {chips.map((q) => (
                   <button
                     key={q.id}
                     type="button"
-                    className="shrink-0 rounded-full border border-[rgba(32,48,80,0.14)] bg-[rgba(32,48,80,0.03)] px-2.5 py-1 text-[10px] font-semibold text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.08)]"
+                    className="shrink-0 rounded-full border border-[var(--border)] bg-[var(--surface-sunken)] px-2.5 py-1 text-[10px] font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
                     onClick={() => ask(q.prompt)}
                   >
                     {q.label}
@@ -698,7 +1021,9 @@ export function ErpAiChatbot() {
                 ref={inputRef}
                 className="field !py-2 text-sm"
                 placeholder={
-                  pageGuide
+                  requestMode
+                    ? "Describe what you want changed…"
+                    : pageGuide
                     ? `Ask or speak — ${pageGuide.pageLabel}…`
                     : "Ask, speak, or type “open fees”…"
                 }
@@ -712,7 +1037,7 @@ export function ErpAiChatbot() {
                 className={`shrink-0 rounded-xl border px-2 py-2 text-[11px] ${
                   voiceReply
                     ? "border-[rgba(15,118,110,0.35)] bg-[rgba(15,118,110,0.1)]"
-                    : "border-[rgba(32,48,80,0.15)] bg-white opacity-60"
+                    : "border-[var(--border)] bg-[var(--card)] opacity-60"
                 }`}
                 onClick={() => setVoiceReply((v) => !v)}
               >

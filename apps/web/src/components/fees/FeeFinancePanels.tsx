@@ -24,6 +24,7 @@ import { loadFees, searchFeeStudents, type StudentSearchHit } from "@/lib/fees";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { SkeletonKpiRow } from "@/components/ui/skeleton";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -117,7 +118,7 @@ function KpiCard({
   hint?: string;
 }) {
   return (
-    <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">
         {label}
       </div>
@@ -144,7 +145,9 @@ export function FeeDashboardPanel({ tick = 0 }: { tick?: number }) {
 
   if (!kpi) {
     return (
-      <p className="mt-6 text-sm text-[var(--muted)]">Loading finance…</p>
+      <div className="mt-6">
+        <SkeletonKpiRow />
+      </div>
     );
   }
 
@@ -309,7 +312,7 @@ export function FeeReportsPanel({
 
   return (
     <div className="mt-6 space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3">
+      <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
         <div>
           <h2 className="text-base font-semibold text-[var(--brand-deep)]">
             Fee reports
@@ -345,12 +348,12 @@ export function FeeReportsPanel({
       </div>
 
       {notice ? (
-        <p className="rounded-lg bg-[rgba(67,160,71,0.12)] px-3 py-2 text-sm text-[#2e7d32]">
+        <p className="rounded-lg bg-[var(--success-soft)] px-3 py-2 text-sm text-[var(--success)]">
           {notice}
         </p>
       ) : null}
       {error ? (
-        <p className="rounded-lg bg-[#dc2626]/10 px-3 py-2 text-sm text-[#dc2626]">
+        <p className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}
@@ -359,7 +362,7 @@ export function FeeReportsPanel({
         {FEE_REPORT_CATEGORIES.map((cat) => (
           <section
             key={cat.id}
-            className="overflow-hidden rounded-md border border-[rgba(32,48,80,0.08)] bg-[#f3f4f6] shadow-sm"
+            className="overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] shadow-sm"
           >
             <header
               className={`${cat.headerClass} flex items-center justify-between px-4 py-3 text-white`}
@@ -369,12 +372,12 @@ export function FeeReportsPanel({
             </header>
 
             {cat.id === "student" ? (
-              <div className="border-b border-[rgba(32,48,80,0.08)] bg-[#fff8e1] px-2.5 py-2.5">
-                <p className="mb-1.5 text-[11px] font-semibold text-[#8d6e00]">
+              <div className="border-b border-[var(--border)] bg-[var(--accent)] px-2.5 py-2.5">
+                <p className="mb-1.5 text-[11px] font-semibold text-[var(--brand-deep)]">
                   Select student for ledger / payments / agreement
                 </p>
                 {selectedStudent && !allStudents ? (
-                  <div className="mb-2 flex items-start justify-between gap-2 rounded bg-white px-2 py-1.5 text-xs">
+                  <div className="mb-2 flex items-start justify-between gap-2 rounded bg-[var(--card)] px-2 py-1.5 text-xs">
                     <div className="min-w-0">
                       <div className="font-semibold text-[var(--brand-deep)]">
                         {selectedStudent.fullName}
@@ -396,7 +399,7 @@ export function FeeReportsPanel({
                   </div>
                 ) : null}
                 {allStudents ? (
-                  <div className="mb-2 flex items-center justify-between rounded bg-white px-2 py-1.5 text-xs font-semibold text-[var(--brand-deep)]">
+                  <div className="mb-2 flex items-center justify-between rounded bg-[var(--card)] px-2 py-1.5 text-xs font-semibold text-[var(--brand-deep)]">
                     All students (school-wide)
                     <button
                       type="button"
@@ -408,7 +411,7 @@ export function FeeReportsPanel({
                   </div>
                 ) : null}
                 <input
-                  className="field !bg-white !py-1.5 text-sm"
+                  className="field !bg-[var(--card)] !py-1.5 text-sm"
                   value={studentQuery}
                   onChange={(e) => {
                     setStudentQuery(e.target.value);
@@ -418,7 +421,7 @@ export function FeeReportsPanel({
                   autoComplete="off"
                 />
                 {studentHits.length > 0 ? (
-                  <ul className="mt-1 max-h-40 overflow-auto rounded border border-[rgba(32,48,80,0.1)] bg-white text-sm">
+                  <ul className="mt-1 max-h-40 overflow-auto rounded border border-[var(--border)] bg-[var(--card)] text-sm">
                     {studentHits.map((hit) => (
                       <li key={hit.student.id}>
                         <button
@@ -439,7 +442,7 @@ export function FeeReportsPanel({
                 ) : null}
                 <button
                   type="button"
-                  className="mt-2 text-[11px] font-semibold text-[#8d6e00] underline-offset-2 hover:underline"
+                  className="mt-2 text-[11px] font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline"
                   onClick={() => {
                     setAllStudents(true);
                     setSelectedStudentId(null);
@@ -513,7 +516,7 @@ export function FeeReportsPanel({
         ))}
       </div>
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]">
         <button
           type="button"
           className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold text-[var(--brand-deep)]"
@@ -536,7 +539,7 @@ export function FeeReportsPanel({
               ).map(([kind, label]) => (
                 <div
                   key={kind}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[#f3f4f6] px-3 py-2"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--surface-sunken)] px-3 py-2"
                 >
                   <span className="text-sm font-medium text-[var(--brand-deep)]">
                     {label}

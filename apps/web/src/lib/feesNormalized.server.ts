@@ -19,6 +19,8 @@ import {
 } from "@/lib/feesDeskAncillary.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { feesDualWriteDbEnabled } from "@/lib/feesDbConfig";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
+import type { NamedDeletes } from "@/lib/deskNamedDeletes.server";
 
 export type FeeDeskSyncMeta = {
   voucherCount: number;
@@ -44,7 +46,35 @@ function unmapLineKind(kind: string, original?: string): VoucherLine["kind"] {
   return kind as VoucherLine["kind"];
 }
 
-function voucherToRows(
+/**
+ * Exported for the self-test. What it must never emit is as load-bearing as
+ * what it does: a row the database's own CHECK rejects fails the whole
+ * receipt now that header, lines and tenders share one transaction.
+ */
+/**
+ * A value Postgres will accept for a date / timestamp column, or null.
+ *
+ * `jsonb_populate_recordset` casts every header in ONE statement, so a single
+ * value it cannot parse — "", "null", "Invalid Date" — aborts the insert and
+ * takes every other receipt in that push with it. The push carries the whole
+ * book, so one malformed row anywhere means no receipt can ever be written
+ * again, silently. Coercing here is the difference between losing one
+ * receipt's metadata and losing the school's fee desk.
+ */
+function tsOrNull(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const t = value.trim();
+  if (!t || t === "null" || t === "undefined" || t === "Invalid Date") return null;
+  return Number.isNaN(Date.parse(t)) ? null : t;
+}
+
+/** Same, for a DATE column, falling back rather than writing nothing. */
+function dateOr(value: unknown, fallback: string): string {
+  const t = tsOrNull(value);
+  return t ? t.slice(0, 10) : fallback;
+}
+
+export function voucherToRows(
   tenantId: string,
   v: CollectionVoucher,
 ): {
@@ -52,6 +82,11 @@ function voucherToRows(
   lines: Record<string, unknown>[];
   tenders: Record<string, unknown>[];
 } {
+  const collectionDate = dateOr(
+    v.collectionDate,
+    new Date().toISOString().slice(0, 10),
+  );
+
   const header = {
     id: v.id,
     tenant_id: tenantId,
@@ -62,15 +97,15 @@ function voucherToRows(
     source: v.source || "counter",
     manual_book_series: v.manualBookSeries || "",
     manual_book_leaf: v.manualBookLeaf || "",
-    collection_date: v.collectionDate,
-    transaction_date: v.transactionDate || v.collectionDate,
+    collection_date: collectionDate,
+    transaction_date: dateOr(v.transactionDate, collectionDate),
     transaction_id: v.transactionId || "",
-    collected_at: v.collectedAt || new Date().toISOString(),
+    collected_at: tsOrNull(v.collectedAt) || new Date().toISOString(),
     cashier_name: v.cashierName || "",
     total_paise: v.totalPaise,
     note: v.note || "",
-    voided_at: v.voidedAt,
-    whatsapp_sent_at: v.whatsappSentAt,
+    voided_at: tsOrNull(v.voidedAt),
+    whatsapp_sent_at: tsOrNull(v.whatsappSentAt),
     voucher_json: {
       source: v.source,
       manualBookSeries: v.manualBookSeries,
@@ -79,7 +114,16 @@ function voucherToRows(
     updated_at: new Date().toISOString(),
   };
 
-  const lines = (v.lines || []).map((line) => ({
+  // A ₹0 line cannot be stored — fee_desk_voucher_lines has
+  // CHECK (amount_paise > 0) — and one of them would fail the WHOLE receipt,
+  // taking every other line with it now that the write is a single
+  // transaction. A fully-waived head is a real thing to have on a receipt and
+  // must not be able to cost the receipt its breakdown. It contributes
+  // nothing to the total, so dropping it leaves the lines still summing to
+  // the money collected.
+  const lines = (v.lines || [])
+    .filter((line) => Math.round(line.amountPaise) > 0)
+    .map((line) => ({
     id: `${v.id}:${line.dueKey}`,
     voucher_id: v.id,
     tenant_id: tenantId,
@@ -100,7 +144,11 @@ function voucherToRows(
     },
   }));
 
-  const tenders = (v.tenders || []).map((t, idx) => ({
+  // Same rule for tenders — CHECK (amount_paise > 0) there too. A ₹0 tender
+  // is not a payment mode, and must not fail the receipt that carries it.
+  const tenders = (v.tenders || [])
+    .filter((t) => Math.round(t.amountPaise) > 0)
+    .map((t, idx) => ({
     id: `${v.id}:t${idx}`,
     voucher_id: v.id,
     tenant_id: tenantId,
@@ -113,6 +161,11 @@ function voucherToRows(
     realisation: t.realisation || "cleared",
     tender_json: {
       bankAccountId: t.bankAccountId,
+      gatewayProvider: t.gatewayProvider || "",
+      // A jsonb bag, so a passed-on gateway charge needs no column. Always
+      // written, including as 0, so a reader can tell "no charge" from "this
+      // row predates the field" if that ever matters.
+      gatewaySurchargePaise: Math.max(0, Math.round(t.gatewaySurchargePaise || 0)),
     },
   }));
 
@@ -160,6 +213,8 @@ function rowToVoucher(
         instrumentDate: String(row.instrument_date || "").slice(0, 10),
         bankName: String(row.bank_name || ""),
         bankAccountId: tj.bankAccountId as string | undefined,
+        gatewayProvider: (tj.gatewayProvider as string | undefined) || "",
+        gatewaySurchargePaise: Math.max(0, Math.round(Number(tj.gatewaySurchargePaise) || 0)),
         realisation:
           (row.realisation as VoucherTender["realisation"]) || "cleared",
       };
@@ -215,6 +270,101 @@ async function resolveCtx(): Promise<{
   return getServerTenantContext();
 }
 
+/**
+ * The vouchers a push may safely REPLACE the lines of.
+ *
+ * Only those it actually carries lines for. A push that says nothing about a
+ * voucher's lines is a browser that does not know them — unhydrated, or
+ * hydrated with headers before lines arrived — not a receipt that has none.
+ *
+ * Exported so the rule can be tested. It is one `.filter`, but it is the one
+ * that cost 134 receipts their lines on 2026-09-01: 5,80,543 of collections
+ * showing a guardian and an amount with no student, no head and no month,
+ * and every month those families had paid reading unpaid again.
+ */
+export function voucherIdsCarryingLines(
+  vouchers: Pick<CollectionVoucher, "id" | "lines">[],
+): string[] {
+  return vouchers
+    .filter((v) => Array.isArray(v.lines) && v.lines.length > 0)
+    .map((v) => v.id);
+}
+
+/**
+ * The first id that appears twice, or null.
+ *
+ * A line id is `${voucherId}:${dueKey}`, so a repeat means one receipt has two
+ * lines settling the same due. That is not a duplicate to be deduped — it is
+ * either a real split the id scheme cannot express, or a corrupt payload. The
+ * push refuses either way rather than picking one of the two amounts.
+ */
+export function firstDuplicateId(
+  rows: { id?: unknown }[],
+): string | null {
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const id = typeof r.id === "string" ? r.id : String(r.id ?? "");
+    if (!id) continue;
+    if (seen.has(id)) return id;
+    seen.add(id);
+  }
+  return null;
+}
+
+/** The same rule for tenders — a push without them must not erase them. */
+export function voucherIdsCarryingTenders(
+  vouchers: Pick<CollectionVoucher, "id" | "tenders">[],
+): string[] {
+  return vouchers
+    .filter((v) => Array.isArray(v.tenders) && v.tenders.length > 0)
+    .map((v) => v.id);
+}
+
+/**
+ * Every row, not the first thousand.
+ *
+ * PostgREST caps an unbounded select at its configured maximum — 1000 here —
+ * and returns the truncation as a perfectly ordinary success. Reading fee
+ * lines that way meant receipts beyond the cap hydrated with NO LINES, and a
+ * browser holding that state then pushed it back: on 2026-09-01, with 1048
+ * lines in the table, 134 receipts lost theirs outright.
+ *
+ * The push no longer deletes what it was not given, so the damage is stopped.
+ * This stops the CAUSE: a desk that never sees a receipt's lines shows it as
+ * settling nothing, whatever the database holds.
+ *
+ * Paged rather than given a bigger number, because a bigger number is the
+ * same bug with a later date on it.
+ */
+async function fetchAllRows(
+  sb: Awaited<ReturnType<typeof resolveCtx>> extends infer C ? (C extends { sb: infer S } ? S : never) : never,
+  table: string,
+  tenantId: string,
+  voucherIds: string[],
+): Promise<{ data: Record<string, unknown>[] | null; error: { message: string } | null }> {
+  const PAGE = 1000;
+  const out: Record<string, unknown>[] = [];
+  // Chunk the id filter too: a URL carrying 400+ ids is its own limit.
+  for (let i = 0; i < voucherIds.length; i += 200) {
+    const idChunk = voucherIds.slice(i, i + 200);
+    let from = 0;
+    for (;;) {
+      const { data, error } = await sb
+        .from(table)
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .in("voucher_id", idChunk)
+        .range(from, from + PAGE - 1);
+      if (error) return { data: null, error };
+      const rows = (data ?? []) as Record<string, unknown>[];
+      out.push(...rows);
+      if (rows.length < PAGE) break;
+      from += PAGE;
+    }
+  }
+  return { data: out, error: null };
+}
+
 /** Upsert all vouchers (full desk snapshot). */
 export async function pushFeeVouchersToDb(
   vouchers: CollectionVoucher[],
@@ -232,66 +382,197 @@ export async function pushFeeVouchersToDb(
   const ids = active.map((v) => v.id);
   const idSet = new Set(ids);
 
-  const { data: existingHeaders } = await sb
-    .from("fee_desk_vouchers")
-    .select("id")
-    .eq("tenant_id", tenantId);
-  const staleIds = (existingHeaders ?? [])
-    .map((r) => String(r.id))
-    .filter((id) => !idSet.has(id));
+  const { rows: existingHeaders } = await fetchAllPages<{ id: string; household_id: string | null }>((from, to) =>
+    sb
+      .from("fee_desk_vouchers")
+      .select("id, household_id")
+      .eq("tenant_id", tenantId)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  const existingIdSet = new Set((existingHeaders ?? []).map((r) => String(r.id)));
+  const staleIds = [...existingIdSet].filter((id) => !idSet.has(id));
+  // NEVER deleted. A fee receipt is append-only — voiding keeps the row — so
+  // a server voucher the pushing browser doesn't know can only mean that
+  // browser is unhydrated or partially hydrated. Deleting here is how eight
+  // receipts (RCV-00001..08) vanished on 2026-08-26: a freshly-logged-in
+  // browser holding two receipts pushed, and the prune took the rest with
+  // it. The server keeps everything; hydration merges the union back down.
   if (staleIds.length > 0) {
-    await sb.from("fee_desk_vouchers").delete().in("id", staleIds);
+    console.warn(
+      `[fees-desk] push omitted ${staleIds.length} voucher(s) the server holds — keeping them (append-only receipts)`,
+    );
   }
 
-  if (ids.length > 0) {
-    const { error: delLines } = await sb
-      .from("fee_desk_voucher_lines")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .in("voucher_id", ids);
-    if (delLines) {
-      return { ok: false, count: 0, error: delLines.message };
-    }
-    const { error: delTenders } = await sb
-      .from("fee_desk_voucher_tenders")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .in("voucher_id", ids);
-    if (delTenders) {
-      return { ok: false, count: 0, error: delTenders.message };
-    }
+  // Replace the lines only of vouchers the push actually CARRIES lines for.
+  //
+  // The delete used to cover every pushed id, so a browser holding a voucher
+  // header with an empty `lines` array wiped the real lines and put nothing
+  // back. That is how 134 receipts — RCV-00001..00227, 5,80,543 — ended up on
+  // 2026-09-01 showing a guardian and an amount with no student, no head and
+  // no month, while every month they had paid still read unpaid: the dues
+  // clear from the lines, and the lines were gone.
+  //
+  // It is the same lesson as the header prune above, one level down. A
+  // receipt is append-only; a push that says nothing about a voucher's lines
+  // is a browser that does not know them, not a receipt that has none.
+  const idsWithLines = voucherIdsCarryingLines(active);
+  const idsWithTenders = voucherIdsCarryingTenders(active);
+
+  const omittedLines = ids.length - idsWithLines.length;
+  if (omittedLines > 0) {
+    console.warn(
+      `[fees-desk] push carried ${omittedLines} voucher(s) with no lines — keeping the server's (a receipt without lines clears no dues)`,
+    );
   }
 
   const allLines: Record<string, unknown>[] = [];
   const allTenders: Record<string, unknown>[] = [];
   const headers: Record<string, unknown>[] = [];
 
+  // A receipt's family is the server's once it exists. Separating a child
+  // from a family they were wrongly put in moves their receipts on the
+  // server (lib/sisSeparate.server.ts); a browser still holding the old
+  // copy must not move them back on its next sync.
+  const familyOf = new Map(
+    (existingHeaders ?? [])
+      .filter((r) => !!r.household_id)
+      .map((r) => [String(r.id), String(r.household_id)]),
+  );
   for (const v of active) {
     const { header, lines, tenders } = voucherToRows(tenantId, v);
+    const kept = familyOf.get(String(header.id));
+    if (kept) header.household_id = kept;
     headers.push(header);
     allLines.push(...lines);
     allTenders.push(...tenders);
   }
 
-  if (headers.length) {
-    const { error: hErr } = await sb
-      .from("fee_desk_vouchers")
-      .upsert(headers, { onConflict: "id" });
-    if (hErr) return { ok: false, count: 0, error: hErr.message };
+  // Two lines claiming the same id means two lines claiming the same
+  // (receipt, due) — real money detail that must not be collapsed into one
+  // row. Caught here so the message names the receipt; the RPC would raise a
+  // duplicate-key error that says only which id.
+  const dupLineId = firstDuplicateId(allLines);
+  if (dupLineId) {
+    return {
+      ok: false,
+      count: 0,
+      error:
+        `Receipt line ${dupLineId} appears twice in this push — two lines settle the same due. ` +
+        `Nothing was written; open that receipt and re-enter its breakdown.`,
+    };
   }
 
-  if (allLines.length) {
-    const { error: lErr } = await sb
-      .from("fee_desk_voucher_lines")
-      .upsert(allLines, { onConflict: "id" });
-    if (lErr) return { ok: false, count: 0, error: lErr.message };
-  }
+  // Headers in one transaction with lines and tenders — and the receipt's
+  // breakdown is APPEND-ONLY on the server (20260907130000).
+  //
+  // The push may add the lines of a receipt that has none; it can no longer
+  // rewrite or empty one that has them, whatever state this browser is in.
+  // That is the fix for the cause rather than the symptom: four incidents
+  // this week were one shape — two copies of the truth and a full-snapshot
+  // sync that could overwrite in either direction — and the ledger, which
+  // refuses UPDATE and DELETE outright, lost nothing in the same week.
+  //
+  // `keptLineVouchers` in the result counts receipts the server declined to
+  // let this push touch. That is normal and expected on every resync; it is
+  // only worth reading when a receipt is unexpectedly still blank.
+  //
+  // These used to be four statements over PostgREST with nothing tying them
+  // together, so an insert that failed left the deletes committed and the
+  // receipts blank — 1,913 lines over 435 receipts on 2026-09-06, 134
+  // receipts on 2026-09-01.
+  //
+  // The first fix put the lines in a transaction but left the HEADER upsert
+  // outside it, running first. On 2026-09-07 that produced the same damage in
+  // a new shape: seven counter receipts (RCV-00503..00509, ₹34,500) committed
+  // as headers with an amount and no student, head, month or payment mode,
+  // because the line write behind them failed and the header had already
+  // landed. A receipt with no breakdown is worse than no receipt: the money
+  // reads collected, the months it paid read unpaid, and the counter is
+  // invited to take them again. A receipt that never reached the server is
+  // still in the browser and pushes on the next sync.
+  //
+  // So the header goes in with its lines, and a failed push changes nothing.
+  if (headers.length || idsWithLines.length > 0 || idsWithTenders.length > 0) {
+    const { error: rpcErr } = await sb.rpc("replace_fee_desk_voucher_lines", {
+      p_tenant_id: tenantId,
+      p_line_voucher_ids: idsWithLines,
+      p_tender_voucher_ids: idsWithTenders,
+      p_lines: allLines,
+      p_tenders: allTenders,
+      p_headers: headers,
+    });
+    if (rpcErr) {
+      // Logged, not only returned. On 2026-09-07 every push failed with a 502
+      // and the reason existed nowhere a person could read it — the body went
+      // to the browser and the server said nothing, so diagnosing it meant
+      // guessing at constraints. Never again: the message names itself.
+      const describe = (e: { message: string; details?: string; hint?: string }) =>
+        e.message +
+        (e.details ? ` | details: ${e.details}` : "") +
+        (e.hint ? ` | hint: ${e.hint}` : "");
+      console.error(
+        `[fees-desk] push REFUSED — nothing was written. ` +
+          `${headers.length} header(s), ${allLines.length} line(s) over ` +
+          `${idsWithLines.length} voucher(s), ${allTenders.length} tender(s). ` +
+          `Postgres said: ${describe(rpcErr)}`,
+      );
 
-  if (allTenders.length) {
-    const { error: tErr } = await sb
-      .from("fee_desk_voucher_tenders")
-      .upsert(allTenders, { onConflict: "id" });
-    if (tErr) return { ok: false, count: 0, error: tErr.message };
+      // ONE BAD RECEIPT MUST NOT HOLD A NEW ONE HOSTAGE.
+      //
+      // The whole book goes in one statement, so a value Postgres will not
+      // parse in ANY of the 648 headers refuses all of them — including the
+      // receipt that was just collected. On 26 Sep 2026 that is how AADVIK
+      // SINGH's ₹2,500 stayed unbooked through a webhook and two replays,
+      // with the failure reported as a successful settlement.
+      //
+      // So retry with only the vouchers the server does not already have.
+      // That is the minimum this push exists to write, and it cannot be
+      // refused on account of history it does not carry. Receipts are
+      // append-only, so leaving the existing rows untouched loses nothing.
+      const freshIds = new Set(
+        active.map((v) => v.id).filter((id) => !existingIdSet.has(id)),
+      );
+      if (freshIds.size > 0 && freshIds.size < active.length) {
+        const retryHeaders = headers.filter((h) => freshIds.has(String(h.id)));
+        const retryLines = allLines.filter((l) => freshIds.has(String(l.voucher_id)));
+        const retryTenders = allTenders.filter((t) => freshIds.has(String(t.voucher_id)));
+        const { error: retryErr } = await sb.rpc("replace_fee_desk_voucher_lines", {
+          p_tenant_id: tenantId,
+          p_line_voucher_ids: idsWithLines.filter((id) => freshIds.has(id)),
+          p_tender_voucher_ids: idsWithTenders.filter((id) => freshIds.has(id)),
+          p_lines: retryLines,
+          p_tenders: retryTenders,
+          p_headers: retryHeaders,
+        });
+        if (!retryErr) {
+          console.warn(
+            `[fees-desk] full push refused; wrote the ${retryHeaders.length} new ` +
+              `receipt(s) on their own. The refusal is in stored history: ${describe(rpcErr)}`,
+          );
+          return {
+            ok: true,
+            count: retryHeaders.length,
+            error: `Only the new receipt(s) were written — the full push was refused: ${rpcErr.message}`,
+          };
+        }
+        console.error(
+          `[fees-desk] narrowed push ALSO refused — nothing was written. ` +
+            `Postgres said: ${describe(retryErr)}`,
+        );
+        return {
+          ok: false,
+          count: 0,
+          error: `Fee desk not written (nothing was changed): ${retryErr.message}`,
+        };
+      }
+
+      return {
+        ok: false,
+        count: 0,
+        error: `Fee desk not written (nothing was changed): ${rpcErr.message}`,
+      };
+    }
   }
 
   const lastCollected = active
@@ -314,52 +595,128 @@ export async function pushFeeVouchersToDb(
   return { ok: true, count: active.length };
 }
 
-export async function fetchFeeVouchersFromDb(): Promise<{
-  vouchers: CollectionVoucher[];
-  meta: FeeDeskSyncMeta | null;
-}> {
+/**
+ * One household's vouchers — the parent app's receipt list. Same mappers
+ * as the full fetch, filtered at the query so a family never pulls the
+ * school's whole book.
+ */
+export async function fetchHouseholdVouchersFromDb(
+  householdId: string,
+): Promise<{ vouchers: CollectionVoucher[]; ok: boolean }> {
   const ctx = await resolveCtx();
-  if (!ctx) return { vouchers: [], meta: null };
+  if (!ctx) return { vouchers: [], ok: false };
   const { sb, tenantId } = ctx;
-
   const { data: headers, error: hErr } = await sb
     .from("fee_desk_vouchers")
     .select("*")
     .eq("tenant_id", tenantId)
+    .eq("household_id", householdId)
     .order("collected_at", { ascending: false });
+  if (hErr) {
+    console.warn("[fees-db] household vouchers fetch failed", hErr.message);
+    return { vouchers: [], ok: false };
+  }
+  if (!headers?.length) return { vouchers: [], ok: true };
+  const ids = headers.map((h) => h.id as string);
+  const [{ data: lineRows, error: lErr }, { data: tenderRows, error: tErr }] = await Promise.all([
+    fetchAllRows(sb, "fee_desk_voucher_lines", tenantId, ids),
+    fetchAllRows(sb, "fee_desk_voucher_tenders", tenantId, ids),
+  ]);
+  if (lErr || tErr) {
+    console.warn("[fees-db] household voucher parts fetch failed", lErr?.message || tErr?.message);
+    return { vouchers: [], ok: false };
+  }
+  const linesBy = new Map<string, Record<string, unknown>[]>();
+  for (const r of (lineRows ?? []) as Record<string, unknown>[]) {
+    const k = String(r.voucher_id);
+    (linesBy.get(k) ?? linesBy.set(k, []).get(k)!).push(r);
+  }
+  const tendersBy = new Map<string, Record<string, unknown>[]>();
+  for (const r of (tenderRows ?? []) as Record<string, unknown>[]) {
+    const k = String(r.voucher_id);
+    (tendersBy.get(k) ?? tendersBy.set(k, []).get(k)!).push(r);
+  }
+  return {
+    ok: true,
+    vouchers: (headers as Record<string, unknown>[]).map((h) =>
+      rowToVoucher(h, linesBy.get(String(h.id)) ?? [], tendersBy.get(String(h.id)) ?? []),
+    ),
+  };
+}
 
-  if (hErr || !headers?.length) {
-    const { data: metaRow } = await sb
+export async function fetchFeeVouchersFromDb(): Promise<{
+  vouchers: CollectionVoucher[];
+  meta: FeeDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
+  ok: boolean;
+}> {
+  const ctx = await resolveCtx();
+  if (!ctx) return { vouchers: [], meta: null, ok: false };
+  const { sb, tenantId } = ctx;
+
+  // Paged: 502 receipts today; the thousand-and-first would have vanished
+  // from every browser silently, and the next push would have pruned its
+  // lines. Ordered by id for stable pages, newest first afterwards.
+  const headersRes = await fetchAllPages<Record<string, unknown>>((from, to) =>
+    sb
+      .from("fee_desk_vouchers")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  const hErr = headersRes.error ? { message: headersRes.error } : null;
+  const headers = headersRes.rows.sort((a, b) =>
+    String(b.collected_at ?? "").localeCompare(String(a.collected_at ?? "")),
+  );
+
+  if (hErr) {
+    console.warn("[fees-db] fetch failed", hErr.message);
+    return { vouchers: [], meta: null, ok: false };
+  }
+
+  if (!headers?.length) {
+    const { data: metaRow, error: metaErr } = await sb
       .from("fee_desk_sync_meta")
       .select(FEE_DESK_META_SELECT)
       .eq("tenant_id", tenantId)
       .maybeSingle();
+    if (metaErr) {
+      console.warn("[fees-db] meta fetch failed", metaErr.message);
+      return { vouchers: [], meta: null, ok: false };
+    }
     return {
       vouchers: [],
       meta: mapFeeDeskMetaRow(metaRow as Record<string, unknown> | null),
+      ok: true,
     };
   }
 
   const ids = headers.map((h) => h.id as string);
 
-  const [{ data: lineRows }, { data: tenderRows }, { data: metaRow }] =
-    await Promise.all([
-      sb
-        .from("fee_desk_voucher_lines")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .in("voucher_id", ids),
-      sb
-        .from("fee_desk_voucher_tenders")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .in("voucher_id", ids),
-      sb
-        .from("fee_desk_sync_meta")
-        .select(FEE_DESK_META_SELECT)
-        .eq("tenant_id", tenantId)
-        .maybeSingle(),
-    ]);
+  const [
+    { data: lineRows, error: lErr },
+    { data: tenderRows, error: tErr },
+    { data: metaRow, error: metaErr },
+  ] = await Promise.all([
+    fetchAllRows(sb, "fee_desk_voucher_lines", tenantId, ids),
+    fetchAllRows(sb, "fee_desk_voucher_tenders", tenantId, ids),
+    sb
+      .from("fee_desk_sync_meta")
+      .select(FEE_DESK_META_SELECT)
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+  ]);
+
+  if (lErr || tErr || metaErr) {
+    console.warn(
+      "[fees-db] fetch failed",
+      lErr?.message,
+      tErr?.message,
+      metaErr?.message,
+    );
+    return { vouchers: [], meta: null, ok: false };
+  }
 
   const linesByVoucher = new Map<string, Record<string, unknown>[]>();
   for (const row of lineRows ?? []) {
@@ -388,6 +745,7 @@ export async function fetchFeeVouchersFromDb(): Promise<{
   return {
     vouchers,
     meta: mapFeeDeskMetaRow(metaRow as Record<string, unknown> | null),
+    ok: true,
   };
 }
 
@@ -395,12 +753,14 @@ export type FeeDeskSnapshot = {
   vouchers: CollectionVoucher[];
   ancillary: FeeDeskAncillary;
   meta: FeeDeskSyncMeta | null;
+  /** false = tenant/query could not be resolved; result is NOT a confirmed empty state. */
+  ok: boolean;
 };
 
 /** Push full fee desk (vouchers + ancillary) and rebuild open dues cache. */
 export async function pushFeeDeskToDb(
   state: Pick<FeesState, "vouchers"> & FeeDeskAncillary,
-  opts?: { academicYearCode?: string; rebuildOpenDues?: boolean },
+  opts?: { academicYearCode?: string; rebuildOpenDues?: boolean; deletes?: NamedDeletes },
 ): Promise<{ ok: boolean; error?: string; voucherCount: number; openDuesCount?: number }> {
   const voucherResult = await pushFeeVouchersToDb(state.vouchers ?? []);
   if (!voucherResult.ok) {
@@ -419,6 +779,9 @@ export async function pushFeeDeskToDb(
     planAllocations: state.planAllocations ?? [],
     carriedForwardDues: state.carriedForwardDues ?? [],
     chargeVouchers: state.chargeVouchers ?? [],
+  }, {
+    deletes: opts?.deletes,
+    voidedVoucherIds: (state.vouchers ?? []).filter((v) => v.voidedAt).map((v) => v.id),
   });
   if (!ancillaryResult.ok) {
     return {
@@ -429,8 +792,10 @@ export async function pushFeeDeskToDb(
   }
 
   let openDuesCount: number | undefined;
-  if (opts?.rebuildOpenDues !== false) {
-    const ay = opts?.academicYearCode || state.vouchers[0]?.academicYearCode || "2025-26";
+  // No academic year to scope the rebuild to is "unknown", not "2025-26":
+  // a guessed year rebuilt (and pruned) the wrong year's dues cache. Skip.
+  const ay = opts?.academicYearCode || state.vouchers[0]?.academicYearCode || "";
+  if (opts?.rebuildOpenDues !== false && ay) {
     const dues = await rebuildFeeOpenDuesCache(ay);
     if (!dues.ok) {
       return {
@@ -445,10 +810,43 @@ export async function pushFeeDeskToDb(
   return { ok: true, voucherCount: voucherResult.count, openDuesCount };
 }
 
+/**
+ * Is this voucher actually in the desk table?
+ *
+ * The settlement path uses this to check its own work rather than believe a
+ * return value: a push that reports success while writing nothing is exactly
+ * the failure that lost AADVIK SINGH's ₹2,500 three times on 26 Sep 2026.
+ *
+ * null = the question could not be answered (no tenant, query error). That is
+ * deliberately NOT false: "I could not look" must never be recorded as "the
+ * receipt is missing".
+ */
+export async function feeVoucherExistsInDb(
+  voucherId: string,
+): Promise<boolean | null> {
+  const id = voucherId?.trim();
+  if (!id) return null;
+  const ctx = await resolveCtx();
+  if (!ctx) return null;
+  const { data, error } = await ctx.sb
+    .from("fee_desk_vouchers")
+    .select("id")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    console.warn("[fees-desk] voucher read-back failed", id, error.message);
+    return null;
+  }
+  return !!data;
+}
+
 export async function fetchFeeDeskFromDb(): Promise<FeeDeskSnapshot> {
-  const [{ vouchers, meta }, ancillary] = await Promise.all([
+  const [{ vouchers, meta, ok }, anc] = await Promise.all([
     fetchFeeVouchersFromDb(),
     fetchFeeDeskAncillaryFromDb(),
   ]);
-  return { vouchers, ancillary, meta };
+  // Both halves must have been read: cheques, plans and day closes that
+  // failed to load are unknown, not "none".
+  return { vouchers, ancillary: anc.ancillary, meta, ok: ok && anc.ok };
 }

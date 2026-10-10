@@ -17,6 +17,8 @@ import { loadMasters, saveMasters } from "@/lib/masters";
 import { getGracePeriodMinutes } from "@/lib/staffHr";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { readCache, writeCacheOrInvalidate } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 export type { SchoolWeekTiming };
 
 export type RuleStepKind =
@@ -91,7 +93,7 @@ export function schoolTimingFromMasters(): SchoolWeekTiming {
 export function migrateLegacyTimingIntoMasters() {
   if (typeof window === "undefined") return;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return;
     const parsed = JSON.parse(raw) as StaffAttendanceRulesState;
     if (!parsed?.schoolTiming) return;
@@ -118,7 +120,7 @@ export function migrateLegacyTimingIntoMasters() {
     }
     // Drop legacy copy from rules store
     const { schoolTiming: _drop, ...rest } = parsed;
-    localStorage.setItem(
+    writeCacheOrInvalidate(
       STORAGE_KEY,
       JSON.stringify({ ...rest, version: 1 }),
     );
@@ -204,11 +206,18 @@ export function defaultRuleSteps(): RuleStep[] {
   ];
 }
 
+/**
+ * The two starter rules. Their ids are FIXED: until 8 Oct 2026 they were
+ * minted fresh on every read of a never-saved state, so the rule picked in
+ * "Assign rules to staff" no longer existed by the time Assign re-read it —
+ * the button failed every time ("Select an active rule", shown at the top of
+ * the page, out of sight) and nothing was ever saved.
+ */
 function seedRules(): AttendanceRule[] {
   const now = new Date().toISOString();
   return [
     {
-      id: nid("arl"),
+      id: "arl_seed_hd_time",
       code: "HD-TIME",
       name: "Half day by time",
       description: "School timing + late buffer + half day from punch-in/out cutoffs",
@@ -227,7 +236,7 @@ function seedRules(): AttendanceRule[] {
       updatedAt: now,
     },
     {
-      id: nid("arl"),
+      id: "arl_seed_hd_hrs",
       code: "HD-HRS",
       name: "Half day by hours",
       description: "School timing + buffer + half day when worked hours are short",
@@ -345,7 +354,8 @@ function normalizeState(
 export function loadAttendanceRules(): StaffAttendanceRulesState {
   if (typeof window === "undefined") return emptyAttendanceRulesState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    // readCache: on a full browser store the last save lives in memory only.
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyAttendanceRulesState();
     const parsed = JSON.parse(raw) as StaffAttendanceRulesState;
     if (!parsed || parsed.version !== 1) return emptyAttendanceRulesState();
@@ -358,7 +368,18 @@ export function loadAttendanceRules(): StaffAttendanceRulesState {
 export function saveAttendanceRules(state: StaffAttendanceRulesState) {
   if (!assertModulePermission("staff", "edit", "saveAttendanceRules")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeState(state)));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(normalizeState(state)));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("staff_attendance_rules", normalizeState(state))));
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeAttendanceRulesLocalRaw(state: StaffAttendanceRulesState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 export function upsertAttendanceRule(
@@ -651,6 +672,53 @@ export function evaluatePunchAgainstRule(
     workedHours,
     notes,
   };
+}
+
+/** The rules state as stored (module_local_state "staff_attendance_rules"),
+ * normalized — for server callers that read the row themselves. */
+export function normalizeAttendanceRulesState(
+  raw: Partial<StaffAttendanceRulesState> | null | undefined,
+): StaffAttendanceRulesState {
+  return normalizeState(raw ?? {});
+}
+
+/**
+ * What a member of staff with NO rule assigned is held to: the school
+ * timing in Masters, and the late grace from Leave settings. Nothing is
+ * invented — no half-day cut-offs the school never set.
+ */
+export function schoolTimingOnlyRule(): AttendanceRule {
+  return {
+    id: "arl_school_timing",
+    code: "SCHOOL",
+    name: "School timing",
+    description: "Masters school timing + Leave-settings grace (no rule assigned)",
+    isActive: true,
+    followSchoolTiming: true,
+    steps: [emptyRuleStep("use_school_timing"), emptyRuleStep("buffer_late")],
+    createdAt: "",
+    updatedAt: "",
+  };
+}
+
+/**
+ * Grade one member of staff's punches for a date: their assigned rule from
+ * Masters → Attendance rules, else school timing. A punch on a day the rule
+ * calls non-working is still attendance (P), not leave.
+ */
+export function gradeStaffPunch(
+  state: StaffAttendanceRulesState,
+  staffId: string,
+  dateIso: string,
+  inTime: string,
+  outTime: string,
+): PunchEvaluation & { ruleName: string } {
+  const rule = ruleForStaff(state, staffId) ?? schoolTimingOnlyRule();
+  const ev = evaluatePunchAgainstRule(state, rule, dateIso, inTime, outTime);
+  if (ev.label === "Non-working day" && (inTime || "").trim()) {
+    return { ...ev, status: "P", label: "Present (non-working day)", ruleName: rule.name };
+  }
+  return { ...ev, ruleName: rule.name };
 }
 
 export function activeStaffSorted(staff: StaffRecord[]): StaffRecord[] {

@@ -6,6 +6,21 @@ import type { ExamsState } from "@/lib/exams";
 import { defaultExamPolicy } from "@/lib/exams";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+
+const EXAMS_DESK = "exams";
+
+/** Exam setup rows the user deleted; the next push deletes them by id. */
+export function recordExamsDeletion(
+  table: "exam_desk_terms" | "exam_desk_date_sheet" | "exam_desk_rooms" | "exam_desk_seating",
+  ids: string[],
+) {
+  recordDeskDeletion(EXAMS_DESK, table, ids);
+}
 
 const META_KEY = "bhb_exams_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -42,7 +57,9 @@ export function examsNormalizedSyncEnabled(): boolean {
 }
 
 export function examsReadFromDbClientEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_EXAMS_READ_FROM_DB === "true";
+  const flag = process.env.NEXT_PUBLIC_EXAMS_READ_FROM_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 export function scheduleExamsDeskSync(state: ExamsState) {
@@ -60,17 +77,21 @@ export function scheduleExamsDeskSync(state: ExamsState) {
 }
 
 async function pushExamsDeskApi(state: ExamsState) {
+  const sentDeletes = pendingDeskDeletes(EXAMS_DESK);
   try {
     const res = await fetch("/api/school-data/exams-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      // Setup only. Sheets go one at a time through examsSheetSync.ts —
+      // sending them here replaced (and pruned) every sheet on the server.
       body: JSON.stringify({
         terms: state.terms,
         subjects: state.subjects,
         dateSheet: state.dateSheet,
-        sheets: state.sheets,
         policy: state.policy,
         promotions: state.promotions,
+        // Deletions are named, never inferred from what this browser lacks.
+        deletes: sentDeletes,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -80,6 +101,7 @@ async function pushExamsDeskApi(state: ExamsState) {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(EXAMS_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         sheetCount: body.sheetCount ?? state.sheets.length,
@@ -87,7 +109,12 @@ async function pushExamsDeskApi(state: ExamsState) {
     } else if (!res.ok) {
       console.warn("[exams-db] desk push failed", body?.error || res.status);
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("exams");
+    else recordDeskSyncFailure("exams", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("exams", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[exams-db] desk push error", e);
   }
 }
@@ -141,7 +168,7 @@ export async function fetchExamsDeskFromApi(): Promise<{
 
 export async function hydrateExamsDeskFromDb(
   preferDb?: boolean,
-): Promise<{ bundle: ExamsState; changed: boolean }> {
+): Promise<{ bundle: ExamsState; changed: boolean; ok: boolean }> {
   const remote = await fetchExamsDeskFromApi();
   if (!remote) {
     return {
@@ -153,8 +180,11 @@ export async function hydrateExamsDeskFromDb(
         sheets: [],
         policy: defaultExamPolicy(),
         promotions: [],
+        rooms: [],
+        seating: [],
       },
       changed: false,
+      ok: false,
     };
   }
 
@@ -176,8 +206,11 @@ export async function hydrateExamsDeskFromDb(
         sheets: [],
         policy: defaultExamPolicy(),
         promotions: [],
+        rooms: [],
+        seating: [],
       },
       changed: false,
+      ok: true,
     };
   }
 
@@ -189,8 +222,11 @@ export async function hydrateExamsDeskFromDb(
   return {
     bundle: {
       version: 1,
+      rooms: [],
+      seating: [],
       ...remote.bundle,
     },
     changed: true,
+    ok: true,
   };
 }

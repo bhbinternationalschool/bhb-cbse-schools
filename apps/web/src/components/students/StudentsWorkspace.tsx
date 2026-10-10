@@ -1,8 +1,34 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import Link from "next/link";
 import { GraduationCap } from "lucide-react";
+import { recordAudit } from "@/lib/auditClient";
+import { recordSisDeletion } from "@/lib/sisNormalizedClient";
+import {
+  BUILT_IN_VIEWS,
+  EMPTY_FILTERS,
+  MISSING_FIELD_LABELS,
+  countActiveFilters,
+  filtersFromSearchParams,
+  filtersToSearchParams,
+  isMissing,
+  matchesCompleteness,
+  loadFilters,
+  loadSavedViews,
+  saveFilters,
+  saveSavedViews,
+  type MissingField,
+  type SavedView,
+  type StudentFilterState,
+} from "@/lib/studentFilters";
 import {
   STUDENT_TYPES,
   currentAcademicYearCode,
@@ -31,12 +57,21 @@ import {
   type StudentStatus,
 } from "@/lib/sis";
 import { RemoveControl } from "@/components/masters/RemoveControl";
+import { WaNumberGapBanner } from "@/components/comms/WaNumberGapBanner";
 import {
   StudentAvatar,
   StudentNameLabel,
 } from "@/components/students/StudentAvatar";
-import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
-import { describeFilters } from "@/lib/reportExport";
+import { UdiseStatusBadge } from "@/components/students/UdiseStatusBadge";
+import { describeFilters, downloadPdfReport, downloadXlsxReport } from "@/lib/reportExport";
+import {
+  BulkActionBar,
+  ExportMenu,
+  RowActionMenu,
+  RowCheckbox,
+  useRowSelection,
+} from "@/components/ui/erp-grid";
+import { openWaMe } from "@/lib/waMe";
 import {
   STUDENT_REGISTER_EXPORT_COLUMNS,
   studentToRegisterExportRow,
@@ -52,14 +87,19 @@ import { SisReportsPanel } from "@/components/students/SisReportsPanel";
 import { StudentTagsPanel } from "@/components/students/StudentTagsPanel";
 import { StudentSiblingsPanel } from "@/components/students/StudentSiblingsPanel";
 import { StudentUpgradePanel } from "@/components/students/StudentUpgradePanel";
+import { StudentPromotionPanel } from "@/components/students/StudentPromotionPanel";
 import { StudentUpdatePanel } from "@/components/students/StudentUpdatePanel";
 import { StudentDuplicatesPanel } from "@/components/students/StudentDuplicatesPanel";
 import { DocVerificationQueuePanel } from "@/components/students/DocVerificationQueuePanel";
-import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpTableShell } from "@/components/ui/erp-roster";
+import { EmptyState } from "@/components/ui/empty-state";
+import { SkeletonModulePage } from "@/components/ui/skeleton";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { BirthdaysPanel } from "@/components/students/BirthdaysPanel";
+import { canSeeModuleTab, canWriteModuleTab, visibleModuleTabs } from "@/lib/rbac";
 import { listImportSessions, normalizeSessionCode } from "@/lib/studentImport";
 import {
   classNeedsCartEnrollment,
@@ -78,12 +118,40 @@ type MainTab =
   | "update"
   | "duplicates"
   | "udise"
-  | "doc_verify";
+  | "doc_verify"
+  | "birthdays";
 const VIEW_KEY = "bhb_sis_view";
 const TAB_KEY = "bhb_sis_main_tab";
 
+const STUDENT_TABS: ModuleTabItem[] = [
+  { id: "dashboard", label: "Dashboard", tone: "navy" },
+  { id: "roster", label: "Overview", tone: "navy" },
+  { id: "register", label: "Register", tone: "navy" },
+  { id: "update", label: "Update", tone: "sky" },
+  { id: "duplicates", label: "Duplicates", tone: "coral" },
+  { id: "udise", label: "UDISE+", tone: "coral" },
+  { id: "doc_verify", label: "Doc verify", tone: "amber" },
+  { id: "siblings", label: "Siblings", tone: "violet" },
+  { id: "upgrade", label: "Upgrade", tone: "amber" },
+  { id: "reports", label: "Reports", tone: "green" },
+  { id: "tags", label: "Tags", tone: "slate" },
+  { id: "birthdays", label: "Birthdays", tone: "coral" },
+];
+
 export function StudentsWorkspace() {
   const session = useDemoSession();
+  // A teacher's register is the children of their own sections. The whole
+  // school used to be listed for every login that held students.view.
+  const { my: myTeaching } = useMyTeaching();
+  const teacherMode = isRestrictedTeacher(myTeaching);
+  const mySectionIds = useMemo(
+    () => new Set(teacherMode ? myTeaching.teaching.map((t) => t.sectionId) : []),
+    [teacherMode, myTeaching],
+  );
+  const myClassIds = useMemo(
+    () => new Set(teacherMode ? myTeaching.teaching.map((t) => t.classId) : []),
+    [teacherMode, myTeaching],
+  );
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [state, setState] = useState<SisState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -93,6 +161,9 @@ export function StudentsWorkspace() {
   const [sessionFilter, setSessionFilter] = useState("");
   const [classFilter, setClassFilter] = useState("");
   const [sectionFilter, setSectionFilter] = useState("");
+  const [rollSortMode, setRollSortMode] = useState<"name" | "admissionNo">(
+    "name",
+  );
   const [statusFilter, setStatusFilter] = useState<"all" | StudentStatus>(
     "active",
   );
@@ -109,14 +180,49 @@ export function StudentsWorkspace() {
   const [bloodFilter, setBloodFilter] = useState("");
   const [joinedFrom, setJoinedFrom] = useState("");
   const [joinedTo, setJoinedTo] = useState("");
+  const [sortBy, setSortBy] = useState<"rollNo" | "name" | "admissionNo" | "joinedOn">("rollNo");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   /** all = every set filter must match; any = at least one set filter */
   const [matchMode, setMatchMode] = useState<"all" | "any">("all");
+  /** "Show only students missing X" — the completeness work list. */
+  const [missingFilter, setMissingFilter] = useState<MissingField>("");
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  /**
+   * Gate for the persist effect. Must be state, not a ref: a ref set
+   * synchronously during restore lets the persist effect run in the same
+   * commit with the still-empty defaults, which overwrites the URL before
+   * the restored values land — silently discarding a shared filter link.
+   * As state it batches with the restore, so persistence only begins on a
+   * render where the filters are actually populated.
+   */
+  const [filtersReady, setFiltersReady] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [profileId, setProfileId] = useState("");
   const [view, setView] = useState<ViewMode>("list");
   const [mainTab, setMainTab] = useState<MainTab>("dashboard");
   const [showCurriculumOffice, setShowCurriculumOffice] = useState(false);
   const [panelTick, setPanelTick] = useState(0);
+  /** Upgrade sub-tab: one child vs the whole class — alternatives, not steps. */
+  const [upgradeMode, setUpgradeMode] = useState<"single" | "class">("single");
+
+  // Someone holding only a Students function (director, 6 Oct 2026 — e.g.
+  // Birthday cards) sees only its tab.
+  const shownTabs = useMemo(
+    () => {
+      if (!masters) return STUDENT_TABS;
+      const own = new Set(visibleModuleTabs(STUDENT_TABS, session, masters, "students").map((t) => t.id));
+      // UDISE+ is Compliance work that lives on this screen.
+      return STUDENT_TABS.filter(
+        (t) => own.has(t.id) || (t.id === "udise" && canSeeModuleTab(session, masters, "compliance", "udise")),
+      );
+    },
+    [session, masters],
+  );
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === mainTab)) {
+      setMainTab(shownTabs[0]!.id as MainTab);
+    }
+  }, [shownTabs, mainTab]);
 
   useEffect(() => {
     const m = loadMasters();
@@ -141,7 +247,8 @@ export function StudentsWorkspace() {
         tab === "update" ||
         tab === "duplicates" ||
         tab === "udise" ||
-        tab === "doc_verify"
+        tab === "doc_verify" ||
+        tab === "birthdays"
       ) {
         setMainTab(tab);
         if (!urlTab && tab !== "dashboard") {
@@ -164,11 +271,146 @@ export function StudentsWorkspace() {
     }
 
     void (async () => {
-      const { ensureSisHydrated } = await import("@/lib/sisPersistence");
-      const did = await ensureSisHydrated();
-      if (did) setState(loadSis());
+      const [{ ensureSisHydrated }, { withHydrationSlot }] = await Promise.all([
+        import("@/lib/sisPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      // Always re-read: when another part of the page loaded the roster
+      // first, `did` is false but this screen still shows the empty start.
+      await withHydrationSlot(() => ensureSisHydrated());
+      setState(loadSis());
     })();
   }, []);
+
+  /** Current filters as one object — for persistence, URL and saved views. */
+  const currentFilters: StudentFilterState = {
+    query,
+    sessionFilter,
+    classFilter,
+    sectionFilter,
+    statusFilter,
+    typeFilter,
+    genderFilter,
+    categoryFilter,
+    feeGroupFilter,
+    campusFilter,
+    penStatusFilter,
+    bloodFilter,
+    joinedFrom,
+    joinedTo,
+    missingFilter,
+    matchMode,
+    sortBy,
+    sortOrder,
+  };
+
+  const applyFilters = useCallback((f: Partial<StudentFilterState>) => {
+    if (f.query !== undefined) setQuery(f.query);
+    if (f.sessionFilter !== undefined) setSessionFilter(f.sessionFilter);
+    if (f.classFilter !== undefined) setClassFilter(f.classFilter);
+    if (f.sectionFilter !== undefined) setSectionFilter(f.sectionFilter);
+    if (f.statusFilter !== undefined) {
+      setStatusFilter(f.statusFilter as "all" | StudentStatus);
+    }
+    if (f.typeFilter !== undefined) setTypeFilter(f.typeFilter as "" | FeeStudentType);
+    if (f.genderFilter !== undefined) {
+      setGenderFilter(f.genderFilter as "" | SisStudent["gender"]);
+    }
+    if (f.categoryFilter !== undefined) {
+      setCategoryFilter(f.categoryFilter as "" | StudentCategory);
+    }
+    if (f.feeGroupFilter !== undefined) setFeeGroupFilter(f.feeGroupFilter);
+    if (f.campusFilter !== undefined) setCampusFilter(f.campusFilter);
+    if (f.penStatusFilter !== undefined) {
+      setPenStatusFilter(f.penStatusFilter as "" | PenStatus);
+    }
+    if (f.bloodFilter !== undefined) setBloodFilter(f.bloodFilter);
+    if (f.joinedFrom !== undefined) setJoinedFrom(f.joinedFrom);
+    if (f.joinedTo !== undefined) setJoinedTo(f.joinedTo);
+    if (f.missingFilter !== undefined) setMissingFilter(f.missingFilter);
+    if (f.matchMode !== undefined) setMatchMode(f.matchMode);
+    if (f.sortBy !== undefined) {
+      setSortBy(f.sortBy as "rollNo" | "name" | "admissionNo" | "joinedOn");
+    }
+    if (f.sortOrder !== undefined) setSortOrder(f.sortOrder);
+  }, []);
+
+  // Restore filters on mount: an explicit URL wins (shared link), else the
+  // last state this browser was left in. Without this, every filter reset
+  // whenever a user opened a student and came back.
+  useEffect(() => {
+    try {
+      const fromUrl = filtersFromSearchParams(
+        new URLSearchParams(window.location.search),
+      );
+      applyFilters(
+        Object.keys(fromUrl).length > 0 ? fromUrl : loadFilters(),
+      );
+      setSavedViews([...BUILT_IN_VIEWS, ...loadSavedViews()]);
+    } catch {
+      /* ignore */
+    } finally {
+      // Batched with the applyFilters setters above, so the persist effect
+      // first runs on a render that already has the restored values.
+      setFiltersReady(true);
+    }
+  }, [applyFilters]);
+
+  // Persist + reflect in the URL. Guarded so the restore above isn't
+  // immediately overwritten by an empty initial render.
+  useEffect(() => {
+    if (!filtersReady) return;
+    saveFilters(currentFilters);
+    try {
+      const url = new URL(window.location.href);
+      const next = filtersToSearchParams(currentFilters);
+      const tab = url.searchParams.get("tab");
+      url.search = next.toString();
+      if (tab) url.searchParams.set("tab", tab);
+      window.history.replaceState({}, "", url.toString());
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    filtersReady,
+    query, sessionFilter, classFilter, sectionFilter, statusFilter,
+    typeFilter, genderFilter, categoryFilter, feeGroupFilter, campusFilter,
+    penStatusFilter, bloodFilter, joinedFrom, joinedTo, missingFilter,
+    matchMode, sortBy, sortOrder,
+  ]);
+
+  const activeFilterCount = countActiveFilters(currentFilters);
+
+  function resetFilters() {
+    applyFilters(EMPTY_FILTERS);
+  }
+
+  function applySavedView(v: SavedView) {
+    applyFilters(v.filters);
+    setMainTabPersist("register");
+  }
+
+  function saveCurrentAsView() {
+    const name = window.prompt("Name this view");
+    if (!name?.trim()) return;
+    const view: SavedView = {
+      id: `view_${Date.now().toString(36)}`,
+      name: name.trim().slice(0, 60),
+      filters: currentFilters,
+    };
+    const next = [...savedViews, view];
+    setSavedViews(next);
+    saveSavedViews(next);
+    setNotice(`Saved view “${view.name}”`);
+    window.setTimeout(() => setNotice(null), 2500);
+  }
+
+  function deleteSavedView(id: string) {
+    const next = savedViews.filter((v) => v.id !== id);
+    setSavedViews(next);
+    saveSavedViews(next);
+  }
 
   function setViewMode(next: ViewMode) {
     setView(next);
@@ -204,13 +446,72 @@ export function StudentsWorkspace() {
     }
   }
 
+  /**
+   * Number one section at a time, in a single commit. There was no bulk or
+   * auto path before this; office typed each roll number by hand, one
+   * student at a time.
+   *
+   * Scoped to exactly one class AND one section deliberately: the button is
+   * disabled unless both filters are set, so there is never a question of
+   * which students "assign roll numbers" means. It touches only active
+   * students in the current session filter, and only the rollNo field —
+   * every other field on every other student is untouched, and this is one
+   * commit(), not N raced writes.
+   */
+  function assignRollNumbers(sortBy: "name" | "admissionNo") {
+    if (!state || !masters) return;
+    if (!classFilter || !sectionFilter) return;
+    const cls = masters.classes.find((c) => c.id === classFilter);
+    const sec = masters.sections.find((s) => s.id === sectionFilter);
+    const label = cls && sec ? `${cls.name}-${sec.name}` : "this section";
+
+    const inSection = state.students.filter(
+      (s) =>
+        s.sectionId === sectionFilter &&
+        s.status === "active" &&
+        (!effectiveSession ||
+          normalizeSessionCode(s.academicYearCode || "") ===
+            normalizeSessionCode(effectiveSession)),
+    );
+    if (inSection.length === 0) return;
+
+    const byLabel =
+      sortBy === "admissionNo" ? "by admission number" : "alphabetically by name";
+    const ok = window.confirm(
+      `Assign roll numbers 1–${inSection.length} to every active student in ${label}, ${byLabel}?\n\nThis overwrites any roll numbers already set in this section.`,
+    );
+    if (!ok) return;
+
+    const ordered = [...inSection].sort((a, b) =>
+      sortBy === "admissionNo"
+        ? a.admissionNo.localeCompare(b.admissionNo, undefined, {
+            numeric: true,
+            sensitivity: "base",
+          })
+        : a.fullName.localeCompare(b.fullName),
+    );
+    const rollById = new Map(ordered.map((s, i) => [s.id, String(i + 1)]));
+    const next: SisState = {
+      ...state,
+      students: state.students.map((s) =>
+        rollById.has(s.id) ? { ...s, rollNo: rollById.get(s.id)! } : s,
+      ),
+    };
+    commit(next, `Roll numbers assigned for ${label}`);
+  }
+
   const sectionsForFilter = useMemo(() => {
     if (!masters || !classFilter) return [];
     return masters.sections
-      .filter((s) => s.classId === classFilter && s.isActive)
+      .filter(
+        (s) =>
+          s.classId === classFilter &&
+          s.isActive &&
+          (!teacherMode || mySectionIds.has(s.id)),
+      )
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [masters, classFilter]);
+  }, [masters, classFilter, teacherMode, mySectionIds]);
 
   const headerAy =
     session.academicYearCode ||
@@ -247,8 +548,41 @@ export function StudentsWorkspace() {
     return [...codes].sort((a, b) => b.localeCompare(a));
   }, [masters, state]);
 
+  /**
+   * Typing stays responsive; the 711-row filter catches up.
+   *
+   * The roster search had no debounce, so every keystroke re-ran the whole
+   * filter — and the filter did per-student work that should have been done
+   * once: householdOf() is a linear find over 193 households, called inside
+   * the callback for each of 711 students, and matchesClass did the same
+   * against 30 sections. That is ~137,000 comparisons and ~8,500 toLowerCase
+   * allocations PER CHARACTER, which is why the field appeared to freeze and
+   * then dump the letters at once.
+   *
+   * useDeferredValue lets React paint the keystroke first and run the filter
+   * at lower priority, so the input never waits for the list.
+   */
+  const deferredQuery = useDeferredValue(query);
+
+  /** Built once per state change, not once per student per keystroke. */
+  const householdById = useMemo(() => {
+    type Hh = NonNullable<typeof state>["households"][number];
+    const m = new Map<string, Hh>();
+    for (const h of state?.households ?? []) m.set(h.id, h);
+    return m;
+  }, [state]);
+
+  const sectionById = useMemo(() => {
+    const m = new Map<string, { id: string; classId: string }>();
+    for (const x of masters?.sections ?? []) m.set(x.id, x);
+    return m;
+  }, [masters]);
+
   const filtered = useMemo(() => {
     if (!state || !masters) return [];
+
+    // Hoisted: this was recomputed inside the callback for every student.
+    const q = deferredQuery.trim().toLowerCase();
 
     const inSession = (s: SisStudent) =>
       !effectiveSession ||
@@ -256,9 +590,8 @@ export function StudentsWorkspace() {
         normalizeSessionCode(effectiveSession);
 
     const matchesSearch = (s: SisStudent) => {
-      if (!query.trim()) return true;
-      const q = query.trim().toLowerCase();
-      const hh = householdOf(state, s.householdId);
+      if (!q) return true;
+      const hh = householdById.get(s.householdId);
       return (
         s.fullName.toLowerCase().includes(q) ||
         s.admissionNo.toLowerCase().includes(q) ||
@@ -281,7 +614,7 @@ export function StudentsWorkspace() {
     const matchesClass = (s: SisStudent) => {
       if (!classFilter) return true;
       if (s.classId === classFilter) return true;
-      const sec = masters.sections.find((x) => x.id === s.sectionId);
+      const sec = sectionById.get(s.sectionId);
       return sec?.classId === classFilter;
     };
 
@@ -296,6 +629,7 @@ export function StudentsWorkspace() {
     /** Only filters the user actually set (empty = ignored). */
     type Pred = (s: SisStudent) => boolean;
     const predicates: Pred[] = [];
+    if (teacherMode) predicates.push((s) => mySectionIds.has(s.sectionId));
     if (statusFilter !== "all") {
       predicates.push((s) => s.status === statusFilter);
     }
@@ -327,6 +661,9 @@ export function StudentsWorkspace() {
     if (joinedFrom || joinedTo) {
       predicates.push(matchesAdmissionRange);
     }
+    if (missingFilter) {
+      predicates.push((s) => matchesCompleteness(s, missingFilter));
+    }
     if (query.trim()) predicates.push(matchesSearch);
 
     const list = state.students.filter((s) => {
@@ -339,9 +676,26 @@ export function StudentsWorkspace() {
     });
 
     return list.sort((a, b) => {
-      const roll = Number(a.rollNo) - Number(b.rollNo);
-      if (Number.isFinite(roll) && roll !== 0) return roll;
-      return a.fullName.localeCompare(b.fullName);
+      let cmp = 0;
+      if (sortBy === "rollNo") {
+        const ra = Number(a.rollNo);
+        const rb = Number(b.rollNo);
+        if (Number.isFinite(ra) && Number.isFinite(rb) && ra !== rb) {
+          cmp = ra - rb;
+        } else {
+          cmp = (a.rollNo || "").localeCompare(b.rollNo || "");
+        }
+      } else if (sortBy === "name") {
+        cmp = a.fullName.localeCompare(b.fullName);
+      } else if (sortBy === "admissionNo") {
+        cmp = a.admissionNo.localeCompare(b.admissionNo);
+      } else if (sortBy === "joinedOn") {
+        cmp = (a.joinedOn || "").localeCompare(b.joinedOn || "");
+      }
+      if (cmp === 0) {
+        cmp = a.fullName.localeCompare(b.fullName);
+      }
+      return sortOrder === "asc" ? cmp : -cmp;
     });
   }, [
     state,
@@ -359,8 +713,13 @@ export function StudentsWorkspace() {
     bloodFilter,
     joinedFrom,
     joinedTo,
+    missingFilter,
     query,
     matchMode,
+    sortBy,
+    sortOrder,
+    teacherMode,
+    mySectionIds,
   ]);
 
   function clearFilters() {
@@ -419,6 +778,9 @@ export function StudentsWorkspace() {
     if (state?.students.some((s) => s.id === selectedId)) return;
     setSelectedId(filtered[0]!.id);
   }, [filtered, selectedId, state]);
+
+  const rosterKeys = useMemo(() => filtered.map((s) => s.id), [filtered]);
+  const rosterSelection = useRowSelection(rosterKeys);
 
   const exportRows = useMemo(() => {
     if (!masters || !state) return [];
@@ -499,7 +861,7 @@ export function StudentsWorkspace() {
   );
 
   if (!state || !masters) {
-    return <p className="text-sm text-[var(--muted)]">Loading students…</p>;
+    return <SkeletonModulePage />;
   }
 
   const m = masters;
@@ -554,6 +916,15 @@ export function StudentsWorkspace() {
       },
       s.status === "active" ? "Student inactivated" : "Student activated",
     );
+    recordAudit({
+      module: "students",
+      action: "status_change",
+      entityType: "student",
+      entityId: s.id,
+      summary: `${s.status === "active" ? "Inactivated" : "Activated"} ${s.fullName} (${s.admissionNo})`,
+      before: { status: s.status },
+      after: { status: s.status === "active" ? "inactive" : "active" },
+    });
   }
 
   function onRemove(s: SisStudent) {
@@ -567,8 +938,42 @@ export function StudentsWorkspace() {
       result.state.students[0]?.id ??
       "";
     setSelectedId(nextId);
+
+    // State the deletion before committing. removeStudent only filters the
+    // local roster, and the push upserts — so without this the row is never
+    // deleted in the database and the student returns on the next hydrate.
+    // removeStudent also drops the household when its last student goes, so
+    // take that from the diff rather than assuming.
+    const removedHouseholdIds = sis.households
+      .filter((h) => !result.state.households.some((x) => x.id === h.id))
+      .map((h) => h.id);
+    recordSisDeletion({
+      studentIds: [s.id],
+      householdIds: removedHouseholdIds,
+    });
+
     commit(result.state, "Student removed");
+    // Hard delete with no soft-delete or restore — the audit entry is the
+    // only remaining record that this student ever existed.
+    recordAudit({
+      module: "students",
+      action: "delete",
+      entityType: "student",
+      entityId: s.id,
+      summary: `Removed ${s.fullName} (${s.admissionNo}) from ${s.academicYearCode}`,
+      before: {
+        fullName: s.fullName,
+        admissionNo: s.admissionNo,
+        academicYearCode: s.academicYearCode,
+        classId: s.classId,
+        sectionId: s.sectionId,
+        status: s.status,
+        householdId: s.householdId,
+      },
+    });
   }
+
+  const anyFilterActive = Boolean(classFilter || sectionFilter || hasExtraFilters);
 
   const emptyMsg =
     classFilter || sectionFilter
@@ -581,6 +986,23 @@ export function StudentsWorkspace() {
           .filter(Boolean)
           .join("-") || "this selection"} yet.`
       : "No students match filters";
+
+  const emptyStateAction = anyFilterActive ? (
+    <button
+      type="button"
+      onClick={clearFilters}
+      className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+    >
+      Clear filters
+    </button>
+  ) : (
+    <Link
+      href="/students/new"
+      className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+    >
+      Add student
+    </Link>
+  );
 
   return (
     <ErpWorkspaceShell
@@ -598,7 +1020,7 @@ export function StudentsWorkspace() {
         <>
           {mainTab === "register" ? (
             <div
-              className="flex rounded-lg border border-[rgba(32,48,80,0.15)] bg-white p-0.5"
+              className="flex rounded-lg border border-[var(--border)] bg-[var(--card)] p-0.5"
               role="group"
               aria-label="View mode"
             >
@@ -639,24 +1061,29 @@ export function StudentsWorkspace() {
         aria-label="Students sections"
         value={mainTab}
         onChange={(id) => setMainTabPersist(id as MainTab)}
-        items={[
-          { id: "dashboard", label: "Dashboard", tone: "navy" },
-          { id: "roster", label: "Overview", tone: "navy" },
-          { id: "register", label: "Register", tone: "navy" },
-          { id: "update", label: "Update", tone: "sky" },
-          { id: "duplicates", label: "Duplicates", tone: "coral" },
-          { id: "udise", label: "UDISE+", tone: "coral" },
-          { id: "doc_verify", label: "Doc verify", tone: "amber" },
-          { id: "siblings", label: "Siblings", tone: "violet" },
-          { id: "upgrade", label: "Upgrade", tone: "amber" },
-          { id: "reports", label: "Reports", tone: "green" },
-          { id: "tags", label: "Tags", tone: "slate" },
-        ]}
+        items={shownTabs}
+      />
+
+      {/* Parents the school cannot reach on WhatsApp. Sits above every tab
+          on purpose: the roster is where a clerk has the family's record
+          open and can ask for the right number. */}
+      <WaNumberGapBanner
+        sis={state}
+        masters={masters}
+        // The table below is filtered to this session; the banner must agree.
+        // It used to receive the whole roster and list a child once per year
+        // they had been enrolled.
+        academicYearCode={effectiveSession}
+        onSaved={() => {
+          setState(loadSis());
+          setPanelTick((t) => t + 1);
+        }}
       />
 
       {mainTab === "dashboard" ? (
         <ModuleDashboardHost
           moduleId="students"
+          refreshKey={panelTick}
           onNavigateTab={(t) => setMainTabPersist(t as MainTab)}
         />
       ) : null}
@@ -697,6 +1124,10 @@ export function StudentsWorkspace() {
         />
       ) : null}
 
+      {mainTab === "birthdays" ? (
+        <BirthdaysPanel canEdit={!!session && !!masters && canWriteModuleTab(session, masters, "students", "birthdays")} />
+      ) : null}
+
       {mainTab === "tags" ? (
         <StudentTagsPanel
           tick={panelTick}
@@ -718,13 +1149,37 @@ export function StudentsWorkspace() {
       ) : null}
 
       {mainTab === "upgrade" ? (
-        <StudentUpgradePanel
-          tick={panelTick}
-          onChanged={(next) => {
-            setState(next);
-            setPanelTick((t) => t + 1);
-          }}
-        />
+        <div className="space-y-6">
+          <ModuleTabs
+            size="md"
+            aria-label="Upgrade type"
+            value={upgradeMode}
+            onChange={(id) => setUpgradeMode(id as "single" | "class")}
+            items={[
+              { id: "single", label: "Single student", tone: "navy" },
+              { id: "class", label: "Whole class", tone: "teal" },
+            ]}
+          />
+          {/* Both stay mounted (hidden) so unsaved picks survive a switch. */}
+          <div className={upgradeMode === "single" ? "" : "hidden"}>
+          <StudentUpgradePanel
+            tick={panelTick}
+            onChanged={(next) => {
+              setState(next);
+              setPanelTick((t) => t + 1);
+            }}
+          />
+          </div>
+          <div className={upgradeMode === "class" ? "" : "hidden"}>
+          <StudentPromotionPanel
+            tick={panelTick}
+            onChanged={(next) => {
+              setState(next);
+              setPanelTick((t) => t + 1);
+            }}
+          />
+          </div>
+        </div>
       ) : null}
 
       {mainTab === "update" ? (
@@ -772,9 +1227,71 @@ export function StudentsWorkspace() {
       {mainTab === "register" ? (
         <>
       <div className="mt-5 space-y-2">
+        {/* Saved views — one click to the work lists staff actually need,
+            including the completeness gaps the filters could not express. */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+            Views
+          </span>
+          {savedViews.map((v) => (
+            <span key={v.id} className="inline-flex items-center">
+              <button
+                type="button"
+                onClick={() => applySavedView(v)}
+                className={`rounded-l-lg border border-[rgba(32,48,80,0.14)] px-2.5 py-1 text-[11px] font-medium hover:bg-[var(--surface-sunken)] ${
+                  v.builtIn ? "bg-[var(--card)]" : "bg-[rgba(197,160,40,0.12)]"
+                } ${v.builtIn ? "rounded-r-lg" : ""}`}
+                title={v.builtIn ? "Built-in view" : "Saved view"}
+              >
+                {v.name}
+              </button>
+              {!v.builtIn ? (
+                <button
+                  type="button"
+                  onClick={() => deleteSavedView(v.id)}
+                  aria-label={`Delete saved view ${v.name}`}
+                  className="rounded-r-lg border border-l-0 border-[rgba(32,48,80,0.14)] bg-[rgba(197,160,40,0.12)] px-1.5 py-1 text-[11px] text-[var(--muted)] hover:text-[#c0392b]"
+                >
+                  ✕
+                </button>
+              ) : null}
+            </span>
+          ))}
+          <button
+            type="button"
+            onClick={saveCurrentAsView}
+            disabled={activeFilterCount === 0}
+            className="rounded-lg border border-dashed border-[rgba(32,48,80,0.28)] px-2.5 py-1 text-[11px] font-medium text-[var(--brand-mid)] disabled:opacity-40"
+            title={
+              activeFilterCount === 0
+                ? "Set some filters first"
+                : "Save the current filters as a view"
+            }
+          >
+            + Save current
+          </button>
+          {activeFilterCount > 0 ? (
+            <span className="ml-auto flex items-center gap-2">
+              <span
+                className="rounded-full bg-[rgba(32,48,80,0.08)] px-2 py-0.5 text-[11px] font-semibold text-[var(--brand-deep)]"
+                aria-live="polite"
+              >
+                {activeFilterCount} filter{activeFilterCount === 1 ? "" : "s"} active
+              </span>
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="text-[11px] font-semibold text-[var(--brand-mid)] underline"
+              >
+                Clear all
+              </button>
+            </span>
+          ) : null}
+        </div>
+
         <div className="flex flex-wrap items-center gap-2">
           <div
-            className="inline-flex rounded-lg border border-[rgba(32,48,80,0.12)] bg-white p-0.5"
+            className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--card)] p-0.5"
             role="group"
             aria-label="Filter match mode"
           >
@@ -846,13 +1363,14 @@ export function StudentsWorkspace() {
           >
             <option value="">All classes</option>
             {m.classes
-              .filter((c) => c.isActive)
+              .filter((c) => c.isActive && (!teacherMode || myClassIds.has(c.id)))
               .map((c) => {
                 const n = sis.students.filter(
                   (s) =>
                     (!effectiveSession ||
                       normalizeSessionCode(s.academicYearCode || "") ===
                         normalizeSessionCode(effectiveSession)) &&
+                    (statusFilter === "all" || s.status === statusFilter) &&
                     (s.classId === c.id ||
                       m.sections.find((sec) => sec.id === s.sectionId)
                         ?.classId === c.id),
@@ -898,6 +1416,32 @@ export function StudentsWorkspace() {
             })}
           </select>
           <select
+            className="field max-w-[9rem] text-xs disabled:opacity-40"
+            value={rollSortMode}
+            onChange={(e) =>
+              setRollSortMode(e.target.value as "name" | "admissionNo")
+            }
+            disabled={!classFilter || !sectionFilter}
+            aria-label="Roll number order"
+            title="Order to assign roll numbers in"
+          >
+            <option value="name">By name (A–Z)</option>
+            <option value="admissionNo">By admission no.</option>
+          </select>
+          <button
+            type="button"
+            className="field max-w-[11rem] text-xs font-semibold text-[var(--brand-mid)] disabled:opacity-40"
+            onClick={() => assignRollNumbers(rollSortMode)}
+            disabled={!classFilter || !sectionFilter}
+            title={
+              classFilter && sectionFilter
+                ? "Assign roll numbers 1..N in the order picked on the left"
+                : "Pick a class and section first"
+            }
+          >
+            Assign roll numbers
+          </button>
+          <select
             className="field max-w-[9rem]"
             value={statusFilter}
             onChange={(e) =>
@@ -909,13 +1453,39 @@ export function StudentsWorkspace() {
             <option value="inactive">Inactive</option>
             <option value="all">All status</option>
           </select>
-          <FilterExportButtons
+          <div className="flex items-center gap-1">
+            <select
+              className="field max-w-[9.5rem]"
+              value={sortBy}
+              onChange={(e) =>
+                setSortBy(
+                  e.target.value as "rollNo" | "name" | "admissionNo" | "joinedOn",
+                )
+              }
+              aria-label="Sort student list"
+              title="Sort student list"
+            >
+              <option value="rollNo">Sort: Roll No</option>
+              <option value="name">Sort: Name</option>
+              <option value="admissionNo">Sort: Adm No</option>
+              <option value="joinedOn">Sort: Joined Date</option>
+            </select>
+            <button
+              type="button"
+              className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs font-bold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"
+              onClick={() => setSortOrder((o) => (o === "asc" ? "desc" : "asc"))}
+              title={`Sorting ${sortOrder === "asc" ? "Ascending (A-Z / 1-9)" : "Descending (Z-A / 9-1)"}`}
+            >
+              {sortOrder === "asc" ? "↑ Asc" : "↓ Desc"}
+            </button>
+          </div>
+          <ExportMenu
             title="Student register (full form)"
             subtitle={`${TENANT.shortName} · ${headerAy}`}
             filterNote={exportFilterNote}
             fileBaseName="students_full_register"
             columns={STUDENT_REGISTER_EXPORT_COLUMNS}
-            rows={exportRows}
+            rows={() => exportRows}
             onMessage={(msg) => {
               setNotice(msg);
               window.setTimeout(() => setNotice(null), 2200);
@@ -1025,6 +1595,24 @@ export function StudentsWorkspace() {
               </option>
             ))}
           </select>
+          {/* "Missing X" — the completeness work list. Every other filter
+              matches a value; this one matches its absence. */}
+          <select
+            className="field max-w-[13rem]"
+            value={missingFilter}
+            onChange={(e) => setMissingFilter(e.target.value as MissingField)}
+            aria-label="Show only students missing a field"
+            title="Show only students where this field is blank"
+          >
+            <option value="">Completeness: any</option>
+            {(
+              Object.keys(MISSING_FIELD_LABELS) as (keyof typeof MISSING_FIELD_LABELS)[]
+            ).map((k) => (
+              <option key={k} value={k}>
+                {MISSING_FIELD_LABELS[k]}
+              </option>
+            ))}
+          </select>
           <label className="flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
             <span className="whitespace-nowrap">Admission from</span>
             <input
@@ -1049,7 +1637,7 @@ export function StudentsWorkspace() {
           {hasExtraFilters ? (
             <button
               type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-[11px] font-semibold text-[var(--muted)]"
+              className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[11px] font-semibold text-[var(--muted)]"
               onClick={clearFilters}
             >
               Clear filters
@@ -1068,8 +1656,8 @@ export function StudentsWorkspace() {
               type="button"
               className={`rounded-lg px-3 py-2 text-xs font-bold ${
                 showCurriculumOffice
-                  ? "bg-[#0f766e] text-white"
-                  : "border border-[#0f766e] bg-white text-[#0f766e]"
+                  ? "bg-[var(--tone-teal-solid)] text-white"
+                  : "border border-[var(--tone-teal)] bg-[var(--card)] text-[var(--tone-teal)]"
               }`}
               onClick={() => setShowCurriculumOffice((v) => !v)}
             >
@@ -1098,9 +1686,139 @@ export function StudentsWorkspace() {
 
       <div className="mt-5 grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
         <div>
-          <div className="mb-2 text-sm font-semibold text-[var(--brand-deep)]">
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[var(--brand-deep)]">
+            <RowCheckbox
+              checked={rosterSelection.allSelected(rosterKeys)}
+              indeterminate={rosterSelection.someSelected(rosterKeys)}
+              onChange={() => rosterSelection.toggleAll(rosterKeys)}
+              label="Select every student shown"
+            />
             Register · {filtered.length} (all matches)
+            {rosterSelection.count ? (
+              <span className="text-xs font-normal text-[var(--muted)]">· {rosterSelection.count} selected</span>
+            ) : null}
           </div>
+
+          <BulkActionBar
+            selection={rosterSelection}
+            noun="student"
+            actions={[
+              {
+                id: "activate",
+                label: "Mark active",
+                onRun: (ids) => {
+                  const picked = new Set(ids);
+                  const next = {
+                    ...sis,
+                    students: sis.students.map((st) =>
+                      picked.has(st.id) && st.status !== "active" ? { ...st, status: "active" as const } : st,
+                    ),
+                  };
+                  commit(next, `${ids.length} student(s) marked active`);
+                  rosterSelection.clear();
+                },
+              },
+              {
+                id: "inactivate",
+                label: "Mark inactive",
+                onRun: (ids) => {
+                  const picked = new Set(ids);
+                  const next = {
+                    ...sis,
+                    students: sis.students.map((st) =>
+                      picked.has(st.id) && st.status === "active" ? { ...st, status: "inactive" as const } : st,
+                    ),
+                  };
+                  commit(next, `${ids.length} student(s) marked inactive`);
+                  rosterSelection.clear();
+                },
+              },
+              {
+                id: "wa",
+                label: "Send WhatsApp",
+                title: "Opens WhatsApp to each selected family's guardian mobile (12 per click)",
+                onRun: (ids) => {
+                  const text = window.prompt(
+                    "Message to the families:",
+                    "Namaste, this is a message from BHB International School.",
+                  );
+                  if (!text) return;
+                  const picked = new Set(ids);
+                  const seen = new Set<string>();
+                  let opened = 0;
+                  for (const st of sis.students) {
+                    if (!picked.has(st.id) || opened >= 12) continue;
+                    const mob = householdOf(sis, st.householdId)?.mobile ?? "";
+                    if (!mob || seen.has(mob)) continue;
+                    seen.add(mob);
+                    openWaMe(mob, text);
+                    opened += 1;
+                  }
+                  setNotice(`Opened WhatsApp for ${opened} famil${opened === 1 ? "y" : "ies"}`);
+                  window.setTimeout(() => setNotice(null), 2800);
+                },
+              },
+              {
+                id: "pdf",
+                label: "Register PDF",
+                onRun: async (ids) => {
+                  const picked = new Set(ids);
+                  const rows = filtered
+                    .filter((st) => picked.has(st.id))
+                    .map((st) => studentToRegisterExportRow(st, sis, m));
+                  await downloadPdfReport({
+                    title: "Student register (selected)",
+                    subtitle: `${TENANT.shortName} · ${headerAy}`,
+                    columns: STUDENT_REGISTER_EXPORT_COLUMNS,
+                    rows,
+                    fileBaseName: "students_selected",
+                  });
+                },
+              },
+              {
+                id: "udise",
+                label: "UDISE+ sheet (Excel)",
+                title: "PEN, APAAR, Aadhaar, parents and DOB of the selected pupils, ready for the portal",
+                onRun: async (ids) => {
+                  const picked = new Set(ids);
+                  const rows = filtered
+                    .filter((st) => picked.has(st.id))
+                    .map((st) => ({
+                      admissionNo: st.admissionNo,
+                      name: st.fullName,
+                      class: classSectionOf(st),
+                      gender: st.gender,
+                      dob: st.dob,
+                      pen: st.pen,
+                      apaar: st.apaarId,
+                      aadhaarLast4: st.aadhaarLast4 || (st.aadhaarNumber || "").slice(-4),
+                      father: st.fatherName,
+                      mother: st.motherName,
+                      mobile: householdOf(sis, st.householdId)?.mobile ?? "",
+                    }));
+                  await downloadXlsxReport({
+                    title: "UDISE+ mapping sheet",
+                    subtitle: `${TENANT.shortName} · ${headerAy}`,
+                    columns: [
+                      { key: "admissionNo", header: "Adm no" },
+                      { key: "name", header: "Student", width: 2 },
+                      { key: "class", header: "Class" },
+                      { key: "gender", header: "Gender" },
+                      { key: "dob", header: "DOB" },
+                      { key: "pen", header: "PEN" },
+                      { key: "apaar", header: "APAAR" },
+                      { key: "aadhaarLast4", header: "Aadhaar (L4)" },
+                      { key: "father", header: "Father", width: 1.6 },
+                      { key: "mother", header: "Mother", width: 1.6 },
+                      { key: "mobile", header: "Mobile" },
+                    ],
+                    rows,
+                    fileBaseName: "udise_mapping_selected",
+                  });
+                },
+              },
+            ]}
+          />
 
           {view === "list" ? (
             <ErpTableShell>
@@ -1116,11 +1834,19 @@ export function StudentsWorkspace() {
                       className={`flex items-start gap-2 px-4 py-3 ${
                         focused
                           ? "bg-[rgba(197,160,40,0.14)]"
-                          : on
-                            ? "bg-[rgba(32,48,80,0.05)]"
-                            : ""
+                          : rosterSelection.isSelected(s.id)
+                            ? "bg-[var(--accent)]"
+                            : on
+                              ? "bg-[rgba(32,48,80,0.05)]"
+                              : ""
                       }`}
                     >
+                      <RowCheckbox
+                        className="mt-3"
+                        checked={rosterSelection.isSelected(s.id)}
+                        onChange={() => rosterSelection.toggle(s.id)}
+                        label={`Select ${s.fullName}`}
+                      />
                       <div className="min-w-0 flex-1">
                         <button
                           type="button"
@@ -1137,6 +1863,7 @@ export function StudentsWorkspace() {
                                 </span>
                               ) : null}
                               </StudentNameLabel>
+                              <UdiseStatusBadge student={s} />
                               {state &&
                               pendingCurriculumRequests(state, s.id).length >
                                 0 ? (
@@ -1147,7 +1874,7 @@ export function StudentsWorkspace() {
                                 <span
                                   className={`ml-2 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
                                     enrollmentStatusOf(s) === "confirmed"
-                                      ? "bg-[rgba(15,118,110,0.12)] text-[#0f766e]"
+                                      ? "bg-[rgba(15,118,110,0.12)] text-[var(--tone-teal)]"
                                       : enrollmentStatusOf(s) === "draft"
                                         ? "bg-[rgba(196,149,58,0.15)] text-[var(--brand-gold)]"
                                         : "bg-[rgba(32,48,80,0.08)] text-[var(--muted)]"
@@ -1183,6 +1910,9 @@ export function StudentsWorkspace() {
                       </div>
                       <RowActions
                         student={s}
+                        guardianMobile={hh?.mobile ?? ""}
+                        onView={() => openProfile(s.id)}
+                        onHousehold={() => openHousehold(s.id)}
                         onToggle={() => toggleStatus(s)}
                         onRemove={() => onRemove(s)}
                       />
@@ -1190,14 +1920,13 @@ export function StudentsWorkspace() {
                   );
                 })}
                 {filtered.length === 0 ? (
-                  <li className="px-4 py-10 text-center text-sm text-[var(--muted)]">
-                    {emptyMsg}{" "}
-                    <Link
-                      href="/students/new"
-                      className="font-medium text-[var(--brand-mid)]"
-                    >
-                      Add student
-                    </Link>
+                  <li>
+                    <EmptyState
+                      icon={GraduationCap}
+                      title={emptyMsg}
+                      variant="table"
+                      action={emptyStateAction}
+                    />
                   </li>
                 ) : null}
               </ul>
@@ -1212,7 +1941,7 @@ export function StudentsWorkspace() {
                 return (
                   <div
                     key={s.id}
-                    className={`rounded-xl border bg-white p-4 transition ${
+                    className={`rounded-xl border bg-[var(--card)] p-4 transition ${
                       focused
                         ? "border-[rgba(197,160,40,0.55)] shadow-[0_0_0_1px_rgba(197,160,40,0.12)]"
                         : on
@@ -1274,14 +2003,12 @@ export function StudentsWorkspace() {
                 );
               })}
               {filtered.length === 0 ? (
-                <div className="col-span-full rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-10 text-center text-sm text-[var(--muted)]">
-                  {emptyMsg}{" "}
-                  <Link
-                    href="/students/new"
-                    className="font-medium text-[var(--brand-mid)]"
-                  >
-                    Add student
-                  </Link>
+                <div className="col-span-full">
+                  <EmptyState
+                    icon={GraduationCap}
+                    title={emptyMsg}
+                    action={emptyStateAction}
+                  />
                 </div>
               ) : null}
             </div>
@@ -1310,7 +2037,7 @@ export function StudentsWorkspace() {
               ))}
             </div>
           ) : (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-10 text-center text-sm text-[var(--muted)]">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
               Select a student to see the snapshot
             </div>
           )}
@@ -1342,28 +2069,66 @@ export function StudentsWorkspace() {
 
 function RowActions({
   student,
+  guardianMobile,
+  onView,
+  onHousehold,
   onToggle,
   onRemove,
 }: {
   student: SisStudent;
+  guardianMobile: string;
+  onView: () => void;
+  onHousehold: () => void;
   onToggle: () => void;
   onRemove: () => void;
 }) {
   return (
     <div className="flex shrink-0 flex-col items-end gap-1">
-      <Link
-        href={`/students/${student.id}/edit`}
-        className="text-xs font-medium text-[var(--brand-mid)]"
-      >
-        Edit
-      </Link>
-      <button
-        type="button"
-        className="text-xs font-medium text-[var(--brand-mid)]"
-        onClick={onToggle}
-      >
-        {student.status === "active" ? "Inactivate" : "Activate"}
-      </button>
+      <RowActionMenu
+        row={student}
+        label={`Actions for ${student.fullName}`}
+        actions={[
+          { id: "view", label: "View details", onSelect: onView },
+          {
+            id: "edit",
+            label: "Edit properties",
+            onSelect: (s) => {
+              window.location.href = `/students/${s.id}/edit`;
+            },
+          },
+          { id: "household", label: "Household & siblings", onSelect: onHousehold },
+          {
+            id: "fees",
+            label: "Fee ledger & receipts",
+            onSelect: (s) => {
+              window.location.href = `/fees?household=${encodeURIComponent(s.householdId)}`;
+            },
+          },
+          {
+            id: "attendance",
+            label: "Attendance history",
+            onSelect: (s) => {
+              window.location.href = `/attendance?student=${encodeURIComponent(s.id)}`;
+            },
+          },
+          {
+            id: "wa",
+            label: "Send WhatsApp to family",
+            disabled: () => !guardianMobile,
+            onSelect: (s) =>
+              openWaMe(
+                guardianMobile,
+                `Namaste, this is a message from BHB International School regarding ${s.fullName}.`,
+              ),
+          },
+          {
+            id: "status",
+            label: student.status === "active" ? "Mark inactive" : "Mark active",
+            separatorAbove: true,
+            onSelect: onToggle,
+          },
+        ]}
+      />
       <RemoveControl
         check={checkStudentRemoval(student)}
         onRemove={onRemove}
@@ -1438,7 +2203,7 @@ function StudentDetail({
 
   return (
     <div
-      className={`rounded-xl border bg-white p-4 ${
+      className={`rounded-xl border bg-[var(--card)] p-4 ${
         highlight
           ? "border-[rgba(197,160,40,0.55)] shadow-[0_0_0_1px_rgba(197,160,40,0.12)]"
           : "border-[rgba(32,48,80,0.12)]"
@@ -1451,7 +2216,7 @@ function StudentDetail({
             <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
               <StudentNameLabel student={student} sis={state}>
               {highlight && sibs.length > 0 ? (
-                <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--brand-gold)]">
+                <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--tone-amber)]">
                   Focus
                 </span>
               ) : null}

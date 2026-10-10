@@ -95,7 +95,7 @@ export function AutomationAudiencePicker({
   }
 
   return (
-    <div className="space-y-3 rounded-lg border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3">
+    <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
       <div>
         <p className="text-[12px] font-semibold text-[var(--brand-deep)]">
           Who receives this?
@@ -124,7 +124,7 @@ export function AutomationAudiencePicker({
       </label>
 
       {selectedPreset && selectedPreset.id !== "custom" ? (
-        <div className="rounded-md bg-white px-2.5 py-2 text-[11px]">
+        <div className="rounded-md bg-[var(--card)] px-2.5 py-2 text-[11px]">
           <p className="font-semibold text-[var(--brand-deep)]">
             {selectedPreset.summary}
           </p>
@@ -150,7 +150,7 @@ export function AutomationAudiencePicker({
         </label>
       ) : null}
 
-      <div className="border-t border-[rgba(32,48,80,0.08)] pt-3 space-y-2">
+      <div className="border-t border-[var(--border)] pt-3 space-y-2">
         <p className="text-[11px] font-semibold text-[var(--brand-deep)]">
           AI helper (optional)
         </p>

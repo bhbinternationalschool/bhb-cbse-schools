@@ -45,6 +45,8 @@ export type WhatsAppPhoneHealth = {
   wabaId: string | null;
   businessId: string | null;
   appId: string | null;
+  /** Meta's messaging quality signal: GREEN / YELLOW / RED / UNKNOWN. */
+  qualityRating: string | null;
 };
 
 /** Resolve WABA id from env or Meta phone health_status.entities. */
@@ -66,6 +68,7 @@ export async function fetchWhatsAppPhoneHealth(): Promise<WhatsAppPhoneHealth> {
     wabaId: null,
     businessId: null,
     appId: null,
+    qualityRating: null,
   };
   const token = metaAccessToken();
   const phoneId = metaPhoneNumberId();
@@ -74,7 +77,7 @@ export async function fetchWhatsAppPhoneHealth(): Promise<WhatsAppPhoneHealth> {
   const version = metaGraphVersion();
   try {
     const res = await fetch(
-      `https://graph.facebook.com/${version}/${phoneId}?fields=display_phone_number,verified_name,status,account_mode,code_verification_status,health_status`,
+      `https://graph.facebook.com/${version}/${phoneId}?fields=display_phone_number,verified_name,status,account_mode,code_verification_status,quality_rating,health_status`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
     const json = (await res.json().catch(() => ({}))) as {
@@ -83,6 +86,7 @@ export async function fetchWhatsAppPhoneHealth(): Promise<WhatsAppPhoneHealth> {
       status?: string;
       account_mode?: string;
       code_verification_status?: string;
+      quality_rating?: string;
       health_status?: {
         can_send_message?: string;
         entities?: {
@@ -113,6 +117,7 @@ export async function fetchWhatsAppPhoneHealth(): Promise<WhatsAppPhoneHealth> {
       wabaId: waba,
       businessId: business,
       appId: app,
+      qualityRating: json.quality_rating || null,
     };
   } catch {
     return empty;
@@ -238,6 +243,7 @@ export async function getWhatsAppSetupReport(): Promise<WhatsAppSetupReport> {
         wabaId: null,
         businessId: null,
         appId: null,
+        qualityRating: null,
       } satisfies WhatsAppPhoneHealth);
   const wabaId = metaWabaIdFromEnv() || phoneHealth.wabaId;
   const subs = wabaId
@@ -308,6 +314,21 @@ export async function getWhatsAppSetupReport(): Promise<WhatsAppSetupReport> {
   }
   if (!wabaFromEnv && wabaId) {
     fixes.push(`Add WHATSAPP_WABA_ID=${wabaId} to .env.local for faster template sync.`);
+  }
+  if (phoneHealth.qualityRating === "RED") {
+    issues.push(
+      "WhatsApp quality rating is RED — Meta may restrict or pause sending soon.",
+    );
+    fixes.push(
+      "Pause non-essential campaigns, reduce send volume, and review recent template content for complaints/blocks in Meta Business Suite.",
+    );
+  } else if (phoneHealth.qualityRating === "YELLOW") {
+    issues.push(
+      "WhatsApp quality rating is YELLOW — sending is still allowed but degrading.",
+    );
+    fixes.push(
+      "Slow down bulk sends and review recent messages for parent complaints/blocks before it drops further.",
+    );
   }
 
   return {

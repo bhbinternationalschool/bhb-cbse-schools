@@ -6,6 +6,9 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { getSessionActor } from "@/lib/sessionActor";
 import type { CommsAudience } from "@/lib/schoolComms";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
+import { recordNotificationsDeletion } from "@/lib/notificationsNormalizedClient";
 
 const STORAGE_KEY = "bhb_notifications_v1";
 
@@ -51,7 +54,7 @@ export function emptyNotifications(): NotificationsState {
 export function loadNotifications(): NotificationsState {
   if (typeof window === "undefined") return emptyNotifications();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyNotifications();
     const parsed = JSON.parse(raw) as Partial<NotificationsState>;
     return {
@@ -65,7 +68,7 @@ export function loadNotifications(): NotificationsState {
 
 export function writeNotificationsLocalRaw(state: NotificationsState): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function notificationsIsEmpty(state: NotificationsState): boolean {
@@ -74,12 +77,12 @@ export function notificationsIsEmpty(state: NotificationsState): boolean {
 
 export function saveNotifications(state: NotificationsState): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/notificationsPersistence").then(
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void trackServerWork(import("@/lib/notificationsPersistence").then(
     ({ scheduleNotificationsSync }) => {
       scheduleNotificationsSync(state);
     },
-  );
+  ));
 }
 
 export function recipientKey(opts: {
@@ -218,6 +221,8 @@ export function pruneNotifications(): NotificationsState {
   }
   const state = loadNotifications();
   const next = { ...state, items: state.items.slice(0, 50) };
+  // An explicit clear: named, because a save no longer deletes what it omits.
+  recordNotificationsDeletion(state.items.slice(50).map((n) => n.id));
   saveNotifications(next);
   return next;
 }

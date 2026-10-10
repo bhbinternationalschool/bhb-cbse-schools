@@ -9,10 +9,32 @@ import {
   SESSION_MONTHS,
   dueOnForSessionMonth,
   sessionStartYear,
+  type ClassGroupCode,
 } from "@/lib/masters";
 import { checkHold } from "@/lib/holds";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { serverTransportDeskIsEmpty } from "@/lib/transportHydrationState";
+import { TENANT } from "@/lib/types";
+import { trackServerWork } from "@/lib/serverWork";
 
 /* ─── Core ops ─────────────────────────────────────────────── */
+
+/**
+ * Where a stop's distance came from.
+ *
+ * `google` is a Distance Matrix road result and is the only value safe to bill
+ * on without a human having looked. `manual` was typed by a person. `""` means
+ * nobody has established it — which is NOT the same as zero kilometres, and
+ * must never be quietly treated as such.
+ */
+/**
+ * Where a stop's distance came from. This is provenance on a number that
+ * sets what every family at the stop pays, so "free" (an OpenStreetMap
+ * routing engine) is its own value rather than being recorded as "google":
+ * a measurement is allowed to be cheaper, it is not allowed to be
+ * mislabelled in the record the fee is defended from.
+ */
+export type StopDistanceSource = "" | "google" | "free" | "manual";
 
 export type TransportStop = {
   id: string;
@@ -20,6 +42,71 @@ export type TransportStop = {
   sequence: number;
   /** Distance from school (km) — for per-km / slab fee policy */
   distanceKm: number;
+  /** Coordinates, when the stop was picked from Google Places. */
+  geoLat?: number;
+  geoLng?: number;
+  /** Google place id, so the same stop resolves identically next time. */
+  placeId?: string;
+  /** Full address Google returned — shown so a clerk can sanity-check the pin. */
+  geoAddress?: string;
+  distanceSource: StopDistanceSource;
+  /**
+   * Monthly fee for this stop, in paise.
+   *
+   * Under `band_then_formula` the two lower bands are stop-priced: everybody
+   * boarding at the same stop pays the same, which is the fairness argument
+   * parents actually make. 0 means nobody has priced it yet — NOT free.
+   */
+  monthlyFeePaise?: number;
+};
+
+/** A pick-up run or a drop run. */
+export type TransportShiftDirection = "pickup" | "drop";
+
+/**
+ * One timed run of a route.
+ *
+ * A route is a path; a shift is a journey along it at a stated time. The
+ * distinction only starts to matter in the afternoon: the morning is one run
+ * because everybody starts school together, but dismissal is staggered by
+ * class group, so the same bus goes out at 13:40 for the little ones and
+ * again at 15:40 for the rest.
+ *
+ * Until this existed, both of those were recorded as `trip: "PM"` — one label
+ * for two different journeys. The attendant's list mixed the two runs and the
+ * boarding register could not say which one a child was on.
+ *
+ * A route with NO shifts behaves exactly as it always did: one implicit run
+ * each way. Shifts are opt-in per route, so nothing changes until the office
+ * sets them up.
+ */
+export type TransportShift = {
+  id: string;
+  /** What the office calls this run — "Morning", "Early drop", "Main drop". */
+  name: string;
+  direction: TransportShiftDirection;
+  /**
+   * HH:mm the vehicle rolls — leaves the depot for a pick-up run, leaves the
+   * campus for a drop run.
+   *
+   * "" means nobody has set it. That is NOT midnight and not "same as the
+   * other run": a run with no time cannot be put on a parent's screen or used
+   * to check whether one vehicle can serve two dismissals, and both of those
+   * refuse rather than guess.
+   */
+  departTime: string;
+  /**
+   * Class groups this run carries.
+   *
+   * This is how a rider reaches the right run without anybody assigning 168
+   * children one at a time — the child's class decides, and it keeps deciding
+   * correctly when they move up a class in April. Empty means the run claims
+   * no group by rule, so only a per-child override puts anyone on it.
+   */
+  classGroups: ClassGroupCode[];
+  /** 0=Sun … 6=Sat. Empty means every day the route runs. */
+  weekdays: number[];
+  isActive: boolean;
 };
 
 export type TransportRoute = {
@@ -33,6 +120,21 @@ export type TransportRoute = {
   monthlyFeePaise: number;
   isActive: boolean;
   stops: TransportStop[];
+  /**
+   * Timed runs along this route. Empty means one implicit run each way, which
+   * is how every route behaved before shifts existed.
+   */
+  shifts: TransportShift[];
+  /**
+   * Measured round trip for the whole route — campus out, every stop, campus
+   * back — from Google Directions when "Suggest order" was last run.
+   *
+   * 0 means never measured. Deliberately not estimated from stop distance:
+   * this figure decides whether one vehicle can serve two dismissals, and a
+   * guess that is ten minutes optimistic strands small children at the gate.
+   */
+  roundTripMinutes?: number;
+  roundTripKm?: number;
 };
 
 export type TransportAssignment = {
@@ -44,20 +146,61 @@ export type TransportAssignment = {
   academicYearCode: string;
   effectiveFrom: string;
   effectiveTo: string | null;
+  /**
+   * Which legs the child actually uses. Half the service is billed at half the
+   * fee, applied on top of whatever the full fee works out to — so an override
+   * is always entered as the FULL-service amount and halved from there.
+   */
+  serviceMode?: TransportServiceMode;
   /** Override route / policy fee when > 0 */
   monthlyFeePaise: number;
   /** Audit when fee override differs from expected */
   feeOverrideReason: string;
   boardingSuspended: boolean;
+  /**
+   * Runs chosen by hand for this child, overriding the class-group rule.
+   *
+   * "" means follow the rule, which is what almost every rider does. The
+   * override exists for the cases the rule cannot know: a Class II child who
+   * waits for an elder sister and goes home on the late run, or a child kept
+   * back for coaching twice a week.
+   */
+  pickupShiftId?: string;
+  dropShiftId?: string;
   createdAt: string;
 };
 
-export type TransportFeeRateMode = "flat_route" | "per_km" | "slab";
+/** "both" is the default; the one-way modes bill at half. */
+export type TransportServiceMode = "both" | "pickup" | "drop";
+
+export type TransportFeeRateMode =
+  | "flat_route"
+  | "per_km"
+  | "slab"
+  | "band_then_formula";
 
 export type TransportFeeSlab = {
   id: string;
   upToKm: number;
   monthlyFeePaise: number;
+};
+
+/**
+ * A stop-priced distance band. The stop carries the actual number; the band
+ * says what range is acceptable, so a mistyped ₹50 or ₹5,000 is caught.
+ */
+export type TransportFeeBand = {
+  id: string;
+  upToKm: number;
+  minPaise: number;
+  maxPaise: number;
+};
+
+/** Charged beyond the last band: base, what it covers, then per started km. */
+export type TransportFeeFormula = {
+  basePaise: number;
+  baseCoversKm: number;
+  perKmPaise: number;
 };
 
 export type TransportFeePolicy = {
@@ -67,6 +210,10 @@ export type TransportFeePolicy = {
   minFeePaise: number;
   maxFeePaise: number | null;
   slabs: TransportFeeSlab[];
+  /** Stop-priced bands, used when rateMode = band_then_formula. */
+  bands: TransportFeeBand[];
+  /** Applied past the last band. */
+  formula: TransportFeeFormula;
   /** Soft Principal approval threshold for repair estimates */
   repairApprovalPaise: number;
 };
@@ -119,17 +266,45 @@ export type FleetVehicle = {
   type: VehicleType;
   fuelType: FuelType;
   fuelUnit: FuelUnit;
+  /**
+   * The second fuel a bi-fuel vehicle actually runs on.
+   *
+   * Four of this fleet are CNG with a petrol tank. One value could not say
+   * that, so they were recorded as whichever fuel someone thought of first,
+   * and a petrol fill on a CNG bus had nowhere to go. Empty for a
+   * single-fuel vehicle, which is most of them.
+   */
+  secondaryFuelType?: FuelType | "";
   tankCapacity: number;
   odometerKm: number;
   avgMileage: number;
   primaryRouteId: string;
   /** Bus photo URL for Fee Take / parent comms */
   photoUrl?: string;
-  /** Passenger capacity for route planning */
+  /**
+   * Seats, as somebody recorded them.
+   *
+   * 0 means NOBODY HAS RECORDED IT. It is not zero seats and it is not the
+   * 40 this field used to invent: on 2026-09-12 all six vehicles read exactly
+   * 40, which is the old default, while the fleet is a Tata Magic (about 7),
+   * a Winger (about 13) and a van. A check built on that number would have
+   * refused a legitimate move on a fiction, or waved a child onto a 13-seater
+   * that already had 31. Every reader must branch on 0 rather than subtract
+   * from it — `seatsOnRoute` does it once so they do not each have to.
+   */
   seatCapacity?: number;
   /** Assigned driver (WhatsApp hub / fleet comms) */
   driverName?: string;
   driverMobile?: string;
+  /**
+   * The sis_staff row this vehicle's driver is, when they are on the payroll.
+   * The name alone is not a link: it breaks on a spelling correction, and it
+   * cannot answer "can this person sign in and mark boarding?", which is the
+   * question the driver app actually asks. Empty for an outside driver
+   * supplied by a vehicle provider — those have a name and no staff record,
+   * and must stay recordable.
+   */
+  driverStaffId?: string;
   status: VehicleStatus;
   compliance: VehicleComplianceDoc[];
   serviceSchedule: ServiceScheduleItem[];
@@ -312,15 +487,39 @@ export type RepairRequest = {
 export type BoardingTrip = "AM" | "PM";
 export type BoardingStatus = "boarded" | "absent" | "unauthorized";
 
+/** GPS captured from the attendant's own phone at the moment they mark
+ * boarding/offboarding — not from Fleet Edge vehicle telemetry, which is
+ * only continuous for 1 of 5 vehicles today and far too coarse (30-minute
+ * windows) on the rest to pin down a specific stop. */
+export type BoardingGeoCapture = {
+  lat: number;
+  lng: number;
+  accuracyM: number | null;
+  at: string;
+  distanceFromSchoolKm: number;
+};
+
 export type BoardingEvent = {
   id: string;
   date: string;
   routeId: string;
   trip: BoardingTrip;
+  /**
+   * Which timed run this mark belongs to, when the route has runs.
+   *
+   * `trip` says morning or afternoon; it cannot say WHICH afternoon, and a
+   * bus that goes out at 13:40 and again at 15:40 produced two indistinguish-
+   * able sets of "PM" marks. "" means either the route has no runs or the
+   * mark predates them — it does NOT mean the first run.
+   */
+  shiftId?: string;
   studentId: string;
   status: BoardingStatus;
   note: string;
   createdAt: string;
+  /** Optional: old records predate location capture. */
+  boardedLocation?: BoardingGeoCapture | null;
+  offboardedLocation?: BoardingGeoCapture | null;
 };
 
 export type GpsPing = {
@@ -334,6 +533,39 @@ export type GpsPing = {
 };
 
 /* ─── State ────────────────────────────────────────────────── */
+
+/**
+ * A staff member who rides the school bus.
+ *
+ * Kept separate from student assignments rather than bolted onto them. A
+ * student rider is billed through the fee engine against a household; a staff
+ * rider is not billed at all — any cost is recovered through payroll — and has
+ * no household, no academic fee head and no concession rules. Forcing both
+ * through one record would mean a studentId that is really a staffId and a
+ * fee that must never reach an invoice.
+ */
+export type TransportStaffRider = {
+  id: string;
+  staffId: string;
+  routeId: string;
+  stopId: string;
+  academicYearCode: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  /**
+   * Stated, never inferred from a zero fee. "Free" is a decision someone made;
+   * a blank fee is a decision nobody made yet, and the two must not look alike
+   * on a roster — that is the whole reason riders billed nothing were invisible
+   * for so long.
+   */
+  costMode: "free" | "charged";
+  /** Monthly recovery in paise. Always 0 when costMode is "free". */
+  monthlyFeePaise: number;
+  serviceMode: TransportServiceMode;
+  /** Why it is free, or what the charge was agreed as. */
+  note: string;
+  createdAt: string;
+};
 
 export type TransportState = {
   version: 2;
@@ -354,6 +586,7 @@ export type TransportState = {
   repairRequests: RepairRequest[];
   boardingEvents: BoardingEvent[];
   gpsPings: GpsPing[];
+  staffRiders: TransportStaffRider[];
 };
 
 /** One month of transport due for a rider (computed, not stored). */
@@ -396,12 +629,49 @@ export type TransportComplianceAlert = {
 const STORAGE_KEY = "bhb_transport_v2";
 const LEGACY_KEY = "bhb_transport_v1";
 
+/**
+ * The desk, held in memory, independent of localStorage.
+ *
+ * localStorage is a cache and on a phone it is a small one: WebKit allows
+ * about half of what desktop Chrome does, and fees, attendance and masters
+ * alone can fill it. When `writeCacheOrInvalidate` cannot store the desk it
+ * drops the entry, and until 14 Sep 2026 `loadTransport()` then read that
+ * absence as "no routes, no riders" — while the server held 174 assignments.
+ * A cache that could not be written must not read as an empty desk.
+ *
+ * Held unconditionally, like SIS: nothing in this module clears the desk on
+ * purpose, so there is no deliberate clear for a memory copy to resurrect.
+ * Same pattern as `memorySisState`; see the note there.
+ */
+let memoryTransportState: TransportState | null = null;
+
 function id(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * The fuels a vehicle can be filled with, each with the unit it is sold in.
+ *
+ * One entry for a single-fuel vehicle, two for a bi-fuel one — and the units
+ * differ between them, which is the whole point: a CNG+petrol bus takes kg of
+ * CNG and litres of petrol, at different rates. Anything pricing a fill has
+ * to ask this rather than assume the vehicle has one rate.
+ */
+export function vehicleFuelOptions(
+  v: Pick<FleetVehicle, "fuelType" | "secondaryFuelType">,
+): { fuelType: FuelType; unit: FuelUnit }[] {
+  const out: { fuelType: FuelType; unit: FuelUnit }[] = [
+    { fuelType: v.fuelType, unit: fuelUnitFor(v.fuelType) },
+  ];
+  const second = v.secondaryFuelType || "";
+  if (second && second !== v.fuelType) {
+    out.push({ fuelType: second as FuelType, unit: fuelUnitFor(second as FuelType) });
+  }
+  return out;
 }
 
 function fuelUnitFor(ft: FuelType): FuelUnit {
@@ -423,6 +693,13 @@ export function defaultFeePolicy(ay = DEFAULT_AY): TransportFeePolicy {
       { id: id("slb"), upToKm: 8, monthlyFeePaise: 70000 },
       { id: id("slb"), upToKm: 99, monthlyFeePaise: 90000 },
     ],
+    // The school's published 2026-27 rule: stop-priced up to 8 km, then
+    // ₹500 covering the first 5 km plus ₹100 for every started km after that.
+    bands: [
+      { id: id("bnd"), upToKm: 5, minPaise: 30000, maxPaise: 50000 },
+      { id: id("bnd"), upToKm: 8, minPaise: 70000, maxPaise: 80000 },
+    ],
+    formula: { basePaise: 50000, baseCoversKm: 5, perKmPaise: 10000 },
     repairApprovalPaise: 2500000,
   };
 }
@@ -447,15 +724,115 @@ function emptyTransport(): TransportState {
     repairRequests: [],
     boardingEvents: [],
     gpsPings: [],
+    staffRiders: [],
   };
 }
 
-function normalizeStop(s: Partial<TransportStop>, i: number): TransportStop {
+/** Exported for the self-test — every saved and reloaded row passes here. */
+export function normalizeStaffRider(
+  r: Partial<TransportStaffRider>,
+): TransportStaffRider {
+  // A record that says "charged" but carries no amount is not a charge — it
+  // is an unfinished one. Reading it as free would waive money nobody agreed
+  // to waive, so it stays "charged" with a zero and shows up as incomplete.
+  const charged = r.costMode === "charged";
+  return {
+    id: String(r.id || ""),
+    staffId: String(r.staffId || ""),
+    routeId: String(r.routeId || ""),
+    stopId: String(r.stopId || ""),
+    academicYearCode: String(r.academicYearCode || ""),
+    effectiveFrom: String(r.effectiveFrom || ""),
+    effectiveTo: r.effectiveTo ?? null,
+    costMode: charged ? "charged" : "free",
+    monthlyFeePaise: charged ? Math.max(0, Number(r.monthlyFeePaise) || 0) : 0,
+    serviceMode:
+      r.serviceMode === "pickup" || r.serviceMode === "drop"
+        ? r.serviceMode
+        : "both",
+    note: String(r.note || ""),
+    createdAt: String(r.createdAt || new Date().toISOString()),
+  };
+}
+
+export function normalizeStop(
+  s: Partial<TransportStop>,
+  i: number,
+): TransportStop {
+  const km = Math.max(0, Number(s.distanceKm) || 0);
+  const src: StopDistanceSource =
+    s.distanceSource === "google" ||
+    s.distanceSource === "free" ||
+    s.distanceSource === "manual"
+      ? s.distanceSource
+      : // Stops saved before distances were sourced carry a hand-typed km and
+        // no provenance. Call that `manual` rather than inventing `google`; a
+        // stop with no distance at all stays unsourced.
+        km > 0
+        ? "manual"
+        : "";
+  const lat = Number(s.geoLat);
+  const lng = Number(s.geoLng);
+  const hasGeo = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
   return {
     id: s.id ?? id("st"),
     name: s.name ?? `Stop ${i + 1}`,
     sequence: s.sequence ?? i + 1,
-    distanceKm: Math.max(0, Number(s.distanceKm) || 0),
+    distanceKm: km,
+    distanceSource: src,
+    ...(Number(s.monthlyFeePaise) > 0
+      ? { monthlyFeePaise: Math.round(Number(s.monthlyFeePaise)) }
+      : {}),
+    ...(hasGeo ? { geoLat: lat, geoLng: lng } : {}),
+    ...(s.placeId ? { placeId: String(s.placeId) } : {}),
+    ...(s.geoAddress ? { geoAddress: String(s.geoAddress) } : {}),
+  };
+}
+
+/** True when the stop has coordinates we can measure a road distance from. */
+export function stopHasGeo(stop: TransportStop | undefined): boolean {
+  return (
+    !!stop &&
+    Number.isFinite(stop.geoLat) &&
+    Number.isFinite(stop.geoLng) &&
+    (stop.geoLat !== 0 || stop.geoLng !== 0)
+  );
+}
+
+/**
+ * A stored shift, made safe to read.
+ *
+ * An unparseable time becomes "" rather than a plausible default. Callers
+ * treat "" as "nobody has set this" and refuse to show or plan around it; a
+ * silent 00:00 would be believed and would put midnight on a parent's screen.
+ */
+export function normalizeShift(sh: Partial<TransportShift>): TransportShift {
+  const time = (sh.departTime ?? "").trim();
+  const ok = /^\d{1,2}:\d{2}$/.test(time);
+  let depart = "";
+  if (ok) {
+    const [h, m] = time.split(":").map(Number);
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+      depart = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    }
+  }
+  return {
+    id: sh.id ?? id("ts"),
+    name: (sh.name ?? "").trim() || "Run",
+    direction: sh.direction === "drop" ? "drop" : "pickup",
+    departTime: depart,
+    classGroups: Array.isArray(sh.classGroups)
+      ? (sh.classGroups.filter(
+          (g, i, all) => typeof g === "string" && all.indexOf(g) === i,
+        ) as ClassGroupCode[])
+      : [],
+    weekdays: Array.isArray(sh.weekdays)
+      ? sh.weekdays
+          .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
+          .filter((n, i, all) => all.indexOf(n) === i)
+          .sort()
+      : [],
+    isActive: sh.isActive !== false,
   };
 }
 
@@ -463,6 +840,9 @@ function normalizeRoute(r: Partial<TransportRoute>): TransportRoute {
   const stops = Array.isArray(r.stops)
     ? r.stops.map((s, i) => normalizeStop(s, i))
     : [];
+  const shifts = Array.isArray(r.shifts) ? r.shifts.map(normalizeShift) : [];
+  const rtMin = Number(r.roundTripMinutes);
+  const rtKm = Number(r.roundTripKm);
   return {
     id: r.id ?? id("tr"),
     code: (r.code ?? "").trim().toUpperCase() || "R-00",
@@ -473,6 +853,9 @@ function normalizeRoute(r: Partial<TransportRoute>): TransportRoute {
     monthlyFeePaise: Math.max(0, r.monthlyFeePaise ?? 0),
     isActive: r.isActive !== false,
     stops,
+    shifts,
+    ...(Number.isFinite(rtMin) && rtMin > 0 ? { roundTripMinutes: Math.round(rtMin) } : {}),
+    ...(Number.isFinite(rtKm) && rtKm > 0 ? { roundTripKm: Math.round(rtKm * 10) / 10 } : {}),
   };
 }
 
@@ -491,27 +874,43 @@ function normalizeAssignment(
     monthlyFeePaise: Math.max(0, a.monthlyFeePaise ?? 0),
     feeOverrideReason: a.feeOverrideReason ?? "",
     boardingSuspended: !!a.boardingSuspended,
+    serviceMode:
+      a.serviceMode === "pickup" || a.serviceMode === "drop"
+        ? a.serviceMode
+        : "both",
+    pickupShiftId: (a.pickupShiftId ?? "").trim(),
+    dropShiftId: (a.dropShiftId ?? "").trim(),
     createdAt: a.createdAt ?? new Date().toISOString(),
   };
 }
 
-function normalizeVehicle(v: Partial<FleetVehicle>): FleetVehicle {
+export function normalizeVehicle(v: Partial<FleetVehicle>): FleetVehicle {
   const fuelType = (v.fuelType as FuelType) || "diesel";
+  // A secondary fuel that repeats the primary says nothing, so it is dropped.
+  const secondary = (v.secondaryFuelType as FuelType | "") || "";
   return {
     id: v.id ?? id("veh"),
     registrationNo: (v.registrationNo ?? "").trim().toUpperCase() || "TBD",
     name: v.name ?? v.registrationNo ?? "Bus",
     type: (v.type as VehicleType) || "bus",
     fuelType,
-    fuelUnit: v.fuelUnit || fuelUnitFor(fuelType),
+    // The unit is a FACT ABOUT THE FUEL, not a preference: CNG is sold by the
+    // kilogram, diesel and petrol by the litre, electricity by the kWh. A
+    // stored unit that contradicts its fuel is a data error — production had
+    // a CNG bus recorded in litres — so it is corrected rather than kept.
+    fuelUnit: fuelUnitFor(fuelType),
+    secondaryFuelType: secondary && secondary !== fuelType ? secondary : "",
     tankCapacity: Math.max(0, Number(v.tankCapacity) || 0),
     odometerKm: Math.max(0, Number(v.odometerKm) || 0),
     avgMileage: Math.max(0, Number(v.avgMileage) || 0),
     primaryRouteId: v.primaryRouteId ?? "",
     photoUrl: v.photoUrl?.trim() || "",
-    seatCapacity: Math.max(1, Number(v.seatCapacity) || 40),
+    // Unknown stays 0. See the field's comment: a default of 40 made "nobody
+    // measured this" indistinguishable from "a forty-seat bus".
+    seatCapacity: Math.max(0, Math.round(Number(v.seatCapacity) || 0)),
     driverName: (v.driverName ?? "").trim(),
     driverMobile: (v.driverMobile ?? "").replace(/\D/g, "").slice(-10),
+    driverStaffId: (v.driverStaffId ?? "").trim(),
     status: (v.status as VehicleStatus) || "active",
     compliance: Array.isArray(v.compliance) ? v.compliance : [],
     serviceSchedule: Array.isArray(v.serviceSchedule) ? v.serviceSchedule : [],
@@ -527,6 +926,8 @@ function normalizeFeePolicy(p?: Partial<TransportFeePolicy>): TransportFeePolicy
     ...base,
     ...p,
     slabs: Array.isArray(p.slabs) && p.slabs.length ? p.slabs : base.slabs,
+    bands: Array.isArray(p.bands) && p.bands.length ? p.bands : base.bands,
+    formula: p.formula ?? base.formula,
     repairApprovalPaise:
       p.repairApprovalPaise ?? base.repairApprovalPaise,
   };
@@ -568,9 +969,21 @@ function migrateFromV1(raw: unknown): TransportState {
 }
 
 export function loadTransport(): TransportState {
-  if (typeof window === "undefined") return emptyTransport();
+  // The server has no localStorage, so until 2026-09-16 this returned an
+  // empty desk there — and every server-side fee calculation then read the
+  // bus fee of 157 riders as zero. `fee_desk_open_dues` held not one
+  // transport line; the reminders, the pay links, the parent app and the
+  // principal cockpit all quoted school fee only, and parents answered
+  // "only September is pending" because that is what we sent them.
+  // `ensureTransportHydratedServer` fills the memory copy from the desk
+  // tables; an instance that has not hydrated yet still reads empty, which
+  // is why the dues paths hydrate before they compute.
+  if (typeof window === "undefined") return memoryTransportState ?? emptyTransport();
   try {
-    const raw2 = localStorage.getItem(STORAGE_KEY);
+    const raw2 = readCache(STORAGE_KEY);
+    // A cache that could not be written (or was evicted to make room for
+    // another desk) must not read as "no routes". See memoryTransportState.
+    if (!raw2 && memoryTransportState) return memoryTransportState;
     if (raw2) {
       const parsed = JSON.parse(raw2) as Partial<TransportState>;
       return {
@@ -618,6 +1031,9 @@ export function loadTransport(): TransportState {
           ? parsed.boardingEvents
           : [],
         gpsPings: Array.isArray(parsed.gpsPings) ? parsed.gpsPings : [],
+        staffRiders: Array.isArray(parsed.staffRiders)
+          ? parsed.staffRiders.map(normalizeStaffRider)
+          : [],
       };
     }
     const legacy = localStorage.getItem(LEGACY_KEY);
@@ -636,16 +1052,24 @@ export function saveTransport(state: TransportState) {
   if (!assertModulePermission("transport", "edit", "saveTransport")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
-  void import("@/lib/transportPersistence").then(({ scheduleTransportSync }) => {
+  writeTransportLocalRaw(state);
+  void trackServerWork(import("@/lib/transportPersistence").then(({ scheduleTransportSync }) => {
     scheduleTransportSync(state);
-  });
+  }));
 
 }
 
 export function writeTransportLocalRaw(state: TransportState) {
+  const next: TransportState = { ...state, version: 2 };
+  // Memory first, and unconditionally: this must survive a cache that cannot
+  // hold the desk. writeCacheOrInvalidate never throws for a full disk.
+  memoryTransportState = next;
+  // On the server the memory copy IS the desk: there is no cache to write,
+  // and returning early here (as this did until 2026-09-16) made
+  // `ensureTransportHydratedServer` a no-op that pulled the whole transport
+  // desk from Supabase and then threw it away.
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
 }
 
 export function transportStateIsEmpty(state: TransportState): boolean {
@@ -715,12 +1139,156 @@ function assignmentCoversPeriod(
   return true;
 }
 
+/**
+ * Half the service, half the fee.
+ *
+ * Applied on top of the full-service figure, whether that came from the policy
+ * or from a clerk's override — so an override is always entered as the full
+ * amount and this halves it. Rounded to whole rupees, because a receipt showing
+ * ₹337.50 invites an argument at the counter.
+ */
+export function applyServiceMode(
+  fullPaise: number,
+  mode: TransportServiceMode | undefined,
+): number {
+  if (!fullPaise || fullPaise <= 0) return 0;
+  if (mode !== "pickup" && mode !== "drop") return fullPaise;
+  return Math.round(fullPaise / 2 / 100) * 100;
+}
+
+export function serviceModeLabel(mode: TransportServiceMode | undefined): string {
+  if (mode === "pickup") return "Pick-up only";
+  if (mode === "drop") return "Drop only";
+  return "Both ways";
+}
+
+export type FeeBasis =
+  | "route-flat"
+  | "stop-price"
+  | "formula"
+  | "per-km"
+  | "slab"
+  | "unpriced";
+
+export type ExpectedFee = {
+  paise: number;
+  basis: FeeBasis;
+  /** False when the fee could not be established and must not be billed as-is. */
+  ok: boolean;
+  /** Why, when not ok — shown to the clerk instead of a confident number. */
+  reason?: string;
+  /** Set when a stop price sits outside its band. */
+  warning?: string;
+};
+
+/** Every started kilometre counts — 8.2 km is charged as 9. */
+function kmBeyond(km: number, covered: number): number {
+  return Math.max(0, Math.ceil(km - covered));
+}
+
+/**
+ * What the policy says this stop costs, and whether that is knowable.
+ *
+ * Returns `ok: false` rather than a plausible number when the stop has no
+ * measured distance or no price. A transport fee that quietly defaults is a
+ * wrong invoice nobody notices — the counter should say "not priced" and make
+ * somebody decide.
+ */
+export function expectedMonthlyFeeDetail(
+  route: TransportRoute,
+  stop: TransportStop | undefined,
+  policy?: TransportFeePolicy,
+): ExpectedFee {
+  const p = policy ?? loadTransport().feePolicy;
+
+  if (p.rateMode === "band_then_formula") {
+    if (!stop) {
+      return {
+        paise: 0,
+        basis: "unpriced",
+        ok: false,
+        reason: "No stop selected",
+      };
+    }
+    const km = stop.distanceKm || 0;
+    if (km <= 0) {
+      return {
+        paise: 0,
+        basis: "unpriced",
+        ok: false,
+        reason: `${stop.name} has no measured distance — pin it on the map and measure before billing`,
+      };
+    }
+
+    const bands = [...(p.bands ?? [])].sort((a, b) => a.upToKm - b.upToKm);
+    const band = bands.find((b) => km <= b.upToKm);
+
+    if (band) {
+      const priced = stop.monthlyFeePaise ?? 0;
+      if (priced <= 0) {
+        return {
+          paise: 0,
+          basis: "unpriced",
+          ok: false,
+          reason: `${stop.name} is within ${band.upToKm} km, where each stop carries its own fee — set it between ${formatPaise(band.minPaise)} and ${formatPaise(band.maxPaise)}`,
+        };
+      }
+      const outside = priced < band.minPaise || priced > band.maxPaise;
+      return {
+        paise: priced,
+        basis: "stop-price",
+        ok: true,
+        warning: outside
+          ? `${formatPaise(priced)} is outside the ${formatPaise(band.minPaise)}–${formatPaise(band.maxPaise)} band for stops up to ${band.upToKm} km`
+          : undefined,
+      };
+    }
+
+    const f = p.formula;
+    return {
+      paise: f.basePaise + kmBeyond(km, f.baseCoversKm) * f.perKmPaise,
+      basis: "formula",
+      ok: true,
+    };
+  }
+
+  return { paise: legacyExpectedFee(route, stop, p), basis: legacyBasis(p), ok: true };
+}
+
+function formatPaise(paise: number): string {
+  return `₹${Math.round(paise / 100).toLocaleString("en-IN")}`;
+}
+
+function legacyBasis(p: TransportFeePolicy): FeeBasis {
+  if (p.rateMode === "per_km") return "per-km";
+  if (p.rateMode === "slab") return "slab";
+  return "route-flat";
+}
+
+/**
+ * Backwards-compatible number.
+ *
+ * Callers that only want a figure keep working; an unpriced stop yields 0 here,
+ * which `computeTransportPeriodDues` already skips rather than billing.
+ * New UI should prefer `expectedMonthlyFeeDetail` so it can say why.
+ */
 export function expectedMonthlyFeePaise(
   route: TransportRoute,
   stop: TransportStop | undefined,
   policy?: TransportFeePolicy,
 ): number {
   const p = policy ?? loadTransport().feePolicy;
+  if (p.rateMode === "band_then_formula") {
+    return expectedMonthlyFeeDetail(route, stop, p).paise;
+  }
+  return legacyExpectedFee(route, stop, p);
+}
+
+function legacyExpectedFee(
+  route: TransportRoute,
+  stop: TransportStop | undefined,
+  p: TransportFeePolicy,
+): number {
   if (p.rateMode === "flat_route" || !stop) {
     return Math.max(0, route.monthlyFeePaise);
   }
@@ -769,11 +1337,21 @@ export function computeTransportPeriodDues(
   for (const asg of assignments) {
     const route = s.routes.find((r) => r.id === asg.routeId);
     if (!route || !route.isActive) continue;
-    const stop =
-      route.stops.find((st) => st.id === asg.stopId) ?? route.stops[0];
-    const expected = expectedMonthlyFeePaise(route, stop, s.feePolicy);
-    const fee =
-      asg.monthlyFeePaise > 0 ? asg.monthlyFeePaise : expected;
+    // A rider whose stopId does not resolve has NO stop, and therefore no
+    // stop price. This used to fall back to route.stops[0] — the first stop
+    // on the route — so when every assignment's stop link was orphaned on
+    // 2026-08-23, riders with no explicit fee were quietly billed at whatever
+    // the first stop happened to cost, wherever they actually live. A guess
+    // in the fee engine is worse than a gap: the gap is visible, the guess
+    // goes out on an invoice. No stop means no policy fee; the rider's own
+    // agreed fee still bills, and anyone left at zero is skipped below and
+    // surfaced as unbilled on the roster.
+    const stop = route.stops.find((st) => st.id === asg.stopId);
+    const expected = stop
+      ? expectedMonthlyFeePaise(route, stop, s.feePolicy)
+      : 0;
+    const fullFee = asg.monthlyFeePaise > 0 ? asg.monthlyFeePaise : expected;
+    const fee = applyServiceMode(fullFee, asg.serviceMode);
     if (fee <= 0) continue;
 
     const veh = route.vehicleId
@@ -808,7 +1386,66 @@ export function computeTransportPeriodDues(
     }
   }
 
-  return out.sort((a, b) => a.dueOn.localeCompare(b.dueOn));
+  // One month, one transport charge. Overlapping assignments for the same
+  // student are a data fault, not a reason to bill a family twice: it happens
+  // whenever a re-assignment is back-dated to before the assignment it
+  // replaces, because assignTransport's close-the-previous-row step declines
+  // to set an effectiveTo earlier than that row's own effectiveFrom and leaves
+  // it open. Twelve riders were double-billed for Apr-Aug 2026 that way.
+  //
+  // The winner is the most recently created assignment covering the period —
+  // the latest decision the office made about that rider. Ties fall back to
+  // the assignment id so the choice is stable between renders rather than
+  // depending on array order.
+  const byPeriod = new Map<string, TransportPeriodDue>();
+  const createdAt = new Map(
+    assignments.map((a) => [a.id, a.createdAt ?? ""] as const),
+  );
+  for (const due of out) {
+    const prev = byPeriod.get(due.periodKey);
+    if (!prev) {
+      byPeriod.set(due.periodKey, due);
+      continue;
+    }
+    const a = createdAt.get(due.assignmentId) ?? "";
+    const b = createdAt.get(prev.assignmentId) ?? "";
+    const newer =
+      a !== b ? a > b : due.assignmentId > prev.assignmentId;
+    if (newer) byPeriod.set(due.periodKey, due);
+  }
+
+  return [...byPeriod.values()].sort((a, b) => a.dueOn.localeCompare(b.dueOn));
+}
+
+/**
+ * Assignments for a student that overlap each other — a data fault the roster
+ * should surface. Billing already de-duplicates (see above), so this is for
+ * showing the office what needs correcting, not for protecting the invoice.
+ */
+export function overlappingAssignments(
+  studentId: string,
+  options?: { academicYearCode?: string; state?: TransportState },
+): TransportAssignment[][] {
+  const s = options?.state ?? loadTransport();
+  const ay = options?.academicYearCode ?? DEFAULT_AY;
+  const rows = s.assignments.filter(
+    (a) => a.studentId === studentId && a.academicYearCode === ay,
+  );
+  const END = "9999-12-31";
+  const clashes: TransportAssignment[][] = [];
+  for (let i = 0; i < rows.length; i += 1) {
+    for (let j = i + 1; j < rows.length; j += 1) {
+      const x = rows[i];
+      const y = rows[j];
+      if (
+        x.effectiveFrom <= (y.effectiveTo || END) &&
+        y.effectiveFrom <= (x.effectiveTo || END)
+      ) {
+        clashes.push([x, y]);
+      }
+    }
+  }
+  return clashes;
 }
 
 /* ─── Fee policy ───────────────────────────────────────────── */
@@ -870,34 +1507,312 @@ export function deactivateTransportRoute(routeId: string): boolean {
   return true;
 }
 
+/**
+ * Record what Directions measured for the whole route.
+ *
+ * Written only from a real measurement, never from an estimate — see the
+ * comment on TransportRoute.roundTripMinutes for why.
+ */
+export function setRouteRoundTrip(
+  routeId: string,
+  measured: { minutes: number; km: number },
+): boolean {
+  if (!(measured.minutes > 0)) return false;
+  const state = loadTransport();
+  if (!state.routes.some((r) => r.id === routeId)) return false;
+  saveTransport({
+    ...state,
+    routes: state.routes.map((r) =>
+      r.id === routeId
+        ? {
+            ...r,
+            roundTripMinutes: Math.round(measured.minutes),
+            roundTripKm: Math.round(measured.km * 10) / 10,
+          }
+        : r,
+    ),
+  });
+  return true;
+}
+
+export type RouteStopInput = {
+  /** The existing stop this row IS, when the editor knows. */
+  id?: string;
+  name: string;
+  distanceKm?: number;
+  geoLat?: number;
+  geoLng?: number;
+  placeId?: string;
+  geoAddress?: string;
+  distanceSource?: StopDistanceSource;
+  monthlyFeePaise?: number;
+};
+
+function stopNameKey(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * The next stop list for a route, keeping every stop's id that can be kept.
+ *
+ * Assignments name their stop by id. Until 14 Sep 2026 this function minted a
+ * fresh id for EVERY row on every save — so adding one stop to a route, or
+ * fixing a spelling, orphaned every rider on that route. It happened on
+ * 23 Aug (124 riders) and again in September (171 of 182), and each time the
+ * fee benchmark, the driver's manifest and the parent app lost the stop for
+ * every child on the bus.
+ *
+ * A row keeps an existing stop's id when: it says which stop it is (`id`);
+ * or it carries the same Google place; or, failing both, the same name.
+ * Each existing stop is claimed at most once, in row order, so two rows
+ * with one name take the two existing ids in sequence rather than sharing
+ * one. Only a row that matches nothing is a new stop.
+ *
+ * Pure — exported for the self-test.
+ */
+export function planRouteStops(
+  existing: TransportStop[],
+  rows: RouteStopInput[],
+): TransportStop[] {
+  const kept = rows.filter((r) => r.name.trim());
+  const unclaimed = new Set(existing.map((s) => s.id));
+  const byId = new Map(existing.map((s) => [s.id, s]));
+
+  const claim = (row: RouteStopInput): string | null => {
+    if (row.id && unclaimed.has(row.id)) return row.id;
+    const place = (row.placeId ?? "").trim();
+    if (place) {
+      const hit = existing.find(
+        (s) => unclaimed.has(s.id) && (s.placeId ?? "").trim() === place,
+      );
+      if (hit) return hit.id;
+    }
+    const key = stopNameKey(row.name);
+    const hit = existing.find(
+      (s) => unclaimed.has(s.id) && stopNameKey(s.name) === key,
+    );
+    return hit ? hit.id : null;
+  };
+
+  // Two passes: rows that name their stop claim first, so a renamed row
+  // cannot lose its id to a later row that merely shares its old name.
+  const ids: (string | null)[] = kept.map(() => null);
+  kept.forEach((row, i) => {
+    if (row.id && unclaimed.has(row.id)) {
+      ids[i] = row.id;
+      unclaimed.delete(row.id);
+    }
+  });
+  kept.forEach((row, i) => {
+    if (ids[i]) return;
+    const found = claim(row);
+    if (found) {
+      ids[i] = found;
+      unclaimed.delete(found);
+    }
+  });
+
+  return kept.map((row, i) => {
+    const prior = ids[i] ? byId.get(ids[i] as string) : undefined;
+    return normalizeStop(
+      {
+        id: ids[i] ?? undefined,
+        name: row.name.trim(),
+        sequence: i + 1,
+        distanceKm: row.distanceKm ?? prior?.distanceKm ?? 0,
+        geoLat: row.geoLat,
+        geoLng: row.geoLng,
+        placeId: row.placeId,
+        geoAddress: row.geoAddress,
+        distanceSource: row.distanceSource,
+        monthlyFeePaise: row.monthlyFeePaise,
+      },
+      i,
+    );
+  });
+}
+
 export function setRouteStops(
   routeId: string,
-  stops: { name: string; distanceKm?: number }[],
+  stops: RouteStopInput[],
 ):
   | { ok: true; route: TransportRoute }
   | { ok: false; error: string } {
   const state = loadTransport();
   const route = state.routes.find((r) => r.id === routeId);
   if (!route) return { ok: false, error: "Route not found" };
-  const nextStops = stops
-    .map((s) => s.name.trim())
-    .filter(Boolean)
-    .map((name, i) =>
-      normalizeStop(
-        {
-          name,
-          sequence: i + 1,
-          distanceKm: stops[i]?.distanceKm ?? 0,
-        },
-        i,
-      ),
-    );
+  const nextStops = planRouteStops(route.stops, stops);
   const updated = { ...route, stops: nextStops };
   saveTransport({
     ...state,
     routes: state.routes.map((r) => (r.id === routeId ? updated : r)),
   });
   return { ok: true, route: updated };
+}
+
+/* ─── Seats ────────────────────────────────────────────────── */
+
+/**
+ * How full a bus is, or an honest admission that nobody can say.
+ *
+ * `known: false` is the state of every vehicle in the fleet today, and it must
+ * not collapse into either "full" or "empty". Subtracting riders from an
+ * unrecorded capacity gives a negative number that `Math.max(0, …)` turns into
+ * "bus full", which is how an unmeasured van ends up refusing children; using
+ * the old 40 default gives "five seats free" on a Tata Magic.
+ */
+export type RouteSeats =
+  | { known: true; capacity: number; used: number; left: number; full: boolean }
+  | { known: false; capacity: 0; used: number };
+
+/**
+ * Seats on the vehicle serving a route.
+ *
+ * WHO COUNTS AS ABOARD
+ * The same rule `ridersOnRoute` has always used: the assignment's date window
+ * covers the day being asked about. Not "effectiveTo is null" — an amendment
+ * CLOSES the old assignment with a future end date and opens the new one with
+ * a future start, so on the day of the change both rows exist for one child.
+ * Counting open-ended rows only would lose the rider who is still on the bus
+ * until the end of the month; counting every row would seat them twice.
+ *
+ * `exceptStudentId` leaves one child out. Without it, changing the stop of a
+ * rider already on the bus counts them against their own seat and reports the
+ * bus one fuller than it is — which on a full bus refuses a move that frees
+ * nothing and takes nothing.
+ */
+export function seatsOnRoute(
+  state: TransportState,
+  routeId: string,
+  opts?: {
+    exceptStudentId?: string;
+    academicYearCode?: string;
+    /** The day to ask about. Defaults to today. */
+    onDate?: string;
+  },
+): RouteSeats {
+  const route = state.routes.find((r) => r.id === routeId);
+  const vehicle = route?.vehicleId
+    ? state.vehicles.find((v) => v.id === route.vehicleId)
+    : state.vehicles.find((v) => v.primaryRouteId === routeId);
+
+  const on = opts?.onDate || todayIso();
+  const used = state.assignments.filter(
+    (a) =>
+      a.routeId === routeId &&
+      a.effectiveFrom <= on &&
+      (!a.effectiveTo || a.effectiveTo >= on) &&
+      a.studentId !== opts?.exceptStudentId &&
+      (!opts?.academicYearCode || a.academicYearCode === opts.academicYearCode),
+  ).length;
+
+  const capacity = Math.max(0, Math.round(Number(vehicle?.seatCapacity) || 0));
+  if (capacity <= 0) return { known: false, capacity: 0, used };
+  return {
+    known: true,
+    capacity,
+    used,
+    left: Math.max(0, capacity - used),
+    full: used >= capacity,
+  };
+}
+
+/** One line for a screen: "6 seats free", "full (40 of 40)", or the truth. */
+export function describeRouteSeats(seats: RouteSeats): string {
+  if (!seats.known) {
+    return `${seats.used} riders · seats not recorded for this vehicle`;
+  }
+  return seats.full
+    ? `full — ${seats.used} of ${seats.capacity}`
+    : `${seats.left} of ${seats.capacity} seats free`;
+}
+
+/* ─── Shifts ───────────────────────────────────────────────── */
+
+/**
+ * Replace a route's timed runs.
+ *
+ * Removing a run does NOT quietly move the children pinned to it — see
+ * `resolveRiderShift`, which reports them as unresolved rather than reverting
+ * them to the class rule. So this counts them and hands the number back, for
+ * the screen to say "3 children are placed on this run by hand" BEFORE the
+ * clerk saves rather than after.
+ */
+export function setRouteShifts(
+  routeId: string,
+  shifts: Partial<TransportShift>[],
+):
+  | { ok: true; route: TransportRoute; orphanedRiders: number }
+  | { ok: false; error: string } {
+  const state = loadTransport();
+  const route = state.routes.find((r) => r.id === routeId);
+  if (!route) return { ok: false, error: "Route not found" };
+
+  const next = shifts.map(normalizeShift);
+  const keptIds = new Set(next.map((s) => s.id));
+
+  const orphanedRiders = state.assignments.filter(
+    (a) =>
+      a.routeId === routeId &&
+      a.effectiveTo == null &&
+      ((a.pickupShiftId && !keptIds.has(a.pickupShiftId)) ||
+        (a.dropShiftId && !keptIds.has(a.dropShiftId))),
+  ).length;
+
+  const updated = { ...route, shifts: next };
+  saveTransport({
+    ...state,
+    routes: state.routes.map((r) => (r.id === routeId ? updated : r)),
+  });
+  return { ok: true, route: updated, orphanedRiders };
+}
+
+/**
+ * Pin one rider to a run by hand, or hand them back to the class rule.
+ *
+ * Pass "" to clear the override — the child then follows their class group
+ * again, which is what should happen when the reason for the exception ends.
+ * A run on a different route is refused: the rider's route decides which runs
+ * exist for them, and accepting a stray id would put a child on a bus they
+ * are not assigned to.
+ */
+export function setAssignmentShift(
+  assignmentId: string,
+  direction: TransportShiftDirection,
+  shiftId: string,
+): { ok: true } | { ok: false; error: string } {
+  const state = loadTransport();
+  const target = state.assignments.find(
+    (a) => a.id === assignmentId && a.effectiveTo == null,
+  );
+  if (!target) return { ok: false, error: "No live assignment found" };
+
+  const wanted = (shiftId || "").trim();
+  if (wanted) {
+    const route = state.routes.find((r) => r.id === target.routeId);
+    const shift = route?.shifts.find((s) => s.id === wanted);
+    if (!shift) {
+      return { ok: false, error: "That run is not on this child's route" };
+    }
+    if (!shift.isActive) {
+      return { ok: false, error: `${shift.name} is not running` };
+    }
+    if (shift.direction !== direction) {
+      return {
+        ok: false,
+        error: `${shift.name} is a ${shift.direction === "pickup" ? "pick-up" : "drop"} run`,
+      };
+    }
+  }
+
+  const key = direction === "pickup" ? "pickupShiftId" : "dropShiftId";
+  saveTransport({
+    ...state,
+    assignments: state.assignments.map((a) =>
+      a.id === assignmentId ? { ...a, [key]: wanted } : a,
+    ),
+  });
+  return { ok: true };
 }
 
 /* ─── Assignments ──────────────────────────────────────────── */
@@ -911,8 +1826,25 @@ export function assignStudentToRoute(input: {
   academicYearCode?: string;
   monthlyFeePaise?: number;
   feeOverrideReason?: string;
+  serviceMode?: TransportServiceMode;
+  /**
+   * Runs chosen by hand, when the class-group rule is not what this child
+   * does. A run that is not on the new route is refused rather than stored —
+   * a stray id would leave the rider unresolved on a screen nobody revisits.
+   */
+  pickupShiftId?: string;
+  dropShiftId?: string;
+  /**
+   * Why this child may be seated on a bus already at capacity.
+   *
+   * Required only when the capacity is actually RECORDED and already met. A
+   * vehicle whose seats nobody has entered never blocks a move — refusing on
+   * an unknown would stop the office working over a number that does not
+   * exist. That case returns a warning instead.
+   */
+  overCapacityReason?: string;
 }):
-  | { ok: true; assignment: TransportAssignment }
+  | { ok: true; assignment: TransportAssignment; warning?: string }
   | { ok: false; error: string } {
   const state = loadTransport();
   const route = state.routes.find((r) => r.id === input.routeId && r.isActive);
@@ -926,12 +1858,45 @@ export function assignStudentToRoute(input: {
     return { ok: false, error: "Effective from date is required" };
   }
 
+  for (const [key, wanted] of [
+    ["pickup", input.pickupShiftId],
+    ["drop", input.dropShiftId],
+  ] as const) {
+    const id = (wanted || "").trim();
+    if (!id) continue;
+    const shift = route.shifts.find((sh) => sh.id === id);
+    if (!shift || !shift.isActive || shift.direction !== key) {
+      return {
+        ok: false,
+        error: `That ${key === "pickup" ? "pick-up" : "drop"} run is not on ${route.busNo || route.code}`,
+      };
+    }
+  }
+
   const hold = checkHold(input.studentId, "HOLD_TRANSPORT");
   if (!hold.allowed) {
     return { ok: false, error: hold.message };
   }
 
   const ay = input.academicYearCode ?? DEFAULT_AY;
+
+  // Seats, asked for the year this assignment belongs to. The child being
+  // assigned is left out of the count: when only their stop is changing they
+  // already hold a seat on this bus, and counting them against it would refuse
+  // a move that frees nothing and takes nothing.
+  const seats = seatsOnRoute(state, route.id, {
+    exceptStudentId: input.studentId,
+    academicYearCode: ay,
+  });
+  let seatWarning: string | undefined;
+  if (!seats.known) {
+    seatWarning = `No seat capacity is recorded for ${route.busNo || route.code}, so nobody can say whether it is full — it carries ${seats.used} already. Set the seats in Fleet.`;
+  } else if (seats.full && !input.overCapacityReason?.trim()) {
+    return {
+      ok: false,
+      error: `${route.busNo || route.code} is full — ${seats.used} of ${seats.capacity} seats. Enter a reason to seat one more.`,
+    };
+  }
   const expected = expectedMonthlyFeePaise(route, stop, state.feePolicy);
   const override =
     input.monthlyFeePaise != null && input.monthlyFeePaise > 0
@@ -944,6 +1909,12 @@ export function assignStudentToRoute(input: {
     };
   }
 
+  // Close whatever the rider was on before. The end date is the day before the
+  // new assignment starts — but never earlier than the old row's own start, or
+  // the row would end before it began. That case (a re-assignment back-dated
+  // to on/before the row it replaces) used to leave the old row OPEN, so both
+  // billed and the family was charged twice a month; it is now closed to a
+  // zero-length row, which covers no period and bills nothing.
   const nextAssignments = state.assignments.map((a) => {
     if (
       a.studentId === input.studentId &&
@@ -953,9 +1924,7 @@ export function assignStudentToRoute(input: {
       const dayBefore = new Date(`${input.effectiveFrom}T12:00:00`);
       dayBefore.setDate(dayBefore.getDate() - 1);
       const end = dayBefore.toISOString().slice(0, 10);
-      if (end >= a.effectiveFrom) {
-        return { ...a, effectiveTo: end };
-      }
+      return { ...a, effectiveTo: end >= a.effectiveFrom ? end : a.effectiveFrom };
     }
     return a;
   });
@@ -971,6 +1940,9 @@ export function assignStudentToRoute(input: {
     effectiveTo: null,
     monthlyFeePaise: override,
     feeOverrideReason: input.feeOverrideReason ?? "",
+    serviceMode: input.serviceMode ?? "both",
+    pickupShiftId: input.pickupShiftId ?? "",
+    dropShiftId: input.dropShiftId ?? "",
     createdAt: new Date().toISOString(),
   });
 
@@ -979,7 +1951,7 @@ export function assignStudentToRoute(input: {
     assignments: [assignment, ...nextAssignments],
   });
   saveTransport(alignVehiclesToRoutes(loadTransport()));
-  return { ok: true, assignment };
+  return { ok: true, assignment, ...(seatWarning ? { warning: seatWarning } : {}) };
 }
 
 /** Sync vehicle.primaryRouteId ↔ route.vehicleId from fleet records. */
@@ -1028,6 +2000,149 @@ export function endTransportAssignment(
     ),
   });
   return true;
+}
+
+/**
+ * Switch a rider between full service and one-way.
+ *
+ * Deliberately narrow: it flips the mode on the live assignment and nothing
+ * else. The fee is not rewritten, because `applyServiceMode` halves the full
+ * figure at billing time — storing a halved fee here would halve it twice the
+ * next time someone edited it.
+ *
+ * Note for the caller: this takes effect on every month the fee engine has
+ * not yet collected, including the current one. A rider who has already paid
+ * a full month and switches to one-way part-way through needs the amendment
+ * dialog instead, which splits the assignment so paid months keep the fee
+ * they were collected at.
+ */
+export function setAssignmentServiceMode(
+  assignmentId: string,
+  mode: TransportServiceMode,
+): boolean {
+  const state = loadTransport();
+  const target = state.assignments.find(
+    (a) => a.id === assignmentId && a.effectiveTo == null,
+  );
+  if (!target) return false;
+  if (target.serviceMode === mode) return true;
+  saveTransport({
+    ...state,
+    assignments: state.assignments.map((a) =>
+      a.id === assignmentId ? { ...a, serviceMode: mode } : a,
+    ),
+  });
+  return true;
+}
+
+/**
+ * Put a staff member on a bus, free or charged.
+ *
+ * `costMode` is required and is not derived from the amount. "Free" has to be
+ * a decision somebody recorded, because the alternative — treating a blank
+ * fee as free — silently waives money and is indistinguishable on screen from
+ * a fee nobody has set yet.
+ *
+ * Nothing here touches payroll. The monthly figure is recorded and surfaced
+ * for the payroll desk to recover; creating a salary deduction as a side
+ * effect of a transport screen would move someone's pay from a module that
+ * has no business doing so.
+ */
+export function assignStaffToTransport(input: {
+  id?: string;
+  staffId: string;
+  routeId: string;
+  stopId: string;
+  academicYearCode: string;
+  effectiveFrom: string;
+  costMode: "free" | "charged";
+  monthlyFeePaise?: number;
+  serviceMode?: TransportServiceMode;
+  note?: string;
+}):
+  | { ok: true; rider: TransportStaffRider }
+  | { ok: false; error: string } {
+  if (!input.staffId) return { ok: false, error: "Pick a staff member" };
+  if (!input.effectiveFrom) {
+    return { ok: false, error: "Effective from date is required" };
+  }
+  const state = loadTransport();
+  const route = state.routes.find((r) => r.id === input.routeId && r.isActive);
+  if (!route) return { ok: false, error: "Route not found or inactive" };
+  if (!route.stops.some((st) => st.id === input.stopId)) {
+    return { ok: false, error: "Select a stop on this route" };
+  }
+
+  const fee = Math.max(0, Number(input.monthlyFeePaise) || 0);
+  if (input.costMode === "charged" && fee <= 0) {
+    // Refused rather than saved as a zero: a charge of nothing is not a
+    // charge, and it would sit in the ledger looking settled.
+    return {
+      ok: false,
+      error: "Enter the monthly amount, or mark this ride as free",
+    };
+  }
+  if (input.costMode === "free" && !(input.note ?? "").trim()) {
+    // Free rides are the ones an auditor asks about. A reason costs the clerk
+    // one line now and answers the question later.
+    return { ok: false, error: "Say why this ride is free" };
+  }
+
+  const existing = input.id
+    ? state.staffRiders.find((r) => r.id === input.id)
+    : state.staffRiders.find(
+        (r) =>
+          r.staffId === input.staffId &&
+          r.academicYearCode === input.academicYearCode &&
+          r.effectiveTo == null,
+      );
+
+  const rider = normalizeStaffRider({
+    ...existing,
+    id: existing?.id ?? input.id ?? id("str"),
+    staffId: input.staffId,
+    routeId: input.routeId,
+    stopId: input.stopId,
+    academicYearCode: input.academicYearCode,
+    effectiveFrom: input.effectiveFrom,
+    effectiveTo: null,
+    costMode: input.costMode,
+    monthlyFeePaise: fee,
+    serviceMode: input.serviceMode ?? "both",
+    note: (input.note ?? "").trim(),
+    createdAt: existing?.createdAt ?? new Date().toISOString(),
+  });
+
+  saveTransport({
+    ...state,
+    staffRiders: existing
+      ? state.staffRiders.map((r) => (r.id === rider.id ? rider : r))
+      : [...state.staffRiders, rider],
+  });
+  return { ok: true, rider };
+}
+
+export function endStaffTransport(riderId: string, endDate: string): boolean {
+  const state = loadTransport();
+  if (!state.staffRiders.some((r) => r.id === riderId)) return false;
+  saveTransport({
+    ...state,
+    staffRiders: state.staffRiders.map((r) =>
+      r.id === riderId ? { ...r, effectiveTo: endDate } : r,
+    ),
+  });
+  return true;
+}
+
+export function listActiveStaffRiders(
+  state: TransportState,
+  academicYearCode?: string,
+): TransportStaffRider[] {
+  return state.staffRiders.filter(
+    (r) =>
+      r.effectiveTo == null &&
+      (!academicYearCode || r.academicYearCode === academicYearCode),
+  );
 }
 
 export function setBoardingSuspended(
@@ -1189,7 +2304,10 @@ export function markPayablePaid(
 
 export function listOpenPayables(state?: TransportState): FleetPayable[] {
   const s = state ?? loadTransport();
-  return s.payables.filter((p) => p.status !== "paid");
+  // Soonest due first — the store prepends, so it read newest-entered first.
+  return s.payables
+    .filter((p) => p.status !== "paid")
+    .sort((a, b) => (a.dueOn || "").localeCompare(b.dueOn || ""));
 }
 
 /* ─── Fuel ─────────────────────────────────────────────────── */
@@ -1548,7 +2666,7 @@ export function upsertInsurance(
     : [policy, ...state.insurancePolicies];
 
   // Sync insurance compliance doc
-  let vehicles = state.vehicles.map((v) => {
+  const vehicles = state.vehicles.map((v) => {
     if (v.id !== policy.vehicleId) return v;
     const others = v.compliance.filter((c) => c.certType !== "insurance");
     return {
@@ -1929,12 +3047,127 @@ export function upsertBoardingEvent(input: {
     status: input.status,
     note: input.note ?? "",
     createdAt: existing?.createdAt ?? new Date().toISOString(),
+    boardedLocation: existing?.boardedLocation ?? null,
+    offboardedLocation: existing?.offboardedLocation ?? null,
   };
   const boardingEvents = existing
     ? state.boardingEvents.map((e) => (e.id === event.id ? event : e))
     : [event, ...state.boardingEvents];
   saveTransport({ ...state, boardingEvents });
   return { ok: true, event };
+}
+
+export function haversineKm(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+): number {
+  const r = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return r * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+export type BoardingDistanceFlag = {
+  registeredKm: number;
+  actualKm: number;
+  deltaKm: number;
+};
+
+/** Delta above which a boarding location is flagged as differing from the
+ * student's registered stop. 1.5 km is a judgment call, not a confirmed
+ * school policy — loose enough to absorb ordinary GPS drift (the school
+ * itself already shows ~20-30m of scatter across vehicles at rest), tight
+ * enough to catch "boarded from a different stop entirely". Tune once real
+ * capture data shows what normal variance actually looks like. */
+const BOARDING_DISTANCE_FLAG_THRESHOLD_KM = 1.5;
+
+function boardingDistanceFlag(
+  state: TransportState,
+  studentId: string,
+  routeId: string,
+  actualKm: number,
+): BoardingDistanceFlag | null {
+  const assignment = state.assignments.find(
+    (a) => a.studentId === studentId && a.routeId === routeId && a.effectiveTo == null,
+  );
+  const route = state.routes.find((r) => r.id === routeId);
+  const stop = route?.stops.find((s) => s.id === assignment?.stopId);
+  if (!stop) return null;
+  const deltaKm = Math.abs(actualKm - stop.distanceKm);
+  if (deltaKm < BOARDING_DISTANCE_FLAG_THRESHOLD_KM) return null;
+  return { registeredKm: stop.distanceKm, actualKm, deltaKm };
+}
+
+/**
+ * Records where a student actually boarded/offboarded, from the marking
+ * staff member's own phone GPS — not Fleet Edge vehicle telemetry (see
+ * BoardingGeoCapture's doc comment for why). Boarding sets status
+ * "boarded" as a side effect; offboarding requires the student to already
+ * be marked boarded for this trip (you can't get off a bus you never got
+ * on) and does not change status.
+ */
+export function recordBoardingGeoEvent(input: {
+  date: string;
+  routeId: string;
+  trip: BoardingTrip;
+  studentId: string;
+  kind: "boarded" | "offboarded";
+  lat: number;
+  lng: number;
+  accuracyM?: number;
+}):
+  | { ok: true; event: BoardingEvent; flag: BoardingDistanceFlag | null }
+  | { ok: false; error: string } {
+  if (!input.studentId) return { ok: false, error: "Student required" };
+  if (!input.routeId) return { ok: false, error: "Route required" };
+  if (!Number.isFinite(input.lat) || !Number.isFinite(input.lng)) {
+    return { ok: false, error: "Invalid GPS coordinates" };
+  }
+  const state = loadTransport();
+  const existing = state.boardingEvents.find(
+    (e) =>
+      e.date === input.date &&
+      e.routeId === input.routeId &&
+      e.trip === input.trip &&
+      e.studentId === input.studentId,
+  );
+  if (input.kind === "offboarded" && existing?.status !== "boarded") {
+    return { ok: false, error: "Mark boarded before recording where they got off" };
+  }
+
+  const distanceFromSchoolKm = haversineKm(input.lat, input.lng, TENANT.schoolLat, TENANT.schoolLng);
+  const capture: BoardingGeoCapture = {
+    lat: input.lat,
+    lng: input.lng,
+    accuracyM: typeof input.accuracyM === "number" ? input.accuracyM : null,
+    at: new Date().toISOString(),
+    distanceFromSchoolKm,
+  };
+
+  const event: BoardingEvent = {
+    id: existing?.id ?? id("brd"),
+    date: input.date,
+    routeId: input.routeId,
+    trip: input.trip,
+    studentId: input.studentId,
+    status: input.kind === "boarded" ? "boarded" : (existing?.status ?? "boarded"),
+    note: existing?.note ?? "",
+    createdAt: existing?.createdAt ?? new Date().toISOString(),
+    boardedLocation: input.kind === "boarded" ? capture : (existing?.boardedLocation ?? null),
+    offboardedLocation: input.kind === "offboarded" ? capture : (existing?.offboardedLocation ?? null),
+  };
+  const boardingEvents = existing
+    ? state.boardingEvents.map((e) => (e.id === event.id ? event : e))
+    : [event, ...state.boardingEvents];
+  saveTransport({ ...state, boardingEvents });
+
+  const flag = boardingDistanceFlag(state, input.studentId, input.routeId, distanceFromSchoolKm);
+  return { ok: true, event, flag };
 }
 
 export function listBoardingForTrip(
@@ -2176,11 +3409,15 @@ export function importTransportRoutesCsv(text: string): {
       .filter(Boolean);
     const stops: TransportStop[] = stopNames.map((n, idx) => {
       const [nm, km] = n.split(":").map((x) => x.trim());
+      const importedKm = Number(km) || 0;
       return {
         id: id("st"),
         name: nm || n,
         sequence: idx + 1,
-        distanceKm: Number(km) || 0,
+        distanceKm: importedKm,
+        // A km in the CSV is someone's typed figure, not a measured road
+        // distance — record it as manual so it is never mistaken for Google.
+        distanceSource: importedKm > 0 ? ("manual" as const) : ("" as const),
       };
     });
     const existing = byCode.get(code);
@@ -2255,59 +3492,70 @@ export function exportTransportRoutesCsv(state?: TransportState): void {
   URL.revokeObjectURL(url);
 }
 
-/** Seed demo fleet + routes when empty. */
+/** The school's real fleet, per Tata Fleet Edge's official Subscribed
+ * Vehicles Report (2026-08-15) — VIN and registration number (where
+ * allotted) are the only confirmed facts. Everything else about these
+ * vehicles (fuel type, tank capacity, odometer, mileage, routes, driver)
+ * is NOT known here and is deliberately left for staff to fill in via the
+ * Fleet tab, rather than invented. */
+const REAL_FLEET: readonly { registrationNo: string; vin: string }[] = [
+  { registrationNo: "UP65QT4657", vin: "MAT805022SFB02913" },
+  { registrationNo: "UP65MT0849", vin: "MAT557029PUA00368" },
+  { registrationNo: "UP65PT3540", vin: "MAT558017RVE22810" },
+  { registrationNo: "", vin: "MAT558053TVE29204" },
+  { registrationNo: "", vin: "MAT558053TVG40149" },
+];
+
+function buildRealFleetVehicles(): FleetVehicle[] {
+  return REAL_FLEET.map((v) =>
+    normalizeVehicle({
+      registrationNo: v.registrationNo || v.vin,
+      name: v.registrationNo || `Bus — registration pending (VIN ${v.vin})`,
+    }),
+  );
+}
+
+/** Seed the real fleet when the registry is genuinely empty — no
+ * fictional route, dealer, or fuel stock; none of that is known either. */
+/**
+ * Seed a starter fleet — but only when the SERVER has said the desk is empty.
+ *
+ * An empty local cache is not that. On 14 Sep 2026 a phone with full storage
+ * downloaded the whole desk, could not cache it, read back nothing, and this
+ * function invented five vehicles and pushed them; the server refused the
+ * push twelve times because it held routes and assignments the client had
+ * just been sent. Before the server answers (null) or when it holds data
+ * (false) this returns whatever is loaded and touches nothing.
+ */
 export function seedTransportIfEmpty(): TransportState {
   const state = loadTransport();
   if (state.routes.length > 0 || state.vehicles.length > 0) return state;
-  const veh = normalizeVehicle({
-    registrationNo: "UP32 BT 4512",
-    name: "Bus 3",
-    type: "bus",
-    fuelType: "diesel",
-    tankCapacity: 120,
-    odometerKm: 45200,
-    avgMileage: 6.5,
-  });
-  const stops = [
-    normalizeStop({ name: "Lanka Gate", distanceKm: 2 }, 0),
-    normalizeStop({ name: "BHU Gate", distanceKm: 4 }, 1),
-    normalizeStop({ name: "Sigra", distanceKm: 6 }, 2),
-    normalizeStop({ name: "Cantonment", distanceKm: 8 }, 3),
-  ];
-  const route = normalizeRoute({
-    code: "R-12",
-    name: "Lanka – Cantonment",
-    busNo: "Bus 3",
-    vehicleReg: veh.registrationNo,
-    vehicleId: veh.id,
-    monthlyFeePaise: 120000,
-    stops,
-  });
-  veh.primaryRouteId = route.id;
-  const dealer: FleetDealer = {
-    id: id("dlr"),
-    name: "IOCL Sigra Pump",
-    type: "fuel_dealer",
-    phone: "",
-    gstin: "",
-    paymentTermsDays: 15,
-    isActive: true,
-  };
+  if (serverTransportDeskIsEmpty() !== true) return state;
+  const next: TransportState = { ...state, vehicles: buildRealFleetVehicles() };
+  saveTransport(next);
+  return next;
+}
+
+/** One-time cleanup for browsers that already seeded the OLD placeholder
+ * demo bus (UP32 BT 4512 / "Lanka – Cantonment") before the real fleet
+ * was known. Narrow, exact-match check — only touches state that still
+ * looks untouched, so it never overwrites anything staff has since
+ * entered themselves. */
+export function migrateDemoFleetToReal(): TransportState {
+  const state = loadTransport();
+  const onlyDemoVehicle =
+    state.vehicles.length === 1 && state.vehicles[0].registrationNo === "UP32 BT 4512";
+  if (!onlyDemoVehicle) return state;
+  // A save here pushes the desk. Do not rewrite a stale cache before the
+  // server has said what it holds — see seedTransportIfEmpty.
+  if (serverTransportDeskIsEmpty() === null) return state;
+  const demoVehicleId = state.vehicles[0].id;
   const next: TransportState = {
     ...state,
-    vehicles: [veh],
-    routes: [route],
-    dealers: [dealer],
-    fuelStockLocations: [
-      {
-        id: id("fsl"),
-        name: "Campus diesel depot",
-        fuelType: "diesel",
-        qtyOnHand: 200,
-        minAlert: 40,
-        maxCapacity: 500,
-      },
-    ],
+    vehicles: buildRealFleetVehicles(),
+    routes: state.routes.filter((r) => r.vehicleId !== demoVehicleId),
+    dealers: state.dealers.filter((d) => d.name !== "IOCL Sigra Pump"),
+    fuelStockLocations: state.fuelStockLocations.filter((f) => f.name !== "Campus diesel depot"),
   };
   saveTransport(next);
   return next;

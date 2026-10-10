@@ -1,0 +1,643 @@
+name: CI
+
+# Merge gate for the BHB ERP. Typecheck and lint are both currently clean,
+# so any new error here is a genuine regression introduced by the change —
+# not pre-existing debt. Keep it that way.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck · Lint · Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` installs exactly the lockfile — never silently resolves
+      # a different tree than the one that was reviewed.
+      #
+      # The lockfile is generated on macOS, so npm prunes every non-darwin
+      # platform binary from it (npm/cli#4828) — on a Linux runner Tailwind v4
+      # then dies with "Cannot find module '../lightningcss.linux-x64-gnu.node'".
+      # Install the Linux binaries explicitly, at the same pinned versions
+      # apps/web/Dockerfile uses, so CI builds the same tree production does.
+      - name: Install
+        run: |
+          npm ci
+          npm install --no-save --workspace=web \
+            lightningcss-linux-x64-gnu@1.32.0 \
+            @tailwindcss/oxide-linux-x64-gnu@4.3.2
+
+      - name: Typecheck
+        # tsc outgrew Node's default ~2 GB heap on 6 Oct 2026: every PR's
+        # Typecheck died with "JavaScript heap out of memory" (exit 134).
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # The ratchets: patterns being retired may not regrow.
+      #
+      # Until 19 Sep 2026 this ran ONLY inside scripts/verify.sh, which is a
+      # local pre-push script — so nothing on GitHub enforced it, and seven
+      # grids drifted past a row-menu standard that was reported as met.
+      # A guard nobody's machine runs is a guard that does not exist.
+      - name: Ratchets — retired patterns may not regrow
+        run: bash scripts/check-ratchets.sh
+
+      # Self-test harnesses (no test framework in this repo by design —
+      # these run as plain tsx scripts and exit non-zero on failure).
+      - name: Test — session cookie cannot be forged
+        working-directory: apps/web
+        run: npm run test:session-cookie
+
+      - name: Test — a client cannot replace the masters id generation
+        working-directory: apps/web
+        run: npm run test:masters-write-guard
+
+      - name: Test — a stale masters push cannot overwrite a newer save
+        working-directory: apps/web
+        run: npm run test:masters-revision-guard
+
+      - name: Test — a refused client can recover and save again
+        working-directory: apps/web
+        run: npm run test:masters-revision-lifecycle
+
+      - name: Test — a cold client does not invent a school
+        working-directory: apps/web
+        run: npm run test:masters-cold-client
+
+      - name: Test — a stale wipe signal expires
+        working-directory: apps/web
+        run: npm run test:tenant-wipe-expiry
+
+      - name: Test — a failed read cannot be mistaken for empty data
+        working-directory: apps/web
+        run: npm run test:data-contract
+
+      - name: Test — failed reads never look like empty data
+        working-directory: apps/web
+        run: npm run test:hydrate-failure-safety
+
+      - name: Test — a laptop cannot write to the production database
+        working-directory: apps/web
+        run: npm run test:prod-write-guard
+
+      - name: Test — money with no fee lines raises an alarm
+        working-directory: apps/web
+        run: npm run test:fee-integrity
+
+      - name: Test — a fee receipt goes out as the receipt template, filled
+        working-directory: apps/web
+        run: npm run test:wa-receipt-template
+
+      - name: Test — a parent is asked their language once, and it is remembered
+        working-directory: apps/web
+        run: npm run test:wa-language-gate
+      - name: Test — "need time" is asked how much and by when; "already paid" gets an apology, not a menu
+        working-directory: apps/web
+        run: npm run test:sis-bot-fee-replies
+      - name: "Test — an enrolled parent is a parent: no role-pick menu, no General tag"
+        working-directory: apps/web
+        run: npm run test:wa-known-parent-role
+      - name: "Test — the webhook parser never invents text a parent did not send"
+        working-directory: apps/web
+        run: npm run test:wa-inbound-parse
+      - name: Self-test — when the WhatsApp bots speak, and when they stay quiet
+        working-directory: apps/web
+        run: npm run test:wa-bot-silence
+      - name: "Test — two parents at once: neither family's turns are written over"
+        working-directory: apps/web
+        run: npm run test:sis-bot-thread-merge
+
+      - name: Self-test — a CV becomes a routable job application
+        working-directory: apps/web
+        run: npm run test:job-applications
+
+      - name: Self-test — an online class opens on the clock, and a link goes only where a class can be
+        working-directory: apps/web
+        run: npm run test:online-classes
+
+      - name: Self-test — an in-class answer is a child's work, and the note only says what the teacher said
+        working-directory: apps/web
+        run: npm run test:online-class-qa
+
+      - name: Self-test — the free AI service is off by default, and no student identifier can reach it
+        working-directory: apps/web
+        run: npm run test:puter-ai
+
+      - name: Self-test — free public lookups validate locally and never trust the shape
+        working-directory: apps/web
+        run: npm run test:open-lookups
+
+      - name: Self-test — a free road distance never bills a family unless the school said so
+        working-directory: apps/web
+        run: npm run test:free-routing
+
+      - name: Self-test — the free translation engine never answers Bhojpuri in Hindi
+        working-directory: apps/web
+        run: npm run test:bhashini
+
+      - name: Self-test — NCERT/CBSE class lists from DIKSHA apply to a class once, and renames stay matched
+        working-directory: apps/web
+        run: npm run test:ncf-official
+
+      - name: Self-test — enrolment follows CBSE 2026-27 (three languages from VI and IX, XI–XII one language + four)
+        working-directory: apps/web
+        run: npm run test:student-curriculum
+
+      - name: Self-test — a subject the school adds is never hidden, and codes stay unique
+        working-directory: apps/web
+        run: npm run test:subject-masters
+
+      - name: Self-test — UPI pay link and success-screenshot reading
+        working-directory: apps/web
+        run: npm run test:upi-pay
+
+      - name: Self-test — WhatsApp UPI screenshot finds the payment it pays
+        working-directory: apps/web
+        run: npm run test:upi-proof-match
+
+      - name: Self-test — dashboard expense periods (India days, Monday weeks)
+        working-directory: apps/web
+        run: npm run test:expense-range
+
+      - name: Self-test — payroll Mark paid uses the real pay date
+        working-directory: apps/web
+        run: npm run test:payroll-paid-on
+
+      - name: Self-test — Masters function grants, own classes only
+        working-directory: apps/web
+        run: npm run test:masters-change-auth
+
+      - name: Self-test — free-period grid agrees with the free-period list
+        working-directory: apps/web
+        run: npm run test:timetable-free-grid
+
+      - name: Self-test — UDISE+ teacher profiles and APAAR consent page from the ERP
+        working-directory: apps/web
+        run: npm run test:udise-teacher-apaar
+
+      - name: Test — which number sends which template, and both languages
+        working-directory: apps/web
+        run: npm run test:wa-sender-routing
+
+      - name: Test — optimistic-locking token survives normalization
+        working-directory: apps/web
+        run: npm run test:sis-revision
+
+      - name: Test — parent contacts and Aadhaar are not flattened or dropped
+        working-directory: apps/web
+        run: npm run test:sis-contacts
+
+      - name: Test — every student and household field survives the DB round trip
+        working-directory: apps/web
+        run: npm run test:sis-round-trip
+
+      - name: Test — a partial sync can never wipe the roster
+        working-directory: apps/web
+        run: npm run test:sis-prune
+
+      - name: Test — a partial attendance push never deletes history
+        working-directory: apps/web
+        run: npm run test:attendance-prune
+
+      - name: Test — no sync deletes a table because a client turned up empty
+        working-directory: apps/web
+        run: npm run test:prune-floor
+
+      - name: Test — stripping empties off the wire is reversible
+        working-directory: apps/web
+        run: npm run test:wire-payload
+
+      - name: Test — a removed student is actually deleted
+        working-directory: apps/web
+        run: npm run test:sis-delete
+
+      - name: Test — an empty desk never refuses the server's masters
+        working-directory: apps/web
+        run: npm run test:masters-freeze
+
+      - name: Test — a guessed academic year never reaches the server session
+        working-directory: apps/web
+        run: npm run test:session-year
+
+      - name: Test — a failed masters read is never guarded as empty
+        working-directory: apps/web
+        run: npm run test:masters-read-failure
+
+      - name: Test — a full localStorage never blocks the database write
+        working-directory: apps/web
+        run: npm run test:save-full-cache
+
+      - name: Test — an ended academic year cannot still be current
+        working-directory: apps/web
+        run: npm run test:academic-year-resolve
+      - name: Test — idle logout is thirty minutes for every session (standing policy)
+        working-directory: apps/web
+        run: npm run test:workspace-policy
+      - name: Test — accent tone tokens are not used in each other's place
+        working-directory: apps/web
+        run: npm run test:tone-tokens
+
+      - name: Test — a list projection never breaks pagination
+        working-directory: apps/web
+        run: npm run test:projection
+
+      - name: Test — an image is never stored inside a lead row
+        working-directory: apps/web
+        run: npm run test:survey-photo
+
+      - name: Test — a failed read is never shaped like data
+        working-directory: apps/web
+        run: npm run test:read-client
+
+      - name: Test — a full cache never reads as an empty roster
+        working-directory: apps/web
+        run: npm run test:sis-memory-fallback
+
+      - name: Test — a projected lead never blanks the record it came from
+        working-directory: apps/web
+        run: npm run test:partial-lead
+
+      - name: Test — a projected lead gets its 59 fields back before writing
+        working-directory: apps/web
+        run: npm run test:projected-lead-write
+
+      - name: Test — a failing guard refuses the push, never falls back silently
+        working-directory: apps/web
+        run: npm run test:sis-guard-fallback
+
+      - name: Test — audit trail never stores identity numbers
+        working-directory: apps/web
+        run: npm run test:audit-redaction
+
+      - name: Test — roster filters persist and share correctly
+        working-directory: apps/web
+        run: npm run test:student-filters
+
+      - name: Test — server masters come from desk without wiping staff
+        working-directory: apps/web
+        run: npm run test:masters-merge
+
+      - name: Test — the accounts books balance
+        working-directory: apps/web
+        run: npm run test:accounts
+
+      - name: Test — fee structure / import / automation suites
+        working-directory: apps/web
+        run: |
+          npm run test:playbook
+          npm run test:erp-chat
+          npm run test:wa-templates-automation
+          npm run test:wa-template-seeds
+          npm run test:wa-relay
+          npm run test:wa-unified-menus-hindi
+          npm run test:parent-messages-hindi
+          npm run test:parent-bot-real-chats
+          npm run test:staff-wa-real-chats
+          npm run test:staff-onboarding
+          npm run test:staff-leave-wa
+          npm run test:staff-register-leave
+          npm run test:staff-half-day-session
+          npm run test:class-notice-wa
+          npm run test:wa-template-autopilot
+          npm run test:pin-review
+          npm run test:due-pay-link
+          npm run test:fee-dues-server-inputs
+          npm run test:fee-store-dues-line
+          npm run test:ledger-monthly-cash
+          npm run test:app-home-numbers
+          npm run test:exam-paper-transliterate
+          npm run test:school-location-reply
+          npm run test:weekly-child-digest
+          npm run test:exam-eve
+          npm run test:tutor-guide
+          npm run test:wa-markdown
+          npm run test:wa-parent-guide
+          npm run test:udise-nudge
+          npm run test:apaar-consent
+          npm run test:aadhaar-certificate
+          npm run test:staff-chat-bare
+          npm run test:job-desk
+          npm run test:fee-adjustments-merge
+          npm run test:parent-bot-clarify
+          npm run test:office-backlog
+          npm run test:automation-send-rules
+          npm run test:fee-family-reminder
+          npm run test:fleet-keep-rule
+          npm run test:server-work-tracker
+          npm run test:concession-review-ai
+          npm run test:collections-weekly-ai
+          npm run test:erp-ask
+          npm run test:erp-reports
+          npm run test:fleet-live
+          npm run test:udise-doc-intake
+          npm run test:homework-expand
+          npm run test:homework-page-scan
+          npm run test:homework-submission
+          npm run test:exam-drill
+          npm run test:drill-skills
+          npm run test:fee-server-persistence
+          npm run test:exam-seating
+          npm run test:roster-name-case
+          npm run test:review-demo-records
+          npm run test:wa-template-shape-sync
+          npm run test:pdf-letterhead-assets
+          npm run test:brief-call-link
+          npm run test:fee-student-search
+
+      - name: Test — admissions village market
+        working-directory: apps/web
+        run: |
+          npm run test:village-market
+          npm run test:lead-score
+          npm run test:fuel-expense-line
+          npm run test:vendor-history
+          npm run test:site-seo
+          npm run test:approval-gate
+          npm run test:photo-consent
+          npm run test:registration-blockers
+          npm run test:sibling-carry-over
+          npm run test:sibling-separate
+          npm run test:udise-upload-store
+          npm run test:udise-student-details
+      - name: Test — PEN + APAAR is the whole of UDISE+ compliance
+        working-directory: apps/web
+        run: |
+          npm run test:village-market
+          npm run test:lead-score
+          npm run test:fuel-expense-line
+          npm run test:vendor-history
+          npm run test:site-seo
+          npm run test:approval-gate
+          npm run test:photo-consent
+          npm run test:registration-blockers
+          npm run test:sibling-carry-over
+          npm run test:udise-upload-store
+          npm run test:udise-compliance
+          npm run test:udise-robot
+          npm run test:udise-portal-api
+          npm run test:udise-portal-fill
+          npm run test:udise-portal-student-sync
+          npm run test:udise-school-finance
+          npm run test:udise-teacher-sync
+          npm run test:login-unknown-numbers
+          npm run test:desk-probe-allowlist
+          npm run test:full-storage-loaders
+          npm run test:cashfree-settlements
+          npm run test:holiday-calendar-view
+          npm run test:student-working-days
+          npm run test:leave-allotment
+          npm run test:class-group-message
+          npm run test:comms-reach
+          npm run test:udise-school-profile
+          npm run test:student-measurements
+          npm run test:udise-portal-add
+          npm run test:udise-portal-reconcile
+          npm run test:lead-worklist
+          npm run test:student-import
+          npm run test:student-import-mid-year
+          npm run test:cash-pool-orphans
+          npm run test:academic-risk
+          npm run test:admissions-ai
+          npm run test:admissions-enquiry-form
+          npm run test:admissions-kb
+          npm run test:birthday-cards
+          npm run test:collections-ai
+          npm run test:concession-per-due
+          npm run test:concession-ground
+          npm run test:fee-backdate
+          npm run test:receipt-auto-wa
+          npm run test:review-login
+          npm run test:desk-sync-status
+          npm run test:duty-roster
+          npm run test:email
+          npm run test:exam-invigilation
+          npm run test:exams
+          npm run test:exam-date-sheet
+          npm run test:exams-sheet-safety
+          npm run test:exam-schemes
+          npm run test:exam-readiness
+          npm run test:exam-report-templates
+          npm run test:exam-paper-question-types
+          npm run test:exam-paper-print-layout
+          npm run test:ai-school-status
+          npm run test:exam-formula-catalog
+          npm run test:household-prefs
+          npm run test:item-analytics
+          npm run test:fleet-edge-link
+          npm run test:fleet-edge-push
+          npm run test:fleet-edge-fuel
+          npm run test:boarding-point-audit
+          npm run test:halt-clustering
+          npm run test:item-score-import
+          npm run test:exam-paper-import
+          npm run test:answer-key-parse
+          npm run test:desk-shrink-guard
+          npm run test:nucleus-manifest
+          npm run test:nucleus-capture
+          npm run test:nucleus-handoff
+          npm run test:lead-extract-ai
+          npm run test:lead-followup-ai
+          npm run test:lead-quality
+          npm run test:lead-timeline
+          npm run test:ledger
+          npm run test:closing-balance
+          npm run test:accounts-position-rbac
+          npm run test:voucher-filter
+          npm run test:voucher-amend
+          npm run test:lesson-plan-ai
+          npm run test:marketing-content-ai
+          npm run test:module-filters
+          npm run test:outdoor-duty-persistence
+          npm run test:outdoor-duty-staff-id
+          npm run test:drive-archive
+          npm run test:fee-due-future
+          npm run test:ai-stream
+          npm run test:tutor-plans
+          npm run test:tutor-video-sources
+          npm run test:smart-teach
+          npm run test:nucleus-progress
+          npm run test:nucleus-reminder
+          npm run test:nucleus-assessments
+          npm run test:staff-home-kind
+          npm run test:staff-teaching-scope
+          npm run test:staff-month-calendar
+          npm run test:staff-roster-redact
+          npm run test:sis-class-teacher
+          npm run test:punch-code
+          npm run test:wa-language-gate
+          npm run test:answer-sheet-ai
+          npm run test:voice-dictation
+          npm run test:punch-devices
+          npm run test:punch-attempts
+          npm run test:punch-schedule
+          npm run test:survey-day
+          npm run test:timetable-rules
+          npm run test:module-state-merge
+          npm run test:staff-day-status
+          npm run test:payroll-no-register
+          npm run test:mobile-features
+          npm run test:cashfree-checkout
+          npm run test:gateway-fees
+          npm run test:gateway-methods
+          npm run test:cashfree-refund
+          npm run test:fee-autopay
+          npm run test:secure-id
+          npm run test:payouts
+          npm run test:cashgram
+          npm run test:diksha-index
+          npm run test:teacher-contact
+          npm run test:parent-profile
+          npm run test:tutor-access
+          npm run test:chapter-standards
+          npm run test:answer-book
+          npm run test:syllabus-from-books
+          npm run test:tutor-syllabus
+          npm run test:masters-staff-slices
+          npm run test:parent-tickets
+          npm run test:payroll-register
+          npm run test:ptm-brief-ai
+          npm run test:question-bank
+          npm run test:rbac-infer
+          npm run test:rbac-scope
+          npm run test:rbac-user-grants
+          npm run test:visitor-gate
+          npm run test:play-billing
+          npm run test:ai-content-report
+          npm run test:fleet-live-position
+          npm run test:parent-bus-reply
+          npm run test:voice-note
+          npm run test:wa-dedupe
+          npm run test:parent-dues-fallback
+          npm run test:school-whatsapp
+          npm run test:upload-validation
+          npm run test:receipt-lookup
+          npm run test:receipt-pdf
+          npm run test:referrals
+          npm run test:report-export
+          npm run test:report-remark-ai
+          npm run test:salary-additional
+          npm run test:salary-gross-up
+          npm run test:school-receipt-no
+          npm run test:session-cookie-edge
+          npm run test:staff-geo
+          npm run test:punch-screen-geofence
+          npm run test:app-min-build
+          npm run test:canva-birthday
+          npm run test:standing-discount-change
+          npm run test:syllabus-outcomes-import
+          npm run test:transport-overlap-billing
+          npm run test:transport-shifts
+          npm run test:transport-phone-empty-desk
+          npm run test:transport-stop-links
+          npm run test:transport-seats
+          npm run test:boarding-suggest
+          npm run test:defaulter-hold-policy
+          npm run test:hold-resolve
+          npm run test:live-bus-marker
+          npm run test:transport-pin-intake
+          npm run test:storage-quota
+          npm run test:wa-contact-state
+          npm run test:wa-delivery-log
+          npm run test:wa-meta-account-alerts
+          npm run test:wa-failure-reason
+          npm run test:wa-household-numbers
+          npm run test:wa-audience-spec
+          npm run test:wa-audience-households
+          npm run test:wa-tutor-bot
+          npm run test:wa-student-link
+          npm run test:leave-command
+          npm run test:daily-brief
+          npm run test:automation-approvals
+          npm run test:automation-schedule
+          npm run test:wa-number-gap
+          npm run test:session-scoped-students
+          npm run test:counter-discount-settled
+          npm run test:student-attendance
+          npm run test:student-homework
+          npm run test:student-transport
+          npm run test:student-library
+          npm run test:wa-transport-track
+          npm run test:wa-usage-cost
+          npm run test:wa-command-templates
+          npm run test:wa-sequences
+          npm run test:wa-staff-att-bot
+          npm run test:erp-commands
+          npm run test:wa-real-chats-oct
+          npm run test:class-channel-apply
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Same Linux-binary install as the verify job and apps/web/Dockerfile —
+      # the macOS-generated lockfile carries no linux-x64-gnu binaries.
+      - name: Install
+        run: |
+          npm ci
+          npm install --no-save --workspace=web \
+            lightningcss-linux-x64-gnu@1.32.0 \
+            @tailwindcss/oxide-linux-x64-gnu@4.3.2
+
+      # Catches anything that only fails at build time (bad dynamic
+      # imports, server/client boundary violations) before it reaches
+      # Cloud Run. Placeholder env values: the build must not require
+      # real secrets, and if it starts to, that itself is worth knowing.
+      - name: Build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+          # 6144, AND DELIBERATELY THE SAME AS apps/web/Dockerfile.
+          #
+          # On 28 Sep this job failed: compilation succeeded and then "Checking
+          # validity of types" died with SIGABRT at ~2.0 GB. It had no
+          # NODE_OPTIONS at all, so it ran on Node's default while every other
+          # build in the project had an explicit heap.
+          #
+          # Measured on this tree, not guessed: 2048 dies ~2.0 GB, 4096 dies
+          # ~4.0 GB in the Next.js build worker, 6144 and 8192 both complete with
+          # no GC pressure logged.
+          #
+          # 6144 rather than 8192, which is the whole point. The Docker build is
+          # capped at 6144 because cloudbuild.yaml runs on E2_HIGHCPU_8 — 8 GB of
+          # RAM — where a larger heap would be killed by the kernel. If THIS job
+          # had more headroom than that, CI would go green while the production
+          # deploy ran out of memory: exactly the failure that hid here until
+          # today, when the Dockerfile's 4096 was already below what this tree
+          # needs and nothing but an unrelated CI failure revealed it.
+          #
+          # So CI must never be more permissive than the deploy. Raise both
+          # together, and raise the Cloud Build machineType before raising these.
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: npm run build

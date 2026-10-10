@@ -1,6 +1,10 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — detail tables inside the pupil's profile dialog
 
+import { HouseholdMessageLogPanel } from "@/components/comms/HouseholdMessageLogPanel";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { useEffect, useMemo, useState } from "react";
+import { HOUSEHOLD_CHANNELS, languageLabel, quietHoursLabel } from "@/lib/householdPrefs";
 import Link from "next/link";
 import {
   DOC_LABELS,
@@ -17,6 +21,8 @@ import {
   StudentAvatar,
   StudentNameLabel,
 } from "@/components/students/StudentAvatar";
+import { loadTransport, type TransportState } from "@/lib/transport";
+import { studentTransportSummary } from "@/lib/transportForStudent";
 import {
   computeStudentDues,
   loadFees,
@@ -36,9 +42,17 @@ import {
   type AttendanceState,
   type AttendanceStatus,
 } from "@/lib/attendance";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type ProfileTab =
   | "profile"
+  | "messages"
   | "fees"
   | "exams"
   | "attendance"
@@ -52,6 +66,7 @@ const TABS: { id: ProfileTab; label: string }[] = [
   { id: "attendance", label: "Attendance" },
   { id: "documents", label: "Documents" },
   { id: "siblings", label: "Siblings" },
+  { id: "messages", label: "Messages" },
 ];
 
 function inr(paise: number): string {
@@ -77,6 +92,7 @@ export function StudentProfileModal({
 }) {
   const [tab, setTab] = useState<ProfileTab>("profile");
   const [fees, setFees] = useState<FeesState | null>(null);
+  const [transport, setTransport] = useState<TransportState | null>(null);
   const [exams, setExams] = useState<ExamsState | null>(null);
   const [attendance, setAttendance] = useState<AttendanceState | null>(null);
 
@@ -85,6 +101,11 @@ export function StudentProfileModal({
       setFees(loadFees());
     } catch {
       setFees(null);
+    }
+    try {
+      setTransport(loadTransport());
+    } catch {
+      setTransport(null);
     }
     try {
       setExams(loadExams());
@@ -128,6 +149,20 @@ export function StudentProfileModal({
     }
     return { lines, billed, paid, balance };
   }, [fees, student, masters]);
+
+  // A child's fee lines in due order, with balance sortable to find what is outstanding.
+  const feeLineSort = useTableSort(
+    feeSummary.lines,
+    {
+      head: (l) => l.label || l.feeHeadName,
+      dueOn: (l) => l.dueOn || "",
+      billed: (l) => l.billedPaise - l.concessionPaise,
+      paid: (l) => l.paidPaise,
+      balance: (l) => l.balancePaise,
+    },
+    "dueOn",
+    "asc",
+  );
 
   const examCards = useMemo(() => {
     if (!exams) return [] as ReportCard[];
@@ -182,16 +217,10 @@ export function StudentProfileModal({
   }, [attendance, student.id, ay]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[rgba(12,18,32,0.55)] p-4 sm:p-8"
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-3xl rounded-2xl bg-white shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+    // Base UI: focus trap, scroll lock, Escape. The hand-rolled overlay
+    // had none of them, so Tab left the open card for the page behind it.
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogPopup  className="w-full max-w-3xl rounded-2xl bg-white shadow-2xl">
         <div className="flex items-start gap-4 border-b border-[rgba(32,48,80,0.1)] p-5">
           <StudentAvatar student={student} size={64} />
           <div className="min-w-0 flex-1">
@@ -280,6 +309,9 @@ export function StudentProfileModal({
                 <Field label="Caste" value={student.caste || "—"} />
                 <Field label="Religion" value={student.religion || "—"} />
                 <Field label="Blood group" value={student.bloodGroup || "—"} />
+                <Field label="Mother tongue" value={student.motherTongue || "—"} />
+                <Field label="Place of birth" value={student.placeOfBirth || "—"} />
+                <Field label="Nationality" value={student.nationality || "—"} />
                 <Field label="Fee group" value={feeGroupLabel} />
                 {student.heightCm || student.weightKg ? (
                   <Field
@@ -311,9 +343,16 @@ export function StudentProfileModal({
                 ) : null}
               </Section>
 
+              <TransportSection
+                studentId={student.id}
+                academicYearCode={student.academicYearCode}
+                transport={transport}
+              />
+
               <Section title="Compliance IDs">
                 <Field label="PEN" value={student.pen || student.penStatus || "—"} />
                 <Field label="APAAR" value={student.apaarId || "—"} />
+                <ApaarConsentField student={student} />
                 <Field label="SRN" value={student.srn || "—"} />
                 <Field
                   label="Aadhaar"
@@ -338,6 +377,19 @@ export function StudentProfileModal({
               <Section title="Parents & guardian">
                 <Field label="Father" value={student.fatherName || "—"} />
                 <Field label="Father mobile" value={student.fatherMobile || "—"} />
+                {student.fatherAadhaarNumber || student.fatherAadhaarLast4 ? (
+                  <Field
+                    label="Father Aadhaar"
+                    value={displayAadhaar({
+                      number: student.fatherAadhaarNumber,
+                      last4: student.fatherAadhaarLast4,
+                      verification: student.fatherAadhaarVerification,
+                    })}
+                  />
+                ) : null}
+                {student.fatherPan ? (
+                  <Field label="Father PAN" value={student.fatherPan} />
+                ) : null}
                 {student.fatherOccupation || student.fatherQualification ? (
                   <Field
                     label="Father work / qualification"
@@ -348,6 +400,19 @@ export function StudentProfileModal({
                 ) : null}
                 <Field label="Mother" value={student.motherName || "—"} />
                 <Field label="Mother mobile" value={student.motherMobile || "—"} />
+                {student.motherAadhaarNumber || student.motherAadhaarLast4 ? (
+                  <Field
+                    label="Mother Aadhaar"
+                    value={displayAadhaar({
+                      number: student.motherAadhaarNumber,
+                      last4: student.motherAadhaarLast4,
+                      verification: student.motherAadhaarVerification,
+                    })}
+                  />
+                ) : null}
+                {student.motherPan ? (
+                  <Field label="Mother PAN" value={student.motherPan} />
+                ) : null}
                 {student.motherOccupation || student.motherQualification ? (
                   <Field
                     label="Mother work / qualification"
@@ -361,14 +426,55 @@ export function StudentProfileModal({
                 ) : null}
                 <Field
                   label="Guardian"
-                  value={hh?.guardianName || "—"}
+                  value={
+                    [hh?.guardianName, student.guardianRelation]
+                      .filter(Boolean)
+                      .join(" · ") || "—"
+                  }
                 />
                 <Field label="Guardian mobile" value={hh?.mobile || "—"} />
                 <Field
                   label="WhatsApp"
                   value={hh?.whatsappMobile || hh?.mobile || "—"}
                 />
+                <Field label="Alternate mobile" value={hh?.altMobile || "—"} />
+                {/* Who to ring when neither parent answers. It was not on this
+                    card at all, which is the one thing a card like this exists
+                    for. */}
+                <Field
+                  label="Emergency contact"
+                  value={
+                    [student.emergencyName, student.emergencyMobile]
+                      .filter(Boolean)
+                      .join(" · ") || "—"
+                  }
+                />
                 <Field label="Email" value={hh?.email || "—"} />
+                {/* The family's own answer about photographs. Blank is a real
+                    answer — never asked — and must not read as a refusal or as
+                    permission. See lib/photoConsent.ts. */}
+                <Field
+                  label="Photos of the child"
+                  value={
+                    hh?.photoConsent === "granted"
+                      ? "May be published"
+                      : hh?.photoConsent === "refused"
+                        ? "Not to be published"
+                        : "Not asked"
+                  }
+                />
+                <Field
+                  label="Preferred language"
+                  value={hh?.preferredLanguage ? languageLabel(hh.preferredLanguage) : "Not asked"}
+                />
+                <Field
+                  label="Preferred channel"
+                  value={
+                    HOUSEHOLD_CHANNELS.find((c) => c.id === hh?.channelPreference)?.label ||
+                    "Not asked"
+                  }
+                />
+                <Field label="Quiet hours" value={quietHoursLabel(hh) || "None"} />
               </Section>
 
               <Section title="Address">
@@ -396,6 +502,14 @@ export function StudentProfileModal({
                   />
                 ) : null}
               </Section>
+
+              {student.bankName || student.bankAccountNo || student.bankIfsc ? (
+                <Section title="Bank (scholarships / DBT)">
+                  <Field label="Bank" value={student.bankName || "—"} />
+                  <Field label="Account no" value={student.bankAccountNo || "—"} />
+                  <Field label="IFSC" value={student.bankIfsc || "—"} />
+                </Section>
+              ) : null}
 
               {student.registrationNo ||
               student.admissionFormNo ||
@@ -453,19 +567,20 @@ export function StudentProfileModal({
               {feeSummary.lines.length === 0 ? (
                 <Empty text="No fee dues found for this student." />
               ) : (
-                <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)]">
-                  <table className="w-full text-sm">
-                    <thead className="bg-[rgba(32,48,80,0.04)] text-left text-[11px] uppercase tracking-wide text-[var(--muted)]">
+                <ErpTableShell>
+                  <div className="overflow-x-auto">
+                  <ErpTable>
+                    <ErpTableHead>
                       <tr>
-                        <th className="px-3 py-2">Head</th>
-                        <th className="px-3 py-2">Due on</th>
-                        <th className="px-3 py-2 text-right">Billed</th>
-                        <th className="px-3 py-2 text-right">Paid</th>
-                        <th className="px-3 py-2 text-right">Balance</th>
+                        <ErpSortTh sort={feeLineSort} field="head" className="px-3 py-2">Head</ErpSortTh>
+                        <ErpSortTh sort={feeLineSort} field="dueOn" className="px-3 py-2">Due on</ErpSortTh>
+                        <ErpSortTh sort={feeLineSort} field="billed" align="right" className="px-3 py-2 text-right">Billed</ErpSortTh>
+                        <ErpSortTh sort={feeLineSort} field="paid" align="right" className="px-3 py-2 text-right">Paid</ErpSortTh>
+                        <ErpSortTh sort={feeLineSort} field="balance" align="right" className="px-3 py-2 text-right">Balance</ErpSortTh>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[rgba(32,48,80,0.08)]">
-                      {feeSummary.lines.map((l) => (
+                    </ErpTableHead>
+                    <ErpTableBody>
+                      {feeLineSort.rows.map((l) => (
                         <tr key={l.dueKey}>
                           <td className="px-3 py-2 text-[var(--brand-deep)]">
                             {l.label || l.feeHeadName}
@@ -476,23 +591,24 @@ export function StudentProfileModal({
                           <td className="px-3 py-2 text-right">
                             {inr(l.billedPaise - l.concessionPaise)}
                           </td>
-                          <td className="px-3 py-2 text-right text-[#0f766e]">
+                          <td className="px-3 py-2 text-right text-[var(--tone-teal)]">
                             {inr(l.paidPaise)}
                           </td>
                           <td
                             className={`px-3 py-2 text-right font-semibold ${
                               l.balancePaise > 0
                                 ? "text-[#c0392b]"
-                                : "text-[#0f766e]"
+                                : "text-[var(--tone-teal)]"
                             }`}
                           >
                             {inr(l.balancePaise)}
                           </td>
                         </tr>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
+                    </ErpTableBody>
+                  </ErpTable>
+                  </div>
+                </ErpTableShell>
               )}
             </div>
           ) : null}
@@ -503,11 +619,8 @@ export function StudentProfileModal({
                 <Empty text="No exam marks recorded for this session yet." />
               ) : (
                 examCards.map((rc) => (
-                  <div
-                    key={rc.examTerm.id}
-                    className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)]"
-                  >
-                    <div className="flex items-center justify-between bg-[rgba(32,48,80,0.04)] px-3 py-2">
+                  <ErpTableShell key={rc.examTerm.id}>
+                    <div className="flex items-center justify-between bg-[var(--surface-sunken)] px-3 py-2">
                       <span className="text-sm font-semibold text-[var(--brand-deep)]">
                         {rc.examTerm.label}
                       </span>
@@ -516,8 +629,9 @@ export function StudentProfileModal({
                         {rc.overallGrade || "—"}
                       </span>
                     </div>
-                    <table className="w-full text-sm">
-                      <tbody className="divide-y divide-[rgba(32,48,80,0.08)]">
+                    <div className="overflow-x-auto">
+                    <ErpTable>
+                      <ErpTableBody>
                         {rc.lines.map((l) => (
                           <tr key={l.subjectId}>
                             <td className="px-3 py-2 text-[var(--brand-deep)]">
@@ -533,9 +647,10 @@ export function StudentProfileModal({
                             </td>
                           </tr>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      </ErpTableBody>
+                    </ErpTable>
+                    </div>
+                  </ErpTableShell>
                 ))
               )}
             </div>
@@ -622,6 +737,24 @@ export function StudentProfileModal({
             </div>
           ) : null}
 
+          {tab === "messages" ? (
+            student.householdId ? (
+              /*
+                The family's whole message history, in the record the office
+                already has open. It is keyed on the HOUSEHOLD, not the
+                child: the school writes to a guardian, so a message about a
+                sibling belongs in this history too — that is the question
+                being asked ("what have we sent this family?").
+              */
+              <HouseholdMessageLogPanel
+                forHouseholdId={student.householdId}
+                showIntro={false}
+              />
+            ) : (
+              <Empty text="This student has no household on file, so there is no message history to show." />
+            )
+          ) : null}
+
           {tab === "siblings" ? (
             <div className="space-y-3">
               {sibs.length === 0 ? (
@@ -654,8 +787,70 @@ export function StudentProfileModal({
             </div>
           ) : null}
         </div>
-      </div>
-    </div>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+/**
+ * The child's bus, on their SIS record.
+ *
+ * Renders nothing at all when they do not ride — an empty "Transport" heading
+ * with dashes reads as missing data, when the truth is simply that the family
+ * does not use the bus.
+ */
+function TransportSection({
+  studentId,
+  academicYearCode,
+  transport,
+}: {
+  studentId: string;
+  academicYearCode: string;
+  transport: TransportState | null;
+}) {
+  const summary = studentTransportSummary(studentId, transport, {
+    academicYearCode,
+  });
+  if (!summary.assigned) return null;
+
+  return (
+    <Section title="Transport">
+      <Field
+        label="Route"
+        value={
+          [summary.routeCode, summary.routeName].filter(Boolean).join(" · ") ||
+          "—"
+        }
+      />
+      <Field
+        label="Bus"
+        value={
+          summary.busNo
+            ? `${summary.busNo}${summary.vehicleReg ? ` (${summary.vehicleReg})` : ""}`
+            : "—"
+        }
+      />
+      <Field label="Stop" value={summary.stopName || "—"} />
+      <Field
+        label="Distance from school"
+        value={
+          summary.distanceKm > 0
+            ? `${summary.distanceKm} km${summary.distanceSource === "manual" ? " (typed)" : ""}`
+            : "Not measured"
+        }
+      />
+      <Field
+        label="Monthly fee"
+        value={summary.monthlyFeePaise > 0 ? inr(summary.monthlyFeePaise) : "Per route policy"}
+      />
+      <Field label="Riding since" value={summary.effectiveFrom || "—"} />
+      {summary.boardingSuspended ? (
+        <Field label="Boarding" value="Suspended" full />
+      ) : null}
+      {summary.feeOverrideReason ? (
+        <Field label="Fee override reason" value={summary.feeOverrideReason} full />
+      ) : null}
+    </Section>
   );
 }
 
@@ -672,6 +867,61 @@ function Section({
         {title}
       </h4>
       <dl className="grid gap-x-4 gap-y-3 sm:grid-cols-2">{children}</dl>
+    </div>
+  );
+}
+
+/**
+ * The parent's APAAR ID answer, given on WhatsApp (lib/apaarConsent):
+ * received or not, YES or NO, when and from whom — and the printable record
+ * the school keeps in place of a signed form.
+ */
+function ApaarConsentField({ student }: { student: SisStudent }) {
+  const answered = student.apaarConsent === "given" || student.apaarConsent === "refused";
+  const when = student.apaarConsentAt
+    ? new Date(student.apaarConsentAt).toLocaleString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Asia/Kolkata",
+      })
+    : "";
+  const who = (student.apaarConsentBy || "").split(" · ").slice(0, 2).join(" · ");
+  return (
+    <div className="sm:col-span-2">
+      <dt className="text-[11px] uppercase tracking-wide text-[var(--muted)]">APAAR consent</dt>
+      <dd className="mt-0.5 text-sm font-medium text-[var(--brand-deep)]">
+        {!answered ? (
+          <span>
+            Not received{student.apaarId ? " (APAAR ID already exists)" : ""}
+          </span>
+        ) : (
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>Received —</span>
+            <span
+              className={
+                student.apaarConsent === "given"
+                  ? "rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"
+                  : "rounded bg-rose-100 px-1.5 py-0.5 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200"
+              }
+            >
+              {student.apaarConsent === "given" ? "YES" : "NO"}
+            </span>
+            {when ? <span className="font-normal text-[var(--muted)]">{when}</span> : null}
+            {who ? <span className="font-normal text-[var(--muted)]">· {who}</span> : null}
+            <a
+              href={`/api/v1/udise/apaar-consent?student=${encodeURIComponent(student.id)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-semibold text-[var(--brand-mid)]"
+            >
+              Print record
+            </a>
+          </span>
+        )}
+      </dd>
     </div>
   );
 }
@@ -708,7 +958,7 @@ function Stat({
 }) {
   const color =
     tone === "green"
-      ? "text-[#0f766e]"
+      ? "text-[var(--tone-teal)]"
       : tone === "coral"
         ? "text-[#c0392b]"
         : "text-[var(--brand-deep)]";

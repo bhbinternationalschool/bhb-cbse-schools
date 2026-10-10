@@ -5,6 +5,7 @@
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   loadRte,
+  markRteDeskPulled,
   rteStateIsEmpty,
   writeRteLocalRaw,
   type RteState,
@@ -21,6 +22,7 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "rte";
 
@@ -41,7 +43,7 @@ export function resetRtePersistenceCache() {
 
 export function scheduleRteSync(state: RteState) {
   if (typeof window === "undefined") {
-    void pushRteRemoteServer(state);
+    void trackServerWork(pushRteRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("rte")) blob.scheduleSync(state);
@@ -69,7 +71,6 @@ export async function pushRteRemoteServer(
 
 export async function ensureRteHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = rteReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("rte")
@@ -77,7 +78,14 @@ export async function ensureRteHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateRteDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateRteDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
+  // The desk has really been read: only now may an empty one be seeded.
+  markRteDeskPulled();
   if (
     changed &&
     (bundle.seats.length > 0 ||
@@ -90,7 +98,9 @@ export async function ensureRteHydrated(): Promise<boolean> {
     normChanged = true;
   }
 
-  if (normChanged) scheduleRteSync(loadRte());
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+
+  if (normChanged && !readFromDb) scheduleRteSync(loadRte());
   return blobChanged || normChanged;
 }
 

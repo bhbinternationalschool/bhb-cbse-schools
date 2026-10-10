@@ -1,0 +1,161 @@
+/**
+ * Ingest Meta's per-message delivery-status webhook events (sent/delivered/
+ * read/failed) into wa_message_delivery — parallel in spirit to
+ * parseMetaTemplateStatusUpdates in waTemplatesMeta.server.ts, but for the
+ * `statuses` array Meta sends on the same `field: "messages"` change as
+ * inbound messages (see parseMetaWebhookInbound in waCrmBotServer.ts).
+ */
+import { getServerTenantContext } from "@/lib/serverTenant";
+import { classifyWaFailure } from "@/lib/waFailureReason";
+
+export type WaDeliveryStatusEvent = {
+  waMessageId: string;
+  status: string;
+  mobile?: string;
+  errorMessage?: string;
+  eventAt?: string;
+  /**
+   * Meta's `pricing` block, on sent/delivered/read events: whether THIS
+   * message is charged, and in which category. A utility template inside an
+   * open 24-hour window and every free-form reply come back billable=false.
+   */
+  billable?: boolean;
+  pricingCategory?: string;
+  pricingType?: string;
+};
+
+/** Pure — extract `statuses` events from a Meta webhook POST body. */
+export function parseMetaStatusUpdates(body: unknown): WaDeliveryStatusEvent[] {
+  const out: WaDeliveryStatusEvent[] = [];
+  if (!body || typeof body !== "object") return out;
+  const root = body as {
+    entry?: {
+      changes?: {
+        value?: {
+          statuses?: {
+            id?: string;
+            status?: string;
+            timestamp?: string;
+            recipient_id?: string;
+            errors?: { title?: string; message?: string }[];
+            pricing?: { billable?: unknown; category?: unknown; type?: unknown };
+          }[];
+        };
+      }[];
+    }[];
+  };
+  for (const entry of root.entry || []) {
+    for (const change of entry.changes || []) {
+      for (const s of change.value?.statuses || []) {
+        if (!s.id || !s.status) continue;
+        const ts = Number(s.timestamp);
+        const p = s.pricing;
+        out.push({
+          ...(p && typeof p.billable === "boolean"
+            ? {
+                billable: p.billable,
+                pricingCategory: typeof p.category === "string" ? p.category.toLowerCase() : undefined,
+                pricingType: typeof p.type === "string" ? p.type.toLowerCase() : undefined,
+              }
+            : {}),
+          waMessageId: s.id,
+          status: s.status,
+          mobile: s.recipient_id,
+          errorMessage: s.errors?.[0]?.title || s.errors?.[0]?.message,
+          eventAt: Number.isFinite(ts) && ts > 0
+            ? new Date(ts * 1000).toISOString()
+            : undefined,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/** Count failed deliveries in the trailing `hours` window. Throws (does not
+ * return 0) on any lookup failure — a caller surfacing this as an anomaly
+ * count must never confuse "couldn't check" with "genuinely zero failures". */
+export async function countRecentWaFailures(hours = 24): Promise<number> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) throw new Error("[waDeliveryLog] no server tenant context");
+  const { sb, tenantId } = ctx;
+  const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const { count, error } = await sb
+    .from("wa_message_delivery")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .eq("status", "failed")
+    .gte("event_at", cutoff);
+  if (error) throw new Error(`[waDeliveryLog] countRecentWaFailures: ${error.message}`);
+  return count ?? 0;
+}
+
+/** Append delivery-status events. Best-effort — a logging failure must never
+ * break webhook processing for the caller's other work (inbound routing etc). */
+export async function recordDeliveryStatuses(
+  events: WaDeliveryStatusEvent[],
+): Promise<void> {
+  if (!events.length) return;
+  try {
+    const ctx = await getServerTenantContext();
+    if (!ctx) {
+      console.warn("[waDeliveryLog] no server tenant context — skipping");
+      return;
+    }
+    const { sb, tenantId } = ctx;
+    const now = new Date().toISOString();
+    const rows = events.map((e) => ({
+      tenant_id: tenantId,
+      wa_message_id: e.waMessageId,
+      mobile_e164: e.mobile || null,
+      status: e.status,
+      error_message: e.errorMessage || null,
+      event_at: e.eventAt || now,
+      updated_at: now,
+      billable: e.billable ?? null,
+      pricing_category: e.pricingCategory ?? null,
+      pricing_type: e.pricingType ?? null,
+    }));
+    let { error } = await sb.from("wa_message_delivery").insert(rows);
+    if (error && /billable|pricing_(category|type)/.test(error.message)) {
+      // Deployed before migration 20261002130000 reached this database: the
+      // delivery log itself matters more than the pricing columns, so write
+      // the row without them rather than lose it.
+      console.warn("[waDeliveryLog] pricing columns missing — saving without", error.message);
+      const bare = rows.map((r) => {
+        const rest: Partial<typeof r> = { ...r };
+        delete rest.billable;
+        delete rest.pricing_category;
+        delete rest.pricing_type;
+        return rest;
+      });
+      ({ error } = await sb.from("wa_message_delivery").insert(bare));
+    }
+    if (error) console.warn("[waDeliveryLog] insert failed", error.message);
+
+    // Meta has just told us a number is not a WhatsApp user (131026). Write
+    // that down against the number, so the next fee run can skip it and the
+    // office sees it on the "Numbers to fix" list without anyone reading a
+    // per-message log. Only "not on WhatsApp" is recorded here: a delivery
+    // failure for any other reason says nothing about the number.
+    const notOnWhatsApp = events
+      .filter(
+        (e) =>
+          e.status === "failed" &&
+          !!e.mobile &&
+          classifyWaFailure(e.errorMessage).kind === "not_on_whatsapp",
+      )
+      .map((e) => ({ mobile: e.mobile as string, onWhatsApp: false }));
+    if (notOnWhatsApp.length) {
+      const { recordWaNumberVerdicts } = await import(
+        "@/lib/waNumberHealth.server"
+      );
+      const wrote = await recordWaNumberVerdicts(notOnWhatsApp, "send_failure");
+      if (!wrote.ok) {
+        console.warn("[waDeliveryLog] number verdict not saved", wrote.error);
+      }
+    }
+  } catch (e) {
+    console.warn("[waDeliveryLog] recordDeliveryStatuses failed", e);
+  }
+}

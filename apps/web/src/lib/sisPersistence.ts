@@ -6,9 +6,11 @@
 
 import {
   normalizeStudent,
+  type ClassUpgradeRecord,
   type Household,
   type SisState,
   type SisStudent,
+  type StudentTag,
 } from "@/lib/sis";
 import { sisReadFromDbEnabled } from "@/lib/sisDbConfig";
 import {
@@ -22,11 +24,8 @@ import {
   scheduleSisDeskSync,
   sisNormalizedSyncEnabled,
 } from "@/lib/sisNormalizedClient";
-import {
-  isDeskHydrated,
-  markDeskHydrated,
-  resetDeskHydrated,
-} from "@/lib/deskHydrateGuard";
+import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "sis";
 
@@ -80,7 +79,14 @@ export function mergeSisRemoteIntoState(
         curriculum: curriculumById.get(s.id) ?? s.curriculum ?? null,
       }),
     );
-    return { ...local, version: 1, households, students };
+    const merged = mergeTagsAndUpgrades(local, remote);
+    return {
+      ...local,
+      version: 1,
+      households,
+      students: remapTagIds(students, local.tags ?? [], merged.tags),
+      ...merged,
+    };
   }
 
   // ── Additive merge: local wins, remote fills gaps ──
@@ -104,12 +110,89 @@ export function mergeSisRemoteIntoState(
     }
   }
 
+  const merged = mergeTagsAndUpgrades(local, remote);
   return {
     ...local,
     version: 1,
     households: [...hhMap.values()],
-    students: [...stuMap.values()],
+    students: remapTagIds([...stuMap.values()], local.tags ?? [], merged.tags),
+    ...merged,
   };
+}
+
+/**
+ * Re-point a child's tags at the stored tag row with the same CODE.
+ *
+ * Until 2026-09-12 the tag list was seeded per browser with random ids, so two
+ * machines held different ids for the same six default tags. Now that the
+ * stored list wins, a child tagged on the machine that lost would be left
+ * holding an id nothing can name — and `assignStudentTags` drops ids it cannot
+ * name, so the next edit of that child would delete the tag silently. The code
+ * is the natural key, so remap by it rather than discarding.
+ *
+ * An id already present in the stored list is left alone, which is why this is
+ * safe to run over students that came from the database: their ids are the
+ * stored ones.
+ */
+function remapTagIds(
+  students: SisStudent[],
+  localTags: StudentTag[],
+  nextTags: StudentTag[],
+): SisStudent[] {
+  const codeByOldId = new Map(localTags.map((tag) => [tag.id, tag.code]));
+  const idByCode = new Map(nextTags.map((tag) => [tag.code, tag.id]));
+  const kept = new Set(nextTags.map((tag) => tag.id));
+
+  const rename = new Map<string, string>();
+  for (const [oldId, code] of codeByOldId) {
+    if (kept.has(oldId)) continue;
+    const replacement = idByCode.get(code);
+    if (replacement) rename.set(oldId, replacement);
+  }
+  if (rename.size === 0) return students;
+
+  return students.map((s) => {
+    const ids = s.tagIds ?? [];
+    if (!ids.some((id) => rename.has(id))) return s;
+    return {
+      ...s,
+      tagIds: [...new Set(ids.map((id) => rename.get(id) ?? id))],
+    };
+  });
+}
+
+/**
+ * Tag definitions and the move history, merged.
+ *
+ * Both got their own tables on 2026-09-12, having lived until then in the
+ * localStorage of one machine. The first hydrate after that happens against
+ * EMPTY tables, so a plain "the database is the truth" replace would erase the
+ * only copy of the office's tags before they were ever pushed — the shape of
+ * the 2026-08-21 transport wipe. Hence:
+ *
+ *  - tags: the stored list wins when there is one, otherwise keep what this
+ *    browser holds (and the next save uploads it). A tag is retired with
+ *    `isActive: false`, never deleted, so the stored list is always complete
+ *    and replacing is safe once it exists.
+ *  - classUpgrades: union by id, stored copy winning on collision. History is
+ *    append-only and must never shrink: two browsers can each hold a move the
+ *    other has not seen, and both are true.
+ */
+function mergeTagsAndUpgrades(
+  local: SisState,
+  remote: SisRemoteBundle,
+): Pick<SisState, "tags" | "classUpgrades"> {
+  const tags =
+    (remote.tags ?? []).length > 0 ? remote.tags : (local.tags ?? []);
+
+  const byId = new Map<string, ClassUpgradeRecord>();
+  for (const u of local.classUpgrades ?? []) byId.set(u.id, u);
+  for (const u of remote.classUpgrades ?? []) byId.set(u.id, u);
+  const classUpgrades = [...byId.values()].sort((a, b) =>
+    (b.createdAt || "").localeCompare(a.createdAt || ""),
+  );
+
+  return { tags, classUpgrades };
 }
 
 export async function fetchSisRemote(): Promise<SisRemoteBundle | null> {
@@ -152,7 +235,7 @@ export async function wipeRemoteSisRoster(): Promise<{
 export function scheduleSisSync(state: SisState) {
   if (!sisRemoteEnabled()) return;
   if (typeof window === "undefined") {
-    void pushSisToDb(state);
+    void trackServerWork(pushSisToDb(state));
     return;
   }
   scheduleSisDeskSync(state);
@@ -170,67 +253,95 @@ export async function flushSisSync() {
 export async function ensureSisHydrated(): Promise<boolean> {
   if (!sisRemoteEnabled()) return false;
   if (isDeskHydrated(MODULE)) return false;
+  // The roster is the biggest single payload the app pulls (~2.5 MB), so a
+  // duplicate fetch of it costs more than any other desk's.
+  return dedupeHydration(MODULE, hydrateSisOnce);
+}
 
-  const {
-    hydrateSisDeskFromDb,
-    scheduleSisDeskSync,
-    sisNormalizedSyncEnabled,
-    sisSyncRecentlyPushed,
-  } = await import("@/lib/sisNormalizedClient");
+async function hydrateSisOnce(): Promise<boolean> {
 
-  if (typeof window !== "undefined" && sisSyncRecentlyPushed()) {
-    markDeskHydrated(MODULE);
-    return false;
-  }
+  const { hydrateSisDeskFromDb, sisSyncRecentlyPushed } = await import(
+    "@/lib/sisNormalizedClient"
+  );
 
-  markDeskHydrated(MODULE);
-
-  const { loadSis, saveSis, writeSisLocalRaw, isLikelyDemoRoster } =
+  const { loadSis, writeSisLocalRaw, emptySisState } =
     await import("@/lib/sis");
   let next = loadSis();
   let changed = false;
 
+  // "We just pushed, so we hold the latest" is only true while we still HOLD
+  // it. After a refresh the browser has no memory copy, and when the origin
+  // is over its localStorage quota there is no cache copy either — so this
+  // skip left the office looking at a register of 0 students until the
+  // 30 s window passed and someone navigated again (2026-09-06). Skip only
+  // when there is actually a roster in hand.
+  if (
+    typeof window !== "undefined" &&
+    sisSyncRecentlyPushed() &&
+    next.students.length > 0
+  ) {
+    markDeskHydrated(MODULE);
+    return false;
+  }
+
   const readFromDb = sisReadFromDbEnabled();
-  const { bundle, changed: remoteChanged } = await hydrateSisDeskFromDb(
+  const { bundle, changed: remoteChanged, ok } = await hydrateSisDeskFromDb(
     readFromDb,
   );
+
+  if (!ok) {
+    // Unauthenticated or fetch failed — do not lock hydration flag
+    if (typeof window !== "undefined") {
+      const { reportLoadFailure } = await import("@/components/shell/Toast");
+      reportLoadFailure("student records");
+    }
+    return false;
+  }
+
   const remoteEmpty =
     bundle.households.length === 0 && bundle.students.length === 0;
 
-  if (remoteEmpty && (next.students.length > 0 || next.households.length > 0)) {
-    // If remote DB is empty but browser has local uploaded students, push local students to DB!
-    void pushSisState(next);
-  } else if (
-    remoteChanged &&
-    (bundle.households.length > 0 || bundle.students.length > 0)
-  ) {
-    const remoteAsSis = {
-      version: 1 as const,
-      households: bundle.households,
-      students: bundle.students,
-      curriculumRequests: [] as [],
-      tags: next.tags ?? [],
-      classUpgrades: next.classUpgrades ?? [],
-    };
-    if (next.students.length === 0 && isLikelyDemoRoster(remoteAsSis)) {
-      await wipeRemoteSisRoster();
-    } else {
-      next = mergeSisRemoteIntoState(next, bundle, {
-        preferDb: readFromDb,
-      });
-      changed = true;
+  if (readFromDb && remoteEmpty && (next.students.length > 0 || next.households.length > 0)) {
+    // A school with a roster in hand does not learn from one answer that it
+    // has no students. An empty bundle against a populated browser is a
+    // failed or partial read wearing a 200 — the same shape the transport
+    // desk wipe took on 2026-08-21 — so it is reported and the copy in hand
+    // is kept. A genuinely emptied roster is an explicit, audited action
+    // (wipeRemoteSisRoster), never inferred here. The hydration flag is left
+    // unset so the next navigation asks again.
+    if (typeof window !== "undefined") {
+      const { reportLoadFailure } = await import("@/components/shell/Toast");
+      reportLoadFailure("student records (server answered with none)");
     }
+    return false;
   }
 
-  // If we just replaced local state from the DB, we don't need to push it back
-  // Push is only needed if there are local-only rows or we didn't prefer the DB
+  markDeskHydrated(MODULE);
+  if (readFromDb && remoteEmpty) {
+    // Nothing locally and nothing remotely: leave the empty state as is.
+  } else if (
+    (remoteChanged || bundle.students.length > 0) &&
+    (bundle.households.length > 0 || bundle.students.length > 0)
+  ) {
+    next = mergeSisRemoteIntoState(next, bundle, {
+      preferDb: readFromDb,
+    });
+    changed = true;
+  }
+
+  // Hydration is pull-only. This used to call saveSis(next), which schedules
+  // a full-roster push (and, via syncSisIntoMasters → saveMasters, a masters
+  // and staff push) on every hydrate — 226 of 228 roster POSTs in one day were
+  // within 90 s of a roster GET from the same browser, median 23.6 s each,
+  // and sis_students changed for 3 rows in six days (audit 2026-08-18). That
+  // echo is what was timing out every ordinary read. Local edits reach the
+  // DB only through an explicit saveSis() from the UI.
   if (next.students.length > 0 && !readFromDb) {
-    void pushSisState(next);
+    void trackServerWork(pushSisState(next));
   }
 
   if (changed) {
     writeSisLocalRaw(next);
-    saveSis(next);
   }
 
   const { ensureCurriculumHydrated } = await import(

@@ -7,15 +7,18 @@ import { NextResponse } from "next/server";
 import {
   emptyWaTemplates,
   getTemplateById,
+  markTemplateEditedOnMeta,
   markTemplateSubmittedToMeta,
   normalizeWaTemplatesState,
   type WaTemplatesState,
 } from "@/lib/waTemplates";
 import {
   submitWaTemplateToMeta,
+  updateWaTemplateOnMeta,
   waTemplatesMetaConfigured,
 } from "@/lib/waTemplatesMeta.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 
 export const runtime = "nodejs";
 
@@ -30,6 +33,10 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  // Staff with wa_templates edit only: this creates templates on the school's
+  // Meta WABA with the system-user token. Middleware does not cover /api.
+  const auth = await requireStaffPermission(req, "wa_templates", "edit");
+  if (!auth.ok) return auth.response;
   await ensureSchoolMirrorHydrated();
   let body: { templateId?: string; state?: WaTemplatesState };
   try {
@@ -49,11 +56,27 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Template not found" }, { status: 404 });
   }
 
-  if (template.status === "approved" && template.metaTemplateId) {
-    return NextResponse.json(
-      { error: "Template already approved on Meta. Edit creates a new version in Meta — duplicate as draft first." },
-      { status: 400 },
-    );
+  // Already on Meta: edit it in place. Meta keeps sending the approved
+  // wording until the new one clears review, so the senders that name this
+  // template keep working throughout — nothing to re-point, no second name.
+  if (template.metaTemplateId && template.status !== "draft") {
+    const edited = await updateWaTemplateOnMeta(template);
+    if (!edited.ok) {
+      return NextResponse.json(
+        { ok: false, error: edited.error, warnings: edited.warnings, state },
+        { status: 400 },
+      );
+    }
+    state = markTemplateEditedOnMeta(state, templateId, "erp_submit");
+    return NextResponse.json({
+      ok: true,
+      metaTemplateId: template.metaTemplateId,
+      status: "PENDING",
+      edited: true,
+      warnings: edited.warnings,
+      state,
+      hint: "Sent to Meta as an edit. The previous wording keeps going out until the new one is approved.",
+    });
   }
 
   const result = await submitWaTemplateToMeta(template);

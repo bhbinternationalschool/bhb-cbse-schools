@@ -7,6 +7,8 @@ import type { MastersState } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import type { SessionLike } from "@/lib/rbac";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type StaffChatMessage = {
   id: string;
@@ -91,7 +93,7 @@ export function normalizeStaffChatState(raw: unknown): StaffChatState {
 export function loadStaffChat(): StaffChatState {
   if (typeof window === "undefined") return emptyStaffChatState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyStaffChatState();
     return normalizeStaffChatState(JSON.parse(raw));
   } catch {
@@ -102,16 +104,16 @@ export function loadStaffChat(): StaffChatState {
 export function saveStaffChat(state: StaffChatState) {
   if (typeof window === "undefined") return;
   const next = normalizeStaffChatState(state);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   window.dispatchEvent(new Event("bhb-staff-chat"));
-  void import("@/lib/staffChatPersistence").then(({ scheduleStaffChatSync }) => {
+  void trackServerWork(import("@/lib/staffChatPersistence").then(({ scheduleStaffChatSync }) => {
     scheduleStaffChatSync(next);
-  });
+  }));
 }
 
 export function writeStaffChatLocalRaw(state: StaffChatState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(
+  writeCacheOrInvalidate(
     STORAGE_KEY,
     JSON.stringify(normalizeStaffChatState(state)),
   );

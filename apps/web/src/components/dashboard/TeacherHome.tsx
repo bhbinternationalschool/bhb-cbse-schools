@@ -1,8 +1,11 @@
 "use client";
 
+import { ClassDuesCard } from "@/components/dashboard/ClassDuesCard";
+import { useMyTeaching } from "@/components/staff/useMyTeaching";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
+  BookMarked,
   BookOpen,
   CalendarClock,
   ClipboardCheck,
@@ -11,15 +14,23 @@ import {
   NotebookPen,
   ArrowRight,
   AlertCircle,
+  Users,
 } from "lucide-react";
 import { formatIst } from "@bhb/time";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { findRegister, todayIso } from "@/lib/attendance";
 import { isTeacherOnly } from "@/lib/erpChatAccess";
+import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { TONE } from "@/lib/erpNav";
 import { loadMasters } from "@/lib/masters";
 import { inferRoleCodes } from "@/lib/rbac";
-import { listSessionClassTeacherSections } from "@/lib/staffResolve";
+import { listSessionClassTeacherSections, resolveSessionStaff } from "@/lib/staffResolve";
+import {
+  computeDelivery,
+  loadTeaching,
+  resolveExpectedPeriods,
+} from "@/lib/teaching";
+import { loadTimetable } from "@/lib/timetable";
 import { TENANT } from "@/lib/types";
 
 const ACTIONS = [
@@ -43,6 +54,13 @@ const ACTIONS = [
     blurb: "Today's periods",
     icon: CalendarClock,
     tone: "violet" as const,
+  },
+  {
+    href: "/teaching",
+    title: "Period log",
+    blurb: "What you taught",
+    icon: BookMarked,
+    tone: "teal" as const,
   },
   {
     href: "/ptm",
@@ -85,29 +103,111 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
     setReady(true);
     setTick((n) => n + 1);
     void (async () => {
-      const { ensureAttendanceHydrated } = await import(
-        "@/lib/attendancePersistence"
-      );
-      const changed = await ensureAttendanceHydrated();
+      const [{ ensureAttendanceHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/attendancePersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      const changed = await withHydrationSlot(() => ensureAttendanceHydrated());
       if (changed) setTick((n) => n + 1);
+    })();
+    void (async () => {
+      const [
+        { ensureTimetableHydrated },
+        { ensureTeachingHydrated },
+        { withHydrationSlot },
+      ] = await Promise.all([
+        import("@/lib/timetablePersistence"),
+        import("@/lib/teachingPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      const [tt, tg] = await Promise.all([
+        withHydrationSlot(() => ensureTimetableHydrated()),
+        withHydrationSlot(() => ensureTeachingHydrated()),
+      ]);
+      if (tt || tg) setTick((n) => n + 1);
     })();
   }, []);
 
   const ay = session.academicYearCode;
   const today = todayIso();
 
+  // What this teacher teaches, from the server: class-teacher sections and
+  // subject sections alike. "Your classes" used to list class-teacher links
+  // only — and only when this browser held Masters, which a teacher's never
+  // did — so it was always empty.
+  const { my } = useMyTeaching();
+
   const mySections = useMemo(() => {
     if (!ready) return [];
+    if (my && !my.unrestricted) {
+      return my.teaching
+        .filter((t) => t.isClassTeacher)
+        .map((t) => ({
+          classId: t.classId,
+          sectionId: t.sectionId,
+          label: `${t.className} · ${t.sectionName}`,
+        }));
+    }
     const masters = loadMasters();
     return listSessionClassTeacherSections(session, masters, ay);
-  }, [ready, session, ay, tick]);
+  }, [ready, session, ay, tick, my]);
+
+  const teachingChips = useMemo(() => {
+    if (my && !my.unrestricted) {
+      return my.teaching.map((t) => ({
+        classId: t.classId,
+        sectionId: t.sectionId,
+        label: `${t.className} · ${t.sectionName}`,
+        detail: t.isClassTeacher
+          ? "Class teacher"
+          : t.subjects.map((x) => x.name).join(", "),
+      }));
+    }
+    return mySections.map((s) => ({ ...s, detail: "" }));
+  }, [my, mySections]);
 
   const pendingAttendance = useMemo(() => {
     if (!ready) return [];
-    return mySections.filter(
-      (s) => !findRegister(ay, s.sectionId, today),
-    );
+    // Per section, not one blanket check — holidays can be scoped to a
+    // single class group, so a section on its own day off must not read
+    // as an unmarked register, while the teacher's other sections still do.
+    const masters = loadMasters();
+    return mySections.filter((s) => {
+      if (findRegister(ay, s.sectionId, today)) return false;
+      const classification = classifyClassHolidayDay(masters, today, ay, s.classId);
+      return classification.status !== "holiday";
+    });
   }, [ready, mySections, ay, today, tick]);
+
+  /**
+   * Periods that are past their grace window with no log yet. This is a
+   * prompt to record what happened — deliberately NOT a claim that the
+   * class was missed, which only the teacher can say.
+   */
+  const unloggedPeriods = useMemo(() => {
+    if (!ready) return [];
+    const masters = loadMasters();
+    const me = resolveSessionStaff(session, masters);
+    if (!me) return [];
+    const teaching = loadTeaching();
+    const expected = resolveExpectedPeriods({
+      timetable: loadTimetable(),
+      masters,
+      academicYearCode: ay,
+      date: today,
+      staffId: me.id,
+    });
+    // A day whose schedule cannot be resolved raises nothing — an
+    // unpublished timetable is not the teacher's problem to chase.
+    if (!expected.ok) return [];
+    return computeDelivery({
+      expected: expected.periods,
+      logs: teaching.logs,
+      academicYearCode: ay,
+      policy: teaching.policy,
+    }).filter((r) => r.status === "unlogged");
+  }, [ready, session, ay, today, tick]);
 
   const firstName = session.fullName.split(/\s+/)[0] || session.fullName;
 
@@ -119,7 +219,7 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
 
   return (
     <div className="teacher-home mx-auto max-w-lg space-y-5 pb-2 sm:max-w-2xl">
-      <section className="relative overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.1)] bg-[var(--brand-deep)] px-5 py-6 text-white">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--primary)] px-5 py-6 text-[var(--primary-foreground)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-40"
           style={{
@@ -128,14 +228,19 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
           }}
           aria-hidden
         />
-        <p className="relative text-[11px] font-bold uppercase tracking-[0.12em] text-white/70">
+        <p className="relative text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--primary-foreground)]/70">
           {TENANT.shortName} · Teacher
         </p>
         <h1 className="relative mt-1 font-display text-2xl font-semibold tracking-tight">
           Hello, {firstName}
         </h1>
-        <p className="relative mt-1 text-sm text-white/80">{istWeekdayLine()}</p>
-        <p className="relative mt-0.5 text-[11px] text-white/55" suppressHydrationWarning>
+        <p className="relative mt-1 text-sm text-[var(--primary-foreground)]/80">
+          {istWeekdayLine()}
+        </p>
+        <p
+          className="relative mt-0.5 text-[11px] text-[var(--primary-foreground)]/55"
+          suppressHydrationWarning
+        >
           {formatIst()}
         </p>
       </section>
@@ -143,9 +248,9 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
       {pendingAttendance.length > 0 ? (
         <Link
           href="/attendance?tab=students"
-          className="flex items-start gap-3 rounded-xl border border-[rgba(180,35,24,0.25)] bg-[rgba(180,35,24,0.06)] px-4 py-3 transition hover:border-[rgba(180,35,24,0.4)]"
+          className="flex items-start gap-3 rounded-xl border border-[var(--danger)]/25 bg-[var(--danger-soft)] px-4 py-3 transition hover:border-[var(--danger)]/40"
         >
-          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-[#b42318]" />
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-[var(--danger)]" />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-[var(--brand-deep)]">
               Attendance not marked today
@@ -157,8 +262,8 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
           <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-[var(--muted)]" />
         </Link>
       ) : mySections.length > 0 ? (
-        <div className="rounded-xl border border-[rgba(15,118,110,0.2)] bg-[rgba(15,118,110,0.06)] px-4 py-3">
-          <p className="text-sm font-semibold text-[#0f766e]">
+        <div className="rounded-xl border border-[var(--success)]/20 bg-[var(--success-soft)] px-4 py-3">
+          <p className="text-sm font-semibold text-[var(--success)]">
             Today&apos;s attendance is done
           </p>
           <p className="mt-0.5 text-xs text-[var(--muted)]">
@@ -168,22 +273,89 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
       ) : null}
 
       {mySections.length > 0 ? (
+        <Link
+          href="/my-class"
+          className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
+        >
+          <Users className="h-5 w-5 shrink-0 text-[var(--brand-deep)]" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-[var(--brand-deep)]">
+              My class records
+            </span>
+            <span className="block text-xs text-[var(--muted)]">
+              Class sheet for UDISE+ (height, weight, blood group…), WhatsApp numbers, details and photos
+            </span>
+          </span>
+          <ArrowRight className="h-4 w-4 shrink-0 text-[var(--muted)]" />
+        </Link>
+      ) : null}
+
+      <Link
+        href="/my-pay"
+        className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
+      >
+        <CalendarClock className="h-5 w-5 shrink-0 text-[var(--brand-deep)]" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-[var(--brand-deep)]">
+            My pay &amp; attendance
+          </span>
+          <span className="block text-xs text-[var(--muted)]">
+            Attendance calendar, payslips, advances
+          </span>
+        </span>
+        <ArrowRight className="h-4 w-4 shrink-0 text-[var(--muted)]" />
+      </Link>
+
+      {mySections.length > 0 ? <ClassDuesCard /> : null}
+
+      {unloggedPeriods.length > 0 ? (
+        <Link
+          href="/teaching"
+          className="flex items-start gap-3 rounded-xl border border-[var(--warning)]/25 bg-[var(--warning-soft)] px-4 py-3 transition hover:border-[var(--warning)]/40"
+        >
+          <NotebookPen className="mt-0.5 h-5 w-5 shrink-0 text-[var(--warning)]" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-[var(--brand-deep)]">
+              {unloggedPeriods.length} period
+              {unloggedPeriods.length === 1 ? "" : "s"} not logged yet
+            </p>
+            <p className="mt-0.5 text-xs text-[var(--muted)]">
+              {unloggedPeriods
+                .map((p) => p.expected.bellLabel)
+                .join(" · ")}
+            </p>
+          </div>
+          <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-[var(--muted)]" />
+        </Link>
+      ) : null}
+
+      {teachingChips.length > 0 ? (
         <section>
           <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
             Your classes
           </h2>
           <div className="flex flex-wrap gap-2">
-            {mySections.map((s) => (
+            {teachingChips.map((s) => (
               <Link
                 key={`${s.classId}-${s.sectionId}`}
-                href="/attendance?tab=students"
-                className="rounded-full border border-[rgba(32,48,80,0.12)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] shadow-sm"
+                href={`/attendance?tab=students&classId=${encodeURIComponent(s.classId)}&sectionId=${encodeURIComponent(s.sectionId)}`}
+                className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] shadow-[var(--shadow-1)]"
               >
                 {s.label}
+                {s.detail ? (
+                  <span className="block text-[10px] font-medium text-[var(--muted)]">
+                    {s.detail}
+                  </span>
+                ) : null}
               </Link>
             ))}
           </div>
         </section>
+      ) : my && !my.unrestricted ? (
+        <p className="rounded-xl border border-[rgba(217,119,6,0.45)] bg-[rgba(217,119,6,0.12)] px-4 py-3 text-sm text-[var(--brand-deep)]">
+          No classes are assigned to you yet. Ask the office to add your class
+          or subjects in Staff → Duties.
+        </p>
       ) : null}
 
       <section>
@@ -198,7 +370,7 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
               <Link
                 key={action.href}
                 href={action.href}
-                className="teacher-home-tile flex min-h-[6.5rem] flex-col rounded-2xl border border-[rgba(32,48,80,0.1)] bg-white p-3.5 transition active:scale-[0.98] hover:border-[rgba(197,160,40,0.45)] hover:shadow-md"
+                className="teacher-home-tile flex min-h-[6.5rem] flex-col rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3.5 transition active:scale-[0.98] hover:border-[rgba(197,160,40,0.45)] hover:shadow-md"
               >
                 <span
                   className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${tone.icon}`}
@@ -217,15 +389,15 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
         </div>
       </section>
 
-      <section className="rounded-xl border border-dashed border-[rgba(32,48,80,0.15)] bg-[rgba(32,48,80,0.03)] px-4 py-3">
+      <section className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <LayoutGrid className="h-4 w-4 text-[var(--muted)]" />
             <p className="text-xs text-[var(--muted)]">
-              Fees, exams, reports &amp; admin modules
+              Everything else your role can open is under Modules
             </p>
           </div>
-          {onOpenFullDashboard ? (
+          {onOpenFullDashboard && my?.unrestricted ? (
             <button
               type="button"
               onClick={onOpenFullDashboard}

@@ -1,0 +1,60 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- The parent app ships with INTERNET and POST_NOTIFICATIONS and nothing
+         else. Removing them here is NOT belt-and-braces: geolocator,
+         speech_to_text, image_picker and flutter_background_service each
+         declare permissions in their OWN manifests, and the merger pulls them
+         in whether or not a line of Dart ever calls them. Simply not importing
+         those screens gets you a smaller app, not a smaller permission list.
+
+         So every restricted permission is removed explicitly below. If the
+         built AAB ever shows one of these again, a new dependency has started
+         asking for it — check before shipping, because a background-location
+         declaration on a parent-facing app is what got this split done in the
+         first place.
+
+         Verify after building, with aapt2:
+           aapt2 dump permissions build/app/outputs/flutter-apk/app-parent-release.apk
+         or on a bundle, with bundletool's "dump manifest". -->
+    <!-- Location WHILE THE APP IS OPEN, for one thing only: a parent setting
+         their child's bus pickup point (Transport → Set my pickup point,
+         director 9 Oct 2026). Asked at runtime when they tap "Use my current
+         location"; never in the background — that stays removed below. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- Location and microphone permissions make Play assume the phone HAS
+         GPS / a mic and drop every device without one (1.0.24 lost 7 devices
+         this way). Both are optional here: the pickup pin can be dropped by
+         tapping the map, and the tutor can be typed to. -->
+    <uses-feature android:name="android.hardware.location" android:required="false"/>
+    <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
+    <uses-feature android:name="android.hardware.location.network" android:required="false"/>
+    <uses-feature android:name="android.hardware.microphone" android:required="false"/>
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" tools:node="remove"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK" tools:node="remove"/>
+    <!-- RECORD_AUDIO is declared here on purpose: the AI tutor takes spoken
+         questions through the phone's own speech service. It is a runtime
+         prompt, not a Play declaration form, asked only when the mic is tapped. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.CAMERA" tools:node="remove"/>
+    <!-- Kept as a guard, not a fix. The DUMP string that shows up in a built
+         artifact is androidx.profileinstaller's ProfileInstallReceiver saying
+         "only callers holding DUMP may invoke me" (android:permission on the
+         receiver). That is a restriction, not a request, and it is not in the
+         merged uses-permission list. This line stays so that a plugin which
+         one day genuinely asks for DUMP is dropped before it reaches Play. -->
+    <uses-permission android:name="android.permission.DUMP" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
+
+    <!-- flutter_background_service registers this even when unused. -->
+    <application>
+        <service
+            android:name="id.flutter.flutter_background_service.BackgroundService"
+            tools:node="remove" />
+    </application>
+</manifest>

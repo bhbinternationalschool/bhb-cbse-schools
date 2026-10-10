@@ -20,6 +20,8 @@ import { formatInr } from "@/lib/fees";
 import { TENANT } from "@/lib/types";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 const STORAGE_KEY = "bhb_wa_campaigns_v1";
 export const WA_ME_BATCH_CAP = 20;
 
@@ -93,6 +95,42 @@ export type WaCampaign = {
   /** Meta template name when using registry */
   registryMetaName: string;
   registryLanguage: string;
+  /** Set when this campaign is one step of a nurture sequence */
+  sequenceId: string;
+  /** 1-based step number within the sequence */
+  sequenceStep: number;
+};
+
+/* ─── Nurture sequences (drip) ───────────────────────────────────────── */
+
+export type WaSequenceStep = {
+  id: string;
+  /** Days relative to the anchor date (negative = before, e.g. −7 before an event) */
+  dayOffset: number;
+  /** HH:MM IST send time */
+  time: string;
+  label: string;
+  templateKey: CampaignTemplateKey;
+  body: string;
+};
+
+export type WaSequenceStatus = "draft" | "started" | "stopped";
+
+export type WaSequence = {
+  id: string;
+  name: string;
+  listId: string;
+  /** What the offsets are relative to: "start" = the day it is started, "event" = an event date */
+  anchor: "start" | "event";
+  /** YYYY-MM-DD event date when anchor = event */
+  eventDate: string;
+  steps: WaSequenceStep[];
+  status: WaSequenceStatus;
+  startedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  note: string;
 };
 
 export type CampaignMessageStatus =
@@ -119,6 +157,7 @@ export type WaCampaignsState = {
   lists: AudienceList[];
   campaigns: WaCampaign[];
   messages: CampaignMessage[];
+  sequences: WaSequence[];
   nextListSeq: number;
   nextCampaignSeq: number;
 };
@@ -151,6 +190,7 @@ export function defaultWaCampaignsState(): WaCampaignsState {
     lists: [],
     campaigns: [],
     messages: [],
+    sequences: [],
     nextListSeq: 1,
     nextCampaignSeq: 1,
   };
@@ -283,6 +323,51 @@ function normalizeCampaign(raw: Partial<WaCampaign>): WaCampaign {
     registryTemplateId: String(raw.registryTemplateId || ""),
     registryMetaName: String(raw.registryMetaName || ""),
     registryLanguage: String(raw.registryLanguage || ""),
+    sequenceId: String(raw.sequenceId || ""),
+    sequenceStep: Math.max(0, Math.round(Number(raw.sequenceStep) || 0)),
+  };
+}
+
+function validHhmm(t: string): boolean {
+  const m = t.match(/^(\d{2}):(\d{2})$/);
+  return !!m && Number(m[1]) <= 23 && Number(m[2]) <= 59;
+}
+
+function normalizeTemplateKey(key: unknown): CampaignTemplateKey {
+  return key === "fee_reminder" || key === "open_day" || key === "custom" || key === "registration_invite"
+    ? key
+    : "custom";
+}
+
+function normalizeSequence(raw: Partial<WaSequence>): WaSequence {
+  const t = nowIso();
+  const steps = (Array.isArray(raw.steps) ? raw.steps : [])
+    .map((st) => {
+      const x = (st ?? {}) as Partial<WaSequenceStep>;
+      const body = String(x.body || "").trim();
+      return {
+        id: x.id || nid("seq_step"),
+        dayOffset: Math.max(-60, Math.min(120, Math.round(Number(x.dayOffset) || 0))),
+        time: validHhmm(String(x.time || "")) ? String(x.time) : "10:00",
+        label: String(x.label || "").trim().slice(0, 80),
+        templateKey: normalizeTemplateKey(x.templateKey),
+        body,
+      };
+    })
+    .slice(0, 12);
+  return {
+    id: raw.id || nid("seq"),
+    name: String(raw.name || "Untitled sequence").trim().slice(0, 120),
+    listId: String(raw.listId || ""),
+    anchor: raw.anchor === "event" ? "event" : "start",
+    eventDate: /^\d{4}-\d{2}-\d{2}$/.test(String(raw.eventDate || "")) ? String(raw.eventDate) : "",
+    steps,
+    status: raw.status === "started" || raw.status === "stopped" ? raw.status : "draft",
+    startedAt: String(raw.startedAt || ""),
+    createdAt: raw.createdAt || t,
+    updatedAt: raw.updatedAt || t,
+    createdBy: String(raw.createdBy || ""),
+    note: String(raw.note || "").slice(0, 400),
   };
 }
 
@@ -323,6 +408,9 @@ export function normalizeWaCampaignsState(
     messages: (Array.isArray(raw.messages) ? raw.messages : []).map((m) =>
       normalizeMessage(m),
     ),
+    sequences: (Array.isArray(raw.sequences) ? raw.sequences : []).map((q) =>
+      normalizeSequence(q),
+    ),
     nextListSeq:
       Number.isFinite(Number(raw.nextListSeq)) && Number(raw.nextListSeq) > 0
         ? Math.round(Number(raw.nextListSeq))
@@ -338,7 +426,7 @@ export function normalizeWaCampaignsState(
 export function loadWaCampaigns(): WaCampaignsState {
   if (typeof window === "undefined") return defaultWaCampaignsState();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return defaultWaCampaignsState();
     return normalizeWaCampaignsState(
       JSON.parse(raw) as Partial<WaCampaignsState>,
@@ -351,7 +439,18 @@ export function loadWaCampaigns(): WaCampaignsState {
 export function saveWaCampaigns(state: WaCampaignsState): void {
   if (!assertModulePermission("admissions", "edit", "saveWaCampaigns")) return;
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("wa_campaigns", state)));
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeWaCampaignsLocalRaw(state: WaCampaignsState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 export function feeStatusOfLead(
@@ -539,57 +638,70 @@ export const CAMPAIGN_TEMPLATES: {
   label: string;
   body: string;
 }[] = [
+  // The same shape as every parent template: a greeting by name, the facts
+  // on their own lines, one clear thing to do, a warm sign-off. A campaign
+  // is often the FIRST message a family ever gets from the school.
   {
     key: "registration_invite",
     label: "Registration invite",
-    body: `*{{schoolName}}*
-Namaste {{guardianName}},
+    body: `Namaste {{guardianName}} ji 🙏
 
-Please complete registration for *{{childName}}*.
+Thank you for your interest in *{{schoolName}}* for {{childName}}. 🎒
 
-Register & pay online:
-{{registerLink}}
+The next step is a short online registration — it takes about 5 minutes:
+🔗 {{registerLink}}
 
-Thank you.`,
+Once done, our admissions team will call you to fix a campus visit. We look forward to welcoming your family! 🌼
+
+— Admissions desk, {{schoolName}}`,
   },
   {
     key: "fee_reminder",
     label: "Registration fee reminder",
-    body: `*{{schoolName}}*
-Dear {{guardianName}},
+    body: `Namaste {{guardianName}} ji 🙏
 
-Registration fee for *{{childName}}* is due: *{{feeDue}}*.
+A gentle reminder — the registration fee for {{childName}} is pending:
 
-Pay here:
-{{payLink}}
+💰 Amount: *{{feeDue}}*
 
-Or register siblings:
-{{registerLink}}
+Pay securely in a minute (UPI, card or net banking):
+🔗 {{payLink}}
 
-— Admissions desk`,
+Registering a brother or sister too? Use the same link:
+🔗 {{registerLink}}
+
+Your seat is confirmed as soon as the payment goes through. Thank you! 🙏
+
+— Admissions desk, {{schoolName}}`,
   },
   {
     key: "open_day",
     label: "Open day / visit",
-    body: `*{{schoolName}}*
-Dear {{guardianName}},
+    body: `Namaste {{guardianName}} ji 🙏
 
-You are invited to visit campus for *{{childName}}* admission counselling.
+You are warmly invited to visit *{{schoolName}}* with {{childName}}! 🏫
 
-Register online:
-{{registerLink}}
+Walk through our classrooms, meet the teachers, and get a one-to-one counselling session on the right class and the way we teach.
 
-We look forward to meeting you.`,
+Book your visit here:
+🔗 {{registerLink}}
+
+We would love to show you around. 🌼
+
+— Admissions desk, {{schoolName}}`,
   },
   {
     key: "custom",
     label: "Custom",
-    body: `*{{schoolName}}*
-Dear {{guardianName}},
+    body: `Namaste {{guardianName}} ji 🙏
 
-{{childName}}
+A message from *{{schoolName}}* about {{childName}}:
 
-{{registerLink}}`,
+(write your message here)
+
+🔗 {{registerLink}}
+
+Reply to this message if you have a question — we are happy to help. 🙏`,
   },
 ];
 
@@ -639,9 +751,17 @@ export function renderCampaignBody(
     .replace(/\{\{schoolName\}\}/g, vars.schoolName || TENANT.nameDisplay);
 }
 
+/**
+ * personal-whatsapp-allow: this fills the row's `waMeUrl` field for export and
+ * for the message log. Since 2026-09-07 nothing in the UI opens it — the
+ * campaign panel sends through the school's Business number via openWaMe() —
+ * so it is a record of the link, not a way to message a family from a
+ * personal account.
+ */
 function waMe(mobile: string, text: string): string {
   const digits = mobile.replace(/\D/g, "");
   const phone = digits.length === 10 ? `91${digits}` : digits;
+  // personal-whatsapp-allow: recorded on the row, never opened — see above.
   return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
 }
 
@@ -781,6 +901,8 @@ export function updateCampaign(
       | "registryTemplateId"
       | "registryMetaName"
       | "registryLanguage"
+      | "sequenceId"
+      | "sequenceStep"
     >
   >,
 ): WaCampaignsState {
@@ -935,7 +1057,7 @@ export function dispatchDueCampaigns(
     return Number.isFinite(t) && t <= asOfMs;
   });
 
-  let next = { ...wa, messages: [...wa.messages], campaigns: [...wa.campaigns] };
+  const next = { ...wa, messages: [...wa.messages], campaigns: [...wa.campaigns] };
   const opened: string[] = [];
   let markedSent = 0;
   const pending: {
@@ -1025,7 +1147,7 @@ export function applyCampaignDispatchResults(
     error?: string;
   }[],
 ): WaCampaignsState {
-  let next = { ...wa, messages: [...wa.messages], campaigns: [...wa.campaigns] };
+  const next = { ...wa, messages: [...wa.messages], campaigns: [...wa.campaigns] };
   const byId = new Map(
     results
       .filter((r) => r.messageId)
@@ -1044,6 +1166,10 @@ export function applyCampaignDispatchResults(
         sentAt: nowIso(),
         error: "",
       };
+    }
+    if (r.status === "deferred") {
+      // Family quiet hours — stays queued so the next dispatch picks it up.
+      return { ...m, status: "queued" as const, error: r.error || "Deferred (quiet hours)" };
     }
     return {
       ...m,
@@ -1078,7 +1204,10 @@ export function campaignMessagesOf(
   wa: WaCampaignsState,
   campaignId: string,
 ): CampaignMessage[] {
-  return wa.messages.filter((m) => m.campaignId === campaignId);
+  // Newest sent first; unsent (no sentAt) after them in queue order.
+  return wa.messages
+    .filter((m) => m.campaignId === campaignId)
+    .sort((a, b) => (b.sentAt || "").localeCompare(a.sentAt || ""));
 }
 
 export function previewCampaignSample(
@@ -1118,3 +1247,174 @@ export function openEnquiryFilters(): AudienceListFilters {
     stages: ["enquiry"],
   };
 }
+
+/* ─── Sequence ops ───────────────────────────────────────────────────── */
+
+export function createSequence(
+  state: WaCampaignsState,
+  input: Partial<WaSequence> & { name: string; listId: string },
+  by: string,
+): { ok: true; state: WaCampaignsState; sequence: WaSequence } | { ok: false; reason: string } {
+  if (!input.listId || !state.lists.some((l) => l.id === input.listId)) return { ok: false, reason: "Choose an audience list" };
+  if (!input.name.trim()) return { ok: false, reason: "Name the sequence" };
+  const seq = normalizeSequence({ ...input, id: undefined, status: "draft", createdBy: by, startedAt: "" });
+  if (seq.steps.length === 0) return { ok: false, reason: "Add at least one step" };
+  return { ok: true, sequence: seq, state: { ...state, sequences: [...state.sequences, seq] } };
+}
+
+export function updateSequence(state: WaCampaignsState, id: string, patch: Partial<WaSequence>): WaCampaignsState {
+  return {
+    ...state,
+    sequences: state.sequences.map((q) => (q.id === id ? normalizeSequence({ ...q, ...patch, id, updatedAt: nowIso() }) : q)),
+  };
+}
+
+export function deleteSequence(state: WaCampaignsState, id: string): WaCampaignsState {
+  const seq = state.sequences.find((q) => q.id === id);
+  if (!seq) return state;
+  if (seq.status === "started") return state; // stop first
+  return { ...state, sequences: state.sequences.filter((q) => q.id !== id) };
+}
+
+/** "YYYY-MM-DDTHH:MM" local for anchor + offset days at the step's time. */
+export function sequenceStepWhen(anchorYmd: string, step: Pick<WaSequenceStep, "dayOffset" | "time">): string {
+  const d = new Date(`${anchorYmd}T00:00:00`);
+  d.setDate(d.getDate() + step.dayOffset);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}T${step.time}`;
+}
+
+/**
+ * Start a sequence: one scheduled campaign per step (messages queued now
+ * for the list as it stands), anchored on today or the event date. Steps
+ * whose time is already past are still created (due immediately) — the
+ * office sees them in the queue and can pause.
+ */
+export function startSequence(
+  wa: WaCampaignsState,
+  sequenceId: string,
+  admissions: AdmissionsState,
+  by: string,
+  opts?: { today?: string },
+): { ok: true; wa: WaCampaignsState; admissions: AdmissionsState; campaigns: number; queued: number } | { ok: false; reason: string } {
+  const seq = wa.sequences.find((q) => q.id === sequenceId);
+  if (!seq) return { ok: false, reason: "Sequence not found" };
+  if (seq.status === "started") return { ok: false, reason: "Already started — stop it to restart" };
+  if (!wa.lists.some((l) => l.id === seq.listId)) return { ok: false, reason: "Audience list missing" };
+  if (seq.steps.some((st) => !st.body.trim())) return { ok: false, reason: "Every step needs a message body" };
+  const anchor = seq.anchor === "event" ? seq.eventDate : opts?.today || new Date().toISOString().slice(0, 10);
+  if (!anchor) return { ok: false, reason: "Set the event date" };
+  let next = wa;
+  let adm = admissions;
+  let queued = 0;
+  let created = 0;
+  seq.steps.forEach((step, i) => {
+    const c = createCampaign(
+      next,
+      {
+        name: `${seq.name} · ${i + 1}/${seq.steps.length}${step.label ? ` · ${step.label}` : ""}`,
+        listId: seq.listId,
+        templateKey: step.templateKey,
+        body: step.body,
+        note: `Sequence step ${i + 1} (${step.dayOffset >= 0 ? "+" : ""}${step.dayOffset} d)`,
+      },
+      by,
+    );
+    if (!c.ok) return;
+    next = updateCampaign(c.state, c.campaign.id, { sequenceId: seq.id, sequenceStep: i + 1 });
+    const sch = scheduleCampaign(next, c.campaign.id, sequenceStepWhen(anchor, step), adm, by);
+    if (!sch.ok) return;
+    next = sch.wa;
+    adm = sch.admissions;
+    queued += sch.queued;
+    created += 1;
+  });
+  next = updateSequence(next, seq.id, { status: "started", startedAt: nowIso() });
+  return { ok: true, wa: next, admissions: adm, campaigns: created, queued };
+}
+
+/** Stop: pause not-yet-done step campaigns and skip their queued messages. */
+export function stopSequence(wa: WaCampaignsState, sequenceId: string): WaCampaignsState {
+  const ids = new Set(wa.campaigns.filter((c) => c.sequenceId === sequenceId && c.status !== "done").map((c) => c.id));
+  return updateSequence(
+    {
+      ...wa,
+      campaigns: wa.campaigns.map((c) => (ids.has(c.id) ? { ...c, status: "paused" as const, updatedAt: nowIso() } : c)),
+      messages: wa.messages.map((m) =>
+        ids.has(m.campaignId) && m.status === "queued" ? { ...m, status: "skipped" as const, error: "Sequence stopped" } : m,
+      ),
+    },
+    sequenceId,
+    { status: "stopped" },
+  );
+}
+
+/**
+ * Before dispatch: drop queued sequence messages for families that moved on
+ * — enrolled, lost, or last outcome "not interested". STOP opt-outs are
+ * enforced at send time (waSend); this is the funnel-stage half.
+ */
+export function pruneSequenceQueue(wa: WaCampaignsState, admissions: AdmissionsState): { wa: WaCampaignsState; skipped: number } {
+  const seqCampaigns = new Set(wa.campaigns.filter((c) => c.sequenceId).map((c) => c.id));
+  if (seqCampaigns.size === 0) return { wa, skipped: 0 };
+  const leads = new Map(admissions.leads.map((l) => [l.id, l]));
+  let skipped = 0;
+  const messages = wa.messages.map((m) => {
+    if (!seqCampaigns.has(m.campaignId) || m.status !== "queued") return m;
+    const lead = leads.get(m.leadId);
+    if (!lead) return m;
+    const lastOutcome = (lead.followUps || []).slice(-1)[0]?.outcome;
+    const reason =
+      lead.stage === "enrolled" ? "Enrolled — sequence no longer applies"
+      : lead.stage === "lost" ? "Marked lost"
+      : lastOutcome === "not_interested" ? "Family said not interested"
+      : lastOutcome === "wrong_number" ? "Wrong number"
+      : "";
+    if (!reason) return m;
+    skipped += 1;
+    return { ...m, status: "skipped" as const, error: reason };
+  });
+  return { wa: skipped ? { ...wa, messages } : wa, skipped };
+}
+
+/** Event-driven presets (offsets relative to the event date). Bodies are drafted by the office / AI. */
+export const SEQUENCE_PRESETS: { id: string; label: string; anchor: "start" | "event"; steps: Omit<WaSequenceStep, "id" | "body">[] }[] = [
+  {
+    id: "open_house",
+    label: "Open house / school tour",
+    anchor: "event",
+    steps: [
+      { dayOffset: -7, time: "10:00", label: "Invitation", templateKey: "open_day" },
+      { dayOffset: -1, time: "17:00", label: "Reminder", templateKey: "custom" },
+      { dayOffset: 1, time: "10:00", label: "Thank you + next step", templateKey: "custom" },
+    ],
+  },
+  {
+    id: "nurture_3",
+    label: "Enquiry nurture (3 touches)",
+    anchor: "start",
+    steps: [
+      { dayOffset: 0, time: "11:00", label: "Welcome + what to expect", templateKey: "custom" },
+      { dayOffset: 4, time: "11:00", label: "A day at school / results", templateKey: "custom" },
+      { dayOffset: 9, time: "11:00", label: "Visit or register", templateKey: "registration_invite" },
+    ],
+  },
+  {
+    id: "result_day",
+    label: "Result-season announcement",
+    anchor: "event",
+    steps: [
+      { dayOffset: 0, time: "12:00", label: "Result announcement", templateKey: "custom" },
+      { dayOffset: 3, time: "11:00", label: "Admissions open + CTA", templateKey: "registration_invite" },
+    ],
+  },
+  {
+    id: "festival",
+    label: "Festival / occasion greeting",
+    anchor: "event",
+    steps: [{ dayOffset: 0, time: "09:00", label: "Greeting", templateKey: "custom" }],
+  },
+];
+

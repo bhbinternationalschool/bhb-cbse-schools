@@ -12,7 +12,11 @@ import {
   type CollectionVoucher,
   type FeeDueLine,
 } from "@/lib/fees";
-import { DEFAULT_AY, loadMasters } from "@/lib/masters";
+import {
+  DEFAULT_AY,
+  currentAcademicYearCode,
+  loadMasters,
+} from "@/lib/masters";
 import {
   classLabelForStudent,
   formatParentDueHint,
@@ -26,6 +30,7 @@ import {
   createPaymentLink,
 } from "@/lib/payments";
 import { loadSis, type Household, type SisStudent } from "@/lib/sis";
+import { getPaymentGatewayConfig } from "@/lib/paymentGateway";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
@@ -72,9 +77,14 @@ export function ParentFeesPortal({
       setReceipts([]);
       return;
     }
+    // Scoped to the running session. A promoted child keeps one student
+    // row per academic year, all of them still "active", so without this
+    // the parent sees each of their children listed once per year they
+    // have attended and a family balance several times the real one.
     const rows = computeHouseholdDues(hh.id, sis, masters, fees, {
       includeFuture: true,
       includePaid: true,
+      academicYearCode: currentAcademicYearCode(masters),
     });
     setBundle(rows);
     setReceipts(householdReceipts(hh.id, fees));
@@ -149,6 +159,36 @@ export function ParentFeesPortal({
     }
     setPaying(true);
     try {
+      // Live gateway: the server recomputes the dues, creates the link, and
+      // attaches the hosted checkout. The demo instant-settle below must
+      // never run when real money is being collected.
+      if (getPaymentGatewayConfig().mode !== "demo") {
+        try {
+          const res = await fetch("/api/payments/parent-checkout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              dueKeys: [...selected],
+              studentId: activeStudentId,
+            }),
+          });
+          const json = (await res.json().catch(() => ({}))) as {
+            ok?: boolean;
+            checkoutUrl?: string | null;
+            shareUrl?: string;
+            error?: string;
+          };
+          if (res.ok && json.ok && (json.checkoutUrl || json.shareUrl)) {
+            window.location.href = json.checkoutUrl || json.shareUrl!;
+            return;
+          }
+          flash(json.error || "Could not start payment — try again");
+        } catch {
+          flash("Could not start payment — check connection and try again");
+        }
+        return;
+      }
+
       const masters = loadMasters();
       const primary =
         bundle.find((r) => r.student.id === activeStudentId)?.student ??
@@ -212,12 +252,16 @@ export function ParentFeesPortal({
 
   if (!household) {
     return (
-      <div className="mx-auto max-w-lg px-4 py-12 text-center">
+      <div className="mx-auto max-w-lg px-4 py-12 text-center md:max-w-2xl lg:max-w-3xl">
         <p className="text-sm text-[var(--muted)]">
           No household linked for this parent demo. Open staff portal and check
           SIS households.
         </p>
-        <button type="button" className="mt-4 text-sm underline" onClick={onSignOut}>
+        <button
+          type="button"
+          className="mt-4 text-sm underline"
+          onClick={onSignOut}
+        >
           Sign out
         </button>
       </div>
@@ -225,7 +269,7 @@ export function ParentFeesPortal({
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-lg flex-col pb-28">
+    <div className="mx-auto flex min-h-screen max-w-lg flex-col pb-28 md:max-w-2xl lg:max-w-3xl">
       <header className="sticky top-0 z-20 border-b border-[rgba(32,48,80,0.1)] bg-[rgba(246,245,239,0.92)] px-4 py-3 backdrop-blur-md">
         <div className="flex items-start gap-3">
           <Image
@@ -266,7 +310,7 @@ export function ParentFeesPortal({
             <div className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
               Discount
             </div>
-            <div className="text-sm font-bold tabular-nums text-[#0f7a4c]">
+            <div className="text-sm font-bold tabular-nums text-[var(--success)]">
               {householdTotals.concessionPaise > 0
                 ? `−${formatInr(householdTotals.concessionPaise)}`
                 : "—"}
@@ -446,7 +490,7 @@ export function ParentFeesPortal({
                                 <div className="text-sm font-medium text-[var(--brand-deep)]">
                                   {d.feeHeadName || d.label}
                                   {paid ? (
-                                    <span className="ml-1.5 text-[10px] font-semibold uppercase text-[#0f7a4c]">
+                                    <span className="ml-1.5 text-[10px] font-semibold uppercase text-[var(--success)]">
                                       Paid
                                     </span>
                                   ) : null}
@@ -455,7 +499,7 @@ export function ParentFeesPortal({
                                   {formatParentDueHint(d)}
                                 </div>
                                 {d.concessionDetails?.length ? (
-                                  <ul className="mt-1 space-y-0.5 text-[10px] text-[#0f7a4c]">
+                                  <ul className="mt-1 space-y-0.5 text-[10px] text-[var(--success)]">
                                     {d.concessionDetails.map((c) => (
                                       <li key={`${d.dueKey}-${c.grantId}`}>
                                         Discount ·{" "}
@@ -468,7 +512,7 @@ export function ParentFeesPortal({
                               <div
                                 className={`shrink-0 text-sm font-bold tabular-nums ${
                                   paid
-                                    ? "text-[#0f7a4c]"
+                                    ? "text-[var(--success)]"
                                     : "text-[var(--brand-deep)]"
                                 }`}
                               >
@@ -527,7 +571,7 @@ export function ParentFeesPortal({
                       <li>+{v.lines.length - 6} more</li>
                     ) : null}
                     {v.lines.some((l) => (l.concessionPaise ?? 0) > 0) ? (
-                      <li className="font-medium text-[#0f7a4c]">
+                      <li className="font-medium text-[var(--success)]">
                         Includes approved discounts on collected heads
                       </li>
                     ) : null}
@@ -541,7 +585,7 @@ export function ParentFeesPortal({
 
       {tab === "dues" ? (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[rgba(32,48,80,0.12)] bg-[rgba(246,245,239,0.96)] px-4 py-3 backdrop-blur-md">
-          <div className="mx-auto flex max-w-lg items-center gap-3">
+          <div className="mx-auto flex max-w-lg items-center gap-3 md:max-w-2xl lg:max-w-3xl">
             <div className="min-w-0 flex-1">
               <div className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
                 Selected

@@ -1,13 +1,15 @@
 import { writeAudit } from "@/lib/audit.server";
-import { apiErr, apiOk } from "@/lib/api/v1/errors";
+import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import {
   assertPermission,
   requestMeta,
   resolveApiAuth,
 } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { ensureAttendanceHydratedServer } from "@/lib/attendancePersistence";
-import { upsertRegister, type AttendanceMark, type AttendanceStatus } from "@/lib/attendance";
+import { assertSectionScope } from "@/lib/api/v1/staffScope";
+import { markAttendanceServer } from "@/lib/attendanceMark.server";
+import { loadSisForStaff, studentsInSession } from "@/lib/sis";
+import type { AttendanceMark, AttendanceStatus } from "@/lib/attendance";
 
 export const runtime = "nodejs";
 
@@ -28,12 +30,37 @@ export async function POST(request: Request) {
 
     const body = (await request.json()) as MarkBody;
     if (!body.sectionId || !body.classId || !body.date || !body.marks?.length) {
-      const { ApiError } = await import("@/lib/api/v1/errors");
-      throw new ApiError("bad_request", "classId, sectionId, date, marks required", 400);
+      throw new ApiError(
+        "bad_request",
+        "classId, sectionId, date, marks required",
+        400,
+      );
     }
 
     await ensureSchoolMirrorHydrated();
-    await ensureAttendanceHydratedServer();
+    // Class teacher, a subject teacher on the section's timetable, or the
+    // office — the module permission alone let any staff login mark any class.
+    // This is the route's own guard; the command desk checks its own scope.
+    const scope = await assertSectionScope(ctx, body.classId, body.sectionId);
+
+    // A teacher's register is for the working year and for the children of
+    // THIS section only; the office may still name another year.
+    const academicYearCode = scope.unrestricted
+      ? body.academicYearCode || scope.academicYearCode
+      : scope.academicYearCode;
+    const inSection = new Set(
+      studentsInSession(loadSisForStaff(), academicYearCode)
+        .filter((s) => s.classId === body.classId && s.sectionId === body.sectionId)
+        .map((s) => s.id),
+    );
+    const strangers = body.marks.filter((m) => !inSection.has(m.studentId));
+    if (strangers.length) {
+      throw new ApiError(
+        "bad_request",
+        `${strangers.length} of these children are not in this section — reload the class and try again`,
+        400,
+      );
+    }
 
     const marks: AttendanceMark[] = body.marks.map((m) => ({
       studentId: m.studentId,
@@ -41,30 +68,19 @@ export async function POST(request: Request) {
       note: m.note || "",
     }));
 
-    const result = upsertRegister({
-      academicYearCode: body.academicYearCode || ctx.session.academicYearCode,
-      campusId: "",
+    // Upsert + persist + alert live in one server-side helper, shared with
+    // the ERP command desk so both cannot drift apart.
+    const result = await markAttendanceServer({
+      session: ctx.session,
+      masters: ctx.masters,
+      academicYearCode,
       classId: body.classId,
       sectionId: body.sectionId,
       date: body.date,
       marks,
-      markedBy: ctx.session.fullName,
-      remark: body.remark || "",
-      skipLockCheck: true,
+      remark: body.remark,
     });
-
-    if (!result.ok) {
-      const { ApiError } = await import("@/lib/api/v1/errors");
-      throw new ApiError("bad_request", result.error, 400);
-    }
-
-    const { pushAttendanceRegisterToDb } = await import(
-      "@/lib/attendanceNormalized.server"
-    );
-    const dbPush = await pushAttendanceRegisterToDb(result.register);
-    if (!dbPush.ok) {
-      console.warn("[attendance-v1] db push failed", dbPush.error);
-    }
+    if (!result.ok) throw new ApiError("bad_request", result.error, 400);
 
     const meta = requestMeta(request);
     await writeAudit({
@@ -83,6 +99,7 @@ export async function POST(request: Request) {
       registerId: result.register.id,
       date: body.date,
       markCount: marks.length,
+      push: result.push,
     });
   } catch (e) {
     return apiErr(e);

@@ -27,6 +27,7 @@ import {
   type SisState,
   type SisStudent,
   type StudentCategory,
+  studentsInSession,
 } from "@/lib/sis";
 
 export type UdiseStudentRow = {
@@ -52,6 +53,33 @@ export type UdiseStudentRow = {
   apaarStatus: string;
   suspectedDuplicate: string;
   mbuStatus: string;
+  // The "List of Active Students" export carries the full student profile —
+  // 66 columns against the 23 of "Students Details" — so these are blank on
+  // the shorter report and populated on the longer one. Everything here is
+  // read; only the fields the SIS actually has a home for are offered as an
+  // update, and each of those only when our own field is empty.
+  guardianName: string;
+  mobile: string;
+  altMobile: string;
+  email: string;
+  address: string;
+  pincode: string;
+  motherTongue: string;
+  bloodGroup: string;
+  admissionNo: string;
+  admissionDate: string;
+  isIndianNational: string;
+  nationality: string;
+  ews: string;
+  aay: string;
+  impairmentType: string;
+  disabilityCertificate: string;
+  disabilityPercent: string;
+  outOfSchoolChild: string;
+  isRepeater: string;
+  heightCm: string;
+  weightKg: string;
+  rteSection12c: string;
 };
 
 export type UdiseMatchMethod =
@@ -62,6 +90,8 @@ export type UdiseMatchMethod =
   | "name_father"
   | "name_class_section"
   | "name_unique"
+  | "name_parents"
+  | "name_dob"
   | "fuzzy_name_father";
 
 /** Which keys the operator wants to match SIS ↔ UDISE on, plus fuzzy toggle. */
@@ -97,6 +127,8 @@ export const UDISE_MATCH_METHOD_LABEL: Record<UdiseMatchMethod, string> = {
   name_father: "Name + father",
   name_class_section: "Name + class/section",
   name_unique: "Unique name",
+  name_parents: "Name + father + mother",
+  name_dob: "Name + DOB",
   fuzzy_name_father: "Fuzzy name",
 };
 
@@ -133,6 +165,11 @@ export type UdiseMatchPreview = {
     udiseMbuStatus?: string;
     udisePortalClassHint?: string;
     udiseAgeBelowClassAlert?: boolean;
+    // From the longer "List of Active Students" export only.
+    bloodGroup?: string;
+    motherTongue?: string;
+    nationality?: string;
+    joinedOn?: string;
   };
   /** Fields already present in SIS (for display) */
   sisFilled: {
@@ -218,7 +255,72 @@ function normName(name: string): string {
     .replace(/[^a-z0-9\u0900-\u097f ]/gi, "");
 }
 
+
+/**
+ * The portal's admission date (dd/mm/yyyy) as YYYY-MM-DD, or "" when absent.
+ *
+ * A child created from a UDISE+ row takes this, never today's date: an
+ * admission date we do not know stays blank rather than becoming the day
+ * someone ran the import.
+ */
+export function udiseAdmissionDateIso(raw: string | null | undefined): string {
+  const v = (raw || "").trim();
+  if (!v || udiseIsBlank(v)) return "";
+  const m = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(v);
+  return m ? `${m[3]}-${m[2]!.padStart(2, "0")}-${m[1]!.padStart(2, "0")}` : "";
+}
+
+export function udiseNormName(name: string): string {
+  return normName(name);
+}
+
+/** Honorifics that appear on parents' names in one file and not the other. */
+const NAME_HONORIFICS = new Set([
+  "mr", "mrs", "ms", "smt", "shri", "sri", "shree", "late", "lt", "dr", "km", "kumari",
+]);
+
+function nameTokens(name: string): string[] {
+  const t = normName(name).split(" ").filter(Boolean);
+  const stripped = t.filter((x) => !NAME_HONORIFICS.has(x));
+  return stripped.length ? stripped : t;
+}
+
+/**
+ * Whether two spellings can be the same person.
+ *
+ * Exact after normalisation, or one is the other with a surname or middle
+ * name added or dropped: VEER PRATAP on the portal, VEER PRATAP MISHRA in the
+ * SIS; RITESH SINGH against RITESH KUMAR SINGH. The shorter name must appear
+ * in the longer one in order and share its first token, so RAM KUMAR and
+ * KUMAR RAM stay apart. This says "could be"; a match on it still needs a
+ * parent, a birth date or a class to agree before it is believed.
+ */
+export function udiseNamesCompatible(a: string, b: string): boolean {
+  const x = nameTokens(a);
+  const y = nameTokens(b);
+  if (!x.length || !y.length) return false;
+  if (x.join(" ") === y.join(" ")) return true;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  if (short[0] !== long[0]) return false;
+  let j = 0;
+  for (const t of long) {
+    if (j < short.length && short[j] === t) j += 1;
+  }
+  return j === short.length;
+}
+
 /** Canonical DOB key (yyyymmdd) for comparing SIS vs UDISE dates. */
+export function udiseDobKey(s: string): string {
+  return normDobKey(s);
+}
+
+/** ISO yyyy-mm-dd, which is the only shape the SIS keeps a birth date in. */
+export function udiseDobIso(s: string): string {
+  const k = normDobKey(s);
+  if (!/^\d{8}$/.test(k)) return "";
+  return `${k.slice(0, 4)}-${k.slice(4, 6)}-${k.slice(6, 8)}`;
+}
+
 function normDobKey(s: string): string {
   const raw = (s || "").trim();
   if (!raw || udiseIsBlank(raw)) return "";
@@ -247,6 +349,12 @@ export function udiseIsBlank(v: string): boolean {
   if (/^na$/i.test(s)) return true;
   if (/not available/i.test(s)) return true;
   if (/^n\/?a$/i.test(s)) return true;
+  // A dash is how the portal writes "none"; it must never become an identity
+  // (2026-09-05: every child without an APAAR collapsed into one row keyed
+  // "apaar:na", and about 110 pupils vanished from a 213-row upload).
+  if (/^[-\u2013\u2014.]+$/.test(s)) return true;
+  if (/^not applicable$/i.test(s)) return true;
+  if (/^(nil|null|none)$/i.test(s)) return true;
   return false;
 }
 
@@ -403,15 +511,127 @@ export function findUdiseHeaderRow(
         apaarStatus: idx([(n) => n.includes("apaar status")]),
         suspectedDuplicate: idx([(n) => n.includes("suspected duplicate")]),
         mbu: idx([(n) => n.includes("mbu")]),
+        // Present only on the longer "List of Active Students" export.
+        guardianName: idx([(n) => n.includes("guardian name")]),
+        mobile: idx([(n) => n === "mobile no" || n === "mobile number"]),
+        altMobile: idx([(n) => n.includes("alternate mobile")]),
+        email: idx([(n) => n.includes("email")]),
+        address: idx([(n) => n === "address"]),
+        pincode: idx([(n) => n === "pincode" || n === "pin code" || n === "pin"]),
+        motherTongue: idx([(n) => n.includes("mother tongue")]),
+        bloodGroup: idx([(n) => n.includes("blood group")]),
+        admissionNo: idx([(n) => n.includes("admission no")]),
+        admissionDate: idx([(n) => n.includes("admission date")]),
+        isIndianNational: idx([(n) => n.includes("indian national")]),
+        nationality: idx([(n) => n.includes("nationality of foreign")]),
+        ews: idx([(n) => n.includes("ews") || n.includes("disadvantaged")]),
+        aay: idx([(n) => n.includes("antyodaya") || n.includes("aay")]),
+        impairmentType: idx([(n) => n.includes("type of impairment")]),
+        disabilityCertificate: idx([(n) => n.includes("disability certificate")]),
+        disabilityPercent: idx([(n) => n.includes("disability percentage")]),
+        outOfSchoolChild: idx([(n) => n.includes("out of school")]),
+        isRepeater: idx([(n) => n.includes("repeater")]),
+        heightCm: idx([(n) => n.includes("height")]),
+        weightKg: idx([(n) => n.includes("weight")]),
+        rteSection12c: idx([(n) => n.includes("section 12c") || n.includes("section 12 c")]),
       },
     };
   }
   return null;
 }
 
+/**
+ * The working sheet's own shape.
+ *
+ * UDISE+ exports students in two layouts — the 23-column "Students Details"
+ * with PEN, and the 66-column "List of Active Students" with the birth date,
+ * parents and profile but no PEN — and the office uploads both. Storing raw
+ * portal rows under whichever header came last read one file's cells under
+ * the other file's columns (a child called "Female", a birth date of "AARVI
+ * SINGH"). So every file is parsed on arrival and the sheet keeps one
+ * canonical record per child; this is the header those records travel under.
+ */
+export const UDISE_CANONICAL_MARKER = "__udise_canonical_v2__";
+
+export const UDISE_CANONICAL_COLUMNS: { key: keyof UdiseStudentRow; header: string }[] = [
+  { key: "classHint", header: "Class" },
+  { key: "sectionHint", header: "Section" },
+  { key: "fullName", header: "Name" },
+  { key: "gender", header: "Gender" },
+  { key: "dob", header: "Date of Birth" },
+  { key: "sdmsYear", header: "Initialised at SDMS" },
+  { key: "pen", header: "Student PEN" },
+  { key: "stateCode", header: "Student State Code" },
+  { key: "fatherName", header: "Father Name" },
+  { key: "motherName", header: "Mother Name" },
+  { key: "socialCategory", header: "Social Category" },
+  { key: "minorityGroup", header: "Minority Group" },
+  { key: "bpl", header: "BPL Beneficiary" },
+  { key: "cwsn", header: "CWSN" },
+  { key: "entryStatus", header: "Entry Status" },
+  { key: "aadhaarRaw", header: "AADHAAR No." },
+  { key: "aadhaarName", header: "Name As per AADHAAR" },
+  { key: "aadhaarValidation", header: "AADHAAR Validation Status" },
+  { key: "apaarId", header: "APAAR ID" },
+  { key: "apaarStatus", header: "APAAR Status" },
+  { key: "suspectedDuplicate", header: "Suspected Duplicate" },
+  { key: "mbuStatus", header: "MBU Status" },
+  { key: "guardianName", header: "Guardian Name" },
+  { key: "mobile", header: "Mobile No." },
+  { key: "altMobile", header: "Alternate Mobile No." },
+  { key: "email", header: "Contact Email Id" },
+  { key: "address", header: "Address" },
+  { key: "pincode", header: "Pincode" },
+  { key: "motherTongue", header: "Mother Tongue" },
+  { key: "bloodGroup", header: "Blood Group" },
+  { key: "admissionNo", header: "Admission No." },
+  { key: "admissionDate", header: "Admission Date" },
+  { key: "isIndianNational", header: "Student is Indian National" },
+  { key: "nationality", header: "Mention The Nationality of Foreign Student" },
+  { key: "ews", header: "EWS / Disadvantaged Group" },
+  { key: "aay", header: "Antyodaya Anna Yojana (AAY) beneficiary" },
+  { key: "impairmentType", header: "Type of Impairments" },
+  { key: "disabilityCertificate", header: "Disability Certificate" },
+  { key: "disabilityPercent", header: "Disability Percentage (in %)" },
+  { key: "outOfSchoolChild", header: "Student identified as Out-of-School-Child" },
+  { key: "isRepeater", header: "Is Repeater" },
+  { key: "heightCm", header: "Height(in CMs)" },
+  { key: "weightKg", header: "Weight(in KGs)" },
+  { key: "rteSection12c", header: "Whether Admitted under Section 12C of RTE Act" },
+];
+
+export function udiseEmptyRow(): UdiseStudentRow {
+  const r = {} as Record<keyof UdiseStudentRow, string>;
+  for (const c of UDISE_CANONICAL_COLUMNS) r[c.key] = "";
+  return r as UdiseStudentRow;
+}
+
+/** Canonical records → the matrix shape every reader of the sheet expects. */
+export function udiseRowsToMatrix(rows: UdiseStudentRow[]): unknown[][] {
+  return [
+    [...UDISE_CANONICAL_COLUMNS.map((c) => c.header), UDISE_CANONICAL_MARKER],
+    ...rows.map((r) => [
+      ...UDISE_CANONICAL_COLUMNS.map((c) => r[c.key] ?? ""),
+      "",
+    ]),
+  ];
+}
+
 export function parseUdiseStudentDetailsMatrix(
   matrix: unknown[][],
 ): UdiseStudentRow[] {
+  // A canonical sheet reads back by position, exactly as it was written.
+  if ((matrix[0] || []).some((c) => c === UDISE_CANONICAL_MARKER)) {
+    const out: UdiseStudentRow[] = [];
+    for (const row of matrix.slice(1)) {
+      const r = udiseEmptyRow();
+      UDISE_CANONICAL_COLUMNS.forEach((c, i) => {
+        r[c.key] = cellStr(row[i]);
+      });
+      if (r.fullName) out.push(r);
+    }
+    return out;
+  }
   const detected = findUdiseHeaderRow(matrix);
   if (!detected) return [];
   const { headerRow, col } = detected;
@@ -426,6 +646,10 @@ export function parseUdiseStudentDetailsMatrix(
     const pen = cleanPen(get(row, "pen"));
     if (!fullName) continue;
     if (/^list of all/i.test(fullName)) continue;
+    // "List of Active Students" puts a row of column numbers — (1) (2) (3) …
+    // — between the header and the first pupil. Left in, it becomes a student
+    // called "(4)" that matches nothing and inflates every count on the panel.
+    if (/^\(\d+\)$/.test(fullName.trim())) continue;
     out.push({
       classHint: get(row, "className"),
       sectionHint: get(row, "section"),
@@ -449,14 +673,38 @@ export function parseUdiseStudentDetailsMatrix(
       apaarStatus: get(row, "apaarStatus"),
       suspectedDuplicate: get(row, "suspectedDuplicate"),
       mbuStatus: get(row, "mbu"),
+      guardianName: get(row, "guardianName"),
+      mobile: get(row, "mobile"),
+      altMobile: get(row, "altMobile"),
+      email: get(row, "email"),
+      address: get(row, "address"),
+      pincode: get(row, "pincode"),
+      motherTongue: get(row, "motherTongue"),
+      bloodGroup: get(row, "bloodGroup"),
+      admissionNo: get(row, "admissionNo"),
+      admissionDate: get(row, "admissionDate"),
+      isIndianNational: get(row, "isIndianNational"),
+      nationality: get(row, "nationality"),
+      ews: get(row, "ews"),
+      aay: get(row, "aay"),
+      impairmentType: get(row, "impairmentType"),
+      disabilityCertificate: get(row, "disabilityCertificate"),
+      disabilityPercent: get(row, "disabilityPercent"),
+      outOfSchoolChild: get(row, "outOfSchoolChild"),
+      isRepeater: get(row, "isRepeater"),
+      heightCm: get(row, "heightCm"),
+      weightKg: get(row, "weightKg"),
+      rteSection12c: get(row, "rteSection12c"),
     });
   }
   return out;
 }
 
-function activeStudents(sis: SisState): SisStudent[] {
-  return sis.students.filter((s) => s.status === "active");
-}
+// `activeStudents` used to live here: `students.filter(s => s.status ===
+// "active")` with no session. It had no callers, which is the only reason it
+// never caused harm — SIS keeps one row per child per session and marks them
+// all active. Removed rather than left as a pattern for the next caller to
+// copy. Use `studentsInSession` from "@/lib/sis".
 
 /**
  * One record per child (by admission no) for matching. A promoted student has a
@@ -582,8 +830,8 @@ function matchStudent(
 
   if (byName.length) {
     if (options.useNameFather && fatherKey) {
-      const withFather = byName.filter(
-        (s) => normName(s.fatherName) === fatherKey,
+      const withFather = byName.filter((s) =>
+        udiseNamesCompatible(row.fatherName, s.fatherName),
       );
       if (withFather.length === 1) {
         if (classId) {
@@ -664,7 +912,11 @@ function matchStudent(
       }
     }
 
-    if (options.useNameUnique && byName.length === 1) {
+    if (
+      options.useNameUnique &&
+      byName.length === 1 &&
+      !parentsConflict(row, byName[0]!)
+    ) {
       return {
         student: byName[0]!,
         method: "name_unique",
@@ -677,6 +929,104 @@ function matchStudent(
         student: null,
         method: "ambiguous",
         note: `Name matches ${byName.length} SIS students`,
+      };
+    }
+  }
+
+  // Names that differ by a surname: VEER PRATAP on the portal, VEER PRATAP
+  // MISHRA in the SIS. The name alone is not enough; the parents, or the
+  // birth date, must agree too — that is the rule the director set on
+  // 2026-09-05 when the two exports (one with PEN, one with DOB and parents)
+  // had to land on the same child.
+  const loose = pool.filter(
+    (s) =>
+      normName(s.fullName) !== nameKey &&
+      udiseNamesCompatible(row.fullName, s.fullName),
+  );
+  const looseAll = [...byName, ...loose];
+  if (looseAll.length) {
+    const rowFather = udiseIsBlank(row.fatherName) ? "" : row.fatherName;
+    const rowMother = udiseIsBlank(row.motherName) ? "" : row.motherName;
+    const rowDob = normDobKey(row.dob);
+    const fatherOk = (s: SisStudent) =>
+      !!rowFather &&
+      !!normName(s.fatherName) &&
+      udiseNamesCompatible(rowFather, s.fatherName);
+    const motherOk = (s: SisStudent) =>
+      !!rowMother &&
+      !!normName(s.motherName) &&
+      udiseNamesCompatible(rowMother, s.motherName);
+    const dobOk = (s: SisStudent) => !!rowDob && normDobKey(s.dob) === rowDob;
+    const inClass = (list: SisStudent[]) =>
+      classId ? list.filter((s) => s.classId === classId) : [];
+
+    if (options.useNameFather) {
+      const parents = looseAll.filter((s) => fatherOk(s) && motherOk(s));
+      if (parents.length === 1) {
+        return {
+          student: parents[0]!,
+          method: "name_parents",
+          note: "Matched name + father + mother",
+        };
+      }
+      if (parents.length > 1) {
+        const c = inClass(parents);
+        if (c.length === 1) {
+          return {
+            student: c[0]!,
+            method: "name_parents",
+            note: "Matched name + father + mother + class",
+          };
+        }
+        return {
+          student: null,
+          method: "ambiguous",
+          note: `Name+parents match ${parents.length} SIS students`,
+        };
+      }
+      const fathers = looseAll.filter(
+        (s) =>
+          fatherOk(s) &&
+          !dobConflict(row, s) &&
+          !(rowMother && normName(s.motherName) && !motherOk(s)),
+      );
+      if (fathers.length === 1) {
+        return {
+          student: fathers[0]!,
+          method: "name_father",
+          note: "Matched name + father (surname differs)",
+        };
+      }
+      if (fathers.length > 1) {
+        const c = inClass(fathers);
+        if (c.length === 1) {
+          return {
+            student: c[0]!,
+            method: "name_father_class",
+            note: "Matched name + father + class (surname differs)",
+          };
+        }
+        return {
+          student: null,
+          method: "ambiguous",
+          note: `Name+father matches ${fathers.length} SIS students`,
+        };
+      }
+    }
+
+    const byDob = looseAll.filter((s) => dobOk(s) && !parentsConflict(row, s));
+    if (byDob.length === 1) {
+      return {
+        student: byDob[0]!,
+        method: "name_dob",
+        note: "Matched name + date of birth",
+      };
+    }
+    if (byDob.length > 1) {
+      return {
+        student: null,
+        method: "ambiguous",
+        note: `Name+DOB matches ${byDob.length} SIS students`,
       };
     }
   }
@@ -725,14 +1075,47 @@ function matchStudent(
     }
   }
 
-  if (!byName.length) {
+  if (!byName.length && !loose.length) {
     return { student: null, method: "unmatched", note: "No name match in SIS" };
+  }
+  if (!byName.length) {
+    // A similar name exists but neither parent nor birth date confirms it.
+    // Left for the operator: creating a second pupil would be worse than a
+    // question.
+    return {
+      student: null,
+      method: "ambiguous",
+      note: `Similar name in SIS (${loose
+        .slice(0, 3)
+        .map((s) => s.fullName)
+        .join(", ")}) but father / mother / DOB do not confirm — pick by hand`,
+    };
   }
   return {
     student: null,
     method: "ambiguous",
     note: `Name matches ${byName.length} SIS students`,
   };
+}
+
+/** Parents named on both sides, and at least one of them does not agree. */
+function parentsConflict(row: UdiseStudentRow, s: SisStudent): boolean {
+  const f =
+    !udiseIsBlank(row.fatherName) &&
+    !!normName(s.fatherName) &&
+    !udiseNamesCompatible(row.fatherName, s.fatherName);
+  const m =
+    !udiseIsBlank(row.motherName) &&
+    !!normName(s.motherName) &&
+    !udiseNamesCompatible(row.motherName, s.motherName);
+  return f || m;
+}
+
+/** Birth dates on both sides, and they differ. */
+function dobConflict(row: UdiseStudentRow, s: SisStudent): boolean {
+  const a = normDobKey(row.dob);
+  const b = normDobKey(s.dob);
+  return !!a && !!b && a !== b;
 }
 
 export function isMbuAgePending(mbuStatus: string): boolean {
@@ -746,6 +1129,61 @@ function aadhaarOfficialName(row: UdiseStudentRow): string {
   return n;
 }
 
+/**
+ * What UDISE+ says it actually checked against UIDAI.
+ *
+ * The portal writes one of a small set of phrases in "AADHAAR Validation
+ * Status", and they do not mean the same thing:
+ *
+ *   "Verified From UIDAI against Name, Gender & DOB"  — Aadhaar matched, and
+ *                                                       the birth date was one
+ *                                                       of the fields matched
+ *   "Verified From UIDAI"                             — Aadhaar matched
+ *   "Verification Failed From UIDAI"                  — did not match
+ *   "Not Defined" / blank                             — never attempted
+ *
+ * Only the first asserts anything about the date of birth. Note that the test
+ * for "verified" cannot be an equality check: no export writes the bare word.
+ */
+export function udiseAadhaarVerified(status: string | undefined | null): boolean {
+  const s = (status || "").trim();
+  return /^verified\b/i.test(s) && !/fail/i.test(s);
+}
+
+/** True only when UIDAI matched the birth date itself, not merely the Aadhaar. */
+export function udiseAadhaarVerifiedAgainstDob(
+  status: string | undefined | null,
+): boolean {
+  const s = (status || "").trim();
+  if (!udiseAadhaarVerified(s)) return false;
+  return /\bdob\b|date\s+of\s+birth/i.test(s);
+}
+
+/**
+ * Whether the pupil behind a portal row is settled well enough to overwrite a
+ * field the office typed, rather than merely fill one it left blank.
+ *
+ * A government identifier — PEN, APAAR, Aadhaar — is the child. A name plus a
+ * father plus a class is the child in practice: the roll is 300 pupils, not
+ * 300,000. A lone name, or a name matched approximately, is not: PRATIK YADAV
+ * and PRATEEK YADAV are two boys with two different fathers, and pairing them
+ * is exactly how a correct birth date gets replaced with a stranger's.
+ */
+export function isConfidentUdiseMatch(
+  method: UdiseMatchPreview["method"],
+): boolean {
+  return (
+    method === "pen" ||
+    method === "apaar" ||
+    method === "aadhaar" ||
+    method === "name_father_class" ||
+    method === "name_father" ||
+    method === "name_class_section" ||
+    method === "name_parents" ||
+    method === "name_dob"
+  );
+}
+
 function namesDiffer(a: string, b: string): boolean {
   return normName(a) !== normName(b) && !!normName(a) && !!normName(b);
 }
@@ -753,6 +1191,9 @@ function namesDiffer(a: string, b: string): boolean {
 function buildPatch(
   student: SisStudent,
   row: UdiseStudentRow,
+  // Whether we are sure this portal row is about this pupil. Gates the one
+  // field that overwrites rather than fills — see the DOB rule below.
+  identityConfirmed = false,
 ): UdiseMatchPreview["willUpdate"] {
   const will: UdiseMatchPreview["willUpdate"] = {};
   // Never patch classId / sectionId — UDISE+ class can be wrong.
@@ -769,13 +1210,20 @@ function buildPatch(
     will.penStatus = "has_pen";
   }
 
+  // The portal masks APAAR to its last four digits on both exports. A mask
+  // may fill a blank; it must never replace the full id the office holds.
   const apaar = cleanApaar(row.apaarId);
-  if (apaar && (student.apaarId || "").trim() !== apaar) {
-    will.apaarId = apaar;
+  const sisApaar = (student.apaarId || "").trim();
+  if (apaar && sisApaar !== apaar) {
+    if (!apaar.includes("*")) will.apaarId = apaar;
+    else if (!sisApaar) will.apaarId = apaar;
+    else if (extractLast4(sisApaar) !== extractLast4(apaar) && sisApaar.includes("*")) {
+      will.apaarId = apaar;
+    }
   }
 
   const a4 = extractLast4(row.aadhaarRaw);
-  const verified = /^verified$/i.test((row.aadhaarValidation || "").trim());
+  const verified = udiseAadhaarVerified(row.aadhaarValidation);
   if (a4 && student.aadhaarLast4 !== a4) {
     will.aadhaarLast4 = a4;
   }
@@ -783,8 +1231,7 @@ function buildPatch(
     // Only flag a change when the student isn't already verified by UDISE+.
     if (student.aadhaarVerification !== "verified_udise") {
       will.aadhaarVerification = "verified_udise";
-      // Aadhaar now govt-verified — drop any stored full number if present.
-      if (student.aadhaarNumber) will.aadhaarNumber = "";
+      // The full number, when the office has it, stays on the record.
       if (!will.aadhaarLast4 && student.aadhaarLast4 !== a4) will.aadhaarLast4 = a4;
     }
   } else if (
@@ -829,12 +1276,72 @@ function buildPatch(
     will.gender = g;
   }
 
-  // DOB: only auto-fill when SIS is blank. When both exist and differ, we never
-  // silently overwrite — it's surfaced as a mismatch for the operator instead.
+  // DOB. Two rules, and what separates them is who holds the better evidence.
+  //
+  // Blank in the SIS: the portal's date is the only one anybody has, so take it.
+  //
+  // Both present and different: the portal wins only when it says UIDAI matched
+  // the birth date itself, and only when we are sure the row is about this
+  // pupil. A date the office keyed from a birth certificate outranks a portal
+  // row we are half sure belongs to this child; a date Aadhaar has confirmed
+  // outranks the keyed one, because that is the date every board, scholarship
+  // and APAAR record will be checked against for the rest of the child's
+  // schooling. Anything weaker — "Not Defined", a failed check, a fuzzy name
+  // match — stays a mismatch for the operator to settle by hand.
+  //
+  // 2026-09-05, the director's decision: when we are sure the row is this
+  // pupil — a government id, or name with both parents, or name with the
+  // date itself — the portal's date replaces ours whether or not UIDAI has
+  // stamped it. The UDISE+ record is the one every board, scholarship and
+  // APAAR check is run against, and the SIS dates were once mangled by an
+  // import (day and month swapped on 42% of them). Weak matches still only
+  // fill a blank.
+  //
+  // Written as ISO yyyy-mm-dd: that is the only shape the SIS keeps, and the
+  // server projection drops anything else, which is how earlier DOB fills
+  // in dd/mm/yyyy vanished on the way to the database.
   const portalDobKey = normDobKey(row.dob);
-  if (portalDobKey && !normDobKey(student.dob)) {
-    will.dob = fmtDob(row.dob);
+  const sisDobKey = normDobKey(student.dob);
+  const portalIso = udiseDobIso(row.dob);
+  if (portalIso && !sisDobKey) {
+    will.dob = portalIso;
+  } else if (
+    portalIso &&
+    sisDobKey &&
+    portalDobKey !== sisDobKey &&
+    identityConfirmed
+  ) {
+    will.dob = portalIso;
   }
+
+  // Profile fields the longer export carries. Same rule as DOB throughout:
+  // fill only where the SIS is blank, never overwrite what the office typed.
+  // The portal writes "NA" for empty, which udiseIsBlank already knows about.
+  const fillIfBlank = (
+    key: "bloodGroup" | "motherTongue" | "nationality" | "joinedOn",
+    raw: string,
+    clean: (v: string) => string = (v) => v.trim(),
+  ) => {
+    const v = (raw || "").trim();
+    if (!v || udiseIsBlank(v)) return;
+    if ((student[key] || "").trim()) return;
+    const out = clean(v);
+    if (out) will[key] = out;
+  };
+
+  fillIfBlank("bloodGroup", row.bloodGroup, (v) =>
+    // "Under Investigation - Result will follow" and similar are not a group.
+    /^(A|B|AB|O)[+-]?$|^(A|B|AB|O)\s*(positive|negative)$/i.test(v) ? v.toUpperCase() : "",
+  );
+  // "42 - HINDI - Hindi" → "Hindi"
+  fillIfBlank("motherTongue", row.motherTongue, (v) => {
+    const parts = v.split("-").map((p) => p.trim()).filter(Boolean);
+    return parts.length ? parts[parts.length - 1]! : "";
+  });
+  if (!(student.nationality || "").trim() && /^yes$/i.test((row.isIndianNational || "").trim())) {
+    will.nationality = "Indian";
+  }
+  fillIfBlank("joinedOn", row.admissionDate, udiseAdmissionDateIso);
 
   const aval = (row.aadhaarValidation || "").trim();
   // Record the portal validation status only when it actually differs — this
@@ -860,7 +1367,13 @@ function buildPatch(
   return will;
 }
 
-function fillLabelsOf(will: UdiseMatchPreview["willUpdate"]): string[] {
+function fillLabelsOf(
+  will: UdiseMatchPreview["willUpdate"],
+  // The SIS date this patch would land on, so the label can say whether the
+  // date is being filled in or written over. Those are different acts and the
+  // operator should not have to work out which one from a bare arrow.
+  currentDob = "",
+): string[] {
   const labels: string[] = [];
   if (will.fullName) labels.push(`Name (Aadhaar) → ${will.fullName}`);
   if (will.fatherName) labels.push(`Father → ${will.fatherName}`);
@@ -886,7 +1399,17 @@ function fillLabelsOf(will: UdiseMatchPreview["willUpdate"]): string[] {
   }
   if (will.gender) labels.push(`Gender → ${will.gender}`);
   if (will.category) labels.push(`Category → ${will.category}`);
-  if (will.dob) labels.push(`DOB → ${will.dob}`);
+  if (will.dob) {
+    labels.push(
+      currentDob.trim()
+        ? `DOB ${fmtDob(currentDob)} → ${fmtDob(will.dob)} (from UDISE+)`
+        : `DOB → ${fmtDob(will.dob)}`,
+    );
+  }
+  if (will.bloodGroup) labels.push(`Blood group → ${will.bloodGroup}`);
+  if (will.motherTongue) labels.push(`Mother tongue → ${will.motherTongue}`);
+  if (will.nationality) labels.push(`Nationality → ${will.nationality}`);
+  if (will.joinedOn) labels.push(`Admission date → ${will.joinedOn}`);
   return labels;
 }
 
@@ -917,11 +1440,10 @@ function sisFilledOf(
     fullName: student.fullName || "",
     pen: student.pen || "",
     apaarId: student.apaarId || "",
-    aadhaar: a4
-      ? student.aadhaarVerification === "verified_udise"
-        ? `********${a4}`
-        : student.aadhaarNumber || `********${a4}`
-      : "",
+    // Staff surface: the whole number whenever it is known, verified or not —
+    // the same rule as displayAadhaar. Only the last four are masked, because
+    // only the last four are all there is.
+    aadhaar: a4 ? student.aadhaarNumber || `********${a4}` : "",
     aadhaarVerification: student.aadhaarVerification || "missing",
     motherName: student.motherName || "",
     fatherName: student.fatherName || "",
@@ -946,16 +1468,17 @@ function buildPreviewRow(
   sisInactive = false,
 ): UdiseMatchPreview {
   const portalSuspect = isPortalSuspect(udise);
-  const portalAadhaarVerified = /^verified$/i.test(
-    (udise.aadhaarValidation || "").trim(),
-  );
+  const portalAadhaarVerified = udiseAadhaarVerified(udise.aadhaarValidation);
   const mbuAgeAlert = isMbuAgePending(udise.mbuStatus);
   // Representative record may itself be inactive (left / TC / promoted-out) —
   // derive from status so a single-pass match still flags it correctly.
   const inactive = !!student && (sisInactive || student.status !== "active");
   // Never auto-fill an inactive SIS record — just flag it for the operator.
-  const willUpdate = student && !inactive ? buildPatch(student, udise) : {};
-  const fillLabels = fillLabelsOf(willUpdate);
+  const willUpdate =
+    student && !inactive
+      ? buildPatch(student, udise, isConfidentUdiseMatch(method))
+      : {};
+  const fillLabels = fillLabelsOf(willUpdate, student?.dob ?? "");
   const sisFilled = sisFilledOf(student, masters);
 
   const udiseClassId = resolveUdiseClassId(udise.classHint, masters);
@@ -979,10 +1502,17 @@ function buildPreviewRow(
   let tone: UdiseRowTone = "ok";
   let actionHint = "";
 
+  // Once the SIS holds both government ids and nothing is left to fill, the
+  // row is done and leaves the "still to do" list — the office should not be
+  // shown the same settled child on every upload (director, 2026-09-05).
+  const hasPen = !!student && !!cleanPen(student.pen);
+  const hasApaar = !!student && !!(student.apaarId || "").trim();
+  const settled = hasPen && hasApaar;
+
   if (inactive && student) {
     tone = "inactive";
     actionHint = `Student exists in SIS but is INACTIVE (${student.status || "inactive"} · session ${student.academicYearCode || "—"}). Reactivate / promote in SIS to bring them onto UDISE+ for this year.`;
-  } else if (mbuAgeAlert && student) {
+  } else if (mbuAgeAlert && student && !settled && !fillLabels.length) {
     tone = "mbu_age";
     actionHint = `⚠ MBU Pending — age below / biometric pending for this class (govt). UDISE+ class: ${udise.classHint || "—"}. SIS class unchanged: ${sisFilled.sisClassLabel}.`;
   } else if (method === "ambiguous") {
@@ -997,6 +1527,14 @@ function buildPreviewRow(
     tone = "fill";
     actionHint =
       "Apply sync to update SIS fields (class never changed from UDISE+)";
+  } else if (settled) {
+    tone = "ok";
+    actionHint =
+      student.aadhaarVerification === "verified_udise"
+        ? "In sync · PEN & APAAR present · student Aadhaar verified"
+        : "In sync · PEN & APAAR present" +
+          (mbuAgeAlert ? " · MBU pending on the portal" : "") +
+          " · Aadhaar not yet marked verified on UDISE+";
   } else if (student.aadhaarVerification !== "verified_udise") {
     tone = "verify";
     actionHint =
@@ -1020,8 +1558,9 @@ function buildPreviewRow(
   }
 
   if (dobMismatch) {
-    actionHint =
-      `${actionHint} · ⚠ DOB differs — SIS ${sisDob} vs UDISE+ ${udiseDob} (verify & correct; not auto-updated).`.trim();
+    actionHint = willUpdate.dob
+      ? `${actionHint} · DOB differs — SIS ${sisDob} vs UDISE+ ${udiseDob}. The row is confirmed as this pupil, so applying will replace ours with the UDISE+ date.`.trim()
+      : `${actionHint} · ⚠ DOB differs — SIS ${sisDob} vs UDISE+ ${udiseDob} (verify & correct; not auto-updated).`.trim();
   }
 
   return {
@@ -1084,6 +1623,72 @@ export function previewUdiseStudentDetailsSync(
  * Apply UDISE+ Students_Details sync: update PEN / APAAR / Aadhaar last-4 on matched SIS students.
  * Does not create new students.
  */
+/**
+ * Identity facts are about the CHILD, not the session. When UDISE+ corrects a
+ * name, parent name, DOB or a govt id on the current session's record, every
+ * other session's record for the same admission number must say the same
+ * thing — otherwise history drifts apart again (the 2026-08-27 audit removed
+ * ~40 such cross-session drifts). Class and section deliberately stay
+ * session-local: UDISE never patches them, and a class belongs to one year.
+ */
+function propagateIdentityAcrossSessions(
+  students: SisStudent[],
+  source: SisStudent,
+  stamp: string,
+): number {
+  const adm = (source.admissionNo || "").trim();
+  if (!adm) return 0;
+  let changed = 0;
+  for (let i = 0; i < students.length; i++) {
+    const s = students[i]!;
+    if (s.id === source.id || (s.admissionNo || "").trim() !== adm) continue;
+    // DOB follows the same fill-only rule as the matched row: never blank an
+    // existing value, never overwrite a differing one silently.
+    const dob = s.dob || source.dob;
+    if (
+      s.fullName === source.fullName &&
+      s.fatherName === source.fatherName &&
+      s.motherName === source.motherName &&
+      s.gender === source.gender &&
+      s.category === source.category &&
+      s.dob === dob &&
+      s.pen === source.pen &&
+      s.apaarId === source.apaarId &&
+      s.aadhaarLast4 === source.aadhaarLast4 &&
+      s.aadhaarVerification === source.aadhaarVerification
+    ) {
+      continue;
+    }
+    students[i] = normalizeStudent({
+      ...s,
+      fullName: source.fullName,
+      fatherName: source.fatherName,
+      motherName: source.motherName,
+      gender: source.gender,
+      category: source.category,
+      dob,
+      pen: source.pen,
+      penStatus: source.penStatus,
+      apaarId: source.apaarId,
+      aadhaarLast4: source.aadhaarLast4,
+      // The stored 12 digits survive the sync. Blanking them on
+      // "verified_udise" was removed from the student form and normalizeStudent
+      // on 2026-09-06 and left here: a portal sync would still wipe a number
+      // the office had typed, and there is nowhere to read it back from.
+      aadhaarNumber: s.aadhaarNumber,
+      aadhaarVerification: source.aadhaarVerification,
+      notes: [
+        s.notes,
+        `Identity aligned with UDISE+ sync ${stamp} (from current session)`,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    });
+    changed += 1;
+  }
+  return changed;
+}
+
 export function applyUdiseStudentDetailsSync(
   matrix: unknown[][],
   sis?: SisState,
@@ -1149,10 +1754,8 @@ export function applyUdiseStudentDetailsSync(
       penStatus: (p.willUpdate.penStatus ?? cur.penStatus) as PenStatus,
       apaarId: p.willUpdate.apaarId ?? cur.apaarId,
       aadhaarLast4: p.willUpdate.aadhaarLast4 ?? cur.aadhaarLast4,
-      aadhaarNumber:
-        p.willUpdate.aadhaarVerification === "verified_udise"
-          ? ""
-          : (p.willUpdate.aadhaarNumber ?? cur.aadhaarNumber),
+      // Never blanked on verification — see the note in syncFromCurrentSession.
+      aadhaarNumber: p.willUpdate.aadhaarNumber ?? cur.aadhaarNumber,
       aadhaarVerification:
         p.willUpdate.aadhaarVerification ?? cur.aadhaarVerification,
       category: p.willUpdate.category ?? cur.category,
@@ -1190,6 +1793,11 @@ export function applyUdiseStudentDetailsSync(
     students[idx] = next;
     touched.add(p.studentId);
     updated += 1;
+    propagateIdentityAcrossSessions(
+      students,
+      next,
+      new Date().toISOString().slice(0, 10),
+    );
   }
 
   // Also clear inbound pending when PEN appears in file even if name match failed earlier —
@@ -1343,6 +1951,15 @@ export function applyUdiseRowToStudent(input: {
   reactivate?: boolean;
   sis?: SisState;
   masters?: MastersState;
+  /**
+   * Whether this row is settled as being about this pupil. The panel passes
+   * the match method's own verdict for an auto-matched row, and `true` when
+   * the operator picked the pupil out of a candidate list by hand — choosing
+   * a name off that list *is* the confirmation. Defaults to false so a caller
+   * that says nothing gets the cautious rule, and so the preview and the
+   * apply never disagree about whether a birth date will be overwritten.
+   */
+  identityConfirmed?: boolean;
 }):
   | { ok: true; state: SisState; student: SisStudent; fields: string[] }
   | { ok: false; error: string } {
@@ -1350,7 +1967,7 @@ export function applyUdiseRowToStudent(input: {
   const idx = state.students.findIndex((s) => s.id === input.studentId);
   if (idx < 0) return { ok: false, error: "Student not found in SIS" };
   const cur = state.students[idx]!;
-  const will = buildPatch(cur, input.row);
+  const will = buildPatch(cur, input.row, input.identityConfirmed ?? false);
   const fields = Object.keys(will);
   if (!fields.length && !input.reactivate && cur.status === "active") {
     return { ok: false, error: "Nothing to update on this student" };
@@ -1367,10 +1984,8 @@ export function applyUdiseRowToStudent(input: {
     penStatus: (will.penStatus ?? cur.penStatus) as PenStatus,
     apaarId: will.apaarId ?? cur.apaarId,
     aadhaarLast4: will.aadhaarLast4 ?? cur.aadhaarLast4,
-    aadhaarNumber:
-      will.aadhaarVerification === "verified_udise"
-        ? ""
-        : (will.aadhaarNumber ?? cur.aadhaarNumber),
+    // Never blanked on verification — see the note in syncFromCurrentSession.
+    aadhaarNumber: will.aadhaarNumber ?? cur.aadhaarNumber,
     aadhaarVerification: will.aadhaarVerification ?? cur.aadhaarVerification,
     category: will.category ?? cur.category,
     gender: will.gender ?? cur.gender,
@@ -1391,6 +2006,7 @@ export function applyUdiseRowToStudent(input: {
       .filter(Boolean)
       .join(" · "),
   });
+  propagateIdentityAcrossSessions(students, students[idx]!, stamp);
   const nextState: SisState = { ...state, students };
   saveSis(nextState);
   return { ok: true, state: nextState, student: students[idx]!, fields };
@@ -1475,11 +2091,11 @@ export function promoteUdiseRowToSession(input: {
       .filter(Boolean)
       .join(" · "),
   });
-  const withRow = normalizeStudent({
-    ...draft,
-    ...buildPatch(draft, input.row),
-  });
-  const fields = Object.keys(buildPatch(draft, input.row));
+  // The operator named both the source pupil and the target year, so who this
+  // row is about is not in question here.
+  const promoted = buildPatch(draft, input.row, true);
+  const withRow = normalizeStudent({ ...draft, ...promoted });
+  const fields = Object.keys(promoted);
   const nextState: SisState = {
     ...state,
     students: [...state.students, withRow],
@@ -1727,9 +2343,11 @@ export function reconcileUdisePortalUpload(input: {
     if (!cleanPen(s.pen)) matchedButPlaceholderPen += 1;
   }
 
+  // The loop above already discards rows from another year (matchedButOtherYear);
+  // this half of the same reconciliation did not, so a DEPARTED child's PEN
+  // masked a genuine "PEN in the file but not in SIS" gap.
   const sisActivePens = new Set(
-    state.students
-      .filter((s) => s.status === "active")
+    studentsInSession(state, scope)
       .map((s) => cleanPen(s.pen))
       .filter(Boolean),
   );
@@ -1813,7 +2431,7 @@ export function markStudentVerifiedFromUdise(input: {
     penStatus: pen ? "has_pen" : cur.penStatus,
     apaarId: apaar || cur.apaarId,
     aadhaarLast4: a4 || cur.aadhaarLast4,
-    aadhaarNumber: "",
+    aadhaarNumber: cur.aadhaarNumber,
     aadhaarVerification: "verified_udise",
     notes: [
       cur.notes,
@@ -1934,7 +2552,7 @@ export function migrateUdiseRowToSis(input: {
     academicYearCode: ay,
     studentType,
     feeGroupId,
-    joinedOn: new Date().toISOString().slice(0, 10),
+    joinedOn: udiseAdmissionDateIso(row.admissionDate),
     fatherName: row.fatherName,
     motherName: row.motherName,
     gender,
@@ -2092,7 +2710,7 @@ export function importUnmatchedUdiseRows(input: {
       academicYearCode: ay,
       studentType: input.studentType,
       feeGroupId,
-      joinedOn: new Date().toISOString().slice(0, 10),
+      joinedOn: udiseAdmissionDateIso(row.admissionDate),
       fatherName: row.fatherName,
       motherName: row.motherName,
       gender: mapUdiseGender(row.gender),

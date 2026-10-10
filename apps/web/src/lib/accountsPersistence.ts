@@ -4,11 +4,15 @@
 
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
+  accountsSeedAllowed,
   accountsStateIsEmpty,
   loadAccounts,
+  markAccountsDeskPulled,
+  seedAccountsIfEmpty,
   writeAccountsLocalRaw,
-  type AccountsState,
-} from "@/lib/accounts";
+  repairOrphanCashLedger,
+} from "@/lib/accountsStore";
+import type { AccountsState } from "@/lib/accountsTypes";
 import {
   hydrateAccountsDeskFromDb,
   scheduleAccountsDeskSync,
@@ -17,10 +21,12 @@ import { mergeDbDeskIntoAccountsState } from "@/lib/accountsNormalizedMerge";
 import { accountsReadFromDbEnabled } from "@/lib/accountsDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
 import {
+  dedupeHydration,
   isDeskHydrated,
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "accounts";
 
@@ -36,32 +42,89 @@ const blob = createDomainBlobPersistence<AccountsState>({
 export const accountsRemoteEnabled = blob.remoteEnabled;
 export const scheduleAccountsSync = (state: AccountsState) => {
   if (typeof window === "undefined") {
-    void pushAccountsRemoteServer(state);
+    void trackServerWork(pushAccountsRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("accounts")) blob.scheduleSync(state);
   scheduleAccountsDeskSync(state);
 };
-export const ensureAccountsHydrated = async () => {
+/**
+ * Pull the accounts desk, and let every caller AWAIT the same pull.
+ *
+ * This used to mark the module hydrated on the way IN and hold no shared
+ * promise, so a second caller returned `false` immediately while the first
+ * caller's fetch was still in flight. On the fee counter that is the whole
+ * bug: the app shell starts the accounts pull as the page mounts, the
+ * counter's own `await ensureAccountsHydrated()` returns at once against an
+ * empty store, and the Mode & account list is built with nothing in it —
+ * cash, no banks. Reaching the counter from the Accounts page hid it, because
+ * by then the desk was already in localStorage.
+ *
+ * Measured on a warm dev server: the banks landed 6.7s after a direct load of
+ * /fees. Cloud Run with a cold start and fifteen desks queued behind four
+ * hydration slots is slower, and the operator is already typing.
+ *
+ * `dedupeHydration` — what SIS, fees, masters and payments already use —
+ * shares the in-flight promise, and the flag is set after the work rather
+ * than before, so an await is an actual await.
+ */
+export const ensureAccountsHydrated = async (): Promise<boolean> => {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
+  return dedupeHydration(MODULE, hydrateAccountsOnce);
+};
 
+const hydrateAccountsOnce = async (): Promise<boolean> => {
   const readFromDb = accountsReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("accounts")
     ? false
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateAccountsDeskFromDb(readFromDb);
+  const { bundle, changed, fetched } = await hydrateAccountsDeskFromDb(readFromDb, loadAccounts());
   if (changed && (bundle.coaAccounts.length > 0 || readFromDb)) {
     writeAccountsLocalRaw(
       mergeDbDeskIntoAccountsState(loadAccounts(), bundle, { preferDb: readFromDb }),
     );
     normChanged = true;
   }
-  if (normChanged) scheduleAccountsSync(loadAccounts());
+  // The school's desk is now in this browser — only now may the seed run.
+  if (fetched) markAccountsDeskPulled();
+  // Hydration is exactly when pool ids can go stale: the ledger arrives from
+  // the server while the pools are whatever this browser happens to hold. Heal
+  // before anyone reads a cash balance, or the money reads as zero.
+  const healed = repairOrphanCashLedger(loadAccounts());
+  if (healed !== loadAccounts()) {
+    writeAccountsLocalRaw(healed);
+    normChanged = true;
+  }
+
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+  if (normChanged && !readFromDb) scheduleAccountsSync(loadAccounts());
+  // Marked only now. Setting it on the way in is what let a caller believe a
+  // pull had finished when it had not.
+  markDeskHydrated(MODULE);
   return blobChanged || normChanged;
 };
+
+/**
+ * The seed, for callers that need pools and a chart to exist (fee postings,
+ * capex): pull the school's desk first, then seed only what is truly absent.
+ *
+ * A pull that ran but failed still marks the module hydrated for 15s, so if
+ * the desk has never landed this clears that mark and tries once more. If it
+ * still has not landed the seed stays a read, and a posting that needs a pool
+ * fails into the retry queue rather than inventing one.
+ */
+export async function ensureAccountsSeeded(): Promise<AccountsState> {
+  if (typeof window !== "undefined" && !accountsSeedAllowed()) {
+    await ensureAccountsHydrated();
+    if (!accountsSeedAllowed()) {
+      resetDeskHydrated(MODULE);
+      await ensureAccountsHydrated();
+    }
+  }
+  return seedAccountsIfEmpty();
+}
 
 export async function pushAccountsRemoteServer(
   state: AccountsState,
@@ -106,7 +169,11 @@ export async function ensureAccountsHydratedServer(): Promise<boolean> {
   }
 
   const dbDesk = await fetchAccountsDeskFromDb();
-  if (dbDesk.bundle.coaAccounts.length > 0 || accountsReadFromDbEnabled()) {
+  // A failed read is not an empty desk: merging it with preferDb replaced the
+  // server's accounts copy with nothing.
+  if (!dbDesk.ok) {
+    console.error("[accounts] server hydrate: desk read failed —", dbDesk.error);
+  } else if (dbDesk.bundle.coaAccounts.length > 0 || accountsReadFromDbEnabled()) {
     state = mergeDbDeskIntoAccountsState(state, dbDesk.bundle, {
       preferDb:
         accountsReadFromDbEnabled() || (state.coaAccounts?.length ?? 0) === 0,

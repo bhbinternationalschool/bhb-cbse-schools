@@ -13,6 +13,7 @@ import {
 } from "@/lib/sis";
 import type { ReportColumn } from "@/lib/reportExport";
 import { tagLabelsForStudent } from "@/lib/studentTags";
+import { formatDobLong } from "@/lib/dobFormat";
 
 export const STUDENT_REGISTER_EXPORT_COLUMNS: ReportColumn[] = [
   { key: "admissionNo", header: "Admission no", width: 1.1 },
@@ -128,7 +129,9 @@ export function studentToRegisterExportRow(
     admissionNo: s.admissionNo,
     fullName: s.fullName,
     gender: genderLabel(s.gender),
-    dob: s.dob,
+    // Spelled-out month: this file gets re-imported, and "08/04/2020"
+    // has two readings. See lib/dobFormat.ts.
+    dob: formatDobLong(s.dob),
     status: s.status,
     campus,
     className: cls,

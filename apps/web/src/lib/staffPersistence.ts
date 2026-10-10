@@ -4,13 +4,10 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import {
-  createBrowserSupabase,
-  isSupabaseConfigured,
-} from "@/lib/supabase/client";
-import { TENANT } from "@/lib/types";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
   normalizeStaffRecord,
+  normalizeStaffDocs,
   type Department,
   type Designation,
   type StaffDocKey,
@@ -20,13 +17,18 @@ import {
   STAFF_DOC_LABELS,
 } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
-import { staffDualWriteDbEnabled, staffReadFromDbEnabled } from "@/lib/staffDbConfig";
+import {
+  STAFF_OWNED_MASTERS_SLICES,
+  staffDualWriteDbEnabled,
+  staffReadFromDbEnabled,
+} from "@/lib/staffDbConfig";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 import {
   isDeskHydrated,
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "staff";
 
@@ -53,7 +55,7 @@ type DesignationRow = {
   updated_at: string;
 };
 
-type StaffRow = {
+export type StaffRow = {
   id: string;
   emp_code: string | null;
   full_name: string | null;
@@ -69,7 +71,6 @@ type StaffRow = {
   updated_at: string;
 };
 
-let tenantIdCache: string | null = null;
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingPush: MastersState | null = null;
 
@@ -81,32 +82,11 @@ export function staffRemoteEnabled() {
 
 export function resetStaffPersistenceCache() {
   resetDeskHydrated(MODULE);
-  tenantIdCache = null;
   pendingPush = null;
   if (pushTimer) {
     clearTimeout(pushTimer);
     pushTimer = null;
   }
-}
-
-async function clientAndTenant(): Promise<{
-  sb: SupabaseClient;
-  tenantId: string;
-} | null> {
-  const sb = createBrowserSupabase();
-  if (!sb) return null;
-  if (tenantIdCache) return { sb, tenantId: tenantIdCache };
-  const { data, error } = await sb
-    .from("tenants")
-    .select("id")
-    .eq("slug", TENANT.slug)
-    .maybeSingle();
-  if (error || !data?.id) {
-    console.warn("[staff] tenant resolve failed", error?.message);
-    return null;
-  }
-  tenantIdCache = data.id as string;
-  return { sb, tenantId: tenantIdCache };
 }
 
 function photoForRemote(url: string): string {
@@ -155,7 +135,7 @@ function rowToDesignation(row: DesignationRow): Designation {
   };
 }
 
-function rowToStaff(row: StaffRow): StaffRecord {
+export function rowToStaff(row: StaffRow): StaffRecord {
   const profile =
     row.profile && typeof row.profile === "object"
       ? (row.profile as Partial<StaffRecord>)
@@ -182,38 +162,36 @@ function rowToStaff(row: StaffRow): StaffRecord {
   });
 }
 
+/** Browser: pull staff/departments/designations via the server API. */
 export async function fetchStaffRemote(): Promise<StaffRemoteBundle | null> {
   if (!staffRemoteEnabled()) return null;
-  const ctx = await clientAndTenant();
-  if (!ctx) return null;
-  const { sb, tenantId } = ctx;
-
-  const [depRes, desRes, stfRes] = await Promise.all([
-    sb.from("sis_departments").select("*").eq("tenant_id", tenantId),
-    sb.from("sis_designations").select("*").eq("tenant_id", tenantId),
-    sb.from("sis_staff").select("*").eq("tenant_id", tenantId),
-  ]);
-
-  if (depRes.error) {
-    console.warn("[staff] pull departments failed", depRes.error.message);
+  if (typeof window === "undefined") return null;
+  try {
+    const res = await fetch("/api/school-data/staff-roster", {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      console.warn("[staff] pull failed", res.status);
+      return null;
+    }
+    const body = (await res.json()) as {
+      ok?: boolean;
+      departments?: Department[];
+      designations?: Designation[];
+      staff?: StaffRecord[];
+    };
+    if (!body.ok) return null;
+    return {
+      departments: body.departments ?? [],
+      designations: body.designations ?? [],
+      staff: body.staff ?? [],
+    };
+  } catch (e) {
+    console.warn("[staff] pull error", e);
     return null;
   }
-  if (desRes.error) {
-    console.warn("[staff] pull designations failed", desRes.error.message);
-    return null;
-  }
-  if (stfRes.error) {
-    console.warn("[staff] pull staff failed", stfRes.error.message);
-    return null;
-  }
-
-  return {
-    departments: ((depRes.data ?? []) as DepartmentRow[]).map(rowToDepartment),
-    designations: ((desRes.data ?? []) as DesignationRow[]).map(
-      rowToDesignation,
-    ),
-    staff: ((stfRes.data ?? []) as StaffRow[]).map(rowToStaff),
-  };
 }
 
 /** Service-role pull for WhatsApp / server mirror (no browser session). */
@@ -244,6 +222,31 @@ export async function fetchStaffRemoteServer(): Promise<StaffRemoteBundle | null
     ),
     staff: ((stfRes.data ?? []) as StaffRow[]).map(rowToStaff),
   };
+}
+
+/**
+ * Single-staff docs lookup — for the Drive document serve/upload routes
+ * (docs/GOOGLE_DRIVE_DOCUMENTS_PLAN.md §Phase 3). docs lives inside the
+ * profile jsonb blob, not a dedicated column — see rowToStaff.
+ */
+export async function fetchStaffDocsById(
+  staffId: string,
+): Promise<StaffDocs | null> {
+  const { getServerTenantContext } = await import("@/lib/serverTenant");
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { data, error } = await ctx.sb
+    .from("sis_staff")
+    .select("profile")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", staffId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const profile =
+    data.profile && typeof data.profile === "object"
+      ? (data.profile as { docs?: unknown })
+      : {};
+  return normalizeStaffDocs(profile.docs);
 }
 
 /**
@@ -326,6 +329,21 @@ function staffToRow(s: StaffRecord, tenantId: string, now: string) {
   };
 }
 
+/**
+ * Ids are minted per-browser in localStorage, so two clients (or a re-seeded
+ * client) can hold the same department/designation codes or staff empCodes
+ * under different ids. Upserting on id alone then trips the secondary unique
+ * keys — (tenant_id, code) / (tenant_id, emp_code) — and aborts the whole
+ * push, which leaves sis_staff empty and server-side RBAC without a roster.
+ * Remap incoming ids onto the DB's ids by natural key, and dedupe within the
+ * payload by the same key, before upserting.
+ */
+function dedupeByKey<T>(rows: T[], keyOf: (row: T) => string): T[] {
+  const m = new Map<string, T>();
+  for (const row of rows) m.set(keyOf(row), row);
+  return [...m.values()];
+}
+
 async function upsertStaffBundle(
   sb: SupabaseClient,
   tenantId: string,
@@ -334,9 +352,89 @@ async function upsertStaffBundle(
   if (!staffDualWriteDbEnabled()) return { ok: true };
   const now = new Date().toISOString();
 
-  const depRows = (state.departments ?? []).map((d) =>
-    departmentToRow(d, tenantId, now),
+  const [depRes, desRes, stfRes] = await Promise.all([
+    sb.from("sis_departments").select("id, code").eq("tenant_id", tenantId),
+    sb.from("sis_designations").select("id, code").eq("tenant_id", tenantId),
+    sb.from("sis_staff").select("id, emp_code").eq("tenant_id", tenantId),
+  ]);
+  if (depRes.error || desRes.error || stfRes.error) {
+    const message =
+      depRes.error?.message ||
+      desRes.error?.message ||
+      stfRes.error?.message ||
+      "read failed";
+    console.warn("[staff] push precheck failed", message);
+    return { ok: false, error: message };
+  }
+  const idByKey = (
+    rows: { id: string }[] | null,
+    key: "code" | "emp_code",
+  ): Map<string, string> => {
+    const m = new Map<string, string>();
+    for (const r of rows ?? []) {
+      const k = String((r as Record<string, unknown>)[key] ?? "").trim();
+      if (k) m.set(k, String(r.id));
+    }
+    return m;
+  };
+  const depIdByCode = idByKey(depRes.data, "code");
+  const desIdByCode = idByKey(desRes.data, "code");
+  const stfIdByEmp = idByKey(stfRes.data, "emp_code");
+
+  const depRemap = new Map<string, string>();
+  const departments = dedupeByKey(
+    (state.departments ?? []).map((d) => {
+      const code = (d.code || "").trim();
+      const dbId = code ? depIdByCode.get(code) : undefined;
+      if (dbId && dbId !== d.id) {
+        depRemap.set(d.id, dbId);
+        return { ...d, id: dbId };
+      }
+      return d;
+    }),
+    (d) => (d.code || "").trim() || d.id,
   );
+
+  const desRemap = new Map<string, string>();
+  const designations = dedupeByKey(
+    (state.designations ?? []).map((d) => {
+      const code = (d.code || "").trim();
+      const dbId = code ? desIdByCode.get(code) : undefined;
+      const departmentId = d.departmentId
+        ? depRemap.get(d.departmentId) ?? d.departmentId
+        : d.departmentId;
+      const next = { ...d, departmentId };
+      if (dbId && dbId !== d.id) {
+        desRemap.set(d.id, dbId);
+        next.id = dbId;
+      }
+      return next;
+    }),
+    (d) => (d.code || "").trim() || d.id,
+  );
+
+  const staff = dedupeByKey(
+    (state.staff ?? []).map((raw) => {
+      // The API route feeds request JSON straight through; normalize so a
+      // partial record can't crash the row builders further down.
+      const s = normalizeStaffRecord(raw);
+      const emp = (s.empCode || "").trim();
+      const dbId = emp ? stfIdByEmp.get(emp) : undefined;
+      return {
+        ...s,
+        id: dbId && dbId !== s.id ? dbId : s.id,
+        departmentId: s.departmentId
+          ? depRemap.get(s.departmentId) ?? s.departmentId
+          : s.departmentId,
+        designationId: s.designationId
+          ? desRemap.get(s.designationId) ?? s.designationId
+          : s.designationId,
+      };
+    }),
+    (s) => (s.empCode || "").trim() || s.id,
+  );
+
+  const depRows = departments.map((d) => departmentToRow(d, tenantId, now));
   if (depRows.length > 0) {
     const { error } = await sb.from("sis_departments").upsert(depRows, {
       onConflict: "id",
@@ -347,9 +445,7 @@ async function upsertStaffBundle(
     }
   }
 
-  const desRows = (state.designations ?? []).map((d) =>
-    designationToRow(d, tenantId, now),
-  );
+  const desRows = designations.map((d) => designationToRow(d, tenantId, now));
   if (desRows.length > 0) {
     const { error } = await sb.from("sis_designations").upsert(desRows, {
       onConflict: "id",
@@ -360,9 +456,7 @@ async function upsertStaffBundle(
     }
   }
 
-  const staffRows = (state.staff ?? []).map((s) =>
-    staffToRow(s, tenantId, now),
-  );
+  const staffRows = staff.map((s) => staffToRow(s, tenantId, now));
   const chunk = 40;
   for (let i = 0; i < staffRows.length; i += chunk) {
     const slice = staffRows.slice(i, i + chunk);
@@ -390,24 +484,39 @@ export async function pushStaffRemoteServer(
   return upsertStaffBundle(ctx.sb, ctx.tenantId, state);
 }
 
+/** Browser: push a Masters state's staff slice via the server API. */
 export async function pushStaffSlice(
   state: MastersState,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!staffRemoteEnabled()) return { ok: true };
-  const ctx = await clientAndTenant();
-  if (!ctx) return { ok: false, error: "Tenant not resolved" };
-  return upsertStaffBundle(ctx.sb, ctx.tenantId, state);
+  if (typeof window === "undefined") return { ok: true };
+  try {
+    const res = await fetch("/api/school-data/staff-roster", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state }),
+    });
+    const body = (await res.json().catch(() => null)) as {
+      ok?: boolean;
+      error?: string;
+    } | null;
+    if (!res.ok || !body?.ok) {
+      const message = body?.error || `HTTP ${res.status}`;
+      console.warn("[staff] push failed", message);
+      return { ok: false, error: message };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.warn("[staff] push error", e);
+    return { ok: false, error: String(e) };
+  }
 }
 
-export async function wipeRemoteStaffRoster(): Promise<{
-  ok: boolean;
-  error?: string;
-}> {
-  if (!staffRemoteEnabled()) return { ok: true };
-  const ctx = await clientAndTenant();
-  if (!ctx) return { ok: false, error: "Tenant not resolved" };
-  const { sb, tenantId } = ctx;
-
+async function wipeStaffBundle(
+  sb: SupabaseClient,
+  tenantId: string,
+): Promise<{ ok: boolean; error?: string }> {
   const { error: stfErr } = await sb
     .from("sis_staff")
     .delete()
@@ -432,12 +541,52 @@ export async function wipeRemoteStaffRoster(): Promise<{
     console.warn("[staff] wipe departments failed", depErr.message);
     return { ok: false, error: depErr.message };
   }
-  resetStaffPersistenceCache();
   return { ok: true };
 }
 
+/** Service-role wipe — used by the API route (tenant reset flows). */
+export async function wipeRemoteStaffRosterServer(): Promise<{
+  ok: boolean;
+  error?: string;
+}> {
+  const { getServerTenantContext } = await import("@/lib/serverTenant");
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const result = await wipeStaffBundle(ctx.sb, ctx.tenantId);
+  if (result.ok) resetStaffPersistenceCache();
+  return result;
+}
+
+/** Browser: wipe staff roster via the server API. */
+export async function wipeRemoteStaffRoster(): Promise<{
+  ok: boolean;
+  error?: string;
+}> {
+  if (!staffRemoteEnabled()) return { ok: true };
+  if (typeof window === "undefined") return { ok: true };
+  try {
+    const res = await fetch("/api/school-data/staff-roster", {
+      method: "DELETE",
+      credentials: "same-origin",
+    });
+    const body = (await res.json().catch(() => null)) as {
+      ok?: boolean;
+      error?: string;
+    } | null;
+    if (!res.ok || !body?.ok) {
+      return { ok: false, error: body?.error || `HTTP ${res.status}` };
+    }
+    resetStaffPersistenceCache();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
 export function staffReadFromDbClientEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_STAFF_READ_FROM_DB === "true";
+  const flag = process.env.NEXT_PUBLIC_STAFF_READ_FROM_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 /** Strip staff roster from masters before school_mirror blob upsert. */
@@ -445,18 +594,17 @@ export function stripStaffFromMastersForBlob(
   state: MastersState,
 ): MastersState {
   if (!staffReadFromDbEnabled()) return state;
-  return {
-    ...state,
-    departments: [],
-    designations: [],
-    staff: [],
-  };
+  const stripped = { ...state };
+  for (const key of STAFF_OWNED_MASTERS_SLICES) {
+    (stripped as Record<string, unknown>)[key] = [];
+  }
+  return stripped;
 }
 
 export function scheduleStaffSync(state: MastersState) {
   if (!staffRemoteEnabled()) return;
   if (typeof window === "undefined") {
-    void pushStaffRemoteServer(state);
+    void trackServerWork(pushStaffRemoteServer(state));
     return;
   }
   pendingPush = state;
@@ -466,7 +614,7 @@ export function scheduleStaffSync(state: MastersState) {
     pendingPush = null;
     pushTimer = null;
     if (!payload) return;
-    void pushStaffSlice(payload);
+    void trackServerWork(pushStaffSlice(payload));
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
@@ -476,11 +624,14 @@ export function scheduleStaffSync(state: MastersState) {
 export async function ensureStaffHydrated(): Promise<boolean> {
   if (!staffRemoteEnabled()) return false;
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = staffReadFromDbEnabled();
   const remote = await fetchStaffRemote();
-  const { loadMasters, saveMasters } = await import("@/lib/masters");
+  if (!remote) return false;
+
+  markDeskHydrated(MODULE);
+  const { loadMasters } = await import("@/lib/masters");
+  const { writeMastersLocalRaw } = await import("@/lib/mastersPersistence");
   let next = loadMasters();
   let changed = false;
 
@@ -519,7 +670,14 @@ export async function ensureStaffHydrated(): Promise<boolean> {
   }
 
   if (changed) {
-    saveMasters(next);
+    // Local-only. saveMasters() here pushed masters AND re-pushed the staff
+    // roster on every staff hydrate (269 POST /staff-roster a day, audit
+    // 2026-08-18). The roster we just merged came from the DB; nothing needs
+    // to go back.
+    writeMastersLocalRaw(next);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
+    }
   }
 
   return changed;

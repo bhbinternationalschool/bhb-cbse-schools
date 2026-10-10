@@ -9,7 +9,10 @@
     "dev": "npm run dev -w web",
     "build": "npm run build -w web",
     "lint": "npm run lint -w web",
-    "typecheck": "npm run typecheck -w @bhb/time && npm run typecheck -w web"
+    "typecheck": "npm run typecheck -w @bhb/time && npm run typecheck -w web",
+    "verify": "bash scripts/verify.sh",
+    "check:cashfree": "node scripts/check-cashfree-keys.mjs",
+    "cashfree:payout-key": "node scripts/add-payout-public-key.mjs"
   },
   "engines": {
     "node": ">=20"

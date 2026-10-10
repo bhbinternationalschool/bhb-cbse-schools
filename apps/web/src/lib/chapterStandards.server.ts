@@ -1,0 +1,442 @@
+/**
+ * Reading and deciding the outcomes proposed for a book's chapters, and
+ * handing the agreed ones to whatever wants to use them.
+ *
+ * THIS FILE SITS ON BOTH SIDES OF ONE LINE, on purpose, and which side a
+ * function is on is the most important thing about it:
+ *
+ *   `loadBookOutcomes` and `decideChapterStandard` read and write the BASE
+ *   TABLE, because the review screen's whole subject is rows nobody has
+ *   decided yet. It is the one screen that must see them.
+ *
+ *   `loadAgreedOutcomesByPosition`, `loadAgreedSkillsByPosition` and
+ *   `loadFoundationStatements` are on the other side. Everything that USES an
+ *   outcome — a lesson plan, a child's revision question — may only ever see
+ *   what a teacher agreed with, so the first two read the VIEW and the third
+ *   only ever runs on a component one of them already handed out.
+ *   `learning_chapter_outcomes` cannot show anything else, so that guarantee
+ *   holds even if this file is edited carelessly.
+ *
+ * ANOTHER FUNCTION READING THE BASE TABLE IS THE THING TO QUESTION. Adding
+ * one is how an outcome nobody agreed with reaches a child.
+ *
+ * The standard's `code` is never selected. See lib/chapterStandards.ts for why
+ * the type has no field for it.
+ */
+
+import { getServerTenantContext } from "@/lib/serverTenant";
+import { indexGrade, subjectKeyFor } from "@/lib/tutorSyllabus";
+import type { ChapterOutcomes, ProposedOutcome, ReviewVerdict } from "@/lib/chapterStandards";
+
+/** A row of textbook_chapter_standards as it comes back. */
+type MatchRow = {
+  textbook_id: string;
+  position: number;
+  case_uuid: string;
+  confidence: string;
+  rationale: string;
+  reviewed_at: string | null;
+  reviewed_by: string;
+  rejected_at: string | null;
+};
+
+/**
+ * Which way a row was decided.
+ *
+ * The table's own check constraint forbids reviewed_at and rejected_at being
+ * set together, so the order of these two tests cannot matter — but rejection
+ * is tested first anyway, so that a row which somehow carried both would read
+ * as "not in use" rather than as approved.
+ */
+function verdictOf(row: { reviewed_at: string | null; rejected_at: string | null }): ReviewVerdict {
+  if (row.rejected_at) return "rejected";
+  if (row.reviewed_at) return "approved";
+  return "pending";
+}
+
+export type BookOutcomes = {
+  textbookId: string;
+  bookName: string;
+  grade: number;
+  chapters: ChapterOutcomes[];
+};
+
+/**
+ * Every chapter of one book, with whatever was proposed for it.
+ *
+ * Chapters with nothing proposed are returned too, empty. They are the point
+ * of several of them — the three the seed deliberately skipped need to appear
+ * and say so, not vanish and read as a short book.
+ */
+export async function loadBookOutcomes(input: {
+  grade: number;
+  subjectKey: string;
+}): Promise<BookOutcomes | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { sb, tenantId } = ctx;
+
+  const { data: book } = await sb
+    .from("school_textbooks")
+    .select("id, name, grade")
+    .eq("tenant_id", tenantId)
+    .eq("grade", input.grade)
+    .eq("subject_key", input.subjectKey)
+    .is("retired_at", null)
+    .maybeSingle();
+  if (!book?.id) return null;
+
+  const { data: chapterRows } = await sb
+    .from("school_textbook_chapters")
+    .select("position, name, topics")
+    .eq("tenant_id", tenantId)
+    .eq("textbook_id", book.id)
+    .order("position");
+
+  const { data: matchRows } = await sb
+    .from("textbook_chapter_standards")
+    .select("textbook_id, position, case_uuid, confidence, rationale, reviewed_at, reviewed_by, rejected_at")
+    .eq("tenant_id", tenantId)
+    .eq("textbook_id", book.id);
+
+  const matches = (matchRows ?? []) as MatchRow[];
+
+  // The statements, in one read. Joined here rather than through PostgREST's
+  // relationship inference: this is a plain lookup by primary key, and doing
+  // it by hand keeps the selected columns explicit — which is how `code` stays
+  // out of the payload.
+  const uuids = [...new Set(matches.map((m) => m.case_uuid))];
+  const statements = new Map<string, string>();
+  if (uuids.length > 0) {
+    const { data: standards } = await sb
+      .from("learning_standards")
+      .select("case_uuid, statement")
+      .in("case_uuid", uuids);
+    for (const s of (standards ?? []) as { case_uuid: string; statement: string }[]) {
+      statements.set(s.case_uuid, s.statement);
+    }
+  }
+
+  const byPosition = new Map<number, ProposedOutcome[]>();
+  for (const m of matches) {
+    const statement = statements.get(m.case_uuid);
+    // A match whose standard we cannot name has nothing to show a reviewer;
+    // the foreign key makes this unreachable, and dropping it beats rendering
+    // a blank row that cannot be agreed with.
+    if (!statement) continue;
+    const list = byPosition.get(m.position) ?? [];
+    list.push({
+      caseUuid: m.case_uuid,
+      statement,
+      confidence: m.confidence === "high" ? "high" : "medium",
+      rationale: m.rationale ?? "",
+      verdict: verdictOf(m),
+      reviewedBy: m.reviewed_by ?? "",
+      reviewedAt: m.reviewed_at,
+    });
+    byPosition.set(m.position, list);
+  }
+
+  const chapters: ChapterOutcomes[] = (
+    (chapterRows ?? []) as { position: number; name: string; topics: string[] | null }[]
+  ).map((c) => ({
+    textbookId: book.id as string,
+    position: c.position,
+    chapterName: c.name,
+    topics: c.topics ?? [],
+    // Sorted so the list does not reshuffle between loads: confidence first so
+    // the ones worth a second look sit together, then the sentence itself.
+    outcomes: (byPosition.get(c.position) ?? []).sort(
+      (a, b) =>
+        (a.confidence === b.confidence ? 0 : a.confidence === "high" ? -1 : 1) ||
+        a.statement.localeCompare(b.statement),
+    ),
+  }));
+
+  return {
+    textbookId: book.id as string,
+    bookName: (book.name as string) ?? "",
+    grade: (book.grade as number) ?? input.grade,
+    chapters,
+  };
+}
+
+export type DecisionResult =
+  | {
+      ok: true;
+      decision: {
+        textbookId: string;
+        position: number;
+        caseUuid: string;
+        verdict: ReviewVerdict;
+        reviewedBy: string;
+        reviewedAt: string | null;
+      };
+    }
+  | { ok: false; error: string };
+
+/**
+ * Record one teacher's decision about one proposed outcome.
+ *
+ * Approving is what puts a sentence in front of a lesson plan, so it is
+ * written as an UPDATE of a row that must already exist: a decision about a
+ * match the seed never proposed is refused rather than inserted. That keeps
+ * the table meaning what it says — our proposals, and what was done about them
+ * — instead of becoming a second, hand-made mapping nobody generated.
+ *
+ * "undo" returns a row to pending, because a reviewer who clicks the wrong
+ * button on a Friday afternoon should not need a migration to fix it.
+ */
+export async function decideChapterStandard(input: {
+  textbookId: string;
+  position: number;
+  caseUuid: string;
+  decision: "approve" | "reject" | "undo";
+  by: string;
+}): Promise<DecisionResult> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "No database connection." };
+  const { sb, tenantId } = ctx;
+
+  const now = new Date().toISOString();
+  // reviewed_at and rejected_at are mutually exclusive by check constraint, so
+  // every branch writes BOTH columns rather than only the one it cares about —
+  // otherwise approving a previously rejected row would violate the check.
+  const patch =
+    input.decision === "approve"
+      ? { reviewed_at: now, reviewed_by: input.by, rejected_at: null }
+      : input.decision === "reject"
+        ? { reviewed_at: null, reviewed_by: input.by, rejected_at: now }
+        : { reviewed_at: null, reviewed_by: "", rejected_at: null };
+
+  const { data, error } = await sb
+    .from("textbook_chapter_standards")
+    .update(patch)
+    .eq("tenant_id", tenantId)
+    .eq("textbook_id", input.textbookId)
+    .eq("position", input.position)
+    .eq("case_uuid", input.caseUuid)
+    .select("reviewed_at, reviewed_by, rejected_at")
+    .maybeSingle();
+
+  if (error) return { ok: false, error: error.message };
+  if (!data) {
+    return {
+      ok: false,
+      error: "That outcome is no longer on this chapter — reload the page.",
+    };
+  }
+
+  const row = data as { reviewed_at: string | null; reviewed_by: string; rejected_at: string | null };
+  return {
+    ok: true,
+    decision: {
+      textbookId: input.textbookId,
+      position: input.position,
+      caseUuid: input.caseUuid,
+      verdict: verdictOf(row),
+      reviewedBy: row.reviewed_by ?? "",
+      reviewedAt: row.reviewed_at,
+    },
+  };
+}
+
+/**
+ * The outcomes a teacher has AGREED WITH, for one class and subject, by chapter.
+ *
+ * THIS READS THE VIEW, and it is the first caller that should. Everything above
+ * reads the base table because the review screen's whole subject is rows nobody
+ * has decided yet; this is the other side of that line — a lesson plan may only
+ * ever see what somebody agreed with, and `learning_chapter_outcomes` cannot
+ * show it anything else. That is the guarantee, and it is enforced by the view
+ * rather than by this function remembering to filter.
+ *
+ * Returns an empty map rather than throwing for every ordinary "nothing here"
+ * — no database, a class we hold no book for, a subject nobody has reviewed.
+ * Drafting a lesson plan must not fail because this is empty; the prompt has
+ * always coped with a unit that has no outcomes, and it still does.
+ */
+export async function loadAgreedOutcomesByPosition(input: {
+  classLabel: string;
+  subjectName: string;
+}): Promise<Map<number, string[]>> {
+  const empty = new Map<number, string[]>();
+
+  const found = await bookIdFor(input);
+  if (!found) return empty;
+  const { sb, tenantId, bookId } = found;
+
+  const { data, error } = await sb
+    .from("learning_chapter_outcomes")
+    .select("position, statement")
+    .eq("tenant_id", tenantId)
+    .eq("textbook_id", bookId);
+  // A failed read is not an empty syllabus. Returning the empty map either way
+  // is right here — the plan is simply drafted the way it was before any of
+  // this existed — but it must not be mistaken for "nothing is agreed".
+  if (error) {
+    console.warn("[chapterStandards] agreed outcomes read failed", error.message);
+    return empty;
+  }
+
+  const byPosition = new Map<number, string[]>();
+  for (const row of (data ?? []) as { position: number; statement: string }[]) {
+    const list = byPosition.get(row.position) ?? [];
+    list.push(row.statement);
+    byPosition.set(row.position, list);
+  }
+  // Sorted so two drafts of the same chapter put the same sentence first.
+  for (const [k, v] of byPosition) byPosition.set(k, v.sort((a, b) => a.localeCompare(b)));
+  return byPosition;
+}
+
+/**
+ * The book one class and subject uses, or null. The two view-reading loaders
+ * below both start here, and both mean the same thing by "nothing": no
+ * database, no class we recognise, no loaded book — all of which end with the
+ * caller behaving as it did before any of this existed.
+ */
+type TenantCtx = NonNullable<Awaited<ReturnType<typeof getServerTenantContext>>>;
+
+async function bookIdFor(input: {
+  classLabel: string;
+  subjectName: string;
+}): Promise<{ sb: TenantCtx["sb"]; tenantId: string; bookId: string } | null> {
+  const grade = indexGrade(input.classLabel);
+  const subjectKey = subjectKeyFor(input.subjectName);
+  if (grade === null || !subjectKey) return null;
+
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { sb, tenantId } = ctx;
+
+  const { data: book } = await sb
+    .from("school_textbooks")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("grade", grade)
+    .eq("subject_key", subjectKey)
+    .is("retired_at", null)
+    .maybeSingle();
+  if (!book?.id) return null;
+  return { sb, tenantId, bookId: book.id as string };
+}
+
+/**
+ * The micro-skills of the outcomes a teacher agreed with, by chapter.
+ *
+ * THIS READS THE VIEW, for the same reason `loadAgreedOutcomesByPosition`
+ * does: a revision question a child sits the night before a paper may only be
+ * set from something a teacher agreed with. The components themselves are a
+ * published fact (`learning_standard_components`), but WHICH of them are in
+ * play is decided entirely by which standards reached the view.
+ *
+ * Only CCSS-M carries components, and the seed loaded them for Classes 3–8
+ * only. Everything else — Classes 1–2, Science, English — returns an empty
+ * map, and the drill runs exactly as it did before. That is by construction,
+ * not by a caller remembering to check.
+ *
+ * Returns an empty map rather than throwing for every ordinary "nothing
+ * here"; a drill must not fail because a chapter has no agreed outcomes.
+ */
+export async function loadAgreedSkillsByPosition(input: {
+  classLabel: string;
+  subjectName: string;
+}): Promise<Map<number, { componentId: string; description: string }[]>> {
+  const empty = new Map<number, { componentId: string; description: string }[]>();
+
+  const found = await bookIdFor(input);
+  if (!found) return empty;
+  const { sb, tenantId, bookId } = found;
+
+  const { data: agreed, error } = await sb
+    .from("learning_chapter_outcomes")
+    .select("position, case_uuid")
+    .eq("tenant_id", tenantId)
+    .eq("textbook_id", bookId);
+  if (error) {
+    console.warn("[chapterStandards] agreed skills read failed", error.message);
+    return empty;
+  }
+
+  const rows = (agreed ?? []) as { position: number; case_uuid: string }[];
+  const uuids = [...new Set(rows.map((r) => r.case_uuid))];
+  if (!uuids.length) return empty;
+
+  const { data: comps, error: compError } = await sb
+    .from("learning_standard_components")
+    .select("case_uuid, component_id, description")
+    .in("case_uuid", uuids);
+  if (compError) {
+    console.warn("[chapterStandards] components read failed", compError.message);
+    return empty;
+  }
+
+  const byStandard = new Map<string, { componentId: string; description: string }[]>();
+  for (const c of (comps ?? []) as { case_uuid: string; component_id: string; description: string }[]) {
+    const list = byStandard.get(c.case_uuid) ?? [];
+    list.push({ componentId: c.component_id, description: c.description });
+    byStandard.set(c.case_uuid, list);
+  }
+
+  // One chapter can carry several agreed standards, and two of them can share
+  // a component; deduped by id so the menu never lists the same idea twice.
+  const byPosition = new Map<number, { componentId: string; description: string }[]>();
+  for (const r of rows) {
+    const list = byPosition.get(r.position) ?? [];
+    for (const c of byStandard.get(r.case_uuid) ?? []) {
+      if (!list.some((x) => x.componentId === c.componentId)) list.push(c);
+    }
+    if (list.length) byPosition.set(r.position, list);
+  }
+  return byPosition;
+}
+
+/**
+ * What sits underneath one micro-skill: the statements of the prerequisites
+ * of the standard it belongs to.
+ *
+ * This is the one place the SAP Coherence Map edges are read, and it walks
+ * exactly ONE step back. A transitive walk would reach kindergarten from a
+ * Class 7 standard in four hops, and the caller uses this to make a retry
+ * easier — not to move a child down two classes the night before a paper.
+ *
+ * Empty for everything it cannot answer, including an id that is not a
+ * component of anything we hold.
+ */
+export async function loadFoundationStatements(componentId: string): Promise<string[]> {
+  if (!componentId) return [];
+
+  const ctx = await getServerTenantContext();
+  if (!ctx) return [];
+  const { sb } = ctx;
+
+  const { data: comp } = await sb
+    .from("learning_standard_components")
+    .select("case_uuid")
+    .eq("component_id", componentId)
+    .limit(1)
+    .maybeSingle();
+  if (!comp?.case_uuid) return [];
+
+  const { data: edges } = await sb
+    .from("learning_standard_prereqs")
+    .select("prereq_case_uuid")
+    .eq("case_uuid", comp.case_uuid as string);
+  const prereqs = [...new Set(((edges ?? []) as { prereq_case_uuid: string }[]).map((e) => e.prereq_case_uuid))];
+  if (!prereqs.length) return [];
+
+  // `code` is never selected here either — see the note at the top of this
+  // file. A prerequisite's sentence is the useful half; its US code is the
+  // half that must never reach a child's phone.
+  const { data: standards } = await sb
+    .from("learning_standards")
+    .select("case_uuid, statement")
+    .in("case_uuid", prereqs);
+
+  return ((standards ?? []) as { case_uuid: string; statement: string }[])
+    .map((s) => s.statement)
+    .filter(Boolean)
+    // Sorted so the same wrong answer produces the same hint twice running.
+    .sort((a, b) => a.localeCompare(b));
+}

@@ -5,10 +5,16 @@
 import { clearWorkspaceSessionAlignFlag } from "@/lib/workspaceSession";
 import { FRESH_LOGIN_SESSION_KEY } from "@/lib/workspaceSyncPolicy";
 import { resetDeskHydrated } from "@/lib/deskHydrateGuard";
+import { clearMemoryCopies } from "@/lib/browserStorage";
 
 const DESK_PREFIX = "bhb_";
 
-const LOCAL_STORAGE_KEEP = new Set<string>(["bhb_tenant_data_wipe_seen_v1"]);
+const LOCAL_STORAGE_KEEP = new Set<string>([
+  "bhb_tenant_data_wipe_seen_v1",
+  // Deletions the server has not confirmed yet must survive a re-login,
+  // or the removed student comes back on the next hydrate.
+  "bhb_sis_pending_deletes_v1",
+]);
 
 export function markFreshLoginSession(): void {
   if (typeof window === "undefined") return;
@@ -23,13 +29,27 @@ export function consumeFreshLoginSession(): boolean {
 }
 
 export function clearWorkspaceLocalStorage(): void {
-  // Never delete working data from localStorage on login or session switch.
-  // Local storage holds the primary workspace state and is merged with remote DB.
-  return;
+  if (typeof window === "undefined") return;
+  clearMemoryCopies();
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(DESK_PREFIX) && !LOCAL_STORAGE_KEEP.has(key)) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const key of keysToRemove) {
+      localStorage.removeItem(key);
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function resetAllWorkspacePersistenceCaches(): Promise<void> {
   resetDeskHydrated();
+  clearMemoryCopies();
   const { resetClientSchoolMirrorHydrated } = await import(
     "@/lib/schoolDataMirrorClientHydrate"
   );
@@ -63,10 +83,6 @@ export async function resetAllWorkspacePersistenceCaches(): Promise<void> {
     import("@/lib/schoolCommsPersistence").then((m) =>
       m.resetSchoolCommsPersistenceCache(),
     ),
-    import("@/lib/storePersistence").then((m) => m.resetStorePersistenceCache()),
-    import("@/lib/purchasePersistence").then((m) =>
-      m.resetPurchasePersistenceCache(),
-    ),
     import("@/lib/accountsPersistence").then((m) =>
       m.resetAccountsPersistenceCache(),
     ),
@@ -85,6 +101,12 @@ export async function resetAllWorkspacePersistenceCaches(): Promise<void> {
     import("@/lib/curriculumPersistence").then((m) =>
       m.resetCurriculumPersistenceCache(),
     ),
+    import("@/lib/salarySetupPersistence").then((m) =>
+      m.resetSalarySetupPersistenceCache(),
+    ),
+    import("@/lib/localModulesPersistence").then((m) =>
+      m.resetModuleStatePersistenceCaches(),
+    ),
   ]);
 }
 
@@ -95,11 +117,18 @@ export async function prepareWorkspaceAfterLogin(): Promise<void> {
   markFreshLoginSession();
 }
 
+/**
+ * Flush every debounced push before the tab hides / idle logout signs out.
+ * Until 2026-08-18 only masters was flushed; a roster edit made just before
+ * the 5-minute idle logout was abandoned mid-retry, and the login-time
+ * localStorage wipe then removed it for good.
+ */
 export async function flushAllDeskSyncPending(): Promise<void> {
   await Promise.allSettled([
     import("@/lib/mastersNormalizedClient").then((m) =>
       m.flushMastersDeskSyncPending(),
     ),
+    import("@/lib/sisNormalizedClient").then((m) => m.flushSisDeskSync()),
   ]);
 }
 

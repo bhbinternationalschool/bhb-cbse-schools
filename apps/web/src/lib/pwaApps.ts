@@ -18,10 +18,10 @@ export type PwaAppDef = {
 };
 
 const ICONS: MetadataRoute.Manifest["icons"] = [
-  { src: "/logo.png", sizes: "192x192", type: "image/png", purpose: "any" },
-  { src: "/logo.png", sizes: "512x512", type: "image/png", purpose: "any" },
+  { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+  { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
   {
-    src: "/logo-crest.png",
+    src: "/icon-512-maskable.png",
     sizes: "512x512",
     type: "image/png",
     purpose: "maskable",
@@ -118,6 +118,13 @@ export function pwaManifestHref(appId: PwaAppId): string {
   return `/pwa/${appId}/manifest.webmanifest`;
 }
 
+/**
+ * BHB Staff on Google Play — INTERNAL TESTING join link (director, 9 Oct
+ * 2026). Only staff Gmails on the tester list can join; everyone else uses
+ * the website app. Android only; there is no iPhone staff app.
+ */
+export const STAFF_PLAY_TEST_URL = "https://play.google.com/apps/internaltest/4701007545375064542";
+
 export function pwaDismissKey(appId: PwaAppId): string {
   return `bhb_pwa_dismiss_${appId}`;
 }
@@ -193,17 +200,5 @@ export function parentPwaInstallCopy(): {
     title: "Install BHB Parent app",
     subtitle: "Fees, homework & notices on your home screen",
     iosHint: "Tap Share → Add to Home Screen for fees & homework.",
-  };
-}
-
-export function loginPwaInstallCopy(): {
-  title: string;
-  subtitle: string;
-  iosHint: string;
-} {
-  return {
-    title: "Install BHB School app",
-    subtitle: "One icon — sign in as parent, staff or field",
-    iosHint: "Add to Home Screen, then sign in with your role.",
   };
 }

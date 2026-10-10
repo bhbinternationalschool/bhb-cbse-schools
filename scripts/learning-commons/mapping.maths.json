@@ -1,0 +1,1130 @@
+{
+  "subject_key": "maths",
+  "framework": "ccss-math",
+  "note": "Chapter -> CCSS-M codes, mapped by WHAT THE CHAPTER TEACHES, never by grade number. Propel runs ahead of CCSS in places (Class 5 sets profit & loss, which CCSS places in grade 7), so grade numbers deliberately do not line up.",
+  "chapters": [
+    {
+      "grade": 1,
+      "position": 1,
+      "name": "Sharpening Pre-number Skills",
+      "codes": [
+        "K.MD.A.1",
+        "K.MD.A.2",
+        "K.G.A.1"
+      ],
+      "confidence": "high",
+      "rationale": "Comparing length/weight and describing position are the pre-number skills this chapter drills."
+    },
+    {
+      "grade": 1,
+      "position": 2,
+      "name": "Numbers (0 to 9)",
+      "codes": [
+        "K.CC.A.3",
+        "K.CC.B.4",
+        "K.CC.C.7"
+      ],
+      "confidence": "high",
+      "rationale": "Counting, writing and comparing the numerals 0-9."
+    },
+    {
+      "grade": 1,
+      "position": 3,
+      "name": "Addition and Subtraction (0 to 9)",
+      "codes": [
+        "K.OA.A.1",
+        "K.OA.A.2",
+        "1.OA.C.6"
+      ],
+      "confidence": "high",
+      "rationale": "Adding and subtracting within 10, including word problems."
+    },
+    {
+      "grade": 1,
+      "position": 4,
+      "name": "Numbers (up to 50)",
+      "codes": [
+        "1.NBT.A.1"
+      ],
+      "confidence": "high",
+      "rationale": "Counting, reading and writing numerals past 20."
+    },
+    {
+      "grade": 1,
+      "position": 5,
+      "name": "Addition and Subtraction of Numbers (up to 50)",
+      "codes": [
+        "1.NBT.C.4",
+        "1.NBT.C.6"
+      ],
+      "confidence": "high",
+      "rationale": "Two-digit addition and subtraction within 100."
+    },
+    {
+      "grade": 1,
+      "position": 6,
+      "name": "Numbers (up to 100)",
+      "codes": [
+        "1.NBT.A.1",
+        "1.NBT.B.2"
+      ],
+      "confidence": "high",
+      "rationale": "Numbers to 100 and the tens-and-ones idea behind them."
+    },
+    {
+      "grade": 1,
+      "position": 7,
+      "name": "Addition and Subtraction of Numbers (up to 100)",
+      "codes": [
+        "1.NBT.C.4",
+        "1.NBT.C.6"
+      ],
+      "confidence": "high",
+      "rationale": "Two-digit addition and subtraction within 100."
+    },
+    {
+      "grade": 1,
+      "position": 8,
+      "name": "Introduction to Multiplication",
+      "codes": [
+        "2.NBT.A.2",
+        "2.OA.C.4"
+      ],
+      "confidence": "high",
+      "rationale": "Skip counting and repeated addition, which is how multiplication is introduced here."
+    },
+    {
+      "grade": 1,
+      "position": 9,
+      "name": "Geometrical Shapes and Patterns",
+      "codes": [
+        "1.G.A.1",
+        "1.G.A.2",
+        "K.G.B.4"
+      ],
+      "confidence": "high",
+      "rationale": "Naming plane and solid shapes by their attributes and building with them."
+    },
+    {
+      "grade": 1,
+      "position": 10,
+      "name": "Measurements",
+      "codes": [
+        "1.MD.A.1",
+        "1.MD.A.2"
+      ],
+      "confidence": "high",
+      "rationale": "Comparing and ordering by length using non-standard units."
+    },
+    {
+      "grade": 1,
+      "position": 11,
+      "name": "Time and Calendar",
+      "codes": [
+        "1.MD.B.3"
+      ],
+      "confidence": "high",
+      "rationale": "Telling time to the hour and half hour."
+    },
+    {
+      "grade": 1,
+      "position": 12,
+      "name": "Money",
+      "codes": [],
+      "confidence": "medium",
+      "rationale": "Indian coins and notes. The only CCSS money standard names dollar bills, quarters, dimes, nickels and pennies, so it is deliberately NOT mapped — a rupee chapter must not inherit American currency wording."
+    },
+    {
+      "grade": 1,
+      "position": 13,
+      "name": "Data Handling",
+      "codes": [
+        "K.MD.B.3",
+        "1.MD.C.4"
+      ],
+      "confidence": "high",
+      "rationale": "Sorting objects into categories and counting how many in each."
+    },
+    {
+      "grade": 2,
+      "position": 1,
+      "name": "2-Digit Numbers",
+      "codes": [
+        "1.NBT.B.2",
+        "2.OA.C.3"
+      ],
+      "confidence": "high",
+      "rationale": "Place value in two-digit numbers, plus odd and even."
+    },
+    {
+      "grade": 2,
+      "position": 2,
+      "name": "3-Digit Numbers",
+      "codes": [
+        "2.NBT.A.1",
+        "2.NBT.A.3",
+        "2.NBT.A.4"
+      ],
+      "confidence": "high",
+      "rationale": "Hundreds place value, expanded form and comparing three-digit numbers."
+    },
+    {
+      "grade": 2,
+      "position": 3,
+      "name": "Addition of 2- and 3-Digit Numbers",
+      "codes": [
+        "2.NBT.B.5",
+        "2.NBT.B.7"
+      ],
+      "confidence": "high",
+      "rationale": "Adding within 1000 with and without regrouping."
+    },
+    {
+      "grade": 2,
+      "position": 4,
+      "name": "Subtraction of 2- and 3-digit Numbers",
+      "codes": [
+        "2.NBT.B.5",
+        "2.NBT.B.7"
+      ],
+      "confidence": "high",
+      "rationale": "Subtracting within 1000 with and without regrouping."
+    },
+    {
+      "grade": 2,
+      "position": 5,
+      "name": "Multiplication",
+      "codes": [
+        "2.OA.C.4",
+        "3.OA.A.1",
+        "3.NBT.A.3"
+      ],
+      "confidence": "high",
+      "rationale": "Repeated addition into multiplication facts and multiplying by a one-digit number."
+    },
+    {
+      "grade": 2,
+      "position": 6,
+      "name": "Introduction to Division",
+      "codes": [
+        "3.OA.A.2",
+        "3.OA.B.6"
+      ],
+      "confidence": "high",
+      "rationale": "Division as equal sharing and as the inverse of multiplication."
+    },
+    {
+      "grade": 2,
+      "position": 7,
+      "name": "Geometrical Shapes",
+      "codes": [
+        "2.G.A.1"
+      ],
+      "confidence": "high",
+      "rationale": "Recognising and drawing shapes by their attributes."
+    },
+    {
+      "grade": 2,
+      "position": 8,
+      "name": "Fractions",
+      "codes": [
+        "2.G.A.3",
+        "3.NF.A.1"
+      ],
+      "confidence": "high",
+      "rationale": "Halves, quarters and three-fourths as equal shares of a whole."
+    },
+    {
+      "grade": 2,
+      "position": 9,
+      "name": "Measurement",
+      "codes": [
+        "2.MD.A.1",
+        "2.MD.A.3"
+      ],
+      "confidence": "high",
+      "rationale": "Measuring with standard units and estimating lengths."
+    },
+    {
+      "grade": 2,
+      "position": 10,
+      "name": "Time",
+      "codes": [
+        "2.MD.C.7"
+      ],
+      "confidence": "high",
+      "rationale": "Telling time to five minutes, including quarter past and quarter to."
+    },
+    {
+      "grade": 2,
+      "position": 11,
+      "name": "Money",
+      "codes": [],
+      "confidence": "medium",
+      "rationale": "Indian coins and notes. The only CCSS money standard names dollar bills, quarters, dimes, nickels and pennies, so it is deliberately NOT mapped — a rupee chapter must not inherit American currency wording."
+    },
+    {
+      "grade": 2,
+      "position": 12,
+      "name": "Data Handling",
+      "codes": [
+        "2.MD.D.10"
+      ],
+      "confidence": "high",
+      "rationale": "Drawing and reading picture graphs and bar graphs."
+    },
+    {
+      "grade": 3,
+      "position": 1,
+      "name": "Numbers",
+      "codes": [
+        "2.NBT.A.4",
+        "4.NBT.A.2"
+      ],
+      "confidence": "medium",
+      "rationale": "Four-digit numbers and comparison. Roman numerals have no CCSS counterpart and are not mapped."
+    },
+    {
+      "grade": 3,
+      "position": 2,
+      "name": "Addition",
+      "codes": [
+        "3.NBT.A.2",
+        "4.NBT.B.4"
+      ],
+      "confidence": "high",
+      "rationale": "Column addition of three- and four-digit numbers."
+    },
+    {
+      "grade": 3,
+      "position": 3,
+      "name": "Subtraction",
+      "codes": [
+        "3.NBT.A.1",
+        "3.NBT.A.2"
+      ],
+      "confidence": "high",
+      "rationale": "Subtraction with regrouping and estimating by rounding."
+    },
+    {
+      "grade": 3,
+      "position": 4,
+      "name": "Multiplication",
+      "codes": [
+        "3.OA.A.1",
+        "3.OA.C.7",
+        "3.NBT.A.3"
+      ],
+      "confidence": "high",
+      "rationale": "Multiplication facts, fluency, and multiplying by multiples of ten."
+    },
+    {
+      "grade": 3,
+      "position": 5,
+      "name": "Division",
+      "codes": [
+        "3.OA.A.2",
+        "3.OA.B.6",
+        "3.OA.C.7"
+      ],
+      "confidence": "high",
+      "rationale": "Division as equal sharing, its link to multiplication, and fact fluency."
+    },
+    {
+      "grade": 3,
+      "position": 6,
+      "name": "Fractions",
+      "codes": [
+        "3.NF.A.1"
+      ],
+      "confidence": "high",
+      "rationale": "A fraction as parts of a whole, with numerator and denominator named."
+    },
+    {
+      "grade": 3,
+      "position": 7,
+      "name": "Geometry",
+      "codes": [
+        "3.G.A.1",
+        "4.G.A.3"
+      ],
+      "confidence": "high",
+      "rationale": "Classifying plane and solid figures, and lines of symmetry."
+    },
+    {
+      "grade": 3,
+      "position": 8,
+      "name": "Patterns",
+      "codes": [
+        "3.OA.D.9",
+        "4.OA.C.5"
+      ],
+      "confidence": "high",
+      "rationale": "Spotting and continuing arithmetic patterns."
+    },
+    {
+      "grade": 3,
+      "position": 9,
+      "name": "Measurement",
+      "codes": [
+        "3.MD.A.2",
+        "4.MD.A.1"
+      ],
+      "confidence": "high",
+      "rationale": "Standard units of mass and capacity, and converting between them."
+    },
+    {
+      "grade": 3,
+      "position": 10,
+      "name": "Time",
+      "codes": [
+        "3.MD.A.1"
+      ],
+      "confidence": "high",
+      "rationale": "Telling time to the minute and finding elapsed time."
+    },
+    {
+      "grade": 3,
+      "position": 11,
+      "name": "Money",
+      "codes": [
+        "4.MD.A.2"
+      ],
+      "confidence": "medium",
+      "rationale": "Money word problems using the four operations; the rupee/paise conversion itself is not in CCSS."
+    },
+    {
+      "grade": 3,
+      "position": 12,
+      "name": "Data Handling",
+      "codes": [
+        "3.MD.B.3"
+      ],
+      "confidence": "high",
+      "rationale": "Tally marks, tables and pictographs."
+    },
+    {
+      "grade": 4,
+      "position": 1,
+      "name": "Numbers",
+      "codes": [
+        "4.NBT.A.1",
+        "4.NBT.A.2",
+        "4.NBT.A.3"
+      ],
+      "confidence": "medium",
+      "rationale": "Place value, expanded notation and rounding. The Indian place value system (lakh, crore) has no CCSS counterpart."
+    },
+    {
+      "grade": 4,
+      "position": 2,
+      "name": "Addition and Subtraction",
+      "codes": [
+        "4.NBT.B.4"
+      ],
+      "confidence": "high",
+      "rationale": "Standard algorithm for multi-digit addition and subtraction."
+    },
+    {
+      "grade": 4,
+      "position": 3,
+      "name": "Multiplication",
+      "codes": [
+        "4.NBT.B.5"
+      ],
+      "confidence": "high",
+      "rationale": "Multi-digit multiplication and estimating products."
+    },
+    {
+      "grade": 4,
+      "position": 4,
+      "name": "Division",
+      "codes": [
+        "4.NBT.B.6",
+        "4.OA.B.4"
+      ],
+      "confidence": "high",
+      "rationale": "Dividing four-digit numbers and testing divisibility."
+    },
+    {
+      "grade": 4,
+      "position": 5,
+      "name": "Multiples and Factors",
+      "codes": [
+        "4.OA.B.4"
+      ],
+      "confidence": "high",
+      "rationale": "Factors, multiples, prime and composite numbers. LCM/HCF go beyond the standard."
+    },
+    {
+      "grade": 4,
+      "position": 6,
+      "name": "Fractions",
+      "codes": [
+        "4.NF.A.1",
+        "4.NF.A.2",
+        "4.NF.B.3"
+      ],
+      "confidence": "high",
+      "rationale": "Equivalent fractions, comparison, and adding and subtracting fractions."
+    },
+    {
+      "grade": 4,
+      "position": 7,
+      "name": "Understanding Shapes and Patterns",
+      "codes": [
+        "4.G.A.1",
+        "4.G.A.2",
+        "4.G.A.3"
+      ],
+      "confidence": "high",
+      "rationale": "Polygons, triangles and quadrilaterals, and lines of symmetry."
+    },
+    {
+      "grade": 4,
+      "position": 8,
+      "name": "Measurement",
+      "codes": [
+        "4.MD.A.1",
+        "4.MD.A.2"
+      ],
+      "confidence": "high",
+      "rationale": "Converting units within a system and solving measurement problems."
+    },
+    {
+      "grade": 4,
+      "position": 9,
+      "name": "Perimeter and Area",
+      "codes": [
+        "3.MD.C.7",
+        "4.MD.A.3"
+      ],
+      "confidence": "high",
+      "rationale": "Area and perimeter of rectangles and of irregular figures."
+    },
+    {
+      "grade": 4,
+      "position": 10,
+      "name": "Time",
+      "codes": [
+        "3.MD.A.1",
+        "4.MD.A.2"
+      ],
+      "confidence": "high",
+      "rationale": "Elapsed time and time word problems. The 24-hour clock is not separately in CCSS."
+    },
+    {
+      "grade": 4,
+      "position": 11,
+      "name": "Money",
+      "codes": [
+        "4.MD.A.2"
+      ],
+      "confidence": "medium",
+      "rationale": "Money problems using the four operations."
+    },
+    {
+      "grade": 4,
+      "position": 12,
+      "name": "Data Handling",
+      "codes": [
+        "3.MD.B.3"
+      ],
+      "confidence": "high",
+      "rationale": "Tables, pictographs and reading bar graphs."
+    },
+    {
+      "grade": 4,
+      "position": 13,
+      "name": "Introduction to Decimals",
+      "codes": [
+        "4.NF.C.6",
+        "4.NF.C.7"
+      ],
+      "confidence": "high",
+      "rationale": "Decimal notation for fractions, and comparing decimals."
+    },
+    {
+      "grade": 5,
+      "position": 1,
+      "name": "Large Numbers",
+      "codes": [
+        "4.NBT.A.1",
+        "4.NBT.A.2",
+        "4.NBT.A.3"
+      ],
+      "confidence": "medium",
+      "rationale": "Place value and rounding at scale. The Indian system (lakh, crore) has no CCSS counterpart."
+    },
+    {
+      "grade": 5,
+      "position": 2,
+      "name": "Addition and Subtraction",
+      "codes": [
+        "4.NBT.B.4"
+      ],
+      "confidence": "high",
+      "rationale": "Standard algorithm carried to larger numbers."
+    },
+    {
+      "grade": 5,
+      "position": 3,
+      "name": "Multiplication",
+      "codes": [
+        "5.NBT.B.5"
+      ],
+      "confidence": "high",
+      "rationale": "Fluent multi-digit multiplication."
+    },
+    {
+      "grade": 5,
+      "position": 4,
+      "name": "Division",
+      "codes": [
+        "5.NBT.B.6"
+      ],
+      "confidence": "high",
+      "rationale": "Dividing by two- and three-digit divisors."
+    },
+    {
+      "grade": 5,
+      "position": 5,
+      "name": "More about Operations on Numbers",
+      "codes": [
+        "5.OA.A.1",
+        "5.OA.A.2",
+        "6.RP.A.3"
+      ],
+      "confidence": "high",
+      "rationale": "Order of operations (DMAS) and the unitary method, which is proportional reasoning."
+    },
+    {
+      "grade": 5,
+      "position": 6,
+      "name": "Multiples and Factors",
+      "codes": [
+        "4.OA.B.4",
+        "6.NS.B.4"
+      ],
+      "confidence": "high",
+      "rationale": "Prime factorisation and common factors and multiples."
+    },
+    {
+      "grade": 5,
+      "position": 7,
+      "name": "Fractions",
+      "codes": [
+        "5.NF.A.1",
+        "5.NF.A.2"
+      ],
+      "confidence": "high",
+      "rationale": "Like and unlike fractions, comparison, and adding and subtracting them."
+    },
+    {
+      "grade": 5,
+      "position": 8,
+      "name": "Decimals and Percentages",
+      "codes": [
+        "5.NBT.A.3",
+        "5.NBT.B.7",
+        "6.RP.A.3"
+      ],
+      "confidence": "high",
+      "rationale": "Reading and operating on decimals; percentage is proportional reasoning."
+    },
+    {
+      "grade": 5,
+      "position": 9,
+      "name": "Shapes and Figures",
+      "codes": [
+        "4.MD.C.6",
+        "4.G.A.2",
+        "5.G.B.3"
+      ],
+      "confidence": "high",
+      "rationale": "Measuring angles with a protractor and classifying triangles and quadrilaterals."
+    },
+    {
+      "grade": 5,
+      "position": 10,
+      "name": "Measurement and Temperature",
+      "codes": [
+        "5.MD.A.1"
+      ],
+      "confidence": "high",
+      "rationale": "Converting metric units. Celsius/Fahrenheit is not separately in CCSS."
+    },
+    {
+      "grade": 5,
+      "position": 11,
+      "name": "Perimeter, Area and Volume",
+      "codes": [
+        "5.MD.C.3",
+        "5.MD.C.5",
+        "6.G.A.1"
+      ],
+      "confidence": "high",
+      "rationale": "Volume of cubes and cuboids, and area of triangles and irregular figures."
+    },
+    {
+      "grade": 5,
+      "position": 12,
+      "name": "Time",
+      "codes": [
+        "4.MD.A.2"
+      ],
+      "confidence": "medium",
+      "rationale": "Time word problems; the 24-hour clock has no separate CCSS standard."
+    },
+    {
+      "grade": 5,
+      "position": 13,
+      "name": "Money",
+      "codes": [
+        "7.RP.A.3"
+      ],
+      "confidence": "high",
+      "rationale": "Cost price, selling price, profit and loss are percent problems — CCSS places them in grade 7."
+    },
+    {
+      "grade": 5,
+      "position": 14,
+      "name": "Data Handling",
+      "codes": [
+        "3.MD.B.3",
+        "6.SP.B.4"
+      ],
+      "confidence": "high",
+      "rationale": "Bar graphs, and organising data for display. Pie and line graphs have no CCSS counterpart at this level."
+    },
+    {
+      "grade": 6,
+      "position": 1,
+      "name": "Patterns in Mathematics",
+      "codes": [
+        "4.OA.C.5",
+        "6.EE.A.2"
+      ],
+      "confidence": "medium",
+      "rationale": "Generating and describing number and shape patterns."
+    },
+    {
+      "grade": 6,
+      "position": 2,
+      "name": "Lines and Angles",
+      "codes": [
+        "4.G.A.1",
+        "4.MD.C.6"
+      ],
+      "confidence": "high",
+      "rationale": "Points, lines, rays and angles, and measuring them."
+    },
+    {
+      "grade": 6,
+      "position": 3,
+      "name": "Playing with Large Numbers",
+      "codes": [
+        "4.NBT.A.2",
+        "5.OA.A.1",
+        "6.NS.B.3"
+      ],
+      "confidence": "high",
+      "rationale": "Large-number place value, order of operations and approximation."
+    },
+    {
+      "grade": 6,
+      "position": 4,
+      "name": "Data Handling and Presentation",
+      "codes": [
+        "3.MD.B.3",
+        "6.SP.B.4"
+      ],
+      "confidence": "high",
+      "rationale": "Collecting, organising and displaying data."
+    },
+    {
+      "grade": 6,
+      "position": 5,
+      "name": "Factors and Multiples",
+      "codes": [
+        "6.NS.B.4",
+        "4.OA.B.4"
+      ],
+      "confidence": "high",
+      "rationale": "HCF, LCM and prime factorisation."
+    },
+    {
+      "grade": 6,
+      "position": 6,
+      "name": "Perimeter and Area",
+      "codes": [
+        "6.G.A.1",
+        "4.MD.A.3"
+      ],
+      "confidence": "high",
+      "rationale": "Area and perimeter of plane figures."
+    },
+    {
+      "grade": 6,
+      "position": 7,
+      "name": "Fractions",
+      "codes": [
+        "4.NF.A.1",
+        "5.NF.A.1",
+        "5.NF.A.2"
+      ],
+      "confidence": "high",
+      "rationale": "Equivalent fractions, lowest terms, comparison, and adding and subtracting."
+    },
+    {
+      "grade": 6,
+      "position": 8,
+      "name": "Playing with Constructions",
+      "codes": [
+        "4.G.A.2"
+      ],
+      "confidence": "medium",
+      "rationale": "Compass-and-straightedge construction has no CCSS standard below high school; only the shape properties map."
+    },
+    {
+      "grade": 6,
+      "position": 9,
+      "name": "Symmetry",
+      "codes": [
+        "4.G.A.3",
+        "8.G.A.1"
+      ],
+      "confidence": "high",
+      "rationale": "Lines of symmetry, reflection and rotational symmetry."
+    },
+    {
+      "grade": 6,
+      "position": 10,
+      "name": "Integers",
+      "codes": [
+        "6.NS.C.5",
+        "6.NS.C.6",
+        "6.NS.C.7"
+      ],
+      "confidence": "high",
+      "rationale": "Negative numbers, the number line, and comparing integers."
+    },
+    {
+      "grade": 7,
+      "position": 1,
+      "name": "Large Numbers around Us",
+      "codes": [
+        "4.NBT.A.2",
+        "6.NS.B.3"
+      ],
+      "confidence": "high",
+      "rationale": "Place value at scale and approximation."
+    },
+    {
+      "grade": 7,
+      "position": 2,
+      "name": "Arithmetic Expressions",
+      "codes": [
+        "5.OA.A.1",
+        "6.EE.A.2"
+      ],
+      "confidence": "high",
+      "rationale": "Evaluating expressions and removing brackets."
+    },
+    {
+      "grade": 7,
+      "position": 3,
+      "name": "Decimals",
+      "codes": [
+        "5.NBT.A.3",
+        "5.NBT.B.7"
+      ],
+      "confidence": "high",
+      "rationale": "Decimal place value to thousandths, comparison, and adding and subtracting."
+    },
+    {
+      "grade": 7,
+      "position": 4,
+      "name": "Expressions Using Letter-Numbers",
+      "codes": [
+        "6.EE.A.2",
+        "6.EE.B.6"
+      ],
+      "confidence": "high",
+      "rationale": "Writing, reading and evaluating algebraic expressions with variables."
+    },
+    {
+      "grade": 7,
+      "position": 5,
+      "name": "Parallel and Intersecting Lines",
+      "codes": [
+        "7.G.B.5",
+        "8.G.A.5"
+      ],
+      "confidence": "high",
+      "rationale": "Angle pairs, and angles formed by a transversal with parallel lines."
+    },
+    {
+      "grade": 7,
+      "position": 6,
+      "name": "Patterns in Mathematics",
+      "codes": [
+        "4.OA.C.5",
+        "6.EE.A.2"
+      ],
+      "confidence": "medium",
+      "rationale": "Parity, grid sums and number patterns. Magic squares have no CCSS counterpart."
+    },
+    {
+      "grade": 7,
+      "position": 7,
+      "name": "Triangle and its Properties",
+      "codes": [
+        "7.G.A.2",
+        "8.G.A.5"
+      ],
+      "confidence": "high",
+      "rationale": "Triangle properties, the angle sum, and constructing triangles."
+    },
+    {
+      "grade": 7,
+      "position": 8,
+      "name": "Working with Fractions",
+      "codes": [
+        "5.NF.B.4",
+        "6.NS.A.1"
+      ],
+      "confidence": "high",
+      "rationale": "Multiplying fractions and dividing by a fraction using the reciprocal."
+    },
+    {
+      "grade": 7,
+      "position": 9,
+      "name": "Geometric Twins",
+      "codes": [
+        "8.G.A.2"
+      ],
+      "confidence": "high",
+      "rationale": "Congruence, tested by superposition."
+    },
+    {
+      "grade": 7,
+      "position": 10,
+      "name": "Operations with Integers",
+      "codes": [
+        "7.NS.A.1",
+        "7.NS.A.2"
+      ],
+      "confidence": "high",
+      "rationale": "Adding, subtracting, multiplying and dividing integers."
+    },
+    {
+      "grade": 7,
+      "position": 11,
+      "name": "Finding Common Ground",
+      "codes": [
+        "6.NS.B.4"
+      ],
+      "confidence": "high",
+      "rationale": "HCF and LCM and their applications."
+    },
+    {
+      "grade": 7,
+      "position": 12,
+      "name": "Another Peek beyond the Point",
+      "codes": [
+        "6.NS.B.3",
+        "5.NBT.B.7"
+      ],
+      "confidence": "high",
+      "rationale": "Multiplying and dividing decimals."
+    },
+    {
+      "grade": 7,
+      "position": 13,
+      "name": "Connecting the Dots",
+      "codes": [
+        "6.SP.A.3",
+        "3.MD.B.3",
+        "6.SP.B.4"
+      ],
+      "confidence": "high",
+      "rationale": "Measures of central tendency and bar graphs."
+    },
+    {
+      "grade": 7,
+      "position": 14,
+      "name": "Constructions and Tilings",
+      "codes": [
+        "7.G.A.2"
+      ],
+      "confidence": "medium",
+      "rationale": "Geometric construction; bisectors and tiling have no direct CCSS standard below high school."
+    },
+    {
+      "grade": 7,
+      "position": 15,
+      "name": "Finding the Unknown",
+      "codes": [
+        "6.EE.B.7",
+        "7.EE.B.4"
+      ],
+      "confidence": "high",
+      "rationale": "Framing and solving simple equations."
+    },
+    {
+      "grade": 8,
+      "position": 1,
+      "name": "A Square and a Cube",
+      "codes": [
+        "8.EE.A.2"
+      ],
+      "confidence": "high",
+      "rationale": "Square and cube roots of perfect squares and cubes."
+    },
+    {
+      "grade": 8,
+      "position": 2,
+      "name": "Power Play",
+      "codes": [
+        "8.EE.A.1",
+        "8.EE.A.3",
+        "8.EE.A.4"
+      ],
+      "confidence": "high",
+      "rationale": "Laws of exponents, negative exponents and powers of ten."
+    },
+    {
+      "grade": 8,
+      "position": 3,
+      "name": "A Story of Numbers",
+      "codes": [],
+      "confidence": "medium",
+      "rationale": "History of number systems. No CCSS standard covers this; left unmapped on purpose."
+    },
+    {
+      "grade": 8,
+      "position": 4,
+      "name": "Quadrilaterals",
+      "codes": [
+        "5.G.B.3",
+        "7.G.A.2"
+      ],
+      "confidence": "high",
+      "rationale": "Classifying quadrilaterals by their properties, and constructing them."
+    },
+    {
+      "grade": 8,
+      "position": 5,
+      "name": "Number Play",
+      "codes": [
+        "4.OA.C.5",
+        "6.EE.A.2"
+      ],
+      "confidence": "medium",
+      "rationale": "Parity, divisibility and number patterns. Cryptarithms have no CCSS counterpart."
+    },
+    {
+      "grade": 8,
+      "position": 6,
+      "name": "We Distribute, yet Things Multiply",
+      "codes": [
+        "6.EE.A.3",
+        "7.EE.A.1"
+      ],
+      "confidence": "high",
+      "rationale": "Multiplying algebraic expressions using the distributive property, and identities."
+    },
+    {
+      "grade": 8,
+      "position": 7,
+      "name": "Proportional Reasoning — I",
+      "codes": [
+        "6.RP.A.1",
+        "6.RP.A.3",
+        "7.RP.A.2"
+      ],
+      "confidence": "high",
+      "rationale": "Ratio, sharing in a ratio, proportion and unit conversion."
+    },
+    {
+      "grade": 8,
+      "position": 8,
+      "name": "Rational Numbers",
+      "codes": [
+        "7.NS.A.1",
+        "7.NS.A.2",
+        "8.NS.A.1"
+      ],
+      "confidence": "high",
+      "rationale": "Operations on rational numbers and their decimal expansions."
+    },
+    {
+      "grade": 8,
+      "position": 9,
+      "name": "Factorisation",
+      "codes": [
+        "6.EE.A.3",
+        "7.EE.A.1"
+      ],
+      "confidence": "high",
+      "rationale": "Factoring algebraic expressions and dividing them."
+    },
+    {
+      "grade": 8,
+      "position": 10,
+      "name": "Mensuration",
+      "codes": [
+        "6.G.A.1",
+        "6.G.A.2",
+        "6.G.A.4",
+        "7.G.B.6"
+      ],
+      "confidence": "high",
+      "rationale": "Area of composite shapes, surface area from nets, and volume."
+    },
+    {
+      "grade": 8,
+      "position": 11,
+      "name": "Data Handling",
+      "codes": [
+        "6.SP.B.4",
+        "6.SP.B.5"
+      ],
+      "confidence": "high",
+      "rationale": "Grouping data and displaying it."
+    },
+    {
+      "grade": 8,
+      "position": 12,
+      "name": "Percentage and Its Applications",
+      "codes": [
+        "7.RP.A.3"
+      ],
+      "confidence": "high",
+      "rationale": "Profit, loss, discount, tax and interest are all multistep percent problems."
+    },
+    {
+      "grade": 8,
+      "position": 13,
+      "name": "Proportional Reasoning — II",
+      "codes": [
+        "7.RP.A.2",
+        "8.EE.B.5"
+      ],
+      "confidence": "high",
+      "rationale": "Direct and inverse variation as proportional relationships."
+    },
+    {
+      "grade": 8,
+      "position": 14,
+      "name": "Linear Equations in One Variable",
+      "codes": [
+        "7.EE.B.4",
+        "8.EE.C.7"
+      ],
+      "confidence": "high",
+      "rationale": "Solving and applying linear equations in one variable."
+    }
+  ]
+}

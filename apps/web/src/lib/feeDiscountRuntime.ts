@@ -36,7 +36,7 @@ export function mergeDiscountRulesFromSeed(masters: MastersState): MastersState 
   const ruleByCode = new Map(
     masters.concessions.map((c) => [c.code.toUpperCase(), c]),
   );
-  let concessions = [...masters.concessions];
+  const concessions = [...masters.concessions];
   let changed = false;
 
   for (const r of bundledSeed.rules) {
@@ -82,21 +82,41 @@ export function mergeDiscountRulesFromSeed(masters: MastersState): MastersState 
   return changed ? { ...masters, concessions } : masters;
 }
 
-/** Approved grants for a student — persisted first, then Excel seed by admission no. */
+/**
+ * Approved grants for a student — persisted first, then Excel seed by
+ * admission no.
+ *
+ * `aliasStudentIds` are the SAME child's row ids from other sessions: a
+ * student gets a new row id every session, so a grant given last year points
+ * at last year's id and would silently stop applying after promotion. The
+ * aliases keep the concession with the child, not the row. When the same
+ * rule is granted on more than one of the child's rows, the current row's
+ * grant wins — a concession never stacks with itself.
+ */
 export function resolvedConcessionGrantsForStudent(
   masters: MastersState,
   student: { id: string; admissionNo: string },
   asOf: string,
+  aliasStudentIds: string[] = [],
 ): ConcessionGrant[] {
-  const persisted = (masters.concessionGrants ?? []).filter(
+  const ids = new Set([student.id, ...aliasStudentIds]);
+  const matched = (masters.concessionGrants ?? []).filter(
     (g) =>
-      g.studentId === student.id &&
+      ids.has(g.studentId) &&
       g.status === "approved" &&
       g.effectiveFrom <= asOf &&
       (g.effectiveTo == null || g.effectiveTo >= asOf),
   );
-  if (persisted.length > 0) return persisted;
-
+  if (matched.length > 0) {
+    const byRule = new Map<string, ConcessionGrant>();
+    for (const g of matched) {
+      const prev = byRule.get(g.concessionId);
+      if (!prev || (g.studentId === student.id && prev.studentId !== student.id)) {
+        byRule.set(g.concessionId, g);
+      }
+    }
+    return [...byRule.values()];
+  }
   const seedRow = seedByAdmission.get(
     canonicalAdmissionNo(student.admissionNo),
   );
@@ -129,4 +149,20 @@ export function resolvedConcessionGrantsForStudent(
 
 export function bundledFeeDiscountSeed(): FeeDiscountImportSeed {
   return bundledSeed;
+}
+
+/**
+ * Codes the bundled discount import still owns.
+ *
+ * `mergeDiscountRulesFromSeed` re-creates any of these that is missing from
+ * masters, and `resolvedConcessionGrantsForStudent` falls back to the seed for
+ * a child with no persisted grant — so deleting or renaming one of these rules
+ * either achieves nothing or quietly drops a discount. Anything that tidies
+ * concession definitions has to know which ones are not its to tidy.
+ */
+export function bundledSeedConcessionCodes(): string[] {
+  const codes = new Set<string>();
+  for (const r of bundledSeed.rules) codes.add(r.code.trim().toUpperCase());
+  for (const g of bundledSeed.grants) codes.add(g.concessionCode.trim().toUpperCase());
+  return [...codes].filter(Boolean);
 }

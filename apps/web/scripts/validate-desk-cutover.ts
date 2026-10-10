@@ -24,7 +24,7 @@ import type { VaultState } from "../src/lib/vault";
 import type { LibraryState } from "../src/lib/library";
 import type { StoreState } from "../src/lib/store";
 import type { PurchaseState } from "../src/lib/purchase";
-import type { AccountsState } from "../src/lib/accounts";
+import type { AccountsState } from "../src/lib/accountsTypes";
 import type { PayrollState } from "../src/lib/payroll";
 import type { WaBotPersistBundle } from "../src/lib/waBotStore.server";
 import type { SchoolCommsState } from "../src/lib/schoolComms";

@@ -1,5 +1,9 @@
 # Dependencies
-node_modules/
+# No trailing slash: a bare `node_modules` SYMLINK slipped past the
+# directory-only pattern in PR #82 and was committed. On checkout git
+# materialises it pointing at itself, npm cannot resolve the workspaces, and
+# the dev server exits 194.
+node_modules
 apps/*/node_modules/
 packages/*/node_modules/
 .pnpm-store/
@@ -45,3 +49,23 @@ cbse_school_mobile/android/.gradle/
 cbse_school_mobile/android/local.properties
 cbse_school_mobile/**/*.iml
 cbse_school_mobile/.idea/
+
+# Play Store build artifacts (regenerable) and assets
+cbse_school_mobile/play-store-assets/app-release.aab
+.claude/skills/
+
+# Supabase CLI scratch (npx supabase writes its version cache here)
+supabase/.temp/
+
+# Deploy service-account key — must never be committed. It normally lives
+# outside the repo (~/.config/bhb-deploy/), this is a guard in case one is
+# ever dropped in the tree by mistake.
+**/deploy-sa*.json
+**/bhb-deploy*.json
+
+# Reviewed-and-acted-on exports of live student/fee data — never committed.
+open-ended-counter-discounts.csv
+concession-grants-closed-2027-03-31.json
+
+# Generated greeting-card PNGs (scripts/greeting-card.mjs) — regenerate, never commit.
+/out/

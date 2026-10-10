@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   ModuleDashboardView,
+  type DashboardRowAction,
   type DashboardTableRow,
   type ModuleDashboardModel,
 } from "@/components/dashboard/ModuleDashboard";
@@ -11,6 +12,7 @@ import {
   type DashboardModuleId,
 } from "@/lib/moduleDashboards";
 import { useDemoSessionOptional } from "@/components/shell/SessionContext";
+import { openWaMe } from "@/lib/waMe";
 
 export function ModuleDashboardHost({
   moduleId,
@@ -28,18 +30,75 @@ export function ModuleDashboardHost({
   const [mastersTick, setMastersTick] = useState(0);
 
   useEffect(() => {
-    const onMastersUpdated = () => setMastersTick((t) => t + 1);
-    window.addEventListener("bhb-masters-updated", onMastersUpdated);
-    return () =>
-      window.removeEventListener("bhb-masters-updated", onMastersUpdated);
+    const onDataUpdated = () => setMastersTick((t) => t + 1);
+    window.addEventListener("bhb-masters-updated", onDataUpdated);
+    window.addEventListener("bhb-sis-updated", onDataUpdated);
+    return () => {
+      window.removeEventListener("bhb-masters-updated", onDataUpdated);
+      window.removeEventListener("bhb-sis-updated", onDataUpdated);
+    };
   }, []);
 
   useEffect(() => {
-    setModel(
-      buildModuleDashboard(moduleId, {
-        academicYearCode: session?.academicYearCode,
-      }),
-    );
+    void (async () => {
+      const { withHydrationSlot } = await import("@/lib/deskHydrateGuard");
+      if (moduleId === "admissions") {
+        const { ensureAdmissionsHydrated } = await import("@/lib/admissionsPersistence");
+        await withHydrationSlot(() => ensureAdmissionsHydrated());
+      } else if (moduleId === "students") {
+        const { ensureSisHydrated } = await import("@/lib/sisPersistence");
+        await withHydrationSlot(() => ensureSisHydrated());
+      } else if (moduleId === "fees") {
+        const { ensureFeesHydrated } = await import("@/lib/feesPersistence");
+        await withHydrationSlot(() => ensureFeesHydrated());
+      } else if (moduleId === "staff") {
+        const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
+        await withHydrationSlot(() => ensureStaffHydrated());
+      } else if (moduleId === "attendance") {
+        const { ensureAttendanceHydrated } = await import("@/lib/attendancePersistence");
+        await withHydrationSlot(() => ensureAttendanceHydrated());
+      } else if (moduleId === "exams") {
+        const { ensureExamsHydrated } = await import("@/lib/examsPersistence");
+        await withHydrationSlot(() => ensureExamsHydrated());
+      }
+      // Re-read even when another screen did the loading: the first render
+      // came from an empty page memory (10 Oct 2026).
+      setMastersTick((t) => t + 1);
+    })();
+    const built = buildModuleDashboard(moduleId, {
+      academicYearCode: session?.academicYearCode,
+    });
+    setModel(built);
+    // Accounts KPIs read the server book — the browser-book figures render
+    // first (instant), then the authoritative cockpit replaces them. Store
+    // sales and everything else the ledger carries show up this way.
+    // Books and uniform on credit live in the store, not the fee book, so
+    // the fee tile names them only after the store answers. Fee figures
+    // render first and stay put if it does not.
+    if (moduleId === "fees" && built) {
+      let stale = false;
+      void import("@/lib/feeStoreDuesKpi").then(
+        ({ patchFeeDashWithStoreDues }) =>
+          patchFeeDashWithStoreDues(built, session?.academicYearCode).then((patched) => {
+            if (patched && !stale) setModel(patched);
+          }),
+      );
+      return () => {
+        stale = true;
+      };
+    }
+    if (moduleId === "accounts" && built) {
+      let stale = false;
+      void import("@/lib/accountsServerKpis").then(
+        ({ patchAccountsDashWithServerBook }) =>
+          patchAccountsDashWithServerBook(built).then((patched) => {
+            if (patched && !stale) setModel(patched);
+          }),
+      );
+      return () => {
+        stale = true;
+      };
+    }
   }, [moduleId, refreshKey, mastersTick, session?.academicYearCode]);
 
   if (!model) {
@@ -53,6 +112,52 @@ export function ModuleDashboardHost({
       model={model}
       onNavigateTab={onNavigateTab}
       onTableRowClick={onTableRowClick}
+      onTableRowAction={runRowAction}
     />
   );
+}
+
+/**
+ * Perform a dashboard row action.
+ *
+ * The models are built in plain libs that must not open windows, so they name
+ * the intent and carry what it needs on the row; the work happens here. Same
+ * message the Defaulters page sends, so a family does not get two differently
+ * worded reminders depending on which screen the office was looking at.
+ */
+async function runRowAction(
+  kind: DashboardRowAction["kind"],
+  row: DashboardTableRow,
+): Promise<void> {
+  if (kind !== "whatsapp-defaulter") return;
+  const [{ composeWhatsAppDefaulterReminder }, { TENANT }] =
+    await Promise.all([
+      import("@/lib/playbook"),
+      import("@/lib/types"),
+    ]);
+  const message = composeWhatsAppDefaulterReminder({
+    schoolName: TENANT.nameDisplay,
+    studentName: String(row.name ?? ""),
+    classLabel: String(row.class ?? ""),
+    amountPaise: Number(row.amountPaise ?? 0),
+    overdueDays: Number(row.daysOverdue ?? 0),
+    stageLabel: row.language === "en" ? "Reminder" : "स्मरण",
+    // Families are written to in Hindi unless they chose English.
+    hindi: row.language !== "en",
+  });
+  const mobile = String(row.mobile ?? "").replace(/\D/g, "");
+  if (mobile.length < 10) {
+    // No number on the household. Copying beats a dead link, and the office
+    // can paste it wherever they do reach this family.
+    try {
+      await navigator.clipboard.writeText(message);
+      window.alert(
+        "No WhatsApp number on this household — the reminder is copied to your clipboard.",
+      );
+    } catch {
+      window.alert("No WhatsApp number on this household.");
+    }
+    return;
+  }
+  openWaMe(mobile, message, undefined, { module: "fees" });
 }

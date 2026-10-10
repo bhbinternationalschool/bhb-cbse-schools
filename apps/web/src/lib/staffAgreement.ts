@@ -11,6 +11,8 @@ import {
   suggestFromSeriesCode,
 } from "@/lib/numberSeries";
 import type { StaffRecord } from "@/lib/foundationMasters";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type AgreementTemplateId =
   | "appointment_letter"
@@ -35,6 +37,7 @@ export type AgreementAuditEntry = {
   id: string;
   action:
     | "created"
+    | "ai_drafted"
     | "updated"
     | "sent"
     | "signed_staff"
@@ -61,6 +64,10 @@ export type StaffAgreement = {
   title: string;
   /** Resolved body text (placeholders filled) */
   body: string;
+  /** True if the initial title/body came from the AI drafting assistant —
+   * a human still reviews/edits/signs before it takes effect (the existing
+   * send → sign → counter-sign flow), this just records provenance. */
+  aiGenerated: boolean;
   consentTextVersion: string;
   consentAccepted: boolean;
   staffSignatureUrl: string;
@@ -293,6 +300,7 @@ function normalizeAgreement(a: Partial<StaffAgreement>): StaffAgreement {
     status,
     title: String(a.title || tpl.title),
     body: String(a.body || tpl.body),
+    aiGenerated: Boolean(a.aiGenerated),
     consentTextVersion: String(a.consentTextVersion || CONSENT_TEXT_VERSION),
     consentAccepted: Boolean(a.consentAccepted),
     staffSignatureUrl: String(a.staffSignatureUrl || ""),
@@ -311,7 +319,7 @@ function normalizeAgreement(a: Partial<StaffAgreement>): StaffAgreement {
 export function loadAgreements(): AgreementState {
   if (typeof window === "undefined") return { version: 1, agreements: [] };
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return { version: 1, agreements: [] };
     const parsed = JSON.parse(raw) as Partial<AgreementState>;
     return {
@@ -327,12 +335,12 @@ export function loadAgreements(): AgreementState {
 
 function persistAgreements(state: AgreementState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/staffAgreementPersistence").then(
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void trackServerWork(import("@/lib/staffAgreementPersistence").then(
     ({ scheduleStaffAgreementsSync }) => {
       scheduleStaffAgreementsSync(state);
     },
-  );
+  ));
 }
 
 export function saveAgreements(state: AgreementState) {
@@ -342,7 +350,7 @@ export function saveAgreements(state: AgreementState) {
 
 export function writeAgreementsLocalRaw(state: AgreementState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function agreementsStateIsEmpty(state: AgreementState): boolean {
@@ -395,6 +403,8 @@ export function createStaffAgreement(input: {
   title?: string;
   /** Override template body before placeholder resolution */
   bodyTemplate?: string;
+  /** True when title/bodyTemplate came from the AI drafting assistant */
+  aiGenerated?: boolean;
 }): { ok: true; agreement: StaffAgreement } | { ok: false; error: string } {
   const staff = (input.masters.staff ?? []).find((s) => s.id === input.staffId);
   if (!staff) return { ok: false, error: "Staff not found" };
@@ -403,6 +413,7 @@ export function createStaffAgreement(input: {
   const title = input.title?.trim() || tpl.title;
   const body = resolveAgreementPlaceholders(rawBody, staff, input.masters);
   const hash = computeAgreementHash(`${title}\n${body}`);
+  const aiGenerated = Boolean(input.aiGenerated);
 
   const agreement = normalizeAgreement({
     id: nid("agr"),
@@ -414,6 +425,7 @@ export function createStaffAgreement(input: {
     status: "draft",
     title,
     body,
+    aiGenerated,
     documentHash: hash,
     consentTextVersion: CONSENT_TEXT_VERSION,
     createdBy: input.createdBy,
@@ -421,7 +433,7 @@ export function createStaffAgreement(input: {
     audit: [],
   });
 
-  const withAudit = pushAudit(agreement, {
+  let withAudit = pushAudit(agreement, {
     action: "created",
     at: agreement.createdAt,
     staffId: staff.id,
@@ -431,6 +443,18 @@ export function createStaffAgreement(input: {
     documentHash: hash,
     consentTextVersion: CONSENT_TEXT_VERSION,
   });
+  if (aiGenerated) {
+    withAudit = pushAudit(withAudit, {
+      action: "ai_drafted",
+      at: agreement.createdAt,
+      staffId: staff.id,
+      actorId: input.actorStaffId || "",
+      actorName: input.createdBy,
+      userAgent: clientHint(),
+      documentHash: hash,
+      consentTextVersion: CONSENT_TEXT_VERSION,
+    });
+  }
 
   const state = loadAgreements();
   saveAgreements({

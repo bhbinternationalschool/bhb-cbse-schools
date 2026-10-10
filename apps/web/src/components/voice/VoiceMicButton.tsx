@@ -84,7 +84,7 @@ export function VoiceMicButton({
         aria-label={listening ? "Stop listening" : "Voice input"}
         className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-sm font-bold transition ${
           listening
-            ? "border-[#b42318] bg-[rgba(180,35,24,0.12)] text-[#b42318] animate-pulse"
+            ? "border-[var(--danger)] bg-[rgba(180,35,24,0.12)] text-[var(--danger)] animate-pulse"
             : "border-[rgba(32,48,80,0.2)] bg-white text-[var(--brand-deep)] hover:bg-[rgba(32,48,80,0.04)]"
         } disabled:opacity-40`}
       >

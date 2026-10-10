@@ -5,6 +5,17 @@
 import { loadSchoolComms } from "@/lib/schoolComms";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes } from "@/lib/deskNamedDeletes";
+
+const COMMS_DESK = "school_comms";
+
+// Shared with schoolCommsNormalizedClient: one record of comms deletions.
+// This push applies only its own tables, so it sends — and confirms — only those.
+const OWN_TABLES = ["school_comms_desk_news"];
 
 const META_KEY = "bhb_news_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -44,24 +55,35 @@ export function scheduleNewsDeskSync() {
 async function pushNewsDeskApi(bundle: {
   news: ReturnType<typeof loadSchoolComms>["news"];
 }) {
+  const sentDeletes = Object.fromEntries(
+    Object.entries(pendingDeskDeletes(COMMS_DESK)).filter(([t]) => OWN_TABLES.includes(t)),
+  );
   try {
     const res = await fetch("/api/school-data/news-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(bundle),
+      // Deletions are named, never inferred from what this browser lacks.
+      body: JSON.stringify({ ...bundle, deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
       updatedAt?: string;
       newsCount?: number;
+      error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(COMMS_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         newsCount: body.newsCount ?? bundle.news.length,
       });
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("news");
+    else recordDeskSyncFailure("news", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("news", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[news-db] desk push error", e);
   }
 }
@@ -71,15 +93,17 @@ export async function hydrateNewsDeskFromDb(
 ): Promise<{
   bundle: { news: ReturnType<typeof loadSchoolComms>["news"] };
   changed: boolean;
+  /** false = fetch failed/unauthenticated; caller must not treat bundle as confirmed-empty. */
+  ok: boolean;
 }> {
   const empty = { news: [] };
-  if (!isSupabaseConfigured()) return { bundle: empty, changed: false };
+  if (!isSupabaseConfigured()) return { bundle: empty, changed: false, ok: false };
   try {
     const res = await fetch("/api/school-data/news-desk", {
       method: "GET",
       cache: "no-store",
     });
-    if (!res.ok) return { bundle: empty, changed: false };
+    if (!res.ok) return { bundle: empty, changed: false, ok: false };
     const body = (await res.json()) as {
       news?: ReturnType<typeof loadSchoolComms>["news"];
       updatedAt?: string;
@@ -95,13 +119,13 @@ export async function hydrateNewsDeskFromDb(
       (body.updatedAt && body.updatedAt >= meta.updatedAt) ||
       remoteNews > meta.newsCount ||
       bundle.news.length > 0;
-    if (!shouldTake) return { bundle: empty, changed: false };
+    if (!shouldTake) return { bundle: empty, changed: false, ok: true };
     writeMeta({
       updatedAt: body.updatedAt || new Date().toISOString(),
       newsCount: remoteNews,
     });
-    return { bundle, changed: true };
+    return { bundle, changed: true, ok: true };
   } catch {
-    return { bundle: empty, changed: false };
+    return { bundle: empty, changed: false, ok: false };
   }
 }

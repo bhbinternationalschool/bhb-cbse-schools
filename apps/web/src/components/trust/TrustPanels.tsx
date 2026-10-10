@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { loadAccounts } from "@/lib/accounts";
+import { loadAccounts } from "@/lib/accountsStore";
 import { formatInr } from "@/lib/masters";
 import {
   approveRaBill,
@@ -40,6 +40,9 @@ import {
   type TrustReportFormat,
   type TrustReportId,
 } from "@/lib/trustReportCatalog";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export type TrustPanelProps = {
   state: TrustState;
@@ -49,16 +52,22 @@ export type TrustPanelProps = {
   onFlash: (message: string) => void;
   onError: (message: string) => void;
   actorName: string;
+  /**
+   * Paying posts a cost line and a cash/bank entry on desks a Trust
+   * function holder cannot save; the server refuses their "paid" flag, so
+   * the button is not offered (default: offered).
+   */
+  canPay?: boolean;
 };
 
 const CARD =
-  "rounded-2xl border border-[rgba(32,48,80,0.12)] bg-white p-4";
+  "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
 const FIELD =
-  "w-full rounded-xl border border-[rgba(32,48,80,0.18)] px-3 py-2 text-sm";
+  "w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm";
 const BTN =
   "rounded-xl bg-[#0f2744] px-4 py-2 text-sm font-medium text-white";
 const BTN_OUTLINE =
-  "rounded-xl border border-[rgba(32,48,80,0.2)] px-3 py-1.5 text-sm font-medium text-[var(--brand-deep)]";
+  "rounded-xl border border-[var(--border)] px-3 py-1.5 text-sm font-medium text-[var(--brand-deep)]";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -183,7 +192,7 @@ export function ProjectsPanel({
           <div className="text-[11px] font-bold uppercase text-[var(--muted)]">
             Overdue allotments
           </div>
-          <div className="mt-1 text-2xl font-bold text-[#b45309]">
+          <div className="mt-1 text-2xl font-bold text-[var(--warning)]">
             {snap.overdueAllotments}
           </div>
         </div>
@@ -227,23 +236,23 @@ export function ProjectsPanel({
 
       <section className={CARD}>
         <h3 className="text-sm font-bold text-[var(--brand-deep)]">All projects</h3>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Code</th>
               <th className="pb-2">Name</th>
               <th className="pb-2">Status</th>
               <th className="pb-2 text-right">Budget</th>
               <th className="pb-2 text-right">Spent</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {state.projects.map((p) => {
               const k = projectKpis(p.id, state);
               return (
                 <tr
                   key={p.id}
-                  className={`cursor-pointer border-t border-[rgba(32,48,80,0.08)] ${selectedProjectId === p.id ? "bg-[rgba(197,160,40,0.08)]" : ""}`}
+                  className={`cursor-pointer ${selectedProjectId === p.id ? "bg-[rgba(197,160,40,0.08)]" : ""}`}
                   onClick={() => onSelectProject(p.id)}
                 >
                   <td className="py-2 font-mono text-xs">{p.code}</td>
@@ -254,8 +263,8 @@ export function ProjectsPanel({
                 </tr>
               );
             })}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
 
       <div className={CARD}>
@@ -283,6 +292,19 @@ export function WorksPanel({
 
   const items = state.workItems.filter(
     (w) => !selectedProjectId || w.projectId === selectedProjectId,
+  );
+
+  // Work items: amount sorts by paise, status groups what is still open.
+  const workSort = useTableSort(
+    items,
+    {
+      work: (w) => w.name,
+      category: (w) => w.category,
+      amount: (w) => w.amountPaise,
+      status: (w) => w.status,
+    },
+    "work",
+    "asc",
   );
 
   const suggested = suggestRate(category, unit, state);
@@ -341,19 +363,19 @@ export function WorksPanel({
         </button>
       </section>
       <section className={CARD}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
-              <th className="pb-2">Work</th>
-              <th className="pb-2">Category</th>
+        <ErpTable minWidth="min-w-full">
+          <ErpTableHead>
+            <tr>
+              <ErpSortTh sort={workSort} field="work" className="pb-2">Work</ErpSortTh>
+              <ErpSortTh sort={workSort} field="category" className="pb-2">Category</ErpSortTh>
               <th className="pb-2 text-right">Qty</th>
-              <th className="pb-2 text-right">Amount</th>
-              <th className="pb-2">Status</th>
+              <ErpSortTh sort={workSort} field="amount" align="right" className="pb-2 text-right">Amount</ErpSortTh>
+              <ErpSortTh sort={workSort} field="status" className="pb-2">Status</ErpSortTh>
             </tr>
-          </thead>
-          <tbody>
-            {items.map((w) => (
-              <tr key={w.id} className="border-t border-[rgba(32,48,80,0.08)]">
+          </ErpTableHead>
+          <ErpTableBody>
+            {workSort.rows.map((w) => (
+              <tr key={w.id}>
                 <td className="py-2">{w.name}</td>
                 <td className="py-2">{w.category}</td>
                 <td className="py-2 text-right">
@@ -363,8 +385,8 @@ export function WorksPanel({
                 <td className="py-2">{w.status}</td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );
@@ -386,6 +408,19 @@ export function MaterialsPanel({
 
   const lines = state.materials.filter(
     (m) => !selectedProjectId || m.projectId === selectedProjectId,
+  );
+
+  // Sorting by Balance shows what is still to be issued.
+  const materialSort = useTableSort(
+    lines,
+    {
+      material: (m) => m.name,
+      required: (m) => m.requiredQty,
+      issued: (m) => m.issuedQty,
+      balance: (m) => materialBalance(m),
+    },
+    "material",
+    "asc",
   );
 
   function add() {
@@ -426,26 +461,26 @@ export function MaterialsPanel({
         </button>
       </section>
       <section className={CARD}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
-              <th className="pb-2">Material</th>
-              <th className="pb-2 text-right">Required</th>
-              <th className="pb-2 text-right">Issued</th>
-              <th className="pb-2 text-right">Balance</th>
+        <ErpTable minWidth="min-w-full">
+          <ErpTableHead>
+            <tr>
+              <ErpSortTh sort={materialSort} field="material" className="pb-2">Material</ErpSortTh>
+              <ErpSortTh sort={materialSort} field="required" align="right" className="pb-2 text-right">Required</ErpSortTh>
+              <ErpSortTh sort={materialSort} field="issued" align="right" className="pb-2 text-right">Issued</ErpSortTh>
+              <ErpSortTh sort={materialSort} field="balance" align="right" className="pb-2 text-right">Balance</ErpSortTh>
             </tr>
-          </thead>
-          <tbody>
-            {lines.map((m) => (
-              <tr key={m.id} className="border-t border-[rgba(32,48,80,0.08)]">
+          </ErpTableHead>
+          <ErpTableBody>
+            {materialSort.rows.map((m) => (
+              <tr key={m.id}>
                 <td className="py-2">{m.name}</td>
                 <td className="py-2 text-right">{m.requiredQty}</td>
                 <td className="py-2 text-right">{m.issuedQty}</td>
                 <td className="py-2 text-right">{materialBalance(m)}</td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );
@@ -458,6 +493,7 @@ export function LabourPanel({
   onRefresh,
   onFlash,
   onError,
+  canPay = true,
 }: TrustPanelProps) {
   const accounts = loadAccounts();
   const poolId = accounts.cashPools.find((p) => p.code === "main")?.id ?? "";
@@ -516,34 +552,41 @@ export function LabourPanel({
         </button>
       </section>
       <section className={CARD}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Type</th>
               <th className="pb-2 text-right">Days</th>
               <th className="pb-2 text-right">Amount</th>
               <th className="pb-2">Status</th>
               <th className="pb-2" />
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {entries.map((l) => (
-              <tr key={l.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={l.id}>
                 <td className="py-2">{l.labourType}</td>
                 <td className="py-2 text-right">{l.days}</td>
                 <td className="py-2 text-right">{formatInr(l.amountPaise)}</td>
                 <td className="py-2">{l.paidStatus}</td>
                 <td className="py-2">
-                  {l.paidStatus === "unpaid" ? (
-                    <button type="button" className={BTN_OUTLINE} onClick={() => pay(l.id)}>
-                      Pay
-                    </button>
-                  ) : null}
+                  <RowActionMenu
+                    row={l}
+                    label="Loan instalment actions"
+                    actions={[
+                      {
+                        id: "pay",
+                        label: "Pay this instalment",
+                        hidden: (x) => !canPay || x.paidStatus !== "unpaid",
+                        onSelect: (x) => pay(x.id),
+                      },
+                    ]}
+                  />
                 </td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );
@@ -565,6 +608,19 @@ export function AllotmentsPanel({
 
   const allotments = state.allotments.filter(
     (a) => !selectedProjectId || a.projectId === selectedProjectId,
+  );
+
+  // Allotments by due date, so what is closest to its deadline comes first.
+  const allotSort = useTableSort(
+    allotments,
+    {
+      code: (a) => a.code,
+      assignee: (a) => a.partyName,
+      due: (a) => a.targetEnd,
+      progress: (a) => a.progressPct,
+    },
+    "due",
+    "asc",
   );
   const overdue = listOverdueAllotments(state);
   const workItems = state.workItems.filter((w) => w.projectId === selectedProjectId);
@@ -594,7 +650,7 @@ export function AllotmentsPanel({
     <div className="mt-4 space-y-4">
       <ProjectPicker state={state} selectedProjectId={selectedProjectId} onSelectProject={onSelectProject} />
       {overdue.length > 0 ? (
-        <div className={`${CARD} text-sm text-[#b45309]`}>
+        <div className={`${CARD} text-sm text-[var(--warning)]`}>
           {overdue.length} overdue allotment(s)
         </div>
       ) : null}
@@ -621,59 +677,61 @@ export function AllotmentsPanel({
         </button>
       </section>
       <section className={CARD}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
-              <th className="pb-2">Code</th>
-              <th className="pb-2">Assignee</th>
-              <th className="pb-2">Due</th>
-              <th className="pb-2 text-right">%</th>
+        <ErpTable minWidth="min-w-full">
+          <ErpTableHead>
+            <tr>
+              <ErpSortTh sort={allotSort} field="code" className="pb-2">Code</ErpSortTh>
+              <ErpSortTh sort={allotSort} field="assignee" className="pb-2">Assignee</ErpSortTh>
+              <ErpSortTh sort={allotSort} field="due" className="pb-2">Due</ErpSortTh>
+              <ErpSortTh sort={allotSort} field="progress" align="right" className="pb-2 text-right">%</ErpSortTh>
               <th className="pb-2">Actions</th>
             </tr>
-          </thead>
-          <tbody>
-            {allotments.map((a) => (
-              <tr key={a.id} className="border-t border-[rgba(32,48,80,0.08)]">
+          </ErpTableHead>
+          <ErpTableBody>
+            {allotSort.rows.map((a) => (
+              <tr key={a.id}>
                 <td className="py-2 font-mono text-xs">{a.code}</td>
                 <td className="py-2">{a.partyName}</td>
                 <td className="py-2">{a.targetEnd}</td>
                 <td className="py-2 text-right">{a.progressPct}%</td>
-                <td className="py-2 space-x-1">
-                  <button
-                    type="button"
-                    className={BTN_OUTLINE}
-                    onClick={() => {
-                      const res = updateAllotmentProgress(a.id, Math.min(100, a.progressPct + 25));
-                      if (!res.ok) onError(res.error);
-                      else {
-                        onFlash("Progress updated");
-                        onRefresh();
-                      }
-                    }}
-                  >
-                    +25%
-                  </button>
-                  {a.status === "submitted" || a.progressPct >= 100 ? (
-                    <button
-                      type="button"
-                      className={BTN_OUTLINE}
-                      onClick={() => {
-                        const res = verifyAllotment(a.id, actorName);
-                        if (!res.ok) onError(res.error);
-                        else {
-                          onFlash("Verified");
-                          onRefresh();
-                        }
-                      }}
-                    >
-                      Verify
-                    </button>
-                  ) : null}
+                <td className="py-2">
+                  <RowActionMenu
+                    row={a}
+                    label="Allotment actions"
+                    actions={[
+                      {
+                        id: "progress",
+                        label: "Record +25% progress",
+                        disabled: (x) => x.progressPct >= 100,
+                        onSelect: (x) => {
+                          const res = updateAllotmentProgress(x.id, Math.min(100, x.progressPct + 25));
+                          if (!res.ok) onError(res.error);
+                          else {
+                            onFlash("Progress updated");
+                            onRefresh();
+                          }
+                        },
+                      },
+                      {
+                        id: "verify",
+                        label: "Verify completed work",
+                        hidden: (x) => !(x.status === "submitted" || x.progressPct >= 100),
+                        onSelect: (x) => {
+                          const res = verifyAllotment(x.id, actorName);
+                          if (!res.ok) onError(res.error);
+                          else {
+                            onFlash("Verified");
+                            onRefresh();
+                          }
+                        },
+                      },
+                    ]}
+                  />
                 </td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );
@@ -833,7 +891,7 @@ export function BillsPanel({
           {state.raBills
             .filter((b) => !selectedProjectId || b.projectId === selectedProjectId)
             .map((b) => (
-              <div key={b.id} className="rounded-lg border border-[rgba(32,48,80,0.12)] px-3 py-2 text-xs">
+              <div key={b.id} className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs">
                 {b.billNo} · {formatInr(b.amountPaise)} · {b.status}
                 {b.status === "submitted" ? (
                   <button
@@ -888,45 +946,48 @@ export function BillsPanel({
             Capitalise project
           </button>
         </div>
-        <table className="mt-3 w-full text-sm">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
+        <ErpTable minWidth="min-w-full" className="mt-3">
+          <ErpTableHead>
+            <tr>
               <th className="pb-2">Date</th>
               <th className="pb-2">Type</th>
               <th className="pb-2 text-right">Amount</th>
               <th className="pb-2">Status</th>
               <th className="pb-2" />
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {costLines.map((c) => (
-              <tr key={c.id} className="border-t border-[rgba(32,48,80,0.08)]">
+              <tr key={c.id}>
                 <td className="py-2">{c.date}</td>
                 <td className="py-2">{c.costType}</td>
                 <td className="py-2 text-right">{formatInr(c.amountPaise)}</td>
                 <td className="py-2">{c.paymentStatus}</td>
                 <td className="py-2">
-                  {c.paymentStatus === "open" ? (
-                    <button
-                      type="button"
-                      className={BTN_OUTLINE}
-                      onClick={() => {
-                        const r = payCostLine(c.id, { poolId });
-                        if (!r.ok) onError(r.error);
-                        else {
-                          onFlash("Paid → CWIP");
-                          onRefresh();
-                        }
-                      }}
-                    >
-                      Pay
-                    </button>
-                  ) : null}
+                  <RowActionMenu
+                    row={c}
+                    label="Cost line actions"
+                    actions={[
+                      {
+                        id: "pay",
+                        label: "Pay (into CWIP)",
+                        hidden: (x) => x.paymentStatus !== "open",
+                        onSelect: (x) => {
+                          const r = payCostLine(x.id, { poolId });
+                          if (!r.ok) onError(r.error);
+                          else {
+                            onFlash("Paid → CWIP");
+                            onRefresh();
+                          }
+                        },
+                      },
+                    ]}
+                  />
                 </td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </section>
     </div>
   );
@@ -1000,7 +1061,7 @@ export function ReportsPanel({
             {(reportsByCategory[cat.id] ?? []).map((r) => (
               <li
                 key={r.id}
-                className="flex flex-wrap items-center justify-between gap-2 border-t border-[rgba(32,48,80,0.08)] pt-2 first:border-0 first:pt-0"
+                className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] pt-2 first:border-0 first:pt-0"
               >
                 <div>
                   <div className="font-medium text-[var(--brand-deep)]">{r.label}</div>

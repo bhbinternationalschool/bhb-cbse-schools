@@ -7,6 +7,7 @@ import {
   loadPayments,
   paymentsStateIsEmpty,
   writePaymentsLocalRaw,
+  type PaymentLink,
   type PaymentsState,
 } from "@/lib/payments";
 import {
@@ -16,11 +17,8 @@ import {
 import { mergeDbDeskIntoPaymentsState } from "@/lib/paymentsNormalizedMerge";
 import { paymentsReadFromDbEnabled } from "@/lib/paymentsDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
-import {
-  isDeskHydrated,
-  markDeskHydrated,
-  resetDeskHydrated,
-} from "@/lib/deskHydrateGuard";
+import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "payments";
 
@@ -41,7 +39,7 @@ export function resetPaymentsPersistenceCache() {
 
 export function schedulePaymentsSync(state: PaymentsState) {
   if (typeof window === "undefined") {
-    void pushPaymentsRemoteServer(state);
+    void trackServerWork(pushPaymentsRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("payments")) {
@@ -77,7 +75,11 @@ export async function pushPaymentsRemoteServer(
  */
 export async function ensurePaymentsHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
+  // Same collapse as fees and sis: concurrent callers share one fetch.
+  return dedupeHydration(MODULE, hydratePaymentsOnce);
+}
+
+async function hydratePaymentsOnce(): Promise<boolean> {
 
   const readFromDb = paymentsReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("payments")
@@ -85,7 +87,10 @@ export async function ensurePaymentsHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { links, changed } = await hydratePaymentsDeskFromDb(readFromDb);
+  const { links, changed, ok } = await hydratePaymentsDeskFromDb(readFromDb);
+  if (!ok) return false;
+
+  markDeskHydrated(MODULE);
   if (changed && (links.length > 0 || readFromDb)) {
     const merged = mergeDbDeskIntoPaymentsState(
       loadPayments(),
@@ -96,7 +101,9 @@ export async function ensurePaymentsHydrated(): Promise<boolean> {
     normChanged = true;
   }
 
-  if (normChanged) {
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+
+  if (normChanged && !readFromDb) {
     schedulePaymentsSync(loadPayments());
   }
 
@@ -104,6 +111,102 @@ export async function ensurePaymentsHydrated(): Promise<boolean> {
 }
 
 /** Server-side hydrate from blob + normalized DB into school mirror payments slice. */
+/**
+ * Make sure ONE pay-link is present in the server's payments mirror, and
+ * return it.
+ *
+ * Every settlement begins by looking a link up in the mirror. The mirror is
+ * a cache: `hydrateSchoolMirrorFromRemote` skips the whole re-pull while a
+ * 45-second TTL holds and the desk-table fingerprint is unchanged, and its
+ * "does this look empty?" test only asks whether master classes are
+ * present. So a mirror carrying classes but zero pay-links reads as healthy
+ * and is never refreshed — and it cannot refresh itself, because the
+ * fingerprint only moves when `payment_desk_links` is written, which is
+ * exactly what an already-created link does not do.
+ *
+ * On 26 Sep 2026 that cost AADVIK SINGH's family Rs 2,500. Cashfree had
+ * taken the money and reported the order PAID, `payment_desk_links` held
+ * the link, and three settlement attempts — one webhook, two returns —
+ * each recorded `fee_link.settlement_failed / Pay-link not found` and
+ * booked nothing, because the one instance answering had a payments slice
+ * with nothing in it.
+ *
+ * Three steps, cheapest first: the mirror as it stands, then a full
+ * payments re-hydrate from the desk tables, then this single link read
+ * directly and spliced in, so `applyPaymentLink` (which loads the mirror
+ * itself) can see it. The splice keeps every other link untouched.
+ */
+export async function ensurePaymentLinkHydrated(
+  linkId: string,
+  opts?: {
+    /**
+     * Take the desk table's row as the truth and replace the mirror's copy
+     * with it, instead of accepting whatever the mirror holds.
+     *
+     * Settling money must do this. The mirror is a per-instance cache with no
+     * freshness check on a link it already has, so a copy taken before the
+     * row changed is served indefinitely — and a stale `paid` makes the
+     * settlement skip a payment as already done.
+     *
+     * On 26 Sep 2026 that ignored AADVIK SINGH's ₹2,500 on the fourth
+     * attempt: the instance had cached the link as paid with RCV-00648
+     * minutes before the row was put back to open, so the replay recorded
+     * fee_link.already_paid and booked nothing, while payment_desk_links
+     * plainly read open.
+     */
+    authoritative?: boolean;
+  },
+): Promise<PaymentLink | null> {
+  const id = linkId.trim();
+  if (!id) return null;
+
+  const { getPaymentLink } = await import("@/lib/payments");
+  const inMirror = () => getPaymentLink(id, loadPayments()) ?? null;
+
+  if (opts?.authoritative && typeof window === "undefined") {
+    const fresh = await spliceLinkFromDb(id);
+    if (fresh) return fresh;
+    // The row could not be read. Fall through rather than refuse: the mirror's
+    // copy, stale or not, is better than losing the payment outright.
+  }
+
+  const already = inMirror();
+  if (already) return already;
+  if (typeof window !== "undefined") return null;
+
+  // A full re-hydrate, unconditionally: this bypasses the mirror's TTL and
+  // fingerprint guards, which are what let the gap persist.
+  await ensurePaymentsHydratedServer();
+  const hydrated = inMirror();
+  if (hydrated) return hydrated;
+
+  const recovered = await spliceLinkFromDb(id);
+  if (recovered) {
+    console.warn(
+      "[payments-db] pay-link recovered straight from the desk table",
+      id,
+    );
+  }
+  return recovered;
+}
+
+/** Read one link from the desk table and make it the mirror's copy. */
+async function spliceLinkFromDb(id: string): Promise<PaymentLink | null> {
+  const { fetchPaymentLinkFromDb } = await import(
+    "@/lib/paymentsNormalized.server"
+  );
+  const one = await fetchPaymentLinkFromDb(id);
+  if (!one) return null;
+
+  const { setMirrorSlice } = await import("@/lib/schoolDataMirror");
+  const state = loadPayments();
+  setMirrorSlice("payments", {
+    version: 1,
+    links: [one, ...(state.links ?? []).filter((l) => l.id !== one.id)],
+  });
+  return one;
+}
+
 export async function ensurePaymentsHydratedServer(): Promise<boolean> {
   if (typeof window !== "undefined") return false;
 

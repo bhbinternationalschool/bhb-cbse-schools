@@ -1,8 +1,12 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — report output with dynamic columns; rows are aggregates, not records
 
 import { useEffect, useMemo, useState } from "react";
 import { ATTENDANCE_STATUSES, loadAttendance, type AttendanceStatus } from "@/lib/attendance";
 import { loadMasters, type MastersState } from "@/lib/masters";
+import { hasPermission } from "@/lib/rbac";
+import { useDemoSession } from "@/components/shell/SessionContext";
+import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
   STUDENT_ATT_REPORTS,
@@ -10,6 +14,13 @@ import {
   studentReportNeedsStudent,
   type StudentAttReportId,
 } from "@/lib/studentAttendanceReportCatalog";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -20,6 +31,18 @@ function thisMonth() {
 }
 
 export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
+  const session = useDemoSession();
+  // A teacher reports on their own sections only (2026-09-29): the class
+  // picker offered every class, with "All classes" as the default.
+  const { my } = useMyTeaching();
+  const teacherMode = isRestrictedTeacher(my);
+  const mySections = useMemo(
+    () =>
+      teacherMode
+        ? new Set(my.teaching.map((t) => `${t.classId}|${t.sectionId}`))
+        : null,
+    [teacherMode, my],
+  );
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
   const [reportId, setReportId] = useState<StudentAttReportId>("day_wise");
@@ -32,6 +55,7 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
   const [studentId, setStudentId] = useState("");
   const [status, setStatus] = useState<"all" | AttendanceStatus>("all");
   const [gender, setGender] = useState<"" | "M" | "F" | "O">("");
+  const [maxPercent, setMaxPercent] = useState("");
   const [studentQuery, setStudentQuery] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +64,25 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
     columns: { key: string; header: string }[];
     rows: Record<string, string | number | null | undefined>[];
   } | null>(null);
+
+  // Every report column sorts; until a heading is clicked the rows keep the
+  // order the report produced. Numeric text ("12", "4.5") sorts as a number.
+  const previewRows = useMemo(() => preview?.rows ?? [], [preview]);
+  const previewColumns: Record<
+    string,
+    (row: Record<string, string | number | null | undefined>) => string | number | null
+  > = {};
+  for (const c of preview?.columns ?? []) {
+    previewColumns[c.key] = (row) => {
+      const v = row[c.key];
+      if (v == null) return null;
+      if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) {
+        return Number(v);
+      }
+      return v;
+    };
+  }
+  const previewSort = useTableSort(previewRows, previewColumns, "__report_order__");
 
   useEffect(() => {
     setMasters(loadMasters());
@@ -51,15 +94,39 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
     [reportId],
   );
 
+  // Excel / PDF / the table's own export are downloads; viewing on screen
+  // is not. A teacher holds attendance view/edit but not export.
+  const canExport = useMemo(
+    () => hasPermission(session, masters, "attendance", "export"),
+    [session, masters],
+  );
+
   const classOptions = useMemo(() => {
     if (!masters) return [];
-    return masters.classes.filter((c) => c.isActive);
-  }, [masters]);
+    const active = masters.classes.filter((c) => c.isActive);
+    if (!mySections) return active;
+    const mine = new Set([...mySections].map((k) => k.split("|")[0]));
+    return active.filter((c) => mine.has(c.id));
+  }, [masters, mySections]);
 
   const sectionOptions = useMemo(() => {
     if (!masters || !classId) return [];
-    return masters.sections.filter((s) => s.isActive && s.classId === classId);
-  }, [masters, classId]);
+    return masters.sections.filter(
+      (s) =>
+        s.isActive &&
+        s.classId === classId &&
+        (!mySections || mySections.has(`${classId}|${s.id}`)),
+    );
+  }, [masters, classId, mySections]);
+
+  // No "All classes" for a teacher: start on their first class.
+  useEffect(() => {
+    if (!teacherMode) return;
+    if (!classOptions.some((c) => c.id === classId)) {
+      setClassId(classOptions[0]?.id ?? "");
+      setSectionId("");
+    }
+  }, [teacherMode, classOptions, classId]);
 
   useEffect(() => {
     if (sectionId && !sectionOptions.some((s) => s.id === sectionId)) {
@@ -105,6 +172,34 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
     }, 3200);
   }
 
+  /**
+   * What the report may read. For a teacher, only their own sections'
+   * students and registers — so a report that ignores the class filter
+   * (or "All sections" over a class they share) still cannot reach
+   * another section. The server already limits what reaches this browser;
+   * this keeps a stale local copy from widening it.
+   */
+  function scopedData() {
+    const attendance = loadAttendance();
+    if (!mySections) return { sis: sis ?? undefined, attendance };
+    return {
+      sis: sis
+        ? {
+            ...sis,
+            students: (sis.students ?? []).filter((st) =>
+              mySections.has(`${st.classId}|${st.sectionId}`),
+            ),
+          }
+        : undefined,
+      attendance: {
+        ...attendance,
+        registers: attendance.registers.filter((r) =>
+          mySections.has(`${r.classId}|${r.sectionId}`),
+        ),
+      },
+    };
+  }
+
   function filterPayload() {
     return {
       academicYearCode: ay,
@@ -117,9 +212,9 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
       studentId: studentId || undefined,
       status,
       gender: gender || undefined,
+      maxPercent: maxPercent.trim() ? Number(maxPercent) : undefined,
       masters: masters ?? undefined,
-      sis: sis ?? undefined,
-      attendance: loadAttendance(),
+      ...scopedData(),
     };
   }
 
@@ -142,6 +237,10 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
   }
 
   function onExport(format: "excel" | "pdf") {
+    if (!canExport) {
+      flash("Your role can view attendance reports but not download them", true);
+      return;
+    }
     if (studentReportNeedsStudent(reportId) && !studentId) {
       flash("Select a student for this report", true);
       return;
@@ -171,7 +270,7 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
     if (result.ok && result.preview) setPreview(result.preview);
     else setPreview(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportId, masters, sis, ay]);
+  }, [reportId, masters, sis, ay, mySections]);
 
   if (!masters || !sis) {
     return <p className="text-sm text-[var(--muted)]">Loading reports…</p>;
@@ -298,7 +397,7 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
                     setSectionId("");
                   }}
                 >
-                  <option value="">All classes</option>
+                  {teacherMode ? null : <option value="">All classes</option>}
                   {classOptions.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -398,6 +497,23 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
                 </select>
               </label>
             ) : null}
+            {needs.has("percentBand") ? (
+              <label className="block text-sm">
+                <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                  At or below %
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  className="field !py-1.5"
+                  placeholder="e.g. 75"
+                  value={maxPercent}
+                  onChange={(e) => setMaxPercent(e.target.value)}
+                />
+              </label>
+            ) : null}
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
@@ -408,26 +524,33 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
             >
               Run report
             </button>
-            <button
-              type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.2)] px-4 py-2 text-xs font-bold text-[var(--brand-deep)]"
-              onClick={() => onExport("excel")}
-            >
-              Excel
-            </button>
-            <button
-              type="button"
-              className="rounded-lg border border-[rgba(32,48,80,0.2)] px-4 py-2 text-xs font-bold text-[var(--brand-deep)]"
-              onClick={() => onExport("pdf")}
-            >
-              PDF
-            </button>
+            {canExport ? (
+              <>
+                <button
+                  type="button"
+                  className="rounded-lg border border-[rgba(32,48,80,0.2)] px-4 py-2 text-xs font-bold text-[var(--brand-deep)]"
+                  onClick={() => onExport("excel")}
+                >
+                  Excel
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-[rgba(32,48,80,0.2)] px-4 py-2 text-xs font-bold text-[var(--brand-deep)]"
+                  onClick={() => onExport("pdf")}
+                >
+                  PDF
+                </button>
+              </>
+            ) : null}
           </div>
         </div>
 
         {preview ? (
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
+          <ErpTableShell
+            exportAs={canExport ? "attendance_report" : undefined}
+            exportTitle="Attendance report"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
               <h3 className="text-sm font-bold text-[var(--brand-deep)]">
                 {preview.title}
               </h3>
@@ -436,22 +559,19 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
               </span>
             </div>
             <div className="overflow-x-auto max-h-[min(55vh,520px)]">
-              <table className="min-w-full text-left text-sm">
-                <thead className="sticky top-0 bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+              <ErpTable>
+                <ErpTableHead sticky>
                   <tr>
                     {preview.columns.map((c) => (
-                      <th key={c.key} className="px-3 py-2 whitespace-nowrap">
+                      <ErpSortTh key={c.key} sort={previewSort} field={c.key} className="px-3 py-2 whitespace-nowrap">
                         {c.header}
-                      </th>
+                      </ErpSortTh>
                     ))}
                   </tr>
-                </thead>
-                <tbody>
-                  {preview.rows.map((row, i) => (
-                    <tr
-                      key={i}
-                      className="border-t border-[rgba(32,48,80,0.06)]"
-                    >
+                </ErpTableHead>
+                <ErpTableBody>
+                  {previewSort.rows.map((row, i) => (
+                    <tr key={i}>
                       {preview.columns.map((c) => (
                         <td
                           key={c.key}
@@ -474,10 +594,10 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
                       </td>
                     </tr>
                   ) : null}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable>
             </div>
-          </div>
+          </ErpTableShell>
         ) : (
           <p className="text-sm text-[var(--muted)]">
             Select filters and run the report to preview.

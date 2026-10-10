@@ -12,17 +12,24 @@
 import { NextResponse } from "next/server";
 import {
   isProductionEnv,
-  requireJobSecret,
   requireStaffPermission,
+  timingSafeStringEqual,
 } from "@/lib/apiRouteAuth.server";
+import type { RbacModule } from "@/lib/rbac";
+import { sectionKey, staffSectionScope } from "@/lib/api/v1/staffScope";
+import { loadSis } from "@/lib/sis";
+import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import {
   buildWaTemplateBodyComponent,
   buildWaTemplateMediaHeader,
-  sendWhatsAppTemplate,
-  sendWhatsAppText,
+  sendWaWithFailover,
   waOutboundConfigured,
   type WaTemplateComponent,
 } from "@/lib/waSend";
+import { logHouseholdWaSend } from "@/lib/householdMessageLog.server";
+import { resolveHouseholdByMobileServer } from "@/lib/parentHousehold.server";
+import { isInQuietHours, quietHoursLabel } from "@/lib/householdPrefs";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
 
 export const runtime = "nodejs";
 
@@ -42,9 +49,42 @@ type DispatchTemplate = {
 type DispatchItem = {
   messageId?: string;
   mobile: string;
+  /** Retried automatically if the primary `mobile` send fails synchronously
+   * (invalid, opted out, outside 24h window, Meta rejection) — e.g. a
+   * household's altMobile. Not retried when the provider isn't configured
+   * at all, since a different number can't fix that. */
+  fallbackMobile?: string;
   body?: string;
   template?: DispatchTemplate;
+  /**
+   * Which of the school's WhatsApp numbers to send FROM.
+   *
+   * Resolved by the caller from Masters (per template, else per module, else
+   * the school default). Absent means the single env-configured number, so a
+   * school that has never opened the Numbers screen is unaffected.
+   */
+  fromPhoneNumberId?: string;
+  /**
+   * Skip the household's quiet-hours window? Attendance, transport, health
+   * and safety messages are urgent by module; anything else can set this
+   * explicitly (e.g. an OTP). Default false → fee reminders, campaigns and
+   * notices are deferred inside the family's quiet hours.
+   */
+  urgent?: boolean;
 };
+
+/** Modules whose messages are time-critical for the family — never held. */
+const URGENT_MODULES = new Set<string>([
+  "attendance",
+  "transport",
+  "fleet",
+  "health",
+  "visitors",
+  "discipline",
+  "student_leave",
+  "student-leave",
+  "auth",
+]);
 
 export async function GET() {
   return NextResponse.json({
@@ -56,26 +96,87 @@ export async function GET() {
   });
 }
 
-export async function POST(req: Request) {
-  const secret = process.env.WA_DISPATCH_SECRET?.trim();
-  if (secret) {
-    const hdr = req.headers.get("x-wa-dispatch-secret") || "";
-    if (hdr !== secret) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-  } else if (isProductionEnv()) {
-    const auth = await requireStaffPermission(req, "admissions", "edit");
-    if (!auth.ok) return auth.response;
-  }
+type DispatchBody = {
+  messages?: DispatchItem[];
+  dryRun?: boolean;
+  module?: RbacModule;
+};
 
-  let body: { messages?: DispatchItem[]; dryRun?: boolean };
+export async function POST(req: Request) {
+  let body: DispatchBody | null = null;
   try {
-    body = (await req.json()) as typeof body;
+    body = (await req.json()) as DispatchBody;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const messages = Array.isArray(body.messages) ? body.messages : [];
+  // Two independent valid callers: a job/cron dispatcher presenting the
+  // shared secret, or a signed-in staff browser session with RBAC on
+  // `module`. A configured secret used to act as a mode switch that shut
+  // out every non-secret caller outright — including legitimate staff
+  // sessions from campaigns, fee/payment WA notify, and substitution
+  // notify — the moment WA_DISPATCH_SECRET was set, in dev or prod alike.
+  // Treat a present-but-mismatched/missing header as "not this path" and
+  // fall through to RBAC instead of hard-rejecting.
+  const secret = process.env.WA_DISPATCH_SECRET?.trim();
+  const hdr = req.headers.get("x-wa-dispatch-secret")?.trim() || "";
+  const viaSecret = !!(secret && hdr && timingSafeStringEqual(hdr, secret));
+
+  if (!viaSecret && (isProductionEnv() || secret)) {
+    // Historically hardcoded to "admissions" (this route's first caller was
+    // campaign dispatch) — callers outside Admissions (e.g. substitution
+    // WA notify from Timetable) can pass `module` to be checked against
+    // their own RBAC grant instead of needing Admissions access too.
+    const auth = await requireStaffPermission(
+      req,
+      body?.module || "admissions",
+      "edit",
+    );
+    if (!auth.ok) return auth.response;
+
+    // The module is the caller's own choice, so "homework.edit" let any
+    // teacher send up to 100 messages to ANY number from the school's
+    // WhatsApp. A teacher (not school-wide) may message only the families
+    // of children in the sections they teach.
+    if (!auth.viaMirrorSecret) {
+      const scope = await staffSectionScope(auth.ctx).catch(() => null);
+      if (scope && !scope.unrestricted) {
+        await ensureSisHydratedServer().catch(() => false);
+        const sis = loadSis();
+        const allowed = new Set<string>();
+        const add = (m?: string) => {
+          const d = (m || "").replace(/\D/g, "").slice(-10);
+          if (d.length === 10) allowed.add(d);
+        };
+        for (const st of sis.students) {
+          if (!scope.sections.has(sectionKey(st.classId, st.sectionId))) continue;
+          add(st.fatherMobile);
+          add(st.motherMobile);
+          add(st.emergencyMobile);
+          const hh = sis.households.find((h) => h.id === st.householdId);
+          add(hh?.mobile);
+          add(hh?.whatsappMobile);
+          add(hh?.altMobile);
+        }
+        const msgs = Array.isArray(body?.messages) ? body.messages : [];
+        const outside = msgs.filter(
+          (m) => !allowed.has(String(m.mobile || "").replace(/\D/g, "").slice(-10)),
+        );
+        if (outside.length > 0) {
+          return NextResponse.json(
+            {
+              error:
+                `${outside.length} of these numbers are not a family in your classes — ` +
+                "the school's WhatsApp can only message your own classes' parents from your login",
+            },
+            { status: 403 },
+          );
+        }
+      }
+    }
+  }
+
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
   if (messages.length === 0) {
     return NextResponse.json({ error: "No messages" }, { status: 400 });
   }
@@ -86,10 +187,10 @@ export async function POST(req: Request) {
     );
   }
 
-  if (body.dryRun || !waOutboundConfigured()) {
+  if (body?.dryRun || !waOutboundConfigured()) {
     return NextResponse.json({
       ok: true,
-      mode: body.dryRun ? "dry_run" : "stub",
+      mode: body?.dryRun ? "dry_run" : "stub",
       accepted: messages.length,
       outboundConfigured: waOutboundConfigured(),
       results: messages.map((m) => ({
@@ -107,15 +208,20 @@ export async function POST(req: Request) {
   const results: {
     messageId?: string;
     mobile: string;
-    status: "sent" | "failed";
+    status: "sent" | "failed" | "deferred";
     error?: string;
     providerId?: string;
     mode?: string;
     via?: string;
+    usedFallback?: boolean;
   }[] = [];
+
+  const purpose = body?.module || "admissions";
+  const purposeUrgent = URGENT_MODULES.has(String(purpose));
 
   for (const item of messages) {
     const mobile = (item.mobile || "").replace(/\D/g, "");
+    const fallbackMobile = (item.fallbackMobile || "").replace(/\D/g, "") || undefined;
     if (mobile.length < 10) {
       results.push({
         messageId: item.messageId,
@@ -124,6 +230,22 @@ export async function POST(req: Request) {
         error: "Invalid mobile",
       });
       continue;
+    }
+
+    // Household quiet hours (Students → Family). Non-urgent sends inside the
+    // family's window are returned as "deferred" — the caller (campaign
+    // queue, automation tick) retries later; nothing is dropped silently.
+    if (!item.urgent && !purposeUrgent) {
+      const hh = await resolveHouseholdByMobileServer(mobile).catch(() => null);
+      if (hh && isInQuietHours(hh.household)) {
+        results.push({
+          messageId: item.messageId,
+          mobile,
+          status: "deferred",
+          error: `Family quiet hours ${quietHoursLabel(hh.household)} — retry after the window`,
+        });
+        continue;
+      }
     }
 
     if (item.template?.name) {
@@ -147,11 +269,17 @@ export async function POST(req: Request) {
           buildWaTemplateBodyComponent(keys, item.template.variables),
         );
       }
-      const r = await sendWhatsAppTemplate({
-        toMobile: mobile,
-        name: item.template.name,
-        language: item.template.language || "en",
-        components,
+      const r = await sendWaWithFailover({
+        fromPhoneNumberId: item.fromPhoneNumberId,
+        primaryMobile: mobile,
+        fallbackMobile,
+        template: {
+          name: item.template.name,
+          // A queued item that carries no language is a family nobody has
+          // asked, and the school writes to those in Hindi.
+          language: item.template.language || SCHOOL_DEFAULT_WA_LANGUAGE,
+          components,
+        },
         clientMessageId: item.messageId,
       });
       results.push({
@@ -162,6 +290,17 @@ export async function POST(req: Request) {
         providerId: r.providerId,
         mode: r.mode,
         via: "template",
+        usedFallback: r.usedFallback,
+      });
+      await logHouseholdWaSend({
+        mobile,
+        purpose,
+        via: "template",
+        templateName: item.template.name,
+        preview: `Template: ${item.template.name}`,
+        status: r.ok ? "sent" : "failed",
+        error: r.error,
+        waMessageId: r.providerId,
       });
       continue;
     }
@@ -176,8 +315,9 @@ export async function POST(req: Request) {
       });
       continue;
     }
-    const r = await sendWhatsAppText({
-      toMobile: mobile,
+    const r = await sendWaWithFailover({
+      primaryMobile: mobile,
+      fallbackMobile,
       body: text,
       clientMessageId: item.messageId,
     });
@@ -189,6 +329,16 @@ export async function POST(req: Request) {
       providerId: r.providerId,
       mode: r.mode,
       via: "text",
+      usedFallback: r.usedFallback,
+    });
+    await logHouseholdWaSend({
+      mobile,
+      purpose,
+      via: "text",
+      preview: text,
+      status: r.ok ? "sent" : "failed",
+      error: r.error,
+      waMessageId: r.providerId,
     });
   }
 

@@ -5,7 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { loadMasters } from "@/lib/masters";
-import { canAccessHref } from "@/lib/rbac";
+import { canAccessHref, loadRbac } from "@/lib/rbac";
 
 /**
  * Client-side ERP module gate (RBAC is localStorage-backed).
@@ -27,25 +27,30 @@ export function ErpModuleGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let active = true;
     void (async () => {
-      const masters = loadMasters();
       try {
-        const { ensureRbacHydrated } = await import("@/lib/rbacPersistence");
-        await ensureRbacHydrated();
+        const [{ ensureRbacHydrated }, { withHydrationSlot }] =
+          await Promise.all([
+            import("@/lib/rbacPersistence"),
+            import("@/lib/deskHydrateGuard"),
+          ]);
+        // Never let the gate wait on a slow desk: after 4 s decide from what
+        // this browser already holds (the built-in role defaults at worst).
+        await Promise.race([
+          withHydrationSlot(() => ensureRbacHydrated()),
+          new Promise((r) => window.setTimeout(r, 4000)),
+        ]);
       } catch {
         /* ignore */
       }
-      const isStaff = session.persona === "staff";
-      const isOwnerOrStaffRole =
-        isStaff &&
-        (!session.roleCode ||
-          /owner|director|principal|admin|office|staff|teacher/.test(
-            session.roleCode.toLowerCase(),
-          ));
+      const masters = loadMasters();
+      // The module permission decides, for everyone. This used to let any
+      // staff session whose role code contained "staff", "teacher" or
+      // "office" through to every page — a teacher could open Fees,
+      // Accounts, Payroll and Masters by URL (found 2026-09-29).
       const ok =
         pathname === "/home" ||
         pathname.startsWith("/home/") ||
-        isOwnerOrStaffRole ||
-        canAccessHref(session, masters, href);
+        canAccessHref(session, masters, href, loadRbac());
       if (active) {
         setAllowed(ok);
         setReady(true);
@@ -74,7 +79,7 @@ export function ErpModuleGate({ children }: { children: React.ReactNode }) {
         </p>
         <Link
           href="/home"
-          className="mt-5 inline-flex rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-semibold text-white"
+          className="mt-5 inline-flex rounded-xl bg-[var(--primary)] px-4 py-2.5 text-sm font-semibold text-[var(--primary-foreground)]"
         >
           Back to Home
         </Link>

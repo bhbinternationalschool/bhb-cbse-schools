@@ -4,12 +4,40 @@
 
 import { randomBytes } from "crypto";
 
+/** Google Meet REST API v2 — create a space, and read who was in it. */
+export const GOOGLE_MEET_SCOPE_CREATE =
+  "https://www.googleapis.com/auth/meetings.space.created";
+export const GOOGLE_MEET_SCOPE_READ =
+  "https://www.googleapis.com/auth/meetings.space.readonly";
+
+/**
+ * One grant per staff member covers both Classroom (read) and Meet (create
+ * a room, read its participants). A teacher connects Google once, from
+ * either Homework → Classroom or Online classes, and both work.
+ */
 export const GOOGLE_CLASSROOM_SCOPES = [
   "openid",
   "email",
   "profile",
   "https://www.googleapis.com/auth/classroom.courses.readonly",
   "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
+  GOOGLE_MEET_SCOPE_CREATE,
+  GOOGLE_MEET_SCOPE_READ,
+].join(" ");
+
+/** Does a granted scope string include what Meet room creation needs? */
+export function scopesAllowMeet(scopes: string): boolean {
+  const set = new Set((scopes || "").split(/\s+/).filter(Boolean));
+  return set.has(GOOGLE_MEET_SCOPE_CREATE);
+}
+
+// drive.file only — restricted to files this app creates itself, not the
+// connected account's whole Drive. See docs/GOOGLE_DRIVE_DOCUMENTS_PLAN.md §3.
+export const GOOGLE_DRIVE_SCOPES = [
+  "openid",
+  "email",
+  "profile",
+  "https://www.googleapis.com/auth/drive.file",
 ].join(" ");
 
 export function googleOAuthClientId(): string {
@@ -41,6 +69,21 @@ export function googleOAuthRedirectUri(): string {
   return `${base}/api/integrations/google/classroom/callback`;
 }
 
+/**
+ * Drive's redirect URI, deliberately not sharing googleOAuthRedirectUri's
+ * env-var override — GOOGLE_OAUTH_REDIRECT_URI is Classroom-specific in
+ * practice (set for that integration already) and Drive accidentally
+ * inheriting it would send Google to the wrong callback.
+ */
+export function googleDriveRedirectUri(): string {
+  const explicit = (process.env.GOOGLE_DRIVE_REDIRECT_URI || "").trim();
+  if (explicit) return explicit;
+  const base = (
+    process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+  ).replace(/\/$/, "");
+  return `${base}/api/integrations/google/drive/callback`;
+}
+
 export function googleClassroomOAuthConfigured(): boolean {
   return !!(googleOAuthClientId() && googleOAuthClientSecret());
 }
@@ -49,12 +92,15 @@ export function newOAuthState(): string {
   return randomBytes(24).toString("hex");
 }
 
-export function buildGoogleOAuthUrl(state: string): string {
+export function buildGoogleOAuthUrl(
+  state: string,
+  opts?: { scopes?: string; redirectUri?: string },
+): string {
   const params = new URLSearchParams({
     client_id: googleOAuthClientId(),
-    redirect_uri: googleOAuthRedirectUri(),
+    redirect_uri: opts?.redirectUri || googleOAuthRedirectUri(),
     response_type: "code",
-    scope: GOOGLE_CLASSROOM_SCOPES,
+    scope: opts?.scopes || GOOGLE_CLASSROOM_SCOPES,
     access_type: "offline",
     prompt: "consent",
     state,
@@ -73,6 +119,7 @@ export type GoogleTokenResponse = {
 
 export async function exchangeGoogleAuthCode(
   code: string,
+  redirectUri?: string,
 ): Promise<
   | { ok: true; tokens: GoogleTokenResponse }
   | { ok: false; error: string }
@@ -85,7 +132,7 @@ export async function exchangeGoogleAuthCode(
         code,
         client_id: googleOAuthClientId(),
         client_secret: googleOAuthClientSecret(),
-        redirect_uri: googleOAuthRedirectUri(),
+        redirect_uri: redirectUri || googleOAuthRedirectUri(),
         grant_type: "authorization_code",
       }),
     });

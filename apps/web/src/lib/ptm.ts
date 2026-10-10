@@ -5,13 +5,22 @@
 
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
-import { householdWhatsApp, loadSis, type SisStudent } from "@/lib/sis";
+import {
+  householdWhatsApp,
+  loadSis,
+  normalizeMobile,
+  type SisStudent,
+} from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import {
   describeFilters,
   exportFilterReport,
   type ReportColumn,
 } from "@/lib/reportExport";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { recordPtmDeletion } from "@/lib/ptmNormalizedClient";
 
 const STORAGE_KEY = "bhb_ptm_v1";
 
@@ -118,7 +127,7 @@ export function loadPtm(): PtmState {
     return emptyPtmState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return emptyPtmState();
     return normalizeState(JSON.parse(raw) as Partial<PtmState>);
   } catch {
@@ -131,13 +140,13 @@ export function savePtm(state: PtmState): void {
 
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[ptm] localStorage quota exceeded — relying on server DB sync", e);
   }
-  void import("@/lib/ptmPersistence").then(({ schedulePtmSync }) => {
+  void trackServerWork(import("@/lib/ptmPersistence").then(({ schedulePtmSync }) => {
     schedulePtmSync(state);
-  });
+  }));
 }
 
 export function writePtmLocalRaw(state: PtmState) {
@@ -146,7 +155,7 @@ export function writePtmLocalRaw(state: PtmState) {
     return;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
     console.warn("[ptm] localStorage quota exceeded — relying on server DB sync", e);
   }
@@ -160,6 +169,13 @@ export function ptmStateIsEmpty(state: PtmState): boolean {
 export function seedPtmIfEmpty(ay?: string): PtmState {
   const existing = loadPtm();
   if (existing.events.length > 0) return existing;
+  // Not a default: a made-up "Term PTM" dated today with five 10:00 slots
+  // in "Room 12" under whichever teacher came first — visible to parents and
+  // bookable. It ran on any empty browser BEFORE the desk was pulled and
+  // pushed at once (which deleted every real event, bookings cascading,
+  // while the desk pruned). A school's PTM desk holds only the events its
+  // office creates; only an offline, database-less dev build gets the sample.
+  if (isSupabaseConfigured()) return existing;
   const masters = loadMasters();
   const classIds = masters.classes
     .filter((c) => c.isActive !== false)
@@ -260,6 +276,7 @@ export function deletePtmEvent(
       error: "Cancel or complete all bookings before deleting this event",
     };
   }
+  if (typeof window !== "undefined") recordPtmDeletion("ptm_desk_events", [eventId]);
   savePtm({
     ...state,
     events: state.events.filter((e) => e.id !== eventId),
@@ -290,6 +307,7 @@ export function deletePtmSlot(
       error: "Slot has active bookings — cancel them first",
     };
   }
+  if (typeof window !== "undefined") recordPtmDeletion("ptm_desk_slots", [slotId]);
   savePtm({
     ...state,
     slots: state.slots.filter((s) => s.id !== slotId),
@@ -495,7 +513,23 @@ export function composeWhatsAppPtmConfirm(input: {
   startAt: string;
   teacherName: string;
   roomOrLink: string;
+  hindi?: boolean;
 }): string {
+  if (input.hindi) {
+    return [
+      `*${TENANT.shortName}*`,
+      `अभिभावक-शिक्षक बैठक (PTM) बुक हो गई`,
+      "",
+      `${input.childName}`,
+      `${input.eventName} · ${input.date} ${input.startAt}`,
+      `किनसे मिलना है: ${input.teacherName}`,
+      input.roomOrLink ? `कहाँ: ${input.roomOrLink}` : "",
+      "",
+      "कृपया 5 मिनट पहले पहुँचें। धन्यवाद 🙏",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
   return [
     `*${TENANT.shortName}*`,
     `PTM booked`,
@@ -518,7 +552,23 @@ export function composeWhatsAppPtmReminder(input: {
   startAt: string;
   teacherName: string;
   roomOrLink: string;
+  hindi?: boolean;
 }): string {
+  if (input.hindi) {
+    return [
+      `*${TENANT.shortName}*`,
+      `PTM स्मरण`,
+      "",
+      `${input.childName} — कृपया समय पर पहुँचें`,
+      `${input.eventName} · ${input.date} ${input.startAt}`,
+      `किनसे मिलना है: ${input.teacherName}`,
+      input.roomOrLink ? `कहाँ: ${input.roomOrLink}` : "",
+      "",
+      "जल्द मिलते हैं 🙏",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
   return [
     `*${TENANT.shortName}*`,
     `PTM reminder`,
@@ -541,6 +591,20 @@ export function ptmBookingMobile(
   const state = sis ?? loadSis();
   const hh = state.households.find((h) => h.id === booking.householdId);
   return householdWhatsApp(hh) || "";
+}
+
+/** Same lookup as `ptmBookingMobile`, plus the household's altMobile as a
+ * failover target for `openWaMe`. */
+export function ptmBookingContact(
+  booking: PtmBooking,
+  sis?: ReturnType<typeof loadSis>,
+): { mobile: string; fallbackMobile?: string } {
+  const state = sis ?? loadSis();
+  const hh = state.households.find((h) => h.id === booking.householdId);
+  return {
+    mobile: householdWhatsApp(hh) || "",
+    fallbackMobile: normalizeMobile(hh?.altMobile || "") || undefined,
+  };
 }
 
 export function markPtmWhatsApp(

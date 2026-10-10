@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — a copy-out sheet for the UDISE+ portal; each row already links to the pupil and has a Copy control
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -7,6 +8,18 @@ import {
   downloadPdfReport,
   type ReportColumn,
 } from "@/lib/reportExport";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import type { SortValue } from "@/lib/tableSort";
+
+/** A cell's sort value: numeric strings as numbers, "—"/blank as no value. */
+function cellSortValue(v: string | number | null | undefined): SortValue {
+  if (v == null) return null;
+  if (typeof v === "number") return v;
+  const t = v.trim();
+  if (!t || t === "—") return null;
+  return /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : t;
+}
 
 export type UdiseListRow = Record<string, string | number | null | undefined> & {
   /** When present, the first column value links to the student's edit page. */
@@ -50,6 +63,14 @@ export function UdiseStudentListModal({
       setCopied(null);
     }
   }
+
+  // Default "__order" keeps the order the caller built; every column sorts on click.
+  const orderOf = new Map(rows.map((r, i) => [r, i] as const));
+  const sortColumns: Record<string, (r: UdiseListRow) => SortValue> = {
+    __order: (r) => orderOf.get(r) ?? null,
+  };
+  for (const c of columns) sortColumns[c.key] = (r) => cellSortValue(r[c.key]);
+  const sort = useTableSort(rows, sortColumns, "__order");
 
   const exportRows = rows.map((r) => {
     const { _studentId, ...rest } = r;
@@ -127,31 +148,31 @@ export function UdiseStudentListModal({
               No students in this list.
             </p>
           ) : (
-            <table className="w-full border-collapse text-left text-xs">
-              <thead>
-                <tr className="border-b border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.04)] text-[var(--muted)]">
+            <ErpTable className="border-collapse">
+              <ErpTableHead>
+                <tr>
                   <th className="px-2 py-2 font-medium">#</th>
                   {columns.map((c) => (
-                    <th
+                    <ErpSortTh
                       key={c.key}
+                      sort={sort}
+                      field={c.key}
+                      align={c.align === "right" ? "right" : "left"}
                       className={`px-2 py-2 font-medium ${
                         c.align === "right" ? "text-right" : ""
                       }`}
                     >
                       {c.header}
-                    </th>
+                    </ErpSortTh>
                   ))}
                   {copyKeys?.length ? (
                     <th className="px-2 py-2 font-medium">Copy</th>
                   ) : null}
                 </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, i) => (
-                  <tr
-                    key={row._studentId ?? i}
-                    className="border-b border-[rgba(32,48,80,0.06)] align-top hover:bg-[rgba(32,48,80,0.02)]"
-                  >
+              </ErpTableHead>
+              <ErpTableBody hoverable>
+                {sort.rows.map((row, i) => (
+                  <tr key={row._studentId ?? i} className="align-top">
                     <td className="px-2 py-2 text-[var(--muted)]">{i + 1}</td>
                     {columns.map((c) => {
                       const value = row[c.key];
@@ -202,8 +223,8 @@ export function UdiseStudentListModal({
                     ) : null}
                   </tr>
                 ))}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           )}
         </div>
       </div>

@@ -141,6 +141,7 @@ function registrationTendersToVoucher(
       ref: t.ref || payment.upiRef || payment.code,
       bankName: t.bankName || "",
       instrumentDate: (t.instrumentDate || paidOn).slice(0, 10),
+      gatewayProvider: t.gatewayProvider || "",
       realisation: "cleared" as const,
     }))
     .filter((t) => t.amountPaise > 0);
@@ -227,7 +228,7 @@ export function postRegistrationFeeToStudentLedger(
 
   const masters = loadMasters();
   const ay = student.academicYearCode || lead.academicYearCode || "";
-  let dues = computeStudentDues(student, masters, loadFees(), {
+  const dues = computeStudentDues(student, masters, loadFees(), {
     includePaid: true,
   });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import {
   formatInr,
@@ -16,6 +16,7 @@ import {
   DEFAULT_MAP_LAYERS,
   TransportGoogleMap,
   TransportMapLegend,
+  type LiveVehicleMarker,
 } from "@/components/transport/TransportGoogleMap";
 import {
   buildTransportMapMarkers,
@@ -33,6 +34,7 @@ import {
   listOpenPayables,
   markPayablePaid,
   openServiceJob,
+  recordBoardingGeoEvent,
   recordCertificateRenewal,
   recordEmiPayment,
   recordGpsPing,
@@ -68,7 +70,7 @@ export function DealersPanel({
 
   return (
     <div className="mt-4 grid gap-4 lg:grid-cols-2">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">Add dealer</h2>
         <div className="mt-3 grid gap-2">
           <input
@@ -100,7 +102,7 @@ export function DealersPanel({
           </select>
           <button
             type="button"
-            className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-bold text-white"
+            className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
             onClick={() => {
               const r = upsertDealer({ name, type });
               if (!r.ok) {
@@ -129,7 +131,7 @@ export function DealersPanel({
           ))}
         </ul>
       </div>
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Open payables
         </h2>
@@ -191,14 +193,18 @@ export function FinancePanel({
   const [expiry, setExpiry] = useState("");
   const [fee, setFee] = useState("400");
 
+  // Soonest due first, sorted BEFORE the 20-row cap: each new loan's schedule
+  // is prepended, so a new loan's future EMIs used to hide older loans'
+  // overdue ones (8 Oct 2026).
   const dueEmis = state.emiSchedule
     .filter((e) => e.status === "due" || e.status === "overdue")
+    .sort((a, b) => (a.dueOn || "").localeCompare(b.dueOn || ""))
     .slice(0, 20);
 
   return (
     <div className="mt-4 grid gap-4 lg:grid-cols-2">
       <div className="space-y-4">
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             New vehicle loan / EMI
           </h2>
@@ -249,7 +255,7 @@ export function FinancePanel({
             />
             <button
               type="button"
-              className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-bold text-white"
+              className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
               onClick={() => {
                 const r = createVehicleLoan({
                   vehicleId,
@@ -274,7 +280,7 @@ export function FinancePanel({
             </button>
           </div>
         </div>
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             Certificate renewal
           </h2>
@@ -349,7 +355,7 @@ export function FinancePanel({
             </button>
           </div>
         </div>
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             Insurance policy
           </h2>
@@ -381,7 +387,7 @@ export function FinancePanel({
           </button>
         </div>
       </div>
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">EMI due</h2>
         <ul className="mt-2 max-h-[28rem] divide-y overflow-y-auto text-sm">
           {dueEmis.length === 0 ? (
@@ -449,7 +455,7 @@ export function ServicePanel({
 
   return (
     <div className="mt-4 grid gap-4 lg:grid-cols-2">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Open service / repair job
         </h2>
@@ -473,7 +479,7 @@ export function ServicePanel({
           />
           <button
             type="button"
-            className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-bold text-white"
+            className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
             onClick={() => {
               const r = openServiceJob({
                 vehicleId,
@@ -538,7 +544,7 @@ export function ServicePanel({
           Submit request
         </button>
       </div>
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Open jobs & requests
         </h2>
@@ -655,9 +661,44 @@ export function BoardingPanel({
       ? searchFeeStudents(unauthQ, sis, masters).slice(0, 8)
       : [];
 
+  function captureAndRecord(studentId: string, kind: "boarded" | "offboarded") {
+    if (!navigator.geolocation) {
+      onError("Geolocation unavailable on this device");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const r = recordBoardingGeoEvent({
+          date,
+          routeId,
+          trip,
+          studentId,
+          kind,
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracyM: pos.coords.accuracy,
+        });
+        if (!r.ok) {
+          onError(r.error);
+          return;
+        }
+        onRefresh();
+        if (r.flag) {
+          onFlash(
+            `${kind === "boarded" ? "Boarded" : "Offboarded"} ~${r.flag.actualKm.toFixed(1)} km from school — ` +
+              `registered stop is ${r.flag.registeredKm.toFixed(1)} km, review this student's stop`,
+          );
+        } else {
+          onFlash(`${kind === "boarded" ? "Boarded" : "Offboarded"} recorded`);
+        }
+      },
+      () => onError("Location permission denied"),
+    );
+  }
+
   return (
     <div className="mt-4 space-y-4">
-      <div className="flex flex-wrap gap-3 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="flex flex-wrap gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <label className="text-sm">
           <span className="mb-1 block text-[11px] text-[var(--muted)]">Date</span>
           <input
@@ -700,7 +741,7 @@ export function BoardingPanel({
         <p className="text-sm text-[var(--muted)]">Pick a route to mark boarding.</p>
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Authorized riders
             </h2>
@@ -718,28 +759,36 @@ export function BoardingPanel({
                         {st?.fullName ?? a.studentId}
                       </div>
                       <div className="text-[10px] text-[var(--muted)]">
-                        {a.stopName}
+                        {a.stopName} · registered {a.route?.stops.find((s) => s.id === a.stopId)?.distanceKm ?? "?"} km
                         {a.boardingSuspended ? " · SUSPENDED" : ""}
                         {ev ? ` · ${ev.status}` : ""}
                       </div>
+                      {ev?.boardedLocation ? (
+                        <div className="text-[10px] text-[var(--muted)]">
+                          Boarded {ev.boardedLocation.distanceFromSchoolKm.toFixed(1)} km from school
+                          {ev.offboardedLocation
+                            ? ` · offboarded ${ev.offboardedLocation.distanceFromSchoolKm.toFixed(1)} km from school`
+                            : ""}
+                        </div>
+                      ) : null}
                     </div>
                     <div className="flex gap-1">
                       <button
                         type="button"
                         className="rounded border px-2 py-0.5 text-[10px] font-bold"
-                        onClick={() => {
-                          upsertBoardingEvent({
-                            date,
-                            routeId,
-                            trip,
-                            studentId: a.studentId,
-                            status: "boarded",
-                          });
-                          onRefresh();
-                        }}
+                        onClick={() => captureAndRecord(a.studentId, "boarded")}
                       >
                         Board
                       </button>
+                      {ev?.status === "boarded" ? (
+                        <button
+                          type="button"
+                          className="rounded border px-2 py-0.5 text-[10px] font-bold"
+                          onClick={() => captureAndRecord(a.studentId, "offboarded")}
+                        >
+                          Offboard
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="rounded border px-2 py-0.5 text-[10px] font-bold"
@@ -762,7 +811,7 @@ export function BoardingPanel({
               })}
             </ul>
           </div>
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Report unauthorized
             </h2>
@@ -827,7 +876,7 @@ export function CompliancePanel({
   }, [state]);
 
   return (
-    <div className="mt-4 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+    <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Fee & boarding compliance
@@ -865,7 +914,7 @@ export function CompliancePanel({
                 {a.assignmentId ? (
                   <button
                     type="button"
-                    className="text-[11px] font-semibold text-[#dc2626]"
+                    className="text-[11px] font-semibold text-[var(--danger)]"
                     onClick={() => {
                       setBoardingSuspended(a.assignmentId, true);
                       onRefresh();
@@ -883,6 +932,28 @@ export function CompliancePanel({
     </div>
   );
 }
+
+type LiveBusRow = {
+  vehicleId: string;
+  name: string;
+  registrationNo: string;
+  routeName: string | null;
+  busNo: string | null;
+  tracked: boolean;
+  position: {
+    lat: number;
+    lng: number;
+    recordedAt: string;
+    ageSec: number;
+    freshness: "live" | "recent" | "stale" | "cold";
+    speedKmh: number | null;
+    /** Heading in degrees. Already sent by /api/transport/live; the client
+     *  used to drop it, which is why every bus was drawn as a dot. */
+    courseDeg: number | null;
+    ignitionOn: boolean | null;
+    fuelPercent: number | null;
+  } | null;
+};
 
 export function LiveMapPanel({
   state,
@@ -905,7 +976,68 @@ export function LiveMapPanel({
   const [lat, setLat] = useState(String(TENANT.schoolLat));
   const [lng, setLng] = useState(String(TENANT.schoolLng));
   const [layers, setLayers] = useState<TransportMapLayers>(DEFAULT_MAP_LAYERS);
-  const last = lastGpsPingByVehicle(state);
+  // Fleet Edge positions, polled every 30 s and plotted as the freshest bus
+  // pings. Telemetry lands in fleet_vehicle_positions on the server; nothing
+  // writes it into this browser's gpsPings slice, so the map reads it here.
+  const [liveBuses, setLiveBuses] = useState<LiveBusRow[]>([]);
+  const [liveAt, setLiveAt] = useState<string>("");
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/transport/live", { cache: "no-store" });
+        const json = (await res.json()) as { ok?: boolean; buses?: LiveBusRow[]; at?: string };
+        if (alive && json.ok && Array.isArray(json.buses)) {
+          setLiveBuses(json.buses);
+          setLiveAt(json.at || new Date().toISOString());
+        }
+      } catch {
+        /* the manual pings still plot */
+      }
+    };
+    void load();
+    const t = setInterval(() => void load(), 30_000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
+  /**
+   * Live fixes used to be flattened into `gpsPings` — an array whose shape has
+   * no heading, no speed and no age — so the map drew each bus as the same
+   * blue dot as a hand-typed ping, and rebuilt it from scratch every poll.
+   * They are passed to the map as vehicles now; `gpsPings` keeps only what a
+   * clerk actually recorded by hand.
+   */
+  const liveVehicles = useMemo<LiveVehicleMarker[]>(
+    () =>
+      liveBuses
+        .filter((b) => b.position)
+        .map((b) => {
+          const pos = b.position!;
+          const age =
+            pos.ageSec < 60
+              ? `${pos.ageSec}s ago`
+              : `${Math.round(pos.ageSec / 60)} min ago`;
+          const speed =
+            pos.speedKmh != null ? ` · ${Math.round(pos.speedKmh)} km/h` : "";
+          return {
+            id: b.vehicleId || pos.recordedAt,
+            label: b.busNo || b.routeName || b.registrationNo || b.name,
+            detail: `${age}${speed}`,
+            lat: pos.lat,
+            lng: pos.lng,
+            speedKmh: pos.speedKmh,
+            courseDeg: pos.courseDeg,
+            ignitionOn: pos.ignitionOn,
+            freshness: pos.freshness,
+            at: pos.recordedAt,
+          };
+        }),
+    [liveBuses],
+  );
+  const liveState = state;
+  const last = lastGpsPingByVehicle(liveState);
   const onRoad = state.vehicles.filter(
     (v) => v.isActive && v.status === "active",
   );
@@ -920,7 +1052,7 @@ export function LiveMapPanel({
     });
     const countKind = (key: keyof TransportMapLayers) =>
       buildTransportMapMarkers({
-        transport: state,
+        transport: liveState,
         sis: sis ?? null,
         masters: masters ?? null,
         academicYearCode,
@@ -931,9 +1063,20 @@ export function LiveMapPanel({
       stops: countKind("stops"),
       unassigned: countKind("unassigned"),
       riders: countKind("riders"),
-      buses: countKind("buses"),
+      // Buses on the map are the live ones now. Counting hand-typed gpsPings
+      // here would report a fleet the map is not drawing.
+      buses: liveVehicles.length,
     };
-  }, [state, sis, masters, academicYearCode]);
+  }, [liveState, sis, masters, academicYearCode, liveVehicles.length]);
+
+  /**
+   * Buses the map cannot show, counted rather than quietly omitted.
+   *
+   * Three of six report. A map drawing three buses with nothing said reads as
+   * "the fleet", and an office would trust a screen that cannot see half of
+   * it — the same reason the panel below names untracked vehicles.
+   */
+  const untrackedCount = liveBuses.filter((b) => !b.position).length;
 
   function toggleLayer(key: keyof TransportMapLayers) {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -941,15 +1084,23 @@ export function LiveMapPanel({
 
   return (
     <div className="mt-4 space-y-4">
-      <section className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Live route map
             </h2>
             <p className="mt-0.5 text-xs text-[var(--muted)]">
-              School · route stop zones · pinned homes · bus GPS
+              School · route stop zones · pinned homes · live buses
             </p>
+            {untrackedCount > 0 ? (
+              <p className="mt-0.5 text-[11px] font-semibold text-[var(--danger)]">
+                {untrackedCount} of {liveBuses.length} vehicle
+                {liveBuses.length === 1 ? "" : "s"} {untrackedCount === 1 ? "is" : "are"}{" "}
+                not on the map — no tracker reporting. This map is not the whole
+                fleet.
+              </p>
+            ) : null}
           </div>
           <TransportMapLegend
             layers={layers}
@@ -957,24 +1108,63 @@ export function LiveMapPanel({
             counts={layerCounts}
           />
         </div>
+        {liveBuses.length ? (
+          <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {liveBuses.map((b) => (
+              <li key={b.vehicleId} className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken,rgba(32,48,80,0.04))] px-3 py-2 text-[12px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-[var(--brand-deep)]">{b.busNo || b.name}</span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      !b.tracked
+                        ? "bg-[rgba(32,48,80,0.08)] text-[var(--muted)]"
+                        : b.position?.freshness === "live"
+                          ? "bg-[rgba(31,122,77,0.14)] text-[var(--success,#1f7a4d)]"
+                          : b.position?.freshness === "recent"
+                            ? "bg-[rgba(197,160,40,0.18)] text-[var(--brand-deep)]"
+                            : "bg-[rgba(180,35,24,0.1)] text-[var(--danger,#b42318)]"
+                    }`}
+                  >
+                    {!b.tracked ? "no tracker" : b.position?.freshness === "live" ? "live" : b.position?.freshness === "recent" ? "recent" : "not reporting"}
+                  </span>
+                </div>
+                <div className="mt-0.5 text-[var(--muted)]">
+                  {b.registrationNo}
+                  {b.routeName ? ` · ${b.routeName}` : ""}
+                  {b.position
+                    ? ` · ${b.position.ageSec < 60 ? `${b.position.ageSec}s` : `${Math.round(b.position.ageSec / 60)} min`} ago${b.position.speedKmh != null ? ` · ${Math.round(b.position.speedKmh)} km/h` : ""}${b.position.fuelPercent != null ? ` · fuel ${Math.round(b.position.fuelPercent)}%` : ""}`
+                    : b.tracked
+                      ? ""
+                      : " · this vehicle has no GPS tracker"}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {liveAt ? <p className="mt-1 text-[10px] text-[var(--muted)]">Positions refreshed {new Date(liveAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} · every 30 s</p> : null}
         <div className="mt-3">
           <TransportGoogleMap
-            transport={state}
+            transport={liveState}
             sis={sis ?? null}
             masters={masters ?? null}
             academicYearCode={academicYearCode}
             layers={layers}
+            liveVehicles={liveVehicles}
           />
         </div>
         <p className="mt-2 text-[10px] text-[var(--muted)]">
-          Orange = students without transport (need SIS address pin). Navy dots =
-          stop fee zones (~distance from school). Enable{" "}
-          <strong>Maps JavaScript API</strong> on your Google key.
+          A bus points the way it is travelling only while it is actually
+          moving; a stopped one is drawn square, because the heading a parked
+          tracker reports is wherever it last pointed. Green = heard from in
+          the last few minutes, amber = older, faded = a last known position
+          and not a live one. Orange = students without transport (need SIS
+          address pin). Navy dots = stop fee zones (~distance from school).
+          Enable <strong>Maps JavaScript API</strong> on your Google key.
         </p>
       </section>
 
     <div className="grid gap-4 lg:grid-cols-2">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Record GPS ping
         </h2>
@@ -1008,7 +1198,7 @@ export function LiveMapPanel({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-bold text-white"
+              className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
               onClick={() => {
                 const r = recordGpsPing({
                   vehicleId,

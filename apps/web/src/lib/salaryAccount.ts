@@ -7,6 +7,8 @@ import { loadSalarySetup, normalizeSalarySettings } from "@/lib/salarySetup";
 import type { PayrollRun, PayrollStaffLine } from "@/lib/payroll";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 export type SalaryAccountEntryType =
   | "net_payable"
   | "june_hold"
@@ -45,7 +47,7 @@ function nid(prefix: string) {
 export function loadSalaryAccount(): SalaryAccountState {
   if (typeof window === "undefined") return { version: 1, entries: [] };
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return { version: 1, entries: [] };
     const parsed = JSON.parse(raw) as Partial<SalaryAccountState>;
     return {
@@ -60,7 +62,18 @@ export function loadSalaryAccount(): SalaryAccountState {
 export function saveSalaryAccount(state: SalaryAccountState) {
   if (!assertModulePermission("payroll", "edit", "saveSalaryAccount")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("salary_account", state)));
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeSalaryAccountLocalRaw(state: SalaryAccountState): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 function entriesFromLine(

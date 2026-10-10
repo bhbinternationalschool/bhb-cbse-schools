@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import {
   WA_TEMPLATE_CONTENT_SNIPPETS,
   type WaTemplateLanguage,
@@ -20,7 +21,7 @@ export function WaTemplateContentHelper({
   module: WaTemplateModule;
   language: WaTemplateLanguage;
   layoutKind: WaTemplateLayoutKind;
-  onApply: (body: string, footer: string) => void;
+  onApply: (body: string, footer: string, header?: string) => void;
 }) {
   const [purpose, setPurpose] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -51,12 +52,17 @@ export function WaTemplateContentHelper({
         error?: string;
         body?: string;
         footer?: string;
+        generationId?: string;
       };
       if (!json.ok || !json.body) {
         setAiError(json.error || "Generation failed");
         return;
       }
       onApply(json.body, json.footer || "");
+      // Applying the draft into the template editor is the acceptance signal.
+      if (json.generationId) {
+        reportAiOutcome({ ids: [json.generationId], outcome: "accepted", targetType: "wa_template" });
+      }
       setPurpose("");
     } catch (e) {
       setAiError(e instanceof Error ? e.message : "Generation failed");
@@ -66,7 +72,7 @@ export function WaTemplateContentHelper({
   }
 
   return (
-    <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.02)] p-3 space-y-3">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3 space-y-3">
       <div>
         <p className="text-[12px] font-semibold text-[var(--brand-deep)]">
           Write with helper
@@ -83,8 +89,8 @@ export function WaTemplateContentHelper({
             key={s.id}
             type="button"
             disabled={readOnly}
-            className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-2.5 py-1 text-[10px] font-semibold text-[var(--brand-deep)] hover:border-[#0f766e] disabled:opacity-50"
-            onClick={() => onApply(s.body, s.footer)}
+            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-[10px] font-semibold text-[var(--brand-deep)] hover:border-[var(--tone-teal)] disabled:opacity-50"
+            onClick={() => onApply(s.body, s.footer, s.header)}
           >
             {s.label}
           </button>

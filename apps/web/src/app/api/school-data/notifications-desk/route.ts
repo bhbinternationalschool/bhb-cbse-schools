@@ -8,14 +8,22 @@ import { notificationsDualWriteDbEnabled } from "@/lib/notificationsDbConfig";
 import {
   fetchNotificationsDeskFromDb,
   pushNotificationsDeskToDb,
+  NOTIFICATIONS_DELETABLE_TABLES,
 } from "@/lib/notificationsNormalized.server";
+import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["notifications-desk"], "GET");
   if (!auth.ok) return auth.response
-  const { bundle, meta } = await fetchNotificationsDeskFromDb();
+  const { bundle, meta, ok } = await fetchNotificationsDeskFromDb();
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: "Failed to fetch notifications desk" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     items: bundle.items,
@@ -25,7 +33,7 @@ export async function GET(req: Request) {
   });
 }
 
-type NotificationsDeskPostBody = Pick<NotificationsState, "items">;
+type NotificationsDeskPostBody = Pick<NotificationsState, "items"> & { deletes?: unknown };
 
 export async function POST(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["notifications-desk"], "POST");
@@ -48,7 +56,7 @@ export async function POST(req: Request) {
   const result = await pushNotificationsDeskToDb({
     version: 1,
     items: Array.isArray(body.items) ? body.items : [],
-  });
+  }, readNamedDeletes(body.deletes, NOTIFICATIONS_DELETABLE_TABLES));
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },

@@ -1,7 +1,11 @@
+import { staffRoleCodeFor } from "@/lib/staffSessionRole";
 import { NextResponse } from "next/server";
+import { resolveStaffHomeKind } from "@/lib/staffHomeKind.server";
 import { createClient } from "@supabase/supabase-js";
 import { DEMO_USERS, demoSessionCookieName, type DemoSession } from "@/lib/auth";
 import { appSessionCookieOptions } from "@/lib/authCookies.server";
+import { signSession } from "@/lib/sessionCookie.server";
+import { loadServerMasters } from "@/lib/api/v1/auth";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { superAdminRoleCode } from "@/lib/superAdmin";
 import { TENANT, type Persona } from "@/lib/types";
@@ -82,6 +86,7 @@ export async function POST(request: Request) {
 
   let roleCode = DEMO_USERS[persona].roleCode;
   let staffId: string | undefined;
+  let householdId: string | undefined;
   let fullName = (profile.full_name as string) || DEMO_USERS[persona].fullName;
   const email =
     (profile.email as string | null) ||
@@ -118,14 +123,87 @@ export async function POST(request: Request) {
     }
   }
 
-  if (persona === "staff" && !staffId && !ownerRole) {
-    // Fall back to principal-ish role from profile email heuristics
-    const em = (email || "").toLowerCase();
-    if (em.includes("principal") || em.includes("owner")) {
-      roleCode = "principal";
-    } else if (em.includes("admin")) {
-      roleCode = "admin";
+  // Same shape as the staff resolution above, by mobile instead of email —
+  // profiles has no household_id column, so this is how a parent's
+  // session gets scoped to their household. Previously missing entirely:
+  // a parent signing in via Supabase Auth got a session with no
+  // householdId, which every parent-portal screen needs.
+  if (persona === "parent" && admin && profile.tenant_id) {
+    const mobileKey = (profile.mobile as string | null)?.trim() || "";
+    if (mobileKey) {
+      const { data: hhRows } = await admin
+        .from("sis_households")
+        .select("id, guardian_name, mobile, whatsapp_mobile, alt_mobile")
+        .eq("tenant_id", profile.tenant_id)
+        .or(
+          `mobile.eq.${mobileKey},whatsapp_mobile.eq.${mobileKey},alt_mobile.eq.${mobileKey}`,
+        )
+        .limit(1)
+        .maybeSingle();
+      if (hhRows) {
+        householdId = hhRows.id as string;
+        if (hhRows.guardian_name) fullName = hhRows.guardian_name as string;
+      }
     }
+  }
+
+  // Every real (non-demo) staff login used to keep roleCode at its
+  // DEMO_USERS default of "principal" once staffId WAS matched — the block
+  // below only ever ran for the unmatched case, so the one signal that
+  // actually knows who this person is (their sis_staff designation) was
+  // never consulted. Every teacher and driver signing in for real landed on
+  // roleCode "principal", which is what the mobile app's principal-vs-
+  // teacher-vs-driver home routing keys off. inferRoleCodes() already does
+  // this correctly (designation-aware, staffId-aware) and is the same
+  // function permission checks use — reuse it instead of a second, weaker
+  // heuristic. roleCode is passed in blank so the stale default above can't
+  // leak into its own regex-matching step; ownerRole (protected super-admin
+  // emails) is preserved untouched — inferRoleCodes never grants "owner"
+  // from a designation, by design (see its own comment).
+  if (persona === "staff" && !ownerRole) {
+    // A staff login that matches nobody on the roster used to start from
+    // DEMO_USERS' "principal" and keep it (inferRoleCodes' blank-login
+    // fallback). The school's own emails all match today; anything else is
+    // refused and named, rather than handed the principal's desk.
+    if (!staffId) {
+      return NextResponse.json(
+        {
+          error:
+            "This login is not linked to a staff record. Ask the office to put " +
+            "your email on your staff profile (Staff → Login), then sign in again.",
+        },
+        { status: 403 },
+      );
+    }
+    try {
+      roleCode = staffRoleCodeFor(
+        { email, fullName, staffId },
+        await loadServerMasters(),
+      );
+    } catch (e) {
+      console.warn("[session] roleCode inference failed", e);
+      return NextResponse.json(
+        { error: "Could not read the staff roster to sign you in — please try again." },
+        { status: 503 },
+      );
+    }
+  }
+
+  // Resolved before the session is built so an unresolvable year stops login
+  // rather than being stamped into a signed cookie. Null means Masters defines
+  // no academic year at all, or could not be read — in both cases every scoped
+  // query afterwards would be meaningless, and a guessed year is what ran the
+  // school inside a session that ended 2026-03-31.
+  const resolvedAy = await resolveLoginAcademicYearCode(body.academicYearCode);
+  if (!resolvedAy) {
+    return NextResponse.json(
+      {
+        error:
+          "No academic year is set up, so the session cannot be scoped. " +
+          "Add the current academic year in Masters, then sign in again.",
+      },
+      { status: 503 },
+    );
   }
 
   const session: DemoSession = {
@@ -134,15 +212,32 @@ export async function POST(request: Request) {
     roleCode,
     email: email || undefined,
     staffId,
+    householdId,
     tenantSlug: TENANT.slug,
-    academicYearCode: await resolveLoginAcademicYearCode(body.academicYearCode),
+    academicYearCode: resolvedAy,
   };
 
-  const res = NextResponse.json({ ok: true, session });
-  res.cookies.set(
-    demoSessionCookieName(),
-    encodeURIComponent(JSON.stringify(session)),
-    appSessionCookieOptions(),
-  );
+  const signed = signSession(session);
+  if (!signed) {
+    return NextResponse.json(
+      { error: "Server session signing is not configured" },
+      { status: 503 },
+    );
+  }
+
+  let homeKind: string | undefined;
+  if (persona === "staff") {
+    try {
+      homeKind = resolveStaffHomeKind(session, await loadServerMasters());
+    } catch (e) {
+      console.warn("[session] homeKind failed", e);
+    }
+  }
+
+  const res = NextResponse.json({
+    ok: true,
+    session: homeKind ? { ...session, homeKind } : session,
+  });
+  res.cookies.set(demoSessionCookieName(), signed, appSessionCookieOptions());
   return res;
 }

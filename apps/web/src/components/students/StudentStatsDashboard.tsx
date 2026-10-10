@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import Link from "next/link";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import {
@@ -8,10 +9,13 @@ import {
   type MastersState,
 } from "@/lib/masters";
 import { type SisState, type SisStudent } from "@/lib/sis";
+import { isMissing } from "@/lib/studentFilters";
 import { loadTransport } from "@/lib/transport";
 import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 function StatIcon({
   tone,
@@ -23,7 +27,7 @@ function StatIcon({
   const bg: Record<typeof tone, string> = {
     green: "bg-[#e8f5e9] text-[#2e7d32]",
     red: "bg-[#ffebee] text-[#c62828]",
-    amber: "bg-[#fff8e1] text-[#f9a825]",
+    amber: "bg-[#fff8e1] text-[#8a5a10]",
     sky: "bg-[#e1f5fe] text-[#0288d1]",
     blue: "bg-[#e3f2fd] text-[#1565c0]",
     indigo: "bg-[#e8eaf6] text-[#3949ab]",
@@ -56,19 +60,19 @@ function StatRow({ cell, bordered }: { cell: StatCell; bordered?: boolean }) {
       onClick={clickable ? cell.onClick : undefined}
       disabled={!clickable}
       className={`flex w-full items-center gap-3 px-3 py-3 text-left transition ${
-        bordered ? "border-b border-[#eceff1]" : ""
+        bordered ? "border-b border-[var(--border)]" : ""
       } ${clickable ? "cursor-pointer hover:bg-[#f5f8fb]" : "cursor-default"}`}
       title={clickable ? `View ${cell.label}` : undefined}
     >
       <StatIcon tone={cell.tone}>{cell.icon}</StatIcon>
       <div className="min-w-0 flex-1">
-        <div className="text-[12px] text-[#607d8b]">{cell.label}</div>
+        <div className="text-[12px] text-[var(--muted)]">{cell.label}</div>
         <div className="text-lg font-semibold tabular-nums text-[#263238]">
           {cell.value}
         </div>
       </div>
       {clickable ? (
-        <span className="text-[#b0bec5]" aria-hidden>
+        <span className="text-[var(--muted)]" aria-hidden>
           ›
         </span>
       ) : null}
@@ -78,7 +82,7 @@ function StatRow({ cell, bordered }: { cell: StatCell; bordered?: boolean }) {
 
 function PairCard({ left, right }: { left: StatCell; right: StatCell }) {
   return (
-    <div className="overflow-hidden rounded-md border border-[#cfd8dc] bg-white shadow-sm">
+    <div className="overflow-hidden rounded-md border border-[var(--border)] bg-[var(--card)] shadow-sm">
       <StatRow cell={left} bordered />
       <StatRow cell={right} />
     </div>
@@ -104,19 +108,19 @@ function BreakdownTable({
 }) {
   const total = rows.reduce((s, r) => s + r.count, 0);
   return (
-    <div className="overflow-hidden rounded-md border border-[#cfd8dc] bg-white shadow-sm">
+    <div className="overflow-hidden rounded-md border border-[var(--border)] bg-[var(--card)] shadow-sm">
       <div className="border-b border-[#90caf9] bg-[#e3f2fd] px-3 py-2 text-sm font-semibold text-[#1565c0]">
         {title}
       </div>
       <div className="max-h-72 overflow-auto">
-        <table className="w-full text-left text-[13px]">
-          <thead>
-            <tr className="border-b border-[#eceff1] text-[11px] uppercase tracking-wide text-[#78909c]">
+        <ErpTable className="text-[13px]">
+          <ErpTableHead>
+            <tr>
               <th className="px-3 py-2 font-semibold">{colA}</th>
               <th className="px-3 py-2 text-right font-semibold">{colB}</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody>
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={2} className="px-2 py-2">
@@ -134,11 +138,9 @@ function BreakdownTable({
                     onClick={
                       clickable ? () => onRowClick!(r.key, r.label) : undefined
                     }
-                    className={`border-b border-[#f5f5f5] text-[#37474f] ${
-                      clickable
-                        ? "cursor-pointer hover:bg-[#f5f8fb]"
-                        : ""
-                    }`}
+                    className={
+                      clickable ? "cursor-pointer hover:bg-[#f5f8fb]" : ""
+                    }
                     title={clickable ? `View ${r.label}` : undefined}
                   >
                     <td className="px-3 py-1.5">
@@ -156,13 +158,13 @@ function BreakdownTable({
               })
             )}
             {showTotal && rows.length > 0 ? (
-              <tr className="bg-[#fffde7] font-semibold text-[#37474f]">
+              <tr className="bg-[var(--accent)] font-semibold text-[var(--foreground)]">
                 <td className="px-3 py-2">Total</td>
                 <td className="px-3 py-2 text-right tabular-nums">{total}</td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
       </div>
     </div>
   );
@@ -184,49 +186,54 @@ function StudentListDrawer({
     const sec = masters.sections.find((x) => x.id === s.sectionId)?.name ?? "";
     return sec ? `${cls}-${sec}` : cls;
   };
+
+  // The drill-down list — by class to group them, by admission number to
+  // find one child. The # column is a running count, so it is not a handle.
+  const statSort = useTableSort(
+    students,
+    {
+      student: (s) => s.fullName,
+      klass: (s) => classSec(s),
+      admission: (s) => s.admissionNo,
+    },
+    "student",
+    "asc",
+  );
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(32,48,80,0.45)] p-3 sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      onClick={onClose}
-    >
-      <div
-        className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[#cfd8dc] bg-white shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-2 border-b border-[#eceff1] px-4 py-3">
+    // Base UI: focus is trapped inside, the page behind is locked and
+    // Escape closes. The hand-rolled version had a click-catching
+    // backdrop and nothing else, so Tab walked out of the open card
+    // into the page underneath it.
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogPopup aria-label={title} className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-lg">
+        <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
           <div className="text-sm font-semibold text-[var(--brand-deep)]">
             {title}
-            <span className="ml-2 text-xs font-normal text-[#78909c]">
+            <span className="ml-2 text-xs font-normal text-[var(--muted)]">
               {students.length} student{students.length === 1 ? "" : "s"}
             </span>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md px-2 py-1 text-xs font-semibold text-[#607d8b] hover:bg-[#eceff1]"
+            className="rounded-md px-2 py-1 text-xs font-semibold text-[var(--muted)] hover:bg-[var(--surface-sunken)]"
           >
             Close
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full text-left text-[13px]">
-            <thead className="sticky top-0 bg-white text-[10px] uppercase tracking-wide text-[#78909c]">
-              <tr className="border-b border-[#eceff1]">
+          <ErpTable className="text-[13px]">
+            <ErpTableHead sticky>
+              <tr>
                 <th className="px-4 py-2 font-semibold">#</th>
-                <th className="px-4 py-2 font-semibold">Student</th>
-                <th className="px-4 py-2 font-semibold">Class</th>
-                <th className="px-4 py-2 font-semibold">Admission</th>
+                <ErpSortTh sort={statSort} field="student" className="px-4 py-2 font-semibold">Student</ErpSortTh>
+                <ErpSortTh sort={statSort} field="klass" className="px-4 py-2 font-semibold">Class</ErpSortTh>
+                <ErpSortTh sort={statSort} field="admission" className="px-4 py-2 font-semibold">Admission</ErpSortTh>
               </tr>
-            </thead>
-            <tbody>
-              {students.map((s, i) => (
-                <tr
-                  key={s.id}
-                  className="border-b border-[#f5f5f5] text-[#37474f]"
-                >
+            </ErpTableHead>
+            <ErpTableBody>
+              {statSort.rows.map((s, i) => (
+                <tr key={s.id}>
                   <td className="px-4 py-2 tabular-nums text-[#90a4ae]">
                     {i + 1}
                   </td>
@@ -243,15 +250,130 @@ function StudentListDrawer({
                       </span>
                     ) : null}
                   </td>
-                  <td className="px-4 py-2 text-[#607d8b]">
+                  <td className="px-4 py-2 text-[var(--muted)]">
                     {classSec(s)}
                     {s.rollNo ? ` · ${s.rollNo}` : ""}
                   </td>
-                  <td className="px-4 py-2 text-[#607d8b]">{s.admissionNo}</td>
+                  <td className="px-4 py-2 text-[var(--muted)]">{s.admissionNo}</td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
+        </div>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+/**
+ * Compliance readiness.
+ *
+ * Every other tile on this dashboard counts what the roster *is*. These
+ * count what still needs doing, and each one links into the register
+ * already filtered to exactly those students — so the number is the
+ * start of the work, not a fact to write down and act on elsewhere.
+ */
+function ComplianceCard({
+  activeCount,
+  udiseReady,
+  qualityPct,
+  missingCounts,
+  sessionAy,
+}: {
+  activeCount: number;
+  udiseReady: number;
+  qualityPct: number;
+  missingCounts: Record<string, number>;
+  sessionAy: string;
+}) {
+  const readyPct =
+    activeCount === 0 ? 100 : Math.round((udiseReady / activeCount) * 100);
+
+  const gaps: { field: string; label: string; count: number }[] = [
+    { field: "apaar", label: "APAAR ID", count: missingCounts.apaar ?? 0 },
+    { field: "pen", label: "PEN", count: missingCounts.pen ?? 0 },
+    { field: "aadhaar", label: "Aadhaar", count: missingCounts.aadhaar ?? 0 },
+    { field: "dob", label: "Date of birth", count: missingCounts.dob ?? 0 },
+    { field: "household", label: "Household link", count: missingCounts.household ?? 0 },
+    { field: "photo", label: "Photo", count: missingCounts.photo ?? 0 },
+  ].sort((a, b) => b.count - a.count);
+
+  const tone =
+    readyPct >= 90 ? "var(--success)" : readyPct >= 50 ? "var(--warning)" : "var(--danger)";
+
+  return (
+    <div className="overflow-hidden rounded-md border border-[var(--border)] bg-[var(--card)] shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#ffcc80] bg-[#fff8e1] px-3 py-2">
+        <span className="text-sm font-semibold text-[#e65100]">
+          Compliance &amp; data quality · {sessionAy}
+        </span>
+        <span className="text-[11px] text-[#8d6e63]">
+          Active roster only · UDISE+ needs PEN, APAAR, Aadhaar and DOB
+        </span>
+      </div>
+
+      <div className="grid gap-4 px-3 py-3 md:grid-cols-[minmax(0,18rem)_1fr]">
+        <div>
+          <div className="text-[12px] text-[var(--muted)]">UDISE+ ready</div>
+          <div className="mt-0.5 flex items-baseline gap-2">
+            <span
+              className="text-2xl font-semibold tabular-nums"
+              style={{ color: tone }}
+            >
+              {udiseReady}
+            </span>
+            <span className="text-sm text-[var(--muted)]">
+              of {activeCount} students
+            </span>
+          </div>
+          <div
+            className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[var(--surface-sunken)]"
+            role="progressbar"
+            aria-valuenow={readyPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="UDISE+ readiness"
+          >
+            <div
+              className="h-full rounded-full transition-all"
+              style={{ width: `${readyPct}%`, background: tone }}
+            />
+          </div>
+          <div className="mt-1.5 text-[11px] text-[var(--muted)]">
+            {readyPct}% filing-ready · {qualityPct}% of all tracked fields present
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+          {gaps.map((g) => {
+            const clean = g.count === 0;
+            return (
+              <Link
+                key={g.field}
+                href={`/students?tab=register&missingFilter=${g.field}&sortBy=name`}
+                className={`rounded-md border px-2.5 py-2 transition ${
+                  clean
+                    ? "border-[#c8e6c9] bg-[#f1f8e9]"
+                    : "border-[#ffcdd2] bg-[#fff5f5] hover:bg-[#ffebee]"
+                }`}
+                title={
+                  clean
+                    ? `Every active student has ${g.label}`
+                    : `Open the ${g.count} student(s) missing ${g.label}`
+                }
+              >
+                <div
+                  className="text-lg font-semibold tabular-nums"
+                  style={{ color: clean ? "var(--success)" : "var(--danger)" }}
+                >
+                  {g.count}
+                </div>
+                <div className="text-[11px] leading-tight text-[var(--muted)]">
+                  missing {g.label}
+                </div>
+              </Link>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -366,7 +488,51 @@ export function StudentStatsDashboard({
       .sort((a, b) => b[1] - a[1])
       .map(([label, count]) => ({ key: label, label, count }));
 
+    /**
+     * Compliance readiness for the active roster.
+     *
+     * PEN and APAAR are UDISE+/CBSE requirements and were invisible on
+     * this dashboard, which reported gender splits and transport counts
+     * while 98% of the roster had no APAAR ID. Counted against active
+     * students only — inactive records are not filed.
+     */
+    const COMPLIANCE_FIELDS = [
+      "apaar",
+      "pen",
+      "aadhaar",
+      "dob",
+      "household",
+      "photo",
+    ] as const;
+
+    const missingCounts = Object.fromEntries(
+      COMPLIANCE_FIELDS.map((f) => [
+        f,
+        active.filter((s) => isMissing(s, f)).length,
+      ]),
+    ) as Record<(typeof COMPLIANCE_FIELDS)[number], number>;
+
+    /** UDISE+ filing needs PEN, APAAR, Aadhaar and DOB on every child. */
+    const udiseReady = active.filter(
+      (s) =>
+        !isMissing(s, "pen") &&
+        !isMissing(s, "apaar") &&
+        !isMissing(s, "aadhaar") &&
+        !isMissing(s, "dob"),
+    ).length;
+
+    /** Share of all tracked fields present across the active roster. */
+    const totalChecks = active.length * COMPLIANCE_FIELDS.length;
+    const filledChecks =
+      totalChecks -
+      COMPLIANCE_FIELDS.reduce((sum, f) => sum + missingCounts[f], 0);
+    const qualityPct =
+      totalChecks === 0 ? 100 : Math.round((filledChecks / totalChecks) * 100);
+
     return {
+      missingCounts,
+      udiseReady,
+      qualityPct,
       active: active.length,
       inactive: inactive.length,
       oldCount,
@@ -427,8 +593,8 @@ export function StudentStatsDashboard({
 
   return (
     <div className="mt-4 space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#cfd8dc] bg-white px-3 py-2 text-sm">
-        <span className="font-medium text-[#546e7a]">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm">
+        <span className="font-medium text-[var(--muted)]">
           Student overview · {stats.sessionAy} only (not combined years)
         </span>
         <div className="flex flex-wrap items-center gap-2">
@@ -456,6 +622,14 @@ export function StudentStatsDashboard({
           />
         </div>
       </div>
+
+      <ComplianceCard
+        activeCount={stats.active}
+        udiseReady={stats.udiseReady}
+        qualityPct={stats.qualityPct}
+        missingCounts={stats.missingCounts}
+        sessionAy={stats.sessionAy}
+      />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <PairCard

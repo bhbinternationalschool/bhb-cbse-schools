@@ -6,6 +6,29 @@ import type { AttendanceState } from "@/lib/attendance";
 import type { AttendanceDeskAncillary } from "@/lib/attendanceDeskAncillary.server";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import { scheduleRetryingPush } from "@/lib/syncRetryStatus";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes } from "@/lib/deskNamedDeletes";
+import { ATTENDANCE_DESK } from "@/lib/attendanceDeletes";
+import {
+  applyStampedSave,
+  buildStampedSave,
+  captureRowStamps,
+  onStampConflicts,
+  type RowConflicts,
+  type RowStamps,
+} from "@/lib/rowStampClient";
+
+/** Registers are saved one by one, each stamped with the version it was loaded at. */
+const STAMP_SLICES = ["registers"] as const;
+
+/** After a load: which version of each register this browser now holds. */
+export function captureAttendanceStamps(stamps: RowStamps, local: AttendanceState) {
+  captureRowStamps(ATTENDANCE_DESK, stamps, local as unknown as Record<string, unknown>, STAMP_SLICES);
+}
 
 const META_KEY = "bhb_attendance_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -44,7 +67,9 @@ export function attendanceNormalizedSyncEnabled(): boolean {
 }
 
 export function attendanceReadFromDbClientEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_ATTENDANCE_READ_FROM_DB === "true";
+  const flag = process.env.NEXT_PUBLIC_ATTENDANCE_READ_FROM_DB?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 export function scheduleAttendanceDeskSync(state: AttendanceState) {
@@ -57,11 +82,17 @@ export function scheduleAttendanceDeskSync(state: AttendanceState) {
     pending = null;
     pushTimer = null;
     if (!batch) return;
-    void pushAttendanceDeskApi(batch);
+    scheduleRetryingPush("attendanceDesk", () => pushAttendanceDeskApi(batch));
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
-async function pushAttendanceDeskApi(state: AttendanceState) {
+async function pushAttendanceDeskApi(
+  state: AttendanceState,
+): Promise<{ ok: boolean; error?: string }> {
+  const sentDeletes = pendingDeskDeletes(ATTENDANCE_DESK);
+  // Only the registers this browser changed, each with the stamp it loaded
+  // — never its old copy of a register a teacher marked since.
+  const sentStamps = buildStampedSave(ATTENDANCE_DESK, state as unknown as Record<string, unknown>, STAMP_SLICES);
   try {
     const res = await fetch("/api/school-data/attendance-registers", {
       method: "POST",
@@ -71,6 +102,9 @@ async function pushAttendanceDeskApi(state: AttendanceState) {
         policy: state.policy,
         absentNudges: state.absentNudges ?? [],
         exceptions: state.exceptions ?? [],
+        // Deletions are named, never inferred from what this browser lacks.
+        deletes: sentDeletes,
+        stamps: sentStamps,
       }),
     });
     const body = (await res.json().catch(() => null)) as {
@@ -78,23 +112,39 @@ async function pushAttendanceDeskApi(state: AttendanceState) {
       updatedAt?: string;
       count?: number;
       error?: string;
+      stamps?: RowStamps;
+      conflicts?: RowConflicts;
     } | null;
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence. (These
+    // two calls once sat after the returns below and never ran, so a
+    // refused student-register save showed no warning at all.)
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(ATTENDANCE_DESK, sentDeletes);
+      applyStampedSave(ATTENDANCE_DESK, state as unknown as Record<string, unknown>, sentStamps, body, STAMP_SLICES);
+      onStampConflicts(ATTENDANCE_DESK, body.conflicts);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         registerCount: body.count ?? state.registers.length,
         ancillaryUpdatedAt: body.updatedAt,
       });
-    } else if (!res.ok) {
-      console.warn("[attendance-db] desk push failed", body?.error || res.status);
+      recordDeskSyncSuccess("attendance");
+      return { ok: true };
     }
+    const error = body?.error || `HTTP ${res.status}`;
+    recordDeskSyncFailure("attendance", { status: res.status, error });
+    console.warn("[attendance-db] desk push failed", error);
+    return { ok: false, error };
   } catch (e) {
+    recordDeskSyncFailure("attendance", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[attendance-db] desk push error", e);
+    return { ok: false, error: String(e) };
   }
 }
 
 export async function fetchAttendanceDeskFromApi(): Promise<{
   registers: AttendanceState["registers"];
+  stamps: RowStamps;
   ancillary: AttendanceDeskAncillary;
   updatedAt: string;
   count: number;
@@ -108,6 +158,7 @@ export async function fetchAttendanceDeskFromApi(): Promise<{
     if (!res.ok) return null;
     const body = (await res.json()) as {
       registers?: AttendanceState["registers"];
+      stamps?: RowStamps;
       ancillary?: AttendanceDeskAncillary;
       updatedAt?: string;
       count?: number;
@@ -115,6 +166,7 @@ export async function fetchAttendanceDeskFromApi(): Promise<{
     if (!Array.isArray(body.registers)) return null;
     return {
       registers: body.registers,
+      stamps: body.stamps ?? {},
       ancillary: body.ancillary ?? {
         policy: {
           teacherCutoffTime: "10:30",
@@ -139,6 +191,8 @@ export async function hydrateAttendanceDeskFromDb(
   registers: AttendanceState["registers"];
   ancillary: AttendanceDeskAncillary;
   changed: boolean;
+  ok: boolean;
+  stamps: RowStamps;
 }> {
   const remote = await fetchAttendanceDeskFromApi();
   if (!remote) {
@@ -155,6 +209,8 @@ export async function hydrateAttendanceDeskFromDb(
         exceptions: [],
       },
       changed: false,
+      ok: false,
+      stamps: {},
     };
   }
 
@@ -171,7 +227,7 @@ export async function hydrateAttendanceDeskFromDb(
     hasAncillary;
 
   if (!shouldTake) {
-    return { registers: [], ancillary: remote.ancillary, changed: false };
+    return { registers: [], ancillary: remote.ancillary, changed: false, ok: true, stamps: remote.stamps };
   }
 
   writeMeta({
@@ -183,5 +239,7 @@ export async function hydrateAttendanceDeskFromDb(
     registers: remote.registers,
     ancillary: remote.ancillary,
     changed: true,
+    ok: true,
+    stamps: remote.stamps,
   };
 }

@@ -2,10 +2,13 @@ import type { AttendanceRegister, AttendanceState } from "@/lib/attendance";
 import type { AttendanceDeskAncillary } from "@/lib/attendanceDeskAncillary.server";
 
 export function attendanceReadFromDbFlag(): boolean {
-  if (typeof window !== "undefined") {
-    return process.env.NEXT_PUBLIC_ATTENDANCE_READ_FROM_DB === "true";
-  }
-  return process.env.ATTENDANCE_READ_FROM_DB === "true";
+  const flag = (
+    typeof window !== "undefined"
+      ? process.env.NEXT_PUBLIC_ATTENDANCE_READ_FROM_DB
+      : process.env.ATTENDANCE_READ_FROM_DB
+  )?.trim().toLowerCase();
+  if (flag === "false" || flag === "0") return false;
+  return true;
 }
 
 function preferRemoteDb(

@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — rows carry EditControl (which shows which row is open in the form beside it) and RemoveControl (which holds the check explaining why a row cannot be deleted); neither survives being folded into a menu
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -34,12 +35,15 @@ import {
   classesInGroup,
   classGroupCodeForName,
 } from "@/lib/masters";
+import { TutorPassesPanel } from "@/components/masters/TutorPassesPanel";
 import { EditControl } from "@/components/masters/EditControl";
 import { RemoveControl } from "@/components/masters/RemoveControl";
+import { SectionTeachersPanel } from "@/components/masters/SectionTeachersPanel";
 import {
   FeeGroupsPanel,
   InstallmentsPanel,
   LateFeePanel,
+  FeeBackdatePolicyPanel,
   MidYearFeePolicyPanel,
 } from "@/components/masters/FeeSetupPanels";
 import { FeeStructurePanel } from "@/components/masters/FeeStructureBoard";
@@ -52,8 +56,8 @@ import {
   NumberSeriesPanel,
   SchoolProfilePanel,
   StaffMastersPanel,
-  SubjectsPanel,
 } from "@/components/masters/FoundationPanels";
+import { SubjectsPanel } from "@/components/masters/SubjectsPanel";
 import { SalarySetupPanel } from "@/components/masters/SalarySetupPanel";
 import { RolesPermissionsPanel } from "@/components/masters/RolesPermissionsPanel";
 import { WaTemplatesPanel } from "@/components/masters/WaTemplatesPanel";
@@ -68,6 +72,7 @@ import {
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
 import { ModuleTabGroups, type ModuleTabGroup } from "@/components/ui/ModuleTabs";
+import { StepChainGuide, StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
@@ -76,6 +81,8 @@ import {
   canConfigureRbac,
   loadRbac,
 } from "@/lib/rbac";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import { SubjectRequestsCard } from "@/components/masters/SubjectRequestsCard";
 
 type Tab =
   | "overview"
@@ -98,6 +105,7 @@ type Tab =
   | "installments"
   | "late-fee"
   | "mid-year"
+  | "tutor-passes"
   | "wa-templates"
   | "automation"
   | "wa-chatbot"
@@ -148,7 +156,8 @@ const TAB_GROUPS: ModuleTabGroup[] = [
       { id: "concessions", label: "Concessions", tone: "teal" },
       { id: "installments", label: "Due dates", tone: "amber" },
       { id: "late-fee", label: "Late fee", tone: "rose" },
-      { id: "mid-year", label: "Mid-year", tone: "rose" },
+      { id: "mid-year", label: "Fee rules", tone: "rose" },
+      { id: "tutor-passes", label: "Tutor passes", tone: "teal" },
     ],
   },
   {
@@ -161,6 +170,31 @@ const TAB_GROUPS: ModuleTabGroup[] = [
       { id: "wa-chatbot", label: "WhatsApp chatbot", tone: "teal" },
     ],
   },
+];
+
+/**
+ * Two chains in Masters run across separate tabs, each needing the one
+ * before: fees are built head → group → structure → … → rules, and the
+ * academic year session → classes → subjects → holidays. A step guide over
+ * the tabs says where you are and what comes next; the tabs still work
+ * on their own.
+ */
+const FEE_SETUP_STEPS: StepDef<Tab>[] = [
+  { id: "fee-heads", title: "Fee heads", what: "The kinds of charge — tuition, admission, exam, transport, annual — every fee line is booked to one." },
+  { id: "fee-groups", title: "Fee groups", what: "Bands of classes that pay the same fees (e.g. Nursery–UKG, I–V, VI–VIII)." },
+  { id: "fee-structure", title: "Fee structure", what: "The amounts for each group, month by month, per student type (new, promoted, mid-year, RTE). Publish a group to use it at the counter." },
+  { id: "special-fees", title: "Special fees", what: "One-off charges outside the structure for chosen classes or students." },
+  { id: "concessions", title: "Concessions", what: "Discount policies and who receives them — sibling, staff ward, merit, need." },
+  { id: "installments", title: "Due dates", what: "When each month's or term's fees fall due — the pattern and the individual dates." },
+  { id: "late-fee", title: "Late fee", what: "What is charged after a due date passes, and from when." },
+  { id: "mid-year", title: "Fee rules", what: "How fees work for a child joining mid-year, and who may enter a back-dated receipt." },
+];
+
+const ACADEMIC_STEPS: StepDef<Tab>[] = [
+  { id: "academic", title: "Session", what: "The academic years and their terms. The current session is what every other screen works in." },
+  { id: "classes", title: "Classes & sections", what: "The classes the school runs, their sections, and the class teachers." },
+  { id: "subjects", title: "Subjects", what: "Subjects and their components, linked to classes, with periods per week for the timetable." },
+  { id: "holidays", title: "Holidays", what: "The holiday calendar — import the government list, draft the school's, and publish it." },
 ];
 
 export function MastersWorkspace() {
@@ -204,6 +238,7 @@ export function MastersWorkspace() {
       "installments",
       "late-fee",
       "mid-year",
+      "tutor-passes",
       "wa-templates",
       "automation",
       "wa-chatbot",
@@ -215,13 +250,21 @@ export function MastersWorkspace() {
   useEffect(() => {
     setState(loadMasters());
     void (async () => {
-      const { ensureMastersHydrated } = await import("@/lib/mastersPersistence");
-      const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
-      const { ensureRbacHydrated } = await import("@/lib/rbacPersistence");
+      const [
+        { ensureMastersHydrated },
+        { ensureStaffHydrated },
+        { ensureRbacHydrated },
+        { withHydrationSlot },
+      ] = await Promise.all([
+        import("@/lib/mastersPersistence"),
+        import("@/lib/staffPersistence"),
+        import("@/lib/rbacPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
       await Promise.all([
-        ensureMastersHydrated(),
-        ensureStaffHydrated(),
-        ensureRbacHydrated(),
+        withHydrationSlot(() => ensureMastersHydrated()),
+        withHydrationSlot(() => ensureStaffHydrated()),
+        withHydrationSlot(() => ensureRbacHydrated()),
       ]);
       setState(loadMasters());
       setRbac(loadRbac());
@@ -260,11 +303,22 @@ export function MastersWorkspace() {
       return;
     }
     setState(next);
-    saveMasters(next);
-    if (msg) {
-      setNotice(msg);
-      window.setTimeout(() => setNotice(null), 2200);
-    }
+    // The success notice must wait for the database, not for React. Showing
+    // it synchronously is what made 16 refused writes look like 16 saves on
+    // 2026-08-09 — the screen said "session changed" every time while the
+    // server was rejecting the push. On failure we stay silent here: the
+    // push path raises a sticky error toast naming the actual reason.
+    if (msg) setNotice("Saving…");
+    void saveMasters(next).then((outcome) => {
+      if (!outcome.ok) {
+        setNotice(null);
+        return;
+      }
+      if (msg) {
+        setNotice(msg);
+        window.setTimeout(() => setNotice(null), 2200);
+      }
+    });
   }
 
   if (!state) {
@@ -287,6 +341,16 @@ export function MastersWorkspace() {
         groups={visibleTabGroups}
       />
 
+      <StepChainGuide
+        chains={[
+          { label: "Fee setup", steps: FEE_SETUP_STEPS },
+          { label: "Academic setup", steps: ACADEMIC_STEPS },
+        ]}
+        value={tab}
+        onChange={setTab}
+        visible={visibleTabGroups.flatMap((g) => g.tabs.map((t) => t.id))}
+      />
+
       <div className="mt-5">
         {tab === "overview" ? (
           <Overview state={state} onGo={setTab} commit={commit} />
@@ -307,7 +371,14 @@ export function MastersWorkspace() {
           <ClassesPanel state={state} commit={commit} />
         ) : null}
         {tab === "subjects" ? (
-          <SubjectsPanel state={state} commit={commit} />
+          <div className="space-y-3">
+            <SubjectRequestsCard
+              subjects={state.subjects ?? []}
+              canEdit={!readOnly}
+              onMastersChanged={() => setState(loadMasters())}
+            />
+            <SubjectsPanel state={state} commit={commit} />
+          </div>
         ) : null}
         {tab === "series" ? (
           <NumberSeriesPanel state={state} commit={commit} />
@@ -343,7 +414,13 @@ export function MastersWorkspace() {
           <LateFeePanel state={state} commit={commit} />
         ) : null}
         {tab === "mid-year" ? (
-          <MidYearFeePolicyPanel state={state} commit={commit} />
+          <div className="space-y-4">
+            <MidYearFeePolicyPanel state={state} commit={commit} />
+            <FeeBackdatePolicyPanel state={state} commit={commit} />
+          </div>
+        ) : null}
+        {tab === "tutor-passes" ? (
+          <TutorPassesPanel state={state} canEdit={!readOnly} />
         ) : null}
         {tab === "wa-templates" ? (
           canAccessMastersTab(session, state, "wa-templates", rbac ?? undefined) ? (
@@ -432,7 +509,7 @@ function Overview({
     { label: "Special fees", value: specialCount, tab: "special-fees" as Tab },
     { label: "Concessions", value: concessionCount, tab: "concessions" as Tab },
     { label: "Due dates", value: installments, tab: "installments" as Tab },
-    { label: "Mid-year rules", value: "Edit", tab: "mid-year" as Tab },
+    { label: "Mid-year & back-dating", value: "Edit", tab: "mid-year" as Tab },
     { label: "WA templates", value: "EN+HI", tab: "wa-templates" as Tab },
     { label: "Automation", value: "Rules", tab: "automation" as Tab },
     { label: "WA chatbot", value: "Flows", tab: "wa-chatbot" as Tab },
@@ -450,7 +527,7 @@ function Overview({
             key={c.label}
             type="button"
             onClick={() => onGo(c.tab)}
-            className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-4 text-left transition hover:border-[rgba(197,160,40,0.45)]"
+            className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-4 text-left transition hover:border-[rgba(197,160,40,0.45)]"
           >
             <div className="text-2xl font-semibold text-[var(--brand-deep)]">
               {c.value}
@@ -463,14 +540,14 @@ function Overview({
         <button
           type="button"
           onClick={() => onGo("school")}
-          className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
         >
           School profile →
         </button>
         <button
           type="button"
           onClick={() => onGo("fee-structure")}
-          className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
         >
           Edit fee structure →
         </button>
@@ -483,7 +560,7 @@ function Overview({
         <button
           type="button"
           onClick={() => onGo("holidays")}
-          className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
         >
           Holidays →
         </button>
@@ -496,21 +573,21 @@ function Overview({
         <button
           type="button"
           onClick={() => onGo("staff")}
-          className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
         >
           Staff setup →
         </button>
         <button
           type="button"
           onClick={() => onGo("roles")}
-          className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
         >
           Roles &amp; permissions →
         </button>
         <button
           type="button"
           onClick={() => onGo("leave")}
-          className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
         >
           Leave setup →
         </button>
@@ -616,78 +693,78 @@ function CampusesPanel({
     resetForm();
   }
 
+  const campusCols: DataTableColumn<(typeof state.campuses)[number]>[] = [
+    {
+      key: "name", header: "Campus", sortable: true,
+      value: (c) => c.name,
+      render: (c) => (
+        <span>
+          <span className="font-medium text-[var(--brand-deep)]">{c.name}</span>
+          {c.isPrimary ? (
+            <span className="ml-2 rounded bg-[rgba(197,160,40,0.2)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--brand-deep)]">
+              Primary
+            </span>
+          ) : null}
+        </span>
+      ),
+    },
+    { key: "code", header: "Code", sortable: true, value: (c) => c.code },
+    { key: "address", header: "Address", value: (c) => c.address || "—" },
+    {
+      key: "status", header: "Status", sortable: true,
+      value: (c) => (c.isActive ? "Active" : "Inactive"),
+    },
+    {
+      key: "actions", header: "",
+      render: (c) => (
+        <div className="flex items-center justify-end gap-1.5">
+          <EditControl active={editingId === c.id} onEdit={() => startEdit(c)} />
+          <button
+            type="button"
+            className="text-xs font-medium text-[var(--brand-mid)]"
+            onClick={() =>
+              commit(
+                {
+                  ...state,
+                  campuses: state.campuses.map((x) =>
+                    x.id === c.id ? { ...x, isActive: !x.isActive } : x,
+                  ),
+                },
+                c.isActive ? "Campus inactivated" : "Campus activated",
+              )
+            }
+          >
+            {c.isActive ? "Inactivate" : "Activate"}
+          </button>
+          <RemoveControl
+            check={checkCampusRemoval(state, c.id)}
+            onRemove={() => {
+              const result = removeCampus(state, c.id);
+              if (!result.ok) {
+                commit(state, result.reason);
+                return;
+              }
+              if (editingId === c.id) resetForm();
+              commit(result.state, "Campus removed");
+            }}
+          />
+        </div>
+      ),
+    },
+  ];
+
   return (
     <MastersTabStack
       tables={
         <MastersTablesRow cols={1}>
           <MastersTableCard title="Campuses">
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
-              {state.campuses.map((c) => (
-                <li
-                  key={c.id}
-                  className="flex items-center justify-between gap-3 px-4 py-3"
-                >
-                  <div>
-                    <div className="font-medium text-[var(--brand-deep)]">
-                      {c.name}{" "}
-                      <span className="text-xs font-normal text-[var(--muted)]">
-                        {c.code}
-                      </span>
-                      {c.isPrimary ? (
-                        <span className="ml-2 rounded bg-[rgba(197,160,40,0.2)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--brand-deep)]">
-                          Primary
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="text-xs text-[var(--muted)]">
-                      {c.address || "—"} · {c.isActive ? "Active" : "Inactive"}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-center">
-                    <EditControl
-                      active={editingId === c.id}
-                      onEdit={() => startEdit(c)}
-                    />
-                    <button
-                      type="button"
-                      className="text-xs font-medium text-[var(--brand-mid)]"
-                      onClick={() =>
-                        commit(
-                          {
-                            ...state,
-                            campuses: state.campuses.map((x) =>
-                              x.id === c.id
-                                ? { ...x, isActive: !x.isActive }
-                                : x,
-                            ),
-                          },
-                          c.isActive ? "Campus inactivated" : "Campus activated",
-                        )
-                      }
-                    >
-                      {c.isActive ? "Inactivate" : "Activate"}
-                    </button>
-                    <RemoveControl
-                      check={checkCampusRemoval(state, c.id)}
-                      onRemove={() => {
-                        const result = removeCampus(state, c.id);
-                        if (!result.ok) {
-                          commit(state, result.reason);
-                          return;
-                        }
-                        if (editingId === c.id) resetForm();
-                        commit(result.state, "Campus removed");
-                      }}
-                    />
-                  </div>
-                </li>
-              ))}
-              {state.campuses.length === 0 ? (
-                <li className="px-4 py-8 text-center text-sm text-[var(--muted)]">
-                  No campuses yet
-                </li>
-              ) : null}
-            </ul>
+            <DataTable
+              columns={campusCols}
+              rows={state.campuses}
+              rowKey={(c) => c.id}
+              minWidth="min-w-[640px]"
+              emptyTitle="No campuses yet"
+            />
           </MastersTableCard>
         </MastersTablesRow>
       }
@@ -735,7 +812,7 @@ function CampusesPanel({
               {editingId ? (
                 <button
                   type="button"
-                  className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
+                  className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
                   onClick={resetForm}
                 >
                   Cancel
@@ -755,6 +832,31 @@ function CampusesPanel({
   );
 }
 
+/**
+ * Classes, then their sections, then who teaches each section: a section
+ * belongs to a class, and teachers are assigned per section. The class list
+ * stays on every step — it is how a class is picked for its sections.
+ */
+type ClassesStep = "classes" | "sections" | "teachers";
+
+const CLASSES_STEPS: StepDef<ClassesStep>[] = [
+  {
+    id: "classes",
+    title: "Classes",
+    what: "Add, rename or remove classes. A new class starts with sections A and B; its group (Pre-Primary to Senior) follows from its name.",
+  },
+  {
+    id: "sections",
+    title: "Sections",
+    what: "Pick a class in the list, then add, rename, inactivate or remove its sections.",
+  },
+  {
+    id: "teachers",
+    title: "Class & subject teachers",
+    what: "Pick a section's Teachers, then set its class teacher and a teacher for each subject.",
+  },
+];
+
 function ClassesPanel({
   state,
   commit,
@@ -762,6 +864,7 @@ function ClassesPanel({
   state: MastersState;
   commit: (s: MastersState, msg?: string) => void;
 }) {
+  const [classStep, setClassStep] = useState<ClassesStep>("classes");
   const [className, setClassName] = useState("");
   const [editingClassId, setEditingClassId] = useState<string | null>(null);
   const [selectedClassId, setSelectedClassId] = useState(
@@ -769,6 +872,9 @@ function ClassesPanel({
   );
   const [sectionName, setSectionName] = useState("");
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
+  const [teachersSectionId, setTeachersSectionId] = useState<string | null>(
+    null,
+  );
 
   const selected = useMemo(
     () => state.classes.find((c) => c.id === selectedClassId),
@@ -777,6 +883,13 @@ function ClassesPanel({
   const sectionsForClass = state.sections.filter(
     (s) => s.classId === selectedClassId,
   );
+  const teachersSection = useMemo(() => {
+    const sec = state.sections.find((s) => s.id === teachersSectionId);
+    if (!sec) return null;
+    const cls = state.classes.find((c) => c.id === sec.classId);
+    if (!cls) return null;
+    return { ...sec, className: cls.name };
+  }, [state.sections, state.classes, teachersSectionId]);
 
   function resetClassForm() {
     setEditingClassId(null);
@@ -902,16 +1015,22 @@ function ClassesPanel({
   }
 
   return (
+    <StepTabs
+      aria-label="Classes & sections steps"
+      steps={CLASSES_STEPS}
+      value={classStep}
+      onChange={setClassStep}
+    >
     <MastersTabStack
       intro="Classes are grouped: Pre-Primary (Nursery–UKG), Primary (I–V), Middle (VI–VIII), Secondary (IX–X), Senior (XI–XII)."
       tables={
-        <MastersTablesRow>
+        <MastersTablesRow cols={classStep === "classes" ? 1 : 2}>
           <MastersTableCard title="Classes by group" maxHeight="max-h-[min(70vh,560px)]">
             {CLASS_GROUPS.map((g) => {
               const rows = classesInGroup(state.classes, g.code);
               return (
                 <div key={g.code}>
-                  <div className="sticky top-0 z-[1] border-b border-[rgba(32,48,80,0.08)] bg-[rgba(32,48,80,0.05)] px-4 py-2">
+                  <div className="sticky top-0 z-[1] border-b border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-2">
                     <div className="text-xs font-bold text-[var(--brand-deep)]">
                       {g.label}{" "}
                       <span className="font-semibold text-[var(--muted)]">
@@ -920,17 +1039,19 @@ function ClassesPanel({
                     </div>
                     <p className="text-[10px] text-[var(--muted)]">{g.nepHint}</p>
                   </div>
-                  <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+                  <ul className="divide-y divide-[var(--border)]">
                     {rows.map((c) => {
-                      const count = state.sections.filter(
-                        (s) => s.classId === c.id && s.isActive,
-                      ).length;
+                      const classSections = state.sections.filter(
+                        (s) => s.classId === c.id,
+                      );
+                      const count = classSections.filter((s) => s.isActive).length;
+                      const inactiveCount = classSections.length - count;
                       const active = c.id === selectedClassId;
                       return (
                         <li
                           key={c.id}
                           className={`flex items-start justify-between gap-2 px-4 py-2.5 ${
-                            active ? "bg-[rgba(32,48,80,0.06)]" : ""
+                            active ? "bg-[var(--surface-sunken)]" : ""
                           }`}
                         >
                           <button
@@ -947,7 +1068,10 @@ function ClassesPanel({
                               ) : null}
                             </span>
                             <span className="mt-0.5 block text-xs text-[var(--muted)]">
-                              {count} sections
+                              {count} section{count === 1 ? "" : "s"}
+                              {inactiveCount > 0
+                                ? ` (+${inactiveCount} inactive)`
+                                : ""}
                             </span>
                           </button>
                           <div className="flex shrink-0 flex-col items-end gap-1">
@@ -989,8 +1113,9 @@ function ClassesPanel({
             })}
           </MastersTableCard>
 
+          {classStep !== "classes" ? (
           <MastersTableCard title={`Sections · ${selected?.name ?? "—"}`}>
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {sectionsForClass.map((s) => (
                 <li
                   key={s.id}
@@ -1005,6 +1130,26 @@ function ClassesPanel({
                     ) : null}
                   </span>
                   <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-center">
+                    <button
+                      type="button"
+                      className={`text-xs font-semibold ${
+                        teachersSectionId === s.id
+                          ? "text-[var(--brand-deep)]"
+                          : "text-[var(--brand-mid)]"
+                      }`}
+                      onClick={() => {
+                        if (classStep !== "teachers") {
+                          setTeachersSectionId(s.id);
+                          setClassStep("teachers");
+                          return;
+                        }
+                        setTeachersSectionId(
+                          teachersSectionId === s.id ? null : s.id,
+                        );
+                      }}
+                    >
+                      Teachers
+                    </button>
                     <EditControl
                       active={editingSectionId === s.id}
                       onEdit={() => startEditSection(s)}
@@ -1039,6 +1184,8 @@ function ClassesPanel({
                           return;
                         }
                         if (editingSectionId === s.id) resetSectionForm();
+                        if (teachersSectionId === s.id)
+                          setTeachersSectionId(null);
                         commit(result.state, "Section removed");
                       }}
                     />
@@ -1052,10 +1199,12 @@ function ClassesPanel({
               ) : null}
             </ul>
           </MastersTableCard>
+          ) : null}
         </MastersTablesRow>
       }
       work={
         <div className="grid gap-4 lg:grid-cols-2">
+          {classStep === "classes" ? (
           <MastersWorkCard
             title={editingClassId ? "Edit class" : "Add class"}
           >
@@ -1071,7 +1220,7 @@ function ClassesPanel({
               {editingClassId ? (
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
+                  className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
                   onClick={resetClassForm}
                 >
                   Cancel
@@ -1085,6 +1234,8 @@ function ClassesPanel({
               </button>
             </form>
           </MastersWorkCard>
+          ) : null}
+          {classStep === "sections" ? (
           <MastersWorkCard
             title={
               editingSectionId
@@ -1105,7 +1256,7 @@ function ClassesPanel({
               {editingSectionId ? (
                 <button
                   type="button"
-                  className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
+                  className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
                   onClick={resetSectionForm}
                 >
                   Cancel
@@ -1120,9 +1271,31 @@ function ClassesPanel({
               </button>
             </form>
           </MastersWorkCard>
+          ) : null}
+
+          {classStep === "teachers" && !teachersSection ? (
+            <p className="text-sm text-[var(--muted)]">
+              Pick a class, then press Teachers on one of its sections.
+            </p>
+          ) : null}
+          {classStep === "teachers" && teachersSection ? (
+            <MastersWorkCard
+              title={`Teachers · ${teachersSection.className}-${teachersSection.name}`}
+            >
+              <SectionTeachersPanel
+                state={state}
+                commit={commit}
+                classId={teachersSection.classId}
+                sectionId={teachersSection.id}
+                className={teachersSection.className}
+                sectionName={teachersSection.name}
+              />
+            </MastersWorkCard>
+          ) : null}
         </div>
       }
     />
+    </StepTabs>
   );
 }
 
@@ -1294,81 +1467,81 @@ function FeeHeadsPanel({
     resetForm();
   }
 
+  /**
+   * Fee-head categories as a table. "3 fee heads · inactive" was a grey line;
+   * how many heads hang off a category is the number that decides whether it
+   * can be removed at all, so it gets a column.
+   *
+   * EditControl and RemoveControl stay in a column rather than moving into a
+   * row menu: EditControl shows which row is currently open in the form
+   * beside it, and RemoveControl carries the check that says why a category
+   * cannot be deleted.
+   */
+  const feeCategoryCols: DataTableColumn<(typeof categories)[number]>[] = [
+    { key: "label", header: "Category", sortable: true, value: (c) => c.label },
+    { key: "code", header: "Code", sortable: true, value: (c) => c.code },
+    {
+      key: "used", header: "Fee heads", align: "right", sortable: true,
+      value: (c) => state.feeHeads.filter((h) => h.category === c.code).length,
+    },
+    {
+      key: "active", header: "Status", sortable: true,
+      value: (c) => (c.isActive ? "Active" : "Inactive"),
+    },
+    {
+      key: "actions", header: "",
+      render: (c) => (
+        <div className="flex items-center justify-end gap-1.5">
+          <EditControl active={catEditingId === c.id} onEdit={() => startEditCategory(c)} />
+          <button
+            type="button"
+            className="text-xs font-medium text-[var(--brand-mid)]"
+            onClick={() =>
+              commit(
+                {
+                  ...state,
+                  feeHeadCategories: resolveFeeHeadCategories(state).map((x) =>
+                    x.id === c.id ? { ...x, isActive: !x.isActive } : x,
+                  ),
+                },
+                c.isActive ? "Category inactivated" : "Category activated",
+              )
+            }
+          >
+            {c.isActive ? "Inactivate" : "Activate"}
+          </button>
+          <RemoveControl
+            check={checkFeeHeadCategoryRemoval(state, c.id)}
+            onRemove={() => {
+              const result = removeFeeHeadCategory(state, c.id);
+              if (!result.ok) {
+                commit(state, result.reason);
+                return;
+              }
+              if (catEditingId === c.id) resetCatForm();
+              commit(result.state, "Category removed");
+            }}
+          />
+        </div>
+      ),
+    },
+  ];
+
   return (
     <MastersTabStack
       tables={
         <MastersTablesRow cols={2}>
           <MastersTableCard title="Fee head categories">
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
-              {categories.map((c) => {
-                const used = state.feeHeads.filter(
-                  (h) => h.category === c.code,
-                ).length;
-                return (
-                  <li
-                    key={c.id}
-                    className="flex items-center justify-between gap-3 px-4 py-3"
-                  >
-                    <div>
-                      <div className="font-medium text-[var(--brand-deep)]">
-                        {c.label}{" "}
-                        <span className="text-xs font-normal text-[var(--muted)]">
-                          {c.code}
-                        </span>
-                      </div>
-                      <div className="text-xs text-[var(--muted)]">
-                        {used} fee head{used === 1 ? "" : "s"}
-                        {!c.isActive ? " · inactive" : ""}
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-start">
-                      <EditControl
-                        active={catEditingId === c.id}
-                        onEdit={() => startEditCategory(c)}
-                      />
-                      <button
-                        type="button"
-                        className="text-xs font-medium text-[var(--brand-mid)]"
-                        onClick={() =>
-                          commit(
-                            {
-                              ...state,
-                              feeHeadCategories: resolveFeeHeadCategories(
-                                state,
-                              ).map((x) =>
-                                x.id === c.id
-                                  ? { ...x, isActive: !x.isActive }
-                                  : x,
-                              ),
-                            },
-                            c.isActive
-                              ? "Category inactivated"
-                              : "Category activated",
-                          )
-                        }
-                      >
-                        {c.isActive ? "Inactivate" : "Activate"}
-                      </button>
-                      <RemoveControl
-                        check={checkFeeHeadCategoryRemoval(state, c.id)}
-                        onRemove={() => {
-                          const result = removeFeeHeadCategory(state, c.id);
-                          if (!result.ok) {
-                            commit(state, result.reason);
-                            return;
-                          }
-                          if (catEditingId === c.id) resetCatForm();
-                          commit(result.state, "Category removed");
-                        }}
-                      />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+            <DataTable
+              columns={feeCategoryCols}
+              rows={categories}
+              rowKey={(c) => c.id}
+              minWidth="min-w-[620px]"
+              emptyTitle="No fee-head categories yet"
+            />
           </MastersTableCard>
           <MastersTableCard title="Fee heads">
-            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+            <ul className="divide-y divide-[var(--border)]">
               {state.feeHeads
                 .slice()
                 .sort((a, b) => a.sortOrder - b.sortOrder)
@@ -1469,7 +1642,7 @@ function FeeHeadsPanel({
                 {catEditingId ? (
                   <button
                     type="button"
-                    className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
+                    className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
                     onClick={resetCatForm}
                   >
                     Cancel
@@ -1571,7 +1744,7 @@ function FeeHeadsPanel({
                 {editingId ? (
                   <button
                     type="button"
-                    className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
+                    className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"
                     onClick={resetForm}
                   >
                     Cancel

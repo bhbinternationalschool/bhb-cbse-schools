@@ -1,7 +1,10 @@
 "use client";
 
+import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { useEffect, useMemo, useState } from "react";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import Link from "next/link";
+import { withHydrationSlot } from "@/lib/deskHydrateGuard";
 import {
   buildPlaybook,
   composeEscalationNotice,
@@ -16,8 +19,8 @@ import {
   buildPaymentShareUrl,
   composeWhatsAppPaymentLinkMessage,
   createPaymentLink,
-  whatsAppPaymentLinkUrl,
 } from "@/lib/payments";
+import { attachGatewayCheckout } from "@/lib/paymentGatewayClient";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import {
   householdOf,
@@ -45,8 +48,13 @@ import {
   scheduleParentMeeting,
   type FeeRecoveryMeeting,
 } from "@/lib/feeRecoveryTasks";
-import { openWaMe } from "@/lib/waMe";
 import type { HoldCode } from "@/lib/types";
+import { useHoldDecisions } from "@/lib/useHoldDecisions";
+import { paymentLikelihood } from "@/lib/collectionsAi";
+import { AGEING_BAND_LABEL, type AgeingBand } from "@/lib/collectionsWeeklyAi";
+import { CollectionsWeeklyNoteCard } from "@/components/fees/CollectionsWeeklyNoteCard";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { openWaMe } from "@/lib/waMe";
 
 const STAGE_FILTERS: { value: "" | OverdueStage; label: string }[] = [
   { value: "", label: "All stages" },
@@ -57,7 +65,18 @@ const STAGE_FILTERS: { value: "" | OverdueStage; label: string }[] = [
   { value: "S0", label: "S0 Upcoming" },
 ];
 
+/** Which ageing band a family's oldest overdue due sits in. */
+function ageingBandOf(r: { overdueDays: number }): AgeingBand {
+  if (r.overdueDays < 0) return "notDue";
+  if (r.overdueDays > 90) return "over90";
+  if (r.overdueDays > 30) return "d31to90";
+  return "d0to30";
+}
+
 export function DefaultersPlaybook() {
+  // Fee holds are server truth. Without this the gates below read an
+  // unloaded snapshot and every child looks allowed.
+  useHoldDecisions();
   const session = useDemoSession();
   const ay = session.academicYearCode;
   const [sis, setSis] = useState<SisState | null>(null);
@@ -67,6 +86,10 @@ export function DefaultersPlaybook() {
   const [query, setQuery] = useState("");
   const [classId, setClassId] = useState("");
   const [stageFilter, setStageFilter] = useState<"" | OverdueStage>("");
+  // The ageing view: three quarters of what the school was owed on 2026-09-08
+  // sat past ninety days, and nothing showed it. A band is a filter, so the
+  // headline number becomes the list of families behind it.
+  const [bandFilter, setBandFilter] = useState<"" | AgeingBand>("");
   const [includeUpcoming, setIncludeUpcoming] = useState(false);
   const [rosterMode, setRosterMode] = useState<"active" | "inactive">(
     "active",
@@ -75,6 +98,8 @@ export function DefaultersPlaybook() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  // Re-read when the server copy of fee holds lands (login/refresh hydration).
+  useModuleStateHydration("fee_holds", () => setTick((t) => t + 1));
   const [planOpen, setPlanOpen] = useState(false);
   const [holdDialog, setHoldDialog] = useState(false);
   const [holdTarget, setHoldTarget] = useState<{
@@ -83,6 +108,11 @@ export function DefaultersPlaybook() {
     block: Extract<HoldCheck, { allowed: false }> | null;
   } | null>(null);
   const [meetings, setMeetings] = useState<FeeRecoveryMeeting[]>([]);
+  const [aiDraft, setAiDraft] = useState<
+    { whatsappMessage: string; callScript: string; generationId?: string } | null
+  >(null);
+  const [aiDraftLoading, setAiDraftLoading] = useState(false);
+  const [aiDraftError, setAiDraftError] = useState<string | null>(null);
 
   function refresh() {
     const s = loadSis();
@@ -113,7 +143,7 @@ export function DefaultersPlaybook() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      await ensureFeeRecoveryTasksHydrated();
+      await withHydrationSlot(() => ensureFeeRecoveryTasksHydrated());
       setMeetings(listOpenParentMeetings());
     })();
   }, []);
@@ -127,6 +157,7 @@ export function DefaultersPlaybook() {
     const q = query.trim().toLowerCase();
     return rows.filter((r) => {
       if (stageFilter && r.stage !== stageFilter) return false;
+      if (bandFilter && ageingBandOf(r) !== bandFilter) return false;
       if (classId && r.student.classId !== classId) return false;
       if (!q) return true;
       return (
@@ -135,7 +166,7 @@ export function DefaultersPlaybook() {
         r.classLabel.toLowerCase().includes(q)
       );
     });
-  }, [rows, query, classId, stageFilter]);
+  }, [rows, query, classId, stageFilter, bandFilter]);
 
   const selected =
     filtered.find((r) => r.studentId === selectedId) ??
@@ -157,6 +188,68 @@ export function DefaultersPlaybook() {
     });
   }, [selected]);
 
+  const likelihood = useMemo(() => {
+    if (!selected) return null;
+    return paymentLikelihood({
+      overdueDays: selected.overdueDays,
+      overdueAmountPaise: selected.overdueAmountPaise,
+      planCode: selected.planCode,
+    });
+  }, [selected]);
+
+  useEffect(() => {
+    setAiDraft(null);
+    setAiDraftError(null);
+  }, [selectedId]);
+
+  async function draftWithAi(row: LiveDefaulter) {
+    setAiDraftLoading(true);
+    setAiDraftError(null);
+    setAiDraft(null);
+    try {
+      const res = await fetch("/api/ai/collections-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentName: row.fullName,
+          classLabel: row.classLabel,
+          amountLabel: formatInrFromPaise(row.overdueAmountPaise),
+          overdueDaysLabel:
+            row.overdueDays < 0
+              ? "upcoming"
+              : row.overdueDays === 0
+                ? "due today"
+                : `${row.overdueDays} day(s) overdue`,
+          stageLabel: row.stageLabel,
+          // Household's preferred language (Students → Family); "" = not asked → the school default, Hindi.
+          language: sis ? householdOf(sis, row.householdId)?.preferredLanguage ?? "" : "",
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        whatsappMessage?: string;
+        callScript?: string;
+        language?: string;
+        warnings?: string[];
+        generationId?: string;
+      };
+      if (!json.ok || !json.whatsappMessage || !json.callScript) {
+        setAiDraftError(json.error || "Draft failed");
+        return;
+      }
+      setAiDraft({
+        whatsappMessage: json.whatsappMessage,
+        callScript: json.callScript,
+        generationId: json.generationId,
+      });
+    } catch (e) {
+      setAiDraftError(e instanceof Error ? e.message : "Draft failed");
+    } finally {
+      setAiDraftLoading(false);
+    }
+  }
+
   const policyHolds = useMemo(() => {
     if (!selected || !playbook) return [];
     return listPolicyHoldRows(selected.studentId, playbook.holds);
@@ -171,6 +264,23 @@ export function DefaultersPlaybook() {
     return { count: filtered.length, amount, byStage };
   }, [filtered]);
 
+  // Ageing over the UNFILTERED roster, so the chips read as the school's
+  // position and a click narrows the list rather than the chips.
+  const ageing = useMemo(() => {
+    const acc: Record<AgeingBand, { amount: number; children: number }> = {
+      over90: { amount: 0, children: 0 },
+      d31to90: { amount: 0, children: 0 },
+      d0to30: { amount: 0, children: 0 },
+      notDue: { amount: 0, children: 0 },
+    };
+    for (const r of rows) {
+      const b = ageingBandOf(r);
+      acc[b].amount += r.overdueAmountPaise || r.openAmountPaise;
+      acc[b].children += 1;
+    }
+    return acc;
+  }, [rows]);
+
   function flash(msg: string) {
     setNotice(msg);
     setError(null);
@@ -180,6 +290,12 @@ export function DefaultersPlaybook() {
   function guardianMobile(row: LiveDefaulter): string {
     if (!sis) return "";
     return householdWhatsApp(householdOf(sis, row.householdId));
+  }
+
+  /** Hindi unless the family chose English — the school's default for parents. */
+  function familyHindi(row: LiveDefaulter): boolean {
+    const hh = sis ? householdOf(sis, row.householdId) : undefined;
+    return waTemplateLanguageFor(hh ?? {}) === "hi";
   }
 
   function createLinkForRow(row: LiveDefaulter) {
@@ -197,31 +313,32 @@ export function DefaultersPlaybook() {
     });
   }
 
-  function sendPayLink(row: LiveDefaulter) {
+  async function sendPayLink(row: LiveDefaulter) {
     const created = createLinkForRow(row);
     if (!created.ok) {
       setError(created.error);
       return;
     }
-    const payload = buildPaymentSharePayload(
-      created.link,
-      TENANT.nameDisplay,
-    );
+    const attached = await attachGatewayCheckout(created.link);
+    const link = attached.link;
+    const payload = buildPaymentSharePayload(link, TENANT.nameDisplay);
     const url = buildPaymentShareUrl(payload);
     const mobile = guardianMobile(row);
     if (mobile && isValidMobile(mobile)) {
       const msg = composeWhatsAppPaymentLinkMessage(
-        created.link,
+        link,
         url,
         TENANT.nameDisplay,
+        attached.attached,
+        familyHindi(row),
       );
-      window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
-      flash(`UPI link ${created.link.code} — WhatsApp opened`);
+      openWaMe(mobile, msg, undefined, { module: "fees" });
+      flash(`${attached.attached ? "Checkout" : "UPI"} link ${link.code} — WhatsApp opened`);
     } else {
       void navigator.clipboard.writeText(url).then(
         () =>
           flash(
-            `UPI link ${created.link.code} copied — set WhatsApp on household`,
+            `${attached.attached ? "Checkout" : "UPI"} link ${link.code} copied — set WhatsApp on household`,
           ),
         () => flash(url),
       );
@@ -250,9 +367,10 @@ export function DefaultersPlaybook() {
       overdueDays: row.overdueDays,
       stageLabel: row.stageLabel,
       payUrl: payUrl || undefined,
+      hindi: familyHindi(row),
     });
     if (mobile && isValidMobile(mobile)) {
-      window.open(whatsAppPaymentLinkUrl(mobile, msg), "_blank", "noopener");
+      openWaMe(mobile, msg, undefined, { module: "fees" });
       flash(`Reminder sent via WhatsApp (${mobile})`);
     } else {
       void navigator.clipboard.writeText(msg).then(
@@ -294,7 +412,7 @@ export function DefaultersPlaybook() {
   function onAction(actionId: string, row: LiveDefaulter) {
     setError(null);
     if (actionId === "paylink" || actionId === "remind") {
-      sendPayLink(row);
+      void sendPayLink(row);
       return;
     }
     if (actionId === "whatsapp") {
@@ -322,6 +440,7 @@ export function DefaultersPlaybook() {
         amountPaise: row.overdueAmountPaise,
         overdueDays: row.overdueDays,
         earliestDueOn: row.earliestDueOn,
+        hindi: familyHindi(row),
       });
       void navigator.clipboard.writeText(text).then(
         () => flash("Escalation notice copied"),
@@ -350,7 +469,7 @@ export function DefaultersPlaybook() {
         setError(result.error);
         return;
       }
-      const invite = composeParentMeetingInvite(result.meeting);
+      const invite = composeParentMeetingInvite(result.meeting, familyHindi(row));
       setMeetings(listOpenParentMeetings());
       if (mobile && isValidMobile(mobile)) {
         openWaMe(mobile, invite);
@@ -424,6 +543,34 @@ export function DefaultersPlaybook() {
           {notice}
         </p>
       ) : null}
+
+      <CollectionsWeeklyNoteCard />
+
+      <div className="mt-4 flex flex-wrap items-center gap-2 text-[12px]">
+        <span className="text-[var(--muted)]">Ageing</span>
+        {(["over90", "d31to90", "d0to30", "notDue"] as AgeingBand[]).map((b) => {
+          const on = bandFilter === b;
+          const v = ageing[b];
+          if (!v.children && !on) return null;
+          return (
+            <button
+              key={b}
+              type="button"
+              onClick={() => setBandFilter(on ? "" : b)}
+              className={`rounded-full border px-3 py-1 tabular-nums ${
+                on
+                  ? "border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]"
+                  : b === "over90"
+                    ? "border-[rgba(180,35,24,0.35)] bg-[rgba(180,35,24,0.06)] text-[var(--brand-deep)]"
+                    : "border-[var(--border)] bg-[var(--card)] text-[var(--brand-deep)]"
+              }`}
+              title={on ? "Show all" : `Only families with dues ${AGEING_BAND_LABEL[b].toLowerCase()}`}
+            >
+              {AGEING_BAND_LABEL[b]} · <span className="font-semibold">{formatInrFromPaise(v.amount)}</span> · {v.children}
+            </button>
+          );
+        })}
+      </div>
 
       <div className="mt-4 flex flex-wrap gap-3 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3 text-sm">
         <div>
@@ -608,6 +755,11 @@ export function DefaultersPlaybook() {
             <ul className="mt-3 divide-y divide-[rgba(32,48,80,0.1)] overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
               {filtered.map((d) => {
                 const active = d.studentId === selected?.studentId;
+                const rowLikelihood = paymentLikelihood({
+                  overdueDays: d.overdueDays,
+                  overdueAmountPaise: d.overdueAmountPaise,
+                  planCode: d.planCode,
+                });
                 return (
                   <li key={d.studentId} className="flex items-stretch">
                     <label className="flex items-center px-3">
@@ -655,6 +807,17 @@ export function DefaultersPlaybook() {
                               ? "Due today"
                               : `${d.overdueDays}d overdue`}
                         </div>
+                        <div
+                          className={`mt-0.5 text-[10px] font-semibold ${
+                            rowLikelihood.tone === "good"
+                              ? "text-[var(--tone-green)]"
+                              : rowLikelihood.tone === "warn"
+                                ? "text-[#8a6400]"
+                                : "text-[var(--danger)]"
+                          }`}
+                        >
+                          {rowLikelihood.score}% likely
+                        </div>
                       </div>
                     </button>
                   </li>
@@ -690,9 +853,25 @@ export function DefaultersPlaybook() {
                     {guardianMobile(selected) || "not set"}
                   </p>
                 </div>
-                <span className="rounded-md bg-[rgba(180,35,24,0.1)] px-2 py-1 text-xs font-semibold text-[var(--danger)]">
-                  {playbook.stage}
-                </span>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <span className="rounded-md bg-[rgba(180,35,24,0.1)] px-2 py-1 text-xs font-semibold text-[var(--danger)]">
+                    {playbook.stage}
+                  </span>
+                  {likelihood ? (
+                    <span
+                      className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${
+                        likelihood.tone === "good"
+                          ? "bg-[rgba(21,128,61,0.1)] text-[var(--tone-green)]"
+                          : likelihood.tone === "warn"
+                            ? "bg-[rgba(180,131,0,0.12)] text-[#8a6400]"
+                            : "bg-[rgba(180,35,24,0.1)] text-[var(--danger)]"
+                      }`}
+                      title="Heuristic estimate from overdue days, amount, and any active recovery plan — not a guarantee"
+                    >
+                      {likelihood.label} · {likelihood.score}%
+                    </span>
+                  ) : null}
+                </div>
               </div>
 
               <div className="mt-4 max-h-36 overflow-y-auto rounded-lg border border-[rgba(32,48,80,0.1)]">
@@ -754,6 +933,100 @@ export function DefaultersPlaybook() {
               </div>
 
               <div className="mt-5">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                    AI DRAFT
+                  </h4>
+                  <button
+                    type="button"
+                    disabled={aiDraftLoading}
+                    className="rounded-lg border border-[rgba(32,48,80,0.2)] px-2.5 py-1 text-[11px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                    onClick={() => void draftWithAi(selected)}
+                  >
+                    {aiDraftLoading
+                      ? "Drafting…"
+                      : aiDraft
+                        ? "Redraft"
+                        : "Draft message + call script"}
+                  </button>
+                </div>
+                <p className="mt-1 text-[11px] text-[var(--muted)]">
+                  AI-drafted — review before sending, nothing goes out automatically.
+                </p>
+                {aiDraftError ? (
+                  <p className="mt-2 text-[11px] text-[var(--danger)]">
+                    {aiDraftError}
+                  </p>
+                ) : null}
+                {aiDraft ? (
+                  <div className="mt-2 space-y-2">
+                    <div className="rounded-lg bg-[var(--surface)] p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                          WhatsApp message
+                        </span>
+                        <button
+                          type="button"
+                          className="text-[10px] font-semibold text-[var(--brand-deep)] underline"
+                          onClick={() =>
+                            void navigator.clipboard
+                              .writeText(aiDraft.whatsappMessage)
+                              .then(
+                                () => {
+                                  flash("Draft message copied");
+                                  if (aiDraft.generationId) {
+                                    reportAiOutcome({ ids: [aiDraft.generationId], outcome: "accepted", targetType: "fee_defaulter", targetId: selectedId ?? "" });
+                                    setAiDraft({ ...aiDraft, generationId: undefined });
+                                  }
+                                },
+                                () => setError("Could not copy"),
+                              )
+                          }
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <p className="mt-1 whitespace-pre-wrap text-[12px] text-[var(--ink)]">
+                        {aiDraft.whatsappMessage}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-[var(--surface)] p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                          Call script
+                        </span>
+                        <button
+                          type="button"
+                          className="text-[10px] font-semibold text-[var(--brand-deep)] underline"
+                          onClick={() =>
+                            void navigator.clipboard
+                              .writeText(aiDraft.callScript)
+                              .then(
+                                () => {
+                                  flash("Call script copied");
+                                  // Copying the script is accepting the draft
+                                  // just as copying the message is.
+                                  if (aiDraft.generationId) {
+                                    reportAiOutcome({ ids: [aiDraft.generationId], outcome: "accepted", targetType: "fee_defaulter", targetId: selectedId ?? "" });
+                                    setAiDraft({ ...aiDraft, generationId: undefined });
+                                  }
+                                },
+                                () => setError("Could not copy"),
+                              )
+                          }
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <p className="mt-1 whitespace-pre-wrap text-[12px] text-[var(--ink)]">
+                        {aiDraft.callScript}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-5">
                 <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
                   STOP / HOLD (policy)
                 </h4>
@@ -794,7 +1067,7 @@ export function DefaultersPlaybook() {
                             <span
                               className={`text-[10px] font-bold uppercase tracking-wide ${
                                 isUnheld
-                                  ? "text-[#15803d]"
+                                  ? "text-[var(--tone-green)]"
                                   : isHeld
                                     ? "text-[var(--danger)]"
                                     : "text-[var(--muted)]"

@@ -40,7 +40,7 @@ export function SisParentMatchBanner({
         "rounded-xl border border-[rgba(15,118,110,0.35)] bg-[rgba(15,118,110,0.08)] px-3 py-2.5 text-[12px] text-[var(--brand-deep)]"
       }
     >
-      <p className="font-semibold text-[#0f766e]">
+      <p className="font-semibold text-[var(--tone-teal)]">
         SIS suggestion — parent already in Students
       </p>
       <p className="mt-0.5 text-[11px] text-[var(--muted)]">
@@ -75,7 +75,7 @@ function SisMatchRow({ match }: { match: SisParentMatch }) {
         {match.reasons.map((r) => (
           <span
             key={r}
-            className="rounded-full bg-[rgba(15,118,110,0.12)] px-1.5 py-0.5 text-[9px] font-semibold text-[#0f766e]"
+            className="rounded-full bg-[rgba(15,118,110,0.12)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--tone-teal)]"
           >
             {SIS_PARENT_MATCH_LABELS[r]}
           </span>

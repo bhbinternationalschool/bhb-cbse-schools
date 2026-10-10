@@ -61,7 +61,7 @@ export const TRANSPORT_REPORT_CATEGORIES: {
 }[] = [
   { id: "ops", title: "Riders & boarding", headerClass: "bg-[#1565c0]" },
   { id: "fleet", title: "Fleet & compliance", headerClass: "bg-[#ef6c00]" },
-  { id: "finance", title: "Finance & TCO", headerClass: "bg-[#0f766e]" },
+  { id: "finance", title: "Finance & TCO", headerClass: "bg-[var(--tone-teal-solid)]" },
 ];
 
 export const TRANSPORT_REPORTS: TransportReportDef[] = [

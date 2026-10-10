@@ -3,6 +3,7 @@
  * Beats/attendance live in admissions state; offline drafts in a separate localStorage key.
  */
 
+import { recordDeskDeletion } from "@/lib/deskNamedDeletes";
 import {
   createEnquiry,
   loadAdmissions,
@@ -45,11 +46,23 @@ export type SurveyOfflineDraft = {
   beatId: string;
   beatName: string;
   childName: string;
+  /** Exact birth date when the parent knew it. */
+  dob: string;
+  /**
+   * Parent-stated age in years, when they did not.
+   *
+   * Carried through the offline queue because door-to-door survey work is
+   * mostly offline, and the queue previously dropped age entirely — every
+   * lead captured without signal arrived unscoreable on the one field the
+   * survey had just collected.
+   */
+  ageYearsApprox: number;
   guardianName: string;
   motherName: string;
   mobile: string;
   classSoughtId: string;
-  surveyPhotoDataUrl: string;
+  /** URL of the uploaded photo. NEVER a data: URL — see admissions.ts. */
+  surveyPhotoUrl: string;
   parentConsent: boolean;
   by: string;
 };
@@ -394,6 +407,8 @@ export function flushOfflineSurveyQueue(
       {
         source: "field_survey",
         childName: item.childName,
+        dob: item.dob || "",
+        ageYearsApprox: item.ageYearsApprox || 0,
         guardianName: item.guardianName,
         motherName: item.motherName,
         mobile: item.mobile,
@@ -401,7 +416,7 @@ export function flushOfflineSurveyQueue(
         campaignNote: item.beatName,
         locality: item.beatName,
         surveyBeatId: item.beatId,
-        surveyPhotoDataUrl: item.surveyPhotoDataUrl,
+        surveyPhotoUrl: item.surveyPhotoUrl,
         declarationAccepted: item.parentConsent,
         parentConsentAt: item.parentConsent ? new Date().toISOString() : "",
         parentConsentBy: item.parentConsent ? item.by || by : "",
@@ -411,7 +426,11 @@ export function flushOfflineSurveyQueue(
         parentGroupKey: item.mobile,
       },
       item.by || by,
-      { allowMissingClass: !item.classSoughtId },
+      // Offline queue draining: SurveyOfflineDraft carries only a class id,
+      // and a surveyor often has none. Rejecting here would strand the
+      // queued lead in `remaining` forever. Literal, not
+      // `!item.classSoughtId` — that form can never refuse anything.
+      { allowMissingClass: true },
     );
     if (!r.ok) {
       failed.push({ id: item.id, reason: r.reason });
@@ -468,7 +487,7 @@ export function captureFieldSurveyWithExtras(
   draft: Partial<AdmissionLead> & {
     beatId?: string;
     beatName?: string;
-    surveyPhotoDataUrl?: string;
+    surveyPhotoUrl?: string;
     parentConsent?: boolean;
   },
   by: string,
@@ -492,7 +511,7 @@ export function captureFieldSurveyWithExtras(
       campaignNote: beatName,
       locality: draft.locality || beatName,
       surveyBeatId: draft.beatId || draft.surveyBeatId || "",
-      surveyPhotoDataUrl: draft.surveyPhotoDataUrl || "",
+      surveyPhotoUrl: draft.surveyPhotoUrl || "",
       declarationAccepted: true,
       parentConsentAt: new Date().toISOString(),
       parentConsentBy: by,
@@ -502,7 +521,8 @@ export function captureFieldSurveyWithExtras(
       parentGroupKey: normalizeMobile(draft.mobile || ""),
     },
     by,
-    { allowMissingClass: !draft.classSoughtId },
+    // Same field-survey rule as flushOfflineSurveyQueue above.
+    { allowMissingClass: true },
   );
   if (!r.ok) return r;
   return { ok: true, state: r.state, lead: r.lead };
@@ -630,6 +650,7 @@ export function addStaffToSurveyTeam(
     empCode: staff.empCode || "",
     role: asLeader ? "leader" : "agent",
     assigned: true,
+    startMode: "school",
     createdAt: new Date().toISOString(),
   };
   return {
@@ -665,6 +686,7 @@ export function addExternalToSurveyTeam(
     empCode: "EXT",
     role: "agent",
     assigned: true,
+    startMode: "field",
     createdAt: new Date().toISOString(),
   };
   return {
@@ -688,6 +710,18 @@ export function setSurveyTeamAssigned(
   };
 }
 
+export function setSurveyTeamStartMode(
+  state: AdmissionsState,
+  memberId: string,
+  startMode: "school" | "field",
+): AdmissionsState {
+  const s = ensureSurveyMasters(state);
+  return {
+    ...s,
+    surveyTeam: s.surveyTeam.map((m) => (m.id === memberId ? { ...m, startMode } : m)),
+  };
+}
+
 export function setSurveyTeamLeader(
   state: AdmissionsState,
   memberId: string,
@@ -707,6 +741,8 @@ export function removeSurveyTeamMember(
   memberId: string,
 ): AdmissionsState {
   const s = ensureSurveyMasters(state);
+  // Named, so the save removes them — a save never deletes by absence.
+  if (typeof window !== "undefined") recordDeskDeletion("admissions", "admission_survey_team", [memberId]);
   return {
     ...s,
     surveyTeam: s.surveyTeam.filter((m) => m.id !== memberId),

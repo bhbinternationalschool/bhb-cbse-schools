@@ -12,15 +12,14 @@ import {
 import {
   hydrateTransportDeskFromDb,
   scheduleTransportDeskSync,
+  captureTransportRevs,
 } from "@/lib/transportNormalizedClient";
 import { mergeDbDeskIntoTransportState } from "@/lib/transportNormalizedMerge";
 import { transportReadFromDbEnabled } from "@/lib/transportDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
-import {
-  isDeskHydrated,
-  markDeskHydrated,
-  resetDeskHydrated,
-} from "@/lib/deskHydrateGuard";
+import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
+import { resetTransportDeskAnswer } from "@/lib/transportHydrationState";
+import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "transport";
 
@@ -36,12 +35,13 @@ const blob = createDomainBlobPersistence<TransportState>({
 export const transportRemoteEnabled = blob.remoteEnabled;
 export function resetTransportPersistenceCache() {
   resetDeskHydrated(MODULE);
+  resetTransportDeskAnswer();
   blob.resetCache();
 }
 
 export function scheduleTransportSync(state: TransportState) {
   if (typeof window === "undefined") {
-    void pushTransportRemoteServer(state);
+    void trackServerWork(pushTransportRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("transport")) blob.scheduleSync(state);
@@ -71,7 +71,11 @@ export async function pushTransportRemoteServer(
 
 export async function ensureTransportHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
+  // Same collapse as fees and sis: concurrent callers share one fetch.
+  return dedupeHydration(MODULE, hydrateTransportOnce);
+}
+
+async function hydrateTransportOnce(): Promise<boolean> {
 
   const readFromDb = transportReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("transport")
@@ -79,7 +83,12 @@ export async function ensureTransportHydrated(): Promise<boolean> {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateTransportDeskFromDb(readFromDb);
+  const { bundle, changed, ok, server } = await hydrateTransportDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (
     changed &&
     (bundle.routes.length > 0 ||
@@ -93,8 +102,12 @@ export async function ensureTransportHydrated(): Promise<boolean> {
     );
     normChanged = true;
   }
+  // Each row's server version, against this browser's copy of it.
+  captureTransportRevs(server, loadTransport());
 
-  if (normChanged) scheduleTransportSync(loadTransport());
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+
+  if (normChanged && !readFromDb) scheduleTransportSync(loadTransport());
   return blobChanged || normChanged;
 }
 

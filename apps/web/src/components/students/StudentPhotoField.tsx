@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { StudentAvatar } from "@/components/students/StudentAvatar";
 
 const MAX_BYTES = 800_000;
@@ -179,14 +180,11 @@ export function StudentPhotoField({
         </p>
       </div>
 
-      {camOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(32,48,80,0.72)] p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Take student photo"
-        >
-          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-lg">
+      {/* Base UI: Escape now closes the camera AND stops the stream via
+            closeCam. The hand-rolled overlay had no key handling at all, so a
+            parent or clerk who pressed Escape left the camera running. */}
+        <Dialog open={camOpen} onOpenChange={(next) => !next && closeCam()}>
+          <DialogPopup aria-label="Take student photo" className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-lg p-0">
             <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3 text-sm font-semibold text-[var(--brand-deep)]">
               Camera
             </div>
@@ -214,9 +212,8 @@ export function StudentPhotoField({
                 Capture
               </button>
             </div>
-          </div>
-        </div>
-      ) : null}
+          </DialogPopup>
+        </Dialog>
     </div>
   );
 }

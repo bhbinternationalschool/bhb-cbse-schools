@@ -114,7 +114,7 @@ export function LeaveApprovalSettingsPanel() {
           }
         />
 
-        <div className="border-b border-[rgba(32,48,80,0.08)] pb-3 last:border-0 last:pb-0">
+        <div className="border-b border-[var(--border)] pb-3 last:border-0 last:pb-0">
           <div className="mb-2">
             <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
               Rule 3
@@ -148,7 +148,7 @@ export function LeaveApprovalSettingsPanel() {
             </label>
             <button
               type="submit"
-              className="rounded-lg bg-[var(--brand-deep)] px-4 py-2 text-xs font-bold text-white"
+              className="rounded-lg bg-[var(--primary)] px-4 py-2 text-xs font-bold text-[var(--primary-foreground)]"
             >
               Save
             </button>
@@ -175,7 +175,7 @@ function RuleRow({
   disabledHint?: string;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgba(32,48,80,0.08)] pb-3 last:border-0 last:pb-0">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] pb-3 last:border-0 last:pb-0">
       <div>
         <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
           {rule}
@@ -196,8 +196,8 @@ function RuleRow({
           type="button"
           className={`rounded-lg px-3 py-1.5 text-xs font-bold ${
             enabled
-              ? "bg-[var(--brand-deep)] text-white"
-              : "border border-[rgba(32,48,80,0.15)] text-[var(--brand-deep)]"
+              ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+              : "border border-[var(--border)] text-[var(--brand-deep)]"
           }`}
           onClick={onEnable}
         >
@@ -207,8 +207,8 @@ function RuleRow({
           type="button"
           className={`rounded-lg px-3 py-1.5 text-xs font-bold ${
             !enabled
-              ? "bg-[var(--brand-deep)] text-white"
-              : "border border-[rgba(32,48,80,0.15)] text-[var(--brand-deep)]"
+              ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+              : "border border-[var(--border)] text-[var(--brand-deep)]"
           }`}
           onClick={onDisable}
         >

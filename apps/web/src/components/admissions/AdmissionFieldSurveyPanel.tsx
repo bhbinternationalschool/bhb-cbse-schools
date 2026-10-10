@@ -48,6 +48,10 @@ import {
 } from "@/components/masters/MastersLayout";
 import { SisParentMatchBanner } from "@/components/admissions/SisParentMatchBanner";
 import { AdmissionSurveyTeamPanel } from "@/components/admissions/AdmissionSurveyTeamPanel";
+import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 
 const inp =
   "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm";
@@ -79,6 +83,11 @@ type ChildRow = {
   key: string;
   childName: string;
   dob: string;
+  /**
+   * Age in years the parent stated, when they do not know a birth date.
+   * Stored as its own field — never turned into a fabricated dob.
+   */
+  ageYears: string;
   gender: string;
   classSoughtId: string;
   transportInterest: TransportInterest;
@@ -90,6 +99,7 @@ function emptyChildRow(): ChildRow {
     key: `c_${Math.random().toString(36).slice(2, 9)}`,
     childName: "",
     dob: "",
+    ageYears: "",
     gender: "",
     classSoughtId: "",
     transportInterest: "undecided",
@@ -112,6 +122,17 @@ function Field({
   );
 }
 
+/**
+ * Field survey, in the order a survey day runs: the team, beats and capture
+ * link are set up before anyone goes out; a capture is household first (the
+ * mobile decides whether it is a new family or a sibling), then its children
+ * and Save; captures taken offline wait in the queue until synced; saved
+ * leads are then pushed on to Registration; agent WhatsApp chats are watched
+ * throughout. Every step stays mounted (hidden, not unmounted) so a
+ * half-typed household, beat or reply survives a step switch.
+ */
+type SurveyStep = "team" | "household" | "children" | "offline" | "leads" | "chats";
+
 export function AdmissionFieldSurveyPanel({
   state: rawState,
   masters,
@@ -133,6 +154,20 @@ export function AdmissionFieldSurveyPanel({
   const stats = useMemo(() => fieldSurveyStats(state), [state]);
   const leads = useMemo(() => listFieldSurveyLeads(state), [state]);
   const productivity = useMemo(() => surveyAgentProductivity(state), [state]);
+
+  // Busiest agent first; Status groups who is on the field right now.
+  const agentSort = useTableSort(
+    productivity,
+    {
+      agent: (p) => p.agentName,
+      captures: (p) => p.captures,
+      open: (p) => p.open,
+      registered: (p) => p.registered,
+      status: (p) => p.checkedIn ? 1 : 0,
+    },
+    "captures",
+    "desc",
+  );
   const classes = useMemo(
     () => (masters.classes ?? []).filter((c) => c.isActive),
     [masters],
@@ -159,7 +194,11 @@ export function AdmissionFieldSurveyPanel({
   const [childrenRows, setChildrenRows] = useState<ChildRow[]>([
     emptyChildRow(),
   ]);
+  // photoDataUrl is the on-screen PREVIEW only and is never persisted.
+  // photoUrl is what reaches the lead — see sanitizeSurveyPhotoUrl.
   const [photoDataUrl, setPhotoDataUrl] = useState("");
+  const [photoUrl, setPhotoUrl] = useState("");
+  const [photoUploading, setPhotoUploading] = useState(false);
   const [parentConsent, setParentConsent] = useState(false);
   const [qr, setQr] = useState<string | null>(null);
   const [online, setOnline] = useState(true);
@@ -172,6 +211,7 @@ export function AdmissionFieldSurveyPanel({
   const [beatArea, setBeatArea] = useState("");
   const [beatTarget, setBeatTarget] = useState("50");
   const [editBeatId, setEditBeatId] = useState("");
+  const [surveyStep, setSurveyStep] = useState<SurveyStep>("team");
 
   const surveyUrl = useMemo(
     () => publicEnquiryAbsoluteUrl("field_survey"),
@@ -262,6 +302,24 @@ export function AdmissionFieldSurveyPanel({
       return b === beatFilter;
     });
   }, [leads, beatFilter]);
+  // Newest capture first, as the list always opened.
+  const leadSort = useTableSort(
+    filtered,
+    {
+      lead: (l) => l.enquiryNo,
+      beat: (l) =>
+        state.surveyBeats.find((b) => b.id === l.surveyBeatId)?.name ||
+        (l.campaignNote || "").trim() ||
+        (l.locality || "").trim() ||
+        null,
+      child: (l) => l.childName,
+      status: (l) => l.stage,
+      agent: (l) => l.assignedTo || l.createdBy || null,
+      date: (l) => l.leadDate || l.createdAt || null,
+    },
+    "date",
+    "desc",
+  );
 
   const openSelectedIds = useMemo(
     () =>
@@ -284,6 +342,7 @@ export function AdmissionFieldSurveyPanel({
     setExtraGuardian({ fullName: "", relation: "uncle", mobile: "" });
     setChildrenRows([emptyChildRow()]);
     setPhotoDataUrl("");
+    setPhotoUrl("");
     setParentConsent(false);
   }
 
@@ -295,11 +354,44 @@ export function AdmissionFieldSurveyPanel({
 
   async function onPhotoPick(file: File | null) {
     if (!file) return;
+    setPhotoUrl("");
+    let dataUrl = "";
     try {
-      const url = await compressSurveyPhoto(file);
-      setPhotoDataUrl(url);
+      dataUrl = await compressSurveyPhoto(file);
+      setPhotoDataUrl(dataUrl);
     } catch {
       onCommit(state, "Could not read photo — try a smaller image");
+      return;
+    }
+
+    // Upload immediately. The lead stores a URL, never the image: a base64
+    // photo is ~200 KB inside lead_json, which every admissions read and every
+    // localStorage write would then carry.
+    setPhotoUploading(true);
+    try {
+      const blob = await (await fetch(dataUrl)).blob();
+      const { uploadSchoolObject } = await import("@/lib/objectStorage");
+      const res = await uploadSchoolObject({
+        path: `survey/${todayYmd()}/photo_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}.jpg`,
+        blob,
+        contentType: "image/jpeg",
+      });
+      // `local` mode returns a data URL when no bucket is configured. Usable
+      // as a preview, never as a stored value.
+      if (res.ok && !/^data:/i.test(res.url)) {
+        setPhotoUrl(res.url);
+      } else {
+        setPhotoDataUrl("");
+        onCommit(
+          state,
+          "Photo could not be uploaded, so it was not attached. The survey can still be saved.",
+        );
+      }
+    } catch {
+      setPhotoDataUrl("");
+      onCommit(state, "Photo upload failed — the survey can still be saved without it");
+    } finally {
+      setPhotoUploading(false);
     }
   }
 
@@ -324,6 +416,18 @@ export function AdmissionFieldSurveyPanel({
       onCommit(state, "Class sought is required for the first child");
       return;
     }
+    // Age is what makes a lead scoreable, and it was optional until now —
+    // 96% of 919 surveyed leads came back with neither an age nor a date.
+    // One tap satisfies this, so it costs the agent a second at the door
+    // and stops the whole cohort arriving unusable.
+    const ageless = filled.find((c) => !c.dob && !c.ageYears);
+    if (ageless) {
+      onCommit(
+        state,
+        `Age is required for ${ageless.childName || "each child"} — tap a year, or enter the exact date if the parent knows it`,
+      );
+      return;
+    }
 
     const householdDraft = {
       ...draft,
@@ -332,7 +436,7 @@ export function AdmissionFieldSurveyPanel({
       campaignNote: beat.name,
       locality: draft.locality || beat.area || beat.name,
       surveyBeatId: beat.id,
-      surveyPhotoDataUrl: photoDataUrl,
+      surveyPhotoUrl: photoUrl,
       declarationAccepted: true,
       parentConsentAt: new Date().toISOString(),
       parentConsentBy: by,
@@ -347,11 +451,13 @@ export function AdmissionFieldSurveyPanel({
           beatId: beat.id,
           beatName: beat.name,
           childName: child.childName,
+          dob: child.dob,
+          ageYearsApprox: child.ageYears === "0" ? 1.5 : Number(child.ageYears) || 0,
           guardianName: draft.guardianName,
           motherName: draft.motherName,
           mobile: draft.mobile,
           classSoughtId: child.classSoughtId,
-          surveyPhotoDataUrl: photoDataUrl,
+          surveyPhotoUrl: photoUrl,
           parentConsent: true,
           by,
         });
@@ -371,6 +477,9 @@ export function AdmissionFieldSurveyPanel({
         ...householdDraft,
         childName: first.childName,
         dob: first.dob,
+        // "under 2" is a real answer, not a missing one. It is sent as 1.5 so
+        // it scores as a young child rather than as unknown.
+        ageYearsApprox: first.ageYears === "0" ? 1.5 : Number(first.ageYears) || 0,
         gender: first.gender,
         classSoughtId: first.classSoughtId,
         transportInterest: first.transportInterest,
@@ -414,6 +523,7 @@ export function AdmissionFieldSurveyPanel({
         {
           childName: child.childName,
           dob: child.dob,
+          ageYearsApprox: child.ageYears === "0" ? 1.5 : Number(child.ageYears) || 0,
           gender: child.gender,
           classSoughtId: child.classSoughtId,
           source: "field_survey",
@@ -429,7 +539,7 @@ export function AdmissionFieldSurveyPanel({
       }
       next = updateLead(s.state, s.lead.id, {
         surveyBeatId: beat.id,
-        surveyPhotoDataUrl: photoDataUrl,
+        surveyPhotoUrl: photoUrl,
         declarationAccepted: true,
         parentConsentAt: householdDraft.parentConsentAt,
         parentConsentBy: by,
@@ -537,6 +647,42 @@ export function AdmissionFieldSurveyPanel({
   const filledChildCount = childrenRows.filter((c) => c.childName.trim())
     .length;
 
+  const surveySteps: StepDef<SurveyStep>[] = [
+    {
+      id: "team",
+      title: "Team & beats",
+      what: "Survey team and lead callers, survey days, the beat / cluster master with household targets, the capture link & QR for parents, and today's agent check-in.",
+    },
+    {
+      id: "household",
+      title: "Household",
+      what: "Lead date, beat, primary mobile (an existing number links siblings), parents, address, optional photo and the parent's consent.",
+    },
+    {
+      id: "children",
+      title: "Children & save",
+      what: "Each child to enquire for (name, age, class sought…), then Save to the CRM — or queue it on this device when offline.",
+      badge: filledChildCount || undefined,
+    },
+    {
+      id: "offline",
+      title: "Offline queue",
+      what: "Captures stored on this device while offline — sync them to the CRM once the connection returns.",
+      badge: offlineQueue.length || undefined,
+    },
+    {
+      id: "leads",
+      title: "Push to Registration",
+      what: "Survey leads for the beat picked in Team & beats — select open ones and push them to Registration with a fee head and amount, or open one in the CRM.",
+      badge: filtered.length,
+    },
+    {
+      id: "chats",
+      title: "Agent WhatsApp",
+      what: "Chats from survey agents running their field day on WhatsApp (start code, location, captures) — read and reply.",
+    },
+  ];
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -568,14 +714,19 @@ export function AdmissionFieldSurveyPanel({
         </span>
       </div>
 
+      <StepTabs
+        aria-label="Field survey steps"
+        steps={surveySteps}
+        value={surveyStep}
+        onChange={setSurveyStep}
+      >
+      <div className={surveyStep === "team" ? "space-y-4" : "hidden"}>
       <AdmissionSurveyTeamPanel
         state={state}
         masters={masters}
         canEdit={canEdit}
         onCommit={onCommit}
       />
-
-      <SurveyAgentWaInbox by={by} canEdit={canEdit} />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <MastersWorkCard
@@ -633,7 +784,7 @@ export function AdmissionFieldSurveyPanel({
             <div className="mb-3 flex flex-wrap gap-2">
               <button
                 type="button"
-                className="rounded-lg bg-[#166534] px-3 py-1.5 text-[11px] font-semibold text-white"
+                className="rounded-lg bg-[var(--tone-green-deep-solid)] px-3 py-1.5 text-[11px] font-semibold text-white"
                 onClick={onCheckIn}
               >
                 Check in{selectedBeat ? ` · ${selectedBeat.name}` : ""}
@@ -670,22 +821,19 @@ export function AdmissionFieldSurveyPanel({
               No attendance or captures today yet.
             </p>
           ) : (
-            <table className="min-w-full text-left text-[12px]">
-              <thead className="text-[10px] text-[var(--muted)]">
+            <ErpTable className="text-[12px]">
+              <ErpTableHead>
                 <tr>
-                  <th className="py-1 pr-2">Agent</th>
-                  <th className="py-1 pr-2">Captures</th>
-                  <th className="py-1 pr-2">Open</th>
-                  <th className="py-1 pr-2">Reg</th>
-                  <th className="py-1">Status</th>
+                  <ErpSortTh sort={agentSort} field="agent" className="py-1 pr-2">Agent</ErpSortTh>
+                  <ErpSortTh sort={agentSort} field="captures" align="right" className="py-1 pr-2">Captures</ErpSortTh>
+                  <ErpSortTh sort={agentSort} field="open" align="right" className="py-1 pr-2">Open</ErpSortTh>
+                  <ErpSortTh sort={agentSort} field="registered" align="right" className="py-1 pr-2">Reg</ErpSortTh>
+                  <ErpSortTh sort={agentSort} field="status" className="py-1">Status</ErpSortTh>
                 </tr>
-              </thead>
-              <tbody>
-                {productivity.map((p) => (
-                  <tr
-                    key={p.agentName}
-                    className="border-t border-[rgba(32,48,80,0.06)]"
-                  >
+              </ErpTableHead>
+              <ErpTableBody>
+                {agentSort.rows.map((p) => (
+                  <tr key={p.agentName}>
                     <td className="py-1.5 pr-2 font-medium">{p.agentName}</td>
                     <td className="py-1.5 pr-2">{p.captures}</td>
                     <td className="py-1.5 pr-2">{p.open}</td>
@@ -699,8 +847,8 @@ export function AdmissionFieldSurveyPanel({
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           )}
         </MastersWorkCard>
       </div>
@@ -764,7 +912,7 @@ export function AdmissionFieldSurveyPanel({
                   }}
                   className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                     beatFilter === b.id
-                      ? "bg-[#9a3412] text-white"
+                      ? "bg-[var(--tone-brick-solid)] text-white"
                       : b.isActive
                         ? "bg-[rgba(180,83,9,0.12)] text-[#9a3412]"
                         : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)] line-through"
@@ -808,7 +956,9 @@ export function AdmissionFieldSurveyPanel({
           })}
         </div>
       </MastersWorkCard>
+      </div>
 
+      <div className={surveyStep === "household" || surveyStep === "children" ? "space-y-4" : "hidden"}>
       <p className="text-[12px] text-[var(--muted)]">
         Desk form below matches <strong>walk-in enquiry</strong> (household +
         children), with source locked to Field survey, beat, photo &amp;
@@ -821,6 +971,7 @@ export function AdmissionFieldSurveyPanel({
         </p>
       ) : (
         <>
+          <div className={surveyStep === "household" ? "" : "hidden"}>
           <MastersWorkCard
             title="1 · Field survey household / parents"
             hint="Primary mobile identifies the family. Matching an existing number links children as siblings."
@@ -1034,7 +1185,9 @@ export function AdmissionFieldSurveyPanel({
               </div>
             </div>
           </MastersWorkCard>
+          </div>
 
+          <div className={surveyStep === "children" ? "space-y-4" : "hidden"}>
           <MastersWorkCard
             title={`2 · Children (${childrenRows.length})`}
             hint="Same as walk-in — add as many children as needed. Each gets their own survey enquiry under this household."
@@ -1061,7 +1214,7 @@ export function AdmissionFieldSurveyPanel({
                     {childrenRows.length > 1 ? (
                       <button
                         type="button"
-                        className="text-[11px] font-semibold text-[#b42318]"
+                        className="text-[11px] font-semibold text-[var(--danger)]"
                         onClick={() =>
                           setChildrenRows((rows) =>
                             rows.filter((r) => r.key !== row.key),
@@ -1084,7 +1237,67 @@ export function AdmissionFieldSurveyPanel({
                         }
                       />
                     </Field>
-                    <Field label="Date of birth">
+                    <Field label="Age *">
+                      {/*
+                        Age, not a date picker, is what a doorstep conversation
+                        produces: a parent says "chaar saal ka hai". The old
+                        form offered only <input type="date">, which opens on
+                        today's date and needs several scrolls back — and 96%
+                        of 919 surveyed leads came back with no birth date at
+                        all, which is why nothing could be scored on age.
+
+                        One tap records it. The exact date stays available
+                        below for the families who know it, and the two are
+                        never conflated: a tapped age is stored as an age.
+                      */}
+                      <div className="flex flex-wrap gap-1.5">
+                        {[2, 3, 4, 5, 6, 7, 8].map((yr) => {
+                          const active = row.ageYears === String(yr);
+                          return (
+                            <button
+                              key={yr}
+                              type="button"
+                              aria-pressed={active}
+                              className={`min-w-[2.75rem] rounded-xl border px-2 py-2 text-[13px] font-semibold ${
+                                active
+                                  ? "border-[var(--brand-deep)] bg-[var(--brand-deep)] text-white"
+                                  : "border-[rgba(32,48,80,0.18)] bg-white text-[var(--brand-deep)]"
+                              }`}
+                              onClick={() =>
+                                updateChildRow(row.key, {
+                                  ageYears: active ? "" : String(yr),
+                                })
+                              }
+                            >
+                              {yr}
+                            </button>
+                          );
+                        })}
+                        <button
+                          type="button"
+                          aria-pressed={row.ageYears === "0"}
+                          className={`rounded-xl border px-2 py-2 text-[12px] font-semibold ${
+                            row.ageYears === "0"
+                              ? "border-[var(--brand-deep)] bg-[var(--brand-deep)] text-white"
+                              : "border-[rgba(32,48,80,0.18)] bg-white text-[var(--brand-deep)]"
+                          }`}
+                          onClick={() =>
+                            updateChildRow(row.key, {
+                              ageYears: row.ageYears === "0" ? "" : "0",
+                            })
+                          }
+                        >
+                          under 2
+                        </button>
+                      </div>
+                      {row.ageYears && !row.dob ? (
+                        <p className="mt-1 text-[11px] text-[var(--muted)]">
+                          Recorded as an approximate age. Add the exact date
+                          below only if the parent knows it.
+                        </p>
+                      ) : null}
+                    </Field>
+                    <Field label="Date of birth (if known)">
                       <input
                         type="date"
                         className={inp}
@@ -1173,7 +1386,7 @@ export function AdmissionFieldSurveyPanel({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="rounded-lg bg-[#9a3412] px-4 py-2.5 text-sm font-semibold text-white"
+              className="rounded-lg bg-[var(--tone-brick-solid)] px-4 py-2.5 text-sm font-semibold text-white"
               onClick={submitSurvey}
             >
               {!online
@@ -1185,9 +1398,17 @@ export function AdmissionFieldSurveyPanel({
                     : "Save survey enquiry + household → CRM"}
             </button>
           </div>
+          </div>
         </>
       )}
+      </div>
 
+      <div className={surveyStep === "offline" ? "space-y-4" : "hidden"}>
+      {offlineQueue.length === 0 ? (
+        <p className="text-sm text-[var(--muted)]">
+          Nothing queued on this device.
+        </p>
+      ) : null}
       {offlineQueue.length > 0 ? (
         <MastersWorkCard
           title={`Offline queue (${offlineQueue.length})`}
@@ -1220,7 +1441,7 @@ export function AdmissionFieldSurveyPanel({
             <button
               type="button"
               disabled={!online}
-              className="rounded-lg bg-[#166534] px-3 py-2 text-[12px] font-semibold text-white disabled:opacity-40"
+              className="rounded-lg bg-[var(--tone-green-deep-solid)] px-3 py-2 text-[12px] font-semibold text-white disabled:opacity-40"
               onClick={onFlushQueue}
             >
               Sync queue → CRM
@@ -1228,7 +1449,9 @@ export function AdmissionFieldSurveyPanel({
           ) : null}
         </MastersWorkCard>
       ) : null}
+      </div>
 
+      <div className={surveyStep === "leads" ? "space-y-4" : "hidden"}>
       <MastersTableCard title="Survey leads → CRM">
         {canEdit && filtered.some((l) => l.stage === "enquiry") ? (
           <div className="mb-3 flex flex-wrap items-end gap-2 border-b border-[rgba(32,48,80,0.08)] pb-3">
@@ -1286,21 +1509,22 @@ export function AdmissionFieldSurveyPanel({
             No field survey leads in this beat yet.
           </div>
         ) : (
-          <table className="min-w-full text-left text-sm">
-            <thead className="text-[11px] text-[var(--muted)]">
+          <ErpTable>
+            <ErpTableHead>
               <tr>
                 {canEdit ? <th className="px-2 py-2"> </th> : null}
-                <th className="px-3 py-2">Lead</th>
-                <th className="px-3 py-2">Beat</th>
-                <th className="px-3 py-2">Child / parent</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Agent</th>
+                <ErpSortTh sort={leadSort} field="lead" className="px-3 py-2">Lead</ErpSortTh>
+                <ErpSortTh sort={leadSort} field="beat" className="px-3 py-2">Beat</ErpSortTh>
+                <ErpSortTh sort={leadSort} field="child" className="px-3 py-2">Child / parent</ErpSortTh>
+                <ErpSortTh sort={leadSort} field="status" className="px-3 py-2">Status</ErpSortTh>
+                <ErpSortTh sort={leadSort} field="agent" className="px-3 py-2">Agent</ErpSortTh>
                 <th className="px-3 py-2">Photo</th>
-                <th className="px-3 py-2">Date</th>
+                <ErpSortTh sort={leadSort} field="date" className="px-3 py-2">Date</ErpSortTh>
+                <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
-            </thead>
-            <tbody>
-              {filtered.map((l) => {
+            </ErpTableHead>
+            <ErpTableBody hoverable>
+              {leadSort.rows.map((l) => {
                 const beatLabel =
                   state.surveyBeats.find((b) => b.id === l.surveyBeatId)
                     ?.name ||
@@ -1308,10 +1532,7 @@ export function AdmissionFieldSurveyPanel({
                   (l.locality || "").trim() ||
                   "—";
                 return (
-                  <tr
-                    key={l.id}
-                    className="border-t border-[rgba(32,48,80,0.06)] hover:bg-[rgba(32,48,80,0.03)]"
-                  >
+                  <tr key={l.id}>
                     {canEdit ? (
                       <td className="px-2 py-2">
                         {l.stage === "enquiry" ? (
@@ -1359,10 +1580,10 @@ export function AdmissionFieldSurveyPanel({
                       {l.assignedTo || l.createdBy || "—"}
                     </td>
                     <td className="px-3 py-2">
-                      {l.surveyPhotoDataUrl ? (
+                      {l.surveyPhotoUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
-                          src={l.surveyPhotoDataUrl}
+                          src={l.surveyPhotoUrl}
                           alt=""
                           className="h-8 w-8 rounded object-cover"
                         />
@@ -1375,13 +1596,22 @@ export function AdmissionFieldSurveyPanel({
                     <td className="px-3 py-2 text-[11px]">
                       {(l.leadDate || "").slice(0, 10)}
                     </td>
+                    <td className="px-2 py-1.5 text-right">
+                      <RowActionMenu row={l} label="Lead actions" actions={[{ id: "crm", label: "Open in CRM", onSelect: (x) => onOpenCrm(x.id) }]} />
+                    </td>
                   </tr>
                 );
               })}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         )}
       </MastersTableCard>
+      </div>
+
+      <div className={surveyStep === "chats" ? "space-y-4" : "hidden"}>
+        <SurveyAgentWaInbox by={by} canEdit={canEdit} />
+      </div>
+      </StepTabs>
 
       <MastersWorkCard
         title="What this tab covers — roadmap"

@@ -21,8 +21,33 @@ import {
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
+import { hasAnyFeatureInModule, type RbacModule } from "@/lib/rbac";
+import { getSessionActor } from "@/lib/sessionActor";
+import { loadMasters } from "@/lib/masters";
 
 const MODULE = "school_comms";
+
+/**
+ * May this browser's person save to a desk of `module` at all — the module,
+ * or one of its functions (Masters → Roles)?
+ *
+ * One Comms save goes to three desks: notices, news and gallery. Someone who
+ * holds only Notices → Notices & circulars was refused by the news and
+ * gallery desks on every save and told "Your last change was NOT saved" —
+ * twice, about desks they never changed (the schoolComms helpers already
+ * refuse their edits there, so there is nothing of theirs to send). The
+ * server still decides; this only skips a push that can only be refused.
+ * No actor (SSR) → push as before.
+ */
+function mayPushDesk(module: RbacModule): boolean {
+  const session = getSessionActor();
+  if (!session) return true;
+  const masters = loadMasters();
+  return (["create", "edit", "delete"] as const).some((a) =>
+    hasAnyFeatureInModule(session, masters, module, a),
+  );
+}
 
 const blob = createDomainBlobPersistence<SchoolCommsState>({
   table: "school_comms_state",
@@ -36,21 +61,24 @@ const blob = createDomainBlobPersistence<SchoolCommsState>({
 export const schoolCommsRemoteEnabled = blob.remoteEnabled;
 export const scheduleSchoolCommsSync = (state: SchoolCommsState) => {
   if (typeof window === "undefined") {
-    void pushSchoolCommsRemoteServer(state);
+    void trackServerWork(pushSchoolCommsRemoteServer(state));
     return;
   }
   if (!deskSkipBlobPushClient("school_comms")) blob.scheduleSync(state);
-  scheduleSchoolCommsDeskSync(state);
-  void import("@/lib/galleryPersistence").then(({ scheduleGalleryDeskSync }) => {
-    scheduleGalleryDeskSync();
-  });
-  void import("@/lib/newsPersistence").then(({ scheduleNewsDeskSync }) => {
-    scheduleNewsDeskSync();
-  });
+  if (mayPushDesk("notices")) scheduleSchoolCommsDeskSync(state);
+  if (mayPushDesk("gallery")) {
+    void trackServerWork(import("@/lib/galleryPersistence").then(({ scheduleGalleryDeskSync }) => {
+      scheduleGalleryDeskSync();
+    }));
+  }
+  if (mayPushDesk("news")) {
+    void trackServerWork(import("@/lib/newsPersistence").then(({ scheduleNewsDeskSync }) => {
+      scheduleNewsDeskSync();
+    }));
+  }
 };
 export const ensureSchoolCommsHydrated = async () => {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = schoolCommsReadFromDbEnabled();
   const blobChanged = deskSkipBlobHydrateClient("school_comms")
@@ -58,7 +86,12 @@ export const ensureSchoolCommsHydrated = async () => {
     : await blob.ensureHydrated();
 
   let normChanged = false;
-  const { bundle, changed } = await hydrateSchoolCommsDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateSchoolCommsDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return blobChanged;
+  }
+  markDeskHydrated(MODULE);
   if (
     changed &&
     (bundle.notices.length > 0 ||
@@ -73,7 +106,8 @@ export const ensureSchoolCommsHydrated = async () => {
     );
     normChanged = true;
   }
-  if (normChanged) scheduleSchoolCommsSync(loadSchoolComms());
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+  if (normChanged && !readFromDb) scheduleSchoolCommsSync(loadSchoolComms());
 
   const { ensureGalleryHydrated } = await import("@/lib/galleryPersistence");
   const { ensureNewsHydrated } = await import("@/lib/newsPersistence");

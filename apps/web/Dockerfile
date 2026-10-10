@@ -19,6 +19,8 @@ ARG NEXT_PUBLIC_APP_URL=https://bhbinternational.school
 ARG NEXT_PUBLIC_DEMO_AUTH=true
 ARG NEXT_PUBLIC_SCHOOL_NAME="BHB International School"
 ARG NEXT_PUBLIC_TENANT_SLUG=bhb-international
+ARG NEXT_PUBLIC_VAPID_PUBLIC_KEY
+ARG NEXT_PUBLIC_PAYMENT_GATEWAY
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
@@ -27,10 +29,23 @@ ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
 ENV NEXT_PUBLIC_DEMO_AUTH=$NEXT_PUBLIC_DEMO_AUTH
 ENV NEXT_PUBLIC_SCHOOL_NAME=$NEXT_PUBLIC_SCHOOL_NAME
 ENV NEXT_PUBLIC_TENANT_SLUG=$NEXT_PUBLIC_TENANT_SLUG
-ENV NODE_OPTIONS=--max-old-space-size=4096
+ENV NEXT_PUBLIC_VAPID_PUBLIC_KEY=$NEXT_PUBLIC_VAPID_PUBLIC_KEY
+ENV NEXT_PUBLIC_PAYMENT_GATEWAY=$NEXT_PUBLIC_PAYMENT_GATEWAY
+# 6144, measured on 28 Sep 2026. The type-check phase of `next build` OOMs at
+# 4096 on this tree (dies ~4.0 GB in the Next.js build worker) and completes at
+# 6144 with no GC pressure logged. NOT higher: cloudbuild.yaml builds on
+# E2_HIGHCPU_8 — 8 vCPU but only 8 GB of RAM — so a heap near 8 GB would be
+# killed by the kernel, which presents as a hung build rather than V8's clear
+# out-of-memory error. This value leaves ~2 GB for the OS and Docker.
+#
+# Keep this and the same value in .github/workflows/ci.yml EQUAL. See the note
+# there: if CI's heap is larger, CI passes while the deploy fails.
+ENV NODE_OPTIONS=--max-old-space-size=6144
 
 # Track C desk cutover — NEXT_PUBLIC_*_READ_FROM_DB baked into client bundle
-COPY deploy/.generated/desk-cutover-build.env ./desk-cutover-build.env
+# Committed source of truth (deploy/desk-cutover-build.env), so a Cloud Build
+# trigger with no .env.local can build. Matches the live service exactly.
+COPY deploy/desk-cutover-build.env ./desk-cutover-build.env
 
 RUN set -a \
   && . ./desk-cutover-build.env \
@@ -39,6 +54,13 @@ RUN set -a \
   && npm run build -w web
 
 FROM node:22-bookworm-slim AS runner
+
+# poppler-utils gives `pdftotext`, which the exams desk uses to read the
+# publisher's answer-key PDFs and put each answer on its question. Without it
+# a key is still stored and still opens — it just fills nothing, and says so.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends poppler-utils \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -51,6 +73,8 @@ ARG NEXT_PUBLIC_APP_URL=https://bhbinternational.school
 ARG NEXT_PUBLIC_DEMO_AUTH=true
 ARG NEXT_PUBLIC_SCHOOL_NAME="BHB International School"
 ARG NEXT_PUBLIC_TENANT_SLUG=bhb-international
+ARG NEXT_PUBLIC_VAPID_PUBLIC_KEY
+ARG NEXT_PUBLIC_PAYMENT_GATEWAY
 
 ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -58,6 +82,8 @@ ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
 ENV NEXT_PUBLIC_DEMO_AUTH=$NEXT_PUBLIC_DEMO_AUTH
 ENV NEXT_PUBLIC_SCHOOL_NAME=$NEXT_PUBLIC_SCHOOL_NAME
 ENV NEXT_PUBLIC_TENANT_SLUG=$NEXT_PUBLIC_TENANT_SLUG
+ENV NEXT_PUBLIC_VAPID_PUBLIC_KEY=$NEXT_PUBLIC_VAPID_PUBLIC_KEY
+ENV NEXT_PUBLIC_PAYMENT_GATEWAY=$NEXT_PUBLIC_PAYMENT_GATEWAY
 
 RUN groupadd --system --gid 1001 nodejs \
   && useradd --system --uid 1001 --gid nodejs nextjs

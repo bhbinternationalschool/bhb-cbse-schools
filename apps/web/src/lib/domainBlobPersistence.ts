@@ -1,15 +1,15 @@
 /**
- * Shared Supabase jsonb blob sync (one row per tenant).
- * Used by fees / payments / attendance / exams Week 3–6 overlays.
+ * Shared jsonb blob sync (one row per tenant), routed through the
+ * server-side /api/school-data/domain-blob endpoint — the browser never
+ * talks to Supabase directly for these tables (keeps RBAC enforcement
+ * server-side rather than relying on RLS for authorization).
  */
 
-import type { SupabaseClient } from "@supabase/supabase-js";
-import {
-  createBrowserSupabase,
-  isSupabaseConfigured,
-} from "@/lib/supabase/client";
-import { TENANT } from "@/lib/types";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import { scheduleRetryingPush } from "@/lib/syncRetryStatus";
+import { domainBlobRbacModule } from "@/lib/domainBlobRbac";
+import { isFunctionOnlyWriter } from "@/lib/rbacGuard";
 
 export type DomainBlobTable =
   | "fees_state"
@@ -30,6 +30,7 @@ export type DomainBlobTable =
   | "transport_state"
   | "homework_state"
   | "timetable_state"
+  | "teaching_state"
   | "exam_papers_state"
   | "ptm_state"
   | "student_leave_state"
@@ -44,10 +45,10 @@ export type DomainBlobTable =
   | "wa_templates_state"
   | "automation_state"
   | "admissions_state"
-  | "library_state";
+  | "library_state"
+  | "salary_setup_state";
 
 type BlobRow = {
-  tenant_id: string;
   state: unknown;
   updated_at: string;
 };
@@ -73,7 +74,6 @@ export function createDomainBlobPersistence<T>(opts: {
    */
   writeLocalRaw: (state: T) => void;
 }): DomainBlobPersistence<T> {
-  let tenantIdCache: string | null = null;
   let hydratedOnce = false;
   let pushTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingPush: T | null = null;
@@ -82,8 +82,10 @@ export function createDomainBlobPersistence<T>(opts: {
     return isSupabaseConfigured();
   }
 
+  /** The server version this page last took — sent with every save. */
+  let serverBase = "";
+
   function resetCache() {
-    tenantIdCache = null;
     hydratedOnce = false;
     pendingPush = null;
     if (pushTimer) {
@@ -112,69 +114,85 @@ export function createDomainBlobPersistence<T>(opts: {
     );
   }
 
-  async function clientAndTenant(): Promise<{
-    sb: SupabaseClient;
-    tenantId: string;
-  } | null> {
-    const sb = createBrowserSupabase();
-    if (!sb) return null;
-    if (tenantIdCache) return { sb, tenantId: tenantIdCache };
-    const { data, error } = await sb
-      .from("tenants")
-      .select("id")
-      .eq("slug", TENANT.slug)
-      .maybeSingle();
-    if (error || !data?.id) {
-      console.warn(`[${opts.label}] tenant resolve failed`, error?.message);
-      return null;
-    }
-    tenantIdCache = data.id as string;
-    return { sb, tenantId: tenantIdCache };
-  }
-
   async function fetchRemote(): Promise<BlobRow | null> {
     if (!remoteEnabled()) return null;
-    const ctx = await clientAndTenant();
-    if (!ctx) return null;
-    const { sb, tenantId } = ctx;
-    const { data, error } = await sb
-      .from(opts.table)
-      .select("tenant_id, state, updated_at")
-      .eq("tenant_id", tenantId)
-      .maybeSingle();
-    if (error) {
-      console.warn(`[${opts.label}] pull failed`, error.message);
+    if (typeof window === "undefined") return null;
+    try {
+      const res = await fetch(
+        `/api/school-data/domain-blob?table=${encodeURIComponent(opts.table)}`,
+        { method: "GET", credentials: "same-origin", cache: "no-store" },
+      );
+      if (!res.ok) {
+        console.warn(`[${opts.label}] pull failed`, res.status);
+        return null;
+      }
+      const body = (await res.json()) as {
+        ok?: boolean;
+        state?: unknown;
+        updatedAt?: string;
+      };
+      if (!body.ok) return null;
+      return { state: body.state ?? null, updated_at: body.updatedAt || "" };
+    } catch (e) {
+      console.warn(`[${opts.label}] pull error`, e);
       return null;
     }
-    if (!data) return null;
-    return data as BlobRow;
   }
 
   async function pushState(state: T): Promise<{ ok: boolean; error?: string }> {
     if (!remoteEnabled()) return { ok: true };
-    const ctx = await clientAndTenant();
-    if (!ctx) return { ok: false, error: "Tenant not resolved" };
-    const { sb, tenantId } = ctx;
-    const now = new Date().toISOString();
-    const { error } = await sb.from(opts.table).upsert(
-      {
-        tenant_id: tenantId,
-        state,
-        updated_at: now,
-      },
-      { onConflict: "tenant_id" },
-    );
-    if (error) {
-      console.warn(`[${opts.label}] push failed`, error.message);
-      return { ok: false, error: error.message };
+    if (typeof window === "undefined") return { ok: true };
+    try {
+      const res = await fetch("/api/school-data/domain-blob", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ table: opts.table, state, baseUpdatedAt: serverBase || null }),
+      });
+      const body = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        updatedAt?: string;
+        error?: string;
+      } | null;
+      if (res.status === 409) {
+        // Changed elsewhere, or this page never loaded the saved copy: the
+        // server's copy wins. Forget this page's claim and pull it again.
+        writeMetaUpdatedAt("");
+        hydratedOnce = false;
+        void ensureHydrated();
+        void import("@/components/shell/Toast")
+          .then(({ pushToast }) =>
+            pushToast({
+              kind: "error",
+              message: `${opts.label}: changed on another device — your last change was NOT saved. The screen now shows the current data; please re-apply it.`,
+              durationMs: 9000,
+            }),
+          )
+          .catch(() => {});
+        return { ok: true };
+      }
+      if (!res.ok || !body?.ok) {
+        const message = body?.error || `HTTP ${res.status}`;
+        console.warn(`[${opts.label}] push failed`, message);
+        return { ok: false, error: message };
+      }
+      if (body.updatedAt) serverBase = body.updatedAt;
+      writeMetaUpdatedAt(body.updatedAt || new Date().toISOString());
+      return { ok: true };
+    } catch (e) {
+      console.warn(`[${opts.label}] push error`, e);
+      return { ok: false, error: String(e) };
     }
-    writeMetaUpdatedAt(now);
-    return { ok: true };
   }
 
   function scheduleSync(state: T) {
     if (!remoteEnabled()) return;
     if (typeof window === "undefined") return;
+    // A function holder (Masters → Roles → functions) saves through the
+    // module's desk, merged slice by slice; the whole-module blob is not
+    // theirs to write, and pushing it would only retry a 403 forever.
+    const blobModule = domainBlobRbacModule(opts.table);
+    if (blobModule && isFunctionOnlyWriter(blobModule)) return;
     writeMetaUpdatedAt(new Date().toISOString());
     pendingPush = state;
     if (pushTimer) clearTimeout(pushTimer);
@@ -183,13 +201,19 @@ export function createDomainBlobPersistence<T>(opts: {
       pendingPush = null;
       pushTimer = null;
       if (!payload) return;
-      void pushState(payload);
+      scheduleRetryingPush(`blob:${opts.table}`, () => pushState(payload));
     }, DESK_PUSH_DEBOUNCE_MS);
   }
 
   /**
    * Pull once per tab session. Remote wins when newer (or local empty).
-   * Then push working copy so cloud stays warm.
+   *
+   * Pull-only. This used to end by pushing the local working copy "so the
+   * cloud stays warm" — including when fetchRemote() had failed, so a
+   * browser that could not read the server overwrote it with whatever it
+   * held. Multiplied across ~30 modules that is the login-time write storm
+   * seen in Cloud Run (audit 2026-08-18). Local edits reach the DB through
+   * scheduleSync() from an explicit save only.
    */
   async function ensureHydrated(): Promise<boolean> {
     if (!remoteEnabled()) return false;
@@ -197,6 +221,11 @@ export function createDomainBlobPersistence<T>(opts: {
     hydratedOnce = true;
 
     const remote = await fetchRemote();
+    if (!remote) {
+      // Unknown is not empty: leave local alone, and let a later call retry.
+      hydratedOnce = false;
+      return false;
+    }
     const local = opts.loadLocal();
     const localAt = readMetaUpdatedAt();
     let changed = false;
@@ -210,6 +239,7 @@ export function createDomainBlobPersistence<T>(opts: {
       if (takeRemote) {
         opts.writeLocalRaw(remote.state as T);
         writeMetaUpdatedAt(remoteAt || new Date().toISOString());
+        serverBase = remoteAt;
         changed = true;
       }
     }
@@ -226,10 +256,8 @@ export function createDomainBlobPersistence<T>(opts: {
     ) {
       opts.writeLocalRaw(remoteState);
       writeMetaUpdatedAt(remote?.updated_at || new Date().toISOString());
+      serverBase = remote?.updated_at || "";
       return true;
-    }
-    if (!opts.isEmpty(next)) {
-      await pushState(next);
     }
     return changed;
   }

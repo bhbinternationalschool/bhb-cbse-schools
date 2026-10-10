@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+} from "@/components/ui/erp-roster";
 import { listSessionYearOptions, loadMasters, type MastersState } from "@/lib/masters";
 import {
   adjustHalfDayLeave,
@@ -19,6 +24,7 @@ import {
   normalizeLeaveSettings,
   remainingBalance,
   saveStaffHr,
+  type HalfDaySession,
   type LeaveRequest,
   type LeaveStatus,
   type LeaveTypeCode,
@@ -28,13 +34,18 @@ import {
   canManageStaffLeave,
   resolveSessionStaff,
 } from "@/lib/staffResolve";
+import { hasFeaturePermission } from "@/lib/rbac";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { LeaveAllotmentPanel } from "@/components/staff/LeaveAllotmentPanel";
 
 type LeaveTab =
   | "request"
   | "manage"
   | "direct"
   | "adjust"
-  | "halfday";
+  | "halfday"
+  | "allot";
 
 export function StaffLeavePanel({ ay }: { ay: string }) {
   const session = useDemoSession();
@@ -54,6 +65,9 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     new Date().toISOString().slice(0, 10),
   );
   const [halfDay, setHalfDay] = useState(false);
+  // Which half is taken off — asked whenever "Half day" is ticked, never
+  // guessed (director, 6 Oct 2026).
+  const [halfDaySession, setHalfDaySession] = useState<HalfDaySession>("");
   const [reason, setReason] = useState("");
   const [adjustId, setAdjustId] = useState("");
   const [halfDayId, setHalfDayId] = useState("");
@@ -70,11 +84,15 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
   useEffect(() => {
     reload();
     void (async () => {
-      const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
-      const { ensureStaffHrHydrated } = await import("@/lib/staffHrPersistence");
+      const [{ ensureStaffHydrated }, { ensureStaffHrHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/staffPersistence"),
+          import("@/lib/staffHrPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
       const [didStaff, didHr] = await Promise.all([
-        ensureStaffHydrated(),
-        ensureStaffHrHydrated(),
+        withHydrationSlot(() => ensureStaffHydrated()),
+        withHydrationSlot(() => ensureStaffHrHydrated()),
       ]);
       if (didStaff || didHr) reload();
     })();
@@ -88,7 +106,12 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
 
   const isManager = useMemo(() => {
     if (!masters) return false;
-    return canManageStaffLeave(session, masters);
+    // Staff → Leave approvals (director, 6 Oct 2026) manages leave without
+    // the whole Staff module; the server takes only its slices.
+    return (
+      canManageStaffLeave(session, masters) ||
+      hasFeaturePermission(session, masters, "staff.leave", "edit")
+    );
   }, [masters, session]);
 
   useEffect(() => {
@@ -98,7 +121,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
   }, [isManager, selfStaff]);
 
   useEffect(() => {
-    if (!isManager && (tab === "manage" || tab === "direct" || tab === "adjust" || tab === "halfday")) {
+    if (!isManager && (tab === "manage" || tab === "direct" || tab === "adjust" || tab === "halfday" || tab === "allot")) {
       setTab("request");
     }
   }, [isManager, tab]);
@@ -159,8 +182,10 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     let rows = (hr?.leaveRequests ?? []).filter(
       (r) => r.academicYearCode === ay,
     );
-    if (!isManager && selfStaff) {
-      rows = rows.filter((r) => r.staffId === selfStaff.id);
+    // Not a manager: your own rows, or none — never everyone's because your
+    // record could not be found (it failed open until 2026-09-29).
+    if (!isManager) {
+      rows = rows.filter((r) => !!selfStaff && r.staffId === selfStaff.id);
     }
     const filtered =
       statusFilter === "all"
@@ -169,12 +194,28 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     return filtered.sort((a, b) => b.appliedAt.localeCompare(a.appliedAt));
   }, [hr, ay, statusFilter, isManager, selfStaff]);
 
+  // Newest application first, and "Status" brings the pending ones together —
+  // the list a manager works through. Days sorts as a number.
+  const leaveSort = useTableSort(
+    history,
+    {
+      staff: (r) => staffLabel(r.staffId),
+      type: (r) => r.typeCode,
+      dates: (r) => r.fromDate,
+      days: (r) => r.days,
+      status: (r) => r.status,
+      origin: (r) => r.origin,
+      by: (r) => r.decidedBy || r.appliedBy,
+    },
+    "dates",
+    "desc",
+  );
+
   const balances = useMemo(() => {
     if (!hr || !masters) return [];
-    const people =
-      !isManager && selfStaff
-        ? roster.filter((s) => s.id === selfStaff.id)
-        : roster;
+    const people = !isManager
+      ? roster.filter((s) => !!selfStaff && s.id === selfStaff.id)
+      : roster;
     return people.map((s) => {
       const byType = hr.leaveTypes.map((t) => {
         const bal = hr.leaveBalances.find(
@@ -197,6 +238,17 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     });
   }, [hr, masters, roster, ay, isManager, selfStaff]);
 
+  // Leave types are configurable, so each type column sorts by days left.
+  type BalanceRow = (typeof balances)[number];
+  const balanceColumns: Record<string, (r: BalanceRow) => number | string | null> = {
+    staff: (r) => r.staff.fullName,
+  };
+  for (const t of hr?.leaveTypes ?? []) {
+    balanceColumns[`t_${t.code}`] = (r) =>
+      r.byType.find((b) => b.code === t.code)?.remaining ?? null;
+  }
+  const balanceSort = useTableSort(balances, balanceColumns, "staff");
+
   function flash(msg: string, isError = false) {
     if (isError) {
       setError(msg);
@@ -214,11 +266,22 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
   function resetForm() {
     setReason("");
     setHalfDay(false);
+    setHalfDaySession("");
     if (!isManager && selfStaff) setStaffId(selfStaff.id);
+  }
+
+  /** A half day must say which half is taken off. */
+  function halfDaySessionMissing(): boolean {
+    if (halfDay && !halfDaySession) {
+      flash("Half day: choose morning off or afternoon off", true);
+      return true;
+    }
+    return false;
   }
 
   function onRequest(e: React.FormEvent) {
     e.preventDefault();
+    if (halfDaySessionMissing()) return;
     const targetId =
       !isManager && selfStaff ? selfStaff.id : staffId;
     if (!targetId) {
@@ -235,6 +298,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
       fromDate,
       toDate,
       halfDay,
+      halfDaySession,
       reason,
       appliedBy: session.fullName,
     });
@@ -253,6 +317,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
 
   function onDirect(e: React.FormEvent) {
     e.preventDefault();
+    if (halfDaySessionMissing()) return;
     if (!isManager) {
       flash("Only principal / admin can grant direct leave", true);
       return;
@@ -264,6 +329,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
       fromDate,
       toDate,
       halfDay,
+      halfDaySession,
       reason,
       appliedBy: session.fullName,
     });
@@ -285,11 +351,13 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     setFromDate(r.fromDate);
     setToDate(r.toDate);
     setHalfDay(r.halfDay);
+    setHalfDaySession(r.halfDaySession ?? "");
     setReason(r.reason);
   }
 
   function onAdjust(e: React.FormEvent) {
     e.preventDefault();
+    if (halfDaySessionMissing()) return;
     if (!isManager) {
       flash("Only principal / admin can adjust leave", true);
       return;
@@ -303,6 +371,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
       fromDate,
       toDate,
       halfDay,
+      halfDaySession,
       typeCode,
       reason,
       adjustedBy: session.fullName,
@@ -383,6 +452,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
           { id: "direct", label: "Direct leave" },
           { id: "adjust", label: "Adjust leave" },
           { id: "halfday", label: "Adjust half-day" },
+          { id: "allot", label: "Allot leave days" },
         ] as const)
       : []),
   ];
@@ -390,7 +460,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
   return (
     <div className="space-y-5">
       {error ? (
-        <p className="rounded-lg bg-[#fee2e2] px-3 py-2 text-sm font-medium text-[#b91c1c]">
+        <p className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-medium text-[var(--danger)]">
           {error}
         </p>
       ) : null}
@@ -400,7 +470,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
         </p>
       ) : null}
 
-      <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-2.5 text-sm text-[var(--muted)]">
+      <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-2.5 text-sm text-[var(--muted)]">
         {isManager ? (
           <>
             Signed in as <strong className="text-[var(--brand-deep)]">{session.fullName}</strong>{" "}
@@ -421,11 +491,11 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
       </p>
 
       {settings.autoApproveLeaves ? (
-        <p className="rounded-xl border border-[rgba(21,128,61,0.25)] bg-[rgba(21,128,61,0.08)] px-4 py-2.5 text-sm text-[#15803d]">
+        <p className="rounded-xl border border-[rgba(21,128,61,0.25)] bg-[rgba(21,128,61,0.08)] px-4 py-2.5 text-sm text-[var(--success)]">
           Auto-approve is on — new leave requests are approved immediately.
         </p>
       ) : settings.twoLevelApproval ? (
-        <p className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-[rgba(32,48,80,0.03)] px-4 py-2.5 text-sm text-[var(--muted)]">
+        <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-2.5 text-sm text-[var(--muted)]">
           Two-level approval is on — Level 1 then Level 2.
         </p>
       ) : null}
@@ -446,7 +516,9 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                   ? ("amber" as const)
                   : t.id === "adjust"
                     ? ("violet" as const)
-                    : ("sky" as const),
+                    : t.id === "allot"
+                      ? ("teal" as const)
+                      : ("sky" as const),
         }))}
       />
 
@@ -461,6 +533,8 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
           fromDate={fromDate}
           toDate={toDate}
           halfDay={halfDay}
+          halfDaySession={halfDaySession}
+          onHalfDaySession={setHalfDaySession}
           reason={reason}
           daysPreview={daysPreview}
           leaveTypes={hr.leaveTypes}
@@ -494,6 +568,8 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
           fromDate={fromDate}
           toDate={toDate}
           halfDay={halfDay}
+          halfDaySession={halfDaySession}
+          onHalfDaySession={setHalfDaySession}
           reason={reason}
           daysPreview={daysPreview}
           leaveTypes={hr.leaveTypes}
@@ -543,7 +619,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
               showLevel1
             />
           ) : (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 text-sm text-[var(--muted)]">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm text-[var(--muted)]">
               Approve or reject staff leave requests here. Use Direct leave to
               grant leave without a request, or Adjust to change dates / type.
             </div>
@@ -553,7 +629,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
 
       {tab === "adjust" && isManager ? (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="text-sm font-bold text-[var(--brand-deep)]">
               Select leave to adjust
             </h2>
@@ -567,8 +643,8 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                       type="button"
                       className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${
                         adjustId === r.id
-                          ? "border-[var(--brand-deep)] bg-[rgba(32,48,80,0.06)]"
-                          : "border-[rgba(32,48,80,0.1)]"
+                          ? "border-[var(--brand-deep)] bg-[var(--surface-sunken)]"
+                          : "border-[var(--border)]"
                       }`}
                       onClick={() => loadAdjust(r.id)}
                     >
@@ -579,7 +655,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                         {r.typeCode} · {r.fromDate}
                         {r.toDate !== r.fromDate ? ` → ${r.toDate}` : ""} ·{" "}
                         {r.days}d · {r.status}
-                        {r.halfDay ? " · half" : ""}
+                        {r.halfDay ? ` · half${r.halfDaySession ? ` (${r.halfDaySession} off)` : ""}` : ""}
                       </div>
                     </button>
                   </li>
@@ -598,6 +674,8 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
             fromDate={fromDate}
             toDate={toDate}
             halfDay={halfDay}
+            halfDaySession={halfDaySession}
+            onHalfDaySession={setHalfDaySession}
             reason={reason}
             daysPreview={daysPreview}
             leaveTypes={hr.leaveTypes}
@@ -620,8 +698,21 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
         </div>
       ) : null}
 
+      {tab === "allot" && isManager ? (
+        <LeaveAllotmentPanel
+          ay={ay}
+          hr={hr}
+          roster={roster}
+          by={session.fullName}
+          onChanged={(next, message) => {
+            setHr(next);
+            flash(message);
+          }}
+        />
+      ) : null}
+
       {tab === "halfday" && isManager ? (
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 space-y-4 max-w-xl">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-4 max-w-xl">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             Adjust half-day leave
           </h2>
@@ -670,8 +761,8 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
         </div>
       ) : null}
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             Leave balances · {ay}
             {!isManager && selfStaff ? " (yours)" : ""}
@@ -680,7 +771,7 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
                 onClick={() => {
                   const years = listSessionYearOptions(masters ?? undefined);
                   const idx = years.findIndex((y) => y.code === ay);
@@ -713,23 +804,21 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
           ) : null}
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead className="bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+          <ErpTable>
+            <ErpTableHead>
               <tr>
-                <th className="px-4 py-2">Staff</th>
+                <ErpSortTh sort={balanceSort} field="staff" className="px-4 py-2">Staff</ErpSortTh>
                 {hr.leaveTypes.map((t) => (
-                  <th key={t.code} className="px-3 py-2 text-center">
+                  <ErpSortTh key={t.code} sort={balanceSort} field={`t_${t.code}`} className="px-3 py-2 text-center">
                     {t.code}
-                  </th>
+                  </ErpSortTh>
                 ))}
+                <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
-            </thead>
-            <tbody>
-              {balances.map(({ staff, byType }) => (
-                <tr
-                  key={staff.id}
-                  className="border-t border-[rgba(32,48,80,0.06)]"
-                >
+            </ErpTableHead>
+            <ErpTableBody>
+              {balanceSort.rows.map(({ staff, byType }) => (
+                <tr key={staff.id}>
                   <td className="px-4 py-2 font-medium text-[var(--brand-deep)]">
                     {staff.empCode} · {staff.fullName}
                   </td>
@@ -781,6 +870,9 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                       ) : null}
                     </td>
                   ))}
+                  <td className="px-2 py-1.5 text-right">
+                    <RowActionMenu row={staff} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.id))}/edit`; } }]} />
+                  </td>
                 </tr>
               ))}
               {balances.length === 0 ? (
@@ -793,13 +885,13 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                   </td>
                 </tr>
               ) : null}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
       </div>
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             Request history
             {!isManager ? " (yours)" : ""}
@@ -819,24 +911,22 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
           </select>
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead className="bg-[rgba(32,48,80,0.04)] text-[11px] uppercase tracking-wide text-[var(--muted)]">
+          <ErpTable>
+            <ErpTableHead>
               <tr>
-                <th className="px-4 py-2">Staff</th>
-                <th className="px-3 py-2">Type</th>
-                <th className="px-3 py-2">Dates</th>
-                <th className="px-3 py-2">Days</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Origin</th>
-                <th className="px-3 py-2">By</th>
+                <ErpSortTh sort={leaveSort} field="staff" className="px-4 py-2">Staff</ErpSortTh>
+                <ErpSortTh sort={leaveSort} field="type">Type</ErpSortTh>
+                <ErpSortTh sort={leaveSort} field="dates">Dates</ErpSortTh>
+                <ErpSortTh sort={leaveSort} field="days">Days</ErpSortTh>
+                <ErpSortTh sort={leaveSort} field="status">Status</ErpSortTh>
+                <ErpSortTh sort={leaveSort} field="origin">Origin</ErpSortTh>
+                <ErpSortTh sort={leaveSort} field="by" className="px-3 py-2">By</ErpSortTh>
+                <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
-            </thead>
-            <tbody>
-              {history.map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-t border-[rgba(32,48,80,0.06)]"
-                >
+            </ErpTableHead>
+            <ErpTableBody>
+              {leaveSort.rows.map((r) => (
+                <tr key={r.id}>
                   <td className="px-4 py-2">{staffLabel(r.staffId)}</td>
                   <td className="px-3 py-2">{r.typeCode}</td>
                   <td className="px-3 py-2 text-xs text-[var(--muted)]">
@@ -857,6 +947,9 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                         ? r.level1By || r.appliedBy
                         : r.decidedBy || r.appliedBy}
                   </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <RowActionMenu row={r} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
+                  </td>
                 </tr>
               ))}
               {history.length === 0 ? (
@@ -869,8 +962,8 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                   </td>
                 </tr>
               ) : null}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
       </div>
     </div>
@@ -888,6 +981,8 @@ function LeaveForm({
   fromDate,
   toDate,
   halfDay,
+  halfDaySession,
+  onHalfDaySession,
   reason,
   daysPreview,
   leaveTypes,
@@ -911,6 +1006,8 @@ function LeaveForm({
   fromDate: string;
   toDate: string;
   halfDay: boolean;
+  halfDaySession: HalfDaySession;
+  onHalfDaySession: (v: HalfDaySession) => void;
   reason: string;
   daysPreview: number;
   leaveTypes: { code: string; name: string; paid: boolean }[];
@@ -927,7 +1024,7 @@ function LeaveForm({
   return (
     <form
       onSubmit={onSubmit}
-      className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 space-y-3 max-w-xl"
+      className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-3 max-w-xl"
     >
       <h2 className="text-sm font-bold text-[var(--brand-deep)]">{title}</h2>
       {hint ? (
@@ -977,6 +1074,32 @@ function LeaveForm({
           Half day (0.5)
         </label>
       </div>
+      {halfDay ? (
+        <fieldset className="text-sm" disabled={disabled}>
+          <legend className="mb-1 block text-[11px] text-[var(--muted)]">
+            Which half is off? The other half must be punched for the day to count as a half day.
+          </legend>
+          <div className="flex flex-wrap gap-4">
+            {(
+              [
+                ["morning", "Morning off (come in the afternoon)"],
+                ["afternoon", "Afternoon off (work the morning)"],
+              ] as const
+            ).map(([v, label]) => (
+              <label key={v} className="flex items-center gap-2 font-semibold text-[var(--brand-deep)]">
+                <input
+                  type="radio"
+                  name="halfDaySession"
+                  value={v}
+                  checked={halfDaySession === v}
+                  onChange={() => onHalfDaySession(v)}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-sm">
           <span className="mb-1 block text-[11px] text-[var(--muted)]">From</span>
@@ -1045,7 +1168,7 @@ function ApprovalQueue({
   showLevel1?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <h2 className="text-sm font-bold text-[var(--brand-deep)]">{title}</h2>
       {rows.length === 0 ? (
         <p className="mt-3 text-sm text-[var(--muted)]">{empty}</p>
@@ -1054,7 +1177,7 @@ function ApprovalQueue({
           {rows.map((r) => (
             <li
               key={r.id}
-              className="rounded-lg border border-[rgba(32,48,80,0.1)] px-3 py-2"
+              className="rounded-lg border border-[var(--border)] px-3 py-2"
             >
               <div className="text-sm font-semibold text-[var(--brand-deep)]">
                 {staffLabel(r.staffId)}
@@ -1076,14 +1199,14 @@ function ApprovalQueue({
               <div className="mt-2 flex gap-2">
                 <button
                   type="button"
-                  className="rounded-lg bg-[rgba(21,128,61,0.12)] px-3 py-1 text-xs font-bold text-[#15803d]"
+                  className="rounded-lg bg-[rgba(21,128,61,0.12)] px-3 py-1 text-xs font-bold text-[var(--success)]"
                   onClick={() => onDecide(r.id, "approved")}
                 >
                   {approveLabel}
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg bg-[#fee2e2] px-3 py-1 text-xs font-bold text-[#b91c1c]"
+                  className="rounded-lg bg-[var(--danger-soft)] px-3 py-1 text-xs font-bold text-[var(--danger)]"
                   onClick={() => onDecide(r.id, "rejected")}
                 >
                   Reject
@@ -1106,12 +1229,12 @@ function StatusPill({ status }: { status: LeaveStatus }) {
         : status;
   const cls =
     status === "approved"
-      ? "bg-[rgba(21,128,61,0.12)] text-[#15803d]"
+      ? "bg-[rgba(21,128,61,0.12)] text-[var(--success)]"
       : status === "rejected"
-        ? "bg-[#fee2e2] text-[#b91c1c]"
+        ? "bg-[var(--danger-soft)] text-[var(--danger)]"
         : status === "pending_l2"
           ? "bg-[rgba(197,160,40,0.2)] text-[var(--brand-deep)]"
-          : "bg-[rgba(32,48,80,0.08)] text-[var(--muted)]";
+          : "bg-[var(--surface-sunken)] text-[var(--muted)]";
   return (
     <span
       className={`rounded-md px-2 py-0.5 text-[10px] font-black uppercase ${cls}`}

@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
-import { demoSessionCookieName, type DemoSession } from "@/lib/auth";
-import { appSessionCookieOptions } from "@/lib/authCookies.server";
-import { DEFAULT_AY } from "@/lib/masters";
-import { resolveParentHousehold } from "@/lib/parentPortal";
+import { parentSessionResponse } from "@/lib/parentSession.server";
+import { readReviewLogin, isReviewLoginPair } from "@/lib/reviewLogin.server";
+import { resolveHouseholdByMobileServer } from "@/lib/parentHousehold.server";
 import { verifyParentOtp } from "@/lib/parentOtp.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadSis } from "@/lib/sis";
-import { TENANT } from "@/lib/types";
-import { writeAudit } from "@/lib/audit.server";
 
 export const runtime = "nodejs";
 
@@ -25,43 +22,44 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Mobile and OTP required" }, { status: 400 });
     }
 
-    const verified = await verifyParentOtp({ mobile, code });
-    if (!verified.ok) {
-      return NextResponse.json({ error: verified.reason }, { status: 401 });
+    // App-store review access: Play/App Store reviewers cannot receive a
+    // WhatsApp OTP, so a fixed mobile+code pair (env-configured, disabled
+    // unless all three vars are set) signs into one designated household.
+    const review = readReviewLogin();
+    const reviewHousehold = review?.householdId;
+    const isReviewLogin = isReviewLoginPair(mobile, code);
+
+    if (!isReviewLogin) {
+      const verified = await verifyParentOtp({ mobile, code });
+      if (!verified.ok) {
+        return NextResponse.json({ error: verified.reason }, { status: 401 });
+      }
     }
 
     await ensureSchoolMirrorHydrated();
-    const sis = loadSis();
-    const hh = resolveParentHousehold(sis, { mobile });
+    // The session minted below is this household's whole record, so the
+    // mobile must resolve to it exactly. resolveParentHousehold() used to
+    // sit here and never returned null, which meant a verified code from
+    // any number signed in to an unrelated family.
+    const hh = isReviewLogin
+      ? loadSis().households.find((h) => h.id === reviewHousehold) || null
+      : (await resolveHouseholdByMobileServer(mobile))?.household || null;
     if (!hh) {
-      return NextResponse.json({ error: "Household not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "No parent record found for this mobile. Contact school office." },
+        { status: 404 },
+      );
     }
 
-    const session: DemoSession = {
-      persona: "parent",
-      fullName: hh.guardianName || "Parent",
-      roleCode: "parent",
-      householdId: hh.id,
-      tenantSlug: TENANT.slug,
-      academicYearCode: body.academicYearCode?.trim() || DEFAULT_AY,
-    };
-
-    await writeAudit({
-      session,
-      module: "auth",
-      action: "create",
-      entityType: "parent_session",
-      entityId: hh.id,
-      summary: `Parent OTP login ${mobile.slice(-4)}`,
+    // Academic year, inactive-family check, audit and cookie: one place.
+    return parentSessionResponse({
+      household: hh,
+      requestedAy: body.academicYearCode,
+      checkInactive: !isReviewLogin,
+      auditSummary: isReviewLogin
+        ? "Store-review parent login (fixed review credentials)"
+        : `Parent OTP login ${mobile.slice(-4)}`,
     });
-
-    const res = NextResponse.json({ ok: true, session });
-    res.cookies.set(
-      demoSessionCookieName(),
-      encodeURIComponent(JSON.stringify(session)),
-      appSessionCookieOptions(),
-    );
-    return res;
   } catch (e) {
     console.error("[otp/verify]", e);
     return NextResponse.json({ error: "Verification failed" }, { status: 500 });

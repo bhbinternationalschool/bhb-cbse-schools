@@ -23,10 +23,14 @@ export { scheduleGalleryDeskSync };
 
 export async function ensureGalleryHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
-  markDeskHydrated(MODULE);
 
   const readFromDb = galleryReadFromDbEnabled();
-  const { bundle, changed } = await hydrateGalleryDeskFromDb(readFromDb);
+  const { bundle, changed, ok } = await hydrateGalleryDeskFromDb(readFromDb);
+  if (!ok) {
+    // Fetch failed — do not lock hydration flag; caller can retry later.
+    return false;
+  }
+  markDeskHydrated(MODULE);
   if (!changed || (bundle.albums.length === 0 && !readFromDb)) return false;
 
   writeSchoolCommsLocalRaw(
@@ -34,7 +38,8 @@ export async function ensureGalleryHydrated(): Promise<boolean> {
       preferDb: readFromDb,
     }),
   );
-  scheduleGalleryDeskSync();
+  // Pull-only under desk-as-truth — hydrate must not re-push (audit 2026-08-18).
+  if (!readFromDb) scheduleGalleryDeskSync();
   return true;
 }
 

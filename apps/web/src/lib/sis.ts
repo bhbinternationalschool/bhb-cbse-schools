@@ -4,14 +4,17 @@
  */
 
 import { activeSessionCode } from "@/lib/sessionWriteGuard";
+import { normalizePhotoConsent, type PhotoConsent } from "@/lib/photoConsent";
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { reviewDemoHouseholdIds, withoutReviewDemo } from "@/lib/reviewDemoRecords";
+import { stripEmptyDocsList, stripEmptyList } from "@/lib/wirePayload";
 import {
   DEFAULT_AY,
   DEMO_STUDENT_CLASS_BY_NAME,
   currentAcademicYearCode,
   ensureStudentClassLinks,
   loadMasters,
-  saveMasters,
   type DemoStudent,
   type FeeStudentType,
   type MastersState,
@@ -26,11 +29,18 @@ import {
 } from "@/lib/schoolDataMirror";
 import { deskSkipBlobPushClient } from "@/lib/deskCutover";
 import {
+  normalizeHouseholdChannel,
+  normalizeHouseholdLanguage,
+  normalizeQuietTime,
+} from "@/lib/householdPrefs";
+import { writeMastersLocalRaw } from "@/lib/mastersPersistence";
+import {
   normalizeCurriculum,
   normalizeCurriculumRequest,
   type CurriculumRequest,
   type StudentCurriculum,
 } from "@/lib/studentCurriculum";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type { CurriculumRequest, StudentCurriculum } from "@/lib/studentCurriculum";
 
@@ -68,13 +78,20 @@ export type StudentDocKey =
   | "casteCert"
   | "incomeCert";
 
-/** Per-doc vault entry — fileUrl is https or data: (demo) until Supabase Storage. */
+/**
+ * Per-doc vault entry. fileUrl is an app-internal proxy URL
+ * (/api/documents/{driveFileId}) once stored in Google Drive — see
+ * docs/GOOGLE_DRIVE_DOCUMENTS_PLAN.md. Older records may still hold a
+ * data: URL from before that cutover.
+ */
 export type StudentDocFile = {
   status: DocStatus;
   fileName: string;
   mimeType: string;
   size: number;
   fileUrl: string;
+  /** Set once the file is in Drive; empty for legacy/unmigrated records. */
+  driveFileId?: string;
   uploadedAt: string;
   /** Parent/guardian who submitted for verification */
   submittedBy?: string;
@@ -114,6 +131,23 @@ export type Household = {
   altMobile: string;
   /** Guardian / parent photo (data URL or https) */
   guardianPhotoUrl: string;
+  /**
+   * Communication preferences (lib/householdPrefs.ts). "" = not asked —
+   * callers fall back to the school default and must not record the
+   * fallback as the family's choice.
+   */
+  preferredLanguage: string;
+  channelPreference: string;
+  /**
+   * Whether this family agreed to photographs of their child being
+   * published. Same "" = not-asked convention as the preferences above, and
+   * for the same reason: the fallback must never be stored as their answer.
+   * The website reads this. See lib/photoConsent.ts.
+   */
+  photoConsent?: PhotoConsent;
+  /** "HH:MM" IST; both set = do-not-disturb window for non-urgent sends */
+  quietHoursStart: string;
+  quietHoursEnd: string;
   /** Google Maps geocode — shared by siblings on this household */
   geoLat?: number;
   geoLng?: number;
@@ -124,6 +158,8 @@ export type Household = {
   geoConfidence?: "high" | "low" | "failed";
   /** Fingerprint of address fields when geo was set */
   geoAddressKey?: string;
+  /** Optimistic-locking token — see SisStudent.revisionAt. Server-owned. */
+  revisionAt: string;
 };
 
 export type SisStudent = {
@@ -173,8 +209,10 @@ export type SisStudent = {
   placeOfBirth: string;
   aadhaarLast4: string;
   /**
-   * Full 12-digit Aadhaar while not yet verified on UDISE+.
-   * After `aadhaarVerification === "verified_udise"`, UI shows last 4 only.
+   * Full 12-digit Aadhaar. Kept after UDISE+ verification too — the office
+   * needs the whole number on the register (2026-09-06); it was previously
+   * blanked on verify and, worse, never had a database column at all, so it
+   * only ever lived in one browser. Persisted in sis_students.profile.
    */
   aadhaarNumber: string;
   /** UDISE+ Aadhaar validation */
@@ -187,7 +225,12 @@ export type SisStudent = {
   previousSchool: string;
   previousTcNo: string;
   previousUdise: string;
-  /** Father / mother full Aadhaar (needed for APAAR) — masked after verified */
+  /**
+   * Father / mother full Aadhaar — needed for APAAR, and kept whatever the
+   * verification state says, exactly like the student's own number above.
+   * Staff surfaces show it in full (displayAadhaar); parent-facing views mask
+   * it (maskAadhaar). Persisted in sis_students.profile.
+   */
   fatherAadhaarNumber: string;
   motherAadhaarNumber: string;
   fatherAadhaarVerification: AadhaarVerificationStatus;
@@ -196,6 +239,18 @@ export type SisStudent = {
   udiseComplianceRemindedAt: string;
   /** Last sync from UDISE+ Students_Details */
   udiseAadhaarValidationStatus: string;
+  /**
+   * The parent's APAAR ID answer, given on WhatsApp (lib/apaarConsent).
+   * "" = not asked or not answered. APAAR is voluntary: "refused" is a
+   * valid, final answer, not a gap to chase.
+   */
+  apaarConsent: "" | "given" | "refused";
+  /** When the answer was given (ISO). */
+  apaarConsentAt: string;
+  /** Who gave it and how: "<guardian> · WhatsApp +91… · <message id>". */
+  apaarConsentBy: string;
+  /** Drive file id of the printable record made at the tap (lib/apaarConsentPdf). */
+  apaarConsentFileId: string;
   udiseMbuStatus: string;
   /** Portal class label (informational — never overwrites SIS class) */
   udisePortalClassHint: string;
@@ -238,6 +293,8 @@ export type SisStudent = {
   /** Health record */
   heightCm: string;
   weightKg: string;
+  /** YYYY-MM-DD the height/weight were last measured (My class → Height & weight). */
+  measuredOn: string;
   /** Children With Special Needs (a.k.a. divyang / handicapped) */
   isCwsn: boolean;
   disabilityDetails: string;
@@ -276,6 +333,15 @@ export type SisStudent = {
   curriculum: StudentCurriculum | null;
   /** Assigned student tag ids (shown before name across the ERP) */
   tagIds: string[];
+  /**
+   * Optimistic-locking token — the `updated_at` this record carried when it
+   * was last read from the database. Server-owned: never set or edited by
+   * feature code. On push the server compares it against the stored value
+   * and refuses the write if another user has saved in the meantime, which
+   * is what stops two staff overwriting each other. Empty means "no known
+   * base version" (a record created locally and not yet synced).
+   */
+  revisionAt: string;
 };
 
 /** School-defined labels (RTE cohort, sports, staff ward, etc.) */
@@ -359,6 +425,20 @@ export const BLOOD_GROUPS = [
   "O-",
 ];
 
+/**
+ * "B(+)", "b +ve", "O Positive" → "B+" / "O+"; "" when it is not a blood
+ * group. The old ERP import wrote "B(+)" — 17 of 23 recorded groups on
+ * 7 Oct 2026 — which nothing that compared against BLOOD_GROUPS recognised.
+ */
+export function normalizeBloodGroup(raw: string): string {
+  const t = (raw || "")
+    .toUpperCase()
+    .replace(/[\s()]/g, "")
+    .replace(/(POSITIVE|POS|\+VE)$/, "+")
+    .replace(/(NEGATIVE|NEG|-VE)$/, "-");
+  return (BLOOD_GROUPS as readonly string[]).includes(t) && t ? t : "";
+}
+
 export function emptyDocFile(status: DocStatus = "missing"): StudentDocFile {
   return {
     status,
@@ -366,6 +446,7 @@ export function emptyDocFile(status: DocStatus = "missing"): StudentDocFile {
     mimeType: "",
     size: 0,
     fileUrl: "",
+    driveFileId: "",
     uploadedAt: "",
     submittedBy: "",
     submittedAt: "",
@@ -429,6 +510,7 @@ export function normalizeDocFile(raw: unknown): StudentDocFile {
     mimeType: typeof o.mimeType === "string" ? o.mimeType : "",
     size: typeof o.size === "number" ? o.size : 0,
     fileUrl,
+    driveFileId: typeof o.driveFileId === "string" ? o.driveFileId : "",
     uploadedAt: typeof o.uploadedAt === "string" ? o.uploadedAt : "",
     submittedBy: typeof o.submittedBy === "string" ? o.submittedBy : "",
     submittedAt: typeof o.submittedAt === "string" ? o.submittedAt : "",
@@ -537,12 +619,12 @@ export function displayAadhaar(input: {
   last4?: string;
   verification?: AadhaarVerificationStatus;
 }): string {
+  // Staff-facing: the whole number whenever it is known, whatever the
+  // verification state. Only when just the last four exist is it masked.
+  // (Parent-facing views use maskAadhaar and never show the full number.)
   const last4 =
     (input.last4 || "").replace(/\D/g, "").slice(-4) ||
     (input.number || "").replace(/\D/g, "").slice(-4);
-  if (input.verification === "verified_udise") {
-    return last4 ? `********${last4}` : "—";
-  }
   const full = (input.number || "").replace(/\D/g, "");
   if (full.length === 12) return full.replace(/(\d{4})(?=\d)/g, "$1 ");
   if (last4) return `********${last4}`;
@@ -558,7 +640,7 @@ export function hasStoredAadhaar(input: {
   return full.length === 12 || last4.length === 4;
 }
 
-/** After UDISE verify: keep last4, clear full number from display store. */
+/** After UDISE verify: mark verified; the full number (when known) stays. */
 export function applyAadhaarUdiseVerified(input: {
   number?: string;
   last4?: string;
@@ -571,15 +653,130 @@ export function applyAadhaarUdiseVerified(input: {
     (input.last4 || "").replace(/\D/g, "").slice(-4) ||
     (input.number || "").replace(/\D/g, "").slice(-4);
   return {
-    aadhaarNumber: "",
+    aadhaarNumber: normalizeAadhaarFull(input.number || ""),
     aadhaarLast4: last4,
     aadhaarVerification: "verified_udise",
   };
 }
 
+/**
+ * True for a real UDISE+ portal id, false for the placeholders a spreadsheet
+ * import leaves behind: blank, "NA", a run of asterisks (a masked cell), or a
+ * run of zeros.
+ *
+ * Lives here rather than in udiseCompliance so that the register's filters,
+ * the Overview counts and the UDISE+ worklist all answer "does this child
+ * have a PEN?" the same way. They did not: the filter asked only whether the
+ * cell was blank, so ten students carrying a PEN of "0" or "NA" were counted
+ * as registered by "Missing PEN" and as unregistered by the worklist
+ * (2026-09-06).
+ */
+export function isRealPortalId(raw: string | undefined | null): boolean {
+  const v = String(raw ?? "").trim();
+  if (!v) return false;
+  if (/^na$/i.test(v)) return false;
+  if (/^\*+$/.test(v)) return false;
+  if (/^0+$/.test(v)) return false;
+  return true;
+}
+
 export function isValidPan(value: string): boolean {
   if (!value) return true;
   return /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value);
+}
+
+/**
+ * SisStudent fields that have NO column in sis_students. They travel in the
+ * `profile` jsonb column (studentToRow / rowToStudent in
+ * sisNormalized.server.ts). Before 2026-09-06 these were silently dropped on
+ * every push — full Aadhaar numbers, verification, the UDISE+ flags, caste,
+ * permanent address, bank, health, parents' occupation … all lost the moment
+ * another browser hydrated. Add a field to SisStudent → add it here, unless
+ * it gets its own column or its own store (curriculum, revisionAt).
+ */
+export const STUDENT_PROFILE_KEYS = [
+  "legacyErpAdmissionNo",
+  "systemAdmissionPending",
+  "importedViaLegacyList",
+  "aadhaarNumber",
+  "aadhaarVerification",
+  "fatherAadhaarNumber",
+  "motherAadhaarNumber",
+  "fatherAadhaarVerification",
+  "motherAadhaarVerification",
+  "udiseComplianceRemindedAt",
+  "udiseAadhaarValidationStatus",
+  "apaarConsent",
+  "apaarConsentAt",
+  "apaarConsentBy",
+  "apaarConsentFileId",
+  "udiseMbuStatus",
+  "udisePortalClassHint",
+  "udiseAgeBelowClassAlert",
+  "udiseInboundTransferPending",
+  "promotionLocked",
+  "promotionLockReason",
+  "caste",
+  "admissionClass",
+  "admissionFormNo",
+  "registrationNo",
+  "tcNo",
+  "previousSchoolClass",
+  "previousSchoolYear",
+  "permanentAddress",
+  "permanentCity",
+  "permanentState",
+  "permanentPincode",
+  "transportRoute",
+  "heightCm",
+  "weightKg",
+  "measuredOn",
+  "isCwsn",
+  "disabilityDetails",
+  "medicalNotes",
+  "fatherOccupation",
+  "motherOccupation",
+  "fatherQualification",
+  "motherQualification",
+  "annualIncome",
+  "bankName",
+  "bankAccountNo",
+  "bankIfsc",
+  "secondLanguage",
+  "thirdLanguage",
+  "hobbies",
+  "fatherPhotoUrl",
+  "motherPhotoUrl",
+  "rfidNo",
+  "biometricId",
+  "loginUsername",
+  "loginPassword",
+  "tagIds",
+] as const satisfies readonly (keyof SisStudent)[];
+
+export type StudentProfileKey = (typeof STUDENT_PROFILE_KEYS)[number];
+
+/** The profile bag for a student: only keys with a meaningful value. */
+export function studentProfileExtras(s: SisStudent): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of STUDENT_PROFILE_KEYS) {
+    const v = s[k];
+    if (v === undefined || v === null || v === "" || v === false) continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/** Read back the profile bag defensively (unknown jsonb → partial student). */
+export function studentProfileFromRow(v: unknown): Partial<SisStudent> {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+  const src = v as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of STUDENT_PROFILE_KEYS) {
+    if (k in src) out[k] = src[k];
+  }
+  return out as Partial<SisStudent>;
 }
 
 /** Normalize legacy / partial student rows after load. */
@@ -595,7 +792,7 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     legacyErpAdmissionNo: s.legacyErpAdmissionNo ?? "",
     systemAdmissionPending: !!s.systemAdmissionPending,
     importedViaLegacyList: !!s.importedViaLegacyList,
-    fullName: cleanRepeatedName(s.fullName ?? ""),
+    fullName: toRosterCase(cleanRepeatedName(s.fullName ?? "")),
     gender: s.gender ?? "",
     dob: s.dob ?? "",
     status: s.status === "inactive" ? "inactive" : "active",
@@ -607,8 +804,8 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     studentType: s.studentType ?? "NEW",
     feeGroupId: s.feeGroupId ?? null,
     joinedOn: s.joinedOn ?? "",
-    fatherName: cleanRepeatedName(s.fatherName ?? ""),
-    motherName: cleanRepeatedName(s.motherName ?? ""),
+    fatherName: toRosterCase(cleanRepeatedName(s.fatherName ?? "")),
+    motherName: toRosterCase(cleanRepeatedName(s.motherName ?? "")),
     fatherMobile: normalizeMobile(s.fatherMobile ?? ""),
     motherMobile: normalizeMobile(s.motherMobile ?? ""),
     fatherAadhaarLast4: (() => {
@@ -621,20 +818,20 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
       const full = normalizeAadhaarFull(s.motherAadhaarNumber ?? "", l4);
       return l4 || full.slice(-4);
     })(),
-    fatherAadhaarNumber:
-      String(s.fatherAadhaarVerification) === "verified_udise"
-        ? ""
-        : normalizeAadhaarFull(
-            s.fatherAadhaarNumber ?? "",
-            (s.fatherAadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
-          ),
-    motherAadhaarNumber:
-      String(s.motherAadhaarVerification) === "verified_udise"
-        ? ""
-        : normalizeAadhaarFull(
-            s.motherAadhaarNumber ?? "",
-            (s.motherAadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
-          ),
+    // Kept whatever the verification says, exactly like the student's own
+    // number above. Blanking on "verified_udise" was removed for the student
+    // on 2026-09-06 and missed here: the office typed a father's 12 digits,
+    // the UDISE+ sync marked the parent verified, and the number the school
+    // needs for APAAR was thrown away by the next normalize — with nothing
+    // anywhere to type it back from.
+    fatherAadhaarNumber: normalizeAadhaarFull(
+      s.fatherAadhaarNumber ?? "",
+      (s.fatherAadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
+    ),
+    motherAadhaarNumber: normalizeAadhaarFull(
+      s.motherAadhaarNumber ?? "",
+      (s.motherAadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
+    ),
     fatherAadhaarVerification: normalizeAadhaarVerification(
       s.fatherAadhaarVerification,
       s.fatherAadhaarNumber || s.fatherAadhaarLast4,
@@ -660,13 +857,10 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
       const full = normalizeAadhaarFull(s.aadhaarNumber ?? "", l4);
       return l4 || full.slice(-4);
     })(),
-    aadhaarNumber:
-      String(s.aadhaarVerification) === "verified_udise"
-        ? ""
-        : normalizeAadhaarFull(
-            s.aadhaarNumber ?? "",
-            (s.aadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
-          ),
+    aadhaarNumber: normalizeAadhaarFull(
+      s.aadhaarNumber ?? "",
+      (s.aadhaarLast4 ?? "").replace(/\D/g, "").slice(0, 4),
+    ),
     aadhaarVerification: normalizeAadhaarVerification(
       s.aadhaarVerification,
       s.aadhaarNumber || s.aadhaarLast4,
@@ -680,6 +874,10 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     previousUdise: s.previousUdise ?? "",
     udiseComplianceRemindedAt: s.udiseComplianceRemindedAt ?? "",
     udiseAadhaarValidationStatus: s.udiseAadhaarValidationStatus ?? "",
+    apaarConsent: s.apaarConsent === "given" || s.apaarConsent === "refused" ? s.apaarConsent : "",
+    apaarConsentAt: s.apaarConsentAt ?? "",
+    apaarConsentBy: s.apaarConsentBy ?? "",
+    apaarConsentFileId: s.apaarConsentFileId ?? "",
     udiseMbuStatus: s.udiseMbuStatus ?? "",
     udisePortalClassHint: s.udisePortalClassHint ?? "",
     udiseAgeBelowClassAlert: !!s.udiseAgeBelowClassAlert,
@@ -700,6 +898,7 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     transportRoute: s.transportRoute ?? "",
     heightCm: s.heightCm ?? "",
     weightKg: s.weightKg ?? "",
+    measuredOn: s.measuredOn ?? "",
     isCwsn: !!s.isCwsn,
     disabilityDetails: s.disabilityDetails ?? "",
     medicalNotes: s.medicalNotes ?? "",
@@ -730,6 +929,7 @@ export function normalizeStudent(s: Partial<SisStudent> & { id: string }): SisSt
     tagIds: Array.isArray(s.tagIds)
       ? [...new Set(s.tagIds.filter((id): id is string => typeof id === "string"))]
       : [],
+    revisionAt: typeof s.revisionAt === "string" ? s.revisionAt : "",
   };
 }
 
@@ -749,6 +949,37 @@ export function normalizeStudentTag(
   };
 }
 
+/**
+ * Normalize one class-upgrade record.
+ *
+ * Lives here rather than in classUpgrade.ts because the history now has its own
+ * table (migration 20260912130000) and the server's row reader needs the same
+ * normalizer the desk uses — importing classUpgrade.ts there would pull the
+ * whole desk, and its loadSis/saveSis, into a server module.
+ */
+export function normalizeClassUpgrade(
+  raw: Partial<ClassUpgradeRecord> & { id: string; studentId: string },
+): ClassUpgradeRecord {
+  return {
+    id: raw.id,
+    studentId: raw.studentId,
+    studentName: raw.studentName ?? "",
+    admissionNo: raw.admissionNo ?? "",
+    fromClassId: raw.fromClassId ?? "",
+    fromSectionId: raw.fromSectionId ?? "",
+    toClassId: raw.toClassId ?? "",
+    toSectionId: raw.toSectionId ?? "",
+    fromFeeGroupId: raw.fromFeeGroupId ?? null,
+    toFeeGroupId: raw.toFeeGroupId ?? null,
+    fromStudentType: raw.fromStudentType ?? "",
+    toStudentType: raw.toStudentType ?? raw.fromStudentType ?? "",
+    reason: raw.reason ?? "",
+    effectiveOn: raw.effectiveOn ?? "",
+    createdAt: raw.createdAt ?? new Date().toISOString(),
+    createdBy: raw.createdBy ?? "office",
+  };
+}
+
 function householdAddressKey(
   h: Pick<
     Household,
@@ -759,6 +990,34 @@ function householdAddressKey(
     .map((s) => String(s || "").trim().toLowerCase())
     .filter(Boolean)
     .join("|");
+}
+
+/**
+ * The roster's own convention for a name or a place: UPPER CASE.
+ *
+ * The student form has forced this since it was written — every name,
+ * address and place field is upper-cased as the office types. 234 of this
+ * school's 239 students follow it, and so do its printed documents, the
+ * UDISE+ working sheet and the CBSE formats.
+ *
+ * But the rule lived in ONE form, so every other way in wrote whatever it
+ * was handed: the admissions desk copies a child's name straight off the
+ * public enquiry form (which does not upper-case), and so does the RTE
+ * application path. That is where "Yatharth Singh", "Rudraksha Yadav" and
+ * "Anjal" came from — the last with "VINAY GUPTA" as the father, because
+ * the father was typed at the counter and the child came from an enquiry.
+ * Households drifted further still: 118 of 199 guardian names and 112 city
+ * names were mixed case, even though the counter form upper-cases both.
+ *
+ * A convention enforced by a form is a convention with holes in it. This is
+ * the one gate every write passes through, so it belongs here: the form,
+ * the admissions desk, RTE, the parent app, an import and the WhatsApp
+ * document reader now all agree without any of them having to remember.
+ *
+ * Devanagari and other scripts have no case, so this leaves them untouched.
+ */
+export function toRosterCase(v: string): string {
+  return (v ?? "").toUpperCase();
 }
 
 export function cleanRepeatedName(rawName: string): string {
@@ -798,20 +1057,30 @@ export function normalizeHousehold(h: Partial<Household> & { id: string }): Hous
   return {
     id: h.id,
     code: h.code ?? "",
-    guardianName: cleanRepeatedName(h.guardianName ?? ""),
+    guardianName: toRosterCase(cleanRepeatedName(h.guardianName ?? "")),
     mobile,
     /** Legacy households without WhatsApp inherit guardian mobile */
     whatsappMobile: whatsappRaw || mobile,
+    // Not the email: an address is a name, an email is an identifier.
     email: h.email ?? "",
-    address: h.address ?? "",
-    locality: h.locality ?? "",
-    landmark: h.landmark ?? "",
-    city: h.city ?? "",
-    state: h.state ?? "Uttar Pradesh",
+    address: toRosterCase(h.address ?? ""),
+    locality: toRosterCase(h.locality ?? ""),
+    landmark: toRosterCase(h.landmark ?? ""),
+    city: toRosterCase(h.city ?? ""),
+    state: toRosterCase(h.state ?? "Uttar Pradesh"),
     pincode: (h.pincode ?? "").replace(/\D/g, "").slice(0, 6),
     altMobile: normalizeMobile(h.altMobile ?? ""),
     guardianPhotoUrl:
       typeof h.guardianPhotoUrl === "string" ? h.guardianPhotoUrl : "",
+    preferredLanguage: normalizeHouseholdLanguage(h.preferredLanguage),
+    channelPreference: normalizeHouseholdChannel(h.channelPreference),
+    // The family's own answer about photographs. Dropped here until
+    // 2026-09-12, which silently turned every "granted" into "never asked"
+    // the moment a lead was enrolled — the website reads this household.
+    photoConsent: normalizePhotoConsent(h.photoConsent),
+    quietHoursStart: normalizeQuietTime(h.quietHoursStart),
+    quietHoursEnd: normalizeQuietTime(h.quietHoursEnd),
+    revisionAt: typeof h.revisionAt === "string" ? h.revisionAt : "",
     ...(keepGeo
       ? {
           geoLat: h.geoLat,
@@ -834,9 +1103,21 @@ export function householdWhatsApp(hh?: Household | null): string {
 }
 
 /**
- * Update household WhatsApp used for every communication channel.
- * When WhatsApp previously matched guardian mobile (or `alsoUpdateMobile`),
- * guardian mobile is updated too and sibling father/mother mobiles stay aligned.
+ * Set the household's WhatsApp number — the number every fee reminder,
+ * receipt and notice goes to. It changes THAT number and nothing else.
+ *
+ * It used to change three more things. When the stored WhatsApp number
+ * equalled the stored guardian mobile — which normalizeHousehold makes true
+ * for every household that never had a separate WhatsApp number, 175 of 200
+ * here — it also rewrote the guardian mobile AND the father's (or mother's)
+ * mobile on every child in the family. So a clerk at the fee counter who
+ * typed the number the parent in front of them was actually reachable on, to
+ * send that one receipt, silently replaced the father's recorded mobile for
+ * every sibling. That is the "one number pasted everywhere" the office
+ * reported on 2026-09-12.
+ *
+ * `alsoUpdateMobile: true` still does the wider update, for a caller that
+ * genuinely means "this is now the family's phone" — nothing passes it today.
  */
 export function updateHouseholdWhatsApp(
   householdId: string,
@@ -851,14 +1132,7 @@ export function updateHouseholdWhatsApp(
   const existing = sis.households.find((h) => h.id === householdId);
   if (!existing) return { ok: false, error: "Household not found" };
 
-  const prevWa = normalizeMobile(
-    existing.whatsappMobile || existing.mobile || "",
-  );
-  const prevMobile = normalizeMobile(existing.mobile);
-  const syncMobile =
-    options?.alsoUpdateMobile === true ||
-    (options?.alsoUpdateMobile === undefined &&
-      (!prevWa || prevWa === prevMobile));
+  const syncMobile = options?.alsoUpdateMobile === true;
 
   const household: Household = {
     ...existing,
@@ -916,6 +1190,56 @@ export function profileCompleteness(student: SisStudent, hh?: Household): number
 
 const STORAGE_KEY = "bhb_sis_v1";
 
+/**
+ * The cache copy of the roster, in wire shape: empty document slots and
+ * rebuildable-empty fields dropped. loadSis() normalises every record on
+ * read, so the round trip is exact (sisWirePayload.selftest pins it) and the
+ * entry is ~40% smaller — 2.77 M chars measured → ~1.7 M. Chrome caps an
+ * origin's localStorage at ~5.2 M chars and the office browser holds SIS,
+ * admissions, fees, attendance and masters together (7.5 M on 2026-09-06);
+ * the SIS entry was the write that lost, and a lost cache read as 0 students.
+ *
+ * Every writer of STORAGE_KEY goes through here — loadSis's own write-back
+ * included, which used to re-inflate the skeleton on every read.
+ */
+function slimSisJson(state: SisState): string {
+  return JSON.stringify({
+    ...state,
+    households: stripEmptyList(
+      (state.households ?? []) as unknown as Record<string, unknown>[],
+    ),
+    students: stripEmptyList(
+      stripEmptyDocsList(
+        (state.students ?? []) as unknown as Record<string, unknown>[],
+      ),
+    ),
+  });
+}
+
+function writeSisCache(state: SisState): boolean {
+  return writeCacheOrInvalidate(STORAGE_KEY, slimSisJson(state));
+}
+
+/**
+ * The roster, held in memory, independent of localStorage.
+ *
+ * SIS is 2.46 MB. With admissions and ~35 other module desks the origin sits
+ * past the ~5 MB mobile cap, so caching it can simply fail — and on
+ * 2026-08-10 it did: the server returned 200 with 2,457,504 bytes, the cache
+ * write threw QuotaExceededError inside writeSisLocalRaw, hydration aborted,
+ * and the phone showed 0 students against a database holding 711.
+ *
+ * loadSis() reads from localStorage, so a dropped cache read as "no
+ * students". That is the same failure as everything else today: an absent
+ * value standing in for a known one. The data was never missing — only
+ * unstorable.
+ *
+ * This is the record for the session; localStorage is a best-effort copy for
+ * the next page load. Under the no-offline decision the database is the real
+ * source, and a browser that cannot cache must still be able to work.
+ */
+let memorySisState: SisState | null = null;
+
 function id(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -931,6 +1255,38 @@ export function normalizeMobile(value: string): string {
 
 export function isValidMobile(value: string): boolean {
   return /^\d{10}$/.test(value.trim());
+}
+
+/**
+ * A number typed to fill the box, not a family's phone: "0000000000",
+ * "9999999999", "1234567890", anything that is not ten digits or does not
+ * start 6–9 (no Indian mobile does).
+ *
+ * Never group children by one of these. On 26–27 Aug 2026 three unrelated
+ * admissions entered with 0000000000 became one family; editing the first
+ * child's parents rewrote the other two's. The UDISE import also saves
+ * households with 0000000000, so any admission without a number could
+ * join one of those.
+ */
+/** Next free "HH-NNN" — count-based codes could repeat after a delete. */
+export function nextHouseholdCode(codes: string[]): string {
+  let max = 0;
+  for (const c of codes) {
+    const m = /^HH-(\d+)$/i.exec((c || "").trim());
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `HH-${String(max + 1).padStart(3, "0")}`;
+}
+
+export function isPlaceholderMobile(value: string): boolean {
+  // Last ten digits: "+91 …" and "0…" prefixes are the same number.
+  const digits = (value || "").replace(/\D/g, "");
+  const m = digits.length > 10 ? digits.slice(-10) : digits;
+  if (m.length !== 10) return true;
+  if (!/^[6-9]/.test(m)) return true;
+  if (/^(\d)\1{9}$/.test(m)) return true;
+  if (m === "1234567890" || m === "9876543210") return true;
+  return false;
 }
 
 export function studentInitials(fullName: string): string {
@@ -1070,7 +1426,26 @@ export function syncSisIntoMasters(
     .filter((s) => demoStudentLinksValid(validSections, s));
   const current = m.students ?? [];
   if (demoStudentsEqual(current, demo)) return;
-  saveMasters({ ...m, students: demo });
+  // Local-only. `masters.students` is a client-side projection of the SIS
+  // roster with exactly one consumer (alignSisToMasters below); the server
+  // derives its own copy from sis_students. This used to call saveMasters(),
+  // which pushed the whole masters state (+ staff roster) to Supabase every
+  // time the roster was hydrated — with the session-year filter above, two
+  // browsers on different years re-pushed it at each other indefinitely.
+  // Cloud Run showed 258 masters pushes / 24 h with 56 "stale" 409s from
+  // that alone (audit 2026-08-18).
+  if (typeof window === "undefined") {
+    setMirrorSlice("masters", { ...m, students: demo });
+    return;
+  }
+  // Synchronous, and re-read masters at write time. The first version of
+  // this write went through a dynamic import; on a fresh page load it then
+  // landed AFTER masters hydration and overwrote the real classes with the
+  // cold-start copy captured earlier — every student showed "Unassigned"
+  // (2026-08-18, minutes after deploy). Only the students projection is
+  // ours to change; everything else must be whatever masters holds now.
+  writeMastersLocalRaw({ ...loadMasters(), students: demo });
+  window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
 }
 
 /** Align SIS students to current masters class/section ids. */
@@ -1155,6 +1530,51 @@ export function alignSisToMasters(
 
 const DEMO_CLEARED_KEY = "bhb_demo_roster_cleared_v1";
 
+/** Household ids of the Play review family seen in this browser's roster. */
+const hiddenReviewDemoHouseholds = new Set<string>();
+
+/**
+ * The Play review family, as staff should see it: not at all (director,
+ * 9 Oct 2026 — "those 2 students are confusing to school staff"). Fees,
+ * attendance, transport, exams, lists and counts all read the roster through
+ * loadSis(), so dropping the family here hides it from every staff screen.
+ *
+ * Browser only. The server roster (parent app, the review login) still has
+ * it, and the browser can never delete it: roster pushes are upserts, and a
+ * deletion has to be named explicitly (recordSisDeletion) — absence from this
+ * copy deletes nothing. See lib/reviewDemoRecords.ts.
+ */
+function hideReviewDemoFromStaff(state: SisState): SisState {
+  const demo = reviewDemoHouseholdIds(state);
+  if (demo.size === 0) return state;
+  for (const id of demo) hiddenReviewDemoHouseholds.add(id);
+  const kept = withoutReviewDemo(state);
+  return { ...state, households: kept.households, students: kept.students };
+}
+
+let staffViewOf: SisState | null = null;
+let staffView: SisState | null = null;
+
+/**
+ * The roster for a STAFF request on the server (staff app, attendance,
+ * principal lists, UDISE…): the Play review family removed. A read-only view
+ * — never save it back, and never use it for the parent app or the review
+ * login, which must still find the family.
+ */
+export function loadSisForStaff(): SisState {
+  const full = loadSis();
+  if (staffViewOf === full && staffView) return staffView;
+  const kept = withoutReviewDemo(full);
+  staffViewOf = full;
+  staffView = kept.students.length === full.students.length ? full : { ...full, households: kept.households, students: kept.students };
+  return staffView;
+}
+
+/** True for a household id of the hidden review family (payment links etc.). */
+export function isHiddenReviewDemoHousehold(householdId: string | null | undefined): boolean {
+  return !!householdId && hiddenReviewDemoHouseholds.has(householdId);
+}
+
 export function loadSis(): SisState {
   const masters = ensureStudentClassLinks(loadMasters());
   if (typeof window === "undefined") {
@@ -1164,8 +1584,13 @@ export function loadSis(): SisState {
     }
     return emptySisState();
   }
+  // A cache that could not be written must not read as "no students".
+  // See memorySisState.
+  const cachedRaw = readCache(STORAGE_KEY);
+  if (!cachedRaw && memorySisState) return memorySisState;
+
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = cachedRaw;
     if (raw) {
       const parsed = JSON.parse(raw) as SisState;
       let next: SisState = {
@@ -1190,6 +1615,7 @@ export function loadSis(): SisState {
             }))
           : [],
       };
+      next = hideReviewDemoFromStaff(next);
       // One-time wipe of built-in demo people so live testing starts clean
       if (
         !localStorage.getItem(DEMO_CLEARED_KEY) &&
@@ -1203,19 +1629,23 @@ export function loadSis(): SisState {
       if (next.students.length > 0) {
         next = alignSisToMasters(next, masters);
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      // Write back only when normalisation or alignment changed something:
+      // this runs on EVERY read, and re-serialising 2.7 M chars into a full
+      // origin each time is how the cache thrashed.
+      const slim = slimSisJson(next);
+      if (slim !== cachedRaw) writeCacheOrInvalidate(STORAGE_KEY, slim);
       syncSisIntoMasters(next, masters);
       if (next.students.length > 0) {
-        void import("@/lib/feeDiscountImportHydrate").then(
+        void trackServerWork(import("@/lib/feeDiscountImportHydrate").then(
           ({ mergeAndPersistFeeDiscountSeed }) => {
             mergeAndPersistFeeDiscountSeed(masters, next);
           },
-        );
+        ));
       }
       return next;
     }
     const empty = emptySisState();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(empty));
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(empty));
     localStorage.setItem(DEMO_CLEARED_KEY, "1");
     syncSisIntoMasters(empty, masters);
     return empty;
@@ -1252,27 +1682,29 @@ export function saveSis(state: SisState) {
 
   if (typeof window === "undefined") {
     setMirrorSlice("sis", state);
-    void import("@/lib/sisPersistence").then(({ scheduleSisSync }) => {
+    void trackServerWork(import("@/lib/sisPersistence").then(({ scheduleSisSync }) => {
       scheduleSisSync(state);
-    });
+    }));
     return;
   }
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (e) {
-    console.warn("[sis] localStorage quota exceeded — using server DB persistence", e);
-  }
+  memorySisState = state;
+  writeSisCache(state);
   syncSisIntoMasters(state);
   if (!deskSkipBlobPushClient("sis")) {
     scheduleClientSchoolMirrorSync({ sis: state });
   }
   // Dual-mode: push full roster + curriculum when Supabase is configured
-  void import("@/lib/sisPersistence").then(({ scheduleSisSync }) => {
+  void trackServerWork(import("@/lib/sisPersistence").then(({ scheduleSisSync }) => {
     scheduleSisSync(state);
-  });
-  void import("@/lib/curriculumPersistence").then(({ scheduleCurriculumSync }) => {
+  }));
+  void trackServerWork(import("@/lib/curriculumPersistence").then(({ scheduleCurriculumSync }) => {
     scheduleCurriculumSync(state);
-  });
+  }));
+  // A same-tab write never fires the native "storage" event (that only
+  // fires in OTHER tabs) — dashboards that relied on it alone (e.g.
+  // SchoolHomeDashboard) stayed stale after a merge/edit until a full
+  // reload. Mirrors masters.ts's "bhb-masters-updated" signal.
+  window.dispatchEvent(new CustomEvent("bhb-sis-updated"));
 }
 
 const SIS_MIRROR_META = "bhb_sis_mirror_meta_v1";
@@ -1316,7 +1748,11 @@ export function writeSisLocalRaw(state: SisState) {
     setMirrorSlice("sis", next);
     return;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  // Memory first, and unconditionally: this must survive a cache that cannot
+  // hold 2.46 MB. writeCacheOrInvalidate never throws for a full disk, so
+  // hydration can no longer be aborted by one.
+  memorySisState = next;
+  writeSisCache(next);
   syncSisIntoMasters(next, loadMasters());
 }
 
@@ -1516,6 +1952,125 @@ function normalizeAyCode(code: string): string {
   return t;
 }
 
+/**
+ * Every child the school teaches THIS session, once each.
+ *
+ * The list behind every student picker, dropdown and tagging roster. SIS
+ * keeps one row per child per academic year and leaves every one of them
+ * `status: "active"`, so `students.filter(s => s.status === "active")` — the
+ * expression copied into a dozen screens — returns 681 rows for 239 children
+ * on this school's data. In a picker capped at `.slice(0, 8)` the duplicates
+ * push real matches off the end, so a clerk searching a name cannot find it.
+ *
+ * Same two rules as `childrenOfHousehold`: a row with no academic year is
+ * kept, and identity is the admission number AND the name, never the number
+ * alone.
+ */
+export function studentsInSession(
+  state: SisState | null | undefined,
+  academicYearCode?: string,
+): SisStudent[] {
+  if (!state || !Array.isArray(state.students)) return [];
+  const targetAy =
+    academicYearCode && academicYearCode !== "all"
+      ? normalizeAyCode(academicYearCode)
+      : "";
+
+  const mine = state.students.filter(
+    (s) =>
+      s.status === "active" &&
+      (!targetAy ||
+        !s.academicYearCode ||
+        normalizeAyCode(s.academicYearCode) === targetAy),
+  );
+
+  const best = new Map<string, SisStudent>();
+  for (const s of mine) {
+    const name = (s.fullName || "").trim().toUpperCase();
+    const adm = (s.admissionNo || "").trim().toUpperCase();
+    const key = adm ? `${adm}::${name}` : `${s.householdId ?? ""}::${name}`;
+    const prev = best.get(key);
+    if (!prev) {
+      best.set(key, s);
+      continue;
+    }
+    const prevAy = normalizeAyCode(prev.academicYearCode || "");
+    const thisAy = normalizeAyCode(s.academicYearCode || "");
+    if (targetAy) {
+      if (thisAy === targetAy && prevAy !== targetAy) best.set(key, s);
+    } else if (thisAy > prevAy) {
+      best.set(key, s);
+    }
+  }
+  return [...best.values()];
+}
+
+/**
+ * The children of one household, as the school teaches them THIS session.
+ *
+ * SIS keeps one row per child per academic year and leaves every one of them
+ * `status: "active"`. A parent portal that filters on household and status
+ * alone therefore shows a family their own child two, three or four times —
+ * once for every year the child has been enrolled — and keeps showing a child
+ * who has left. On this school's data that is 681 rows for 239 children.
+ *
+ * `siblingsOf` has always got this right ("same academic year only"). This is
+ * the same rule for the other question, asked in a dozen places: not "who
+ * else is in this family" but "which children ARE this family".
+ *
+ * Pass the session. Omit it and the rows still collapse to one per child,
+ * keeping the newest, so a caller that forgets returns a list that is
+ * slightly too long rather than one that repeats a child's name back to their
+ * own parent.
+ *
+ * A row carrying no academic year is KEPT. It is an old record, not a wrong
+ * one, and dropping it would hide a real child from their own parent.
+ */
+export function childrenOfHousehold(
+  state: SisState | null | undefined,
+  householdId: string,
+  academicYearCode?: string,
+): SisStudent[] {
+  if (!state || !Array.isArray(state.students) || !householdId) return [];
+  const targetAy =
+    academicYearCode && academicYearCode !== "all"
+      ? normalizeAyCode(academicYearCode)
+      : "";
+
+  const mine = state.students.filter(
+    (s) =>
+      s.householdId === householdId &&
+      s.status === "active" &&
+      (!targetAy ||
+        !s.academicYearCode ||
+        normalizeAyCode(s.academicYearCode) === targetAy),
+  );
+
+  // One row per child. Keyed on admission number AND name, never the number
+  // alone: an admission number typed twice is an ordinary office error, and
+  // merging those two children would hide one from their parent. A child
+  // listed twice is visible; a child missing is not.
+  const best = new Map<string, SisStudent>();
+  for (const s of mine) {
+    const name = (s.fullName || "").trim().toUpperCase();
+    const adm = (s.admissionNo || "").trim().toUpperCase();
+    const key = adm ? `${adm}::${name}` : name;
+    const prev = best.get(key);
+    if (!prev) {
+      best.set(key, s);
+      continue;
+    }
+    const prevAy = normalizeAyCode(prev.academicYearCode || "");
+    const thisAy = normalizeAyCode(s.academicYearCode || "");
+    if (targetAy) {
+      if (thisAy === targetAy && prevAy !== targetAy) best.set(key, s);
+    } else if (thisAy > prevAy) {
+      best.set(key, s);
+    }
+  }
+  return [...best.values()];
+}
+
 export function siblingsOf(
   state: SisState,
   student: SisStudent,
@@ -1582,9 +2137,38 @@ export function sharedFamilyContactsOf(
 }
 
 /**
- * Align guardian household mobile with the primary parent contact, and keep
- * WhatsApp linked when it previously matched the old guardian mobile.
- * Prefers the field the user actually changed (parent vs household mobile).
+ * Keep the guardian household mobile in step with the guardian parent's own
+ * number — without ever putting one parent's number in the other's field, and
+ * without touching the WhatsApp number the office typed.
+ *
+ * Both of those were happening (found 2026-09-12, reported as "we entered
+ * father, mother and WhatsApp numbers and the system put one number
+ * everywhere"):
+ *
+ *  * The old rule filled a blank father's mobile from the household mobile
+ *    whenever the relation read "Father" — and "Father" is the dropdown's
+ *    default, never an answer anyone gave. A family that had given one number,
+ *    the mother's, ended up asserting it as the father's. 186 of 717 students
+ *    carry the same number for both parents and it is the household number in
+ *    every one of those rows.
+ *  * WhatsApp was forced to the guardian mobile whenever the household's
+ *    stored WhatsApp equalled its stored mobile — which normalizeHousehold
+ *    makes true for every household that never had a separate one (175 of
+ *    200). So a different WhatsApp number could be typed, saved, and was gone
+ *    on the next open.
+ *
+ * The rules now:
+ *  - guardian parent → household: when the guardian parent's mobile is the
+ *    field that moved, or the household has no number yet, the household
+ *    takes it. This states nothing new — the household mobile IS the
+ *    guardian's phone.
+ *  - household → guardian parent: only when that parent's field held exactly
+ *    the household's previous number, i.e. the two were in step and one
+ *    correction is meant for both. A blank field stays blank; a different
+ *    number is left alone.
+ *  - the other parent is never written to at all.
+ *  - WhatsApp is whatever was typed; the household mobile fills in only when
+ *    no WhatsApp number was given.
  */
 export function alignHouseholdMobiles(input: {
   relation: string;
@@ -1605,39 +2189,29 @@ export function alignHouseholdMobiles(input: {
   let fatherMobile = normalizeMobile(input.fatherMobile);
   let motherMobile = normalizeMobile(input.motherMobile);
   let householdMobile = normalizeMobile(input.householdMobile);
-  let whatsappMobile =
-    normalizeMobile(input.whatsappMobile) || householdMobile;
 
   const prevMobile = normalizeMobile(input.previousHousehold?.mobile ?? "");
   const prevFather = normalizeMobile(input.previousFatherMobile ?? "");
   const prevMother = normalizeMobile(input.previousMotherMobile ?? "");
-  const fatherChanged = fatherMobile !== prevFather;
-  const motherChanged = motherMobile !== prevMother;
+
+  const guardianIsMother = relation === "mother";
+  const guardianMobile = guardianIsMother ? motherMobile : fatherMobile;
+  const prevGuardian = guardianIsMother ? prevMother : prevFather;
+  const guardianChanged = guardianMobile !== prevGuardian;
   const hhChanged = householdMobile !== prevMobile;
+  const guardianWasInStep = !!prevGuardian && prevGuardian === prevMobile;
 
-  if (relation === "mother") {
-    if (motherChanged && motherMobile) householdMobile = motherMobile;
-    else if (hhChanged && householdMobile) motherMobile = householdMobile;
-    else if (motherMobile) householdMobile = motherMobile;
-    else if (householdMobile) motherMobile = householdMobile;
-  } else {
-    if (fatherChanged && fatherMobile) householdMobile = fatherMobile;
-    else if (hhChanged && householdMobile) fatherMobile = householdMobile;
-    else if (fatherMobile) householdMobile = fatherMobile;
-    else if (householdMobile) fatherMobile = householdMobile;
+  if (guardianChanged && guardianMobile) {
+    householdMobile = guardianMobile;
+  } else if (hhChanged && householdMobile && guardianWasInStep) {
+    if (guardianIsMother) motherMobile = householdMobile;
+    else fatherMobile = householdMobile;
+  } else if (!householdMobile && guardianMobile) {
+    householdMobile = guardianMobile;
   }
 
-  const prevWa = normalizeMobile(
-    input.previousHousehold?.whatsappMobile ||
-      input.previousHousehold?.mobile ||
-      "",
-  );
-  const waWasLinked = !prevWa || prevWa === prevMobile;
-  if (waWasLinked) {
-    whatsappMobile = householdMobile;
-  } else if (!whatsappMobile) {
-    whatsappMobile = householdMobile;
-  }
+  const whatsappMobile =
+    normalizeMobile(input.whatsappMobile) || householdMobile;
 
   return { fatherMobile, motherMobile, householdMobile, whatsappMobile };
 }

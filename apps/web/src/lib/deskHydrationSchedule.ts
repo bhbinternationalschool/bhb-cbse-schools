@@ -3,6 +3,8 @@
  */
 
 import { yieldToMain } from "@/lib/runWhenIdle";
+import { withHydrationSlot } from "@/lib/deskHydrateGuard";
+import { trackServerWork } from "@/lib/serverWork";
 
 export type DeskHydrateId =
   | "rbac"
@@ -26,7 +28,9 @@ export type DeskHydrateId =
   | "waTemplates"
   | "automation"
   | "erpChat"
-  | "staffChat";
+  | "staffChat"
+  | "salarySetup"
+  | "moduleStates";
 
 type DeskHydrateTask = {
   id: DeskHydrateId;
@@ -42,19 +46,45 @@ const CORE_IDS: DeskHydrateId[] = [
 
 /** Extra hydrators to run early when the user opens a module route. */
 const ROUTE_IDS: Record<string, DeskHydrateId[]> = {
-  home: [],
-  fees: ["fees", "payments", "feeRecoveryTasks"],
+  home: ["sis", "admissions", "fees", "payments", "staff", "attendance"],
+  // transport is here because Fee Take BILLS transport dues — without it a
+  // fresh login straight to the counter computed dues before the transport
+  // assignments arrived, and the transport fee simply wasn't offered.
+  fees: ["fees", "payments", "feeRecoveryTasks", "transport"],
   admissions: ["admissions"],
   attendance: ["attendance", "staffAttendance"],
   exams: ["exams", "examPapers", "certificates"],
   certificates: ["certificates"],
-  staff: ["staff", "staffHr", "staffAdvances", "staffAgreements", "staffAttendance"],
+  staff: ["staff", "staffHr", "staffAdvances", "staffAgreements", "staffAttendance", "salarySetup"],
   transport: ["transport"],
-  masters: [],
+  masters: ["salarySetup"],
   students: ["fees", "payments"],
   comms: ["waTemplates", "erpChat", "staffChat", "automation"],
-  payroll: ["staff", "staffHr", "staffAdvances"],
+  payroll: ["staff", "staffHr", "staffAdvances", "salarySetup"],
   reports: ["fees", "payments", "attendance", "exams"],
+};
+
+/**
+ * module_local_state modules by route — hydrated in the priority tier when the
+ * user is on that route (each is one small GET). Everything else picks them
+ * up in the idle sweep below.
+ */
+const ROUTE_MODULE_STATES: Record<string, import("@/lib/moduleStateRegistry").ModuleStateKey[]> = {
+  fees: ["fee_holds", "fee_adjustments"],
+  payroll: ["salary_increment", "salary_hold", "salary_account", "tally_sync"],
+  staff: ["duty_roster", "staff_attendance_rules"],
+  attendance: ["staff_attendance_rules"],
+  exams: ["exam_invigilation", "attendance_result_overrides"],
+  complaints: ["complaints"],
+  discipline: ["discipline"],
+  health: ["health"],
+  visitors: ["visitors"],
+  students: ["udise_compliance", "fee_holds"],
+  admissions: ["wa_campaigns", "crm_parent_chat"],
+  masters: ["wa_chatbot_flows"],
+  "id-cards": ["id_card_template"],
+  certificates: ["fee_holds"],
+  accounts: ["tally_sync"],
 };
 
 const IDLE_BATCH_SIZE = 4;
@@ -196,6 +226,22 @@ function allDeskHydrateTasks(): DeskHydrateTask[] {
           m.ensureStaffChatHydrated(),
         ),
     },
+    {
+      id: "salarySetup",
+      run: () =>
+        import("@/lib/salarySetupPersistence").then((m) =>
+          m.ensureSalarySetupHydrated(),
+        ),
+    },
+    {
+      // All module_local_state modules — idle sweep so every desk has the
+      // server copy shortly after login even off its own route.
+      id: "moduleStates",
+      run: () =>
+        import("@/lib/localModulesPersistence").then((m) =>
+          m.ensureAllModuleStatesHydrated(),
+        ),
+    },
   ];
 }
 
@@ -225,9 +271,13 @@ function dispatchAdmissionsHydrated() {
 }
 
 async function runDeskTasks(tasks: DeskHydrateTask[]): Promise<void> {
+  // Each task's actual network work is gated through withHydrationSlot, so
+  // even the "priority" tier (up to 9 tasks for the home route) can't fire
+  // more than a handful of concurrent DB round trips at once — Promise.all
+  // here just waits for all of them, it no longer controls concurrency.
   await Promise.allSettled(
     tasks.map(async (task) => {
-      await task.run();
+      await withHydrationSlot(() => task.run());
       if (task.id === "admissions") dispatchAdmissionsHydrated();
     }),
   );
@@ -249,7 +299,15 @@ export async function ensureDeskHydratedPriority(
 
   const priorityIds = priorityDeskHydrateIds(pathname);
   const tasks = allDeskHydrateTasks().filter((t) => priorityIds.has(t.id));
-  await runDeskTasks(tasks);
+  const routeStates = ROUTE_MODULE_STATES[deskHydrateRouteKey(pathname)] ?? [];
+  await Promise.allSettled([
+    runDeskTasks(tasks),
+    routeStates.length > 0
+      ? import("@/lib/localModulesPersistence").then((m) =>
+          m.ensureModuleStatesHydrated(routeStates),
+        )
+      : Promise.resolve(),
+  ]);
 }
 
 async function runBackgroundHydration(initialPathname: string): Promise<void> {
@@ -262,7 +320,7 @@ async function runBackgroundHydration(initialPathname: string): Promise<void> {
   const { ensureDeskCutoverClient } = await import(
     "@/lib/ensureDeskCutoverClient"
   );
-  void ensureDeskCutoverClient();
+  void trackServerWork(ensureDeskCutoverClient());
 }
 
 /**
@@ -275,7 +333,7 @@ export function startDeskHydrationBackground(pathname: string): void {
     backgroundPromise = runBackgroundHydration(pathname);
     return;
   }
-  void ensureDeskHydratedPriority(pathname);
+  void trackServerWork(ensureDeskHydratedPriority(pathname));
 }
 
 export function deskHydrationBackgroundDone(): Promise<void> | null {
@@ -289,5 +347,5 @@ export async function ensureAllDeskHydrated(): Promise<void> {
   const { ensureDeskCutoverClient } = await import(
     "@/lib/ensureDeskCutoverClient"
   );
-  void ensureDeskCutoverClient();
+  void trackServerWork(ensureDeskCutoverClient());
 }

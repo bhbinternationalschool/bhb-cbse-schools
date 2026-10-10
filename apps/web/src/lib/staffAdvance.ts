@@ -6,6 +6,8 @@
 import type { MastersState } from "@/lib/masters";
 import type { PayrollPaymentMode, PayrollRun } from "@/lib/payroll";
 import { assertStaffAdvancesPermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 export type AdvanceStatus = "open" | "closed";
 
 export type AdvanceSource = "cash" | "with_salary" | "other";
@@ -61,7 +63,7 @@ function nid(prefix: string) {
 export function loadAdvances(): AdvanceState {
   if (typeof window === "undefined") return { version: 1, advances: [] };
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return { version: 1, advances: [] };
     const parsed = JSON.parse(raw) as Partial<AdvanceState>;
     return {
@@ -78,17 +80,17 @@ export function loadAdvances(): AdvanceState {
 export function saveAdvances(state: AdvanceState) {
   if (!assertStaffAdvancesPermission("edit", "saveAdvances")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  void import("@/lib/staffAdvancesPersistence").then(
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
+  void trackServerWork(import("@/lib/staffAdvancesPersistence").then(
     ({ scheduleStaffAdvancesSync }) => {
       scheduleStaffAdvancesSync(state);
     },
-  );
+  ));
 }
 
 export function writeAdvancesLocalRaw(state: AdvanceState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function advancesStateIsEmpty(state: AdvanceState): boolean {

@@ -2,7 +2,22 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { formatInr } from "@/lib/fees";
-import type { MastersState } from "@/lib/masters";
+import { StopDistanceBackfillCard } from "@/components/transport/StopDistanceBackfillCard";
+import { ShiftCoveragePanel } from "@/components/transport/ShiftCoveragePanel";
+import { strictClassGroup } from "@/lib/transportShifts";
+import {
+  StopRowsEditor,
+  newStopDraft,
+  type StopDraft,
+} from "@/components/transport/StopRowsEditor";
+import {
+  RouteShiftsEditor,
+  describeRouteShifts,
+  shiftDraftsFromRoute,
+  type ShiftDraft,
+} from "@/components/transport/RouteShiftsEditor";
+import { type ClassGroupCode, type MastersState } from "@/lib/masters";
+import { listTransportCrew } from "@/lib/transportPlanner";
 import type { SisState } from "@/lib/sis";
 import {
   deactivateTransportRoute,
@@ -12,6 +27,8 @@ import {
   recordFuelPurchase,
   recordFuelRefill,
   saveFeePolicy,
+  setRouteRoundTrip,
+  setRouteShifts,
   setRouteStops,
   upsertFuelStockLocation,
   upsertTransportRoute,
@@ -22,16 +39,50 @@ import {
   type TransportRoute,
   type TransportState,
 } from "@/lib/transport";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import type { RowAction } from "@/components/ui/erp-grid";
+import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
+
+type RouteStep = "routes" | "policy";
+
+/**
+ * Routes first: a route's stops, bus and runs are one form saved together, so
+ * they stay one step with the list beside it (Edit on a row fills the form).
+ * The year's fee policy comes after — it decides how the stop distances
+ * recorded in step 1 turn into monthly dues on assign / Fee Take.
+ * Inactive steps are hidden, not unmounted: the coverage and stop-distance
+ * cards keep their own state.
+ */
+const ROUTE_STEPS: StepDef<RouteStep>[] = [
+  {
+    id: "routes",
+    title: "Routes, stops & runs",
+    what: "Add or edit a route — stops in boarding order with road distance, bus, vehicle and runs — and see all routes.",
+  },
+  {
+    id: "policy",
+    title: "Fee policy for the year",
+    what: "How monthly transport dues are calculated on assign / Fee Take — flat route fee, per km, distance slabs or stop-priced bands.",
+  },
+];
 
 export function RoutesPanel({
   state,
   vehicles,
+  masters,
+  sis,
+  academicYearCode,
   onRefresh,
   onFlash,
   onError,
 }: {
   state: TransportState;
   vehicles: FleetVehicle[];
+  /** School timings and classes — runs are drafted from the real dismissals. */
+  masters: MastersState | null;
+  /** The roster, to know which class groups are actually on each bus. */
+  sis: SisState | null;
+  academicYearCode: string;
   onRefresh: () => void;
   onFlash: (m: string) => void;
   onError: (m: string) => void;
@@ -42,12 +93,96 @@ export function RoutesPanel({
   const [busNo, setBusNo] = useState("");
   const [vehicleId, setVehicleId] = useState("");
   const [fee, setFee] = useState("");
-  const [stopsText, setStopsText] = useState("");
+  const [stopRows, setStopRows] = useState<StopDraft[]>([]);
+  const [shiftRows, setShiftRows] = useState<ShiftDraft[]>([]);
+  const [measuredRoundTrip, setMeasuredRoundTrip] = useState<{
+    minutes: number;
+    km: number;
+  } | null>(null);
   const [policy, setPolicy] = useState<TransportFeePolicy>(state.feePolicy);
+  const [routeStep, setRouteStep] = useState<RouteStep>("routes");
 
   useEffect(() => {
     setPolicy(state.feePolicy);
   }, [state.feePolicy]);
+
+  /**
+   * The class groups actually on the bus being edited.
+   *
+   * This is what runs are drafted from, so a route carrying only Primary and
+   * Middle is never handed a Pre-Primary run it will never use. A child whose
+   * class is not on the roster contributes no group rather than a guessed one.
+   */
+  const groupsOnEditedRoute = useMemo<ClassGroupCode[]>(() => {
+    if (!editId || !sis || !masters) return [];
+    const classNameById = new Map(masters.classes.map((c) => [c.id, c.name]));
+    const studentById = new Map(sis.students.map((st) => [st.id, st]));
+    const out: ClassGroupCode[] = [];
+    for (const a of state.assignments) {
+      if (a.routeId !== editId) continue;
+      if (a.effectiveTo != null) continue;
+      if (a.academicYearCode !== academicYearCode) continue;
+      const st = studentById.get(a.studentId);
+      const className = st ? classNameById.get(st.classId) : undefined;
+      if (!className) continue;
+      const code = strictClassGroup(className);
+      if (!code) continue;
+      if (!out.includes(code)) out.push(code);
+    }
+    return out;
+  }, [editId, sis, masters, state.assignments, academicYearCode]);
+
+  /**
+   * Routes as a table. A route's code, bus, monthly fee, stop count and
+   * shifts were four lines of grey text under a bold name; the office reads
+   * this to answer "which routes cost what" and "which bus runs which
+   * route", and neither could be sorted.
+   */
+  const routeCols: DataTableColumn<TransportRoute>[] = [
+    {
+      key: "code", header: "Route", sortable: true,
+      value: (r) => `${r.code} ${r.name}`,
+      render: (r) => (
+        <span className={r.isActive ? undefined : "opacity-50"}>
+          <span className="font-bold text-[var(--brand-deep)]">{r.code}</span>
+          <span className="ml-1">{r.name}</span>
+        </span>
+      ),
+    },
+    { key: "bus", header: "Bus", value: (r) => r.busNo || "—", sortable: true },
+    {
+      key: "fee", header: "Fee / month", align: "right", sortable: true,
+      value: (r) => r.monthlyFeePaise,
+      render: (r) => formatInr(r.monthlyFeePaise),
+    },
+    {
+      key: "stops", header: "Stops", align: "right", sortable: true,
+      value: (r) => r.stops.length,
+    },
+    { key: "shifts", header: "Shifts", value: (r) => describeRouteShifts(r.shifts ?? []) },
+    {
+      key: "active", header: "Status", sortable: true,
+      value: (r) => (r.isActive ? "Running" : "Off"),
+      render: (r) =>
+        r.isActive ? (
+          <span className="text-[var(--ok)]">Running</span>
+        ) : (
+          <span className="text-[var(--muted)]">Off</span>
+        ),
+    },
+  ];
+
+  const routeActions: RowAction<TransportRoute>[] = [
+    { id: "edit", label: "Edit", onSelect: (r) => loadRoute(r) },
+    {
+      id: "off", label: "Take off the road", tone: "danger", separatorAbove: true,
+      hidden: (r) => !r.isActive,
+      onSelect: (r) => {
+        deactivateTransportRoute(r.id);
+        onRefresh();
+      },
+    },
+  ];
 
   function loadRoute(r: TransportRoute) {
     setEditId(r.id);
@@ -56,13 +191,21 @@ export function RoutesPanel({
     setBusNo(r.busNo);
     setVehicleId(r.vehicleId);
     setFee(String(r.monthlyFeePaise / 100));
-    setStopsText(
-      r.stops
-        .map((s) =>
-          s.distanceKm > 0 ? `${s.name}:${s.distanceKm}` : s.name,
-        )
-        .join("\n"),
+    setStopRows(
+      r.stops.map((s) => ({
+        ...newStopDraft(),
+        stopId: s.id,
+        name: s.name,
+        distanceKm: s.distanceKm,
+        distanceSource: s.distanceSource,
+        geoLat: s.geoLat,
+        geoLng: s.geoLng,
+        placeId: s.placeId,
+        geoAddress: s.geoAddress,
+        monthlyFeePaise: s.monthlyFeePaise,
+      })),
     );
+    setShiftRows(shiftDraftsFromRoute(r.shifts ?? []));
   }
 
   function clearForm() {
@@ -72,18 +215,25 @@ export function RoutesPanel({
     setBusNo("");
     setVehicleId("");
     setFee("");
-    setStopsText("");
+    setStopRows([]);
+    setShiftRows([]);
+    setMeasuredRoundTrip(null);
   }
 
   function save() {
-    const stopLines = stopsText
-      .split(/\n|,/)
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const [nm, km] = line.split(":").map((x) => x.trim());
-        return { name: nm || line, distanceKm: Number(km) || 0 };
-      });
+    const stopLines = stopRows
+      .filter((r) => r.name.trim())
+      .map((r) => ({
+        id: r.stopId,
+        name: r.name.trim(),
+        distanceKm: r.distanceKm,
+        distanceSource: r.distanceSource,
+        geoLat: r.geoLat,
+        geoLng: r.geoLng,
+        placeId: r.placeId,
+        geoAddress: r.geoAddress,
+        monthlyFeePaise: r.monthlyFeePaise,
+      }));
     const veh = vehicles.find((v) => v.id === vehicleId);
     const r = upsertTransportRoute({
       id: editId || undefined,
@@ -94,32 +244,69 @@ export function RoutesPanel({
       vehicleId,
       monthlyFeePaise: Math.round(Number(fee || "0") * 100),
       isActive: true,
-      stops: stopLines.map((s, i) => ({
-        id: `st_${i}`,
-        name: s.name,
-        sequence: i + 1,
-        distanceKm: s.distanceKm,
-      })),
+      // Stops are NOT passed here. This used to hand the upsert a list with
+      // made-up ids (st_0, st_1…) and then have setRouteStops re-key it — two
+      // rewrites, and every rider on the route orphaned each time the route
+      // was saved. setRouteStops below keeps each existing stop's id.
     });
     if (!r.ok) {
       onError(r.error);
       return;
     }
-    if (stopLines.length) {
-      setRouteStops(
-        r.route.id,
-        stopLines.map((s) => ({ name: s.name, distanceKm: s.distanceKm })),
-      );
+    if (measuredRoundTrip) {
+      setRouteRoundTrip(r.route.id, measuredRoundTrip);
     }
+    // Unconditionally: an emptied list is a decision, and it was already
+    // possible through the upsert before this change.
+    setRouteStops(r.route.id, stopLines);
+
+    // Saved unconditionally, including as an empty list: clearing every run is
+    // a real decision ("this bus goes back to one journey each way") and must
+    // be savable. setRouteShifts reports the children who were pinned by hand
+    // to a run that has just gone, because the alternative to telling somebody
+    // is a child whose afternoon run silently stops existing.
+    const sh = setRouteShifts(
+      r.route.id,
+      shiftRows
+        .filter((row) => row.name.trim() || row.departTime)
+        .map((row) => ({
+          id: row.id || undefined,
+          name: row.name.trim(),
+          direction: row.direction,
+          departTime: row.departTime,
+          classGroups: row.classGroups,
+          weekdays: row.weekdays,
+          isActive: true,
+        })),
+    );
+    if (!sh.ok) {
+      onError(sh.error);
+      return;
+    }
+
     clearForm();
     onRefresh();
-    onFlash(editId ? "Route updated" : "Route added");
+    onFlash(
+      sh.orphanedRiders > 0
+        ? `${editId ? "Route updated" : "Route added"} — ${sh.orphanedRiders} child${sh.orphanedRiders === 1 ? " was" : "ren were"} placed by hand on a run that no longer exists. Give them a run on the Riders tab.`
+        : editId
+          ? "Route updated"
+          : "Route added",
+    );
   }
 
   return (
-    <div className="mt-4 grid gap-4 lg:grid-cols-2">
+    <StepTabs
+      className="mt-4"
+      aria-label="Routes steps"
+      steps={ROUTE_STEPS}
+      value={routeStep}
+      onChange={setRouteStep}
+    >
+    <div className={routeStep === "routes" ? "grid gap-4 lg:grid-cols-2" : ""}>
       <div className="space-y-4">
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <div className={routeStep === "routes" ? "space-y-4" : "hidden"}>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             {editId ? "Edit route" : "Add route"}
           </h2>
@@ -190,25 +377,51 @@ export function RoutesPanel({
                 }
               />
             </label>
-            <label className="text-sm sm:col-span-2">
+            <div className="text-sm sm:col-span-2">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                Stops (one per line
-                {policy.rateMode !== "flat_route"
-                  ? ", use Name:km e.g. Lanka:2"
-                  : ", optional :km e.g. Lanka:2"}
-                )
+                Stops in boarding order — type a name to search Google, then the
+                distance is measured by road from campus
+                {policy.rateMode === "flat_route"
+                  ? " (this route bills a flat fee, so distance is recorded but not charged)"
+                  : ""}
               </span>
-              <textarea
-                className="field min-h-[6rem] !py-1.5"
-                value={stopsText}
-                onChange={(e) => setStopsText(e.target.value)}
+              <StopRowsEditor
+                rows={stopRows}
+                onChange={setStopRows}
+                showDistance
+                onMeasured={(m) => setMeasuredRoundTrip(m)}
+                bands={
+                  policy.rateMode === "band_then_formula" ? policy.bands : undefined
+                }
               />
-            </label>
+            </div>
+
+            <div className="text-sm sm:col-span-2">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Runs — the same bus goes out more than once when dismissal is
+                staggered. A child rides the run that carries their class, so
+                these do not have to be set per child.
+              </span>
+              <RouteShiftsEditor
+                rows={shiftRows}
+                onChange={setShiftRows}
+                timing={masters?.schoolTiming ?? null}
+                groupsRiding={groupsOnEditedRoute}
+                roundTripMinutes={
+                  measuredRoundTrip?.minutes ??
+                  (editId
+                    ? (state.routes.find((r) => r.id === editId)
+                        ?.roundTripMinutes ?? 0)
+                    : 0)
+                }
+                onNote={onFlash}
+              />
+            </div>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
-              className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-bold text-white"
+              className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
               onClick={save}
             >
               {editId ? "Save route" : "Add route"}
@@ -225,7 +438,23 @@ export function RoutesPanel({
           </div>
         </div>
 
-        <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+        <ShiftCoveragePanel
+          state={state}
+          sis={sis}
+          masters={masters}
+          academicYearCode={academicYearCode}
+        />
+
+        <StopDistanceBackfillCard
+          state={state}
+          onRefresh={onRefresh}
+          onFlash={onFlash}
+          onError={onError}
+        />
+        </div>
+
+        <div className={routeStep === "policy" ? "" : "hidden"}>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             Fee policy (AY)
           </h2>
@@ -251,11 +480,136 @@ export function RoutesPanel({
                 <option value="flat_route">Flat route fee</option>
                 <option value="per_km">Per km</option>
                 <option value="slab">Distance slabs</option>
+                <option value="band_then_formula">
+                  Stop-priced bands, then per km (2026-27 rule)
+                </option>
               </select>
             </label>
 
+            {policy.rateMode === "band_then_formula" ? (
+              <div className="sm:col-span-2 space-y-2">
+                <p className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-[12px] text-[var(--brand-deep)]">
+                  Stops inside a band carry their own monthly fee — everyone
+                  boarding at the same stop pays the same. Past the last band
+                  the fee is worked out from distance instead.
+                </p>
+                {[...policy.bands]
+                  .sort((a, b) => a.upToKm - b.upToKm)
+                  .map((b, i) => (
+                    <div
+                      key={b.id}
+                      className="flex flex-wrap items-center gap-2 text-[12px]"
+                    >
+                      <span className="text-[var(--muted)]">Up to</span>
+                      <input
+                        className="field !w-16 !py-1 text-right tabular-nums"
+                        inputMode="decimal"
+                        value={b.upToKm}
+                        onChange={(e) =>
+                          setPolicy((p) => ({
+                            ...p,
+                            bands: p.bands.map((x) =>
+                              x.id === b.id
+                                ? { ...x, upToKm: Number(e.target.value) || 0 }
+                                : x,
+                            ),
+                          }))
+                        }
+                      />
+                      <span className="text-[var(--muted)]">km · ₹</span>
+                      <input
+                        className="field !w-20 !py-1 text-right tabular-nums"
+                        inputMode="decimal"
+                        value={Math.round(b.minPaise / 100)}
+                        onChange={(e) =>
+                          setPolicy((p) => ({
+                            ...p,
+                            bands: p.bands.map((x) =>
+                              x.id === b.id
+                                ? { ...x, minPaise: Math.round(Number(e.target.value) * 100) || 0 }
+                                : x,
+                            ),
+                          }))
+                        }
+                      />
+                      <span className="text-[var(--muted)]">to ₹</span>
+                      <input
+                        className="field !w-20 !py-1 text-right tabular-nums"
+                        inputMode="decimal"
+                        value={Math.round(b.maxPaise / 100)}
+                        onChange={(e) =>
+                          setPolicy((p) => ({
+                            ...p,
+                            bands: p.bands.map((x) =>
+                              x.id === b.id
+                                ? { ...x, maxPaise: Math.round(Number(e.target.value) * 100) || 0 }
+                                : x,
+                            ),
+                          }))
+                        }
+                      />
+                      <span className="text-[var(--muted)]">
+                        {i === 0 ? "(nearest band)" : ""}
+                      </span>
+                    </div>
+                  ))}
+                <div className="flex flex-wrap items-center gap-2 text-[12px]">
+                  <span className="text-[var(--muted)]">Beyond that: ₹</span>
+                  <input
+                    className="field !w-20 !py-1 text-right tabular-nums"
+                    inputMode="decimal"
+                    value={Math.round(policy.formula.basePaise / 100)}
+                    onChange={(e) =>
+                      setPolicy((p) => ({
+                        ...p,
+                        formula: {
+                          ...p.formula,
+                          basePaise: Math.round(Number(e.target.value) * 100) || 0,
+                        },
+                      }))
+                    }
+                  />
+                  <span className="text-[var(--muted)]">covering the first</span>
+                  <input
+                    className="field !w-14 !py-1 text-right tabular-nums"
+                    inputMode="decimal"
+                    value={policy.formula.baseCoversKm}
+                    onChange={(e) =>
+                      setPolicy((p) => ({
+                        ...p,
+                        formula: {
+                          ...p.formula,
+                          baseCoversKm: Number(e.target.value) || 0,
+                        },
+                      }))
+                    }
+                  />
+                  <span className="text-[var(--muted)]">km, then ₹</span>
+                  <input
+                    className="field !w-16 !py-1 text-right tabular-nums"
+                    inputMode="decimal"
+                    value={Math.round(policy.formula.perKmPaise / 100)}
+                    onChange={(e) =>
+                      setPolicy((p) => ({
+                        ...p,
+                        formula: {
+                          ...p.formula,
+                          perKmPaise: Math.round(Number(e.target.value) * 100) || 0,
+                        },
+                      }))
+                    }
+                  />
+                  <span className="text-[var(--muted)]">per started km</span>
+                </div>
+                <p className="text-[11px] text-[var(--muted)]">
+                  A part kilometre counts as a whole one — 8.2 km is charged as
+                  9 km.
+                </p>
+              </div>
+            ) : null}
+
             {policy.rateMode === "flat_route" ? (
-              <p className="sm:col-span-2 rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2 text-[12px] text-[var(--brand-deep)]">
+              <p className="sm:col-span-2 rounded-lg bg-[var(--surface-sunken)] px-3 py-2 text-[12px] text-[var(--brand-deep)]">
                 Each route’s <strong>Flat fee ₹/mo</strong> is billed. Stop
                 distances are not used for pricing in this mode.
               </p>
@@ -391,7 +745,7 @@ export function RoutesPanel({
                         </label>
                         <button
                           type="button"
-                          className="self-end pb-2 text-[11px] font-semibold text-[#dc2626]"
+                          className="self-end pb-2 text-[11px] font-semibold text-[var(--danger)]"
                           onClick={() =>
                             setPolicy((p) => ({
                               ...p,
@@ -482,9 +836,10 @@ export function RoutesPanel({
             Save policy
           </button>
         </div>
+        </div>
       </div>
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className={routeStep === "routes" ? "rounded-xl border border-[var(--border)] bg-[var(--card)] p-4" : "hidden"}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
             All routes
@@ -532,46 +887,20 @@ export function RoutesPanel({
             </label>
           </div>
         </div>
-        <ul className="mt-2 max-h-[32rem] divide-y overflow-y-auto text-sm">
-          {state.routes.map((r) => (
-            <li key={r.id} className={`py-2 ${r.isActive ? "" : "opacity-50"}`}>
-              <div className="flex justify-between gap-2">
-                <div>
-                  <div className="font-bold text-[var(--brand-deep)]">
-                    {r.code} · {r.name}
-                  </div>
-                  <div className="text-[10px] text-[var(--muted)]">
-                    {r.busNo} · {formatInr(r.monthlyFeePaise)}/mo ·{" "}
-                    {r.stops.length} stops
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    className="text-[11px] font-semibold"
-                    onClick={() => loadRoute(r)}
-                  >
-                    Edit
-                  </button>
-                  {r.isActive ? (
-                    <button
-                      type="button"
-                      className="text-[11px] font-semibold text-[#dc2626]"
-                      onClick={() => {
-                        deactivateTransportRoute(r.id);
-                        onRefresh();
-                      }}
-                    >
-                      Off
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <DataTable
+          columns={routeCols}
+          rows={state.routes}
+          rowKey={(r) => r.id}
+          rowActions={routeActions}
+          rowActionsLabel="Route actions"
+          minWidth="min-w-[760px]"
+          exportFileBaseName="transport-routes"
+          exportTitle="Transport routes"
+          emptyTitle="No routes yet"
+        />
       </div>
     </div>
+    </StepTabs>
   );
 }
 
@@ -596,12 +925,16 @@ export function FleetPanel({
     "diesel",
   );
   const [odo, setOdo] = useState("0");
-  const [seats, setSeats] = useState("40");
+  // Blank, not "40". Pre-filling a capacity is how all six vehicles came to
+  // claim forty seats when the fleet is a Magic, a Winger and a van.
+  const [seats, setSeats] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverMobile, setDriverMobile] = useState("");
+  const [driverStaffId, setDriverStaffId] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  const crew = useMemo(() => listTransportCrew(masters), [masters]);
   const selected = state.vehicles.find((v) => v.id === selectedId) ?? null;
 
   function save() {
@@ -611,9 +944,11 @@ export function FleetPanel({
       name: vname || reg,
       fuelType,
       odometerKm: Number(odo) || 0,
-      seatCapacity: Number(seats) || 40,
+      // 0 = left blank = not recorded. Never 40.
+      seatCapacity: Math.max(0, Math.round(Number(seats) || 0)),
       driverName: driverName.trim(),
       driverMobile: driverMobile.replace(/\D/g, "").slice(-10),
+      driverStaffId,
       type: "bus",
     });
     if (!r.ok) {
@@ -624,16 +959,60 @@ export function FleetPanel({
     setReg("");
     setVname("");
     setOdo("0");
-    setSeats("40");
+    setSeats("");
     setDriverName("");
     setDriverMobile("");
+    setDriverStaffId("");
     onRefresh();
     onFlash("Vehicle saved");
   }
 
+  function beginEditVehicle(v: FleetVehicle) {
+    setEditId(v.id);
+    setReg(v.registrationNo);
+    setVname(v.name);
+    setFuelType(v.fuelType === "cng" || v.fuelType === "petrol" ? v.fuelType : "diesel");
+    setOdo(String(v.odometerKm));
+    setSeats(v.seatCapacity && v.seatCapacity > 0 ? String(v.seatCapacity) : "");
+    setDriverName(v.driverName || "");
+    setDriverMobile(v.driverMobile || "");
+    setDriverStaffId(v.driverStaffId || "");
+  }
+
+  /**
+   * The fleet as a table. Registration, name, fuel, status, odometer and
+   * driver were one grey line under the number plate; clicking the row still
+   * opens the vehicle's 360 view, which is what the row used to do.
+   *
+   * Seat capacity is deliberately absent here: every vehicle in this school
+   * carries 40 because that was an old default, not because anyone counted,
+   * and a column of confident 40s reads as a fact.
+   */
+  const vehicleCols: DataTableColumn<FleetVehicle>[] = [
+    {
+      key: "reg", header: "Registration", sortable: true,
+      value: (v) => v.registrationNo,
+      render: (v) => <span className="font-semibold text-[var(--brand-deep)]">{v.registrationNo}</span>,
+    },
+    { key: "name", header: "Name", value: (v) => v.name || "—", sortable: true },
+    { key: "fuel", header: "Fuel", value: (v) => v.fuelType, sortable: true },
+    { key: "status", header: "Status", value: (v) => v.status, sortable: true },
+    {
+      key: "odo", header: "Odometer", align: "right", sortable: true,
+      value: (v) => v.odometerKm,
+      render: (v) => `${v.odometerKm} km`,
+    },
+    { key: "driver", header: "Driver", value: (v) => v.driverName || "—", sortable: true },
+  ];
+
+  const vehicleActions: RowAction<FleetVehicle>[] = [
+    { id: "view", label: "Open vehicle", onSelect: (v) => setSelectedId(v.id) },
+    { id: "edit", label: "Edit", onSelect: (v) => beginEditVehicle(v) },
+  ];
+
   return (
     <div className="mt-4 grid gap-4 lg:grid-cols-2">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           {editId ? "Edit vehicle" : "Add vehicle"}
         </h2>
@@ -690,21 +1069,76 @@ export function FleetPanel({
             </span>
             <input
               className="field !py-1.5"
+              inputMode="numeric"
               value={seats}
+              placeholder="How many this vehicle actually seats"
               onChange={(e) => setSeats(e.target.value)}
             />
+            <span className="mt-1 block text-[10px] text-[var(--muted)]">
+              Leave blank if nobody has counted. Blank reads as “not recorded”
+              everywhere and never blocks a rider; a wrong number does both.
+            </span>
           </label>
           <label className="text-sm sm:col-span-2">
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
-              Driver name
+              Driver
             </span>
-            <input
+            <select
               className="field !py-1.5"
-              value={driverName}
-              onChange={(e) => setDriverName(e.target.value)}
-              placeholder="For WhatsApp hub"
-            />
+              value={driverStaffId || (driverName ? "__other" : "")}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "" || v === "__other") {
+                  // "Other" keeps whatever name was typed; clearing the
+                  // selection clears the person, not just the link.
+                  setDriverStaffId("");
+                  if (v === "") {
+                    setDriverName("");
+                    setDriverMobile("");
+                  }
+                  return;
+                }
+                const picked = crew.find((c) => c.staffId === v);
+                if (!picked) return;
+                setDriverStaffId(picked.staffId);
+                setDriverName(picked.fullName);
+                setDriverMobile(picked.mobile.replace(/\D/g, "").slice(-10));
+              }}
+            >
+              <option value="">— not assigned —</option>
+              {crew.map((c) => (
+                <option key={c.staffId} value={c.staffId}>
+                  {c.fullName} · {c.designation}
+                  {c.canSignIn ? "" : " (no mobile)"}
+                </option>
+              ))}
+              <option value="__other">Other — not on staff roster</option>
+            </select>
+            {!masters ? (
+              // Not "nobody drives" — the roster simply has not arrived yet.
+              <span className="mt-1 block text-[10px] text-[var(--muted)]">
+                Loading staff…
+              </span>
+            ) : crew.length === 0 ? (
+              <span className="mt-1 block text-[10px] text-[var(--muted)]">
+                No active staff carry a driver or attendant designation. Add
+                them in Masters → Staff first.
+              </span>
+            ) : null}
           </label>
+          {!driverStaffId ? (
+            <label className="text-sm sm:col-span-2">
+              <span className="mb-1 block text-[11px] text-[var(--muted)]">
+                Driver name
+              </span>
+              <input
+                className="field !py-1.5"
+                value={driverName}
+                onChange={(e) => setDriverName(e.target.value)}
+                placeholder="Outside driver (vehicle provider)"
+              />
+            </label>
+          ) : null}
           <label className="text-sm sm:col-span-2">
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
               Driver mobile (10-digit)
@@ -715,56 +1149,38 @@ export function FleetPanel({
               onChange={(e) => setDriverMobile(e.target.value)}
               placeholder="WhatsApp identity"
             />
+            {driverStaffId && !driverMobile ? (
+              // The staff row itself has no number, so this driver cannot
+              // receive a login OTP. Say so here rather than let the office
+              // wonder later why the app never worked for them.
+              <span className="mt-1 block text-[10px] text-[var(--danger)]">
+                This staff record has no mobile — they cannot sign in to the
+                driver app until one is added in Masters → Staff.
+              </span>
+            ) : null}
           </label>
         </div>
         <button
           type="button"
-          className="mt-3 rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-bold text-white"
+          className="mt-3 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
           onClick={save}
         >
           Save vehicle
         </button>
-        <ul className="mt-4 max-h-80 divide-y overflow-y-auto text-sm">
-          {state.vehicles.map((v) => (
-            <li key={v.id} className="flex justify-between gap-2 py-2">
-              <button
-                type="button"
-                className="text-left"
-                onClick={() => setSelectedId(v.id)}
-              >
-                <div className="font-semibold text-[var(--brand-deep)]">
-                  {v.registrationNo}
-                </div>
-                <div className="text-[10px] text-[var(--muted)]">
-                  {v.name} · {v.fuelType} · {v.status} · {v.odometerKm} km
-                  {v.driverName ? ` · ${v.driverName}` : ""}
-                </div>
-              </button>
-              <button
-                type="button"
-                className="text-[11px] font-semibold"
-                onClick={() => {
-                  setEditId(v.id);
-                  setReg(v.registrationNo);
-                  setVname(v.name);
-                  setFuelType(
-                    v.fuelType === "cng" || v.fuelType === "petrol"
-                      ? v.fuelType
-                      : "diesel",
-                  );
-                  setOdo(String(v.odometerKm));
-                  setSeats(String(v.seatCapacity || 40));
-                  setDriverName(v.driverName || "");
-                  setDriverMobile(v.driverMobile || "");
-                }}
-              >
-                Edit
-              </button>
-            </li>
-          ))}
-        </ul>
+        <DataTable
+          columns={vehicleCols}
+          rows={state.vehicles}
+          rowKey={(v) => v.id}
+          rowActions={vehicleActions}
+          rowActionsLabel="Vehicle actions"
+          onRowClick={(v) => setSelectedId(v.id)}
+          minWidth="min-w-[760px]"
+          exportFileBaseName="transport-vehicles"
+          exportTitle="Vehicles"
+          emptyTitle="No vehicles yet"
+        />
       </div>
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Vehicle 360
         </h2>
@@ -802,7 +1218,7 @@ function Vehicle360({
 
   return (
     <div className="mt-2 space-y-3 text-sm">
-      <div className="rounded-lg bg-[rgba(32,48,80,0.04)] px-3 py-2">
+      <div className="rounded-lg bg-[var(--surface-sunken)] px-3 py-2">
         <div className="font-bold text-[var(--brand-deep)]">
           {vehicle.registrationNo} · {vehicle.name}
         </div>
@@ -887,7 +1303,7 @@ export function FuelPanel({
 
   return (
     <div className="mt-4 grid gap-4 lg:grid-cols-2">
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Log refill
         </h2>
@@ -965,7 +1381,7 @@ export function FuelPanel({
           />
           <button
             type="button"
-            className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-bold text-white"
+            className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
             onClick={() => {
               const r = recordFuelRefill({
                 vehicleId,
@@ -1007,7 +1423,7 @@ export function FuelPanel({
           ))}
         </ul>
       </div>
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h2 className="text-sm font-bold text-[var(--brand-deep)]">
           Depot purchase (Mode A)
         </h2>
@@ -1089,7 +1505,7 @@ export function FuelPanel({
             <li key={l.id} className="py-1">
               {l.name}: <strong>{l.qtyOnHand}</strong> {l.fuelType}
               {l.qtyOnHand <= l.minAlert ? (
-                <span className="ml-2 text-[#c2410c]">LOW</span>
+                <span className="ml-2 text-[var(--tone-coral)]">LOW</span>
               ) : null}
             </li>
           ))}

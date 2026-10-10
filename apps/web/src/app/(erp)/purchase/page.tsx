@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-/** Purchase lives under Store — keep old URL working. */
+/** Purchase is a section of the Store & purchase module now. */
 export default function PurchaseRedirectPage() {
-  redirect("/store?tab=purchase");
+  redirect("/inventory?tab=purchase");
 }

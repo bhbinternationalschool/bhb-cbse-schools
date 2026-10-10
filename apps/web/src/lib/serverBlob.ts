@@ -27,6 +27,7 @@ export type ServerBlobTable =
   | "notifications_state"
   | "rte_state"
   | "timetable_state"
+  | "teaching_state"
   | "trust_state"
   | "transport_state"
   | "library_state"
@@ -42,7 +43,8 @@ export type ServerBlobTable =
   | "automation_state"
   | "erp_chat_state"
   | "staff_chat_state"
-  | "social_integrations_state";
+  | "social_integrations_state"
+  | "salary_setup_state";
 
 export async function fetchServerBlob<T>(
   table: ServerBlobTable,

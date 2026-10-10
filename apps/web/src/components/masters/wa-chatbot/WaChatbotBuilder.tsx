@@ -74,7 +74,7 @@ export function WaChatbotBuilder({
   return (
     <div className="grid gap-4 xl:grid-cols-[200px_1fr_280px]">
       {/* Palette */}
-      <div className="space-y-2 rounded-xl border bg-[rgba(32,48,80,0.02)] p-3">
+      <div className="space-y-2 rounded-xl border bg-[var(--surface-sunken)] p-3">
         <p className="text-[11px] font-semibold text-[var(--brand-deep)]">
           Blocks
         </p>
@@ -105,7 +105,7 @@ export function WaChatbotBuilder({
       {/* Canvas + step list */}
       <div className="space-y-3">
         <div
-          className="relative min-h-[320px] overflow-auto rounded-xl border border-dashed border-[rgba(32,48,80,0.2)] bg-[rgba(32,48,80,0.02)] p-4"
+          className="relative min-h-[320px] overflow-auto rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface-sunken)] p-4"
           onDragOver={(e) => {
             e.preventDefault();
             e.dataTransfer.dropEffect = "copy";
@@ -128,10 +128,10 @@ export function WaChatbotBuilder({
               <div
                 key={n.id}
                 draggable={!readOnly}
-                className={`absolute w-[220px] cursor-move rounded-lg border bg-white p-2 shadow-sm ${
+                className={`absolute w-[220px] cursor-move rounded-lg border bg-[var(--card)] p-2 shadow-sm ${
                   selectedId === n.id
-                    ? "border-[#0f766e] ring-2 ring-[rgba(15,118,110,0.2)]"
-                    : "border-[rgba(32,48,80,0.15)]"
+                    ? "border-[var(--tone-teal)] ring-2 ring-[rgba(15,118,110,0.2)]"
+                    : "border-[var(--border)]"
                 }`}
                 style={{ left: n.x, top: n.y }}
                 onClick={() => setSelectedId(n.id)}
@@ -146,7 +146,7 @@ export function WaChatbotBuilder({
                   });
                 }}
               >
-                <p className="text-[10px] font-bold uppercase text-[#0f766e]">
+                <p className="text-[10px] font-bold uppercase text-[var(--tone-teal)]">
                   {n.type}
                   {entryNodeId === n.id ? " · start" : ""}
                 </p>
@@ -159,7 +159,7 @@ export function WaChatbotBuilder({
           )}
         </div>
 
-        <div className="rounded-xl border bg-white p-3">
+        <div className="rounded-xl border bg-[var(--card)] p-3">
           <p className="mb-2 text-[11px] font-semibold text-[var(--brand-deep)]">
             Flow order (drag to reorder)
           </p>
@@ -170,8 +170,8 @@ export function WaChatbotBuilder({
                 draggable={!readOnly}
                 className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 text-[11px] ${
                   selectedId === n.id
-                    ? "border-[#0f766e] bg-[rgba(15,118,110,0.06)]"
-                    : "border-[rgba(32,48,80,0.1)]"
+                    ? "border-[var(--tone-teal)] bg-[rgba(15,118,110,0.06)]"
+                    : "border-[var(--border)]"
                 }`}
                 onDragStart={() => setDragStepIndex(i)}
                 onDragOver={(e) => e.preventDefault()}
@@ -195,7 +195,7 @@ export function WaChatbotBuilder({
       </div>
 
       {/* Properties */}
-      <div className="rounded-xl border bg-white p-3">
+      <div className="rounded-xl border bg-[var(--card)] p-3">
         <p className="mb-2 text-[11px] font-semibold text-[var(--brand-deep)]">
           Step properties
         </p>
@@ -266,7 +266,7 @@ export function WaChatbotBuilder({
                 <button
                   type="button"
                   disabled={readOnly}
-                  className="text-[10px] font-semibold text-[#0f766e] underline"
+                  className="text-[10px] font-semibold text-[var(--tone-teal)] underline"
                   onClick={() => onChange(nodes, selected.id)}
                 >
                   Set as start step
@@ -352,7 +352,7 @@ function ButtonEditor({
       {!readOnly && buttons.length < 3 ? (
         <button
           type="button"
-          className="text-[10px] font-semibold text-[#0f766e]"
+          className="text-[10px] font-semibold text-[var(--tone-teal)]"
           onClick={() =>
             onChange([
               ...buttons,
@@ -432,7 +432,7 @@ function ListEditor({
       {!readOnly ? (
         <button
           type="button"
-          className="text-[10px] font-semibold text-[#0f766e]"
+          className="text-[10px] font-semibold text-[var(--tone-teal)]"
           onClick={() =>
             onChange([
               ...rows,

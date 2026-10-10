@@ -5,8 +5,63 @@
 import { randomInt } from "crypto";
 import { hashOtpCode } from "@/lib/audit.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { sendWhatsAppText } from "@/lib/waSend";
+import { fetchServerBlob } from "@/lib/serverBlob";
+import {
+  sendWhatsAppText,
+  sendWhatsAppTemplate,
+  buildWaTemplateBodyComponent,
+  buildWaOtpCopyCodeButtonComponent,
+} from "@/lib/waSend";
+import {
+  normalizeWaTemplatesState,
+  getTemplateFamily,
+  type WaTemplatesState,
+} from "@/lib/waTemplates";
 import { TENANT } from "@/lib/types";
+
+const OTP_TEMPLATE_FAMILY = "auth_parent_login_otp";
+
+/**
+ * Send the OTP via the Meta-approved AUTHENTICATION template when one is
+ * live — required once a parent hasn't messaged the bot in the last 24h,
+ * which Meta's free-text session window otherwise blocks. Returns false
+ * (never throws) on any missing/unapproved template or send failure, so the
+ * caller always falls through to the existing free-text send.
+ */
+async function tryOtpLoginTemplateSend(
+  mobile: string,
+  code: string,
+): Promise<boolean> {
+  try {
+    const { state: raw } = await fetchServerBlob<WaTemplatesState>(
+      "wa_templates_state",
+    );
+    const state = normalizeWaTemplatesState(raw);
+    const template = getTemplateFamily(state, OTP_TEMPLATE_FAMILY).find(
+      (t) => t.language === "en" && t.status === "approved" && !t.paused,
+    );
+    if (!template) return false;
+    const send = await sendWhatsAppTemplate({
+      toMobile: mobile,
+      name: template.metaName,
+      language: template.metaLanguage || "en",
+      components: [
+        buildWaTemplateBodyComponent(["otp"], { otp: code }),
+        buildWaOtpCopyCodeButtonComponent(code),
+      ],
+    });
+    if (!send.ok) {
+      console.warn(
+        `[parent-otp] template send failed, falling back to text: ${send.error}`,
+      );
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.warn("[parent-otp] template lookup/send error, falling back to text", e);
+    return false;
+  }
+}
 
 const OTP_TTL_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
@@ -31,6 +86,12 @@ export function normalizeMobile10(raw: string): string | null {
 export async function issueParentOtp(opts: {
   mobile: string;
   householdId?: string;
+  /** Free-text fallback message label — "Parent" (default) or "Staff".
+   * The AUTHENTICATION template send above is unaffected: Meta approved
+   * OTP_TEMPLATE_FAMILY under the "Parent" name specifically, so a
+   * cold-start (outside-24h-window) message still reads "Parent Login"
+   * until a dedicated staff template is approved. */
+  loginLabel?: string;
 }): Promise<{ ok: true; expiresInSec: number } | { ok: false; reason: string }> {
   const mobile = normalizeMobile10(opts.mobile);
   if (!mobile) return { ok: false, reason: "Enter a valid 10-digit mobile number" };
@@ -41,13 +102,29 @@ export async function issueParentOtp(opts: {
 
   const ctx = await getServerTenantContext();
   if (ctx) {
-    await ctx.sb.from("parent_otp_codes").insert({
+    // household_id is a uuid column; SIS household ids are "hh_…" text.
+    // Passing one made Postgres refuse the WHOLE row (PostgREST 400) — and
+    // the result was never checked, so the parent got a WhatsApp code that
+    // /verify could never find: "OTP expired or not requested" for every
+    // parent app login from 15 Aug to 8 Oct 2026 (staff logins pass no
+    // household and kept working). /verify re-resolves the household from
+    // the mobile, so the column is only kept for a real uuid.
+    const householdUuid =
+      opts.householdId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(opts.householdId)
+        ? opts.householdId
+        : null;
+    const { error } = await ctx.sb.from("parent_otp_codes").insert({
       tenant_id: ctx.tenantId,
       mobile,
       code_hash: hash,
-      household_id: opts.householdId || null,
+      household_id: householdUuid,
       expires_at: new Date(expiresAt).toISOString(),
     });
+    // A code that was not stored can never be verified: never send it.
+    if (error) {
+      console.error("[parent-otp] could not store the OTP:", error.message);
+      return { ok: false, reason: "Could not start the OTP — please try again in a minute" };
+    }
   } else {
     memoryOtps.set(otpKey("local", mobile), {
       hash,
@@ -57,18 +134,22 @@ export async function issueParentOtp(opts: {
     });
   }
 
-  const body =
-    `*${TENANT.shortName} Parent Login*\n\n` +
-    `Your OTP is *${code}*. Valid for 10 minutes.\n\n` +
-    `Do not share this code with anyone.`;
+  const sentViaTemplate = await tryOtpLoginTemplateSend(mobile, code);
+  if (!sentViaTemplate) {
+    const label = opts.loginLabel || "Parent";
+    const body =
+      `*${TENANT.shortName} ${label} Login*\n\n` +
+      `Your OTP is *${code}*. Valid for 10 minutes.\n\n` +
+      `Do not share this code with anyone.`;
 
-  const send = await sendWhatsAppText({ toMobile: mobile, body });
-  if (!send.ok && send.mode !== "stub") {
-    return { ok: false, reason: send.error || "Could not send OTP on WhatsApp" };
-  }
+    const send = await sendWhatsAppText({ toMobile: mobile, body });
+    if (!send.ok && send.mode !== "stub") {
+      return { ok: false, reason: send.error || "Could not send OTP on WhatsApp" };
+    }
 
-  if (send.mode === "stub" && process.env.NODE_ENV === "development") {
-    console.info(`[parent-otp] stub mode — OTP for ${mobile}: ${code}`);
+    if (send.mode === "stub" && process.env.NODE_ENV === "development") {
+      console.info(`[parent-otp] stub mode — OTP for ${mobile}: ${code}`);
+    }
   }
 
   return { ok: true, expiresInSec: Math.floor(OTP_TTL_MS / 1000) };

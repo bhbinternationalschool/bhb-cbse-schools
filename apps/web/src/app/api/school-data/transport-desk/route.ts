@@ -1,21 +1,35 @@
 import { NextResponse } from "next/server";
+import { readRevsParam } from "@/lib/sliceRevMerge";
+import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
 import {
-  authorizeSchoolDataDesk,
-  SCHOOL_DATA_DESK_RBAC,
-} from "@/lib/apiRouteAuth.server";
+  deskReadGate,
+  deskWriteGate,
+  featurePushOutcome,
+  featureSavedResponse,
+  stripDeskForFeatures,
+} from "@/lib/deskFeatureGate.server";
 import type { TransportState } from "@/lib/transport";
 import { transportDualWriteDbEnabled } from "@/lib/transportDbConfig";
 import {
   fetchTransportDeskFromDb,
   pushTransportDeskToDb,
+  TRANSPORT_SLICE_KEYS,
 } from "@/lib/transportNormalized.server";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["transport-desk"], "GET");
-  if (!auth.ok) return auth.response
-  const { bundle, meta } = await fetchTransportDeskFromDb();
+  // The whole desk, or — holding Transport functions only — their slices.
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["transport-desk"]);
+  if (gate.mode === "deny") return gate.response;
+  const { bundle: full, meta, ok } = await fetchTransportDeskFromDb();
+  const bundle = gate.mode === "feature" ? stripDeskForFeatures("transport", full, gate) : full;
+  if (!ok) {
+    return NextResponse.json(
+      { ok: false, error: "Transport desk fetch failed — tenant/db unavailable" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     ...bundle,
@@ -28,8 +42,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["transport-desk"], "POST");
-  if (!auth.ok) return auth.response
+  const gate = await deskWriteGate(req, SCHOOL_DATA_DESK_RBAC["transport-desk"]);
+  if (gate.mode === "deny") return gate.response;
   if (!transportDualWriteDbEnabled()) {
     return NextResponse.json({
       ok: true,
@@ -38,11 +52,30 @@ export async function POST(req: Request) {
     });
   }
 
-  let body: TransportState;
+  let body: TransportState & { revs?: unknown };
   try {
-    body = (await req.json()) as TransportState;
+    body = (await req.json()) as TransportState & { revs?: unknown };
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+  // Which rows this browser changed, and from which `_rev`. Absent = an older
+  // browser: its rows win as before.
+  const revs = readRevsParam(body.revs, TRANSPORT_SLICE_KEYS);
+
+  // Function-only writers (e.g. Transport → Fuel log): merged onto the
+  // stored desk, only their functions' slices — never the body as sent.
+  if (gate.mode === "feature") {
+    const stored = await fetchTransportDeskFromDb();
+    if (!stored.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Could not read the saved transport desk — nothing was written. Try again." },
+        { status: 503 },
+      );
+    }
+    const merged = featurePushOutcome(gate, "transport", stored.bundle, body);
+    if (!merged.ok) return merged.response;
+    if (!merged.changed) return featureSavedResponse(false);
+    body = merged.state as unknown as TransportState;
   }
 
   const result = await pushTransportDeskToDb({
@@ -64,7 +97,8 @@ export async function POST(req: Request) {
     repairRequests: body.repairRequests ?? [],
     boardingEvents: body.boardingEvents ?? [],
     gpsPings: body.gpsPings ?? [],
-  });
+    staffRiders: body.staffRiders ?? [],
+  }, { revs });
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },
@@ -72,8 +106,23 @@ export async function POST(req: Request) {
     );
   }
 
+  if (gate.mode === "feature") {
+    // No desk revision for a function holder, on purpose — but its rows'
+    // new versions, so its next edit is made from the version it wrote.
+    return NextResponse.json({
+      ok: true,
+      functionOnly: true,
+      changed: true,
+      revs: result.revs ?? {},
+      conflicts: result.conflicts ?? {},
+    });
+  }
   return NextResponse.json({
     ok: true,
+    // New `_rev` of each row written, and rows refused because they changed
+    // elsewhere first — the browser updates its versions / reloads.
+    revs: result.revs ?? {},
+    conflicts: result.conflicts ?? {},
     routeCount: body.routes?.length ?? 0,
     vehicleCount: body.vehicles?.length ?? 0,
     updatedAt: new Date().toISOString(),

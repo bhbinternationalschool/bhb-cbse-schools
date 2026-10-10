@@ -5,6 +5,11 @@
  * Usage:
  *   cd apps/web && npx tsx scripts/backfill-desk-slice.ts rbac
  *   cd apps/web && npx tsx scripts/backfill-desk-slice.ts all
+ *
+ * A blob that is smaller than the desk it would replace is refused by the
+ * shrink guard — which is the point, since a stale blob overwriting a live
+ * desk is how work disappears. Pass --allow-shrink when the blob really is
+ * the truth and the desk really should lose those rows.
  */
 
 import type { DeskModuleId } from "../src/lib/deskCutover";
@@ -14,6 +19,8 @@ import {
   fetchDeskSliceFromDb,
   pushDeskSliceToDb,
 } from "../src/lib/deskSliceNormalized.server";
+
+const ALLOW_SHRINK = process.argv.includes("--allow-shrink");
 
 async function backfillOne(id: DeskModuleId) {
   const def = deskSliceDef(id);
@@ -29,7 +36,9 @@ async function backfillOne(id: DeskModuleId) {
     return true;
   }
   const before = await fetchDeskSliceFromDb(id);
-  const result = await pushDeskSliceToDb(id, blob.state);
+  const result = await pushDeskSliceToDb(id, blob.state, {
+    allowShrink: ALLOW_SHRINK,
+  });
   if (!result.ok) {
     console.error(`${id}: backfill failed`, result.error);
     return false;
@@ -42,7 +51,7 @@ async function backfillOne(id: DeskModuleId) {
 }
 
 async function main() {
-  const arg = process.argv[2] || "all";
+  const arg = process.argv.find((a) => !a.startsWith("--") && a !== process.argv[0] && a !== process.argv[1]) || "all";
   const ids: DeskModuleId[] =
     arg === "all"
       ? DESK_SLICE_MODULE_DEFS.map((d) => d.id)

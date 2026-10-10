@@ -1,10 +1,12 @@
 "use client";
 
+import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { BookOpen } from "lucide-react";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { hasFeaturePermission, visibleModuleTabs } from "@/lib/rbac";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import {
@@ -47,9 +49,24 @@ import {
   type HomeworkState,
 } from "@/lib/homework";
 import { ClassroomSyncPanel } from "@/components/homework/ClassroomSyncPanel";
+import {
+  HomeworkPageScan,
+  type HomeworkPageDraftForForm,
+} from "@/components/homework/HomeworkPageScan";
+import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { TENANT } from "@/lib/types";
+import { composeClassGroupMessage, waShareUrl } from "@/lib/classGroupMessage";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
+import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 type HwTab =
   | "dashboard"
@@ -93,6 +110,19 @@ export function HomeworkWorkspace() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Someone holding only some Homework functions (Masters → Roles, e.g.
+  // Class diary) sees only their tabs.
+  const shownTabs = useMemo(
+    () => visibleModuleTabs(TABS, session, masters, "homework"),
+    [session, masters],
+  );
+  useEffect(() => {
+    if (!masters) return;
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as HwTab);
+    }
+  }, [masters, shownTabs, tab]);
+
   // Compose
   const [title, setTitle] = useState("");
   const [bodyEn, setBodyEn] = useState("");
@@ -100,6 +130,25 @@ export function HomeworkWorkspace() {
   const [dueAt, setDueAt] = useState(todayIso);
   const [requiresSubmit, setRequiresSubmit] = useState(false);
   const [aiHint, setAiHint] = useState("");
+  const [referenceAnswer, setReferenceAnswer] = useState("");
+  /**
+   * The draft a scanned book page put into the form (2026-09-30), kept to
+   * report what the teacher did with it — posted as read, or edited first.
+   */
+  const [pageDraft, setPageDraft] = useState<
+    (HomeworkPageDraftForForm & { field: "en" | "hi" }) | null
+  >(null);
+  const [gradingAssist, setGradingAssist] = useState<
+    Record<
+      string,
+      {
+        loading?: boolean;
+        error?: string;
+        completeness?: "complete" | "partial" | "unclear";
+        feedbackDraft?: string;
+      }
+    >
+  >({});
   const [attachUrl, setAttachUrl] = useState("");
   const [attachLabel, setAttachLabel] = useState("");
   const [defaultsNote, setDefaultsNote] = useState<string | null>(null);
@@ -121,8 +170,47 @@ export function HomeworkWorkspace() {
   const [toDate, setToDate] = useState(todayIso);
   const [format, setFormat] = useState<HomeworkReportFormat>("excel");
 
+  // The teacher's own sections and subjects (server answer). Principal and
+  // office still see the whole school.
+  const { my } = useMyTeaching();
+  const teacherMode = isRestrictedTeacher(my);
+
   const teacherName = session.fullName || "Teacher";
   const teacherStaffId = session.staffId || "";
+
+  /** The same post, worded for the old class WhatsApp group (no child named). */
+  function groupTextForPost(p: HomeworkPost): string {
+    return composeClassGroupMessage({
+      kind: "homework",
+      classLabel: masters ? classLabel(masters, p.classId, p.sectionId) : "",
+      date: p.date,
+      subject: masters ? subjectLabel(masters, p.subjectId) : "",
+      title: p.title,
+      bodyEn: p.bodyEn,
+      bodyHi: p.bodyHi,
+      dueAt: p.dueAt,
+      schoolName: TENANT.nameDisplay || TENANT.shortName,
+    });
+  }
+  function groupTextForDiary(d: DiaryEntry): string {
+    return composeClassGroupMessage({
+      kind: "diary",
+      classLabel: masters ? classLabel(masters, d.classId, d.sectionId) : "",
+      date: d.date,
+      title: d.title,
+      bodyEn: d.bodyEn,
+      bodyHi: d.bodyHi,
+      schoolName: TENANT.nameDisplay || TENANT.shortName,
+    });
+  }
+  async function copyForGroup(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      flash("Copied — paste it in the class WhatsApp group");
+    } catch {
+      setError("Could not copy — use “Share to WhatsApp” instead.");
+    }
+  }
 
   function flash(msg: string) {
     setNotice(msg);
@@ -144,10 +232,12 @@ export function HomeworkWorkspace() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensureHomeworkHydrated } = await import(
-        "@/lib/homeworkPersistence"
-      );
-      await ensureHomeworkHydrated();
+      const [{ ensureHomeworkHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/homeworkPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await withHydrationSlot(() => ensureHomeworkHydrated());
       refresh();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -193,26 +283,56 @@ export function HomeworkWorkspace() {
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
-    return masters.classes.filter((c) => c.isActive !== false);
-  }, [masters]);
+    const all = masters.classes.filter((c) => c.isActive !== false);
+    if (!teacherMode) return all;
+    const mine = new Set(my.teaching.map((t) => t.classId));
+    return all.filter((c) => mine.has(c.id));
+  }, [masters, teacherMode, my]);
 
   const sectionOptions = useMemo(() => {
     if (!masters || !classId) return [];
-    return masters.sections.filter(
+    const all = masters.sections.filter(
       (s) => s.classId === classId && s.isActive !== false,
     );
-  }, [masters, classId]);
+    if (!teacherMode) return all;
+    const mine = new Set(
+      my.teaching.filter((t) => t.classId === classId).map((t) => t.sectionId),
+    );
+    return all.filter((s) => mine.has(s.id));
+  }, [masters, classId, teacherMode, my]);
 
   const subjectOptions = useMemo(() => {
     if (!masters) return [];
     const all = (masters.subjects ?? []).filter(
       (s) => s.isActive !== false && !s.parentId,
     );
+    if (teacherMode) {
+      // Exactly the subjects this teacher teaches in the chosen section.
+      const sec = my.teaching.find(
+        (t) => t.classId === classId && t.sectionId === sectionId,
+      );
+      const ids = new Set((sec?.subjects ?? []).map((x) => x.id));
+      return all.filter((s) => ids.has(s.id));
+    }
     const allowed = teacherDefaults?.subjectIds ?? [];
     if (allowed.length === 0) return all;
     const filtered = all.filter((s) => allowed.includes(s.id));
     return filtered.length > 0 ? filtered : all;
-  }, [masters, teacherDefaults]);
+  }, [masters, teacherDefaults, teacherMode, my, classId, sectionId]);
+
+  useEffect(() => {
+    // Keep the chosen subject one the teacher may post for.
+    if (subjectId && subjectOptions.length && !subjectOptions.some((s) => s.id === subjectId)) {
+      setSubjectId(subjectOptions[0]!.id);
+    }
+  }, [subjectId, subjectOptions]);
+
+  useEffect(() => {
+    if (classId && classOptions.length && !classOptions.some((c) => c.id === classId)) {
+      setClassId(classOptions[0]!.id);
+      setSectionId("");
+    }
+  }, [classId, classOptions]);
 
   useEffect(() => {
     if (!classId && classOptions[0]) setClassId(classOptions[0].id);
@@ -283,6 +403,21 @@ export function HomeworkWorkspace() {
     setAttachLabel("");
     setRequiresSubmit(false);
     setAiHint("");
+    setReferenceAnswer("");
+    setPageDraft(null);
+  }
+
+  /** A scanned page's draft into the ordinary fields — nothing is saved here. */
+  function applyScannedPage(d: HomeworkPageDraftForForm) {
+    const field = d.language === "hi" ? "hi" : "en";
+    setTitle(d.title);
+    if (field === "hi") setBodyHi(d.body);
+    else setBodyEn(d.body);
+    // Only a chapter the school's own book has; never over a teacher's hint.
+    if (d.chapterHint && !aiHint.trim()) setAiHint(d.chapterHint);
+    setPageDraft({ ...d, field });
+    setError(null);
+    flash("Read from the page — check it, then Publish");
   }
 
   function beginEditPost(p: HomeworkPost) {
@@ -294,6 +429,7 @@ export function HomeworkWorkspace() {
     setDueAt(p.dueAt || date);
     setRequiresSubmit(p.requiresSubmit);
     setAiHint(p.aiTutorHint || "");
+    setReferenceAnswer(p.referenceAnswer || "");
     const att = p.attachments[0];
     setAttachUrl(att?.url || "");
     setAttachLabel(att?.label || "");
@@ -315,6 +451,7 @@ export function HomeworkWorkspace() {
       dueAt,
       requiresSubmit,
       aiTutorHint: aiHint,
+      referenceAnswer,
       attachments: attachUrl.trim()
         ? [
             {
@@ -333,6 +470,19 @@ export function HomeworkWorkspace() {
       setError(r.error);
       return;
     }
+    if (pageDraft && !wasEdit) {
+      // Posted as read, or changed first — the ai_generations loop for the
+      // page scan. Compared on what was drafted: the title and the one body
+      // field the draft filled.
+      const sent = pageDraft.field === "hi" ? bodyHi : bodyEn;
+      const same = title.trim() === pageDraft.title.trim() && sent.trim() === pageDraft.body.trim();
+      reportAiOutcome({
+        ids: [pageDraft.generationId],
+        outcome: same ? "accepted" : "edited",
+        targetType: "homework_post",
+        targetId: r.post.id,
+      });
+    }
     resetComposeForm();
     refresh();
     if (wasEdit) {
@@ -342,6 +492,58 @@ export function HomeworkWorkspace() {
       flash("Homework published — notify parents below");
     }
     setTab("today");
+  }
+
+  async function runGradingAssist(
+    submissionId: string,
+    imageBase64: string,
+    post: HomeworkPost,
+    studentLabel: string,
+  ) {
+    setGradingAssist((prev) => ({
+      ...prev,
+      [submissionId]: { loading: true },
+    }));
+    try {
+      const res = await fetch("/api/ai/homework-grading-assist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64,
+          assignmentTitle: post.title,
+          subjectLabel: masters ? subjectLabel(masters, post.subjectId) : undefined,
+          referenceAnswer: post.referenceAnswer,
+          studentLabel,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        completeness?: "complete" | "partial" | "unclear";
+        feedbackDraft?: string;
+      };
+      if (!res.ok || !json.ok) {
+        setGradingAssist((prev) => ({
+          ...prev,
+          [submissionId]: { error: json.error || "Grading assist failed" },
+        }));
+        return;
+      }
+      setGradingAssist((prev) => ({
+        ...prev,
+        [submissionId]: {
+          completeness: json.completeness,
+          feedbackDraft: json.feedbackDraft,
+        },
+      }));
+    } catch (e) {
+      setGradingAssist((prev) => ({
+        ...prev,
+        [submissionId]: {
+          error: e instanceof Error ? e.message : "Grading assist failed",
+        },
+      }));
+    }
   }
 
   function resetDiaryForm() {
@@ -483,6 +685,8 @@ export function HomeworkWorkspace() {
             <input
               type="checkbox"
               checked={state.settings.examModeFreeze}
+              // The module's edit, or Homework → Exam-time freeze.
+              disabled={!hasFeaturePermission(session, masters, "homework.freeze", "edit")}
               onChange={(e) => {
                 setHomeworkExamFreeze(e.target.checked);
                 refresh();
@@ -543,7 +747,7 @@ export function HomeworkWorkspace() {
             </select>
           </label>
           {defaultsNote ? (
-            <p className="self-end pb-2 text-xs text-[#0f766e]">{defaultsNote}</p>
+            <p className="self-end pb-2 text-xs text-[var(--tone-teal)]">{defaultsNote}</p>
           ) : null}
         </div>
       }
@@ -612,7 +816,7 @@ export function HomeworkWorkspace() {
               ) : null}
             </ul>
           ) : (
-            <p className="mt-2 text-xs text-[#b42318]">
+            <p className="mt-2 text-xs text-[var(--danger)]">
               No WhatsApp numbers on households for this section — set them in
               SIS.
             </p>
@@ -621,7 +825,7 @@ export function HomeworkWorkspace() {
       ) : null}
 
       <ModuleTabs
-        items={TABS}
+        items={shownTabs}
         value={tab}
         onChange={(id) => setTab(id as HwTab)}
       />
@@ -639,7 +843,7 @@ export function HomeworkWorkspace() {
             Homework · {date}
           </h2>
           {todayPosts.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-[rgba(32,48,80,0.15)] px-4 py-6 text-sm text-[var(--muted)]">
+            <p className="rounded-xl border border-dashed border-[var(--border)] px-4 py-6 text-sm text-[var(--muted)]">
               No homework for this class/date.{" "}
               <button
                 type="button"
@@ -657,14 +861,14 @@ export function HomeworkWorkspace() {
                 return (
                   <li
                     key={p.id}
-                    className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3"
+                    className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
                         <p className="text-sm font-semibold text-[var(--brand-deep)]">
                           {p.title}
                           {p.status === "withdrawn" ? (
-                            <span className="ml-2 text-xs font-normal text-[#b42318]">
+                            <span className="ml-2 text-xs font-normal text-[var(--danger)]">
                               (withdrawn)
                             </span>
                           ) : null}
@@ -701,7 +905,7 @@ export function HomeworkWorkspace() {
                         <img
                           src={p.attachments[0].url}
                           alt={p.attachments[0].label || "Attachment"}
-                          className="mt-2 max-h-40 rounded-lg border border-[rgba(32,48,80,0.1)]"
+                          className="mt-2 max-h-40 rounded-lg border border-[var(--border)]"
                         />
                       ) : (
                         <a
@@ -727,17 +931,33 @@ export function HomeworkWorkspace() {
                         ) : null}
                         <button
                           type="button"
-                          className="text-xs text-[#0f766e] underline"
+                          className="text-xs text-[var(--tone-teal)] underline"
                           onClick={() =>
                             setNotifyTarget({ kind: "homework", post: p })
                           }
                         >
                           Notify WhatsApp
                         </button>
+                        <button
+                          type="button"
+                          className="text-xs text-[var(--brand-deep)] underline"
+                          title="During the move off personal class groups: the same post, worded for the group"
+                          onClick={() => void copyForGroup(groupTextForPost(p))}
+                        >
+                          Copy for class group
+                        </button>
+                        <a
+                          className="text-xs text-[var(--brand-deep)] underline"
+                          href={waShareUrl(groupTextForPost(p))}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Share to WhatsApp
+                        </a>
                         {!readOnly ? (
                           <button
                             type="button"
-                            className="text-xs text-[#b42318] underline"
+                            className="text-xs text-[var(--danger)] underline"
                             onClick={() => {
                               withdrawHomeworkPost(p.id);
                               refresh();
@@ -789,7 +1009,7 @@ export function HomeworkWorkspace() {
                         </button>
                         <button
                           type="button"
-                          className="text-xs text-[#b42318] underline"
+                          className="text-xs text-[var(--danger)] underline"
                           onClick={() => {
                             if (!window.confirm("Delete this diary entry?")) return;
                             const r = deleteDiaryEntry(d.id);
@@ -806,13 +1026,28 @@ export function HomeworkWorkspace() {
                     ) : null}
                     <button
                       type="button"
-                      className="text-xs text-[#0f766e] underline"
+                      className="text-xs text-[var(--tone-teal)] underline"
                       onClick={() =>
                         setNotifyTarget({ kind: "diary", diary: d })
                       }
                     >
                       Notify WhatsApp
                     </button>
+                    <button
+                      type="button"
+                      className="text-xs text-[var(--brand-deep)] underline"
+                      onClick={() => void copyForGroup(groupTextForDiary(d))}
+                    >
+                      Copy for class group
+                    </button>
+                    <a
+                      className="text-xs text-[var(--brand-deep)] underline"
+                      href={waShareUrl(groupTextForDiary(d))}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Share to WhatsApp
+                    </a>
                   </div>
                 </li>
               ))}
@@ -855,6 +1090,15 @@ export function HomeworkWorkspace() {
               ))}
             </select>
           </label>
+          {!editingPostId && !readOnly ? (
+            <HomeworkPageScan
+              classId={classId}
+              sectionId={sectionId}
+              subjectId={subjectId}
+              subjectLabel={masters ? subjectLabel(masters, subjectId) : ""}
+              onUse={applyScannedPage}
+            />
+          ) : null}
           <label className="block text-xs text-[var(--muted)]">
             Title
             <input
@@ -864,24 +1108,35 @@ export function HomeworkWorkspace() {
               placeholder="e.g. Fractions worksheet"
             />
           </label>
-          <label className="block text-xs text-[var(--muted)]">
-            English
+          {/* 2026-09-30: div, not label — a label's first control is the mic,
+              so tapping the caption would start recording. The mic works on
+              iPhone Safari too (the old browser-only mic hid itself there). */}
+          <div className="block text-xs text-[var(--muted)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>English</span>
+              <VoiceDictateButton lang="en-IN" title="Dictate homework (English)" value={bodyEn} onChange={setBodyEn} disabled={readOnly} />
+            </div>
             <textarea
+              aria-label="Homework (English)"
               className={`${field} mt-1 w-full`}
               rows={3}
               value={bodyEn}
               onChange={(e) => setBodyEn(e.target.value)}
             />
-          </label>
-          <label className="block text-xs text-[var(--muted)]">
-            Hindi (optional)
+          </div>
+          <div className="block text-xs text-[var(--muted)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>Hindi (optional)</span>
+              <VoiceDictateButton lang="hi-IN" title="Dictate homework (Hindi)" value={bodyHi} onChange={setBodyHi} disabled={readOnly} />
+            </div>
             <textarea
+              aria-label="Homework (Hindi)"
               className={`${field} mt-1 w-full`}
               rows={2}
               value={bodyHi}
               onChange={(e) => setBodyHi(e.target.value)}
             />
-          </label>
+          </div>
           <div className="flex flex-wrap gap-3">
             <label className="text-xs text-[var(--muted)]">
               Due
@@ -955,6 +1210,20 @@ export function HomeworkWorkspace() {
               placeholder="e.g. MATH-FRAC-01"
             />
           </label>
+          <div className="block text-xs text-[var(--muted)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>Reference answer / rubric (optional — grounds the AI grading assist on submitted photos, never shown to students)</span>
+              <VoiceDictateButton title="Dictate reference answer" value={referenceAnswer} onChange={setReferenceAnswer} disabled={readOnly} />
+            </div>
+            <textarea
+              aria-label="Reference answer / rubric"
+              className={`${field} mt-1 w-full`}
+              rows={2}
+              value={referenceAnswer}
+              onChange={(e) => setReferenceAnswer(e.target.value)}
+              placeholder="e.g. Q1: 3/4 + 1/8 = 7/8. Q2: correctly identifies photosynthesis inputs..."
+            />
+          </div>
           <button type="button" className={btn} onClick={publishHw} disabled={readOnly}>
             {editingPostId ? "Save changes" : "Publish homework"}
           </button>
@@ -982,24 +1251,32 @@ export function HomeworkWorkspace() {
               onChange={(e) => setDiaryTitle(e.target.value)}
             />
           </label>
-          <label className="block text-xs text-[var(--muted)]">
-            English
+          <div className="block text-xs text-[var(--muted)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>English</span>
+              <VoiceDictateButton lang="en-IN" title="Dictate diary note (English)" value={diaryEn} onChange={setDiaryEn} disabled={readOnly} />
+            </div>
             <textarea
+              aria-label="Diary note (English)"
               className={`${field} mt-1 w-full`}
               rows={3}
               value={diaryEn}
               onChange={(e) => setDiaryEn(e.target.value)}
             />
-          </label>
-          <label className="block text-xs text-[var(--muted)]">
-            Hindi (optional)
+          </div>
+          <div className="block text-xs text-[var(--muted)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>Hindi (optional)</span>
+              <VoiceDictateButton lang="hi-IN" title="Dictate diary note (Hindi)" value={diaryHi} onChange={setDiaryHi} disabled={readOnly} />
+            </div>
             <textarea
+              aria-label="Diary note (Hindi)"
               className={`${field} mt-1 w-full`}
               rows={2}
               value={diaryHi}
               onChange={(e) => setDiaryHi(e.target.value)}
             />
-          </label>
+          </div>
           <button type="button" className={btn} onClick={publishDiary} disabled={readOnly}>
             {editingDiaryId ? "Save changes" : "Post diary"}
           </button>
@@ -1009,7 +1286,7 @@ export function HomeworkWorkspace() {
             </button>
           ) : null}
           {todayDiary.length > 0 ? (
-            <div className="mt-6 space-y-2 border-t border-[rgba(32,48,80,0.1)] pt-4">
+            <div className="mt-6 space-y-2 border-t border-[var(--border)] pt-4">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
                 Entries for {date}
               </h3>
@@ -1017,7 +1294,7 @@ export function HomeworkWorkspace() {
                 {todayDiary.map((d) => (
                   <li
                     key={d.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.1)] px-3 py-2"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] px-3 py-2"
                   >
                     <span className="text-sm font-medium text-[var(--brand-deep)]">
                       {d.title}
@@ -1053,52 +1330,116 @@ export function HomeworkWorkspace() {
             <p className="text-sm text-[var(--muted)]">No pending submissions.</p>
           ) : (
             <ul className="space-y-2">
-              {pendingSubs.map(({ submission: s, post, student }) => (
-                <li
-                  key={s.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-4 py-3"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-[var(--brand-deep)]">
-                      {student?.fullName} · {post?.title}
-                    </p>
-                    <p className="text-xs text-[var(--muted)]">
-                      {s.submittedAt.slice(0, 16).replace("T", " ")}
-                      {s.note ? ` · ${s.note}` : ""}
-                    </p>
-                    {s.photoUrl ? (
-                      s.photoUrl.startsWith("data:image") ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={s.photoUrl}
-                          alt="Submission"
-                          className="mt-1 max-h-24 rounded border"
-                        />
-                      ) : (
-                        <a
-                          href={s.photoUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-xs text-[#1565c0] underline"
-                        >
-                          Photo / file
-                        </a>
-                      )
-                    ) : null}
-                  </div>
-                  <button
-                    type="button"
-                    className={btn}
-                    onClick={() => {
-                      acknowledgeSubmission(s.id, teacherName);
-                      refresh();
-                      flash("Acknowledged");
-                    }}
+              {pendingSubs.map(({ submission: s, post, student }) => {
+                const ga = gradingAssist[s.id];
+                const isPhoto = s.photoUrl.startsWith("data:image");
+                return (
+                  <li
+                    key={s.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3"
                   >
-                    Ack
-                  </button>
-                </li>
-              ))}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-[var(--brand-deep)]">
+                        {student?.fullName} · {post?.title}
+                      </p>
+                      <p className="text-xs text-[var(--muted)]">
+                        {s.submittedAt.slice(0, 16).replace("T", " ")}
+                        {s.channel === "whatsapp" ? " · 📷 sent on WhatsApp" : ""}
+                        {s.note ? ` · ${s.note}` : ""}
+                      </p>
+                      {s.channel === "whatsapp" && !s.teacherRemark && s.replyCode ? (
+                        <p className="text-xs text-[var(--muted)]">
+                          The teacher can reply on WhatsApp with{" "}
+                          <span className="font-semibold">#{s.replyCode}</span>
+                        </p>
+                      ) : null}
+                      {s.teacherRemark ? (
+                        <p className="mt-1 rounded-lg bg-[var(--surface-2,transparent)] text-xs text-[var(--brand-deep)]">
+                          📝 {s.teacherRemark}
+                          {s.teacherAckBy ? ` — ${s.teacherAckBy}` : ""}
+                        </p>
+                      ) : null}
+                      {s.driveNote ? (
+                        <p className="text-[10px] text-[var(--muted)]">{s.driveNote}</p>
+                      ) : null}
+                      {s.photoUrl ? (
+                        isPhoto ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={s.photoUrl}
+                            alt="Submission"
+                            className="mt-1 max-h-24 rounded border"
+                          />
+                        ) : (
+                          <a
+                            href={s.photoUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs text-[#1565c0] underline"
+                          >
+                            Photo / file
+                          </a>
+                        )
+                      ) : null}
+                      {isPhoto && post ? (
+                        <div className="mt-1.5">
+                          <button
+                            type="button"
+                            disabled={ga?.loading}
+                            className="rounded-lg border border-[var(--border)] px-2 py-1 text-[10px] font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                            onClick={() =>
+                              void runGradingAssist(
+                                s.id,
+                                s.photoUrl,
+                                post,
+                                student?.fullName || "Student",
+                              )
+                            }
+                          >
+                            {ga?.loading
+                              ? "Reading…"
+                              : ga?.feedbackDraft
+                                ? "Re-run AI grading assist"
+                                : "AI grading assist"}
+                          </button>
+                          {ga?.error ? (
+                            <p className="mt-1 text-[10px] text-[var(--danger)]">
+                              {ga.error}
+                            </p>
+                          ) : null}
+                          {ga?.feedbackDraft ? (
+                            <div
+                              className={`mt-1.5 max-w-sm rounded-lg border px-2 py-1.5 text-[11px] ${
+                                ga.completeness === "complete"
+                                  ? "border-[var(--success)]/30 bg-[var(--success-soft)] text-[var(--success)]"
+                                  : ga.completeness === "partial"
+                                    ? "border-[var(--warning)]/30 bg-[var(--warning-soft)] text-[var(--warning)]"
+                                    : "border-[var(--border)] bg-[var(--surface-sunken)] text-[var(--muted)]"
+                              }`}
+                            >
+                              <p className="font-semibold uppercase">
+                                {ga.completeness}
+                              </p>
+                              <p>{ga.feedbackDraft}</p>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className={btn}
+                      onClick={() => {
+                        acknowledgeSubmission(s.id, teacherName);
+                        refresh();
+                        flash("Acknowledged");
+                      }}
+                    >
+                      Ack
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
 
@@ -1158,7 +1499,7 @@ export function HomeworkWorkspace() {
             {HOMEWORK_REPORTS.map((r) => (
               <li
                 key={r.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
               >
                 <div>
                   <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -1180,6 +1521,10 @@ export function HomeworkWorkspace() {
                       homework: state,
                       masters,
                       sis,
+                      // A teacher's export covers their own sections only (2026-09-29).
+                      sectionKeys: teacherMode
+                        ? new Set(my.teaching.map((t) => `${t.classId}|${t.sectionId}`))
+                        : undefined,
                     });
                     if (!res.ok) setError(res.error);
                     else flash(res.message);
@@ -1215,6 +1560,16 @@ function RosterSubmitTable({
     sectionId,
   }).filter((p) => p.requiresSubmit);
   const roster = rosterForSection(sis, sectionId, ay);
+
+  // Only the name sorts: every other column is one homework post's submission state.
+  const hwRosterSort = useTableSort(
+    roster,
+    {
+      student: (stu) => stu.fullName,
+    },
+    "student",
+    "asc",
+  );
   if (!posts.length) {
     return (
       <p className="text-xs text-[var(--muted)]">
@@ -1223,21 +1578,22 @@ function RosterSubmitTable({
     );
   }
   return (
-    <div className="overflow-x-auto rounded-xl border border-[rgba(32,48,80,0.1)]">
-      <table className="w-full text-left text-sm">
-        <thead className="bg-[rgba(32,48,80,0.04)] text-xs text-[var(--muted)]">
+    <ErpTableShell className="overflow-x-auto" exportAs="homework_completion" exportTitle="Homework completion">
+      <ErpTable>
+        <ErpTableHead>
           <tr>
-            <th className="px-3 py-2">Student</th>
+            <ErpSortTh sort={hwRosterSort} field="student" className="px-3 py-2">Student</ErpSortTh>
             {posts.map((p) => (
               <th key={p.id} className="px-3 py-2">
                 {p.title.slice(0, 20)}
               </th>
             ))}
+            <th className="w-10 px-2 py-2" aria-label="Actions" />
           </tr>
-        </thead>
-        <tbody>
-          {roster.map((stu) => (
-            <tr key={stu.id} className="border-t border-[rgba(32,48,80,0.06)]">
+        </ErpTableHead>
+        <ErpTableBody>
+          {hwRosterSort.rows.map((stu) => (
+            <tr key={stu.id}>
               <td className="px-3 py-2 font-medium">{stu.fullName}</td>
               {posts.map((p) => {
                 const sub = submissionForStudent(state, p.id, stu.id);
@@ -1245,22 +1601,25 @@ function RosterSubmitTable({
                 return (
                   <td key={p.id} className="px-3 py-2 text-xs">
                     {sub ? (
-                      <span className="text-[#0f7a4c]">
+                      <span className="text-[var(--success)]">
                         Submitted
                         {sub.teacherAckAt ? " · ack" : ""}
                       </span>
                     ) : seen ? (
                       <span className="text-[var(--muted)]">Seen</span>
                     ) : (
-                      <span className="text-[#b42318]">Pending</span>
+                      <span className="text-[var(--danger)]">Pending</span>
                     )}
                   </td>
                 );
               })}
+              <td className="px-2 py-1.5 text-right">
+                <RowActionMenu row={stu} label="Student actions" actions={[{ id: "open", label: "Open student profile", onSelect: (x) => { window.location.href = `/students/${encodeURIComponent(String(x.id))}/edit`; } }]} />
+              </td>
             </tr>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </ErpTableBody>
+      </ErpTable>
+    </ErpTableShell>
   );
 }

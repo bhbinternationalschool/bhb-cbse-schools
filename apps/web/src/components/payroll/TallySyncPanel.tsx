@@ -1,4 +1,5 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — journal preview and export log — rows are voucher lines
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -18,6 +19,14 @@ import {
 } from "@/lib/tallySync";
 import { monthLabel } from "@/components/payroll/PrintPayslipsPanel";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function TallySyncPanel({
   academicYearCode,
@@ -27,6 +36,8 @@ export function TallySyncPanel({
   const session = useDemoSession();
   const [month, setMonth] = useState(currentMonthIso);
   const [tick, setTick] = useState(0);
+  // Re-read when the server copy of this module lands (login/refresh hydration).
+  useModuleStateHydration(["tally_sync", "salary_account"], () => setTick((t) => t + 1));
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,6 +66,20 @@ export function TallySyncPanel({
     void tick;
     return listTallySync(25);
   }, [tick]);
+
+  // Export history, newest first; the Dr/Cr column carries two figures so it is not a sort handle.
+  const exportSort = useTableSort(
+    history,
+    {
+      when: (r) => r.exportedAt,
+      month: (r) => r.month,
+      voucher: (r) => r.voucherNo,
+      format: (r) => r.format,
+      by: (r) => r.exportedBy,
+    },
+    "when",
+    "desc",
+  );
 
   function flash(msg: string, isErr = false) {
     if (isErr) {
@@ -135,7 +160,7 @@ export function TallySyncPanel({
           </p>
         ) : null}
         {error ? (
-          <p className="mt-2 text-sm font-medium text-[#b42318]">{error}</p>
+          <p className="mt-2 text-sm font-medium text-[var(--danger)]">{error}</p>
         ) : null}
 
         <div className="mt-4 flex flex-wrap items-end gap-3">
@@ -252,7 +277,7 @@ export function TallySyncPanel({
                 <span className="text-[var(--muted)]">Balance</span>
                 <p
                   className={`font-semibold ${
-                    jv.balanced ? "text-teal-700" : "text-[#b42318]"
+                    jv.balanced ? "text-teal-700" : "text-[var(--danger)]"
                   }`}
                 >
                   {jv.balanced ? "OK" : `Off ${formatInr(jv.imbalance)}`}
@@ -262,25 +287,22 @@ export function TallySyncPanel({
           </div>
 
           {jv.error ? (
-            <p className="mt-3 text-sm font-medium text-[#b42318]">{jv.error}</p>
+            <p className="mt-3 text-sm font-medium text-[var(--danger)]">{jv.error}</p>
           ) : null}
 
           <div className="mt-3 overflow-x-auto">
-            <table className="min-w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-[rgba(32,48,80,0.1)] text-[var(--muted)]">
+            <ErpTable className="text-xs">
+              <ErpTableHead>
+                <tr>
                   <th className="py-2 pr-2 font-semibold">Ledger</th>
                   <th className="py-2 pr-2 font-semibold text-right">Debit</th>
                   <th className="py-2 pr-2 font-semibold text-right">Credit</th>
                   <th className="py-2 font-semibold">Source</th>
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {jv.lines.map((line) => (
-                  <tr
-                    key={`${line.ledger}-${line.debit}-${line.credit}`}
-                    className="border-b border-[rgba(32,48,80,0.06)]"
-                  >
+                  <tr key={`${line.ledger}-${line.debit}-${line.credit}`}>
                     <td className="py-2 pr-2 font-semibold text-[var(--brand-deep)]">
                       {line.ledger}
                     </td>
@@ -303,13 +325,13 @@ export function TallySyncPanel({
                     </td>
                   </tr>
                 ) : null}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           </div>
         </div>
       ) : null}
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <ErpTableShell className="p-4" exportAs="tally_journal" exportTitle="Tally journal">
         <h3 className="font-display text-base font-bold text-[var(--brand-deep)]">
           Sync history
         </h3>
@@ -318,23 +340,20 @@ export function TallySyncPanel({
           Tally.
         </p>
         <div className="mt-3 overflow-x-auto">
-          <table className="min-w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-[rgba(32,48,80,0.1)] text-[var(--muted)]">
-                <th className="py-2 pr-2 font-semibold">When</th>
-                <th className="py-2 pr-2 font-semibold">Month</th>
-                <th className="py-2 pr-2 font-semibold">Voucher</th>
-                <th className="py-2 pr-2 font-semibold">Format</th>
+          <ErpTable className="text-xs">
+            <ErpTableHead>
+              <tr>
+                <ErpSortTh sort={exportSort} field="when" className="py-2 pr-2 font-semibold">When</ErpSortTh>
+                <ErpSortTh sort={exportSort} field="month" className="py-2 pr-2 font-semibold">Month</ErpSortTh>
+                <ErpSortTh sort={exportSort} field="voucher" className="py-2 pr-2 font-semibold">Voucher</ErpSortTh>
+                <ErpSortTh sort={exportSort} field="format" className="py-2 pr-2 font-semibold">Format</ErpSortTh>
                 <th className="py-2 pr-2 font-semibold">Dr / Cr</th>
-                <th className="py-2 font-semibold">By</th>
+                <ErpSortTh sort={exportSort} field="by" className="py-2 font-semibold">By</ErpSortTh>
               </tr>
-            </thead>
-            <tbody>
-              {history.map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-b border-[rgba(32,48,80,0.06)]"
-                >
+            </ErpTableHead>
+            <ErpTableBody>
+              {exportSort.rows.map((r) => (
+                <tr key={r.id}>
                   <td className="py-2 pr-2 text-[var(--muted)]">
                     {new Date(r.exportedAt).toLocaleString()}
                   </td>
@@ -359,10 +378,10 @@ export function TallySyncPanel({
                   </td>
                 </tr>
               ) : null}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
-      </div>
+      </ErpTableShell>
     </div>
   );
 }

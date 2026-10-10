@@ -1,25 +1,26 @@
 /**
- * Automation tick — evaluate due rules (approval-first by default).
+ * Automation tick — evaluate due rules and SEND what is approved.
  * Guard: WA_DISPATCH_SECRET or CRON_SECRET via x-wa-dispatch-secret / x-cron-secret / Authorization Bearer.
- * POST body: { state?: AutomationState, forceRuleIds?: string[] }
+ * POST body: { state?: AutomationState, forceRuleIds?: string[], dryRun?: boolean }
+ * With no body.state (the Cloud Scheduler path) the tick loads the tenant's
+ * automation state from Supabase, evaluates it server-side, dispatches every
+ * approved item through /api/wa/dispatch, and persists the result — an empty
+ * POST must never evaluate an empty ruleset, and an auto-run rule must never
+ * report a completed run it did not actually send.
  */
 
 import { NextResponse } from "next/server";
 import { requireJobSecret } from "@/lib/apiRouteAuth.server";
-import {
-  emptyAutomation,
-  evaluateAutomationTick,
-  normalizeAutomationState,
-  pendingApprovals,
-  type AutomationState,
-} from "@/lib/automation";
+import { normalizeAutomationState, type AutomationState } from "@/lib/automation";
+import { runAutomationTick } from "@/lib/automationTick.server";
+import { AutomationStateUnreadable } from "@/lib/automationState.server";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   return NextResponse.json({
     service: "wa-automation-tick",
-    note: "POST { state?, forceRuleIds? } — returns evaluated automation state. Wire Cloud Scheduler / cron every 5–15 min.",
+    note: "POST { state?, forceRuleIds?, dryRun? } — evaluates DB-loaded automation state, sends approved items, persists the result. Wire Cloud Scheduler / cron every 5–15 min.",
   });
 }
 
@@ -33,29 +34,52 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { state?: AutomationState; forceRuleIds?: string[] } = {};
+  let body: {
+    state?: AutomationState;
+    forceRuleIds?: string[];
+    dryRun?: boolean;
+  } = {};
   try {
     body = (await req.json()) as typeof body;
   } catch {
     body = {};
   }
 
-  const before = normalizeAutomationState(body.state || emptyAutomation());
-  const after = evaluateAutomationTick(before, {
-    forceRuleIds: Array.isArray(body.forceRuleIds)
-      ? body.forceRuleIds.map(String)
-      : undefined,
-  });
-  const pending = pendingApprovals(after);
+  let report: Awaited<ReturnType<typeof runAutomationTick>>;
+  try {
+    report = await runAutomationTick({
+      originUrl: req.url,
+      state: body.state ? normalizeAutomationState(body.state) : undefined,
+      forceRuleIds: Array.isArray(body.forceRuleIds)
+        ? body.forceRuleIds.map(String)
+        : undefined,
+      dryRun: !!body.dryRun,
+    });
+  } catch (e) {
+    if (e instanceof AutomationStateUnreadable) {
+      console.error("[automation] tick refused:", e.message);
+      return NextResponse.json({ ok: false, error: e.message, reason: "state_unreadable" }, { status: 503 });
+    }
+    throw e;
+  }
 
   return NextResponse.json({
     ok: true,
-    lastTickAt: after.lastTickAt,
-    pendingApprovals: pending.length,
-    autoApproved: after.approvals.filter(
-      (a) => a.decidedBy === "auto" && a.createdAt === after.lastTickAt,
-    ).length,
-    state: after,
-    hint: "Persist returned state client-side (or future server blob). Approve pending items in Masters → Automation.",
+    lastTickAt: report.lastTickAt,
+    pendingApprovals: report.pendingApprovals,
+    dispatchedApprovals: report.dispatched,
+    sent: report.sent,
+    failed: report.failed,
+    deferred: report.deferred,
+    simulated: report.simulated,
+    staleCards: report.stale,
+    audienceErrors: report.audienceErrors,
+    stateSource: body.state ? "request" : "db",
+    persisted: report.persisted,
+    persistError: report.persistError,
+    state: report.state,
+    hint: report.simulated
+      ? "Nothing was sent — dryRun, or no WhatsApp provider is configured. The cards are still approved and a real tick will send them."
+      : "Auto-run rules are sent by this tick. Approval-first rules wait in Masters → Automation and are sent by the next tick once approved.",
   });
 }

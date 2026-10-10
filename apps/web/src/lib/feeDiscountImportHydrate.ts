@@ -15,9 +15,37 @@ import {
   type MastersState,
 } from "@/lib/masters";
 import type { SisState } from "@/lib/sis";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 
 const APPLIED_KEY = "bhb_fee_discount_seed_applied_v1";
+/**
+ * Set once a run of this seed version applied nothing new. The seed is a
+ * one-time July-2026 import: 19 of its 96 rows match today's roster (the
+ * other 77 carry pre-renumbering admission numbers that no longer exist),
+ * so isSeedFullyApplied() can never be true and, until 2026-08-18, every
+ * boot and every SIS hydrate re-ran the merge and re-pushed masters. A
+ * settled seed is skipped until the bundled seed's version changes.
+ */
+const SETTLED_KEY = "bhb_fee_discount_seed_settled_v1";
 const bundledSeed = feeDiscountSeedJson as FeeDiscountImportSeed;
+
+function seedIsSettled(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return localStorage.getItem(SETTLED_KEY) === seedMarker(bundledSeed);
+  } catch {
+    return false;
+  }
+}
+
+function markSeedSettled(): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(SETTLED_KEY, seedMarker(bundledSeed));
+  } catch {
+    /* storage full — we just run again next time */
+  }
+}
 
 let running = false;
 
@@ -53,6 +81,13 @@ export function mergeAndPersistFeeDiscountSeed(
   if (typeof window === "undefined" || running) {
     return { masters, applied: 0, pending: 0 };
   }
+  // A live school's grants are on the server (applied July 2026). A browser
+  // must never save the whole Masters book on its own: since 10 Oct 2026
+  // module data starts empty on every load, so a boot-time run here would
+  // be saving whatever half-loaded copy the page held.
+  if (isSupabaseConfigured()) {
+    return { masters, applied: 0, pending: 0 };
+  }
 
   running = true;
   try {
@@ -68,7 +103,7 @@ export function mergeAndPersistFeeDiscountSeed(
       return { masters, applied: 0, pending: bundledSeed.grants.length };
     }
 
-    if (isSeedFullyApplied(masters, bundledSeed)) {
+    if (seedIsSettled() || isSeedFullyApplied(masters, bundledSeed)) {
       return { masters, applied: 0, pending: 0 };
     }
 
@@ -90,6 +125,8 @@ export function mergeAndPersistFeeDiscountSeed(
       return { masters: next, applied, pending };
     }
 
+    // Nothing new to apply — this seed version is done on this browser.
+    markSeedSettled();
     return { masters: next, applied, pending };
   } finally {
     running = false;

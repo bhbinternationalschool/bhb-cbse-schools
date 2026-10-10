@@ -4,6 +4,10 @@
  */
 
 import type { WaTemplateLanguage } from "@/lib/waTemplates";
+import { nextCronRunIst } from "@/lib/automationSchedule";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { SCHOOL_DEFAULT_WA_LANGUAGE } from "@/lib/householdPrefs";
+import { trackServerWork } from "@/lib/serverWork";
 
 const STORAGE_KEY = "bhb_automation_v1";
 
@@ -69,6 +73,17 @@ export type AutomationRule = {
   templateFamilyKey: string;
   templateLanguage: WaTemplateLanguage;
   audienceSummary: string;
+  /**
+   * Smallest balance, in paise, that earns this message. 0 = no floor.
+   *
+   * The office used to write the threshold into `audienceSummary` — the
+   * live fee rule read "Parents with pending fee balance > ₹5,000" — where
+   * it was a label and nothing more: the tick chased every overdue family,
+   * including one owing ₹200. A number the resolver actually reads.
+   *
+   * Only the fee audiences use it; the others ignore it.
+   */
+  minAmountPaise: number;
   quietHours: QuietHours;
   executionMode: AutomationExecutionMode;
   testedAt: string;
@@ -90,14 +105,24 @@ export type AutomationApprovalItem = {
   previewBody: string;
   audienceCount: number;
   sampleRecipients: string[];
-  dispatchPayload: {
-    mobile: string;
-    body: string;
-    templateName?: string;
-    templateLanguage?: string;
-    variables?: Record<string, string>;
-  }[];
+  dispatchPayload: AutomationDispatchEntry[];
   error: string;
+  /** How the audience was resolved ("24 recipients from live data"). */
+  audienceNote?: string;
+};
+
+export type AutomationDispatchEntry = {
+  mobile: string;
+  body: string;
+  templateName?: string;
+  templateLanguage?: string;
+  variables?: Record<string, string>;
+  /** Household altMobile — tried when the primary number fails outright. */
+  fallbackMobile?: string;
+  /** THIS family's template language, which may differ from the rule's. */
+  language?: WaTemplateLanguage;
+  /** "Aarav Sharma · V-A" — shown on the approval card, never sent. */
+  label?: string;
 };
 
 export type AutomationRun = {
@@ -156,8 +181,9 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "",
     actionType: "whatsapp_template",
     templateFamilyKey: "fees_stage_reminder",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Households with overdue fees (stages S1–S4)",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -173,8 +199,9 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "",
     actionType: "whatsapp_template",
     templateFamilyKey: "fees_soft_reminder",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Dues within next 3 days",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -190,8 +217,9 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "",
     actionType: "whatsapp_template",
     templateFamilyKey: "admissions_followup",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Open leads with overdue follow-up",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -207,8 +235,9 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "",
     actionType: "whatsapp_template",
     templateFamilyKey: "admissions_fee_reminder",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Leads with unpaid/partial registration fee",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -224,8 +253,9 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "campaign.due",
     actionType: "enqueue_campaign",
     templateFamilyKey: "",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Queued campaign messages due now",
+    minAmountPaise: 0,
     quietHours: { ...defaultQuietHours(), enabled: false },
     executionMode: "approval_first",
   },
@@ -241,8 +271,9 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "attendance.absent_marked",
     actionType: "whatsapp_template",
     templateFamilyKey: "attendance_absent",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Parents of students marked absent today",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -258,8 +289,9 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "homework.published",
     actionType: "whatsapp_template",
     templateFamilyKey: "homework_published",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Class parents",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -275,8 +307,9 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "exams.datesheet_published",
     actionType: "whatsapp_template",
     templateFamilyKey: "exams_datesheet",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Exam cohort parents",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -292,8 +325,9 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "ptm.opened",
     actionType: "whatsapp_template",
     templateFamilyKey: "ptm_invite",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "PTM eligible parents",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -309,8 +343,9 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "leave.decided",
     actionType: "whatsapp_template",
     templateFamilyKey: "leave_student_status",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Leave requester / guardian",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -326,8 +361,9 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "",
     actionType: "whatsapp_template",
     templateFamilyKey: "vault_expiry",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Document owners / office",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -343,8 +379,31 @@ const SEED_RULES: SeedRule[] = [
     eventKey: "comms.notice_published",
     actionType: "whatsapp_template",
     templateFamilyKey: "comms_notice",
-    templateLanguage: "en",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: "Notice audience",
+    minAmountPaise: 0,
+    quietHours: defaultQuietHours(),
+    executionMode: "approval_first",
+  },
+
+  {
+    // Monday, mid-morning, once the office is in: the photos come back over
+    // the day and each one is read and filed by udiseDocIntake.server.ts.
+    // Off and approval-first until the office switches it on, like the rest.
+    id: "auto_udise_docs_request",
+    name: "UDISE+ documents request",
+    description: "Ask families whose child still lacks Aadhaar, birth certificate or address proof to send a photo on WhatsApp.",
+    module: "rte",
+    enabled: false,
+    triggerType: "schedule",
+    cronExpr: "0 10 * * 1",
+    intervalMinutes: 0,
+    eventKey: "",
+    actionType: "whatsapp_template",
+    templateFamilyKey: "udise_docs_request",
+    templateLanguage: SCHOOL_DEFAULT_WA_LANGUAGE,
+    audienceSummary: "Families of students with UDISE+ gaps (Aadhaar, birth certificate, address)",
+    minAmountPaise: 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
   },
@@ -378,8 +437,18 @@ function normalizeRule(raw: Partial<AutomationRule> | null): AutomationRule | nu
     eventKey: String(raw.eventKey || ""),
     actionType: (raw.actionType as AutomationActionType) || "whatsapp_template",
     templateFamilyKey: String(raw.templateFamilyKey || ""),
-    templateLanguage: raw.templateLanguage === "hi" ? "hi" : "en",
+    // A rule's language is only the FALLBACK for a family whose own language
+    // did not reach the dispatch entry. It read `=== "hi" ? "hi" : "en"`, so
+    // every one of the 13 stored rules — all seeded "en" — fell back to
+    // English. Only an explicit "en" stays English now.
+    templateLanguage:
+      raw.templateLanguage === "en"
+        ? "en"
+        : raw.templateLanguage === "hi"
+          ? "hi"
+          : SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: String(raw.audienceSummary || ""),
+    minAmountPaise: Math.max(0, Math.round(Number(raw.minAmountPaise) || 0)),
     quietHours: normalizeQuiet(raw.quietHours),
     executionMode:
       raw.executionMode === "auto" && raw.testedAt
@@ -443,10 +512,10 @@ export function normalizeAutomationState(
 export function loadAutomation(): AutomationState {
   if (typeof window === "undefined") return emptyAutomation();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) {
       const seeded = emptyAutomation();
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(seeded));
       return seeded;
     }
     return normalizeAutomationState(JSON.parse(raw) as Partial<AutomationState>);
@@ -457,7 +526,7 @@ export function loadAutomation(): AutomationState {
 
 export function writeAutomationLocalRaw(state: AutomationState): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(
+  writeCacheOrInvalidate(
     STORAGE_KEY,
     JSON.stringify(normalizeAutomationState(state)),
   );
@@ -471,11 +540,11 @@ export function automationIsEmpty(state: AutomationState): boolean {
 export function saveAutomation(state: AutomationState): void {
   if (typeof window === "undefined") return;
   const next = normalizeAutomationState(state);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
   window.dispatchEvent(new CustomEvent("bhb-automation"));
-  void import("@/lib/automationPersistence").then(({ scheduleAutomationSync }) => {
+  void trackServerWork(import("@/lib/automationPersistence").then(({ scheduleAutomationSync }) => {
     scheduleAutomationSync(next);
-  });
+  }));
 }
 
 export function setRuleEnabled(
@@ -544,24 +613,35 @@ export function updateRuleSchedule(
       | "templateLanguage"
       | "quietHours"
       | "audienceSummary"
+      | "minAmountPaise"
       | "enabled"
     >
   >,
 ): AutomationState {
   return {
     ...state,
-    rules: state.rules.map((r) =>
-      r.id === ruleId
-        ? {
-            ...r,
-            ...patch,
-            quietHours: patch.quietHours
-              ? normalizeQuiet(patch.quietHours)
-              : r.quietHours,
-            updatedAt: nowIso(),
-          }
-        : r,
-    ),
+    rules: state.rules.map((r) => {
+      if (r.id !== ruleId) return r;
+      const next: AutomationRule = {
+        ...r,
+        ...patch,
+        quietHours: patch.quietHours
+          ? normalizeQuiet(patch.quietHours)
+          : r.quietHours,
+        updatedAt: nowIso(),
+      };
+      // Changing the time changes when it next runs. Without this the desk
+      // kept showing (and the tick kept using) the old rule's next-run, so
+      // "moved to 8 AM" still fired at midnight.
+      const timingChanged =
+        patch.cronExpr !== undefined ||
+        patch.intervalMinutes !== undefined ||
+        patch.triggerType !== undefined;
+      if (timingChanged && patch.nextRunAt === undefined) {
+        next.nextRunAt = computeNextRun(next, new Date());
+      }
+      return next;
+    }),
   };
 }
 
@@ -577,6 +657,7 @@ export type CreateAutomationRuleOpts = {
   templateFamilyKey?: string;
   templateLanguage?: WaTemplateLanguage;
   audienceSummary?: string;
+  minAmountPaise?: number;
   enabled?: boolean;
 };
 
@@ -598,8 +679,9 @@ export function createAutomationRule(
     eventKey: opts.eventKey || "",
     actionType: opts.actionType,
     templateFamilyKey: opts.templateFamilyKey || "",
-    templateLanguage: opts.templateLanguage || "en",
+    templateLanguage: opts.templateLanguage || SCHOOL_DEFAULT_WA_LANGUAGE,
     audienceSummary: opts.audienceSummary || "",
+    minAmountPaise: opts.minAmountPaise || 0,
     quietHours: defaultQuietHours(),
     executionMode: "approval_first",
     nextRunAt: "",
@@ -631,6 +713,7 @@ export function updateAutomationRule(
       | "templateFamilyKey"
       | "templateLanguage"
       | "audienceSummary"
+      | "minAmountPaise"
       | "quietHours"
       | "enabled"
     >
@@ -683,72 +766,253 @@ function ruleIsDue(rule: AutomationRule, now: Date): boolean {
   if (rule.nextRunAt) {
     return new Date(rule.nextRunAt).getTime() <= now.getTime();
   }
-  // Never run → due on first tick so operators see a sample approval
+  /*
+    Never armed yet.
+
+    A rule with a clock on it waits for that clock. This used to return
+    true, so a fee reminder set to "8:00 AM, Mon/Wed/Fri" was due on the
+    first tick after it was created — which on 11 September 2026 meant
+    00:24 IST on a Friday, to 146 families. The tick arms such a rule
+    instead (see armRule below) and it fires at its own time.
+
+    Interval rules ("every 30 minutes") have no wall-clock anchor, so
+    starting now is exactly right for them.
+  */
+  if (rule.triggerType === "schedule" && rule.cronExpr.trim()) return false;
   return true;
 }
 
+/**
+ * When this rule should next run.
+ *
+ * `cronExpr` is read here — the whole reason the field exists. Before
+ * this, every scheduled rule was answered with "24 hours from now",
+ * so a rule tested by hand at 6:54 PM was next due at 6:54 PM, and the
+ * schedule the office had set was decoration.
+ */
 function computeNextRun(rule: AutomationRule, from: Date): string {
   if (rule.triggerType === "interval" && rule.intervalMinutes > 0) {
     return new Date(
       from.getTime() + rule.intervalMinutes * 60_000,
     ).toISOString();
   }
-  // Default: next calendar day 10:00 IST approx (+24h)
+  if (rule.triggerType === "schedule" && rule.cronExpr.trim()) {
+    const next = nextCronRunIst(rule.cronExpr, from);
+    // An unparseable cron falls through to +24h rather than never running
+    // again; the desk shows "Custom schedule (…)" for the same input.
+    if (next) return next.toISOString();
+  }
+  // No usable schedule: tomorrow, so the rule is not lost.
   return new Date(from.getTime() + 24 * 60 * 60_000).toISOString();
 }
 
-function demoPreviewForRule(rule: AutomationRule): {
-  previewBody: string;
-  audienceCount: number;
-  sampleRecipients: string[];
-  dispatchPayload: AutomationApprovalItem["dispatchPayload"];
-} {
-  const previewBody = `[Automation] ${rule.name} → template ${rule.templateFamilyKey || "(campaign)"} (${rule.templateLanguage}). Audience: ${rule.audienceSummary}`;
-  const samples = ["9876543210", "9123456780"];
+/** Is this stored next-run actually an occurrence of this cron? */
+function cronIsAligned(cronExpr: string, iso: string): boolean {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return false;
+  const next = nextCronRunIst(cronExpr, new Date(t - 60_000));
+  return !!next && next.getTime() === t;
+}
+
+/**
+ * Put a rule's `nextRunAt` where its own schedule says it should be.
+ *
+ * Two jobs, both fallout from the same fault:
+ *
+ *   - a rule that has never been armed gets its first next-run WITHOUT
+ *     being run, so the desk can say when it will fire. The old code
+ *     answered that question by firing.
+ *   - a rule carrying a next-run that is not an occurrence of its cron
+ *     is re-anchored. Every scheduled rule in this school is in that
+ *     state: they were all stamped "24 hours after the last run", so
+ *     "8:00 AM Mon/Wed/Fri" was sitting on 00:24 on a Saturday. Left
+ *     alone, each would fire once more at the wrong time after this
+ *     ships.
+ *
+ * Interval and event rules are left exactly as they are: "every 30
+ * minutes" has no wall clock to wait for, so starting now is right for it.
+ */
+function alignRule(rule: AutomationRule, now: Date): AutomationRule {
+  if (!rule.enabled) return rule;
+  if (rule.triggerType !== "schedule") return rule;
+  const cron = rule.cronExpr.trim();
+  if (!cron) return rule;
+  const needsAnchor =
+    !rule.nextRunAt || !cronIsAligned(cron, rule.nextRunAt);
+  if (!needsAnchor) return rule;
   return {
-    previewBody,
-    audienceCount: samples.length,
-    sampleRecipients: samples,
-    dispatchPayload: samples.map((mobile) => ({
-      mobile,
-      body: previewBody,
-      templateName: rule.templateFamilyKey
-        ? rule.templateFamilyKey.replace(/_/g, "_")
-        : undefined,
-      templateLanguage: rule.templateLanguage,
-      variables: {
-        guardianName: "Parent",
-        childName: "Student",
-        schoolName: "School",
-      },
-    })),
+    ...rule,
+    nextRunAt: computeNextRun(rule, now),
+    updatedAt: nowIso(),
   };
 }
 
 /**
- * Evaluate due rules and create approval items (or auto-dispatch markers).
- * Client and tick API both use this pure function.
+ * The audience a caller resolved for one rule.
+ *
+ * There is no built-in fallback on purpose. This used to invent two demo
+ * mobiles (9876543210 / 9123456780) whenever nobody supplied an audience,
+ * which was harmless while the tick only proposed cards for a human and
+ * became a real message to two strangers the moment a rule was set to
+ * auto-run. A rule with no resolved audience now proposes nothing and says
+ * why. See lib/automationAudience.server.ts for the resolver.
+ */
+export type ResolvedAudience =
+  | {
+      ok: true;
+      recipients: {
+        mobile: string;
+        fallbackMobile?: string;
+        language?: WaTemplateLanguage;
+        variables: Record<string, string>;
+        label: string;
+      }[];
+      note: string;
+    }
+  | { ok: false; error: string };
+
+export type ResolvedAudiences = Record<string, ResolvedAudience>;
+
+function previewForRule(
+  rule: AutomationRule,
+  audience: ResolvedAudience,
+): {
+  previewBody: string;
+  audienceCount: number;
+  sampleRecipients: string[];
+  dispatchPayload: AutomationDispatchEntry[];
+  audienceNote: string;
+} {
+  const head = `${rule.name} → ${rule.templateFamilyKey || "(campaign)"} (${rule.templateLanguage})`;
+  if (!audience.ok) {
+    return {
+      previewBody: `${head} — not sent: ${audience.error}`,
+      audienceCount: 0,
+      sampleRecipients: [],
+      dispatchPayload: [],
+      audienceNote: audience.error,
+    };
+  }
+  const body = `${head} · ${rule.audienceSummary}`;
+  return {
+    previewBody: body,
+    audienceCount: audience.recipients.length,
+    sampleRecipients: audience.recipients.slice(0, 3).map((r) => r.label),
+    audienceNote: audience.note,
+    dispatchPayload: audience.recipients.map((r) => ({
+      mobile: r.mobile,
+      fallbackMobile: r.fallbackMobile,
+      body,
+      templateName: rule.templateFamilyKey || undefined,
+      templateLanguage: r.language || rule.templateLanguage,
+      language: r.language || rule.templateLanguage,
+      label: r.label,
+      variables: r.variables,
+    })),
+  };
+}
+
+/** How recently an auto-run rule must have sent for a re-run to be a duplicate. */
+const AUTO_RESEND_GUARD_MS = 10 * 60_000;
+
+const NO_AUDIENCE_RESOLVER: ResolvedAudience = {
+  ok: false,
+  error:
+    "Recipients are resolved on the server. Run the tick from Masters → " +
+    "Automation (or let the scheduled tick run) instead of evaluating in the browser.",
+};
+
+/**
+ * Evaluate due rules and create approval items (or auto-approved items the
+ * caller then dispatches for real).
+ *
+ * Pure, so both the API tick and any test can drive it: the caller resolves
+ * each rule's audience (`opts.audiences`, keyed by rule id) and this decides
+ * what is due and what card to raise. A rule whose audience could not be
+ * resolved records a FAILED run carrying the reason and raises no approval —
+ * an approval card with nobody behind it is a card someone will press.
  */
 export function evaluateAutomationTick(
   state: AutomationState,
-  opts?: { forceRuleIds?: string[]; now?: Date },
+  opts?: {
+    forceRuleIds?: string[];
+    now?: Date;
+    audiences?: ResolvedAudiences;
+  },
 ): AutomationState {
   const now = opts?.now || new Date();
-  let rules = [...state.rules];
+  const rules = [...state.rules];
   let approvals = [...state.approvals];
   let runs = [...state.runs];
 
   for (let i = 0; i < rules.length; i++) {
-    const rule = rules[i]!;
+    // Read the rule's own schedule first: an unarmed or drifted next-run
+    // is corrected here, before anything is judged due.
+    const rule = alignRule(rules[i]!, now);
+    if (rule !== rules[i]) rules[i] = rule;
     const forced = opts?.forceRuleIds?.includes(rule.id);
     if (!forced && !ruleIsDue(rule, now)) continue;
     if (!forced && !rule.enabled) continue;
 
-    const preview = demoPreviewForRule(rule);
+    const audience: ResolvedAudience =
+      opts?.audiences?.[rule.id] ?? NO_AUDIENCE_RESOLVER;
+    const preview = previewForRule(rule, audience);
     const runId = nid("run");
     const approvalId = nid("appr");
 
-    if (rule.executionMode === "auto" && rule.testedAt) {
+    // Nobody to write to — record the run and move on. This covers both
+    // "the audience could not be read" and the ordinary good news that no
+    // family is overdue today; neither should raise an approval card.
+    if (preview.dispatchPayload.length === 0) {
+      runs = [
+        {
+          id: runId,
+          ruleId: rule.id,
+          status: audience.ok ? "completed" : "failed",
+          scheduledFor: now.toISOString(),
+          startedAt: now.toISOString(),
+          finishedAt: now.toISOString(),
+          approvalId: "",
+          stats: { proposed: 0, approved: 0, dispatched: 0, failed: 0 },
+          error: audience.ok ? "" : audience.error,
+        },
+        ...runs,
+      ];
+      rules[i] = {
+        ...rule,
+        lastRunAt: now.toISOString(),
+        nextRunAt: computeNextRun(rule, now),
+        updatedAt: nowIso(),
+      };
+      continue;
+    }
+
+    const autoRun = rule.executionMode === "auto" && !!rule.testedAt;
+
+    // An auto-run rule really sends, so a second evaluation minutes after
+    // the first must not send the same message again — a double-clicked
+    // "Run evaluation now", or the cron landing while someone is pressing
+    // it. Approval-first rules are already protected by the pending check
+    // below; this is the same protection for the rules nobody reviews.
+    if (autoRun) {
+      const recent = approvals.find(
+        (a) =>
+          a.ruleId === rule.id &&
+          (a.status === "approved" || a.status === "dispatched") &&
+          now.getTime() - Date.parse(a.createdAt || "") < AUTO_RESEND_GUARD_MS,
+      );
+      if (recent) {
+        rules[i] = {
+          ...rule,
+          lastRunAt: now.toISOString(),
+          nextRunAt: computeNextRun(rule, now),
+          updatedAt: nowIso(),
+        };
+        continue;
+      }
+    }
+
+    if (autoRun) {
       approvals = [
         {
           id: approvalId,
@@ -770,10 +1034,13 @@ export function evaluateAutomationTick(
         {
           id: runId,
           ruleId: rule.id,
-          status: "completed",
+          // "running" until the caller actually dispatches and calls
+          // markApprovalDispatched. Reporting "completed · dispatched 0"
+          // here is what made auto-run rules look like they had sent.
+          status: "running",
           scheduledFor: now.toISOString(),
           startedAt: now.toISOString(),
-          finishedAt: now.toISOString(),
+          finishedAt: "",
           approvalId,
           stats: {
             proposed: preview.audienceCount,
@@ -786,11 +1053,65 @@ export function evaluateAutomationTick(
         ...runs,
       ];
     } else {
-      // Skip if pending approval already exists for this rule
-      const hasPending = approvals.some(
-        (a) => a.ruleId === rule.id && a.status === "pending",
+      /*
+        ONE open card per rule, always.
+
+        A rule with a card already waiting must not raise a second one, and
+        that has to hold for a forced evaluation too. "Run evaluation now"
+        used to bypass the check, so every press stacked another card for
+        the same rule: this school ended up with four pending cards for
+        "Fee stage reminders", two of them two seconds apart, 146 families
+        on each. Approving all four would have sent every family the same
+        reminder four times.
+
+        A forced run is not a request for a second card — it is a request
+        for CURRENT numbers on the one that is there. So it refreshes the
+        open card's payload in place and leaves its run attached, which is
+        also what makes the audience growing from 2 to 146 visible without
+        a pile of history.
+
+        A snoozed card counts as open until its snooze expires. Otherwise
+        "Snooze 24h" cleared the guard and the next tick, half an hour
+        later, raised the very card the office had just put down.
+      */
+      const openIdx = approvals.findIndex(
+        (a) =>
+          a.ruleId === rule.id &&
+          (a.status === "pending" ||
+            (a.status === "snoozed" &&
+              Date.parse(a.snoozeUntil || "") > now.getTime())),
       );
-      if (!hasPending || forced) {
+
+      if (openIdx >= 0) {
+        if (forced) {
+          const open = approvals[openIdx]!;
+          approvals = approvals.map((a, i) =>
+            i === openIdx
+              ? {
+                  ...a,
+                  // Re-evaluated, so the snooze no longer applies: the
+                  // office asked to look again.
+                  status: "pending" as const,
+                  snoozeUntil: "",
+                  templateFamilyKey: rule.templateFamilyKey,
+                  templateLanguage: rule.templateLanguage,
+                  ...preview,
+                  error: "",
+                }
+              : a,
+          );
+          runs = runs.map((r) =>
+            r.approvalId === open.id
+              ? {
+                  ...r,
+                  scheduledFor: now.toISOString(),
+                  startedAt: now.toISOString(),
+                  stats: { ...r.stats, proposed: preview.audienceCount },
+                }
+              : r,
+          );
+        }
+      } else {
         approvals = [
           {
             id: approvalId,
@@ -847,6 +1168,59 @@ export function evaluateAutomationTick(
   };
 }
 
+/**
+ * How long an approved card may wait before its contents are too old to send.
+ *
+ * `dispatchPayload` is a SNAPSHOT — this family, this child, this amount, as
+ * they were when the card was raised. A fee reminder approved last Tuesday
+ * and sent today tells a parent they owe a figure they may have paid at the
+ * counter on Wednesday. Past this window the card is failed with a reason
+ * and the next evaluation raises a fresh one against current data.
+ */
+export const APPROVAL_STALE_AFTER_MS = 12 * 60 * 60_000;
+
+export function approvalIsStale(
+  item: AutomationApprovalItem,
+  now = new Date(),
+): boolean {
+  const created = Date.parse(item.createdAt || "");
+  if (!Number.isFinite(created)) return true;
+  return now.getTime() - created > APPROVAL_STALE_AFTER_MS;
+}
+
+/**
+ * Approved items that have not gone out yet.
+ *
+ * Both the auto-run cards this tick just raised and anything a human
+ * approved in Masters while the sender was misconfigured — the next tick
+ * picks those up rather than leaving them approved and unsent forever.
+ */
+export function undispatchedApprovals(
+  state: AutomationState,
+): AutomationApprovalItem[] {
+  return state.approvals.filter(
+    (a) => a.status === "approved" && a.dispatchPayload.length > 0,
+  );
+}
+
+/**
+ * Would this rule produce anything on a tick at `now`?
+ *
+ * Exported so a caller can decide whether resolving the rule's audience is
+ * worth a roster + fee-ledger read. The tick used to resolve every enabled
+ * rule, event-driven ones included — and an event rule never fires on a
+ * tick, so those reads were pure waste on every run.
+ */
+export function ruleWillEvaluate(
+  rule: AutomationRule,
+  now = new Date(),
+  forced = false,
+): boolean {
+  if (forced) return true;
+  if (!rule.enabled) return false;
+  return ruleIsDue(rule, now);
+}
+
 export function decideApproval(
   state: AutomationState,
   approvalId: string,
@@ -867,14 +1241,50 @@ export function decideApproval(
           : "",
     };
   });
-  return { ...state, approvals };
+
+  /*
+    A rejected card's run is finished, and must say so.
+
+    It used to stay "proposed · dispatched 0" for ever, so the Runs tab
+    filled with rows that read as work still waiting to go out — this
+    school has two of them from 9 September, both rejected the same
+    afternoon. "Proposed 146, dispatched 0" is the correct thing to show
+    while a card is waiting and a lie once it has been turned down.
+
+    Approving does NOT close the run: the send has not happened yet, and
+    markApprovalDispatched closes it with the real counts.
+  */
+  if (decision !== "rejected") return { ...state, approvals };
+  return {
+    ...state,
+    approvals,
+    runs: state.runs.map((r) =>
+      r.approvalId === approvalId && r.status === "proposed"
+        ? {
+            ...r,
+            status: "cancelled" as const,
+            finishedAt: nowIso(),
+            error: r.error || `Rejected by ${by || "the office"}`,
+          }
+        : r,
+    ),
+  };
 }
 
+/**
+ * Record what the send actually did.
+ *
+ * `counts` comes from the dispatcher, so a partly-delivered run reports the
+ * real split instead of "all of them" / "none of them". Without it the
+ * caller is assumed to have sent to everyone proposed, which is what the
+ * browser's own dispatch has always done.
+ */
 export function markApprovalDispatched(
   state: AutomationState,
   approvalId: string,
   ok: boolean,
   error = "",
+  counts?: { sent: number; failed: number; deferred?: number },
 ): AutomationState {
   return {
     ...state,
@@ -883,7 +1293,9 @@ export function markApprovalDispatched(
         ? {
             ...a,
             status: ok ? "dispatched" : "failed",
-            error: ok ? "" : error,
+            // A partial send is still a failure to report, but the error
+            // must not be blanked when some messages did go out.
+            error: ok && !error ? "" : error,
             decidedAt: a.decidedAt || nowIso(),
           }
         : a,
@@ -897,10 +1309,14 @@ export function markApprovalDispatched(
             stats: {
               ...r.stats,
               approved: r.stats.proposed,
-              dispatched: ok ? r.stats.proposed : 0,
-              failed: ok ? 0 : r.stats.proposed,
+              dispatched: counts
+                ? counts.sent
+                : ok
+                  ? r.stats.proposed
+                  : 0,
+              failed: counts ? counts.failed : ok ? 0 : r.stats.proposed,
             },
-            error: ok ? "" : error,
+            error: ok && !error ? "" : error,
           }
         : r,
     ),

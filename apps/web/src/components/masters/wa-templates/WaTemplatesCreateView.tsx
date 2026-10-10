@@ -59,9 +59,12 @@ export function WaTemplatesCreateView({
   const [module, setModule] = useState<WaTemplateModule>("comms");
   const [lang, setLang] = useState<WaTemplateLanguage>("en");
   const [body, setBody] = useState(
-    "Namaste {{guardianName}}, message from {{schoolName}}.",
+    "Namaste {{guardianName}} ji 🙏\n\nA message from *{{schoolName}}* about {{childName}}:\n\n📢 (write the message here)\n\nReply to this message if you have a question — we are happy to help. 🙏",
   );
   const [footer, setFooter] = useState("");
+  // Title line above the body (Meta TEXT header, 60 chars, plain text).
+  // Only for the text layout — a media layout already has its header.
+  const [headerText, setHeaderText] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
   const [mediaFileName, setMediaFileName] = useState("");
   const [carousel, setCarousel] = useState<Omit<WaCarouselCard, "id">[]>(
@@ -157,6 +160,9 @@ export function WaTemplatesCreateView({
       body,
       footer,
       layoutKind,
+      ...(layoutKind === "text" && headerText.trim()
+        ? { headerFormat: "TEXT" as const, headerText: headerText.trim().slice(0, 60) }
+        : {}),
       mediaUrl,
       mediaFileName,
       carousel: layoutKind === "carousel" ? carousel : undefined,
@@ -198,7 +204,7 @@ export function WaTemplatesCreateView({
             <button
               key={opt.id}
               type="button"
-              className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 text-left transition hover:border-[#0f766e] hover:shadow-sm"
+              className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-left transition hover:border-[var(--tone-teal)] hover:shadow-sm"
               onClick={() => pickLayout(opt.id)}
             >
               <p className="text-[14px] font-semibold text-[var(--brand-deep)]">
@@ -247,7 +253,7 @@ export function WaTemplatesCreateView({
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-3 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-4">
+        <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="block text-[11px] font-semibold text-[var(--muted)]">
               Display name
@@ -303,7 +309,7 @@ export function WaTemplatesCreateView({
           </div>
 
           {needsHeaderMedia ? (
-            <div className="rounded-lg border border-[rgba(32,48,80,0.1)] p-3">
+            <div className="rounded-lg border border-[var(--border)] p-3">
               <p className="text-[11px] font-semibold text-[var(--brand-deep)]">
                 Header {layoutKind} upload
               </p>
@@ -344,7 +350,7 @@ export function WaTemplatesCreateView({
               {carousel.map((c, idx) => (
                 <div
                   key={idx}
-                  className="rounded-lg border border-[rgba(32,48,80,0.08)] p-2"
+                  className="rounded-lg border border-[var(--border)] p-2"
                 >
                   <p className="text-[10px] font-bold text-[var(--muted)]">
                     Card {idx + 1}
@@ -404,11 +410,26 @@ export function WaTemplatesCreateView({
               module={module}
               language={lang}
               layoutKind={layoutKind}
-              onApply={(b, f) => {
+              onApply={(b, f, h) => {
                 setBody(b);
                 setFooter(f);
+                if (h != null && layoutKind === "text") setHeaderText(h);
               }}
             />
+          ) : null}
+
+          {layoutKind === "text" ? (
+            <label className="block text-[11px] font-semibold text-[var(--muted)]">
+              Title line (optional, shown bold above the body — plain text, no emoji)
+              <input
+                className={`${waInp} mt-1`}
+                value={headerText}
+                maxLength={60}
+                disabled={readOnly}
+                placeholder="Fee reminder"
+                onChange={(e) => setHeaderText(e.target.value)}
+              />
+            </label>
           ) : null}
 
           <label className="block text-[11px] font-semibold text-[var(--muted)]">

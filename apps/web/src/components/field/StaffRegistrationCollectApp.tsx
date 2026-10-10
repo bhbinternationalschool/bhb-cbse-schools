@@ -20,12 +20,12 @@ import {
   setLeadRegistrationFee,
   takeRegistrationPayment,
   todayYmd,
-  whatsAppUrl,
 } from "@/lib/admissions";
 import { formatInr, TENDER_MODES, type TenderMode } from "@/lib/fees";
 import { loadMasters } from "@/lib/masters";
 import type { DemoSession } from "@/lib/auth";
 import { TENANT } from "@/lib/types";
+import { openWaMe } from "@/lib/waMe";
 
 const inp =
   "w-full rounded-xl border border-[rgba(32,48,80,0.18)] bg-white px-3 py-3 text-base";
@@ -95,7 +95,10 @@ export function StaffRegistrationCollectApp({
           docsPhoto: true,
         }),
         by,
-        { allowMissingClass: !classSoughtId },
+        // The picker below is labelled "Class (optional)" — blank is a
+        // supported answer here. Literal rather than `!classSoughtId`,
+        // which reads like a check but can never refuse anything.
+        { allowMissingClass: true },
       );
       if (!created.ok) return { ok: false, reason: created.reason };
       state = created.state;
@@ -131,7 +134,7 @@ export function StaffRegistrationCollectApp({
       setMsg(ready.reason);
       return;
     }
-    let { state, id } = ready;
+    const { state, id } = ready;
     const head = feeHeads.find((h) => h.id === feeHeadId);
     const lead = state.leads.find((l) => l.id === id)!;
     const bal = registrationBalancePaise(state, lead);
@@ -248,7 +251,7 @@ export function StaffRegistrationCollectApp({
     setCollectAmount(still > 0 ? String(still / 100) : "0");
     setRef("");
     setUpiQr(null);
-    window.open(whatsAppUrl(mobile || r.payment.mobile, text), "_blank", "noopener,noreferrer");
+    openWaMe(mobile || r.payment.mobile, text, undefined, { module: "admissions" });
   }
 
   function confirmPaidAndWhatsApp() {
@@ -287,7 +290,7 @@ export function StaffRegistrationCollectApp({
         .filter(Boolean)
         .join(" · "),
     );
-    window.open(whatsAppUrl(mobile || r.payment.mobile, text), "_blank", "noopener,noreferrer");
+    openWaMe(mobile || r.payment.mobile, text, undefined, { module: "admissions" });
     setUtr("");
     setCollectAmount(still > 0 ? String(still / 100) : "0");
     setUpiQr(null);
@@ -417,7 +420,7 @@ export function StaffRegistrationCollectApp({
 
       <button
         type="button"
-        className="w-full rounded-2xl bg-[#0f766e] py-3 text-sm font-semibold text-white"
+        className="w-full rounded-2xl bg-[var(--tone-teal-solid)] py-3 text-sm font-semibold text-white"
         onClick={() => void prepareUpi()}
       >
         Show school UPI QR
@@ -451,7 +454,7 @@ export function StaffRegistrationCollectApp({
           />
           <button
             type="button"
-            className="w-full rounded-2xl bg-[#166534] py-3 text-sm font-semibold text-white"
+            className="w-full rounded-2xl bg-[var(--tone-green-deep-solid)] py-3 text-sm font-semibold text-white"
             onClick={confirmPaidAndWhatsApp}
           >
             Capture UPI + WhatsApp receipt

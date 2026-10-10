@@ -7,6 +7,10 @@ ENV_FILE="${ROOT}/apps/web/.env.local"
 PROJECT_ID="${GCP_PROJECT_ID:-school-erp-prod-493619}"
 REGION="${GCP_REGION:-asia-southeast1}"
 APP_URL="${NEXT_PUBLIC_APP_URL_OVERRIDE:-https://bhbinternational.school}"
+# Per-request-billed twin of the main service (scripts/sync-lite-service.sh).
+# Jobs that run through the night go here so they do not keep the main
+# service — billed per instance-second — awake until morning.
+LITE_URL="${LITE_URL:-https://school-erp-lite-lgeutmxlnq-as.a.run.app}"
 
 get_env() {
   python3 - "$ENV_FILE" "$1" <<'PY'
@@ -49,67 +53,315 @@ fi
 
 gcloud config set project "$PROJECT_ID" >/dev/null
 
+# create_job NAME SCHEDULE URI [TZ] [DEADLINE] [START_STATE]
+#
+# TZ defaults to Asia/Kolkata: every schedule here is expressed in school time,
+# and a job left on UTC silently runs 5h30m out when its schedule gains an
+# hour-of-day restriction. DEADLINE used to be implied by whether a timezone
+# was passed, which coupled two unrelated things — a */5 job that gained a
+# timezone also jumped to a 300s deadline, long enough to overlap its own next
+# tick. It is now explicit and defaults to 120s.
 create_job() {
   local name="$1"
   local schedule="$2"
   local uri="$3"
-  local tz="${4:-}"
+  local tz="${4:-Asia/Kolkata}"
+  local deadline="${5:-120s}"
+  # "paused" => pause the job right after CREATING it. Deliberately not applied
+  # on update: if someone has resumed the job on purpose, re-running this script
+  # must not switch it back off.
+  local start_state="${6:-}"
+
+  local -a flags=(
+    --location="$REGION"
+    --schedule="$schedule"
+    --time-zone="$tz"
+    --uri="$uri"
+    --http-method=POST
+    --attempt-deadline="$deadline"
+    --quiet
+  )
+
   if gcloud scheduler jobs describe "$name" --location="$REGION" >/dev/null 2>&1; then
+    # A plain `jobs update` silently re-enables a PAUSED job. Remember the
+    # state and put it back, so re-running this script never switches on a
+    # feature that was paused on purpose (the staff GPS tick, 2026-08-29).
+    local was_state
+    was_state="$(gcloud scheduler jobs describe "$name" --location="$REGION" --format='value(state)' 2>/dev/null || true)"
     echo "Updating ${name}..."
-    if [[ -n "$tz" ]]; then
-      gcloud scheduler jobs update http "$name" \
-        --location="$REGION" \
-        --schedule="$schedule" \
-        --time-zone="$tz" \
-        --uri="$uri" \
-        --http-method=POST \
-        --update-headers="x-cron-secret=${CRON_SECRET}" \
-        --attempt-deadline=300s \
-        --quiet
-    else
-      gcloud scheduler jobs update http "$name" \
-        --location="$REGION" \
-        --schedule="$schedule" \
-        --uri="$uri" \
-        --http-method=POST \
-        --update-headers="x-cron-secret=${CRON_SECRET}" \
-        --attempt-deadline=120s \
-        --quiet
+    gcloud scheduler jobs update http "$name" \
+      "${flags[@]}" --update-headers="x-cron-secret=${CRON_SECRET}"
+    if [[ "$was_state" == "PAUSED" ]]; then
+      echo "  ...${name} was paused; keeping it paused"
+      gcloud scheduler jobs pause "$name" --location="$REGION" --quiet
     fi
   else
     echo "Creating ${name}..."
-    if [[ -n "$tz" ]]; then
-      gcloud scheduler jobs create http "$name" \
-        --location="$REGION" \
-        --schedule="$schedule" \
-        --time-zone="$tz" \
-        --uri="$uri" \
-        --http-method=POST \
-        --headers="x-cron-secret=${CRON_SECRET}" \
-        --attempt-deadline=300s \
-        --quiet
-    else
-      gcloud scheduler jobs create http "$name" \
-        --location="$REGION" \
-        --schedule="$schedule" \
-        --uri="$uri" \
-        --http-method=POST \
-        --headers="x-cron-secret=${CRON_SECRET}" \
-        --attempt-deadline=120s \
-        --quiet
+    gcloud scheduler jobs create http "$name" \
+      "${flags[@]}" --headers="x-cron-secret=${CRON_SECRET}"
+    if [[ "$start_state" == "paused" ]]; then
+      echo "  ...pausing ${name} (feature is off; resume when enabling it)"
+      gcloud scheduler jobs pause "$name" --location="$REGION" --quiet
     fi
   fi
 }
 
-create_job "bhb-comms-scheduled-publish" "*/5 * * * *" \
-  "${APP_URL}/api/comms/scheduled-publish/tick"
+# Scheduled notices / news / gallery + social cross-post. Was */5 around the
+# clock — 288 cold starts a day, the largest single line in the August cost
+# audit. Now every 10 minutes from 06:00 to 21:59 (96 a day): a post is
+# scheduled with a datetime picker and lands within ten minutes of it, and
+# one set for the small hours goes out at 06:00 — the school has never
+# published at night on purpose. If that ever changes, widen the hours here
+# rather than the interval.
+create_job "bhb-comms-scheduled-publish" "*/10 6-21 * * *" \
+  "${APP_URL}/api/comms/scheduled-publish/tick" \
+  "Asia/Kolkata" "120s"
 
-create_job "bhb-wa-automation-tick" "*/15 * * * *" \
-  "${APP_URL}/api/wa/automation/tick"
+# WhatsApp automation rules. The automation's own quiet hours default to
+# 20:00-08:00, during which it sends nothing anyway, so ticking overnight
+# only ever found "not now". Every 30 minutes, 08:00 to 19:59; reminders are
+# day-granular and approvals are reviewed by staff in office hours.
+#
+# Mon-Sat, like every other school-day job here. It ran seven days a week
+# while the tick only ever PROPOSED cards for a human to look at, and a card
+# raised on Sunday simply waited for Monday. The tick now sends, so a Sunday
+# tick is a fee chase arriving on a Sunday.
+#
+# 300s, not 120s, for the same reason: the tick resolves the audience from
+# the roster, the fee ledger and the admissions pipeline, then posts each
+# message to Meta. 120s was sized for an evaluation that did no I/O beyond
+# reading and writing the rules. 300s is the ceiling worth asking for — the
+# Cloud Run service takes its default 300s request timeout (no --timeout in
+# cloudbuild.yaml), so a longer scheduler deadline would just wait on a
+# request the platform has already cut off.
+create_job "bhb-wa-automation-tick" "*/30 8-19 * * 1-6" \
+  "${APP_URL}/api/wa/automation/tick" \
+  "Asia/Kolkata" "300s"
+
+# "Read Nucleus" — the weekly nudge to copy LEAD's syllabus-progress table
+# into the ERP. LEAD has no API and their login is behind reCAPTCHA, so a
+# human carries the numbers across; without this reminder the screen shows a
+# month-old reading and nobody notices.
+#
+# Monday 08:30 IST, once a week: the figures move by day plans, not by hours,
+# and the principal reads them at the start of the week. The tick itself
+# decides whether to send — nothing goes out while the last reading is under
+# a week old, so a Monday after a Friday paste is silent.
+create_job "bhb-nucleus-reminder" "30 8 * * 1" \
+  "${APP_URL}/api/nucleus/reminder/tick" \
+  "Asia/Kolkata" "120s"
+
+# The 6 PM brief for owner, principal and office head: the day's collection
+# with its mode break-up, expenses by head, attendance class by class, staff
+# absences split into approved leave / awaiting a decision / nothing on file,
+# and tomorrow's calling list — headlines on WhatsApp, detail in an attached
+# PDF.
+#
+# 18:00 on school days, and once: unlike the birthday tick this is NOT
+# idempotent by clock, it is idempotent by clientMessageId
+# (dailybrief:<date>:<mobile>), so a retry after a timeout will not send a
+# second copy. Deadline 300s because the brief reads the fee ledger, the
+# registers, the leave queue and the defaulters, then renders a PDF.
+create_job "bhb-daily-brief" "0 18 * * 1-6" \
+  "${APP_URL}/api/reports/daily-brief/send" \
+  "Asia/Kolkata" "300s"
 
 create_job "bhb-bigquery-nightly-sync" "0 2 * * *" \
-  "${APP_URL}/api/analytics/bigquery-sync/tick" \
-  "Asia/Kolkata"
+  "${LITE_URL}/api/analytics/bigquery-sync/tick" \
+  "Asia/Kolkata" "300s"
+
+# NCERT chapter index from DIKSHA (lib/dikshaIndex.server.ts). Weekly: DIKSHA
+# shows NCERT revising books through the term (a dozen republished in the first
+# half of September 2026), and only books whose publish date moved are fetched
+# again. Sunday night, on the lite service: a full rebuild reads ~26 MB.
+create_job "bhb-diksha-index-weekly" "30 3 * * 0" \
+  "${LITE_URL}/api/curriculum/diksha-index/tick" \
+  "Asia/Kolkata" "300s"
+
+# NCERT / CBSE class-wise subject lists from DIKSHA (lib/ncfOfficial.server.ts).
+# Weekly, after the chapter index: two small framework reads; new or dropped
+# subjects wait in Masters → Subjects for the office to act on.
+create_job "bhb-ncf-subjects-weekly" "45 3 * * 0" \
+  "${LITE_URL}/api/curriculum/ncf-official/tick" \
+  "Asia/Kolkata" "120s"
+
+# Birthday greetings: the tick sends once the IST clock passes the hour set in
+# Students → Birthdays (and auto-send is on); it is idempotent, so hourly is safe
+# and also retries quiet-hours deferrals.
+create_job "bhb-birthday-tick" "5 * * * *" \
+  "${LITE_URL}/api/birthday/tick" \
+  "Asia/Kolkata" "300s"
+
+# Fee integrity: money that has lost its breakdown.
+#
+# A live receipt with an amount and no lines has a guardian and a total and no
+# student, no fee head and no month — and because dues clear FROM the lines,
+# every month those families paid reads unpaid again and the counter starts
+# re-collecting money it already has.
+#
+# This has happened twice (134 receipts on 2026-09-01, all 502 on 2026-09-06).
+# Both times the Accounts controls page raised it correctly and nobody was
+# looking at the Accounts controls page; the second ran about fourteen hours
+# until the director noticed on his own screen. Hourly, because the cost of a
+# cold start is nothing against re-collecting a family's fees.
+#
+# The tick returns 500 while a blank receipt exists, so Cloud Scheduler retries
+# and the failure is visible in the job history — a job that only ever shows
+# green teaches everyone to ignore it.
+create_job "bhb-fee-integrity-tick" "35 * * * *" \
+  "${LITE_URL}/api/fees/integrity/tick" \
+  "Asia/Kolkata" "120s"
+
+# Fee auto-pay (Cashfree UPI Autopay / e-NACH). Daily at 10:15: finishes any
+# debit whose outcome or receipt is outstanding (a webhook that never came),
+# then from the school's charge day raises the month's debit for each active
+# mandate, landing the next day. Raising before 9 PM for T+1 is inside every
+# rail's cut-off. Does nothing but report until Accounts → Auto-pay is turned
+# on. Returns 500 when a debit could not be raised or booked, so it shows red.
+create_job "bhb-fee-autopay-tick" "15 10 * * *" \
+  "${APP_URL}/api/fees/autopay/tick" \
+  "Asia/Kolkata" "300s"
+
+# Ledger projection: the server book is derived from the desks (a fee receipt
+# → receipt voucher, a void → reversal). It used to run only when somebody
+# pressed "Project" in Accounts → Server book; over 69 voided receipts the
+# reversal lagged the void by a median 3.3 h and up to 67 h. Hourly through the
+# school day, Mon–Sat, at :50 so it follows the :35 integrity tick. Idempotent
+# by source id; 300s because it scans every desk record.
+create_job "bhb-ledger-project-tick" "50 8-15 * * 1-6" \
+  "${APP_URL}/api/ledger/project/tick" \
+  "Asia/Kolkata" "300s"
+
+# The director's Monday note on fee collections: last week's receipts against
+# the week before, the ageing of what is still owed, parent meetings — figures
+# computed by code, a few sentences by the model with no digit in them. Goes
+# to every owner on the roster (same recipients as the command digest).
+create_job "bhb-collections-weekly-note" "15 8 * * 1" \
+  "${APP_URL}/api/ai/collections-weekly-note?send=1" \
+  "Asia/Kolkata" "300s"
+
+# Fleet owner alerts: a bus moving outside the transport day, a tank running
+# low, a service or a paper falling due. All day, every day — a bus on the
+# road at midnight is exactly what the owner wants to hear about — every 15
+# minutes, each alert on its own cooldown so nobody is messaged twice.
+create_job "bhb-fleet-alerts-tick" "*/15 * * * *" \
+  "${LITE_URL}/api/transport/fleet-alerts/tick" \
+  "Asia/Kolkata" "120s"
+
+# ERP command desk: the director's end-of-day digest of what staff asked the
+# ERP over WhatsApp / app / assistant. Sends once after ERP_COMMANDS_DIGEST_HOUR
+# (default 19:00 IST), only on days with commands; idempotent per date, so the
+# three evening attempts cover a cold start or a late command.
+create_job "bhb-erp-commands-digest-tick" "20 19-21 * * *" \
+  "${APP_URL}/api/erp-commands/digest/tick" \
+  "Asia/Kolkata" "120s"
+
+# Receipt archive: a PDF of every fee receipt into the school's Google Drive
+# (Receipts / <academic year> / <month>).
+#
+# Once a day, after the counter closes — not on a repeating interval. Every
+# tick of a job is a cold start of the service (min-instances=0) plus its
+# Secret Manager reads, which is what the August bill audit traced the cost
+# to; a half-hourly job would be 48 starts a day to find, most times, nothing.
+# One pass at 15:45 covers the day's counter receipts and the previous
+# night's online ones. Nobody waits on it: a parent opening a receipt in the
+# app gets it rendered on the spot and archived as a side effect. Idempotent
+# through drive_archive, so a missed day is simply picked up by the next.
+# limit=120 with a 300s deadline: a day is a few dozen receipts at ~1.5s each.
+create_job "bhb-drive-archive-receipts" "45 15 * * *" \
+  "${APP_URL}/api/drive/archive/receipts/tick?limit=120" \
+  "Asia/Kolkata" "300s"
+
+# Staff GPS presence (bhb-staff-geo-tick) — DELETED 2026-10-09.
+#
+# It sat paused from 2026-08-29 (geo-fence off in Staff → GPS, no staff
+# consented), and a paused job is still billed. Recreate it when the feature
+# is turned on:
+#   gcloud scheduler jobs create http bhb-staff-geo-tick --location=asia-southeast1 \
+#     --schedule="*/5 7-15 * * 1-6" --time-zone=Asia/Kolkata \
+#     --uri="${APP_URL}/api/staff-geo/tick" --attempt-deadline=300s  # + the auth flags create_job uses
+# or restore its create_job line from git history.
+
+# Online classes: the "starting soon" push 15 minutes before a scheduled
+# class, and closing any class still marked live half an hour after its end
+# time. School hours plus an evening margin — teachers do hold revision
+# classes after dinner — and never on Sunday.
+create_job "bhb-online-classes-tick" "*/5 7-21 * * 1-6" \
+  "${APP_URL}/api/online-classes/tick" \
+  "Asia/Kolkata" "120s"
+
+# WhatsApp template status: what Meta has approved since we last looked.
+#
+# A template approved at Meta but still stored as `pending` here is REFUSED by
+# the sender, which falls back to plain text, which Meta rejects outside the
+# 24-hour window. On 2026-09-08 `bhb_fee_receipt` had been approved in both
+# languages for days while every fee receipt failed, and the error said
+# "outside the 24 hour window" — pointing at the parent's silence rather than
+# at a status two steps upstream. The registry had drifted to 5 approved rows
+# against Meta's 64.
+#
+# Nothing self-corrected because there were only two paths in, and both needed
+# luck: Meta's webhook wrote to a JSON file on the container disk, which Cloud
+# Run wipes on every deploy and scale-to-zero, and the Masters button hands the
+# merged registry to the BROWSER to save, so it cannot run unattended.
+#
+# Every hour 07:00-21:00, SEVEN days a week (15 ticks a day). It used to be
+# every two hours 08:00-16:00 Mon-Sat, on the theory that approvals only
+# matter in school hours. They do not: the office sends in the evening and on
+# Sundays too. On Sunday 13 Sep 2026 the location request failed for all five
+# parents at 7 pm — Meta had approved it after Saturday's 4 pm run, and nothing
+# would have noticed until Monday 8 am. The send path now asks Meta itself
+# before trusting a "not approved" (resolveTemplateForSendFresh), but most
+# senders do not use it yet, so the schedule is the net under all of them.
+# One Meta list call per tick; the cost is negligible. Idempotent — it merges
+# Meta's statuses and refuses outright if the stored registry cannot be read,
+# rather than writing from an empty one and erasing the configured templates.
+create_job "bhb-wa-template-refresh" "0 7-21 * * *" \
+  "${APP_URL}/api/wa/templates/refresh" \
+  "Asia/Kolkata" "120s"
+
+# Parent chats that have gone quiet get a thank-you and the assistant guide,
+# once per conversation, inside Meta's 24-hour window, 8 am–8 pm only.
+create_job "bhb-wa-parent-chat-close" "*/15 8-19 * * *" \
+  "${APP_URL}/api/wa/parent-chat-close" \
+  "Asia/Kolkata" "120s"
+
+# The evening before each exam day: tomorrow's papers to every family, with
+# a button that starts the AI tutor on that subject (lib/examEve.server.ts).
+# Daily at 6 pm — it sends nothing when tomorrow has no paper, so the date
+# sheet is the only calendar this job needs. Runs on the main service, not
+# lite: the send path hands work to the reply tracker.
+create_job "bhb-wa-exam-eve" "0 18 * * *" \
+  "${APP_URL}/api/wa/exam-eve" \
+  "Asia/Kolkata" "300s"
+
+# The answer book: take down any answer whose date has passed, before the
+# school day starts. An expired answer that stays on the shelf is still
+# quoted to parents, which is worse than having none.
+create_job "bhb-wa-answer-expiry" "20 6 * * *" \
+  "${APP_URL}/api/wa/answer-book/expiry-tick" \
+  "Asia/Kolkata" "120s"
+
+# Index published notices into the shelf the parent bot reads. Until 21 Sep
+# 2026 this ran only when a member of staff pressed a button, so it had never
+# run at all: the bot held zero chunks with notices published, and answered
+# "I don't have that information" to everything outside a family's own dues.
+# Just after the expiry sweep, so the shelf is tidied and then refilled.
+create_job "bhb-ai-kb-sync" "30 6 * * *" \
+  "${APP_URL}/api/ai/kb-sync" \
+  "Asia/Kolkata" "300s"
+
+# Cashfree settlement sweep: pulls what the gateway actually paid into the
+# bank, with its event-level breakdown, and posts it to the ledger.
+#
+# Daily rather than hourly: a T+1 cycle settles once, in the morning, and the
+# sweep asks for a rolling 7-day window so a missed run, a bank holiday
+# weekend, or a webhook that never arrived is picked up by the next one
+# without anybody noticing it was needed. It is idempotent, so a re-run costs
+# nothing but the request.
+create_job "bhb-cashfree-settlement-sweep" "30 7 * * *" \
+  "${APP_URL}/api/payments/cashfree/settlements" \
+  "Asia/Kolkata" "300s"
 
 echo ""
 echo "Done. Jobs in $REGION:"

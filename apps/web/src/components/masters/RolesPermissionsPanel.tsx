@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import {
   appendRbacAudit,
@@ -13,6 +13,7 @@ import {
   principalAccessSummary,
   roleHasAction,
   saveRbac,
+  setRoleFeaturePermission,
   setRolePermission,
   staffAccessOverview,
   RBAC_ACTIONS,
@@ -24,17 +25,26 @@ import {
   type RbacState,
   type UserRoleAssignment,
 } from "@/lib/rbac";
+import { featuresForModule } from "@/lib/rbacFeatures";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isSuperAdminSession } from "@/lib/superAdmin";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { MobileAccessPanel } from "@/components/masters/MobileAccessPanel";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+} from "@/components/ui/erp-roster";
 import {
   MastersEmptyRow,
   MastersTableCard,
   MastersTablesRow,
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
-type RbacTab = "matrix" | "roles" | "assignments" | "summary" | "audit";
+type RbacTab = "matrix" | "mobile" | "roles" | "assignments" | "summary" | "audit";
 
 function emptyScope() {
   return {
@@ -48,6 +58,32 @@ export function RolesPermissionsPanel() {
   const session = useDemoSession();
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [state, setState] = useState<RbacState | null>(null);
+
+  // Sorting by Expires shows which role assignments lapse soonest.
+  const assignSort = useTableSort(
+    state?.assignments ?? [],
+    {
+      staff: (a) =>
+        masters?.staff?.find((s) => s.id === a.staffId)?.fullName || a.staffId,
+      // By the role's name as shown, not its id.
+      role: (a) => state?.roles.find((r) => r.id === a.roleId)?.name || a.roleId,
+      expires: (a) => a.expiresOn || "",
+    },
+    "role",
+    "asc",
+  );
+
+  // Roles: Type separates the built-in ones from what the school added. The Active box is a control.
+  const roleSort = useTableSort(
+    state?.roles ?? [],
+    {
+      code: (r) => r.code,
+      name: (r) => r.name,
+      type: (r) => r.isBuiltIn ? "Built-in" : "Custom",
+    },
+    "code",
+    "asc",
+  );
   const [tab, setTab] = useState<RbacTab>("matrix");
   const [notice, setNotice] = useState<string | null>(null);
   const [roleId, setRoleId] = useState<string>("");
@@ -79,8 +115,12 @@ export function RolesPermissionsPanel() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensureRbacHydrated } = await import("@/lib/rbacPersistence");
-      await ensureRbacHydrated();
+      const [{ ensureRbacHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/rbacPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await withHydrationSlot(() => ensureRbacHydrated());
       const r = loadRbac();
       setState(r);
     })();
@@ -101,9 +141,63 @@ export function RolesPermissionsPanel() {
     [state],
   );
 
+  // Which capability nobody holds is the question this summary answers.
+  const capSort = useTableSort(
+    summary,
+    {
+      capability: (row) => row.capability,
+      roles: (row) => row.roleNames.length,
+    },
+    "capability",
+    "asc",
+  );
+
   const staffRows = useMemo(
     () => (state && masters ? staffAccessOverview(state, masters) : []),
     [state, masters],
+  );
+
+  // Staff and the roles they carry.
+  const staffRowSort = useTableSort(
+    staffRows,
+    {
+      staff: (r) => r.staffName,
+      roles: (r) => r.roles.join(", "),
+    },
+    "staff",
+    "asc",
+  );
+
+  /**
+   * Every permission somebody holds outside their role. A personal grant is a
+   * deliberate exception, so it has to be readable in one place — otherwise it
+   * is exactly the quiet back door RBAC exists to prevent.
+   */
+  const grantRows = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return (state?.userGrants ?? []).map((g) => ({
+      id: g.id,
+      staffName:
+        (masters?.staff ?? []).find((s) => s.id === g.staffId)?.fullName ||
+        g.staffId,
+      module: g.module,
+      actions: g.actions.join(", "),
+      note: g.note,
+      grantedBy: g.grantedBy,
+      expiresOn: g.expiresOn,
+      expired: !!g.expiresOn && g.expiresOn < today,
+    }));
+  }, [state?.userGrants, masters]);
+
+  // Per-person grants, which are the ones worth reviewing first.
+  const grantSort = useTableSort(
+    grantRows,
+    {
+      staff: (g) => g.staffName,
+      permission: (g) => g.module,
+    },
+    "staff",
+    "asc",
   );
 
   function commit(next: RbacState, msg?: string) {
@@ -122,6 +216,31 @@ export function RolesPermissionsPanel() {
         state,
         selected.id,
         module,
+        action,
+        enabled,
+        session.fullName,
+      ),
+    );
+  }
+
+  // Modules whose function rows are unfolded in the matrix.
+  const [openModules, setOpenModules] = useState<Set<string>>(() => new Set());
+  function toggleOpen(moduleId: string) {
+    setOpenModules((prev) => {
+      const next = new Set(prev);
+      if (next.has(moduleId)) next.delete(moduleId);
+      else next.add(moduleId);
+      return next;
+    });
+  }
+
+  function toggleFeature(featureId: string, action: RbacAction, enabled: boolean) {
+    if (!state || !selected) return;
+    commit(
+      setRoleFeaturePermission(
+        state,
+        selected.id,
+        featureId,
         action,
         enabled,
         session.fullName,
@@ -295,7 +414,7 @@ export function RolesPermissionsPanel() {
 
   return (
     <div className="space-y-4">
-      <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-3 text-sm text-[var(--muted)]">
+      <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--muted)]">
         {isSuperAdminSession(session) ? (
           <>
             <strong>Super admin</strong> — assign roles to staff (Principal,
@@ -320,6 +439,7 @@ export function RolesPermissionsPanel() {
         onChange={(id) => setTab(id as RbacTab)}
         items={[
           { id: "matrix", label: "Permission matrix", tone: "navy" },
+          { id: "mobile", label: "Mobile app", tone: "sky" },
           { id: "roles", label: "Roles", tone: "teal" },
           { id: "assignments", label: "Assignments", tone: "violet" },
           { id: "summary", label: "Access summary", tone: "amber" },
@@ -338,7 +458,7 @@ export function RolesPermissionsPanel() {
                 Role
               </span>
               <select
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                 value={roleId}
                 onChange={(e) => setRoleId(e.target.value)}
               >
@@ -358,19 +478,19 @@ export function RolesPermissionsPanel() {
             ) : null}
           </div>
           {selected ? (
-            <div className="overflow-x-auto rounded-lg border border-[rgba(32,48,80,0.1)]">
+            <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
               {RBAC_MODULE_GROUPS.map((grp) => {
                 const modules = RBAC_MODULES.filter(
                   (m) => (m.group || "core") === grp.id,
                 );
                 if (modules.length === 0) return null;
                 return (
-                  <div key={grp.id} className="border-b border-[rgba(32,48,80,0.06)] last:border-0">
-                    <p className="bg-[rgba(32,48,80,0.04)] px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
+                  <div key={grp.id} className="border-b border-[var(--border)] last:border-0">
+                    <p className="bg-[var(--surface-sunken)] px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--muted)]">
                       {grp.label}
                     </p>
-                    <table className="min-w-full text-left text-[11px]">
-                      <thead className="text-[var(--muted)]">
+                    <ErpTable minWidth="min-w-full" className="text-[11px]">
+                      <ErpTableHead>
                         <tr>
                           <th className="px-2 py-2 font-semibold">Module</th>
                           {RBAC_ACTIONS.map((a) => (
@@ -383,15 +503,32 @@ export function RolesPermissionsPanel() {
                             </th>
                           ))}
                         </tr>
-                      </thead>
-                      <tbody>
+                      </ErpTableHead>
+                      <ErpTableBody>
                         {modules.map((m) => (
-                          <tr
-                            key={m.id}
-                            className="border-t border-[rgba(32,48,80,0.06)]"
-                          >
+                          <Fragment key={m.id}>
+                          <tr>
                             <td className="px-2 py-1.5 font-medium text-[var(--brand-deep)]">
                               {m.label}
+                              {(() => {
+                                const fns = featuresForModule(m.id);
+                                if (fns.length === 0) return null;
+                                const held = fns.filter((f) =>
+                                  selected.featureGrants?.some((g) => g.feature === f.id && g.actions.length > 0),
+                                ).length;
+                                const open = openModules.has(m.id);
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleOpen(m.id)}
+                                    className="ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold text-[var(--muted)] hover:bg-[var(--surface-sunken)]"
+                                    aria-expanded={open}
+                                  >
+                                    {open ? "▾" : "▸"} {fns.length} functions
+                                    {held > 0 ? ` · ${held} given` : ""}
+                                  </button>
+                                );
+                              })()}
                             </td>
                             {RBAC_ACTIONS.map((a) => {
                               const on = roleHasAction(selected, m.id, a.id);
@@ -409,15 +546,67 @@ export function RolesPermissionsPanel() {
                               );
                             })}
                           </tr>
+                          {/* Functions inside the module, each grantable on
+                              its own. A module tick covers every function. */}
+                          {(openModules.has(m.id) ? featuresForModule(m.id) : []).map((f) => (
+                            <tr key={f.id} className="bg-[var(--surface-sunken)]/40">
+                              <td
+                                className="py-1 pl-6 pr-2 text-[var(--foreground)]"
+                                title={f.blurb}
+                              >
+                                ↳ {f.label}
+                                {f.classScoped ? (
+                                  <span className="ml-1 text-[10px] text-[var(--muted)]">
+                                    (own classes)
+                                  </span>
+                                ) : null}
+                              </td>
+                              {RBAC_ACTIONS.map((a) => {
+                                if (!f.actions.includes(a.id)) {
+                                  return <td key={a.id} className="px-1 py-1" />;
+                                }
+                                const viaModule = roleHasAction(selected, m.id, a.id);
+                                const on =
+                                  viaModule ||
+                                  !!selected.featureGrants?.some(
+                                    (g) => g.feature === f.id && g.actions.includes(a.id),
+                                  );
+                                return (
+                                  <td key={a.id} className="px-1 py-1 text-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={on}
+                                      disabled={viaModule}
+                                      title={viaModule ? `Given by the whole ${m.label} tick` : undefined}
+                                      onChange={(e) =>
+                                        toggleFeature(f.id, a.id, e.target.checked)
+                                      }
+                                      aria-label={`${m.label} — ${f.label} ${a.label}`}
+                                    />
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                          </Fragment>
                         ))}
-                      </tbody>
-                    </table>
+                      </ErpTableBody>
+                    </ErpTable>
                   </div>
                 );
               })}
             </div>
           ) : null}
         </MastersWorkCard>
+      ) : null}
+
+      {tab === "mobile" && state ? (
+        <MobileAccessPanel
+          state={state}
+          masters={masters}
+          commit={commit}
+          actorName={session.fullName}
+        />
       ) : null}
 
       {tab === "roles" ? (
@@ -428,7 +617,7 @@ export function RolesPermissionsPanel() {
           >
             <div className="flex flex-wrap gap-2">
               <select
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                 value={roleId}
                 onChange={(e) => setRoleId(e.target.value)}
               >
@@ -439,27 +628,27 @@ export function RolesPermissionsPanel() {
                 ))}
               </select>
               <input
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
                 placeholder="new_code"
                 value={cloneCode}
                 onChange={(e) => setCloneCode(e.target.value)}
               />
               <input
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
                 placeholder="Display name"
                 value={cloneName}
                 onChange={(e) => setCloneName(e.target.value)}
               />
               <button
                 type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-semibold text-white"
+                className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
                 onClick={runClone}
               >
                 Clone
               </button>
               <button
                 type="button"
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
                 onClick={resetBuiltIns}
               >
                 Reset built-ins
@@ -467,22 +656,19 @@ export function RolesPermissionsPanel() {
             </div>
           </MastersWorkCard>
           <MastersTableCard title="Roles">
-            <table className="min-w-full text-left text-sm">
-              <thead className="text-[11px] text-[var(--muted)]">
+            <ErpTable>
+              <ErpTableHead>
                 <tr>
-                  <th className="px-3 py-2">Code</th>
-                  <th className="px-3 py-2">Name</th>
-                  <th className="px-3 py-2">Type</th>
+                  <ErpSortTh sort={roleSort} field="code" className="px-3 py-2">Code</ErpSortTh>
+                  <ErpSortTh sort={roleSort} field="name" className="px-3 py-2">Name</ErpSortTh>
+                  <ErpSortTh sort={roleSort} field="type" className="px-3 py-2">Type</ErpSortTh>
                   <th className="px-3 py-2">Active</th>
                   <th className="px-3 py-2" />
                 </tr>
-              </thead>
-              <tbody>
-                {state.roles.map((r) => (
-                  <tr
-                    key={r.id}
-                    className="border-t border-[rgba(32,48,80,0.06)]"
-                  >
+              </ErpTableHead>
+              <ErpTableBody>
+                {roleSort.rows.map((r) => (
+                  <tr key={r.id}>
                     <td className="px-3 py-2 font-mono text-[12px]">{r.code}</td>
                     <td className="px-3 py-2">{r.name}</td>
                     <td className="px-3 py-2 text-[11px] text-[var(--muted)]">
@@ -497,21 +683,25 @@ export function RolesPermissionsPanel() {
                       />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        className="text-[11px] font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline"
-                        onClick={() => {
-                          setRoleId(r.id);
-                          setTab("matrix");
-                        }}
-                      >
-                        Matrix →
-                      </button>
+                      <RowActionMenu
+                        row={r}
+                        label={`Actions for role ${r.name}`}
+                        actions={[
+                          {
+                            id: "matrix",
+                            label: "Open permission matrix",
+                            onSelect: (x) => {
+                              setRoleId(x.id);
+                              setTab("matrix");
+                            },
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           </MastersTableCard>
         </div>
       ) : null}
@@ -524,7 +714,7 @@ export function RolesPermissionsPanel() {
           >
             <div className="flex flex-wrap gap-2">
               <select
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                 value={assignStaffId}
                 onChange={(e) => setAssignStaffId(e.target.value)}
               >
@@ -536,7 +726,7 @@ export function RolesPermissionsPanel() {
                 ))}
               </select>
               <select
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                 value={assignRoleId}
                 onChange={(e) => setAssignRoleId(e.target.value)}
               >
@@ -550,20 +740,20 @@ export function RolesPermissionsPanel() {
               </select>
               <input
                 type="date"
-                className="rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
                 value={assignExpires}
                 onChange={(e) => setAssignExpires(e.target.value)}
                 title="Expires on"
               />
               <input
-                className="min-w-[10rem] flex-1 rounded-lg border border-[rgba(32,48,80,0.15)] px-3 py-2 text-sm"
+                className="min-w-[10rem] flex-1 rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
                 placeholder="Note (e.g. substitute XI-A)"
                 value={assignNote}
                 onChange={(e) => setAssignNote(e.target.value)}
               />
               <button
                 type="button"
-                className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-semibold text-white"
+                className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
                 onClick={addAssignment}
               >
                 Assign
@@ -580,7 +770,7 @@ export function RolesPermissionsPanel() {
                   Copy from
                 </span>
                 <select
-                  className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                   value={copyFromStaffId}
                   onChange={(e) => setCopyFromStaffId(e.target.value)}
                 >
@@ -597,7 +787,7 @@ export function RolesPermissionsPanel() {
                   Copy to
                 </span>
                 <select
-                  className="rounded-lg border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2 text-sm"
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                   value={copyToStaffId}
                   onChange={(e) => setCopyToStaffId(e.target.value)}
                 >
@@ -619,7 +809,7 @@ export function RolesPermissionsPanel() {
               </label>
               <button
                 type="button"
-                className="self-end rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-sm font-semibold text-white"
+                className="self-end rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
                 onClick={runCopyStaffAccess}
                 disabled={!copyFromStaffId || !copyToStaffId}
               >
@@ -633,25 +823,22 @@ export function RolesPermissionsPanel() {
                 No explicit assignments — roles inferred from designation / login.
               </div>
             ) : (
-              <table className="min-w-full text-left text-sm">
-                <thead className="text-[11px] text-[var(--muted)]">
+              <ErpTable>
+                <ErpTableHead>
                   <tr>
-                    <th className="px-3 py-2">Staff</th>
-                    <th className="px-3 py-2">Role</th>
-                    <th className="px-3 py-2">Expires</th>
+                    <ErpSortTh sort={assignSort} field="staff" className="px-3 py-2">Staff</ErpSortTh>
+                    <ErpSortTh sort={assignSort} field="role" className="px-3 py-2">Role</ErpSortTh>
+                    <ErpSortTh sort={assignSort} field="expires" className="px-3 py-2">Expires</ErpSortTh>
                     <th className="px-3 py-2">Note</th>
                     <th className="px-3 py-2" />
                   </tr>
-                </thead>
-                <tbody>
-                  {state.assignments.map((a) => {
+                </ErpTableHead>
+                <ErpTableBody>
+                  {assignSort.rows.map((a) => {
                     const staff = masters.staff?.find((s) => s.id === a.staffId);
                     const role = state.roles.find((r) => r.id === a.roleId);
                     return (
-                      <tr
-                        key={a.id}
-                        className="border-t border-[rgba(32,48,80,0.06)]"
-                      >
+                      <tr key={a.id}>
                         <td className="px-3 py-2">
                           {staff?.fullName || a.staffId}
                           <span className="ml-1 text-[11px] text-[var(--muted)]">
@@ -666,19 +853,24 @@ export function RolesPermissionsPanel() {
                           {a.note || "—"}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          <button
-                            type="button"
-                            className="text-xs font-medium text-[var(--danger)]"
-                            onClick={() => removeAssignment(a.id)}
-                          >
-                            Remove
-                          </button>
+                          <RowActionMenu
+                            row={a}
+                            label="Assignment actions"
+                            actions={[
+                              {
+                                id: "remove",
+                                label: "Remove this role assignment",
+                                tone: "danger",
+                                onSelect: (x) => removeAssignment(x.id),
+                              },
+                            ]}
+                          />
                         </td>
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable>
             )}
           </MastersTableCard>
         </div>
@@ -687,19 +879,16 @@ export function RolesPermissionsPanel() {
       {tab === "summary" ? (
         <MastersTablesRow>
           <MastersTableCard title="Principal access summary">
-            <table className="min-w-full text-left text-sm">
-              <thead className="text-[11px] text-[var(--muted)]">
+            <ErpTable>
+              <ErpTableHead>
                 <tr>
-                  <th className="px-3 py-2">Capability</th>
-                  <th className="px-3 py-2">Roles with access</th>
+                  <ErpSortTh sort={capSort} field="capability" className="px-3 py-2">Capability</ErpSortTh>
+                  <ErpSortTh sort={capSort} field="roles" className="px-3 py-2">Roles with access</ErpSortTh>
                 </tr>
-              </thead>
-              <tbody>
-                {summary.map((row) => (
-                  <tr
-                    key={row.capability}
-                    className="border-t border-[rgba(32,48,80,0.06)]"
-                  >
+              </ErpTableHead>
+              <ErpTableBody>
+                {capSort.rows.map((row) => (
+                  <tr key={row.capability}>
                     <td className="px-3 py-2">{row.capability}</td>
                     <td className="px-3 py-2 text-[12px] text-[var(--muted)]">
                       {row.roleNames.length
@@ -708,8 +897,8 @@ export function RolesPermissionsPanel() {
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           </MastersTableCard>
           <MastersTableCard title="Staff with explicit roles">
             {staffRows.length === 0 ? (
@@ -717,23 +906,20 @@ export function RolesPermissionsPanel() {
                 No assignment overrides yet.
               </div>
             ) : (
-              <table className="min-w-full text-left text-sm">
-                <thead className="text-[11px] text-[var(--muted)]">
+              <ErpTable>
+                <ErpTableHead>
                   <tr>
-                    <th className="px-3 py-2">Staff</th>
-                    <th className="px-3 py-2">Roles</th>
+                    <ErpSortTh sort={staffRowSort} field="staff" className="px-3 py-2">Staff</ErpSortTh>
+                    <ErpSortTh sort={staffRowSort} field="roles" className="px-3 py-2">Roles</ErpSortTh>
                   </tr>
-                </thead>
-                <tbody>
-                  {staffRows.map((r) => (
-                    <tr
-                      key={r.staffId}
-                      className="border-t border-[rgba(32,48,80,0.06)]"
-                    >
+                </ErpTableHead>
+                <ErpTableBody>
+                  {staffRowSort.rows.map((r) => (
+                    <tr key={r.staffId}>
                       <td className="px-3 py-2">
                         {r.staffName}
                         {r.expiresSoon ? (
-                          <span className="ml-2 text-[10px] font-semibold text-[#b42318]">
+                          <span className="ml-2 text-[10px] font-semibold text-[var(--danger)]">
                             expires soon
                           </span>
                         ) : null}
@@ -743,8 +929,47 @@ export function RolesPermissionsPanel() {
                       </td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
+                </ErpTableBody>
+              </ErpTable>
+            )}
+          </MastersTableCard>
+          <MastersTableCard title="Permissions given to one person">
+            {grantRows.length === 0 ? (
+              <div className="px-4 py-8 text-center text-sm text-[var(--muted)]">
+                Nobody holds a permission outside their role.
+              </div>
+            ) : (
+              <ErpTable>
+                <ErpTableHead>
+                  <tr>
+                    <ErpSortTh sort={grantSort} field="staff" className="px-3 py-2">Staff</ErpSortTh>
+                    <ErpSortTh sort={grantSort} field="permission" className="px-3 py-2">Permission</ErpSortTh>
+                    <th className="px-3 py-2">Why</th>
+                  </tr>
+                </ErpTableHead>
+                <ErpTableBody>
+                  {grantSort.rows.map((g) => (
+                    <tr key={g.id}>
+                      <td className="px-3 py-2">
+                        {g.staffName}
+                        {g.expired ? (
+                          <span className="ml-2 text-[10px] font-semibold text-[var(--danger)]">
+                            expired
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-[12px]">
+                        {g.module} · {g.actions}
+                      </td>
+                      <td className="px-3 py-2 text-[12px] text-[var(--muted)]">
+                        {g.note || "No note"}
+                        {g.grantedBy ? ` · by ${g.grantedBy}` : ""}
+                        {g.expiresOn ? ` · until ${g.expiresOn}` : ""}
+                      </td>
+                    </tr>
+                  ))}
+                </ErpTableBody>
+              </ErpTable>
             )}
           </MastersTableCard>
         </MastersTablesRow>
@@ -757,21 +982,18 @@ export function RolesPermissionsPanel() {
               No RBAC changes logged yet.
             </div>
           ) : (
-            <table className="min-w-full text-left text-sm">
-              <thead className="text-[11px] text-[var(--muted)]">
+            <ErpTable>
+              <ErpTableHead>
                 <tr>
                   <th className="px-3 py-2">When</th>
                   <th className="px-3 py-2">Who</th>
                   <th className="px-3 py-2">Action</th>
                   <th className="px-3 py-2">Detail</th>
                 </tr>
-              </thead>
-              <tbody>
+              </ErpTableHead>
+              <ErpTableBody>
                 {state.audit.map((e) => (
-                  <tr
-                    key={e.id}
-                    className="border-t border-[rgba(32,48,80,0.06)]"
-                  >
+                  <tr key={e.id}>
                     <td className="px-3 py-2 text-[11px] text-[var(--muted)]">
                       {e.at.slice(0, 19).replace("T", " ")}
                     </td>
@@ -784,8 +1006,8 @@ export function RolesPermissionsPanel() {
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
+              </ErpTableBody>
+            </ErpTable>
           )}
         </MastersTableCard>
       ) : null}

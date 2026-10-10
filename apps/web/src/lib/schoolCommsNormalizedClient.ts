@@ -5,6 +5,29 @@
 import type { SchoolCommsState } from "@/lib/schoolComms";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
+import {
+  recordDeskSyncFailure,
+  recordDeskSyncSuccess,
+} from "@/lib/deskSyncStatus";
+import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+
+const COMMS_DESK = "school_comms";
+
+/**
+ * A notice, news item, album or photo the user deleted. The comms, news and
+ * gallery pushes all carry it until the server confirms.
+ */
+export function recordSchoolCommsDeletion(
+  table:
+    | "school_comms_desk_notices"
+    | "school_comms_desk_news"
+    | "school_comms_desk_albums"
+    | "school_comms_desk_photos",
+  ids: string[],
+) {
+  if (typeof window === "undefined" || ids.length === 0) return;
+  recordDeskDeletion(COMMS_DESK, table, ids);
+}
 
 const META_KEY = "bhb_school_comms_desk_db_meta_v1";
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -55,11 +78,14 @@ export function scheduleSchoolCommsDeskSync(state: SchoolCommsState) {
 }
 
 async function pushSchoolCommsDeskApi(state: SchoolCommsState) {
+  const sentDeletes = pendingDeskDeletes(COMMS_DESK);
   try {
     const res = await fetch("/api/school-data/school-comms-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      // Deletions are named, never inferred from what this browser lacks.
       body: JSON.stringify({
+        deletes: sentDeletes,
         notices: state.notices,
         news: state.news,
         albums: state.albums,
@@ -73,12 +99,18 @@ async function pushSchoolCommsDeskApi(state: SchoolCommsState) {
       error?: string;
     } | null;
     if (res.ok && body?.ok) {
+      confirmDeskDeletes(COMMS_DESK, sentDeletes);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         noticeCount: body.noticeCount ?? state.notices.length,
       });
     }
+    // Record whether this actually landed. A not-ok response is not
+    // thrown, so without this it slips past every branch in silence.
+    if (res.ok && body?.ok) recordDeskSyncSuccess("school_comms");
+    else recordDeskSyncFailure("school_comms", { status: res.status, error: body?.error });
   } catch (e) {
+    recordDeskSyncFailure("school_comms", { status: 0, error: e instanceof Error ? e.message : String(e) });
     console.warn("[school-comms-db] desk push error", e);
   }
 }
@@ -121,6 +153,7 @@ export async function hydrateSchoolCommsDeskFromDb(preferDb?: boolean) {
       photos: [] as SchoolCommsState["photos"],
     },
     changed: false,
+    ok: false,
   };
   if (!remote) return empty;
 
@@ -132,8 +165,8 @@ export async function hydrateSchoolCommsDeskFromDb(preferDb?: boolean) {
     (remote.updatedAt && remote.updatedAt >= meta.updatedAt) ||
     remote.noticeCount > meta.noticeCount;
 
-  if (!shouldTake) return empty;
+  if (!shouldTake) return { ...empty, bundle: remote.bundle, ok: true };
 
   writeMeta({ updatedAt: remote.updatedAt, noticeCount: remote.noticeCount });
-  return { bundle: remote.bundle, changed: true };
+  return { bundle: remote.bundle, changed: true, ok: true };
 }

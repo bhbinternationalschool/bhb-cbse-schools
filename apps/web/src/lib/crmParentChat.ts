@@ -14,6 +14,7 @@ import {
   CRM_BOT_QUICK_PROMPTS,
   crmBotWelcomeText,
   detectCrmBotIntent,
+  isCrmKeywordOrGreeting,
   replyCrmBotIntent,
   stageLabelForBot,
   type CrmBotQuickId,
@@ -21,6 +22,8 @@ import {
 import { formatInr } from "@/lib/masters";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
+import { trackServerWork } from "@/lib/serverWork";
 const STORAGE_KEY = "bhb_crm_parent_chat_v1";
 
 /** Distinguishes this product surface from SIS parent account chats */
@@ -138,7 +141,7 @@ export function normalizeCrmParentChatState(
 export function loadCrmParentChat(): CrmParentChatState {
   if (typeof window === "undefined") return defaultCrmParentChatState();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return defaultCrmParentChatState();
     return normalizeCrmParentChatState(
       JSON.parse(raw) as Partial<CrmParentChatState>,
@@ -151,10 +154,22 @@ export function loadCrmParentChat(): CrmParentChatState {
 export function saveCrmParentChat(state: CrmParentChatState): void {
   if (!assertModulePermission("admissions", "edit", "saveCrmParentChat")) return;
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(
+  writeCacheOrInvalidate(
     STORAGE_KEY,
     JSON.stringify({ ...state, audience: CRM_CHAT_AUDIENCE }),
   );
+  void trackServerWork(import("@/lib/localModulesPersistence").then((m) => m.scheduleModuleStateSync("crm_parent_chat", { ...state, audience: CRM_CHAT_AUDIENCE })));
+}
+
+/** Hydrate path (module_local_state) — cache write only, no RBAC, no push. */
+export function writeCrmParentChatLocalRaw(state: CrmParentChatState): void {
+  if (typeof window === "undefined") return;
+  try {
+    // Never a bare setItem on module state — a full origin must not throw here.
+    writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, audience: CRM_CHAT_AUDIENCE }));
+  } catch {
+    /* quota — the server copy is the truth anyway */
+  }
 }
 
 export function findLeadByMobile(
@@ -321,6 +336,45 @@ export function postCrmParentMessage(
       ),
     },
   };
+}
+
+/**
+ * Parent message + a reply composed elsewhere (the KB-grounded answer from
+ * /api/ai/admissions-answer). The engine is not run; the thread stays in
+ * bot mode. Used only when the server said the answer is grounded.
+ */
+export function postCrmParentMessageWithReply(
+  state: CrmParentChatState,
+  threadId: string,
+  text: string,
+  replyText: string,
+): { ok: true; state: CrmParentChatState; thread: CrmChatThread } | { ok: false; reason: string } {
+  const body = text.trim();
+  if (!body) return { ok: false, reason: "Enter a message" };
+  const thread = state.threads.find((t) => t.id === threadId);
+  if (!thread) return { ok: false, reason: "Chat not found" };
+  if (thread.audience !== CRM_CHAT_AUDIENCE) {
+    return { ok: false, reason: "Wrong audience — SIS parent chat is separate" };
+  }
+  const parentMsg = normalizeMessage({ role: "parent", text: body, by: thread.parentName || "Parent" });
+  const botMsg = normalizeMessage({ role: "bot", text: replyText.trim(), by: "Admissions bot" });
+  const nextThread: CrmChatThread = {
+    ...thread,
+    status: thread.status === "closed" ? "bot" : thread.status,
+    messages: [...thread.messages, parentMsg, botMsg],
+    updatedAt: nowIso(),
+    lastParentAt: nowIso(),
+  };
+  return {
+    ok: true,
+    thread: nextThread,
+    state: { ...state, audience: CRM_CHAT_AUDIENCE, threads: state.threads.map((t) => (t.id === threadId ? nextThread : t)) },
+  };
+}
+
+/** A typed question worth asking the KB: not a quick-prompt intent, not a greeting. */
+export function crmTextIsFreeQuestion(text: string): boolean {
+  return !isCrmKeywordOrGreeting(text);
 }
 
 export function postCrmStaffReply(

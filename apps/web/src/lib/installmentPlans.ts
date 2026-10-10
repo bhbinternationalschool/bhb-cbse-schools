@@ -334,7 +334,24 @@ export function composeWhatsAppInstallmentPlan(input: {
   studentName: string;
   classLabel: string;
   plan: InstallmentPlan;
+  hindi?: boolean;
 }): string {
+  if (input.hindi) {
+    const hi = [
+      `*${input.schoolName}*`,
+      `फीस किस्त योजना ${input.plan.code}`,
+      "",
+      `${input.studentName}${input.classLabel ? ` (${input.classLabel})` : ""}`,
+      `कुल: *${formatInr(input.plan.totalPaise)}*, ${input.plan.slices.length} किस्तों में`,
+      "",
+    ];
+    for (const s of input.plan.slices) {
+      hi.push(`• ${s.label}: ${formatInr(s.amountPaise)}, ${s.dueOn} तक`);
+    }
+    if (input.plan.note.trim()) hi.push("", input.plan.note.trim());
+    hi.push("", "कृपया हर किस्त अपनी तिथि तक जमा करें। धन्यवाद 🙏");
+    return hi.join("\n");
+  }
   const lines = [
     `*${input.schoolName}*`,
     `Fee installment plan ${input.plan.code}`,

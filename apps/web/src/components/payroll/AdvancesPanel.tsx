@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { UpiPayButton, type UpiPaid } from "@/components/payments/UpiPayButton";
+import { recordUpiProof, useRecordedUpiProofs } from "@/lib/upiProofsClient";
+import { PayoutButton } from "@/components/payments/PayoutButton";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import {
   formatInr,
@@ -23,6 +26,14 @@ import {
   type StaffAdvance,
 } from "@/lib/staffAdvance";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
   const session = useDemoSession();
@@ -39,6 +50,9 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
   );
   const [mode, setMode] = useState<PayrollPaymentMode>("cash");
   const [note, setNote] = useState("");
+  // The UPI payment made for the advance being issued (Pay by UPI button);
+  // recorded against the advance once it exists.
+  const [pendingUpi, setPendingUpi] = useState<{ utr: string; paidOn: string; payeeVpa: string } | null>(null);
   const [showClosed, setShowClosed] = useState(true);
 
   const [viewStaffId, setViewStaffId] = useState("");
@@ -59,10 +73,12 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
-      const { ensureStaffAdvancesHydrated } = await import(
-        "@/lib/staffAdvancesPersistence"
-      );
-      await ensureStaffAdvancesHydrated();
+      const [{ ensureStaffAdvancesHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/staffAdvancesPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+      await withHydrationSlot(() => ensureStaffAdvancesHydrated());
       setTick((t) => t + 1);
     })();
   }, []);
@@ -86,6 +102,21 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
     }
     return [...list].sort((a, b) => b.givenDate.localeCompare(a.givenDate));
   }, [advances, showClosed, viewStaffId, tick]);
+  // UTRs recorded for these advances — from Pay by UPI or a screenshot
+  // confirmed on WhatsApp (api/payments/upi-proofs).
+  const upiPaid = useRecordedUpiProofs("staff_advance", visible.map((a) => a.id), tick);
+
+  // Newest advance first; amounts sort by their rupees, not their labels.
+  const advSort = useTableSort(
+    visible,
+    {
+      staff: (a) => a.empCode,
+      given: (a) => a.givenDate,
+      amount: (a) => a.amount,
+    },
+    "given",
+    "desc",
+  );
 
   const viewDue = viewStaffId ? outstandingForStaff(viewStaffId) : 0;
   const returnDue = returnStaffId ? outstandingForStaff(returnStaffId) : 0;
@@ -121,6 +152,22 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
       source: "cash",
     });
     if (!r.ok) return flash(r.error, true);
+    if (pendingUpi) {
+      const adv = r.advance;
+      void recordUpiProof({
+        utr: pendingUpi.utr,
+        amountPaise: Math.round(adv.amount * 100),
+        paidOn: pendingUpi.paidOn,
+        payeeName: adv.fullName,
+        payeeVpa: pendingUpi.payeeVpa,
+        targetKind: "staff_advance",
+        targetId: adv.id,
+        targetLabel: `Advance ${adv.givenDate} — ${adv.fullName}`,
+      }).then((rec) => {
+        if (!rec.ok) flash(`Advance issued, but the UTR was not recorded: ${rec.error}`, true);
+      });
+      setPendingUpi(null);
+    }
     flash(
       `Advance ${formatInr(r.advance.amount)} issued to ${r.advance.empCode}`,
     );
@@ -163,7 +210,7 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
         <p className="text-sm font-medium text-[var(--brand-deep)]">{notice}</p>
       ) : null}
       {error ? (
-        <p className="text-sm font-medium text-[#b42318]">{error}</p>
+        <p className="text-sm font-medium text-[var(--danger)]">{error}</p>
       ) : null}
 
       <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
@@ -285,7 +332,56 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
             placeholder="Reason / reference"
           />
         </label>
-        <div className="flex items-end">
+        <div className="flex flex-wrap items-end gap-2">
+          {/* Pay it by UPI first; the UTR from the app's screenshot goes into
+              the note and the mode/date are set — then Issue advance. */}
+          {(() => {
+            const st = masters?.staff.find((x) => x.id === staffId);
+            const onPaid = (p: UpiPaid) => {
+              setPendingUpi({ utr: p.utr, paidOn: p.paidOn, payeeVpa: p.payeeVpa });
+              setMode("upi");
+              setGivenDate(p.paidOn);
+              setNote((n) => [n.trim(), `UTR ${p.utr}`].filter(Boolean).join(" · "));
+            };
+            const today = new Date(Date.now() + 330 * 60 * 1000).toISOString().slice(0, 10);
+            const paise = Math.round(amount * 100);
+            return st && amount > 0 ? (
+              <>
+              <UpiPayButton
+                payeeName={st.fullName}
+                payeeVpa={st.upiId || ""}
+                payeeMobile={st.mobile || ""}
+                amountPaise={Math.round(amount * 100)}
+                note={`Advance · ${st.empCode || st.fullName}`}
+                onPaid={(p) => {
+                  setPendingUpi({ utr: p.utr, paidOn: p.paidOn, payeeVpa: p.payeeVpa });
+                  setMode("upi");
+                  setGivenDate(p.paidOn);
+                  setNote((n) => [n.trim(), `UTR ${p.utr}`].filter(Boolean).join(" · "));
+                }}
+              />
+              {/* Or from the Cashfree wallet (owner's switch). The advance is
+                  not issued yet, so the transfer carries a draft target; the
+                  UTR is recorded against the advance on Issue, as above. */}
+              <PayoutButton
+                paid={Boolean(pendingUpi)}
+                payee={{
+                  name: st.fullName,
+                  vpa: st.upiId || "",
+                  accountNumber: st.bankAccountNo || "",
+                  ifsc: st.bankIfsc || "",
+                  phone: st.mobile || "",
+                }}
+                amountPaise={paise}
+                note={`Advance ${st.empCode || ""}`.trim()}
+                target={{ kind: "staff_advance", id: `draft:${st.id}:${paise}:${today}`, label: `Advance ${today} — ${st.fullName}` }}
+                subjectId={st.id}
+                period={today}
+                onPaid={onPaid}
+              />
+              </>
+            ) : null;
+          })()}
           <button
             type="button"
             className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-xs font-semibold text-white"
@@ -398,7 +494,7 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4">
+      <ErpTableShell className="p-4" exportAs="staff_advances" exportTitle="Staff advances">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-[var(--brand-deep)]">
             Ledger
@@ -416,27 +512,24 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
           ) : null}
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-[rgba(32,48,80,0.1)] text-[var(--muted)]">
-                <th className="py-2 pr-2 font-semibold">Staff / advance</th>
-                <th className="py-2 pr-2 font-semibold">Given</th>
-                <th className="py-2 pr-2 font-semibold">Amount</th>
+          <ErpTable className="text-xs">
+            <ErpTableHead>
+              <tr>
+                <ErpSortTh sort={advSort} field="staff" className="py-2 pr-2 font-semibold">Staff / advance</ErpSortTh>
+                <ErpSortTh sort={advSort} field="given" className="py-2 pr-2 font-semibold">Given</ErpSortTh>
+                <ErpSortTh sort={advSort} field="amount" className="py-2 pr-2 font-semibold">Amount</ErpSortTh>
                 <th className="py-2 pr-2 font-semibold">Outstanding</th>
                 <th className="py-2 pr-2 font-semibold">
                   Recoveries (salary month / return)
                 </th>
                 <th className="py-2 font-semibold" />
               </tr>
-            </thead>
-            <tbody>
-              {visible.map((a) => {
+            </ErpTableHead>
+            <ErpTableBody>
+              {advSort.rows.map((a) => {
                 const bal = outstandingOf(a);
                 return (
-                  <tr
-                    key={a.id}
-                    className="border-b border-[rgba(32,48,80,0.06)] align-top"
-                  >
+                  <tr key={a.id} className="align-top">
                     <td className="py-2 pr-2">
                       <span className="font-semibold text-[var(--brand-deep)]">
                         {a.empCode}
@@ -453,6 +546,7 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
                       {a.givenDate}
                       <span className="block text-[10px] text-[var(--muted)]">
                         {a.paymentMode}
+                        {upiPaid.get(a.id) ? ` · UTR ${upiPaid.get(a.id)!.utr}` : ""}
                       </span>
                     </td>
                     <td className="py-2 pr-2">
@@ -492,17 +586,20 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
                       )}
                     </td>
                     <td className="py-2 text-right">
-                      {!readOnly &&
-                      a.recoveries.length === 0 &&
-                      a.source !== "with_salary" ? (
-                        <button
-                          type="button"
-                          className="text-[11px] font-semibold text-[#b42318]"
-                          onClick={() => onVoid(a.id)}
-                        >
-                          Delete
-                        </button>
-                      ) : null}
+                      <RowActionMenu
+                        row={a}
+                        label="Advance actions"
+                        actions={[
+                          {
+                            id: "delete",
+                            label: "Delete advance",
+                            tone: "danger",
+                            hidden: (x) =>
+                              readOnly || x.recoveries.length > 0 || x.source === "with_salary",
+                            onSelect: (x) => onVoid(x.id),
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>
                 );
@@ -519,10 +616,10 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
                   </td>
                 </tr>
               ) : null}
-            </tbody>
-          </table>
+            </ErpTableBody>
+          </ErpTable>
         </div>
-      </div>
+      </ErpTableShell>
     </div>
   );
 }

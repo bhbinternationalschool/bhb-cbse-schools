@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDemoSession } from "@/lib/auth";
+import { timingSafeStringEqual } from "@/lib/apiRouteAuth.server";
 import { crossPostCommsContent } from "@/lib/socialCrossPost.server";
 import { listCrossPostLogs } from "@/lib/socialCrossPostLog.server";
 import type {
@@ -18,8 +19,9 @@ async function requireStaff(): Promise<boolean> {
 async function isAuthorized(req: Request): Promise<boolean> {
   if (await requireStaff()) return true;
   const secret = process.env.SOCIAL_CROSS_POST_SECRET;
-  if (!secret) return false;
-  return req.headers.get("x-social-cross-post-secret") === secret;
+  const header = req.headers.get("x-social-cross-post-secret");
+  if (!secret || !header) return false;
+  return timingSafeStringEqual(header, secret);
 }
 
 export async function GET(req: Request) {

@@ -13,7 +13,9 @@ import {
   adjustStaffHalfDayAttendance,
   applyApprovedLeaveToMarks,
   defaultStaffMarks,
+  NOT_PUNCHED_NOTE,
   findStaffRegister,
+  attendanceExemptStaffIds,
   loadStaffAttendance,
   normalizeAttendanceSettings,
   nowHhmm,
@@ -27,11 +29,34 @@ import {
   type StaffAttendanceMark,
 } from "@/lib/staffAttendance";
 import {
-  evaluatePunchAgainstRule,
+  gradeStaffPunch,
   loadAttendanceRules,
   ruleForStaff,
 } from "@/lib/staffAttendanceRules";
 import { loadMasters, type MastersState } from "@/lib/masters";
+import {
+  approvedLeaveOn,
+  cancelRegisterLeave,
+  directLeave,
+  loadStaffHr,
+  REGISTER_LEAVE_REASON,
+  type LeaveType,
+} from "@/lib/staffHr";
+
+/**
+ * What each code means for STAFF, spelled out. The register used to show
+ * only "L" and "LE" side by side, and "L" is Late — on 3 Oct 2026 two staff
+ * on leave were marked L, counted as late (present), and every "On leave"
+ * figure read 0.
+ */
+const STAFF_STATUS_LABEL: Record<AttendanceStatus, string> = {
+  P: "Present",
+  A: "Absent",
+  L: "Late",
+  HD: "Half day",
+  LE: "On leave",
+};
+import { hasPermission, loadRbac } from "@/lib/rbac";
 import { classifyStaffHolidayDay } from "@/lib/holidayPolicy";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
@@ -39,6 +64,20 @@ import {
   canManageStaffLeave,
   resolveSessionStaff,
 } from "@/lib/staffResolve";
+import {
+  autoRunSubstitutionForDate,
+  notifySubstitutes,
+} from "@/lib/timetableSubstitutionAuto";
+import {
+  ErpTable,
+  ErpTableBody,
+  ErpTableHead,
+  ErpTableShell,
+} from "@/components/ui/erp-roster";
+import { BulkActionBar, RowActionMenu, RowCheckbox, useRowSelection } from "@/components/ui/erp-grid";
+import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { QrPunchCard } from "@/components/staff/QrPunchCard";
+import { PunchPhonesPanel } from "@/components/staff/PunchPhonesPanel";
 
 type AttTab =
   | "punch"
@@ -46,7 +85,8 @@ type AttTab =
   | "direct"
   | "adjust"
   | "halfday"
-  | "sync";
+  | "sync"
+  | "phones";
 
 export function StaffAttendancePanel({ ay }: { ay: string }) {
   const session = useDemoSession();
@@ -58,6 +98,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [streamFilter, setStreamFilter] = useState<"all" | "teaching" | "non_teaching">("all");
   const [tick, setTick] = useState(0);
   const [tab, setTab] = useState<AttTab>("manage");
 
@@ -68,9 +109,15 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
   const [note, setNote] = useState("");
   const [punchWay, setPunchWay] = useState<AttendancePunchWay | "">("direct");
   const [halfDay, setHalfDay] = useState(true);
+  /** Leave type chosen on the register for staff marked On leave (staffId → CL / ML / …). */
+  const [leaveTypeFor, setLeaveTypeFor] = useState<Record<string, string>>({});
+  /** Leave type for the single-staff direct / adjust forms. */
+  const [formLeaveType, setFormLeaveType] = useState("");
 
   const rulesState = useMemo(() => loadAttendanceRules(), [tick]);
   const attState = useMemo(() => loadStaffAttendance(), [tick]);
+  const hrState = useMemo(() => loadStaffHr(), [tick]);
+  const leaveTypes: LeaveType[] = hrState.leaveTypes;
   const settings = useMemo(
     () => normalizeAttendanceSettings(attState.settings),
     [attState],
@@ -82,34 +129,69 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
 
   useEffect(() => {
     void (async () => {
-      const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
-      const { ensureStaffAttendanceHydrated } = await import(
-        "@/lib/staffAttendancePersistence"
-      );
-      const [didStaff, didAtt] = await Promise.all([
-        ensureStaffHydrated(),
-        ensureStaffAttendanceHydrated(),
+      const [
+        { ensureStaffHydrated },
+        { ensureStaffAttendanceHydrated },
+        { ensureStaffHrHydrated },
+        { withHydrationSlot },
+      ] = await Promise.all([
+        import("@/lib/staffPersistence"),
+        import("@/lib/staffAttendancePersistence"),
+        import("@/lib/staffHrPersistence"),
+        import("@/lib/deskHydrateGuard"),
       ]);
-      if (didStaff || didAtt) setTick((n) => n + 1);
+      // HR too: marking someone On leave files the leave against their
+      // balance, which must be read from the real HR desk, not a stale copy.
+      const [didStaff, didAtt, didHr] = await Promise.all([
+        withHydrationSlot(() => ensureStaffHydrated()),
+        withHydrationSlot(() => ensureStaffAttendanceHydrated()),
+        withHydrationSlot(() => ensureStaffHrHydrated()),
+      ]);
+      if (didStaff || didAtt || didHr) setTick((n) => n + 1);
     })();
   }, []);
+
+  // Who keeps no attendance: the owner, and anyone the office has said so
+  // of. They are left OFF the register rather than marked absent — a
+  // director who never punches used to read as a daily absentee, which made
+  // "absent today" mean nothing.
+  const exemptIds = useMemo(() => {
+    if (!masters) return new Set<string>();
+    const rbac = loadRbac();
+    return attendanceExemptStaffIds(settings, {
+      roles: rbac.roles.map((r) => ({ id: r.id, code: r.code })),
+      assignments: rbac.assignments.map((a) => ({
+        staffId: a.staffId,
+        roleId: a.roleId,
+        isPrimary: a.isPrimary,
+      })),
+    });
+  }, [masters, settings]);
 
   const roster = useMemo(() => {
     if (!masters) return [];
     return (masters.staff ?? [])
-      .filter((s) => s.status === "active")
+      .filter((s) => s.status === "active" && !exemptIds.has(s.id))
       .sort((a, b) => a.empCode.localeCompare(b.empCode));
-  }, [masters]);
+  }, [masters, exemptIds]);
 
   const selfStaff = useMemo(() => {
     if (!masters) return null;
     return resolveSessionStaff(session, masters);
   }, [masters, session]);
 
-  const isManager = useMemo(() => {
+  // Office staff who manage leave still see punch phones and QR screens,
+  // but marking or changing the register needs RBAC attendance.edit —
+  // admin and owner only since 5 Oct 2026 (director). The server refuses
+  // those saves anyway; hiding the tabs saves a click that can only fail.
+  const canSeePhones = useMemo(() => {
     if (!masters) return false;
     return canManageStaffLeave(session, masters);
   }, [masters, session]);
+  const isManager = useMemo(() => {
+    if (!masters) return false;
+    return canSeePhones && hasPermission(session, masters, "attendance", "edit");
+  }, [canSeePhones, masters, session]);
 
   const holidayTeaching = useMemo(() => {
     if (!masters) return null;
@@ -141,7 +223,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     holidayNonTeaching?.status === "holiday";
 
   useEffect(() => {
-    if (isManager) setTab((t) => (t === "punch" ? "manage" : t));
+    if (isManager) setTab((t) => (t === "punch" || t === "phones" ? "manage" : t));
     else setTab("punch");
   }, [isManager]);
 
@@ -149,7 +231,8 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     if (!isManager && (tab === "manage" || tab === "direct" || tab === "adjust" || tab === "halfday" || tab === "sync")) {
       setTab("punch");
     }
-  }, [isManager, tab]);
+    if (tab === "phones" && (isManager || !canSeePhones)) setTab(isManager ? "manage" : "punch");
+  }, [isManager, canSeePhones, tab]);
 
   useEffect(() => {
     if (!isManager && selfStaff) setStaffId(selfStaff.id);
@@ -168,8 +251,8 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
           return (
             hit ?? {
               staffId: s.id,
-              status: "P" as AttendanceStatus,
-              note: "",
+              status: "A" as AttendanceStatus,
+              note: NOT_PUNCHED_NOTE,
               inTime: "",
               outTime: "",
               punchWay: "" as const,
@@ -190,8 +273,16 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return roster;
-    return roster.filter((s) => {
+    const byStream =
+      streamFilter === "all"
+        ? roster
+        : roster.filter((s) =>
+            streamFilter === "non_teaching"
+              ? s.stream === "non_teaching"
+              : s.stream !== "non_teaching",
+          );
+    if (!q) return byStream;
+    return byStream.filter((s) => {
       const des = masters?.designations.find((d) => d.id === s.designationId);
       return [s.empCode, s.fullName, s.mobile, s.rfidNo, s.biometricId, des?.name]
         .filter(Boolean)
@@ -199,14 +290,77 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
         .toLowerCase()
         .includes(q);
     });
-  }, [roster, query, masters]);
+  }, [roster, query, masters, streamFilter]);
+
+  // The register sorts by whatever the office is scanning for: the code it
+  // reads off a card, the name it hears, the rule, or today's mark. The
+  // punch columns are inputs, not values, so they are not sort handles.
+  const staffSort = useTableSort(
+    filtered,
+    {
+      code: (s) => s.empCode,
+      name: (s) => s.fullName,
+      rule: (s) => ruleForStaff(rulesState, s.id)?.code ?? "",
+      mark: (s) => marks.find((m) => m.staffId === s.id)?.status ?? "",
+    },
+    "code",
+    "asc",
+  );
 
   const summary = useMemo(() => summarizeStaffMarks(marks), [marks]);
 
-  const myMark = useMemo(() => {
+  const localMark = useMemo(() => {
     if (!selfStaff) return null;
     return marks.find((m) => m.staffId === selfStaff.id) ?? null;
   }, [marks, selfStaff]);
+
+  /**
+   * My own punch, as the SERVER holds it. The card used to read this
+   * browser's copy of the register — where everyone defaults to "P" — so a
+   * teacher who had not punched saw "Status: P", and "Punch in" wrote to a
+   * local copy the teacher's role could not save (staff.edit), silently.
+   */
+  type ServerPunch = {
+    allowSelfPunch: boolean;
+    today: {
+      status: string;
+      inTime: string | null;
+      outTime: string | null;
+      punchWayLabel?: string;
+    } | null;
+  };
+  const [serverPunch, setServerPunch] = useState<ServerPunch | null>(null);
+
+  async function loadServerPunch() {
+    try {
+      const res = await fetch("/api/v1/staff/attendance/punch", { cache: "no-store" });
+      const body = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        data?: ServerPunch;
+      } | null;
+      if (res.ok && body?.ok && body.data) setServerPunch(body.data);
+    } catch {
+      /* keep what we have */
+    }
+  }
+
+  useEffect(() => {
+    if (tab !== "punch" || !selfStaff) return;
+    void loadServerPunch();
+  }, [tab, selfStaff]);
+
+  const myMark = serverPunch
+    ? serverPunch.today
+      ? {
+          status: serverPunch.today.status,
+          inTime: serverPunch.today.inTime || "",
+          outTime: serverPunch.today.outTime || "",
+          punchWay: localMark?.punchWay,
+          note: "",
+          punchGeo: undefined as undefined | { distanceM?: number },
+        }
+      : null
+    : localMark;
 
   function flash(msg: string, isErr = false) {
     if (isErr) {
@@ -222,7 +376,36 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     }, 2800);
   }
 
-  function setStatus(id: string, st: AttendanceStatus) {
+  /** Re-derives who's absent on `forDate` and auto-arranges + notifies any
+   * newly-uncovered periods — safe to call after every save, since it's a
+   * no-op when nothing changed (see lib/timetableSubstitutionAuto.ts). */
+  async function runSubstitutionAutomation(forDate: string) {
+    if (!masters) return;
+    const outcome = autoRunSubstitutionForDate(masters, ay, forDate);
+    if (!outcome.ran || outcome.created.length === 0) return;
+    const bits = [
+      `${outcome.created.length} substitution(s) auto-arranged for ${forDate}`,
+    ];
+    const notifyResult = await notifySubstitutes(
+      outcome.created,
+      masters,
+      forDate,
+    );
+    if (notifyResult.ok) {
+      if (notifyResult.sent > 0) {
+        bits.push(`${notifyResult.sent} substitute(s) notified on WhatsApp`);
+      }
+    } else {
+      bits.push(`WhatsApp notify failed: ${notifyResult.error}`);
+    }
+    flash(bits.join(" · "));
+  }
+
+  const staffKeys = useMemo(() => filtered.map((s) => s.id), [filtered]);
+  const staffSel = useRowSelection(staffKeys);
+
+  function setStatus(id: string, st: AttendanceStatus, leaveType?: string) {
+    if (st === "LE" && leaveType) setLeaveTypeFor((prev) => ({ ...prev, [id]: leaveType }));
     setMarks((prev) =>
       prev.map((m) =>
         m.staffId === id
@@ -259,22 +442,23 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     setDirty(true);
   }
 
-  function applyRulesToMarks(list: StaffAttendanceMark[]): StaffAttendanceMark[] {
+  /** Punches graded by Masters → Attendance rules (school timing for staff
+   * with no rule). What a person decided stays: manual / direct / adjusted
+   * marks and approved leave are not re-graded. */
+  const DECIDED_BY_PERSON = new Set(["manual", "direct", "adjusted", "leave_sync", "survey", "outdoor"]);
+  function applyRulesToMarks(
+    list: StaffAttendanceMark[],
+    opts: { punchesOnly?: boolean } = {},
+  ): StaffAttendanceMark[] {
     return list.map((m) => {
-      const rule = ruleForStaff(rulesState, m.staffId);
-      if (!rule || !m.inTime) return m;
-      const ev = evaluatePunchAgainstRule(
-        rulesState,
-        rule,
-        date,
-        m.inTime,
-        m.outTime,
-      );
+      if (!m.inTime) return m;
+      if (opts.punchesOnly && DECIDED_BY_PERSON.has(m.punchWay || "")) return m;
+      const ev = gradeStaffPunch(rulesState, m.staffId, date, m.inTime, m.outTime);
       return {
         ...m,
         status: ev.status,
-        note: ev.label,
-        punchWay: "rule",
+        note: `${ev.label} (${ev.ruleName})`,
+        punchWay: opts.punchesOnly ? m.punchWay : "rule",
       };
     });
   }
@@ -285,23 +469,16 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     setMarks((prev) =>
       prev.map((m) => {
         if (!filtered.some((s) => s.id === m.staffId)) return m;
-        const rule = ruleForStaff(rulesState, m.staffId);
-        if (!rule || !m.inTime) {
+        if (!m.inTime) {
           skipped += 1;
           return m;
         }
-        const ev = evaluatePunchAgainstRule(
-          rulesState,
-          rule,
-          date,
-          m.inTime,
-          m.outTime,
-        );
+        const ev = gradeStaffPunch(rulesState, m.staffId, date, m.inTime, m.outTime);
         applied += 1;
         return {
           ...m,
           status: ev.status,
-          note: ev.label,
+          note: `${ev.label} (${ev.ruleName})`,
           punchWay: "rule",
         };
       }),
@@ -309,13 +486,44 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     setDirty(true);
     flash(
       `Rules applied to ${applied} staff` +
-        (skipped ? ` · ${skipped} skipped (no rule / no in-time)` : ""),
+        (skipped ? ` · ${skipped} skipped (no in-time)` : ""),
     );
+  }
+
+  /**
+   * Make the HR leave record agree with a staff member's mark for `date`.
+   * On leave → a one-day approved leave of the chosen type (balance goes
+   * down; refused when the balance or the type's rules say no). Anything
+   * else → withdraw a leave the register itself filed earlier. Leave filed
+   * through HR is never created twice nor withdrawn here.
+   * Returns an error to show, or "" when the HR side is in order.
+   */
+  function reconcileRegisterLeave(id: string, st: AttendanceStatus, typeCode: string): string {
+    const name = roster.find((s) => s.id === id)?.fullName || "this staff member";
+    const hr = loadStaffHr();
+    if (st === "LE") {
+      const existing = approvedLeaveOn(hr, id, date, ay);
+      if (existing) return "";
+      if (!typeCode) return `Choose the leave type (${leaveTypes.map((t) => t.code).join(" / ")}) for ${name}`;
+      const res = directLeave({
+        academicYearCode: ay,
+        staffId: id,
+        typeCode,
+        fromDate: date,
+        toDate: date,
+        reason: REGISTER_LEAVE_REASON,
+        appliedBy: session.fullName,
+      });
+      return res.ok ? "" : `${name}: ${res.error}`;
+    }
+    if (st === "HD") return "";
+    const res = cancelRegisterLeave({ staffId: id, date, academicYearCode: ay, cancelledBy: session.fullName });
+    return res.ok ? "" : `${name}: ${res.error}`;
   }
 
   function saveRegister() {
     if (!isManager) {
-      flash("Only principal / admin can save the full register", true);
+      flash("Only admin can save the full register", true);
       return;
     }
     if (holidayBlocksAllStaff) {
@@ -329,11 +537,32 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
       flash("No active staff in roster", true);
       return;
     }
-    let toSave = marks;
-    if (settings.autoApplyRulesOnSave) {
-      toSave = applyRulesToMarks(marks);
-      setMarks(toSave);
+    // Punches always follow the Masters rules; with "Auto-apply punch rules
+    // on save" on, every mark with an in-time is re-graded.
+    // Leave first: an On-leave mark must be backed by an HR leave of a
+    // chosen type before the register says so, and a mark moved off leave
+    // gives the day back to the balance.
+    for (const m of marks) {
+      const err = reconcileRegisterLeave(m.staffId, m.status, leaveTypeFor[m.staffId] || "");
+      if (err) {
+        flash(err, true);
+        setTick((x) => x + 1);
+        return;
+      }
     }
+    const hrNow = loadStaffHr();
+    let toSave = applyRulesToMarks(
+      marks.map((m) => {
+        if (m.status !== "LE") return m;
+        const lv = approvedLeaveOn(hrNow, m.staffId, date, ay);
+        return lv ? { ...m, note: `On leave (${lv.typeCode})` } : m;
+      }),
+      { punchesOnly: !settings.autoApplyRulesOnSave },
+    );
+    if (settings.syncLeaveToAttendance) {
+      toSave = applyApprovedLeaveToMarks(toSave, date, ay);
+    }
+    setMarks(toSave);
     upsertStaffRegister({
       academicYearCode: ay,
       date,
@@ -344,48 +573,13 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     setDirty(false);
     flash("Staff attendance saved");
     setTick((x) => x + 1);
-  }
-
-  function onSelfPunch(kind: "in" | "out") {
-    if (!selfStaff) {
-      flash("Sign in with your staff login to punch", true);
-      return;
-    }
-    const selfHol = holidayForStaffId(selfStaff.id);
-    if (selfHol?.status === "holiday") {
-      flash(`Holiday for you: ${selfHol.label}`, true);
-      return;
-    }
-    if (!settings.allowSelfPunch) {
-      flash("Self-punch is disabled in attendance settings", true);
-      return;
-    }
-    const time = nowHhmm();
-    const cur = myMark;
-    const result = upsertStaffMark({
-      academicYearCode: ay,
-      date,
-      staffId: selfStaff.id,
-      status: cur?.status === "A" || !cur ? "P" : cur.status,
-      inTime: kind === "in" ? time : cur?.inTime || time,
-      outTime: kind === "out" ? time : cur?.outTime || "",
-      note: kind === "in" ? "Self punch-in" : "Self punch-out",
-      punchWay: "self",
-      markedBy: session.fullName,
-      roster,
-    });
-    if (!result.ok) {
-      flash(result.error, true);
-      return;
-    }
-    flash(kind === "in" ? `Punched in at ${time}` : `Punched out at ${time}`);
-    setTick((x) => x + 1);
+    void runSubstitutionAutomation(date);
   }
 
   function onDirect(e: React.FormEvent) {
     e.preventDefault();
     if (!isManager) {
-      flash("Only principal / admin can direct-mark", true);
+      flash("Only admin can direct-mark", true);
       return;
     }
     const targetHol = holidayForStaffId(staffId);
@@ -394,6 +588,11 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
         `Holiday for this staff: ${targetHol.label}. Direct mark blocked.`,
         true,
       );
+      return;
+    }
+    const leaveErr = reconcileRegisterLeave(staffId, status, formLeaveType);
+    if (leaveErr) {
+      flash(leaveErr, true);
       return;
     }
     const result = upsertStaffMark({
@@ -414,12 +613,18 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     }
     flash("Direct attendance saved");
     setTick((x) => x + 1);
+    void runSubstitutionAutomation(date);
   }
 
   function onAdjust(e: React.FormEvent) {
     e.preventDefault();
     if (!isManager) {
-      flash("Only principal / admin can adjust attendance", true);
+      flash("Only admin can adjust attendance", true);
+      return;
+    }
+    const leaveErr = reconcileRegisterLeave(staffId, status, formLeaveType);
+    if (leaveErr) {
+      flash(leaveErr, true);
       return;
     }
     const result = adjustStaffAttendance({
@@ -439,12 +644,13 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     }
     flash("Attendance adjusted");
     setTick((x) => x + 1);
+    void runSubstitutionAutomation(date);
   }
 
   function onHalfDay(e: React.FormEvent) {
     e.preventDefault();
     if (!isManager) {
-      flash("Only principal / admin can adjust half-day", true);
+      flash("Only admin can adjust half-day", true);
       return;
     }
     const result = adjustStaffHalfDayAttendance({
@@ -465,7 +671,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
 
   function onSyncLeave() {
     if (!isManager) {
-      flash("Only principal / admin can sync leave", true);
+      flash("Only admin can sync leave", true);
       return;
     }
     syncLeaveOntoAttendanceDate({
@@ -552,7 +758,9 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
           { id: "halfday", label: "Adjust half-day", tone: "sky" },
           { id: "sync", label: "Sync leave", tone: "green" },
         ] as const)
-      : []),
+      : canSeePhones
+        ? ([{ id: "phones", label: "Punch phones & QR screens", tone: "navy" }] as const)
+        : []),
   ];
 
   if (!masters) {
@@ -575,7 +783,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
       <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-2.5 text-sm text-[var(--muted)]">
         {isManager ? (
           <>
-            Principal / admin — manage register, direct mark, adjust, sync leave.
+            Admin — manage register, direct mark, adjust, sync leave.
             Settings &amp; rules in{" "}
             <Link
               href="/masters"
@@ -649,7 +857,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
       {tab === "punch" ? (
         <div className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4 max-w-lg space-y-3">
           <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-            My punch · {date}
+            My punch · today
           </h2>
           {!settings.allowSelfPunch ? (
             <p className="text-sm text-[var(--muted)]">
@@ -664,7 +872,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
               <div className="text-sm text-[var(--muted)]">
                 Status:{" "}
                 <strong className="text-[var(--brand-deep)]">
-                  {myMark?.status ?? "—"}
+                  {myMark?.status ?? (serverPunch ? "Not punched yet" : "—")}
                 </strong>
                 {myMark?.inTime ? ` · In ${myMark.inTime}` : ""}
                 {myMark?.outTime ? ` · Out ${myMark.outTime}` : ""}
@@ -685,29 +893,27 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                   WA GPS · ~{Math.round(myMark.punchGeo.distanceM)} m from campus
                 </p>
               ) : null}
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white"
-                  onClick={() => onSelfPunch("in")}
-                >
-                  Punch in
-                </button>
-                <button
-                  type="button"
-                  className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-bold text-[var(--brand-deep)]"
-                  onClick={() => onSelfPunch("out")}
-                >
-                  Punch out
-                </button>
-              </div>
+              <QrPunchCard
+                staffId={selfStaff.id}
+                inTime={myMark?.inTime || null}
+                outTime={myMark?.outTime || null}
+                onPunched={() => {
+                  void loadServerPunch();
+                  setTick((x) => x + 1);
+                }}
+              />
             </>
           )}
         </div>
       ) : null}
 
+      {tab === "phones" && canSeePhones && !isManager ? (
+        <PunchPhonesPanel canDecidePhones={false} />
+      ) : null}
+
       {tab === "manage" && isManager ? (
         <>
+          <PunchPhonesPanel canDecidePhones />
           <div className="flex flex-wrap items-end gap-2">
             <label className="min-w-[12rem] flex-1 text-xs font-semibold text-[var(--muted)]">
               Search / RFID / biometric
@@ -723,6 +929,26 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                   }
                 }}
               />
+            </label>
+            <label className="text-xs font-semibold text-[var(--muted)]">
+              Staff
+              <select
+                className="field mt-1 !py-2"
+                value={streamFilter}
+                onChange={(e) =>
+                  setStreamFilter(
+                    e.target.value as "all" | "teaching" | "non_teaching",
+                  )
+                }
+              >
+                <option value="all">All ({roster.length})</option>
+                <option value="teaching">
+                  Teaching ({roster.filter((x) => x.stream !== "non_teaching").length})
+                </option>
+                <option value="non_teaching">
+                  Non-teaching ({roster.filter((x) => x.stream === "non_teaching").length})
+                </option>
+              </select>
             </label>
             <button
               type="button"
@@ -761,7 +987,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                 key={s.code}
                 className="rounded-md bg-[rgba(32,48,80,0.06)] px-2 py-1 font-semibold text-[var(--brand-deep)]"
               >
-                {s.short}: {summary[s.code] ?? 0}
+                {STAFF_STATUS_LABEL[s.code]}: {summary[s.code] ?? 0}
               </span>
             ))}
             {dirty ? (
@@ -783,25 +1009,65 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
             />
           </label>
 
-          <div className="overflow-hidden rounded-2xl border border-[rgba(32,48,80,0.12)] bg-white">
-            <table className="w-full min-w-[880px] text-left text-sm">
-              <thead className="border-b border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] text-[11px] uppercase text-[var(--muted)]">
+          <BulkActionBar
+            selection={staffSel}
+            noun="staff member"
+            actions={[
+              ...ATTENDANCE_STATUSES.filter((st) => st.code !== "LE").map((st) => ({
+                id: st.code,
+                label: `Mark ${STAFF_STATUS_LABEL[st.code]}`,
+                onRun: (ids: string[]) => {
+                  for (const id of ids) setStatus(id, st.code);
+                  staffSel.clear();
+                },
+              })),
+              // On leave always carries its type, so the balance is charged.
+              ...leaveTypes.map((t) => ({
+                id: `LE:${t.code}`,
+                label: `Mark On leave (${t.code})`,
+                onRun: (ids: string[]) => {
+                  for (const id of ids) setStatus(id, "LE", t.code);
+                  staffSel.clear();
+                },
+              })),
+            ]}
+          />
+          <ErpTableShell exportAs="staff_attendance" exportTitle="Staff attendance">
+            <div className="overflow-x-auto">
+            <ErpTable minWidth="min-w-[880px]">
+              <ErpTableHead>
                 <tr>
-                  <th className="px-3 py-2">Code</th>
-                  <th className="px-3 py-2">Name</th>
-                  <th className="px-3 py-2">Rule</th>
+                  <th className="w-10 px-2 py-2">
+                    <RowCheckbox
+                      checked={staffSel.allSelected(filtered.map((s) => s.id))}
+                      indeterminate={staffSel.someSelected(filtered.map((s) => s.id))}
+                      onChange={() => staffSel.toggleAll(filtered.map((s) => s.id))}
+                      label="Select all staff shown"
+                    />
+                  </th>
+                  <ErpSortTh sort={staffSort} field="code">Code</ErpSortTh>
+                  <ErpSortTh sort={staffSort} field="name">Name</ErpSortTh>
+                  <ErpSortTh sort={staffSort} field="rule">Rule</ErpSortTh>
                   <th className="px-3 py-2">In</th>
                   <th className="px-3 py-2">Out</th>
                   <th className="px-3 py-2">Way</th>
-                  <th className="px-3 py-2">Mark</th>
+                  <ErpSortTh sort={staffSort} field="mark">Mark</ErpSortTh>
+                  <th className="w-10 px-2 py-2" aria-label="Actions" />
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-[rgba(32,48,80,0.08)]">
-                {filtered.map((s) => {
+              </ErpTableHead>
+              <ErpTableBody>
+                {staffSort.rows.map((s) => {
                   const mark = marks.find((m) => m.staffId === s.id);
                   const rule = ruleForStaff(rulesState, s.id);
                   return (
                     <tr key={s.id}>
+                      <td className="w-10 px-2 py-2">
+                        <RowCheckbox
+                          checked={staffSel.isSelected(s.id)}
+                          onChange={() => staffSel.toggle(s.id)}
+                          label={`Select ${s.fullName}`}
+                        />
+                      </td>
                       <td className="px-3 py-2 font-semibold text-[var(--brand-deep)]">
                         {s.empCode}
                       </td>
@@ -852,17 +1118,51 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                                     : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
                                 }`}
                                 onClick={() => setStatus(s.id, st.code)}
+                                title={STAFF_STATUS_LABEL[st.code]}
                               >
-                                {st.short}
+                                {STAFF_STATUS_LABEL[st.code]}
                               </button>
                             );
                           })}
                         </div>
-                        {mark?.note ? (
+                        {mark?.status === "LE" ? (
+                          (() => {
+                            const lv = approvedLeaveOn(hrState, s.id, date, ay);
+                            if (lv) {
+                              return (
+                                <p className="mt-1 text-[10px] font-semibold text-[var(--brand-deep)]">
+                                  {lv.typeCode} leave · {lv.reason === REGISTER_LEAVE_REASON ? "from this register" : "approved in HR"}
+                                </p>
+                              );
+                            }
+                            return (
+                              <select
+                                className="field mt-1 !py-0.5 !text-[11px]"
+                                aria-label={`Leave type for ${s.fullName}`}
+                                value={leaveTypeFor[s.id] || ""}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setLeaveTypeFor((prev) => ({ ...prev, [s.id]: v }));
+                                  setDirty(true);
+                                }}
+                              >
+                                <option value="">Leave type…</option>
+                                {leaveTypes.map((t) => (
+                                  <option key={t.code} value={t.code}>
+                                    {t.code} — {t.name}
+                                  </option>
+                                ))}
+                              </select>
+                            );
+                          })()
+                        ) : mark?.note ? (
                           <p className="mt-1 text-[10px] text-[var(--muted)]">
                             {mark.note}
                           </p>
                         ) : null}
+                      </td>
+                      <td className="px-2 py-1.5 text-right">
+                        <RowActionMenu row={s} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.id))}/edit`; } }]} />
                       </td>
                     </tr>
                   );
@@ -877,9 +1177,10 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
                     </td>
                   </tr>
                 ) : null}
-              </tbody>
-            </table>
-          </div>
+              </ErpTableBody>
+            </ErpTable>
+            </div>
+          </ErpTableShell>
         </>
       ) : null}
 
@@ -901,6 +1202,9 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
           onOutTime={setOutTime}
           onNote={setNote}
           onPunchWay={setPunchWay}
+          leaveTypes={leaveTypes}
+          leaveType={formLeaveType}
+          onLeaveType={setFormLeaveType}
           onSubmit={onDirect}
           submitLabel="Save direct mark"
         />
@@ -924,6 +1228,9 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
           onOutTime={setOutTime}
           onNote={setNote}
           onPunchWay={setPunchWay}
+          leaveTypes={leaveTypes}
+          leaveType={formLeaveType}
+          onLeaveType={setFormLeaveType}
           onSubmit={onAdjust}
           submitLabel="Save adjustment"
         />
@@ -1011,6 +1318,9 @@ function MarkForm({
   onOutTime,
   onNote,
   onPunchWay,
+  leaveTypes,
+  leaveType,
+  onLeaveType,
   onSubmit,
   submitLabel,
 }: {
@@ -1030,6 +1340,9 @@ function MarkForm({
   onOutTime: (v: string) => void;
   onNote: (v: string) => void;
   onPunchWay: (v: AttendancePunchWay | "") => void;
+  leaveTypes: LeaveType[];
+  leaveType: string;
+  onLeaveType: (v: string) => void;
   onSubmit: (e: React.FormEvent) => void;
   submitLabel: string;
 }) {
@@ -1065,11 +1378,30 @@ function MarkForm({
         >
           {ATTENDANCE_STATUSES.map((s) => (
             <option key={s.code} value={s.code}>
-              {s.short} — {s.label}
+              {STAFF_STATUS_LABEL[s.code]}
             </option>
           ))}
         </select>
       </label>
+      {status === "LE" ? (
+        <label className="block text-sm">
+          <span className="mb-1 block text-[11px] text-[var(--muted)]">
+            Leave type (charged to the balance unless HR already approved this day)
+          </span>
+          <select
+            className="field !py-1.5"
+            value={leaveType}
+            onChange={(e) => onLeaveType(e.target.value)}
+          >
+            <option value="">Select…</option>
+            {leaveTypes.map((t) => (
+              <option key={t.code} value={t.code}>
+                {t.code} — {t.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       {showPunchWay ? (
         <label className="block text-sm">
           <span className="mb-1 block text-[11px] text-[var(--muted)]">

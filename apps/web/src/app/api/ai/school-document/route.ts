@@ -77,6 +77,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     engine: result.engine,
+    generationId: result.generationId,
     titleEn: result.doc.titleEn,
     titleHi: result.doc.titleHi,
     bodyEn: result.doc.bodyEn,
