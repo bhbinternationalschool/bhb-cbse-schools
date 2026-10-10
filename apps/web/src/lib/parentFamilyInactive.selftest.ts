@@ -35,7 +35,8 @@ void (async () => {
   const read = (f: string) => readFileSync(join(__dirname, f), "utf8");
   assert.ok(/=== "inactive"\) \{\s*throw new ApiError\("family_inactive", FAMILY_INACTIVE_MESSAGE, 403\)/.test(read("api/v1/auth.ts")), "every app request");
   assert.ok(/familyRollStatus\(found\.students, ""\) === "inactive"/.test(read("../app/api/auth/otp/request/route.ts")), "no code is sent");
-  assert.ok(/readFamilyRollStatus\(hh\.id, resolvedAy\)\) === "inactive"/.test(read("../app/api/auth/otp/verify/route.ts")), "no session is signed");
+  assert.ok(/readFamilyRollStatus\(hh\.id, resolvedAy\)\) === "inactive"/.test(read("parentSession.server.ts")), "no session is signed");
+  assert.ok(/checkInactive: !isReviewLogin/.test(read("../app/api/auth/otp/verify/route.ts")), "OTP login signs in through it");
   const status = read("parentFamilyStatus.server.ts");
   assert.ok(/if \(error\) return "unknown";/.test(status) && /if \(!ctx\) return "unknown";/.test(status), "a failed read never blocks");
   const app = readFileSync(join(__dirname, "../../../../cbse_school_mobile/lib/core/api/api_client.dart"), "utf8");

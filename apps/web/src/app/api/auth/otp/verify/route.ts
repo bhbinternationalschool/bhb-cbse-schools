@@ -1,15 +1,10 @@
 import { NextResponse } from "next/server";
+import { parentSessionResponse } from "@/lib/parentSession.server";
 import { readReviewLogin, isReviewLoginPair } from "@/lib/reviewLogin.server";
-import { demoSessionCookieName, type DemoSession } from "@/lib/auth";
-import { appSessionCookieOptions } from "@/lib/authCookies.server";
-import { signSession } from "@/lib/sessionCookie.server";
-import { resolveLoginAcademicYearCode } from "@/lib/workspaceSession.server";
 import { resolveHouseholdByMobileServer } from "@/lib/parentHousehold.server";
 import { verifyParentOtp } from "@/lib/parentOtp.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadSis } from "@/lib/sis";
-import { TENANT } from "@/lib/types";
-import { writeAudit } from "@/lib/audit.server";
 
 export const runtime = "nodejs";
 
@@ -56,57 +51,15 @@ export async function POST(request: Request) {
       );
     }
 
-    // Resolved server-side, exactly as the staff login routes do. This line
-    // used to read `body.academicYearCode?.trim() || DEFAULT_AY` — an
-    // unvalidated value from the request, or a hardcoded 2025-26, written
-    // into a signed cookie that scopes every fee and result a parent sees.
-    const resolvedAy = await resolveLoginAcademicYearCode(body.academicYearCode);
-    if (!resolvedAy) {
-      return NextResponse.json(
-        { error: "No academic year is set up. Please contact the school." },
-        { status: 503 },
-      );
-    }
-
-    // A family the school has made inactive is not signed in (review login aside).
-    if (!isReviewLogin) {
-      const { readFamilyRollStatus, FAMILY_INACTIVE_MESSAGE } = await import("@/lib/parentFamilyStatus.server");
-      if ((await readFamilyRollStatus(hh.id, resolvedAy)) === "inactive") {
-        return NextResponse.json({ error: FAMILY_INACTIVE_MESSAGE, code: "family_inactive" }, { status: 403 });
-      }
-    }
-
-    const session: DemoSession = {
-      persona: "parent",
-      fullName: hh.guardianName || "Parent",
-      roleCode: "parent",
-      householdId: hh.id,
-      tenantSlug: TENANT.slug,
-      academicYearCode: resolvedAy,
-    };
-
-    await writeAudit({
-      session,
-      module: "auth",
-      action: "create",
-      entityType: "parent_session",
-      entityId: hh.id,
-      summary: isReviewLogin
+    // Academic year, inactive-family check, audit and cookie: one place.
+    return parentSessionResponse({
+      household: hh,
+      requestedAy: body.academicYearCode,
+      checkInactive: !isReviewLogin,
+      auditSummary: isReviewLogin
         ? "Store-review parent login (fixed review credentials)"
         : `Parent OTP login ${mobile.slice(-4)}`,
     });
-
-    const signed = signSession(session);
-    if (!signed) {
-      return NextResponse.json(
-        { error: "Server session signing is not configured" },
-        { status: 503 },
-      );
-    }
-
-    const res = NextResponse.json({ ok: true, session });
-    res.cookies.set(demoSessionCookieName(), signed, appSessionCookieOptions());
-    return res;
   } catch (e) {
     console.error("[otp/verify]", e);
     return NextResponse.json({ error: "Verification failed" }, { status: 500 });

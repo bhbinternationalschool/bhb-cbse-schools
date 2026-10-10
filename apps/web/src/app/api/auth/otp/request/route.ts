@@ -28,6 +28,16 @@ export async function POST(request: Request) {
       });
     }
 
+    // A mistyped number (Indian mobiles start 6–9) is said so at once, and
+    // never lands on the office's call list.
+    const typed = normalizeMobile10(mobile);
+    if (!typed || !/^[6-9]/.test(typed)) {
+      return NextResponse.json(
+        { error: "This doesn't look like a 10-digit mobile number — please check it.", code: "invalid_number" },
+        { status: 400 },
+      );
+    }
+
     await ensureSchoolMirrorHydrated();
     // Must be the household this number actually belongs to. The old
     // resolveParentHousehold() call could not return null — an unknown
@@ -40,7 +50,11 @@ export async function POST(request: Request) {
       const m10 = normalizeMobile10(mobile);
       if (m10) await noteUnknownLoginServer(m10, "parent");
       return NextResponse.json(
-        { error: "No parent record found for this mobile. Contact school office." },
+        // The app offers "Link this number" on this code (lib/parentNumberLink).
+        {
+          error: "This number is not on the school's record. Link it to your child below (update the app if you don't see the option), or contact the school office.",
+          code: "unknown_number",
+        },
         { status: 404 },
       );
     }

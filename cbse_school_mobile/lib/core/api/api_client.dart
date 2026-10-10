@@ -27,13 +27,44 @@ const _roleKey = "bhb_role_code";
 const _kindKey = "bhb_home_kind";
 
 class ApiException implements Exception {
-  ApiException(this.message, [this.statusCode]);
+  ApiException(this.message, [this.statusCode, this.code = ""]);
 
   final String message;
   final int? statusCode;
 
+  /// The server's reason code, e.g. "unknown_number", "family_inactive".
+  final String code;
+
   @override
   String toString() => message;
+}
+
+/// The first step of linking a new number (see [ApiClient.linkNumberStart]).
+class LinkStartResult {
+  const LinkStartResult({
+    required this.linkId,
+    required this.maskedRegistered,
+    required this.childFirstName,
+    required this.needClass,
+    required this.classes,
+    required this.noMatch,
+    required this.message,
+  });
+
+  /// Set when the code went to the family's registered number.
+  final String linkId;
+  final String maskedRegistered;
+  final String childFirstName;
+
+  /// Several children match — the parent picks the class.
+  final bool needClass;
+  final List<String> classes;
+
+  /// Nothing matched (or no phone on record) — offer "Ask the school office".
+  final bool noMatch;
+  final String message;
+
+  bool get codeSent => linkId.isNotEmpty;
 }
 
 /// Reply from the ERP command desk (`POST /api/v1/commands`).
@@ -2806,7 +2837,80 @@ class ApiClient {
     if (res.statusCode != 401 && res.statusCode != 426) {
       ScreenGuides.noteError(message);
     }
-    throw ApiException(message, res.statusCode);
+    throw ApiException(message, res.statusCode, code);
+  }
+
+  /// Link a phone the school doesn't have: name the child (admission number
+  /// OR name) and the exact date of birth. On a match a code goes to the
+  /// family's registered WhatsApp number (lib/parentNumberLink on the ERP).
+  Future<LinkStartResult> linkNumberStart({
+    required String mobile,
+    String childName = "",
+    String admissionNo = "",
+    required String dob,
+    String className = "",
+  }) async {
+    final res = await http.post(
+      _uri("/api/auth/link/start"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({
+        "mobile": mobile,
+        "childName": childName,
+        "admissionNo": admissionNo,
+        "dob": dob,
+        "className": className,
+      }),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+    final b = jsonDecode(res.body) as Map<String, dynamic>;
+    return LinkStartResult(
+      linkId: "${b["linkId"] ?? ""}",
+      maskedRegistered: "${b["maskedRegistered"] ?? ""}",
+      childFirstName: "${b["childFirstName"] ?? ""}",
+      needClass: b["needClass"] == true,
+      classes: ((b["classes"] as List?) ?? const []).map((c) => "$c").toList(),
+      noMatch: b["noMatch"] == true || b["noRegisteredPhone"] == true,
+      message: "${b["error"] ?? ""}",
+    );
+  }
+
+  /// The code from the registered phone: links this number and signs in.
+  Future<void> linkNumberVerify(String linkId, String code) async {
+    final res = await http.post(
+      _uri("/api/auth/link/verify"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({"linkId": linkId, "code": code}),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+    _captureCookie(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    await _storeSession(body["session"] as Map<String, dynamic>?);
+  }
+
+  /// No registered phone to hand (or no match): ask the school office.
+  Future<String> linkNumberAskOffice({
+    required String mobile,
+    String childName = "",
+    String admissionNo = "",
+    String dob = "",
+    String className = "",
+    String note = "",
+  }) async {
+    final res = await http.post(
+      _uri("/api/auth/link/office"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({
+        "mobile": mobile,
+        "childName": childName,
+        "admissionNo": admissionNo,
+        "dob": dob,
+        "className": className,
+        "note": note,
+      }),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+    final b = jsonDecode(res.body) as Map<String, dynamic>;
+    return "${b["message"] ?? ""}";
   }
 
   /// Step 1 — send the WhatsApp OTP to a registered parent mobile.

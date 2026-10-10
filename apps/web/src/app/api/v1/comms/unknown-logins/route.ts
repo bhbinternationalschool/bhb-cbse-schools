@@ -4,6 +4,8 @@ import { readModuleLocalState, writeModuleLocalState } from "@/lib/moduleLocalSt
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { findHouseholdByMobileStrict } from "@/lib/parentHousehold.server";
 import { loadSis } from "@/lib/sis";
+import { readParentLinks } from "@/lib/parentNumberLink.server";
+import { linkedHousehold } from "@/lib/parentNumberLink";
 import { resolvePersonByMobile } from "@/lib/authProvisioning.server";
 import {
   normalizeUnknownLoginState,
@@ -30,10 +32,14 @@ export async function GET(req: Request) {
   // The hydrated mirror, not a database lookup per number: these numbers are
   // by definition mostly unknown, and each miss cost two queries.
   const sis = loadSis();
+  // A number the parent has since linked from the app counts as registered.
+  const links = await readParentLinks();
   const numbers = await Promise.all(
     state.numbers.map(async (n) => {
       const known =
-        n.app === "staff" ? !!(await resolvePersonByMobile("staff", n.mobile10)) : !!findHouseholdByMobileStrict(sis, n.mobile10);
+        n.app === "staff"
+          ? !!(await resolvePersonByMobile("staff", n.mobile10))
+          : !!findHouseholdByMobileStrict(sis, n.mobile10) || !!(links && linkedHousehold(links, n.mobile10));
       return { ...n, nowRegistered: known };
     }),
   );

@@ -109,7 +109,11 @@ export async function resolveHouseholdByMobileServer(
     const { fetchSisHouseholdByMobileFromDb } = await import(
       "@/lib/sisNormalized.server"
     );
-    const found = await fetchSisHouseholdByMobileFromDb(mobile10);
+    const found =
+      (await fetchSisHouseholdByMobileFromDb(mobile10)) ||
+      // A number the parent linked from the app (code to the family's
+      // registered phone, or the office's approval) — lib/parentNumberLink.
+      (await (await import("@/lib/parentNumberLink.server")).fetchLinkedHousehold(mobile10));
     if (!found) return null;
     patchMirrorHousehold(found.household, found.students);
     return found;

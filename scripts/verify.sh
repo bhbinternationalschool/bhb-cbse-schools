@@ -220,6 +220,7 @@ SELFTESTS=(
   test:app-popup-text
   test:app-popups-on-roll
   test:parent-family-inactive
+  test:parent-number-link
   test:module-requests
   test:weekly-holiday-range
   test:push-voice
