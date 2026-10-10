@@ -515,6 +515,39 @@ export async function collectOnSale(
   };
 }
 
+/**
+ * A discount on a store due after the sale — given at the fee counter with
+ * the fee receipt (externalRef = receipt number; repeat-safe). The sale's
+ * discount rises and its balance falls; the books get Dr Store income /
+ * Cr Student receivable. See migration 20261010150000_store_sale_discounts.
+ */
+export async function discountOnSale(
+  input: { saleId: string; amountPaise: number; reason?: string; externalRef?: string },
+  actor: string,
+): Promise<{ balancePaise: number; status: InvSaleStatus; alreadyApplied: boolean; ledgerVoucherNo: string }> {
+  const amount = int(input.amountPaise);
+  if (amount <= 0) throw new InvError("Discount must be more than zero", 400);
+  const { sb, tenantId } = await invCtx();
+  const { data, error } = await sb.rpc("inv_discount_on_sale", {
+    p_tenant_id: tenantId,
+    p_actor: actor,
+    p_payload: {
+      sale_id: input.saleId,
+      amount_paise: amount,
+      reason: str(input.reason),
+      external_ref: str(input.externalRef),
+    },
+  });
+  if (error) throw new InvError(cleanDbMessage(error.message), 409);
+  const out = (data ?? {}) as Row;
+  return {
+    balancePaise: int(out.balance_paise),
+    status: str(out.status) as InvSaleStatus,
+    alreadyApplied: out.already_applied === true,
+    ledgerVoucherNo: str(out.ledger_voucher_no),
+  };
+}
+
 export async function postSaleReturn(
   input: {
     saleId: string;
@@ -690,6 +723,15 @@ export async function reverseCollectionByReceipt(input: {
   sales: { saleNo: string; status: string; amountPaise: number }[];
 }> {
   const { sb, tenantId } = await invCtx();
+  // The discounts given with the receipt go back first: the sale's balance
+  // is then whole again before the cash is taken off it.
+  const disc = await sb.rpc("inv_reverse_sale_discounts", {
+    p_tenant_id: tenantId,
+    p_actor: input.actor,
+    p_external_ref: input.receiptNo,
+    p_reason: input.reason ?? "Fee receipt voided",
+  });
+  if (disc.error) throw new InvError(cleanDbMessage(disc.error.message), 422);
   const { data, error } = await sb.rpc("inv_reverse_collection", {
     p_tenant_id: tenantId,
     p_actor: input.actor,

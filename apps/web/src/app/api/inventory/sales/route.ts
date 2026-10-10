@@ -2,6 +2,7 @@
 
 import {
   collectOnSale,
+  discountOnSale,
   counterPrices,
   counterSummary,
   listSaleReturns,
@@ -88,6 +89,7 @@ type Body =
   | ({ action: "return" } & Parameters<typeof postSaleReturn>[0])
   | { action: "void"; saleId: string; reason: string }
   | { action: "reverse-collect"; receiptNo: string; reason?: string }
+  | { action: "discount"; saleId: string; amountPaise: number; reason?: string; externalRef?: string }
   | ({ action: "household" } & Parameters<typeof postHouseholdSale>[0]);
 
 export async function POST(req: Request) {
@@ -101,6 +103,9 @@ export async function POST(req: Request) {
   return invRoute(req, needs, async ({ actor, academicYearCode }) => {
     if (action === "collect") {
       return collectOnSale(body as Parameters<typeof collectOnSale>[0], actor);
+    }
+    if (action === "discount") {
+      return { discount: await discountOnSale(body as Parameters<typeof discountOnSale>[0], actor) };
     }
     if (action === "return") {
       return {
