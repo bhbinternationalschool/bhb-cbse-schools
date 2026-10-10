@@ -3845,6 +3845,7 @@ class ApiClient {
     required String signature,
     required int ts,
     String deviceLabel = "",
+    String phoneId = "",
   }) async {
     final data = await _postData("/api/v1/staff/attendance/punch", {
       "kind": kind,
@@ -3858,6 +3859,7 @@ class ApiClient {
         "signature": signature,
         "ts": ts,
         "label": deviceLabel,
+        if (phoneId.isNotEmpty) "phoneId": phoneId,
       },
     });
     return PunchResult(
