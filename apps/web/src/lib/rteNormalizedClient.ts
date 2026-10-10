@@ -10,6 +10,10 @@ import {
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
 import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+import { afterStampedDeskSave, captureDeskStamps, stampedDeskBody } from "@/lib/deskStampsClient";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+
+const RTE_SLICES = ["seats", "applications"] as const;
 
 const RTE_DESK = "rte";
 
@@ -74,14 +78,20 @@ export function scheduleRteDeskSync(state: RteState) {
 
 async function pushRteDeskApi(state: RteState) {
   const sentDeletes = pendingDeskDeletes(RTE_DESK);
+  const holder = {
+    seats: state.seats,
+    applications: state.applications,
+    settings: state.settings,
+  } as Record<string, unknown>;
+  // Only the rows this browser changed, each with the stamp it loaded.
+  const sent = stampedDeskBody("rte", holder, RTE_SLICES);
+  if (!sent.anything && !Object.values(sentDeletes).some((ids) => ids?.length)) return;
   try {
     const res = await fetch("/api/school-data/rte-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        seats: state.seats,
-        applications: state.applications,
-        settings: state.settings,
+        ...sent.body,
         // Deletions are named, never inferred from what this browser lacks.
         deletes: sentDeletes,
       }),
@@ -92,9 +102,13 @@ async function pushRteDeskApi(state: RteState) {
       seatCount?: number;
       applicationCount?: number;
       error?: string;
+      stamps?: RowStamps;
+      conflicts?: RowConflicts;
+      settingsStamp?: string;
     } | null;
     if (res.ok && body?.ok) {
       confirmDeskDeletes(RTE_DESK, sentDeletes);
+      afterStampedDeskSave("rte", holder, RTE_SLICES, sent, body);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         seatCount: body.seatCount ?? state.seats.length,
@@ -154,6 +168,8 @@ export async function hydrateRteDeskFromDb(
       updatedAt?: string;
       seatCount?: number;
       applicationCount?: number;
+      stamps?: RowStamps;
+      settingsStamp?: string;
     };
 
     const bundle = {
@@ -197,6 +213,8 @@ export async function hydrateRteDeskFromDb(
       seatCount: body.seatCount ?? bundle.seats.length,
       applicationCount: body.applicationCount ?? bundle.applications.length,
     });
+    // The rows as the server holds them are the base of the next save.
+    captureDeskStamps("rte", bundle as Record<string, unknown>, RTE_SLICES, body.stamps, body.settingsStamp);
 
     return { bundle, changed: true, ok: true };
   } catch {

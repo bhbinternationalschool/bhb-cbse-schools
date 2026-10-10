@@ -21,6 +21,18 @@ import {
 } from "@/lib/deskNamedDeletes.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
+import {
+  countDeskRows,
+  settingsStampOf,
+  writeDeskRows,
+  writeDeskSettings,
+  type StampedDeskPushResult,
+} from "@/lib/deskStamps.server";
+import { stampsOf } from "@/lib/rowStampWrite.server";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+
+/** Statutory lists saved row by row with stamps (10 Oct 2026). */
+export const STATUTORY_STAMPED_SLICES = ["batches"] as const;
 
 export type StatutoryDeskSyncMeta = {
   batchCount: number;
@@ -225,11 +237,19 @@ function configToRow(
 /** The only statutory table a desk save deletes from — by named id. */
 export const STATUTORY_DELETABLE_TABLES = ["statutory_desk_batches"] as const;
 
+/**
+ * Save the statutory desk. Stamped (`opts.stamps`): only the batches named,
+ * each at the stamp it was loaded at — a stale tab can no longer mark a
+ * deposited batch pending again. Lines go only with a batch whose save
+ * landed; the establishment config only from the stamp it was loaded at.
+ * Unstamped (older tabs): new batches only.
+ */
 export async function pushStatutoryDeskToDb(
   state: StatutoryRemitState,
   config: StatutoryEstablishmentConfig,
   deletes: NamedDeletes = {},
-): Promise<{ ok: boolean; error?: string }> {
+  opts: { stamps?: RowStamps; configBase?: string | null } = {},
+): Promise<StampedDeskPushResult> {
   if (!statutoryDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
@@ -249,60 +269,86 @@ export async function pushStatutoryDeskToDb(
     });
   }
 
-  const tables: [string, Record<string, unknown>[]][] = [
-    ["statutory_desk_batches", batches.map((b) => batchToRow(tenantId, b))],
-    ["statutory_desk_lines", lineRows],
-  ];
-  for (const [table, rows] of tables) {
-    const r = await upsertChunks(sb, table, rows);
-    if (!r.ok) return r;
-  }
+  const stamped = opts.stamps !== undefined;
+  const conflicts: RowConflicts = {};
+  const batchWrite = await writeDeskRows(
+    sb,
+    tenantId,
+    "statutory_desk_batches",
+    batches.map((b) => batchToRow(tenantId, b)),
+    stamped ? (opts.stamps!.batches ?? {}) : undefined,
+  );
+  if (!batchWrite.ok) return batchWrite;
+  if (batchWrite.conflicts.length) conflicts.batches = batchWrite.conflicts;
+
+  // Lines travel only with a batch whose save landed.
+  const landedBatches = batches.filter((b) => batchWrite.landed.has(b.id));
+  const up = await upsertChunks(
+    sb,
+    "statutory_desk_lines",
+    lineRows.filter((l) => batchWrite.landed.has(String(l.batch_id))),
+  );
+  if (!up.ok) return { ok: false, error: up.error || "statutory_desk_lines: write failed" };
 
   // No prune by absence. A batch the desk removed is named (lines cascade).
   // A batch's lines are rewritten when it is re-synced from its payroll run,
-  // so lines past the new count are removed — only under batches this
-  // payload carries in full.
+  // so lines past the new count are removed — only under batches whose save
+  // just landed.
   const delBatches = await deleteNamedIds(sb, tenantId, "statutory_desk_batches", [...goneBatches]);
-  if (!delBatches.ok) return delBatches;
+  if (!delBatches.ok) return { ok: false, error: delBatches.error || "statutory_desk_batches: delete failed" };
   const delLines = await deleteChildrenNotKept(
     sb,
     tenantId,
     "statutory_desk_lines",
     "batch_id",
-    batches.map((b) => b.id),
+    landedBatches.map((b) => b.id),
     lineKeep,
   );
-  if (!delLines.ok) return delLines;
+  if (!delLines.ok) return { ok: false, error: delLines.error || "statutory_desk_lines: delete failed" };
 
-  const { error: configErr } = await sb
-    .from("statutory_establishment_config")
-    .upsert(configToRow(tenantId, config), { onConflict: "tenant_id" });
-  if (configErr) return { ok: false, error: configErr.message };
+  const set = await writeDeskSettings(
+    sb,
+    tenantId,
+    "statutory_establishment_config",
+    configToRow(tenantId, config),
+    stamped,
+    opts.configBase,
+  );
+  if (!set.ok) return set;
+  if (set.conflict) conflicts.config = ["config"];
 
-  const pendingCount = batches.filter((b) => b.status === "pending_deposit").length;
-  let lastBatchMonth: string | null = null;
-  for (const b of batches) {
-    if (b.month && (!lastBatchMonth || b.month > lastBatchMonth)) {
-      lastBatchMonth = b.month;
-    }
-  }
-
+  // Counted from the tables: a stamped save carries only what changed.
+  const [batchCount, lineCount, pendingCount, lastBatch] = await Promise.all([
+    countDeskRows(sb, tenantId, "statutory_desk_batches"),
+    countDeskRows(sb, tenantId, "statutory_desk_lines"),
+    countDeskRows(sb, tenantId, "statutory_desk_batches", { column: "status", value: "pending_deposit" }),
+    sb
+      .from("statutory_desk_batches")
+      .select("month")
+      .eq("tenant_id", tenantId)
+      .neq("month", "")
+      .order("month", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
   await sb.from("statutory_desk_sync_meta").upsert(
     {
       tenant_id: tenantId,
-      batch_count: batches.length,
-      line_count: lineRows.length,
+      batch_count: batchCount,
+      line_count: lineCount,
       pending_count: pendingCount,
-      last_batch_month: lastBatchMonth,
+      last_batch_month: (lastBatch.data as { month?: string } | null)?.month ?? null,
       updated_at: now,
     },
     { onConflict: "tenant_id" },
   );
 
-  return { ok: true };
+  return { ok: true, stamps: { batches: batchWrite.stamps }, conflicts, settingsStamp: set.stamp, kept: batchWrite.kept };
 }
 
 export async function fetchStatutoryDeskFromDb(): Promise<{
+  stamps?: RowStamps;
+  settingsStamp?: string;
   bundle: StatutoryDeskBundle;
   meta: StatutoryDeskSyncMeta | null;
   /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
@@ -403,6 +449,8 @@ export async function fetchStatutoryDeskFromDb(): Promise<{
 
   return {
     bundle: { batches, config },
+    stamps: { batches: stampsOf(batchRows as Record<string, unknown>[]) },
+    settingsStamp: settingsStampOf(configRow),
     meta: metaRow
       ? {
           batchCount: Number((metaRow as Record<string, unknown>).batch_count ?? 0),
