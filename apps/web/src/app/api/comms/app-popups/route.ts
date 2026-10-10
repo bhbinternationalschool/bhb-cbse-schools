@@ -22,7 +22,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 async function stats(popups: AppPopup[]) {
-  const out: Record<string, { shown: number; dismissed: number; done: number; pendingNow?: number }> = {};
+  const out: Record<string, { shown: number; dismissed: number; done: number; pendingNow?: number; completeNow?: number }> = {};
+  // Families (hh:<id>) who saved something on each pop-up.
+  const savedBy = new Map<string, Set<string>>();
   for (const p of popups) out[p.id] = { shown: 0, dismissed: 0, done: 0 };
   const ctx = await getServerTenantContext();
   if (ctx && popups.length) {
@@ -40,6 +42,7 @@ async function stats(popups: AppPopup[]) {
       seen.add(k);
       const st = out[String(r.popup_id)];
       if (st && (r.event === "shown" || r.event === "dismissed" || r.event === "done")) st[r.event as "shown"] += 1;
+      if (r.event === "done") savedBy.set(String(r.popup_id), (savedBy.get(String(r.popup_id)) ?? new Set()).add(String(r.subject_key)));
     }
   }
   const rulePopups = popups.filter((p) => p.targetMode === "rule");
@@ -52,13 +55,20 @@ async function stats(popups: AppPopup[]) {
     }
     for (const p of rulePopups) {
       let n = 0;
-      for (const kids of byHousehold.values()) {
+      let complete = 0;
+      const saved = savedBy.get(p.id) ?? new Set<string>();
+      for (const [hh, kids] of byHousehold) {
         const f = familyFacts(kids, p.consentKey && p.consentKey !== "apaar" ? [p.consentKey] : []);
-        if (p.rule === "missing_docs" && f.missingDocs.length) n += 1;
-        if (p.rule === "missing_aadhaar" && aadhaarInScope(f.missingAadhaar, p.aadhaarScope).length) n += 1;
-        if (p.rule === "consent_pending" && (p.consentKey || "apaar") === "apaar" && f.pendingConsents.includes("apaar")) n += 1;
+        const pending =
+          (p.rule === "missing_docs" && f.missingDocs.length > 0) ||
+          (p.rule === "missing_aadhaar" && aadhaarInScope(f.missingAadhaar, p.aadhaarScope).length > 0) ||
+          (p.rule === "consent_pending" && (p.consentKey || "apaar") === "apaar" && f.pendingConsents.includes("apaar"));
+        if (pending) n += 1;
+        // Finished through this pop-up: saved here, and nothing left to ask.
+        else if (saved.has(`hh:${hh}`)) complete += 1;
       }
       out[p.id]!.pendingNow = n;
+      out[p.id]!.completeNow = complete;
     }
   }
   return out;

@@ -34,6 +34,20 @@ assert.equal(apaar.consentKey, "apaar");
 assert.equal(popupApplies(apaar, { ...who, facts: { ...none, pendingConsents: ["apaar"] } }, []), true);
 assert.equal(popupApplies(apaar, { ...who, facts: { ...none, pendingConsents: ["photo"] } }, []), false);
 
+// An Aadhaar / documents form ends when the record is complete, not when
+// something was saved (10 Oct 2026): one child's number saved, a sibling's
+// still missing → asked again, for the sibling.
+{
+  const done = [{ popupId: "a", event: "done" as const, createdAt: "2026-10-10T08:00:00Z" }];
+  assert.equal(popupApplies(aad, { ...who, facts: { ...none, missingAadhaar: ["stu_sibling"] } }, done), true, "a sibling still missing → asked again");
+  assert.equal(popupApplies(aad, who, done), false, "record complete → never again");
+  const docs = normalizeAppPopup({ id: "d", title: "Docs", targetMode: "rule", rule: "missing_docs", form: "documents", frequency: "until_done" }) as AppPopup;
+  const docsDone = [{ popupId: "d", event: "done" as const, createdAt: "x" }];
+  assert.equal(popupApplies(docs, { ...who, facts: { ...none, missingDocs: ["stu1"] } }, docsDone), true);
+  // A consent is answered once — done still ends it.
+  assert.equal(popupApplies(apaar, { ...who, facts: { ...none, pendingConsents: ["apaar"] } }, [{ popupId: "c", event: "done", createdAt: "x" }]), false);
+}
+
 // Bad input is cleaned
 assert.equal(normalizeAppPopup({ id: "", title: "x" }), null);
 assert.equal(normalizeAppPopup({ id: "x", title: "y", imageUrl: "javascript:alert(1)" })!.imageUrl, "");

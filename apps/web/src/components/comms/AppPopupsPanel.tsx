@@ -18,7 +18,7 @@ const KEYS: Record<Field, { en: "title" | "body" | "consentText"; hi: "titleHi" 
   consent: { en: "consentText", hi: "consentTextHi" },
 };
 
-type Stats = Record<string, { shown: number; dismissed: number; done: number; pendingNow?: number }>;
+type Stats = Record<string, { shown: number; dismissed: number; done: number; pendingNow?: number; completeNow?: number }>;
 
 const AADHAAR_SCOPES: { id: AadhaarScope; label: string }[] = [
   { id: "all", label: "Child + father + mother" },
@@ -519,11 +519,11 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
           const st = stats[p.id];
           const status = popupStatus(p, today);
           const toDo = typeof st?.pendingNow === "number" ? st.pendingNow : null;
-          const reached = st ? st.shown : 0;
-          // Done out of everyone it is meant for: those who finished plus,
-          // for a rule pop-up, the families the rule still matches.
-          const of = toDo !== null ? (st?.done ?? 0) + toDo : reached;
-          const pct = of > 0 ? Math.round(((st?.done ?? 0) / of) * 100) : 0;
+          // A rule pop-up: finished = saved here AND nothing left to ask
+          // (a parent may save one child's number and not a sibling's).
+          const finished = typeof st?.completeNow === "number" ? st.completeNow : st?.done ?? 0;
+          const of = toDo !== null ? finished + toDo : st ? st.shown : 0;
+          const pct = of > 0 ? Math.round((finished / of) * 100) : 0;
           const open = previewId === p.id;
           return (
             <li key={p.id} className="space-y-2 rounded-lg border border-[var(--border)] p-3 text-sm">
@@ -583,7 +583,8 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {[
                       { k: p.audience === "parents" ? "Families who saw it" : "Staff who saw it", v: st.shown },
-                      { k: p.form === "none" ? "Tapped OK / button" : "Completed", v: st.done },
+                      { k: p.form === "none" ? "Tapped OK / button" : toDo !== null ? "Fully completed" : "Completed", v: finished },
+                      ...(toDo !== null && st.done > finished ? [{ k: "Saved, some still missing", v: st.done - finished }] : []),
                       { k: "Tapped “Later”", v: st.dismissed },
                       ...(toDo !== null ? [{ k: "Still to do", v: toDo }] : []),
                     ].map((c) => (
@@ -599,7 +600,7 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
                         <div className="h-full rounded-full bg-[var(--success)]" style={{ width: `${pct}%` }} />
                       </div>
                       <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-                        {st.done} of {of} {toDo !== null ? "families it is meant for" : "who saw it"} completed ({pct}%)
+                        {finished} of {of} {toDo !== null ? "families it is meant for" : "who saw it"} completed ({pct}%)
                       </p>
                     </div>
                   ) : (
