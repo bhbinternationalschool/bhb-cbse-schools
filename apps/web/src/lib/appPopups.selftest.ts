@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { isValidAadhaar, maskAadhaarNumber, normalizeAppPopup, popupApplies, type AppPopup, type RuleFacts } from "./appPopups";
+import { aadhaarInScope, countAadhaarGaps, isValidAadhaar, maskAadhaarNumber, normalizeAppPopup, popupApplies, type AppPopup, type RuleFacts } from "./appPopups";
 
 console.log("appPopups.selftest.ts");
 
@@ -47,5 +47,27 @@ assert.equal(isValidAadhaar("234123412345"), false, "one digit wrong");
 assert.equal(isValidAadhaar("123412341234"), false, "cannot start with 1");
 assert.equal(isValidAadhaar("23412341234"), false, "11 digits");
 assert.equal(maskAadhaarNumber("234123412346"), "XXXX-XXXX-2346");
+
+// Aadhaar scope (director, 10 Oct 2026): child only, parents only, or both.
+assert.equal(normalizeAppPopup({ id: "a", title: "t" })!.aadhaarScope, "all", "old pop-ups ask for everyone, as before");
+assert.equal(normalizeAppPopup({ id: "a", title: "t", aadhaarScope: "parents" })!.aadhaarScope, "parents");
+assert.deepEqual(aadhaarInScope(["stu1", "father"], "parents"), ["father"]);
+assert.deepEqual(aadhaarInScope(["stu1", "father"], "child"), ["stu1"]);
+assert.deepEqual(aadhaarInScope(["stu1", "father"], "all"), ["stu1", "father"]);
+{
+  const base = normalizeAppPopup({ id: "aa", title: "Aadhaar", targetMode: "rule", rule: "missing_aadhaar", form: "aadhaar", frequency: "until_done", aadhaarScope: "parents" })!;
+  const who = (missing: string[]) => ({ audience: "parents" as const, classIds: [], today: "2026-10-10", facts: { missingDocs: [], missingAadhaar: missing, pendingConsents: [] } });
+  assert.equal(popupApplies(base, who(["stu1"]), []), false, "parents-only pop-up skips a family missing only the child's");
+  assert.equal(popupApplies(base, who(["stu1", "mother"]), []), true);
+}
+assert.deepEqual(
+  countAadhaarGaps([
+    { children: 2, missing: ["s1", "s2", "father"] },
+    { children: 1, missing: ["mother"] },
+    { children: 1, missing: [] },
+    { children: 0, missing: ["father"] },
+  ]),
+  { families: 3, children: 4, childrenMissing: 2, familiesChildMissing: 1, fatherMissing: 1, motherMissing: 1, familiesParentMissing: 2, reach: { all: 2, child: 1, parents: 2 } },
+);
 
 console.log("appPopups.selftest: all assertions passed");
