@@ -7,17 +7,19 @@ import type { LibraryState } from "@/lib/library";
 import { libraryDualWriteDbEnabled } from "@/lib/libraryDbConfig";
 import {
   LIBRARY_DELETABLE_TABLES,
+  LIBRARY_STAMPED_SLICES,
   fetchLibraryDeskFromDb,
   pushLibraryDeskToDb,
 } from "@/lib/libraryNormalized.server";
 import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { readStampsParam } from "@/lib/rowStampClient";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["library-desk"], "GET");
   if (!auth.ok) return auth.response
-  const { bundle, meta, ok } = await fetchLibraryDeskFromDb();
+  const { bundle, meta, ok, stamps, settingsStamp } = await fetchLibraryDeskFromDb();
   if (!ok) {
     return NextResponse.json(
       { ok: false, error: "Library desk fetch failed — tenant/db unavailable" },
@@ -30,6 +32,8 @@ export async function GET(req: Request) {
     titleCount: bundle.titles.length,
     updatedAt: meta?.updatedAt || new Date().toISOString(),
     meta,
+    stamps,
+    settingsStamp,
   });
 }
 
@@ -43,7 +47,7 @@ export async function POST(req: Request) {
   let body: Pick<
     LibraryState,
     "titles" | "ebooks" | "copies" | "issues" | "procurementDocs" | "settings"
-  > & { deletes?: unknown };
+  > & { deletes?: unknown; stamps?: unknown; settingsBase?: string | null };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -63,14 +67,22 @@ export async function POST(req: Request) {
       loanDays: 14,
       finePaisePerDay: 500,
     },
-  }, readNamedDeletes(body.deletes, LIBRARY_DELETABLE_TABLES));
+  }, readNamedDeletes(body.deletes, LIBRARY_DELETABLE_TABLES), {
+    // No stamps = a tab from before 10 Oct 2026: it may add, never replace.
+    stamps: readStampsParam(body.stamps, LIBRARY_STAMPED_SLICES),
+    settingsBase: typeof body.settingsBase === "string" ? body.settingsBase : null,
+  });
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 502 });
   }
+  if (result.kept) console.warn(`[library-desk] unstamped save left ${result.kept} stored row(s) as they were`);
 
   return NextResponse.json({
     ok: true,
     titleCount: body.titles?.length ?? 0,
     updatedAt: new Date().toISOString(),
+    stamps: result.stamps,
+    conflicts: result.conflicts,
+    settingsStamp: result.settingsStamp,
   });
 }

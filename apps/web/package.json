@@ -370,6 +370,7 @@
     "test:payment-link-reuse": "npx tsx src/lib/paymentLinkReuse.selftest.ts",
     "test:student-leave-status-guard": "npx tsx src/lib/studentLeaveStatusGuard.selftest.ts",
     "test:ptm-row-stamps": "npx tsx src/lib/ptmRowStamps.selftest.ts",
+    "test:desk-stamps": "npx tsx src/lib/deskStamps.selftest.ts",
     "test:attendance-row-stamps": "npx tsx src/lib/attendanceRowStamps.selftest.ts",
     "test:fee-extras-forward-only": "npx tsx src/lib/feeExtrasForwardOnly.selftest.ts",
     "test:admissions-field-ops-merge": "npx tsx src/lib/admissionsFieldOpsMerge.selftest.ts",

@@ -10,6 +10,10 @@ import {
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
 import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+import { afterStampedDeskSave, captureDeskStamps, stampedDeskBody } from "@/lib/deskStampsClient";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+
+const PAYROLL_SLICES = ["runs", "audit"] as const;
 
 const PAYROLL_DESK = "payroll";
 
@@ -68,21 +72,28 @@ export function schedulePayrollDeskSync(state: PayrollState) {
 
 async function pushPayrollDeskApi(state: PayrollState) {
   const sentDeletes = pendingDeskDeletes(PAYROLL_DESK);
+  const holder = { runs: state.runs, audit: state.audit } as Record<string, unknown>;
+  // Only the runs (and new audit rows) this browser changed, with their stamps.
+  const sent = stampedDeskBody("payroll", holder, PAYROLL_SLICES);
+  if (!sent.anything && !Object.values(sentDeletes).some((ids) => ids?.length)) return;
   try {
     const res = await fetch("/api/school-data/payroll-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // Deletions are named, never inferred from what this browser lacks.
-      body: JSON.stringify({ runs: state.runs, audit: state.audit, deletes: sentDeletes }),
+      body: JSON.stringify({ ...sent.body, deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
       updatedAt?: string;
       runCount?: number;
       error?: string;
+      stamps?: RowStamps;
+      conflicts?: RowConflicts;
     } | null;
     if (res.ok && body?.ok) {
       confirmDeskDeletes(PAYROLL_DESK, sentDeletes);
+      afterStampedDeskSave("payroll", holder, PAYROLL_SLICES, sent, body);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         runCount: body.runCount ?? state.runs.length,
@@ -107,6 +118,7 @@ export async function fetchPayrollDeskFromApi() {
       ok?: boolean;
       updatedAt?: string;
       runCount?: number;
+      stamps?: RowStamps;
     };
     if (!Array.isArray(body.runs)) return null;
     return {
@@ -116,6 +128,7 @@ export async function fetchPayrollDeskFromApi() {
       },
       updatedAt: body.updatedAt || "",
       runCount: body.runCount ?? body.runs.length,
+      stamps: body.stamps,
     };
   } catch {
     return null;
@@ -142,5 +155,7 @@ export async function hydratePayrollDeskFromDb(preferDb?: boolean) {
   if (!shouldTake) return { ...empty, bundle: remote.bundle, ok: true };
 
   writeMeta({ updatedAt: remote.updatedAt, runCount: remote.runCount });
+  // The runs as the server holds them are the base of the next save.
+  captureDeskStamps("payroll", remote.bundle as Record<string, unknown>, PAYROLL_SLICES, remote.stamps);
   return { bundle: remote.bundle, changed: true, ok: true };
 }

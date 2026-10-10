@@ -10,6 +10,10 @@ import {
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
 import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+import { afterStampedDeskSave, captureDeskStamps, stampedDeskBody } from "@/lib/deskStampsClient";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+
+const VAULT_SLICES = ["documents"] as const;
 
 const VAULT_DESK = "vault";
 
@@ -74,13 +78,16 @@ export function scheduleVaultDeskSync(state: VaultState) {
 
 async function pushVaultDeskApi(state: VaultState) {
   const sentDeletes = pendingDeskDeletes(VAULT_DESK);
+  const holder = { documents: state.documents, settings: state.settings } as Record<string, unknown>;
+  // Only the documents this browser changed, each with the stamp it loaded.
+  const sent = stampedDeskBody("vault", holder, VAULT_SLICES);
+  if (!sent.anything && !Object.values(sentDeletes).some((ids) => ids?.length)) return;
   try {
     const res = await fetch("/api/school-data/vault-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        documents: state.documents,
-        settings: state.settings,
+        ...sent.body,
         // Deletions are named, never inferred from what this browser lacks.
         deletes: sentDeletes,
       }),
@@ -90,9 +97,13 @@ async function pushVaultDeskApi(state: VaultState) {
       updatedAt?: string;
       documentCount?: number;
       error?: string;
+      stamps?: RowStamps;
+      conflicts?: RowConflicts;
+      settingsStamp?: string;
     } | null;
     if (res.ok && body?.ok) {
       confirmDeskDeletes(VAULT_DESK, sentDeletes);
+      afterStampedDeskSave("vault", holder, VAULT_SLICES, sent, body);
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         documentCount: body.documentCount ?? state.documents.length,
@@ -114,6 +125,8 @@ export async function fetchVaultDeskFromApi(): Promise<{
   bundle: Pick<VaultState, "documents" | "settings">;
   updatedAt: string;
   documentCount: number;
+  stamps?: RowStamps;
+  settingsStamp?: string;
 } | null> {
   if (!vaultNormalizedSyncEnabled()) return null;
   try {
@@ -127,6 +140,8 @@ export async function fetchVaultDeskFromApi(): Promise<{
       settings?: VaultState["settings"];
       updatedAt?: string;
       documentCount?: number;
+      stamps?: RowStamps;
+      settingsStamp?: string;
     };
     if (!Array.isArray(body.documents)) return null;
     return {
@@ -136,6 +151,8 @@ export async function fetchVaultDeskFromApi(): Promise<{
       },
       updatedAt: body.updatedAt || "",
       documentCount: body.documentCount ?? body.documents.length,
+      stamps: body.stamps,
+      settingsStamp: body.settingsStamp,
     };
   } catch {
     return null;
@@ -168,6 +185,8 @@ export async function hydrateVaultDeskFromDb(
     updatedAt: remote.updatedAt,
     documentCount: remote.documentCount,
   });
+  // The documents as the server holds them are the base of the next save.
+  captureDeskStamps("vault", remote.bundle as Record<string, unknown>, VAULT_SLICES, remote.stamps, remote.settingsStamp);
 
   return { bundle: remote.bundle, changed: true, ok: true };
 }
