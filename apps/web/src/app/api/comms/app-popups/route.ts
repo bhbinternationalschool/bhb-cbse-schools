@@ -10,6 +10,7 @@
 import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { aadhaarInScope, normalizeAppPopup, type AppPopup } from "@/lib/appPopups";
+import { popupTextTooLong } from "@/lib/appPopupText";
 import { familyFacts, readAppPopups, schoolAadhaarGaps, writeAppPopups } from "@/lib/appPopups.server";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -99,6 +100,12 @@ export async function POST(req: Request) {
   const prev = state.popups.find((p) => p.id === id);
   const popup = normalizeAppPopup({ ...raw, id, createdBy: prev?.createdBy || by, createdAt: prev?.createdAt || now, updatedAt: now });
   if (!popup) return NextResponse.json({ ok: false, error: "A pop-up needs a title." }, { status: 400 });
+  // One phone screen, no scrolling (lib/appPopupText) — checked here too, not only in the editor.
+  // Only when the words change: stopping or starting an older, longer pop-up still works.
+  const textKeys = ["title", "titleHi", "body", "bodyHi", "consentText", "consentTextHi", "form", "imageUrl"] as const;
+  const textChanged = !prev || textKeys.some((k) => prev[k] !== popup[k]);
+  const tooLong = textChanged ? popupTextTooLong(popup) : "";
+  if (tooLong) return NextResponse.json({ ok: false, error: tooLong }, { status: 400 });
   if (popup.form === "consent" && !popup.consentText.trim()) {
     return NextResponse.json({ ok: false, error: "Write the consent text the parent agrees to." }, { status: 400 });
   }

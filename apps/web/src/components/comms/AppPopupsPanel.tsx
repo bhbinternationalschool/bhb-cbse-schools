@@ -2,10 +2,21 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+
+const fieldCls = field;
 import type { AadhaarGapCounts, AadhaarScope, AppPopup } from "@/lib/appPopups";
 import { loadMasters } from "@/lib/masters";
 import { uploadMedia } from "@/lib/mediaUpload";
 import { AppPopupPreview, popupStatus } from "@/components/comms/AppPopupPreview";
+import { looksHindi, POPUP_CONSENT_MAX, POPUP_TITLE_MAX, popupBodyMax } from "@/lib/appPopupText";
+
+/** The paired fields: English and Hindi of the title, message and consent. */
+type Field = "title" | "body" | "consent";
+const KEYS: Record<Field, { en: "title" | "body" | "consentText"; hi: "titleHi" | "bodyHi" | "consentTextHi" }> = {
+  title: { en: "title", hi: "titleHi" },
+  body: { en: "body", hi: "bodyHi" },
+  consent: { en: "consentText", hi: "consentTextHi" },
+};
 
 type Stats = Record<string, { shown: number; dismissed: number; done: number; pendingNow?: number }>;
 
@@ -82,6 +93,9 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
   /** Which list item's phone preview is open, and the language it shows. */
   const [previewId, setPreviewId] = useState("");
   const [lang, setLang] = useState<"hi" | "en">("hi");
+  /** Fields the AI filled (and nobody has changed since) — only these are refilled. */
+  const [aiFilled, setAiFilled] = useState<Set<string>>(new Set());
+  const [aiBusy, setAiBusy] = useState("");
   const today = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
   const classes = useMemo(() => (loadMasters().classes ?? []).filter((c) => c.isActive !== false), []);
 
@@ -137,6 +151,120 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
   }
 
   const set = (patch: Partial<AppPopup>) => draft && setDraft({ ...draft, ...patch });
+  const bodyMax = draft ? popupBodyMax(draft.form, !!draft.imageUrl) : 0;
+
+  async function ai(payload: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+    const res = await fetch("/api/ai/app-popup-text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok || !body.ok) {
+      setError(String(body.error || `AI: HTTP ${res.status}`));
+      return null;
+    }
+    return body;
+  }
+
+  /** The message (both languages) written from the title. */
+  async function writeWithAi() {
+    if (!draft) return;
+    setAiBusy("draft");
+    const r = await ai({ mode: "draft", title: draft.title.trim() || draft.titleHi.trim(), form: draft.form, imageUrl: draft.imageUrl });
+    setAiBusy("");
+    const d = r?.draft as { title: string; titleHi: string; body: string; bodyHi: string } | undefined;
+    if (!d) return;
+    setDraft((cur) =>
+      cur
+        ? {
+            ...cur,
+            title: cur.title.trim() ? cur.title : d.title,
+            titleHi: cur.titleHi.trim() && !aiFilled.has("titleHi") ? cur.titleHi : d.titleHi,
+            body: d.body,
+            bodyHi: d.bodyHi,
+          }
+        : cur,
+    );
+    setAiFilled((s0) => new Set([...s0, "body", "bodyHi", ...(draft.titleHi.trim() && !aiFilled.has("titleHi") ? [] : ["titleHi"])]));
+  }
+
+  /**
+   * After typing in one box: Hindi typed in the English box moves to the
+   * Hindi box (and the other way round), then the other language is filled —
+   * unless someone wrote that box by hand.
+   */
+  async function fillOther(field: Field, typedIn: "en" | "hi") {
+    if (!draft) return;
+    const k = KEYS[field];
+    let text = (typedIn === "en" ? draft[k.en] : draft[k.hi]).trim();
+    if (!text) return;
+    const isHi = looksHindi(text);
+    let from: "en" | "hi" = typedIn;
+    if (typedIn === "en" && isHi) {
+      set({ [k.hi]: text, [k.en]: "" } as Partial<AppPopup>);
+      from = "hi";
+    } else if (typedIn === "hi" && !isHi) {
+      set({ [k.en]: text, [k.hi]: "" } as Partial<AppPopup>);
+      from = "en";
+    }
+    const target = from === "en" ? k.hi : k.en;
+    const existing = from === typedIn ? (target === k.hi ? draft[k.hi] : draft[k.en]).trim() : "";
+    if (existing && !aiFilled.has(target)) return; // written by hand — leave it
+    text = text.trim();
+    setAiBusy(field);
+    const r = await ai({ mode: "translate", text, from, field, form: draft.form, imageUrl: draft.imageUrl });
+    setAiBusy("");
+    if (typeof r?.text !== "string") return;
+    const translated = r.text;
+    setDraft((cur) => (cur ? { ...cur, [target]: translated } : cur));
+    setAiFilled((s0) => new Set([...s0, target]));
+  }
+
+  /** An English + Hindi pair with live counters, capped at `max`. */
+  function pairField(field: Field, label: string, max: number, multiline: boolean) {
+    if (!draft) return null;
+    const k = KEYS[field];
+    return (["en", "hi"] as const).map((l) => {
+      const key = l === "en" ? k.en : k.hi;
+      const value = draft[key];
+      const n = [...value].length;
+      const props = {
+        value,
+        maxLength: Math.max(max, n),
+        lang: l,
+        onChange: (e: { target: { value: string } }) => {
+          // A field typed into is no longer the AI's: it will not be refilled.
+          setAiFilled((s0) => {
+            const next = new Set(s0);
+            next.delete(key);
+            return next;
+          });
+          // Never longer than the limit (an older, longer text may only shrink).
+          const v = [...e.target.value].length > Math.max(max, n) ? [...e.target.value].slice(0, max).join("") : e.target.value;
+          set({ [key]: v } as Partial<AppPopup>);
+        },
+        onBlur: () => void fillOther(field, l),
+      };
+      return (
+        <label key={key} className="block">
+          <span className="flex items-center justify-between text-xs font-semibold">
+            <span>
+              {label} ({l === "en" ? "English" : "Hindi"})
+              {aiFilled.has(key) ? <span className="ml-1 font-normal text-[var(--muted)]">· AI</span> : null}
+            </span>
+            <span className={n > max ? "text-[var(--danger)]" : "font-normal text-[var(--muted)]"}>
+              {n}/{max}
+            </span>
+          </span>
+          {multiline ? <textarea {...props} className={`${fieldCls} min-h-[72px]`} /> : <input {...props} className={fieldCls} />}
+          {n > max ? <span className="text-[11px] text-[var(--danger)]">Too long for one phone screen — shorten to {max}.</span> : null}
+        </label>
+      );
+    });
+  }
+
+
 
   return (
     <section className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4" aria-label="App pop-ups">
@@ -158,24 +286,24 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
       {draft ? (
         <div className="grid gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-sm lg:grid-cols-[minmax(0,1fr)_auto]">
         <div className="min-w-0 space-y-3">
-          <div className="grid gap-2 sm:grid-cols-2">
-            <label className="block">
-              <span className="text-xs font-semibold">Title (English)</span>
-              <input className={field} value={draft.title} onChange={(e) => set({ title: e.target.value })} />
-            </label>
-            <label className="block">
-              <span className="text-xs font-semibold">Title (Hindi)</span>
-              <input className={field} value={draft.titleHi} onChange={(e) => set({ titleHi: e.target.value })} />
-            </label>
-            <label className="block">
-              <span className="text-xs font-semibold">Message (English)</span>
-              <textarea className={`${field} min-h-[72px]`} value={draft.body} onChange={(e) => set({ body: e.target.value })} />
-            </label>
-            <label className="block">
-              <span className="text-xs font-semibold">Message (Hindi)</span>
-              <textarea className={`${field} min-h-[72px]`} value={draft.bodyHi} onChange={(e) => set({ bodyHi: e.target.value })} />
-            </label>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[11px] text-[var(--muted)]">
+              Type in either language — the other box fills itself. Limits keep the whole pop-up on one phone screen.
+            </p>
+            <button
+              type="button"
+              className={btnOutline}
+              disabled={!!aiBusy || (draft.title.trim() || draft.titleHi.trim()).length < 3}
+              onClick={() => void writeWithAi()}
+            >
+              {aiBusy === "draft" ? "Writing…" : "Write message with AI"}
+            </button>
           </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {pairField("title", "Title", POPUP_TITLE_MAX, false)}
+            {pairField("body", "Message", bodyMax, true)}
+          </div>
+          {aiBusy && aiBusy !== "draft" ? <p className="text-[11px] text-[var(--muted)]">Filling the other language…</p> : null}
 
           <div className="flex flex-wrap items-center gap-3">
             <label className="text-xs font-semibold">
@@ -328,14 +456,7 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
                   &quot;apaar&quot; records the APAAR consent on each child (as WhatsApp does). Any other key just records each family&apos;s answer.
                 </span>
               </label>
-              <label className="block">
-                <span className="text-xs font-semibold">Consent text (English)</span>
-                <textarea className={`${field} min-h-[90px]`} value={draft.consentText} onChange={(e) => set({ consentText: e.target.value })} />
-              </label>
-              <label className="block">
-                <span className="text-xs font-semibold">Consent text (Hindi)</span>
-                <textarea className={`${field} min-h-[90px]`} value={draft.consentTextHi} onChange={(e) => set({ consentTextHi: e.target.value })} />
-              </label>
+              {pairField("consent", "Consent text", POPUP_CONSENT_MAX, true)}
             </div>
           ) : null}
 

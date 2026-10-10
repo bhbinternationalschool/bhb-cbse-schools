@@ -217,6 +217,7 @@ SELFTESTS=(
   test:accounts-no-prune
   test:app-popups
   test:app-popup-preview
+  test:app-popup-text
   test:module-requests
   test:weekly-holiday-range
   test:push-voice
