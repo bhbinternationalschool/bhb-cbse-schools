@@ -9,9 +9,14 @@
  * against the item it paid (payouts.server recordTransferView). Idempotent —
  * Cashfree redelivers. The status check on the screens is the fallback when a
  * webhook never comes.
+ *
+ * Cashgram events (CASHGRAM_REDEEMED / _EXPIRED / _TRANSFER_REVERSAL — the fee
+ * refund links) arrive on this same URL and go to cashgramRefunds.server.
  */
 
 import { NextResponse } from "next/server";
+import { readCashgramWebhook } from "@/lib/cashgram";
+import { onCashgramWebhook } from "@/lib/cashgramRefunds.server";
 import { readPayoutTransfer } from "@/lib/payouts";
 import { recordTransferView } from "@/lib/payouts.server";
 import { verifyPayoutWebhook, verifyPayoutWebhookV1 } from "@/lib/payoutsSignature";
@@ -55,6 +60,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Invalid signature" }, { status: 400 });
   }
   if (v1ok) {
+    // Cashgram events (fee refund links) are V1 and come here too.
+    const cashgram = readCashgramWebhook(v1Fields);
+    if (cashgram) {
+      await onCashgramWebhook(cashgram);
+      return NextResponse.json({ ok: true });
+    }
     const view = readPayoutTransfer(v1Fields);
     if (view) await recordTransferView(view);
     return NextResponse.json({ ok: true });
@@ -71,6 +82,14 @@ export async function POST(req: Request) {
     payload = JSON.parse(raw);
   } catch {
     return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
+  }
+  const cashgram =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? readCashgramWebhook(payload as Record<string, unknown>)
+      : null;
+  if (cashgram) {
+    await onCashgramWebhook(cashgram);
+    return NextResponse.json({ ok: true });
   }
   const view = readPayoutTransfer(payload);
   // Not every event is about a transfer (LOW_BALANCE_ALERT, CREDIT_CONFIRMATION):

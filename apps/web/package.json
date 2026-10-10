@@ -70,6 +70,7 @@
     "test:fee-autopay": "npx tsx src/lib/feeAutopay.selftest.ts",
     "test:secure-id": "npx tsx src/lib/secureId.selftest.ts",
     "test:payouts": "npx tsx src/lib/payouts.selftest.ts",
+    "test:cashgram": "npx tsx src/lib/cashgram.selftest.ts",
     "test:diksha-index": "npx tsx src/lib/dikshaIndex.selftest.ts",
     "test:teacher-contact": "npx tsx src/lib/teacherContact.selftest.ts",
     "test:academic-risk": "npx tsx src/lib/academicRisk.selftest.ts",

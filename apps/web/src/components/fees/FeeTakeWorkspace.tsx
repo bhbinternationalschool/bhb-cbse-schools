@@ -138,6 +138,7 @@ import { openWaMe } from "@/lib/waMe";
 import { ReceiptWaStatus } from "@/components/fees/ReceiptWaStatus";
 import { ReceiptDeliveryPanel } from "@/components/fees/ReceiptDeliveryPanel";
 import { ReceiptRepairDialog } from "@/components/fees/ReceiptRepairDialog";
+import { CashgramRefundPanel } from "@/components/fees/CashgramRefundPanel";
 
 /**
  * The search box owns its keystrokes. Typing re-renders ONLY this input;
@@ -2998,6 +2999,11 @@ function CollectPanel({
             tone="voucher"
           />
         </div>
+        <CashgramRefundPanel
+          key={student.householdId}
+          householdId={student.householdId}
+          readOnly={readOnly}
+        />
 
         {canTransfer.length > 0 ? (
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--danger)]/25 bg-[var(--danger-soft)] px-3 py-2 text-xs text-[var(--brand-deep)]">

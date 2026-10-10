@@ -41,6 +41,7 @@ import {
   type PayoutTransferView,
 } from "@/lib/payouts";
 import { payoutSignatureFrom } from "@/lib/payoutsSignature";
+import { readApprovalRule, type CashgramApprovalRule } from "@/lib/cashgram";
 import { getServerTenantContext } from "@/lib/serverTenant";
 
 export const PAYOUT_API_VERSION = "2024-01-01";
@@ -73,12 +74,24 @@ export type PayoutSettings = {
   enabled: boolean;
   testTransferId: string;
   testPassedAt: string;
+  /** Who must approve a fee-refund link before it goes out (cashgram.ts). */
+  refundApproval: CashgramApprovalRule;
+  /** With refundApproval "above": links above this wait for the owner. */
+  refundApprovalAbovePaise: number;
   updatedBy: string;
   updatedAt: string;
 };
 
 export async function getPayoutSettings(): Promise<PayoutSettings> {
-  const off: PayoutSettings = { enabled: false, testTransferId: "", testPassedAt: "", updatedBy: "", updatedAt: "" };
+  const off: PayoutSettings = {
+    enabled: false,
+    testTransferId: "",
+    testPassedAt: "",
+    refundApproval: "owner",
+    refundApprovalAbovePaise: 0,
+    updatedBy: "",
+    updatedAt: "",
+  };
   const ctx = await getServerTenantContext();
   if (!ctx) return off;
   const { data, error } = await ctx.sb.from("payout_settings").select("*").eq("tenant_id", ctx.tenantId).maybeSingle();
@@ -89,12 +102,23 @@ export async function getPayoutSettings(): Promise<PayoutSettings> {
     enabled: r.enabled === true,
     testTransferId: String(r.test_transfer_id ?? ""),
     testPassedAt: r.test_passed_at ? String(r.test_passed_at) : "",
+    refundApproval: readApprovalRule(r.refund_approval),
+    refundApprovalAbovePaise: Math.max(0, Number(r.refund_approval_above_paise ?? 0) || 0),
     updatedBy: String(r.updated_by ?? ""),
     updatedAt: String(r.updated_at ?? ""),
   };
 }
 
-async function savePayoutSettings(patch: Partial<{ enabled: boolean; test_transfer_id: string; test_passed_at: string | null }>, by: string) {
+async function savePayoutSettings(
+  patch: Partial<{
+    enabled: boolean;
+    test_transfer_id: string;
+    test_passed_at: string | null;
+    refund_approval: CashgramApprovalRule;
+    refund_approval_above_paise: number;
+  }>,
+  by: string,
+) {
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false as const, error: "No tenant context" };
   const { error } = await ctx.sb
@@ -116,6 +140,17 @@ export async function payoutsEnabled(): Promise<{ ok: boolean; why: string }> {
   if (!st.testPassedAt) return { ok: false, why: "Send the ₹1 test transfer first (Settings → Payouts)" };
   if (!st.enabled) return { ok: false, why: "Payouts are switched off (Settings → Payouts)" };
   return { ok: true, why: "" };
+}
+
+/** The school's rule for who approves a fee-refund link. Owner only (route). */
+export async function setRefundApproval(
+  rule: CashgramApprovalRule,
+  abovePaise: number,
+  by: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const above = Math.max(0, Math.round(Number(abovePaise) || 0));
+  if (rule === "above" && above < 100) return { ok: false, error: "Give the amount above which the owner approves" };
+  return savePayoutSettings({ refund_approval: rule, refund_approval_above_paise: rule === "above" ? above : 0 }, by);
 }
 
 /** The owner's switch. Turning ON needs a passed ₹1 test. */
@@ -255,7 +290,7 @@ async function call(
  * the V2 calls; asked for fresh each time — it is one cheap call before a
  * run, and a cached token is exactly what goes stale in production.
  */
-async function payoutV1Token(): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
+export async function payoutV1Token(): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
   const h = payoutHeaders();
   if (!h.ok) return { ok: false, error: h.error };
   try {
