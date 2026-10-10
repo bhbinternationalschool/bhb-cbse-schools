@@ -61,8 +61,8 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
         import("@/lib/staffPersistence"),
         import("@/lib/deskHydrateGuard"),
       ]);
-      const did = await withHydrationSlot(() => ensureStaffHydrated());
-      if (did) reload();
+      await withHydrationSlot(() => ensureStaffHydrated());
+      reload();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ay]);

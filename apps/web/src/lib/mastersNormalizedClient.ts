@@ -260,7 +260,9 @@ async function pushMastersDeskApi(
         body?.reason === "stale" ||
         body?.reason === "unversioned" ||
         body?.reason === "regenerated" ||
-        body?.reason === "wipe";
+        body?.reason === "wipe" ||
+        body?.reason === "subject_wipe" ||
+        body?.reason === "unknown_subject";
       console.warn(`[masters-db] push refused (${body?.reason})`, body?.error);
       await reportMastersPushFailure(
         body?.reason === "stale"
@@ -279,6 +281,14 @@ async function pushMastersDeskApi(
               : `Your last change was NOT saved. ${body?.error || "The server refused it."}`,
       );
       if (rehydrate) {
+        // The server's copy wins: drop this browser's claim that its copy is
+        // newer, so the reload TAKES the server's Masters instead of keeping
+        // the refused copy and pushing it again (10 Oct 2026).
+        try {
+          localStorage.removeItem(LOCAL_EDIT_META_KEY);
+        } catch {
+          /* storage unavailable */
+        }
         const { resetDeskHydrated } = await import("@/lib/deskHydrateGuard");
         resetDeskHydrated("masters");
       }
@@ -379,31 +389,14 @@ export async function hydrateMastersDeskFromDb(
       ? remoteIsNewer || ((!localEditAt || localIsEmpty) && hasRemote)
       : hasRemote && (bootstrapNewDevice || remoteIsNewer || localIsEmpty);
 
-    // Record the server's revision on ANY successful read, before deciding
-    // whether to adopt its data.
-    //
-    // This used to sit after the early return below, so a client that
-    // declined the remote bundle — which is every client holding a local
-    // edit — never learned the revision it had just been shown. Its push
-    // base stayed frozen at whatever a previous response gave it, so every
-    // save came back 409 "changed on another device" and reloading could not
-    // clear it, because reloading is exactly the path that skipped this line.
-    // Observed 2026-08-11: base=10:46:42.608 against stored=10:46:42.650 —
-    // 42 milliseconds apart, same second, no other device involved.
-    //
-    // Safe: knowing the server's revision changes nothing about what this
-    // browser holds. It only means the next push is judged against what this
-    // client actually saw, which is what optimistic locking is for. Refusing
-    // to record it does not protect anyone's data — it just guarantees the
-    // next write is rejected.
-    if (remoteAt) {
-      writeMeta({
-        updatedAt: remoteAt,
-        classCount: remoteClasses,
-        feeHeadCount: body.feeHeadCount ?? bundle.feeHeads?.length ?? 0,
-      });
-    }
-
+    // The server's revision is recorded only when this browser takes the
+    // server's copy. Recording it while KEEPING an older local copy (as
+    // before 10 Oct 2026) let that copy pass the revision lock on its next
+    // save — the refused Masters came straight back. A browser that keeps a
+    // pending edit pushes against the revision it last took; if Masters has
+    // moved on, the server refuses (409), the claim above is dropped, and
+    // the reload takes the server's copy. A page reload always starts from
+    // the server now (module data is not stored on the device).
     if (!shouldTake) return { bundle: empty, changed: false, ok: true };
     writeMeta({
       // Same rule as the push path: a revision only ever comes from the

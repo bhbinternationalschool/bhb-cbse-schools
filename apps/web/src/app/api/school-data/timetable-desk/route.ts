@@ -35,7 +35,9 @@ export async function GET(req: Request) {
     ...(gate.mode === "feature" ? { functionOnly: true } : {}),
     gridCount: bundle.grids.length,
     substitutionCount: bundle.substitutions.length,
-    updatedAt: meta?.updatedAt || new Date().toISOString(),
+    // The real revision or nothing — an invented one would be sent back as
+    // the base of the next save.
+    updatedAt: meta?.updatedAt || "",
     meta,
   });
 }
@@ -51,9 +53,9 @@ export async function POST(req: Request) {
     });
   }
 
-  let body: TimetableState;
+  let body: TimetableState & { baseUpdatedAt?: string | null };
   try {
-    body = (await req.json()) as TimetableState;
+    body = (await req.json()) as TimetableState & { baseUpdatedAt?: string | null };
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -61,6 +63,9 @@ export async function POST(req: Request) {
   // Function holders (e.g. Timetable → Substitutions): merged onto the
   // stored desk, only their functions' slices — a class grid only for their
   // own classes when the function is limited to them.
+  // The version this save was made from. A function holder's save is merged
+  // onto the copy read just below, so that read is its version.
+  let baseUpdatedAt = body.baseUpdatedAt ?? null;
   if (gate.mode === "feature") {
     const stored = await fetchTimetableDeskFromDb();
     if (!stored.ok) {
@@ -73,6 +78,7 @@ export async function POST(req: Request) {
     if (!merged.ok) return merged.response;
     if (!merged.changed) return featureSavedResponse(false);
     body = merged.state as unknown as TimetableState;
+    baseUpdatedAt = stored.meta?.updatedAt || null;
   }
 
   const result = await pushTimetableDeskToDb({
@@ -99,7 +105,10 @@ export async function POST(req: Request) {
       generatedAt: "",
       solverStats: null,
     },
-  });
+  }, { versioned: true, baseUpdatedAt });
+  if (result.conflict) {
+    return NextResponse.json({ ok: false, error: result.error, reason: result.conflict }, { status: 409 });
+  }
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },
@@ -112,6 +121,6 @@ export async function POST(req: Request) {
     ok: true,
     gridCount: body.grids?.length ?? 0,
     substitutionCount: body.substitutions?.length ?? 0,
-    updatedAt: new Date().toISOString(),
+    updatedAt: result.updatedAt || new Date().toISOString(),
   });
 }

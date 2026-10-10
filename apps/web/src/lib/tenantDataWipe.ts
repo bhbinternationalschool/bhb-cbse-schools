@@ -72,13 +72,16 @@ export async function applyTenantDataWipeSignalIfNeeded(): Promise<boolean> {
     if (key?.startsWith(DESK_PREFIX)) keys.push(key);
   }
   for (const key of keys) localStorage.removeItem(key);
+  const { clearMemoryCopies } = await import("@/lib/browserStorage");
+  clearMemoryCopies();
 
   localStorage.removeItem("bhb_masters_desk_db_meta_v1");
   localStorage.removeItem("bhb_masters_mirror_meta_v1");
 
   const { emptyMastersShell } = await import("@/lib/masters");
   const emptyShell = emptyMastersShell();
-  localStorage.setItem("bhb_masters_v5", JSON.stringify(emptyShell));
+  const { writeCacheOrInvalidate } = await import("@/lib/browserStorage");
+  writeCacheOrInvalidate("bhb_masters_v5", JSON.stringify(emptyShell));
 
   localStorage.setItem(
     "bhb_masters_mirror_meta_v1",

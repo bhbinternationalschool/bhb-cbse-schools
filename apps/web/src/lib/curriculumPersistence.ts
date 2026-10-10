@@ -3,6 +3,7 @@
  * when Supabase is configured, push/pull overlays remote rows.
  */
 
+import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
   normalizeCurriculum,
@@ -243,7 +244,7 @@ export async function ensureCurriculumHydrated(): Promise<boolean> {
   // /curriculum a day for a module nobody was editing (audit 2026-08-18).
   writeSisLocalRaw(merged);
   if (typeof window !== "undefined") {
-    localStorage.setItem(
+    writeCacheOrInvalidate(
       TEMPLATE_KEY,
       JSON.stringify(
         mergeCurriculumTemplates(loadClassCurriculumTemplates(), remote.templates),

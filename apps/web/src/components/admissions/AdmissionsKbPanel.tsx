@@ -132,20 +132,9 @@ export function AdmissionsKbPanel({ masters, canEdit, by }: { masters: MastersSt
     setBusy("sync");
     setError(null);
     try {
-      // The index is built from the server copy — push what we see first so
-      // a save a moment ago is what gets indexed (same endpoint the
-      // background sync uses; harmless if it already ran).
-      const cur = loadAdmissionsKb();
-      const pushed = await fetch("/api/school-data/module-state/admissions_kb", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state: cur }),
-      });
-      if (!pushed.ok) {
-        setError(`Could not save to server before indexing (HTTP ${pushed.status})`);
-        return;
-      }
+      // The index is built from the server copy. Every save already reaches
+      // the server (with its version) the moment it is made, so there is
+      // nothing to push first — a second, unversioned push would be refused.
       const res = await fetch("/api/ai/kb-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

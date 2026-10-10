@@ -1621,7 +1621,8 @@ export function rebuildDemoRoster(masters: MastersState): MastersState {
 export function ensureStudentClassLinks(masters: MastersState): MastersState {
   const classIds = new Set(masters.classes.map((c) => c.id));
   const students = masters.students ?? [];
-  if (students.length === 0) return masters;
+  // No classes means Masters has not loaded yet, not that every class is gone.
+  if (students.length === 0 || classIds.size === 0) return masters;
 
   const valid = students.filter(
     (s) =>
@@ -1852,7 +1853,52 @@ function mastersLooksUnhydrated(state: MastersState): boolean {
   );
 }
 
+/**
+ * Lists a browser must never invent on a real tenant (10 Oct 2026). A
+ * teacher's phone gets a reduced Masters (classes, subjects, holidays — no
+ * fees), so "empty" there means "not sent", not "not set up". Filling those
+ * gaps minted a whole school with random ids — a generic subject list and
+ * NCF IX–X offerings among them — and the next save replaced the school's
+ * subjects twice in one day. The server sets up defaults; the browser keeps
+ * exactly what it was given.
+ */
+const NEVER_SEEDED_ON_TENANT = [
+  "subjects",
+  "classSubjects",
+  "seniorStreams",
+  "feeGroups",
+  "feeStructureLines",
+  "feeHeads",
+  "installments",
+  "concessions",
+  "specialFees",
+  "specialFeeAssignments",
+  "lateFeeRules",
+  "academicYears",
+  "academicTerms",
+  "holidays",
+] as const;
+
 function ensureFeeSetup(state: MastersState): MastersState {
+  const out = ensureFeeSetupInner(state);
+  if (!isSupabaseConfigured()) return out;
+  const given = state as unknown as Record<string, unknown>;
+  const kept = { ...out } as unknown as Record<string, unknown>;
+  for (const key of NEVER_SEEDED_ON_TENANT) {
+    const was = given[key];
+    // The subject list and class links are the server's, row for row — no
+    // NCF top-up, no default list. Other lists keep their normalisation, but
+    // one that arrived empty stays empty.
+    if (key === "subjects" || key === "classSubjects" || key === "seniorStreams") {
+      kept[key] = Array.isArray(was) ? was : [];
+    } else if (!Array.isArray(was) || was.length === 0) {
+      kept[key] = Array.isArray(was) ? was : [];
+    }
+  }
+  return kept as unknown as MastersState;
+}
+
+function ensureFeeSetupInner(state: MastersState): MastersState {
   // Absent is not a default.
   //
   // On a cold client this function used to fabricate an entire school:

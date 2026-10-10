@@ -5,6 +5,7 @@
 import { clearWorkspaceSessionAlignFlag } from "@/lib/workspaceSession";
 import { FRESH_LOGIN_SESSION_KEY } from "@/lib/workspaceSyncPolicy";
 import { resetDeskHydrated } from "@/lib/deskHydrateGuard";
+import { clearMemoryCopies } from "@/lib/browserStorage";
 
 const DESK_PREFIX = "bhb_";
 
@@ -29,6 +30,7 @@ export function consumeFreshLoginSession(): boolean {
 
 export function clearWorkspaceLocalStorage(): void {
   if (typeof window === "undefined") return;
+  clearMemoryCopies();
   try {
     const keysToRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
@@ -47,6 +49,7 @@ export function clearWorkspaceLocalStorage(): void {
 
 export async function resetAllWorkspacePersistenceCaches(): Promise<void> {
   resetDeskHydrated();
+  clearMemoryCopies();
   const { resetClientSchoolMirrorHydrated } = await import(
     "@/lib/schoolDataMirrorClientHydrate"
   );

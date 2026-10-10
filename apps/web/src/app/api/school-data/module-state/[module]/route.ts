@@ -174,9 +174,9 @@ export async function POST(req: Request, ctx: RouteCtx) {
     }
   }
 
-  let body: { state?: unknown };
+  let body: { state?: unknown; baseUpdatedAt?: string | null };
   try {
-    body = (await req.json()) as { state?: unknown };
+    body = (await req.json()) as { state?: unknown; baseUpdatedAt?: string | null };
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -235,6 +235,42 @@ export async function POST(req: Request, ctx: RouteCtx) {
       );
     }
     state = mergeModuleState(module, current?.state ?? null, body.state as Record<string, unknown>);
+  }
+  // A whole book written over the stored one — only over the version the
+  // browser loaded (10 Oct 2026). Merged books (above) and server jobs keep
+  // their own rules; everything else used to take any browser's copy, old or
+  // half-loaded, as the truth.
+  const versioned = !auth.viaMirrorSecret && module !== "fee_adjustments" && !isMergedModuleState(module);
+  if (versioned) {
+    const base = String(body.baseUpdatedAt ?? "").trim();
+    if (base) {
+      const { data: hit, error: upErr } = await tctx.sb
+        .from("module_local_state")
+        .update({ state, updated_at: now })
+        .eq("tenant_id", tctx.tenantId)
+        .eq("module_key", module)
+        .eq("updated_at", base)
+        .select("module_key");
+      if (upErr) return NextResponse.json({ ok: false, error: upErr.message }, { status: 502 });
+      if ((hit ?? []).length === 1) return NextResponse.json({ ok: true, updatedAt: now });
+      return NextResponse.json(
+        { ok: false, reason: "stale", error: `${MODULE_STATE_DEFS[module].label} changed on another device after this one loaded it.` },
+        { status: 409 },
+      );
+    }
+    const { data: existing, error: exErr } = await tctx.sb
+      .from("module_local_state")
+      .select("module_key")
+      .eq("tenant_id", tctx.tenantId)
+      .eq("module_key", module)
+      .maybeSingle();
+    if (exErr) return NextResponse.json({ ok: false, error: exErr.message }, { status: 503 });
+    if (existing) {
+      return NextResponse.json(
+        { ok: false, reason: "unversioned", error: `This device had not loaded the saved ${MODULE_STATE_DEFS[module].label}, so it cannot replace it.` },
+        { status: 409 },
+      );
+    }
   }
   const { error } = await tctx.sb.from("module_local_state").upsert(
     { tenant_id: tctx.tenantId, module_key: module, state, updated_at: now },

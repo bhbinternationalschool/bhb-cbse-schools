@@ -70,7 +70,10 @@ export function dedupeHydration<T>(
  * this gate instead, so the fan-out is capped tab-wide regardless of which
  * component triggered it first.
  */
-const MAX_CONCURRENT_HYDRATIONS = 4;
+// 6, not 4 (10 Oct 2026): module copies now live only in page memory, so a
+// fresh tab reads every desk it shows; four lanes left the page's own
+// module queued behind the bell, the strip and the chat button.
+const MAX_CONCURRENT_HYDRATIONS = 6;
 let activeHydrations = 0;
 const hydrationQueue: Array<() => void> = [];
 

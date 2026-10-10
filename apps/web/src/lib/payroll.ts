@@ -4,6 +4,7 @@
  * Account ledger / PF-ESIC remit / June holds only update on publish.
  */
 
+import { readCache, writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { loadRbac } from "@/lib/rbac";
 import type { StaffRecord } from "@/lib/foundationMasters";
@@ -217,7 +218,7 @@ export function loadPayroll(): PayrollState {
     return { version: 2, runs: [], audit: [] };
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readCache(STORAGE_KEY);
     if (!raw) return { version: 2, runs: [], audit: [] };
     const parsed = JSON.parse(raw) as Partial<PayrollState>;
     const runs = (Array.isArray(parsed.runs) ? parsed.runs : []).map(
@@ -248,10 +249,7 @@ export function savePayroll(state: PayrollState) {
   if (!assertModulePermission("payroll", "edit", "savePayroll")) return;
 
   if (typeof window === "undefined") return;
-  localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({ ...state, version: 2 }),
-  );
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
   void trackServerWork(import("@/lib/payrollPersistence").then(({ schedulePayrollSync }) => {
     schedulePayrollSync(state);
   }));
@@ -262,10 +260,7 @@ export function writePayrollLocalRaw(state: PayrollState) {
     serverPayrollCache = state;
     return;
   }
-  localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({ ...state, version: 2 }),
-  );
+  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...state, version: 2 }));
 }
 
 export function payrollStateIsEmpty(state: PayrollState): boolean {

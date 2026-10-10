@@ -51,7 +51,7 @@ export async function GET(req: Request) {
   }
 }
 
-type PostBody = { table?: string; state?: unknown };
+type PostBody = { table?: string; state?: unknown; baseUpdatedAt?: string | null };
 
 /** POST /api/school-data/domain-blob — upsert one tenant's blob row */
 export async function POST(req: Request) {
@@ -107,8 +107,17 @@ export async function POST(req: Request) {
     }
   }
 
-  const result = await pushDomainBlobToDb(table, body.state);
+  // Chat books are written by many people at once; a version check would
+  // refuse ordinary messages. They keep last-write until they move to
+  // per-message saves (Phase 2, 10 Oct 2026 plan).
+  const multiWriter = table === "erp_chat_state" || table === "staff_chat_state";
+  const result = await pushDomainBlobToDb(table, body.state, body.baseUpdatedAt ?? null, {
+    server: auth.viaMirrorSecret === true || multiWriter,
+  });
   if (!result.ok) {
+    if (result.conflict) {
+      return NextResponse.json({ ok: false, error: result.error, reason: result.conflict }, { status: 409 });
+    }
     return NextResponse.json(
       { ok: false, error: result.error || "Push failed" },
       { status: 502 },
