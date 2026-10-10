@@ -229,6 +229,8 @@ SELFTESTS=(
   test:payment-link-reuse
   test:student-leave-status-guard
   test:ptm-row-stamps
+  test:accounts-row-stamps
+  test:staff-row-stamps
   test:attendance-row-stamps
   test:fee-extras-forward-only
   test:admissions-field-ops-merge

@@ -29,6 +29,15 @@ import {
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
 import { trackServerWork } from "@/lib/serverWork";
+import {
+  applyStampedSave,
+  buildStampedSave,
+  captureRowStamps,
+  onStampConflicts,
+  type RowConflicts,
+  type RowStamps,
+} from "@/lib/rowStampClient";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 const MODULE = "staff";
 
@@ -36,6 +45,16 @@ export type StaffRemoteBundle = {
   departments: Department[];
   designations: Designation[];
   staff: StaffRecord[];
+  /** Each row's `updated_at` per list — the base of the next stamped save. */
+  stamps?: RowStamps;
+};
+
+/** The roster lists saved row by row with stamps (10 Oct 2026). */
+export const STAFF_STAMPED_SLICES = ["staff", "departments", "designations"] as const;
+const STAFF_STAMPED_TABLES: Record<(typeof STAFF_STAMPED_SLICES)[number], string> = {
+  staff: "sis_staff",
+  departments: "sis_departments",
+  designations: "sis_designations",
 };
 
 type DepartmentRow = {
@@ -181,17 +200,25 @@ export async function fetchStaffRemote(): Promise<StaffRemoteBundle | null> {
       departments?: Department[];
       designations?: Designation[];
       staff?: StaffRecord[];
+      stamps?: RowStamps;
     };
     if (!body.ok) return null;
     return {
       departments: body.departments ?? [],
       designations: body.designations ?? [],
       staff: body.staff ?? [],
+      stamps: body.stamps,
     };
   } catch (e) {
     console.warn("[staff] pull error", e);
     return null;
   }
+}
+
+function stampsOfRows(rows: Record<string, unknown>[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const r of rows) if (typeof r.id === "string" && r.updated_at) out[r.id] = String(r.updated_at);
+  return out;
 }
 
 /** Service-role pull for WhatsApp / server mirror (no browser session). */
@@ -201,26 +228,31 @@ export async function fetchStaffRemoteServer(): Promise<StaffRemoteBundle | null
   if (!ctx) return null;
   const { sb, tenantId } = ctx;
 
+  // Paged: PostgREST stops at 1,000 rows and calls the cut a success.
+  const page = (table: string) =>
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from(table).select("*").eq("tenant_id", tenantId).order("id").range(from, to),
+    );
   const [depRes, desRes, stfRes] = await Promise.all([
-    sb.from("sis_departments").select("*").eq("tenant_id", tenantId),
-    sb.from("sis_designations").select("*").eq("tenant_id", tenantId),
-    sb.from("sis_staff").select("*").eq("tenant_id", tenantId),
+    page("sis_departments"),
+    page("sis_designations"),
+    page("sis_staff"),
   ]);
 
   if (depRes.error || desRes.error || stfRes.error) {
-    console.warn(
-      "[staff] server pull failed",
-      depRes.error?.message || desRes.error?.message || stfRes.error?.message,
-    );
+    console.warn("[staff] server pull failed", depRes.error || desRes.error || stfRes.error);
     return null;
   }
 
   return {
-    departments: ((depRes.data ?? []) as DepartmentRow[]).map(rowToDepartment),
-    designations: ((desRes.data ?? []) as DesignationRow[]).map(
-      rowToDesignation,
-    ),
-    staff: ((stfRes.data ?? []) as StaffRow[]).map(rowToStaff),
+    departments: (depRes.rows as unknown as DepartmentRow[]).map(rowToDepartment),
+    designations: (desRes.rows as unknown as DesignationRow[]).map(rowToDesignation),
+    staff: (stfRes.rows as unknown as StaffRow[]).map(rowToStaff),
+    stamps: {
+      departments: stampsOfRows(depRes.rows),
+      designations: stampsOfRows(desRes.rows),
+      staff: stampsOfRows(stfRes.rows),
+    },
   };
 }
 
@@ -344,11 +376,36 @@ function dedupeByKey<T>(rows: T[], keyOf: (row: T) => string): T[] {
   return [...m.values()];
 }
 
+export type StaffPushResult = {
+  ok: boolean;
+  error?: string;
+  /** Stamped saves: rows written, at their new stamps. */
+  stamps?: RowStamps;
+  /** Stamped saves: rows refused because they changed elsewhere first. */
+  conflicts?: RowConflicts;
+  /** Unstamped saves: stored rows left exactly as they were. */
+  kept?: number;
+};
+
+/**
+ * Save the roster.
+ *
+ * Stamped (`stamps`, the browser since 10 Oct 2026): only the rows named,
+ * each only while the database still holds it at the stamp the browser
+ * loaded. A staff record changed elsewhere first — a phone number fixed from
+ * the staff app, a UDISE+ teacher sync — is a conflict, not overwritten.
+ *
+ * Unstamped (a tab from an older build, or a server caller handing over a
+ * whole cached Masters): new rows are added, stored rows are never replaced.
+ * Every Masters save used to re-send the whole roster this way, so a stale
+ * tab editing a fee head put back old phone numbers, salaries and banks.
+ */
 async function upsertStaffBundle(
   sb: SupabaseClient,
   tenantId: string,
   state: MastersState,
-): Promise<{ ok: boolean; error?: string }> {
+  stamps?: RowStamps,
+): Promise<StaffPushResult> {
   if (!staffDualWriteDbEnabled()) return { ok: true };
   const now = new Date().toISOString();
 
@@ -413,6 +470,7 @@ async function upsertStaffBundle(
     (d) => (d.code || "").trim() || d.id,
   );
 
+  const stfRemap = new Map<string, string>();
   const staff = dedupeByKey(
     (state.staff ?? []).map((raw) => {
       // The API route feeds request JSON straight through; normalize so a
@@ -420,6 +478,7 @@ async function upsertStaffBundle(
       const s = normalizeStaffRecord(raw);
       const emp = (s.empCode || "").trim();
       const dbId = emp ? stfIdByEmp.get(emp) : undefined;
+      if (dbId && dbId !== s.id) stfRemap.set(s.id, dbId);
       return {
         ...s,
         id: dbId && dbId !== s.id ? dbId : s.id,
@@ -434,78 +493,108 @@ async function upsertStaffBundle(
     (s) => (s.empCode || "").trim() || s.id,
   );
 
-  const depRows = departments.map((d) => departmentToRow(d, tenantId, now));
-  if (depRows.length > 0) {
-    const { error } = await sb.from("sis_departments").upsert(depRows, {
-      onConflict: "id",
-    });
-    if (error) {
-      console.warn("[staff] push departments failed", error.message);
-      return { ok: false, error: error.message };
+  const rowsBySlice: Record<(typeof STAFF_STAMPED_SLICES)[number], Record<string, unknown>[]> = {
+    departments: departments.map((d) => departmentToRow(d, tenantId, now)),
+    designations: designations.map((d) => designationToRow(d, tenantId, now)),
+    staff: staff.map((x) => staffToRow(x, tenantId, now)),
+  };
+  const remaps = { departments: depRemap, designations: desRemap, staff: stfRemap };
+
+  const written: RowStamps = {};
+  const conflicts: RowConflicts = {};
+  let kept = 0;
+  // Departments before designations before staff: each refers to the last.
+  for (const slice of ["departments", "designations", "staff"] as const) {
+    const table = STAFF_STAMPED_TABLES[slice];
+    const rows = rowsBySlice[slice];
+    if (stamps) {
+      // The browser named rows by the ids it holds; follow any remap.
+      const named: Record<string, string> = {};
+      for (const [id, stamp] of Object.entries(stamps[slice] ?? {})) {
+        named[remaps[slice].get(id) ?? id] = stamp;
+      }
+      const changed = rows.filter((r) => String(r.id) in named);
+      if (!changed.length) continue;
+      const { writeStampedRows } = await import("@/lib/rowStampWrite.server");
+      const res = await writeStampedRows(sb, table, tenantId, changed, named);
+      if (!res.ok) {
+        console.warn(`[staff] push ${slice} failed`, res.error);
+        return { ok: false, error: res.error };
+      }
+      written[slice] = res.stamps;
+      if (res.conflicts.length) conflicts[slice] = res.conflicts;
+    } else {
+      for (let i = 0; i < rows.length; i += 40) {
+        const part = rows.slice(i, i + 40);
+        const { data, error } = await sb
+          .from(table)
+          .upsert(part, { onConflict: "id", ignoreDuplicates: true })
+          .select("id");
+        if (error) {
+          console.warn(`[staff] push ${slice} failed`, error.message);
+          return { ok: false, error: error.message };
+        }
+        kept += part.length - (data ?? []).length;
+      }
     }
   }
 
-  const desRows = designations.map((d) => designationToRow(d, tenantId, now));
-  if (desRows.length > 0) {
-    const { error } = await sb.from("sis_designations").upsert(desRows, {
-      onConflict: "id",
-    });
-    if (error) {
-      console.warn("[staff] push designations failed", error.message);
-      return { ok: false, error: error.message };
-    }
-  }
-
-  const staffRows = staff.map((s) => staffToRow(s, tenantId, now));
-  const chunk = 40;
-  for (let i = 0; i < staffRows.length; i += chunk) {
-    const slice = staffRows.slice(i, i + chunk);
-    const { error } = await sb.from("sis_staff").upsert(slice, {
-      onConflict: "id",
-    });
-    if (error) {
-      console.warn("[staff] push staff failed", error.message);
-      return { ok: false, error: error.message };
-    }
-  }
-
-  return { ok: true };
+  return { ok: true, stamps: written, conflicts, kept };
 }
 
 export async function pushStaffRemoteServer(
   state: MastersState,
-): Promise<{ ok: boolean; error?: string }> {
+  stamps?: RowStamps,
+): Promise<StaffPushResult> {
   if (!staffDualWriteDbEnabled()) return { ok: true };
   const { getServerTenantContext } = await import("@/lib/serverTenant");
   const ctx = await getServerTenantContext();
   if (!ctx) {
     return { ok: false, error: "Supabase tenant not configured" };
   }
-  return upsertStaffBundle(ctx.sb, ctx.tenantId, state);
+  return upsertStaffBundle(ctx.sb, ctx.tenantId, state, stamps);
 }
 
-/** Browser: push a Masters state's staff slice via the server API. */
+/** Browser: push the roster rows this browser changed, with their stamps. */
 export async function pushStaffSlice(
   state: MastersState,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!staffRemoteEnabled()) return { ok: true };
   if (typeof window === "undefined") return { ok: true };
+  const holder = state as unknown as Record<string, unknown>;
+  const stamps = buildStampedSave(MODULE, holder, STAFF_STAMPED_SLICES);
+  const lists: Record<string, unknown[]> = {};
+  let any = false;
+  for (const slice of STAFF_STAMPED_SLICES) {
+    const changed = stamps[slice] ?? {};
+    lists[slice] = ((holder[slice] as { id?: string }[] | undefined) ?? []).filter(
+      (r) => r && typeof r.id === "string" && r.id in changed,
+    );
+    if (lists[slice].length) any = true;
+  }
+  // Every Masters save calls this; most change no staff. Nothing to send.
+  if (!any) return { ok: true };
   try {
     const res = await fetch("/api/school-data/staff-roster", {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ state }),
+      body: JSON.stringify({ state: lists, stamps }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
       error?: string;
+      stamps?: RowStamps;
+      conflicts?: RowConflicts;
     } | null;
     if (!res.ok || !body?.ok) {
       const message = body?.error || `HTTP ${res.status}`;
       console.warn("[staff] push failed", message);
       return { ok: false, error: message };
     }
+    applyStampedSave(MODULE, holder, stamps, body, STAFF_STAMPED_SLICES);
+    // A record changed elsewhere first was not written: reload, and say so.
+    onStampConflicts(MODULE, body.conflicts);
     return { ok: true };
   } catch (e) {
     console.warn("[staff] push error", e);
@@ -678,6 +767,16 @@ export async function ensureStaffHydrated(): Promise<boolean> {
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
     }
+  }
+  // The roster as this browser now holds it, at the server's stamps, is the
+  // base of the next save: only rows changed from here are sent.
+  if (remote.stamps) {
+    captureRowStamps(
+      MODULE,
+      remote.stamps,
+      loadMasters() as unknown as Record<string, unknown>,
+      STAFF_STAMPED_SLICES,
+    );
   }
 
   return changed;

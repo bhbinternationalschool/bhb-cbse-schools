@@ -36,6 +36,13 @@ import { syncModeBankMapFromBanks } from "@/lib/accountsNormalize";
 import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
+import {
+  ACCOUNTS_STAMPED_SLICES,
+  ACCOUNTS_STAMPED_TABLES,
+  type AccountsStampedSlice,
+} from "@/lib/accountsStampSlices";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+import { stampsOf, writeStampedRows } from "@/lib/rowStampWrite.server";
 
 export type AccountsDeskSyncMeta = {
   coaCount: number;
@@ -921,10 +928,39 @@ export const ACCOUNTS_DELETABLE_TABLES = [
   "accounts_desk_vendors",
 ] as const;
 
+export type AccountsPushResult =
+  | {
+      ok: true;
+      /** Rows written by this save, at their new stamps (stamped saves). */
+      stamps?: RowStamps;
+      /** Rows refused because they changed elsewhere first. */
+      conflicts?: RowConflicts;
+      /** Settings stamp after the save; "" when settings were not written. */
+      settingsStamp?: string;
+      /** Rows an unstamped save found already stored and left alone. */
+      kept?: number;
+    }
+  | { ok: false; error: string };
+
+/**
+ * Save the accounts desk.
+ *
+ * Stamped (10 Oct 2026, the browser since then): `opts.stamps` names, per
+ * list, each row this browser changed and the stamp it changed it from. A
+ * row lands only while the database still holds it at that stamp; anything
+ * else is a conflict and the stored row stands. Lines are written only under
+ * a parent whose save landed. Settings likewise, against `settingsBase`.
+ *
+ * Unstamped (a tab opened before that build): it holds the whole desk as it
+ * was when it loaded, so it may add rows the database does not have but
+ * never replaces one that is there — that is exactly how a stale tab used to
+ * quietly undo another PC's ledger edit.
+ */
 export async function pushAccountsDeskToDb(
   state: AccountsState,
   deletes: NamedDeletes = {},
-): Promise<{ ok: boolean; error?: string }> {
+  opts: { stamps?: RowStamps; settingsBase?: string | null } = {},
+): Promise<AccountsPushResult> {
   if (!accountsDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
@@ -985,52 +1021,106 @@ export async function pushAccountsDeskToDb(
     ),
   );
 
-  const tables: [string, Record<string, unknown>[]][] = [
-    ["accounts_desk_cash_pools", cashPools.map((p) => cashPoolToRow(tenantId, p))],
-    ["accounts_desk_cash_ledger", cashLedger.map((e) => cashLedgerToRow(tenantId, e))],
-    ["accounts_desk_bank_accounts", bankAccounts.map((b) => bankAccountToRow(tenantId, b))],
-    ["accounts_desk_bank_ledger", bankLedger.map((e) => bankLedgerToRow(tenantId, e))],
-    ["accounts_desk_mode_bank_map", modeBankMap.map((m) => modeBankMapToRow(tenantId, m))],
-    ["accounts_desk_recon_sessions", reconSessions.map((s) => reconSessionToRow(tenantId, s))],
-    ["accounts_desk_recon_lines", reconLineRows],
-    [
-      "accounts_desk_expense_categories",
-      expenseCategories.map((c) => expenseCategoryToRow(tenantId, c)),
-    ],
-    ["accounts_desk_expense_vouchers", expenseVouchers.map((v) => expenseVoucherToRow(tenantId, v))],
-    ["accounts_desk_expense_voucher_lines", expenseVoucherLineRows],
-    ["accounts_desk_recurring_rules", recurringRules.map((r) => recurringRuleToRow(tenantId, r))],
-    ["accounts_desk_vendors", vendors.map((v) => vendorToRow(tenantId, v))],
-    ["accounts_desk_vendor_bills", vendorBills.map((b) => vendorBillToRow(tenantId, b))],
-    ["accounts_desk_vendor_bill_lines", vendorBillLineRows],
-    ["accounts_desk_payables", payables.map((p) => payableToRow(tenantId, p))],
-    ["accounts_desk_trustees", trustees.map((t) => trusteeToRow(tenantId, t))],
-    ["accounts_desk_owner_loans", ownerLoans.map((l) => ownerLoanToRow(tenantId, l))],
-    [
-      "accounts_desk_owner_loan_schedule",
-      ownerLoanSchedule.map((r) => ownerLoanScheduleToRow(tenantId, r)),
-    ],
-    [
-      "accounts_desk_owner_cash_handovers",
-      ownerCashHandovers.map((h) => ownerCashHandoverToRow(tenantId, h)),
-    ],
-    ["accounts_desk_coa_accounts", coaAccounts.map((c) => coaToRow(tenantId, c))],
-    ["accounts_desk_journal_entries", journalEntries.map((j) => journalEntryToRow(tenantId, j))],
-    ["accounts_desk_journal_lines", journalLineRows],
-    ["accounts_desk_fiscal_years", fiscalYears.map((fy) => fiscalYearToRow(tenantId, fy))],
+  const rowsBySlice: Record<AccountsStampedSlice, Record<string, unknown>[]> = {
+    cashPools: cashPools.map((p) => cashPoolToRow(tenantId, p)),
+    cashLedger: cashLedger.map((e) => cashLedgerToRow(tenantId, e)),
+    bankAccounts: bankAccounts.map((b) => bankAccountToRow(tenantId, b)),
+    bankLedger: bankLedger.map((e) => bankLedgerToRow(tenantId, e)),
+    reconSessions: reconSessions.map((x) => reconSessionToRow(tenantId, x)),
+    expenseCategories: expenseCategories.map((c) => expenseCategoryToRow(tenantId, c)),
+    expenseVouchers: expenseVouchers.map((v) => expenseVoucherToRow(tenantId, v)),
+    recurringRules: recurringRules.map((r) => recurringRuleToRow(tenantId, r)),
+    vendors: vendors.map((v) => vendorToRow(tenantId, v)),
+    vendorBills: vendorBills.map((b) => vendorBillToRow(tenantId, b)),
+    payables: payables.map((p) => payableToRow(tenantId, p)),
+    trustees: trustees.map((t) => trusteeToRow(tenantId, t)),
+    ownerLoans: ownerLoans.map((l) => ownerLoanToRow(tenantId, l)),
+    ownerLoanSchedule: ownerLoanSchedule.map((r) => ownerLoanScheduleToRow(tenantId, r)),
+    ownerCashHandovers: ownerCashHandovers.map((h) => ownerCashHandoverToRow(tenantId, h)),
+    coaAccounts: coaAccounts.map((c) => coaToRow(tenantId, c)),
+    journalEntries: journalEntries.map((j) => journalEntryToRow(tenantId, j)),
+    fiscalYears: fiscalYears.map((fy) => fiscalYearToRow(tenantId, fy)),
+  };
+  // Lines belong to a parent row and travel only with it.
+  const lineSets: {
+    parent: AccountsStampedSlice;
+    table: string;
+    parentKey: string;
+    rows: Record<string, unknown>[];
+  }[] = [
+    { parent: "reconSessions", table: "accounts_desk_recon_lines", parentKey: "session_id", rows: reconLineRows },
+    { parent: "expenseVouchers", table: "accounts_desk_expense_voucher_lines", parentKey: "voucher_id", rows: expenseVoucherLineRows },
+    { parent: "vendorBills", table: "accounts_desk_vendor_bill_lines", parentKey: "bill_id", rows: vendorBillLineRows },
+    { parent: "journalEntries", table: "accounts_desk_journal_lines", parentKey: "journal_id", rows: journalLineRows },
   ];
 
-  // A row this save names for deletion is not upserted back first.
-  for (const [table, rows] of tables) {
+  const stamped = opts.stamps !== undefined;
+  const writtenStamps: RowStamps = {};
+  const conflicts: RowConflicts = {};
+  let kept = 0;
+  // Parents whose row this save wrote (or inserted): only their lines go in.
+  const landed = new Map<AccountsStampedSlice, Set<string>>();
+
+  for (const slice of ACCOUNTS_STAMPED_SLICES) {
+    const table = ACCOUNTS_STAMPED_TABLES[slice];
+    // A row this save names for deletion is not written back first.
     const gone = new Set(deletes[table] ?? []);
-    const keep = gone.size ? rows.filter((r) => !gone.has(String(r.id))) : rows;
-    const r = await upsertChunks(sb, table, keep);
-    if (!r.ok) return r;
+    const rows = rowsBySlice[slice].filter((r) => !gone.has(String(r.id)));
+    if (stamped) {
+      const sliceStamps = opts.stamps![slice] ?? {};
+      const changed = rows.filter((r) => String(r.id) in sliceStamps);
+      if (!changed.length) continue;
+      const res = await writeStampedRows(sb, table, tenantId, changed, sliceStamps);
+      if (!res.ok) return { ok: false, error: `${table}: ${res.error}` };
+      writtenStamps[slice] = res.stamps;
+      if (res.conflicts.length) conflicts[slice] = res.conflicts;
+      landed.set(slice, new Set(Object.keys(res.stamps)));
+    } else {
+      const res = await insertMissingRows(sb, table, rows);
+      if (!res.ok) return { ok: false, error: `${table}: ${res.error}` };
+      kept += res.kept;
+      landed.set(slice, res.inserted);
+    }
+  }
+
+  for (const set of lineSets) {
+    const parents = landed.get(set.parent) ?? new Set<string>();
+    if (!parents.size) continue;
+    const rows = set.rows.filter((r) => parents.has(String(r[set.parentKey])));
+    const up = await upsertChunks(sb, set.table, rows);
+    if (!up.ok) return { ok: false, error: `${set.table}: ${up.error}` };
+    // A line the parent no longer has goes with this save — the parent row
+    // itself just landed, so this is the parent as it now is.
+    const keepIds = new Set(rows.map((r) => String(r.id)));
+    const parentIds = [...parents];
+    for (let i = 0; i < parentIds.length; i += 150) {
+      const { data, error } = await sb
+        .from(set.table)
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .in(set.parentKey, parentIds.slice(i, i + 150));
+      if (error) return { ok: false, error: `${set.table}: ${error.message}` };
+      const extra = (data ?? []).map((d) => String(d.id)).filter((id) => !keepIds.has(id));
+      if (extra.length) {
+        const { error: delErr } = await sb.from(set.table).delete().eq("tenant_id", tenantId).in("id", extra);
+        if (delErr) return { ok: false, error: `${set.table}: ${delErr.message}` };
+      }
+    }
+  }
+
+  // The mode map is derived from the banks; an empty one is never written.
+  if (modeBankMap.length && (!stamped || (state.modeBankMap ?? []).length)) {
+    const up = await upsertChunks(
+      sb,
+      "accounts_desk_mode_bank_map",
+      modeBankMap.map((m) => modeBankMapToRow(tenantId, m)),
+    );
+    if (!up.ok) return { ok: false, error: `accounts_desk_mode_bank_map: ${up.error}` };
   }
 
   for (const table of ACCOUNTS_DELETABLE_TABLES) {
     const r = await deleteNamedIds(sb, tenantId, table, deletes[table]);
-    if (!r.ok) return r;
+    if (!r.ok) return { ok: false, error: r.error || `${table}: delete failed` };
   }
   // A mode still pointing at a bank the user deleted is unmapped, not kept.
   const goneBanks = deletes["accounts_desk_bank_accounts"] ?? [];
@@ -1043,20 +1133,33 @@ export async function pushAccountsDeskToDb(
     if (error) return { ok: false, error: `accounts_desk_mode_bank_map: ${error.message}` };
   }
 
-  await sb.from("accounts_desk_settings").upsert(
-    {
-      tenant_id: tenantId,
-      expense_approval_paise: settings.expenseApprovalPaise ?? DEFAULT_SETTINGS.expenseApprovalPaise,
-      petty_threshold_paise: settings.pettyThresholdPaise ?? DEFAULT_SETTINGS.pettyThresholdPaise,
-      updated_at: now,
-    },
-    { onConflict: "tenant_id" },
-  );
-
-  let lastVoucherAt: string | null = null;
-  for (const v of expenseVouchers) {
-    const at = v.date;
-    if (at && (!lastVoucherAt || at > lastVoucherAt)) lastVoucherAt = at;
+  // Settings: written only when this browser changed them, from the version
+  // it loaded. An unstamped save adds them only if the school has none.
+  let settingsStamp = "";
+  const settingsRow = {
+    tenant_id: tenantId,
+    expense_approval_paise: settings.expenseApprovalPaise ?? DEFAULT_SETTINGS.expenseApprovalPaise,
+    petty_threshold_paise: settings.pettyThresholdPaise ?? DEFAULT_SETTINGS.pettyThresholdPaise,
+    updated_at: now,
+  };
+  if (!stamped || opts.settingsBase === "") {
+    const { error } = await sb
+      .from("accounts_desk_settings")
+      .upsert(settingsRow, { onConflict: "tenant_id", ignoreDuplicates: true });
+    if (error) return { ok: false, error: `accounts_desk_settings: ${error.message}` };
+  } else if (opts.settingsBase) {
+    const at = Date.parse(now) > Date.parse(opts.settingsBase)
+      ? now
+      : new Date(Date.parse(opts.settingsBase) + 1).toISOString();
+    const { data, error } = await sb
+      .from("accounts_desk_settings")
+      .update({ ...settingsRow, updated_at: at })
+      .eq("tenant_id", tenantId)
+      .eq("updated_at", opts.settingsBase)
+      .select("updated_at");
+    if (error) return { ok: false, error: `accounts_desk_settings: ${error.message}` };
+    if (data?.length) settingsStamp = String(data[0].updated_at);
+    else conflicts.settings = ["settings"];
   }
 
   // Any head or sub-head the school just added must be postable straight
@@ -1082,25 +1185,68 @@ export async function pushAccountsDeskToDb(
     console.error("[accounts] desk chart -> ledger sync threw", e);
   }
 
+  // Counted from the database: a stamped save carries only what changed.
+  const count = async (table: string) => {
+    const { count: n } = await sb.from(table).select("id", { count: "exact", head: true }).eq("tenant_id", tenantId);
+    return n ?? 0;
+  };
+  const [coaCount, voucherCount, journalCount, billCount, lastVoucher] = await Promise.all([
+    count("accounts_desk_coa_accounts"),
+    count("accounts_desk_expense_vouchers"),
+    count("accounts_desk_journal_entries"),
+    count("accounts_desk_vendor_bills"),
+    sb
+      .from("accounts_desk_expense_vouchers")
+      .select("date")
+      .eq("tenant_id", tenantId)
+      .order("date", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
   await sb.from("accounts_desk_sync_meta").upsert(
     {
       tenant_id: tenantId,
-      coa_count: coaAccounts.length,
-      voucher_count: expenseVouchers.length,
-      journal_count: journalEntries.length,
-      vendor_bill_count: vendorBills.length,
-      last_voucher_at: lastVoucherAt,
+      coa_count: coaCount,
+      voucher_count: voucherCount,
+      journal_count: journalCount,
+      vendor_bill_count: billCount,
+      last_voucher_at: (lastVoucher.data as { date?: string } | null)?.date ?? null,
       updated_at: now,
     },
     { onConflict: "tenant_id" },
   );
 
-  return { ok: true };
+  return { ok: true, stamps: writtenStamps, conflicts, settingsStamp, kept };
+}
+
+/**
+ * An unstamped save's rows: insert those the database lacks, leave every
+ * row it already holds exactly as stored.
+ */
+async function insertMissingRows(
+  sb: SupabaseClient,
+  table: string,
+  rows: Record<string, unknown>[],
+): Promise<{ ok: true; inserted: Set<string>; kept: number } | { ok: false; error: string }> {
+  const inserted = new Set<string>();
+  for (let i = 0; i < rows.length; i += 200) {
+    const part = rows.slice(i, i + 200);
+    const { data, error } = await sb
+      .from(table)
+      .upsert(part, { onConflict: "id", ignoreDuplicates: true })
+      .select("id");
+    if (error) return { ok: false, error: error.message };
+    for (const d of data ?? []) inserted.add(String(d.id));
+  }
+  return { ok: true, inserted, kept: rows.length - inserted.size };
 }
 
 export async function fetchAccountsDeskFromDb(): Promise<{
   bundle: AccountsDeskBundle;
   meta: AccountsDeskSyncMeta | null;
+  /** Each row's `updated_at`, per stamped list — the base of the next save. */
+  stamps?: RowStamps;
+  settingsStamp?: string;
   /** false = a read failed; the bundle is unknown, NOT an empty desk. */
   ok: boolean;
   error?: string;
@@ -1167,7 +1313,7 @@ export async function fetchAccountsDeskFromDb(): Promise<{
     page("accounts_desk_fiscal_years"),
     sb
       .from("accounts_desk_settings")
-      .select("expense_approval_paise, petty_threshold_paise")
+      .select("expense_approval_paise, petty_threshold_paise, updated_at")
       .eq("tenant_id", tenantId)
       .maybeSingle(),
     sb
@@ -1230,7 +1376,33 @@ export async function fetchAccountsDeskFromDb(): Promise<{
   const s = settingsRow as {
     expense_approval_paise?: number;
     petty_threshold_paise?: number;
+    updated_at?: string;
   } | null;
+
+  const rawBySlice: Record<AccountsStampedSlice, unknown[] | null | undefined> = {
+    cashPools: cashPoolRows,
+    cashLedger: cashLedgerRows,
+    bankAccounts: bankAccountRows,
+    bankLedger: bankLedgerRows,
+    reconSessions: reconSessionRows,
+    expenseCategories: expenseCategoryRows,
+    expenseVouchers: expenseVoucherRows,
+    recurringRules: recurringRuleRows,
+    vendors: vendorRows,
+    vendorBills: vendorBillRows,
+    payables: payableRows,
+    trustees: trusteeRows,
+    ownerLoans: ownerLoanRows,
+    ownerLoanSchedule: ownerLoanScheduleRows,
+    ownerCashHandovers: ownerCashHandoverRows,
+    coaAccounts: coaRows,
+    journalEntries: journalEntryRows,
+    fiscalYears: fiscalYearRows,
+  };
+  const stamps: RowStamps = {};
+  for (const slice of ACCOUNTS_STAMPED_SLICES) {
+    stamps[slice] = stampsOf(rawBySlice[slice] as Record<string, unknown>[] | null | undefined);
+  }
 
   return {
     bundle: {
@@ -1322,6 +1494,8 @@ export async function fetchAccountsDeskFromDb(): Promise<{
           updatedAt: String((metaRow as { updated_at: string }).updated_at),
         }
       : null,
+    stamps,
+    settingsStamp: s?.updated_at ? String(s.updated_at) : "",
     ok: true,
   };
 }
