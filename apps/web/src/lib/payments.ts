@@ -3,6 +3,7 @@
  * Parent page can mark paid on same origin; counter can confirm manually.
  */
 
+import { hydrateOnFirstRead } from "@/lib/deskLazyHydrate";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import {
   collectPayment,
@@ -106,6 +107,8 @@ export function emptyPaymentsState(): PaymentsState {
 }
 
 export function loadPayments(): PaymentsState {
+  // Not in the idle sweep any more: the first read on a page loads it.
+  hydrateOnFirstRead("payments", () => import("@/lib/paymentsPersistence").then((m) => m.ensurePaymentsHydrated()));
   if (typeof window === "undefined") {
     const mirrored = getSchoolMirrorSync().payments as PaymentsState | null;
     if (mirrored && Array.isArray(mirrored.links)) {

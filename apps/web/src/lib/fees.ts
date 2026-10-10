@@ -3,6 +3,7 @@
  * Academic + transport + special + store/books − concessions − paid.
  */
 
+import { hydrateOnFirstRead } from "@/lib/deskLazyHydrate";
 import {
   mergeDiscountRulesFromSeed,
   resolvedConcessionGrantsForStudent,
@@ -1170,6 +1171,8 @@ function persistFeesClient(state: FeesState, opts?: { sync?: boolean }) {
 }
 
 export function loadFees(): FeesState {
+  // Not in the idle sweep any more: the first read on a page loads it.
+  hydrateOnFirstRead("fees", () => import("@/lib/feesPersistence").then((m) => m.ensureFeesHydrated()));
   if (typeof window === "undefined") {
     const mirrored = getSchoolMirrorSync().fees as FeesState | null;
     if (mirrored && Array.isArray(mirrored.vouchers)) {

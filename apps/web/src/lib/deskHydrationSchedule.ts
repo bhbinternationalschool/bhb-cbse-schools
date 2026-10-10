@@ -53,12 +53,17 @@ const ROUTE_IDS: Record<string, DeskHydrateId[]> = {
   fees: ["fees", "payments", "feeRecoveryTasks", "transport"],
   admissions: ["admissions"],
   attendance: ["attendance", "staffAttendance"],
-  exams: ["exams", "examPapers", "certificates"],
+  exams: ["exams", "examPapers", "certificates", "attendance"],
+  // Staff field apps (lead capture, calling, registration collect).
+  field: ["admissions"],
+  events: ["fees", "payments"],
+  parent: ["fees", "payments"],
   certificates: ["certificates"],
   staff: ["staff", "staffHr", "staffAdvances", "staffAgreements", "staffAttendance", "salarySetup"],
-  transport: ["transport"],
+  // Transport bills, links stops to fee lines and shows dues on the fleet.
+  transport: ["transport", "fees", "payments"],
   masters: ["salarySetup"],
-  students: ["fees", "payments"],
+  students: ["fees", "payments", "attendance"],
   comms: ["waTemplates", "erpChat", "staffChat", "automation"],
   payroll: ["staff", "staffHr", "staffAdvances", "salarySetup"],
   reports: ["fees", "payments", "attendance", "exams"],
@@ -86,6 +91,19 @@ const ROUTE_MODULE_STATES: Record<string, import("@/lib/moduleStateRegistry").Mo
   certificates: ["fee_holds"],
   accounts: ["tally_sync"],
 };
+
+/**
+ * The heaviest desks (Phase 3, 10 Oct 2026) are never swept in idle: they
+ * load on the routes that use them (ROUTE_IDS) and on first read
+ * (deskLazyHydrate). The sweep fetched them on every page, so every phone
+ * downloaded the fee book and every lead whatever it was showing.
+ */
+export const HEAVY_ON_DEMAND_IDS: ReadonlySet<DeskHydrateId> = new Set<DeskHydrateId>([
+  "admissions",
+  "fees",
+  "payments",
+  "attendance",
+]);
 
 const IDLE_BATCH_SIZE = 4;
 
@@ -314,7 +332,9 @@ async function runBackgroundHydration(initialPathname: string): Promise<void> {
   const priorityIds = priorityDeskHydrateIds(initialPathname);
   await ensureDeskHydratedPriority(initialPathname);
 
-  const idleTasks = allDeskHydrateTasks().filter((t) => !priorityIds.has(t.id));
+  const idleTasks = allDeskHydrateTasks().filter(
+    (t) => !priorityIds.has(t.id) && !HEAVY_ON_DEMAND_IDS.has(t.id),
+  );
   await runDeskTasksInIdleBatches(idleTasks);
 
   const { ensureDeskCutoverClient } = await import(
