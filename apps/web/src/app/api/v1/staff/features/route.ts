@@ -22,10 +22,16 @@ export async function GET(request: Request) {
     // A class teacher always sees their own class's fee dues (read-only,
     // scoped server-side in /api/v1/staff/fees/defaulters).
     const scope = await staffSectionScope(ctx);
-    const features =
+    const features: string[] =
       scope.classTeacherOf.size > 0 && !access.features.includes("fee_defaulters")
         ? [...access.features, "fee_defaulters"]
-        : access.features;
+        : [...access.features];
+    // Anyone who teaches a class may ask the office to change what it
+    // studies (My subjects; the office approves in Masters → Subjects). A
+    // request changes nothing, so it needs no grant of its own.
+    if ((scope.unrestricted || scope.teaching.length > 0) && !features.includes("subject_requests")) {
+      features.push("subject_requests");
+    }
     return apiOk({
       staffId: ctx.session.staffId || "",
       fullName: ctx.session.fullName,

@@ -2995,6 +2995,16 @@ class ApiClient {
     return (decoded["data"] as Map<String, dynamic>?) ?? const {};
   }
 
+  /// My subjects: what each of my classes studies, the school's subject
+  /// list and my requests to change it (the office approves in Masters).
+  Future<Map<String, dynamic>> fetchSubjectRequests() =>
+      _getData("/api/v1/staff/subject-requests");
+
+  /// `{action: "file", classId, change: add|remove|new, subjectId?,
+  /// subjectName?, reason?}` or `{action: "withdraw", id}`.
+  Future<Map<String, dynamic>> postSubjectRequest(Map<String, dynamic> body) =>
+      _postData("/api/v1/staff/subject-requests", body);
+
   /// FCM device token → signed-in subject (parent household / staff).
   Future<void> registerPushToken({
     required String token,
