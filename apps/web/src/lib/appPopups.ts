@@ -18,6 +18,8 @@ export type AppPopupForm = "none" | "aadhaar" | "consent" | "documents";
 export type AppPopupAudience = "parents" | "staff";
 export type AppPopupRule = "" | "missing_docs" | "missing_aadhaar" | "consent_pending";
 export type AppPopupFrequency = "once" | "until_done" | "daily";
+/** Whose Aadhaar an Aadhaar pop-up asks for (director, 10 Oct 2026). */
+export type AadhaarScope = "all" | "child" | "parents";
 
 export type AppPopup = {
   id: string;
@@ -33,6 +35,8 @@ export type AppPopup = {
   consentKey: string;
   consentText: string;
   consentTextHi: string;
+  /** Aadhaar form / rule: the child's, the parents', or both (default). */
+  aadhaarScope: AadhaarScope;
   audience: AppPopupAudience;
   targetMode: "all" | "classes" | "rule";
   classIds: string[];
@@ -84,6 +88,7 @@ export function normalizeAppPopup(raw: unknown): AppPopup | null {
     consentKey: s(r.consentKey, 40).trim().toLowerCase().replace(/[^a-z0-9_-]/g, ""),
     consentText: s(r.consentText, 3000),
     consentTextHi: s(r.consentTextHi, 3000),
+    aadhaarScope: pick(r.aadhaarScope, ["all", "child", "parents"] as const, "all"),
     audience: pick(r.audience, ["parents", "staff"] as const, "parents"),
     targetMode: targetMode === "rule" && !rule ? "all" : targetMode,
     classIds: (Array.isArray(r.classIds) ? r.classIds : []).map((c) => s(c, 60)).filter(Boolean).slice(0, 60),
@@ -116,6 +121,55 @@ export type RuleFacts = {
   pendingConsents: string[];
 };
 
+/** The missing Aadhaar entries this pop-up asks about ("father"/"mother" are the parents; the rest are children). */
+export function aadhaarInScope(missing: string[], scope: AadhaarScope): string[] {
+  if (scope === "parents") return missing.filter((k) => k === "father" || k === "mother");
+  if (scope === "child") return missing.filter((k) => k !== "father" && k !== "mother");
+  return missing;
+}
+
+export type AadhaarGapCounts = {
+  families: number;
+  children: number;
+  childrenMissing: number;
+  familiesChildMissing: number;
+  fatherMissing: number;
+  motherMissing: number;
+  familiesParentMissing: number;
+  /** Families a pop-up would reach, per scope. */
+  reach: Record<AadhaarScope, number>;
+};
+
+/** Whole-school Aadhaar gaps from each family's facts (one entry per family). */
+export function countAadhaarGaps(families: { children: number; missing: string[] }[]): AadhaarGapCounts {
+  const out: AadhaarGapCounts = {
+    families: 0,
+    children: 0,
+    childrenMissing: 0,
+    familiesChildMissing: 0,
+    fatherMissing: 0,
+    motherMissing: 0,
+    familiesParentMissing: 0,
+    reach: { all: 0, child: 0, parents: 0 },
+  };
+  for (const f of families) {
+    if (!f.children) continue;
+    out.families += 1;
+    out.children += f.children;
+    const kids = aadhaarInScope(f.missing, "child").length;
+    const parents = aadhaarInScope(f.missing, "parents");
+    out.childrenMissing += kids;
+    if (kids) out.familiesChildMissing += 1;
+    if (parents.includes("father")) out.fatherMissing += 1;
+    if (parents.includes("mother")) out.motherMissing += 1;
+    if (parents.length) out.familiesParentMissing += 1;
+    if (f.missing.length) out.reach.all += 1;
+    if (kids) out.reach.child += 1;
+    if (parents.length) out.reach.parents += 1;
+  }
+  return out;
+}
+
 /**
  * Should this person see this pop-up on this app open?
  *
@@ -138,7 +192,7 @@ export function popupApplies(
   if (p.targetMode === "classes" && !p.classIds.some((c) => who.classIds.includes(c))) return false;
   if (p.targetMode === "rule") {
     if (p.rule === "missing_docs" && who.facts.missingDocs.length === 0) return false;
-    if (p.rule === "missing_aadhaar" && who.facts.missingAadhaar.length === 0) return false;
+    if (p.rule === "missing_aadhaar" && aadhaarInScope(who.facts.missingAadhaar, p.aadhaarScope).length === 0) return false;
     if (p.rule === "consent_pending" && !who.facts.pendingConsents.includes(p.consentKey || "apaar")) return false;
   }
 

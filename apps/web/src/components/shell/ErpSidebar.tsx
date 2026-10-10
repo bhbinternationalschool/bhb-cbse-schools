@@ -11,9 +11,10 @@ import {
   X,
 } from "lucide-react";
 import { HUB_GROUPS, TONE } from "@/lib/erpNav";
+import { commsTabIsOfficeOnly, commsTabOfHref } from "@/lib/commsTabAccess";
 import { defaultMasters, loadMasters } from "@/lib/masters";
 import { markModuleRegistryClientReady } from "@/lib/moduleRegistry";
-import { canAccessHref, defaultRbacState, loadRbac } from "@/lib/rbac";
+import { canAccessHref, defaultRbacState, hasPermission, loadRbac } from "@/lib/rbac";
 import { useDemoSession } from "@/components/shell/SessionContext";
 
 type NavView = "main" | "sub";
@@ -273,8 +274,12 @@ export function ErpSidebar({
     const rbac = navTick > 0 ? loadRbac() : defaultRbacState();
     return HUB_GROUPS.map((g) => ({
       ...g,
-      hubs: g.hubs.filter((h) =>
-        canAccessHref(session, masters, h.href, rbac),
+      hubs: g.hubs.filter(
+        (h) =>
+          canAccessHref(session, masters, h.href, rbac) &&
+          // Office-only Comms screens stay off a teacher's menu.
+          (!commsTabIsOfficeOnly(commsTabOfHref(h.href)) ||
+            hasPermission(session, masters, "notices", "edit", rbac)),
       ),
     })).filter((g) => g.hubs.length > 0);
      
