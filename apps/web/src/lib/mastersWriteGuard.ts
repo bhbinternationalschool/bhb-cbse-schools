@@ -71,3 +71,49 @@ export function guardMastersOverwrite(
       `rebuilt, clear the desk slices first.`,
   };
 }
+
+/**
+ * Subjects and class–subject links, guarded like the classes (10 Oct 2026).
+ *
+ * A teacher's phone, saving Masters in the background, replaced the whole
+ * subject list with a generic one under new ids: every teacher's subject
+ * assignment, the timetable and the exam papers named ids that no longer
+ * existed, and homework offered teachers no subjects. Removing a subject is
+ * a deliberate one-at-a-time act on the Subjects screen; a save that drops
+ * several at once is a stale or seeded copy, never an edit.
+ */
+export type ListGuardVerdict = { allow: true } | { allow: false; removed: number; stored: number; message: string };
+
+export function guardListShrink(
+  label: string,
+  storedIds: string[],
+  incomingIds: string[],
+  opts: { maxRemoved: number; maxShare: number },
+): ListGuardVerdict {
+  const incoming = new Set(incomingIds);
+  const removed = storedIds.filter((id) => !incoming.has(id)).length;
+  if (removed > opts.maxRemoved && removed > storedIds.length * opts.maxShare) {
+    return {
+      allow: false,
+      removed,
+      stored: storedIds.length,
+      message: `This save would remove ${removed} of ${storedIds.length} ${label} at once — that is a stale copy, not an edit. Nothing was saved; the screen will refresh.`,
+    };
+  }
+  return { allow: true };
+}
+
+export function guardSubjectsOverwrite(
+  stored: { subjects?: { id: string }[]; classSubjects?: { id: string }[] },
+  incoming: { subjects?: { id: string }[]; classSubjects?: { id: string }[] },
+): ListGuardVerdict {
+  if (Array.isArray(incoming.subjects) && Array.isArray(stored.subjects)) {
+    const v = guardListShrink("subjects", stored.subjects.map((s) => s.id), incoming.subjects.map((s) => s.id), { maxRemoved: 2, maxShare: 0.1 });
+    if (!v.allow) return v;
+  }
+  if (Array.isArray(incoming.classSubjects) && Array.isArray(stored.classSubjects)) {
+    const v = guardListShrink("class–subject links", stored.classSubjects.map((s) => s.id), incoming.classSubjects.map((s) => s.id), { maxRemoved: 10, maxShare: 0.25 });
+    if (!v.allow) return v;
+  }
+  return { allow: true };
+}

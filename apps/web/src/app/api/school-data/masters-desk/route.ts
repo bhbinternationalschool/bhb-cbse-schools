@@ -13,7 +13,7 @@ import {
   pushMastersDeskToDb,
 } from "@/lib/mastersNormalized.server";
 import { fetchMastersFromRowTables } from "@/lib/mastersRowTables.server";
-import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
+import { guardMastersOverwrite, guardSubjectsOverwrite } from "@/lib/mastersWriteGuard";
 import { guardMastersRevision } from "@/lib/mastersRevisionGuard";
 import {
   deskWriteGate,
@@ -309,6 +309,20 @@ export async function POST(req: Request) {
         storedClassCount: verdict.storedCount,
         incomingClassCount: verdict.incomingCount,
       },
+      { status: 409 },
+    );
+  }
+
+  // Subjects and their class links, the same way (10 Oct 2026: a teacher's
+  // phone replaced the subject list and cut every teacher's assignments).
+  const subjectVerdict = guardSubjectsOverwrite(stored, state);
+  if (!subjectVerdict.allow) {
+    console.warn(
+      `[masters-desk] rejected subject wipe push`,
+      `removed=${subjectVerdict.removed} stored=${subjectVerdict.stored}`,
+    );
+    return NextResponse.json(
+      { error: subjectVerdict.message, reason: "subject_wipe" },
       { status: 409 },
     );
   }
