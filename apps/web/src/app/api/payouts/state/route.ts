@@ -31,6 +31,8 @@ export async function GET(req: Request) {
     testPassedAt: settings.testPassedAt,
     refundApproval: settings.refundApproval,
     refundApprovalAbovePaise: settings.refundApprovalAbovePaise,
+    paymentApproval: settings.paymentApproval,
+    paymentApprovalAbovePaise: settings.paymentApprovalAbovePaise,
     updatedBy: settings.updatedBy,
     updatedAt: settings.updatedAt,
     // null = could not be read: a screen must not take that as zero or as plenty.

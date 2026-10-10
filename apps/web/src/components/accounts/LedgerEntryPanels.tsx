@@ -18,6 +18,7 @@
  * reason.
  */
 
+import { VoucherPayLink } from "@/components/payments/VoucherPayLink";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { UpiPayButton } from "@/components/payments/UpiPayButton";
 import { Check, FileText, Plus, Trash2, Undo2 } from "lucide-react";
@@ -528,6 +529,33 @@ export function VoucherEntryPanel({
               setInstrumentMode("upi");
               setInstrumentRef(p.utr);
               setDate(p.paidOn);
+            }}
+          />
+        ) : null}
+        {/* Or a Cashfree pay link to the payee's phone (director, 10 Oct
+            2026). The server posts this voucher — the debit heads below,
+            Cr the wallet — when they collect; nothing is posted here. */}
+        {kind === "payment" ? (
+          <VoucherPayLink
+            payeeName={partyName}
+            narration={narration}
+            debitLines={lines
+              .filter((l) => {
+                const acc = byCode.get(l.accountCode);
+                return l.accountCode && paiseFromRupees(l.debit) > 0 && !acc?.isCash && !acc?.isBank && !acc?.bankAccountId;
+              })
+              .map((l) => ({
+                accountCode: l.accountCode,
+                amountPaise: paiseFromRupees(l.debit),
+                ...(spentOn ? { costCentreCode: spentOn } : {}),
+              }))}
+            onSent={(message) => {
+              setNotice({ tone: "ok", text: `${message} The voucher posts by itself when the payee collects — do not post it here.` });
+              setNarration("");
+              setPartyName("");
+              setInstrumentMode("");
+              setInstrumentRef("");
+              setLines(PRESETS.find((p) => p.kind === kind)?.lines() ?? PRESETS[3].lines());
             }}
           />
         ) : null}

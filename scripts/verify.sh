@@ -416,6 +416,7 @@ SELFTESTS=(
   test:secure-id
   test:payouts
   test:cashgram
+  test:payout-requests
   test:diksha-index
   test:teacher-contact
   test:question-bank

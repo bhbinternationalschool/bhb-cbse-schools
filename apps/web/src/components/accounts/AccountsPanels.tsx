@@ -1,6 +1,8 @@
 "use client";
 /* ratchet-allow: raw_table — the <table> here is inside an HTML string written into a print popup, not JSX — there is no component to shell */
 
+import { VendorCashfreePay } from "@/components/payments/VendorCashfreePay";
+import { useBillRequests } from "@/lib/payoutRequestsClient";
 import { PRINT_LETTERHEAD_CSS, printLetterheadHtml, printWhenImagesReady } from "@/lib/printLetterheadHtml";
 import Link from "next/link";
 import { RowActionMenu } from "@/components/ui/erp-grid";
@@ -2204,6 +2206,13 @@ function StoreVendorDues() {
   } | null>(null);
   const [paying, setPaying] = useState(false);
   const [notice, setNotice] = useState("");
+  // Cashfree payments for the open vendor's bills (director, 10 Oct 2026).
+  // One in flight blocks paying the same bill by hand — that would pay twice.
+  const [cfTick, setCfTick] = useState(0);
+  const cfRequests = useBillRequests(
+    openVendor ? (billsByVendor[openVendor] ?? []).map((b) => b.id) : [],
+    cfTick,
+  );
 
   const load = async () => {
     setLoading(true);
@@ -2526,10 +2535,14 @@ function StoreVendorDues() {
                                         </strong>
                                       </span>
                                       {pay?.billId !== b.id ? (
+                                        <span className="inline-flex flex-wrap items-center gap-1.5">
                                         <button
                                           type="button"
                                           className={BTN}
-                                          disabled={b.balancePaise <= 0}
+                                          disabled={
+                                            b.balancePaise <= 0 ||
+                                            ["PENDING_APPROVAL", "SENT"].includes(cfRequests.get(b.id)?.status ?? "")
+                                          }
                                           onClick={() =>
                                             setPay({
                                               billId: b.id,
@@ -2547,6 +2560,18 @@ function StoreVendorDues() {
                                         >
                                           Pay
                                         </button>
+                                        <VendorCashfreePay
+                                          billId={b.id}
+                                          billNo={b.billNo}
+                                          balancePaise={b.balancePaise}
+                                          request={cfRequests.get(b.id)}
+                                          onChanged={() => {
+                                            setCfTick((t) => t + 1);
+                                            void load();
+                                            void loadBills(r.vendorId);
+                                          }}
+                                        />
+                                        </span>
                                       ) : null}
                                     </div>
                                     {pay?.billId === b.id ? (
