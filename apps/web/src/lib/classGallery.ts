@@ -26,7 +26,7 @@ const MB = 1024 * 1024;
 export const VIDEO_MAX_MINUTES = 5;
 export const VIDEO_MAX_BYTES = 500 * MB;
 
-/** What the bucket accepts (kept in step with migration 20261010210000_class_gallery_bucket). */
+/** What the bucket accepts (kept in step with migration 20261010230000_class_gallery_bucket). */
 export const CLASS_GALLERY_TYPES: Record<string, { ext: string; kind: "photo" | "video"; maxBytes: number }> = {
   "image/jpeg": { ext: "jpg", kind: "photo", maxBytes: 15 * MB },
   "image/png": { ext: "png", kind: "photo", maxBytes: 15 * MB },

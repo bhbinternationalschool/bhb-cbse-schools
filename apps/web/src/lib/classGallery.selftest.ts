@@ -95,7 +95,7 @@ const comms = read("schoolCommsNormalized.server.ts");
 assert.ok(/keepStoredAudience\(sb, tenantId, rows\)/.test(comms), "a save from an older browser keeps a class album's audience");
 assert.ok(/section_ids: Array\.isArray\(a\.sectionIds\) \? a\.sectionIds : undefined/.test(comms));
 assert.ok(/features\.push\("class_gallery"\)/.test(read("../app/api/v1/staff/features/route.ts")), "class teachers get the tile");
-const mig = readFileSync(join(__dirname, "../../../../supabase/migrations/20261010210000_class_gallery_bucket.sql"), "utf8");
+const mig = readFileSync(join(__dirname, "../../../../supabase/migrations/20261010230000_class_gallery_bucket.sql"), "utf8");
 assert.ok(/'class-gallery',\s*'class-gallery',\s*false/.test(mig), "the bucket is private");
 for (const t of Object.keys(CLASS_GALLERY_TYPES)) assert.ok(mig.includes(`'${t}'`), `bucket allows ${t}`);
 assert.ok(/524288000/.test(mig), "the bucket takes a 500 MB video");
