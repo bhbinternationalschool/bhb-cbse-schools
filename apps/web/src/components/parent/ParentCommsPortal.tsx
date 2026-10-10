@@ -56,7 +56,9 @@ export function ParentCommsPortal({
     [comms],
   );
   const albums = useMemo(
-    () => (comms ? listAlbums(comms, { publishedOnly: true }) : []),
+    // School-wide albums only: a class gallery album is shown, to that
+    // class's families, in the parent app (api/v1/gallery/albums).
+    () => (comms ? listAlbums(comms, { publishedOnly: true }).filter((a) => !a.sectionIds?.length) : []),
     [comms],
   );
   const photos = useMemo(

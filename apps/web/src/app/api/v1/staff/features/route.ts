@@ -32,6 +32,11 @@ export async function GET(request: Request) {
     if ((scope.unrestricted || scope.teaching.length > 0) && !features.includes("subject_requests")) {
       features.push("subject_requests");
     }
+    // Class gallery (10 Oct 2026): a class teacher posts their class's photos
+    // and videos; only that class's families see them.
+    if (scope.classTeacherOf.size > 0 && !features.includes("class_gallery")) {
+      features.push("class_gallery");
+    }
     return apiOk({
       staffId: ctx.session.staffId || "",
       fullName: ctx.session.fullName,

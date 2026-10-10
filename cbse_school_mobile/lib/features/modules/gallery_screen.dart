@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
@@ -30,11 +31,20 @@ class GalleryScreen extends StatelessWidget {
       emptyText: context.l10n.noAlbumsPublishedYetPhotosFrom,
       isEmpty: (albums) => albums.isEmpty,
       builder: (context, albums, _) {
-        return ListView.builder(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-          itemCount: albums.length,
-          itemBuilder: (context, i) => _AlbumBlock(album: albums[i]),
+        // Class-gallery photos are served by the ERP, which checks who is
+        // looking: they need the login, which goes to the ERP host only.
+        return FutureBuilder<Map<String, String>>(
+          future: api.imageHeaders(),
+          builder: (context, snap) => ListView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            itemCount: albums.length,
+            itemBuilder: (context, i) => _AlbumBlock(
+              album: albums[i],
+              api: api,
+              headers: snap.data ?? const {},
+            ),
+          ),
         );
       },
     );
@@ -42,9 +52,15 @@ class GalleryScreen extends StatelessWidget {
 }
 
 class _AlbumBlock extends StatelessWidget {
-  const _AlbumBlock({required this.album});
+  const _AlbumBlock({
+    required this.album,
+    required this.api,
+    required this.headers,
+  });
 
   final GalleryAlbum album;
+  final ApiClient api;
+  final Map<String, String> headers;
 
   @override
   Widget build(BuildContext context) {
@@ -81,7 +97,11 @@ class _AlbumBlock extends StatelessWidget {
               backgroundColor: AppColors.ink.withValues(alpha: 0.06),
               onTap: (i) => _openViewer(context, i),
               children: [
-                for (final photo in album.photos) _PhotoTile(photo: photo),
+                for (final photo in album.photos)
+                  _PhotoTile(
+                    photo: photo,
+                    headers: api.isOwnServer(photo.url) ? headers : null,
+                  ),
               ],
             ),
           ),
@@ -93,39 +113,60 @@ class _AlbumBlock extends StatelessWidget {
   void _openViewer(BuildContext context, int index) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => _PhotoViewer(album: album, initialIndex: index),
+        builder: (_) => _PhotoViewer(
+          album: album,
+          initialIndex: index,
+          api: api,
+          headers: headers,
+        ),
       ),
     );
   }
 }
 
 class _PhotoTile extends StatelessWidget {
-  const _PhotoTile({required this.photo});
+  const _PhotoTile({required this.photo, this.headers});
 
   final GalleryPhoto photo;
+  final Map<String, String>? headers;
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       fit: StackFit.expand,
       children: [
-        Image.network(
-          photo.url,
-          fit: BoxFit.cover,
-          // A carousel of broken tiles is worse than a carousel of grey ones:
-          // the parent cannot tell whether the school posted nothing or the
-          // phone lost the connection.
-          errorBuilder: (_, _, _) => const ColoredBox(
-            color: Color(0xFFECEAE3),
-            child: Icon(
-              Icons.image_not_supported_outlined,
-              color: AppColors.muted,
+        if (photo.isVideo)
+          // No thumbnail is made for a clip; a dark tile with a play badge
+          // says "video" without downloading it.
+          const ColoredBox(
+            color: Color(0xFF2C2C2A),
+            child: Center(
+              child: Icon(
+                Icons.play_circle_outline,
+                color: Colors.white,
+                size: 54,
+              ),
             ),
+          )
+        else
+          Image.network(
+            photo.url,
+            headers: headers,
+            fit: BoxFit.cover,
+            // A carousel of broken tiles is worse than a carousel of grey ones:
+            // the parent cannot tell whether the school posted nothing or the
+            // phone lost the connection.
+            errorBuilder: (_, _, _) => const ColoredBox(
+              color: Color(0xFFECEAE3),
+              child: Icon(
+                Icons.image_not_supported_outlined,
+                color: AppColors.muted,
+              ),
+            ),
+            loadingBuilder: (context, child, progress) => progress == null
+                ? child
+                : const ColoredBox(color: Color(0xFFECEAE3)),
           ),
-          loadingBuilder: (context, child, progress) => progress == null
-              ? child
-              : const ColoredBox(color: Color(0xFFECEAE3)),
-        ),
         if (photo.caption.isNotEmpty)
           Positioned(
             left: 0,
@@ -158,10 +199,17 @@ class _PhotoTile extends StatelessWidget {
 /// A PageView and not a carousel: here the parent is looking AT a photo, not
 /// choosing between photos, so a tapering neighbour would be a distraction.
 class _PhotoViewer extends StatefulWidget {
-  const _PhotoViewer({required this.album, required this.initialIndex});
+  const _PhotoViewer({
+    required this.album,
+    required this.initialIndex,
+    required this.api,
+    required this.headers,
+  });
 
   final GalleryAlbum album;
   final int initialIndex;
+  final ApiClient api;
+  final Map<String, String> headers;
 
   @override
   State<_PhotoViewer> createState() => _PhotoViewerState();
@@ -211,21 +259,36 @@ class _PhotoViewerState extends State<_PhotoViewer> {
           return Column(
             children: [
               Expanded(
-                child: InteractiveViewer(
-                  minScale: 1,
-                  maxScale: 4,
-                  child: Center(
-                    child: Image.network(
-                      photo.url,
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) => const Icon(
-                        Icons.image_not_supported_outlined,
-                        color: Colors.white38,
-                        size: 44,
+                child: photo.isVideo
+                    ? Center(
+                        child: FilledButton.icon(
+                          icon: const Icon(Icons.play_arrow),
+                          label: Text(
+                            Localizations.localeOf(context).languageCode == "hi"
+                                ? "वीडियो चलाएँ"
+                                : "Play video",
+                          ),
+                          onPressed: () => _playVideo(context, photo),
+                        ),
+                      )
+                    : InteractiveViewer(
+                        minScale: 1,
+                        maxScale: 4,
+                        child: Center(
+                          child: Image.network(
+                            photo.url,
+                            headers: widget.api.isOwnServer(photo.url)
+                                ? widget.headers
+                                : null,
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, _, _) => const Icon(
+                              Icons.image_not_supported_outlined,
+                              color: Colors.white38,
+                              size: 44,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                ),
               ),
               if (photo.caption.isNotEmpty)
                 Padding(
@@ -240,6 +303,28 @@ class _PhotoViewerState extends State<_PhotoViewer> {
           );
         },
       ),
+    );
+  }
+}
+
+/// A class-gallery clip: a ten-minute link from the ERP (asked with the
+/// login), opened in the phone's own video player.
+Future<void> _playVideo(BuildContext context, GalleryPhoto photo) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final link =
+        await (context.findAncestorStateOfType<_PhotoViewerState>()!.widget.api)
+            .galleryVideoLink(photo.id);
+    if (link.isEmpty ||
+        !await launchUrl(
+          Uri.parse(link),
+          mode: LaunchMode.externalApplication,
+        )) {
+      throw Exception("no player");
+    }
+  } catch (_) {
+    messenger.showSnackBar(
+      const SnackBar(content: Text("Could not open the video — try again.")),
     );
   }
 }

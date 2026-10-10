@@ -8,6 +8,8 @@ import { requireJobSecret } from "@/lib/apiRouteAuth.server";
 import { processScheduledCommsPublish } from "@/lib/schoolCommsScheduledPublish.server";
 
 export const runtime = "nodejs";
+// The class-gallery sweep streams videos to the AI check and to Drive.
+export const maxDuration = 300;
 
 export async function GET() {
   return NextResponse.json({
@@ -37,8 +39,16 @@ export async function POST(req: Request) {
   }));
 
   const result = await processScheduledCommsPublish();
+
+  // Class-gallery items whose AI check did not finish at upload, and passed
+  // items whose Drive copy has not landed (lib/classGalleryReview).
+  const { sweepClassGallery } = await import("@/lib/classGalleryReview.server");
+  const classGallery = await sweepClassGallery(Date.now() + 120_000).catch((e) => ({
+    error: e instanceof Error ? e.message : String(e),
+  }));
+
   if (!result.ok) {
-    return NextResponse.json(result, { status: 500 });
+    return NextResponse.json({ ...result, classGallery }, { status: 500 });
   }
-  return NextResponse.json({ ...result, heldTeacherMessages });
+  return NextResponse.json({ ...result, heldTeacherMessages, classGallery });
 }

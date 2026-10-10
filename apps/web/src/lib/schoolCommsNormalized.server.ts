@@ -2,6 +2,7 @@
  * School comms desk — Supabase normalized tables (school_comms_desk_*).
  */
 
+import { reviewStatusOf } from "@/lib/classGallery";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   GalleryAlbum,
@@ -128,6 +129,10 @@ export async function writeCommsRows(
   rows: Record<string, unknown>[],
 ): Promise<{ ok: true; kept: number } | { ok: false; error: string }> {
   if (!rows.length) return { ok: true, kept: 0 };
+  if (table === "school_comms_desk_albums") {
+    const filled = await keepStoredAudience(sb, tenantId, rows);
+    if (!filled.ok) return filled;
+  }
   const insertOnly = (r: Record<string, unknown>) => table === "school_comms_desk_photos" || isUntouchedSeed(r);
   const fresh = rows.filter(insertOnly);
   for (let i = 0; i < fresh.length; i += 200) {
@@ -145,8 +150,35 @@ export async function writeCommsRows(
   return { ok: true, kept: newer.ids.size };
 }
 
+/**
+ * Albums whose copy does not say who sees them take the stored audience
+ * (section_ids, class_label); a new one is school-wide. A failed read writes
+ * nothing — guessing "school-wide" could show a class's children to everyone.
+ */
+async function keepStoredAudience(
+  sb: SupabaseClient,
+  tenantId: string,
+  rows: Record<string, unknown>[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const missing = rows.filter((r) => r.section_ids === undefined);
+  if (!missing.length) return { ok: true };
+  const { data, error } = await sb
+    .from("school_comms_desk_albums")
+    .select("id, section_ids, class_label")
+    .eq("tenant_id", tenantId)
+    .in("id", missing.map((r) => String(r.id)));
+  if (error) return { ok: false, error: `Could not read the albums' audience: ${error.message}` };
+  const stored = new Map((data ?? []).map((d) => [String(d.id), d as { section_ids?: string[]; class_label?: string }]));
+  for (const r of missing) {
+    const d = stored.get(String(r.id));
+    r.section_ids = Array.isArray(d?.section_ids) ? d!.section_ids : [];
+    r.class_label = d?.class_label ?? "";
+  }
+  return { ok: true };
+}
+
 /** Recount the desk meta from the tables (each desk's copy holds only part). */
-async function touchCommsMeta(sb: SupabaseClient, tenantId: string, now: string): Promise<void> {
+export async function touchCommsMeta(sb: SupabaseClient, tenantId: string, now: string): Promise<void> {
   const count = (table: string) =>
     sb.from(table).select("id", { count: "exact", head: true }).eq("tenant_id", tenantId);
   const latest = (table: string) =>
@@ -281,7 +313,7 @@ function rowToNews(r: Record<string, unknown>): SchoolNewsItem {
   };
 }
 
-function albumToRow(tenantId: string, a: GalleryAlbum): Record<string, unknown> {
+export function albumToRow(tenantId: string, a: GalleryAlbum): Record<string, unknown> {
   return {
     id: a.id,
     tenant_id: tenantId,
@@ -295,10 +327,15 @@ function albumToRow(tenantId: string, a: GalleryAlbum): Record<string, unknown> 
     created_at: a.createdAt || nowIso(),
     created_by: a.createdBy || "",
     updated_at: a.updatedAt || nowIso(),
+    // Left undefined when the copy does not carry them (an older browser):
+    // writeCommsRows then keeps the stored audience — a class album must
+    // never become school-wide because someone saved without knowing of it.
+    section_ids: Array.isArray(a.sectionIds) ? a.sectionIds : undefined,
+    class_label: Array.isArray(a.sectionIds) ? a.classLabel || "" : undefined,
   };
 }
 
-function rowToAlbum(r: Record<string, unknown>): GalleryAlbum {
+export function rowToAlbum(r: Record<string, unknown>): GalleryAlbum {
   return {
     id: String(r.id),
     title: String(r.title || ""),
@@ -318,10 +355,12 @@ function rowToAlbum(r: Record<string, unknown>): GalleryAlbum {
     createdAt: String(r.created_at || nowIso()),
     createdBy: String(r.created_by || ""),
     updatedAt: String(r.updated_at || nowIso()),
+    sectionIds: Array.isArray(r.section_ids) ? (r.section_ids as unknown[]).map(String) : [],
+    classLabel: String(r.class_label || ""),
   };
 }
 
-function photoToRow(tenantId: string, p: GalleryPhoto): Record<string, unknown> {
+export function photoToRow(tenantId: string, p: GalleryPhoto): Record<string, unknown> {
   return {
     id: p.id,
     tenant_id: tenantId,
@@ -331,10 +370,16 @@ function photoToRow(tenantId: string, p: GalleryPhoto): Record<string, unknown> 
     uploaded_at: p.uploadedAt || nowIso(),
     uploaded_by: p.uploadedBy || "",
     updated_at: nowIso(),
+    media_kind: p.mediaKind === "video" ? "video" : "photo",
+    storage_path: p.storagePath || "",
+    // Never the browser's word: a class item a desk save inserts (a stale
+    // copy of one removed, say) is checked again. Rows are insert-only, so
+    // a save never moves a stored item's status.
+    review_status: p.storagePath ? "pending" : "ok",
   };
 }
 
-function rowToPhoto(r: Record<string, unknown>): GalleryPhoto {
+export function rowToPhoto(r: Record<string, unknown>): GalleryPhoto {
   return {
     id: String(r.id),
     albumId: String(r.album_id || ""),
@@ -342,6 +387,11 @@ function rowToPhoto(r: Record<string, unknown>): GalleryPhoto {
     caption: String(r.caption || ""),
     uploadedAt: String(r.uploaded_at || nowIso()),
     uploadedBy: String(r.uploaded_by || ""),
+    mediaKind: r.media_kind === "video" ? "video" : "photo",
+    storagePath: String(r.storage_path || ""),
+    reviewStatus: reviewStatusOf(r.review_status),
+    reviewNote: String(r.review_note || ""),
+    storageEvicted: !!r.storage_evicted_at,
   };
 }
 
