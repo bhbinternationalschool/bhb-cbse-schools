@@ -22,6 +22,16 @@ import {
   type FeeDueLine,
 } from "@/lib/fees";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
+import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
+import {
+  addDays,
+  composeAppDownloadReply,
+  composeSchoolDayReply,
+  detectAppDownloadQuestion,
+  detectSchoolDayQuestion,
+  type ChildDay,
+  type SchoolDayQuestion,
+} from "@/lib/sisParentBotDayApp";
 import {
   buildPaymentSharePayload,
   buildPaymentShareUrlAbsolute,
@@ -297,6 +307,37 @@ function dueStudentName(due: FeeDueLine): string {
  * fallback) on any failure — this is a graceful upgrade, never a hard
  * dependency for the bot to keep working.
  */
+
+/**
+ * "Is school open today?" from the published holiday calendar, per child —
+ * Pre-Primary can be off on a Saturday the rest of the school works. Null
+ * when the calendar is not loaded: an unknown must not be told as "open".
+ */
+function schoolDayReply(hh: Household, q: SchoolDayQuestion, hindi: boolean): string | null {
+  const masters = loadMasters();
+  const ay = currentAcademicYearCode(masters);
+  if (!(masters.holidays ?? []).some((h) => h.isPublished && h.academicYearCode === ay)) return null;
+  const kids = childrenOf(hh);
+  if (!kids.length) return null;
+  const children: ChildDay[] = kids.map((s) => {
+    const day = classifyClassHolidayDay(masters, q.dateIso, ay, s.classId);
+    let nextWorkingIso = "";
+    if (day.status === "holiday") {
+      for (let i = 1; i <= 21 && !nextWorkingIso; i++) {
+        const d = addDays(q.dateIso, i);
+        if (classifyClassHolidayDay(masters, d, ay, s.classId).status !== "holiday") nextWorkingIso = d;
+      }
+    }
+    return {
+      name: s.fullName,
+      className: classLabelForStudent(s, masters),
+      status: day.status,
+      title: day.holiday?.title ?? "",
+      nextWorkingIso,
+    };
+  });
+  return composeSchoolDayReply({ q, children, hindi });
+}
 
 async function tryAiFallbackReply(
   hh: Household,
@@ -1287,6 +1328,13 @@ export async function handleWaSisBotInbound(opts: {
   // the bot failed to answer (see detectRecordCorrection).
   const correction =
     !quickReply && !feeReply && !feeWhy && !feeQuestion && !answeringPtp ? detectRecordCorrection(text) : null;
+  // Two everyday questions with answers the ERP holds (director, 10 Oct
+  // 2026): before this they went to the office as "I don't know".
+  const plainQuestion = !quickReply && !feeReply && !feeWhy && !feeQuestion && !answeringPtp && !complaint && !correction;
+  const istToday = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+  const schoolDayQ = plainQuestion ? detectSchoolDayQuestion(text, istToday) : null;
+  const schoolDayText = schoolDayQ ? schoolDayReply(hh, schoolDayQ, hindi) : null;
+  const appAsk = plainQuestion && !schoolDayText && detectAppDownloadQuestion(text);
   let nextPendingAsk: WaSisBotThread["pendingAsk"] = undefined;
   let nextPtpAsks: number | undefined;
   let lastPromise = thread.lastPromise;
@@ -1363,6 +1411,12 @@ export async function handleWaSisBotInbound(opts: {
     if (bot.escalate) {
       officeNote = `Parent asked about fees${feeQuestion.transport ? " / transport" : ""}${feeQuestion.discount ? " / a discount" : ""}${feeQuestion.namedClass ? ` / class ${feeQuestion.namedClass}` : ""}: "${text.slice(0, 160)}"`;
     }
+  } else if (schoolDayText) {
+    intent = "info";
+    bot = { escalate: false, text: schoolDayText };
+  } else if (appAsk) {
+    intent = "info";
+    bot = { escalate: false, text: composeAppDownloadReply(hindi) };
   } else if (!quickReply && isSisAcknowledgement(text)) {
     // "ok / thanks" ends the conversation: thanks + the guide, once. A second
     // "ok" in the same closed conversation just gets a short thank-you.
