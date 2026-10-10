@@ -32,8 +32,10 @@ import {
   readCashgramCreate,
   readCashgramStatus,
   readCashgramStatusResponse,
+  staffLinkProblem,
   voidRefundProblem,
   type CashgramFeeEffect,
+  type CashgramPurpose,
   type CashgramStatus,
   type CashgramView,
 } from "@/lib/cashgram";
@@ -50,7 +52,13 @@ import { getServerTenantContext } from "@/lib/serverTenant";
 
 export type CashgramRefundRow = {
   cashgramId: string;
+  purpose: CashgramPurpose;
   feeEffect: CashgramFeeEffect;
+  /** staff_pay: what it pays (upi_payment_proofs keys) and to whom. */
+  targetKind: string;
+  targetId: string;
+  targetLabel: string;
+  staffId: string;
   householdId: string;
   voucherId: string;
   receiptNo: string;
@@ -79,7 +87,12 @@ function rowTo(r: Record<string, unknown>): CashgramRefundRow {
   const status = String(r.status ?? "");
   return {
     cashgramId: String(r.cashgram_id ?? ""),
-    feeEffect: r.fee_effect === "void" ? "void" : "excess",
+    purpose: r.purpose === "staff_pay" ? "staff_pay" : "fee_refund",
+    feeEffect: r.fee_effect === "void" ? "void" : r.fee_effect === "none" ? "none" : "excess",
+    targetKind: String(r.target_kind ?? ""),
+    targetId: String(r.target_id ?? ""),
+    targetLabel: String(r.target_label ?? ""),
+    staffId: String(r.staff_id ?? ""),
     householdId: String(r.household_id ?? ""),
     voucherId: String(r.voucher_id ?? ""),
     receiptNo: String(r.receipt_no ?? ""),
@@ -133,7 +146,8 @@ export async function listCashgramRefunds(filter: {
 }): Promise<CashgramRefundRow[]> {
   const ctx = await getServerTenantContext();
   if (!ctx) return [];
-  let q = ctx.sb.from("cashgram_refunds").select("*").eq("tenant_id", ctx.tenantId);
+  // Fee refunds only: staff salary links have their own list and route.
+  let q = ctx.sb.from("cashgram_refunds").select("*").eq("tenant_id", ctx.tenantId).eq("purpose", "fee_refund");
   if (filter.householdId) q = q.eq("household_id", filter.householdId);
   if (filter.voucherId) q = q.eq("voucher_id", filter.voucherId);
   if (filter.status) q = q.eq("status", filter.status);
@@ -452,7 +466,12 @@ async function sendCashgramRefund(cashgramId: string): Promise<CashgramResult> {
     phone: row.payeePhone,
     email: row.payeeEmail,
     expiryDate: row.linkExpiry,
-    remarks: row.receiptNo ? `Refund ${row.receiptNo}` : "School fee refund",
+    remarks:
+      row.purpose === "staff_pay"
+        ? row.targetLabel || "Salary"
+        : row.receiptNo
+          ? `Refund ${row.receiptNo}`
+          : "School fee refund",
   });
   if (!built.ok) return keepWaiting(row, built.error);
 
@@ -594,6 +613,9 @@ export async function applyCashgramView(view: CashgramView): Promise<{ applied: 
   if (view.status === "REVERSED" && row.appliedAt && row.status !== "REVERSED") return reverseApplied(row);
   if (view.status !== "REDEEMED") return { applied: false, reason: `Refund is ${view.status}` };
   if (row.appliedAt) return { applied: false, reason: "Already applied" };
+  if (row.purpose === "staff_pay") return applyStaffPaid(row, view);
+  const feeEffect = row.feeEffect;
+  if (feeEffect === "none") return { applied: false, reason: "A fee refund row with no fee effect" };
 
   const narration = `Fee refund by Cashgram ${row.cashgramId}${row.receiptNo ? ` — receipt ${row.receiptNo}` : ""}: ${row.reason}`.slice(0, 240);
 
@@ -624,7 +646,7 @@ export async function applyCashgramView(view: CashgramView): Promise<{ applied: 
   }
 
   const lines = cashgramRefundLines({
-    feeEffect: row.feeEffect,
+    feeEffect,
     amountPaise: row.amountPaise,
     householdId: row.householdId,
     tenders,
@@ -669,6 +691,21 @@ export async function applyCashgramView(view: CashgramView): Promise<{ applied: 
  * for the office (send a new link, or restore the receipt) — the row says so.
  */
 async function reverseApplied(row: CashgramRefundRow): Promise<{ applied: boolean; reason: string }> {
+  if (row.purpose === "staff_pay") {
+    // The salary is unpaid again: its UTR record is set aside, exactly as a
+    // reversed Pay via Cashfree transfer is.
+    const ctx = await getServerTenantContext();
+    if (ctx) {
+      await ctx.sb
+        .from("upi_payment_proofs")
+        .update({ status: "dismissed", updated_at: new Date().toISOString() })
+        .eq("tenant_id", ctx.tenantId)
+        .eq("id", staffProofId(row.cashgramId));
+    }
+    await update(row.cashgramId, { last_error: "The bank returned this salary. It is unpaid again — pay it another way or send a new link." });
+    await logEvent("cashgram.reversed", row, {});
+    return { applied: false, reason: "Reversed" };
+  }
   if (row.ledgerVoucherId) {
     const { ledgerReverse } = await import("@/lib/ledger/ledger.server");
     await ledgerReverse({ voucherId: row.ledgerVoucherId, reason: `Cashgram ${row.cashgramId} reversed by the bank`, date: istToday() });
@@ -681,4 +718,205 @@ async function reverseApplied(row: CashgramRefundRow): Promise<{ applied: boolea
   });
   await logEvent("cashgram.reversed", row, {});
   return { applied: false, reason: "Reversed" };
+}
+
+/* ── staff salary by link ────────────────────────────────────────────── */
+
+/** The UTR record a collected staff link writes — one id per link, so a replay is refused. */
+function staffProofId(cashgramId: string): string {
+  return `upp_cg_${cashgramId}`.slice(0, 64);
+}
+
+const LIVE_STATUSES: CashgramStatus[] = ["PENDING_APPROVAL", "SENDING", "UNKNOWN", "ACTIVE", "REDEEMING", "REDEEMED"];
+
+/**
+ * The live link paying this item, if any. `ok: false` when it could not be
+ * read — callers guarding against a second payment must treat that as "maybe",
+ * never as "none".
+ */
+export async function liveCashgramForTarget(
+  targetKind: string,
+  targetId: string,
+): Promise<{ ok: true; row: CashgramRefundRow | null } | { ok: false; error: string }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "No tenant context" };
+  const { data, error } = await ctx.sb
+    .from("cashgram_refunds")
+    .select("*")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("purpose", "staff_pay")
+    .eq("target_kind", targetKind)
+    .eq("target_id", targetId)
+    .in("status", LIVE_STATUSES)
+    .limit(1);
+  if (error) return { ok: false, error: `Could not check for an open pay link: ${error.message}` };
+  const r = (data ?? [])[0];
+  return { ok: true, row: r ? rowTo(r as Record<string, unknown>) : null };
+}
+
+/** Every staff link for these items, newest first — for the payroll screen. */
+export async function listCashgramsForTargets(targetKind: string, targetIds: string[]): Promise<CashgramRefundRow[]> {
+  const ctx = await getServerTenantContext();
+  if (!ctx || targetIds.length === 0) return [];
+  const { data } = await ctx.sb
+    .from("cashgram_refunds")
+    .select("*")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("purpose", "staff_pay")
+    .eq("target_kind", targetKind)
+    .in("target_id", targetIds.slice(0, 500))
+    .order("created_at", { ascending: false });
+  return (data ?? []).map((r) => rowTo(r as Record<string, unknown>));
+}
+
+/**
+ * Send a posted salary line by Cashgram link.
+ *
+ * Everything that decides the money is read on the server: the amount from
+ * the payroll run, the phone from the staff record. The screen only says which
+ * line. A staff member with no real mobile on file cannot be paid this way —
+ * only the phone on the link can collect it.
+ *
+ * No separate approval: the run was approved when it was published, and the
+ * caller holds payroll or accounts approve — the same authority as Pay via
+ * Cashfree.
+ */
+export async function prepareStaffCashgram(input: {
+  runId: string;
+  staffId: string;
+  amountPaise: number;
+  expiryDays?: number;
+  requestedBy: string;
+}): Promise<CashgramResult> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "No tenant context" };
+  if (!payoutKeysPresent()) return { ok: false, error: "Cashfree Payouts is not configured on this server" };
+  const gate = await payoutsEnabled();
+  if (!gate.ok) return { ok: false, error: gate.why };
+
+  const { fetchPayrollDeskFromDb } = await import("@/lib/payrollNormalized.server");
+  const payroll = await fetchPayrollDeskFromDb();
+  if (!payroll.ok) return { ok: false, error: "Could not read the payroll run — try again" };
+  const run = payroll.bundle.runs.find((r) => r.id === input.runId);
+  if (!run) return { ok: false, error: "Payroll run not found" };
+  const line = run.lines.find((l) => l.staffId === input.staffId);
+  if (!line) return { ok: false, error: "That staff member is not on this run" };
+  const payablePaise = Math.round((line.amountPayable ?? (line.juneHold ? 0 : line.netPay)) * 100);
+
+  const { loadServerMasters } = await import("@/lib/api/v1/auth");
+  const masters = await loadServerMasters();
+  const staff = masters.staff.find((s) => s.id === input.staffId);
+  const phone = staff?.mobile || "";
+  const phoneProblem = cashgramPhoneProblem(phone);
+  if (phoneProblem) {
+    return { ok: false, error: `${line.fullName}: add a real mobile number on the staff record first — only that phone can collect the link` };
+  }
+
+  const targetKind = "payroll_line";
+  const targetId = `${run.id}|${line.staffId}`;
+  const { findRecordedTargetProof } = await import("@/lib/upiProofs.server");
+  const [proof, live] = await Promise.all([findRecordedTargetProof(targetKind, targetId), liveCashgramForTarget(targetKind, targetId)]);
+  if (!live.ok) return { ok: false, error: live.error };
+  const problem = staffLinkProblem({
+    runStatus: run.status,
+    payablePaise,
+    requestedPaise: input.amountPaise,
+    alreadyPaidUtr: proof?.utr || "",
+    liveLinkStatus: live.row?.status || "",
+  });
+  if (problem) return { ok: false, error: problem };
+
+  const cashgramId = newCashgramId();
+  const label = `Salary ${run.month} ${line.empCode || ""}`.replace(/\s+/g, " ").trim();
+  const now = new Date().toISOString();
+  const { error } = await ctx.sb.from("cashgram_refunds").insert({
+    cashgram_id: cashgramId,
+    tenant_id: ctx.tenantId,
+    purpose: "staff_pay",
+    fee_effect: "none",
+    target_kind: targetKind,
+    target_id: targetId,
+    target_label: `Salary ${run.month} — ${line.fullName}`,
+    staff_id: line.staffId,
+    amount_paise: payablePaise,
+    payee_name: line.fullName,
+    payee_phone: cashgramPhone(phone),
+    payee_email: "",
+    reason: label,
+    link_expiry: cashgramExpiryDate(istToday(), input.expiryDays ?? 7),
+    status: "PENDING_APPROVAL",
+    requested_by: input.requestedBy,
+    approved_by: input.requestedBy,
+    approved_at: now,
+  });
+  if (error) {
+    // The partial unique index: another link went out for this line a moment ago.
+    return {
+      ok: false,
+      error: /duplicate key|unique/i.test(error.message)
+        ? "A pay link for this salary is already open"
+        : `Could not record the pay link: ${error.message}`,
+    };
+  }
+  const sent = await sendCashgramRefund(cashgramId);
+  if (!sent.ok) {
+    // Not sent (wallet, switch, Cashfree refused): free the line for another
+    // way of paying. UNKNOWN stays — it may exist at Cashfree.
+    const now2 = await getCashgramRefund(cashgramId);
+    if (now2?.status === "PENDING_APPROVAL") await update(cashgramId, { status: "CREATE_FAILED", last_error: sent.error });
+  }
+  return sent;
+}
+
+/**
+ * A staff link was collected. Record its UTR against the salary line — the
+ * same record Pay via Cashfree writes, which is what the screens read as paid.
+ * Without a 12-digit UTR from Cashfree, the link itself is the evidence: the
+ * row stays REDEEMED, and the payroll screen shows "Paid by link".
+ */
+async function applyStaffPaid(row: CashgramRefundRow, view: CashgramView): Promise<{ applied: boolean; reason: string }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { applied: false, reason: "No tenant context" };
+  const utr = /^\d{12}$/.test(view.utr) ? view.utr : /^\d{12}$/.test(row.utr) ? row.utr : "";
+
+  const { findRecordedTargetProof } = await import("@/lib/upiProofs.server");
+  const other = await findRecordedTargetProof(row.targetKind as "payroll_line", row.targetId);
+  if (other && other.id !== staffProofId(row.cashgramId)) {
+    // Paid another way while the link was open — the guards should make this
+    // impossible, so say it loudly rather than record a second payment.
+    await update(row.cashgramId, {
+      applied_at: new Date().toISOString(),
+      last_error: `PAID TWICE: this salary also has UTR ${other.utr} recorded. Recover one payment from ${row.payeeName}.`,
+    });
+    await logEvent("cashgram.paid_twice", row, { otherUtr: other.utr });
+    return { applied: false, reason: "Paid twice" };
+  }
+
+  if (utr) {
+    const { error } = await ctx.sb.from("upi_payment_proofs").insert({
+      id: staffProofId(row.cashgramId),
+      tenant_id: ctx.tenantId,
+      status: "recorded",
+      utr,
+      amount_paise: row.amountPaise,
+      paid_on: istToday(),
+      payee_name: row.payeeName,
+      target_kind: row.targetKind,
+      target_id: row.targetId,
+      target_label: row.targetLabel,
+      source: "cashgram",
+      recorded_by: row.approvedBy || row.requestedBy || "cashfree",
+    });
+    if (error && !/duplicate key|unique/i.test(error.message)) {
+      await update(row.cashgramId, { last_error: `Collected; UTR not recorded yet (${error.message}) — Check status retries it` });
+      return { applied: false, reason: "Proof insert failed" };
+    }
+  }
+  await update(row.cashgramId, {
+    applied_at: new Date().toISOString(),
+    ...(utr ? { utr } : {}),
+    last_error: utr ? "" : "Collected. Cashfree reported no UTR — the payroll screen shows it as paid by link.",
+  });
+  await logEvent("cashgram.staff_paid", row, { utr });
+  return { applied: true, reason: utr ? "UTR recorded" : "Paid by link (no UTR)" };
 }

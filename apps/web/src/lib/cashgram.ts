@@ -33,7 +33,43 @@ import {
 } from "@/lib/ledger/coa";
 import type { LedgerLineInput } from "@/lib/ledger/types";
 
-export type CashgramFeeEffect = "excess" | "void";
+export type CashgramFeeEffect = "excess" | "void" | "none";
+
+/**
+ * What the link pays. Every Cashgram the school sends lives in one table, so
+ * the wallet check (the sum of every open link) and the webhook see them all.
+ *   fee_refund  money back to a parent (fee effect excess / void)
+ *   staff_pay   a posted salary line (fee effect none); collected → its UTR
+ *               is recorded against the line like any payout
+ */
+export type CashgramPurpose = "fee_refund" | "staff_pay";
+
+/**
+ * Why a salary line cannot be paid by link now, or "" when it can.
+ *
+ * One way of paying at a time: a recorded UTR (UPI, screenshot, Pay via
+ * Cashfree) means it is paid; a live link means it is being paid. Both block.
+ */
+export function staffLinkProblem(input: {
+  runStatus: string;
+  payablePaise: number;
+  requestedPaise: number;
+  alreadyPaidUtr: string;
+  liveLinkStatus: CashgramStatus | "";
+}): string {
+  if (input.runStatus !== "posted" && input.runStatus !== "paid") return "Publish the payroll run before paying it";
+  if (!(input.payablePaise >= 100)) return "Nothing payable on this line";
+  if (Math.round(input.requestedPaise) !== Math.round(input.payablePaise)) {
+    return `The line is for ₹${(input.payablePaise / 100).toFixed(2)} — the screen asked for ₹${(input.requestedPaise / 100).toFixed(2)}. Refresh and try again.`;
+  }
+  if (input.alreadyPaidUtr) return `Already paid — UTR ${input.alreadyPaidUtr} is recorded on this salary`;
+  if (input.liveLinkStatus) {
+    return input.liveLinkStatus === "REDEEMED"
+      ? "Already paid by a Cashgram link"
+      : "A pay link for this salary is already open — cancel it before paying another way";
+  }
+  return "";
+}
 
 export type CashgramStatus =
   /** Prepared by the desk; waits for the owner under the school's rule. */
@@ -374,7 +410,7 @@ export function voidRefundProblem(input: {
  * residue on an account the void touched.
  */
 export function cashgramRefundLines(input: {
-  feeEffect: CashgramFeeEffect;
+  feeEffect: Exclude<CashgramFeeEffect, "none">;
   amountPaise: number;
   householdId: string;
   tenders?: { mode: string; amountPaise: number; bankAccountId?: string }[];

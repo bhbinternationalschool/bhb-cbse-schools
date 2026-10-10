@@ -8,6 +8,9 @@ import type { StaffRecord } from "@/lib/foundationMasters";
 import { UpiPayButton, type UpiPaid } from "@/components/payments/UpiPayButton";
 import { recordUpiProof, useRecordedUpiProofs } from "@/lib/upiProofsClient";
 import { PayoutButton } from "@/components/payments/PayoutButton";
+import { StaffCashgramButton } from "@/components/payments/StaffCashgramButton";
+import { useStaffCashgrams } from "@/lib/cashgramClient";
+import { cashgramIsDead } from "@/lib/cashgram";
 import { PayoutSwitchPanel } from "@/components/payments/PayoutSwitchPanel";
 import {
   loadSalarySetup,
@@ -1097,6 +1100,13 @@ function RunDetail({
     run.status === "posted" || run.status === "paid" ? run.lines.map((l) => `${run.id}|${l.staffId}`) : [],
     run.lockVersion || 0,
   );
+  // Cashgram pay links for the same lines (director, 10 Oct 2026). A live one
+  // — open or collected — stands in for every other way of paying the line.
+  const [linkTick, setLinkTick] = useState(0);
+  const staffLinks = useStaffCashgrams(
+    run.status === "posted" || run.status === "paid" ? run.lines.map((l) => `${run.id}|${l.staffId}`) : [],
+    (run.lockVersion || 0) * 1000 + linkTick,
+  );
   // The day the salary was paid; empty = the lines' own date, else today.
   const [paidOnDraft, setPaidOnDraft] = useState("");
   const net = run.lines.reduce((s, l) => s + l.netPay, 0);
@@ -1462,9 +1472,13 @@ function RunDetail({
                             const st = staffById(l.staffId);
                             const amt = l.amountPayable ?? (l.juneHold ? 0 : l.netPay);
                             const lineKey = `${run.id}|${l.staffId}`;
-                            const linePaid = Boolean(upiPaid.get(lineKey)) || /UTR \d{12}/.test(l.note || "");
+                            const link = staffLinks.get(lineKey);
+                            const linkLive = Boolean(link && !cashgramIsDead(link.status));
+                            const linePaid = Boolean(upiPaid.get(lineKey)) || /UTR \d{12}/.test(l.note || "") || linkLive;
                             return amt > 0 ? (
                               <>
+                              {/* A salary paid by link shows only the link. */}
+                              {linkLive ? null : (
                               <UpiPayButton
                                 label={
                                   upiPaid.get(`${run.id}|${l.staffId}`)
@@ -1481,6 +1495,7 @@ function RunDetail({
                                 earliest={`${run.month}-01`}
                                 onPaid={(p) => onLinePaid(l.staffId, p)}
                               />
+                              )}
                               {/* Or straight from the Cashfree wallet when the
                                   owner's switch is on (director, 7 Oct 2026). */}
                               <PayoutButton
@@ -1498,6 +1513,18 @@ function RunDetail({
                                 subjectId={l.staffId}
                                 period={run.id}
                                 onPaid={(p) => onLinePaid(l.staffId, p)}
+                              />
+                              {/* Or a Cashgram link to their phone — for staff
+                                  with no UPI ID or bank on file. */}
+                              <StaffCashgramButton
+                                link={link}
+                                runId={run.id}
+                                staffId={l.staffId}
+                                name={l.fullName}
+                                phone={st?.mobile || ""}
+                                amountPaise={Math.round(amt * 100)}
+                                paid={Boolean(upiPaid.get(lineKey)) || /UTR \d{12}/.test(l.note || "")}
+                                onChanged={() => setLinkTick((t) => t + 1)}
                               />
                               </>
                             ) : null;
