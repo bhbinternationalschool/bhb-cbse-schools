@@ -9,9 +9,15 @@ import { emptyMastersShell, type MastersState } from "@/lib/masters";
 import { mastersDualWriteDbEnabled } from "@/lib/mastersDbConfig";
 import {
   fetchMastersDeskFromDb,
+  fetchMastersSliceStamps,
   fetchMastersSyncMeta,
+  MASTERS_SLICE_KEYS,
   pushMastersDeskToDb,
+  pushMastersSlicesToDb,
+  type MastersSliceKey,
 } from "@/lib/mastersNormalized.server";
+import { STAFF_OWNED_MASTERS_SLICES } from "@/lib/staffDbConfig";
+import { rowFingerprint } from "@/lib/sliceRevClient";
 import { fetchMastersFromRowTables } from "@/lib/mastersRowTables.server";
 import { guardMastersOverwrite, guardSubjectsOverwrite } from "@/lib/mastersWriteGuard";
 import { guardMastersRevision } from "@/lib/mastersRevisionGuard";
@@ -119,9 +125,11 @@ export async function GET(req: Request) {
         const rows = await fetchMastersFromRowTables();
         if (!rows.ok) throw new Error("row path failed");
         const meta = await fetchMastersSyncMeta(rows.bundle);
+        const sliceStamps = await fetchMastersSliceStamps();
         return {
           ok: true,
           ...rows.bundle,
+          sliceStamps,
           classCount: rows.bundle.classes.length,
           feeHeadCount: rows.bundle.feeHeads.length,
           subjectCount: rows.bundle.subjects.length,
@@ -139,9 +147,11 @@ export async function GET(req: Request) {
       // optimistic-locking base is identical whichever source served the
       // bundle. Anything else would make every save falsely stale.
       const meta = await fetchMastersSyncMeta(rows.bundle);
+      const sliceStamps = await fetchMastersSliceStamps();
       return NextResponse.json({
         ok: true,
         ...rows.bundle,
+        sliceStamps,
         classCount: rows.bundle.classes.length,
         feeHeadCount: rows.bundle.feeHeads.length,
         subjectCount: rows.bundle.subjects.length,
@@ -162,10 +172,11 @@ export async function GET(req: Request) {
     );
   }
 
-  const { bundle, meta } = await fetchMastersDeskFromDb();
+  const { bundle, meta, sliceStamps } = await fetchMastersDeskFromDb();
   return NextResponse.json({
     ok: true,
     ...bundle,
+    sliceStamps,
     classCount: bundle.classes.length,
     feeHeadCount: bundle.feeHeads.length,
     subjectCount: bundle.subjects.length,
@@ -190,17 +201,33 @@ export async function POST(req: Request) {
     });
   }
 
-  let body: MastersState & { baseUpdatedAt?: string | null };
+  let body: MastersState & { baseUpdatedAt?: string | null; sliceBases?: unknown };
   try {
-    body = (await req.json()) as MastersState & { baseUpdatedAt?: string | null };
+    body = (await req.json()) as MastersState & { baseUpdatedAt?: string | null; sliceBases?: unknown };
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { version: _v, baseUpdatedAt, ...rest } = body;
+  const { version: _v, baseUpdatedAt, sliceBases: rawBases, ...rest } = body;
   let state = { version: 2 as const, ...rest } as MastersState;
 
-  const { bundle: stored, meta, readFailed } = await fetchMastersDeskFromDb();
+  const { bundle: stored, meta, readFailed, sliceStamps: storedStamps } = await fetchMastersDeskFromDb();
+
+  // Section saves (10 Oct 2026): the browser sends only the sections it
+  // changed, each with the stamp it loaded it at. Anything else in Masters is
+  // taken from what is stored, so the guards below still see the whole book.
+  const sliceBases =
+    rawBases && typeof rawBases === "object" && !Array.isArray(rawBases)
+      ? Object.fromEntries(
+          Object.entries(rawBases as Record<string, unknown>).filter(
+            ([k, v]) => typeof v === "string" && MASTERS_SLICE_KEYS.includes(k as MastersSliceKey),
+          ),
+        ) as Record<string, string>
+      : null;
+  const staffOwned = new Set<string>(STAFF_OWNED_MASTERS_SLICES as readonly string[]);
+  let sliceKeys: MastersSliceKey[] = sliceBases
+    ? (Object.keys(sliceBases) as MastersSliceKey[]).filter((k) => !staffOwned.has(k) && k in rest)
+    : [];
 
   // No stored state, no guard. guardMastersOverwrite reads zero stored classes
   // as `bootstrap` and allows the write — correct for a genuinely new tenant,
@@ -232,6 +259,15 @@ export async function POST(req: Request) {
   // Compare against meta.updatedAt first: it is the field GET serves as
   // `updatedAt`, which is what the client stored as its base. (Push writes
   // both columns from the same instant, so they normally agree.)
+  if (sliceBases && !featureGate) {
+    const sent = rest as unknown as Record<string, unknown>;
+    state = {
+      ...(stored as unknown as MastersState),
+      ...Object.fromEntries(sliceKeys.map((k) => [k, sent[k]])),
+      version: 2,
+    } as MastersState;
+  }
+
   const revision = guardMastersRevision(
     baseUpdatedAt ?? null,
     meta?.updatedAt ?? meta?.lastUpdatedAt ?? null,
@@ -240,7 +276,7 @@ export async function POST(req: Request) {
   // subset with no revision, and their push is merged row by row onto the
   // stored desk below — nothing of theirs can overwrite a newer save
   // outside their own classes.
-  if (!revision.allow && !featureGate) {
+  if (!revision.allow && !featureGate && !sliceBases) {
     console.warn(
       `[masters-desk] rejected stale push`,
       `base=${baseUpdatedAt} stored=${revision.storedUpdatedAt}`,
@@ -258,7 +294,7 @@ export async function POST(req: Request) {
   // loaded masters — "legacy client" was the label, but it is precisely the
   // empty, un-pulled copy every guard here exists to stop. Refused; the
   // client rehydrates.
-  if (revision.reason === "unversioned" && meta && !featureGate) {
+  if (revision.reason === "unversioned" && meta && !featureGate && !sliceBases) {
     console.warn("[masters-desk] rejected unversioned push");
     return NextResponse.json(
       {
@@ -312,6 +348,12 @@ export async function POST(req: Request) {
     }
     if (!merged.changed) return featureSavedResponse(false);
     state = { ...(merged.state as unknown as MastersState), version: 2 };
+    // Only the sections the merge changed, at the stamps the read returned.
+    const before = stored as unknown as Record<string, unknown>;
+    const after = state as unknown as Record<string, unknown>;
+    sliceKeys = MASTERS_SLICE_KEYS.filter(
+      (k) => !staffOwned.has(k) && rowFingerprint(before[k] ?? null) !== rowFingerprint(after[k] ?? null),
+    );
   }
 
   // A client must not be able to replace the class-id generation wholesale.
@@ -358,15 +400,23 @@ export async function POST(req: Request) {
   // The writer re-checks the revision and claims the next one atomically. A
   // function holder's push was merged onto the desk read above, so that read
   // is its base.
-  const pushed = await pushMastersDeskToDb(state, {
-    baseUpdatedAt: featureGate
-      ? (meta?.updatedAt ?? meta?.lastUpdatedAt ?? null)
-      : (baseUpdatedAt ?? null),
-  });
+  // Section saves (and function holders' merges) write only the sections
+  // named, all or none, each at its stamp. A browser from an older build
+  // still saves the whole book against the desk revision.
+  const pushed =
+    sliceBases || featureGate
+      ? await pushMastersSlicesToDb(
+          state,
+          sliceKeys,
+          featureGate
+            ? Object.fromEntries(sliceKeys.map((k) => [k, storedStamps?.[k] ?? ""]))
+            : (sliceBases as Record<string, string>),
+        )
+      : await pushMastersDeskToDb(state, { baseUpdatedAt: baseUpdatedAt ?? null });
   if (!pushed.ok) {
     if (pushed.conflict) {
       return NextResponse.json(
-        { error: pushed.error, reason: pushed.conflict },
+        { error: pushed.error, reason: pushed.conflict, conflicts: pushed.conflicts },
         { status: 409 },
       );
     }
@@ -387,6 +437,7 @@ export async function POST(req: Request) {
     // The exact revision written to sync meta, not a fresh timestamp: the
     // client stores this as the base for its next push, and it must equal
     // what the revision guard will read back.
-    updatedAt: pushed.updatedAt || new Date().toISOString(),
+    updatedAt: pushed.updatedAt || meta?.updatedAt || new Date().toISOString(),
+    sliceStamps: pushed.sliceStamps,
   });
 }

@@ -36,7 +36,10 @@ const read = (f: string) => readFileSync(join(__dirname, f), "utf8");
   const route = read("../app/api/school-data/masters-desk/route.ts");
   assert.equal(/unversioned push accepted/.test(route), false, "no more 'legacy client' pass");
   assert.ok(/revision\.reason === "unversioned" && meta && !featureGate[\s\S]*?status: 409/.test(route), "an unversioned browser push gets 409");
-  assert.ok(/pushMastersDeskToDb\(state, \{\s*baseUpdatedAt: featureGate/.test(route), "the route passes the revision to the writer");
+  // Whole-book saves (older builds) pass the desk revision; section saves and
+  // function holders' merges pass each section's stamp (10 Oct 2026).
+  assert.ok(/pushMastersDeskToDb\(state, \{ baseUpdatedAt: baseUpdatedAt \?\? null \}\)/.test(route), "the route passes the revision to the whole-book writer");
+  assert.ok(/storedStamps\?\.\[k\] \?\? ""/.test(route), "a function holder's merge is written at the stamps just read");
   assert.ok(/if \(pushed\.conflict\)[\s\S]*?status: 409/.test(route), "a writer conflict is a 409, not a 500");
 }
 
