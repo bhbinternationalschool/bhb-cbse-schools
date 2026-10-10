@@ -205,8 +205,9 @@ export function StaffWorkspace() {
         import("@/lib/staffPersistence"),
         import("@/lib/deskHydrateGuard"),
       ]);
-      const did = await withHydrationSlot(() => ensureStaffHydrated());
-      if (did) setState(loadMasters());
+      // Always re-read: another part of the page may have done the loading.
+      await withHydrationSlot(() => ensureStaffHydrated());
+      setState(loadMasters());
     })();
   }, []);
 

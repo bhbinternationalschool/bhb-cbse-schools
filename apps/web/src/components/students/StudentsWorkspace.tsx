@@ -275,8 +275,10 @@ export function StudentsWorkspace() {
         import("@/lib/sisPersistence"),
         import("@/lib/deskHydrateGuard"),
       ]);
-      const did = await withHydrationSlot(() => ensureSisHydrated());
-      if (did) setState(loadSis());
+      // Always re-read: when another part of the page loaded the roster
+      // first, `did` is false but this screen still shows the empty start.
+      await withHydrationSlot(() => ensureSisHydrated());
+      setState(loadSis());
     })();
   }, []);
 

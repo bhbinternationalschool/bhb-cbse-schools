@@ -71,6 +71,7 @@ import {
   voidJournalEntry,
 } from "@/lib/accountsJournal";
 import { createOwnerLoan } from "@/lib/accountsLoans";
+import { clearMemoryCopies } from "@/lib/browserStorage";
 import { getCoaByCode } from "@/lib/accountsLookups";
 import { listUnifiedPayables } from "@/lib/accountsPayables";
 import {
@@ -113,6 +114,8 @@ const TODAY = new Date().toISOString().slice(0, 10);
 /** Wipe local state and re-seed, so each scenario starts from a known book. */
 function freshBooks(): AccountsState {
   store.clear();
+  // The books live in page memory (10 Oct 2026), not in localStorage.
+  clearMemoryCopies();
   const state = seedAccountsIfEmpty();
   assert.ok(state.coaAccounts.length > 0, "seed must install a chart of accounts");
   return state;

@@ -82,6 +82,9 @@ export function createDomainBlobPersistence<T>(opts: {
     return isSupabaseConfigured();
   }
 
+  /** The server version this page last took — sent with every save. */
+  let serverBase = "";
+
   function resetCache() {
     hydratedOnce = false;
     pendingPush = null;
@@ -144,18 +147,36 @@ export function createDomainBlobPersistence<T>(opts: {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ table: opts.table, state }),
+        body: JSON.stringify({ table: opts.table, state, baseUpdatedAt: serverBase || null }),
       });
       const body = (await res.json().catch(() => null)) as {
         ok?: boolean;
         updatedAt?: string;
         error?: string;
       } | null;
+      if (res.status === 409) {
+        // Changed elsewhere, or this page never loaded the saved copy: the
+        // server's copy wins. Forget this page's claim and pull it again.
+        writeMetaUpdatedAt("");
+        hydratedOnce = false;
+        void ensureHydrated();
+        void import("@/components/shell/Toast")
+          .then(({ pushToast }) =>
+            pushToast({
+              kind: "error",
+              message: `${opts.label}: changed on another device — your last change was NOT saved. The screen now shows the current data; please re-apply it.`,
+              durationMs: 9000,
+            }),
+          )
+          .catch(() => {});
+        return { ok: true };
+      }
       if (!res.ok || !body?.ok) {
         const message = body?.error || `HTTP ${res.status}`;
         console.warn(`[${opts.label}] push failed`, message);
         return { ok: false, error: message };
       }
+      if (body.updatedAt) serverBase = body.updatedAt;
       writeMetaUpdatedAt(body.updatedAt || new Date().toISOString());
       return { ok: true };
     } catch (e) {
@@ -218,6 +239,7 @@ export function createDomainBlobPersistence<T>(opts: {
       if (takeRemote) {
         opts.writeLocalRaw(remote.state as T);
         writeMetaUpdatedAt(remoteAt || new Date().toISOString());
+        serverBase = remoteAt;
         changed = true;
       }
     }
@@ -234,6 +256,7 @@ export function createDomainBlobPersistence<T>(opts: {
     ) {
       opts.writeLocalRaw(remoteState);
       writeMetaUpdatedAt(remote?.updated_at || new Date().toISOString());
+      serverBase = remote?.updated_at || "";
       return true;
     }
     return changed;

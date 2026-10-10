@@ -15,6 +15,7 @@ import {
   type MastersState,
 } from "@/lib/masters";
 import type { SisState } from "@/lib/sis";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 
 const APPLIED_KEY = "bhb_fee_discount_seed_applied_v1";
 /**
@@ -78,6 +79,13 @@ export function mergeAndPersistFeeDiscountSeed(
   sis: SisState,
 ): { masters: MastersState; applied: number; pending: number } {
   if (typeof window === "undefined" || running) {
+    return { masters, applied: 0, pending: 0 };
+  }
+  // A live school's grants are on the server (applied July 2026). A browser
+  // must never save the whole Masters book on its own: since 10 Oct 2026
+  // module data starts empty on every load, so a boot-time run here would
+  // be saving whatever half-loaded copy the page held.
+  if (isSupabaseConfigured()) {
     return { masters, applied: 0, pending: 0 };
   }
 

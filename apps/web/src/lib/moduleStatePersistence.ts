@@ -49,20 +49,40 @@ export function createModuleStatePersistence<T extends object>(opts: {
     }
   }
 
+  /** The server version this page last took — sent with every save. */
+  let serverBase = "";
+
   async function push(state: T): Promise<{ ok: boolean; error?: string }> {
     try {
       const res = await fetch(`/api/school-data/module-state/${opts.key}`, {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state }),
+        body: JSON.stringify({ state, baseUpdatedAt: serverBase || null }),
       });
       const body = (await res.json().catch(() => null)) as { ok?: boolean; updatedAt?: string; error?: string } | null;
+      if (res.status === 409) {
+        // Changed elsewhere, or never loaded here: the server's copy wins.
+        writeMetaAt("");
+        resetDeskHydrated(guardKey);
+        void ensureHydrated();
+        void import("@/components/shell/Toast")
+          .then(({ pushToast }) =>
+            pushToast({
+              kind: "error",
+              message: `${label}: changed on another device — your last change was NOT saved. The screen now shows the current data; please re-apply it.`,
+              durationMs: 9000,
+            }),
+          )
+          .catch(() => {});
+        return { ok: true };
+      }
       if (!res.ok || !body?.ok) {
         const message = body?.error || `HTTP ${res.status}`;
         console.warn(`[${label}] push failed`, message);
         return { ok: false, error: message };
       }
+      if (body.updatedAt) serverBase = body.updatedAt;
       writeMetaAt(body.updatedAt || new Date().toISOString());
       return { ok: true };
     } catch (e) {
@@ -101,12 +121,15 @@ export function createModuleStatePersistence<T extends object>(opts: {
     }
     markDeskHydrated(guardKey);
     if (!remote.state || typeof remote.state !== "object") return false;
+    // Known whether or not this page takes the copy: a save from a page that
+    // keeps its own will then be judged against what the server holds.
 
     const local = opts.loadLocal();
     const localAt = readMetaAt();
     const takeRemote =
       opts.isEmpty(local) || !localAt || (remote.updatedAt && remote.updatedAt >= localAt);
     if (!takeRemote) return false;
+    serverBase = remote.updatedAt;
     opts.writeLocalRaw(remote.state);
     writeMetaAt(remote.updatedAt || new Date().toISOString());
     window.dispatchEvent(new CustomEvent(MODULE_STATE_UPDATED_EVENT, { detail: { key: opts.key } }));
