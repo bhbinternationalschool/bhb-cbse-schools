@@ -357,6 +357,7 @@
     "test:payment-link-amount": "npx tsx src/lib/paymentLinkAmount.selftest.ts",
     "test:accounts-no-prune": "npx tsx src/lib/accountsNoPrune.selftest.ts",
     "test:app-popups": "npx tsx src/lib/appPopups.selftest.ts",
+    "test:app-popup-preview": "npx tsx src/lib/appPopupPreview.selftest.ts",
     "test:module-requests": "npx tsx src/lib/moduleRequests.selftest.ts",
     "test:weekly-holiday-range": "npx tsx src/lib/weeklyHolidayRange.selftest.ts",
     "test:push-voice": "npx tsx src/lib/pushVoice.selftest.ts",

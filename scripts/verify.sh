@@ -216,6 +216,7 @@ SELFTESTS=(
   test:payment-link-amount
   test:accounts-no-prune
   test:app-popups
+  test:app-popup-preview
   test:module-requests
   test:weekly-holiday-range
   test:push-voice

@@ -5,6 +5,7 @@ import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import type { AadhaarGapCounts, AadhaarScope, AppPopup } from "@/lib/appPopups";
 import { loadMasters } from "@/lib/masters";
 import { uploadMedia } from "@/lib/mediaUpload";
+import { AppPopupPreview, popupStatus } from "@/components/comms/AppPopupPreview";
 
 type Stats = Record<string, { shown: number; dismissed: number; done: number; pendingNow?: number }>;
 
@@ -78,6 +79,10 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
   const [draft, setDraft] = useState<AppPopup | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  /** Which list item's phone preview is open, and the language it shows. */
+  const [previewId, setPreviewId] = useState("");
+  const [lang, setLang] = useState<"hi" | "en">("hi");
+  const today = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
   const classes = useMemo(() => (loadMasters().classes ?? []).filter((c) => c.isActive !== false), []);
 
   const load = useCallback(async () => {
@@ -151,7 +156,8 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
       {error ? <p className="text-xs text-[var(--danger)]">{error}</p> : null}
 
       {draft ? (
-        <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-sm">
+        <div className="grid gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-sm lg:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="min-w-0 space-y-3">
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="block">
               <span className="text-xs font-semibold">Title (English)</span>
@@ -375,6 +381,14 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
             </button>
           </div>
         </div>
+        <div className="space-y-2">
+          <LangSwitch lang={lang} setLang={setLang} />
+          <AppPopupPreview popup={draft} lang={lang} />
+          <p className="max-w-[300px] text-[11px] text-[var(--muted)]">
+            Live preview — as it opens on the phone. The app asks only for what each family is missing.
+          </p>
+        </div>
+        </div>
       ) : null}
 
       {popups === null && !error ? <p className="text-xs text-[var(--muted)]">Loading…</p> : null}
@@ -382,36 +396,101 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
       <ul className="space-y-2">
         {(popups ?? []).map((p) => {
           const st = stats[p.id];
+          const status = popupStatus(p, today);
+          const toDo = typeof st?.pendingNow === "number" ? st.pendingNow : null;
+          const reached = st ? st.shown : 0;
+          // Done out of everyone it is meant for: those who finished plus,
+          // for a rule pop-up, the families the rule still matches.
+          const of = toDo !== null ? (st?.done ?? 0) + toDo : reached;
+          const pct = of > 0 ? Math.round(((st?.done ?? 0) / of) * 100) : 0;
+          const open = previewId === p.id;
           return (
-            <li key={p.id} className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-[var(--border)] p-3 text-sm">
-              <div className="min-w-0">
-                <p className="font-semibold text-[var(--brand-deep)]">
-                  {p.title} {!p.active ? <span className="text-xs text-[var(--muted)]">(off)</span> : null}
-                </p>
-                <p className="text-xs text-[var(--muted)]">
-                  {p.audience === "parents" ? "Parents" : "Staff"} ·{" "}
-                  {p.targetMode === "rule" ? RULES.find((r) => r.id === p.rule)?.label : p.targetMode === "classes" ? `${p.classIds.length} class(es)` : "everyone"} ·{" "}
-                  {p.frequency === "once" ? "once" : p.frequency === "daily" ? "daily" : "until done"} · {p.startsOn || "now"}
-                  {p.endsOn ? ` → ${p.endsOn}` : ""}
-                </p>
-                {st ? (
-                  <p className="text-xs">
-                    Seen by {st.shown} · completed {st.done} · “Later” {st.dismissed}
-                    {typeof st.pendingNow === "number" ? ` · ${st.pendingNow} famil${st.pendingNow === 1 ? "y" : "ies"} still to do` : ""}
+            <li key={p.id} className="space-y-2 rounded-lg border border-[var(--border)] p-3 text-sm">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="flex flex-wrap items-center gap-2 font-semibold text-[var(--brand-deep)]">
+                    {p.title}
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        status.tone === "live"
+                          ? "bg-[var(--success-soft)] text-[var(--success)]"
+                          : status.tone === "wait"
+                            ? "bg-[var(--warning-soft)] text-[var(--warning)]"
+                            : "bg-[var(--surface)] text-[var(--muted)]"
+                      }`}
+                    >
+                      {status.label}
+                    </span>
                   </p>
-                ) : null}
+                  <p className="text-xs text-[var(--muted)]">
+                    {p.audience === "parents" ? "Parents" : "Staff"} ·{" "}
+                    {p.targetMode === "rule" ? RULES.find((r) => r.id === p.rule)?.label : p.targetMode === "classes" ? `${p.classIds.length} class(es)` : "everyone"} ·{" "}
+                    {p.frequency === "once" ? "once" : p.frequency === "daily" ? "daily" : "until done"} · {p.startsOn || "now"}
+                    {p.endsOn ? ` → ${p.endsOn}` : ""}
+                    {p.createdBy ? ` · by ${p.createdBy}` : ""}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className={btnOutline} onClick={() => setPreviewId(open ? "" : p.id)} aria-expanded={open}>
+                    {open ? "Hide preview" : "Preview"}
+                  </button>
+                  {canEdit ? (
+                    <>
+                      <button type="button" className={btnOutline} onClick={() => setDraft(p)}>
+                        Edit
+                      </button>
+                      <button type="button" className={btnOutline} onClick={() => void save({ ...p, active: !p.active })}>
+                        {p.active ? "Stop" : "Start"}
+                      </button>
+                      <button
+                        type="button"
+                        className={btnOutline}
+                        onClick={() => setDraft({ ...p, id: "", title: `${p.title} (copy)`, createdAt: "", createdBy: "", updatedAt: "" })}
+                      >
+                        Duplicate
+                      </button>
+                      <button type="button" className={btnOutline} onClick={() => void remove(p.id)}>
+                        Delete
+                      </button>
+                    </>
+                  ) : null}
+                </div>
               </div>
-              {canEdit ? (
-                <div className="flex gap-2">
-                  <button type="button" className={btnOutline} onClick={() => setDraft(p)}>
-                    Edit
-                  </button>
-                  <button type="button" className={btnOutline} onClick={() => void save({ ...p, active: !p.active })}>
-                    {p.active ? "Switch off" : "Switch on"}
-                  </button>
-                  <button type="button" className={btnOutline} onClick={() => void remove(p.id)}>
-                    Delete
-                  </button>
+
+              {st ? (
+                <div className="space-y-1.5">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {[
+                      { k: p.audience === "parents" ? "Families who saw it" : "Staff who saw it", v: st.shown },
+                      { k: p.form === "none" ? "Tapped OK / button" : "Completed", v: st.done },
+                      { k: "Tapped “Later”", v: st.dismissed },
+                      ...(toDo !== null ? [{ k: "Still to do", v: toDo }] : []),
+                    ].map((c) => (
+                      <div key={c.k} className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5">
+                        <p className="text-[10px] font-semibold uppercase text-[var(--muted)]">{c.k}</p>
+                        <p className="text-base font-bold text-[var(--brand-deep)]">{c.v}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {of > 0 ? (
+                    <div>
+                      <div className="h-2 overflow-hidden rounded-full bg-[var(--surface)]" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+                        <div className="h-full rounded-full bg-[var(--success)]" style={{ width: `${pct}%` }} />
+                      </div>
+                      <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+                        {st.done} of {of} {toDo !== null ? "families it is meant for" : "who saw it"} completed ({pct}%)
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-[var(--muted)]">Nobody has opened the app since it went live.</p>
+                  )}
+                </div>
+              ) : null}
+
+              {open ? (
+                <div className="space-y-2 pt-1">
+                  <LangSwitch lang={lang} setLang={setLang} />
+                  <AppPopupPreview popup={p} lang={lang} />
                 </div>
               ) : null}
             </li>
@@ -419,5 +498,23 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
         })}
       </ul>
     </section>
+  );
+}
+
+function LangSwitch({ lang, setLang }: { lang: "hi" | "en"; setLang: (l: "hi" | "en") => void }) {
+  return (
+    <div className="flex gap-1 text-xs" role="group" aria-label="Preview language">
+      {(["hi", "en"] as const).map((l) => (
+        <button
+          key={l}
+          type="button"
+          aria-pressed={lang === l}
+          onClick={() => setLang(l)}
+          className={`rounded-full border px-2.5 py-0.5 ${lang === l ? "border-[var(--brand-deep)] font-semibold text-[var(--brand-deep)]" : "border-[var(--border)] text-[var(--muted)]"}`}
+        >
+          {l === "hi" ? "Hindi (parents' default)" : "English"}
+        </button>
+      ))}
+    </div>
   );
 }
