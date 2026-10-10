@@ -3,6 +3,7 @@ import { apaarConsentPending } from "@/lib/apaarConsent";
 import { fileConsentRecord } from "@/lib/apaarConsent.server";
 import {
   aadhaarInScope,
+  childrenOnRoll,
   countAadhaarGaps,
   type AadhaarGapCounts,
   normalizeAppPopupsState,
@@ -28,6 +29,8 @@ import { pushSisToDb, rowToStudent } from "@/lib/sisNormalized.server";
  * shown/dismissed/done events in app_popup_events.
  */
 
+export { childrenOnRoll };
+
 export async function readAppPopups(): Promise<AppPopupsState | null> {
   const row = await readModuleLocalState<unknown>("app_popups");
   return row ? normalizeAppPopupsState(row.state) : null;
@@ -38,20 +41,13 @@ export async function writeAppPopups(state: AppPopupsState): Promise<{ ok: boole
   return w.ok ? { ok: true } : { ok: false, error: w.error };
 }
 
-/** The family's children who are on roll, one row each (the session's year preferred). */
+/** The family's children who are on roll, one row each (see childrenOnRoll). */
 export async function householdChildren(householdId: string, sessionAy: string): Promise<SisStudent[]> {
   await ensureSisHydratedServer();
-  const sis = loadSis();
-  const byKey = new Map<string, SisStudent>();
-  for (const s of sis.students) {
-    if (s.householdId !== householdId || s.status !== "active") continue;
-    const key = s.admissionNo || s.id;
-    const prev = byKey.get(key);
-    if (!prev || s.academicYearCode === sessionAy || (prev.academicYearCode !== sessionAy && s.academicYearCode > prev.academicYearCode)) {
-      byKey.set(key, s);
-    }
-  }
-  return [...byKey.values()];
+  return childrenOnRoll(
+    loadSis().students.filter((s) => s.householdId === householdId),
+    sessionAy,
+  );
 }
 
 export function missingDocKeys(s: SisStudent): string[] {

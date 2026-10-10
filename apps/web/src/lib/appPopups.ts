@@ -13,6 +13,8 @@
  * already gave the Aadhaar never sees the Aadhaar pop-up. Pure.
  */
 
+import type { SisStudent } from "@/lib/sis";
+
 export type AppPopupKind = "poster" | "info" | "form";
 export type AppPopupForm = "none" | "aadhaar" | "consent" | "documents";
 export type AppPopupAudience = "parents" | "staff";
@@ -247,4 +249,27 @@ export function isValidAadhaar(raw: string): boolean {
 export function maskAadhaarNumber(raw: string): string {
   const n = String(raw ?? "").replace(/\D/g, "");
   return n.length === 12 ? `XXXX-XXXX-${n.slice(8)}` : "";
+}
+
+/**
+ * Children on roll, one row each. SIS keeps a row per child per academic
+ * year and older rows stay "active" (erp-stale-academic-year-rows): a child
+ * who left this year has an inactive 2026-27 row and an active 2025-26 one,
+ * and was counted as on roll — their family would be asked for Aadhaar.
+ * Each child's row for `sessionAy` decides (else their newest row), and the
+ * child counts only if that row is active.
+ */
+export function childrenOnRoll(students: SisStudent[], sessionAy: string): SisStudent[] {
+  const byKey = new Map<string, SisStudent>();
+  for (const s of students) {
+    const key = `${s.householdId}|${s.admissionNo || s.id}`;
+    const prev = byKey.get(key);
+    const better =
+      !prev ||
+      (sessionAy && s.academicYearCode === sessionAy && prev.academicYearCode !== sessionAy) ||
+      (!(sessionAy && prev.academicYearCode === sessionAy) && s.academicYearCode > prev.academicYearCode) ||
+      (s.academicYearCode === prev.academicYearCode && s.status === "active" && prev.status !== "active");
+    if (better) byKey.set(key, s);
+  }
+  return [...byKey.values()].filter((s) => s.status === "active");
 }

@@ -11,7 +11,7 @@ import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { aadhaarInScope, normalizeAppPopup, type AppPopup } from "@/lib/appPopups";
 import { popupTextTooLong } from "@/lib/appPopupText";
-import { familyFacts, readAppPopups, schoolAadhaarGaps, writeAppPopups } from "@/lib/appPopups.server";
+import { childrenOnRoll, familyFacts, readAppPopups, schoolAadhaarGaps, writeAppPopups } from "@/lib/appPopups.server";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
@@ -21,7 +21,7 @@ import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function stats(popups: AppPopup[]) {
+async function stats(popups: AppPopup[], ay: string) {
   const out: Record<string, { shown: number; dismissed: number; done: number; pendingNow?: number; completeNow?: number }> = {};
   // Families (hh:<id>) who saved something on each pop-up.
   const savedBy = new Map<string, Set<string>>();
@@ -48,9 +48,9 @@ async function stats(popups: AppPopup[]) {
   const rulePopups = popups.filter((p) => p.targetMode === "rule");
   if (rulePopups.length) {
     await ensureSisHydratedServer();
+    // One row per child on roll — not every year's row (see childrenOnRoll).
     const byHousehold = new Map<string, SisStudent[]>();
-    for (const s of loadSis().students) {
-      if (s.status !== "active" || !s.householdId) continue;
+    for (const s of childrenOnRoll(loadSis().students.filter((x) => x.householdId), ay)) {
       byHousehold.set(s.householdId, [...(byHousehold.get(s.householdId) ?? []), s]);
     }
     for (const p of rulePopups) {
@@ -83,7 +83,7 @@ export async function GET(req: Request) {
   const ay = currentAcademicYearCode(loadMasters());
   const aadhaarCounts = await schoolAadhaarGaps(ay).catch(() => null);
   return NextResponse.json(
-    { ok: true, popups: state.popups, stats: await stats(state.popups), aadhaarCounts },
+    { ok: true, popups: state.popups, stats: await stats(state.popups, ay), aadhaarCounts },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

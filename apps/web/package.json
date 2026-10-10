@@ -359,6 +359,7 @@
     "test:app-popups": "npx tsx src/lib/appPopups.selftest.ts",
     "test:app-popup-preview": "npx tsx src/lib/appPopupPreview.selftest.ts",
     "test:app-popup-text": "npx tsx src/lib/appPopupText.selftest.ts",
+    "test:app-popups-on-roll": "npx tsx src/lib/appPopupsOnRoll.selftest.ts",
     "test:module-requests": "npx tsx src/lib/moduleRequests.selftest.ts",
     "test:weekly-holiday-range": "npx tsx src/lib/weeklyHolidayRange.selftest.ts",
     "test:push-voice": "npx tsx src/lib/pushVoice.selftest.ts",
