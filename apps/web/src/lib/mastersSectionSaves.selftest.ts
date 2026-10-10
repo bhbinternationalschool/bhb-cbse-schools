@@ -55,7 +55,7 @@ assert.ok(/guardMastersOverwrite\(/.test(route) && /guardSubjectsOverwrite\(stor
 assert.ok(/sliceStamps,/.test(route), "the load returns each section's stamp");
 const server = read("mastersNormalized.server.ts");
 assert.ok(/sb\.rpc\("masters_write_slices"/.test(server), "the writer calls the transactional function");
-const sql = readFileSync(join(__dirname, "../../../../supabase/migrations/20261010200000_masters_write_slices.sql"), "utf8");
+const sql = readFileSync(join(__dirname, "../../../../supabase/migrations/20261010220000_masters_write_slices.sql"), "utf8");
 assert.ok(/for update/.test(sql) && /if array_length\(v_conflicts, 1\) > 0 then\s*return/.test(sql), "locks, checks every base, writes nothing on any conflict");
 assert.ok(/grant execute on function public\.masters_write_slices\(uuid, jsonb, timestamptz\) to service_role/.test(sql), "service_role may call it");
 assert.ok(/revoke all on function public\.masters_write_slices/.test(sql), "nobody else may");
