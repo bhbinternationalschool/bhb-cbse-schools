@@ -246,6 +246,8 @@ SELFTESTS=(
   test:notifications-readers-only-grow
   test:attendance-side-lists-forward-only
   test:school-comms-newer-wins
+  test:class-gallery
+  test:class-media-link
   test:staff-attendance-row-stamps
   test:admissions-row-stamps
   test:payment-link-status-guard

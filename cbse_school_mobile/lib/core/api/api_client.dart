@@ -624,17 +624,127 @@ class GalleryPhoto {
     required this.id,
     required this.url,
     required this.caption,
+    this.kind = "photo",
   });
 
   factory GalleryPhoto.fromJson(Map<String, dynamic> j) => GalleryPhoto(
     id: (j["id"] as String?) ?? "",
     url: (j["url"] as String?) ?? "",
     caption: (j["caption"] as String?) ?? "",
+    kind: (j["kind"] as String?) == "video" ? "video" : "photo",
   );
 
   final String id;
   final String url;
   final String caption;
+
+  /// "video" for a class-gallery clip (opened in the phone's player).
+  final String kind;
+  bool get isVideo => kind == "video";
+}
+
+/// One event (album) of a class gallery, for the class teacher.
+class ClassGalleryEvent {
+  const ClassGalleryEvent({
+    required this.id,
+    required this.title,
+    required this.photos,
+    required this.videos,
+    required this.coverUrl,
+    required this.createdAt,
+    this.checking = 0,
+    this.held = 0,
+  });
+
+  factory ClassGalleryEvent.fromJson(Map<String, dynamic> j, String base) =>
+      ClassGalleryEvent(
+        id: "${j["id"] ?? ""}",
+        title: "${j["title"] ?? ""}",
+        photos: (j["photos"] as num?)?.toInt() ?? 0,
+        videos: (j["videos"] as num?)?.toInt() ?? 0,
+        coverUrl: "${j["coverUrl"] ?? ""}".startsWith("/")
+            ? "$base${j["coverUrl"]}"
+            : "${j["coverUrl"] ?? ""}",
+        createdAt: "${j["createdAt"] ?? ""}",
+        checking: (j["checking"] as num?)?.toInt() ?? 0,
+        held: (j["held"] as num?)?.toInt() ?? 0,
+      );
+
+  final String id;
+  final String title;
+
+  /// Passed the check — what parents see.
+  final int photos;
+  final int videos;
+  final String coverUrl;
+  final String createdAt;
+
+  /// Still being checked by the AI.
+  final int checking;
+
+  /// Held for the principal.
+  final int held;
+}
+
+/// A class-gallery item the AI check held (or is still checking), for the principal.
+class ClassReviewItem {
+  const ClassReviewItem({
+    required this.id,
+    required this.isVideo,
+    required this.url,
+    required this.status,
+    required this.note,
+    required this.event,
+    required this.classLabel,
+    required this.uploadedBy,
+  });
+
+  factory ClassReviewItem.fromJson(Map<String, dynamic> j, String base) =>
+      ClassReviewItem(
+        id: "${j["id"] ?? ""}",
+        isVideo: j["kind"] == "video",
+        url: "${j["url"] ?? ""}".startsWith("/")
+            ? "$base${j["url"]}"
+            : "${j["url"] ?? ""}",
+        status: "${j["status"] ?? ""}",
+        note: "${j["note"] ?? ""}",
+        event: "${j["event"] ?? ""}",
+        classLabel: "${j["classLabel"] ?? ""}",
+        uploadedBy: "${j["uploadedBy"] ?? ""}",
+      );
+
+  final String id;
+  final bool isVideo;
+  final String url;
+
+  /// "held" or "pending".
+  final String status;
+  final String note;
+  final String event;
+  final String classLabel;
+  final String uploadedBy;
+}
+
+/// The class teacher's class gallery: their class(es) and its events.
+class ClassGallery {
+  const ClassGallery({
+    required this.section,
+    required this.classLabel,
+    required this.classes,
+    required this.events,
+    this.canReview = false,
+    this.heldCount = 0,
+  });
+
+  /// The principal and leadership decide on held items.
+  final bool canReview;
+  final int heldCount;
+
+  /// "classId|sectionId" of the class shown.
+  final String section;
+  final String classLabel;
+  final List<({String section, String classLabel})> classes;
+  final List<ClassGalleryEvent> events;
 }
 
 /// A published album, with its pictures already in hand — the server sends
@@ -3211,12 +3321,19 @@ class ApiClient {
   }
 
   /// Counts a screen where someone hit the same error twice. Best effort.
-  Future<void> appGuideStuck({required String screen, required String message}) async {
+  Future<void> appGuideStuck({
+    required String screen,
+    required String message,
+  }) async {
     try {
       await http.post(
         _uri("/api/v1/app-guide"),
         headers: await _authHeaders(),
-        body: jsonEncode({"action": "stuck", "screen": screen, "message": message}),
+        body: jsonEncode({
+          "action": "stuck",
+          "screen": screen,
+          "message": message,
+        }),
       );
     } catch (_) {
       /* never in the user's way */
@@ -3234,13 +3351,12 @@ class ApiClient {
     required double lat,
     required double lng,
     double? accuracyM,
-  }) =>
-      _postData("/api/v1/transport/pickup-pin", {
-        "action": "save",
-        "lat": lat,
-        "lng": lng,
-        "accuracyM": ?accuracyM,
-      });
+  }) => _postData("/api/v1/transport/pickup-pin", {
+    "action": "save",
+    "lat": lat,
+    "lng": lng,
+    "accuracyM": ?accuracyM,
+  });
 
   /// "Not now" — recorded so the family is not asked again.
   Future<void> declinePickupPin() async {
@@ -3271,7 +3387,11 @@ class ApiClient {
   /// Completes a pop-up's form (Aadhaar numbers, a consent answer). Throws
   /// [ApiException] with the server's reason if it was not saved.
   Future<void> appPopupDone(String popupId, Map<String, dynamic> value) async {
-    await _postData("/api/v1/app/popups", {"popupId": popupId, "action": "done", ...value});
+    await _postData("/api/v1/app/popups", {
+      "popupId": popupId,
+      "action": "done",
+      ...value,
+    });
   }
 
   /// Reports an AI reply as wrong, unsafe or offensive.
@@ -3734,9 +3854,139 @@ class ApiClient {
 
   Future<List<GalleryAlbum>> fetchGalleryAlbums() async {
     final data = await _getData("/api/v1/gallery/albums");
-    return ((data["albums"] as List?) ?? const [])
-        .map((a) => GalleryAlbum.fromJson(a as Map<String, dynamic>))
+    // Class-gallery items come as ERP paths (they check who is looking):
+    // make them full URLs; [isOwnServer] then sends the login with them.
+    String abs(Object? u) {
+      final s = "${u ?? ""}";
+      return s.startsWith("/") ? "${config.apiBaseUrl}$s" : s;
+    }
+
+    return ((data["albums"] as List?) ?? const []).map((a) {
+      final m = Map<String, dynamic>.from(a as Map);
+      m["coverUrl"] = abs(m["coverUrl"]);
+      m["photos"] = ((m["photos"] as List?) ?? const []).map((p) {
+        final pm = Map<String, dynamic>.from(p as Map);
+        pm["url"] = abs(pm["url"]);
+        return pm;
+      }).toList();
+      return GalleryAlbum.fromJson(m);
+    }).toList();
+  }
+
+  /// Is this URL on the ERP itself (so the login may go with it)? Never true
+  /// for storage or any other host — the session must not leave the school.
+  bool isOwnServer(String url) => url.startsWith(config.apiBaseUrl);
+
+  /// A ten-minute link to a class-gallery video, for the phone's player.
+  Future<String> galleryVideoLink(String photoId) async {
+    final data = await _getData(
+      "/api/v1/gallery/media/${Uri.encodeComponent(photoId)}?link=1",
+    );
+    return "${data["url"] ?? ""}";
+  }
+
+  // ---- class gallery (class teachers) -------------------------------------
+
+  Future<ClassGallery> fetchClassGallery({String section = ""}) async {
+    final q = section.isEmpty ? "" : "?section=${Uri.encodeComponent(section)}";
+    final data = await _getData("/api/v1/staff/class-gallery$q");
+    final base = config.apiBaseUrl;
+    return ClassGallery(
+      section: "${data["section"] ?? ""}",
+      classLabel: "${data["classLabel"] ?? ""}",
+      classes: ((data["classes"] as List?) ?? const [])
+          .map(
+            (c) => (
+              section: "${(c as Map)["section"]}",
+              classLabel: "${c["classLabel"]}",
+            ),
+          )
+          .toList(),
+      events: ((data["events"] as List?) ?? const [])
+          .map(
+            (e) => ClassGalleryEvent.fromJson(e as Map<String, dynamic>, base),
+          )
+          .toList(),
+      canReview: data["canReview"] == true,
+      heldCount: (data["heldCount"] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  /// Items the AI check held (and those still being checked) — principal only.
+  Future<List<ClassReviewItem>> fetchClassReview() async {
+    final data = await _getData("/api/v1/staff/class-gallery/review");
+    final base = config.apiBaseUrl;
+    return ((data["items"] as List?) ?? const [])
+        .map((e) => ClassReviewItem.fromJson(e as Map<String, dynamic>, base))
         .toList();
+  }
+
+  /// [action] "approve" (parents see it) or "remove" (the file is deleted).
+  Future<void> decideClassItem(String id, String action) async {
+    await _postData("/api/v1/staff/class-gallery/review", {
+      "id": id,
+      "action": action,
+    });
+  }
+
+  /// An event of the class ("Sports day"); made if it does not exist. Returns its id.
+  Future<String> createClassEvent(String section, String name) async {
+    final data = await _postData("/api/v1/staff/class-gallery/event", {
+      "section": section,
+      "name": name,
+    });
+    return "${data["id"] ?? ""}";
+  }
+
+  /// One photo or video into an event: the file goes straight from the phone
+  /// to storage (a video does not fit through the server), then the ERP
+  /// records it and runs the AI check. [onProgress] gets 0..1. Returns
+  /// "ok" (parents see it), "held" (the principal decides) or "pending"
+  /// (still being checked).
+  Future<String> uploadClassMedia({
+    required String albumId,
+    required String fileName,
+    required String contentType,
+    required int length,
+    required Stream<List<int>> Function() open,
+    String caption = "",
+    void Function(double)? onProgress,
+  }) async {
+    final start = await _postData("/api/v1/staff/class-gallery/upload-url", {
+      "albumId": albumId,
+      "fileName": fileName,
+      "contentType": contentType,
+      "bytes": length,
+    });
+    final req = http.StreamedRequest("PUT", Uri.parse("${start["uploadUrl"]}"));
+    req.headers["Content-Type"] = "${start["contentType"]}";
+    req.headers["x-upsert"] = "false";
+    req.contentLength = length;
+    var sent = 0;
+    open().listen(
+      (chunk) {
+        sent += chunk.length;
+        req.sink.add(chunk);
+        onProgress?.call(length == 0 ? 1 : sent / length);
+      },
+      onDone: req.sink.close,
+      onError: (Object e) => req.sink.addError(e),
+      cancelOnError: true,
+    );
+    final res = await http.Response.fromStream(await req.send());
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw ApiException(
+        "The file did not upload (${res.statusCode}) — check the connection and try again.",
+        res.statusCode,
+      );
+    }
+    final done = await _postData("/api/v1/staff/class-gallery/complete", {
+      "albumId": albumId,
+      "photoId": start["photoId"],
+      "path": start["path"],
+      "caption": caption,
+    });
+    return "${done["status"] ?? "pending"}";
   }
 
   // ---- leave --------------------------------------------------------------

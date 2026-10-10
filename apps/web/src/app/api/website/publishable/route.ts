@@ -56,6 +56,8 @@ export async function GET(req: Request) {
       .from("school_comms_desk_albums")
       .select("id, title, description, published_at, created_at")
       .eq("tenant_id", tenantId)
+      // A class gallery album is for that class's families, never the website.
+      .eq("section_ids", "{}")
       .limit(200),
     sb
       .from("school_events")
