@@ -46,7 +46,10 @@ const CORE_IDS: DeskHydrateId[] = [
 
 /** Extra hydrators to run early when the user opens a module route. */
 const ROUTE_IDS: Record<string, DeskHydrateId[]> = {
-  home: ["sis", "admissions", "fees", "payments", "staff", "attendance"],
+  // Heavy desks are not forced here (Phase 3): everyone lands on home, and a
+  // teacher's home reads none of the fee book or the leads. The dashboards
+  // that do read them load them on first read and redraw when they land.
+  home: ["sis", "staff"],
   // transport is here because Fee Take BILLS transport dues — without it a
   // fresh login straight to the counter computed dues before the transport
   // assignments arrived, and the transport fee simply wasn't offered.

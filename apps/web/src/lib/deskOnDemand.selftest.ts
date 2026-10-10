@@ -40,7 +40,8 @@ void (async () => {
   assert.ok(priorityDeskHydrateIds("/students").has("attendance"), "student profile shows attendance");
   assert.ok(priorityDeskHydrateIds("/exams").has("attendance"), "report cards use attendance");
   assert.ok(priorityDeskHydrateIds("/field/calling").has("admissions"), "field apps read leads");
-  assert.ok(priorityDeskHydrateIds("/").has("fees"), "the home dashboard still loads its figures");
+  // Everyone lands on home: it forces nothing heavy; its dashboards load on first read.
+  for (const id of HEAVY_ON_DEMAND_IDS) assert.equal(priorityDeskHydrateIds("/").has(id), false, `home does not force ${id}`);
   console.log("  ok  heavy desks load on their routes only");
 
   // First read starts one load; later reads do not start another.
@@ -81,6 +82,7 @@ void (async () => {
     const body = src.slice(src.indexOf(`export function ${fn}()`), src.indexOf(`export function ${fn}()`) + 300);
     assert.ok(body.includes(`hydrateOnFirstRead("${id}"`), `${fn} loads its desk on first read`);
   }
+  assert.ok(/addEventListener\("bhb-desk-hydrated", refresh\)/.test(read("../components/dashboard/SchoolHomeDashboard.tsx")), "the home dashboard redraws when a desk lands");
   console.log("  ok  wiring: idle sweep skips heavy desks; each load*() is a first-read trigger");
   console.log("\nAll on-demand desk checks passed.");
   process.exit(0);
