@@ -89,6 +89,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: `Already paid — UTR ${paid.utr} is recorded on this.` }, { status: 409 });
   }
 
+  // A Cashgram pay link open (or collected) for this item is a payment in
+  // progress: sending a transfer too would pay twice.
+  const { liveCashgramForTarget } = await import("@/lib/cashgramRefunds.server");
+  const link = await liveCashgramForTarget(targetKind, targetId);
+  if (!link.ok) return NextResponse.json({ ok: false, error: link.error }, { status: 409 });
+  if (link.row) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          link.row.status === "REDEEMED"
+            ? "Already paid by a Cashgram link."
+            : "A Cashgram pay link is open for this — cancel it before paying another way.",
+      },
+      { status: 409 },
+    );
+  }
+
   const mode = payoutModeForInstrument(amountPaise, { vpa, accountNumber: accountNumber && ifsc ? accountNumber : "" });
   if (mode === "upi" && amountPaise > UPI_PAYOUT_MAX_PAISE) {
     return NextResponse.json(

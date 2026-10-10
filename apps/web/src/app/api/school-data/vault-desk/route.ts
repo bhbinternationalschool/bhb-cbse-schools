@@ -9,15 +9,17 @@ import {
   fetchVaultDeskFromDb,
   pushVaultDeskToDb,
   VAULT_DELETABLE_TABLES,
+  VAULT_STAMPED_SLICES,
 } from "@/lib/vaultNormalized.server";
 import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { readStampsParam } from "@/lib/rowStampClient";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["vault-desk"], "GET");
   if (!auth.ok) return auth.response
-  const { bundle, meta, ok } = await fetchVaultDeskFromDb();
+  const { bundle, meta, ok, stamps, settingsStamp } = await fetchVaultDeskFromDb();
   if (!ok) {
     return NextResponse.json(
       { ok: false, error: "Vault desk fetch failed — tenant/db unavailable" },
@@ -31,10 +33,16 @@ export async function GET(req: Request) {
     documentCount: bundle.documents.length,
     updatedAt: meta?.updatedAt || new Date().toISOString(),
     meta,
+    stamps,
+    settingsStamp,
   });
 }
 
-type VaultDeskPostBody = Pick<VaultState, "documents" | "settings"> & { deletes?: unknown };
+type VaultDeskPostBody = Pick<VaultState, "documents" | "settings"> & {
+  deletes?: unknown;
+  stamps?: unknown;
+  settingsBase?: string | null;
+};
 
 export async function POST(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["vault-desk"], "POST");
@@ -58,7 +66,11 @@ export async function POST(req: Request) {
     version: 1,
     documents: Array.isArray(body.documents) ? body.documents : [],
     settings: body.settings ?? { digestMobiles: "" },
-  }, readNamedDeletes(body.deletes, VAULT_DELETABLE_TABLES));
+  }, readNamedDeletes(body.deletes, VAULT_DELETABLE_TABLES), {
+    // No stamps = a tab from before 10 Oct 2026: it may add, never replace.
+    stamps: readStampsParam(body.stamps, VAULT_STAMPED_SLICES),
+    settingsBase: typeof body.settingsBase === "string" ? body.settingsBase : null,
+  });
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Sync failed" },
@@ -70,5 +82,8 @@ export async function POST(req: Request) {
     ok: true,
     documentCount: body.documents?.length ?? 0,
     updatedAt: new Date().toISOString(),
+    stamps: result.stamps,
+    conflicts: result.conflicts,
+    settingsStamp: result.settingsStamp,
   });
 }

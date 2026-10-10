@@ -16,6 +16,9 @@ export type PayoutState = {
   why: string;
   switchOn: boolean;
   testPassedAt: string | null;
+  /** Who approves a fee-refund link: "owner" | "above" | "none". */
+  refundApproval: "owner" | "above" | "none";
+  refundApprovalAbovePaise: number;
   updatedBy: string;
   updatedAt: string | null;
   /** null = could not be read — neither zero nor plenty. */

@@ -12,6 +12,7 @@
 
 import { emptyModuleRequestsState } from "@/lib/moduleRequests";
 import { emptyAppPopupsState } from "@/lib/appPopups";
+import { emptyParentLinkState } from "@/lib/parentNumberLink";
 import {
   createModuleStatePersistence,
   type ModuleStatePersistence,
@@ -129,6 +130,14 @@ const registry: Record<ModuleStateKey, ModuleStatePersistence<any>> = {
     key: "login_unknown_numbers",
     isEmpty: () => true,
     loadLocal: emptyUnknownLoginState,
+    writeLocalRaw: () => undefined,
+  }),
+  // Written only by the server (parents linking a number from the app, and
+  // the office approving it).
+  parent_linked_mobiles: createModuleStatePersistence({
+    key: "parent_linked_mobiles",
+    isEmpty: () => true,
+    loadLocal: emptyParentLinkState,
     writeLocalRaw: () => undefined,
   }),
   // Written only by the server (Comms → App pop-ups saves through its route).

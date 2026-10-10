@@ -18,6 +18,15 @@ import {
 } from "@/lib/deskNamedDeletes.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
+import { countDeskRows, writeDeskRows, type StampedDeskPushResult } from "@/lib/deskStamps.server";
+import { stampsOf } from "@/lib/rowStampWrite.server";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+
+/**
+ * Payroll lists the browser names row by row (10 Oct 2026). Runs are
+ * stamped; the audit trail is append-only, so its rows are only ever added.
+ */
+export const PAYROLL_STAMPED_SLICES = ["runs", "audit"] as const;
 
 export type PayrollDeskSyncMeta = {
   runCount: number;
@@ -253,10 +262,17 @@ function rowToAudit(r: Record<string, unknown>): PayrollAuditEntry {
 /** The only payroll table a desk save deletes from — by named id. */
 export const PAYROLL_DELETABLE_TABLES = ["payroll_desk_runs"] as const;
 
+/**
+ * Save the payroll desk. Stamped (`opts.stamps`): only the runs named, each
+ * at the stamp it was loaded at — a stale tab can no longer put a posted run
+ * back to draft. A run's lines go only with a run whose save landed.
+ * Unstamped (older tabs): new runs only. Audit rows are only ever added.
+ */
 export async function pushPayrollDeskToDb(
   state: PayrollState,
   deletes: NamedDeletes = {},
-): Promise<{ ok: boolean; error?: string }> {
+  opts: { stamps?: RowStamps } = {},
+): Promise<StampedDeskPushResult> {
   if (!payrollDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
@@ -277,61 +293,85 @@ export async function pushPayrollDeskToDb(
     });
   }
 
-  const tables: [string, Record<string, unknown>[]][] = [
-    ["payroll_desk_runs", runs.map((r) => runToRow(tenantId, r))],
-    ["payroll_desk_run_lines", lineRows],
-    ["payroll_desk_audit", audit.map((a) => auditToRow(tenantId, a))],
-  ];
+  const stamped = opts.stamps !== undefined;
+  const conflicts: RowConflicts = {};
+  const runWrite = await writeDeskRows(
+    sb,
+    tenantId,
+    "payroll_desk_runs",
+    runs.map((r) => runToRow(tenantId, r)),
+    stamped ? (opts.stamps!.runs ?? {}) : undefined,
+  );
+  if (!runWrite.ok) return runWrite;
+  if (runWrite.conflicts.length) conflicts.runs = runWrite.conflicts;
 
-  for (const [table, rows] of tables) {
-    const r = await upsertChunks(sb, table, rows);
-    if (!r.ok) return r;
-  }
+  // Lines travel only with a run whose save landed.
+  const landedRuns = runs.filter((r) => runWrite.landed.has(r.id));
+  const landedLines = lineRows.filter((l) => runWrite.landed.has(String(l.run_id)));
+  const up = await upsertChunks(sb, "payroll_desk_run_lines", landedLines);
+  if (!up.ok) return { ok: false, error: up.error || "payroll_desk_run_lines: write failed" };
+
+  // The audit trail is append-only: its rows are added, never rewritten.
+  const auditWrite = await writeDeskRows(
+    sb,
+    tenantId,
+    "payroll_desk_audit",
+    audit
+      .filter((a) => !stamped || a.id in (opts.stamps!.audit ?? {}))
+      .map((a) => auditToRow(tenantId, a)),
+    undefined,
+  );
+  if (!auditWrite.ok) return auditWrite;
 
   // No prune by absence. A run the user deleted is named (its lines go with
   // it, on delete cascade). A run's lines are positional, so a draft that
   // lost a staff line leaves its last index behind: remove those — only under
-  // runs this payload carries in full. The audit trail is append-only; the
-  // browser keeps the newest 500 and used to delete everything older.
+  // runs whose save just landed.
   const delRuns = await deleteNamedIds(sb, tenantId, "payroll_desk_runs", [...goneRuns]);
-  if (!delRuns.ok) return delRuns;
+  if (!delRuns.ok) return { ok: false, error: delRuns.error || "payroll_desk_runs: delete failed" };
   const delLines = await deleteChildrenNotKept(
     sb,
     tenantId,
     "payroll_desk_run_lines",
     "run_id",
-    runs.map((r) => r.id),
+    landedRuns.map((r) => r.id),
     lineKeep,
   );
-  if (!delLines.ok) return delLines;
+  if (!delLines.ok) return { ok: false, error: delLines.error || "payroll_desk_run_lines: delete failed" };
 
-  const draftCount = runs.filter((r) => r.status === "draft").length;
-  const lineCount = runs.reduce((n, r) => n + (r.lines?.length ?? 0), 0);
-  let lastRunMonth: string | null = null;
-  for (const r of runs) {
-    if (r.month && (!lastRunMonth || r.month > lastRunMonth)) {
-      lastRunMonth = r.month;
-    }
-  }
-
+  // Counted from the tables: a stamped save carries only what changed.
+  const [runCount, lineCount, draftCount, lastRun] = await Promise.all([
+    countDeskRows(sb, tenantId, "payroll_desk_runs"),
+    countDeskRows(sb, tenantId, "payroll_desk_run_lines"),
+    countDeskRows(sb, tenantId, "payroll_desk_runs", { column: "status", value: "draft" }),
+    sb
+      .from("payroll_desk_runs")
+      .select("month")
+      .eq("tenant_id", tenantId)
+      .neq("month", "")
+      .order("month", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
   await sb.from("payroll_desk_sync_meta").upsert(
     {
       tenant_id: tenantId,
-      run_count: runs.length,
+      run_count: runCount,
       line_count: lineCount,
       draft_count: draftCount,
-      last_run_month: lastRunMonth,
+      last_run_month: (lastRun.data as { month?: string } | null)?.month ?? null,
       updated_at: now,
     },
     { onConflict: "tenant_id" },
   );
 
-  return { ok: true };
+  return { ok: true, stamps: { runs: runWrite.stamps }, conflicts, kept: runWrite.kept };
 }
 
 export async function fetchPayrollDeskFromDb(): Promise<{
   bundle: PayrollDeskBundle;
   meta: PayrollDeskSyncMeta | null;
+  stamps?: RowStamps;
   /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
   ok: boolean;
 }> {
@@ -408,6 +448,10 @@ export async function fetchPayrollDeskFromDb(): Promise<{
           updatedAt: String((metaRow as { updated_at: string }).updated_at),
         }
       : null,
+    stamps: {
+      runs: stampsOf(runRows as Record<string, unknown>[]),
+      audit: stampsOf(auditRows as Record<string, unknown>[]),
+    },
     ok: true,
   };
 }

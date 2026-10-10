@@ -11,6 +11,10 @@ import {
   recordDeskSyncSuccess,
 } from "@/lib/deskSyncStatus";
 import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
+import { afterStampedDeskSave, captureDeskStamps, stampedDeskBody } from "@/lib/deskStampsClient";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+
+const EXAMS_SLICES = ["terms", "subjects", "dateSheet", "promotions", "rooms", "seating"] as const;
 
 const EXAMS_DESK = "exams";
 
@@ -78,30 +82,40 @@ export function scheduleExamsDeskSync(state: ExamsState) {
 
 async function pushExamsDeskApi(state: ExamsState) {
   const sentDeletes = pendingDeskDeletes(EXAMS_DESK);
+  // Setup only. Sheets go one at a time through examsSheetSync.ts — sending
+  // them here replaced (and pruned) every sheet on the server. Only the rows
+  // this browser changed travel, each with the stamp it loaded; rooms and
+  // seating plans now travel too (they never did before 10 Oct 2026).
+  const holder = {
+    terms: state.terms,
+    subjects: state.subjects,
+    dateSheet: state.dateSheet,
+    promotions: state.promotions,
+    rooms: state.rooms ?? [],
+    seating: state.seating ?? [],
+    policy: state.policy,
+  } as Record<string, unknown>;
+  const sent = stampedDeskBody("exams", holder, EXAMS_SLICES, "policy");
+  if (!sent.anything && !Object.values(sentDeletes).some((ids) => ids?.length)) return;
   try {
     const res = await fetch("/api/school-data/exams-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // Setup only. Sheets go one at a time through examsSheetSync.ts —
-      // sending them here replaced (and pruned) every sheet on the server.
-      body: JSON.stringify({
-        terms: state.terms,
-        subjects: state.subjects,
-        dateSheet: state.dateSheet,
-        policy: state.policy,
-        promotions: state.promotions,
-        // Deletions are named, never inferred from what this browser lacks.
-        deletes: sentDeletes,
-      }),
+      // Deletions are named, never inferred from what this browser lacks.
+      body: JSON.stringify({ ...sent.body, deletes: sentDeletes }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
       updatedAt?: string;
       sheetCount?: number;
       error?: string;
+      stamps?: RowStamps;
+      conflicts?: RowConflicts;
+      settingsStamp?: string;
     } | null;
     if (res.ok && body?.ok) {
       confirmDeskDeletes(EXAMS_DESK, sentDeletes);
+      afterStampedDeskSave("exams", holder, EXAMS_SLICES, sent, body, "policy");
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
         sheetCount: body.sheetCount ?? state.sheets.length,
@@ -127,9 +141,13 @@ export async function fetchExamsDeskFromApi(): Promise<{
     sheets: ExamsState["sheets"];
     policy: ExamsState["policy"];
     promotions: ExamsState["promotions"];
+    rooms: ExamsState["rooms"];
+    seating: ExamsState["seating"];
   };
   updatedAt: string;
   sheetCount: number;
+  stamps?: RowStamps;
+  policyStamp?: string;
 } | null> {
   if (!examsNormalizedSyncEnabled()) return null;
   try {
@@ -145,8 +163,12 @@ export async function fetchExamsDeskFromApi(): Promise<{
       sheets?: ExamsState["sheets"];
       policy?: ExamsState["policy"];
       promotions?: ExamsState["promotions"];
+      rooms?: ExamsState["rooms"];
+      seating?: ExamsState["seating"];
       updatedAt?: string;
       sheetCount?: number;
+      stamps?: RowStamps;
+      policyStamp?: string;
     };
     if (!Array.isArray(body.sheets)) return null;
     return {
@@ -157,9 +179,13 @@ export async function fetchExamsDeskFromApi(): Promise<{
         sheets: body.sheets,
         policy: body.policy!,
         promotions: body.promotions ?? [],
+        rooms: body.rooms ?? [],
+        seating: body.seating ?? [],
       },
       updatedAt: body.updatedAt || "",
       sheetCount: body.sheetCount ?? body.sheets.length,
+      stamps: body.stamps,
+      policyStamp: body.policyStamp,
     };
   } catch {
     return null;
@@ -218,12 +244,12 @@ export async function hydrateExamsDeskFromDb(
     updatedAt: remote.updatedAt,
     sheetCount: remote.sheetCount,
   });
+  // The setup as the server holds it is the base of the next save.
+  captureDeskStamps("exams", remote.bundle as Record<string, unknown>, EXAMS_SLICES, remote.stamps, remote.policyStamp, "policy");
 
   return {
     bundle: {
       version: 1,
-      rooms: [],
-      seating: [],
       ...remote.bundle,
     },
     changed: true,

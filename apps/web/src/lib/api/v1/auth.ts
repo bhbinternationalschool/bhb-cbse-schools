@@ -238,6 +238,15 @@ export async function resolveApiAuth(request: Request): Promise<ApiAuthContext> 
   const masters = await loadServerMasters();
   const session = revalidateStaffSession(cookieSession, masters);
 
+  // A family the school has made inactive (every child) is signed out of
+  // the app, with the reason — not left on a screen of errors.
+  if (session.persona === "parent" && session.householdId) {
+    const { readFamilyRollStatus, FAMILY_INACTIVE_MESSAGE } = await import("@/lib/parentFamilyStatus.server");
+    if ((await readFamilyRollStatus(session.householdId, session.academicYearCode || "")) === "inactive") {
+      throw new ApiError("family_inactive", FAMILY_INACTIVE_MESSAGE, 403);
+    }
+  }
+
   return {
     session,
     masters,

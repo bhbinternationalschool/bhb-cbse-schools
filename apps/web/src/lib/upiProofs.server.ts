@@ -212,6 +212,8 @@ export async function answerPendingUpiProof(
   }
   const pick = row.candidates[choice];
   if (!pick) return { ok: false, error: "That choice is no longer on offer — send the screenshot again." };
+  const blocked = await cashgramBlocks(pick.kind, pick.targetId);
+  if (blocked) return { ok: false, error: blocked };
   const { data: upd, error } = await ctx.sb
     .from("upi_payment_proofs")
     .update({
@@ -238,6 +240,22 @@ export async function answerPendingUpiProof(
   return { ok: true, recorded: (upd as UpiProofRow | null) ?? null };
 }
 
+/**
+ * Why a UTR must not be recorded against this item now: a Cashgram pay link is
+ * open for it, or already collected. "" when nothing blocks it. Fails closed —
+ * an unreadable check blocks, since recording would mark a salary paid that a
+ * link may be paying too.
+ */
+async function cashgramBlocks(kind: string, targetId: string): Promise<string> {
+  const { liveCashgramForTarget } = await import("@/lib/cashgramRefunds.server");
+  const link = await liveCashgramForTarget(kind, targetId);
+  if (!link.ok) return link.error;
+  if (!link.row) return "";
+  return link.row.status === "REDEEMED"
+    ? "Already paid by a Cashgram link — this would be a second payment."
+    : "A Cashgram pay link is open for this — cancel it first, or this is paid twice.";
+}
+
 /** Recorded from the ERP's own Pay by UPI button. */
 export async function recordUpiProofFromErp(input: {
   utr: string;
@@ -253,6 +271,8 @@ export async function recordUpiProofFromErp(input: {
 }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "tenant unavailable" };
+  const blocked = await cashgramBlocks(input.targetKind, input.targetId);
+  if (blocked) return { ok: false, error: blocked };
   const id = `upr_${randomBytes(9).toString("base64url")}`;
   const { error } = await ctx.sb.from("upi_payment_proofs").insert({
     id,

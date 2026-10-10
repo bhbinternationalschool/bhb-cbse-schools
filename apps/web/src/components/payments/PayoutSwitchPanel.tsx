@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import { RefreshCw, Send, Wallet } from "lucide-react";
 import { isVpa } from "@/lib/upiPay";
 import { loadPayoutState, type PayoutState } from "@/lib/payoutsClient";
+import { CashgramRefundApprovals } from "@/components/payments/CashgramRefundApprovals";
 
 const CARD = "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
 const BTN =
@@ -177,6 +178,7 @@ export function PayoutSwitchPanel() {
         <p className="mt-3 text-[11px] text-[var(--muted)]">Only the owner / director can switch this.</p>
       )}
       {msg ? <p className={`mt-2 text-sm font-semibold ${msg.bad ? "text-red-700" : "text-emerald-700"}`}>{msg.text}</p> : null}
+      {state.configured ? <CashgramRefundApprovals state={state} onChanged={() => void refresh()} /> : null}
     </div>
   );
 }

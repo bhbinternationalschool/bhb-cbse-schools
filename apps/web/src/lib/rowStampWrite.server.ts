@@ -31,6 +31,8 @@ export async function writeStampedRows(
   tenantId: string,
   rows: Record<string, unknown>[],
   stamps: Record<string, string>,
+  /** The table's unique key for inserts — "tenant_id,id" where id alone is not unique. */
+  conflictKey = "id",
 ): Promise<StampedWriteResult> {
   const written: Record<string, string> = {};
   const conflicts: string[] = [];
@@ -40,7 +42,7 @@ export async function writeStampedRows(
     const part = fresh.slice(i, i + 200);
     const { data, error } = await sb
       .from(table)
-      .upsert(part, { onConflict: "id", ignoreDuplicates: true })
+      .upsert(part, { onConflict: conflictKey, ignoreDuplicates: true })
       .select("id, updated_at");
     if (error) return { ok: false, error: error.message };
     const got = new Map((data ?? []).map((d) => [String(d.id), String(d.updated_at)]));
