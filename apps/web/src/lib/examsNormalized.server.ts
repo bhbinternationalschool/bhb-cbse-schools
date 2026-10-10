@@ -31,6 +31,15 @@ import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server
 import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
 import { replaceChildRows } from "./replaceChildRows.server";
 import { sameInstant } from "@/lib/examsSheetVersion";
+import {
+  countDeskRows,
+  settingsStampOf,
+  writeDeskRows,
+  writeDeskSettings,
+  type StampedDeskPushResult,
+} from "@/lib/deskStamps.server";
+import { stampsOf } from "@/lib/rowStampWrite.server";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
 
 export type ExamDeskSyncMeta = {
   termCount: number;
@@ -425,10 +434,32 @@ export const EXAMS_TABLE_SLICES: Record<string, string> = {
   exam_desk_seating: "seating",
 };
 
+/**
+ * Exam setup lists saved row by row with stamps (10 Oct 2026), the table
+ * each lives in, and its unique key (rooms and seating are keyed per school).
+ */
+export const EXAMS_STAMPED_TABLES = {
+  terms: { table: "exam_desk_terms", key: "id" },
+  subjects: { table: "exam_desk_subjects", key: "id" },
+  dateSheet: { table: "exam_desk_date_sheet", key: "id" },
+  promotions: { table: "exam_desk_promotions", key: "id" },
+  rooms: { table: "exam_desk_rooms", key: "tenant_id,id" },
+  seating: { table: "exam_desk_seating", key: "tenant_id,id" },
+} as const;
+export type ExamsStampedSlice = keyof typeof EXAMS_STAMPED_TABLES;
+export const EXAMS_STAMPED_SLICES = Object.keys(EXAMS_STAMPED_TABLES) as ExamsStampedSlice[];
+
+/**
+ * Save the exam setup. Stamped (`opts.stamps`): only the rows named, each
+ * at the stamp it was loaded at — an old tab can no longer put back
+ * yesterday's date sheet. The policy only when changed, from its stamp.
+ * Unstamped (older tabs): new rows only (deskStamps.server).
+ */
 export async function pushExamDeskToDb(
   state: ExamsState,
   deletes: NamedDeletes = {},
-): Promise<{ ok: boolean; error?: string }> {
+  opts: { stamps?: RowStamps; policyBase?: string | null } = {},
+): Promise<StampedDeskPushResult> {
   if (!examsDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
@@ -457,26 +488,33 @@ export async function pushExamDeskToDb(
   // No prune by absence (any more than for sheets): subjects and promotions
   // are never deleted in the UI; a term, a date-sheet row, a room or a
   // seating plan goes only when the user deleted it, and arrives named.
-  let r = await upsertChunks(
-    sb,
-    "exam_desk_terms",
-    terms.map((t) => termToRow(tenantId, t)),
-  );
-  if (!r.ok) return r;
-
-  r = await upsertChunks(
-    sb,
-    "exam_desk_subjects",
-    subjects.map((s) => subjectToRow(tenantId, s)),
-  );
-  if (!r.ok) return r;
-
-  r = await upsertChunks(
-    sb,
-    "exam_desk_date_sheet",
-    dateSheet.map((d) => dateSheetToRow(tenantId, d)),
-  );
-  if (!r.ok) return r;
+  const stamped = opts.stamps !== undefined;
+  const rowsBySlice: Record<ExamsStampedSlice, Record<string, unknown>[]> = {
+    terms: terms.map((t) => termToRow(tenantId, t)),
+    subjects: subjects.map((x) => subjectToRow(tenantId, x)),
+    dateSheet: dateSheet.map((d) => dateSheetToRow(tenantId, d)),
+    promotions: promotions.map((p) => promotionToRow(tenantId, p)),
+    rooms: rooms.map((x) => roomToRow(tenantId, x)),
+    seating: seating.map((x) => seatingToRow(tenantId, x)),
+  };
+  const stamps: RowStamps = {};
+  const conflicts: RowConflicts = {};
+  let kept = 0;
+  for (const slice of EXAMS_STAMPED_SLICES) {
+    const { table, key } = EXAMS_STAMPED_TABLES[slice];
+    const w = await writeDeskRows(
+      sb,
+      tenantId,
+      table,
+      rowsBySlice[slice],
+      stamped ? (opts.stamps![slice] ?? {}) : undefined,
+      key,
+    );
+    if (!w.ok) return w;
+    stamps[slice] = w.stamps;
+    if (w.conflicts.length) conflicts[slice] = w.conflicts;
+    kept += w.kept;
+  }
 
   // Deleting an exam (allowed only while it has no marks) drops its sheets
   // locally; mirror that for that exam's sheets that have no marks. Only an
@@ -486,38 +524,36 @@ export async function pushExamDeskToDb(
     await deleteEmptySheetsOfTerms(sb, tenantId, [...goneTerms]);
   }
 
-  r = await upsertChunks(
-    sb,
-    "exam_desk_promotions",
-    promotions.map((p) => promotionToRow(tenantId, p)),
-  );
-  if (!r.ok) return r;
-
-  r = await upsertChunks(sb, "exam_desk_rooms", rooms.map((x) => roomToRow(tenantId, x)));
-  if (!r.ok) return r;
-
-  r = await upsertChunks(sb, "exam_desk_seating", seating.map((x) => seatingToRow(tenantId, x)));
-  if (!r.ok) return r;
-
   for (const table of EXAMS_DELETABLE_TABLES) {
     const del = await deleteNamedIds(sb, tenantId, table, deletes[table]);
-    if (!del.ok) return del;
+    if (!del.ok) return { ok: false, error: del.error || `${table}: delete failed` };
   }
 
-  await sb.from("exam_desk_policy").upsert({
-    tenant_id: tenantId,
-    policy_json: policy,
-    updated_at: now,
-  });
+  const set = await writeDeskSettings(
+    sb,
+    tenantId,
+    "exam_desk_policy",
+    { policy_json: policy },
+    stamped,
+    opts.policyBase,
+  );
+  if (!set.ok) return set;
+  if (set.conflict) conflicts.policy = ["policy"];
 
+  // Counted from the tables: a stamped save carries only what changed.
+  const [termCount, subjectCount, promotionCount] = await Promise.all([
+    countDeskRows(sb, tenantId, "exam_desk_terms"),
+    countDeskRows(sb, tenantId, "exam_desk_subjects"),
+    countDeskRows(sb, tenantId, "exam_desk_promotions"),
+  ]);
   await writeSyncMeta(sb, tenantId, {
-    term_count: terms.length,
-    subject_count: subjects.length,
-    promotion_count: promotions.length,
+    term_count: termCount,
+    subject_count: subjectCount,
+    promotion_count: promotionCount,
     updated_at: now,
   });
 
-  return { ok: true };
+  return { ok: true, stamps, conflicts, settingsStamp: set.stamp, kept };
 }
 
 async function countRows(
@@ -654,6 +690,9 @@ function rowToSeating(r: Record<string, unknown>): ExamSeatingPlan {
 export async function fetchExamDeskFromDb(): Promise<{
   bundle: ExamDeskBundle;
   meta: ExamDeskSyncMeta | null;
+  /** Each setup row's `updated_at` — the base of the next stamped save. */
+  stamps?: RowStamps;
+  policyStamp?: string;
 }> {
   const ctx = await resolveCtx();
   const empty: ExamDeskBundle = {
@@ -680,20 +719,32 @@ export async function fetchExamDeskFromDb(): Promise<{
     { data: seatingRows },
     { data: metaRow },
   ] = await Promise.all([
-    sb.from("exam_desk_terms").select("*").eq("tenant_id", tenantId),
-    sb.from("exam_desk_subjects").select("*").eq("tenant_id", tenantId),
-    sb.from("exam_desk_date_sheet").select("*").eq("tenant_id", tenantId),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("exam_desk_terms").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("exam_desk_subjects").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("exam_desk_date_sheet").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
     fetchAllPages<Record<string, unknown>>((from, to) =>
       sb.from("exam_desk_sheets").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
     ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
     sb
       .from("exam_desk_policy")
-      .select("policy_json")
+      .select("policy_json, updated_at")
       .eq("tenant_id", tenantId)
       .maybeSingle(),
-    sb.from("exam_desk_promotions").select("*").eq("tenant_id", tenantId),
-    sb.from("exam_desk_rooms").select("*").eq("tenant_id", tenantId),
-    sb.from("exam_desk_seating").select("*").eq("tenant_id", tenantId),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("exam_desk_promotions").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("exam_desk_rooms").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("exam_desk_seating").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
     sb
       .from("exam_desk_sync_meta")
       .select(META_SELECT)
@@ -858,6 +909,15 @@ export async function fetchExamDeskFromDb(): Promise<{
       seating: (seatingRows ?? []).map((r) => rowToSeating(r as Record<string, unknown>)),
     },
     meta: mapMetaRow(metaRow as Record<string, unknown> | null),
+    stamps: {
+      terms: stampsOf(termRows as Record<string, unknown>[] | null),
+      subjects: stampsOf(subjectRows as Record<string, unknown>[] | null),
+      dateSheet: stampsOf(dateRows as Record<string, unknown>[] | null),
+      promotions: stampsOf(promoRows as Record<string, unknown>[] | null),
+      rooms: stampsOf(roomRows as Record<string, unknown>[] | null),
+      seating: stampsOf(seatingRows as Record<string, unknown>[] | null),
+    },
+    policyStamp: settingsStampOf(policyRow),
   };
 }
 
@@ -873,6 +933,8 @@ export async function fetchExamDeskFromDb(): Promise<{
 export async function fetchExamSetupFromDb(): Promise<{
   ok: boolean;
   bundle: Omit<ExamDeskBundle, "sheets">;
+  stamps?: RowStamps;
+  policyStamp?: string;
 }> {
   const empty = {
     terms: [],
@@ -887,13 +949,25 @@ export async function fetchExamSetupFromDb(): Promise<{
   if (!ctx) return { ok: false, bundle: empty };
   const { sb, tenantId } = ctx;
   const results = await Promise.all([
-    sb.from("exam_desk_terms").select("*").eq("tenant_id", tenantId),
-    sb.from("exam_desk_subjects").select("*").eq("tenant_id", tenantId),
-    sb.from("exam_desk_date_sheet").select("*").eq("tenant_id", tenantId),
-    sb.from("exam_desk_policy").select("policy_json").eq("tenant_id", tenantId).maybeSingle(),
-    sb.from("exam_desk_promotions").select("*").eq("tenant_id", tenantId),
-    sb.from("exam_desk_rooms").select("*").eq("tenant_id", tenantId),
-    sb.from("exam_desk_seating").select("*").eq("tenant_id", tenantId),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("exam_desk_terms").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("exam_desk_subjects").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("exam_desk_date_sheet").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
+    sb.from("exam_desk_policy").select("policy_json, updated_at").eq("tenant_id", tenantId).maybeSingle(),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("exam_desk_promotions").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("exam_desk_rooms").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      sb.from("exam_desk_seating").select("*").eq("tenant_id", tenantId).order("id", { ascending: true }).range(from, to),
+    ).then((r) => ({ data: r.rows, error: r.error ? { message: r.error } : null })),
   ]);
   if (results.some((r) => r.error)) return { ok: false, bundle: empty };
   const [terms, subjects, dates, policyRow, promos, rooms, seating] = results;
@@ -913,6 +987,15 @@ export async function fetchExamSetupFromDb(): Promise<{
       rooms: rows(rooms).map(rowToRoom).sort((a, b) => a.sortOrder - b.sortOrder),
       seating: rows(seating).map(rowToSeating),
     },
+    stamps: {
+      terms: stampsOf(rows(terms)),
+      subjects: stampsOf(rows(subjects)),
+      dateSheet: stampsOf(rows(dates)),
+      promotions: stampsOf(rows(promos)),
+      rooms: stampsOf(rows(rooms)),
+      seating: stampsOf(rows(seating)),
+    },
+    policyStamp: settingsStampOf(policyRow.data),
   };
 }
 

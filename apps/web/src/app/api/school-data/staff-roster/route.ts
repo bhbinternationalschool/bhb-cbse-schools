@@ -10,6 +10,8 @@ import type { MastersState } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { hasPermission } from "@/lib/rbac";
 import { redactStaffRoster } from "@/lib/staffRosterRedact";
+import { readStampsParam } from "@/lib/rowStampClient";
+import { STAFF_STAMPED_SLICES } from "@/lib/staffPersistence";
 
 export const runtime = "nodejs";
 
@@ -74,7 +76,7 @@ export async function POST(req: Request) {
   const auth = await requireStaffPermission(req, "staff", "edit");
   if (!auth.ok) return auth.response;
 
-  let body: { state?: Partial<MastersState> };
+  let body: { state?: Partial<MastersState>; stamps?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -102,14 +104,22 @@ export async function POST(req: Request) {
     };
   }
 
-  const result = await pushStaffRemoteServer(body.state as MastersState);
+  // Stamped (current browsers): only the rows named, each at its stamp.
+  // Unstamped (older tabs): new rows added, stored rows never replaced.
+  const result = await pushStaffRemoteServer(
+    body.state as MastersState,
+    readStampsParam(body.stamps, STAFF_STAMPED_SLICES),
+  );
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Push failed" },
       { status: 502 },
     );
   }
-  return NextResponse.json({ ok: true });
+  if (result.kept) {
+    console.warn(`[staff-roster] unstamped save left ${result.kept} stored row(s) as they were`);
+  }
+  return NextResponse.json({ ok: true, stamps: result.stamps, conflicts: result.conflicts });
 }
 
 /** DELETE — wipe staff roster (used by tenant reset flows) */

@@ -235,6 +235,9 @@ SELFTESTS=(
   test:student-leave-status-guard
   test:ptm-row-stamps
   test:desk-on-demand
+  test:masters-section-saves
+  test:accounts-row-stamps
+  test:staff-row-stamps
   test:desk-stamps
   test:attendance-row-stamps
   test:fee-extras-forward-only

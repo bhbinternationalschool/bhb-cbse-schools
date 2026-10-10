@@ -7,6 +7,9 @@ import type { MastersState } from "@/lib/masters";
 import { emptyMastersShell } from "@/lib/masters";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { stripStaffFromMastersForBlob } from "@/lib/staffPersistence";
+import { MASTERS_SLICE_KEYS } from "@/lib/mastersNormalized.server";
+import { STAFF_OWNED_MASTERS_SLICES } from "@/lib/staffDbConfig";
+import { rowFingerprint } from "@/lib/sliceRevClient";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 import {
   recordDeskSyncFailure,
@@ -194,23 +197,72 @@ export function scheduleMastersDeskSync(state: MastersState) {
  */
 export type MastersPushResult = { ok: true } | { ok: false; reason: string };
 
+/**
+ * Section saves (10 Oct 2026). Each Masters section's stamp and content as
+ * this browser loaded it; a save sends only the sections that differ, each
+ * with its stamp, so an edit to holidays no longer collides with a
+ * concession saved elsewhere. Null until a full desk is loaded (a teacher's
+ * reduced copy never becomes a base). Page memory only.
+ */
+let sliceBase: Map<string, { stamp: string; hash: number }> | null = null;
+const STAFF_OWNED = new Set<string>(STAFF_OWNED_MASTERS_SLICES as readonly string[]);
+
+function captureSliceBases(bundle: Record<string, unknown>, stamps: Record<string, string> | undefined) {
+  if (!stamps) {
+    sliceBase = null;
+    return;
+  }
+  const next = new Map<string, { stamp: string; hash: number }>();
+  for (const key of MASTERS_SLICE_KEYS) {
+    if (STAFF_OWNED.has(key)) continue;
+    next.set(key, { stamp: stamps[key] ?? "", hash: rowFingerprint(bundle[key] ?? null) });
+  }
+  sliceBase = next;
+}
+
+/** The sections of this save that differ from what was loaded, with their stamps. */
+export function mastersSectionSave(
+  rest: Record<string, unknown>,
+  base: Map<string, { stamp: string; hash: number }>,
+): { sections: Record<string, unknown>; bases: Record<string, string> } {
+  const sections: Record<string, unknown> = {};
+  const bases: Record<string, string> = {};
+  for (const key of MASTERS_SLICE_KEYS) {
+    if (STAFF_OWNED.has(key) || rest[key] === undefined) continue;
+    const b = base.get(key);
+    if (b && b.hash === rowFingerprint(rest[key] ?? null)) continue;
+    sections[key] = rest[key];
+    bases[key] = b?.stamp ?? "";
+  }
+  return { sections, bases };
+}
+
 async function pushMastersDeskApi(
   state: MastersState,
 ): Promise<MastersPushResult> {
   try {
     const payload = stripStaffFromMastersForBlob(state);
     const { version: _v, ...rest } = payload;
+    // With a loaded desk: only the sections that changed, each at its stamp.
+    // Without one (a teacher's reduced copy): the old whole-book save, which
+    // the server merges by function and checks against the desk revision.
+    const section = sliceBase ? mastersSectionSave(rest as Record<string, unknown>, sliceBase) : null;
+    if (section && Object.keys(section.sections).length === 0) return { ok: true };
     const res = await fetch("/api/school-data/masters-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        version: 2,
-        ...rest,
-        // Optimistic locking: the desk revision this client last hydrated
-        // or pushed at. The server refuses the push (409 "stale") when the
-        // desk has moved since — see mastersRevisionGuard.ts.
-        baseUpdatedAt: readMeta().updatedAt || null,
-      }),
+      body: JSON.stringify(
+        section
+          ? { version: 2, ...section.sections, sliceBases: section.bases }
+          : {
+              version: 2,
+              ...rest,
+              // Optimistic locking: the desk revision this client last hydrated
+              // or pushed at. The server refuses the push (409 "stale") when the
+              // desk has moved since — see mastersRevisionGuard.ts.
+              baseUpdatedAt: readMeta().updatedAt || null,
+            },
+      ),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
@@ -220,6 +272,7 @@ async function pushMastersDeskApi(
       error?: string;
       reason?: string;
       functionOnly?: boolean;
+      sliceStamps?: Record<string, string>;
     } | null;
     if (res.ok && body?.ok && body.functionOnly) {
       // Saved through a function grant (a teacher's class subjects): the
@@ -241,6 +294,13 @@ async function pushMastersDeskApi(
         classCount: body.classCount ?? state.classes.length,
         feeHeadCount: body.feeHeadCount ?? state.feeHeads.length,
       });
+      // The sections just written move on to their new stamps.
+      if (section && sliceBase && body.sliceStamps) {
+        for (const [key, value] of Object.entries(section.sections)) {
+          const stamp = body.sliceStamps[key];
+          if (stamp) sliceBase.set(key, { stamp, hash: rowFingerprint(value ?? null) });
+        }
+      }
       recordDeskSyncSuccess("masters");
       return { ok: true };
     }
@@ -262,10 +322,11 @@ async function pushMastersDeskApi(
         body?.reason === "regenerated" ||
         body?.reason === "wipe" ||
         body?.reason === "subject_wipe" ||
-        body?.reason === "unknown_subject";
+        body?.reason === "unknown_subject" ||
+        body?.reason === "slice_stale";
       console.warn(`[masters-db] push refused (${body?.reason})`, body?.error);
       await reportMastersPushFailure(
-        body?.reason === "stale"
+        body?.reason === "stale" || body?.reason === "slice_stale"
           ? "Masters changed on another device — your last change was NOT saved. " +
               "The screen will refresh with the current data; please re-apply it."
           : body?.reason === "unversioned"
@@ -289,6 +350,7 @@ async function pushMastersDeskApi(
         } catch {
           /* storage unavailable */
         }
+        sliceBase = null;
         const { resetDeskHydrated } = await import("@/lib/deskHydrateGuard");
         resetDeskHydrated("masters");
       }
@@ -347,9 +409,12 @@ export async function hydrateMastersDeskFromDb(
       feeHeadCount?: number;
       sliceCount?: number;
       meta?: { sliceCount?: number; updatedAt?: string };
+      sliceStamps?: Record<string, string> | null;
     };
-    const bundle = body as Omit<MastersState, "version">;
+    const { sliceStamps, ...bundleBody } = body;
+    const bundle = bundleBody as Omit<MastersState, "version">;
     if ((body as { teachingOnly?: boolean }).teachingOnly) {
+      sliceBase = null;
       // A teacher's view of Masters (classes, subjects, holidays — no fees).
       // Take it, but record no revision: this browser has not seen the whole
       // desk, so it must never become a base for a push, and the next
@@ -405,6 +470,8 @@ export async function hydrateMastersDeskFromDb(
       classCount: remoteClasses,
       feeHeadCount: body.feeHeadCount ?? bundle.feeHeads?.length ?? 0,
     });
+    // Each section as the server holds it is the base of the next save.
+    captureSliceBases(bundle as unknown as Record<string, unknown>, sliceStamps ?? undefined);
     return { bundle, changed: true, ok: true };
   } catch {
     return { bundle: empty, changed: false, ok: false };
