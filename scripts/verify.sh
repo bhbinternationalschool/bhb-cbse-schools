@@ -219,6 +219,7 @@ SELFTESTS=(
   test:app-popup-preview
   test:app-popup-text
   test:app-popups-on-roll
+  test:parent-family-inactive
   test:module-requests
   test:weekly-holiday-range
   test:push-voice

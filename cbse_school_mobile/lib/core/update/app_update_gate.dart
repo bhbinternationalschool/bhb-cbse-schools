@@ -32,7 +32,12 @@ class AppUpdateGate extends StatefulWidget {
     required this.apiBaseUrl,
     required this.messenger,
     required this.child,
+    this.onSignOut,
   });
+
+  /// Signs out and returns to the login screen (the family-inactive screen's
+  /// "Use another number").
+  final Future<void> Function()? onSignOut;
 
   final String apiBaseUrl;
   final GlobalKey<ScaffoldMessengerState> messenger;
@@ -178,7 +183,19 @@ class _AppUpdateGateState extends State<AppUpdateGate>
       valueListenable: AppBuild.updateRequired,
       builder: (context, required, child) => required
           ? _UpdateRequiredScreen(onUpdate: () => _update(immediate: true))
-          : child!,
+          : ValueListenableBuilder<String?>(
+              valueListenable: AppBuild.familyInactive,
+              builder: (context, reason, child) => reason == null
+                  ? child!
+                  : _FamilyInactiveScreen(
+                      reason: reason,
+                      onSignOut: () async {
+                        await widget.onSignOut?.call();
+                        AppBuild.familyInactive.value = null;
+                      },
+                    ),
+              child: child,
+            ),
       child: widget.child,
     );
   }
@@ -214,6 +231,52 @@ class _UpdateRequiredScreen extends StatelessWidget {
                   onPressed: onUpdate,
                   icon: const Icon(Icons.download),
                   label: Text(l.updateNow),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The school has made every child of this family inactive: the app is
+/// closed to them, with the school's own words (Hindi and English) and a way
+/// to sign in with another number.
+class _FamilyInactiveScreen extends StatelessWidget {
+  const _FamilyInactiveScreen({required this.reason, required this.onSignOut});
+
+  final String reason;
+  final Future<void> Function() onSignOut;
+
+  @override
+  Widget build(BuildContext context) {
+    final hi = Localizations.localeOf(context).languageCode == "hi";
+    // The server sends "English / हिन्दी"; show the reader's half.
+    final parts = reason.split(" / ");
+    final text = parts.length == 2 ? (hi ? parts[1] : parts[0]) : reason;
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.lock_outline, size: 48),
+                const SizedBox(height: 16),
+                Text(
+                  hi ? "ऐप बंद है" : "App closed for this family",
+                  style: Theme.of(context).textTheme.titleLarge,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(text, textAlign: TextAlign.center),
+                const SizedBox(height: 22),
+                OutlinedButton(
+                  onPressed: onSignOut,
+                  child: Text(hi ? "दूसरे नंबर से लॉगिन करें" : "Sign in with another number"),
                 ),
               ],
             ),
