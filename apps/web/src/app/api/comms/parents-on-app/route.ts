@@ -2,7 +2,7 @@
  * Comms → Parents on app: which families have the parent app, class by
  * class, and when each last opened it (lib/parentsOnApp).
  *
- * GET (notices · view) → { ok, summary, classes, asOf }
+ * GET (notices · edit — office; every parent's mobile is in it) → { ok, summary, classes, asOf }
  */
 
 import { NextResponse } from "next/server";
@@ -18,7 +18,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const auth = await requireStaffPermission(req, "notices", "view");
+  const auth = await requireStaffPermission(req, "notices", "edit");
   if (!auth.ok) return auth.response;
   const ctx = await getServerTenantContext();
   if (!ctx) return NextResponse.json({ ok: false, error: "Database unavailable" }, { status: 503 });
