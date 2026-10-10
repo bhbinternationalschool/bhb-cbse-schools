@@ -54,6 +54,10 @@ export type GalleryPhoto = {
   caption: string;
   uploadedAt: string;
   uploadedBy: string;
+  /** "video" for a class-gallery clip; anything else is a photo. */
+  mediaKind?: "photo" | "video";
+  /** Class-gallery items: the path in the private class-gallery bucket. */
+  storagePath?: string;
 };
 
 export type GalleryAlbum = {
@@ -68,6 +72,13 @@ export type GalleryAlbum = {
   createdAt: string;
   createdBy: string;
   updatedAt: string;
+  /**
+   * Class gallery (10 Oct 2026): the sections ("classId|sectionId") whose
+   * families see this album. Empty = the whole school, as every older album.
+   */
+  sectionIds?: string[];
+  /** "Class III-A" — for the album's heading and its Drive folder. */
+  classLabel?: string;
 };
 
 export type SchoolCommsState = {

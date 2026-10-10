@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 
+import "class_gallery_screen.dart";
 import "../../core/popups/app_popups.dart";
 import "../../core/ui/running_strip.dart";
 import "../../core/guide/screen_guides.dart";
@@ -108,6 +109,12 @@ const _staffModules = [
     "complaints_handle",
   ),
   _StaffModule("PTM", Icons.groups_outlined, ModuleTone.purple, "ptm_meet"),
+  _StaffModule(
+    "Class gallery",
+    Icons.photo_library_outlined,
+    ModuleTone.pink,
+    "class_gallery",
+  ),
   _StaffModule(
     "My subjects",
     Icons.library_books_outlined,
@@ -418,6 +425,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         await _pushScreen(StaffComplaintsScreen(api: widget.api));
       case "PTM":
         await _pushScreen(PtmTeacherScreen(api: widget.api));
+      case "Class gallery":
+        await _pushScreen(ClassGalleryScreen(api: widget.api));
       case "My subjects":
         await _pushScreen(MySubjectsScreen(api: widget.api));
       case "Documents":

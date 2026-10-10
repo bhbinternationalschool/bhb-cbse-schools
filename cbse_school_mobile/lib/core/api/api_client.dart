@@ -624,17 +624,67 @@ class GalleryPhoto {
     required this.id,
     required this.url,
     required this.caption,
+    this.kind = "photo",
   });
 
   factory GalleryPhoto.fromJson(Map<String, dynamic> j) => GalleryPhoto(
     id: (j["id"] as String?) ?? "",
     url: (j["url"] as String?) ?? "",
     caption: (j["caption"] as String?) ?? "",
+    kind: (j["kind"] as String?) == "video" ? "video" : "photo",
   );
 
   final String id;
   final String url;
   final String caption;
+
+  /// "video" for a class-gallery clip (opened in the phone's player).
+  final String kind;
+  bool get isVideo => kind == "video";
+}
+
+/// One event (album) of a class gallery, for the class teacher.
+class ClassGalleryEvent {
+  const ClassGalleryEvent({
+    required this.id,
+    required this.title,
+    required this.photos,
+    required this.videos,
+    required this.coverUrl,
+    required this.createdAt,
+  });
+
+  factory ClassGalleryEvent.fromJson(Map<String, dynamic> j, String base) => ClassGalleryEvent(
+    id: "${j["id"] ?? ""}",
+    title: "${j["title"] ?? ""}",
+    photos: (j["photos"] as num?)?.toInt() ?? 0,
+    videos: (j["videos"] as num?)?.toInt() ?? 0,
+    coverUrl: "${j["coverUrl"] ?? ""}".startsWith("/") ? "$base${j["coverUrl"]}" : "${j["coverUrl"] ?? ""}",
+    createdAt: "${j["createdAt"] ?? ""}",
+  );
+
+  final String id;
+  final String title;
+  final int photos;
+  final int videos;
+  final String coverUrl;
+  final String createdAt;
+}
+
+/// The class teacher's class gallery: their class(es) and its events.
+class ClassGallery {
+  const ClassGallery({
+    required this.section,
+    required this.classLabel,
+    required this.classes,
+    required this.events,
+  });
+
+  /// "classId|sectionId" of the class shown.
+  final String section;
+  final String classLabel;
+  final List<({String section, String classLabel})> classes;
+  final List<ClassGalleryEvent> events;
 }
 
 /// A published album, with its pictures already in hand — the server sends
@@ -3734,9 +3784,102 @@ class ApiClient {
 
   Future<List<GalleryAlbum>> fetchGalleryAlbums() async {
     final data = await _getData("/api/v1/gallery/albums");
-    return ((data["albums"] as List?) ?? const [])
-        .map((a) => GalleryAlbum.fromJson(a as Map<String, dynamic>))
-        .toList();
+    // Class-gallery items come as ERP paths (they check who is looking):
+    // make them full URLs; [isOwnServer] then sends the login with them.
+    String abs(Object? u) {
+      final s = "${u ?? ""}";
+      return s.startsWith("/") ? "${config.apiBaseUrl}$s" : s;
+    }
+
+    return ((data["albums"] as List?) ?? const []).map((a) {
+      final m = Map<String, dynamic>.from(a as Map);
+      m["coverUrl"] = abs(m["coverUrl"]);
+      m["photos"] = ((m["photos"] as List?) ?? const []).map((p) {
+        final pm = Map<String, dynamic>.from(p as Map);
+        pm["url"] = abs(pm["url"]);
+        return pm;
+      }).toList();
+      return GalleryAlbum.fromJson(m);
+    }).toList();
+  }
+
+  /// Is this URL on the ERP itself (so the login may go with it)? Never true
+  /// for storage or any other host — the session must not leave the school.
+  bool isOwnServer(String url) => url.startsWith(config.apiBaseUrl);
+
+  /// A ten-minute link to a class-gallery video, for the phone's player.
+  Future<String> galleryVideoLink(String photoId) async {
+    final data = await _getData("/api/v1/gallery/media/${Uri.encodeComponent(photoId)}?link=1");
+    return "${data["url"] ?? ""}";
+  }
+
+  // ---- class gallery (class teachers) -------------------------------------
+
+  Future<ClassGallery> fetchClassGallery({String section = ""}) async {
+    final q = section.isEmpty ? "" : "?section=${Uri.encodeComponent(section)}";
+    final data = await _getData("/api/v1/staff/class-gallery$q");
+    final base = config.apiBaseUrl;
+    return ClassGallery(
+      section: "${data["section"] ?? ""}",
+      classLabel: "${data["classLabel"] ?? ""}",
+      classes: ((data["classes"] as List?) ?? const [])
+          .map((c) => (section: "${(c as Map)["section"]}", classLabel: "${c["classLabel"]}"))
+          .toList(),
+      events: ((data["events"] as List?) ?? const [])
+          .map((e) => ClassGalleryEvent.fromJson(e as Map<String, dynamic>, base))
+          .toList(),
+    );
+  }
+
+  /// An event of the class ("Sports day"); made if it does not exist. Returns its id.
+  Future<String> createClassEvent(String section, String name) async {
+    final data = await _postData("/api/v1/staff/class-gallery/event", {"section": section, "name": name});
+    return "${data["id"] ?? ""}";
+  }
+
+  /// One photo or video into an event: the file goes straight from the phone
+  /// to storage (a video does not fit through the server), then the ERP
+  /// records it and copies it to Drive. [onProgress] gets 0..1.
+  Future<void> uploadClassMedia({
+    required String albumId,
+    required String fileName,
+    required String contentType,
+    required int length,
+    required Stream<List<int>> Function() open,
+    String caption = "",
+    void Function(double)? onProgress,
+  }) async {
+    final start = await _postData("/api/v1/staff/class-gallery/upload-url", {
+      "albumId": albumId,
+      "fileName": fileName,
+      "contentType": contentType,
+      "bytes": length,
+    });
+    final req = http.StreamedRequest("PUT", Uri.parse("${start["uploadUrl"]}"));
+    req.headers["Content-Type"] = "${start["contentType"]}";
+    req.headers["x-upsert"] = "false";
+    req.contentLength = length;
+    var sent = 0;
+    open().listen(
+      (chunk) {
+        sent += chunk.length;
+        req.sink.add(chunk);
+        onProgress?.call(length == 0 ? 1 : sent / length);
+      },
+      onDone: req.sink.close,
+      onError: (Object e) => req.sink.addError(e),
+      cancelOnError: true,
+    );
+    final res = await http.Response.fromStream(await req.send());
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw ApiException("The file did not upload (${res.statusCode}) — check the connection and try again.", res.statusCode);
+    }
+    await _postData("/api/v1/staff/class-gallery/complete", {
+      "albumId": albumId,
+      "photoId": start["photoId"],
+      "path": start["path"],
+      "caption": caption,
+    });
   }
 
   // ---- leave --------------------------------------------------------------

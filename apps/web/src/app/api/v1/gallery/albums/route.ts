@@ -1,8 +1,10 @@
-import { apiErr, apiOk } from "@/lib/api/v1/errors";
+import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
-import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { ensureSchoolCommsHydratedServer } from "@/lib/schoolCommsPersistence";
-import { loadSchoolComms } from "@/lib/schoolComms";
+import { albumVisibleTo } from "@/lib/classGallery";
+import { parentSections } from "@/lib/classGallery.server";
+import { fetchGalleryDeskFromDb } from "@/lib/schoolCommsNormalized.server";
+import { ensureSisHydratedServer } from "@/lib/sisPersistence";
+import { loadSis } from "@/lib/sis";
 
 export const runtime = "nodejs";
 
@@ -12,8 +14,13 @@ export const runtime = "nodejs";
  *
  * Published only. An album the office is still filling is a draft, and a
  * draft reaching a parent's phone is the same mistake as a draft notice
- * reaching one. Same source and the same hydrate as /comms/feed, because the
- * albums live in the school-comms desk beside the notices and the news.
+ * reaching one.
+ *
+ * Class gallery (10 Oct 2026): an album with sections is seen only by the
+ * families of those sections (their children on roll) and by staff. Read
+ * straight from the tables — a cached copy from before the class columns
+ * would not know an album is a class's, and would show it to everyone. Class
+ * items are served by /api/v1/gallery/media/<id>, which checks again.
  *
  * Photos travel with their album rather than behind a second call: an album
  * holds a handful of pictures, and a phone on a village connection should
@@ -21,10 +28,16 @@ export const runtime = "nodejs";
  */
 export async function GET(request: Request) {
   try {
-    await resolveApiAuth(request);
-    await ensureSchoolMirrorHydrated();
-    await ensureSchoolCommsHydratedServer();
-    const state = loadSchoolComms();
+    const ctx = await resolveApiAuth(request);
+    const desk = await fetchGalleryDeskFromDb();
+    if (!desk.ok) throw new ApiError("server_error", "Could not read the gallery — try again", 503);
+    const state = desk.bundle;
+    let viewer: Parameters<typeof albumVisibleTo>[1] = { staff: true };
+    if (ctx.session.persona !== "staff") {
+      await ensureSisHydratedServer();
+      const hh = loadSis().students.filter((st) => st.householdId === ctx.session.householdId);
+      viewer = { staff: false, sections: parentSections(hh, ctx.session.academicYearCode || "") };
+    }
 
     const byAlbum = new Map<string, typeof state.photos>();
     for (const p of state.photos) {
@@ -35,7 +48,7 @@ export async function GET(request: Request) {
     }
 
     const albums = state.albums
-      .filter((a) => a.status === "published")
+      .filter((a) => a.status === "published" && albumVisibleTo(a, viewer))
       .sort((a, b) =>
         (b.publishedAt || b.createdAt || "").localeCompare(
           a.publishedAt || a.createdAt || "",
@@ -48,8 +61,10 @@ export async function GET(request: Request) {
           .sort((x, y) => (x.uploadedAt || "").localeCompare(y.uploadedAt || ""))
           .map((p) => ({
             id: p.id,
+            // A class item's url is the ERP route (relative): the app adds its base and login.
             url: p.url,
             caption: p.caption || "",
+            kind: p.mediaKind === "video" ? "video" : "photo",
           }));
         return {
           id: a.id,
@@ -57,7 +72,8 @@ export async function GET(request: Request) {
           description: a.description || "",
           // Falls back to the first photo: an album whose cover was never
           // picked still deserves a face on the phone.
-          coverUrl: a.coverUrl || photos[0]?.url || "",
+          coverUrl: a.coverUrl || photos.find((p) => p.kind === "photo")?.url || "",
+          classLabel: a.classLabel || "",
           publishedAt: a.publishedAt || a.createdAt || "",
           photoCount: photos.length,
           photos,
