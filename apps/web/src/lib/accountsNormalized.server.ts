@@ -33,7 +33,7 @@ import type {
 } from "@/lib/accountsTypes";
 import { accountsDualWriteDbEnabled } from "@/lib/accountsDbConfig";
 import { syncModeBankMapFromBanks } from "@/lib/accountsNormalize";
-import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
+import { deleteChildrenNotKept, deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
 import {
@@ -1091,21 +1091,15 @@ export async function pushAccountsDeskToDb(
     if (!up.ok) return { ok: false, error: `${set.table}: ${up.error}` };
     // A line the parent no longer has goes with this save — the parent row
     // itself just landed, so this is the parent as it now is.
-    const keepIds = new Set(rows.map((r) => String(r.id)));
-    const parentIds = [...parents];
-    for (let i = 0; i < parentIds.length; i += 150) {
-      const { data, error } = await sb
-        .from(set.table)
-        .select("id")
-        .eq("tenant_id", tenantId)
-        .in(set.parentKey, parentIds.slice(i, i + 150));
-      if (error) return { ok: false, error: `${set.table}: ${error.message}` };
-      const extra = (data ?? []).map((d) => String(d.id)).filter((id) => !keepIds.has(id));
-      if (extra.length) {
-        const { error: delErr } = await sb.from(set.table).delete().eq("tenant_id", tenantId).in("id", extra);
-        if (delErr) return { ok: false, error: `${set.table}: ${delErr.message}` };
-      }
-    }
+    const gone = await deleteChildrenNotKept(
+      sb,
+      tenantId,
+      set.table,
+      set.parentKey,
+      [...parents],
+      new Set(rows.map((r) => String(r.id))),
+    );
+    if (!gone.ok) return { ok: false, error: `${set.table}: ${gone.error}` };
   }
 
   // The mode map is derived from the banks; an empty one is never written.
