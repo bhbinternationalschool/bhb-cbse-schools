@@ -72,10 +72,14 @@ export function SchoolHomeDashboard() {
     window.addEventListener("bhb-module-registry", refresh);
     window.addEventListener("bhb-sis-updated", refresh);
     window.addEventListener("storage", refresh);
+    // Fees, admissions and attendance load when first read (Phase 3): the
+    // tiles redraw when they land.
+    window.addEventListener("bhb-desk-hydrated", refresh);
     return () => {
       window.removeEventListener("bhb-module-registry", refresh);
       window.removeEventListener("bhb-sis-updated", refresh);
       window.removeEventListener("storage", refresh);
+      window.removeEventListener("bhb-desk-hydrated", refresh);
     };
   }, []);
 

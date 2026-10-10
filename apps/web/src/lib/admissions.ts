@@ -4,6 +4,7 @@
  * Demo store: localStorage `bhb_admissions_v1`.
  */
 
+import { hydrateOnFirstRead } from "@/lib/deskLazyHydrate";
 import { recordDeskDeletion } from "@/lib/deskNamedDeletes";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import {
@@ -1368,6 +1369,8 @@ function refreshLeadRegistrationPaymentStatus(
 let memoryAdmissionsState: AdmissionsState | null = null;
 
 export function loadAdmissions(): AdmissionsState {
+  // Not in the idle sweep any more: the first read on a page loads it.
+  hydrateOnFirstRead("admissions", () => import("@/lib/admissionsPersistence").then((m) => m.ensureAdmissionsHydrated()));
   if (typeof window === "undefined") {
     if (serverAdmissionsCache) return serverAdmissionsCache;
     const mirrored = getSchoolMirrorSync().admissions as

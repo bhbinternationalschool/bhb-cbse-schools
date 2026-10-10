@@ -5,6 +5,7 @@
  * Policy: teacher cut-off lock, absent WhatsApp nudges, office exceptions.
  */
 
+import { hydrateOnFirstRead } from "@/lib/deskLazyHydrate";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { getSessionActor } from "@/lib/sessionActor";
@@ -278,6 +279,8 @@ export function normalizeAttendanceState(raw: unknown): AttendanceState {
 }
 
 export function loadAttendance(): AttendanceState {
+  // Not in the idle sweep any more: the first read on a page loads it.
+  hydrateOnFirstRead("attendance", () => import("@/lib/attendancePersistence").then((m) => m.ensureAttendanceHydrated()));
   if (typeof window === "undefined") {
     if (serverAttendanceCache) return serverAttendanceCache;
     return emptyAttendanceState();

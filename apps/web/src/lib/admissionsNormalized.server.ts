@@ -531,8 +531,17 @@ const LEAD_LIST_COLUMNS =
  * reversible in seconds, not in a build.
  */
 function leadProjectionEnabled(): boolean {
-  const flag = process.env.ADMISSIONS_LIST_PROJECTION?.trim().toLowerCase();
-  return flag === "true" || flag === "1";
+  // DISABLED (10 Oct 2026 audit) whatever ADMISSIONS_LIST_PROJECTION says.
+  // Not safe to switch on: (1) rowToLead normalizes a stub, filling every
+  // missing field with a default ("" / false / []), and restorePartialLeads
+  // copies any value !== undefined over the stored lead_json — so a saved
+  // stub blanks dob, notes and the follow-up history; (2) logFollowUp,
+  // mergeLeadsSameMobile, enrollLead and the SIS reconcile read-modify-write
+  // whole leads and would save the loss; (3) ~25 non-projected fields are
+  // read by list screens; (4) the check sits in fetchAdmissionDeskFromDb, so
+  // it would also hand stubs to the WhatsApp bot and server reports. Fix all
+  // four before re-enabling.
+  return false;
 }
 
 /**
