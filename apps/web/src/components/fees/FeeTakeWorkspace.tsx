@@ -87,8 +87,10 @@ import {
   FEE_ADJUST_AUTO_LIMIT_PAISE,
   linkAdjustmentsToVoucher,
   postCounterDiscountWaivers,
+  voidFeeAdjustment,
   type CounterDiscountSlice,
 } from "@/lib/feeAdjustments";
+import { projectDuesAfterDiscount, splitDiscountSlices, storeSaleIdOf } from "@/lib/feeStoreDiscount";
 import { FutureConcessionModal } from "@/components/fees/FutureConcessionModal";
 import {
   applyFutureConcessionsFromCounter,
@@ -751,7 +753,48 @@ export function FeeTakeWorkspace() {
     setTick((t) => t + 1);
   }
 
-  async function settleStoreLines(receiptNo: string, lines: VoucherLine[]) {
+  /**
+   * Store discounts given at this counter, told to the store: the sale's own
+   * discount rises and its balance falls (books: Dr Store income / Cr
+   * receivable). Keyed by the receipt number — repeat-safe, and a voided
+   * receipt takes them back. A failure is listed for the clerk, like an
+   * unsettled collection.
+   */
+  async function discountStoreLines(ref: string, slices: { dueKey: string; amountPaise: number; label: string }[]) {
+    const failures: { saleNo: string; saleId: string; amountPaise: number; receiptNo: string }[] = [];
+    for (const sl of slices) {
+      const saleId = storeSaleIdOf(sl.dueKey);
+      if (!saleId || sl.amountPaise <= 0) continue;
+      try {
+        const res = await fetch("/api/inventory/sales", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "discount",
+            saleId,
+            amountPaise: sl.amountPaise,
+            reason: `Counter discount · ${counterDiscountReason.trim() || "Counter concession"}`,
+            externalRef: ref,
+          }),
+        });
+        const body = (await res.json().catch(() => ({}))) as { ok?: boolean };
+        if (!res.ok || body.ok === false) throw new Error("refused");
+      } catch {
+        failures.push({ saleNo: `${sl.label} (discount)`, saleId, amountPaise: sl.amountPaise, receiptNo: ref });
+      }
+    }
+    if (failures.length > 0) setUnsettledStore((prev) => [...prev, ...failures]);
+    return failures.length === 0;
+  }
+
+  async function settleStoreLines(
+    receiptNo: string,
+    lines: VoucherLine[],
+    discounts: { dueKey: string; amountPaise: number; label: string }[] = [],
+  ) {
+    // Discount before cash: the cash is the discounted amount, and the store
+    // refuses a collection larger than what it still shows owing.
+    if (discounts.length > 0) await discountStoreLines(receiptNo, discounts);
     const storeLines = lines.filter(
       (l) => l.kind === "store" && l.amountPaise > 0,
     );
@@ -1134,7 +1177,10 @@ export function FeeTakeWorkspace() {
       sis,
       masters,
       fees,
-      { includeFuture, includePaid: true },
+      // Store dues too: without them a ticked store line vanished here, the
+      // payment had nothing to settle, and no store due was ever collected
+      // at this counter (0 of 214 store payments, found 10 Oct 2026).
+      { includeFuture, includePaid: true, storeDues },
     )
       .filter((row) => members.some((m) => m.id === row.student.id))
       .flatMap((b) => b.dues)
@@ -1436,15 +1482,38 @@ export function FeeTakeWorkspace() {
 
     let futureConcessionMsg = "";
     let waiverAdjustmentIds: string[] = [];
+    // A store due's discount goes to the store (after the receipt, under its
+    // number); only fee heads get a fee waiver. See lib/feeStoreDiscount.
+    const { fee: feeSlices, store: storeSlices } = splitDiscountSlices(discountSlices);
+    const nameOf = (id: string) => sis.students.find((s) => s.id === id)?.fullName ?? "Student";
+    // Nothing is saved until the whole collection checks out: on 10 Oct 2026
+    // the discount was saved, the collection then failed, and the waivers
+    // stayed with no receipt and no payment.
+    if (collectTarget > 0) {
+      const check = allocateCollectionToDues(
+        projectDuesAfterDiscount(freshSelectedDues(), discountSlices),
+        tenderSum,
+        nameOf,
+      );
+      if (!check.ok) {
+        failCollect(check.error);
+        return;
+      }
+    }
+    const undoWaivers = () => {
+      for (const id of waiverAdjustmentIds) voidFeeAdjustment(id, session.fullName);
+      waiverAdjustmentIds = [];
+      refresh();
+    };
 
     // Both artefacts are posted, and that is correct now that grants are
     // judged against the due's own month: the waiver settles the month being
     // collected, and the recurring grant starts at the NEXT installment.
     // Before that gating existed the grant reached backwards and the month
     // showed twice the discount typed.
-    if (counterDiscountPaise > 0) {
+    if (feeSlices.length > 0) {
       const waiverResult = postCounterDiscountWaivers({
-        slices: discountSlices,
+        slices: feeSlices,
         reason: counterDiscountReason.trim() || "Counter concession",
         createdBy: session.fullName,
         academicYearCode: ay,
@@ -1513,6 +1582,7 @@ export function FeeTakeWorkspace() {
 
     if (collectTarget <= 0) {
       if (counterDiscountPaise > 0) {
+        if (storeSlices.length > 0) void discountStoreLines(`DISC-${Date.now()}`, storeSlices);
         applyFutureGrants();
         setSelectedKeys(new Set());
         setCollectAmountRupees("");
@@ -1526,16 +1596,12 @@ export function FeeTakeWorkspace() {
       }
       return;
     }
-    const nameById = new Map(
-      sis.students.map((s) => [s.id, s.fullName] as const),
-    );
-    const duesForCollect = freshSelectedDues();
-    const alloc = allocateCollectionToDues(
-      duesForCollect,
-      tenderSum,
-      (id) => nameById.get(id) ?? "Student",
-    );
+    // Fee waivers are in the dues now; store discounts are not yet (they go
+    // to the store with the receipt), so they are projected here.
+    const duesForCollect = projectDuesAfterDiscount(freshSelectedDues(), storeSlices);
+    const alloc = allocateCollectionToDues(duesForCollect, tenderSum, nameOf);
     if (!alloc.ok) {
+      undoWaivers();
       failCollect(alloc.error);
       return;
     }
@@ -1583,6 +1649,7 @@ export function FeeTakeWorkspace() {
       mayBackdate,
     });
     if (!result.ok) {
+      undoWaivers();
       flash(result.error);
       return;
     }
@@ -1593,7 +1660,7 @@ export function FeeTakeWorkspace() {
     // simply still shows the due. Doing it the other way round could take the
     // money with nothing to show for it. The call carries the receipt number,
     // and the store settles once per receipt, so a retry is safe.
-    void settleStoreLines(result.voucher.receiptNo, lines);
+    void settleStoreLines(result.voucher.receiptNo, lines, storeSlices);
 
     // Bind this receipt's counter waivers to it, so voiding takes them back.
     linkAdjustmentsToVoucher(waiverAdjustmentIds, result.voucher.id);
