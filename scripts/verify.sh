@@ -234,6 +234,7 @@ SELFTESTS=(
   test:payment-link-reuse
   test:student-leave-status-guard
   test:ptm-row-stamps
+  test:masters-section-saves
   test:accounts-row-stamps
   test:staff-row-stamps
   test:desk-stamps
