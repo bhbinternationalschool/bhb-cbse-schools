@@ -277,14 +277,39 @@ export async function POST(req: Request) {
   // push is not theirs to save and is ignored, never written.
   if (featureGate) {
     const className = new Map((stored.classes ?? []).map((c) => [c.id, c.name]));
+    // The school's subject list is never taken from a phone's reduced copy
+    // (10 Oct 2026: two such saves replaced it with a made-up list). A
+    // function holder may change their own classes' links; the list itself
+    // changes only on the full Masters screen, under the revision lock.
+    const pushed = {
+      ...state,
+      subjects: stored.subjects ?? [],
+      seniorStreams: stored.seniorStreams ?? [],
+    } as MastersState;
     const merged = featurePushOutcome(
       featureGate,
       "masters",
       stored,
-      state,
+      pushed,
       (id) => className.get(id) || "That class",
     );
     if (!merged.ok) return merged.response;
+    // A link to a subject the school does not have is a made-up copy, not
+    // an edit — refuse it rather than store a dangling link.
+    const knownSubjects = new Set((stored.subjects ?? []).map((x) => x.id));
+    const dangling = ((merged.state as unknown as MastersState).classSubjects ?? []).filter(
+      (l) => !knownSubjects.has(l.subjectId),
+    );
+    if (dangling.length > 0) {
+      console.warn(`[masters-desk] refused function-only push: ${dangling.length} link(s) to unknown subjects`);
+      return NextResponse.json(
+        {
+          error: "This copy links classes to subjects the school does not have. Nothing was saved; the screen will refresh.",
+          reason: "unknown_subject",
+        },
+        { status: 409 },
+      );
+    }
     if (!merged.changed) return featureSavedResponse(false);
     state = { ...(merged.state as unknown as MastersState), version: 2 };
   }

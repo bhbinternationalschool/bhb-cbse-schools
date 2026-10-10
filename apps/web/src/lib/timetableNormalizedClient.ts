@@ -66,7 +66,7 @@ async function pushTimetableDeskApi(state: TimetableState) {
     const res = await fetch("/api/school-data/timetable-desk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(state),
+      body: JSON.stringify({ ...state, baseUpdatedAt: readMeta().updatedAt || null }),
     });
     const body = (await res.json().catch(() => null)) as {
       ok?: boolean;
@@ -75,6 +75,27 @@ async function pushTimetableDeskApi(state: TimetableState) {
       substitutionCount?: number;
       error?: string;
     } | null;
+    if (res.status === 409) {
+      // Changed elsewhere, or never loaded here: the saved timetable wins.
+      writeMeta({ updatedAt: "", gridCount: 0, substitutionCount: 0 });
+      const [{ resetDeskHydrated }, { ensureTimetableHydrated }] = await Promise.all([
+        import("@/lib/deskHydrateGuard"),
+        import("@/lib/timetablePersistence"),
+      ]);
+      resetDeskHydrated("timetable");
+      void ensureTimetableHydrated();
+      void import("@/components/shell/Toast")
+        .then(({ pushToast }) =>
+          pushToast({
+            kind: "error",
+            message: "Timetable: changed on another device — your last change was NOT saved. The screen now shows the current timetable; please re-apply it.",
+            durationMs: 9000,
+          }),
+        )
+        .catch(() => {});
+      recordDeskSyncSuccess("timetable");
+      return;
+    }
     if (res.ok && body?.ok) {
       writeMeta({
         updatedAt: body.updatedAt || new Date().toISOString(),
@@ -175,7 +196,7 @@ export async function hydrateTimetableDeskFromDb(
     if (!shouldTake) return { bundle: emptyBundle, changed: false, ok: true };
 
     writeMeta({
-      updatedAt: body.updatedAt || new Date().toISOString(),
+      updatedAt: body.updatedAt || "",
       gridCount: remoteGrids,
       substitutionCount:
         body.substitutionCount ?? bundle.substitutions.length,

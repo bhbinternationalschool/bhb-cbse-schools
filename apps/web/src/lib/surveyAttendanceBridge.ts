@@ -3,6 +3,7 @@
  * External (survey-only) crew are skipped — not on payroll.
  */
 
+import { readCache } from "@/lib/browserStorage";
 import type {
   SurveyTeamMember,
   SurveyWorkSession,
@@ -241,7 +242,7 @@ export function hasEndedSurveyWorkForStaff(
 ): boolean {
   if (!staffId || typeof window === "undefined") return false;
   try {
-    const raw = window.localStorage.getItem("bhb_admissions_v1");
+    const raw = readCache("bhb_admissions_v1");
     if (!raw) return false;
     const parsed = JSON.parse(raw) as {
       surveySessions?: SurveyWorkSession[];

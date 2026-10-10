@@ -203,21 +203,12 @@ export function AppShell({
 
       void (async () => {
         try {
-          const {
-            ensureClientSchoolMirrorHydrated,
-            startDeskHydrationBackground,
-          } = await import("@/lib/schoolDataMirrorClientHydrate");
-          const { pushFullSchoolMirrorToServer } = await import(
-            "@/lib/schoolDataMirror"
+          // The old whole-school "mirror" copy is no longer read or written
+          // by any screen (every slice moved to its own desk), so login no
+          // longer waits on fetching it and throwing it away (10 Oct 2026).
+          const { startDeskHydrationBackground } = await import(
+            "@/lib/schoolDataMirrorClientHydrate"
           );
-          const { withHydrationSlot } = await import("@/lib/deskHydrateGuard");
-
-          const mirrorChanged = await withHydrationSlot(() =>
-            ensureClientSchoolMirrorHydrated(),
-          );
-          if (mirrorChanged) {
-            window.dispatchEvent(new CustomEvent("bhb-desk-hydrated"));
-          }
 
           const boot = await bootstrapWorkspaceSession(
             pathname,
@@ -229,7 +220,6 @@ export function AppShell({
             return;
           }
 
-          pushFullSchoolMirrorToServer();
           startDeskHydrationBackground(pathname);
           window.dispatchEvent(new CustomEvent("bhb-desk-hydrated"));
         } catch {

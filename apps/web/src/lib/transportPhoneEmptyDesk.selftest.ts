@@ -154,15 +154,14 @@ async function main() {
     assert.equal(seeded.vehicles.length, 6, "no invented fleet on top of the real one");
   }
 
-  /* ── Cache present and later evicted by another desk: memory still answers ── */
+  /* ── Plenty of room: the desk still lives only in page memory (10 Oct 2026) ── */
   {
     const store = install(1_000_000);
     resetTransportDeskAnswer();
     recordTransportDeskAnswer({ routes: 2, vehicles: 1, assignments: 3 });
     writeTransportLocalRaw(deskWith(2, 1, 3));
-    assert.ok(store.getItem("bhb_transport_v2"), "precondition: cached");
-    store.removeItem("bhb_transport_v2"); // evictUntilItFits making room for fees
-    assert.equal(loadTransport().routes.length, 2, "eviction by another desk is not a deletion");
+    assert.equal(store.getItem("bhb_transport_v2"), null, "module copies never reach browser storage");
+    assert.equal(loadTransport().routes.length, 2, "memory answers for the page");
   }
 
   /* ── A genuinely new tenant still gets the starter fleet ── */

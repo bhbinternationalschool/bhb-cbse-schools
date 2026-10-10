@@ -41,28 +41,29 @@ export function ModuleDashboardHost({
 
   useEffect(() => {
     void (async () => {
-      let did = false;
       const { withHydrationSlot } = await import("@/lib/deskHydrateGuard");
       if (moduleId === "admissions") {
         const { ensureAdmissionsHydrated } = await import("@/lib/admissionsPersistence");
-        did = await withHydrationSlot(() => ensureAdmissionsHydrated());
+        await withHydrationSlot(() => ensureAdmissionsHydrated());
       } else if (moduleId === "students") {
         const { ensureSisHydrated } = await import("@/lib/sisPersistence");
-        did = await withHydrationSlot(() => ensureSisHydrated());
+        await withHydrationSlot(() => ensureSisHydrated());
       } else if (moduleId === "fees") {
         const { ensureFeesHydrated } = await import("@/lib/feesPersistence");
-        did = await withHydrationSlot(() => ensureFeesHydrated());
+        await withHydrationSlot(() => ensureFeesHydrated());
       } else if (moduleId === "staff") {
         const { ensureStaffHydrated } = await import("@/lib/staffPersistence");
-        did = await withHydrationSlot(() => ensureStaffHydrated());
+        await withHydrationSlot(() => ensureStaffHydrated());
       } else if (moduleId === "attendance") {
         const { ensureAttendanceHydrated } = await import("@/lib/attendancePersistence");
-        did = await withHydrationSlot(() => ensureAttendanceHydrated());
+        await withHydrationSlot(() => ensureAttendanceHydrated());
       } else if (moduleId === "exams") {
         const { ensureExamsHydrated } = await import("@/lib/examsPersistence");
-        did = await withHydrationSlot(() => ensureExamsHydrated());
+        await withHydrationSlot(() => ensureExamsHydrated());
       }
-      if (did) setMastersTick((t) => t + 1);
+      // Re-read even when another screen did the loading: the first render
+      // came from an empty page memory (10 Oct 2026).
+      setMastersTick((t) => t + 1);
     })();
     const built = buildModuleDashboard(moduleId, {
       academicYearCode: session?.academicYearCode,

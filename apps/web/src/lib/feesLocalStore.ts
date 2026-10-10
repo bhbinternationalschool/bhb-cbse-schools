@@ -24,7 +24,10 @@ function openDb(): Promise<IDBDatabase> {
 }
 
 export function feesIdbAvailable(): boolean {
-  return typeof window !== "undefined" && "indexedDB" in window;
+  // Off (10 Oct 2026): the server is the copy. A fee book kept in this
+  // browser was preferred whenever it "had more rows" — after a reload that
+  // is an OLD book. browserStorage deletes the database at page start.
+  return false;
 }
 
 export async function readFeesFromIdb(): Promise<FeesState | null> {

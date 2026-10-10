@@ -1,5 +1,6 @@
 /**
- * Self-test: what happens to a desk cache when the browser's storage is full.
+ * Self-test: module data never goes to browser storage (10 Oct 2026), and
+ * the small things that do still survive a full browser.
  * Run: npx tsx apps/web/src/lib/browserStorageQuota.selftest.ts
  *
  * The failure this exists to stop, seen in production on 12 Sep 2026:
@@ -14,7 +15,7 @@ import assert from "node:assert/strict";
 
 // Static: writeCacheOrInvalidate reads `window` when CALLED, not when the
 // module loads, so installing a fake storage per test is enough.
-import { isStorageQuotaError, readCache, writeCacheOrInvalidate } from "./browserStorage";
+import { clearMemoryCopies, isMemoryOnlyKey, isStorageQuotaError, readCache, writeCacheOrInvalidate } from "./browserStorage";
 
 /** A localStorage with a byte ceiling, which is what a real one is. */
 class FakeStorage {
@@ -67,126 +68,54 @@ console.log("browserStorageQuota.selftest.ts");
   assert.equal(isStorageQuotaError(null), false);
 }
 
-/* ── A desk that fits is simply written ── */
+/* ── Module data is held in page memory, never written to disk ── */
+// 10 Oct 2026: whole-module copies (students, fees, masters…) filled the
+// ~5 MB browser limit at nearly every login, and an old copy outliving its
+// page was pushed back over newer data. The server is the copy now.
 {
-  install(10_000);
-  assert.equal(writeCacheOrInvalidate("bhb_transport_v2", big(500)), true);
+  const store = install(10_000);
+  for (const k of ["bhb_masters_v5", "bhb_sis_v1", "bhb_fees_v1", "bhb_transport_v2", "bhb_admissions_v1", "bhb_payroll_v1"]) {
+    assert.equal(isMemoryOnlyKey(k), true, k);
+    assert.equal(writeCacheOrInvalidate(k, big(500)), true, `${k} reported stored`);
+    assert.equal(store.getItem(k), null, `${k} is not on disk`);
+    assert.equal(readCache(k)?.length, 500, `${k} is readable for this page`);
+  }
 }
 
-/* ── THE BUG: transport must be able to evict, not only masters ── */
+/* ── Even a completely full browser cannot stop a module loading ── */
 {
-  const store = install(3_000);
-  // A big re-hydratable cache already owns the space.
-  store.setItem("bhb_sis_v1", big(2_500));
-
-  const ok = writeCacheOrInvalidate("bhb_transport_v2", big(1_000));
-  assert.equal(ok, true, "transport must make room rather than drop itself");
-  assert.equal(
-    store.getItem("bhb_transport_v2")?.length,
-    1_000,
-    "and the desk it just hydrated is actually cached",
-  );
-  assert.equal(store.getItem("bhb_sis_v1"), null, "the bulky cache was evicted");
+  const store = install(100);
+  store.setItem("bhb_x", big(90));
+  assert.equal(writeCacheOrInvalidate("bhb_sis_v1", big(5_000_000)), true, "no quota involved at all");
+  assert.equal(readCache("bhb_sis_v1")?.length, 5_000_000);
 }
 
-/* ── The fewest caches are lost: biggest victim first ── */
+/* ── Markers, outboxes and named deletes are NOT module data — they stay on disk ── */
 {
-  const store = install(3_000);
-  store.setItem("bhb_sis_v1", big(1_800));
-  store.setItem("bhb_homework_v1", big(600));
-  store.setItem("bhb_school_comms_v1", big(400));
-
-  assert.equal(writeCacheOrInvalidate("bhb_transport_v2", big(1_500)), true);
-  assert.equal(store.getItem("bhb_sis_v1"), null, "the biggest one goes first");
-  assert.equal(
-    store.getItem("bhb_homework_v1")?.length,
-    600,
-    "and the small ones that still fit are kept",
-  );
-  assert.equal(store.getItem("bhb_school_comms_v1")?.length, 400);
+  for (const k of [
+    "bhb_collections_wipe_seen_v1",
+    "bhb_fee_discount_seed_applied_v1",
+    "bhb_exams_pending_sheets_v1",
+    "bhb_exams_sheet_conflicts_v1",
+    "bhb_homework_diary_deletes_v1",
+    "bhb_sis_pending_deletes_v1",
+    "bhb_desk_named_deletes_v1:fees",
+    "bhb_sis_filters_v1",
+  ]) {
+    assert.equal(isMemoryOnlyKey(k), false, k);
+  }
+  const store = install(10_000);
+  writeCacheOrInvalidate("bhb_exams_pending_sheets_v1", "[1]");
+  assert.equal(store.getItem("bhb_exams_pending_sheets_v1"), "[1]", "an outbox survives a reload");
 }
 
-/* ── Masters is never the victim ── */
+/* ── A small key that cannot fit is held in memory for this page ── */
 {
-  const store = install(3_000);
-  store.setItem("bhb_masters_v5", big(2_000));
-  store.setItem("bhb_sis_v1", big(800));
-
-  writeCacheOrInvalidate("bhb_transport_v2", big(700));
-  assert.equal(
-    store.getItem("bhb_masters_v5")?.length,
-    2_000,
-    "the cache the whole page resolves through is protected",
-  );
-  assert.equal(store.getItem("bhb_sis_v1"), null);
-}
-
-/* ── A key that is NOT a re-hydratable cache is never evicted ── */
-{
-  const store = install(2_000);
-  // The marker whose loss replayed a one-time wipe signal and deleted nine
-  // fee receipts on 2026-08-26. It must survive a storage squeeze.
-  store.setItem("bhb_collections_wipe_seen_v1", big(50));
-  store.setItem("bhb_fee_discount_seed_applied_v1", big(50));
-  store.setItem("bhb_sis_v1", big(1_800));
-
-  writeCacheOrInvalidate("bhb_transport_v2", big(1_000));
-  assert.equal(
-    store.getItem("bhb_collections_wipe_seen_v1")?.length,
-    50,
-    "a wipe-seen marker is not a cache and must never be evicted for room",
-  );
-  assert.equal(store.getItem("bhb_fee_discount_seed_applied_v1")?.length, 50);
-}
-
-/* ── Nothing left to give: the key is dropped, not left stale ── */
-{
-  const store = install(1_000);
-  store.setItem("bhb_transport_v2", big(400));
-  // Nothing evictable exists, and the new value cannot fit.
-  const ok = writeCacheOrInvalidate("bhb_transport_v2", big(5_000));
-  assert.equal(ok, false, "the caller is told it did not persist");
-  assert.equal(
-    store.getItem("bhb_transport_v2"),
-    null,
-    "a stale copy that can never be updated outranks fresh server data — drop it",
-  );
-}
-
-/* ── Masters keeps its previous copy rather than being dropped ── */
-{
-  const store = install(1_000);
-  store.setItem("bhb_masters_v5", big(400));
-  const ok = writeCacheOrInvalidate("bhb_masters_v5", big(5_000));
-  assert.equal(ok, false);
-  assert.equal(
-    store.getItem("bhb_masters_v5")?.length,
-    400,
-    "better a stale masters than none — everything resolves through it",
-  );
-}
-
-/* ── The page reads what it just loaded, even when it could not store it ── */
-// 6 Oct 2026: office browsers hydrated 35 staff, could not store them in
-// masters, read the old stored copy back and showed an HR list of 0.
-{
-  const store = install(1_000);
-  store.setItem("bhb_masters_v5", "old");
-  writeCacheOrInvalidate("bhb_masters_v5", big(5_000));
-  assert.equal(store.getItem("bhb_masters_v5"), "old", "storage still holds the old copy");
-  assert.equal(
-    readCache("bhb_masters_v5")?.length,
-    5_000,
-    "but readers get the fresh copy held in memory for this page",
-  );
-  // A dropped bulk cache is held the same way.
-  writeCacheOrInvalidate("bhb_transport_v2", big(5_000));
-  assert.equal(store.getItem("bhb_transport_v2"), null);
-  assert.equal(readCache("bhb_transport_v2")?.length, 5_000);
-  // Once a write fits again, storage is the truth and the memory copy goes.
-  writeCacheOrInvalidate("bhb_masters_v5", "new");
-  assert.equal(readCache("bhb_masters_v5"), "new");
-  assert.equal(store.getItem("bhb_masters_v5"), "new");
+  const store = install(100);
+  store.setItem("bhb_x", big(90));
+  assert.equal(writeCacheOrInvalidate("bhb_sis_filters_v1", big(500)), false, "the caller is told it did not persist");
+  assert.equal(store.getItem("bhb_sis_filters_v1"), null);
+  assert.equal(readCache("bhb_sis_filters_v1")?.length, 500, "but this page still reads it");
 }
 
 /* ── A non-quota error is a real error and must not be swallowed ── */
@@ -201,10 +130,21 @@ console.log("browserStorageQuota.selftest.ts");
     },
   };
   assert.throws(
-    () => writeCacheOrInvalidate("bhb_transport_v2", "x"),
+    () => writeCacheOrInvalidate("bhb_sis_filters_v1", "x"),
     /SecurityError/,
     "only quota is handled here; anything else is a bug to surface",
   );
 }
 
-console.log("  ✓ storage quota — every desk can make room, markers are never evicted");
+/* ── A fresh login forgets the previous session's module copies ── */
+{
+  (globalThis as Record<string, unknown>).window = {
+    localStorage: { setItem() {}, getItem: () => null, removeItem() {} },
+  };
+  writeCacheOrInvalidate("bhb_masters_v5", "{\"prev\":true}");
+  assert.equal(readCache("bhb_masters_v5"), "{\"prev\":true}");
+  clearMemoryCopies();
+  assert.equal(readCache("bhb_masters_v5"), null, "the next user starts from the server, not the last user's copy");
+}
+
+console.log("  ✓ storage — module data in memory only; markers and outboxes kept on disk");

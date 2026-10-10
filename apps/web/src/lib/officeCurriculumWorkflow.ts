@@ -2,6 +2,7 @@
  * Office curriculum workflow — class templates, bulk apply, session roll.
  */
 
+import { readCache, writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { DEFAULT_AY, type MastersState } from "@/lib/masters";
 import {
   loadSis,
@@ -99,7 +100,7 @@ export function summarizeClassCurriculum(
 export function loadClassCurriculumTemplates(): ClassCurriculumTemplate[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(TEMPLATE_KEY);
+    const raw = readCache(TEMPLATE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as ClassCurriculumTemplate[];
     return Array.isArray(parsed) ? parsed : [];
@@ -113,7 +114,7 @@ export function saveClassCurriculumTemplates(
 ): void {
   if (!assertModulePermission("students", "edit", "saveClassCurriculumTemplates")) return;
   if (typeof window === "undefined") return;
-  localStorage.setItem(TEMPLATE_KEY, JSON.stringify(list));
+  writeCacheOrInvalidate(TEMPLATE_KEY, JSON.stringify(list));
   void trackServerWork(import("@/lib/curriculumPersistence").then(({ scheduleTemplateSync }) => {
     scheduleTemplateSync(list);
   }));

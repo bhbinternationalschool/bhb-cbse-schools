@@ -48,6 +48,130 @@ export function isStorageQuotaError(err: unknown): boolean {
  * froze earlier the same day. An absent cache simply re-reads from the
  * database, which is the intended behaviour anyway.
  */
+/* ── Server is the copy (director, 10 Oct 2026) ──────────────────────────
+ *
+ * Module data is NOT kept in localStorage any more. Every desk below was a
+ * whole copy of a module (students, fees, admissions, masters…), together
+ * 5–8 MB against a ~5 MB browser limit: "storage is full" on nearly every
+ * login, and — worse — a copy that outlived its page could be pushed back
+ * over newer data (the 10 Oct subject wipe came from a phone's old copy).
+ *
+ * Now a desk is held in page memory only. Each visit loads it from the
+ * server, exactly like a normal web site; nothing to fill, nothing stale to
+ * push, nothing for anyone to "clear". Small things that must survive a
+ * reload (login, filters, unsent marks, named deletes, one-time markers)
+ * still use localStorage — they are kilobytes.
+ */
+const MEMORY_ONLY_PREFIXES = [
+  "bhb_masters_v",
+  "bhb_sis_v",
+  "bhb_admissions_v",
+  "bhb_fees_v1",
+  "bhb_attendance_v",
+  "bhb_staff_attendance_v",
+  "bhb_exams_v",
+  "bhb_exam_papers_v",
+  "bhb_homework_v",
+  "bhb_school_comms_v",
+  "bhb_transport_v",
+  "bhb_accounts_v",
+  "bhb_payments_v",
+  "bhb_library_v",
+  "bhb_timetable_v",
+  "bhb_teaching_v",
+  "bhb_staff_hr_v",
+  "bhb_erp_chat_v",
+  "bhb_crm_parent_chat_v",
+  "bhb_staff_chat_v",
+  "bhb_notifications_v",
+  "bhb_certificates_v",
+  "bhb_visitors_v",
+  "bhb_health_v",
+  "bhb_wa_campaigns_v",
+  "bhb_complaints_v",
+  "bhb_student_leave_v",
+  "bhb_ptm_v",
+  "bhb_vault_v",
+  "bhb_trust_v",
+  "bhb_payroll_v",
+  "bhb_class_curriculum_templates_v",
+  "bhb_module_registry_v",
+  "bhb_rbac_v",
+  "bhb_wa_templates_v",
+  "bhb_wa_chatbot_flows_v",
+  "bhb_automation_v",
+  "bhb_staff_agreements_v",
+  "bhb_staff_advances_v",
+  "bhb_fee_recovery_tasks_v",
+  "bhb_fee_adjustments_v",
+  "bhb_rte_ews_v",
+  "bhb_discipline_v",
+  "bhb_holds_v",
+  "bhb_referrals_v",
+  "bhb_duty_roster_v",
+  "bhb_salary_",
+  "bhb_statutory_remit_v",
+  // NOT bhb_udise_upload_v: the UDISE+ working sheet is a file the office
+  // uploaded into this browser and has no server copy — it must survive a
+  // reload.
+];
+
+/**
+ * The bookkeeping that decided whether a browser's copy was newer than the
+ * server's. With the copy gone it must go too: a timestamp saying "my copy is
+ * newer" with no copy behind it is how a page shows 0 and then pushes it.
+ */
+const MEMORY_ONLY_META = [
+  /_mirror_meta_v1$/,
+  /_db_meta_v1$/,
+  /_desk_db_meta_v1$/,
+  /^bhb_module_state_meta_v1:/,
+  /_remote_meta$/,
+  /^bhb_client_mirror_hydrate_v1$/,
+  /^bhb_desk_ensure_meta_v1$/,
+  /^bhb_fees_v1_use_idb$/,
+];
+
+/** Is this key module data, held in page memory only? */
+export function isMemoryOnlyKey(key: string): boolean {
+  if (!key.startsWith("bhb_")) return false;
+  // Outboxes and markers that happen to share a prefix stay on disk.
+  if (/_pending_|_conflicts_|_deletes_|_seen_|_settled_|_applied_|_cleared_/.test(key)) return false;
+  return MEMORY_ONLY_PREFIXES.some((p) => key.startsWith(p));
+}
+
+function isMemoryOnlyMeta(key: string): boolean {
+  return MEMORY_ONLY_META.some((re) => re.test(key));
+}
+
+let purged = false;
+/**
+ * Once per page, before anything reads: drop every module copy and its
+ * "my copy is newer" bookkeeping left by an older build (and the fees copy in
+ * IndexedDB). The page then starts from the server, every time.
+ */
+export function purgeStoredModuleCopies(): void {
+  if (purged || typeof window === "undefined") return;
+  purged = true;
+  try {
+    const ls = window.localStorage;
+    const drop: string[] = [];
+    for (let i = 0; i < ls.length; i++) {
+      const k = ls.key(i);
+      if (k && (isMemoryOnlyKey(k) || isMemoryOnlyMeta(k))) drop.push(k);
+    }
+    for (const k of drop) ls.removeItem(k);
+  } catch {
+    /* storage unavailable — nothing stored to drop */
+  }
+  try {
+    window.indexedDB?.deleteDatabase("bhb_erp_v1");
+  } catch {
+    /* no IndexedDB — nothing to drop */
+  }
+}
+purgeStoredModuleCopies();
+
 /**
  * Small, load-bearing caches: everything else on the page resolves through
  * them (class names, sections, fee heads). When storage is full, evict the
@@ -157,8 +281,23 @@ export function removeCache(key: string): void {
   }
 }
 
+/**
+ * Forget every copy this page holds. Module data lives only here, so a
+ * fresh login, a logout or a tenant wipe that clears localStorage alone
+ * would leave the previous session's data on screen.
+ */
+export function clearMemoryCopies(): void {
+  memoryCopies.clear();
+}
+
 export function writeCacheOrInvalidate(key: string, value: string): boolean {
   if (typeof window === "undefined") return false;
+  if (isMemoryOnlyKey(key)) {
+    // Module data: this page's memory, never the disk. Reported as stored —
+    // readers find it through readCache().
+    memoryCopies.set(key, value);
+    return true;
+  }
   const stored = writeCacheOrInvalidateInner(key, value);
   if (stored) memoryCopies.delete(key);
   else memoryCopies.set(key, value);
