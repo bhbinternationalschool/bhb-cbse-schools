@@ -23,6 +23,7 @@ import {
   writeStaffAttendanceLocalRaw,
 } from "./staffAttendance";
 import { emptyStaffHrState, writeStaffHrLocalRaw } from "./staffHr";
+import { syncRemitFromPayrollRun } from "./statutoryRemit";
 import { staffMonthCalendar } from "./staffMonthCalendar";
 import { emptyTimetableState } from "./timetable";
 import { teachersForSubject } from "./timetableSolver";
@@ -81,7 +82,31 @@ assert.ok(inc.lines.some((l) => l.staffId === "perm"));
   writePayrollLocalRaw({ ...loadPayroll(), runs: [posted as never] });
   const preview = buildBankExportPreview({ masters, month: "2026-08", academicYearCode: ay, modes: ["all"], requirePosted: false });
   assert.ok(preview.rows.some((r) => r.empCode === "PERM"), "permanent staff are in the bank file");
-  assert.ok(!preview.rows.some((r) => r.empCode === "VIS"), "visiting staff are never in the salary bank file");
+  // The payroll draft is the only gate. A line already in a run (drafted
+  // before the person was switched to visiting) is paid as the run says —
+  // dropping it silently would leave them unpaid. Warned, not removed.
+  const switched = preview.rows.find((r) => r.staffId === "vis");
+  assert.ok(switched, "a run line for someone now visiting stays in the bank file");
+  assert.ok(switched!.ok, "and is not blocked");
+  assert.match(switched!.warnings?.[0] ?? "", /Now visiting/, "but is warned about");
+  assert.ok(!preview.rows.find((r) => r.staffId === "perm")!.warnings, "regular lines carry no warning");
+}
+
+/* ── PF/ESIC challan: every line in the run, whatever the category is now ─ */
+{
+  const pf = [
+    { headCode: "BASIC", amount: 12_000 },
+    { headCode: "PF_EE", amount: 1_440 },
+    { headCode: "PF_ER", amount: 1_440 },
+  ];
+  const remit = syncRemitFromPayrollRun({
+    runId: "run_x",
+    month: "2026-08",
+    academicYearCode: ay,
+    lines: [{ staffId: "vis", empCode: "VIS", fullName: "vis", statutoryCover: "both", components: pf as never }],
+  });
+  const batch = remit.batches.find((b) => b.payrollRunId === "run_x");
+  assert.ok(batch?.lines.some((l) => l.staffId === "vis"), "PF already deducted in a run is remitted even if the person is now visiting");
 }
 
 /* ── attendance: not "Not punched" on a day nobody expected them ─────── */

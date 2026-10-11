@@ -73,6 +73,8 @@ export type BankExportRow = {
   remark: string;
   ok: boolean;
   issues: string[];
+  /** Not blocking: worth a look before the file goes to the bank. */
+  warnings?: string[];
 };
 
 export type BankExportPreview = {
@@ -154,9 +156,14 @@ export function buildBankExportPreview(input: {
       if (amount <= 0) continue;
 
       const staff = staffById.get(line.staffId);
-      // Visiting staff are paid from their work sheet, never the salary file.
-      if (isVisitingStaff(staff)) continue;
-      rows.push(buildRow(line, staff, amount, input.month));
+      const row = buildRow(line, staff, amount, input.month);
+      // The payroll draft is the only gate (visiting staff are never drafted).
+      // A line already in a run is paid as the run says, even if the person
+      // has since been made visiting — only warned, never dropped.
+      if (isVisitingStaff(staff)) {
+        row.warnings = ["Now visiting staff — this salary line was drafted before the change; make sure their work sheet does not pay the same days"];
+      }
+      rows.push(row);
     }
   }
 

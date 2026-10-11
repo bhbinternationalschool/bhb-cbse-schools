@@ -31,8 +31,15 @@ import {
   computeTds194J,
   fyMonths,
   fyOfMonth,
+  cashfreeApplyDecision,
+  cashfreeKey,
+  cashfreePrepareDecision,
+  handKey,
+  handPayDecision,
   isMonthKey,
   isVisitingStaff,
+  payrollOverlapProblem,
+  tdsBasisKey,
   istToday,
   makerCheckerProblem,
   monthDates,
@@ -96,6 +103,8 @@ export type SheetView = {
   approvedBy: string;
   approvedAt: string | null;
   payMode: VisitingPayMode | "";
+  /** Set while one payment holds the sheet ("cash:<id>", "bank:<id>", "cashfree:<id>"). */
+  paymentKey: string;
   payoutRequestId: string;
   paidAt: string | null;
   paidBy: string;
@@ -135,6 +144,7 @@ function rowToSheet(r: Record<string, unknown>): SheetView {
     approvedBy: String(r.approved_by ?? ""),
     approvedAt: r.approved_at ? String(r.approved_at) : null,
     payMode: pm === "cashfree" || pm === "cash" || pm === "bank" ? pm : "",
+    paymentKey: String(r.payment_key ?? ""),
     payoutRequestId: String(r.payout_request_id ?? ""),
     paidAt: r.paid_at ? String(r.paid_at) : null,
     paidBy: String(r.paid_by ?? ""),
@@ -411,8 +421,35 @@ export async function getSheet(id: string): Promise<{ ok: true; sheet: SheetView
   return { ok: true, sheet, lines: lines.lines, audit: auditRows };
 }
 
+/** Payroll runs that carry this person for this month (any status: a draft is salary on its way). */
+async function payrollOverlap(staffId: string, month: string): Promise<{ ok: true; problem: string } | Fail> {
+  const ctx = await ctxOrFail();
+  if (!ctx) return { ok: false, error: "No tenant context" };
+  const { data: runs, error } = await ctx.sb.from("payroll_desk_runs").select("id, status, month").eq("tenant_id", ctx.tenantId).eq("month", month);
+  // Fail closed: an unreadable payroll may already be paying these days.
+  if (error) return { ok: false, error: `Payroll could not be read to rule out paying the month twice (${error.message})` };
+  const ids = (runs ?? []).map((r) => String((r as { id: string }).id));
+  if (!ids.length) return { ok: true, problem: "" };
+  const { data: lines, error: lErr } = await ctx.sb
+    .from("payroll_desk_run_lines")
+    .select("run_id")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("staff_id", staffId)
+    .in("run_id", ids)
+    .limit(5);
+  if (lErr) return { ok: false, error: `Payroll lines could not be read to rule out paying the month twice (${lErr.message})` };
+  const onRun = new Set((lines ?? []).map((l) => String((l as { run_id: string }).run_id)));
+  const hits = (runs ?? [])
+    .filter((r) => onRun.has(String((r as { id: string }).id)))
+    .map((r) => {
+      const x = r as { id: string; status: string; month: string };
+      return { runId: String(x.id), status: String(x.status), month: String(x.month) };
+    });
+  return { ok: true, problem: payrollOverlapProblem(hits, month) };
+}
+
 /** The year's other approved / paid sheets of this person — what TDS looks back over. */
-async function earlierInFy(staffId: string, month: string, exceptId: string): Promise<{ ok: true; earlier: { month: string; grossPaise: number; tdsPaise: number }[] } | Fail> {
+async function earlierInFy(staffId: string, month: string, exceptId: string): Promise<{ ok: true; earlier: { id: string; month: string; grossPaise: number; tdsPaise: number }[] } | Fail> {
   const ctx = await ctxOrFail();
   if (!ctx) return { ok: false, error: "No tenant context" };
   const months = fyMonths(fyOfMonth(month));
@@ -430,7 +467,7 @@ async function earlierInFy(staffId: string, month: string, exceptId: string): Pr
       .filter((r) => String((r as Record<string, unknown>).id) !== exceptId)
       .map((r) => {
         const x = r as Record<string, unknown>;
-        return { month: String(x.month), grossPaise: Number(x.gross_paise ?? 0), tdsPaise: Number(x.tds_paise ?? 0) };
+        return { id: String(x.id), month: String(x.month), grossPaise: Number(x.gross_paise ?? 0), tdsPaise: Number(x.tds_paise ?? 0) };
       }),
   };
 }
@@ -478,7 +515,7 @@ function lineToRow(l: ComputedLine, tenantId: string, sheetId: string) {
  * Build a month's sheet, or refresh a draft. Refused — not zero — when any
  * source the person's basis needs cannot be read.
  */
-export async function buildSheet(input: { staffId: string; month: string; by: string }): Promise<{ ok: true; sheet: SheetView; message: string } | Fail> {
+export async function buildSheet(input: { staffId: string; month: string; by: string; byKey: string }): Promise<{ ok: true; sheet: SheetView; message: string } | Fail> {
   const ctx = await ctxOrFail();
   if (!ctx) return { ok: false, error: "No tenant context" };
   if (!isMonthKey(input.month)) return { ok: false, error: "Pick a month" };
@@ -509,6 +546,9 @@ export async function buildSheet(input: { staffId: string; month: string; by: st
   if (existing && existing.status !== "draft") {
     return { ok: false, error: `This sheet is ${existing.status} — reopen it (with a reason) before rebuilding` };
   }
+  const overlap = await payrollOverlap(input.staffId, input.month);
+  if (!overlap.ok) return overlap;
+  if (overlap.problem) return { ok: false, error: overlap.problem };
 
   // Sources. Every read is checked: unknown must not become "no work".
   const punches = await readPunches(input.staffId, input.month);
@@ -575,7 +615,7 @@ export async function buildSheet(input: { staffId: string; month: string; by: st
       warnings,
       built_by: input.by,
       built_at: now,
-      makers: [input.by],
+      makers: [input.byKey],
     });
     if (error) {
       return { ok: false, error: /duplicate|unique/i.test(error.message) ? "Someone else just built this sheet — open it" : `Could not create the sheet (${error.message})` };
@@ -630,7 +670,7 @@ export async function buildSheet(input: { staffId: string; month: string; by: st
         .neq("source", "office");
       if (error) return { ok: false, error: `Could not drop stale lines (${error.message})` };
     }
-    const makers = existing.makers.includes(input.by) ? existing.makers : [...existing.makers, input.by];
+    const makers = existing.makers.includes(input.byKey) ? existing.makers : [...existing.makers, input.byKey];
     await ctx.sb
       .from("visiting_work_sheets")
       .update({ basis, rate_paise: ratePaise, tds_applies: vp.tds194j, staff_name: name, warnings, built_by: input.by, built_at: now, makers, updated_at: now })
@@ -675,7 +715,7 @@ async function noteMaker(sheet: SheetView, by: string) {
 }
 
 /** Change a line's quantity (confirms an unconfirmed one too). */
-export async function adjustLine(input: { sheetId: string; lineId: string; qty: number; reason: string; by: string }): Promise<{ ok: true; sheet: SheetView } | Fail> {
+export async function adjustLine(input: { sheetId: string; lineId: string; qty: number; reason: string; by: string; byKey: string }): Promise<{ ok: true; sheet: SheetView } | Fail> {
   const ctx = await ctxOrFail();
   if (!ctx) return { ok: false, error: "No tenant context" };
   const d = await draftSheetOrFail(input.sheetId);
@@ -702,12 +742,12 @@ export async function adjustLine(input: { sheetId: string; lineId: string; qty: 
     from: { qty: l.qty, status: l.status, amountPaise: l.amountPaise },
     to: { qty: input.qty, status: "counted", amountPaise: amount },
   });
-  await noteMaker(d.sheet, input.by);
+  await noteMaker(d.sheet, input.byKey);
   return retotal(d.sheet);
 }
 
 /** Take a line off the sheet (kept, marked removed, with the reason). */
-export async function removeLine(input: { sheetId: string; lineId: string; reason: string; by: string }): Promise<{ ok: true; sheet: SheetView } | Fail> {
+export async function removeLine(input: { sheetId: string; lineId: string; reason: string; by: string; byKey: string }): Promise<{ ok: true; sheet: SheetView } | Fail> {
   const ctx = await ctxOrFail();
   if (!ctx) return { ok: false, error: "No tenant context" };
   if (String(input.reason || "").trim().length < 4) return { ok: false, error: "Give a reason (it is kept with the sheet)" };
@@ -727,12 +767,12 @@ export async function removeLine(input: { sheetId: string; lineId: string; reaso
     .eq("sheet_id", input.sheetId);
   if (error) return { ok: false, error: `Could not remove the line (${error.message})` };
   await audit(input.sheetId, input.by, "line_removed", input.reason.trim(), { lineId: l.id, date: l.date, note: l.note, qty: l.qty, amountPaise: l.amountPaise });
-  await noteMaker(d.sheet, input.by);
+  await noteMaker(d.sheet, input.byKey);
   return retotal(d.sheet);
 }
 
 /** Work the sources do not show (a class taken elsewhere, a forgotten punch) — with a reason. */
-export async function addLine(input: { sheetId: string; date: string; qty: number; note: string; reason: string; by: string }): Promise<{ ok: true; sheet: SheetView } | Fail> {
+export async function addLine(input: { sheetId: string; date: string; qty: number; note: string; reason: string; by: string; byKey: string }): Promise<{ ok: true; sheet: SheetView } | Fail> {
   const ctx = await ctxOrFail();
   if (!ctx) return { ok: false, error: "No tenant context" };
   const d = await draftSheetOrFail(input.sheetId);
@@ -765,17 +805,17 @@ export async function addLine(input: { sheetId: string; date: string; qty: numbe
   });
   if (error) return { ok: false, error: `Could not add the line (${error.message})` };
   await audit(input.sheetId, input.by, "line_added", input.reason.trim(), { lineId: id, date: input.date, qty: input.qty, amountPaise: amount, note: input.note });
-  await noteMaker(d.sheet, input.by);
+  await noteMaker(d.sheet, input.byKey);
   return retotal(d.sheet);
 }
 
 /** Approve: TDS recomputed against the year as it stands and frozen; the sheet locks. */
-export async function approveSheet(input: { sheetId: string; by: string; byOwner: boolean }): Promise<{ ok: true; sheet: SheetView } | Fail> {
+export async function approveSheet(input: { sheetId: string; by: string; byKey: string; byOwner: boolean }): Promise<{ ok: true; sheet: SheetView } | Fail> {
   const ctx = await ctxOrFail();
   if (!ctx) return { ok: false, error: "No tenant context" };
   const d = await draftSheetOrFail(input.sheetId);
   if (!d.ok) return d;
-  const mc = makerCheckerProblem({ approver: input.by, makers: d.sheet.makers, approverIsOwner: input.byOwner });
+  const mc = makerCheckerProblem({ approver: input.byKey, makers: d.sheet.makers, approverIsOwner: input.byOwner });
   if (mc) return { ok: false, error: mc };
   const lines = await readLines(input.sheetId);
   if (!lines.ok) return lines;
@@ -785,9 +825,15 @@ export async function approveSheet(input: { sheetId: string; by: string; byOwner
   }
   const gross = sheetGrossPaise(lines.lines);
   if (gross <= 0) return { ok: false, error: "Nothing is counted on this sheet — there is nothing to approve" };
+  // Salary for the same days (a mid-month switch) is checked again here:
+  // payroll may have been drafted after the sheet was built.
+  const overlap = await payrollOverlap(d.sheet.staffId, d.sheet.month);
+  if (!overlap.ok) return overlap;
+  if (overlap.problem) return { ok: false, error: overlap.problem };
   const prior = await earlierInFy(d.sheet.staffId, d.sheet.month, d.sheet.id);
   if (!prior.ok) return prior;
   const tds = computeTds194J({ applies: d.sheet.tdsApplies, month: d.sheet.month, grossPaise: gross, earlier: prior.earlier });
+  const basis = tdsBasisKey(prior.earlier);
   const now = new Date().toISOString();
   const { data, error } = await ctx.sb
     .from("visiting_work_sheets")
@@ -807,6 +853,21 @@ export async function approveSheet(input: { sheetId: string; by: string; byOwner
     .select("id");
   if (error) return { ok: false, error: `Could not approve (${error.message})` };
   if (!data || data.length === 0) return { ok: false, error: "The sheet changed while you were looking — open it again" };
+  // Another sheet of this person in the same FY approved at the same moment
+  // would mean both took the year's catch-up TDS. Re-read what this TDS was
+  // worked out against; if it moved, undo this approval.
+  const after = await earlierInFy(d.sheet.staffId, d.sheet.month, d.sheet.id);
+  if (!after.ok || tdsBasisKey(after.earlier) !== basis) {
+    await ctx.sb
+      .from("visiting_work_sheets")
+      .update({ status: "draft", approved_by: "", approved_at: null, updated_at: new Date().toISOString() })
+      .eq("tenant_id", ctx.tenantId)
+      .eq("id", input.sheetId)
+      .eq("status", "approved")
+      .eq("approved_at", now)
+      .is("payment_key", null);
+    return { ok: false, error: "Another of this person's sheets was approved at the same moment, which changes their TDS — approve again" };
+  }
   await audit(input.sheetId, input.by, "approved", "", { grossPaise: gross, tdsPaise: tds.tdsPaise, netPaise: tds.netPaise });
   const fresh = await readSheetRow(input.sheetId);
   return fresh && fresh !== "error" ? { ok: true, sheet: fresh } : { ok: false, error: "Approved, but could not be read back" };
@@ -830,7 +891,7 @@ async function openPayoutRequestFor(sheetId: string): Promise<{ ok: true; open: 
 }
 
 /** Back to draft — only while unpaid and nothing is on its way. */
-export async function reopenSheet(input: { sheetId: string; reason: string; by: string }): Promise<{ ok: true; sheet: SheetView } | Fail> {
+export async function reopenSheet(input: { sheetId: string; reason: string; by: string; byKey: string }): Promise<{ ok: true; sheet: SheetView } | Fail> {
   const ctx = await ctxOrFail();
   if (!ctx) return { ok: false, error: "No tenant context" };
   if (String(input.reason || "").trim().length < 4) return { ok: false, error: "Give a reason for reopening (it is kept with the sheet)" };
@@ -844,7 +905,7 @@ export async function reopenSheet(input: { sheetId: string; reason: string; by: 
   const now = new Date().toISOString();
   const { data, error } = await ctx.sb
     .from("visiting_work_sheets")
-    .update({ status: "draft", approved_by: "", approved_at: null, makers: s.makers.includes(input.by) ? s.makers : [...s.makers, input.by], updated_at: now })
+    .update({ status: "draft", approved_by: "", approved_at: null, makers: s.makers.includes(input.byKey) ? s.makers : [...s.makers, input.byKey], updated_at: now })
     .eq("tenant_id", ctx.tenantId)
     .eq("id", s.id)
     .eq("status", "approved")
@@ -858,6 +919,16 @@ export async function reopenSheet(input: { sheetId: string; reason: string; by: 
 }
 
 /* ── paying ───────────────────────────────────────────────────────────── */
+/*
+ * One payment holds the sheet at a time, through payment_key:
+ *   cash:<sheet> / bank:<sheet>   a hand payment being recorded
+ *   cashfree:<sheet>              a Cashfree request prepared, on its way or
+ *                                 waiting for approval (released if it dies)
+ * The claim is one conditional UPDATE (… where payment_key is null), so two
+ * ways of paying cannot both start. The voucher is keyed (visiting_fee, sheet
+ * id), so a retry after a crash finds the voucher already posted and only
+ * finishes marking the sheet paid.
+ */
 
 /** Claim the sheet for one payment. Whoever claims first pays; everyone else is refused. */
 async function claimPayment(sheetId: string, key: string): Promise<boolean | "error"> {
@@ -914,14 +985,33 @@ async function postPayment(sheet: SheetView, mode: VisitingPayMode, opts: { date
   });
 }
 
-async function markPaid(sheetId: string, patch: Record<string, unknown>) {
+/**
+ * The voucher is in the book: the sheet must end 'paid'. Retried, because a
+ * sheet left 'approved' after its voucher posted could be paid again.
+ */
+async function markPaid(sheetId: string, key: string, patch: Record<string, unknown>): Promise<{ ok: true } | Fail> {
   const ctx = await ctxOrFail();
-  if (!ctx) return;
+  if (!ctx) return { ok: false, error: "No tenant context" };
+  let last = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data, error } = await ctx.sb
+      .from("visiting_work_sheets")
+      .update({ status: "paid", last_error: "", ...patch, updated_at: new Date().toISOString() })
+      .eq("tenant_id", ctx.tenantId)
+      .eq("id", sheetId)
+      .eq("payment_key", key)
+      .select("id");
+    if (!error && data && data.length > 0) return { ok: true };
+    last = error?.message || "the sheet no longer holds this payment";
+    if (!error) break; // claim moved: retrying will not help
+    await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+  }
   await ctx.sb
     .from("visiting_work_sheets")
-    .update({ status: "paid", last_error: "", ...patch, updated_at: new Date().toISOString() })
+    .update({ last_error: `Voucher posted but the sheet could not be marked paid (${last}) — pay again with the same method to finish; the voucher will not be posted twice.` })
     .eq("tenant_id", ctx.tenantId)
     .eq("id", sheetId);
+  return { ok: false, error: last };
 }
 
 /**
@@ -950,36 +1040,59 @@ export async function payByHand(input: {
     if (!bank) return { ok: false, error: "Choose the school bank the money left" };
     bankAccountId = bank.bankAccountId;
   }
-  const open = await openPayoutRequestFor(s.id);
-  if (!open.ok) return open;
-  if (open.open) return { ok: false, error: "A Cashfree payment for this sheet is waiting or on its way — cancel it before paying another way" };
 
-  const key = `${input.mode}:${s.id}`;
-  const claimed = await claimPayment(s.id, key);
-  if (claimed === "error") return { ok: false, error: "Could not claim the sheet for payment — try again" };
-  if (!claimed) return { ok: false, error: "This sheet is already being paid" };
+  const key = handKey(input.mode, s.id);
+  const decision = handPayDecision({ status: s.status, paymentKey: s.paymentKey, mode: input.mode, sheetId: s.id });
+  if (decision.action === "refuse") return { ok: false, error: decision.error };
+  if (decision.action === "claim") {
+    const claimed = await claimPayment(s.id, key);
+    if (claimed === "error") return { ok: false, error: "Could not claim the sheet for payment — try again" };
+    if (!claimed) return { ok: false, error: "This sheet is already being paid" };
+  }
+  // Checked after the claim: a request made before the claim existed would
+  // otherwise slip past and pay the month a second time.
+  const open = await openPayoutRequestFor(s.id);
+  if (!open.ok || open.open) {
+    await releaseClaim(s.id, key, open.ok ? "A Cashfree payment is on its way" : open.error);
+    return { ok: false, error: open.ok ? "A Cashfree payment for this sheet is waiting or on its way — cancel it before paying another way" : open.error };
+  }
   const posted = await postPayment(s, input.mode, { date: input.date, ref: input.ref.trim(), by: input.by, bankLedgerCode: input.bankLedgerCode, bankAccountId });
   if (!posted.ok) {
     await releaseClaim(s.id, key, posted.error);
     return { ok: false, error: `The books refused the payment: ${posted.error}` };
   }
-  await markPaid(s.id, { pay_mode: input.mode, paid_at: new Date().toISOString(), paid_by: input.by, paid_ref: input.ref.trim().slice(0, 80), ledger_voucher_no: posted.voucherNo });
-  await audit(s.id, input.by, "paid", "", { mode: input.mode, date: input.date, ref: input.ref.trim(), voucherNo: posted.voucherNo, netPaise: s.netPaise, tdsPaise: s.tdsPaise });
+  const marked = await markPaid(s.id, key, { pay_mode: input.mode, paid_at: new Date().toISOString(), paid_by: input.by, paid_ref: input.ref.trim().slice(0, 80), ledger_voucher_no: posted.voucherNo });
+  if (!marked.ok) return { ok: false, error: `Voucher ${posted.voucherNo} posted, but the sheet could not be marked paid (${marked.error}). Record the payment again the same way to finish — it will not post twice.` };
+  await audit(s.id, input.by, "paid", "", { mode: input.mode, date: input.date, ref: input.ref.trim(), voucherNo: posted.voucherNo, netPaise: s.netPaise, tdsPaise: s.tdsPaise, replay: !posted.created });
   const fresh = await readSheetRow(s.id);
   return fresh && fresh !== "error"
     ? { ok: true, sheet: fresh, message: `Paid ${inr(s.netPaise)}${s.tdsPaise ? ` (TDS ${inr(s.tdsPaise)} to 2310)` : ""} — voucher ${posted.voucherNo}` }
     : { ok: false, error: `Paid (voucher ${posted.voucherNo}), but could not be read back` };
 }
 
-/** The sheet as the payout flow needs it (approved, unpaid, net ≥ ₹1). */
-export async function sheetForPayout(sheetId: string): Promise<{ ok: true; sheet: SheetView } | Fail> {
+/**
+ * Hold an approved sheet for a Cashfree payment (approved, unpaid, net ≥ ₹1,
+ * nothing else holding it). Released by releaseCashfreeClaim if the request
+ * dies before any money moves.
+ */
+export async function claimSheetForCashfree(sheetId: string): Promise<{ ok: true; sheet: SheetView } | Fail> {
   const s = await readSheetRow(sheetId);
   if (s === "error") return { ok: false, error: "Could not read the sheet" };
   if (!s) return { ok: false, error: "No such sheet" };
   if (s.status === "paid") return { ok: false, error: "This sheet is already paid" };
   if (s.status !== "approved") return { ok: false, error: "Approve the sheet before paying it" };
   if (s.netPaise < 100) return { ok: false, error: "The net amount is under ₹1 — pay it in cash" };
-  return { ok: true, sheet: s };
+  const d = cashfreePrepareDecision({ status: s.status, paymentKey: s.paymentKey, sheetId: s.id });
+  if (d) return { ok: false, error: d };
+  const claimed = await claimPayment(s.id, cashfreeKey(s.id));
+  if (claimed === "error") return { ok: false, error: "Could not claim the sheet for payment — try again" };
+  if (!claimed) return { ok: false, error: "This sheet is already being paid" };
+  return { ok: true, sheet: { ...s, paymentKey: cashfreeKey(s.id) } };
+}
+
+/** The Cashfree request died (failed, rejected, cancelled) before money moved: free the sheet. */
+export async function releaseCashfreeClaim(sheetId: string, why: string) {
+  await releaseClaim(sheetId, cashfreeKey(sheetId), why);
 }
 
 export async function notePayoutRequest(sheetId: string, requestId: string, by: string) {
@@ -1002,37 +1115,57 @@ export async function applyVisitingFeePaid(input: { sheetId: string; requestId: 
   const s = await readSheetRow(input.sheetId);
   if (s === "error") return { ok: false, error: "Could not read the sheet" };
   if (!s) return { ok: false, error: "The sheet is gone" };
-  const key = `cashfree:${input.requestId}`;
-  if (s.status === "paid") {
-    if (s.payMode === "cashfree" && s.payoutRequestId === input.requestId) return { ok: true, voucherNo: s.ledgerVoucherNo };
-    await audit(s.id, "cashfree", "paid_twice", "", { requestId: input.requestId, paidBefore: { mode: s.payMode, ref: s.paidRef } });
+  const key = cashfreeKey(s.id);
+  const paidTwice = async (how: string) => {
+    await audit(s.id, "cashfree", "paid_twice", "", { requestId: input.requestId, paidBefore: how });
     const ctx = await ctxOrFail();
     if (ctx) {
       await ctx.sb
         .from("visiting_work_sheets")
-        .update({ last_error: `PAID TWICE: Cashfree paid ${inr(s.netPaise)} (request ${input.requestId}) after the sheet was already paid by ${s.payMode}. Recover it from ${s.staffName}, or set it against next month.` })
+        .update({ last_error: `PAID TWICE: Cashfree paid ${inr(s.netPaise)} (request ${input.requestId}) but the sheet was already paid ${how}. Recover it from ${s.staffName}, or set it against next month.` })
         .eq("tenant_id", ctx.tenantId)
         .eq("id", s.id);
     }
-    return { ok: true, voucherNo: "PAID TWICE — see the sheet" };
-  }
-  const claimed = await claimPayment(s.id, key);
-  if (claimed === "error") return { ok: false, error: "Could not claim the sheet" };
-  if (!claimed) {
-    const again = await readSheetRow(s.id);
-    if (again && again !== "error" && again.status === "paid") return applyVisitingFeePaid(input);
-    // Claimed by this same request on an earlier, interrupted try: carry on.
-    const ctx = await ctxOrFail();
-    if (!ctx) return { ok: false, error: "No tenant context" };
-    const { data } = await ctx.sb.from("visiting_work_sheets").select("payment_key").eq("tenant_id", ctx.tenantId).eq("id", s.id).maybeSingle();
-    if (String((data as { payment_key?: string } | null)?.payment_key ?? "") !== key) return { ok: false, error: "The sheet is being paid another way" };
+    return { ok: true as const, voucherNo: "PAID TWICE — see the sheet" };
+  };
+  const d = cashfreeApplyDecision({ status: s.status, paymentKey: s.paymentKey, sheetId: s.id, payMode: s.payMode, payoutRequestId: s.payoutRequestId, requestId: input.requestId });
+  if (d.action === "done") return { ok: true, voucherNo: s.ledgerVoucherNo };
+  if (d.action === "paid_twice") return paidTwice(d.how);
+  if (d.action === "claim") {
+    // Released after a false failure, then the money landed after all.
+    const claimed = await claimPayment(s.id, key);
+    if (claimed === "error") return { ok: false, error: "Could not claim the sheet" };
+    if (!claimed) return applyVisitingFeePaid(input);
   }
   const date = istToday();
   const posted = await postPayment(s, "cashfree", { date, ref: input.ref, by: input.by });
   if (!posted.ok) return { ok: false, error: posted.error };
-  await markPaid(s.id, { pay_mode: "cashfree", payout_request_id: input.requestId, paid_at: new Date().toISOString(), paid_by: input.by, paid_ref: input.ref.slice(0, 80), ledger_voucher_no: posted.voucherNo });
+  const marked = await markPaid(s.id, key, { pay_mode: "cashfree", payout_request_id: input.requestId, paid_at: new Date().toISOString(), paid_by: input.by, paid_ref: input.ref.slice(0, 80), ledger_voucher_no: posted.voucherNo });
+  // Not ok → the request stays unapplied and Check status retries; the voucher will not repeat.
+  if (!marked.ok) return { ok: false, error: `voucher ${posted.voucherNo} posted; sheet not marked paid (${marked.error})` };
   await audit(s.id, "cashfree", "paid", "", { mode: "cashfree", requestId: input.requestId, ref: input.ref, voucherNo: posted.voucherNo, netPaise: s.netPaise, tdsPaise: s.tdsPaise });
   return { ok: true, voucherNo: posted.voucherNo };
+}
+
+/**
+ * The bank returned a Cashfree payment after it was booked. The sheet stays
+ * paid (its voucher is the record of what was owed and deducted); what the
+ * office must do is written on the sheet.
+ */
+export async function flagVisitingFeeReturned(sheetId: string, requestId: string) {
+  const s = await readSheetRow(sheetId);
+  if (!s || s === "error") return;
+  const ctx = await ctxOrFail();
+  if (!ctx) return;
+  await ctx.sb
+    .from("visiting_work_sheets")
+    .update({
+      last_error: `RETURNED: the bank sent back ${inr(s.netPaise)} (request ${requestId}) after it was booked as voucher ${s.ledgerVoucherNo}; the money is back in the Cashfree wallet. To pay ${s.staffName} again: in Accounts → Vouchers reverse ${s.ledgerVoucherNo}, then post a payment voucher with the same split (Dr 5075 ${inr(s.grossPaise)} / Cr 2310 ${inr(s.tdsPaise)} / Cr cash or bank ${inr(s.netPaise)}) when you pay them — fix their bank details first.`,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", sheetId);
+  await audit(sheetId, "cashfree", "payment_returned", "", { requestId, voucherNo: s.ledgerVoucherNo });
 }
 
 /** Banks the office can say a hand-made transfer left from. */

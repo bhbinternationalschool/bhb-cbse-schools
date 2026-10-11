@@ -13,6 +13,15 @@ import assert from "node:assert/strict";
 
 import { L_CASH, L_PAYOUTS_WALLET, L_TDS_PAYABLE, L_VISITING_FEES } from "@/lib/ledger/coa";
 import {
+  actorKey,
+  cashfreeApplyDecision,
+  cashfreeKey,
+  cashfreePrepareDecision,
+  handKey,
+  handPayDecision,
+  minutesOf,
+  payrollOverlapProblem,
+  tdsBasisKey,
   buildVisitingLines,
   checkAdjustment,
   computeTds194J,
@@ -253,9 +262,88 @@ const classDay = (date: string, classId: string) =>
   assert.equal(checkAdjustment({ qty: 0, unit: "day", reason: "was not here" }), "");
   assert.equal(readSheetStatus("draft"), "draft");
   assert.equal(readSheetStatus("??"), "paid", "an unreadable status is locked and never payable again");
-  assert.match(makerCheckerProblem({ approver: "Nihal Rajak", makers: ["nihal rajak"], approverIsOwner: false }), /someone else/);
-  assert.equal(makerCheckerProblem({ approver: "Beena Singh", makers: ["Nihal Rajak"], approverIsOwner: false }), "");
-  assert.equal(makerCheckerProblem({ approver: "Director", makers: ["Director"], approverIsOwner: true }), "", "the owner may approve their own");
+  // Keys, not display names: two people called "Neha" are two people.
+  const neha1 = actorKey({ staffId: "stf_1", fullName: "Neha" });
+  const neha2 = actorKey({ staffId: "stf_2", fullName: "Neha" });
+  assert.equal(neha1, "staff:stf_1");
+  assert.equal(actorKey({ email: " Office@School.in " }), "email:office@school.in");
+  assert.equal(actorKey({ fullName: "Someone" }), "", "a name alone is not an identity");
+  assert.match(makerCheckerProblem({ approver: neha1, makers: [neha1], approverIsOwner: false }), /someone else/);
+  assert.equal(makerCheckerProblem({ approver: neha2, makers: [neha1], approverIsOwner: false }), "", "same name, different person may approve");
+  assert.match(makerCheckerProblem({ approver: "", makers: [neha1], approverIsOwner: false }), /cannot approve/);
+  assert.equal(makerCheckerProblem({ approver: neha1, makers: [neha1], approverIsOwner: true }), "", "the owner may approve their own");
+}
+
+/* ── register times: 24-hour and the old ERP's AM/PM ───────────────────── */
+{
+  assert.equal(minutesOf("13:24"), 13 * 60 + 24);
+  assert.equal(minutesOf("07:22 AM"), 7 * 60 + 22);
+  assert.equal(minutesOf("1:05 pm"), 13 * 60 + 5);
+  assert.equal(minutesOf("12:10 AM"), 10, "12 AM is just after midnight");
+  assert.equal(minutesOf("12:10 PM"), 12 * 60 + 10, "12 PM is noon");
+  assert.equal(minutesOf("09:00:30"), 9 * 60);
+  assert.equal(minutesOf("13:00 PM"), null, "13 PM is nonsense");
+  assert.equal(minutesOf("25:00"), null);
+  assert.equal(minutesOf(""), null);
+  const r = buildVisitingLines({
+    staffId: ME,
+    basis: "per_hour",
+    ratePaise: 400_00,
+    month: "2026-09",
+    todayIso: "2026-10-01",
+    punches: { "2026-09-10": { status: "P", inTime: "07:22 AM", outTime: "01:05 PM" } },
+  });
+  assert.ok(r.ok && r.lines[0]!.status === "counted" && r.lines[0]!.qty === 5.75, "07:22 AM → 01:05 PM is 5h43m → 5.75 h, not flagged");
+}
+
+/* ── no double pay with payroll ──────────────────────────────────────── */
+{
+  assert.equal(payrollOverlapProblem([], "2026-10"), "");
+  assert.equal(payrollOverlapProblem([{ runId: "r9", status: "paid", month: "2026-09" }], "2026-10"), "", "another month's run is no overlap");
+  assert.match(payrollOverlapProblem([{ runId: "r1", status: "draft", month: "2026-10" }], "2026-10"), /payroll run \(draft\)/, "even a draft run is salary on its way");
+}
+
+/* ── one payment at a time (payment_key) ─────────────────────────────── */
+{
+  const id = "vws_1";
+  assert.deepEqual(handPayDecision({ status: "approved", paymentKey: "", mode: "cash", sheetId: id }), { action: "claim" });
+  assert.deepEqual(handPayDecision({ status: "approved", paymentKey: handKey("cash", id), mode: "cash", sheetId: id }), { action: "continue" }, "a retry after a crash finishes, it does not re-post");
+  assert.equal(handPayDecision({ status: "approved", paymentKey: cashfreeKey(id), mode: "cash", sheetId: id }).action, "refuse", "Cashfree holds it: no cash");
+  assert.equal(handPayDecision({ status: "approved", paymentKey: handKey("bank", id), mode: "cash", sheetId: id }).action, "refuse", "being paid by bank: no cash");
+  assert.equal(handPayDecision({ status: "paid", paymentKey: "", mode: "cash", sheetId: id }).action, "refuse");
+  assert.equal(handPayDecision({ status: "draft", paymentKey: "", mode: "cash", sheetId: id }).action, "refuse");
+
+  assert.equal(cashfreePrepareDecision({ status: "approved", paymentKey: "", sheetId: id }), "");
+  assert.match(cashfreePrepareDecision({ status: "approved", paymentKey: handKey("cash", id), sheetId: id }), /another way/, "cash being recorded: no Cashfree request");
+  assert.match(cashfreePrepareDecision({ status: "approved", paymentKey: cashfreeKey(id), sheetId: id }), /already waiting/);
+  assert.match(cashfreePrepareDecision({ status: "paid", paymentKey: "", sheetId: id }), /already paid/);
+
+  const base = { sheetId: id, payMode: "", payoutRequestId: "prq1", requestId: "prq1" };
+  assert.deepEqual(cashfreeApplyDecision({ ...base, status: "approved", paymentKey: cashfreeKey(id) }), { action: "book" });
+  assert.deepEqual(cashfreeApplyDecision({ ...base, status: "approved", paymentKey: "" }), { action: "claim" }, "released after a false failure, then the money landed");
+  assert.equal(cashfreeApplyDecision({ ...base, status: "approved", paymentKey: handKey("cash", id) }).action, "paid_twice", "cash recorded while the transfer was in flight is flagged, never booked twice");
+  assert.equal(cashfreeApplyDecision({ ...base, status: "paid", paymentKey: handKey("cash", id), payMode: "cash" }).action, "paid_twice");
+  assert.deepEqual(cashfreeApplyDecision({ ...base, status: "paid", paymentKey: cashfreeKey(id), payMode: "cashfree" }), { action: "done" }, "a replayed webhook is a no-op");
+}
+
+/* ── concurrent approvals: TDS worked out against a set that moved ───── */
+{
+  const a = tdsBasisKey([{ id: "s4", grossPaise: 12_000_00, tdsPaise: 0 }, { id: "s5", grossPaise: 12_000_00, tdsPaise: 0 }]);
+  const sameOtherOrder = tdsBasisKey([{ id: "s5", grossPaise: 12_000_00, tdsPaise: 0 }, { id: "s4", grossPaise: 12_000_00, tdsPaise: 0 }]);
+  assert.equal(a, sameOtherOrder, "order does not matter");
+  const raced = tdsBasisKey([
+    { id: "s4", grossPaise: 12_000_00, tdsPaise: 0 },
+    { id: "s5", grossPaise: 12_000_00, tdsPaise: 0 },
+    { id: "s7", grossPaise: 12_000_00, tdsPaise: 3_600_00 }, // approved meanwhile, took the catch-up
+  ]);
+  assert.notEqual(a, raced, "a sheet approved meanwhile changes the basis → this approval is undone");
+  // And why it matters: both approvals computed alone would each take the catch-up.
+  const earlier = [{ month: "2026-04", grossPaise: 12_000_00, tdsPaise: 0 }, { month: "2026-05", grossPaise: 12_000_00, tdsPaise: 0 }];
+  const june = computeTds194J({ applies: true, month: "2026-06", grossPaise: 12_000_00, earlier });
+  const july = computeTds194J({ applies: true, month: "2026-07", grossPaise: 12_000_00, earlier });
+  assert.equal(june.catchUpPaise + july.catchUpPaise, 2 * 2_400_00, "computed in parallel, both take the catch-up (the race the basis check stops)");
+  const julyAfter = computeTds194J({ applies: true, month: "2026-07", grossPaise: 12_000_00, earlier: [...earlier, { month: "2026-06", grossPaise: 12_000_00, tdsPaise: june.tdsPaise }] });
+  assert.equal(julyAfter.catchUpPaise, 0, "computed after June, July takes none");
 }
 
 /* ── TDS 194J ────────────────────────────────────────────────────────── */

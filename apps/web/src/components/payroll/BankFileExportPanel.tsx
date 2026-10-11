@@ -290,6 +290,9 @@ export function BankFileExportPanel({
                               {r.issues.join(" · ")}
                             </span>
                           )}
+                          {r.warnings?.length ? (
+                            <div className="text-[11px] text-[var(--warning)]">{r.warnings.join(" · ")}</div>
+                          ) : null}
                         </td>
                         <td className="px-2 py-1.5 text-right">
                           <RowActionMenu row={r} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />

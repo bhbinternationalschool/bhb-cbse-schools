@@ -1,7 +1,6 @@
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { loadMasters } from "@/lib/masters";
-import { isVisitingStaff } from "@/lib/visitingPay";
 import { normalizeStatutoryConfig } from "@/lib/foundationMasters";
 import {
   splitEmployerPfContribution,
@@ -325,9 +324,6 @@ export function syncRemitFromPayrollRun(input: {
   for (const line of input.lines) {
     const g = govtDepositFromComponents(line.components);
     if (g.govtTotal <= 0) continue;
-    // Visiting staff are outside PF / ESIC: never on a challan, even if an
-    // old payroll line carried them.
-    if (isVisitingStaff(staffById.get(line.staffId))) continue;
     const basic =
       line.components.find((c) => c.headCode === "BASIC")?.amount || 0;
     const split = splitEmployerPfContribution(basic, g.pfEmployer, config);

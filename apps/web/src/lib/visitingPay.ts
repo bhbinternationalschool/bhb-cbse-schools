@@ -131,12 +131,21 @@ export function fyMonths(fy: string): string[] {
   });
 }
 
-function minutesOf(hhmm: string): number | null {
-  const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm || "").trim());
+/**
+ * Minutes after midnight from a register time. Punches write "13:24"; marks
+ * carried over from the old ERP read "07:22 AM" / "1:05 pm" — both count.
+ */
+export function minutesOf(hhmm: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})(?::\d{2})?\s*([ap]\.?m\.?)?$/i.exec(String(hhmm || "").trim());
   if (!m) return null;
-  const h = Number(m[1]);
+  let h = Number(m[1]);
   const min = Number(m[2]);
-  if (h > 23 || min > 59) return null;
+  if (min > 59) return null;
+  if (m[3]) {
+    if (h < 1 || h > 12) return null;
+    const pm = m[3].toLowerCase().startsWith("p");
+    h = (h % 12) + (pm ? 12 : 0);
+  } else if (h > 23) return null;
   return h * 60 + min;
 }
 
@@ -398,15 +407,53 @@ export function readSheetStatus(raw: unknown): SheetStatus {
   return raw === "draft" ? "draft" : raw === "approved" ? "approved" : "paid";
 }
 
-/** Maker ≠ checker: the person who built or last changed the sheet does not approve it. */
+/**
+ * Who did it, for maker ≠ checker: the staff record, else the login email —
+ * never the display name, which two people can share and anyone can edit.
+ */
+export function actorKey(s: { staffId?: string | null; email?: string | null; fullName?: string | null }): string {
+  if (s.staffId) return `staff:${s.staffId}`;
+  if (s.email) return `email:${s.email.trim().toLowerCase()}`;
+  return "";
+}
+
+/** Maker ≠ checker: the person who built or last changed the sheet does not approve it. Keys from actorKey. */
 export function makerCheckerProblem(input: { approver: string; makers: string[]; approverIsOwner: boolean }): string {
   const who = input.approver.trim().toLowerCase();
-  if (!who) return "Sign in to approve";
+  if (!who) return "Your login is not linked to a staff record or an email — it cannot approve";
   if (input.approverIsOwner) return "";
   if (input.makers.some((m) => m.trim().toLowerCase() === who)) {
     return "You built or changed this sheet — someone else with approve permission must approve it";
   }
   return "";
+}
+
+/* ── no double pay with payroll ───────────────────────────────────────── */
+
+/**
+ * A payroll line for this person and month means salary for those days —
+ * someone switched to visiting mid-month, or drafted before the switch. A
+ * sheet then would pay the same days twice, so it is refused until the
+ * payroll line is taken out of that run. (Safer than an effective-from date:
+ * the run's own day count is the only record of which days salary covered.)
+ */
+export function payrollOverlapProblem(runs: { runId: string; status: string; month: string }[], month: string): string {
+  const hit = runs.find((r) => r.month === month);
+  if (!hit) return "";
+  return `This person is on the ${month} payroll run (${hit.status}) — a work sheet would pay the same days twice. Take them out of that payroll run first, or pay that month through payroll.`;
+}
+
+/**
+ * Two approvals of the same person's sheets at once would each take the
+ * year's catch-up TDS. An approval records the other sheets its TDS was
+ * worked out against; if that set changed by the time it is saved, it is
+ * undone and must be approved again.
+ */
+export function tdsBasisKey(earlier: { id: string; tdsPaise: number; grossPaise: number }[]): string {
+  return earlier
+    .map((e) => `${e.id}:${e.grossPaise}:${e.tdsPaise}`)
+    .sort()
+    .join("|");
 }
 
 /* ── TDS 194J ─────────────────────────────────────────────────────────── */
@@ -577,6 +624,60 @@ export function visitingPaymentLines(input: {
     });
   }
   return { ok: true, lines };
+}
+
+/* ── who holds the sheet for payment (payment_key) ────────────────────── */
+
+export function handKey(mode: "cash" | "bank", sheetId: string): string {
+  return `${mode}:${sheetId}`;
+}
+export function cashfreeKey(sheetId: string): string {
+  return `cashfree:${sheetId}`;
+}
+
+/**
+ * Recording a hand payment: claim a free sheet; carry on when this same
+ * method already holds it (an earlier try posted the voucher, then failed to
+ * mark the sheet paid — the voucher is keyed and will not repeat); refuse
+ * when anything else holds it.
+ */
+export function handPayDecision(s: { status: SheetStatus; paymentKey: string; mode: "cash" | "bank"; sheetId: string }):
+  | { action: "claim" }
+  | { action: "continue" }
+  | { action: "refuse"; error: string } {
+  if (s.status === "paid") return { action: "refuse", error: "This sheet is already paid" };
+  if (s.status !== "approved") return { action: "refuse", error: "Approve the sheet before paying it" };
+  if (!s.paymentKey) return { action: "claim" };
+  if (s.paymentKey === handKey(s.mode, s.sheetId)) return { action: "continue" };
+  return {
+    action: "refuse",
+    error: s.paymentKey.startsWith("cashfree:") ? "A Cashfree payment holds this sheet — cancel it before paying another way" : "This sheet is already being paid another way",
+  };
+}
+
+/** Preparing a Cashfree payment: only a free, approved sheet. "" = go. */
+export function cashfreePrepareDecision(s: { status: SheetStatus; paymentKey: string; sheetId: string }): string {
+  if (s.status === "paid") return "This sheet is already paid";
+  if (s.status !== "approved") return "Approve the sheet before paying it";
+  if (s.paymentKey) return s.paymentKey === cashfreeKey(s.sheetId) ? "A Cashfree payment for this sheet is already waiting or on its way" : "This sheet is being paid another way";
+  return "";
+}
+
+/** Cashfree says the money arrived: book it, or say it was paid twice. */
+export function cashfreeApplyDecision(s: {
+  status: SheetStatus;
+  paymentKey: string;
+  sheetId: string;
+  payMode: string;
+  payoutRequestId: string;
+  requestId: string;
+}): { action: "done" } | { action: "paid_twice"; how: string } | { action: "claim" } | { action: "book" } {
+  if (s.status === "paid") {
+    return s.payMode === "cashfree" && s.payoutRequestId === s.requestId ? { action: "done" } : { action: "paid_twice", how: `by ${s.payMode}`.trim() };
+  }
+  if (!s.paymentKey) return { action: "claim" };
+  if (s.paymentKey === cashfreeKey(s.sheetId)) return { action: "book" };
+  return { action: "paid_twice", how: `by hand (${s.paymentKey.split(":")[0]}) while this payment was on its way` };
 }
 
 export function sheetStatusSentence(s: SheetStatus): string {

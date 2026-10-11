@@ -61,6 +61,7 @@ type Sheet = {
   approvedBy: string;
   approvedAt: string | null;
   payMode: string;
+  paymentKey: string;
   payoutRequestId: string;
   paidAt: string | null;
   paidBy: string;
@@ -813,6 +814,12 @@ function SheetDrawer({
             {sheet.status === "approved" ? (
               <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 text-xs">
                 <p className="text-sm font-semibold text-[var(--brand-deep)]">Pay {inr(sheet.netPaise)}</p>
+                {sheet.paymentKey ? (
+                  <p className="mt-1 text-[var(--warning)]">
+                    Held by a {sheet.paymentKey.split(":")[0]} payment in progress — only that payment can finish this sheet
+                    {sheet.paymentKey.startsWith("cashfree:") ? " (cancel it from Payments to pay another way)" : " (record it again the same way to finish)"}.
+                  </p>
+                ) : null}
                 {payout ? (
                   <p className="mt-1">
                     Cashfree: {requestStatusSentence(payout.status, payout.channel)}

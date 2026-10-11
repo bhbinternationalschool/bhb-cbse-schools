@@ -38,7 +38,7 @@ import {
   removeLine,
   reopenSheet,
 } from "@/lib/visitingPay.server";
-import { isMonthKey } from "@/lib/visitingPay";
+import { actorKey, isMonthKey } from "@/lib/visitingPay";
 
 export const runtime = "nodejs";
 
@@ -99,25 +99,28 @@ export async function POST(req: Request) {
   const session = auth.ctx.session;
   const who = (session.fullName || session.email || "").trim();
   if (!who) return bad("Your login has no name to record against this change", 403);
+  // Maker ≠ checker compares this, never the display name.
+  const byKey = actorKey({ staffId: session.staffId, email: session.email });
+  if (!byKey) return bad("Your login is not linked to a staff record or an email — it cannot change work sheets", 403);
   const isOwner = isSuperAdminSession(session);
   const sheetId = String(b.sheetId || "").trim();
   const reply = (r: { ok: boolean; error?: string }) => NextResponse.json(r, { status: r.ok ? 200 : 400 });
 
   switch (action) {
     case "build":
-      return reply(await buildSheet({ staffId: String(b.staffId || ""), month: String(b.month || ""), by: who }));
+      return reply(await buildSheet({ staffId: String(b.staffId || ""), month: String(b.month || ""), by: who, byKey }));
     case "adjust":
-      return reply(await adjustLine({ sheetId, lineId: String(b.lineId || ""), qty: Number(b.qty), reason: String(b.reason || ""), by: who }));
+      return reply(await adjustLine({ sheetId, lineId: String(b.lineId || ""), qty: Number(b.qty), reason: String(b.reason || ""), by: who, byKey }));
     case "remove":
-      return reply(await removeLine({ sheetId, lineId: String(b.lineId || ""), reason: String(b.reason || ""), by: who }));
+      return reply(await removeLine({ sheetId, lineId: String(b.lineId || ""), reason: String(b.reason || ""), by: who, byKey }));
     case "add":
       return reply(
-        await addLine({ sheetId, date: String(b.date || ""), qty: Number(b.qty), note: String(b.note || ""), reason: String(b.reason || ""), by: who }),
+        await addLine({ sheetId, date: String(b.date || ""), qty: Number(b.qty), note: String(b.note || ""), reason: String(b.reason || ""), by: who, byKey }),
       );
     case "approve":
-      return reply(await approveSheet({ sheetId, by: who, byOwner: isOwner }));
+      return reply(await approveSheet({ sheetId, by: who, byKey, byOwner: isOwner }));
     case "reopen":
-      return reply(await reopenSheet({ sheetId, reason: String(b.reason || ""), by: who }));
+      return reply(await reopenSheet({ sheetId, reason: String(b.reason || ""), by: who, byKey }));
     case "pay_hand": {
       const mode = b.mode === "bank" ? "bank" : b.mode === "cash" ? "cash" : null;
       if (!mode) return bad("Choose cash or bank");
