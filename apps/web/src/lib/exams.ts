@@ -2520,10 +2520,24 @@ export function prepareMarkSheet(
   };
   const gradedPartOf = (sub: ExamSubject | undefined, component: string) =>
     component ? gradedOf(sub).find((g) => g.code === component) ?? null : null;
+  // A part's letter saved earlier and sent back UNCHANGED is not re-judged:
+  // when the school changes a graded part's list, scale or exams mid-term,
+  // the stale letter must not block every later save of the section (the
+  // staff app sends the subject's other rows back). It is kept exactly as
+  // stored; the desk shows it as "not on list" for someone to change.
+  const storedRow = new Map(
+    (existing?.marks ?? []).map((m) => [`${m.studentId}:${m.subjectId}:${m.component}`, m] as const),
+  );
+  const unchangedLetterRow = (m: StudentSubjectMark, component: string): boolean => {
+    if (!component || m.marksObtained != null) return false;
+    const prev = storedRow.get(`${m.studentId}:${m.subjectId}:${component}`);
+    return !!prev && prev.marksObtained == null && (prev.grade || "") === (m.grade || "");
+  };
 
   for (const m of input.marks) {
     const sub = subById.get(m.subjectId);
     if (!sub) continue;
+    if (unchangedLetterRow(m, String(m.component ?? "").toUpperCase())) continue;
     const parts = partsOf(sub);
     const partByCode = new Map(parts.map((c) => [c.code, c]));
     const component = String(m.component ?? "").toUpperCase();
@@ -2571,6 +2585,7 @@ export function prepareMarkSheet(
       // Absent for this paper: no marks, whatever the cell held.
       return normalizeMark({ ...m, component, marksObtained: null, grade: "AB" });
     }
+    if (unchangedLetterRow(m, component)) return normalizeMark({ ...m, component });
     const graded = gradedPartOf(sub, component);
     if (graded) {
       // Validated above; "" (not entered) is stored as "—", never a grade.

@@ -452,7 +452,8 @@ export function splitForSubject(
  * and Annual, unit-test marks for unit tests, and a part with 0 marks for
  * this kind of exam is simply not assessed in it. A split whose MARKS parts
  * are all 0 for this exam leaves the subject as one whole mark (a graded
- * part, if any, still sits beside it). Every other subject keeps the
+ * part, if any, still sits beside it); a split with no marks parts at all
+ * keeps the scheme's components. Every other subject keeps the
  * scheme's components as before. Graded parts are not returned: this is
  * the list every total is summed over.
  */
@@ -463,6 +464,10 @@ export function componentsForSubject(
 ): SchemeComponent[] {
   const split = splitForSubject(scheme, subjectCode);
   if (!split) return componentsForTerm(scheme, termCode);
+  // A split holding ONLY graded parts (just "Handwriting A/B/C") adds a
+  // letter; it does not re-decide how the subject is marked, so the marks
+  // side stays the scheme's components — not a silent switch to one mark.
+  if (split.parts.every(isGradedPart)) return componentsForTerm(scheme, termCode);
   const unitTest = isUnitTestCode(termCode);
   // Graded parts are never a marks column — see gradedPartsForSubject.
   return split.parts

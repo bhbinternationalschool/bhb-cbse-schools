@@ -229,6 +229,9 @@ type MarkRowProps = {
   onAbsentReason: (studentId: string, reason: string) => void;
   onMark: (studentId: string, subjectId: string, component: string, value: string) => void;
   onGrade: (studentId: string, subjectId: string, component: string, grade: string) => void;
+  /** A graded part's letter (AB included) — that part only, never the
+   * subject's absence or its marks. */
+  onPartGrade: (studentId: string, subjectId: string, component: string, grade: string) => void;
   onRating: (studentId: string, domain: CoScholasticDomain, value: string) => void;
   /** Photograph this child's answer sheet for suggested marks; absent = not offered here. */
   onScan?: (studentId: string) => void;
@@ -268,6 +271,7 @@ const MarkRow = memo(function MarkRow({
   onAbsentReason,
   onMark,
   onGrade,
+  onPartGrade,
   onRating,
   onScan,
 }: MarkRowProps) {
@@ -339,15 +343,26 @@ const MarkRow = memo(function MarkRow({
                 —
               </span>
             ) : col.grades ? (
+              (() => {
+                const v = values[key] ?? "";
+                // A letter saved before the part's list changed: shown as it
+                // is, flagged, until someone changes or clears it.
+                const stale = v !== "" && v !== "AB" && !col.grades.includes(v);
+                return (
               <select
-                className="field !w-16 !px-1 !py-1 text-center"
+                className={`field !w-16 !px-1 !py-1 text-center ${stale ? "!border-[var(--danger)] !text-[var(--danger)]" : ""}`}
                 disabled={locked}
-                value={values[key] ?? ""}
-                onChange={(e) => onGrade(st.id, sub.id, code, e.target.value)}
+                value={v}
+                onChange={(e) => onPartGrade(st.id, sub.id, code, e.target.value)}
                 aria-label={`${st.fullName} ${name} grade`}
-                title="Graded — type the letter to pick it. Not counted in the total."
+                title={
+                  stale
+                    ? `"${v}" is not on this part's list (${col.grades.join(", ")}) — change it or clear it (—)`
+                    : "Graded — type the letter to pick it. AB = absent for this part only. Not counted in the total."
+                }
               >
                 <option value="">—</option>
+                {stale ? <option value={v}>{v} · not on list</option> : null}
                 {col.grades.map((g) => (
                   <option key={g} value={g}>
                     {g}
@@ -355,6 +370,8 @@ const MarkRow = memo(function MarkRow({
                 ))}
                 <option value="AB">AB · absent</option>
               </select>
+                );
+              })()
             ) : entryMode === "grades" ? (
               <select
                 className="field !w-16 !px-1 !py-1 text-center"
@@ -1076,6 +1093,25 @@ export function ExamsWorkspace() {
       setDirty(true);
     },
     [takesBy, setAbsentCell],
+  );
+
+  /** A graded part (Handwriting): the letter, "AB" included, on that part's
+   * row alone. Absence of the subject (and its Oral/Written marks) is not
+   * touched — AB here means absent for the handwriting check only. */
+  const setPartGrade = useCallback(
+    (studentId: string, subjectId: string, component: string, grade: string) => {
+      const takes = takesBy.get(studentId);
+      if (takes && !takes.has(subjectId)) return;
+      setGrid((prev) =>
+        prev.map((m) =>
+          m.studentId === studentId && m.subjectId === subjectId && m.component === component
+            ? { ...m, marksObtained: null, grade: grade || "—" }
+            : m,
+        ),
+      );
+      setDirty(true);
+    },
+    [takesBy],
   );
 
   const setCoScholasticRating = useCallback(
@@ -2704,6 +2740,7 @@ export function ExamsWorkspace() {
                             onAbsentReason={setAbsentReason}
                             onMark={setMark}
                             onGrade={setGrade}
+                            onPartGrade={setPartGrade}
                             onRating={setCoScholasticRating}
                             onScan={canScan ? setScanStudentId : undefined}
                           />

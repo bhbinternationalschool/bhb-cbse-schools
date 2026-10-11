@@ -300,6 +300,90 @@ const base = { academicYearCode: "2026-27", examTermId: "term_hy", classId: "cls
   }
 }
 
+// AB on a graded part is that part only: Oral/Written marks and the total stay.
+{
+  const state = makeState();
+  const saved = prepareMarkSheet(
+    { ...base, marks: [mk("sub_eng", "ORAL", 18), mk("sub_eng", "WRIT", 71), mk("sub_eng", "HW", null, "AB"), mk("sub_mat", "", 60)] },
+    state, undefined, deps(state),
+  );
+  assert.ok(saved.ok, saved.ok ? "" : saved.error);
+  if (saved.ok) {
+    assert.equal(saved.sheet.absences.length, 0, "no subject absence recorded");
+    assert.equal(saved.sheet.marks.find((m) => m.component === "WRIT")?.marksObtained, 71, "Written untouched");
+    const card = buildReportCard({ student, classLabel: "VI-A", examTermId: "term_hy", deps: deps(makeState([saved.sheet])) });
+    if ("error" in card) throw new Error(card.error);
+    const l = card.lines.find((x) => x.subjectId === "sub_eng")!;
+    assert.equal(l.marksObtained, 89);
+    assert.equal(l.absent, false);
+    assert.deepEqual(l.gradedParts, [{ code: "HW", label: "Handwriting", grade: "AB" }]);
+    assert.ok(evaluatePromotionPass(card.lines, 33, true).passed);
+  }
+}
+
+// A stale letter (the list changed mid-term) never blocks a later save.
+{
+  const withList = (grades: string[]) =>
+    normalizeAssessmentScheme(
+      { ...scheme, subjectSplits: [{ ...englishSplit, parts: [englishSplit.parts[0], englishSplit.parts[1], { ...englishSplit.parts[2], gradeScale: "custom", grades }] } as never] },
+      33,
+    );
+  const before = withList(["A", "B", "C", "D"]);
+  const st1 = { ...makeState(), policy: normalizeExamPolicy({ ...defaultExamPolicy(), includeComponentsInHyFinalReports: false, schemes: [before] }) };
+  const first = prepareMarkSheet(
+    { ...base, marks: [mk("sub_eng", "ORAL", 18), mk("sub_eng", "WRIT", 71), mk("sub_eng", "HW", null, "D"), mk("sub_mat", "", 60)] },
+    st1, undefined, deps(st1),
+  );
+  assert.ok(first.ok);
+  if (!first.ok) throw new Error("unreachable");
+  // The school drops D from the list.
+  const after = withList(["A", "B", "C"]);
+  const st2 = { ...makeState([first.sheet]), policy: normalizeExamPolicy({ ...defaultExamPolicy(), includeComponentsInHyFinalReports: false, schemes: [after] }) };
+  // Staff app saving Maths only (the route sends the posted subject alone).
+  const mathsOnly = mergeStaffAppEntries(first.sheet.marks, "sub_mat", [{ studentId: "stu_1", marksObtained: 65 }])
+    .filter((m) => m.subjectId === "sub_mat");
+  const app = prepareMarkSheet({ ...base, marks: mathsOnly }, st2, first.sheet, deps(st2));
+  assert.ok(app.ok, app.ok ? "" : app.error);
+  if (app.ok) {
+    assert.equal(app.sheet.marks.find((m) => m.component === "HW")?.grade, "D", "English's stale letter kept as stored");
+    assert.equal(app.sheet.marks.find((m) => m.subjectId === "sub_mat")?.marksObtained, 65);
+  }
+  // Desk / app re-sending English with D unchanged: accepted, kept.
+  const resend = prepareMarkSheet(
+    { ...base, marks: mergeStaffAppEntries(first.sheet.marks, "sub_eng", [{ studentId: "stu_1", component: "HW", grade: "D" }]).filter((m) => m.subjectId === "sub_eng") },
+    st2, first.sheet, deps(st2),
+  );
+  assert.ok(resend.ok, "an unchanged stale letter is not re-judged");
+  // …but newly picking an off-list letter is still refused.
+  const fresh = prepareMarkSheet(
+    { ...base, marks: [mk("sub_eng", "ORAL", 18), mk("sub_eng", "WRIT", 71), mk("sub_eng", "HW", null, "E")] },
+    st2, first.sheet, deps(st2),
+  );
+  assert.equal(fresh.ok, false);
+  const changedToStale = prepareMarkSheet(
+    { ...base, marks: [mk("sub_eng", "ORAL", 18), mk("sub_eng", "WRIT", 71), mk("sub_eng", "HW", null, "D")] },
+    st2, { ...first.sheet, marks: first.sheet.marks.map((m) => (m.component === "HW" ? { ...m, grade: "A" } : m)) }, deps(st2),
+  );
+  assert.equal(changedToStale.ok, false, "changing A → D (off the new list) is refused");
+}
+
+// A split with ONLY a graded part keeps the scheme's components for marks.
+{
+  const withComponents = normalizeAssessmentScheme(
+    {
+      ...scheme,
+      components: [
+        { code: "TE", label: "Term exam", maxMarks: 80, kind: "exam" },
+        { code: "IA", label: "Internal", maxMarks: 20, kind: "internal" },
+      ],
+      subjectSplits: [{ subjectCode: "ENG", passPercent: null, parts: [{ ...englishSplit.parts[2] }] } as never],
+    },
+    33,
+  );
+  assert.deepEqual(componentsForSubject(withComponents, "HY", "ENG").map((c) => c.code), ["TE", "IA"], "not silently one whole mark");
+  assert.deepEqual(gradedPartsForSubject(withComponents, "HY", "ENG").map((g) => g.code), ["HW"]);
+}
+
 // ------------------------------------------------------------- readiness
 {
   const sheet = {

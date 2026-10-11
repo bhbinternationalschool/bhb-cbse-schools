@@ -121,7 +121,10 @@ export async function POST(request: Request) {
         examTermId: termId,
         classId,
         sectionId,
-        marks: merged,
+        // Only the posted subject: every other subject's rows stay exactly
+        // as stored (prepareMarkSheet keeps subjects not sent) and are not
+        // re-validated — a stale letter elsewhere never blocks this save.
+        marks: merged.filter((m) => m.subjectId === subjectId),
         enteredBy: ctx.session.fullName || "Teacher",
       },
       state,
