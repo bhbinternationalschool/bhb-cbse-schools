@@ -386,6 +386,8 @@
     "test:payment-link-reuse": "npx tsx src/lib/paymentLinkReuse.selftest.ts",
     "test:student-leave-status-guard": "npx tsx src/lib/studentLeaveStatusGuard.selftest.ts",
     "test:ptm-row-stamps": "npx tsx src/lib/ptmRowStamps.selftest.ts",
+    "test:propel-robot": "npx tsx src/lib/propelRobot.selftest.ts",
+    "test:library-ebooks": "npx tsx src/lib/libraryEbooks.selftest.ts",
     "test:desk-on-demand": "npx tsx src/lib/deskOnDemand.selftest.ts",
     "test:masters-section-saves": "npx tsx src/lib/mastersSectionSaves.selftest.ts",
     "test:accounts-row-stamps": "npx tsx src/lib/accountsRowStamps.selftest.ts",

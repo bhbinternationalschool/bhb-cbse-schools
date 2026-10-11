@@ -433,6 +433,38 @@ export const EBOOK_SHELF_SEED: string[] = [
   "https://fliphtml5.com/bookcase/gqxrr/",
 ];
 
+const C1_5 = ["Class 1", "Class 2", "Class 3", "Class 4", "Class 5"];
+const C1_8 = [...C1_5, "Class 6", "Class 7", "Class 8"];
+
+/**
+ * What each Propel shelf is — read from each bookcase's own page title on
+ * 12 Oct 2026 (all 20 open; the shelves themselves stay behind their
+ * passwords). Fills a shelf's title, subject and classes only where the
+ * office has not set them.
+ */
+export const EBOOK_SHELF_CATALOGUE: Record<string, { title: string; subject: string; classLabels: string[] }> = {
+  acdlv: { title: "Propel Edition A — Nursery", subject: "All subjects", classLabels: ["Nursery"] },
+  hpgcz: { title: "Propel Edition A — LKG", subject: "All subjects", classLabels: ["LKG"] },
+  oixkm: { title: "Propel Edition A — UKG", subject: "All subjects", classLabels: ["UKG"] },
+  jsmnm: { title: "Propel LKG", subject: "All subjects", classLabels: ["LKG"] },
+  fltsh: { title: "Propel UKG", subject: "All subjects", classLabels: ["UKG"] },
+  luqrl: { title: "Pearson Tip-Tap-Toe — Nursery", subject: "Rhymes and stories", classLabels: ["Nursery"] },
+  bilbd: { title: "Pearson Tip-Tap-Toe — LKG", subject: "Rhymes and stories", classLabels: ["LKG"] },
+  cbgnn: { title: "Pearson Tip-Tap-Toe — UKG", subject: "Rhymes and stories", classLabels: ["UKG"] },
+  pdelb: { title: "Propel Edition A — Class 1", subject: "All subjects", classLabels: ["Class 1"] },
+  fjhwd: { title: "Propel Edition A — Class 2", subject: "All subjects", classLabels: ["Class 2"] },
+  hvtxz: { title: "Propel Edition A — Class 3", subject: "All subjects", classLabels: ["Class 3"] },
+  pocjg: { title: "Propel Edition A — Class 4", subject: "All subjects", classLabels: ["Class 4"] },
+  fmgmo: { title: "Propel Edition A — Class 5", subject: "All subjects", classLabels: ["Class 5"] },
+  ooiny: { title: "Propel New Prime — Class 6", subject: "All subjects", classLabels: ["Class 6"] },
+  npwtl: { title: "Propel New Prime — Class 7", subject: "All subjects", classLabels: ["Class 7"] },
+  qtffd: { title: "Propel New Prime — Class 8", subject: "All subjects", classLabels: ["Class 8"] },
+  vrsvv: { title: "Propel Hindi Navdhara", subject: "Hindi", classLabels: C1_5 },
+  feocx: { title: "Lead Know & Grow", subject: "General knowledge", classLabels: C1_8 },
+  fxwtz: { title: "New Longman Vistas", subject: "Social science", classLabels: C1_5 },
+  gqxrr: { title: "Pearson Click Code Connect", subject: "Computer", classLabels: C1_8 },
+};
+
 /** The bookcase code from a FlipHTML5 shelf URL — the stable identity behind
  *  an opaque link, used so re-importing does not duplicate a shelf. */
 export function bookcaseCode(url: string): string {
@@ -456,10 +488,13 @@ export function mergeEbookShelfSeed(
     const code = bookcaseCode(url);
     if (!code || have.has(code)) continue;
     have.add(code);
+    const known = EBOOK_SHELF_CATALOGUE[code];
     additions.push(
       normalizeEbook({
         id: `eb_${code}`,
-        title: "",
+        title: known?.title ?? "",
+        subject: known?.subject ?? "",
+        classLabels: known?.classLabels ?? [],
         url,
         keyKind: "shelf",
         addedOn,
@@ -467,7 +502,18 @@ export function mergeEbookShelfSeed(
       }),
     );
   }
-  return { ebooks: [...existing, ...additions], added: additions.length };
+  // Shelves already catalogued keep what the office set; only blanks are filled.
+  const filled = existing.map((e) => {
+    const known = EBOOK_SHELF_CATALOGUE[bookcaseCode(e.url)];
+    if (!known) return e;
+    return normalizeEbook({
+      ...e,
+      title: e.title || known.title,
+      subject: e.subject || known.subject,
+      classLabels: e.classLabels.length ? e.classLabels : known.classLabels,
+    });
+  });
+  return { ebooks: [...filled, ...additions], added: additions.length };
 }
 
 export function normalizeEbook(e: Partial<LibraryEbook>): LibraryEbook {
@@ -1380,4 +1426,27 @@ export function parseIssueNote(raw: string): Partial<LibraryIssue> {
     /* legacy plain note */
   }
   return { note: raw };
+}
+
+/** The shelf class label for an ERP class name ("" when no shelf is for it). */
+export function shelfLabelForClass(className: string): string {
+  const n = String(className || "").trim().toUpperCase().replace(/\s+/g, " ");
+  if (/^(NUR|NURSERY|PG|PLAY ?GROUP)$/.test(n)) return "Nursery";
+  if (/^(LKG|JKG|KG ?1)$/.test(n)) return "LKG";
+  if (/^(UKG|SKG|KG ?2)$/.test(n)) return "UKG";
+  const roman: Record<string, string> = { I: "1", II: "2", III: "3", IV: "4", V: "5", VI: "6", VII: "7", VIII: "8", IX: "9", X: "10", XI: "11", XII: "12" };
+  const m = n.match(/^(?:CLASS|STD|GRADE)?\s*([IVX]+|\d{1,2})$/);
+  if (!m) return "";
+  return `Class ${roman[m[1]] ?? Number(m[1])}`;
+}
+
+/**
+ * The shelves a family sees (director, 12 Oct 2026): those tagged for one of
+ * its children's classes, plus any shelf with no class tag. `labels` null =
+ * the children's classes are unknown (read failed, staff, no family) — then
+ * every shelf shows; an unknown class must never empty the shelf.
+ */
+export function shelvesForClasses<T extends { classLabels: string[] }>(books: T[], labels: Set<string> | null): T[] {
+  if (!labels || labels.size === 0) return books;
+  return books.filter((b) => b.classLabels.length === 0 || b.classLabels.some((c) => labels.has(c)));
 }

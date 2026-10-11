@@ -14,6 +14,7 @@ import {
 import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { readStampsParam } from "@/lib/rowStampClient";
 import { isLibraryMigrationPending, LIBRARY_NOT_MIGRATED } from "@/lib/libraryCounter";
+import { mergeLibraryEbooks, readLibraryEbooks } from "@/lib/libraryEbooks.server";
 
 export const runtime = "nodejs";
 
@@ -27,9 +28,13 @@ export async function GET(req: Request) {
       { status: 503 },
     );
   }
+  // The e-book shelves live in their own server store; a failed read sends
+  // none (the browser keeps what it has) rather than an empty shelf.
+  const ebooks = await readLibraryEbooks();
   return NextResponse.json({
     ok: true,
     ...bundle,
+    ...(ebooks ? { ebooks } : {}),
     titleCount: bundle.titles.length,
     updatedAt: meta?.updatedAt || new Date().toISOString(),
     meta,
@@ -76,6 +81,12 @@ export async function POST(req: Request) {
   if (!result.ok) {
     const error = isLibraryMigrationPending(result.error) ? LIBRARY_NOT_MIGRATED : result.error;
     return NextResponse.json({ ok: false, error }, { status: 502 });
+  }
+  // Shelves the browser sent (only when it changed them): merged by id into
+  // their own store — none is ever removed by absence.
+  if (Array.isArray(body.ebooks) && body.ebooks.length) {
+    const shelves = await mergeLibraryEbooks(body.ebooks);
+    if (!shelves.ok) return NextResponse.json({ ok: false, error: shelves.error }, { status: 502 });
   }
   if (result.kept) console.warn(`[library-desk] unstamped save left ${result.kept} stored row(s) as they were`);
 

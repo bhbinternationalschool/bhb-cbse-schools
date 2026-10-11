@@ -1,5 +1,6 @@
 "use client";
 
+import { PropelProgressPanel } from "@/components/staff/PropelProgressPanel";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -516,7 +517,12 @@ export function StaffWorkspace() {
       {tab === "reports" ? (
         <StaffLeaveReportsPanel ay={ay} scope="leave" />
       ) : null}
-      {tab === "appraisal" ? <StaffAppraisalPanel ay={ay} /> : null}
+      {tab === "appraisal" ? (
+        <>
+          <PropelProgressPanel />
+          <StaffAppraisalPanel ay={ay} />
+        </>
+      ) : null}
       {tab === "payslips" ? <StaffPayslipsPanel /> : null}
       {tab === "visiting_pay" ? <VisitingPayPanel /> : null}
 

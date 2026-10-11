@@ -33,9 +33,10 @@ export default function OfficeRobotPrivacyPage() {
         <p>
           Only school staff who are signed in to UDISE+ (the Student module at
           sdms.udiseplus.gov.in, the Teacher module at teacher.udiseplus.gov.in
-          and the School Profile module at profile.udiseplus.gov.in) and to the
-          school ERP (bhbinternational.school) in the same browser, with UDISE
-          permission in the ERP. It is of no use to anyone else.
+          and the School Profile module at profile.udiseplus.gov.in) or to the
+          school&rsquo;s Propel / LEAD Nucleus portal (nucleus.leadgroup.co.in),
+          and to the school ERP (bhbinternational.school) in the same browser,
+          with UDISE permission in the ERP. It is of no use to anyone else.
         </p>
       </LegalSection>
 
@@ -96,6 +97,23 @@ export default function OfficeRobotPrivacyPage() {
             Aadhaar, which the robot types into UDISE+&rsquo;s own Global Student
             Search to find the child&rsquo;s PEN.
           </li>
+          <li>
+            On Propel / LEAD Nucleus, when a staff member presses a Check button:
+            the school&rsquo;s academic calendar (holidays and events), Propel&rsquo;s
+            subject list, the school&rsquo;s Propel staff accounts (name, mobile
+            &mdash; the Propel login &mdash; role and status), Propel&rsquo;s blank
+            student upload sheet, and Propel&rsquo;s list of question papers with
+            the chapters each covers, and Propel&rsquo;s Teacher Timeliness (each
+            teacher&rsquo;s day plans done against the course schedule, per class and
+            subject). Propel holds no children&rsquo;s marks for the robot to read.
+          </li>
+          <li>
+            From the school ERP, for Propel: the school&rsquo;s published student
+            holidays, the exam date sheet, active teaching staff (name, mobile,
+            email, designation) and, for the student upload sheet, each current
+            child&rsquo;s admission number, admission date, name, gender, class,
+            section, address and parents&rsquo; names and mobiles.
+          </li>
         </LegalList>
       </LegalSection>
 
@@ -106,19 +124,34 @@ export default function OfficeRobotPrivacyPage() {
           <li>Each child&rsquo;s UDISE+ profile, the PEN search results and the School Profile answers go only to the school&rsquo;s ERP, where staff review them; nothing changes in the ERP until they apply it.</li>
           <li>A child&rsquo;s search details go only to UDISE+&rsquo;s own student search, in the staff member&rsquo;s signed-in portal session.</li>
           <li>ERP details go only into the UDISE+ form open on the staff member&rsquo;s screen.</li>
+          <li>
+            Propel&rsquo;s calendar, staff list, question papers and teachers&rsquo; course progress go only to the
+            school&rsquo;s ERP. The ERP&rsquo;s holidays, exams and new teachers go only to the school&rsquo;s own
+            Propel account, in the staff member&rsquo;s signed-in session, and only after they confirm the list
+            on screen.
+          </li>
+          <li>
+            The filled student upload sheet is saved to the staff member&rsquo;s own computer; they upload it to
+            Propel themselves.
+          </li>
           <li>Nothing is sent to the extension&rsquo;s developer, to Google, or to any third party.</li>
         </LegalList>
       </LegalSection>
 
       <LegalSection n={4} title="What it never does">
         <LegalList>
-          <li>It never signs in to UDISE+ or the ERP, and never stores a password. Staff sign in themselves.</li>
+          <li>It never signs in to UDISE+, Propel or the ERP, and never stores a password. Staff sign in themselves.</li>
           <li>
             It never presses Save or Submit on the portal. A person checks every form and saves it. With
             &ldquo;One-click&rdquo; on, after the person&rsquo;s own Save the robot only closes the portal&rsquo;s
             message, presses Next to move to the form&rsquo;s next step, and opens the next child&rsquo;s form.
           </li>
-          <li>It never approves, rejects, releases, imports or deletes anything on the portal.</li>
+          <li>It never approves, rejects, releases, imports or deletes anything on the UDISE+ portal.</li>
+          <li>
+            On Propel it adds only calendar entries and teacher logins the ERP shows are missing, after a person
+            confirms them. It never edits, deactivates or deletes anything already on Propel, and never uploads
+            the student sheet itself.
+          </li>
           <li>It runs no timers and no background work. It acts only when a person clicks.</li>
           <li>It has no tracking, analytics or advertising.</li>
         </LegalList>

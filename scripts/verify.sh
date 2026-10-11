@@ -237,6 +237,8 @@ SELFTESTS=(
   test:payment-link-reuse
   test:student-leave-status-guard
   test:ptm-row-stamps
+  test:propel-robot
+  test:library-ebooks
   test:desk-on-demand
   test:masters-section-saves
   test:accounts-row-stamps

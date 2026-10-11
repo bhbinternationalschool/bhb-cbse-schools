@@ -37,6 +37,8 @@ export function mergeDbDeskIntoLibraryState(
   return {
     ...state,
     version: 2,
+    // The shelves are kept on the server since 12 Oct 2026: its list is the list.
+    ebooks: Array.isArray(bundle.ebooks) ? bundle.ebooks : state.ebooks ?? [],
     titles: mergeById(
       state.titles ?? [],
       bundle.titles,
