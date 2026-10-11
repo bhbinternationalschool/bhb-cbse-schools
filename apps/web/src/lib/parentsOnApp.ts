@@ -13,19 +13,21 @@
  *  - app version: the token's version, else the build the home screen sent.
  * "Last seen" is the latest of the three times.
  *
- * Who counts: a family with at least one child on roll this session (the
- * caller passes on-roll children only — lib/appPopups childrenOnRoll), once,
- * however many children it has. A family whose children are all inactive is
- * not a school family today (erp-inactive-family-block). A placeholder phone
- * (0000000000, 9999999999 …) is never a contact.
+ * Who counts: a family with at least one child ACTIVE IN THIS SESSION'S
+ * YEAR (sessionChildren), once, however many children it has. Older-year
+ * rows stay "active" forever in SIS, so a family with no row this year has
+ * left — it is not counted and never invited. A family whose children are
+ * all inactive is not a school family today (erp-inactive-family-block). A
+ * placeholder phone (0000000000, 9999999999 …) is never a contact.
  */
 
-import { isPlaceholderMobile } from "@/lib/sis";
+import { isPlaceholderMobile, studentsInSession, type SisState, type SisStudent } from "@/lib/sis";
 import { householdCandidateNumbers } from "@/lib/waHouseholdNumbers";
 
 export type AppDevice = { householdId: string; appVersion: string; createdAt: string; lastSeenAt: string };
 /** One app sign-in (audit row). */
 export type AppLogin = { householdId: string; at: string };
+export type AppInvite = { householdId: string; invitedAt: string };
 export type AppPresence = { householdId: string; firstSeenAt: string; lastSeenAt: string; appBuild: number | null };
 
 export type RosterChild = {
@@ -71,6 +73,8 @@ export type FamilyRow = {
   /** Latest of sign-in, notification check-in and app open; "" if never. */
   lastSeenAt: string;
   status: AdoptionStatus;
+  /** Last app invite sent from this screen; "" when never. */
+  invitedAt: string;
 };
 
 export type ClassGroup = {
@@ -143,6 +147,7 @@ export function buildParentsOnApp(input: {
   devices: AppDevice[];
   logins: AppLogin[];
   presence: AppPresence[];
+  invites?: AppInvite[];
   families: RosterFamily[];
   /** On-roll children only, one row each (this session's row). */
   children: RosterChild[];
@@ -153,6 +158,10 @@ export function buildParentsOnApp(input: {
   const loginsOf = groupBy(input.logins, (l) => l.householdId);
   const presenceOf = new Map(input.presence.filter((p) => p.householdId).map((p) => [p.householdId, p]));
   const kidsOf = groupBy(input.children, (c) => c.householdId);
+  const invitedOf = new Map<string, string>();
+  for (const i of input.invites ?? []) {
+    if (i.householdId && i.invitedAt > (invitedOf.get(i.householdId) ?? "")) invitedOf.set(i.householdId, i.invitedAt);
+  }
   const classKey = (c: RosterChild) => `${c.classId || "none"}:${c.sectionId || ""}`;
 
   const rows: FamilyRow[] = [];
@@ -201,6 +210,7 @@ export function buildParentsOnApp(input: {
       versions,
       lastSeenAt,
       status: adoptionStatus(signedIn, lastSeenAt, now),
+      invitedAt: invitedOf.get(f.householdId) ?? "",
     });
   }
 
@@ -255,8 +265,50 @@ export function buildParentsOnApp(input: {
   };
 }
 
+/**
+ * This session's children, one row each: only rows of the session's year
+ * that are active (lib/sis studentsInSession — the same rule the WhatsApp
+ * "parents" audience uses). No year → nobody: an unknown session must not
+ * widen to every year's rows.
+ */
+export function sessionChildren(students: SisStudent[], sessionAy: string): SisStudent[] {
+  if (!sessionAy) return [];
+  return studentsInSession({ students } as SisState, sessionAy).filter((s) => !!s.householdId);
+}
+
+/** A family invited this recently is not invited again. */
+export const INVITE_COOLDOWN_DAYS = 7;
+
+export function invitedRecently(invitedAt: string, now: Date, days = INVITE_COOLDOWN_DAYS): boolean {
+  const t = Date.parse(invitedAt || "");
+  return Number.isFinite(t) && now.getTime() - t < days * DAY;
+}
+
+/**
+ * Which of the families the office ticked actually get an app invite: never
+ * signed in, not invited in the last INVITE_COOLDOWN_DAYS, and with a real
+ * phone number. Ids that are not families on roll are dropped.
+ */
+export function pickInviteFamilies(
+  families: FamilyRow[],
+  householdIds: string[],
+  now: Date,
+): { invite: FamilyRow[]; signedIn: number; recentlyInvited: number; noPhone: number; notOnRoll: number } {
+  const byId = new Map(families.map((f) => [f.householdId, f]));
+  const out = { invite: [] as FamilyRow[], signedIn: 0, recentlyInvited: 0, noPhone: 0, notOnRoll: 0 };
+  for (const id of new Set(householdIds)) {
+    const f = byId.get(id);
+    if (!f) out.notOnRoll++;
+    else if (f.signedIn) out.signedIn++;
+    else if (invitedRecently(f.invitedAt, now)) out.recentlyInvited++;
+    else if (!f.contacts.length) out.noPhone++;
+    else out.invite.push(f);
+  }
+  return out;
+}
+
 /** IST calendar day of an ISO time. */
-const istDay = (iso: string) => new Date(Date.parse(iso) + 330 * 60_000).toISOString().slice(0, 10);
+export const istDay = (iso: string) => new Date(Date.parse(iso) + 330 * 60_000).toISOString().slice(0, 10);
 
 /** "just now", "25 min ago", "3 h ago", "yesterday", "4 days ago", else a date. */
 export function lastSeenLabel(iso: string, now = new Date()): string {

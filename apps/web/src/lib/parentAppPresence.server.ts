@@ -18,6 +18,8 @@ import { getServerTenantContext } from "@/lib/serverTenant";
  */
 
 const STAMP_EVERY_MS = 60 * 60_000;
+/** A slow database never holds up the parent's home screen longer than this. */
+const STAMP_TIMEOUT_MS = 1_500;
 const lastStamp = new Map<string, number>();
 
 /** True when this household was stamped less than an hour ago (this instance). */
@@ -37,20 +39,29 @@ export async function stampParentAppPresence(householdId: string, request: Reque
     if (flavor === "staff") return;
     // first_seen_at is left to its insert default; an upsert only updates the
     // columns it sends, so the first time a family opened the app is kept.
-    const { error } = await ctx.sb.from("parent_app_presence").upsert(
-      {
-        tenant_id: ctx.tenantId,
-        household_id: householdId,
-        last_seen_at: new Date().toISOString(),
-        // An unknown build never overwrites a known one.
-        ...(build != null ? { app_build: build } : {}),
-      },
-      { onConflict: "tenant_id,household_id" },
-    );
+    const write = Promise.resolve(
+      ctx.sb.from("parent_app_presence").upsert(
+        {
+          tenant_id: ctx.tenantId,
+          household_id: householdId,
+          last_seen_at: new Date().toISOString(),
+          // An unknown build never overwrites a known one.
+          ...(build != null ? { app_build: build } : {}),
+        },
+        { onConflict: "tenant_id,household_id" },
+      ),
+    )
+      .then((r) => r.error?.message ?? "")
+      .catch((e: unknown) => (e instanceof Error ? e.message : String(e)));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<string>((resolve) => {
+      timer = setTimeout(() => resolve(`timed out after ${STAMP_TIMEOUT_MS} ms`), STAMP_TIMEOUT_MS);
+    });
+    const error = await Promise.race([write, timeout]).finally(() => clearTimeout(timer));
     // A failure waits for the next hour too: a missing table (migration not
     // applied yet) must not add a failed write to every home-screen load.
     lastStamp.set(householdId, Date.now());
-    if (error) console.warn("[parent-app-presence] stamp failed:", error.message);
+    if (error) console.warn("[parent-app-presence] stamp failed:", error);
   } catch (e) {
     console.warn("[parent-app-presence] stamp failed:", e instanceof Error ? e.message : e);
   }

@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { btnOutline, field } from "@/components/ui/erp-ui";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { BulkActionBar, ErpControlBar, ExportMenu, RowActionMenu, RowCheckbox, useRowSelection } from "@/components/ui/erp-grid";
-import { APP_INVITE_BODY, APP_INVITE_TEMPLATE_FAMILY, APP_INVITE_TITLE } from "@/lib/parentAppInvite";
+import { APP_INVITE_BODY, APP_INVITE_TITLE } from "@/lib/parentAppInvite";
 import {
   ADOPTION_STATUS_LABEL,
+  INVITE_COOLDOWN_DAYS,
+  invitedRecently,
   lastSeenLabel,
   type AdoptionReport,
   type AdoptionStatus,
@@ -14,16 +16,21 @@ import {
 } from "@/lib/parentsOnApp";
 import { TENANT } from "@/lib/types";
 
+const istDate = (iso: string) =>
+  iso ? new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" }) : "";
+
 /**
  * Comms → Parents on app: parent app adoption by class and section (the old
  * ERP's "Parent Mobile Usage Report"). Metric cards, one row per class and
  * section, and the household list — filter to "Never signed in" to see who
  * to chase, with their real phone numbers. "Send app invite" goes through
  * the school's approved School notice template (Hindi unless the family
- * chose English): a dry run shows who gets it, then the office presses Send.
+ * chose English) via POST /api/comms/parents-on-app/invite: a dry run shows
+ * who gets it, then the office presses Send. A family invited in the last
+ * INVITE_COOLDOWN_DAYS days is not invited again.
  */
 
-type Data = AdoptionReport & { asOf: string; presenceAvailable: boolean };
+type Data = AdoptionReport & { asOf: string; presenceAvailable: boolean; invitesAvailable: boolean };
 type StatusFilter = "all" | AdoptionStatus | "push_off";
 type DryRun = {
   recipientCount: number;
@@ -31,6 +38,10 @@ type DryRun = {
   skippedNotOnWhatsApp?: number;
   skippedNoNumber?: number;
   skippedOptOut?: number;
+  skippedSignedIn?: number;
+  skippedRecentlyInvited?: number;
+  skippedNoPhone?: number;
+  skippedNotOnRoll?: number;
 };
 
 const istDateTime = (iso: string) =>
@@ -118,6 +129,7 @@ export function ParentsOnAppPanel() {
     { key: "push", header: "Notifications" },
     { key: "version", header: "App version" },
     { key: "firstSignIn", header: "First sign-in (IST)" },
+    { key: "invited", header: "Last app invite (IST)" },
   ];
   const exportRows = () =>
     rows.map((r) => ({
@@ -129,6 +141,7 @@ export function ParentsOnAppPanel() {
       push: r.pushEnabled ? `On (${r.phones} phone${r.phones === 1 ? "" : "s"})` : r.signedIn ? "Off" : "",
       version: r.versions.join(", "),
       firstSignIn: istDateTime(r.firstSignInAt),
+      invited: istDateTime(r.invitedAt),
     }));
   const filterNote = [
     classKey !== "all" ? classLabel(classKey) : "",
@@ -166,6 +179,12 @@ export function ParentsOnAppPanel() {
         <p className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[11px] text-[var(--muted)]">
           App-open records could not be read, so &ldquo;last seen&rdquo; here comes only from sign-ins and notification check-ins. Families who
           turned notifications off may look older than they are.
+        </p>
+      ) : null}
+
+      {data && !data.invitesAvailable ? (
+        <p className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[11px] text-[var(--danger)]">
+          Could not read who was already invited, so &ldquo;Invited&rdquo; dates are missing and sending invites is switched off until it loads.
         </p>
       ) : null}
 
@@ -358,7 +377,14 @@ export function ParentsOnAppPanel() {
                     <td className="px-3 py-1.5 text-[var(--ink)]">
                       {r.children.map((c) => `${c.name}${c.className ? ` (${c.className})` : ""}`).join(", ")}
                     </td>
-                    <td className={`px-3 py-1.5 font-semibold ${STATUS_TONE[r.status]}`}>{ADOPTION_STATUS_LABEL[r.status]}</td>
+                    <td className="px-3 py-1.5">
+                      <p className={`font-semibold ${STATUS_TONE[r.status]}`}>{ADOPTION_STATUS_LABEL[r.status]}</p>
+                      {r.invitedAt ? (
+                        <p className="text-[10px] text-[var(--muted)]" title={istDateTime(r.invitedAt)}>
+                          Invited {istDate(r.invitedAt)}
+                        </p>
+                      ) : null}
+                    </td>
                     <td className="px-3 py-1.5" title={istDateTime(r.lastSeenAt)}>
                       {r.signedIn ? lastSeenLabel(r.lastSeenAt, now) : "—"}
                     </td>
@@ -375,7 +401,7 @@ export function ParentsOnAppPanel() {
                             id: "invite",
                             label: "Send app invite…",
                             hidden: (x) => x.signedIn,
-                            disabled: (x) => !x.contacts.length,
+                            disabled: (x) => !x.contacts.length || invitedRecently(x.invitedAt, now) || !data.invitesAvailable,
                             onSelect: (x) => setInviteFor([x]),
                           },
                           {
@@ -429,11 +455,14 @@ export function ParentsOnAppPanel() {
           {
             id: "invite",
             label: "Send app invite",
+            disabled: !data?.invitesAvailable,
             onRun: (keys) => {
               const picked = keys.map((k) => byId.get(k)).filter((r): r is FamilyRow => !!r);
-              const never = picked.filter((r) => !r.signedIn);
+              const never = picked.filter((r) => !r.signedIn && !invitedRecently(r.invitedAt, now));
               if (!never.length) {
-                setToast("Every selected family has already signed in to the app — no invite needed.");
+                setToast(
+                  `Every selected family has signed in already or was invited in the last ${INVITE_COOLDOWN_DAYS} days — no invite needed.`,
+                );
                 return;
               }
               setInviteFor(never);
@@ -458,6 +487,7 @@ export function ParentsOnAppPanel() {
             if (sent) {
               setToast(sent);
               selection.clear();
+              void load(); // show the new "Invited" dates
             }
           }}
         />
@@ -475,7 +505,7 @@ function InviteDialog({ families, onClose }: { families: FamilyRow[]; onClose: (
   const [dry, setDry] = useState<DryRun | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const studentIds = useMemo(() => [...new Set(families.flatMap((f) => f.children.map((c) => c.studentId)))], [families]);
+  const householdIds = useMemo(() => families.map((f) => f.householdId), [families]);
   const noPhone = families.filter((f) => !f.contacts.length).length;
 
   useEffect(() => {
@@ -490,28 +520,24 @@ function InviteDialog({ families, onClose }: { families: FamilyRow[]; onClose: (
     setBusy(true);
     setErr("");
     try {
-      const res = await fetch("/api/wa/send", {
+      const res = await fetch("/api/comms/parents-on-app/invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          audience: { kind: "students", studentIds },
-          templateFamilyKey: APP_INVITE_TEMPLATE_FAMILY,
-          variables: { schoolName: TENANT.name, noticeTitle: APP_INVITE_TITLE, noticeBody: APP_INVITE_BODY },
-          dryRun,
-          confirmCount: dryRun ? undefined : dry?.recipientCount,
-        }),
+        body: JSON.stringify({ householdIds, dryRun, confirmCount: dryRun ? undefined : dry?.recipientCount }),
       });
       const body = (await res.json().catch(() => ({}))) as DryRun & { error?: string; sent?: number; failed?: number };
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
       if (dryRun) {
         setDry(body);
       } else {
+        // Whatever happened, the families reached are recorded — reload the
+        // report rather than leaving a Send button that would re-aim at them.
         if (!body.sent && body.error) throw new Error(body.error);
         onClose(`App invite sent to ${body.sent ?? 0} famil${body.sent === 1 ? "y" : "ies"}${body.failed ? ` · ${body.failed} failed` : ""}.`);
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Not sent");
-      if (!dryRun) setDry(null);
+      if (!dryRun) setDry(null); // a fresh check is needed; families already reached drop out of it
     } finally {
       setBusy(false);
     }
@@ -530,7 +556,8 @@ function InviteDialog({ families, onClose }: { families: FamilyRow[]; onClose: (
         </div>
         <p className="mt-1 text-[11px] text-[var(--muted)]">
           Sent on WhatsApp from the school number in the approved &ldquo;School notice&rdquo; template — Hindi for every family that has not chosen
-          English. Only families who have never signed in are included.
+          English. Only families who have never signed in and were not invited in the last {INVITE_COOLDOWN_DAYS} days are included, at
+          most once a day each.
           {noPhone ? ` ${noPhone} of them have no phone on record and will be skipped.` : ""}
         </p>
         <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3">
@@ -550,14 +577,17 @@ function InviteDialog({ families, onClose }: { families: FamilyRow[]; onClose: (
             <strong>{dry.recipientCount}</strong> famil{dry.recipientCount === 1 ? "y" : "ies"} will get it
             {dry.skippedNotOnWhatsApp ? ` · ${dry.skippedNotOnWhatsApp} skipped (number not on WhatsApp)` : ""}
             {dry.skippedNoNumber ? ` · ${dry.skippedNoNumber} without a number` : ""}
-            {dry.skippedOptOut ? ` · ${dry.skippedOptOut} opted out` : ""}. WhatsApp from the school number is charged per message.
+            {dry.skippedOptOut ? ` · ${dry.skippedOptOut} opted out` : ""}
+            {dry.skippedRecentlyInvited ? ` · ${dry.skippedRecentlyInvited} invited in the last ${INVITE_COOLDOWN_DAYS} days` : ""}
+            {dry.skippedSignedIn ? ` · ${dry.skippedSignedIn} signed in meanwhile` : ""}
+            {dry.skippedNoPhone ? ` · ${dry.skippedNoPhone} with no phone` : ""}. WhatsApp from the school number is charged per message.
           </p>
         ) : null}
         {err ? <p className="mt-2 text-xs text-[var(--danger)]">{err}</p> : null}
 
         <div className="mt-3 flex flex-wrap justify-end gap-2">
           {!dry ? (
-            <button type="button" className={btnOutline} disabled={busy || !studentIds.length} onClick={() => void post(true)}>
+            <button type="button" className={btnOutline} disabled={busy || !householdIds.length} onClick={() => void post(true)}>
               {busy ? "Checking…" : "Check who gets it"}
             </button>
           ) : (

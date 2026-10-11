@@ -120,6 +120,7 @@ export const PAGE_GUIDES_D: ErpAiPageGuideDef[] = [
       "If a family says they installed the app but shows **Never signed in**, they have not finished the OTP sign-in — the report counts sign-ins, not downloads.",
       "Families whose children are all inactive are not listed. Placeholder numbers like 0000000000 are not shown as contacts.",
       "If sending says the audience changed, press **Check who gets it** again — a family's details changed in between.",
+      "A family invited in the last 7 days shows **Invited** with the date and is left out of the next invite, so pressing Send again never messages the same parents twice.",
       "Click **Refresh** to load the latest numbers.",
     ],
   },

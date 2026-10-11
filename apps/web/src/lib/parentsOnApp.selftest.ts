@@ -1,7 +1,25 @@
 import assert from "node:assert/strict";
-import { APP_INVITE_BODY, APP_INVITE_BODY_RAW, APP_INVITE_FITS, APP_INVITE_TEMPLATE_FAMILY } from "./parentAppInvite";
+import {
+  APP_INVITE_BODY,
+  APP_INVITE_BODY_RAW,
+  APP_INVITE_FITS,
+  APP_INVITE_TEMPLATE_FAMILY,
+  appInviteClaimKey,
+  realInviteNumbers,
+} from "./parentAppInvite";
 import { PARENT_APP_URL } from "./classGroupMoveNotice";
-import { adoptionStatus, buildOfVersion, buildParentsOnApp, familyContacts, lastSeenLabel, type RosterChild } from "./parentsOnApp";
+import {
+  adoptionStatus,
+  buildOfVersion,
+  buildParentsOnApp,
+  familyContacts,
+  invitedRecently,
+  lastSeenLabel,
+  pickInviteFamilies,
+  sessionChildren,
+  type RosterChild,
+} from "./parentsOnApp";
+import type { SisStudent } from "./sis";
 
 console.log("parentsOnApp.selftest.ts");
 
@@ -132,5 +150,65 @@ assert.ok(APP_INVITE_BODY.includes(PARENT_APP_URL));
 assert.ok(!/\n/.test(APP_INVITE_BODY));
 assert.ok(/[ऀ-ॿ]/.test(APP_INVITE_BODY.slice(0, 20)), "Hindi comes first");
 assert.ok(APP_INVITE_BODY.indexOf("Dear parent") > APP_INVITE_BODY.indexOf("प्रिय अभिभावक"));
+
+// 1. Only THIS session's year counts. SIS leaves older-year rows "active", so
+// a family whose only rows are from last year has left: not counted, never
+// invited. An inactive row this year is not rescued by an active older row.
+const row = (id: string, householdId: string, ay: string, status: "active" | "inactive", admissionNo = id) =>
+  ({ id, householdId, admissionNo, academicYearCode: ay, status, fullName: id.toUpperCase(), classId: "c", sectionId: "s" }) as unknown as SisStudent;
+const roll = sessionChildren(
+  [
+    row("s1-old", "hA", "2025-26", "active", "A1"),
+    row("s1", "hA", "2026-27", "active", "A1"), // on roll — once, this year's row
+    row("s2-old", "hLeft", "2025-26", "active", "L1"), // left: no 2026-27 row
+    row("s3-old", "hOff", "2025-26", "active", "O1"),
+    row("s3", "hOff", "2026-27", "inactive", "O1"), // made inactive this year
+  ],
+  "2026-27",
+);
+assert.deepEqual(roll.map((s) => s.id), ["s1"]);
+assert.deepEqual(sessionChildren([row("x", "h", "2026-27", "active")], ""), [], "no session year → nobody, never every year");
+
+// 2. Invites: never signed in, not invited in the last 7 days, a real phone.
+const inv = buildParentsOnApp({
+  now,
+  families: [
+    { householdId: "n1", guardianName: "NEW", mobile: "9876500011" },
+    { householdId: "n2", guardianName: "INVITED 3 DAYS AGO", mobile: "9876500012" },
+    { householdId: "n3", guardianName: "INVITED 10 DAYS AGO", mobile: "9876500013" },
+    { householdId: "n4", guardianName: "NO PHONE", mobile: "0000000000" },
+    { householdId: "n5", guardianName: "ON APP", mobile: "9876500015" },
+  ],
+  children: ["n1", "n2", "n3", "n4", "n5"].map((h) => kid(h, `${h}k`, "i", 1)),
+  devices: [],
+  logins: [{ householdId: "n5", at: "2026-10-08T10:00:00Z" }],
+  presence: [],
+  invites: [
+    { householdId: "n2", invitedAt: "2026-10-06T10:00:00Z" },
+    { householdId: "n3", invitedAt: "2026-09-29T10:00:00Z" },
+    { householdId: "n3", invitedAt: "2026-09-20T10:00:00Z" }, // the latest wins
+  ],
+});
+const invFam = (id: string) => inv.families.find((f) => f.householdId === id)!;
+assert.equal(invFam("n2").invitedAt, "2026-10-06T10:00:00Z");
+assert.equal(invFam("n3").invitedAt, "2026-09-29T10:00:00Z");
+assert.equal(invFam("n1").invitedAt, "");
+assert.ok(invitedRecently("2026-10-06T10:00:00Z", now));
+assert.ok(!invitedRecently("2026-09-29T10:00:00Z", now));
+assert.ok(!invitedRecently("", now));
+const picked = pickInviteFamilies(inv.families, ["n1", "n2", "n3", "n4", "n5", "gone", "n1"], now);
+assert.deepEqual(picked.invite.map((f) => f.householdId).sort(), ["n1", "n3"]);
+assert.deepEqual(
+  { signedIn: picked.signedIn, recentlyInvited: picked.recentlyInvited, noPhone: picked.noPhone, notOnRoll: picked.notOnRoll },
+  { signedIn: 1, recentlyInvited: 1, noPhone: 1, notOnRoll: 1 },
+);
+assert.equal(appInviteClaimKey("n1", "2026-10-09"), "app_invite:n1:2026-10-09");
+
+// 4. The send path never messages a placeholder number.
+assert.deepEqual(realInviteNumbers({ mobile: "9876500011" }), { mobile: "9876500011" });
+assert.deepEqual(realInviteNumbers({ mobile: "0000000000", fallbackMobile: "9876500012" }), { mobile: "9876500012" });
+assert.deepEqual(realInviteNumbers({ mobile: "919999999999", fallbackMobile: "1234567890" }), null);
+assert.deepEqual(realInviteNumbers({ mobile: "9876500011", fallbackMobile: "9999999999" }), { mobile: "9876500011" });
+assert.deepEqual(realInviteNumbers({ mobile: "9876500011", fallbackMobile: "9876500012" }), { mobile: "9876500011", fallbackMobile: "9876500012" });
 
 console.log("parentsOnApp.selftest.ts: ok");

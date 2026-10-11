@@ -1,5 +1,6 @@
 import { PARENT_APP_URL } from "@/lib/classGroupMoveNotice";
 import { flattenTemplateParam, TEMPLATE_PARAM_MAX } from "@/lib/classNoticeWa";
+import { isPlaceholderMobile } from "@/lib/sis";
 
 /**
  * "Please install the parent app" — sent from Comms → Parents on app to the
@@ -30,3 +31,18 @@ export const APP_INVITE_BODY_RAW = [
 export const APP_INVITE_BODY = flattenTemplateParam(APP_INVITE_BODY_RAW);
 export const APP_INVITE_FITS = APP_INVITE_BODY_RAW.length <= TEMPLATE_PARAM_MAX;
 export const APP_INVITE_TEMPLATE_FAMILY = "comms_notice";
+
+/**
+ * The numbers an invite may go to: a placeholder (0000000000, 9999999999 …)
+ * is never one, matching what the report shows as "no phone". A placeholder
+ * primary gives way to a real fallback; with neither, null (skip the family).
+ */
+export function realInviteNumbers(r: { mobile: string; fallbackMobile?: string }): { mobile: string; fallbackMobile?: string } | null {
+  const real = (m?: string) => !!m && !isPlaceholderMobile(m);
+  const nums = [r.mobile, r.fallbackMobile].filter(real) as string[];
+  if (!nums.length) return null;
+  return nums[1] ? { mobile: nums[0]!, fallbackMobile: nums[1] } : { mobile: nums[0]! };
+}
+
+/** Send-once key: one invite per family per India day, across presses and tabs. */
+export const appInviteClaimKey = (householdId: string, istDayIso: string) => `app_invite:${householdId}:${istDayIso}`;

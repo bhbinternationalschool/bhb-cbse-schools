@@ -41,8 +41,6 @@ export async function GET(request: Request) {
       if (requestedHousehold && requestedHousehold !== householdId) {
         throw new ApiError("forbidden", "Not your household", 403);
       }
-      // "Opened the app" for Comms → Parents on app (at most hourly).
-      if (householdId) await stampParentAppPresence(householdId, request);
     } else {
       assertPermission(ctx, "students", "view");
       householdId = requestedHousehold || undefined;
@@ -54,6 +52,9 @@ export async function GET(request: Request) {
     const sis = loadSis();
     const household = sis.households.find((h) => h.id === householdId);
     if (!household) throw new ApiError("not_found", "Household not found", 404);
+    // "Opened the app" for Comms → Parents on app — a parent's own household,
+    // once resolved; at most hourly, never more than 1.5 s.
+    if (ctx.session.persona === "parent") await stampParentAppPresence(household.id, request);
 
     // SIS keeps one student row per academic year; collapse to one child
     // each, preferring the session AY's row, else the newest AY.
