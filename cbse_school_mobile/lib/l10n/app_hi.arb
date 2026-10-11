@@ -394,6 +394,7 @@
   "tutShelfKey": "शेल्फ़ की चाबी (key)",
   "tutBookClasses": "कक्षा {classes}",
   "tutKey": "चाबी (key)",
+  "ebookPasswordFillsItself": "पासवर्ड: •••••• — अपने-आप भर जाएगा",
   "tutKeyLine": "{label}: {value}",
   "tutKeyCopied": "{label} कॉपी हो गई",
   "tutPromptHint": "जैसे: भिन्न कैसे समझाऊँ?",

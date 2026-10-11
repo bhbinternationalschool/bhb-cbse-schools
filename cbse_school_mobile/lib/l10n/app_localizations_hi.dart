@@ -1271,6 +1271,9 @@ class LHi extends L {
   String get tutKey => 'चाबी (key)';
 
   @override
+  String get ebookPasswordFillsItself => 'पासवर्ड: •••••• — अपने-आप भर जाएगा';
+
+  @override
   String tutKeyLine(String label, String value) {
     return '$label: $value';
   }

@@ -2377,6 +2377,12 @@ abstract class L {
   /// **'Key'**
   String get tutKey;
 
+  /// No description provided for @ebookPasswordFillsItself.
+  ///
+  /// In en, this message translates to:
+  /// **'Password: •••••• — fills in by itself'**
+  String get ebookPasswordFillsItself;
+
   /// No description provided for @tutKeyLine.
   ///
   /// In en, this message translates to:
