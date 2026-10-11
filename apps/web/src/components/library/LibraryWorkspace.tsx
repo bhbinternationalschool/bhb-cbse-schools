@@ -32,14 +32,13 @@ import { DEFAULT_AY, formatInr, loadMasters, type MastersState, currentAcademicY
 import { loadSis, type SisState } from "@/lib/sis";
 import {
   availableCountForTitle,
+  copyCountForTitle,
   borrowerLabel,
   categoryLabel,
   conditionLabel,
   deleteProcurementDoc,
   deleteTitle,
-  issueBook,
   LIBRARY_CATEGORIES,
-  LIBRARY_CONDITIONS,
   LIBRARY_REPORT_GROUPS,
   libraryReportNeedsDateRange,
   libraryStats,
@@ -50,21 +49,24 @@ import {
   upsertEbookShelf,
   bookcaseCode,
   overdueIssues,
-  returnBook,
   runLibraryReport,
   upsertProcurementDoc,
   upsertTitle,
   type LibraryBorrowerType,
   type LibraryCategory,
   type LibraryIssue,
-  type LibraryItemCondition,
   type LibraryProcurementDoc,
   type LibraryEbook,
   type LibraryReportFormat,
   type LibraryReportId,
   type LibraryTitle,
 } from "@/lib/library";
-import { ensureLibraryHydrated } from "@/lib/libraryPersistence";
+import { ensureLibraryHydrated, reloadLibraryFromServer, scheduleLibrarySync } from "@/lib/libraryPersistence";
+import { flushLibraryDeskSync } from "@/lib/libraryNormalizedClient";
+import { libraryApi } from "@/lib/libraryCounterClient";
+import { LibraryCounterPanel } from "@/components/library/LibraryCounterPanel";
+import { LibraryCopiesPanel } from "@/components/library/LibraryCopiesPanel";
+import { LibraryCirculationPanel } from "@/components/library/LibraryCirculationPanel";
 import { withHydrationSlot } from "@/lib/deskHydrateGuard";
 import {
   runLibraryProcurementOcrApi,
@@ -76,7 +78,9 @@ import type { RowAction } from "@/components/ui/erp-grid";
 type LibTab =
   | "dashboard"
   | "catalogue"
+  | "copies"
   | "issue"
+  | "circulation"
   | "history"
   | "procurement"
   | "ebooks"
@@ -85,7 +89,9 @@ type LibTab =
 const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
   { id: "catalogue", label: "Catalogue", tone: "teal" },
-  { id: "issue", label: "Issue / Return", tone: "amber" },
+  { id: "copies", label: "Copies & labels", tone: "sky" },
+  { id: "issue", label: "Counter", tone: "amber" },
+  { id: "circulation", label: "Circulation & fines", tone: "rose" },
   { id: "history", label: "History", tone: "green" },
   { id: "procurement", label: "Procurement", tone: "violet" },
   { id: "ebooks", label: "E-books", tone: "coral" },
@@ -183,24 +189,6 @@ export function LibraryWorkspace() {
   }
   const [showTitleForm, setShowTitleForm] = useState(false);
 
-  // Issue / return
-  const [borrowerType, setBorrowerType] = useState<LibraryBorrowerType>("student");
-  const [borrowerQuery, setBorrowerQuery] = useState("");
-  const [selectedStudentId, setSelectedStudentId] = useState("");
-  const [selectedStaffId, setSelectedStaffId] = useState("");
-  const [issueMode, setIssueMode] = useState<"scan" | "title">("scan");
-  const [accession, setAccession] = useState("");
-  const [issueTitleId, setIssueTitleId] = useState("");
-  const [issuedOn, setIssuedOn] = useState(todayIso());
-  const [dueOn, setDueOn] = useState("");
-  const [issueCondition, setIssueCondition] = useState<LibraryItemCondition>("good");
-  const [damageNoteOnIssue, setDamageNoteOnIssue] = useState("");
-  const [issueNote, setIssueNote] = useState("");
-  const [returningIssueId, setReturningIssueId] = useState<string | null>(null);
-  const [returnCondition, setReturnCondition] = useState<LibraryItemCondition>("good");
-  const [damageNoteOnReturn, setDamageNoteOnReturn] = useState("");
-  const [returnedOn, setReturnedOn] = useState(todayIso());
-
   // History filters
   const [histBorrowerType, setHistBorrowerType] = useState<LibraryBorrowerType | "all">("all");
   const [histStudentId, setHistStudentId] = useState("");
@@ -247,7 +235,9 @@ export function LibraryWorkspace() {
     const allowed: LibTab[] = [
       "dashboard",
       "catalogue",
+      "copies",
       "issue",
+      "circulation",
       "history",
       "procurement",
       "ebooks",
@@ -330,46 +320,44 @@ export function LibraryWorkspace() {
       category: (t) => categoryLabel(t.category),
       author: (t) => t.author || null,
       shelf: (t) => t.shelf || null,
-      copies: (t) => t.copiesTotal,
+      copies: (t) => copyCountForTitle(t.id, state),
       available: (t) => availableCountForTitle(t.id, state),
       purchase: (t) => t.purchaseDate || null,
     },
     "title",
   );
 
-  const studentHits = useMemo(() => {
-    const q = borrowerQuery.trim().toLowerCase();
-    if (q.length < 2 || borrowerType !== "student" || !sis) return [];
-    // One row per child, this session. SIS keeps a row per child per year and
-    // marks them all active, so the same name appeared several times and, in a
-    // capped list, pushed real matches off the end.
-    return studentsInSession(sis, currentAcademicYearCode(masters))
-      .filter(
-        (s) =>
-          s.fullName.toLowerCase().includes(q) ||
-          s.admissionNo.toLowerCase().includes(q),
-      )
-      .slice(0, 8);
-  }, [sis, borrowerQuery, borrowerType]);
-
-  const staffHits = useMemo(() => {
-    const q = borrowerQuery.trim().toLowerCase();
-    if (q.length < 2 || borrowerType !== "staff") return [];
-    return staffRoster
-      .filter(
-        (s) =>
-          s.fullName.toLowerCase().includes(q) ||
-          (s.empCode || "").toLowerCase().includes(q),
-      )
-      .slice(0, 8);
-  }, [staffRoster, borrowerQuery, borrowerType]);
-
-  const openLoans = useMemo(
-    // Soonest due first. Insertion order plus the 20-row cap kept the
-    // oldest loans, so a newly issued book never showed (8 Oct 2026).
-    () => state.issues.filter((i) => !i.returnedOn).sort((a, b) => (a.dueOn || "").localeCompare(b.dueOn || "") || (b.issuedOn || "").localeCompare(a.issuedOn || "")),
-    [state.issues],
+  // Borrowers for the counter and the circulation reports: one row per
+  // child this session (SIS keeps a row per child per year), active staff.
+  const studentPeople = useMemo(
+    () =>
+      sis
+        ? studentsInSession(sis, currentAcademicYearCode(masters)).map((s) => ({
+            id: s.id,
+            label: s.fullName,
+            sub: s.admissionNo,
+          }))
+        : [],
+    [sis, masters],
   );
+  const staffPeople = useMemo(
+    () => staffRoster.map((s) => ({ id: s.id, label: s.fullName, sub: s.empCode || "" })),
+    [staffRoster],
+  );
+
+  /**
+   * After the server changed loans, copies, fines or rules: take its desk
+   * as it now is. If that read fails the screen says so — it does not keep
+   * showing the old copy as if it were current.
+   */
+  async function afterServerChange(msg: string) {
+    const ok = await reloadLibraryFromServer();
+    if (!ok) {
+      flashErr(`${msg} — but the library could not be reloaded; refresh the page to see it.`);
+      return;
+    }
+    refresh(msg);
+  }
 
   const filteredHistory = useMemo(() => {
     return state.issues
@@ -449,19 +437,35 @@ export function LibraryWorkspace() {
     setShowTitleForm(true);
   }
 
-  function saveTitle() {
+  async function saveTitle() {
     if (!titleForm.title.trim()) {
       flashErr("Title is required");
       return;
     }
-    upsertTitle({
+    const isNew = !editingTitleId;
+    const wantCopies = isNew ? Math.max(0, Math.floor(titleForm.copiesTotal || 0)) : 0;
+    const row = upsertTitle({
       ...titleForm,
       id: editingTitleId || undefined,
       title: titleForm.title.trim(),
-      copiesTotal: Math.max(1, titleForm.copiesTotal),
     });
     resetTitleForm();
-    refresh(editingTitleId ? "Catalogue item updated" : "Catalogue item added");
+    if (!wantCopies) {
+      refresh(isNew ? "Catalogue item added" : "Catalogue item updated");
+      return;
+    }
+    // Copies need the title on the server first (each copy gets its
+    // accession number there), so send the title now rather than after the
+    // usual pause, then ask for the copies.
+    scheduleLibrarySync(loadLibrary());
+    await flushLibraryDeskSync();
+    const r = await libraryApi.addCopies({ titleId: row.id, count: wantCopies, location: row.shelf, source: "purchase", acquiredOn: row.purchaseDate || undefined });
+    if (!r.ok) {
+      refresh();
+      flashErr(`"${row.title}" added, but its copies were not: ${r.error}. Add them in Copies & labels.`);
+      return;
+    }
+    await afterServerChange(`"${row.title}" added with ${r.copies.length} copy(ies): ${r.copies.map((c) => c.accessionNo).join(", ")}`);
   }
 
   function handleDeleteTitle(id: string) {
@@ -471,59 +475,6 @@ export function LibraryWorkspace() {
       return;
     }
     refresh("Catalogue item deleted");
-  }
-
-  function handleIssue() {
-    const result = issueBook({
-      accessionOrBarcode: issueMode === "scan" ? accession.trim() : undefined,
-      titleId: issueMode === "title" ? issueTitleId : undefined,
-      borrowerType,
-      studentId: borrowerType === "student" ? selectedStudentId : undefined,
-      staffId: borrowerType === "staff" ? selectedStaffId : undefined,
-      academicYearCode: ay,
-      issuedBy: session.fullName,
-      issuedOn,
-      dueOn: dueOn || undefined,
-      note: issueNote,
-      issueCondition,
-      damageNoteOnIssue:
-        issueCondition === "damaged" || issueCondition === "torn"
-          ? damageNoteOnIssue
-          : "",
-    });
-    if (!result.ok) {
-      flashErr(result.reason);
-      return;
-    }
-    setAccession("");
-    setIssueNote("");
-    setDamageNoteOnIssue("");
-    setIssueCondition("good");
-    refresh(`Issued · due ${result.issue.dueOn}`);
-  }
-
-  function handleReturn(issue: LibraryIssue) {
-    const result = returnBook({
-      issueId: issue.id,
-      returnedOn,
-      returnCondition,
-      damageNoteOnReturn:
-        returnCondition === "damaged" || returnCondition === "torn"
-          ? damageNoteOnReturn
-          : "",
-    });
-    if (!result.ok) {
-      flashErr(result.reason);
-      return;
-    }
-    setReturningIssueId(null);
-    setReturnCondition("good");
-    setDamageNoteOnReturn("");
-    refresh(
-      result.issue.finePaise
-        ? `Returned · fine ${formatInr(result.issue.finePaise)}`
-        : "Returned",
-    );
   }
 
   function acceptProcFile(file: File | null) {
@@ -889,21 +840,27 @@ export function LibraryWorkspace() {
                     placeholder="e.g. A-12"
                   />
                 </label>
-                <label className="block text-xs text-[var(--muted)]">
-                  Quantity (copies)
-                  <input
-                    type="number"
-                    min={1}
-                    value={titleForm.copiesTotal}
-                    onChange={(e) =>
-                      setTitleForm((f) => ({
-                        ...f,
-                        copiesTotal: Number(e.target.value) || 1,
-                      }))
-                    }
-                    className={`${field} mt-1`}
-                  />
-                </label>
+                {/* Copies are added once, here for a new title, and in
+                    Copies & labels after that — each gets a server-issued
+                    accession number and its own location. */}
+                {!editingTitleId ? (
+                  <label className="block text-xs text-[var(--muted)]">
+                    Copies to add now (accession nos. are given automatically)
+                    <input
+                      type="number"
+                      min={0}
+                      max={200}
+                      value={titleForm.copiesTotal}
+                      onChange={(e) =>
+                        setTitleForm((f) => ({
+                          ...f,
+                          copiesTotal: Math.max(0, Number(e.target.value) || 0),
+                        }))
+                      }
+                      className={`${field} mt-1`}
+                    />
+                  </label>
+                ) : null}
                 <label className="block text-xs text-[var(--muted)]">
                   Purchase date
                   <input
@@ -935,7 +892,7 @@ export function LibraryWorkspace() {
               <div className="mt-4 flex flex-wrap gap-2">
                 {!readOnly ? (
                   <>
-                    <button type="button" className={btn} onClick={saveTitle}>
+                    <button type="button" className={btn} onClick={() => void saveTitle()}>
                       Save
                     </button>
                     <button type="button" className={btnOutline} onClick={resetTitleForm}>
@@ -969,7 +926,7 @@ export function LibraryWorkspace() {
                   category: categoryLabel(t.category),
                   author: t.author || "",
                   shelf: t.shelf || "",
-                  copies: t.copiesTotal,
+                  copies: copyCountForTitle(t.id, state),
                   available: availableCountForTitle(t.id, state),
                   purchase: t.purchaseDate || "",
                 }))
@@ -1019,7 +976,7 @@ export function LibraryWorkspace() {
                         <td className="px-4 py-2">{categoryLabel(t.category)}</td>
                         <td className="px-4 py-2">{t.author || "—"}</td>
                         <td className="px-4 py-2">{t.shelf || "—"}</td>
-                        <td className="px-4 py-2">{t.copiesTotal}</td>
+                        <td className="px-4 py-2">{copyCountForTitle(t.id, state)}</td>
                         <td className="px-4 py-2">
                           {availableCountForTitle(t.id, state)}
                         </td>
@@ -1040,6 +997,11 @@ export function LibraryWorkspace() {
                                   id: "history",
                                   label: "Loan history",
                                   onSelect: () => setTab("history"),
+                                },
+                                {
+                                  id: "copies",
+                                  label: "Copies & labels",
+                                  onSelect: () => setTab("copies"),
                                 },
                                 {
                                   id: "edit",
@@ -1067,297 +1029,30 @@ export function LibraryWorkspace() {
       ) : null}
 
       {tab === "issue" ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-            <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
-              Issue item
-            </h2>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {(["student", "staff"] as const).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => {
-                    setBorrowerType(t);
-                    setBorrowerQuery("");
-                    setSelectedStudentId("");
-                    setSelectedStaffId("");
-                  }}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                    borrowerType === t
-                      ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-                      : "border border-[var(--border)] text-[var(--brand-deep)]"
-                  }`}
-                >
-                  {t === "student" ? "Student" : "Staff"}
-                </button>
-              ))}
-            </div>
-            <label className="mt-3 block text-xs text-[var(--muted)]">
-              {borrowerType === "student" ? "Student" : "Staff member"}
-              <input
-                value={borrowerQuery}
-                onChange={(e) => setBorrowerQuery(e.target.value)}
-                className={`${field} mt-1`}
-                placeholder={
-                  borrowerType === "student"
-                    ? "Name or admission no"
-                    : "Name or employee code"
-                }
-              />
-            </label>
-            {(borrowerType === "student" ? studentHits : staffHits).length > 0 ? (
-              <ul className="mt-2 max-h-40 overflow-y-auto rounded-lg border text-sm">
-                {(borrowerType === "student" ? studentHits : staffHits).map((s) => (
-                  <li key={s.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (borrowerType === "student") {
-                          setSelectedStudentId(s.id);
-                          setBorrowerQuery(s.fullName);
-                        } else {
-                          setSelectedStaffId(s.id);
-                          setBorrowerQuery(s.fullName);
-                        }
-                      }}
-                      className={`w-full px-3 py-2 text-left hover:bg-[var(--surface-sunken)] ${
-                        (borrowerType === "student"
-                          ? selectedStudentId
-                          : selectedStaffId) === s.id
-                          ? "bg-[rgba(197,160,40,0.12)]"
-                          : ""
-                      }`}
-                    >
-                      {s.fullName}
-                      {"admissionNo" in s
-                        ? ` · ${s.admissionNo}`
-                        : s.empCode
-                          ? ` · ${s.empCode}`
-                          : ""}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
+        <LibraryCounterPanel
+          state={state}
+          students={studentPeople}
+          staff={staffPeople}
+          ay={ay}
+          readOnly={readOnly}
+          onChanged={afterServerChange}
+          onError={flashErr}
+        />
+      ) : null}
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              {(["scan", "title"] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setIssueMode(m)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                    issueMode === m
-                      ? "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"
-                      : "text-[var(--muted)]"
-                  }`}
-                >
-                  {m === "scan" ? "Scan accession" : "Pick title"}
-                </button>
-              ))}
-            </div>
-            {issueMode === "scan" ? (
-              <label className="mt-3 block text-xs text-[var(--muted)]">
-                Accession / barcode
-                <input
-                  value={accession}
-                  onChange={(e) => setAccession(e.target.value)}
-                  className={`${field} mt-1`}
-                  placeholder="Scan or type"
-                />
-              </label>
-            ) : (
-              <label className="mt-3 block text-xs text-[var(--muted)]">
-                Title
-                <select
-                  value={issueTitleId}
-                  onChange={(e) => setIssueTitleId(e.target.value)}
-                  className={`${field} mt-1`}
-                >
-                  <option value="">Select title…</option>
-                  {titles
-                    .filter((t) => availableCountForTitle(t.id, state) > 0)
-                    .map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.title} ({availableCountForTitle(t.id, state)} available)
-                      </option>
-                    ))}
-                </select>
-              </label>
-            )}
+      {tab === "copies" ? (
+        <LibraryCopiesPanel state={state} readOnly={readOnly} onChanged={afterServerChange} onError={flashErr} />
+      ) : null}
 
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="block text-xs text-[var(--muted)]">
-                Issue date
-                <input
-                  type="date"
-                  value={issuedOn}
-                  onChange={(e) => setIssuedOn(e.target.value)}
-                  className={`${field} mt-1`}
-                />
-              </label>
-              <label className="block text-xs text-[var(--muted)]">
-                Due date (optional)
-                <input
-                  type="date"
-                  value={dueOn}
-                  onChange={(e) => setDueOn(e.target.value)}
-                  className={`${field} mt-1`}
-                />
-              </label>
-            </div>
-
-            <label className="mt-3 block text-xs text-[var(--muted)]">
-              Condition on issue
-              <select
-                value={issueCondition}
-                onChange={(e) =>
-                  setIssueCondition(e.target.value as LibraryItemCondition)
-                }
-                className={`${field} mt-1`}
-              >
-                {LIBRARY_CONDITIONS.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {issueCondition === "damaged" || issueCondition === "torn" ? (
-              <label className="mt-3 block text-xs text-[var(--muted)]">
-                Damage notes (issue)
-                <textarea
-                  value={damageNoteOnIssue}
-                  onChange={(e) => setDamageNoteOnIssue(e.target.value)}
-                  className={`${field} mt-1 min-h-[4rem]`}
-                  placeholder="Describe tear, missing pages, etc."
-                />
-              </label>
-            ) : null}
-            <label className="mt-3 block text-xs text-[var(--muted)]">
-              Note (optional)
-              <input
-                value={issueNote}
-                onChange={(e) => setIssueNote(e.target.value)}
-                className={`${field} mt-1`}
-              />
-            </label>
-            {!readOnly ? (
-              <button type="button" className={`${btn} mt-4`} onClick={handleIssue}>
-                Issue
-              </button>
-            ) : null}
-          </div>
-
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-            <h2 className="text-sm font-semibold text-[var(--brand-deep)]">
-              Open loans — return
-            </h2>
-            <ErpTableShell className="mt-3">
-              <ul className="divide-y divide-[var(--border)] text-sm">
-                {openLoans.length === 0 ? (
-                  <li className="px-4 py-6 text-center text-[var(--muted)]">
-                    No open loans
-                  </li>
-                ) : (
-                  openLoans.slice(0, 20).map((issue) => (
-                    <li key={issue.id} className="px-4 py-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate font-medium">
-                            {titleForIssue(issue)}
-                          </p>
-                          <p className="text-xs text-[var(--muted)]">
-                            {accessionForIssue(issue)} ·{" "}
-                            {borrowerLabel(issue, {
-                              students: sis?.students,
-                              staff: staffRoster,
-                            })}{" "}
-                            · due {issue.dueOn}
-                          </p>
-                          {issue.issueCondition !== "good" ? (
-                            <p className="mt-1 text-[11px] text-[#b54708]">
-                              Issued as {conditionLabel(issue.issueCondition)}
-                              {issue.damageNoteOnIssue
-                                ? ` — ${issue.damageNoteOnIssue}`
-                                : ""}
-                            </p>
-                          ) : null}
-                        </div>
-                        {!readOnly ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setReturningIssueId(
-                                returningIssueId === issue.id ? null : issue.id,
-                              );
-                              setReturnedOn(todayIso());
-                            }}
-                            className="shrink-0 text-xs font-semibold text-[var(--brand-deep)] underline"
-                          >
-                            {returningIssueId === issue.id ? "Cancel" : "Return"}
-                          </button>
-                        ) : null}
-                      </div>
-                      {returningIssueId === issue.id ? (
-                        <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] p-3">
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <label className="block text-xs text-[var(--muted)]">
-                              Return date
-                              <input
-                                type="date"
-                                value={returnedOn}
-                                onChange={(e) => setReturnedOn(e.target.value)}
-                                className={`${field} mt-1`}
-                              />
-                            </label>
-                            <label className="block text-xs text-[var(--muted)]">
-                              Condition on return
-                              <select
-                                value={returnCondition}
-                                onChange={(e) =>
-                                  setReturnCondition(
-                                    e.target.value as LibraryItemCondition,
-                                  )
-                                }
-                                className={`${field} mt-1`}
-                              >
-                                {LIBRARY_CONDITIONS.map((c) => (
-                                  <option key={c.id} value={c.id}>
-                                    {c.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          </div>
-                          {returnCondition === "damaged" ||
-                          returnCondition === "torn" ? (
-                            <label className="mt-3 block text-xs text-[var(--muted)]">
-                              Damage notes (return)
-                              <textarea
-                                value={damageNoteOnReturn}
-                                onChange={(e) => setDamageNoteOnReturn(e.target.value)}
-                                className={`${field} mt-1 min-h-[4rem]`}
-                              />
-                            </label>
-                          ) : null}
-                          <button
-                            type="button"
-                            className={`${btn} mt-3`}
-                            onClick={() => handleReturn(issue)}
-                          >
-                            Confirm return
-                          </button>
-                        </div>
-                      ) : null}
-                    </li>
-                  ))
-                )}
-              </ul>
-            </ErpTableShell>
-          </div>
-        </div>
+      {tab === "circulation" ? (
+        <LibraryCirculationPanel
+          state={state}
+          students={studentPeople}
+          staff={staffPeople}
+          readOnly={readOnly}
+          onChanged={afterServerChange}
+          onError={flashErr}
+        />
       ) : null}
 
       {tab === "history" ? (

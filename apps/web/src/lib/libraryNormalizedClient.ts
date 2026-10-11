@@ -120,6 +120,34 @@ async function pushLibraryDeskApi(state: LibraryState) {
   }
 }
 
+/**
+ * Send any save still waiting on the debounce now, and wait for it. The
+ * counter calls this before it reloads the desk from the server, so a title
+ * typed a moment ago is saved rather than replaced by the server's copy.
+ */
+export async function flushLibraryDeskSync(): Promise<void> {
+  if (!pushTimer) return;
+  clearTimeout(pushTimer);
+  pushTimer = null;
+  const batch = pending;
+  pending = null;
+  if (batch) await pushLibraryDeskApi(batch);
+}
+
+/**
+ * The desk exactly as the server holds it — after a counter action changed
+ * loans or copies there. null when the read failed (the caller says so; it
+ * never treats that as an empty library).
+ */
+export async function reloadLibraryDeskFromApi() {
+  await flushLibraryDeskSync();
+  const remote = await fetchLibraryDeskFromApi();
+  if (!remote) return null;
+  writeMeta({ updatedAt: remote.updatedAt, titleCount: remote.titleCount });
+  captureDeskStamps("library", remote.bundle as Record<string, unknown>, LIBRARY_SLICES, remote.stamps, remote.settingsStamp);
+  return remote.bundle;
+}
+
 export async function fetchLibraryDeskFromApi() {
   if (!libraryNormalizedSyncEnabled()) return null;
   try {

@@ -18,6 +18,7 @@ import {
   parseIssueNote,
 } from "@/lib/library";
 import { libraryDualWriteDbEnabled } from "@/lib/libraryDbConfig";
+import type { LibraryFineStatus } from "@/lib/libraryFine";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
@@ -167,6 +168,12 @@ function rowToCopy(r: Record<string, unknown>): LibraryCopy {
       status === "reserved"
         ? status
         : "available",
+    // Server-owned columns (11 Oct 2026): read here, never written by copyToRow,
+    // so a desk save cannot move a copy or blank its location.
+    location: String(r.location ?? ""),
+    source: String(r.source ?? "purchase"),
+    acquiredOn: r.acquired_on ? String(r.acquired_on).slice(0, 10) : undefined,
+    procurementDocId: String(r.procurement_doc_id ?? "") || undefined,
   };
 }
 
@@ -242,7 +249,17 @@ function rowToIssue(r: Record<string, unknown>): LibraryIssue {
       String(r.damage_note_on_issue || "") || meta.damageNoteOnIssue || "",
     damageNoteOnReturn:
       String(r.damage_note_on_return || "") || meta.damageNoteOnReturn || "",
+    // Settled only through /api/library/fines; issueToRow never writes these.
+    fineStatus: fineStatusOf(r.fine_status),
+    fineVoucherNo: String(r.fine_voucher_no ?? ""),
+    fineWaiveReason: String(r.fine_waive_reason ?? ""),
+    returnedBy: String(r.returned_by ?? ""),
   };
+}
+
+function fineStatusOf(v: unknown): LibraryFineStatus {
+  const s = String(v ?? "");
+  return s === "pending" || s === "collected" || s === "waived" ? s : "none";
 }
 
 function procurementToRow(
@@ -366,6 +383,20 @@ export async function pushLibraryDeskToDb(
     kept += w.kept;
   }
 
+  // A tab from before the server counter can still return a book through
+  // this save, with a fine but no fine status. Such a fine is owed: mark it
+  // pending so it shows in Fines to collect instead of vanishing.
+  if (issues.length) {
+    const { error: fineErr } = await sb
+      .from("library_desk_issues")
+      .update({ fine_status: "pending" })
+      .eq("tenant_id", tenantId)
+      .eq("fine_status", "none")
+      .gt("fine_paise", 0)
+      .not("returned_on", "is", null);
+    if (fineErr) return { ok: false, error: `library_desk_issues: ${fineErr.message}` };
+  }
+
   for (const table of LIBRARY_DELETABLE_TABLES) {
     const del = await deleteNamedIds(sb, tenantId, table, deletes[table]);
     if (!del.ok) return { ok: false, error: del.error || `${table}: delete failed` };
@@ -462,7 +493,7 @@ export async function fetchLibraryDeskFromDb(): Promise<{
     sb
       .from("library_desk_settings")
       .select(
-        "max_books_per_student, max_books_per_staff, loan_days, fine_paise_per_day, updated_at",
+        "max_books_per_student, max_books_per_staff, loan_days, fine_paise_per_day, fine_grace_days, fine_cap_paise, updated_at",
       )
       .eq("tenant_id", tenantId)
       .maybeSingle(),
@@ -490,6 +521,8 @@ export async function fetchLibraryDeskFromDb(): Promise<{
     max_books_per_staff?: number;
     loan_days?: number;
     fine_paise_per_day?: number;
+    fine_grace_days?: number;
+    fine_cap_paise?: number;
   } | null;
 
   return {
@@ -505,6 +538,8 @@ export async function fetchLibraryDeskFromDb(): Promise<{
         maxBooksPerStaff: s?.max_books_per_staff ?? 3,
         loanDays: s?.loan_days ?? 14,
         finePaisePerDay: s?.fine_paise_per_day ?? 500,
+        graceDays: s?.fine_grace_days ?? 0,
+        capPaise: Number(s?.fine_cap_paise ?? 0),
       },
     },
     meta: metaRow
