@@ -275,6 +275,31 @@ export async function postReceiptsTogether(input: {
   const stored = await vouchersInDb(made.map((v) => v.id));
   const missing = stored ? made.filter((v) => !stored.has(v.id)) : null;
   if (!pushed.ok || !missing || missing.length > 0) {
+    // ANOTHER INSTANCE GOT THERE FIRST. fee_desk_vouchers_tool_txn_uq allows
+    // one live receipt per tool transaction id, so a racing post of the same
+    // batch / cheque is refused as a whole. If every receipt this call was
+    // asked for is now live in the desk, that is the answer: drop our copies
+    // from memory (so no later push carries a duplicate) and report them as
+    // already posted.
+    const now = await receiptsByTransactionId(input.specs.map((s) => s.transactionId));
+    if (now && input.specs.every((sp) => now.has(sp.transactionId))) {
+      const ours = new Set(made.map((v) => v.id));
+      const theirs = input.specs.map((sp) => now.get(sp.transactionId)!);
+      if (theirs.some((t) => !ours.has(t.id))) {
+        await forgetInMemory(new Set([...ours].filter((id) => !theirs.some((t) => t.id === id))));
+      }
+      return input.specs.map((sp) => {
+        const t = now.get(sp.transactionId)!;
+        return {
+          voucherId: t.id,
+          receiptNo: t.receipt_no,
+          householdId: t.household_id,
+          totalPaise: t.total_paise,
+          transactionId: sp.transactionId,
+          duplicate: !ours.has(t.id),
+        };
+      });
+    }
     // The write is one transaction, so either all landed or none did. If the
     // read-back could not even look, keep the copies: a later push may still
     // carry them, and their transaction ids stop a retry making second ones.

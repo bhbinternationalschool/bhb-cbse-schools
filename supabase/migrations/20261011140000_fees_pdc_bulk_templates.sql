@@ -101,6 +101,22 @@ create table if not exists public.fee_concession_templates (
 create unique index if not exists fee_concession_templates_rule_code_uq
   on public.fee_concession_templates (tenant_id, rule_code);
 
+/*
+ * One live receipt per tool transaction id. The tools stamp 'pdc:<id>' and
+ * 'bulk:<batch>:<student>' on the receipts they make and look for them before
+ * posting; this makes "never a second receipt" hold in the database too, even
+ * across two server instances racing. A voided receipt frees the id.
+ *
+ * Scoped to the tools' prefixes ON PURPOSE: on 11 Oct 2026 production held 99
+ * groups (331 live receipts) sharing a transaction_id from older paths (counter
+ * UTRs, import batches) — a school-wide unique index would fail to build and
+ * would refuse legitimate history. No existing row carries either prefix.
+ */
+create unique index if not exists fee_desk_vouchers_tool_txn_uq
+  on public.fee_desk_vouchers (tenant_id, transaction_id)
+  where voided_at is null
+    and (transaction_id like 'pdc:%' or transaction_id like 'bulk:%');
+
 alter table public.fee_pdc_cheques enable row level security;
 alter table public.fee_bulk_payments enable row level security;
 alter table public.fee_concession_templates enable row level security;
@@ -113,8 +129,9 @@ grant select, insert, update, delete on public.fee_concession_templates to servi
 
 /*
  * Claim a held PDC for deposit. Two cashiers pressing Deposit at once: one
- * claim wins, the other is told to wait. A claim older than two minutes is a
- * deposit that died half-way and may be retried (the receipt's transaction id
+ * claim wins, the other is told to wait. A claim older than ten minutes is a
+ * deposit that died half-way and may be retried (a deposit re-reads the fee
+ * book, pushes it and rebuilds open dues, which can take minutes) (the receipt's transaction id
  * makes the retry find the receipt instead of making another).
  */
 create or replace function public.fee_pdc_claim_deposit(p_tenant_id uuid, p_id text)
@@ -131,7 +148,7 @@ begin
    where tenant_id = p_tenant_id
      and id = p_id
      and status = 'held'
-     and (deposit_claimed_at is null or deposit_claimed_at < now() - interval '2 minutes')
+     and (deposit_claimed_at is null or deposit_claimed_at < now() - interval '10 minutes')
   returning id into v_hit;
   return v_hit is not null;
 end;

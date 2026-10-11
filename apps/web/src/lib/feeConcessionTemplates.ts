@@ -190,6 +190,33 @@ function liveOn(g: ConcessionGrant, onDate: string): boolean {
   return !g.effectiveTo || g.effectiveTo >= onDate;
 }
 
+/**
+ * A live grant under ANOTHER active rule that touches a head this template
+ * covers (an empty head list means every head). Stacking is how a family got
+ * ₹300 off a ₹150 concession before; a template never adds to one silently.
+ */
+export function stackingClash(
+  t: Pick<ConcessionTemplate, "feeHeadIds">,
+  studentId: string,
+  grants: ConcessionGrant[],
+  rules: ConcessionRule[],
+  ownRuleIds: Set<string>,
+  onDate: string,
+): ConcessionRule | undefined {
+  const byId = new Map(rules.map((r) => [r.id, r]));
+  for (const g of grants) {
+    if (g.studentId !== studentId || ownRuleIds.has(g.concessionId) || !liveOn(g, onDate)) continue;
+    const rule = byId.get(g.concessionId);
+    if (!rule || !rule.isActive) continue;
+    const overlap =
+      t.feeHeadIds.length === 0 ||
+      rule.feeHeadIds.length === 0 ||
+      rule.feeHeadIds.some((h) => t.feeHeadIds.includes(h));
+    if (overlap) return rule;
+  }
+  return undefined;
+}
+
 export function planTemplateApplication(input: {
   template: ConcessionTemplate;
   students: TemplatePlanStudent[];
@@ -198,6 +225,12 @@ export function planTemplateApplication(input: {
   /** The rule id new grants point at. */
   ruleId: string;
   existingGrants: ConcessionGrant[];
+  /**
+   * Every Masters concession rule, so a grant under some OTHER rule on the
+   * same fee head (a manual sibling discount, a counter concession) is seen.
+   * Omitted = only this template's own grants are checked.
+   */
+  rules?: ConcessionRule[];
   canGrant: boolean;
   canApprove: boolean;
   /** YYYY-MM — the first month the discount applies to. */
@@ -237,6 +270,18 @@ export function planTemplateApplication(input: {
       (g) => g.studentId === s.studentId && input.ruleIds.has(g.concessionId) && liveOn(g, effectiveFrom),
     );
     const est = estimateTemplatePaise(t, s.billedByHead);
+    const clash = already ? undefined : stackingClash(t, s.studentId, input.existingGrants, input.rules ?? [], input.ruleIds, effectiveFrom);
+    if (clash) {
+      rows.push({
+        studentId: s.studentId,
+        studentName: s.studentName,
+        action: "skip",
+        why: `Already has "${clash.name || clash.code}" on the same fee head — discounts would stack. Remove or end it in Masters first.`,
+        estPaise: est,
+        status: null,
+      });
+      continue;
+    }
     if (already) {
       rows.push({ studentId: s.studentId, studentName: s.studentName, action: "skip", why: "Already has this template's discount", estPaise: est, status: null });
       continue;

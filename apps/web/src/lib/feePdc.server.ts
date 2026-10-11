@@ -19,6 +19,7 @@ import { newId } from "@/lib/masters";
 import { canBackdateReceipt } from "@/lib/rbac";
 import type { DemoSession } from "@/lib/auth";
 import {
+  PDC_DEPOSIT_LEASE_MS,
   canClosePdc,
   canDepositPdc,
   pdcInputProblem,
@@ -188,6 +189,16 @@ export async function depositPdc(
   const today = istToday();
   const why = canDepositPdc(pdc, today);
   if (why) throw new ApiError("bad_request", why, 400);
+  const by = opts.session.fullName || opts.session.email || "fee desk";
+
+  // A deposit that made its receipt but died before linking it: finish it by
+  // linking THAT receipt — no claim needed, and never a second receipt.
+  const earlier = await liveDepositReceipt(pdc.id);
+  if (earlier) {
+    await markDeposited(id, earlier.voucherId, earlier.receiptNo, by);
+    const after = await getPdc(id);
+    return { pdc: after ?? pdc, receiptNo: earlier.receiptNo, voucherId: earlier.voucherId, movedPaise: 0 };
+  }
 
   const { data: claimed, error: claimErr } = await ctx.sb.rpc("fee_pdc_claim_deposit", {
     p_tenant_id: ctx.tenantId,
@@ -195,55 +206,67 @@ export async function depositPdc(
   });
   if (claimErr) throw new ApiError("server_error", `Could not start the deposit: ${claimErr.message}`, 503);
   if (claimed !== true) {
-    throw new ApiError("bad_request", "Someone else is depositing this cheque right now — wait a minute and reload", 409);
+    throw new ApiError("bad_request", "Someone else is depositing this cheque right now — wait a few minutes and reload", 409);
   }
 
-  const release = async () => {
-    await ctx.sb
-      .from("fee_pdc_cheques")
-      .update({ deposit_claimed_at: null })
-      .eq("tenant_id", ctx.tenantId)
-      .eq("id", id)
-      .eq("status", "held");
-  };
-
-  let posted: { voucherId: string; receiptNo: string };
-  let movedPaise = 0;
+  let made: { voucherId: string; receiptNo: string; movedPaise: number };
   try {
-    // A deposit that made its receipt but died before linking it: link that
-    // receipt now. Planning again would see the dues already paid by it.
-    const prior = await receiptsByTransactionId([pdcReceiptTransactionId(pdc.id)]);
-    if (!prior) throw new ApiError("server_error", "Could not check for an earlier deposit receipt — nothing was posted", 503);
-    const earlier = prior.get(pdcReceiptTransactionId(pdc.id));
-    if (earlier) {
-      posted = { voucherId: earlier.id, receiptNo: earlier.receipt_no };
-    } else {
-      const made = await postPdcReceipt(pdc, opts, today);
-      posted = { voucherId: made.voucherId, receiptNo: made.receiptNo };
-      movedPaise = made.movedPaise;
-    }
+    made = await postPdcReceipt(pdc, opts, today);
   } catch (e) {
-    await release();
+    // Free the cheque ONLY if no receipt exists for it. If one does (or we
+    // cannot tell), the claim stays until it lapses, closing stays refused,
+    // and pressing Deposit again links that receipt.
+    const after = await liveDepositReceipt(pdc.id).catch(() => undefined);
+    if (after === null) {
+      await ctx.sb
+        .from("fee_pdc_cheques")
+        .update({ deposit_claimed_at: null })
+        .eq("tenant_id", ctx.tenantId)
+        .eq("id", id)
+        .eq("status", "held");
+    } else if (after) {
+      // Another instance's receipt won (unique index): link it.
+      await markDeposited(id, after.voucherId, after.receiptNo, by);
+      const linked = await getPdc(id);
+      return { pdc: linked ?? pdc, receiptNo: after.receiptNo, voucherId: after.voucherId, movedPaise: 0 };
+    }
     throw e;
   }
+  await markDeposited(id, made.voucherId, made.receiptNo, by);
+  const after = await getPdc(id);
+  return { pdc: after ?? pdc, receiptNo: made.receiptNo, voucherId: made.voucherId, movedPaise: made.movedPaise };
+}
 
+/**
+ * The live receipt a deposit of this cheque made, if any.
+ * null = none; throws when it cannot look.
+ */
+async function liveDepositReceipt(pdcId: string): Promise<{ voucherId: string; receiptNo: string } | null> {
+  const tx = pdcReceiptTransactionId(pdcId);
+  const prior = await receiptsByTransactionId([tx]);
+  if (!prior) throw new ApiError("server_error", "Could not check for an earlier deposit receipt — nothing was changed", 503);
+  const hit = prior.get(tx);
+  return hit ? { voucherId: hit.id, receiptNo: hit.receipt_no } : null;
+}
+
+async function markDeposited(id: string, voucherId: string, receiptNo: string, by: string): Promise<void> {
+  const ctx = await tenant();
   const { data: mark, error: markErr } = await ctx.sb.rpc("fee_pdc_mark_deposited", {
     p_tenant_id: ctx.tenantId,
     p_id: id,
-    p_voucher_id: posted.voucherId,
-    p_by: opts.session.fullName || opts.session.email || "fee desk",
+    p_voucher_id: voucherId,
+    p_by: by,
   });
   const res = (mark ?? {}) as { ok?: boolean; error?: string };
   if (markErr || !res.ok) {
-    await release();
+    // The claim is NOT released: the receipt exists, so the cheque must not be
+    // returned or cancelled, and Deposit again links this same receipt.
     throw new ApiError(
       "server_error",
-      `Receipt ${posted.receiptNo} was made, but the cheque could not be marked deposited (${markErr?.message || res.error}). Press Deposit again — it will link the same receipt, not make another.`,
+      `Receipt ${receiptNo} was made, but the cheque could not be marked deposited (${markErr?.message || res.error}). Press Deposit again — it links the same receipt, it does not make another.`,
       503,
     );
   }
-  const after = await getPdc(id);
-  return { pdc: after ?? pdc, receiptNo: posted.receiptNo, voucherId: posted.voucherId, movedPaise };
 }
 
 export async function closePdc(
@@ -255,9 +278,21 @@ export async function closePdc(
   const ctx = await tenant();
   const pdc = await getPdc(id);
   if (!pdc) throw new ApiError("not_found", "No such cheque", 404);
-  const why = canClosePdc(pdc, to, reason);
+  const { data: claimRow, error: claimErr } = await ctx.sb
+    .from("fee_pdc_cheques")
+    .select("deposit_claimed_at")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", id)
+    .maybeSingle();
+  if (claimErr) throw new ApiError("server_error", "Could not read the cheque", 503);
+  const live = await liveDepositReceipt(id);
+  const why = canClosePdc(pdc, to, reason, {
+    liveReceiptNo: live?.receiptNo ?? null,
+    depositClaimedAt: (claimRow as { deposit_claimed_at?: string | null } | null)?.deposit_claimed_at ?? null,
+    nowMs: Date.now(),
+  });
   if (why) throw new ApiError("bad_request", why, 400);
-  // Conditional on still being held and not mid-deposit: a cheque being
+  // Conditional on still being held and no live deposit claim: a cheque being
   // turned into a receipt this minute cannot also be returned.
   const { data, error } = await ctx.sb
     .from("fee_pdc_cheques")
@@ -271,11 +306,11 @@ export async function closePdc(
     .eq("tenant_id", ctx.tenantId)
     .eq("id", id)
     .eq("status", "held")
-    .or(`deposit_claimed_at.is.null,deposit_claimed_at.lt.${new Date(Date.now() - 120_000).toISOString()}`)
+    .or(`deposit_claimed_at.is.null,deposit_claimed_at.lt.${new Date(Date.now() - PDC_DEPOSIT_LEASE_MS).toISOString()}`)
     .select("*");
   if (error) throw new ApiError("server_error", `Not saved: ${error.message}`, 500);
   if (!data || data.length !== 1) {
-    throw new ApiError("bad_request", "This cheque changed (deposited or closed) a moment ago — reload", 409);
+    throw new ApiError("bad_request", "This cheque changed (being deposited, deposited or closed) a moment ago — reload", 409);
   }
   return fromRow(data[0] as Row);
 }

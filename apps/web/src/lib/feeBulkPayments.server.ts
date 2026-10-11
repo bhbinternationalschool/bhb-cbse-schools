@@ -17,8 +17,10 @@ import type { DemoSession } from "@/lib/auth";
 import { canBackdateReceipt } from "@/lib/rbac";
 import { TENDER_MODES, type TenderMode, type VoucherLine } from "@/lib/fees";
 import {
+  bulkPlanSignature,
   bulkReceiptTransactionId,
   planBulkAllocation,
+  sessionRowProblem,
   type BulkChild,
   type BulkPlan,
   type BulkStrategy,
@@ -34,6 +36,8 @@ import {
 import { getServerTenantContext } from "@/lib/serverTenant";
 
 export type BulkRequest = {
+  /** The session the office is working in (the signed session cookie's year). */
+  academicYearCode: string;
   studentIds: string[];
   strategy: BulkStrategy;
   includeFuture: boolean;
@@ -57,9 +61,14 @@ const BATCH_ID_RE = /^bulk_[a-z0-9]{6,32}$/;
 async function childrenFor(req: BulkRequest) {
   const ctx = await loadFeeToolsContext();
   const children: BulkChild[] = [];
-  for (const id of req.studentIds) {
+  const rows = req.studentIds.map((id) => {
     const s = ctx.sis.students.find((x) => x.id === id);
     if (!s) throw new ApiError("bad_request", "A chosen student is no longer on the roll — reload", 400);
+    return s;
+  });
+  const stale = sessionRowProblem(rows, req.academicYearCode);
+  if (stale) throw new ApiError("bad_request", stale, 400);
+  for (const s of rows) {
     children.push({
       studentId: s.id,
       studentName: s.fullName,
@@ -79,6 +88,8 @@ export async function postBulk(
   req: BulkRequest & {
     batchId: string;
     expectedTotalPaise: number;
+    /** bulkPlanSignature of the preview the office saw. */
+    expectedSignature: string;
     mode: string;
     ref: string;
     instrumentDate: string;
@@ -118,7 +129,11 @@ export async function postBulk(
       } satisfies BulkPlan)
     : planBulkAllocation(children, req.strategy);
   if (!plan.ok) throw new ApiError("bad_request", plan.error, 400);
-  if (!made.length && plan.totalPaise !== Math.round(req.expectedTotalPaise)) {
+  if (
+    !made.length &&
+    (plan.totalPaise !== Math.round(req.expectedTotalPaise) ||
+      bulkPlanSignature(plan.receipts) !== req.expectedSignature)
+  ) {
     throw new ApiError(
       "bad_request",
       "The dues changed since the preview (someone may have collected at the counter). Nothing was posted — preview again.",

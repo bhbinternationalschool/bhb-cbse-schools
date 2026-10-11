@@ -213,3 +213,33 @@ export function planBulkAllocation(children: BulkChild[], strategy: BulkStrategy
 export function bulkReceiptTransactionId(batchId: string, studentId: string): string {
   return `bulk:${batchId}:${studentId}`;
 }
+
+/**
+ * What a plan would actually post, as a comparable string: every receipt's
+ * child, due and amount. Post compares this with the preview's, so a plan
+ * that moved (someone collected at the counter in between) is refused even
+ * when the TOTAL is unchanged — which, for a lump sum or per-child amounts,
+ * it always is.
+ */
+export function bulkPlanSignature(receipts: Pick<BulkReceiptPlan, "studentId" | "lines">[]): string {
+  return receipts
+    .flatMap((r) => r.lines.map((l) => `${r.studentId}|${l.dueKey}|${l.amountPaise}`))
+    .sort()
+    .join(";");
+}
+
+/**
+ * A child carried across years has one roster row per session. Money and
+ * concessions are taken against THIS session's row only; an id from another
+ * year's row (a stale search result, an old link) is refused by name rather
+ * than priced off last year's dues. null = all chosen rows are this session's.
+ */
+export function sessionRowProblem(
+  rows: { id: string; fullName: string; academicYearCode: string }[],
+  sessionAy: string,
+): string | null {
+  if (!sessionAy) return "The session (academic year) is not known — choose it in the header and reload";
+  const stale = rows.find((r) => r.academicYearCode !== sessionAy);
+  if (!stale) return null;
+  return `${stale.fullName || stale.id} is ${stale.academicYearCode || "another session"}'s record, not ${sessionAy}'s — search again in this session`;
+}

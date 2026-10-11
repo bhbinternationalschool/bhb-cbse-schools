@@ -140,11 +140,42 @@ export function canDepositPdc(p: Pick<PdcRecord, "status" | "chequeDate">, today
   return null;
 }
 
+/**
+ * How long a deposit holds the cheque. A deposit re-reads the whole fee book,
+ * pushes it and rebuilds open dues — minutes on a cold instance — and while it
+ * runs nobody may return, cancel or deposit the same cheque. Matches the
+ * interval in fee_pdc_claim_deposit.
+ */
+export const PDC_DEPOSIT_LEASE_MS = 10 * 60 * 1000;
+
+export type PdcCloseGuard = {
+  /** Receipt no. of a LIVE receipt carrying 'pdc:<id>', or null if none. */
+  liveReceiptNo: string | null;
+  /** When a deposit claimed the cheque (ISO), or null. */
+  depositClaimedAt: string | null;
+  nowMs: number;
+};
+
+export function depositClaimHeld(claimedAt: string | null, nowMs: number): boolean {
+  if (!claimedAt) return false;
+  const t = Date.parse(claimedAt);
+  return Number.isFinite(t) && nowMs - t < PDC_DEPOSIT_LEASE_MS;
+}
+
 export function canClosePdc(
   p: Pick<PdcRecord, "status">,
   to: "bounced" | "returned" | "cancelled",
   reason: string,
+  guard?: PdcCloseGuard,
 ): string | null {
+  if (guard?.liveReceiptNo) {
+    // The money is already on a receipt: returning the cheque now would leave
+    // a receipt for a cheque the school no longer holds.
+    return `Receipt ${guard.liveReceiptNo} was already made for this cheque — press Deposit to finish linking it; if it then bounces, bounce it in Fees → Cheques`;
+  }
+  if (guard && depositClaimHeld(guard.depositClaimedAt, guard.nowMs)) {
+    return "This cheque is being deposited right now — wait a few minutes and reload";
+  }
   if (p.status !== "held") {
     return p.status === "deposited"
       ? "This cheque is already a receipt — bounce it from Fees → Cheques, which voids the receipt"

@@ -23,6 +23,7 @@ import type { DemoSession } from "@/lib/auth";
 import type { ApiAuthContext } from "@/lib/api/v1/auth";
 import { loadFeeContext } from "@/lib/api/v1/staffFees";
 import { computeStudentDues } from "@/lib/fees";
+import { sessionRowProblem } from "@/lib/feeBulkAllocation";
 import {
   planTemplateApplication,
   ruleMatchesTemplate,
@@ -231,6 +232,13 @@ export async function applyTemplate(
   const ids = [...new Set(input.studentIds.map((s) => String(s).trim()).filter(Boolean))];
 
   const feeCtx = await loadFeeContext();
+  const rows = ids.map((id) => {
+    const s = feeCtx.sis.students.find((x) => x.id === id);
+    if (!s) throw new ApiError("bad_request", "A chosen student is no longer on the roll — reload", 400);
+    return s;
+  });
+  const stale = sessionRowProblem(rows, session.academicYearCode);
+  if (stale) throw new ApiError("bad_request", stale, 400);
   for (let attempt = 0; attempt < 3; attempt++) {
     const { bundle, readFailed, sliceStamps } = await fetchMastersDeskFromDb();
     if (readFailed || !sliceStamps) {
@@ -248,9 +256,7 @@ export async function applyTemplate(
     const ruleNeedsWrite = !current || !ruleMatchesTemplate(current, template);
 
     const students: TemplatePlanStudent[] = [];
-    for (const id of ids) {
-      const s = feeCtx.sis.students.find((x) => x.id === id);
-      if (!s) throw new ApiError("bad_request", "A chosen student is no longer on the roll — reload", 400);
+    for (const s of rows) {
       students.push({
         studentId: s.id,
         studentName: s.fullName,
@@ -264,6 +270,7 @@ export async function applyTemplate(
       ruleIds: new Set(sameCode.map((r) => r.id)),
       ruleId,
       existingGrants: state.concessionGrants ?? [],
+      rules,
       canGrant,
       canApprove,
       fromMonth: input.fromMonth,

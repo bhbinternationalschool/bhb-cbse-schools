@@ -60,7 +60,7 @@ export function BulkPaymentPanel({ canCollect }: { canCollect: boolean }) {
   const [bankName, setBankName] = useState("");
   const [payerLabel, setPayerLabel] = useState("");
   const [note, setNote] = useState("");
-  const [preview, setPreview] = useState<{ plan: BulkPlan; batchId: string } | null>(null);
+  const [preview, setPreview] = useState<{ plan: BulkPlan; batchId: string; signature: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; bad: boolean } | null>(null);
   const [history, setHistory] = useState<BulkRecord[] | null>(null);
@@ -171,7 +171,7 @@ export function BulkPaymentPanel({ canCollect }: { canCollect: boolean }) {
     }
     setBusy(true);
     setMsg(null);
-    const r = await toolsPost<{ plan: BulkPlan }>("/api/fees/tools/bulk-payment", {
+    const r = await toolsPost<{ plan: BulkPlan; signature: string }>("/api/fees/tools/bulk-payment", {
       action: "preview",
       studentIds: ids,
       strategy: st,
@@ -187,7 +187,7 @@ export function BulkPaymentPanel({ canCollect }: { canCollect: boolean }) {
       setPreview(null);
       return;
     }
-    setPreview({ plan: r.plan, batchId: newBatchId() });
+    setPreview({ plan: r.plan, batchId: newBatchId(), signature: r.signature });
   }
 
   async function post() {
@@ -201,6 +201,7 @@ export function BulkPaymentPanel({ canCollect }: { canCollect: boolean }) {
       action: "post",
       batchId: preview.batchId,
       expectedTotalPaise: preview.plan.totalPaise,
+      expectedSignature: preview.signature,
       studentIds: ids,
       strategy: st,
       includeFuture,

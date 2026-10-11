@@ -1,7 +1,7 @@
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { writeAudit } from "@/lib/audit.server";
 import { formatInr } from "@/lib/fees";
-import type { BulkStrategy } from "@/lib/feeBulkAllocation";
+import { bulkPlanSignature, type BulkStrategy } from "@/lib/feeBulkAllocation";
 import { listBulk, postBulk, previewBulk } from "@/lib/feeBulkPayments.server";
 import { toolsErrorResponse } from "@/lib/feeTools.server";
 
@@ -59,10 +59,16 @@ export async function POST(req: Request) {
 
   try {
     if (body.action === "preview") {
-      const { plan, children } = await previewBulk({ studentIds, strategy, includeFuture });
+      const { plan, children } = await previewBulk({
+        academicYearCode: auth.ctx.session.academicYearCode,
+        studentIds,
+        strategy,
+        includeFuture,
+      });
       return Response.json({
         ok: true,
         plan,
+        signature: plan.ok ? bulkPlanSignature(plan.receipts) : "",
         children: children.map((c) => ({
           studentId: c.studentId,
           openPaise: c.dues.reduce((n, d) => n + d.balancePaise, 0),
@@ -73,9 +79,11 @@ export async function POST(req: Request) {
       const session = auth.ctx.session;
       const r = await postBulk(
         {
+          academicYearCode: session.academicYearCode,
           studentIds,
           strategy,
           includeFuture,
+          expectedSignature: String(body.expectedSignature ?? ""),
           batchId: String(body.batchId ?? ""),
           expectedTotalPaise: Math.round(Number(body.expectedTotalPaise) || 0),
           mode: String(body.mode ?? ""),

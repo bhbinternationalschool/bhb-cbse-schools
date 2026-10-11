@@ -11,13 +11,17 @@ import assert from "node:assert/strict";
 
 import {
   BULK_MAX_CHILDREN,
+  bulkPlanSignature,
   bulkReceiptTransactionId,
   planBulkAllocation,
+  sessionRowProblem,
   type BulkChild,
 } from "@/lib/feeBulkAllocation";
 import {
+  PDC_DEPOSIT_LEASE_MS,
   canClosePdc,
   canDepositPdc,
+  depositClaimHeld,
   pdcInputProblem,
   pdcReceiptTransactionId,
   pdcUrgency,
@@ -29,12 +33,13 @@ import {
   estimateTemplatePaise,
   planTemplateApplication,
   ruleMatchesTemplate,
+  stackingClash,
   templateInputProblem,
   templateRuleCode,
   templateToRule,
   type ConcessionTemplate,
 } from "@/lib/feeConcessionTemplates";
-import type { ConcessionGrant } from "@/lib/masters";
+import type { ConcessionGrant, ConcessionRule } from "@/lib/masters";
 
 let passed = 0;
 function test(name: string, fn: () => void) {
@@ -369,6 +374,73 @@ test("sibling template stamps the child number", () => {
   const p = plan({ template: sib });
   assert.ok(p.ok);
   assert.ok(p.grants.every((g) => g.siblingChildNo === 2));
+});
+
+/* ——— review fixes (PR #552) ——— */
+
+test("a cheque with a live deposit receipt can never be returned, cancelled or bounced here", () => {
+  const now = Date.parse("2026-11-05T10:00:00Z");
+  for (const to of ["returned", "cancelled", "bounced"] as const) {
+    const why = canClosePdc({ status: "held" }, to, "family asked", { liveReceiptNo: "RCV-00700", depositClaimedAt: null, nowMs: now });
+    assert.match(why!, /RCV-00700/);
+    assert.match(why!, /Deposit/);
+  }
+});
+
+test("a held deposit claim blocks closing for the whole 10-minute lease", () => {
+  const now = Date.parse("2026-11-05T10:00:00Z");
+  assert.equal(PDC_DEPOSIT_LEASE_MS, 600_000);
+  const nineMin = new Date(now - 9 * 60_000).toISOString();
+  const elevenMin = new Date(now - 11 * 60_000).toISOString();
+  assert.equal(depositClaimHeld(nineMin, now), true);
+  assert.equal(depositClaimHeld(elevenMin, now), false);
+  assert.equal(depositClaimHeld(null, now), false);
+  assert.match(canClosePdc({ status: "held" }, "returned", "x", { liveReceiptNo: null, depositClaimedAt: nineMin, nowMs: now })!, /being deposited/);
+  assert.equal(canClosePdc({ status: "held" }, "returned", "x", { liveReceiptNo: null, depositClaimedAt: elevenMin, nowMs: now }), null);
+});
+
+test("plan signature: same total, different dues → different plan (post refuses)", () => {
+  const before = planBulkAllocation([asha, ravi], { kind: "oldest_first", amountPaise: 200000 });
+  // Ravi's April was paid at the counter in between: same lump, now lands elsewhere.
+  const after = planBulkAllocation([asha, { ...ravi, dues: [due("bus:jun", "2026-06-10", 50000)] }], { kind: "oldest_first", amountPaise: 200000 });
+  assert.ok(before.ok && after.ok);
+  assert.equal(before.totalPaise, after.totalPaise);
+  assert.notEqual(bulkPlanSignature(before.receipts), bulkPlanSignature(after.receipts));
+  const again = planBulkAllocation([asha, ravi], { kind: "oldest_first", amountPaise: 200000 });
+  assert.ok(again.ok);
+  assert.equal(bulkPlanSignature(again.receipts), bulkPlanSignature(before.receipts));
+});
+
+test("only this session's roster rows may be paid for or granted", () => {
+  assert.equal(sessionRowProblem([{ id: "s1", fullName: "Asha", academicYearCode: "2026-27" }], "2026-27"), null);
+  assert.match(
+    sessionRowProblem([{ id: "s1", fullName: "Asha", academicYearCode: "2026-27" }, { id: "s1old", fullName: "Asha", academicYearCode: "2025-26" }], "2026-27")!,
+    /2025-26/,
+  );
+  assert.ok(sessionRowProblem([{ id: "s1", fullName: "Asha", academicYearCode: "2026-27" }], ""));
+});
+
+test("a discount under ANOTHER rule on the same head is not stacked silently", () => {
+  const manualSibling: ConcessionRule = { ...templateToRule(tpl, "cn_sib"), code: "SIB", name: "Sibling ₹200", kind: "sibling", feeHeadIds: ["fh_tui"] };
+  const transport: ConcessionRule = { ...templateToRule(tpl, "cn_bus"), code: "BUS", name: "Transport", kind: "transport", feeHeadIds: ["fh_bus"] };
+  const g = (concessionId: string, extra: Partial<ConcessionGrant> = {}): ConcessionGrant => ({
+    id: `g_${concessionId}`, concessionId, studentId: "s1", status: "approved", ground: "sibling", reason: "",
+    effectiveFrom: "2026-04-01", effectiveTo: null, createdAt: "", siblingChildNo: null, ...extra,
+  });
+  const rules = [manualSibling, transport, templateToRule(tpl, "cn_1")];
+  const p = plan({ existingGrants: [g("cn_sib")], rules });
+  assert.ok(p.ok);
+  const row = p.rows.find((r) => r.studentId === "s1")!;
+  assert.equal(row.action, "skip");
+  assert.match(row.why, /Sibling ₹200/);
+  assert.ok(!p.grants.some((x) => x.studentId === "s1"));
+  // Another head, an ended grant, a rejected one, or an inactive rule: no clash.
+  assert.equal(stackingClash(tpl, "s1", [g("cn_bus")], rules, new Set(["cn_1"]), "2026-10-01"), undefined);
+  assert.equal(stackingClash(tpl, "s1", [g("cn_sib", { effectiveTo: "2026-09-30" })], rules, new Set(["cn_1"]), "2026-10-01"), undefined);
+  assert.equal(stackingClash(tpl, "s1", [g("cn_sib", { status: "rejected" })], rules, new Set(["cn_1"]), "2026-10-01"), undefined);
+  assert.equal(stackingClash(tpl, "s1", [g("cn_sib")], [{ ...manualSibling, isActive: false }], new Set(["cn_1"]), "2026-10-01"), undefined);
+  // A rule on every head clashes with anything.
+  assert.ok(stackingClash(tpl, "s1", [g("cn_all")], [{ ...manualSibling, id: "cn_all", feeHeadIds: [] }], new Set(["cn_1"]), "2026-10-01"));
 });
 
 console.log(`feeBulkPdcTemplates selftest: ${passed} passed`);
