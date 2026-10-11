@@ -17,6 +17,7 @@
     "test:cash-pool-orphans": "npx tsx src/lib/cashPoolOrphans.selftest.ts",
     "test:receipt-lookup": "npx tsx src/lib/receiptLookup.selftest.ts",
     "test:school-receipt-no": "npx tsx src/lib/schoolReceiptNo.selftest.ts",
+    "test:fee-tender-ref": "npx tsx src/lib/feeTenderRefCheck.selftest.ts",
     "test:transport-overlap-billing": "npx tsx src/lib/transportOverlapBilling.selftest.ts",
     "test:masters-transport-no-prune": "npx tsx src/lib/mastersTransportNoPrune.selftest.ts",
     "test:slice-cas": "npx tsx src/lib/sliceCas.selftest.ts",
