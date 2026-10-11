@@ -10,6 +10,7 @@
  */
 
 import { formatInr } from "@/lib/masters";
+import { shortCached } from "@/lib/shortPromiseCache";
 import type { ModuleDashboardModel } from "@/components/dashboard/ModuleDashboard";
 
 type Position = {
@@ -78,15 +79,21 @@ export async function patchAccountsDashWithServerBook(
   // "position" is the cockpit without its controls: the same balances in a
   // fraction of the time. The controls run over every voucher and took several
   // seconds, during which the dashboard showed browser-book figures.
-  const [cockpit, rp, months] = await Promise.all([
-    ledgerPost<Position>({ action: "position", asOf: today, fyFrom: fyStart() }),
-    ledgerPost<{ ok: boolean; report?: { totalReceiptsPaise: number } }>({
-      action: "receipts-payments",
-      from: today,
-      to: today,
-    }),
-    monthlyCash(fyStart(), today),
-  ]);
+  // Redraws within 15 s share one read of the server book (each desk landing
+  // redraws the dashboard; see shortPromiseCache). A failed position read is
+  // not cached.
+  const [cockpit, rp, months] = await shortCached(`accounts-dash:${today}`, 15_000, async () => {
+    const r = await Promise.all([
+      ledgerPost<Position>({ action: "position", asOf: today, fyFrom: fyStart() }),
+      ledgerPost<{ ok: boolean; report?: { totalReceiptsPaise: number } }>({
+        action: "receipts-payments",
+        from: today,
+        to: today,
+      }),
+      monthlyCash(fyStart(), today),
+    ]);
+    return r[0]?.ok ? r : null;
+  }).then((r) => r ?? ([null, null, null] as const));
   if (!cockpit?.ok) {
     // The server book could not be read. The base model already leaves the
     // money tiles and the bank rows blank, so returning null leaves them
