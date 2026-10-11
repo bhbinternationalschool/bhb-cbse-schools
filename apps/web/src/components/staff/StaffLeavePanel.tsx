@@ -114,6 +114,32 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     );
   }, [masters, session]);
 
+  // Does this year have a leave policy (Staff → Leave rules)? Then the
+  // policy owns allotments and the carry — the old "Allot leave days" tab
+  // and carry button step aside so there is one source of truth. "unknown"
+  // (still checking / could not check) keeps them disabled, never enabled.
+  const [policyState, setPolicyState] = useState<"none" | "policy" | "unknown">("unknown");
+  useEffect(() => {
+    if (!isManager) return;
+    let live = true;
+    setPolicyState("unknown");
+    // leave-book answers {policy: false} for a year without one; it is open
+    // to Staff (view) and to the "Leave approvals" function alike.
+    void fetch(`/api/staff/leave-book?ay=${encodeURIComponent(ay)}`, { cache: "no-store" })
+      .then((r) => r.json() as Promise<{ ok?: boolean; policy?: boolean }>)
+      .then((j) => live && setPolicyState(j.ok ? (j.policy ? "policy" : "none") : "unknown"))
+      .catch(() => live && setPolicyState("unknown"));
+    return () => {
+      live = false;
+    };
+  }, [ay, isManager]);
+  const legacyLeaveNote =
+    policyState === "policy"
+      ? `${ay} has a leave policy — allot days and carry leave forward in Staff → Leave rules.`
+      : policyState === "unknown"
+        ? "Checking whether this year has a leave policy (Staff → Leave rules)…"
+        : null;
+
   useEffect(() => {
     if (!isManager && selfStaff) {
       setStaffId(selfStaff.id);
@@ -407,9 +433,53 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     flash(halfDay ? "Converted to half-day leave" : "Converted to full-day leave");
   }
 
+  /**
+   * Approving goes to the server, which applies the year's leave rules
+   * (Staff → Leave rules): balance with sandwich days, the half-day rule,
+   * and — when the type says so — files an over-balance part as LWP after
+   * asking. Then the desk is re-read so this screen shows what was saved.
+   */
+  async function approveOnServer(requestId: string) {
+    const before = hr?.leaveRequests.find((r) => r.id === requestId);
+    const send = (confirmLwp: boolean) =>
+      fetch("/api/staff/leave-decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: requestId, approve: true, confirmLwp }),
+      })
+        .then(async (r) => ({ status: r.status, body: (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; needsConfirm?: boolean; status?: string; notice?: string | null } }))
+        .catch(() => null);
+    let res = await send(false);
+    if (res && res.status === 409 && res.body.needsConfirm) {
+      if (!window.confirm(`${res.body.error || "The leave balance is short."}\n\nApprove like this?`)) return;
+      res = await send(true);
+    }
+    if (!res) {
+      flash("Could not reach the server — nothing was decided", true);
+      return;
+    }
+    if (!res.body.ok) {
+      flash(res.body.error || "Could not approve", true);
+      return;
+    }
+    const { resetStaffHrPersistenceCache, ensureStaffHrHydrated } = await import("@/lib/staffHrPersistence");
+    resetStaffHrPersistenceCache();
+    await ensureStaffHrHydrated();
+    reload();
+    if (before?.status === "pending" && res.body.status === "pending_l2") {
+      flash("Level 1 approved — awaiting Level 2");
+    } else {
+      flash(res.body.notice ? `Leave approved — ${res.body.notice}` : "Leave approved");
+    }
+  }
+
   function onDecide(requestId: string, decision: "approved" | "rejected") {
     if (!isManager) {
       flash("Only principal / admin can manage leave", true);
+      return;
+    }
+    if (decision === "approved") {
+      void approveOnServer(requestId);
       return;
     }
     const before = hr?.leaveRequests.find((r) => r.id === requestId);
@@ -698,7 +768,10 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
         </div>
       ) : null}
 
-      {tab === "allot" && isManager ? (
+      {tab === "allot" && isManager && legacyLeaveNote ? (
+        <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--brand-deep)]">{legacyLeaveNote}</p>
+      ) : null}
+      {tab === "allot" && isManager && policyState === "none" ? (
         <LeaveAllotmentPanel
           ay={ay}
           hr={hr}
@@ -769,9 +842,11 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
           </h2>
           {isManager ? (
             <div className="flex flex-wrap gap-2">
+              {legacyLeaveNote ? <span className="self-center text-xs text-[var(--muted)]">{legacyLeaveNote}</span> : null}
               <button
                 type="button"
-                className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                disabled={policyState !== "none"}
                 onClick={() => {
                   const years = listSessionYearOptions(masters ?? undefined);
                   const idx = years.findIndex((y) => y.code === ay);

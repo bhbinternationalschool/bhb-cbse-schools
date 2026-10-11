@@ -57,6 +57,17 @@ export async function POST(request: Request) {
       throw new ApiError("bad_request", "Reason is too long (500 characters)", 400);
     }
 
+    if (halfDay) {
+      // The year's leave rules may not allow this type as a half day. A
+      // failed policy read does not refuse here — approving checks again.
+      const { readLeavePolicy } = await import("@/lib/staffLeaveRules.server");
+      const pol = await readLeavePolicy(ctx.session.academicYearCode);
+      const pt = pol.ok ? pol.value?.types.find((t) => t.typeCode === typeCode) : undefined;
+      if (pt && !pt.halfDayAllowed) {
+        throw new ApiError("bad_request", `${typeCode} cannot be taken as a half day`, 400);
+      }
+    }
+
     await loadStaffHrServer();
     const result = applyLeave({
       academicYearCode: ctx.session.academicYearCode,
@@ -86,7 +97,9 @@ export async function POST(request: Request) {
     });
 
     if (result.request.status === "pending") {
-      const approvers = leadershipStaffIds(ctx.masters).filter((id) => id !== staffId);
+      const { approversToNotify } = await import("@/lib/staffLeaveRules.server");
+      const named = await approversToNotify(ctx.masters, staffId);
+      const approvers = [...new Set([...leadershipStaffIds(ctx.masters), ...named])].filter((id) => id !== staffId);
       await sendPushToSubjects("staff", approvers, {
         title: `Leave request · ${ctx.session.fullName}`,
         body: `${typeCode} ${fromDate}${toDate !== fromDate ? ` to ${toDate}` : ""} · ${reason.slice(0, 80)}`,

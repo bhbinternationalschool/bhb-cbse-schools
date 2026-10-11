@@ -5,6 +5,7 @@ import {
   balancesFor,
   leaveRequestJson,
   loadStaffHrServer,
+  withPolicyBalances,
 } from "@/lib/api/v1/staffLeave";
 import { normalizeLeaveSettings } from "@/lib/staffHr";
 
@@ -26,7 +27,9 @@ export async function GET(request: Request) {
     }
     const ay = staffWorkingYear(ctx);
     const state = await loadStaffHrServer();
-    const { state: withBalances, balances } = balancesFor(state, staffId, ay);
+    const { state: withBalances, balances: deskBalances } = balancesFor(state, staffId, ay);
+    // The year's leave rules, when it has them (same fields, policy numbers).
+    const balances = await withPolicyBalances(ctx, withBalances, ay, deskBalances, staffId);
     const settings = normalizeLeaveSettings(state.leaveSettings);
 
     const requests = withBalances.leaveRequests

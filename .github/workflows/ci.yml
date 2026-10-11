@@ -418,6 +418,7 @@ jobs:
           npm run test:holiday-calendar-view
           npm run test:student-working-days
           npm run test:leave-allotment
+          npm run test:staff-leave-rules
           npm run test:class-group-message
           npm run test:comms-reach
           npm run test:udise-school-profile
