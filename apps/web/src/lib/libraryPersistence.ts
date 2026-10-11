@@ -58,7 +58,7 @@ export const ensureLibraryHydrated = async () => {
     return blobChanged;
   }
   markDeskHydrated(MODULE);
-  if (changed && (bundle.titles.length > 0 || bundle.procurementDocs.length > 0 || readFromDb)) {
+  if (changed && (bundle.titles.length > 0 || bundle.procurementDocs.length > 0 || (bundle.ebooks?.length ?? 0) > 0 || readFromDb)) {
     writeLibraryLocalRaw(
       mergeDbDeskIntoLibraryState(loadLibrary(), bundle, { preferDb: readFromDb }),
     );

@@ -51,6 +51,8 @@ export type LibraryDeskBundle = {
   issues: LibraryIssue[];
   procurementDocs: LibraryProcurementDoc[];
   settings: LibraryState["settings"];
+  /** The e-book shelves (server store lib/libraryEbooks.server); added by the desk route. */
+  ebooks?: LibraryState["ebooks"];
 };
 
 const META_SELECT =

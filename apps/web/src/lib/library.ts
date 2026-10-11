@@ -433,6 +433,38 @@ export const EBOOK_SHELF_SEED: string[] = [
   "https://fliphtml5.com/bookcase/gqxrr/",
 ];
 
+const C1_5 = ["Class 1", "Class 2", "Class 3", "Class 4", "Class 5"];
+const C1_8 = [...C1_5, "Class 6", "Class 7", "Class 8"];
+
+/**
+ * What each Propel shelf is — read from each bookcase's own page title on
+ * 12 Oct 2026 (all 20 open; the shelves themselves stay behind their
+ * passwords). Fills a shelf's title, subject and classes only where the
+ * office has not set them.
+ */
+export const EBOOK_SHELF_CATALOGUE: Record<string, { title: string; subject: string; classLabels: string[] }> = {
+  acdlv: { title: "Propel Edition A — Nursery", subject: "All subjects", classLabels: ["Nursery"] },
+  hpgcz: { title: "Propel Edition A — LKG", subject: "All subjects", classLabels: ["LKG"] },
+  oixkm: { title: "Propel Edition A — UKG", subject: "All subjects", classLabels: ["UKG"] },
+  jsmnm: { title: "Propel LKG", subject: "All subjects", classLabels: ["LKG"] },
+  fltsh: { title: "Propel UKG", subject: "All subjects", classLabels: ["UKG"] },
+  luqrl: { title: "Pearson Tip-Tap-Toe — Nursery", subject: "Rhymes and stories", classLabels: ["Nursery"] },
+  bilbd: { title: "Pearson Tip-Tap-Toe — LKG", subject: "Rhymes and stories", classLabels: ["LKG"] },
+  cbgnn: { title: "Pearson Tip-Tap-Toe — UKG", subject: "Rhymes and stories", classLabels: ["UKG"] },
+  pdelb: { title: "Propel Edition A — Class 1", subject: "All subjects", classLabels: ["Class 1"] },
+  fjhwd: { title: "Propel Edition A — Class 2", subject: "All subjects", classLabels: ["Class 2"] },
+  hvtxz: { title: "Propel Edition A — Class 3", subject: "All subjects", classLabels: ["Class 3"] },
+  pocjg: { title: "Propel Edition A — Class 4", subject: "All subjects", classLabels: ["Class 4"] },
+  fmgmo: { title: "Propel Edition A — Class 5", subject: "All subjects", classLabels: ["Class 5"] },
+  ooiny: { title: "Propel New Prime — Class 6", subject: "All subjects", classLabels: ["Class 6"] },
+  npwtl: { title: "Propel New Prime — Class 7", subject: "All subjects", classLabels: ["Class 7"] },
+  qtffd: { title: "Propel New Prime — Class 8", subject: "All subjects", classLabels: ["Class 8"] },
+  vrsvv: { title: "Propel Hindi Navdhara", subject: "Hindi", classLabels: C1_5 },
+  feocx: { title: "Lead Know & Grow", subject: "General knowledge", classLabels: C1_8 },
+  fxwtz: { title: "New Longman Vistas", subject: "Social science", classLabels: C1_5 },
+  gqxrr: { title: "Pearson Click Code Connect", subject: "Computer", classLabels: C1_8 },
+};
+
 /** The bookcase code from a FlipHTML5 shelf URL — the stable identity behind
  *  an opaque link, used so re-importing does not duplicate a shelf. */
 export function bookcaseCode(url: string): string {
@@ -456,10 +488,13 @@ export function mergeEbookShelfSeed(
     const code = bookcaseCode(url);
     if (!code || have.has(code)) continue;
     have.add(code);
+    const known = EBOOK_SHELF_CATALOGUE[code];
     additions.push(
       normalizeEbook({
         id: `eb_${code}`,
-        title: "",
+        title: known?.title ?? "",
+        subject: known?.subject ?? "",
+        classLabels: known?.classLabels ?? [],
         url,
         keyKind: "shelf",
         addedOn,
@@ -467,7 +502,18 @@ export function mergeEbookShelfSeed(
       }),
     );
   }
-  return { ebooks: [...existing, ...additions], added: additions.length };
+  // Shelves already catalogued keep what the office set; only blanks are filled.
+  const filled = existing.map((e) => {
+    const known = EBOOK_SHELF_CATALOGUE[bookcaseCode(e.url)];
+    if (!known) return e;
+    return normalizeEbook({
+      ...e,
+      title: e.title || known.title,
+      subject: e.subject || known.subject,
+      classLabels: e.classLabels.length ? e.classLabels : known.classLabels,
+    });
+  });
+  return { ebooks: [...filled, ...additions], added: additions.length };
 }
 
 export function normalizeEbook(e: Partial<LibraryEbook>): LibraryEbook {

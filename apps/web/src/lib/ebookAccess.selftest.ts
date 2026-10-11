@@ -17,7 +17,7 @@
 import assert from "node:assert/strict";
 
 import { ebookAccess, keyForBook } from "./ebookAccess.server";
-import {
+import { EBOOK_SHELF_CATALOGUE,
   bookcaseCode,
   EBOOK_SHELF_SEED,
   mergeEbookShelfSeed,
@@ -166,8 +166,12 @@ assert.equal(bookcaseCode("not a url"), "", "junk yields no code, not a guess");
 const first = mergeEbookShelfSeed([]);
 assert.equal(first.added, 20);
 assert.equal(first.ebooks.length, 20);
-// Seeded shelves carry NO title — the office names them; nothing is invented.
-assert.ok(first.ebooks.every((e) => e.title === ""), "no title is fabricated");
+// A seeded shelf's title is only ever its verified catalogue entry — read
+// from that bookcase's own page title (12 Oct 2026) — never anything invented.
+assert.ok(
+  first.ebooks.every((e) => e.title === (EBOOK_SHELF_CATALOGUE[bookcaseCode(e.url)]?.title ?? "")),
+  "no title is fabricated",
+);
 assert.ok(first.ebooks.every((e) => e.keyKind === "shelf"));
 assert.ok(first.ebooks.every((e) => e.isActive));
 

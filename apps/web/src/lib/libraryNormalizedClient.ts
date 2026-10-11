@@ -12,6 +12,7 @@ import {
 import { confirmDeskDeletes, pendingDeskDeletes, recordDeskDeletion } from "@/lib/deskNamedDeletes";
 import { afterStampedDeskSave, captureDeskStamps, stampedDeskBody } from "@/lib/deskStampsClient";
 import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+import { rowFingerprint } from "@/lib/sliceRevClient";
 
 const LIBRARY_DESK = "library";
 
@@ -79,6 +80,12 @@ export function scheduleLibraryDeskSync(state: LibraryState) {
 
 const LIBRARY_SLICES = ["titles", "copies", "issues", "procurementDocs"] as const;
 
+/**
+ * The e-book shelves as last loaded or saved (fingerprint): they are sent
+ * only when the office changed them, and the server merges them by id.
+ */
+let ebooksBase: number | null = null;
+
 async function pushLibraryDeskApi(state: LibraryState) {
   const sentDeletes = pendingDeskDeletes(LIBRARY_DESK);
   const holder = {
@@ -90,7 +97,10 @@ async function pushLibraryDeskApi(state: LibraryState) {
   } as Record<string, unknown>;
   // Only the rows this browser changed, each with the stamp it loaded.
   const sent = stampedDeskBody("library", holder, LIBRARY_SLICES);
-  if (!sent.anything && !Object.values(sentDeletes).some((ids) => ids?.length)) return;
+  const ebooksHash = rowFingerprint(state.ebooks ?? []);
+  const ebooksChanged = (state.ebooks ?? []).length > 0 && ebooksHash !== ebooksBase;
+  if (ebooksChanged) sent.body.ebooks = state.ebooks;
+  if (!sent.anything && !ebooksChanged && !Object.values(sentDeletes).some((ids) => ids?.length)) return;
   try {
     const res = await fetch("/api/school-data/library-desk", {
       method: "POST",
@@ -128,6 +138,7 @@ async function pushLibraryDeskApi(state: LibraryState) {
         titleCount: body.titleCount ?? state.titles.length,
       });
       afterStampedDeskSave("library", holder, LIBRARY_SLICES, sent, body);
+      if (ebooksChanged) ebooksBase = ebooksHash;
     }
     // Record whether this actually landed. A not-ok response is not
     // thrown, so without this it slips past every branch in silence.
@@ -164,6 +175,7 @@ export async function reloadLibraryDeskFromApi() {
   if (!remote) return null;
   writeMeta({ updatedAt: remote.updatedAt, titleCount: remote.titleCount });
   captureDeskStamps("library", remote.bundle as Record<string, unknown>, LIBRARY_SLICES, remote.stamps, remote.settingsStamp);
+  if (Array.isArray(remote.bundle.ebooks)) ebooksBase = rowFingerprint(remote.bundle.ebooks);
   return remote.bundle;
 }
 
@@ -184,6 +196,7 @@ export async function fetchLibraryDeskFromApi() {
       issues?: LibraryState["issues"];
       procurementDocs?: LibraryState["procurementDocs"];
       settings?: LibraryState["settings"];
+      ebooks?: LibraryState["ebooks"];
       updatedAt?: string;
       titleCount?: number;
       stamps?: RowStamps;
@@ -202,6 +215,8 @@ export async function fetchLibraryDeskFromApi() {
           loanDays: 14,
           finePaisePerDay: 500,
         },
+        // Absent = the server could not read them: keep what this page has.
+        ...(Array.isArray(body.ebooks) ? { ebooks: body.ebooks } : {}),
       },
       updatedAt: body.updatedAt || "",
       titleCount: body.titleCount ?? body.titles.length,
@@ -227,6 +242,7 @@ export async function hydrateLibraryDeskFromDb(preferDb?: boolean) {
         loanDays: 14,
         finePaisePerDay: 500,
       },
+      ebooks: undefined as LibraryState["ebooks"] | undefined,
     },
     changed: false,
     ok: false,

@@ -1,6 +1,6 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
-import { fetchServerBlob } from "@/lib/serverBlob";
+import { readLibraryEbooks } from "@/lib/libraryEbooks.server";
 import { ebookAccess, keyForBook } from "@/lib/ebookAccess.server";
 import {
   bookcaseCode,
@@ -43,11 +43,12 @@ export async function GET(request: Request) {
       });
     }
 
-    // The catalogue lives on the library blob (library_state). This used to
-    // read a "library" desk slice — a module that was never registered, so
-    // the shelf came back empty no matter what the office catalogued.
-    const remote = await fetchServerBlob<LibraryState>("library_state");
-    const raw = Array.isArray(remote.state?.ebooks) ? remote.state.ebooks : [];
+    // The shelves' own server store (12 Oct 2026). The library blob this
+    // used to read had held no e-books since 5 Aug — the desk save never
+    // wrote them — so parents saw an empty shelf.
+    const stored = await readLibraryEbooks();
+    if (!stored) throw new ApiError("server_error", "Could not read the e-book shelves — try again", 503);
+    const raw = stored;
     const books = (raw as Partial<LibraryEbook>[])
       .map(normalizeEbook)
       .filter((b) => b.isActive)
