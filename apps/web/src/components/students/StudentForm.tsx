@@ -79,6 +79,11 @@ import {
 } from "@/lib/mapsPlaces";
 import { householdHasGeo } from "@/lib/mapsGeocode";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
+import {
+  CustomFieldsSection,
+  type CustomFieldsHandle,
+} from "@/components/custom-fields/CustomFieldsSection";
+import { studentAliasIds } from "@/lib/customFields";
 
 function householdPlaceGeoFromRecord(
   hh: Household,
@@ -96,7 +101,7 @@ function householdPlaceGeoFromRecord(
   };
 }
 
-type Tab = "basic" | "subjects" | "identity" | "family" | "ids" | "docs";
+type Tab = "basic" | "subjects" | "identity" | "family" | "ids" | "docs" | "more";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "basic", label: "Basic" },
@@ -105,6 +110,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "family", label: "Family" },
   { id: "ids", label: "IDs" },
   { id: "docs", label: "Documents" },
+  { id: "more", label: "More details" },
 ];
 
 /** Extended profile fields (string except isCwsn) grouped to keep state tidy. */
@@ -337,6 +343,7 @@ export function StudentForm({
         return;
       }
       const s = normalizeStudent(raw);
+      setCustomAliasIds(studentAliasIds(sis.students, s));
       setAcademicYearCode(s.academicYearCode || session.academicYearCode);
       const hh = householdOf(sis, s.householdId);
       setAdmissionNo(s.admissionNo);
@@ -590,6 +597,12 @@ export function StudentForm({
   }
 
   const dirtyRef = useRef(false);
+  /**
+   * "More details" (Masters → Custom fields). Saved on their own through
+   * /api/custom-fields/values after the record — never inside it.
+   */
+  const customFieldsRef = useRef<CustomFieldsHandle>(null);
+  const [customAliasIds, setCustomAliasIds] = useState<string[]>([]);
 
   const [liveDuplicate, setLiveDuplicate] = useState<{
     reasons: string[];
@@ -693,6 +706,14 @@ export function StudentForm({
       flash("Basic: name, admission no, class and section are required");
       setTab("basic");
       return;
+    }
+    {
+      const problems = customFieldsRef.current?.validate(mode === "create") ?? [];
+      if (problems.length) {
+        pushToast({ kind: "error", message: `More details: ${problems.join("; ")}`, durationMs: 9000 });
+        setTab("more");
+        return;
+      }
     }
     // Everything below is ADVISORY. It used to block the save: after the
     // UDISE+ import filled PENs, an unrelated address edit was refused until
@@ -1085,11 +1106,26 @@ export function StudentForm({
 
     bumpStudentSeriesUses(payload, academicYearCode);
 
-    if (mode === "edit" && studentId) {
-      router.push("/students");
+    const leave = () => {
+      if (mode === "edit" && studentId) router.push("/students");
+      else router.push(`/students/${payload.id}/edit`);
+    };
+    const custom = customFieldsRef.current;
+    if (custom?.isDirty()) {
+      // The record is saved; the extra fields go on their own. On a failed
+      // edit the page stays so nothing typed is lost. A new record always
+      // moves on to its edit page — staying would invite a second "Save"
+      // that admits the child twice.
+      void custom.saveFor(payload.id).then((r) => {
+        if (r.message) {
+          pushToast({ kind: r.ok ? "success" : "error", message: r.message, durationMs: r.ok ? 3000 : 12000 });
+        }
+        if (r.ok || mode === "create") leave();
+        else setTab("more");
+      });
       return;
     }
-    router.push(`/students/${payload.id}/edit`);
+    leave();
   }
 
   if (missing) {
@@ -1172,6 +1208,7 @@ export function StudentForm({
           { id: "family", label: "Family", tone: "violet" },
           { id: "ids", label: "IDs", tone: "amber" },
           { id: "docs", label: "Documents", tone: "green" },
+          { id: "more", label: "More details", tone: "rose" },
         ]}
       />
 
@@ -2599,6 +2636,19 @@ export function StudentForm({
           </div>
         ) : null}
 
+        {/* Mounted on every tab (hidden off its own) so what is typed here
+            survives moving between tabs until Save. */}
+        <div hidden={tab !== "more"}>
+          <CustomFieldsSection
+            ref={customFieldsRef}
+            entity="student"
+            mode={mode}
+            entityId={mode === "edit" ? (studentId ?? null) : null}
+            aliasIds={customAliasIds}
+            readOnly={readOnly}
+          />
+        </div>
+
         <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[rgba(32,48,80,0.08)] pt-4">
           <Link
             href="/students"
@@ -2619,7 +2669,7 @@ export function StudentForm({
                 Previous
               </button>
             ) : null}
-            {tab !== "docs" ? (
+            {tab !== "more" ? (
               <button
                 type="button"
                 className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"

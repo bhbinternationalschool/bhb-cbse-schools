@@ -126,6 +126,7 @@ SELFTESTS=(
   test:fee-store-discount
   test:masters-subject-guard
   test:subject-requests
+  test:custom-fields
   test:udise-nudge
   test:apaar-consent
   test:aadhaar-certificate

@@ -1,7 +1,7 @@
 "use client";
 
 import { schoolCrestUrl, schoolPrintName } from "@/lib/schoolIdentity";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { IfscCheck } from "@/components/ui/open-lookup-fields";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -29,6 +29,11 @@ import { StaffDutiesPanel } from "@/components/staff/StaffDutiesPanel";
 import { StaffAgreementPanel } from "@/components/staff/StaffAgreementPanel";
 import { StaffMessageTimelinePanel } from "@/components/staff/StaffMessageTimelinePanel";
 import { RemoveControl } from "@/components/masters/RemoveControl";
+import { pushToast } from "@/components/shell/Toast";
+import {
+  CustomFieldsSection,
+  type CustomFieldsHandle,
+} from "@/components/custom-fields/CustomFieldsSection";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
   checkStaffRemoval,
@@ -65,6 +70,7 @@ type Tab =
   | "login"
   | "bank"
   | "statutory"
+  | "more"
   | "idcard";
 
 const TABS: {
@@ -90,6 +96,7 @@ const TABS: {
   { id: "login", label: "Login", tone: "slate" },
   { id: "bank", label: "Bank", tone: "green" },
   { id: "statutory", label: "PF & ESIC", tone: "amber" },
+  { id: "more", label: "More details", tone: "teal" },
   { id: "idcard", label: "ID / QR", tone: "rose" },
 ];
 
@@ -107,6 +114,11 @@ export function StaffProfileForm(props: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [sameAddress, setSameAddress] = useState(false);
+  /**
+   * "More details" (Masters → Custom fields). Saved on their own through
+   * /api/custom-fields/values after the profile — never inside it.
+   */
+  const customFieldsRef = useRef<CustomFieldsHandle>(null);
 
   useEffect(() => {
     const m = loadMasters();
@@ -204,6 +216,12 @@ export function StaffProfileForm(props: Props) {
       setTab("basic");
       return;
     }
+    const customProblems = customFieldsRef.current?.validate(props.mode === "create") ?? [];
+    if (customProblems.length) {
+      setError(`More details: ${customProblems.join("; ")}`);
+      setTab("more");
+      return;
+    }
 
     const row = normalizeStaffRecord({
       ...draft,
@@ -234,10 +252,27 @@ export function StaffProfileForm(props: Props) {
     setError(null);
     setNotice(props.mode === "create" ? "Staff created" : "Staff updated");
     window.setTimeout(() => setNotice(null), 2000);
-    if (props.mode === "create") {
-      router.push(`/staff/${row.id}/edit`);
-      router.refresh();
+    const leave = () => {
+      if (props.mode === "create") {
+        router.push(`/staff/${row.id}/edit`);
+        router.refresh();
+      }
+    };
+    const custom = customFieldsRef.current;
+    if (custom?.isDirty()) {
+      // The profile is saved; the extra fields go on their own. A new
+      // profile always moves on to its edit page (staying would invite a
+      // second create); a failure is named in a toast.
+      void custom.saveFor(row.id).then((r) => {
+        if (r.message) {
+          pushToast({ kind: r.ok ? "success" : "error", message: r.message, durationMs: r.ok ? 3000 : 12000 });
+        }
+        if (!r.ok && props.mode === "edit") setTab("more");
+        leave();
+      });
+      return;
     }
+    leave();
   }
 
   function setActiveStatus(status: "active" | "inactive") {
@@ -1193,6 +1228,17 @@ export function StaffProfileForm(props: Props) {
             </label>
           </div>
         ) : null}
+
+        {/* Mounted on every tab (hidden off its own) so what is typed here
+            survives moving between tabs until Save. */}
+        <div hidden={tab !== "more"}>
+          <CustomFieldsSection
+            ref={customFieldsRef}
+            entity="staff"
+            mode={props.mode}
+            entityId={draft.id}
+          />
+        </div>
 
         {tab === "idcard" ? (
           <div className="space-y-4">

@@ -171,6 +171,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:subject-masters
 
+      - name: Self-test — custom fields — day-first dates, typed values, no blanking by import
+        working-directory: apps/web
+        run: npm run test:custom-fields
+
       - name: Self-test — UPI pay link and success-screenshot reading
         working-directory: apps/web
         run: npm run test:upi-pay

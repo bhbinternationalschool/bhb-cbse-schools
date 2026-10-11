@@ -853,6 +853,28 @@ export const PAGE_GUIDES_D: ErpAiPageGuideDef[] = [
     ],
   },
   {
+    id: "masters-custom-fields",
+    paths: ["/masters"],
+    tab: "custom-fields",
+    pageLabel: "Masters · Custom fields",
+    title: "Add your own fields to student and staff records",
+    module: "masters",
+    chipLabel: "How Custom fields works",
+    steps: [
+      "Pick **Students** or **Staff**, then click **+ Add field**.",
+      "Give it a name (Hindi name optional), choose the type — Text, Number, Date, Single choice or Yes / No — and for Single choice type one choice per line.",
+      "Tick **Required when adding a new student** if the office must fill it at admission.",
+      "The field then shows on every student (or staff) edit page under **More details**. Dates are typed DD/MM/YYYY.",
+      "To add it to the register export, tick **+ More details** beside **Export data**. In the student import, a column with the field's name fills it.",
+      "Use **…** → **Switch off** to hide a field. Its saved values are kept; only a field nobody has filled can be deleted.",
+    ],
+    stuckTips: [
+      'If you see "already uses that name", another field (or its Hindi name) has it — the import matches columns by name, so names must be unique.',
+      'If "the type cannot change" appears, records already hold values. Add a new field instead.',
+      'If "Someone changed this field since you opened it" appears, the list was edited on another screen — it has been reloaded; make your change again.',
+    ],
+  },
+  {
     id: "masters-academic",
     paths: ["/masters"],
     tab: "academic",

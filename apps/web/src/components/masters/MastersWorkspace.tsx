@@ -35,6 +35,7 @@ import {
   classesInGroup,
   classGroupCodeForName,
 } from "@/lib/masters";
+import { CustomFieldsPanel } from "@/components/masters/CustomFieldsPanel";
 import { TutorPassesPanel } from "@/components/masters/TutorPassesPanel";
 import { EditControl } from "@/components/masters/EditControl";
 import { RemoveControl } from "@/components/masters/RemoveControl";
@@ -109,7 +110,8 @@ type Tab =
   | "wa-templates"
   | "automation"
   | "wa-chatbot"
-  | "brand";
+  | "brand"
+  | "custom-fields";
 
 const TAB_GROUPS: ModuleTabGroup[] = [
   {
@@ -131,6 +133,7 @@ const TAB_GROUPS: ModuleTabGroup[] = [
       { id: "leave", label: "Leave setup", tone: "coral" },
       { id: "salary", label: "Salary setup", tone: "green" },
       { id: "series", label: "Numbering", tone: "slate" },
+      { id: "custom-fields", label: "Custom fields", tone: "violet" },
     ],
   },
   {
@@ -243,6 +246,7 @@ export function MastersWorkspace() {
       "automation",
       "wa-chatbot",
       "brand",
+      "custom-fields",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as Tab);
   }, []);
@@ -379,6 +383,11 @@ export function MastersWorkspace() {
             />
             <SubjectsPanel state={state} commit={commit} />
           </div>
+        ) : null}
+        {tab === "custom-fields" ? (
+          <CustomFieldsPanel
+            canEdit={!readOnly && canAccessMastersTab(session, state, "custom-fields", rbac ?? undefined, "edit")}
+          />
         ) : null}
         {tab === "series" ? (
           <NumberSeriesPanel state={state} commit={commit} />

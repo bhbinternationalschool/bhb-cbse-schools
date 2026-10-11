@@ -1918,3 +1918,54 @@ export async function workbookToStudentImportCsv(
   }
   return { csv, detectedSession };
 }
+
+/**
+ * A header the built-in import already reads (register columns and the old
+ * ERP's aliases). Custom fields never take one of these, and Masters will
+ * not let a custom field be named like one.
+ */
+export function isBuiltInStudentImportHeader(header: string): boolean {
+  return Boolean(HEADER_TO_KEY[normalizeHeader(header)]);
+}
+
+/**
+ * The header row and the raw cells of every line below it, numbered like
+ * rowsToFieldMaps' `lineNo` so the two can be joined. For the optional
+ * custom-field ("more details") columns, which the built-in import ignores.
+ */
+export function studentImportRawGrid(text: string): {
+  headers: string[];
+  lines: { lineNo: number; cells: string[] }[];
+} | null {
+  const grid = parseCsvText(text);
+  const hi = findHeaderIndex(grid);
+  if (hi < 0) return null;
+  const lines: { lineNo: number; cells: string[] }[] = [];
+  for (let i = hi + 1; i < grid.length; i++) lines.push({ lineNo: i + 1, cells: grid[i]!.map((c) => String(c ?? "")) });
+  return { headers: grid[hi]!.map((h) => String(h ?? "")), lines };
+}
+
+/**
+ * Per imported line: the admission number, name and the session the import
+ * writes it into (same placement rule as the import itself). Lines the
+ * session filter skips are left out.
+ */
+export function studentImportLineTargets(
+  text: string,
+  options: StudentImportOptions,
+): Map<number, { admissionNo: string; fullName: string; session: string }> {
+  const out = new Map<number, { admissionNo: string; fullName: string; session: string }>();
+  const filterAy = options.sourceSessionFilter ? normalizeSessionCode(options.sourceSessionFilter) : "";
+  for (const r of rowsToFieldMaps(text).rows) {
+    const f = r.fields;
+    const csvSession = (f.academicYear ?? "").trim();
+    const csvAy = csvSession ? normalizeSessionCode(csvSession) : "";
+    if (filterAy && csvAy && csvAy !== filterAy) continue;
+    out.set(r.lineNo, {
+      admissionNo: (f.admissionNo ?? "").trim(),
+      fullName: (f.fullName ?? "").trim(),
+      session: applyPlacementSession(csvAy || csvSession, options),
+    });
+  }
+  return out;
+}
