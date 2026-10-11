@@ -576,17 +576,21 @@ export async function ingestFleetEdgeTelemetry(
         const ctx = await getServerTenantContext();
         if (!ctx) return;
         const { sb, tenantId } = ctx;
-        const { count, error } = await sb
+        // Existence, not a count: one indexed row answers "seen before?".
+        // Raw pushes are pruned after 90 days, so a tracker silent that long
+        // is announced again when it returns.
+        const { data, error } = await sb
           .from("fleet_edge_events")
-          .select("id", { count: "exact", head: true })
+          .select("id")
           .eq("tenant_id", tenantId)
+          .eq("vehicle_ref", vehicleRef)
           .eq("event_type", "telemetry")
-          .eq("vehicle_ref", vehicleRef);
+          .limit(1);
         if (error) {
           console.warn("[fleetEdge] first-seen check failed", error.message);
           return;
         }
-        if ((count ?? 0) === 0) void trackServerWork(notifyFleetEdgeFirstSeen(vehicleRef));
+        if (!data?.length) void trackServerWork(notifyFleetEdgeFirstSeen(vehicleRef));
       } catch (e) {
         console.warn("[fleetEdge] first-seen check threw", e);
       }
