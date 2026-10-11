@@ -418,6 +418,7 @@
     "test:wa-real-chats-oct": "npx tsx src/lib/waRealChatsOct.selftest.ts",
     "test:class-channel-apply": "npx tsx src/lib/waClassChannelApply.selftest.ts",
     "test:dashboard-no-refetch-loop": "npx tsx src/lib/dashboardNoRefetchLoop.selftest.ts",
+    "test:short-promise-cache": "npx tsx src/lib/shortPromiseCache.selftest.ts",
     "test:library-fine": "npx tsx src/lib/libraryFine.selftest.ts",
     "test:outdoor-duty-staff-id": "npx tsx src/lib/outdoorDutyStaffId.selftest.ts",
     "test:outdoor-duty-persistence": "npx tsx src/lib/outdoorDutyPersistence.selftest.ts",
