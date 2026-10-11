@@ -11,15 +11,6 @@ import "package:package_info_plus/package_info_plus.dart";
 import "../api/api_client.dart";
 import "../i18n/locale_controller.dart";
 
-/// Runs in a separate isolate when a message arrives while the app is
-/// terminated/backgrounded. FCM already displays `notification` messages
-/// itself in that state, so there is nothing to render here — the handler
-/// only exists so the plugin has one registered.
-@pragma("vm:entry-point")
-Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
-}
-
 /// FCM push for the app. One instance per app; `init()` once at startup,
 /// `registerWithServer()` after every sign-in / session resume, and
 /// `unregister()` before sign-out.
@@ -83,7 +74,12 @@ class PushService {
       return;
     }
 
-    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    // No background handler on purpose. The server always sends a
+    // `notification` payload with its channel, so Android shows it itself
+    // while the app is closed. Registering even an empty handler made the
+    // plugin start its JobIntentService for every such push, and Android
+    // killing that service mid-start crashed the app with a
+    // SecurityException (Play vitals, 1.0.19–1.0.25; 11 Oct 2026).
 
     // Android channel + local-notification plugin (foreground display).
     const androidInit = AndroidInitializationSettings("@mipmap/ic_launcher");
