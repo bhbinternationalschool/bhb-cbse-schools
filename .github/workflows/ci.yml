@@ -554,6 +554,7 @@ jobs:
           npm run test:transport-shifts
           npm run test:transport-phone-empty-desk
           npm run test:transport-stop-links
+          npm run test:transport-boarding-log
           npm run test:transport-seats
           npm run test:boarding-suggest
           npm run test:defaulter-hold-policy
@@ -589,6 +590,7 @@ jobs:
           npm run test:erp-commands
           npm run test:wa-real-chats-oct
           npm run test:class-channel-apply
+          npm run test:dashboard-no-refetch-loop
           npm run test:library-fine
 
   build:

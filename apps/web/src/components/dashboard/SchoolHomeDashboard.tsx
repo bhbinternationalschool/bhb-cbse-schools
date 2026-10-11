@@ -83,11 +83,16 @@ export function SchoolHomeDashboard() {
     };
   }, []);
 
+  // The anomaly scan is server work of several seconds: once per visit and
+  // year, not on every tick — each desk landing (bhb-desk-hydrated) used to
+  // start another scan (11 Oct 2026).
+  const superAdmin = isSuperAdminSession(session);
+  const ayCode = session.academicYearCode;
   useEffect(() => {
-    if (!isSuperAdminSession(session)) return;
+    if (!superAdmin) return;
     let cancelled = false;
     fetch(
-      `/api/v1/owner/anomalies?academicYearCode=${encodeURIComponent(session.academicYearCode)}&_t=${Date.now()}`,
+      `/api/v1/owner/anomalies?academicYearCode=${encodeURIComponent(ayCode)}&_t=${Date.now()}`,
       { cache: "no-store", headers: { "Cache-Control": "no-cache" } },
     )
       .then((res) => res.json())
@@ -97,6 +102,14 @@ export function SchoolHomeDashboard() {
       .catch(() => {
         /* omit the anomaly signals on fetch failure, never fabricate zeros */
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [superAdmin, ayCode]);
+
+  useEffect(() => {
+    if (!isSuperAdminSession(session)) return;
+    let cancelled = false;
     try {
       const defaulters = listLiveDefaulters({
         academicYearCode: session.academicYearCode,
