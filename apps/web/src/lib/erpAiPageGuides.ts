@@ -255,6 +255,11 @@ function resolveOriginalGuide(p: string, tab: string | null): ErpAiPageGuide | n
   if (p === "/home" || p === "") return PAGE_GUIDES.find((g) => g.id === "home")!;
   if (p === "/fees/defaulters") return PAGE_GUIDES.find((g) => g.id === "fees-defaulters")!;
   if (p.startsWith("/fees")) return PAGE_GUIDES.find((g) => g.id === "fees")!;
+  // The bus register's own phone page: the tab guide, not the whole-desk one.
+  if (p === "/transport/register") {
+    const reg = MORE_PAGE_GUIDES.find((g) => g.id === "transport-register");
+    if (reg) return reg;
+  }
   if (p.startsWith("/transport") && tab === "planner") {
     return PAGE_GUIDES.find((g) => g.id === "transport-planner")!;
   }
