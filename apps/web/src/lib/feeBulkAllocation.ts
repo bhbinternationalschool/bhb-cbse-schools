@@ -243,3 +243,40 @@ export function sessionRowProblem(
   if (!stale) return null;
   return `${stale.fullName || stale.id} is ${stale.academicYearCode || "another session"}'s record, not ${sessionAy}'s — search again in this session`;
 }
+
+/**
+ * What a receipt post (feeTools.server postReceiptsTogether) must do after
+ * its desk push, decided from what it can see. Pure so the rules are pinned
+ * by the selftest:
+ *
+ *  - every receipt asked for is live in the desk → success; if the push still
+ *    reported a failure (the cheque register or the open-dues rebuild behind
+ *    the receipts), the push is retried once and a failed retry becomes a
+ *    WARNING the screen shows — never silent success;
+ *  - otherwise the server's in-memory copies are ALWAYS dropped (and the fee
+ *    state re-read from the database): a copy that did not land, or a race
+ *    loser's duplicate, left in memory would ride along on every later
+ *    whole-desk push from that instance and be refused by the unique index —
+ *    blocking the counter and pay-link settlement until a restart. A receipt
+ *    that DID land comes back on the next hydrate, because the database is
+ *    the truth.
+ */
+export type PostOutcome =
+  | { kind: "ok"; retryPush: boolean }
+  | { kind: "not_saved"; dropMemory: true }
+  | { kind: "uncertain"; dropMemory: true };
+
+export function decidePostOutcome(input: {
+  pushOk: boolean;
+  /** Every receipt asked for is live in fee_desk_vouchers (null = could not look). */
+  allLive: boolean | null;
+  /** None of the receipts this call made is in the desk (null = could not look). */
+  noneLanded: boolean | null;
+}): PostOutcome {
+  if (input.allLive === true) return { kind: "ok", retryPush: !input.pushOk };
+  if (input.noneLanded === true) return { kind: "not_saved", dropMemory: true };
+  return { kind: "uncertain", dropMemory: true };
+}
+
+export const ANCILLARY_WARNING =
+  "Receipt made, but the cheque register / open dues did not update. Press Refresh; if the cheque is missing from Fees → Cheques, reload Fee Take before collecting again.";

@@ -38,7 +38,7 @@ import {
   type VoucherTender,
 } from "@/lib/fees";
 import { pushFeesRemoteServer } from "@/lib/feesPersistence.server";
-import type { BulkDue } from "@/lib/feeBulkAllocation";
+import { ANCILLARY_WARNING, decidePostOutcome, type BulkDue } from "@/lib/feeBulkAllocation";
 import type { SisStudent } from "@/lib/sis";
 import { getServerTenantContext } from "@/lib/serverTenant";
 
@@ -190,7 +190,7 @@ export async function postReceiptsTogether(input: {
   collectionDate: string;
   backdatePolicy: FeeToolsContext["masters"]["feeBackdatePolicy"] | undefined;
   mayBackdate: boolean;
-}): Promise<PostedReceipt[]> {
+}): Promise<{ receipts: PostedReceipt[]; warning: string | null }> {
   const already = await receiptsByTransactionId(input.specs.map((s) => s.transactionId));
   if (!already) throw new ApiError("server_error", "Could not check for receipts already made — nothing was posted", 503);
   // Also the server's own working copy (a receipt made but not yet pushed).
@@ -269,26 +269,44 @@ export async function postReceiptsTogether(input: {
     });
   }
 
-  if (made.length === 0) return results;
+  if (made.length === 0) return { receipts: results, warning: null };
 
   const pushed = await pushFeesRemoteServer(loadFees());
-  const stored = await vouchersInDb(made.map((v) => v.id));
-  const missing = stored ? made.filter((v) => !stored.has(v.id)) : null;
-  if (!pushed.ok || !missing || missing.length > 0) {
-    // ANOTHER INSTANCE GOT THERE FIRST. fee_desk_vouchers_tool_txn_uq allows
-    // one live receipt per tool transaction id, so a racing post of the same
-    // batch / cheque is refused as a whole. If every receipt this call was
-    // asked for is now live in the desk, that is the answer: drop our copies
-    // from memory (so no later push carries a duplicate) and report them as
-    // already posted.
-    const now = await receiptsByTransactionId(input.specs.map((s) => s.transactionId));
-    if (now && input.specs.every((sp) => now.has(sp.transactionId))) {
-      const ours = new Set(made.map((v) => v.id));
-      const theirs = input.specs.map((sp) => now.get(sp.transactionId)!);
-      if (theirs.some((t) => !ours.has(t.id))) {
-        await forgetInMemory(new Set([...ours].filter((id) => !theirs.some((t) => t.id === id))));
+  const stored = pushed.ok ? await vouchersInDb(made.map((v) => v.id)) : null;
+  if (pushed.ok && stored && made.every((v) => stored.has(v.id))) {
+    return { receipts: results, warning: null };
+  }
+
+  // Something did not go cleanly. Ask the desk what is actually there, by the
+  // transaction ids this call was asked for (another instance may have won).
+  const now = await receiptsByTransactionId(input.specs.map((s) => s.transactionId));
+  const ours = new Set(made.map((v) => v.id));
+  const allLive = now ? input.specs.every((sp) => now.has(sp.transactionId)) : null;
+  const landed = await vouchersInDb([...ours]);
+  const outcome = decidePostOutcome({
+    pushOk: pushed.ok,
+    allLive,
+    noneLanded: landed ? [...ours].every((id) => !landed.has(id)) : null,
+  });
+
+  if (outcome.kind === "ok" && now) {
+    // Copies of ours that are NOT the live receipts (we lost a race): out of
+    // memory, so no later push carries a duplicate.
+    const liveIds = new Set(input.specs.map((sp) => now.get(sp.transactionId)!.id));
+    const losers = new Set([...ours].filter((id) => !liveIds.has(id)));
+    if (losers.size) await dropAndRehydrate(losers);
+    let warning: string | null = null;
+    if (outcome.retryPush) {
+      // The receipts are in; the cheque register / open-dues rebuild behind
+      // them failed. Once more, then say so.
+      const retry = await pushFeesRemoteServer(loadFees());
+      if (!retry.ok) {
+        console.error("[fee-tools] receipts saved but ancillary push failed twice", retry.error);
+        warning = ANCILLARY_WARNING;
       }
-      return input.specs.map((sp) => {
+    }
+    return {
+      receipts: input.specs.map((sp) => {
         const t = now.get(sp.transactionId)!;
         return {
           voucherId: t.id,
@@ -298,31 +316,37 @@ export async function postReceiptsTogether(input: {
           transactionId: sp.transactionId,
           duplicate: !ours.has(t.id),
         };
-      });
-    }
-    // The write is one transaction, so either all landed or none did. If the
-    // read-back could not even look, keep the copies: a later push may still
-    // carry them, and their transaction ids stop a retry making second ones.
-    if (missing && missing.length === made.length) {
-      await forgetInMemory(new Set(made.map((v) => v.id)));
-      throw new ApiError(
-        "server_error",
-        `The receipts could not be saved — nothing was posted. ${pushed.error ?? ""}`.trim(),
-        503,
-      );
-    }
-    console.error("[fee-tools] receipt push uncertain", {
-      pushOk: pushed.ok,
-      error: pushed.error,
-      missing: missing?.map((v) => v.receiptNo) ?? "unknown",
-    });
+      }),
+      warning,
+    };
+  }
+
+  // Not confirmed: never leave these copies in this instance's memory.
+  await dropAndRehydrate(ours);
+  if (outcome.kind === "not_saved") {
     throw new ApiError(
       "server_error",
-      "The receipts were made but could not be confirmed as saved — check Fees → Receipts before collecting again",
+      `The receipts could not be saved — nothing was posted. ${pushed.error ?? ""}`.trim(),
       503,
     );
   }
-  return results;
+  console.error("[fee-tools] receipt push uncertain", { pushOk: pushed.ok, error: pushed.error });
+  throw new ApiError(
+    "server_error",
+    "The receipts may or may not have been saved — check Fees → Receipts before trying again (a retry will not make a second receipt)",
+    503,
+  );
+}
+
+/** Forget these vouchers in this instance's memory, then re-read the fee desk from the database. */
+async function dropAndRehydrate(ids: Set<string>): Promise<void> {
+  await forgetInMemory(ids);
+  try {
+    const { ensureFeesHydratedServer } = await import("@/lib/feesPersistence.server");
+    await ensureFeesHydratedServer();
+  } catch (e) {
+    console.warn("[fee-tools] fee desk re-read after a failed post did not complete", e instanceof Error ? e.message : e);
+  }
 }
 
 export { householdContact, istToday };

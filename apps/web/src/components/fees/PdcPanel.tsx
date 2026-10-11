@@ -140,7 +140,7 @@ export function PdcPanel({ canCollect, canClose }: { canCollect: boolean; canClo
   async function deposit(p: PdcRecord): Promise<boolean> {
     setBusyId(p.id);
     setMsg(null);
-    const r = await toolsPost<{ receiptNo: string; movedPaise: number }>("/api/fees/tools/pdc", { action: "deposit", id: p.id });
+    const r = await toolsPost<{ receiptNo: string; movedPaise: number; warning: string | null }>("/api/fees/tools/pdc", { action: "deposit", id: p.id });
     setBusyId("");
     if (!r.ok) {
       setMsg({ text: `Cheque ${p.chequeNo}: ${r.error}`, bad: true });
@@ -150,8 +150,9 @@ export function PdcPanel({ canCollect, canClose }: { canCollect: boolean; canClo
     setMsg({
       text:
         `Cheque ${p.chequeNo} deposited — receipt ${r.receiptNo}. Track clearing in Fees → Cheques.` +
-        (r.movedPaise > 0 ? ` ${inr(r.movedPaise)} went to the next open dues (some were already paid).` : ""),
-      bad: false,
+        (r.movedPaise > 0 ? ` ${inr(r.movedPaise)} went to the next open dues (some were already paid).` : "") +
+        (r.warning ? ` ${r.warning}` : ""),
+      bad: !!r.warning,
     });
     await load();
     return true;

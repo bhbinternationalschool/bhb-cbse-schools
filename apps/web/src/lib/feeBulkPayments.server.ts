@@ -98,7 +98,7 @@ export async function postBulk(
     note: string;
   },
   session: DemoSession,
-): Promise<{ record: BulkRecord; duplicate: boolean }> {
+): Promise<{ record: BulkRecord; duplicate: boolean; warning: string | null }> {
   if (!BATCH_ID_RE.test(req.batchId)) throw new ApiError("bad_request", "Bad batch id — reload and preview again", 400);
   const meta = TENDER_MODES.find((m) => m.value === req.mode);
   if (!meta) throw new ApiError("bad_request", "Choose how the money was paid", 400);
@@ -108,7 +108,7 @@ export async function postBulk(
   if (!payerLabel) throw new ApiError("bad_request", "Say who paid (e.g. the sponsor's name, or 'Staff ward — Oct')", 400);
 
   const existing = await getBulk(req.batchId);
-  if (existing) return { record: existing, duplicate: true };
+  if (existing) return { record: existing, duplicate: true, warning: null };
 
   // Receipts of this batch already made (a retry after the register row
   // failed): never plan again — those dues read paid now. Record them.
@@ -143,8 +143,11 @@ export async function postBulk(
 
   const today = istToday();
   const instrumentDate = meta.needsInstrumentDate ? req.instrumentDate.trim() || today : "";
-  const posted: PostedReceipt[] = made.length
-    ? made.map((m) => ({ voucherId: m.id, receiptNo: m.receiptNo, householdId: m.householdId, totalPaise: m.totalPaise, transactionId: m.transactionId, duplicate: true }))
+  const { receipts: posted, warning }: { receipts: PostedReceipt[]; warning: string | null } = made.length
+    ? {
+        receipts: made.map((m) => ({ voucherId: m.id, receiptNo: m.receiptNo, householdId: m.householdId, totalPaise: m.totalPaise, transactionId: m.transactionId, duplicate: true })),
+        warning: null,
+      }
     : await postReceiptsTogether({
     specs: plan.receipts.map((r) => ({
       householdId: r.householdId,
@@ -226,7 +229,7 @@ export async function postBulk(
       500,
     );
   }
-  return { record, duplicate: false };
+  return { record, duplicate: false, warning };
 }
 
 function fromRow(r: Record<string, unknown>): BulkRecord {

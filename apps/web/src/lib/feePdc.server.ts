@@ -182,7 +182,7 @@ export async function createPdc(input: PdcInput & { note: string }, by: string, 
 export async function depositPdc(
   id: string,
   opts: { session: DemoSession },
-): Promise<{ pdc: PdcRecord; receiptNo: string; voucherId: string; movedPaise: number }> {
+): Promise<{ pdc: PdcRecord; receiptNo: string; voucherId: string; movedPaise: number; warning: string | null }> {
   const ctx = await tenant();
   const pdc = await getPdc(id);
   if (!pdc) throw new ApiError("not_found", "No such cheque", 404);
@@ -197,7 +197,7 @@ export async function depositPdc(
   if (earlier) {
     await markDeposited(id, earlier.voucherId, earlier.receiptNo, by);
     const after = await getPdc(id);
-    return { pdc: after ?? pdc, receiptNo: earlier.receiptNo, voucherId: earlier.voucherId, movedPaise: 0 };
+    return { pdc: after ?? pdc, receiptNo: earlier.receiptNo, voucherId: earlier.voucherId, movedPaise: 0, warning: null };
   }
 
   const { data: claimed, error: claimErr } = await ctx.sb.rpc("fee_pdc_claim_deposit", {
@@ -209,7 +209,7 @@ export async function depositPdc(
     throw new ApiError("bad_request", "Someone else is depositing this cheque right now — wait a few minutes and reload", 409);
   }
 
-  let made: { voucherId: string; receiptNo: string; movedPaise: number };
+  let made: { voucherId: string; receiptNo: string; movedPaise: number; warning: string | null };
   try {
     made = await postPdcReceipt(pdc, opts, today);
   } catch (e) {
@@ -228,13 +228,13 @@ export async function depositPdc(
       // Another instance's receipt won (unique index): link it.
       await markDeposited(id, after.voucherId, after.receiptNo, by);
       const linked = await getPdc(id);
-      return { pdc: linked ?? pdc, receiptNo: after.receiptNo, voucherId: after.voucherId, movedPaise: 0 };
+      return { pdc: linked ?? pdc, receiptNo: after.receiptNo, voucherId: after.voucherId, movedPaise: 0, warning: null };
     }
     throw e;
   }
   await markDeposited(id, made.voucherId, made.receiptNo, by);
   const after = await getPdc(id);
-  return { pdc: after ?? pdc, receiptNo: made.receiptNo, voucherId: made.voucherId, movedPaise: made.movedPaise };
+  return { pdc: after ?? pdc, receiptNo: made.receiptNo, voucherId: made.voucherId, movedPaise: made.movedPaise, warning: made.warning };
 }
 
 /**
@@ -320,7 +320,7 @@ async function postPdcReceipt(
   pdc: PdcRecord,
   opts: { session: DemoSession },
   today: string,
-): Promise<{ voucherId: string; receiptNo: string; movedPaise: number }> {
+): Promise<{ voucherId: string; receiptNo: string; movedPaise: number; warning: string | null }> {
   const fctx = await loadFeeToolsContext();
   const live = new Map<string, BulkDue[]>();
   const names = new Map<string, string>();
@@ -332,7 +332,7 @@ async function postPdcReceipt(
   }
   const plan = planPdcDeposit(pdc, live);
   if (!plan.ok) throw new ApiError("bad_request", plan.error, 400);
-  const [receipt] = await postReceiptsTogether({
+  const { receipts: [receipt], warning } = await postReceiptsTogether({
     specs: [
       {
         householdId: pdc.householdId,
@@ -362,5 +362,5 @@ async function postPdcReceipt(
     mayBackdate: canBackdateReceipt(opts.session, fctx.masters),
   });
   if (!receipt) throw new ApiError("server_error", "No receipt was made", 500);
-  return { voucherId: receipt.voucherId, receiptNo: receipt.receiptNo, movedPaise: plan.movedPaise };
+  return { voucherId: receipt.voucherId, receiptNo: receipt.receiptNo, movedPaise: plan.movedPaise, warning };
 }

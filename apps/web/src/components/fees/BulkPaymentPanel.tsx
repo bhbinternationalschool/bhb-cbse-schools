@@ -197,7 +197,7 @@ export function BulkPaymentPanel({ canCollect }: { canCollect: boolean }) {
     if (!window.confirm(`Post ${preview.plan.receipts.length} receipt(s) for ${inr(preview.plan.totalPaise)} from "${payerLabel}"?`)) return;
     setBusy(true);
     setMsg(null);
-    const r = await toolsPost<{ record: BulkRecord; duplicate: boolean }>("/api/fees/tools/bulk-payment", {
+    const r = await toolsPost<{ record: BulkRecord; duplicate: boolean; warning: string | null }>("/api/fees/tools/bulk-payment", {
       action: "post",
       batchId: preview.batchId,
       expectedTotalPaise: preview.plan.totalPaise,
@@ -218,8 +218,10 @@ export function BulkPaymentPanel({ canCollect }: { canCollect: boolean }) {
       return;
     }
     setMsg({
-      text: `${r.duplicate ? "Already posted" : "Posted"}: ${r.record.receipts.map((x) => `${x.studentName} ${x.receiptNo}`).join(" · ")} — ${inr(r.record.totalPaise)}`,
-      bad: false,
+      text:
+        `${r.duplicate ? "Already posted" : "Posted"}: ${r.record.receipts.map((x) => `${x.studentName} ${x.receiptNo}`).join(" · ")} — ${inr(r.record.totalPaise)}` +
+        (r.warning ? ` · ${r.warning}` : ""),
+      bad: !!r.warning,
     });
     setPreview(null);
     setChosen([]);

@@ -11,7 +11,9 @@ import assert from "node:assert/strict";
 
 import {
   BULK_MAX_CHILDREN,
+  ANCILLARY_WARNING,
   bulkPlanSignature,
+  decidePostOutcome,
   bulkReceiptTransactionId,
   planBulkAllocation,
   sessionRowProblem,
@@ -441,6 +443,23 @@ test("a discount under ANOTHER rule on the same head is not stacked silently", (
   assert.equal(stackingClash(tpl, "s1", [g("cn_sib")], [{ ...manualSibling, isActive: false }], new Set(["cn_1"]), "2026-10-01"), undefined);
   // A rule on every head clashes with anything.
   assert.ok(stackingClash(tpl, "s1", [g("cn_all")], [{ ...manualSibling, id: "cn_all", feeHeadIds: [] }], new Set(["cn_1"]), "2026-10-01"));
+});
+
+test("post outcome: receipts in but ancillary failed → retry, never silent success", () => {
+  assert.deepEqual(decidePostOutcome({ pushOk: true, allLive: true, noneLanded: false }), { kind: "ok", retryPush: false });
+  assert.deepEqual(decidePostOutcome({ pushOk: false, allLive: true, noneLanded: false }), { kind: "ok", retryPush: true });
+  assert.match(ANCILLARY_WARNING, /cheque register/);
+});
+
+test("post outcome: anything unconfirmed always drops the in-memory copies", () => {
+  // Race loser whose read-backs both failed: must not keep the duplicate.
+  const unknown = decidePostOutcome({ pushOk: false, allLive: null, noneLanded: null });
+  assert.equal(unknown.kind, "uncertain");
+  assert.equal("dropMemory" in unknown && unknown.dropMemory, true);
+  const none = decidePostOutcome({ pushOk: false, allLive: false, noneLanded: true });
+  assert.equal(none.kind, "not_saved");
+  const partial = decidePostOutcome({ pushOk: true, allLive: false, noneLanded: false });
+  assert.equal(partial.kind, "uncertain");
 });
 
 console.log(`feeBulkPdcTemplates selftest: ${passed} passed`);
