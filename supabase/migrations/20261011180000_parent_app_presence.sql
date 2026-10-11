@@ -29,7 +29,8 @@ create policy parent_app_presence_tenant_all
 grant select, insert, update, delete on public.parent_app_presence to service_role;
 
 -- The last app invite sent to each family from that screen (one row per
--- household, latest wins), written as each WhatsApp send succeeds. Families
+-- household, latest wins), written as each WhatsApp send succeeds (or may
+-- have — status 'unknown'). Families
 -- invited in the last 7 days are left out of the next invite, so a partial
 -- failure followed by a second press does not message the same parents
 -- twice. Kept apart from parent_app_presence on purpose: a presence row
@@ -39,6 +40,9 @@ create table if not exists public.parent_app_invites (
   household_id text not null,
   invited_at timestamptz not null default now(),
   invited_by text not null default '',
+  -- 'sent' = WhatsApp accepted it; 'unknown' = the dispatch failed midway and
+  -- it may have gone. Both keep the family out of the next invite.
+  status text not null default 'sent' check (status in ('sent', 'unknown')),
   primary key (tenant_id, household_id)
 );
 

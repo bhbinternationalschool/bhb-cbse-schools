@@ -52,7 +52,8 @@ export async function sendTemplateToAudience(opts: {
   audienceKind: string;
   /**
    * Optional: each chunk's per-recipient outcome (refId + dispatch status:
-   * "sent", "failed", "deferred", "queued_stub"), awaited before the next
+   * "sent", "failed", "deferred", "queued_stub", or "unknown" when the
+   * dispatch threw and the outcome is not known), awaited before the next
    * chunk — for callers that record who was reached as it happens.
    */
   onChunkResults?: (results: { refId: string; status: string }[]) => Promise<void>;
@@ -176,6 +177,13 @@ export async function sendTemplateToAudience(opts: {
         );
       }
     } catch (e) {
+      // The chunk may or may not have reached Meta: say "unknown", so a
+      // caller that records who was reached can treat it as possibly sent.
+      if (opts.onChunkResults) {
+        await opts
+          .onChunkResults(chunk.map((m) => ({ refId: refIdOf.get(m.messageId) ?? "", status: "unknown" })))
+          .catch(() => undefined);
+      }
       out.failed += chunk.length;
       if (!out.error) {
         out.error = e instanceof Error ? e.message : "Dispatch failed";

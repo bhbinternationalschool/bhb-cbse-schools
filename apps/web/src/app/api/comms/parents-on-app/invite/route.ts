@@ -9,14 +9,17 @@
  *  - never signed in, not invited in the last 7 days, a real phone number
  *    (lib/parentsOnApp pickInviteFamilies);
  *  - a placeholder number is never messaged (realInviteNumbers);
- *  - one send-once claim per family per India day (wa_send_claims), so a
+ *  - one send-once claim per family per India day (wa_send_claims, taken
+ *    with neverStale so it is not handed over after 10 minutes), so a
  *    second press, a second tab or a retry after a partial failure cannot
- *    message a family twice; a claim behind a real send is never released;
- *  - each family reached is written to parent_app_invites as its chunk
- *    returns, which keeps it out of the next invite for 7 days.
+ *    message a family twice; a claim behind a real or possible send is
+ *    never released;
+ *  - each family reached — or possibly reached, when a dispatch threw — is
+ *    written to parent_app_invites as its chunk returns (retried once),
+ *    which keeps it out of the next invite for 7 days.
  * The message is the approved School notice template (lib/parentAppInvite),
  * in Hindi unless the family chose English. `dryRun` counts without sending;
- * a live send must echo the dry run's count (confirmCount).
+ * a live send is refused unless it echoes the dry run's count (confirmCount).
  */
 
 import { NextResponse } from "next/server";
@@ -26,7 +29,10 @@ import {
   APP_INVITE_TEMPLATE_FAMILY,
   APP_INVITE_TITLE,
   appInviteClaimKey,
+  inviteLogStatusFor,
+  liveInviteConfirmError,
   realInviteNumbers,
+  type InviteLogStatus,
 } from "@/lib/parentAppInvite";
 import { istDay, pickInviteFamilies } from "@/lib/parentsOnApp";
 import { loadParentsOnAppReport } from "@/lib/parentsOnAppReport.server";
@@ -106,15 +112,9 @@ export async function POST(req: Request) {
 
   if (body.dryRun) return NextResponse.json({ ok: true, mode: "dry_run", recipientCount: recipients.length, ...counts });
   if (!recipients.length) return NextResponse.json({ error: "None of these families can be messaged", recipientCount: 0, ...counts }, { status: 400 });
-  if (typeof body.confirmCount === "number" && body.confirmCount !== recipients.length) {
-    return NextResponse.json(
-      {
-        error: `The families changed since you checked — now ${recipients.length}, you approved ${body.confirmCount}. Check again before sending.`,
-        recipientCount: recipients.length,
-        ...counts,
-      },
-      { status: 409 },
-    );
+  const confirmError = liveInviteConfirmError(body.confirmCount, recipients.length);
+  if (confirmError) {
+    return NextResponse.json({ error: confirmError, recipientCount: recipients.length, ...counts }, { status: 409 });
   }
 
   const ctx = await getServerTenantContext();
@@ -126,7 +126,7 @@ export async function POST(req: Request) {
   const claimed: WaAudienceRecipient[] = [];
   let skippedInProgress = 0;
   for (const r of recipients) {
-    const claim = await claimSendOnce(appInviteClaimKey(r.refId, today), by, "parent app invite");
+    const claim = await claimSendOnce(appInviteClaimKey(r.refId, today), by, "parent app invite", { neverStale: true });
     if (claim.ok) claimed.push(r);
     else skippedInProgress++;
   }
@@ -140,6 +140,8 @@ export async function POST(req: Request) {
   const reached = new Set<string>();
   /** Families the dispatcher explicitly did NOT send to (failed, deferred, no provider). */
   const notSent = new Set<string>();
+  /** Sent, or the dispatch threw and it may have been. */
+  const possiblySent = new Set<string>();
   let recordFailed = 0;
   const result = await sendTemplateToAudience({
     recipients: claimed,
@@ -148,26 +150,30 @@ export async function POST(req: Request) {
     originUrl: req.url,
     audienceKind: "app_invite",
     onChunkResults: async (rows) => {
-      const sent = rows.filter((x) => x.status === "sent" && x.refId).map((x) => x.refId);
-      for (const id of sent) reached.add(id);
-      for (const x of rows) if (x.refId && x.status !== "sent") notSent.add(x.refId);
-      if (!sent.length) return;
-      const at = new Date().toISOString();
-      try {
-        const { error } = await ctx.sb
-          .from("parent_app_invites")
-          .upsert(
-            sent.map((household_id) => ({ tenant_id: ctx.tenantId, household_id, invited_at: at, invited_by: by })),
-            { onConflict: "tenant_id,household_id" },
-          );
-        if (error) {
-          recordFailed += sent.length;
-          console.warn("[parents-on-app/invite] could not record invites:", error.message);
-        }
-      } catch (e) {
-        recordFailed += sent.length;
-        console.warn("[parents-on-app/invite] could not record invites:", e instanceof Error ? e.message : e);
+      const logged: { household_id: string; status: InviteLogStatus }[] = [];
+      for (const x of rows) {
+        if (!x.refId) continue;
+        const st = inviteLogStatusFor(x.status);
+        if (st === "sent") reached.add(x.refId);
+        if (st) {
+          possiblySent.add(x.refId);
+          logged.push({ household_id: x.refId, status: st });
+        } else notSent.add(x.refId);
       }
+      if (!logged.length) return;
+      const at = new Date().toISOString();
+      const payload = logged.map((l) => ({ tenant_id: ctx.tenantId, household_id: l.household_id, invited_at: at, invited_by: by, status: l.status }));
+      // Retried once: this row is what keeps the family out of the next invite.
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const { error } = await ctx.sb.from("parent_app_invites").upsert(payload, { onConflict: "tenant_id,household_id" });
+          if (!error) return;
+          console.warn(`[parents-on-app/invite] could not record invites (try ${attempt}):`, error.message);
+        } catch (e) {
+          console.warn(`[parents-on-app/invite] could not record invites (try ${attempt}):`, e instanceof Error ? e.message : e);
+        }
+      }
+      recordFailed += logged.length;
     },
   });
 
@@ -175,7 +181,7 @@ export async function POST(req: Request) {
   // so a later press can try them. A claim behind a real send — or behind a
   // chunk whose outcome is unknown (the dispatch threw) — is kept for the day.
   for (const r of claimed) {
-    if (notSent.has(r.refId) && !reached.has(r.refId)) await releaseSendClaim(appInviteClaimKey(r.refId, today)).catch(() => undefined);
+    if (notSent.has(r.refId) && !possiblySent.has(r.refId)) await releaseSendClaim(appInviteClaimKey(r.refId, today)).catch(() => undefined);
   }
 
   return NextResponse.json({
