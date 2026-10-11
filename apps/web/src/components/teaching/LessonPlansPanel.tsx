@@ -1,5 +1,6 @@
 "use client";
 
+import { PublisherAssetsList } from "@/components/teaching/PublisherAssetsList";
 import { useMemo, useState } from "react";
 import { CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Sparkles } from "lucide-react";
 import {
@@ -429,6 +430,8 @@ export function LessonPlansPanel(props: {
 
       {draft ? (
         <LessonPlanEditor
+          classLabel={props.classLabel}
+          subjectName={props.subjectName}
           draft={draft}
           setDraft={setDraft}
           unitOptions={unitOptions}
@@ -604,6 +607,8 @@ function Field({ label, value }: { label: string; value: string }) {
 }
 
 function LessonPlanEditor({
+  classLabel,
+  subjectName,
   draft,
   setDraft,
   unitOptions,
@@ -611,6 +616,8 @@ function LessonPlanEditor({
   onCancel,
   ai,
 }: {
+  classLabel: string;
+  subjectName: string;
   draft: Draft;
   setDraft: (d: Draft) => void;
   unitOptions: { chapter: SyllabusUnit; topics: SyllabusUnit[] }[];
@@ -710,6 +717,18 @@ function LessonPlanEditor({
           </div>
         )}
       </div>
+
+      {/* The publisher's animations, mind maps and games for the chapters
+          ticked above (a ticked topic counts for its chapter). */}
+      <PublisherAssetsList
+        className={classLabel}
+        subjectName={subjectName}
+        codes={unitOptions
+          .filter(({ chapter, topics }) => draft.unitIds.includes(chapter.id) || topics.some((t) => draft.unitIds.includes(t.id)))
+          .map(({ chapter }) => chapter.code)
+          .filter(Boolean)}
+        heading="Use in class — from the publisher (Smart Teach)"
+      />
 
       <div className="flex flex-wrap items-end gap-2 rounded-lg border border-dashed border-[var(--border)] p-2">
         <label className="text-xs font-semibold text-[var(--muted)]">

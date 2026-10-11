@@ -2225,6 +2225,35 @@ class TeachingResource {
   final String locator;
 }
 
+/// The publisher's ready-made assets for a chapter on Pinnacle Smart Teach
+/// (animations, mind maps, games, worksheets), as the Office Robot indexed
+/// them. Titles only; [url] opens the book's Assets page with the teacher's
+/// own Smart Teach login.
+class PublisherAssets {
+  const PublisherAssets({required this.url, required this.items});
+
+  static PublisherAssets? fromJson(Object? raw) {
+    if (raw is! Map<String, dynamic>) return null;
+    final items = ((raw["items"] as List?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(
+          (e) => (
+            type: (e["type"] as String?) ?? "",
+            title: (e["title"] as String?) ?? "",
+          ),
+        )
+        .where((e) => e.type.isNotEmpty)
+        .toList();
+    final url = (raw["url"] as String?) ?? "";
+    return items.isEmpty || url.isEmpty
+        ? null
+        : PublisherAssets(url: url, items: items);
+  }
+
+  final String url;
+  final List<({String type, String title})> items;
+}
+
 /// One chapter or topic a period can be tagged with.
 class TeachingUnit {
   const TeachingUnit({
@@ -2233,6 +2262,7 @@ class TeachingUnit {
     required this.title,
     this.topics = const [],
     this.resources = const [],
+    this.publisherAssets,
   });
 
   factory TeachingUnit.fromJson(Map<String, dynamic> j) => TeachingUnit(
@@ -2245,11 +2275,15 @@ class TeachingUnit {
     resources: ((j["resources"] as List?) ?? const [])
         .map((e) => TeachingResource.fromJson(e as Map<String, dynamic>))
         .toList(),
+    publisherAssets: PublisherAssets.fromJson(j["publisherAssets"]),
   );
 
   final String id;
   final String code;
   final String title;
+
+  /// Smart Teach assets for this chapter; null when none are indexed.
+  final PublisherAssets? publisherAssets;
 
   /// Topics inside this chapter; empty when this is itself a topic.
   final List<TeachingUnit> topics;

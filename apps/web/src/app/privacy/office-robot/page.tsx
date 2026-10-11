@@ -110,8 +110,10 @@ export default function OfficeRobotPrivacyPage() {
           </li>
           <li>
             On Pinnacle Smart Teach, when a staff member presses its button: the
-            titles of the books in the Book Library and each book&rsquo;s table of
-            contents (its chapter names). No personal data.
+            titles of the books in the Book Library, each book&rsquo;s table of
+            contents (its chapter names) and the titles and types of each
+            chapter&rsquo;s teaching assets (e.g. &ldquo;Animation: Early Calculating
+            Devices&rdquo;). No personal data, and no files are downloaded.
           </li>
           <li>
             From the school ERP, for Propel: the school&rsquo;s published student
@@ -137,8 +139,9 @@ export default function OfficeRobotPrivacyPage() {
             on screen.
           </li>
           <li>
-            Pinnacle&rsquo;s book titles and chapter names go only to the school&rsquo;s ERP, which compares
-            them with its own book list. Nothing is sent to Smart Teach.
+            Pinnacle&rsquo;s book titles, chapter names and asset titles go only to the school&rsquo;s ERP, which
+            compares the chapters with its own book list and shows teachers the asset titles with a link back to
+            Smart Teach. Nothing is sent to Smart Teach.
           </li>
           <li>
             The filled student upload sheet is saved to the staff member&rsquo;s own computer; they upload it to

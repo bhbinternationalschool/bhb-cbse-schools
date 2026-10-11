@@ -2,7 +2,12 @@
  * BHB Office Robot — the panel on Pinnacle Smart Teach
  * (teacher.pinnaclelearning.in), director's request of 12 Oct 2026.
  *
- * One job: "Check books against ERP". On the Book Library page the robot
+ * Two jobs. "Bring asset list to ERP" (1.7.0) reads every book's Assets tab
+ * — the publisher's animations, mind maps, games and worksheets per chapter —
+ * and sends their titles and types to the ERP, which shows them to teachers
+ * in lesson plans, Teaching today, homework and exam papers.
+ *
+ * "Check books against ERP": on the Book Library page the robot
  * reads each book's table of contents — the publisher's complete chapter
  * list for Click Code Connect, Know and Grow, New Longman Vistas and
  * Tip-Tap-Toe — and the ERP compares it with its loaded book for that class
@@ -34,8 +39,9 @@
   const head = el("header", {}, "🤖 BHB Office Robot · Pinnacle", el("span", { class: "muted" }, "–"));
   const body = el("div", { class: "body" });
   const checkBtn = el("button", { class: "act", type: "button" }, "Check books against ERP");
+  const assetsBtn = el("button", { class: "act", type: "button" }, "Bring asset list to ERP");
   const msg = el("div", { class: "msg" });
-  body.append(checkBtn, msg);
+  body.append(checkBtn, assetsBtn, msg);
   panel.append(head, body);
   head.addEventListener("click", () => {
     panel.classList.toggle("min");
@@ -165,6 +171,104 @@
       say(e.message || String(e), "err");
     } finally {
       checkBtn.disabled = false;
+    }
+  });
+
+  // ─── Each book's Assets tab ──────────────────────────────────────────
+  //
+  // A book's Assets tab lists, per chapter, the publisher's animations,
+  // games, mind maps and worksheets — each card a type ("Animation") and a
+  // title. The robot opens every book's Assets tab in a hidden frame of this
+  // same site, opens each chapter in turn, and reads the cards. Only the
+  // titles and types go to the ERP; nothing is downloaded or changed here.
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  async function bookAssets(bookId) {
+    const frame = el("iframe", {
+      style: "position:fixed;left:-6000px;top:0;width:1200px;height:900px;border:0",
+      src: `/book?bookId=${bookId}&userRole=teacher&activeTab=assets`,
+      "aria-hidden": "true",
+    });
+    document.body.append(frame);
+    try {
+      let rows = [];
+      for (let i = 0; i < 60 && !rows.length; i++) {
+        await sleep(300);
+        try {
+          rows = [...frame.contentDocument.querySelectorAll('button[data-testid="action-button"]')];
+        } catch {
+          rows = [];
+        }
+      }
+      if (!rows.length) throw new Error("the Assets tab did not open");
+      const chapters = [];
+      for (const row of rows) {
+        const name = row.innerText.replace(/\s+/g, " ").trim();
+        const box = row.closest("div.border") || row.parentElement;
+        row.click();
+        let cards = [];
+        for (let i = 0; i < 30; i++) {
+          await sleep(200);
+          cards = [...box.querySelectorAll("h1")];
+          if (cards.length && !/Loading/.test(box.innerText)) break;
+        }
+        await sleep(150);
+        const assets = [...box.querySelectorAll("h1")].map((h) => ({
+          type: h.textContent.replace(/\s+/g, " ").trim(),
+          title: ((h.nextElementSibling && h.nextElementSibling.textContent) || "").replace(/\s+/g, " ").trim(),
+        }));
+        chapters.push({ name, assets });
+        row.click(); // close it again, so the next one's cards are its own
+      }
+      return chapters;
+    } finally {
+      frame.remove();
+    }
+  }
+
+  assetsBtn.addEventListener("click", async () => {
+    let found = libraryBooks();
+    for (let i = 0; i < 16; i++) {
+      await sleep(500);
+      const now = libraryBooks();
+      if (now.length && now.length === found.length) break;
+      found = now;
+    }
+    found = found.filter((b) => /^\d+\//.test(b.path));
+    if (!found.length) {
+      say("Open the Book Library (left menu) so the books show, then press this again.", "err");
+      return;
+    }
+    if (!window.confirm(`Read the asset list of ${found.length} book(s)? It takes about half a minute a book — keep this tab open.`)) return;
+    checkBtn.disabled = true;
+    assetsBtn.disabled = true;
+    try {
+      const books = [];
+      const failed = [];
+      for (const [i, b] of found.entries()) {
+        say(`Reading assets ${i + 1} of ${found.length}: ${b.title || b.path}…`);
+        try {
+          books.push({ bookId: Number(b.path.split("/")[0]), title: b.title, path: b.path, chapters: await bookAssets(b.path.split("/")[0]) });
+        } catch (e) {
+          failed.push(`${b.title || b.path} (${e.message || e})`);
+        }
+      }
+      say("Sending the asset list to the ERP…");
+      const res = await ask({ type: "pinnacle-assets", books });
+      if (!res.ok) throw new Error(res.error || `ERP answered ${res.status}`);
+      const r = res.body;
+      const lines = [
+        `Kept ${r.assets} asset(s) across ${r.chapters} chapter(s) of ${r.books} book(s) in the ERP.`,
+        "Teachers now see them in lesson plans, Teaching today, homework (worksheets) and exam papers (revision aids).",
+      ];
+      if (failed.length) lines.push("", `Could not read: ${failed.join("; ")} — press again to retry; the rest are kept.`);
+      say(lines.join("\n"), "ok");
+    } catch (e) {
+      say(e.message || String(e), "err");
+    } finally {
+      checkBtn.disabled = false;
+      assetsBtn.disabled = false;
     }
   });
 

@@ -307,6 +307,12 @@ class LEn extends L {
       'WhatsApp is not installed on this phone.';
 
   @override
+  String get publisherAssetsHeading => 'FROM THE PUBLISHER (SMART TEACH)';
+
+  @override
+  String get openInSmartTeach => 'Open in Smart Teach';
+
+  @override
   String get content => 'CONTENT';
 
   @override

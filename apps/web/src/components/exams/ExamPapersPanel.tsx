@@ -1,5 +1,6 @@
 "use client";
 
+import { PublisherAssetsList } from "@/components/teaching/PublisherAssetsList";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MastersState } from "@/lib/masters";
 import type { ExamTerm } from "@/lib/exams";
@@ -979,6 +980,25 @@ export function ExamPapersPanel({
                 })}
               </div>
             )}
+            {/* Revision aids for the ticked chapters (a ticked topic counts
+                for its chapter): the publisher's mind maps, timelines,
+                animations and videos on Smart Teach. */}
+            <div className="mt-2">
+              <PublisherAssetsList
+                className={masters.classes.find((c) => c.id === draft.classId)?.name ?? ""}
+                subjectName={(masters.subjects ?? []).find((x) => x.id === draft.subjectId)?.nameEn ?? ""}
+                codes={[
+                  ...new Set(
+                    syllabusUnits
+                      .filter((u) => draft.unitIds.includes(u.id))
+                      .map((u) => (u.level === "chapter" ? u.code : syllabusUnits.find((c) => c.id === u.parentId)?.code ?? ""))
+                      .filter(Boolean),
+                  ),
+                ]}
+                only="revision"
+                heading="Revision aids for these chapters — from the publisher (Smart Teach)"
+              />
+            </div>
           </div>
         </div>
 

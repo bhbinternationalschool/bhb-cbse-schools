@@ -11,6 +11,9 @@ import {
   resolveExpectedPeriods,
   resourcesForUnits,
 } from "@/lib/teaching";
+import { chapterPositionOf } from "@/lib/chapterStandards";
+import type { ChapterAssets } from "@/lib/pinnacleAssets";
+import { publisherAssetsFor, readPinnacleAssets } from "@/lib/pinnacleAssets.server";
 
 export const runtime = "nodejs";
 
@@ -85,6 +88,24 @@ export async function GET(request: Request) {
     const subjectNameOf = (id: string) =>
       ctx.masters.subjects.find((s) => s.id === id)?.nameEn || "";
 
+    // The publisher's assets per chapter (Smart Teach, indexed by the Office
+    // Robot), looked up once per class + subject on today's timetable. A
+    // failed read just leaves them out — the period card works without them.
+    const assetIndex = (await readPinnacleAssets().catch(() => null))?.books ?? [];
+    const assetsBy = new Map<string, Map<number, ChapterAssets>>();
+    if (assetIndex.length) {
+      for (const r of rows) {
+        const k = `${r.expected.classId}|${r.expected.subjectId}`;
+        if (assetsBy.has(k)) continue;
+        assetsBy.set(
+          k,
+          await publisherAssetsFor(classNameOf(r.expected.classId), subjectNameOf(r.expected.subjectId), "all", assetIndex).catch(
+            () => new Map<number, ChapterAssets>(),
+          ),
+        );
+      }
+    }
+
     /** Chapter → topic tree for one class + subject, with content links. */
     const chaptersFor = (classId: string, subjectId: string) => {
       const mine = teaching.units.filter(
@@ -102,6 +123,11 @@ export async function GET(request: Request) {
           code: c.code,
           title: c.title,
           resources: c.resources,
+          publisherAssets: (() => {
+            const p = chapterPositionOf(c.code);
+            const a = p === null ? undefined : assetsBy.get(`${classId}|${subjectId}`)?.get(p);
+            return a ? { url: a.url, items: a.assets } : null;
+          })(),
           topics: mine
             .filter((t) => t.parentId === c.id)
             .sort((a, b) => a.sortOrder - b.sortOrder)

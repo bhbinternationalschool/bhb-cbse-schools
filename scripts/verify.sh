@@ -240,6 +240,7 @@ SELFTESTS=(
   test:propel-robot
   test:library-ebooks
   test:pinnacle-books
+  test:pinnacle-assets
   test:desk-on-demand
   test:masters-section-saves
   test:accounts-row-stamps

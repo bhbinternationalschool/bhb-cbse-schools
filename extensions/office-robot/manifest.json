@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BHB Office Robot",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "BHB International School staff: syncs UDISE+ and Propel with the ERP, and checks Pinnacle books' chapters. You check and save.",
   "permissions": [
     "storage"
