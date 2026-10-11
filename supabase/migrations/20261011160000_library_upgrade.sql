@@ -7,6 +7,24 @@
 -- dropped or deleted, and the library_state blob is left exactly as it is.
 -- Safe to run twice.
 
+-- ── Loan history is never deleted with its book ─────────────────────────
+-- Both keys were ON DELETE CASCADE: deleting a title took its copies, and
+-- deleting a copy took every loan of it — with any fine still owed and the
+-- link to its receipt. Now the database refuses; the desk save refuses
+-- first, with a message (libraryNormalized.server vetLibraryDeletes).
+alter table public.library_desk_copies
+  drop constraint if exists library_desk_copies_title_id_fkey;
+alter table public.library_desk_copies
+  add constraint library_desk_copies_title_id_fkey
+  foreign key (title_id) references public.library_desk_titles(id) on delete restrict;
+alter table public.library_desk_issues
+  drop constraint if exists library_desk_issues_copy_id_fkey;
+alter table public.library_desk_issues
+  add constraint library_desk_issues_copy_id_fkey
+  foreign key (copy_id) references public.library_desk_copies(id) on delete restrict;
+
+-- (tenant_id, accession_no) is already unique: library_desk_copies_tenant_id_accession_no_key.
+
 -- ── Copies: where it sits, where it came from ───────────────────────────
 alter table public.library_desk_copies
   add column if not exists location text not null default '',
@@ -55,16 +73,11 @@ alter table public.library_desk_issues
   add column if not exists fine_voucher_no text not null default '',
   add column if not exists fine_waive_reason text not null default '';
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_constraint where conname = 'library_desk_issues_fine_status_check'
-  ) then
-    alter table public.library_desk_issues
-      add constraint library_desk_issues_fine_status_check
-      check (fine_status in ('none', 'pending', 'collected', 'waived'));
-  end if;
-end $$;
+alter table public.library_desk_issues
+  drop constraint if exists library_desk_issues_fine_status_check;
+alter table public.library_desk_issues
+  add constraint library_desk_issues_fine_status_check
+  check (fine_status in ('none', 'pending', 'collecting', 'collected', 'waived'));
 
 -- A fine recorded before this migration is owed until someone collects or
 -- waives it: it must not read as settled just because the column is new.
@@ -329,6 +342,51 @@ begin
 end;
 $$;
 
+-- ── Move a copy / mark it lost, damaged or back — never while on loan ───
+create or replace function public.library_update_copy(
+  p_tenant_id uuid,
+  p_copy_id text,
+  p_location text default null,
+  p_status text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_copy public.library_desk_copies;
+begin
+  if p_status is not null and p_status not in ('available', 'lost', 'damaged') then
+    return jsonb_build_object('ok', false, 'error', 'Status can be available, lost or damaged');
+  end if;
+  -- Locked: library_issue_copy locks the same row, so an issue and a
+  -- "mark lost" cannot both pass their checks at once.
+  select * into v_copy from public.library_desk_copies
+   where id = p_copy_id and tenant_id = p_tenant_id
+   for update;
+  if not found then
+    return jsonb_build_object('ok', false, 'code', 'not_found', 'error', 'Copy not found');
+  end if;
+  if p_status is not null and (
+       v_copy.status = 'issued'
+       or exists (select 1 from public.library_desk_issues
+                   where tenant_id = p_tenant_id and copy_id = p_copy_id and returned_on is null)
+     ) then
+    return jsonb_build_object('ok', false, 'error',
+      'Copy ' || v_copy.accession_no || ' is on loan — return it at the counter first');
+  end if;
+  update public.library_desk_copies
+     set location = coalesce(p_location, location),
+         status = coalesce(p_status, status),
+         updated_at = now()
+   where id = p_copy_id and tenant_id = p_tenant_id;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+revoke all on function public.library_update_copy(uuid, text, text, text) from public, anon, authenticated;
+grant execute on function public.library_update_copy(uuid, text, text, text) to service_role;
 revoke all on function public.library_add_copies(uuid, text, int, text, text, date, text) from public, anon, authenticated;
 grant execute on function public.library_add_copies(uuid, text, int, text, text, date, text) to service_role;
 revoke all on function public.library_issue_copy(uuid, text, text, text, text, date, date, text, text, text, text, int) from public, anon, authenticated;

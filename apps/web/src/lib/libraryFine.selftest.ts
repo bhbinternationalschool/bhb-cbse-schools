@@ -7,11 +7,14 @@
  * settled once, and a double scan never issues the same copy twice.
  */
 import assert from "node:assert/strict";
-import { canSettleFine, computeLateFine, initialFineStatus, isoDayNumber, validateFineRule } from "./libraryFine";
+import { canSettleFine, computeLateFine, fineStatusOf, initialFineStatus, isoDayNumber, validateFineRule } from "./libraryFine";
 import {
   dueDateFor,
-  fineDebitAccount,
+  fineDebitLine,
   fineToDate,
+  isLibraryMigrationPending,
+  libraryToday,
+  planLibraryDeletes,
   LIBRARY_FINE_INCOME_ACCOUNT,
   normalizeAccessionCode,
   splitScannedCodes,
@@ -65,15 +68,33 @@ const RULE = { finePaisePerDay: 200, graceDays: 2, capPaise: 1000 };
 {
   assert.equal(initialFineStatus(0), "none");
   assert.equal(initialFineStatus(600), "pending");
-  assert.ok(canSettleFine("pending", 600).ok, "a pending fine can be settled");
-  assert.equal(canSettleFine("collected", 600).ok, false, "collected once only");
-  assert.equal(canSettleFine("waived", 600).ok, false, "a waived fine is not collected later");
-  assert.equal(canSettleFine("none", 0).ok, false, "nothing to settle");
-  assert.equal(canSettleFine("pending", 0).ok, false, "no zero-rupee receipts");
+  assert.ok(canSettleFine("pending", 600, "collect").ok, "a pending fine can be collected");
+  assert.ok(canSettleFine("pending", 600, "waive").ok, "a pending fine can be waived");
+  assert.equal(canSettleFine("collected", 600, "collect").ok, false, "collected once only");
+  assert.equal(canSettleFine("waived", 600, "collect").ok, false, "a waived fine is not collected later");
+  assert.equal(canSettleFine("none", 0, "collect").ok, false, "nothing to settle");
+  assert.equal(canSettleFine("pending", 0, "collect").ok, false, "no zero-rupee receipts");
+  // Collect claims first ("collecting"): a Waive in between is refused, and
+  // a retry of the half-finished Collect is allowed (it finds the voucher).
+  assert.equal(canSettleFine("collecting", 600, "waive").ok, false, "cannot waive while a Collect is booking the receipt");
+  assert.ok(canSettleFine("collecting", 600, "collect").ok, "a retry finishes a half-done Collect");
+  assert.equal(canSettleFine("pending", 600, "waive", true).ok, false, "cannot waive once a receipt exists");
+  assert.equal(fineStatusOf("collecting"), "collecting");
+  assert.equal(fineStatusOf("junk"), "none");
 
-  assert.equal(fineDebitAccount("cash"), "1000", "cash lands in Cash in Hand");
-  assert.equal(fineDebitAccount("upi"), "1010", "UPI lands in the bank");
-  assert.equal(fineDebitAccount("cheque"), null, "a mode we do not take is refused, not guessed");
+  const banks = [
+    { code: "1011", name: "SBI", bankAccountId: "bnk_a" },
+    { code: "1012", name: "UBI", bankAccountId: "bnk_b" },
+  ];
+  const cash = fineDebitLine("cash", undefined, banks);
+  assert.ok(cash.ok && cash.accountCode === "1000" && !cash.subledger, "cash lands in Cash in Hand");
+  const upi = fineDebitLine("upi", "1012", banks);
+  assert.ok(upi.ok && upi.accountCode === "1012" && upi.subledger?.id === "bnk_b", "UPI lands in the chosen bank, with its sub-ledger");
+  assert.equal(fineDebitLine("upi", "1010", banks).ok, false, "never the 1010 heading");
+  assert.equal(fineDebitLine("upi", undefined, banks).ok, false, "no guessing which bank");
+  assert.equal(fineDebitLine("bank", "1099", banks).ok, false, "not a school bank account");
+  assert.equal(fineDebitLine("upi", "1011", []).ok, false, "no bank set up → refused, take cash");
+  assert.equal(fineDebitLine("cheque", undefined, banks).ok, false, "a mode we do not take is refused, not guessed");
   assert.equal(LIBRARY_FINE_INCOME_ACCOUNT, "4100", "credited to Other Income, not fee income");
 }
 
@@ -88,10 +109,36 @@ const RULE = { finePaisePerDay: 200, graceDays: 2, capPaise: 1000 };
   assert.equal(dueDateFor("not-a-date", 14), null);
   assert.equal(borrowerKey({ type: "staff", id: "s9" }), "staff:s9");
   assert.equal(borrowerKey({ type: "student", id: "st1" }), "st1");
+  // The school's day is IST: 20:00 UTC on 10 Oct is already 11 Oct here.
+  assert.equal(libraryToday(new Date("2026-10-10T20:00:00Z")), "2026-10-11", "today is the IST date");
+  assert.equal(libraryToday(new Date("2026-10-10T18:00:00Z")), "2026-10-10", "before IST midnight it is still the 10th");
+
+  assert.ok(isLibraryMigrationPending('column library_desk_settings.fine_grace_days does not exist'), "missing column = migration pending");
+  assert.ok(isLibraryMigrationPending("Could not find the function public.library_issue_copy(...) in the schema cache"), "missing RPC = migration pending");
+  assert.equal(isLibraryMigrationPending("permission denied for table library_desk_copies"), false, "other errors are not dressed up");
 
   assert.equal(fineToDate(RULE, { dueOn: "2026-10-01" }, "2026-10-06"), 600);
   assert.equal(fineToDate(RULE, { dueOn: "2026-10-01", returnedOn: "2026-10-03" }, "2026-10-06"), null, "returned loans have no fine to date");
   assert.equal(fineToDate(RULE, { dueOn: "" }, "2026-10-06"), null, "unreadable due date shows ?, not ₹0");
+}
+
+// ── deletes never take loan history ─────────────────────────────────
+{
+  const copyTitle = new Map([
+    ["c1", "t1"],
+    ["c2", "t1"],
+    ["c3", "t2"],
+    ["c4", "t3"],
+  ]);
+  // c1 was lent once (returned, maybe a fine) → t1 and c1 stay; t2 goes
+  // with its unlent copy c3 even though the browser only named the title.
+  const plan = planLibraryDeletes({ titleIds: ["t1", "t2"], copyIds: ["c1", "c4"], copyTitle, lentCopyIds: new Set(["c1", "c4"]) });
+  assert.deepEqual(plan.refusedTitleIds, ["t1"], "a title with a lent copy is kept");
+  assert.deepEqual(plan.refusedCopyIds.sort(), ["c1", "c4"], "a lent copy is kept");
+  assert.deepEqual(plan.titleIds, ["t2"]);
+  assert.deepEqual(plan.copyIds.sort(), ["c3"], "a deletable title takes its unlent copies (RESTRICT never trips); t1's copies stay");
+  const none = planLibraryDeletes({ titleIds: [], copyIds: ["c2"], copyTitle, lentCopyIds: new Set() });
+  assert.deepEqual(none.copyIds, ["c2"], "an unlent copy can be deleted by name");
 }
 
 // ── labels ───────────────────────────────────────────────────────────

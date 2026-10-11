@@ -6,6 +6,7 @@
 
 import { invBody, invQuery, invRoute } from "@/lib/inventory/route.server";
 import { InvError } from "@/lib/inventory/db.server";
+import { withLibraryDb } from "@/lib/libraryCounter.server";
 import {
   addCopies,
   borrowerAccount,
@@ -38,7 +39,7 @@ function codesOf(raw: unknown): string[] {
 }
 
 export async function GET(req: Request) {
-  return invRoute(req, "view", async () => {
+  return invRoute(req, "view", async () => withLibraryDb(async () => {
     const q = invQuery(req);
     const view = q.get("view") ?? "";
     if (view === "rules") return { rules: await readLibraryRules() };
@@ -47,7 +48,7 @@ export async function GET(req: Request) {
       return borrowerAccount(borrowerOf({ type: q.get("type"), id: q.get("id") }));
     }
     throw new InvError("Unknown view");
-  });
+  }));
 }
 
 export async function POST(req: Request) {
@@ -58,7 +59,7 @@ export async function POST(req: Request) {
   const action = String((body as { action?: unknown }).action ?? "");
   // Issuing creates a loan; everything else edits the library.
   const rbac = action === "issue" || action === "add_copies" ? "create" : "edit";
-  return invRoute(req, rbac, async ({ actor, academicYearCode }) => {
+  return invRoute(req, rbac, async ({ actor, academicYearCode }) => withLibraryDb(async () => {
     const b = await invBody<Record<string, unknown>>(req);
     if (action === "issue") {
       return issueBooks({
@@ -108,5 +109,5 @@ export async function POST(req: Request) {
       return { rules: await saveLibraryRules(pick) };
     }
     throw new InvError("Unknown action");
-  });
+  }));
 }

@@ -18,7 +18,7 @@ export type CounterLoanDto = {
   dueOn: string;
   returnedOn: string | null;
   finePaise: number;
-  fineStatus: "none" | "pending" | "collected" | "waived";
+  fineStatus: "none" | "pending" | "collecting" | "collected" | "waived";
   fineVoucherNo: string;
 };
 
@@ -99,7 +99,8 @@ export const libraryApi = {
   updateCopy: (input: { copyId: string; location?: string; status?: string }) =>
     post<Record<string, unknown>>(COUNTER, { action: "update_copy", ...input }),
   pendingFines: () => call<{ fines: CounterLoanDto[] }>(FINES),
-  collectFine: (input: { issueId: string; mode: string; ref?: string; date?: string }) =>
+  fineBanks: () => call<{ banks: { code: string; name: string; bankAccountId: string }[] }>(`${FINES}?view=banks`),
+  collectFine: (input: { issueId: string; mode: string; bankCode?: string; ref?: string; date?: string }) =>
     post<{ voucherNo: string; finePaise: number }>(FINES, { action: "collect", ...input }),
   waiveFine: (input: { issueId: string; reason: string }) =>
     post<{ finePaise: number }>(FINES, { action: "waive", ...input }),

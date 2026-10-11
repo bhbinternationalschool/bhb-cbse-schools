@@ -18,7 +18,8 @@ import {
   parseIssueNote,
 } from "@/lib/library";
 import { libraryDualWriteDbEnabled } from "@/lib/libraryDbConfig";
-import type { LibraryFineStatus } from "@/lib/libraryFine";
+import { fineStatusOf } from "@/lib/libraryFine";
+import { isLibraryMigrationPending, LIBRARY_NOT_MIGRATED, planLibraryDeletes } from "@/lib/libraryCounter";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { deleteNamedIds, type NamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
@@ -257,10 +258,6 @@ function rowToIssue(r: Record<string, unknown>): LibraryIssue {
   };
 }
 
-function fineStatusOf(v: unknown): LibraryFineStatus {
-  const s = String(v ?? "");
-  return s === "pending" || s === "collected" || s === "waived" ? s : "none";
-}
 
 function procurementToRow(
   tenantId: string,
@@ -324,10 +321,57 @@ function rowToProcurement(r: Record<string, unknown>): LibraryProcurementDoc {
 
 /** The library tables a desk save deletes from — by named id only. */
 export const LIBRARY_DELETABLE_TABLES = [
-  "library_desk_titles",
+  // Copies before titles: the title key is ON DELETE RESTRICT (11 Oct 2026).
   "library_desk_copies",
+  "library_desk_titles",
   "library_desk_procurement_docs",
 ] as const;
+
+/**
+ * Which named title/copy deletes the database may carry out. Read from the
+ * SERVER, not the browser's copy (which may be stale): a copy with any loan
+ * row, or a title with such a copy, is refused — its loans, fines and
+ * receipt links must never go with it. A title that may go takes its
+ * never-lent copies with it. Null when the check could not be read: then
+ * nothing named is deleted.
+ */
+async function vetLibraryDeletes(
+  sb: SupabaseClient,
+  tenantId: string,
+  deletes: NamedDeletes,
+): Promise<{ deletes: NamedDeletes; refused: string[] } | { error: string }> {
+  const titleIds = [...new Set(deletes["library_desk_titles"] ?? [])];
+  const copyIds = [...new Set(deletes["library_desk_copies"] ?? [])];
+  if (!titleIds.length && !copyIds.length) return { deletes, refused: [] };
+  const copyTitle = new Map<string, string>();
+  for (const [col, ids] of [["title_id", titleIds], ["id", copyIds]] as const) {
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data, error } = await sb
+        .from("library_desk_copies")
+        .select("id, title_id")
+        .eq("tenant_id", tenantId)
+        .in(col, ids.slice(i, i + 200));
+      if (error) return { error: `library_desk_copies: ${error.message}` };
+      for (const r of (data ?? []) as { id: string; title_id: string }[]) copyTitle.set(String(r.id), String(r.title_id));
+    }
+  }
+  const lent = new Set<string>();
+  const all = [...copyTitle.keys()];
+  for (let i = 0; i < all.length; i += 200) {
+    const { data, error } = await sb
+      .from("library_desk_issues")
+      .select("copy_id")
+      .eq("tenant_id", tenantId)
+      .in("copy_id", all.slice(i, i + 200));
+    if (error) return { error: `library_desk_issues: ${error.message}` };
+    for (const r of (data ?? []) as { copy_id: string }[]) lent.add(String(r.copy_id));
+  }
+  const plan = planLibraryDeletes({ titleIds, copyIds, copyTitle, lentCopyIds: lent });
+  return {
+    deletes: { ...deletes, library_desk_titles: plan.titleIds, library_desk_copies: plan.copyIds },
+    refused: [...plan.refusedTitleIds.map((id) => `title ${id}`), ...plan.refusedCopyIds.map((id) => `copy ${id}`)],
+  };
+}
 
 /**
  * Save the library desk. Stamped (`opts.stamps`): only the rows named, each
@@ -338,7 +382,7 @@ export async function pushLibraryDeskToDb(
   state: LibraryState,
   deletes: NamedDeletes = {},
   opts: { stamps?: RowStamps; settingsBase?: string | null } = {},
-): Promise<StampedDeskPushResult> {
+): Promise<StampedDeskPushResult & { refusedDeletes?: string[] }> {
   if (!libraryDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
@@ -366,6 +410,7 @@ export async function pushLibraryDeskToDb(
   // a title or copy cascades to its loans in the database, so only named ids
   // may ever reach that delete.
   const stamped = opts.stamps !== undefined;
+  let refusedDeletes: string[] = [];
   const lists: [(typeof LIBRARY_STAMPED_SLICES)[number], string, Record<string, unknown>[]][] = [
     ["titles", "library_desk_titles", titles.map((t) => titleToRow(tenantId, t))],
     ["copies", "library_desk_copies", copies.map((c) => copyToRow(tenantId, c))],
@@ -396,6 +441,11 @@ export async function pushLibraryDeskToDb(
       .not("returned_on", "is", null);
     if (fineErr) return { ok: false, error: `library_desk_issues: ${fineErr.message}` };
   }
+
+  const vetted = await vetLibraryDeletes(sb, tenantId, deletes);
+  if ("error" in vetted) return { ok: false, error: `Delete check failed, nothing saved as deleted: ${vetted.error}` };
+  deletes = vetted.deletes;
+  if (vetted.refused.length) refusedDeletes = vetted.refused;
 
   for (const table of LIBRARY_DELETABLE_TABLES) {
     const del = await deleteNamedIds(sb, tenantId, table, deletes[table]);
@@ -445,7 +495,7 @@ export async function pushLibraryDeskToDb(
     { onConflict: "tenant_id" },
   );
 
-  return { ok: true, stamps, conflicts, settingsStamp: set.stamp, kept };
+  return { ok: true, stamps, conflicts, settingsStamp: set.stamp, kept, refusedDeletes };
 }
 
 export async function fetchLibraryDeskFromDb(): Promise<{
@@ -455,6 +505,8 @@ export async function fetchLibraryDeskFromDb(): Promise<{
   settingsStamp?: string;
   /** false = tenant/query could not be resolved; bundle is NOT a confirmed empty state. */
   ok: boolean;
+  /** Set when the failure is this build running before its migration. */
+  error?: string;
 }> {
   const ctx = await resolveCtx();
   const empty: LibraryDeskBundle = {
@@ -513,7 +565,8 @@ export async function fetchLibraryDeskFromDb(): Promise<{
       procurementErr?.message,
       settingsErr?.message,
     );
-    return { bundle: empty, meta: null, ok: false };
+    const raw = [titleErr, copyErr, issueErr, procurementErr, settingsErr].map((e) => e?.message ?? "").join(" ");
+    return { bundle: empty, meta: null, ok: false, error: isLibraryMigrationPending(raw) ? LIBRARY_NOT_MIGRATED : undefined };
   }
 
   const s = settingsRow as {

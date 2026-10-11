@@ -12,7 +12,7 @@ import {
   type LibraryIssue,
   type LibraryState,
 } from "@/lib/library";
-import { fineToDate } from "@/lib/libraryCounter";
+import { fineToDate, libraryToday } from "@/lib/libraryCounter";
 import { computeLateFine } from "@/lib/libraryFine";
 import { libraryApi, type CounterLoanDto } from "@/lib/libraryCounterClient";
 import { LibraryFineSettle } from "@/components/library/LibraryFineSettle";
@@ -29,8 +29,9 @@ const VIEWS: { id: View; label: string }[] = [
 
 type Person = { id: string; label: string; sub: string };
 
+/** The school's calendar day (IST). */
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return libraryToday();
 }
 
 /** Circulation reports on screen, each exportable: what is out, what is late, who owes. */
@@ -187,6 +188,7 @@ export function LibraryCirculationPanel({
         <LibraryFineSettle
           issueId={l.id}
           finePaise={l.finePaise}
+          collecting={l.fineStatus === "collecting"}
           readOnly={readOnly}
           onError={onError}
           onDone={async (msg) => {

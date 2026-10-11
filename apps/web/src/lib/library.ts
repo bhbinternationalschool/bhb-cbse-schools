@@ -12,7 +12,7 @@ import { TENANT } from "@/lib/types";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import { recordLibraryDeletion } from "@/lib/libraryNormalizedClient";
-import { fineToDate } from "@/lib/libraryCounter";
+import { fineToDate, libraryToday } from "@/lib/libraryCounter";
 import type { LibraryFineStatus } from "@/lib/libraryFine";
 
 export type LibraryCopyStatus =
@@ -901,7 +901,7 @@ export function runLibraryReport(input: {
   const state = input.state ?? loadLibrary();
   const from = input.fromDate || "2000-01-01";
   const to = input.toDate || new Date().toISOString().slice(0, 10);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = libraryToday();
   const titles = listActiveTitles(state);
   const titleById = new Map(titles.map((t) => [t.id, t]));
   const labelOpts = { students: input.students, staff: input.staff };

@@ -14,21 +14,40 @@
  */
 
 import { invCtx, InvError, type InvCtx } from "@/lib/inventory/db.server";
-import { computeLateFine, canSettleFine, validateFineRule, type LibraryFineStatus } from "@/lib/libraryFine";
+import { computeLateFine, canSettleFine, fineStatusOf, validateFineRule, type LibraryFineStatus } from "@/lib/libraryFine";
 import {
   dueDateFor,
-  fineDebitAccount,
+  fineDebitLine,
+  libraryToday,
+  type FineBankAccount,
   isCopySource,
   LIBRARY_FINE_INCOME_ACCOUNT,
   normalizeAccessionCode,
   type LibraryBorrowerRef,
   borrowerKey,
+  isLibraryMigrationPending,
+  LIBRARY_NOT_MIGRATED,
 } from "@/lib/libraryCounter";
 import { isoDayNumber } from "@/lib/libraryFine";
 import { ledgerPost } from "@/lib/ledger/ledger.server";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 type Row = Record<string, unknown>;
+
+/**
+ * Run a library handler; a database error that only means "the migration
+ * is not applied yet" becomes one clear message instead of a raw column
+ * error (the build may reach production before its migration).
+ */
+export async function withLibraryDb<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (isLibraryMigrationPending(msg)) throw new InvError(LIBRARY_NOT_MIGRATED, 503);
+    throw e;
+  }
+}
 
 export type LibraryRules = {
   maxBooksPerStudent: number;
@@ -67,17 +86,13 @@ export type CounterLoan = {
 };
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return libraryToday();
 }
 
 function str(v: unknown): string {
   return v == null ? "" : String(v);
 }
 
-function fineStatusOf(v: unknown): LibraryFineStatus {
-  const s = str(v);
-  return s === "pending" || s === "collected" || s === "waived" ? s : "none";
-}
 
 /** The rules as stored. A failed read throws — it never falls back to defaults. */
 export async function readLibraryRules(c?: InvCtx): Promise<LibraryRules> {
@@ -289,7 +304,7 @@ export async function borrowerAccount(ref: LibraryBorrowerRef): Promise<{ open: 
       .select("*")
       .eq("tenant_id", c.tenantId)
       .eq("student_id", borrowerKey(ref))
-      .or("returned_on.is.null,fine_status.eq.pending")
+      .or("returned_on.is.null,fine_status.in.(pending,collecting)")
       .order("id")
       .range(from, to),
   );
@@ -297,7 +312,7 @@ export async function borrowerAccount(ref: LibraryBorrowerRef): Promise<{ open: 
   const loans = await toLoans(c, r.rows);
   return {
     open: loans.filter((l) => !l.returnedOn).sort((a, b) => a.dueOn.localeCompare(b.dueOn)),
-    finesDue: loans.filter((l) => l.returnedOn && l.fineStatus === "pending"),
+    finesDue: loans.filter((l) => l.returnedOn && (l.fineStatus === "pending" || l.fineStatus === "collecting")),
   };
 }
 
@@ -361,6 +376,7 @@ export async function issueBooks(input: {
         p_max_open: max,
       });
       if (error) {
+        if (isLibraryMigrationPending(error.message)) throw new InvError(LIBRARY_NOT_MIGRATED, 503);
         results.push({ code, ok: false, error: error.message });
         continue;
       }
@@ -371,7 +387,9 @@ export async function issueBooks(input: {
       }
       results.push({ code, ok: true, issueId: str(r.issue_id), title: copy.title, dueOn });
     } catch (e) {
-      results.push({ code, ok: false, error: e instanceof Error ? e.message : String(e) });
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === LIBRARY_NOT_MIGRATED || isLibraryMigrationPending(msg)) throw new InvError(LIBRARY_NOT_MIGRATED, 503);
+      results.push({ code, ok: false, error: msg });
     }
   }
   return { results, borrowerName };
@@ -432,6 +450,7 @@ export async function returnBooks(input: {
         p_returned_by: input.returnedBy,
       });
       if (error) {
+        if (isLibraryMigrationPending(error.message)) throw new InvError(LIBRARY_NOT_MIGRATED, 503);
         results.push({ code, ok: false, error: error.message, title: copy.title });
         continue;
       }
@@ -450,7 +469,9 @@ export async function returnBooks(input: {
         finePaise: fine.finePaise,
       });
     } catch (e) {
-      results.push({ code, ok: false, error: e instanceof Error ? e.message : String(e) });
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === LIBRARY_NOT_MIGRATED || isLibraryMigrationPending(msg)) throw new InvError(LIBRARY_NOT_MIGRATED, 503);
+      results.push({ code, ok: false, error: msg });
     }
   }
   return { results };
@@ -492,37 +513,34 @@ export async function addCopies(input: {
   return { copies: rows.map((r) => ({ id: str(r.id), accessionNo: str(r.accession_no) })) };
 }
 
-/** Move a copy, or mark it lost / damaged / back in stock. Never while it is on loan. */
+/**
+ * Move a copy, or mark it lost / damaged / back in stock. Never while it is
+ * on loan — checked inside library_update_copy with the copy row locked, so
+ * a book issued at the same moment cannot be marked lost under the borrower.
+ */
 export async function updateCopy(input: { copyId: string; location?: string; status?: string }): Promise<{ copy: CounterCopy }> {
   const c = await invCtx();
-  const patch: Row = { updated_at: new Date().toISOString() };
-  if (typeof input.location === "string") patch.location = input.location.trim().slice(0, 120);
-  if (input.status !== undefined) {
-    if (!["available", "lost", "damaged"].includes(input.status)) {
-      throw new InvError("Status can be set to available, lost or damaged — issuing is done at the counter");
-    }
-    const { data: open, error: openErr } = await c.sb
-      .from("library_desk_issues")
-      .select("id")
-      .eq("tenant_id", c.tenantId)
-      .eq("copy_id", input.copyId)
-      .is("returned_on", null)
-      .limit(1);
-    if (openErr) throw new InvError(`Could not read loans: ${openErr.message}`, 503);
-    if ((open ?? []).length) throw new InvError("This copy is on loan — return it at the counter first", 409);
-    patch.status = input.status;
+  if (input.status !== undefined && !["available", "lost", "damaged"].includes(input.status)) {
+    throw new InvError("Status can be set to available, lost or damaged — issuing is done at the counter");
   }
-  const { data, error } = await c.sb
+  const { data, error } = await c.sb.rpc("library_update_copy", {
+    p_tenant_id: c.tenantId,
+    p_copy_id: input.copyId,
+    p_location: typeof input.location === "string" ? input.location.trim().slice(0, 120) : null,
+    p_status: input.status ?? null,
+  });
+  if (error) throw new InvError(`Copy not saved: ${error.message}`, 502);
+  const r = (data ?? {}) as Row;
+  if (r.ok !== true) throw new InvError(str(r.error) || "Copy not saved", r.code === "not_found" ? 404 : 409);
+  const { data: row, error: readErr } = await c.sb
     .from("library_desk_copies")
-    .update(patch)
+    .select("*")
     .eq("tenant_id", c.tenantId)
     .eq("id", input.copyId)
-    .select("*");
-  if (error) throw new InvError(`Copy not saved: ${error.message}`, 502);
-  const row = ((data ?? []) as Row[])[0];
-  if (!row) throw new InvError("Copy not found", 404);
-  const titles = await titlesById(c, [str(row.title_id)]);
-  return { copy: toCopy(row, titles) };
+    .maybeSingle();
+  if (readErr || !row) throw new InvError(`Copy saved, but could not be read back${readErr ? `: ${readErr.message}` : ""}`, 502);
+  const titles = await titlesById(c, [str((row as Row).title_id)]);
+  return { copy: toCopy(row as Row, titles) };
 }
 
 async function readIssue(c: InvCtx, issueId: string): Promise<Row> {
@@ -537,33 +555,81 @@ async function readIssue(c: InvCtx, issueId: string): Promise<Row> {
   return data as Row;
 }
 
+/** The school's bank accounts a fine can be paid into: ledger sub-accounts of 1010 tied to a desk bank account. */
+export async function fineBankAccounts(c?: InvCtx): Promise<FineBankAccount[]> {
+  const ctx = c ?? (await invCtx());
+  const { data, error } = await ctx.sb
+    .from("ledger_accounts")
+    .select("code, name, bank_account_id, is_bank, is_active")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("is_bank", true)
+    .eq("is_active", true)
+    .order("code");
+  if (error) throw new InvError(`Could not read the bank accounts: ${error.message}`, 503);
+  return ((data ?? []) as Row[])
+    .filter((r) => str(r.code) !== "1010" && str(r.bank_account_id))
+    .map((r) => ({ code: str(r.code), name: str(r.name), bankAccountId: str(r.bank_account_id) }));
+}
+
+/** The receipt already booked for this loan's fine, if any (ledger_post is keyed on it). */
+async function fineVoucherFor(c: InvCtx, issueId: string): Promise<{ id: string; voucherNo: string } | null> {
+  const { data, error } = await c.sb
+    .from("ledger_vouchers")
+    .select("id, voucher_no")
+    .eq("tenant_id", c.tenantId)
+    .eq("source_type", "library_fine")
+    .eq("source_id", issueId)
+    .limit(1);
+  if (error) throw new InvError(`Could not check the accounts for this fine: ${error.message}`, 503);
+  const r = ((data ?? []) as Row[])[0];
+  return r ? { id: str(r.id), voucherNo: str(r.voucher_no) } : null;
+}
+
 /**
- * Collect a pending fine: a Ledger v2 receipt (Dr Cash 1000 or Bank 1010,
- * Cr 4100 Other Income) for exactly the amount stored on the loan, then the
- * loan marked collected with the voucher number. The ledger post is keyed on
- * the loan id, so a retry after a failure in between finds the same voucher
- * instead of booking the money twice.
+ * Collect a fine, in three guarded steps so nothing can slip between them:
+ *  1. CLAIM: pending → collecting (a Waive from now on is refused);
+ *  2. BOOK: a Ledger v2 receipt — Dr Cash 1000 or the chosen bank account,
+ *     Cr 4100 Other Income — for exactly the amount stored on the loan,
+ *     keyed on the loan id, so a retry finds the same voucher;
+ *  3. LINK: collecting → collected with the voucher number.
+ * A retry of a half-finished Collect (status still "collecting") skips the
+ * claim and finishes the job. If the accounts refuse and no voucher exists,
+ * the claim is released back to pending.
  */
 export async function collectFine(input: {
   issueId: string;
   mode: string;
+  bankCode?: string;
   ref?: string;
   date?: string;
   collectedBy: string;
 }): Promise<{ voucherNo: string; finePaise: number }> {
   const c = await invCtx();
-  const account = fineDebitAccount(input.mode);
-  if (!account) throw new InvError("Choose how the fine was paid (cash, UPI or bank)");
+  const banks = input.mode === "cash" ? [] : await fineBankAccounts(c);
+  const debit = fineDebitLine(input.mode, input.bankCode, banks);
+  if (!debit.ok) throw new InvError(debit.error);
   const date = input.date || today();
   if (isoDayNumber(date) == null) throw new InvError("Date is not a date");
   const issue = await readIssue(c, input.issueId);
   const finePaise = Number(issue.fine_paise ?? 0);
   const status = fineStatusOf(issue.fine_status);
-  if (status === "collected" && str(issue.fine_voucher_no)) {
-    throw new InvError(`Already collected — receipt ${str(issue.fine_voucher_no)}`, 409);
+  if (status === "collected") {
+    throw new InvError(`Already collected${issue.fine_voucher_no ? ` — receipt ${str(issue.fine_voucher_no)}` : ""}`, 409);
   }
-  const can = canSettleFine(status, finePaise);
+  const can = canSettleFine(status, finePaise, "collect");
   if (!can.ok) throw new InvError(can.error, 409);
+
+  if (status === "pending") {
+    const { data: claimed, error: claimErr } = await c.sb
+      .from("library_desk_issues")
+      .update({ fine_status: "collecting", fine_mode: input.mode, fine_settled_by: input.collectedBy, updated_at: new Date().toISOString() })
+      .eq("tenant_id", c.tenantId)
+      .eq("id", input.issueId)
+      .eq("fine_status", "pending")
+      .select("id");
+    if (claimErr) throw new InvError(`Fine not collected: ${claimErr.message}`, 502);
+    if (!(claimed ?? []).length) throw new InvError("This fine changed meanwhile (waived or collected elsewhere) — reload", 409);
+  }
 
   const ref = refOfIssue(issue);
   const names = await borrowerNames(c, [ref]);
@@ -577,12 +643,13 @@ export async function collectFine(input: {
     createdBy: input.collectedBy,
     lines: [
       {
-        accountCode: account,
+        accountCode: debit.accountCode,
         debitPaise: finePaise,
         creditPaise: 0,
         narration: input.mode.toUpperCase(),
         party,
         instrument: { mode: input.mode, ref: (input.ref ?? "").slice(0, 80) },
+        ...(debit.subledger ? { subledgerKind: debit.subledger.kind, subledgerId: debit.subledger.id } : {}),
       },
       {
         accountCode: LIBRARY_FINE_INCOME_ACCOUNT,
@@ -593,7 +660,20 @@ export async function collectFine(input: {
       },
     ],
   });
-  if (!posted.ok) throw new InvError(`Fine not collected — the accounts refused the receipt: ${posted.error}`, 502);
+  if (!posted.ok) {
+    // Release the claim only when the accounts hold no receipt for it — an
+    // ambiguous failure stays "collecting", and a retry finishes it.
+    const existing = await fineVoucherFor(c, input.issueId).catch(() => undefined);
+    if (existing === null) {
+      await c.sb
+        .from("library_desk_issues")
+        .update({ fine_status: "pending", updated_at: new Date().toISOString() })
+        .eq("tenant_id", c.tenantId)
+        .eq("id", input.issueId)
+        .eq("fine_status", "collecting");
+    }
+    throw new InvError(`Fine not collected — the accounts refused the receipt: ${posted.error}`, 502);
+  }
 
   const { data, error } = await c.sb
     .from("library_desk_issues")
@@ -608,27 +688,26 @@ export async function collectFine(input: {
     })
     .eq("tenant_id", c.tenantId)
     .eq("id", input.issueId)
-    .eq("fine_status", "pending")
+    .eq("fine_status", "collecting")
     .select("id");
   if (error || !(data ?? []).length) {
-    // The money is booked (receipt posted.voucherNo); the loan did not take
-    // the mark. Say so plainly — retrying is safe, it finds the same receipt.
     throw new InvError(
-      `Receipt ${posted.voucherNo} is booked, but the loan was not marked collected${error ? `: ${error.message}` : " (it changed meanwhile)"}. Press Collect again to finish — it will not book twice.`,
+      `Receipt ${posted.voucherNo} is booked, but the loan was not marked collected${error ? `: ${error.message}` : ""}. Press Collect again to finish — it will not book twice.`,
       502,
     );
   }
   return { voucherNo: posted.voucherNo, finePaise };
 }
 
-/** Waive a pending fine, with the reason on record. */
+/** Waive a pending fine, with the reason on record. Refused once a Collect has claimed it or a receipt exists. */
 export async function waiveFine(input: { issueId: string; reason: string; waivedBy: string }): Promise<{ finePaise: number }> {
   const c = await invCtx();
   const reason = input.reason.trim();
   if (reason.length < 3) throw new InvError("Say why the fine is waived");
   const issue = await readIssue(c, input.issueId);
   const finePaise = Number(issue.fine_paise ?? 0);
-  const can = canSettleFine(fineStatusOf(issue.fine_status), finePaise);
+  const voucher = await fineVoucherFor(c, input.issueId);
+  const can = canSettleFine(fineStatusOf(issue.fine_status), finePaise, "waive", !!voucher);
   if (!can.ok) throw new InvError(can.error, 409);
   const { data, error } = await c.sb
     .from("library_desk_issues")
@@ -648,7 +727,7 @@ export async function waiveFine(input: { issueId: string; reason: string; waived
   return { finePaise };
 }
 
-/** Every fine still owed, oldest first (the office's "collect these" list). */
+/** Every fine still owed (or half-collected), oldest first — the office's "collect these" list. */
 export async function pendingFines(): Promise<CounterLoan[]> {
   const c = await invCtx();
   const r = await fetchAllPages<Row>((from, to) =>
@@ -656,7 +735,7 @@ export async function pendingFines(): Promise<CounterLoan[]> {
       .from("library_desk_issues")
       .select("*")
       .eq("tenant_id", c.tenantId)
-      .eq("fine_status", "pending")
+      .in("fine_status", ["pending", "collecting"])
       .order("id")
       .range(from, to),
   );

@@ -10,7 +10,7 @@ import {
   type LibraryItemCondition,
   type LibraryState,
 } from "@/lib/library";
-import { dueDateFor, fineToDate, splitScannedCodes, type LibraryBorrowerRef } from "@/lib/libraryCounter";
+import { dueDateFor, fineToDate, libraryToday, splitScannedCodes, type LibraryBorrowerRef } from "@/lib/libraryCounter";
 import {
   libraryApi,
   type CounterLoanDto,
@@ -22,8 +22,9 @@ import { LibraryFineSettle } from "@/components/library/LibraryFineSettle";
 
 type Person = { id: string; label: string; sub: string };
 
+/** The school's calendar day (IST). */
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return libraryToday();
 }
 
 /**
@@ -431,6 +432,7 @@ export function LibraryCounterPanel({
                           <LibraryFineSettle
                             issueId={l.id}
                             finePaise={l.finePaise}
+          collecting={l.fineStatus === "collecting"}
                             readOnly={readOnly}
                             onError={onError}
                             onDone={async (msg) => {

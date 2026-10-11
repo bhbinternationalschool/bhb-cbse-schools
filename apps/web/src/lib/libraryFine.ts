@@ -33,15 +33,25 @@ export type LibraryFineResult =
     }
   | { ok: false; error: string };
 
-/** How a loan's fine stands once the book is back. */
-export type LibraryFineStatus = "none" | "pending" | "collected" | "waived";
+/**
+ * How a loan's fine stands once the book is back. "collecting" = a Collect
+ * has claimed it and is booking the receipt; only that Collect (or a retry
+ * of it) can finish it, and nothing can waive it meanwhile.
+ */
+export type LibraryFineStatus = "none" | "pending" | "collecting" | "collected" | "waived";
 
 export const LIBRARY_FINE_STATUSES: readonly LibraryFineStatus[] = [
   "none",
   "pending",
+  "collecting",
   "collected",
   "waived",
 ];
+
+export function fineStatusOf(v: unknown): LibraryFineStatus {
+  const s = String(v ?? "");
+  return (LIBRARY_FINE_STATUSES as readonly string[]).includes(s) ? (s as LibraryFineStatus) : "none";
+}
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -103,17 +113,29 @@ export function initialFineStatus(finePaise: number): LibraryFineStatus {
 }
 
 /**
- * Which way a fine may move. Only a pending fine is settled — once, either
- * collected (with a receipt) or waived (with a reason). A collected fine is
- * never quietly turned back; reversing money is an accounts job.
+ * Which way a fine may move.
+ *  - collect: a pending fine, or one a Collect already claimed ("collecting")
+ *    — the retry after a half-finished Collect, which finds the receipt the
+ *    first attempt booked instead of booking another.
+ *  - waive: only a pending fine. Never one being collected, never one with
+ *    a receipt (`hasVoucher`), never twice.
+ * A collected fine is never quietly turned back; reversing money is an
+ * accounts job.
  */
 export function canSettleFine(
   status: LibraryFineStatus,
   finePaise: number,
+  action: "collect" | "waive",
+  hasVoucher = false,
 ): { ok: true } | { ok: false; error: string } {
   if (finePaise <= 0) return { ok: false, error: "This loan has no fine to settle" };
   if (status === "collected") return { ok: false, error: "This fine is already collected" };
   if (status === "waived") return { ok: false, error: "This fine was already waived" };
-  if (status !== "pending") return { ok: false, error: "This fine is not open" };
-  return { ok: true };
+  if (action === "waive") {
+    if (status === "collecting" || hasVoucher) {
+      return { ok: false, error: "This fine is being collected — a receipt exists or is being booked; it cannot be waived" };
+    }
+    return status === "pending" ? { ok: true } : { ok: false, error: "This fine is not open" };
+  }
+  return status === "pending" || status === "collecting" ? { ok: true } : { ok: false, error: "This fine is not open" };
 }
