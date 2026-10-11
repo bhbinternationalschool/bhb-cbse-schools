@@ -111,8 +111,10 @@ import {
   effectivePassPercent,
   gradeForPercent,
   gradeLabel,
+  gradedPartsForSubject,
   NEP_CO_SCHOLASTIC_AREAS,
   normalizeAssessmentSchemes,
+  parsePartGrade,
   schemeForClass,
   splitForSubject,
   type AssessmentScheme,
@@ -140,8 +142,11 @@ export {
   componentsTotalMax,
   gradeForPercent,
   gradeLabel,
+  gradedPartsForSubject,
+  parsePartGrade,
   schemeForClass,
   type AssessmentScheme,
+  type GradedPart,
   type SchemeComponent,
 } from "@/lib/examSchemes";
 
@@ -2339,9 +2344,26 @@ export function buildEmptyMarksGrid(
   const partsBySubject = new Map(
     subjects.map((sub) => [sub.id, scheme ? componentsForSubject(scheme, term.code, sub.code) : []] as const),
   );
+  const gradedBySubject = new Map(
+    subjects.map((sub) => [sub.id, scheme ? gradedPartsForSubject(scheme, term.code, sub.code) : []] as const),
+  );
   for (const st of students) {
     for (const sub of subjects) {
       const parts = partsBySubject.get(sub.id) ?? [];
+      // Graded parts (Handwriting A/B/C) sit after the marks: a picked
+      // letter, never a number.
+      const gradedRows = (gradedBySubject.get(sub.id) ?? []).map((g): StudentSubjectMark => {
+        const prev = map.get(`${st.id}:${sub.id}:${g.code}`);
+        return {
+          studentId: st.id,
+          subjectId: sub.id,
+          component: g.code,
+          marksObtained: null,
+          grade: prev?.grade && prev.grade !== "—" ? prev.grade : "—",
+          remark: prev?.remark ?? "",
+          remarkSource: prev?.remarkSource ?? "manual",
+        };
+      });
       if (parts.length === 0) {
         const prev = map.get(`${st.id}:${sub.id}:`);
         const max = effectiveMaxMarks(term, sub);
@@ -2355,6 +2377,7 @@ export function buildEmptyMarksGrid(
           remark: prev?.remark ?? "",
           remarkSource: prev?.remarkSource ?? "manual",
         });
+        out.push(...gradedRows);
         continue;
       }
       for (const c of parts) {
@@ -2370,6 +2393,7 @@ export function buildEmptyMarksGrid(
           remarkSource: prev?.remarkSource ?? "manual",
         });
       }
+      out.push(...gradedRows);
     }
   }
   return out;
@@ -2482,13 +2506,53 @@ export function prepareMarkSheet(
     if (component) return partsOf(sub).find((c) => c.code === component)?.maxMarks ?? 0;
     return sub ? effectiveMaxMarks(term, sub) : 100;
   };
+  // Graded parts (Handwriting A/B/C): a letter from the part's list, never
+  // a number, and never part of any total.
+  const gradedCache = new Map<string, ReturnType<typeof gradedPartsForSubject>>();
+  const gradedOf = (sub: ExamSubject | undefined) => {
+    if (!sub) return [];
+    let hit = gradedCache.get(sub.id);
+    if (!hit) {
+      hit = gradedPartsForSubject(scheme, term.code, sub.code);
+      gradedCache.set(sub.id, hit);
+    }
+    return hit;
+  };
+  const gradedPartOf = (sub: ExamSubject | undefined, component: string) =>
+    component ? gradedOf(sub).find((g) => g.code === component) ?? null : null;
+  // A part's letter saved earlier and sent back UNCHANGED is not re-judged:
+  // when the school changes a graded part's list, scale or exams mid-term,
+  // the stale letter must not block every later save of the section (the
+  // staff app sends the subject's other rows back). It is kept exactly as
+  // stored; the desk shows it as "not on list" for someone to change.
+  const storedRow = new Map(
+    (existing?.marks ?? []).map((m) => [`${m.studentId}:${m.subjectId}:${m.component}`, m] as const),
+  );
+  const unchangedLetterRow = (m: StudentSubjectMark, component: string): boolean => {
+    if (!component || m.marksObtained != null) return false;
+    const prev = storedRow.get(`${m.studentId}:${m.subjectId}:${component}`);
+    return !!prev && prev.marksObtained == null && (prev.grade || "") === (m.grade || "");
+  };
 
   for (const m of input.marks) {
     const sub = subById.get(m.subjectId);
     if (!sub) continue;
+    if (unchangedLetterRow(m, String(m.component ?? "").toUpperCase())) continue;
     const parts = partsOf(sub);
     const partByCode = new Map(parts.map((c) => [c.code, c]));
     const component = String(m.component ?? "").toUpperCase();
+    const graded = gradedPartOf(sub, component);
+    if (graded) {
+      if (m.marksObtained != null) {
+        return {
+          ok: false,
+          error: `${sub.name} (${graded.label}) is graded (${graded.grades.join(", ")}), not marked — pick a grade, not a number`,
+        };
+      }
+      const g = parsePartGrade(graded.grades, m.grade);
+      if (!g.ok) return { ok: false, error: `${sub.name} (${graded.label}): ${g.error}` };
+      continue;
+    }
     if (component && !partByCode.has(component)) {
       return {
         ok: false,
@@ -2520,6 +2584,18 @@ export function prepareMarkSheet(
     if (absentKeys.has(absenceKey(m.studentId, m.subjectId))) {
       // Absent for this paper: no marks, whatever the cell held.
       return normalizeMark({ ...m, component, marksObtained: null, grade: "AB" });
+    }
+    if (unchangedLetterRow(m, component)) return normalizeMark({ ...m, component });
+    const graded = gradedPartOf(sub, component);
+    if (graded) {
+      // Validated above; "" (not entered) is stored as "—", never a grade.
+      const g = parsePartGrade(graded.grades, m.grade);
+      return normalizeMark({
+        ...m,
+        component,
+        marksObtained: null,
+        grade: g.ok && g.grade ? g.grade : "—",
+      });
     }
     const picked =
       scheme.displayMode !== "marks_grade" && m.marksObtained == null
@@ -2900,6 +2976,13 @@ export type ReportCardLine = {
     /** That own pass line, when the part has one. */
     passPercent?: number | null;
   }[];
+  /**
+   * Graded parts of a split subject (Handwriting: A) from THIS exam's own
+   * sheet. Printed under the subject; never in maxMarks, marksObtained,
+   * the grade, the card's totals, pass/fail or rank. grade null = not
+   * entered (never a fail).
+   */
+  gradedParts?: { code: string; label: string; grade: string | null }[];
 };
 
 export type ReportCardComponentLine = {
@@ -3151,9 +3234,19 @@ function subjectStandingOnSheet(
   pickedGrade: string;
   remark: string;
   parts: ReportCardLine["parts"];
+  gradedParts: NonNullable<ReportCardLine["gradedParts"]>;
 } {
-  const rows = marksForExamSubject(sheet, studentId, subject, allSubjects);
+  const allRows = marksForExamSubject(sheet, studentId, subject, allSubjects);
   const components = componentsForSubject(scheme, term.code, subject.code);
+  // Graded parts never reach the marks below: a Handwriting "A" is not a
+  // whole mark, not a picked subject grade, not a number in any sum.
+  const gradedSpec = gradedPartsForSubject(scheme, term.code, subject.code);
+  const gradedCodes = new Set(gradedSpec.map((g) => g.code));
+  const rows = allRows.filter((r) => !gradedCodes.has(r.component));
+  const gradedParts = gradedSpec.map((g) => {
+    const got = allRows.find((r) => r.component === g.code)?.grade ?? "";
+    return { code: g.code, label: g.label, grade: got && got !== "—" ? got : null };
+  });
   const remark = rows.find((r) => r.remark)?.remark ?? "";
   if (components.length === 0) {
     const whole = rows.find((r) => !r.component) ?? rows[0];
@@ -3163,6 +3256,7 @@ function subjectStandingOnSheet(
       pickedGrade: whole?.grade ?? "—",
       remark,
       parts: [],
+      gradedParts,
     };
   }
   let sum = 0;
@@ -3191,6 +3285,7 @@ function subjectStandingOnSheet(
     pickedGrade: rows.find((r) => r.grade && r.grade !== "—")?.grade ?? "—",
     remark,
     parts,
+    gradedParts,
   };
 }
 
@@ -3400,6 +3495,19 @@ export function buildReportCard(input: {
 
       const lineAbsent = contributors.length > 0 && absentOn === contributors.length;
       const aggGrade = lineAbsent ? "AB" : gradeOf(obtainedScaled, displayMax);
+      // Graded parts are letters: never averaged across exams, read from
+      // THIS exam's own sheet (like co-scholastic) and printed beside it.
+      const ownGraded = gradedPartsForSubject(scheme, term.code, sub.code).length
+        ? subjectStandingOnSheet(
+            findMarkSheet(ay, term.id, input.student.sectionId, state),
+            input.student.id,
+            sub,
+            allExamSubs,
+            term,
+            scheme,
+            passLine,
+          ).gradedParts
+        : [];
       lines.push({
         subjectId: sub.id,
         subjectName: sub.name,
@@ -3411,6 +3519,7 @@ export function buildReportCard(input: {
         remark,
         passPercent: splitForSubject(scheme, sub.code)?.passPercent ?? passLine,
         parts: [],
+        ...(ownGraded.length ? { gradedParts: ownGraded } : {}),
       });
 
       if (obtainedScaled != null) {
@@ -3528,6 +3637,7 @@ export function buildReportCard(input: {
       remark: standing.remark,
       passPercent: splitForSubject(scheme, sub.code)?.passPercent ?? passLine,
       parts: standing.parts,
+      ...(standing.gradedParts.length ? { gradedParts: standing.gradedParts } : {}),
     });
     if (obtained != null) {
       totalObtained += obtained;
@@ -3613,6 +3723,28 @@ export function canPrintReportCard(studentId: string): {
     return { allowed: false, message: hold.message };
   }
   return { allowed: true, message: "" };
+}
+
+/**
+ * The line printed under a subject on the report card: its marks parts
+ * ("Oral 18/20 · Written 71/80", when the card does not already give them
+ * columns) and its graded parts ("Handwriting: A"; "—" until entered).
+ * "" when the subject has neither.
+ */
+export function reportLinePartsText(
+  line: Pick<ReportCardLine, "parts" | "gradedParts" | "absent">,
+  opts: { includeMarksParts: boolean },
+): string {
+  const bits: string[] = [];
+  if (opts.includeMarksParts) {
+    for (const p of line.parts ?? []) {
+      bits.push(`${p.label} ${line.absent ? "AB" : p.marksObtained == null ? "—" : p.marksObtained}/${p.maxMarks}`);
+    }
+  }
+  for (const g of line.gradedParts ?? []) {
+    bits.push(`${g.label}: ${g.grade ?? "—"}`);
+  }
+  return bits.join(" · ");
 }
 
 export function evaluatePromotionPass(

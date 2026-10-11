@@ -347,6 +347,7 @@ SELFTESTS=(
   test:exams-sheet-safety
   test:exam-schemes
   test:exam-readiness
+  test:exam-graded-parts
   test:exam-report-templates
   test:exam-paper-question-types
   test:exam-paper-print-layout

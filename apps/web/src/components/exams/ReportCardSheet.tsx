@@ -5,7 +5,7 @@
  * followed dark mode would print white ink on white stock. */
 
 import { SchoolLetterhead } from "@/components/shared/SchoolLetterhead";
-import { type ReportCard } from "@/lib/exams";
+import { reportLinePartsText, type ReportCard } from "@/lib/exams";
 import { StudentAvatar } from "@/components/students/StudentAvatar";
 import {
   schoolShortName,
@@ -70,6 +70,10 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
         ([, label]) => label,
       )
     : [];
+  // Under each subject: its graded parts (Handwriting: A — never in the
+  // total) and, when the card has no part columns, its marks parts.
+  const partsLine = (line: ReportCard["lines"][number], includeMarksParts: boolean) =>
+    reportLinePartsText(line, { includeMarksParts });
   const st = card.student;
   const health = p.showHealth
     ? [
@@ -198,7 +202,12 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
             <ul className={`mt-2 grid gap-x-8 gap-y-1.5 sm:grid-cols-2 ${text}`}>
               {card.lines.map((line) => (
                 <li key={line.subjectId} className="flex items-baseline justify-between gap-3 border-b border-[rgba(32,48,80,0.08)] py-1">
-                  <span className="font-medium text-[var(--brand-deep)]">{line.subjectName}</span>
+                  <span className="font-medium text-[var(--brand-deep)]">
+                    {line.subjectName}
+                    {partsLine(line, false) ? (
+                      <span className="block text-[10px] font-normal text-[var(--muted)]">{partsLine(line, false)}</span>
+                    ) : null}
+                  </span>
                   <span className="text-right font-semibold">
                     {line.absent ? "AB" : line.gradeLabel || line.grade}
                     {!line.absent && line.gradeLabel && line.grade !== "—" ? (
@@ -235,7 +244,14 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
             <tbody>
               {card.lines.map((line) => (
                 <tr key={line.subjectId} className="border-b border-[rgba(32,48,80,0.08)]">
-                  <td className={`${cell} font-medium text-[var(--brand-deep)]`}>{line.subjectName}</td>
+                  <td className={`${cell} font-medium text-[var(--brand-deep)]`}>
+                    {line.subjectName}
+                    {partsLine(line, !gradesOnly && partCodes.length === 0) ? (
+                      <span className="block text-[10px] font-normal text-[var(--muted)]">
+                        {partsLine(line, !gradesOnly && partCodes.length === 0)}
+                      </span>
+                    ) : null}
+                  </td>
                   {examColumns.map((c) => {
                     const comp = card.components.find((x) => x.examTermId === c.id && x.subjectId === line.subjectId);
                     return (
@@ -293,6 +309,11 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
           <p className="mt-2 text-[10px] text-[var(--muted)]">
             {partCodes.map((pc) => `${pc.code} = ${pc.label}`).join(" · ")}
             {card.lines.some((l) => l.parts.some((x) => x.failed)) ? " · * below the pass line in that part" : ""}
+          </p>
+        ) : null}
+        {!gradesOnly && card.lines.some((l) => (l.gradedParts ?? []).length > 0) ? (
+          <p className="mt-1 text-[10px] text-[var(--muted)]">
+            Graded parts (e.g. {card.lines.flatMap((l) => l.gradedParts ?? [])[0]?.label}) are shown as grades and are not counted in the marks or the total.
           </p>
         ) : null}
         {examColumns.length > 0 ? (
