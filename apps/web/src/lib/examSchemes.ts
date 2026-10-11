@@ -79,6 +79,32 @@ export type SubjectSplitPart = {
   passPercent: number | null;
   /** The Masters component this part came from, when it came from one. */
   masterCode?: string;
+  /**
+   * "marks" (the default, and every part saved before 2026-10-11) or
+   * "grade": Handwriting A/B/C. A graded part has no maximum (termMax and
+   * unitTestMax are 0), no pass line, and NEVER counts toward the subject's
+   * total, percentage, grade, pass/fail or rank — English = Oral 20 +
+   * Written 80 = 100 whatever Handwriting got.
+   */
+  assess?: PartAssess;
+  /** Graded parts: the letters offered — the 3- or 5-point co-scholastic
+   * scale, or the school's own list in `grades`. */
+  gradeScale?: CoScholasticScale | "custom";
+  /** Graded parts with gradeScale "custom": the labels, best first. */
+  grades?: string[];
+  /** Graded parts: assessed in term exams, unit tests, or both. */
+  appliesTo?: GradedPartAppliesTo;
+};
+
+/** How a part of a split subject is assessed. */
+export type PartAssess = "marks" | "grade";
+export type GradedPartAppliesTo = "term" | "unit" | "both";
+
+/** A graded part as one exam asks for it: the letters a teacher may pick. */
+export type GradedPart = {
+  code: string;
+  label: string;
+  grades: string[];
 };
 
 /** How one subject is split, overriding the scheme's components for it. */
@@ -256,6 +282,136 @@ export function splitPartCode(raw: string): string {
     .slice(0, 8);
 }
 
+/** Custom grade labels: trimmed, at most 12 characters, no repeats
+ * (case-insensitive), at most 10. */
+export function normalizeGradeList(list: unknown): string[] {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of list) {
+    const g = String(raw ?? "").trim().slice(0, 12);
+    const key = g.toUpperCase();
+    // "AB" is the absence mark and "—" is "not entered"; neither is a grade.
+    if (!g || key === "AB" || g === "—" || seen.has(key)) continue;
+    seen.add(key);
+    out.push(g);
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
+/**
+ * One part as stored. A part saved before graded parts existed is a marks
+ * part; a graded part loses its maxima and pass line (they mean nothing for
+ * a letter) and keeps its scale, list and the exams it applies to.
+ */
+function normalizeSplitPart(p: Partial<SubjectSplitPart>, code: string): SubjectSplitPart {
+  const base = {
+    code,
+    label: String(p?.label ?? code).trim().slice(0, 40) || code,
+    kind: (p?.kind === "internal" ? "internal" : "exam") as ComponentKind,
+    ...(p?.masterCode ? { masterCode: String(p.masterCode).trim().toUpperCase() } : {}),
+  };
+  if (p?.assess === "grade") {
+    const gradeScale = p.gradeScale === "five" ? "five" : p.gradeScale === "custom" ? "custom" : "three";
+    return {
+      ...base,
+      termMax: 0,
+      unitTestMax: 0,
+      passPercent: null,
+      assess: "grade",
+      gradeScale,
+      grades: gradeScale === "custom" ? normalizeGradeList(p.grades) : [],
+      appliesTo: p.appliesTo === "unit" ? "unit" : p.appliesTo === "both" ? "both" : "term",
+    };
+  }
+  return {
+    ...base,
+    termMax: Math.max(0, Math.floor(Number(p?.termMax) || 0)),
+    unitTestMax: Math.max(0, Math.floor(Number(p?.unitTestMax) || 0)),
+    passPercent: clampPercent(p?.passPercent),
+    assess: "marks",
+  };
+}
+
+export function isGradedPart(p: Pick<SubjectSplitPart, "assess">): boolean {
+  return p.assess === "grade";
+}
+
+/** The letters a graded part offers, best first. */
+export function gradesForPart(p: Pick<SubjectSplitPart, "gradeScale" | "grades">): string[] {
+  if (p.gradeScale === "custom") return normalizeGradeList(p.grades);
+  return coScholasticRatingsFor(p.gradeScale === "five" ? "five" : "three");
+}
+
+/** Problems the scheme editor shows before a save; [] = fine. */
+export function subjectSplitProblems(split: SubjectSplit): string[] {
+  const out: string[] = [];
+  const codes = new Set<string>();
+  for (const p of split.parts) {
+    const code = splitPartCode(p.code);
+    const name = p.label?.trim() || code || "A part";
+    if (!code) out.push(`${split.subjectCode}: ${name} needs a code`);
+    else if (codes.has(code)) out.push(`${split.subjectCode}: the code ${code} is used twice`);
+    codes.add(code);
+    if (isGradedPart(p)) {
+      if (p.gradeScale === "custom" && normalizeGradeList(p.grades).length < 2) {
+        out.push(`${split.subjectCode}: ${name} is graded on a custom list — give at least two grades`);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Is a graded part asked for in this exam? Term exams (Half-yearly /
+ * Annual) unless it applies to unit tests only, unit tests when it applies
+ * to them.
+ */
+export function gradedPartAppliesToTerm(
+  p: Pick<SubjectSplitPart, "appliesTo">,
+  termCode: string,
+): boolean {
+  const unit = isUnitTestCode(termCode);
+  const a = p.appliesTo ?? "term";
+  return a === "both" || (unit ? a === "unit" : a === "term");
+}
+
+/**
+ * The graded parts ONE subject has in ONE exam (Handwriting: A, B, C), in
+ * split order. Never part of componentsForSubject: those are the marks
+ * columns, and everything that totals marks reads only them.
+ */
+export function gradedPartsForSubject(
+  scheme: AssessmentScheme,
+  termCode: string,
+  subjectCode: string,
+): GradedPart[] {
+  const split = splitForSubject(scheme, subjectCode);
+  if (!split) return [];
+  return split.parts
+    .filter((p) => isGradedPart(p) && gradedPartAppliesToTerm(p, termCode))
+    .map((p) => ({ code: p.code, label: p.label, grades: gradesForPart(p) }))
+    .filter((p) => p.grades.length > 0);
+}
+
+/**
+ * A grade typed or sent for a graded part: the matching letter from its
+ * list (case-insensitive), "AB" for absent, or "" for not entered. A grade
+ * not on the list is refused — never stored as something else.
+ */
+export function parsePartGrade(
+  grades: string[],
+  value: unknown,
+): { ok: true; grade: string } | { ok: false; error: string } {
+  const raw = String(value ?? "").trim();
+  if (raw === "" || raw === "—") return { ok: true, grade: "" };
+  if (raw.toUpperCase() === "AB") return { ok: true, grade: "AB" };
+  const hit = grades.find((g) => g.toUpperCase() === raw.toUpperCase());
+  if (hit) return { ok: true, grade: hit };
+  return { ok: false, error: `"${raw}" is not one of the grades (${grades.join(", ")})` };
+}
+
 export function normalizeSubjectSplits(list: unknown): SubjectSplit[] {
   if (!Array.isArray(list)) return [];
   const seenSubjects = new Set<string>();
@@ -268,18 +424,8 @@ export function normalizeSubjectSplits(list: unknown): SubjectSplit[] {
     for (const p of (Array.isArray(raw?.parts) ? raw.parts : []) as Partial<SubjectSplitPart>[]) {
       const code = splitPartCode(String(p?.code ?? ""));
       if (!code || seen.has(code)) continue;
-      const termMax = Math.max(0, Math.floor(Number(p?.termMax) || 0));
-      const unitTestMax = Math.max(0, Math.floor(Number(p?.unitTestMax) || 0));
       seen.add(code);
-      parts.push({
-        code,
-        label: String(p?.label ?? code).trim().slice(0, 40) || code,
-        termMax,
-        unitTestMax,
-        kind: p?.kind === "internal" ? "internal" : "exam",
-        passPercent: clampPercent(p?.passPercent),
-        ...(p?.masterCode ? { masterCode: String(p.masterCode).trim().toUpperCase() } : {}),
-      });
+      parts.push(normalizeSplitPart(p, code));
     }
     // A split with no parts is no split: the subject falls back to the
     // scheme's own components.
@@ -304,9 +450,12 @@ export function splitForSubject(
  *
  * A subject with its own split uses it — term-exam marks for Half-yearly
  * and Annual, unit-test marks for unit tests, and a part with 0 marks for
- * this kind of exam is simply not assessed in it. A split whose parts are
- * ALL 0 for this exam leaves the subject as one whole mark. Every other
- * subject keeps the scheme's components as before.
+ * this kind of exam is simply not assessed in it. A split whose MARKS parts
+ * are all 0 for this exam leaves the subject as one whole mark (a graded
+ * part, if any, still sits beside it); a split with no marks parts at all
+ * keeps the scheme's components. Every other subject keeps the
+ * scheme's components as before. Graded parts are not returned: this is
+ * the list every total is summed over.
  */
 export function componentsForSubject(
   scheme: AssessmentScheme,
@@ -315,8 +464,14 @@ export function componentsForSubject(
 ): SchemeComponent[] {
   const split = splitForSubject(scheme, subjectCode);
   if (!split) return componentsForTerm(scheme, termCode);
+  // A split holding ONLY graded parts (just "Handwriting A/B/C") adds a
+  // letter; it does not re-decide how the subject is marked, so the marks
+  // side stays the scheme's components — not a silent switch to one mark.
+  if (split.parts.every(isGradedPart)) return componentsForTerm(scheme, termCode);
   const unitTest = isUnitTestCode(termCode);
+  // Graded parts are never a marks column — see gradedPartsForSubject.
   return split.parts
+    .filter((p) => !isGradedPart(p))
     .map((p) => ({
       code: p.code,
       label: p.label,
@@ -383,6 +538,7 @@ export function splitPartsFromMasterComponents(
       kind: "exam",
       passPercent: null,
       masterCode: full,
+      assess: "marks",
     });
   }
   return out;
@@ -833,6 +989,8 @@ export function schemeSummary(scheme: AssessmentScheme): string {
   }
   if ((scheme.subjectSplits ?? []).length) {
     parts.push(`${scheme.subjectSplits.length} subject split${scheme.subjectSplits.length === 1 ? "" : "s"}`);
+    const graded = scheme.subjectSplits.reduce((n, x) => n + x.parts.filter(isGradedPart).length, 0);
+    if (graded) parts.push(`${graded} graded part${graded === 1 ? "" : "s"}`);
   }
   parts.push(gradeScaleLabel(scheme.gradeScale).split(" ")[0]!);
   parts.push(displayModeLabel(scheme.displayMode).toLowerCase());

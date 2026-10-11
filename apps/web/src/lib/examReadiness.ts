@@ -19,6 +19,9 @@ export type ReadinessColumn = {
   subjectName: string;
   /** SchemeComponent code, "" for the whole subject. */
   component: string;
+  /** A graded part (Handwriting A/B/C): filled when it has a letter,
+   * whatever the scheme's entry mode. */
+  graded?: boolean;
 };
 
 export type SectionReadinessInput = {
@@ -62,12 +65,16 @@ export function sectionReadiness(input: SectionReadinessInput): SectionReadiness
   }
 
   const markKey = (st: string, sub: string, comp: string) => `${st}\u0000${sub}\u0000${comp}`;
+  const gradedCols = new Set(
+    input.columns.filter((c) => c.graded).map((c) => `${c.subjectId}\u0000${c.component}`),
+  );
   const entered = new Set<string>();
   for (const m of sheet?.marks ?? []) {
-    const has =
-      input.entryMode === "grades"
-        ? !!m.grade && m.grade.trim() !== "" && m.grade !== "—"
-        : m.marksObtained != null;
+    const byGrade =
+      input.entryMode === "grades" || gradedCols.has(`${m.subjectId}\u0000${m.component ?? ""}`);
+    const has = byGrade
+      ? !!m.grade && m.grade.trim() !== "" && m.grade !== "—"
+      : m.marksObtained != null;
     if (has) entered.add(markKey(m.studentId, m.subjectId, m.component ?? ""));
   }
   const absent = new Set((sheet?.absences ?? []).map((a) => `${a.studentId}\u0000${a.subjectId}`));

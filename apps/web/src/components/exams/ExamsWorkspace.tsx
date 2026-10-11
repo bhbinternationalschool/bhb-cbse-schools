@@ -22,6 +22,7 @@ import {
   parseCoScholasticRating,
   coScholasticDomainLabel,
   componentsForSubject,
+  gradedPartsForSubject,
   createExamTerm,
   deactivateExamTerm,
   deleteExamTerm,
@@ -173,7 +174,7 @@ const SETUP_STEPS: StepDef<SetupStep>[] = [
   {
     id: "schemes",
     title: "Assessment schemes",
-    what: "How each class band is graded: marks or grades, grade bands, subject splits (e.g. written + oral) and co-scholastic areas. Classes not given a scheme use the default.",
+    what: "How each class band is graded: marks or grades, grade bands, subject splits (e.g. written + oral, with a graded part like Handwriting A/B/C that is not counted in the total) and co-scholastic areas. Classes not given a scheme use the default.",
   },
   {
     id: "exams",
@@ -191,8 +192,10 @@ function cellKey(studentId: string, subjectId: string, component = "") {
   return `${studentId}:${subjectId}:${component}`;
 }
 
-/** One column of the marks grid: a subject, or one component of it. */
-type GridColumn = { subject: ExamSubject; component: SchemeComponent | null };
+/** One column of the marks grid: a subject, or one component of it. A
+ * graded part (Handwriting A/B/C) carries `grades` — a letter picker, never
+ * a number, and outside every total. */
+type GridColumn = { subject: ExamSubject; component: SchemeComponent | null; grades?: string[] };
 
 function columnKey(col: GridColumn): string {
   return `${col.subject.id}:${col.component?.code ?? ""}`;
@@ -226,6 +229,9 @@ type MarkRowProps = {
   onAbsentReason: (studentId: string, reason: string) => void;
   onMark: (studentId: string, subjectId: string, component: string, value: string) => void;
   onGrade: (studentId: string, subjectId: string, component: string, grade: string) => void;
+  /** A graded part's letter (AB included) — that part only, never the
+   * subject's absence or its marks. */
+  onPartGrade: (studentId: string, subjectId: string, component: string, grade: string) => void;
   onRating: (studentId: string, domain: CoScholasticDomain, value: string) => void;
   /** Photograph this child's answer sheet for suggested marks; absent = not offered here. */
   onScan?: (studentId: string) => void;
@@ -265,6 +271,7 @@ const MarkRow = memo(function MarkRow({
   onAbsentReason,
   onMark,
   onGrade,
+  onPartGrade,
   onRating,
   onScan,
 }: MarkRowProps) {
@@ -335,6 +342,36 @@ const MarkRow = memo(function MarkRow({
               >
                 —
               </span>
+            ) : col.grades ? (
+              (() => {
+                const v = values[key] ?? "";
+                // A letter saved before the part's list changed: shown as it
+                // is, flagged, until someone changes or clears it.
+                const stale = v !== "" && v !== "AB" && !col.grades.includes(v);
+                return (
+              <select
+                className={`field !w-16 !px-1 !py-1 text-center ${stale ? "!border-[var(--danger)] !text-[var(--danger)]" : ""}`}
+                disabled={locked}
+                value={v}
+                onChange={(e) => onPartGrade(st.id, sub.id, code, e.target.value)}
+                aria-label={`${st.fullName} ${name} grade`}
+                title={
+                  stale
+                    ? `"${v}" is not on this part's list (${col.grades.join(", ")}) — change it or clear it (—)`
+                    : "Graded — type the letter to pick it. AB = absent for this part only. Not counted in the total."
+                }
+              >
+                <option value="">—</option>
+                {stale ? <option value={v}>{v} · not on list</option> : null}
+                {col.grades.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+                <option value="AB">AB · absent</option>
+              </select>
+                );
+              })()
             ) : entryMode === "grades" ? (
               <select
                 className="field !w-16 !px-1 !py-1 text-center"
@@ -846,6 +883,14 @@ export function ExamsWorkspace() {
       const parts = scheme ? componentsForSubject(scheme, term.code, subject.code) : [];
       if (parts.length === 0) out.push({ subject, component: null });
       else for (const component of parts) out.push({ subject, component });
+      // Graded parts after the marks: English Oral · Written · Handwriting.
+      for (const g of scheme ? gradedPartsForSubject(scheme, term.code, subject.code) : []) {
+        out.push({
+          subject,
+          component: { code: g.code, label: g.label, maxMarks: 0, kind: "internal" },
+          grades: g.grades,
+        });
+      }
     }
     return out;
   }, [subjects, scheme, term]);
@@ -871,7 +916,7 @@ export function ExamsWorkspace() {
         const c = gridIndex.get(cellKey(st.id, col.subject.id, col.component?.code ?? ""));
         values[columnKey(col)] = absentCells.has(absenceKey(st.id, col.subject.id))
           ? "AB"
-          : entryMode === "grades"
+          : entryMode === "grades" || col.grades
             ? c?.grade && c.grade !== "—"
               ? c.grade
               : ""
@@ -1048,6 +1093,25 @@ export function ExamsWorkspace() {
       setDirty(true);
     },
     [takesBy, setAbsentCell],
+  );
+
+  /** A graded part (Handwriting): the letter, "AB" included, on that part's
+   * row alone. Absence of the subject (and its Oral/Written marks) is not
+   * touched — AB here means absent for the handwriting check only. */
+  const setPartGrade = useCallback(
+    (studentId: string, subjectId: string, component: string, grade: string) => {
+      const takes = takesBy.get(studentId);
+      if (takes && !takes.has(subjectId)) return;
+      setGrid((prev) =>
+        prev.map((m) =>
+          m.studentId === studentId && m.subjectId === subjectId && m.component === component
+            ? { ...m, marksObtained: null, grade: grade || "—" }
+            : m,
+        ),
+      );
+      setDirty(true);
+    },
+    [takesBy],
   );
 
   const setCoScholasticRating = useCallback(
@@ -2638,8 +2702,13 @@ export function ExamsWorkspace() {
                               {col.component.label}
                             </span>
                           ) : null}
-                          <div className="text-[10px] font-normal text-[var(--muted)]">
-                            {entryMode === "grades"
+                          <div
+                            className="text-[10px] font-normal text-[var(--muted)]"
+                            title={col.grades ? "Graded part — not counted in the subject total" : undefined}
+                          >
+                            {col.grades
+                              ? `graded ${col.grades.join("/")} · not in total`
+                              : entryMode === "grades"
                               ? "grade"
                               : `/${col.component ? col.component.maxMarks : term ? effectiveMaxMarks(term, col.subject) : "—"}`}
                           </div>
@@ -2671,6 +2740,7 @@ export function ExamsWorkspace() {
                             onAbsentReason={setAbsentReason}
                             onMark={setMark}
                             onGrade={setGrade}
+                            onPartGrade={setPartGrade}
                             onRating={setCoScholasticRating}
                             onScan={canScan ? setScanStudentId : undefined}
                           />

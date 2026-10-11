@@ -10,12 +10,21 @@
  *
  * Parts are suggested from the subject's components in Masters, so the
  * office types marks, not codes.
+ *
+ * A part may be GRADED instead of marked (director, 11 Oct 2026: English =
+ * Oral 20 + Written 80, Handwriting graded A/B/C). A graded part has no
+ * marks, picks a letter from the 3-/5-point scale or the school's own list,
+ * and never counts toward the subject's total, grade, pass or rank.
  */
 
 import { useMemo, useState } from "react";
 import {
+  gradesForPart,
+  isGradedPart,
   splitPartCode,
   splitPartsFromMasterComponents,
+  subjectSplitProblems,
+  type GradedPartAppliesTo,
   type SubjectSplit,
   type SubjectSplitPart,
 } from "@/lib/examSchemes";
@@ -57,8 +66,8 @@ function defaultParts(subject: MasterSubject, masters: MastersState | null): Sub
   const parts = splitPartsFromMasterComponents(subject.code, kids);
   if (parts.length === 0) {
     return [
-      { code: "WRIT", label: "Written", termMax: 80, unitTestMax: 0, kind: "exam", passPercent: null },
-      { code: "ORAL", label: "Oral", termMax: 20, unitTestMax: 0, kind: "internal", passPercent: null },
+      { code: "WRIT", label: "Written", termMax: 80, unitTestMax: 0, kind: "exam", passPercent: null, assess: "marks" },
+      { code: "ORAL", label: "Oral", termMax: 20, unitTestMax: 0, kind: "internal", passPercent: null, assess: "marks" },
     ];
   }
   // A written / theory part takes the larger share (80); the rest split 20.
@@ -116,6 +125,27 @@ export function SubjectSplitsEditor({
     patchSplit(i, { parts: splits[i]!.parts.map((p, j) => (j === k ? { ...p, ...next } : p)) });
   }
 
+  /** Marked ⇄ graded. A graded part drops its marks and pass line — they
+   * would mean nothing beside a letter. */
+  function setGraded(i: number, k: number, graded: boolean) {
+    const p = splits[i]!.parts[k]!;
+    patchPart(
+      i,
+      k,
+      graded
+        ? {
+            assess: "grade",
+            termMax: 0,
+            unitTestMax: 0,
+            passPercent: null,
+            gradeScale: p.gradeScale ?? "three",
+            grades: p.grades ?? [],
+            appliesTo: p.appliesTo ?? "term",
+          }
+        : { assess: "marks" },
+    );
+  }
+
   const num = (v: string) => Number(v.replace(/\D/g, "") || 0);
   const pct = (v: string): number | null => {
     const n = Number(v.replace(/\D/g, ""));
@@ -171,8 +201,12 @@ export function SubjectSplitsEditor({
 
       <div className="mt-2 space-y-3">
         {splits.map((split, i) => {
-          const termTotal = split.parts.reduce((n, p) => n + p.termMax, 0);
-          const utTotal = split.parts.reduce((n, p) => n + p.unitTestMax, 0);
+          // Totals are marks parts only: a graded part is never in them.
+          const marked = split.parts.filter((p) => !isGradedPart(p));
+          const termTotal = marked.reduce((n, p) => n + p.termMax, 0);
+          const utTotal = marked.reduce((n, p) => n + p.unitTestMax, 0);
+          const gradedNames = split.parts.filter(isGradedPart).map((p) => p.label || p.code);
+          const problems = subjectSplitProblems(split);
           return (
             <div key={split.subjectCode} className="rounded-lg bg-[var(--surface-sunken)] p-2.5">
               <div className="flex flex-wrap items-center gap-2">
@@ -206,11 +240,14 @@ export function SubjectSplitsEditor({
               </div>
 
               <ErpTableShell density="compact" className="mt-2 overflow-x-auto">
-                <ErpTable minWidth="min-w-[560px]">
+                <ErpTable minWidth="min-w-[700px]">
                   <ErpTableHead>
                     <tr>
                       <th className="px-2 py-1.5">Code</th>
                       <th className="px-2 py-1.5">Part</th>
+                      <th className="px-2 py-1.5 text-center" title="Graded parts get a letter (A/B/C), not marks, and are not counted in the total">
+                        Graded (A/B/C)
+                      </th>
                       <th className="px-2 py-1.5 text-center">Term exams</th>
                       <th className="px-2 py-1.5 text-center">Unit tests</th>
                       <th className="px-2 py-1.5 text-center" title="Blank = no separate pass line for this part">
@@ -241,6 +278,55 @@ export function SubjectSplitsEditor({
                             aria-label={`${split.subjectCode} part ${k + 1} name`}
                           />
                         </td>
+                        <td className="px-2 py-1 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isGradedPart(p)}
+                            onChange={(e) => setGraded(i, k, e.target.checked)}
+                            aria-label={`${split.subjectCode} ${p.label || `part ${k + 1}`} graded A/B/C instead of marks`}
+                          />
+                        </td>
+                        {isGradedPart(p) ? (
+                          <td className="px-2 py-1" colSpan={3}>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <select
+                                className="field !w-auto !py-1 text-xs"
+                                value={p.gradeScale ?? "three"}
+                                onChange={(e) =>
+                                  patchPart(i, k, { gradeScale: e.target.value as SubjectSplitPart["gradeScale"] })
+                                }
+                                aria-label={`${split.subjectCode} ${p.label} grade scale`}
+                              >
+                                <option value="three">A–C (3-point)</option>
+                                <option value="five">A–E (5-point)</option>
+                                <option value="custom">Own list…</option>
+                              </select>
+                              {p.gradeScale === "custom" ? (
+                                <input
+                                  className="field !w-36 !py-1 text-xs"
+                                  value={(p.grades ?? []).join(",")}
+                                  placeholder="A, B, C, D"
+                                  onChange={(e) => patchPart(i, k, { grades: e.target.value.split(",") })}
+                                  aria-label={`${split.subjectCode} ${p.label} grades, comma separated`}
+                                  title="Grades best first, separated by commas"
+                                />
+                              ) : (
+                                <span className="text-[11px] text-[var(--muted)]">{gradesForPart(p).join(" / ")}</span>
+                              )}
+                              <select
+                                className="field !w-auto !py-1 text-xs"
+                                value={p.appliesTo ?? "term"}
+                                onChange={(e) => patchPart(i, k, { appliesTo: e.target.value as GradedPartAppliesTo })}
+                                aria-label={`${split.subjectCode} ${p.label} graded in which exams`}
+                              >
+                                <option value="term">in term exams</option>
+                                <option value="unit">in unit tests</option>
+                                <option value="both">in both</option>
+                              </select>
+                            </div>
+                          </td>
+                        ) : (
+                          <>
                         <td className="px-2 py-1">
                           <input
                             className="field !w-16 !py-1 text-center tabular-nums"
@@ -271,6 +357,8 @@ export function SubjectSplitsEditor({
                             aria-label={`${split.subjectCode} ${p.label} own pass percent`}
                           />
                         </td>
+                          </>
+                        )}
                         <td className="px-2 py-1">
                           <select
                             className="field !w-auto !py-1 text-xs"
@@ -304,13 +392,27 @@ export function SubjectSplitsEditor({
                   patchSplit(i, {
                     parts: [
                       ...split.parts,
-                      { code: "", label: "", termMax: 0, unitTestMax: 0, kind: "internal", passPercent: null },
+                      { code: "", label: "", termMax: 0, unitTestMax: 0, kind: "internal", passPercent: null, assess: "marks" },
                     ],
                   })
                 }
               >
                 + Add part
               </button>
+              {gradedNames.length > 0 ? (
+                <p className="mt-1 text-[11px] text-[var(--muted)]">
+                  {gradedNames.join(", ")} {gradedNames.length === 1 ? "is" : "are"} graded: teachers pick a letter, the report card
+                  prints it under the subject, and it is <b>not counted</b> in the subject&apos;s total, percentage, grade, pass/fail or rank.
+                  The total above is the marks parts only.
+                </p>
+              ) : null}
+              {problems.length > 0 ? (
+                <ul className="mt-1 list-disc pl-5 text-[11px] font-semibold text-[var(--danger)]">
+                  {problems.map((x) => (
+                    <li key={x}>{x}</li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           );
         })}
