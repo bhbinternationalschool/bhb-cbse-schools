@@ -13,16 +13,17 @@ import {
 } from "@/lib/libraryNormalized.server";
 import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { readStampsParam } from "@/lib/rowStampClient";
+import { isLibraryMigrationPending, LIBRARY_NOT_MIGRATED } from "@/lib/libraryCounter";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
   const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["library-desk"], "GET");
   if (!auth.ok) return auth.response
-  const { bundle, meta, ok, stamps, settingsStamp } = await fetchLibraryDeskFromDb();
+  const { bundle, meta, ok, stamps, settingsStamp, error } = await fetchLibraryDeskFromDb();
   if (!ok) {
     return NextResponse.json(
-      { ok: false, error: "Library desk fetch failed — tenant/db unavailable" },
+      { ok: false, error: error || "Library desk fetch failed — tenant/db unavailable" },
       { status: 503 },
     );
   }
@@ -73,7 +74,8 @@ export async function POST(req: Request) {
     settingsBase: typeof body.settingsBase === "string" ? body.settingsBase : null,
   });
   if (!result.ok) {
-    return NextResponse.json({ ok: false, error: result.error }, { status: 502 });
+    const error = isLibraryMigrationPending(result.error) ? LIBRARY_NOT_MIGRATED : result.error;
+    return NextResponse.json({ ok: false, error }, { status: 502 });
   }
   if (result.kept) console.warn(`[library-desk] unstamped save left ${result.kept} stored row(s) as they were`);
 
@@ -84,5 +86,7 @@ export async function POST(req: Request) {
     stamps: result.stamps,
     conflicts: result.conflicts,
     settingsStamp: result.settingsStamp,
+    // Named deletes the server kept because the row has loan history.
+    refusedDeletes: result.refusedDeletes ?? [],
   });
 }

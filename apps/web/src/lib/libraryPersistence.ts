@@ -11,6 +11,7 @@ import {
 } from "@/lib/library";
 import {
   hydrateLibraryDeskFromDb,
+  reloadLibraryDeskFromApi,
   scheduleLibraryDeskSync,
 } from "@/lib/libraryNormalizedClient";
 import { mergeDbDeskIntoLibraryState } from "@/lib/libraryNormalizedMerge";
@@ -67,6 +68,19 @@ export const ensureLibraryHydrated = async () => {
   if (normChanged && !readFromDb) scheduleLibrarySync(loadLibrary());
   return blobChanged || normChanged;
 };
+
+/**
+ * After a counter action (issue, return, copies, fines, rules) changed the
+ * server: take the server's desk as it now is. false = the read failed and
+ * the screen still shows the previous copy — the caller must say so.
+ */
+export async function reloadLibraryFromServer(): Promise<boolean> {
+  const bundle = await reloadLibraryDeskFromApi();
+  if (!bundle) return false;
+  writeLibraryLocalRaw(mergeDbDeskIntoLibraryState(loadLibrary(), bundle, { preferDb: true }));
+  markDeskHydrated(MODULE);
+  return true;
+}
 
 export async function pushLibraryRemoteServer(
   state: LibraryState,

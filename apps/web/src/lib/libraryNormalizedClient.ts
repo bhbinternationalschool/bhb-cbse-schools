@@ -15,6 +15,14 @@ import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
 
 const LIBRARY_DESK = "library";
 
+/** Raise a toast where there is a real browser; a toast must never break a sync. */
+function libraryToast(kind: "error" | "info", message: string, durationMs?: number) {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+  void import("@/components/shell/Toast")
+    .then(({ pushToast }) => pushToast({ kind, message, durationMs }))
+    .catch(() => undefined);
+}
+
 /** Titles, copies or procurement documents the user deleted; the next push deletes them by id. */
 export function recordLibraryDeletion(
   table: "library_desk_titles" | "library_desk_copies" | "library_desk_procurement_docs",
@@ -101,7 +109,18 @@ async function pushLibraryDeskApi(state: LibraryState) {
       stamps?: RowStamps;
       conflicts?: RowConflicts;
       settingsStamp?: string;
+      refusedDeletes?: string[];
     } | null;
+    if (res.ok && body?.ok && body.refusedDeletes?.length) {
+      // The server kept them: they have loan history. Say so, and take the
+      // server's desk back so the row reappears instead of looking deleted.
+      libraryToast(
+        "error",
+        `Not deleted — ${body.refusedDeletes!.length} book record(s) have loan history (loans, fines, receipts). Untick Active to retire a title instead.`,
+        0,
+      );
+      void import("@/lib/libraryPersistence").then((m) => m.reloadLibraryFromServer());
+    }
     if (res.ok && body?.ok) {
       confirmDeskDeletes(LIBRARY_DESK, sentDeletes);
       writeMeta({
@@ -120,11 +139,45 @@ async function pushLibraryDeskApi(state: LibraryState) {
   }
 }
 
+/**
+ * Send any save still waiting on the debounce now, and wait for it. The
+ * counter calls this before it reloads the desk from the server, so a title
+ * typed a moment ago is saved rather than replaced by the server's copy.
+ */
+export async function flushLibraryDeskSync(): Promise<void> {
+  if (!pushTimer) return;
+  clearTimeout(pushTimer);
+  pushTimer = null;
+  const batch = pending;
+  pending = null;
+  if (batch) await pushLibraryDeskApi(batch);
+}
+
+/**
+ * The desk exactly as the server holds it — after a counter action changed
+ * loans or copies there. null when the read failed (the caller says so; it
+ * never treats that as an empty library).
+ */
+export async function reloadLibraryDeskFromApi() {
+  await flushLibraryDeskSync();
+  const remote = await fetchLibraryDeskFromApi();
+  if (!remote) return null;
+  writeMeta({ updatedAt: remote.updatedAt, titleCount: remote.titleCount });
+  captureDeskStamps("library", remote.bundle as Record<string, unknown>, LIBRARY_SLICES, remote.stamps, remote.settingsStamp);
+  return remote.bundle;
+}
+
 export async function fetchLibraryDeskFromApi() {
   if (!libraryNormalizedSyncEnabled()) return null;
   try {
     const res = await fetch("/api/school-data/library-desk", { cache: "no-store" });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // Say why — "library update pending" reads very differently from an
+      // empty library. Never treated as no data.
+      const err = (await res.json().catch(() => null)) as { error?: string } | null;
+      if (err?.error) libraryToast("error", `Library could not load: ${err.error}`);
+      return null;
+    }
     const body = (await res.json()) as {
       titles?: LibraryState["titles"];
       copies?: LibraryState["copies"];

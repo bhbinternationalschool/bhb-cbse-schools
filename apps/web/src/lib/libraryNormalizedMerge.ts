@@ -66,6 +66,8 @@ export function mergeDbDeskIntoLibraryState(
       loanDays: bundle.settings?.loanDays ?? state.settings?.loanDays ?? 14,
       finePaisePerDay:
         bundle.settings?.finePaisePerDay ?? state.settings?.finePaisePerDay ?? 500,
+      graceDays: bundle.settings?.graceDays ?? state.settings?.graceDays ?? 0,
+      capPaise: bundle.settings?.capPaise ?? state.settings?.capPaise ?? 0,
     },
   };
 }

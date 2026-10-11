@@ -81,7 +81,9 @@ guard({
   client: "libraryNormalizedClient.ts",
   ui: [
     ["library.ts", /recordLibraryDeletion\("library_desk_titles", \[titleId\]\)/],
-    ["library.ts", /recordLibraryDeletion\("library_desk_copies", \[\.\.\.removeIds\]\)/],
+    // Copies are no longer trimmed by a title's count (11 Oct 2026): they
+    // leave only with their title, named, below.
+    ["library.ts", /recordLibraryDeletion\(\s*"library_desk_copies",/],
     ["library.ts", /recordLibraryDeletion\("library_desk_procurement_docs", \[docId\]\)/],
   ],
 });
