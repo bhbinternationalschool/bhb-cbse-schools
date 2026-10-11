@@ -589,6 +589,7 @@ jobs:
           npm run test:erp-commands
           npm run test:wa-real-chats-oct
           npm run test:class-channel-apply
+          npm run test:dashboard-no-refetch-loop
 
   build:
     name: Production build

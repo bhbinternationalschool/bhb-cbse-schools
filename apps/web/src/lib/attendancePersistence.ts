@@ -79,7 +79,22 @@ export async function pushAttendanceRemoteServer(
  * Pull attendance blob + normalized desk (registers + ancillary).
  * DB wins when NEXT_PUBLIC_ATTENDANCE_READ_FROM_DB=true or local is empty.
  */
-export async function ensureAttendanceHydrated(): Promise<boolean> {
+// Two screens mounting together (the module dashboard and the register)
+// both passed the hydrated check before either finished, and each pulled the
+// whole desk (11 Oct 2026). Callers that arrive mid-load share the one load.
+let hydrating: Promise<boolean> | null = null;
+
+export function ensureAttendanceHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return Promise.resolve(false);
+  if (!hydrating) {
+    hydrating = hydrateAttendanceOnce().finally(() => {
+      hydrating = null;
+    });
+  }
+  return hydrating;
+}
+
+async function hydrateAttendanceOnce(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
 
   const readFromDb = attendanceReadFromDbEnabled();
