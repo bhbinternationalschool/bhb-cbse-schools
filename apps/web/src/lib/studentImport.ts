@@ -109,6 +109,13 @@ export type StudentImportResult = StudentImportPreview & {
   targetSession: string;
   /** Admission nos created/updated in this run (for prior-year gap check) */
   importedAdmissionNos: string[];
+  /**
+   * File line → id of the student row this run actually created or
+   * updated. Lines the import refused (upsert off, unresolved class, no
+   * admission number…) are absent — the custom-field ("more details")
+   * columns are written only for lines in here.
+   */
+  writtenLineIds: Record<number, string>;
 };
 
 const HEADER_TO_KEY: Record<string, string> = {};
@@ -1265,6 +1272,7 @@ export function applyStudentImport(
         options.targetSession || DEFAULT_AY,
       ),
       importedAdmissionNos: [],
+      writtenLineIds: {},
     };
   }
 
@@ -1283,6 +1291,7 @@ export function applyStudentImport(
   let created = 0;
   let updated = 0;
   const importedAdmissionNos: string[] = [];
+  const writtenLineIds: Record<number, string> = {};
   const errors: StudentImportRowError[] = [...preview.errors];
   let resolvedTargetSession = normalizeSessionCode(
     options.targetSession || DEFAULT_AY,
@@ -1591,6 +1600,7 @@ export function applyStudentImport(
 
     const normalized = normalizeStudent(patch);
     importedAdmissionNos.push(adm.toUpperCase());
+    writtenLineIds[r.lineNo] = normalized.id;
     if (existing) {
       students = students.map((s) =>
         s.id === existing.id ? normalized : s,
@@ -1629,6 +1639,7 @@ export function applyStudentImport(
     state,
     targetSession: resolvedTargetSession,
     importedAdmissionNos: [...new Set(importedAdmissionNos)],
+    writtenLineIds,
   };
 }
 
@@ -1917,4 +1928,30 @@ export async function workbookToStudentImportCsv(
     }
   }
   return { csv, detectedSession };
+}
+
+/**
+ * A header the built-in import already reads (register columns and the old
+ * ERP's aliases). Custom fields never take one of these, and Masters will
+ * not let a custom field be named like one.
+ */
+export function isBuiltInStudentImportHeader(header: string): boolean {
+  return Boolean(HEADER_TO_KEY[normalizeHeader(header)]);
+}
+
+/**
+ * The header row and the raw cells of every line below it, numbered like
+ * rowsToFieldMaps' `lineNo` so the two can be joined. For the optional
+ * custom-field ("more details") columns, which the built-in import ignores.
+ */
+export function studentImportRawGrid(text: string): {
+  headers: string[];
+  lines: { lineNo: number; cells: string[] }[];
+} | null {
+  const grid = parseCsvText(text);
+  const hi = findHeaderIndex(grid);
+  if (hi < 0) return null;
+  const lines: { lineNo: number; cells: string[] }[] = [];
+  for (let i = hi + 1; i < grid.length; i++) lines.push({ lineNo: i + 1, cells: grid[i]!.map((c) => String(c ?? "")) });
+  return { headers: grid[hi]!.map((h) => String(h ?? "")), lines };
 }
