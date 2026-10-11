@@ -62,10 +62,10 @@ export const TRANSPORT_FEATURES: RbacFeatureDef[] = [
     id: "transport.boarding",
     module: "transport",
     label: "Boarding register",
-    blurb: "Who boarded and got off, run by run.",
+    blurb: "Who boarded and got off, run by run; the vehicle log book and its monthly reports. Holding edit reaches every bus; view reaches only the bus Staff → Duties or Fleet links the person to.",
     actions: ["view", "create", "edit"],
     slices: ["boardingEvents"],
-    tabs: ["board"],
+    tabs: ["board", "register"],
   },
   {
     id: "transport.finance",

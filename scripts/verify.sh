@@ -285,6 +285,7 @@ SELFTESTS=(
   test:transport-crew-access
   test:transport-crew
   test:transport-stop-links
+  test:transport-boarding-log
   test:transport-concession
   test:transport-by-class
   test:transport-staff-riders
@@ -464,6 +465,7 @@ SELFTESTS=(
   test:erp-commands
   test:wa-real-chats-oct
   test:class-channel-apply
+  test:dashboard-no-refetch-loop
   # Added 2026-09-12, in CI's order, after the drift check below reported that
   # ci.yml had been running these for weeks while this script did not:
   # WhatsApp failure reasons, household numbers, audience specs, the tutor and
