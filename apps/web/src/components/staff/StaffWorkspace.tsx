@@ -66,6 +66,7 @@ import { openWaMe } from "@/lib/waMe";
 import { field, btn } from "@/components/ui/erp-ui";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { StaffLeavePanel } from "@/components/staff/StaffLeavePanel";
+import { StaffLeaveRulesPanel } from "@/components/staff/StaffLeaveRulesPanel";
 import { StaffRequestsPanel } from "@/components/staff/StaffRequestsPanel";
 import { StaffOutdoorDutyPanel } from "@/components/staff/StaffOutdoorDutyPanel";
 import { StaffLeaveReportsPanel } from "@/components/staff/StaffLeaveReportsPanel";
@@ -80,7 +81,7 @@ import { DocVerificationQueuePanel } from "@/components/students/DocVerification
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { StaffPresenceCard } from "@/components/staff/StaffPresenceCard";
 import { StaffGeoAdminPanel } from "@/components/staff/StaffGeoAdminPanel";
-import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
+import { hasFeaturePermission, hasPermission, visibleModuleTabs } from "@/lib/rbac";
 
 type NamedCount = ErpChartRow;
 
@@ -111,6 +112,7 @@ type StaffMainTab =
   | "allocate"
   | "assignments"
   | "leave"
+  | "leave_rules"
   | "requests"
   | "outdoor_duty"
   | "appraisal"
@@ -132,6 +134,7 @@ const STAFF_TABS: ModuleTabItem[] = [
   { id: "agreements", label: "Agreements", tone: "teal" },
   { id: "doc_verify", label: "Doc verify", tone: "amber" },
   { id: "leave", label: "Leave", tone: "teal" },
+  { id: "leave_rules", label: "Leave rules", tone: "teal" },
   { id: "requests", label: "Requests", tone: "coral" },
   { id: "outdoor_duty", label: "Outdoor duty", tone: "sky" },
   { id: "appraisal", label: "Appraisal", tone: "violet" },
@@ -157,6 +160,7 @@ export function StaffWorkspace() {
       "allocate",
       "assignments",
       "leave",
+      "leave_rules",
       "requests",
       "outdoor_duty",
       "appraisal",
@@ -480,6 +484,15 @@ export function StaffWorkspace() {
       ) : null}
 
       {tab === "leave" ? <StaffLeavePanel ay={ay} /> : null}
+      {tab === "leave_rules" ? (
+        <StaffLeaveRulesPanel
+          ay={ay}
+          canEdit={
+            hasPermission(session, state ?? loadMasters(), "staff", "edit") ||
+            hasFeaturePermission(session, state ?? loadMasters(), "staff.leave_policy", "edit")
+          }
+        />
+      ) : null}
       {tab === "requests" ? <StaffRequestsPanel /> : null}
       {tab === "outdoor_duty" ? <StaffOutdoorDutyPanel /> : null}
       {tab === "presence" ? (

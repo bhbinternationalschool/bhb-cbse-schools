@@ -1669,12 +1669,20 @@ export async function handleLeaveCodeDecision(opts: { fromWaId: string; text: st
     return { handled: true };
   }
 
-  const { decideLeave } = await import("@/lib/staffHr");
-  const result = decideLeave({
+  // The year's leave rules (balance, sandwich days, half-day rule) apply
+  // here exactly as in the ERP; a short balance under an "LWP" rule files
+  // the rest as unpaid and says so below.
+  const { decideLeaveWithRules } = await import("@/lib/staffLeaveRules.server");
+  const result = await decideLeaveWithRules({
+    state,
+    masters,
     requestId: req.id,
-    decision: decision.approve ? "approved" : "rejected",
+    approve: decision.approve,
+    note: `Decided on WhatsApp by ${byName}`,
     decidedBy: byName,
-    decisionNote: `Decided on WhatsApp by ${byName}`,
+    approverStaffId: approverStaff!.id,
+    isLeadership: true,
+    confirmLwp: true,
   });
   if (!result.ok) {
     await releaseSendClaim(claimKey);
@@ -1688,24 +1696,28 @@ export async function handleLeaveCodeDecision(opts: { fromWaId: string; text: st
     await say("The decision could not be saved just now. Please try again in a minute.");
     return { handled: true };
   }
-  const after = result.state.leaveRequests.find((r) => r.id === req.id) ?? req;
+  const after = result.after;
   const label = leaveTypeLabel(req.typeCode);
 
   if (after.status === "approved") {
     const { markApprovedLeaveOnRegisters } = await import("@/lib/staffAttendance.server");
-    await markApprovedLeaveOnRegisters({
-      staffId: req.staffId,
-      fromDate: req.fromDate,
-      toDate: req.toDate,
-      halfDay: req.halfDay,
-      halfDaySession: req.halfDaySession,
-      typeCode: req.typeCode,
-      by: `Leave approved by ${byName}`,
-    });
-    await say(`✅ Approved and posted to the ERP: ${whoName} · ${label} · ${dates}. The day is marked as leave.`);
+    for (const part of result.approved) {
+      await markApprovedLeaveOnRegisters({
+        staffId: part.staffId,
+        fromDate: part.fromDate,
+        toDate: part.toDate,
+        halfDay: part.halfDay,
+        halfDaySession: part.halfDaySession,
+        typeCode: part.typeCode,
+        by: `Leave approved by ${byName}`,
+      });
+    }
+    await say(
+      `✅ Approved and posted to the ERP: ${whoName} · ${label} · ${dates}. The day is marked as leave.${result.notice ? `\nBalance short: ${result.notice}.` : ""}`,
+    );
     await sendWhatsAppText({
       toMobile: entry.staffMobile10,
-      body: `✅ Your ${label} for ${dates} is approved by ${byName}, and marked in attendance.`,
+      body: `✅ Your ${label} for ${dates} is approved by ${byName}, and marked in attendance.${result.notice ? `\nYour balance was short: ${result.notice}.` : ""}`,
     });
   } else if (after.status === "rejected") {
     await say(`Refused: ${whoName} · ${label} · ${dates}. They have been told.`);

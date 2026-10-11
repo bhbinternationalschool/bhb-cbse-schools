@@ -205,6 +205,7 @@ SELFTESTS=(
   test:holiday-calendar-view
   test:student-working-days
   test:leave-allotment
+  test:staff-leave-rules
   test:class-group-message
   test:comms-reach
   test:wa-timeline

@@ -407,9 +407,53 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     flash(halfDay ? "Converted to half-day leave" : "Converted to full-day leave");
   }
 
+  /**
+   * Approving goes to the server, which applies the year's leave rules
+   * (Staff → Leave rules): balance with sandwich days, the half-day rule,
+   * and — when the type says so — files an over-balance part as LWP after
+   * asking. Then the desk is re-read so this screen shows what was saved.
+   */
+  async function approveOnServer(requestId: string) {
+    const before = hr?.leaveRequests.find((r) => r.id === requestId);
+    const send = (confirmLwp: boolean) =>
+      fetch("/api/staff/leave-decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: requestId, approve: true, confirmLwp }),
+      })
+        .then(async (r) => ({ status: r.status, body: (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; needsConfirm?: boolean; status?: string; notice?: string | null } }))
+        .catch(() => null);
+    let res = await send(false);
+    if (res && res.status === 409 && res.body.needsConfirm) {
+      if (!window.confirm(`${res.body.error || "The leave balance is short."}\n\nApprove like this?`)) return;
+      res = await send(true);
+    }
+    if (!res) {
+      flash("Could not reach the server — nothing was decided", true);
+      return;
+    }
+    if (!res.body.ok) {
+      flash(res.body.error || "Could not approve", true);
+      return;
+    }
+    const { resetStaffHrPersistenceCache, ensureStaffHrHydrated } = await import("@/lib/staffHrPersistence");
+    resetStaffHrPersistenceCache();
+    await ensureStaffHrHydrated();
+    reload();
+    if (before?.status === "pending" && res.body.status === "pending_l2") {
+      flash("Level 1 approved — awaiting Level 2");
+    } else {
+      flash(res.body.notice ? `Leave approved — ${res.body.notice}` : "Leave approved");
+    }
+  }
+
   function onDecide(requestId: string, decision: "approved" | "rejected") {
     if (!isManager) {
       flash("Only principal / admin can manage leave", true);
+      return;
+    }
+    if (decision === "approved") {
+      void approveOnServer(requestId);
       return;
     }
     const before = hr?.leaveRequests.find((r) => r.id === requestId);

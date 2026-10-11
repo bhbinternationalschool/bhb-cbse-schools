@@ -154,16 +154,21 @@ export const PEOPLE_FEATURES: RbacFeatureDef[] = [
     blurb: "Staff leave applications, approvals, balances and encashments, and the leave report.",
     actions: CRUD,
     slices: ["staff_hr/leaveRequests", "staff_hr/leaveBalances", "staff_hr/leaveEncashments", "staff_hr/leaveAllotmentLog"],
-    tabs: ["leave", "reports"],
+    tabs: ["leave", "reports", "leave_rules"],
+    // Deciding under the year's leave rules, and the leave-rules reports.
+    routes: ["/api/staff/leave-decide", "/api/staff/leave-book"],
   },
   {
     id: "staff.leave_policy",
     module: "staff",
     label: "Leave types & rules",
-    blurb: "The school's leave types, their quotas and the leave settings.",
+    blurb: "The school's leave types, their quotas and the leave settings; each year's leave policy, approvers and carry-forward.",
     actions: CRUD,
     slices: ["staff_hr/leaveTypes", "staff_hr/leaveSettings"],
-    tabs: ["leave"],
+    tabs: ["leave", "leave_rules"],
+    // The year's leave policy, approvers and year-end carry-forward
+    // (server tables, staff_leave_policy_* — Staff → Leave rules).
+    routes: ["/api/staff/leave-policy"],
   },
   {
     id: "staff.appraisals",

@@ -435,6 +435,7 @@
     "test:holiday-calendar-view": "npx tsx src/lib/holidayCalendarView.selftest.ts",
     "test:student-working-days": "npx tsx src/lib/studentWorkingDays.selftest.ts",
     "test:leave-allotment": "npx tsx src/lib/leaveAllotment.selftest.ts",
+    "test:staff-leave-rules": "npx tsx src/lib/staffLeaveRules.selftest.ts",
     "test:class-group-message": "npx tsx src/lib/classGroupMessage.selftest.ts",
     "test:comms-reach": "npx tsx src/lib/commsReach.selftest.ts",
     "test:wa-timeline": "npx tsx src/lib/waTimeline.selftest.ts",
