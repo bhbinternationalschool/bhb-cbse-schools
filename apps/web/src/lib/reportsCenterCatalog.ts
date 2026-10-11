@@ -571,6 +571,19 @@ export function listReportsCenterEntries(): ReportsCenterEntry[] {
       ),
     );
   }
+  // The old ERP's "Parent Mobile Usage Report" lives on its own Comms tab
+  // (it has an invite action), so this entry opens that tab.
+  out.push(
+    entry(
+      "comms",
+      "notices",
+      "/comms?tab=onapp",
+      "parent_app_usage",
+      "Parent app usage",
+      "registers",
+      "Families signed in · active 7/30 days · notifications · never signed in, by class",
+    ),
+  );
 
   return out;
 }

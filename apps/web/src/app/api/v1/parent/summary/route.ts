@@ -12,6 +12,7 @@ import { fetchStudentOpenDuesFromCache } from "@/lib/feesDeskAncillary.server";
 import { loadMasters } from "@/lib/masters";
 import { schoolWhatsAppContact } from "@/lib/schoolWhatsApp.server";
 import { loadSis } from "@/lib/sis";
+import { stampParentAppPresence } from "@/lib/parentAppPresence.server";
 
 export const runtime = "nodejs";
 
@@ -40,6 +41,8 @@ export async function GET(request: Request) {
       if (requestedHousehold && requestedHousehold !== householdId) {
         throw new ApiError("forbidden", "Not your household", 403);
       }
+      // "Opened the app" for Comms → Parents on app (at most hourly).
+      if (householdId) await stampParentAppPresence(householdId, request);
     } else {
       assertPermission(ctx, "students", "view");
       householdId = requestedHousehold || undefined;
