@@ -312,6 +312,17 @@ class LHi extends L {
   String get openInSmartTeach => 'Smart Teach में खोलें';
 
   @override
+  String get reviseInLeadApp => 'LEAD ऐप में दोहराएँ';
+
+  @override
+  String leadRevisionHint(String book, String chapter) {
+    return 'LEAD ऐप में दोहराएँ: $book → $chapter';
+  }
+
+  @override
+  String get couldNotOpenLeadApp => 'LEAD ऐप नहीं खुल सका';
+
+  @override
   String get content => 'विषय-वस्तु';
 
   @override

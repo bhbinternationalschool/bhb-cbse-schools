@@ -3,7 +3,9 @@ import {
   assetsForChapter,
   assetsLine,
   isRevisionAsset,
+  isStudentAsset,
   isWorksheetAsset,
+  LEAD_STUDENT_APP,
   normalizePinnacleAssets,
   pinnacleAssetsUrl,
 } from "./pinnacleAssets";
@@ -66,6 +68,11 @@ const assets = byName.assets;
 assert.deepEqual(assets.filter(isWorksheetAsset).map((a) => a.type), ["Activity Based Worksheet", "Worksheet"]);
 assert.deepEqual(assets.filter(isRevisionAsset).map((a) => a.type), ["Animation", "Mind Map"]);
 assert.equal(assetsLine(assets, 2), "Animation: Early Calculating Devices · Mind Map: Computer - Past and Present - Mind Map · +2 more");
+// What a child opens in the LEAD app: not the printable sheets.
+assert.deepEqual(assets.filter(isStudentAsset).map((a) => a.type), ["Animation", "Mind Map"]);
+assert.ok(isStudentAsset({ type: "Game", title: "x" }) && isStudentAsset({ type: "Additional Interactivity", title: "x" }));
+assert.ok(!isStudentAsset({ type: "Computer Lab Activity", title: "x" }));
+assert.match(LEAD_STUDENT_APP.android, /id=com\.leadschool\.parentapp$/);
 assert.deepEqual(normalizePinnacleAssets(null), []);
 
 console.log("pinnacleAssets.selftest.ts\n  ok");
