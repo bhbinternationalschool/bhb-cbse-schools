@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import {
   ENTRANCE_INVITE_FAMILY,
   ENTRANCE_RESULT_FAMILY,
+  SEND_CLAIM_MS,
+  absentConflict,
   candidateScore,
+  recomputeRuleResults,
+  ruleInputsChanged,
+  sendClaimBlock,
   classSummary,
   cleanMarks,
   entranceMessageVars,
@@ -67,6 +72,8 @@ function cand(over: Partial<EntranceCandidate>): EntranceCandidate {
     statusSetAt: "",
     inviteSentAt: "",
     resultSentAt: "",
+    inviteClaimedAt: "",
+    resultClaimedAt: "",
     updatedAt: "t",
     ...over,
   };
@@ -246,6 +253,54 @@ function cand(over: Partial<EntranceCandidate>): EntranceCandidate {
   assert.ok(ab.ok && ab.vars.testResult === resultLines("absent", "en").testResult);
   // A gap stays visible in a preview rather than vanishing.
   assert.equal(fillTemplateBody("Hi {{a}} {{b}}", { a: "x" }), "Hi x {{b}}");
+}
+
+// Changing the rule re-works rule results only; hand decisions stay.
+{
+  const list = [
+    cand({ id: "r1", marks: { en: 10, ma: 10 }, resultStatus: "selected", statusSource: "rule" }),
+    cand({ id: "m1", marks: { en: 10, ma: 10 }, resultStatus: "selected", statusSource: "manual" }),
+    cand({ id: "r2", marks: { en: 25, ma: 25 }, resultStatus: "selected", statusSource: "rule" }),
+    cand({ id: "u1", marks: { en: 10, ma: 10 } }),
+  ];
+  const stricter = { ...SESSION, passPercent: 60, waitlistPercent: null };
+  assert.ok(ruleInputsChanged(SESSION, stricter));
+  assert.equal(ruleInputsChanged(SESSION, { ...SESSION, subjects: [...SUBJECTS].reverse() }), false, "order is not a change");
+  assert.ok(ruleInputsChanged(SESSION, { ...SESSION, subjects: [SUBJECTS[0]!, { ...SUBJECTS[1]!, maxMarks: 30 }] }));
+  assert.deepEqual(recomputeRuleResults(stricter, list), [{ id: "r1", status: "not_selected", source: "rule" }]);
+  const withNewSubject = { ...SESSION, subjects: [...SUBJECTS, { id: "gk", name: "GK", maxMarks: 10 }] };
+  assert.deepEqual(
+    recomputeRuleResults(withNewSubject, list).map((x) => [x.id, x.status, x.source]),
+    [["r1", "", ""], ["r2", "", ""]],
+    "a new blank subject makes rule results undecided, never stale",
+  );
+}
+
+// Absent over a hand-set result is refused; over a rule result it is fine.
+{
+  const manual = cand({ resultStatus: "selected", statusSource: "manual" });
+  assert.ok(absentConflict(manual, true)?.includes("Selected"));
+  assert.equal(absentConflict(manual, false), null);
+  assert.equal(absentConflict(cand({ resultStatus: "selected", statusSource: "rule" }), true), null);
+  assert.equal(absentConflict(cand({ resultStatus: "absent", statusSource: "manual" }), true), null);
+  assert.equal(absentConflict(cand({ absent: true, resultStatus: "selected", statusSource: "manual" }), true), null, "already absent");
+}
+
+// Send claims: a live claim blocks everyone; a stale one lapses; sent blocks unless re-sending.
+{
+  const now = Date.parse("2026-11-14T10:00:00Z");
+  const iso = (ms: number) => new Date(ms).toISOString();
+  assert.equal(sendClaimBlock(cand({}), "invite", false, now), null);
+  assert.ok(sendClaimBlock(cand({ inviteClaimedAt: iso(now - 60_000) }), "invite", false, now)?.includes("in progress"));
+  assert.ok(sendClaimBlock(cand({ inviteClaimedAt: iso(now - 60_000) }), "invite", true, now), "re-send also waits for a live claim");
+  assert.equal(sendClaimBlock(cand({ inviteClaimedAt: iso(now - SEND_CLAIM_MS - 1) }), "invite", false, now), null, "stale claim lapses");
+  assert.ok(sendClaimBlock(cand({ inviteSentAt: iso(now - 86_400_000) }), "invite", false, now)?.startsWith("Already sent"));
+  assert.equal(sendClaimBlock(cand({ inviteSentAt: iso(now - 86_400_000) }), "invite", true, now), null);
+  assert.ok(
+    sendClaimBlock(cand({ resultSentAt: iso(now - 30_000), resultClaimedAt: iso(now - 40_000) }), "result", true, now)?.includes("wait"),
+    "double-clicked re-send refused",
+  );
+  assert.equal(sendClaimBlock(cand({ inviteClaimedAt: iso(now - 1000) }), "result", false, now), null, "kinds are independent");
 }
 
 console.log("  ok");

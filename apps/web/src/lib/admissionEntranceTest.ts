@@ -68,6 +68,9 @@ export type EntranceCandidate = {
   statusSetAt: string;
   inviteSentAt: string;
   resultSentAt: string;
+  /** A send in flight (or just finished) holds this — see sendClaimBlock. */
+  inviteClaimedAt: string;
+  resultClaimedAt: string;
   updatedAt: string;
 };
 
@@ -399,6 +402,79 @@ export function rankCandidates(
 
 export function rollCompare(a: string, b: string): number {
   return a.localeCompare(b, "en", { numeric: true });
+}
+
+/**
+ * After the pass mark, waitlist mark or subjects change, every result the
+ * RULE set is worked out again; a hand decision is never touched. A rule
+ * result whose marks are now incomplete (a subject was added) is cleared to
+ * undecided rather than left saying what the old rule said.
+ */
+export function recomputeRuleResults(
+  session: Pick<EntranceSession, "subjects" | "passPercent" | "waitlistPercent">,
+  candidates: EntranceCandidate[],
+): { id: string; status: EntranceResultStatus; source: EntranceStatusSource }[] {
+  const out: { id: string; status: EntranceResultStatus; source: EntranceStatusSource }[] = [];
+  for (const c of candidates) {
+    if (c.statusSource !== "rule") continue;
+    const s = suggestedStatus(session, c);
+    if (!s) out.push({ id: c.id, status: "", source: "" });
+    else if (s !== c.resultStatus) out.push({ id: c.id, status: s, source: "rule" });
+  }
+  return out;
+}
+
+/** Did a sitting edit change what the pass-mark rule would say? */
+export function ruleInputsChanged(
+  a: Pick<EntranceSession, "subjects" | "passPercent" | "waitlistPercent">,
+  b: Pick<EntranceSession, "subjects" | "passPercent" | "waitlistPercent">,
+): boolean {
+  if (a.passPercent !== b.passPercent || a.waitlistPercent !== b.waitlistPercent) return true;
+  const key = (x: EntranceSubject[]) => x.map((s) => `${s.id}:${s.maxMarks}`).sort().join("|");
+  return key(a.subjects) !== key(b.subjects);
+}
+
+/**
+ * Ticking Absent on a child whose result was decided BY HAND would leave
+ * the summary saying Absent while the family is told the hand result.
+ * Refused with the reason; the office clears the result first.
+ */
+export function absentConflict(
+  c: Pick<EntranceCandidate, "absent" | "statusSource" | "resultStatus" | "childName">,
+  absent: boolean,
+): string | null {
+  if (!absent || c.absent) return null;
+  if (c.statusSource === "manual" && c.resultStatus && c.resultStatus !== "absent") {
+    return `${c.childName || "This child"} has a result set by hand (${entranceStatusLabel(c.resultStatus)}). Clear it in Results before marking Absent.`;
+  }
+  return null;
+}
+
+/** How long a send claim holds a family before another send may try. */
+export const SEND_CLAIM_MS = 10 * 60 * 1000;
+
+/**
+ * May a send to this family start now? The server claims the row with the
+ * same rule in ONE conditional update, so two staff pressing Send together
+ * cannot both message a family. A claim stays after a successful send, so a
+ * re-send within SEND_CLAIM_MS is refused too (a double click on Re-send).
+ */
+export function sendClaimBlock(
+  c: Pick<EntranceCandidate, "inviteSentAt" | "resultSentAt" | "inviteClaimedAt" | "resultClaimedAt">,
+  kind: EntranceNotifyKind,
+  resend: boolean,
+  nowMs: number,
+): string | null {
+  const sent = kind === "invite" ? c.inviteSentAt : c.resultSentAt;
+  const claimed = kind === "invite" ? c.inviteClaimedAt : c.resultClaimedAt;
+  if (claimed) {
+    const t = Date.parse(claimed);
+    if (Number.isFinite(t) && nowMs - t < SEND_CLAIM_MS) {
+      return sent ? `Sent ${sent.slice(0, 10)} — wait 10 minutes before re-sending` : "Another send to this family is in progress";
+    }
+  }
+  if (sent && !resend) return `Already sent ${sent.slice(0, 10)}`;
+  return null;
 }
 
 /* ─── Roll numbers ──────────────────────────────────────────────── */

@@ -23,6 +23,10 @@
  *   result_status '' = not decided yet; status_source says whether the
  *   pass-mark rule set it or a person overrode it (a rule re-run never
  *   overwrites a manual decision).
+ *   invite_/result_claimed_at: a send claims the row in one conditional
+ *   update before messaging (two staff pressing Send together cannot both
+ *   message a family); cleared when the send fails, kept for 10 minutes
+ *   after a success so a double-clicked re-send is refused too.
  *   updated_at is the row stamp: a marks save names the stamp it loaded and
  *   is refused when someone else saved the row in between.
  *
@@ -76,6 +80,8 @@ create table if not exists public.admission_entrance_candidates (
   status_set_at timestamptz,
   invite_sent_at timestamptz,
   result_sent_at timestamptz,
+  invite_claimed_at timestamptz,
+  result_claimed_at timestamptz,
   created_by text not null default '',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),

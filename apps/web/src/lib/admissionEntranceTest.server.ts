@@ -22,7 +22,11 @@ import { rowToLead } from "@/lib/admissionsNormalized.server";
 import type { AdmissionLead } from "@/lib/admissions";
 import {
   ENTRANCE_ELIGIBLE_STAGES,
+  SEND_CLAIM_MS,
+  absentConflict,
   candidateScore,
+  recomputeRuleResults,
+  ruleInputsChanged,
   cleanMarks,
   isEntranceResultStatus,
   nextRollNumbers,
@@ -132,6 +136,8 @@ function rowToCandidate(r: Record<string, unknown>): EntranceCandidate {
     statusSetAt: String(r.status_set_at ?? ""),
     inviteSentAt: String(r.invite_sent_at ?? ""),
     resultSentAt: String(r.result_sent_at ?? ""),
+    inviteClaimedAt: String(r.invite_claimed_at ?? ""),
+    resultClaimedAt: String(r.result_claimed_at ?? ""),
     updatedAt: String(r.updated_at ?? ""),
   };
 }
@@ -382,13 +388,17 @@ export async function createSession(
  * Change a sitting. `stamp` is the updated_at the screen loaded; a save
  * over someone else's newer change is refused. Subjects may change only
  * when no entered mark would be dropped or exceed its new maximum.
+ *
+ * When the pass mark, waitlist mark or subjects change, every result the
+ * rule set is worked out again under the new rule (hand decisions are
+ * left alone), so a stale "Selected" cannot be sent to a family.
  */
 export async function updateSession(
   id: string,
   draft: EntranceSessionDraft,
   stamp: string,
   actor: string,
-): Promise<EntranceSession> {
+): Promise<{ session: EntranceSession; resultsRecomputed: number }> {
   const c = await ctx();
   const current = await fetchSession(c, id);
   if (!stamp || stamp !== current.updatedAt) {
@@ -422,7 +432,15 @@ export async function updateSession(
   if (!data || data.length === 0) {
     throw new EntranceTestError("This test was changed on another screen a moment ago — reload and try again.", 409);
   }
-  return rowToSession(data[0] as Record<string, unknown>);
+  const saved = rowToSession(data[0] as Record<string, unknown>);
+  let resultsRecomputed = 0;
+  if (ruleInputsChanged(current, saved)) {
+    const changes = recomputeRuleResults(saved, candidates);
+    if (changes.length) {
+      resultsRecomputed = (await writeStatuses(c, id, changes, actor)).length;
+    }
+  }
+  return { session: saved, resultsRecomputed };
 }
 
 /** Delete one sitting, by id. Refused while any child is on its roll. */
@@ -570,6 +588,11 @@ export async function saveMarks(
       continue;
     }
     const absent = r.absent === true;
+    const conflict = absentConflict(cur, absent);
+    if (conflict) {
+      out.errors.push({ id: cur.id, childName: cur.childName, error: conflict });
+      continue;
+    }
     const patch: Record<string, unknown> = {
       marks: cleaned.marks,
       absent,
@@ -686,17 +709,53 @@ export async function setManualStatus(
   );
 }
 
-/** Record that a family was messaged (only after the sender said "sent"). */
-export async function markNotified(
+/**
+ * Claim one family for a send, atomically: ONE conditional update that
+ * succeeds only when no live claim exists (and, unless re-sending, nothing
+ * was sent yet). Two staff pressing Send together — both past the preview —
+ * get one claim between them; only the holder messages the family. Same
+ * rule as sendClaimBlock in lib/admissionEntranceTest.ts.
+ */
+export async function claimForSend(
   candidateId: string,
   kind: "invite" | "result",
+  resend: boolean,
+): Promise<boolean> {
+  const c = await ctx();
+  const claimCol = kind === "invite" ? "invite_claimed_at" : "result_claimed_at";
+  const sentCol = kind === "invite" ? "invite_sent_at" : "result_sent_at";
+  const now = Date.now();
+  const cutoff = new Date(now - SEND_CLAIM_MS).toISOString();
+  let q = c.sb
+    .from(CANDIDATES)
+    .update({ [claimCol]: new Date(now).toISOString() })
+    .eq("tenant_id", c.tenantId)
+    .eq("id", candidateId)
+    .or(`${claimCol}.is.null,${claimCol}.lt."${cutoff}"`);
+  if (!resend) q = q.is(sentCol, null);
+  const { data, error } = await q.select("id");
+  if (error) writeFail("the send claim", error);
+  return !!data && data.length > 0;
+}
+
+/**
+ * Settle a claim. Sent: record it and KEEP the claim (it holds off a
+ * double-clicked re-send for 10 minutes). Not sent (failed, held for quiet
+ * hours): release the claim so the next send can try.
+ */
+export async function settleSendClaim(
+  candidateId: string,
+  kind: "invite" | "result",
+  sent: boolean,
 ): Promise<void> {
   const c = await ctx();
-  const col = kind === "invite" ? "invite_sent_at" : "result_sent_at";
+  const claimCol = kind === "invite" ? "invite_claimed_at" : "result_claimed_at";
+  const sentCol = kind === "invite" ? "invite_sent_at" : "result_sent_at";
+  const patch = sent ? { [sentCol]: new Date().toISOString() } : { [claimCol]: null };
   const { error } = await c.sb
     .from(CANDIDATES)
-    .update({ [col]: new Date().toISOString() })
+    .update(patch)
     .eq("tenant_id", c.tenantId)
     .eq("id", candidateId);
-  if (error) writeFail("the sent mark", error);
+  if (error) writeFail(sent ? "the sent mark" : "the send claim", error);
 }

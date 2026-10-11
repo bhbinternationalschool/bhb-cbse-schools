@@ -29,15 +29,17 @@ import {
   ENTRANCE_RESULT_FAMILY,
   entranceMessageVars,
   fillTemplateBody,
+  sendClaimBlock,
   tenDigitMobile,
   type EntranceNotifyKind,
 } from "@/lib/admissionEntranceTest";
 import {
   EntranceTestError,
+  claimForSend,
   classNamesServer,
   fetchLeadsByIds,
   getSessionBundle,
-  markNotified,
+  settleSendClaim,
 } from "@/lib/admissionEntranceTest.server";
 
 export type NotifyPlanRow = {
@@ -138,10 +140,10 @@ async function buildPlan(
     const body = registry?.body || seedTemplateText(familyKey, language)?.body || "";
     const vars = varsRes.ok ? varsRes.vars : {};
     let skipReason = "";
-    const already = kind === "invite" ? c.inviteSentAt : c.resultSentAt;
+    const blocked = sendClaimBlock(c, kind, resend, Date.now());
     if (!varsRes.ok) skipReason = varsRes.error;
     else if (!mobile) skipReason = "No valid 10-digit mobile on the lead";
-    else if (already && !resend) skipReason = `Already sent ${already.slice(0, 10)}`;
+    else if (blocked) skipReason = blocked;
     rows.push({
       candidateId: c.id,
       rollNo: c.rollNo,
@@ -195,6 +197,8 @@ export type NotifySendResult = {
   sent: number;
   deferred: number;
   failed: number;
+  /** Another send claimed the family first — not messaged by this one. */
+  skippedClaimed: number;
   errors: string[];
 };
 
@@ -224,39 +228,61 @@ export async function sendNotify(
   }
 
   const { sendTemplateToAudience } = await import("@/lib/waAudienceSend.server");
-  const out: NotifySendResult = { sent: 0, deferred: 0, failed: 0, errors: [] };
+  const out: NotifySendResult = { sent: 0, deferred: 0, failed: 0, skippedClaimed: 0, errors: [] };
   // One family per call, so each family's own outcome is known and only a
   // family the sender confirmed is marked as messaged.
   for (const r of plan.internal) {
-    const res = await sendTemplateToAudience({
-      recipients: [
-        {
-          mobile: r.mobile,
-          language: r.language,
-          name: r.label,
-          refId: `entrance_${kind}_${r.candidateId}`,
-          variables: r.vars,
-        },
-      ],
-      familyKey: plan.familyKey,
-      variables: {},
-      originUrl,
-      audienceKind: "admissions_entrance",
-    });
+    // Claim first, atomically. The preview's "already sent" check is only
+    // advice; this is the line two concurrent sends cannot both cross.
+    let claimed = false;
+    try {
+      claimed = await claimForSend(r.candidateId, kind, resend);
+    } catch (e) {
+      out.failed++;
+      if (out.errors.length < 5) out.errors.push(`${r.label}: ${e instanceof Error ? e.message : "could not claim"} — not sent`);
+      continue;
+    }
+    if (!claimed) {
+      out.skippedClaimed++;
+      continue;
+    }
+    let res: Awaited<ReturnType<typeof sendTemplateToAudience>>;
+    try {
+      res = await sendTemplateToAudience({
+        recipients: [
+          {
+            mobile: r.mobile,
+            language: r.language,
+            name: r.label,
+            refId: `entrance_${kind}_${r.candidateId}`,
+            variables: r.vars,
+          },
+        ],
+        familyKey: plan.familyKey,
+        variables: {},
+        originUrl,
+        audienceKind: "admissions_entrance",
+      });
+    } catch (e) {
+      // Whether it left is unknown: keep the claim (it lapses in 10 minutes)
+      // rather than invite an immediate second send.
+      out.failed++;
+      if (out.errors.length < 5) out.errors.push(`${r.label}: ${e instanceof Error ? e.message : "send error"} — check before re-sending`);
+      continue;
+    }
     out.sent += res.sent;
     out.deferred += res.deferred;
     out.failed += res.failed + res.skippedNoTemplate;
     if (res.error && out.errors.length < 5) out.errors.push(`${r.label}: ${res.error}`);
-    if (res.sent > 0) {
-      try {
-        await markNotified(r.candidateId, kind);
-      } catch (e) {
-        // The message went; only the bookkeeping failed. Say so rather than
-        // let the office send it twice without knowing.
-        out.errors.push(
-          `${r.label}: sent, but could not record it (${e instanceof Error ? e.message : "error"}) — do not resend`,
-        );
-      }
+    const sent = res.sent > 0;
+    try {
+      await settleSendClaim(r.candidateId, kind, sent);
+    } catch (e) {
+      out.errors.push(
+        sent
+          ? `${r.label}: sent, but could not record it (${e instanceof Error ? e.message : "error"}) — do not resend`
+          : `${r.label}: not sent; the claim clears itself in 10 minutes`,
+      );
     }
   }
   return out;

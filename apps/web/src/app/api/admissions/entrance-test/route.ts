@@ -154,7 +154,7 @@ export async function POST(request: Request) {
         if (!v.ok) return fail(v.error, 400);
         return NextResponse.json({
           ok: true,
-          session: await updateSession(String(body.id || ""), v.draft, String(body.updatedAt || ""), actor),
+          ...(await updateSession(String(body.id || ""), v.draft, String(body.updatedAt || ""), actor)),
         });
       }
       case "delete_session":

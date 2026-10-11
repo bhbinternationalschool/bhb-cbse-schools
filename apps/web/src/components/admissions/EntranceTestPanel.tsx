@@ -406,7 +406,7 @@ function SetupStep({
       waitlistPercent: form.waitlistPercent,
       notes: form.notes,
     };
-    const r = await postJson<{ session: EntranceSession }>(
+    const r = await postJson<{ session: EntranceSession; resultsRecomputed?: number }>(
       API,
       form.id
         ? { action: "update_session", id: form.id, updatedAt: form.updatedAt, session }
@@ -417,7 +417,12 @@ function SetupStep({
       toastError(r.error);
       return;
     }
-    toastOk(form.id ? "Test updated" : "Test created");
+    const re = r.data.resultsRecomputed ?? 0;
+    toastOk(
+      form.id
+        ? `Test updated${re ? ` · ${re} result${re === 1 ? "" : "s"} set by the pass mark were worked out again (hand decisions kept)` : ""}`
+        : "Test created",
+    );
     setForm(null);
     onSaved(r.data.session);
   }
@@ -1416,7 +1421,7 @@ function NotifyStep({
   }
 
   async function send(count: number) {
-    const r = await postJson<{ sent: number; deferred: number; failed: number; errors: string[]; error?: string }>(`${API}/notify`, {
+    const r = await postJson<{ sent: number; deferred: number; failed: number; skippedClaimed: number; errors: string[]; error?: string }>(`${API}/notify`, {
       sessionId: session.id,
       kind,
       candidateIds: [...sel.selected],
@@ -1430,7 +1435,7 @@ function NotifyStep({
     const d = r.data;
     pushToast({
       kind: d.failed ? "error" : "success",
-      message: `${d.sent} sent${d.deferred ? ` · ${d.deferred} held for the family's quiet hours — send again later` : ""}${d.failed ? ` · ${d.failed} failed${d.errors[0] ? `: ${d.errors[0]}` : ""}` : ""}`,
+      message: `${d.sent} sent${d.deferred ? ` · ${d.deferred} held for the family's quiet hours — send again later` : ""}${d.skippedClaimed ? ` · ${d.skippedClaimed} skipped — another send reached them first` : ""}${d.failed ? ` · ${d.failed} failed${d.errors[0] ? `: ${d.errors[0]}` : ""}` : ""}`,
       durationMs: d.failed ? 0 : undefined,
     });
     setPlan(null);
