@@ -257,6 +257,11 @@ function resolveOriginalGuide(p: string, tab: string | null): ErpAiPageGuide | n
   // Bulk & PDC has its own guides (erpAiPageGuidesD), not the counter's.
   if (p === "/fees/tools") return null;
   if (p.startsWith("/fees")) return PAGE_GUIDES.find((g) => g.id === "fees")!;
+  // The bus register's own phone page: the tab guide, not the whole-desk one.
+  if (p === "/transport/register") {
+    const reg = MORE_PAGE_GUIDES.find((g) => g.id === "transport-register");
+    if (reg) return reg;
+  }
   if (p.startsWith("/transport") && tab === "planner") {
     return PAGE_GUIDES.find((g) => g.id === "transport-planner")!;
   }

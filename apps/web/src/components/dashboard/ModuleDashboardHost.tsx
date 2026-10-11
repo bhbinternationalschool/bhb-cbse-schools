@@ -33,13 +33,22 @@ export function ModuleDashboardHost({
     const onDataUpdated = () => setMastersTick((t) => t + 1);
     window.addEventListener("bhb-masters-updated", onDataUpdated);
     window.addEventListener("bhb-sis-updated", onDataUpdated);
+    // Desks loaded on first read (admissions, fees, payments, attendance)
+    // land after mount; redraw then rather than showing their empty memory.
+    window.addEventListener("bhb-desk-hydrated", onDataUpdated);
     return () => {
       window.removeEventListener("bhb-masters-updated", onDataUpdated);
       window.removeEventListener("bhb-sis-updated", onDataUpdated);
+      window.removeEventListener("bhb-desk-hydrated", onDataUpdated);
     };
   }, []);
 
+  // Load the module's desk once per module. This must not share an effect
+  // with the model below: bumping mastersTick re-ran it, which hydrated and
+  // bumped again — Fee Take asked the server for the dues summary and store
+  // dues about once a second for as long as it stayed open (11 Oct 2026).
   useEffect(() => {
+    let gone = false;
     void (async () => {
       const { withHydrationSlot } = await import("@/lib/deskHydrateGuard");
       if (moduleId === "admissions") {
@@ -63,8 +72,14 @@ export function ModuleDashboardHost({
       }
       // Re-read even when another screen did the loading: the first render
       // came from an empty page memory (10 Oct 2026).
-      setMastersTick((t) => t + 1);
+      if (!gone) setMastersTick((t) => t + 1);
     })();
+    return () => {
+      gone = true;
+    };
+  }, [moduleId]);
+
+  useEffect(() => {
     const built = buildModuleDashboard(moduleId, {
       academicYearCode: session?.academicYearCode,
     });

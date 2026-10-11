@@ -15,6 +15,7 @@ import {
   LiveMapPanel,
   ServicePanel,
 } from "@/components/transport/TransportFleetPanels";
+import { BusRegisterPanel } from "@/components/transport/BusRegisterPanel";
 import { FleetEdgeEventsPanel } from "@/components/transport/FleetEdgeEventsPanel";
 import { FleetEdgeReport } from "@/components/transport/FleetEdgeReport";
 import { canWriteModuleTab, visibleModuleTabs } from "@/lib/rbac";
@@ -101,6 +102,7 @@ import { useHoldDecisions } from "@/lib/useHoldDecisions";
 
 type TransportTab =
   | "dashboard"
+  | "register"
   | "planner"
   | "riders"
   | "requests"
@@ -134,6 +136,7 @@ const TRANSPORT_SETUP_STEPS: StepDef<TransportTab>[] = [
 
 const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
+  { id: "register", label: "Bus register", tone: "sky" },
   { id: "planner", label: "Planner", tone: "teal" },
   { id: "riders", label: "Riders", tone: "navy" },
   { id: "requests", label: "Requests", tone: "coral" },
@@ -169,6 +172,7 @@ export function TransportWorkspace() {
     const raw = new URLSearchParams(window.location.search).get("tab");
     const allowed: TransportTab[] = [
       "dashboard",
+      "register",
       "planner",
       "riders",
       "rosters",
@@ -649,6 +653,7 @@ export function TransportWorkspace() {
               onNavigateTab={(t) => setTab(t as TransportTab)}
             />
           ) : null}
+          {tab === "register" ? <BusRegisterPanel /> : null}
           {tab === "planner" ? (
             <TransportPlannerSteps
               state={state}
