@@ -428,6 +428,8 @@ SELFTESTS=(
   test:cashgram
   test:fee-bulk-pdc-templates
   test:payout-requests
+  test:visiting-pay
+  test:visiting-exclusions
   test:diksha-index
   test:teacher-contact
   test:question-bank

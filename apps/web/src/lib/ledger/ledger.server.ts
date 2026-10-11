@@ -634,7 +634,7 @@ export async function ledgerListAccounts(): Promise<
  * heading the entry forms hide, while the automation kept posting to it: two
  * views of one account. So they stay leaves.
  */
-const RESERVED_EXPENSE_CODES = new Set(["5060", "5065", "5066", "5100"]);
+const RESERVED_EXPENSE_CODES = new Set(["5060", "5065", "5066", "5075", "5100"]);
 
 /**
  * Create or rename an expense head.

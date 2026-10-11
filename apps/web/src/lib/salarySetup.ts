@@ -10,6 +10,7 @@ import type {
   StaffStream,
 } from "@/lib/foundationMasters";
 import { DEFAULT_AY } from "@/lib/masters";
+import { isVisitingStaff } from "@/lib/visitingPay";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 
@@ -648,11 +649,19 @@ export function newSalaryId(prefix: string) {
   return nid(prefix);
 }
 
-/** Resolve structure for a staff member (link → stream/category/designation match → first active). */
+/**
+ * Resolve structure for a staff member (link → stream/category/designation
+ * match → first active).
+ *
+ * Visiting staff (paid per period / hour / day — lib/visitingPay.ts) have no
+ * structure, ever: the `active[0]` fallback below would otherwise hand them a
+ * full monthly salary with PF and ESIC on it.
+ */
 export function resolveStructureForStaff(
   state: SalarySetupState,
   staff: StaffRecord,
 ): SalaryStructure | null {
+  if (isVisitingStaff(staff)) return null;
   const link = state.staffLinks.find((l) => l.staffId === staff.id);
   if (link?.structureId) {
     const hit = state.structures.find(

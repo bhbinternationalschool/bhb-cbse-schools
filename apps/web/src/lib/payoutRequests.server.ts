@@ -21,6 +21,7 @@ import { cashgramExpiryDate, cashgramNeedsApproval, cashgramPhone, cashgramPhone
 import {
   checkVoucherDraft,
   newPayoutRequestId,
+  readRequestKind,
   readRequestStatus,
   requestTransferId,
   topupLines,
@@ -41,6 +42,8 @@ export type PayoutRequestRow = {
   payeeName: string;
   payeePhone: string;
   vendorId: string;
+  /** visiting_fee: the staff member paid. */
+  staffId: string;
   billId: string;
   billNo: string;
   draft: VoucherDraft | null;
@@ -63,12 +66,13 @@ function rowTo(r: Record<string, unknown>): PayoutRequestRow {
   const d = (r.draft ?? null) as VoucherDraft | null;
   return {
     id: String(r.id ?? ""),
-    kind: r.kind === "voucher" ? "voucher" : "vendor_bill",
+    kind: readRequestKind(r.kind),
     channel: r.channel === "link" ? "link" : "transfer",
     amountPaise: Number(r.amount_paise ?? 0),
     payeeName: String(r.payee_name ?? ""),
     payeePhone: String(r.payee_phone ?? ""),
     vendorId: String(r.vendor_id ?? ""),
+    staffId: String(r.staff_id ?? ""),
     billId: String(r.bill_id ?? ""),
     billNo: String(r.bill_no ?? ""),
     draft: d && Array.isArray(d.lines) ? d : null,
@@ -142,7 +146,9 @@ async function insertAndMaybeSend(row: Record<string, unknown>, byOwner: boolean
     return {
       ok: false,
       error: /duplicate key|unique/i.test(error.message)
-        ? "A payment for this bill is already waiting or on its way"
+        ? row.kind === "visiting_fee"
+          ? "A payment for this sheet is already waiting or on its way"
+          : "A payment for this bill is already waiting or on its way"
         : `Could not record the payment: ${error.message}`,
     };
   }
@@ -267,6 +273,63 @@ export async function prepareVoucherPayment(input: {
   );
 }
 
+/**
+ * Pay a visiting staff member's approved month sheet (lib/visitingPay.ts):
+ * the NET amount, to the bank / UPI on their staff record, else a link to
+ * their phone. Booked (Dr 5075 / Cr 2310 TDS / Cr 1110) only when Cashfree
+ * confirms — applyPayoutRequest → applyVisitingFeePaid.
+ */
+export async function prepareVisitingFeePayment(input: {
+  sheetId: string;
+  channel?: PayoutRequestChannel | "";
+  requestedBy: string;
+  requestedByOwner: boolean;
+}): Promise<RequestResult> {
+  const { payoutKeysPresent } = await import("@/lib/payouts.server");
+  if (!payoutKeysPresent()) return { ok: false, error: "Cashfree Payouts is not configured on this server" };
+  const vp = await import("@/lib/visitingPay.server");
+  // Holds the sheet (payment_key) before anything is sent: a hand payment
+  // started now is refused, and one already started refuses this.
+  const s = await vp.claimSheetForCashfree(input.sheetId);
+  if (!s.ok) return s;
+  const giveBack = async (why: string): Promise<RequestResult> => {
+    await vp.releaseCashfreeClaim(s.sheet.id, why);
+    return { ok: false, error: why };
+  };
+  const payee = await vp.readStaffPayee(s.sheet.staffId, input.channel || "");
+  if (!payee.ok) return giveBack(payee.error);
+  if (payee.channel === "link") {
+    const problem = cashgramPhoneProblem(payee.phone);
+    if (problem) return giveBack(problem);
+  }
+  const label = `Visiting fees ${s.sheet.month} · ${s.sheet.staffName}`.slice(0, 80);
+  const r = await insertAndMaybeSend(
+    {
+      kind: "visiting_fee",
+      channel: payee.channel,
+      amount_paise: s.sheet.netPaise,
+      payee_name: payee.name,
+      payee_phone: payee.phone,
+      staff_id: s.sheet.staffId,
+      bill_id: s.sheet.id,
+      bill_no: label,
+      reason: label,
+    },
+    input.requestedByOwner,
+    input.requestedBy,
+    s.sheet.netPaise,
+  );
+  // Recorded even when held or refused at send: the sheet shows which request it has.
+  const latest = await listPayoutRequests({ billIds: [s.sheet.id], kind: "visiting_fee", limit: 1 });
+  const mine = latest[0] && requestIsOpenOrPaid(latest[0].status) ? latest[0] : null;
+  if (latest[0]) await vp.notePayoutRequest(s.sheet.id, latest[0].id, input.requestedBy);
+  // No live request came of it (insert refused, or the send failed outright):
+  // the sheet is free again. A request held for approval or a short wallet
+  // keeps it.
+  if (!mine) await vp.releaseCashfreeClaim(s.sheet.id, r.ok ? "No payment was created" : r.error);
+  return r;
+}
+
 /* ── approve / reject / cancel ───────────────────────────────────────── */
 
 export async function approvePayoutRequest(id: string, by: string): Promise<RequestResult> {
@@ -282,6 +345,7 @@ export async function rejectPayoutRequest(id: string, by: string, note: string):
   if (!r) return { ok: false, error: "No such payment" };
   if (r.status !== "PENDING_APPROVAL") return { ok: false, error: `This payment is ${r.status.toLowerCase()}, not waiting` };
   await update(id, { status: "REJECTED", decided_note: `${by}: ${note}`.trim() });
+  await freeVisitingSheet(id, "Payment not approved");
   const fresh = await getPayoutRequest(id);
   return fresh ? { ok: true, request: fresh, message: "Not approved. Nothing was sent." } : { ok: false, error: "Could not read back" };
 }
@@ -292,11 +356,13 @@ export async function cancelPayoutRequest(id: string, by: string): Promise<Reque
   if (!r) return { ok: false, error: "No such payment" };
   if (r.status === "PENDING_APPROVAL") {
     await update(id, { status: "CANCELLED", decided_note: `Withdrawn by ${by}` });
+    await freeVisitingSheet(id, "Payment withdrawn");
   } else if (r.status === "SENT" && r.channel === "link" && r.cashgramId) {
     const { cancelCashgramRefund } = await import("@/lib/cashgramRefunds.server");
     const c = await cancelCashgramRefund(r.cashgramId, by);
     if (!c.ok) return c;
     await update(id, { status: "CANCELLED", decided_note: `Link cancelled by ${by}` });
+    await freeVisitingSheet(id, "Pay link cancelled");
   } else {
     return { ok: false, error: r.channel === "transfer" && r.status === "SENT" ? "A bank transfer already sent cannot be called back" : `A ${r.status.toLowerCase()} payment cannot be cancelled` };
   }
@@ -341,7 +407,52 @@ async function dispatchPayoutRequest(id: string): Promise<RequestResult> {
     return now ? { ok: true, request: now, message: "Already sent." } : { ok: false, error: "No such payment" };
   }
   const r = (await getPayoutRequest(id)) ?? r0;
-  const label = r.kind === "vendor_bill" ? `Bill ${r.billNo}` : r.reason.slice(0, 60);
+  const label = r.kind === "vendor_bill" ? `Bill ${r.billNo}` : r.kind === "visiting_fee" ? r.billNo || r.reason.slice(0, 60) : r.reason.slice(0, 60);
+
+  if (r.channel === "transfer" && r.kind === "visiting_fee") {
+    // Bank or UPI from the staff record as it is NOW, never the screen.
+    const { readStaffPayee } = await import("@/lib/visitingPay.server");
+    const payee = await readStaffPayee(r.staffId, "transfer");
+    if (!payee.ok) return failSend(id, payee.error);
+    const { payoutBeneficiaryId, payoutModeForInstrument, UPI_PAYOUT_MAX_PAISE } = await import("@/lib/payouts");
+    if (payee.vpa && r.amountPaise > UPI_PAYOUT_MAX_PAISE) return failSend(id, "UPI payouts stop at ₹1,00,000 — add a bank account, or pay in parts by link");
+    const ben = await ps.ensureBeneficiary({
+      beneficiaryId: payoutBeneficiaryId({ subject: `s${r.staffId}`, vpa: payee.vpa || undefined, accountNumber: payee.accountNumber || undefined }),
+      name: payee.name,
+      accountNumber: payee.accountNumber || undefined,
+      ifsc: payee.ifsc || undefined,
+      vpa: payee.vpa || undefined,
+      phone: payee.phone || undefined,
+    });
+    if (!ben.ok) return failSend(id, ben.error);
+    const transferId = requestTransferId(id);
+    await update(id, { transfer_id: transferId });
+    const out = await ps.requestPayoutTransfer({
+      transferId,
+      beneficiaryId: ben.beneficiaryId,
+      amountPaise: r.amountPaise,
+      kind: "vis",
+      subjectId: r.staffId,
+      period: r.billId,
+      remarks: label,
+      requestedBy: r.approvedBy || r.requestedBy,
+      mode: payoutModeForInstrument(r.amountPaise, { vpa: payee.vpa || undefined, accountNumber: payee.accountNumber || undefined }),
+      target: { kind: "payout_request", id, label },
+      payeeName: payee.name,
+    });
+    if (!out.ok) {
+      if (out.needsStatusCheck) {
+        await update(id, { last_error: `${out.error} — check status before anything else` });
+        const now = await getPayoutRequest(id);
+        return now ? { ok: true, request: now, message: "Sent, but Cashfree's answer was lost — check its status." } : { ok: false, error: out.error };
+      }
+      return failSend(id, out.error);
+    }
+    const now = await getPayoutRequest(id);
+    return now
+      ? { ok: true, request: now, message: now.status === "PAID" ? "Paid and booked from the Cashfree wallet." : "Sent. It is booked when Cashfree confirms." }
+      : { ok: false, error: "Sent but could not be read back" };
+  }
 
   if (r.channel === "transfer") {
     const { data: vendor } = await ctx.sb
@@ -439,7 +550,20 @@ async function hold(id: string, why: string): Promise<RequestResult> {
 
 async function failSend(id: string, why: string): Promise<RequestResult> {
   await update(id, { status: "FAILED", last_error: why });
+  await freeVisitingSheet(id, why);
   return { ok: false, error: why };
+}
+
+function requestIsOpenOrPaid(s: PayoutRequestStatus): boolean {
+  return s === "PENDING_APPROVAL" || s === "SENT" || s === "PAID";
+}
+
+/** A visiting-fee request died before any money moved: the sheet may be paid another way. */
+async function freeVisitingSheet(id: string, why: string): Promise<void> {
+  const r = await getPayoutRequest(id);
+  if (!r || r.kind !== "visiting_fee" || r.appliedAt || requestIsOpenOrPaid(r.status)) return;
+  const { releaseCashfreeClaim } = await import("@/lib/visitingPay.server");
+  await releaseCashfreeClaim(r.billId, why);
 }
 
 /* ── apply ───────────────────────────────────────────────────────────── */
@@ -490,6 +614,14 @@ export async function applyPayoutRequest(id: string, ref: string, utr: string): 
     }
   }
 
+  if (r.kind === "visiting_fee") {
+    const { applyVisitingFeePaid } = await import("@/lib/visitingPay.server");
+    const done = await applyVisitingFeePaid({ sheetId: r.billId, requestId: id, ref, by: r.approvedBy || r.requestedBy || "cashfree" });
+    if (!done.ok) return release(`Paid by Cashfree; sheet not booked yet (${done.error}) — Check status retries it`);
+    await update(id, { status: "PAID", ...(utr ? { utr } : {}), result_ref: done.voucherNo, last_error: "" });
+    return { ok: true };
+  }
+
   if (!r.draft) return release("The voucher's details are missing");
   const { ledgerPost } = await import("@/lib/ledger/ledger.server");
   const date = istToday();
@@ -512,12 +644,20 @@ export async function requestChildDied(id: string, why: string): Promise<void> {
   const r = await getPayoutRequest(id);
   if (!r || r.appliedAt || r.status !== "SENT") return;
   await update(id, { status: "FAILED", last_error: why });
+  await freeVisitingSheet(id, why);
 }
 
 /** Booked, then the bank sent the money back. Not unwound by machine. */
 export async function flagRequestReversed(id: string): Promise<void> {
   const r = await getPayoutRequest(id);
   if (!r) return;
+  if (r.kind === "visiting_fee") {
+    // The sheet stays paid; its voucher is the record. What to do is written there.
+    const { flagVisitingFeeReturned } = await import("@/lib/visitingPay.server");
+    await flagVisitingFeeReturned(r.billId, r.id);
+    await update(id, { last_error: `The bank returned this payment after voucher ${r.resultRef} was posted — see the work sheet for the steps to pay again.` });
+    return;
+  }
   await update(id, {
     last_error:
       r.kind === "vendor_bill"

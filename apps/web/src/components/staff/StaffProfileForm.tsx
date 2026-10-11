@@ -33,6 +33,12 @@ import { pushToast } from "@/components/shell/Toast";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { hasPermission } from "@/lib/rbac";
 import {
+  VISITING_PAY_BASES,
+  normalizeVisitingPay,
+  visitingSetupProblems,
+  type VisitingPayProfile,
+} from "@/lib/visitingPay";
+import {
   CustomFieldsSection,
   type CustomFieldsHandle,
 } from "@/components/custom-fields/CustomFieldsSection";
@@ -188,6 +194,24 @@ export function StaffProfileForm(props: Props) {
 
   function patch(p: Partial<StaffRecord>) {
     setDraft((prev) => (prev ? { ...prev, ...p } : prev));
+  }
+
+  // Visiting staff are paid per period / hour / day (Staff → Visiting pay):
+  // no PF & ESIC tab, no basic pay — a rate and a TDS tick instead.
+  const isVisiting = draft?.category === "visiting";
+  const tabs = useMemo(
+    () => (isVisiting ? TABS.filter((t) => t.id !== "statutory") : TABS),
+    [isVisiting],
+  );
+  useEffect(() => {
+    if (isVisiting && tab === "statutory") setTab("employment");
+  }, [isVisiting, tab]);
+  const visitingPay: VisitingPayProfile = normalizeVisitingPay(draft?.visitingPay);
+  const visitingWarnings = draft && isVisiting ? visitingSetupProblems(draft) : null;
+  function patchVisiting(p: Partial<VisitingPayProfile>) {
+    setDraft((prev) =>
+      prev ? { ...prev, visitingPay: { ...normalizeVisitingPay(prev.visitingPay), ...p } } : prev,
+    );
   }
 
   function save() {
@@ -397,7 +421,7 @@ export function StaffProfileForm(props: Props) {
         aria-label="Staff profile sections"
         value={tab}
         onChange={(id) => setTab(id as Tab)}
-        items={TABS}
+        items={tabs}
       />
 
       <div className="mt-5 space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-sm">
@@ -756,6 +780,69 @@ export function StaffProfileForm(props: Props) {
                 ))}
               </select>
             </label>
+            {isVisiting ? (
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3 sm:col-span-2 lg:col-span-3">
+                <p className="text-xs font-semibold text-[var(--brand-deep)]">
+                  Visiting pay — not on payroll (no salary structure, PF or ESIC)
+                </p>
+                <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+                  Each month Staff → Visiting pay counts their work from this basis, the office approves the
+                  sheet, and they are paid by Cashfree to the bank / UPI on the Bank tab, or in cash.
+                </p>
+                <div className="mt-2 grid gap-3 sm:grid-cols-3">
+                  <label className={labelCls}>
+                    Paid
+                    <select
+                      className={field}
+                      value={visitingPay.basis}
+                      onChange={(e) => patchVisiting({ basis: e.target.value as VisitingPayProfile["basis"] })}
+                    >
+                      <option value="">Choose…</option>
+                      {VISITING_PAY_BASES.map((b) => (
+                        <option key={b.value} value={b.value}>
+                          {b.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={labelCls}>
+                    Rate (₹ per{" "}
+                    {visitingPay.basis === "per_hour" ? "hour" : visitingPay.basis === "per_day" ? "day" : "period"})
+                    <input
+                      className={field}
+                      value={visitingPay.rateRupees}
+                      onChange={(e) => patchVisiting({ rateRupees: e.target.value })}
+                      inputMode="decimal"
+                      placeholder="e.g. 250"
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 self-end pb-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={visitingPay.tds194j}
+                      onChange={(e) => patchVisiting({ tds194j: e.target.checked })}
+                    />
+                    Deduct TDS (194J)
+                  </label>
+                </div>
+                <label className={`${labelCls} mt-2 block sm:max-w-xs`}>
+                  PAN
+                  <input
+                    className={field}
+                    value={draft.panNo}
+                    onChange={(e) => patch({ panNo: e.target.value.toUpperCase() })}
+                    placeholder="AAAAA9999A"
+                  />
+                </label>
+                {visitingWarnings && (visitingWarnings.errors.length || visitingWarnings.warnings.length) ? (
+                  <ul className="mt-2 space-y-0.5 text-[11px] text-[var(--warning)]">
+                    {[...visitingWarnings.errors, ...visitingWarnings.warnings].map((w) => (
+                      <li key={w}>• {w}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
             <label className={labelCls}>
               Job type
               <select
@@ -881,15 +968,17 @@ export function StaffProfileForm(props: Props) {
                 onChange={(e) => patch({ staffAddedOn: e.target.value })}
               />
             </label>
-            <label className={labelCls}>
-              Basic pay (₹)
-              <input
-                className={field}
-                value={draft.basicPay}
-                onChange={(e) => patch({ basicPay: e.target.value })}
-                inputMode="decimal"
-              />
-            </label>
+            {isVisiting ? null : (
+              <label className={labelCls}>
+                Basic pay (₹)
+                <input
+                  className={field}
+                  value={draft.basicPay}
+                  onChange={(e) => patch({ basicPay: e.target.value })}
+                  inputMode="decimal"
+                />
+              </label>
+            )}
             <label className={labelCls}>
               Experience (years)
               <input
@@ -1377,8 +1466,8 @@ export function StaffProfileForm(props: Props) {
           className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)] disabled:opacity-40"
           disabled={tab === "basic"}
           onClick={() => {
-            const i = TABS.findIndex((t) => t.id === tab);
-            if (i > 0) setTab(TABS[i - 1]!.id);
+            const i = tabs.findIndex((t) => t.id === tab);
+            if (i > 0) setTab(tabs[i - 1]!.id);
           }}
         >
           Previous
@@ -1396,8 +1485,8 @@ export function StaffProfileForm(props: Props) {
             className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)] disabled:opacity-40"
             disabled={tab === "idcard"}
             onClick={() => {
-              const i = TABS.findIndex((t) => t.id === tab);
-              if (i < TABS.length - 1) setTab(TABS[i + 1]!.id);
+              const i = tabs.findIndex((t) => t.id === tab);
+              if (i < tabs.length - 1) setTab(tabs[i + 1]!.id);
             }}
           >
             Next

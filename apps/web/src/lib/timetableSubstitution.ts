@@ -217,6 +217,9 @@ export function substituteCandidates(input: {
   const out: SubstituteCandidate[] = [];
   for (const staff of input.masters.staff ?? []) {
     if (staff.status !== "active") continue;
+    // Visiting staff are paid per period they are booked for and come only on
+    // their own days — never offered as a substitute.
+    if (staff.category === "visiting") continue;
     if (input.absentTeacherIds.has(staff.id)) continue;
     if (busy.has(staff.id)) continue;
     if (input.takenTeacherIds.has(staff.id)) continue;

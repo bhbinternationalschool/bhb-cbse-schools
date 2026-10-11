@@ -497,7 +497,10 @@ export function defaultStaffMarks(
   staff: StaffRecord[],
 ): StaffAttendanceMark[] {
   return staff
-    .filter((s) => s.status === "active")
+    // Visiting staff (paid per period / hour / day) come on their own days:
+    // they join a register when they punch, and are never "Not punched" on
+    // a day nobody expected them.
+    .filter((s) => s.status === "active" && s.category !== "visiting")
     .map((s) => ({
       staffId: s.id,
       status: "A" as AttendanceStatus,

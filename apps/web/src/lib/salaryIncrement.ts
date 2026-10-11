@@ -6,6 +6,7 @@
 
 import type { StaffStream } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
+import { isVisitingStaff } from "@/lib/visitingPay";
 import {
   additionalFromLink,
   computeStructureAmounts,
@@ -310,8 +311,9 @@ export function buildIncrementDraft(input: {
     input.anniversaryOnly ?? policy.cycle === "anniversary";
   const effMonth = Number(effectiveFrom.slice(5, 7));
 
+  // Visiting staff have a rate on their profile, not a salary to raise.
   const roster = (input.masters.staff ?? []).filter(
-    (s) => s.status === "active",
+    (s) => s.status === "active" && !isVisitingStaff(s),
   );
   const lines: IncrementLine[] = [];
 

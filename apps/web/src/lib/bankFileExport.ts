@@ -5,6 +5,7 @@
 
 import type { StaffRecord } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
+import { isVisitingStaff } from "@/lib/visitingPay";
 import {
   downloadTextFile,
   formatInr,
@@ -72,6 +73,8 @@ export type BankExportRow = {
   remark: string;
   ok: boolean;
   issues: string[];
+  /** Not blocking: worth a look before the file goes to the bank. */
+  warnings?: string[];
 };
 
 export type BankExportPreview = {
@@ -153,7 +156,14 @@ export function buildBankExportPreview(input: {
       if (amount <= 0) continue;
 
       const staff = staffById.get(line.staffId);
-      rows.push(buildRow(line, staff, amount, input.month));
+      const row = buildRow(line, staff, amount, input.month);
+      // The payroll draft is the only gate (visiting staff are never drafted).
+      // A line already in a run is paid as the run says, even if the person
+      // has since been made visiting — only warned, never dropped.
+      if (isVisitingStaff(staff)) {
+        row.warnings = ["Now visiting staff — this salary line was drafted before the change; make sure their work sheet does not pay the same days"];
+      }
+      rows.push(row);
     }
   }
 

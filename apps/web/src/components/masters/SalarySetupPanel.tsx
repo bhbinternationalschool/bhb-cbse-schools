@@ -760,7 +760,7 @@ function StructuresPanel({
             }
           >
             <option value="">Any category</option>
-            {STAFF_CATEGORIES.map((c) => (
+            {STAFF_CATEGORIES.filter((c) => c.value !== "visiting").map((c) => (
               <option key={c.value} value={c.value}>
                 {c.label}
               </option>
@@ -1006,8 +1006,10 @@ function AssignPanel({
     statutoryGrossUp: boolean;
   };
 
+  // Visiting staff are paid per period / hour / day from Staff → Visiting
+  // pay — they never get a structure, PF or ESIC here.
   const roster = (masters.staff ?? [])
-    .filter((s) => s.status === "active")
+    .filter((s) => s.status === "active" && s.category !== "visiting")
     .sort((a, b) => a.empCode.localeCompare(b.empCode));
 
   // Sorting the setup list by what is SAVED is how the office finds who has
