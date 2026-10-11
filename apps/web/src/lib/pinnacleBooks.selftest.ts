@@ -18,6 +18,7 @@ assert.equal(pinnacleChapterName("Ch1: Computer—A Smart Machine"), "Computer�
 assert.equal(pinnacleChapterName("Ch:3 Early to Bed"), "Early to Bed");
 assert.equal(pinnacleChapterName("I Am a Little Teapot"), "I Am a Little Teapot");
 assert.equal(pinnacleChapterName("Book Answer Key"), "");
+assert.equal(pinnacleChapterName("Ch9: Quantiﬁers"), "Quantifiers", "ligatures are plain letters");
 assert.equal(pinnacleChapterName("Infographic: Computer System"), "");
 
 /* ── the scan, cleaned ── */

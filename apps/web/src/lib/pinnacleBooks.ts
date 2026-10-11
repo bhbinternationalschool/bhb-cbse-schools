@@ -47,6 +47,8 @@ export function pinnacleClassName(title: string, path: string): string {
  */
 export function pinnacleChapterName(raw: string): string {
   const s = String(raw || "")
+    // Publisher typesetting: "Quantiﬁers" (ligature) is "Quantifiers".
+    .normalize("NFKC")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^(?:ch(?:apter)?\s*[:.]?\s*\d+\s*[:.\-–]?\s*)/i, "")
