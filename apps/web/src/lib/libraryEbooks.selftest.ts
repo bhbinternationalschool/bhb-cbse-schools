@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { bookcaseCode, EBOOK_SHELF_CATALOGUE, EBOOK_SHELF_SEED, mergeEbookShelfSeed, normalizeEbook } from "./library";
+import {
+  bookcaseCode,
+  EBOOK_SHELF_CATALOGUE,
+  EBOOK_SHELF_SEED,
+  mergeEbookShelfSeed,
+  normalizeEbook,
+  shelfLabelForClass,
+  shelvesForClasses,
+} from "./library";
 
 /**
  * The e-book shelves (director, 12 Oct 2026: "Propel book links are
@@ -39,6 +47,27 @@ assert.deepEqual(six.classLabels, ["Class 6"], "a blank class is filled");
 assert.equal(merged.length, EBOOK_SHELF_SEED.length, "no shelf twice");
 console.log("  ok  verified catalogue fills blanks; office values stand; every class has a shelf");
 
+// ── Class-wise shelves for a family ───────────────────────────────────
+{
+  assert.equal(shelfLabelForClass("Nursery"), "Nursery");
+  assert.equal(shelfLabelForClass("UKG"), "UKG");
+  assert.equal(shelfLabelForClass("III"), "Class 3");
+  assert.equal(shelfLabelForClass("Class 7"), "Class 7");
+  const all = mergeEbookShelfSeed([]).ebooks;
+  const untagged = normalizeEbook({ id: "eb_x", url: "https://fliphtml5.com/bookcase/xxxxx/", classLabels: [] });
+  const shelf = [...all, untagged];
+  const names = (labels: Set<string> | null) => shelvesForClasses(shelf, labels).map((b) => bookcaseCode(b.url)).sort();
+  // A family with a child in Class 3 and one in LKG.
+  assert.deepEqual(
+    names(new Set(["Class 3", "LKG"])),
+    ["bilbd", "feocx", "fxwtz", "gqxrr", "hpgcz", "hvtxz", "jsmnm", "vrsvv", "xxxxx"].sort(),
+    "their two classes' shelves, the shared ones, and any untagged shelf",
+  );
+  assert.ok(!names(new Set(["Class 3"])).includes("ooiny"), "not Class 6's shelf");
+  assert.equal(names(null).length, shelf.length, "unknown classes: every shelf, never an empty one");
+  console.log("  ok  a family sees its children's classes' shelves; unknown = all");
+}
+
 // ── Wiring ─────────────────────────────────────────────────────────────
 const read = (f: string) => readFileSync(join(__dirname, f), "utf8");
 const route = read("../app/api/school-data/library-desk/route.ts");
@@ -50,6 +79,7 @@ const store = read("libraryEbooks.server.ts");
 assert.ok(/byId\.set\(e\.id, e\)/.test(store) && !/\.delete\(/.test(store), "merged by id; nothing removed by absence");
 const client = read("libraryNormalizedClient.ts");
 assert.ok(/ebooksHash !== ebooksBase/.test(client), "shelves are sent only when changed");
+assert.ok(/shelvesForClasses\(stored, labels\)/.test(apps) && /persona !== "staff" && ctx\.session\.householdId/.test(apps), "the apps filter by the family's classes; staff see all");
 console.log("  ok  wiring: stored on save, served on load and to the apps");
 
 console.log("\nAll library e-book checks passed.");

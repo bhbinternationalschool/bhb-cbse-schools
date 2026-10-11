@@ -1,8 +1,9 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
-import { readLibraryEbooks } from "@/lib/libraryEbooks.server";
+import { familyShelfLabels, readLibraryEbooks } from "@/lib/libraryEbooks.server";
 import { ebookAccess, keyForBook } from "@/lib/ebookAccess.server";
 import {
+  shelvesForClasses,
   bookcaseCode,
   normalizeEbook,
   type LibraryEbook,
@@ -48,7 +49,13 @@ export async function GET(request: Request) {
     // wrote them — so parents saw an empty shelf.
     const stored = await readLibraryEbooks();
     if (!stored) throw new ApiError("server_error", "Could not read the e-book shelves — try again", 503);
-    const raw = stored;
+    // A family sees its children's classes' shelves (12 Oct 2026); staff,
+    // and a family whose classes cannot be read, see every shelf.
+    const labels =
+      persona !== "staff" && ctx.session.householdId
+        ? await familyShelfLabels(ctx.session.householdId, ctx.session.academicYearCode || "", ctx.masters.classes ?? [])
+        : null;
+    const raw = shelvesForClasses(stored, labels);
     const books = (raw as Partial<LibraryEbook>[])
       .map(normalizeEbook)
       .filter((b) => b.isActive)

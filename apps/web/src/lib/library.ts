@@ -1427,3 +1427,26 @@ export function parseIssueNote(raw: string): Partial<LibraryIssue> {
   }
   return { note: raw };
 }
+
+/** The shelf class label for an ERP class name ("" when no shelf is for it). */
+export function shelfLabelForClass(className: string): string {
+  const n = String(className || "").trim().toUpperCase().replace(/\s+/g, " ");
+  if (/^(NUR|NURSERY|PG|PLAY ?GROUP)$/.test(n)) return "Nursery";
+  if (/^(LKG|JKG|KG ?1)$/.test(n)) return "LKG";
+  if (/^(UKG|SKG|KG ?2)$/.test(n)) return "UKG";
+  const roman: Record<string, string> = { I: "1", II: "2", III: "3", IV: "4", V: "5", VI: "6", VII: "7", VIII: "8", IX: "9", X: "10", XI: "11", XII: "12" };
+  const m = n.match(/^(?:CLASS|STD|GRADE)?\s*([IVX]+|\d{1,2})$/);
+  if (!m) return "";
+  return `Class ${roman[m[1]] ?? Number(m[1])}`;
+}
+
+/**
+ * The shelves a family sees (director, 12 Oct 2026): those tagged for one of
+ * its children's classes, plus any shelf with no class tag. `labels` null =
+ * the children's classes are unknown (read failed, staff, no family) — then
+ * every shelf shows; an unknown class must never empty the shelf.
+ */
+export function shelvesForClasses<T extends { classLabels: string[] }>(books: T[], labels: Set<string> | null): T[] {
+  if (!labels || labels.size === 0) return books;
+  return books.filter((b) => b.classLabels.length === 0 || b.classLabels.some((c) => labels.has(c)));
+}

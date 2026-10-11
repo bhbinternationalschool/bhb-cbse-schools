@@ -13,7 +13,7 @@ import "server-only";
  */
 
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { mergeEbookShelfSeed, normalizeEbook, type LibraryEbook } from "@/lib/library";
+import { mergeEbookShelfSeed, normalizeEbook, shelfLabelForClass, type LibraryEbook } from "@/lib/library";
 
 export const LIBRARY_EBOOKS_KEY = "library_ebooks";
 
@@ -63,4 +63,33 @@ export async function mergeLibraryEbooks(
     );
   if (error) return { ok: false, error: error.message };
   return { ok: true, ebooks };
+}
+
+/**
+ * Shelf labels for a family's current children ("Class 3", "LKG"); null
+ * when they cannot be read — the caller then shows every shelf.
+ */
+export async function familyShelfLabels(
+  householdId: string,
+  academicYearCode: string,
+  classes: { id: string; name: string }[],
+): Promise<Set<string> | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx || !householdId) return null;
+  let q = ctx.sb
+    .from("sis_students")
+    .select("class_id")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("household_id", householdId)
+    .eq("status", "active");
+  if (academicYearCode) q = q.eq("academic_year_code", academicYearCode);
+  const { data, error } = await q;
+  if (error || !data) return null;
+  const name = new Map(classes.map((c) => [c.id, c.name]));
+  const labels = new Set<string>();
+  for (const r of data as { class_id: string | null }[]) {
+    const label = shelfLabelForClass(name.get(String(r.class_id || "")) || "");
+    if (label) labels.add(label);
+  }
+  return labels.size ? labels : null;
 }
