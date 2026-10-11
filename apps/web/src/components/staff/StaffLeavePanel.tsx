@@ -47,7 +47,14 @@ type LeaveTab =
   | "halfday"
   | "allot";
 
-export function StaffLeavePanel({ ay }: { ay: string }) {
+export function StaffLeavePanel({
+  ay,
+  onOpenLeaveRules,
+}: {
+  ay: string;
+  /** In a year with a leave policy, "Allot leave days" opens Leave rules. */
+  onOpenLeaveRules?: () => void;
+}) {
   const session = useDemoSession();
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [hr, setHr] = useState<StaffHrState | null>(null);
@@ -573,10 +580,19 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
       <ModuleTabs
         aria-label="Leave actions"
         value={tab}
-        onChange={(id) => setTab(id as LeaveTab)}
+        onChange={(id) => {
+          // A policy year allots in Leave rules; the old tab here only showed
+          // a note above the same balances table Manage shows, so it looked
+          // like a duplicate of Manage (director, 11 Oct 2026).
+          if (id === "allot" && policyState === "policy" && onOpenLeaveRules) {
+            onOpenLeaveRules();
+            return;
+          }
+          setTab(id as LeaveTab);
+        }}
         items={tabs.map((t) => ({
           id: t.id,
-          label: t.label,
+          label: t.id === "allot" && policyState === "policy" && onOpenLeaveRules ? "Allot leave days → Leave rules" : t.label,
           tone:
             t.id === "request"
               ? ("teal" as const)
