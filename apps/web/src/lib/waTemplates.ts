@@ -219,6 +219,12 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "weekLabel", label: "Week covered", group: "School", sample: "8–13 Sep" },
   { key: "childSummary", label: "Each child's week", group: "Student", sample: "Aarav (III A) — Present 5 of 6 days · Hindi 18/20  |  Anaya (LKG A) — Present 6 of 6 days", hint: "One line per child from lib/weeklyChildDigest.ts; a family with nothing true to report is not messaged." },
   { key: "registerLink", label: "Registration link", group: "Admissions", sample: "https://school.example/register" },
+  { key: "testDate", label: "Entrance test date", group: "Admissions", sample: "Sat, 14 Nov 2026" },
+  { key: "testTime", label: "Entrance test start time", group: "Admissions", sample: "10:00 AM" },
+  { key: "venue", label: "Entrance test venue", group: "Admissions", sample: "Main building, Room 4" },
+  { key: "rollNo", label: "Entrance test roll no.", group: "Admissions", sample: "014" },
+  { key: "testResult", label: "Entrance test result", group: "Admissions", sample: "Selected — congratulations!" },
+  { key: "nextStep", label: "What the family does next", group: "Admissions", sample: "Please visit the school office to complete the admission formalities." },
   { key: "homeworkTitle", label: "Homework title", group: "Academic", sample: "Exercise 5.2, questions 1–5" },
   { key: "chapterLine", label: "Subject, book, chapter and what it covers", group: "Academic", sample: "Mathematics · Propel Maths Grade 5 · Ch 5 More about Operations on Numbers — DMAS, unitary method", hint: "Resolved from the school's own books by homeworkExpand. One line — Meta refuses a newline inside a variable — and it degrades to subject and book, then to the subject alone, so the line is never a bare dash, never untrue, and never repeats what the greeting already said." },
   { key: "subject", label: "Subject", group: "Academic", sample: "Mathematics" },
@@ -770,6 +776,43 @@ const SEED_DEFS: SeedDef[] = [
       "Namaste {{guardianName}} ji 🙏\n\nJust checking in on {{childName}}'s admission enquiry at *{{schoolName}}*. 🎒\n\nIs there anything we can help with — the class, fees, transport, or a campus visit?\n\n👉 Reply *YES* and our admissions team will call you back, or reply with your question here.\n\nWe are happy to help. 🙏",
     bodyHi:
       "नमस्ते {{guardianName}} जी 🙏\n\n*{{schoolName}}* में {{childName}} की प्रवेश पूछताछ के बारे में हाल जानना चाहते हैं। 🎒\n\nक्या किसी बात में मदद चाहिए — कक्षा, शुल्क, परिवहन या कैंपस विज़िट?\n\n👉 *YES* लिखें और हमारी प्रवेश टीम आपको फ़ोन करेगी, या अपना प्रश्न यहीं लिख भेजें।\n\nहमें मदद करके खुशी होगी। 🙏",
+    footerEn: "Admissions desk · Reply to this message for help",
+    footerHi: "प्रवेश कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  // Admissions → Entrance test (lib/admissionEntranceTest.ts). Neither is
+  // approved on Meta when this ships: the notify step shows the text and
+  // refuses to send until both languages are approved, like every family.
+  {
+    familyKey: "admissions_entrance_invite",
+    nameEn: "Entrance test invitation",
+    nameHi: "प्रवेश परीक्षा सूचना",
+    module: "admissions",
+    category: "UTILITY",
+    metaName: "bhb_entrance_test_invite",
+    headerFormat: "TEXT",
+    headerTextEn: "Admission test",
+    headerTextHi: "प्रवेश परीक्षा",
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\n{{childName}}'s admission test for {{className}} at *{{schoolName}}* is fixed:\n\n📅 Date: *{{testDate}}*\n⏰ Time: *{{testTime}}*\n📍 Venue: {{venue}}\n🎫 Roll no: *{{rollNo}}*\n\nPlease arrive 15 minutes early with a pencil, an eraser and this message.\n\nAll the best to your child! 🌼",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n*{{schoolName}}* में {{className}} के लिए {{childName}} की प्रवेश परीक्षा तय हो गई है:\n\n📅 तिथि: *{{testDate}}*\n⏰ समय: *{{testTime}}*\n📍 स्थान: {{venue}}\n🎫 रोल नंबर: *{{rollNo}}*\n\nकृपया पेंसिल, रबर और यह संदेश लेकर 15 मिनट पहले पहुँचें।\n\nबच्चे को शुभकामनाएँ! 🌼",
+    footerEn: "Admissions desk · Reply to this message for help",
+    footerHi: "प्रवेश कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
+    familyKey: "admissions_entrance_result",
+    nameEn: "Entrance test result",
+    nameHi: "प्रवेश परीक्षा परिणाम",
+    module: "admissions",
+    category: "UTILITY",
+    metaName: "bhb_entrance_test_result",
+    headerFormat: "TEXT",
+    headerTextEn: "Admission test result",
+    headerTextHi: "प्रवेश परीक्षा परिणाम",
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\nThe result of {{childName}}'s admission test for {{className}} at *{{schoolName}}*:\n\n📋 *{{testResult}}*\n\n{{nextStep}}\n\nFor any question, simply reply to this message. Thank you 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n*{{schoolName}}* में {{className}} के लिए {{childName}} की प्रवेश परीक्षा का परिणाम:\n\n📋 *{{testResult}}*\n\n{{nextStep}}\n\nकोई प्रश्न हो तो इसी संदेश का उत्तर दें। धन्यवाद 🙏",
     footerEn: "Admissions desk · Reply to this message for help",
     footerHi: "प्रवेश कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },

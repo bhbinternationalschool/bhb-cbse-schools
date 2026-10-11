@@ -97,6 +97,11 @@ import { ErpTableShell } from "@/components/ui/erp-roster";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonModulePage } from "@/components/ui/skeleton";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import {
+  CustomExportToggle,
+  studentAliasIndex,
+  useCustomFieldExport,
+} from "@/components/custom-fields/useCustomFieldExport";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { BirthdaysPanel } from "@/components/students/BirthdaysPanel";
 import { canSeeModuleTab, canWriteModuleTab, visibleModuleTabs } from "@/lib/rbac";
@@ -782,10 +787,25 @@ export function StudentsWorkspace() {
   const rosterKeys = useMemo(() => filtered.map((s) => s.id), [filtered]);
   const rosterSelection = useRowSelection(rosterKeys);
 
+  // Optional "+ More details" columns (Masters → Custom fields).
+  const customExport = useCustomFieldExport("student");
+  const { cells: customCells, columns: customColumns } = customExport;
+  const customAliasOf = useMemo(
+    () => studentAliasIndex(state?.students ?? []),
+    [state],
+  );
+  const exportColumns = useMemo(
+    () => [...STUDENT_REGISTER_EXPORT_COLUMNS, ...customColumns],
+    [customColumns],
+  );
+
   const exportRows = useMemo(() => {
     if (!masters || !state) return [];
-    return filtered.map((s) => studentToRegisterExportRow(s, state, masters));
-  }, [filtered, masters, state]);
+    return filtered.map((s) => ({
+      ...studentToRegisterExportRow(s, state, masters),
+      ...customCells(customAliasOf(s.id)),
+    }));
+  }, [filtered, masters, state, customCells, customAliasOf]);
 
   const exportFilterNote = useMemo(() => {
     if (!masters) return describeFilters([]);
@@ -1479,12 +1499,13 @@ export function StudentsWorkspace() {
               {sortOrder === "asc" ? "↑ Asc" : "↓ Desc"}
             </button>
           </div>
+          <CustomExportToggle state={customExport} />
           <ExportMenu
             title="Student register (full form)"
             subtitle={`${TENANT.shortName} · ${headerAy}`}
             filterNote={exportFilterNote}
             fileBaseName="students_full_register"
-            columns={STUDENT_REGISTER_EXPORT_COLUMNS}
+            columns={exportColumns}
             rows={() => exportRows}
             onMessage={(msg) => {
               setNotice(msg);

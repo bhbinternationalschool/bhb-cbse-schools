@@ -82,6 +82,10 @@ import { useDemoSession } from "@/components/shell/SessionContext";
 import { StaffPresenceCard } from "@/components/staff/StaffPresenceCard";
 import { StaffGeoAdminPanel } from "@/components/staff/StaffGeoAdminPanel";
 import { hasFeaturePermission, hasPermission, visibleModuleTabs } from "@/lib/rbac";
+import {
+  CustomExportToggle,
+  useCustomFieldExport,
+} from "@/components/custom-fields/useCustomFieldExport";
 
 type NamedCount = ErpChartRow;
 
@@ -178,6 +182,8 @@ export function StaffWorkspace() {
     typeof window !== "undefined" ? loadMasters() : null,
   );
   const [notice, setNotice] = useState<string | null>(null);
+  // Optional "+ More details" export columns (Masters → Custom fields).
+  const customExport = useCustomFieldExport("staff");
 
   // Someone holding only some Staff functions (director, 6 Oct 2026 — e.g.
   // Leave approvals) sees only their tabs.
@@ -656,6 +662,7 @@ export function StaffWorkspace() {
             </label>
           </FilterBar>
           <div className="flex shrink-0 items-center gap-2">
+            <CustomExportToggle state={customExport} />
             <ExportMenu
               title="Staff register"
               subtitle={`${filtered.length} staff · ${staffFilters.status === "active" ? "active" : staffFilters.status}`}
@@ -669,6 +676,7 @@ export function StaffWorkspace() {
                 { key: "gender", header: "Gender" },
                 { key: "mobile", header: "Mobile" },
                 { key: "status", header: "Status" },
+                ...customExport.columns,
               ]}
               rows={() =>
                 staffSort.rows.map((r) => ({
@@ -680,6 +688,7 @@ export function StaffWorkspace() {
                   gender: r.gender === "M" ? "Male" : r.gender === "F" ? "Female" : r.gender === "O" ? "Other" : "",
                   mobile: r.mobile || "",
                   status: r.status,
+                  ...customExport.cells([r.id]),
                 }))
               }
               onMessage={(msg) => {

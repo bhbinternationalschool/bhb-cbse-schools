@@ -108,6 +108,18 @@ export const PEOPLE_FEATURES: RbacFeatureDef[] = [
       "/api/admissions/lead-intelligence",
     ],
   },
+  {
+    // Server tables (admission_entrance_*), not a desk slice — the route
+    // below is the only door, and it checks the action per request.
+    id: "admissions.entrance_test",
+    module: "admissions",
+    label: "Entrance test",
+    blurb:
+      "Admission test sittings, the roll and attendance sheet, marks, results (Selected / Waitlisted / Not selected) and messaging families (change).",
+    actions: CRUD,
+    tabs: ["entrance"],
+    routes: ["/api/admissions/entrance-test"],
+  },
 
   // ── RTE / EWS ──────────────────────────────────────────────────────────
   // Slices are RteState keys (rte-desk). Tab "dashboard" is the Seats tab.

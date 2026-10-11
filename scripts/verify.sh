@@ -126,6 +126,8 @@ SELFTESTS=(
   test:fee-store-discount
   test:masters-subject-guard
   test:subject-requests
+  test:custom-fields
+  test:custom-fields-import
   test:udise-nudge
   test:apaar-consent
   test:aadhaar-certificate
@@ -328,6 +330,7 @@ SELFTESTS=(
   test:admissions-ai
   test:admissions-enquiry-form
   test:admissions-kb
+  test:admission-entrance-test
   test:birthday-cards
   test:collections-ai
   test:concession-per-due
