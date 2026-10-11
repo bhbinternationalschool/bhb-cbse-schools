@@ -17,8 +17,8 @@ type Body = { id?: string; approve?: boolean; note?: string };
 /**
  * POST /api/v1/staff/leave/decide {id, approve, note} — the principal (or a
  * named leave approver for that member of staff) decides. The year's leave
- * rules apply; a short balance under an "LWP" rule files the rest as leave
- * without pay (the response's decisionNote says so).
+ * rules apply; a short balance under an "LWP" rule is refused here with a
+ * message to decide it on the web (where the approver confirms the split).
  */
 export async function POST(request: Request) {
   try {
@@ -52,9 +52,10 @@ export async function POST(request: Request) {
       decidedBy: ctx.session.fullName || "Principal",
       approverStaffId: ctx.session.staffId || "",
       isLeadership: access.leadership,
-      // The app has no second question to ask: an "LWP" rule files the
-      // over-balance part as unpaid, and the note records it.
-      confirmLwp: true,
+      // The app never files unpaid leave on its own: a short balance under
+      // an "LWP" rule is refused with "decide it on the web".
+      channel: "app",
+      confirmLwp: false,
     });
     if (!result.ok) {
       throw new ApiError(
@@ -102,7 +103,7 @@ export async function POST(request: Request) {
           : after.status === "pending_l2"
             ? "Leave cleared at level 1"
             : "Leave not approved",
-      body: `${req.typeCode} ${label}${note ? ` · ${note}` : ""}${result.notice ? ` · Balance short: ${result.notice}` : ""}`,
+      body: `${req.typeCode} ${label}${note ? ` · ${note}` : ""}`,
       url: "/leave",
       data: { kind: "staff_leave_decision", requestId: id, status: after.status },
     }).catch(() => undefined);

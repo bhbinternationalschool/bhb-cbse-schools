@@ -19,7 +19,7 @@ import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster
 import { ExportMenu, RowActionMenu } from "@/components/ui/erp-grid";
 import { listSessionYearOptions, loadMasters, type MastersState } from "@/lib/masters";
 import { STAFF_CATEGORIES } from "@/lib/foundationMasters";
-import type { ApproverRule, ApproverScopeKind, CarryPlan, LeavePolicy, LeavePolicyType } from "@/lib/staffLeaveRules";
+import { nextAcademicYear, type ApproverRule, type ApproverScopeKind, type CarryPlan, type LeavePolicy, type LeavePolicyType } from "@/lib/staffLeaveRules";
 
 type Step = "policy" | "allocations" | "approvers" | "carry" | "reports";
 type DeskType = { code: string; name: string; paid: boolean };
@@ -691,18 +691,14 @@ function ApproversStep({
 
 // ── 4 Carry forward ──────────────────────────────────────────────────────
 
-function nextAy(ay: string): string {
-  const y = Number(ay.slice(0, 4));
-  return Number.isFinite(y) ? `${y + 1}-${String((y + 2) % 100).padStart(2, "0")}` : "";
-}
-
 function CarryStep({ ay, years, canEdit, nameOf, flash }: { ay: string; years: string[]; canEdit: boolean; nameOf: (id: string) => string; flash: (t: string, bad?: boolean) => void }) {
   const [fromAy, setFromAy] = useState(ay);
-  const [toAy, setToAy] = useState(nextAy(ay));
+  // Leave carries into exactly the next academic year.
+  const toAy = nextAcademicYear(fromAy);
   const [plan, setPlan] = useState<CarryPlan | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const choices = [...new Set([...years, ay, nextAy(ay), toAy].filter(Boolean))].sort();
+  const choices = [...new Set([...years, ay].filter(Boolean))].sort();
 
   async function preview() {
     setErr(null);
@@ -743,13 +739,7 @@ function CarryStep({ ay, years, canEdit, nameOf, flash }: { ay: string; years: s
           </label>
           <label className="text-xs">
             <span className="mb-1 block text-[var(--muted)]">Into</span>
-            <select className="field !py-1.5" value={toAy} onChange={(e) => { setToAy(e.target.value); setPlan(null); }}>
-              {choices.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+            <input className="field !py-1.5 w-24" value={toAy} readOnly aria-label="Into academic year" />
           </label>
           <button type="button" className={btn} onClick={() => void preview()}>
             Preview

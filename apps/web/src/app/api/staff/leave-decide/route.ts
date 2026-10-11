@@ -55,6 +55,7 @@ export async function POST(req: Request) {
     decidedBy: ctx.session.fullName || "Principal",
     approverStaffId: ctx.session.staffId || "",
     isLeadership: true,
+    channel: "web",
     confirmLwp: b.confirmLwp === true,
   });
   if (!result.ok) return bad(result.error, result.status, result.needsConfirm ? { needsConfirm: true } : {});

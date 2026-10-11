@@ -8,7 +8,13 @@ import {
   approveOnDesk,
   ayMonths,
   canDecide,
+  carryYearsProblem,
   checkApproval,
+  isMissingTableError,
+  lwpChannelDecision,
+  LWP_NEEDS_WEB,
+  nextAcademicYear,
+  workingRuns,
   computeLeaveBook,
   crossSandwichCharges,
   monthEndBalances,
@@ -165,11 +171,28 @@ assert.ok(!blocked.ok && blocked.reason === "insufficient" && blocked.mode === "
 const ml4 = req({ id: "ml4", staffId: "s3", typeCode: "ML", fromDate: "2026-10-19", toDate: "2026-10-22", status: "pending" });
 const lwp = checkApproval({ ay: AY, policy: pol, deskTypes, staff: staff[2]!, requests: [ml4], carry: [], requestId: "ml4", isOff });
 assert.ok(!lwp.ok && lwp.reason === "insufficient" && lwp.mode === "lwp");
-assert.deepEqual(!lwp.ok && lwp.reason === "insufficient" ? lwp.split : null, { paidToDate: "2026-10-20", lwpFromDate: "2026-10-21", paidCharge: 2 });
+assert.deepEqual(!lwp.ok && lwp.reason === "insufficient" ? lwp.split : null, {
+  paidToDate: "2026-10-20",
+  lwpFromDate: "2026-10-21",
+  paidCharge: 2,
+  lwpRuns: [{ from: "2026-10-21", to: "2026-10-22" }],
+});
 // Nothing left at all → the whole request becomes LWP.
 const used = req({ id: "used", staffId: "s3", typeCode: "ML", fromDate: "2026-09-07", toDate: "2026-09-08" });
 const none = checkApproval({ ay: AY, policy: pol, deskTypes, staff: staff[2]!, requests: [used, ml4], carry: [], requestId: "ml4", isOff });
-assert.deepEqual(!none.ok && none.reason === "insufficient" ? none.split : null, { paidToDate: null, lwpFromDate: "2026-10-19", paidCharge: 0 });
+assert.deepEqual(!none.ok && none.reason === "insufficient" ? none.split : null, {
+  paidToDate: null,
+  lwpFromDate: "2026-10-19",
+  paidCharge: 0,
+  lwpRuns: [{ from: "2026-10-19", to: "2026-10-22" }],
+});
+// The LWP part skips holidays and Sundays: Mon 12 → Sat 17 with the Wed 14
+// holiday, all LWP, is filed as 12–13 and 15–17 (payroll pays the holiday).
+assert.deepEqual(workingRuns("2026-10-12", "2026-10-19", "s3", isOff), [
+  { from: "2026-10-12", to: "2026-10-13" },
+  { from: "2026-10-15", to: "2026-10-17" },
+  { from: "2026-10-19", to: "2026-10-19" },
+]);
 
 // approveOnDesk: the split files a paid part and an LWP part, desk used follows.
 const desk: StaffHrState = {
@@ -183,7 +206,7 @@ const desk: StaffHrState = {
 const now = "2026-10-11T10:00:00.000Z";
 const done = approveOnDesk(desk, {
   requestId: "ml4", decidedBy: "Principal", note: "", now, twoLevel: false,
-  split: { paidToDate: "2026-10-20", lwpFromDate: "2026-10-21", lwpTypeCode: "LWP" },
+  split: { paidToDate: "2026-10-20", lwpRuns: [{ from: "2026-10-21", to: "2026-10-22" }], lwpTypeCode: "LWP" },
 });
 assert.ok(!("error" in done));
 if (!("error" in done)) {
@@ -246,7 +269,7 @@ const deskState: StaffHrState = {
     { id: "x3", academicYearCode: AY, staffId: "s3", typeCode: "CL", allotted: 10, carriedForward: 0, encashed: 0, used: 9 },
   ],
 };
-const sync = planDeskSync({ ay: AY, state: deskState, book });
+const sync = planDeskSync({ ay: AY, state: deskState, book, yearHasCarry: true });
 assert.ok(sync.changes.some((c) => c.staffId === "s1" && c.typeCode === "CL" && c.allottedAfter === 10));
 assert.ok(!sync.changes.some((c) => c.staffId === "s2" && c.typeCode === "CL"), "already in line");
 assert.deepEqual(sync.refused.map((r) => [r.staffId, r.typeCode]), [["s3", "CL"]]);
@@ -255,5 +278,69 @@ const synced = applyDeskSync(deskState, { ay: AY, changes: sync.changes, changed
 assert.equal(synced.leaveBalances.find((b) => b.id === "x1")!.allotted, 10);
 assert.equal(synced.leaveBalances.find((b) => b.staffId === "s1" && b.typeCode === "ML")!.carriedForward, 5);
 assert.ok(synced.leaveAllotmentLog.some((l) => l.staffId === "s1" && l.before === 12 && l.after === 10 && l.reason === `Leave policy ${AY}`));
+
+// ── Review fixes (PR #550) ──
+
+// 1. Tables not migrated yet = no policy, not a failed read.
+assert.equal(isMissingTableError('relation "public.staff_leave_policy_types" does not exist'), true);
+assert.equal(isMissingTableError("42P01"), true);
+assert.equal(isMissingTableError("Could not find the table 'public.staff_leave_policy_types' in the schema cache"), true);
+assert.equal(isMissingTableError("PGRST205"), true);
+assert.equal(isMissingTableError("canceling statement due to statement timeout"), false);
+assert.equal(isMissingTableError("permission denied for table staff_leave_policy_types"), false);
+assert.equal(isMissingTableError(null), false);
+
+// 2. The staff app and WhatsApp never file LWP on their own; the web asks.
+assert.equal(lwpChannelDecision({ channel: "app", confirmLwp: true }), "refuse");
+assert.equal(lwpChannelDecision({ channel: "whatsapp", confirmLwp: true }), "refuse");
+assert.equal(lwpChannelDecision({ channel: "web", confirmLwp: false }), "ask");
+assert.equal(lwpChannelDecision({ channel: "web", confirmLwp: true }), "split");
+assert.match(LWP_NEEDS_WEB, /web/);
+// A whole-LWP split over a Sunday files two requests, the Sunday in neither.
+const overSun = req({ id: "sun", staffId: "s3", typeCode: "ML", fromDate: "2026-10-17", toDate: "2026-10-19", status: "pending" });
+const sunState: StaffHrState = { ...emptyStaffHrState(), leaveRequests: [overSun] };
+const sunSplit = approveOnDesk(sunState, {
+  requestId: "sun", decidedBy: "P", note: "", now, twoLevel: false,
+  split: { paidToDate: null, lwpRuns: workingRuns("2026-10-17", "2026-10-19", "s3", isOff), lwpTypeCode: "LWP" },
+});
+assert.ok(!("error" in sunSplit));
+if (!("error" in sunSplit)) {
+  assert.deepEqual(sunSplit.approved.map((r) => [r.id === "sun", r.typeCode, r.fromDate, r.toDate, r.days]), [
+    [true, "LWP", "2026-10-17", "2026-10-17", 1],
+    [false, "LWP", "2026-10-19", "2026-10-19", 1],
+  ]);
+}
+
+// 3a. Encashed days leave the balance.
+const withEnc = computeLeaveBook({
+  ay: AY, policy: pol, deskTypes, staff, requests, carry, isOff,
+  encashments: [{ academicYearCode: AY, staffId: "s1", typeCode: "CL", days: 2 }, { academicYearCode: "2025-26", staffId: "s1", typeCode: "CL", days: 9 }],
+});
+const encRow = withEnc.find((r) => r.staffId === "s1" && r.typeCode === "CL")!;
+assert.equal(encRow.encashed, 2);
+assert.equal(encRow.balance, 4.5, "6.5 − 2 encashed (other years ignored)");
+assert.equal(monthEndBalances(encRow, AY).at(-1)!.balance, 4.5);
+// 3b. A year with no carry rows: the desk's old carry is the opening, and
+// Apply to balances never lowers it.
+const deskCarryState: StaffHrState = {
+  ...emptyStaffHrState(),
+  leaveBalances: [{ id: "c1", academicYearCode: AY, staffId: "s2", typeCode: "ML", allotted: 2, carriedForward: 3, encashed: 0, used: 0 }],
+};
+const noCarryBook = computeLeaveBook({
+  ay: AY, policy: pol, deskTypes, staff, requests: [], carry: [], isOff,
+  deskCarried: deskCarryState.leaveBalances,
+});
+assert.equal(noCarryBook.find((r) => r.staffId === "s2" && r.typeCode === "ML")!.opening, 3);
+const keep = planDeskSync({ ay: AY, state: deskCarryState, book: computeLeaveBook({ ay: AY, policy: pol, deskTypes, staff, requests: [], carry: [], isOff }), yearHasCarry: false });
+assert.ok(!keep.changes.some((c) => c.staffId === "s2" && c.typeCode === "ML"), "carried 3 is not lowered to 0");
+assert.ok(keep.changes.every((c) => c.carriedAfter >= c.carriedBefore));
+
+// 4. The carry goes into exactly the next academic year.
+assert.equal(nextAcademicYear("2026-27"), "2027-28");
+assert.equal(nextAcademicYear("2099-00"), "2100-01");
+assert.equal(carryYearsProblem("2026-27", "2027-28"), null);
+assert.match(carryYearsProblem("2026-27", "2028-29") ?? "", /2027-28 only/);
+assert.match(carryYearsProblem("2026-27", "2025-26") ?? "", /2027-28 only/);
+assert.ok(carryYearsProblem("", "2027-28"));
 
 console.log("staffLeaveRules selftest: ok");

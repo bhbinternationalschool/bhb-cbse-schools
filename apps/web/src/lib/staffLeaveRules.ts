@@ -109,6 +109,40 @@ export function floorHalf(n: number): number {
   return Math.floor(n * 2 + 1e-9) / 2;
 }
 
+/**
+ * A read error that means the leave-rule tables do not exist yet (the code
+ * deployed before its migration). That is "no policy" — the desk's old rules
+ * apply — not a failed read. Postgres 42P01 / PostgREST PGRST205.
+ */
+export function isMissingTableError(message: string | null | undefined): boolean {
+  const m = String(message ?? "");
+  return /42P01|PGRST205|does not exist|Could not find the table/i.test(m);
+}
+
+/** "2026-27" → "2027-28" ("" when it is not a year code). */
+export function nextAcademicYear(ay: string): string {
+  if (!/^\d{4}-\d{2}$/.test(ay)) return "";
+  const y = Number(ay.slice(0, 4));
+  return `${y + 1}-${String((y + 2) % 100).padStart(2, "0")}`;
+}
+
+/** Where a decision comes from. Only the web screen can ask a second question. */
+export type DecisionChannel = "web" | "app" | "whatsapp";
+
+/**
+ * A short balance under an "approve the rest as LWP" rule: the web screen
+ * asks, then splits on the approver's yes. The staff app and WhatsApp never
+ * file unpaid leave on their own — they refuse and send the approver to the
+ * web (reviewer, PR #550).
+ */
+export function lwpChannelDecision(input: { channel: DecisionChannel; confirmLwp: boolean }): "split" | "ask" | "refuse" {
+  if (input.channel !== "web") return "refuse";
+  return input.confirmLwp ? "split" : "ask";
+}
+
+export const LWP_NEEDS_WEB =
+  "Balance short — this leave would be partly unpaid (LWP). Decide it on the web: Staff → Leave → Manage.";
+
 function addDays(iso: string, n: number): string {
   const d = new Date(`${iso}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() + n);
@@ -121,6 +155,29 @@ export function eachDate(from: string, to: string): string[] {
   const out: string[] = [];
   for (let d = from; d <= to && out.length < 800; d = addDays(d, 1)) out.push(d);
   return out;
+}
+
+/**
+ * The working-day stretches of from..to for one person — holidays and
+ * Sundays cut it. LWP is filed over these only: payroll pays a holiday and
+ * counts an unpaid request's calendar days, so a holiday inside LWP would
+ * be paid and deducted at once.
+ */
+export function workingRuns(from: string, to: string, staffId: string, isOff: IsOffFn): { from: string; to: string }[] {
+  const runs: { from: string; to: string }[] = [];
+  let cur: { from: string; to: string } | null = null;
+  for (const d of eachDate(from, to)) {
+    if (isOff(d, staffId)) {
+      cur = null;
+      continue;
+    }
+    if (cur) cur.to = d;
+    else {
+      cur = { from: d, to: d };
+      runs.push(cur);
+    }
+  }
+  return runs;
 }
 
 /** The academic year's months, April → March ("2026-27" → 2026-04 … 2027-03). */
@@ -244,6 +301,8 @@ export type LeaveBookRow = {
   governed: boolean;
   opening: number;
   allocated: number;
+  /** Days cashed out this year (desk encashments) — they leave the balance. */
+  encashed: number;
   allocationSource: "staff" | "category" | "default" | "none";
   taken: number;
   /** Of `taken`, days counted by the sandwich rule. */
@@ -269,8 +328,16 @@ export function computeLeaveBook(input: {
   requests: RequestLite[];
   carry: CarryForwardRow[];
   isOff: IsOffFn;
+  /** Desk encashments (any year; this year's are used). */
+  encashments?: { academicYearCode: string; staffId: string; typeCode: string; days: number }[];
+  /**
+   * The desk's carried-forward days — the opening ONLY for a year with no
+   * carry rows at all (a carry made the old way, before Leave rules).
+   */
+  deskCarried?: { academicYearCode: string; staffId: string; typeCode: string; carriedForward: number }[];
 }): LeaveBookRow[] {
   const { ay, policy, isOff } = input;
+  const yearHasCarry = input.carry.some((c) => c.toAy === ay);
   const yearReqs = input.requests.filter((r) => r.academicYearCode === ay);
   const sandwichOn = (code: string) => !!policyType(policy, code)?.sandwich;
   const approved = yearReqs.filter((r) => r.status === APPROVED);
@@ -306,10 +373,19 @@ export function computeLeaveBook(input: {
       const pt = policyType(policy, t.code);
       const governed = !!pt && t.paid;
       const alloc = governed ? resolveAllocation(policy, s, t.code) : { days: 0, source: "none" as const };
-      const opening = governed
-        ? input.carry
-            .filter((c) => c.toAy === ay && c.staffId === s.id && c.typeCode === t.code)
-            .reduce((sum, c) => sum + c.daysCarried, 0)
+      const opening = !governed
+        ? 0
+        : yearHasCarry
+          ? input.carry
+              .filter((c) => c.toAy === ay && c.staffId === s.id && c.typeCode === t.code)
+              .reduce((sum, c) => sum + c.daysCarried, 0)
+          : (input.deskCarried ?? [])
+              .filter((c) => c.academicYearCode === ay && c.staffId === s.id && c.typeCode === t.code)
+              .reduce((sum, c) => sum + Math.max(0, c.carriedForward), 0);
+      const encashed = governed
+        ? (input.encashments ?? [])
+            .filter((e) => e.academicYearCode === ay && e.staffId === s.id && e.typeCode === t.code)
+            .reduce((sum, e) => sum + e.days, 0)
         : 0;
       const tk = taken.get(key(s.id, t.code)) ?? { total: 0, sandwich: 0, byMonth: {} };
       rows.push({
@@ -319,11 +395,12 @@ export function computeLeaveBook(input: {
         governed,
         opening: roundHalf(opening),
         allocated: roundHalf(alloc.days),
+        encashed: roundHalf(encashed),
         allocationSource: alloc.source,
         taken: roundHalf(tk.total),
         sandwichDays: roundHalf(tk.sandwich),
         pending: roundHalf(pending.get(key(s.id, t.code)) ?? 0),
-        balance: governed ? roundHalf(opening + alloc.days - tk.total) : 0,
+        balance: governed ? roundHalf(opening + alloc.days - tk.total - encashed) : 0,
         takenByMonth: tk.byMonth,
       });
     }
@@ -331,13 +408,13 @@ export function computeLeaveBook(input: {
   return rows;
 }
 
-/** Balance left at the end of each month of the year (opening + allocated − taken so far). */
+/** Balance left at the end of each month of the year (opening + allocated − encashed − taken so far). */
 export function monthEndBalances(row: LeaveBookRow, ay: string): { month: string; taken: number; balance: number }[] {
   let cum = 0;
   return ayMonths(ay).map((month) => {
     const t = row.takenByMonth[month] ?? 0;
     cum += t;
-    return { month, taken: roundHalf(t), balance: roundHalf(row.opening + row.allocated - cum) };
+    return { month, taken: roundHalf(t), balance: roundHalf(row.opening + row.allocated - row.encashed - cum) };
   });
 }
 
@@ -354,7 +431,7 @@ export type ApprovalCheck =
       charge: number;
       remaining: number;
       /** For 'lwp': paid part ends paidToDate (null = all LWP); LWP from lwpFromDate. */
-      split: { paidToDate: string | null; lwpFromDate: string; paidCharge: number } | null;
+      split: { paidToDate: string | null; lwpFromDate: string; paidCharge: number; lwpRuns: { from: string; to: string }[] } | null;
     };
 
 /**
@@ -371,6 +448,8 @@ export function checkApproval(input: {
   carry: CarryForwardRow[];
   requestId: string;
   isOff: IsOffFn;
+  encashments?: { academicYearCode: string; staffId: string; typeCode: string; days: number }[];
+  deskCarried?: { academicYearCode: string; staffId: string; typeCode: string; carriedForward: number }[];
 }): ApprovalCheck {
   const req = input.requests.find((r) => r.id === input.requestId);
   if (!req) return { ok: true, charge: 0, remainingAfter: null };
@@ -417,6 +496,7 @@ export function checkApproval(input: {
   // A paid part that charges nothing (only edge holidays) is no paid part.
   if (paidCharge <= 0) paidTo = null;
   const lwpFromDate = paidTo ? addDays(paidTo, 1) : req.fromDate;
+  const lwpRuns = req.halfDay ? [{ from: req.fromDate, to: req.fromDate }] : workingRuns(lwpFromDate, req.toDate, req.staffId, input.isOff);
   return {
     ok: false,
     reason: "insufficient",
@@ -424,7 +504,7 @@ export function checkApproval(input: {
     message,
     charge,
     remaining,
-    split: { paidToDate: paidTo, lwpFromDate, paidCharge: roundHalf(paidCharge + Math.max(0, crossPart)) },
+    split: { paidToDate: paidTo, lwpFromDate, paidCharge: roundHalf(paidCharge + Math.max(0, crossPart)), lwpRuns },
   };
 }
 
@@ -458,9 +538,10 @@ export function recomputeDeskUsed(state: StaffHrState, staffId: string, ay: stri
 
 /**
  * Approve (or pass level 1 of) a request on the desk state. Pure. With a
- * split, the request keeps its type up to paidToDate and a new approved LWP
- * request covers lwpFromDate → its end; with paidToDate null the whole
- * request becomes LWP. Returns the requests now approved (for the register).
+ * split, the request keeps its type up to paidToDate and approved LWP
+ * requests cover the working-day stretches after it (lwpRuns); with
+ * paidToDate null the request itself becomes the first stretch. Returns the
+ * requests now approved (for the register).
  */
 export function approveOnDesk(
   state: StaffHrState,
@@ -470,7 +551,7 @@ export function approveOnDesk(
     note: string;
     now: string;
     twoLevel: boolean;
-    split?: { paidToDate: string | null; lwpFromDate: string; lwpTypeCode: string } | null;
+    split?: { paidToDate: string | null; lwpRuns: { from: string; to: string }[]; lwpTypeCode: string } | null;
   },
 ): { state: StaffHrState; approved: LeaveRequest[]; status: LeaveStatus } | { error: string } {
   const req = state.leaveRequests.find((r) => r.id === input.requestId);
@@ -498,42 +579,51 @@ export function approveOnDesk(
     const next: LeaveRequest = { ...req, ...decided, decisionNote: note };
     requests = requests.map((r) => (r.id === req.id ? next : r));
     approved.push(next);
-  } else if (!split.paidToDate) {
-    const next: LeaveRequest = {
-      ...req,
-      ...decided,
-      typeCode: split.lwpTypeCode,
-      origin: "adjusted",
-      decisionNote: [note, `Not enough ${req.typeCode} balance — approved as ${split.lwpTypeCode}`].filter(Boolean).join(" · "),
-    };
-    requests = requests.map((r) => (r.id === req.id ? next : r));
-    approved.push(next);
   } else {
-    const paid: LeaveRequest = {
+    // The LWP part, one request per working-day stretch (holidays and
+    // Sundays left out — payroll pays those).
+    const lwpParts: LeaveRequest[] = split.lwpRuns.map((run, i) => ({
       ...req,
       ...decided,
-      toDate: split.paidToDate,
-      days: calendarDays(req.fromDate, split.paidToDate),
-      origin: "adjusted",
-      decisionNote: [note, `${split.lwpFromDate} to ${req.toDate} approved as ${split.lwpTypeCode} (balance short)`]
-        .filter(Boolean)
-        .join(" · "),
-    };
-    const lwp: LeaveRequest = {
-      ...req,
-      ...decided,
-      id: nid("lv", `${req.id}|${split.lwpFromDate}|lwp`),
+      id: nid("lv", `${req.id}|${run.from}|lwp|${i}`),
       typeCode: split.lwpTypeCode,
-      fromDate: split.lwpFromDate,
-      days: calendarDays(split.lwpFromDate, req.toDate),
-      halfDay: false,
-      halfDaySession: "",
-      origin: "adjusted",
-      decisionNote: `Rest of ${req.typeCode} leave ${req.fromDate}–${req.toDate}: balance short, unpaid`,
-    };
+      fromDate: run.from,
+      toDate: run.to,
+      days: req.halfDay ? req.days : calendarDays(run.from, run.to),
+      halfDay: req.halfDay,
+      halfDaySession: req.halfDay ? req.halfDaySession : "",
+      origin: "adjusted" as const,
+      decisionNote: `Part of ${req.typeCode} leave ${req.fromDate}–${req.toDate}: balance short, unpaid`,
+    }));
+    const lwpLabel = split.lwpRuns.map((r) => (r.from === r.to ? r.from : `${r.from} to ${r.to}`)).join(", ");
+    let head: LeaveRequest[];
+    if (split.paidToDate) {
+      head = [
+        {
+          ...req,
+          ...decided,
+          toDate: split.paidToDate,
+          days: calendarDays(req.fromDate, split.paidToDate),
+          origin: "adjusted",
+          decisionNote: [note, `${lwpLabel || "nothing"} approved as ${split.lwpTypeCode} (balance short)`].filter(Boolean).join(" · "),
+        },
+      ];
+    } else if (lwpParts.length) {
+      // No paid part: the request itself becomes the first LWP stretch.
+      head = [
+        {
+          ...lwpParts[0]!,
+          id: req.id,
+          decisionNote: [note, `Not enough ${req.typeCode} balance — approved as ${split.lwpTypeCode}`].filter(Boolean).join(" · "),
+        },
+      ];
+      lwpParts.shift();
+    } else {
+      return { error: "Nothing to approve — the leave falls on holidays only" };
+    }
     const idx = requests.findIndex((r) => r.id === req.id);
-    requests = [...requests.slice(0, idx), paid, lwp, ...requests.slice(idx + 1)];
-    approved.push(paid, lwp);
+    requests = [...requests.slice(0, idx), ...head, ...lwpParts, ...requests.slice(idx + 1)];
+    approved.push(...head, ...lwpParts);
   }
 
   const next = recomputeDeskUsed({ ...state, leaveRequests: requests }, req.staffId, req.academicYearCode);
@@ -593,6 +683,14 @@ export function canDecide(input: {
 }
 
 // ── Year-end carry-forward ───────────────────────────────────────────────
+
+/** The carry runs from a year into exactly the NEXT year. null = fine. */
+export function carryYearsProblem(fromAy: string, toAy: string): string | null {
+  const next = nextAcademicYear(fromAy);
+  if (!next) return "Choose the closing academic year";
+  if (toAy !== next) return `Leave from ${fromAy} carries into ${next} only`;
+  return null;
+}
 
 export type CarryPlanRow = CarryForwardRow & { staffName: string };
 export type CarryPlan = {
@@ -665,6 +763,12 @@ export function planDeskSync(input: {
   ay: string;
   state: StaffHrState;
   book: LeaveBookRow[];
+  /**
+   * Whether the year has carry rows (Leave rules → Carry forward). Without
+   * any, the desk's carried-forward days are left exactly as they are —
+   * never lowered to zero.
+   */
+  yearHasCarry: boolean;
 }): { changes: DeskBalanceChange[]; refused: { staffId: string; typeCode: string; used: number; wouldBe: number }[] } {
   const changes: DeskBalanceChange[] = [];
   const refused: { staffId: string; typeCode: string; used: number; wouldBe: number }[] = [];
@@ -675,11 +779,12 @@ export function planDeskSync(input: {
     );
     const allottedBefore = desk?.allotted ?? 0;
     const carriedBefore = desk?.carriedForward ?? 0;
-    if (allottedBefore === b.allocated && carriedBefore === b.opening && desk) continue;
+    const carriedAfter = input.yearHasCarry ? b.opening : carriedBefore;
+    if (allottedBefore === b.allocated && carriedBefore === carriedAfter && desk) continue;
     const used = desk?.used ?? 0;
     const encashed = desk?.encashed ?? 0;
-    if (b.allocated + b.opening < used + encashed) {
-      refused.push({ staffId: b.staffId, typeCode: b.typeCode, used, wouldBe: b.allocated + b.opening });
+    if (b.allocated + carriedAfter < used + encashed) {
+      refused.push({ staffId: b.staffId, typeCode: b.typeCode, used, wouldBe: b.allocated + carriedAfter });
       continue;
     }
     changes.push({
@@ -688,7 +793,7 @@ export function planDeskSync(input: {
       allottedBefore,
       allottedAfter: b.allocated,
       carriedBefore,
-      carriedAfter: b.opening,
+      carriedAfter,
     });
   }
   return { changes, refused };

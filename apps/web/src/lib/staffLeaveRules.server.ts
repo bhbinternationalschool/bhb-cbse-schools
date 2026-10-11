@@ -22,7 +22,14 @@ import {
   type StaffHrState,
 } from "@/lib/staffHr";
 import {
+  applyDeskSync,
   approveOnDesk,
+  carryYearsProblem,
+  isMissingTableError,
+  lwpChannelDecision,
+  LWP_NEEDS_WEB,
+  type DecisionChannel,
+  type DeskBalanceChange,
   canDecide,
   checkApproval,
   computeLeaveBook,
@@ -76,7 +83,9 @@ export async function readLeavePolicy(ay: string): Promise<Read<LeavePolicy | nu
         .order("id")
         .range(from, to),
     );
-    if (types.error) return { ok: false, error: types.error };
+    // Tables not there yet (deployed before the migration) = no policy:
+    // the desk's old rules apply. Any other failure is a failed read.
+    if (types.error) return isMissingTableError(types.error) ? { ok: true, value: null } : { ok: false, error: types.error };
     if (!types.rows.length) return { ok: true, value: null };
     const allocs = await fetchAllPages<Record<string, unknown>>((from, to) =>
       sb
@@ -87,7 +96,7 @@ export async function readLeavePolicy(ay: string): Promise<Read<LeavePolicy | nu
         .order("id")
         .range(from, to),
     );
-    if (allocs.error) return { ok: false, error: allocs.error };
+    if (allocs.error) return isMissingTableError(allocs.error) ? { ok: true, value: null } : { ok: false, error: allocs.error };
     return {
       ok: true,
       value: {
@@ -127,7 +136,8 @@ export async function readApproverRules(): Promise<Read<ApproverRule[]>> {
     const res = await fetchAllPages<Record<string, unknown>>((from, to) =>
       sb.from("staff_leave_approvers").select("*").eq("tenant_id", tenantId).order("id").range(from, to),
     );
-    if (res.error) return { ok: false, error: res.error };
+    // No table yet = no approver rules (leadership decides, as before).
+    if (res.error) return isMissingTableError(res.error) ? { ok: true, value: [] } : { ok: false, error: res.error };
     return {
       ok: true,
       value: res.rows.map((r) => ({
@@ -156,7 +166,7 @@ export async function readCarryInto(ay: string): Promise<Read<CarryForwardRow[]>
         .order("id")
         .range(from, to),
     );
-    if (res.error) return { ok: false, error: res.error };
+    if (res.error) return isMissingTableError(res.error) ? { ok: true, value: [] } : { ok: false, error: res.error };
     return {
       ok: true,
       value: res.rows.map((r) => ({
@@ -212,6 +222,14 @@ export function nonWorkingFor(masters: MastersState, ay: string): IsOffFn {
   };
 }
 
+/** Desk encashments and carried-forward days, as the book reads them. */
+export function deskExtras(state: StaffHrState) {
+  return {
+    encashments: state.leaveEncashments.map((e) => ({ academicYearCode: e.academicYearCode, staffId: e.staffId, typeCode: e.typeCode, days: e.days })),
+    deskCarried: state.leaveBalances.map((b) => ({ academicYearCode: b.academicYearCode, staffId: b.staffId, typeCode: b.typeCode, carriedForward: b.carriedForward })),
+  };
+}
+
 export type LeaveBookResult = {
   policy: LeavePolicy;
   book: LeaveBookRow[];
@@ -239,6 +257,7 @@ export async function buildLeaveBook(input: {
     requests: input.state.leaveRequests,
     carry: carry.value,
     isOff: nonWorkingFor(input.masters, input.ay),
+    ...deskExtras(input.state),
   });
   return { ok: true, value: { policy: pol.value, book, carry: carry.value, deskTypes } };
 }
@@ -424,9 +443,8 @@ export async function previewCarryForward(input: {
   masters: MastersState;
   state: StaffHrState;
 }): Promise<Read<CarryPlan>> {
-  if (!ISO_AY.test(input.fromAy) || !ISO_AY.test(input.toAy) || input.fromAy >= input.toAy) {
-    return { ok: false, error: "Carry runs from a year into a LATER year" };
-  }
+  const yearProblem = carryYearsProblem(input.fromAy, input.toAy);
+  if (yearProblem) return { ok: false, error: yearProblem };
   const from = await buildLeaveBook({ ay: input.fromAy, masters: input.masters, state: input.state });
   if (!from.ok) return from;
   if (!from.value) return { ok: false, error: `${input.fromAy} has no leave policy — set its carry caps first` };
@@ -530,7 +548,9 @@ export async function decideLeaveWithRules(input: {
   decidedBy: string;
   approverStaffId: string;
   isLeadership: boolean;
-  /** Approve the over-balance part as LWP without asking again. */
+  /** Where the decision comes from — only "web" may split into LWP. */
+  channel: DecisionChannel;
+  /** Web only: the approver said yes to the LWP split. */
   confirmLwp: boolean;
 }): Promise<RulesDecision> {
   const { state } = input;
@@ -603,9 +623,10 @@ export async function decideLeaveWithRules(input: {
     carry: carry.value,
     requestId: req.id,
     isOff: nonWorkingFor(input.masters, req.academicYearCode),
+    ...deskExtras(state),
   });
 
-  let split: { paidToDate: string | null; lwpFromDate: string; lwpTypeCode: string } | null = null;
+  let split: { paidToDate: string | null; lwpRuns: { from: string; to: string }[]; lwpTypeCode: string } | null = null;
   let notice: string | null = null;
   // Level 1 of two never moves a balance; the check runs again at the final step.
   const finalStep = !(settings.twoLevelApproval && req.status === "pending");
@@ -615,13 +636,16 @@ export async function decideLeaveWithRules(input: {
     const lwp = lwpTypeCode(state);
     if (!lwp) return { ok: false, status: 400, error: `Cannot approve — ${check.message}, and there is no unpaid leave type to file the rest under`, check };
     const s = check.split;
+    const runs = s.lwpRuns.map((r) => (r.from === r.to ? r.from : `${r.from} to ${r.to}`)).join(", ");
     notice = s.paidToDate
-      ? `${req.typeCode} ${req.fromDate} to ${s.paidToDate}; ${s.lwpFromDate} to ${req.toDate} as ${lwp} (unpaid)`
-      : `All of it as ${lwp} (unpaid) — no ${req.typeCode} left`;
-    if (!input.confirmLwp) {
+      ? `${req.typeCode} ${req.fromDate} to ${s.paidToDate}; ${runs || "no working day"} as ${lwp} (unpaid)`
+      : `${runs} as ${lwp} (unpaid) — no ${req.typeCode} left`;
+    const how = lwpChannelDecision({ channel: input.channel, confirmLwp: input.confirmLwp });
+    if (how === "refuse") return { ok: false, status: 400, error: `${LWP_NEEDS_WEB} (${check.message})`, check };
+    if (how === "ask") {
       return { ok: false, status: 409, needsConfirm: true, error: `${check.message}. Approving files ${notice}.`, check };
     }
-    split = { ...s, lwpTypeCode: lwp };
+    split = { paidToDate: s.paidToDate, lwpRuns: s.lwpRuns, lwpTypeCode: lwp };
   } else if (!check.ok && check.reason === "half_day_not_allowed") {
     return { ok: false, status: 400, error: `Cannot approve — ${check.message}`, check };
   }
@@ -684,4 +708,31 @@ export async function bookRowsFor(input: {
     out.set(r.staffId, m);
   }
   return out;
+}
+
+/**
+ * "Apply to balances": re-read the desk, apply the changes to THAT copy and
+ * write only the balance rows that moved plus their allotment-record rows —
+ * both are merge slices (by id, conditional per slice), so a leave decision
+ * saved meanwhile is neither carried along nor reverted.
+ */
+export async function pushDeskBalanceChanges(input: {
+  ay: string;
+  changes: DeskBalanceChange[];
+  by: string;
+}): Promise<{ ok: true; written: number } | { ok: false; error: string }> {
+  const { readStaffHrServer } = await import("@/lib/api/v1/staffLeave");
+  const fresh = await readStaffHrServer();
+  if (!fresh.ok) return { ok: false, error: "Could not read the leave desk — nothing was changed" };
+  const now = new Date().toISOString();
+  const next = applyDeskSync(fresh.state, { ay: input.ay, changes: input.changes, changedBy: input.by, now });
+  const moved = new Set(input.changes.map((c) => `${c.staffId}|${c.typeCode}`));
+  const leaveBalances = next.leaveBalances.filter((b) => b.academicYearCode === input.ay && moved.has(`${b.staffId}|${b.typeCode}`));
+  const oldLog = new Set(fresh.state.leaveAllotmentLog.map((l) => l.id));
+  const leaveAllotmentLog = next.leaveAllotmentLog.filter((l) => !oldLog.has(l.id));
+  const { pushDeskSliceToDb } = await import("@/lib/deskSliceNormalized.server");
+  const res = await pushDeskSliceToDb("staff_hr", { version: 1, leaveBalances, leaveAllotmentLog });
+  if (!res.ok) return { ok: false, error: res.error || "Could not save — try again" };
+  writeStaffHrLocalRaw(next);
+  return { ok: true, written: leaveBalances.length };
 }

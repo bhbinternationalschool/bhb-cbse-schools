@@ -18,7 +18,7 @@
 import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { writeAudit } from "@/lib/audit.server";
-import { readStaffHrServer, saveStaffHrServer } from "@/lib/api/v1/staffLeave";
+import { readStaffHrServer } from "@/lib/api/v1/staffLeave";
 import { ApiError } from "@/lib/api/v1/errors";
 import { normalizeLeaveSettings } from "@/lib/staffHr";
 import {
@@ -27,12 +27,13 @@ import {
   deleteAllocation,
   readApproverRules,
   readLeavePolicy,
+  pushDeskBalanceChanges,
   removeApprover,
   saveAllocation,
   savePolicyType,
   seedPolicyFromDesk,
 } from "@/lib/staffLeaveRules.server";
-import { applyDeskSync, planDeskSync, type ApproverScopeKind, type LeavePolicyType } from "@/lib/staffLeaveRules";
+import { planDeskSync, type ApproverScopeKind, type LeavePolicyType } from "@/lib/staffLeaveRules";
 
 export const runtime = "nodejs";
 
@@ -152,12 +153,19 @@ export async function POST(req: Request) {
         const book = await buildLeaveBook({ ay, masters: ctx.masters, state: hr.state });
         if (!book.ok) return bad(`Could not read the leave policy: ${book.error}`, 503);
         if (!book.value) return bad(`${ay} has no leave policy yet`);
-        const plan = planDeskSync({ ay, state: hr.state, book: book.value.book });
+        const plan = planDeskSync({
+          ay,
+          state: hr.state,
+          book: book.value.book,
+          yearHasCarry: book.value.carry.some((c) => c.toAy === ay),
+        });
         if (action === "sync_preview" || plan.changes.length === 0) {
           return NextResponse.json({ ok: true, committed: false, ...plan });
         }
-        const next = applyDeskSync(hr.state, { ay, changes: plan.changes, changedBy: by, now: new Date().toISOString() });
-        await saveStaffHrServer(next);
+        // Re-read and write only the moved balance rows (merge slices), so a
+        // leave decision saved since this request began is not reverted.
+        const pushed = await pushDeskBalanceChanges({ ay, changes: plan.changes, by });
+        if (!pushed.ok) return bad(pushed.error, 503);
         await audit(`Leave policy ${ay} applied to ${plan.changes.length} desk balance(s)`, { changes: plan.changes.length, refused: plan.refused.length });
         return NextResponse.json({ ok: true, committed: true, ...plan });
       }

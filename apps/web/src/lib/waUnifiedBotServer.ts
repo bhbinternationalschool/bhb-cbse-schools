@@ -1670,8 +1670,7 @@ export async function handleLeaveCodeDecision(opts: { fromWaId: string; text: st
   }
 
   // The year's leave rules (balance, sandwich days, half-day rule) apply
-  // here exactly as in the ERP; a short balance under an "LWP" rule files
-  // the rest as unpaid and says so below.
+  // here exactly as in the ERP.
   const { decideLeaveWithRules } = await import("@/lib/staffLeaveRules.server");
   const result = await decideLeaveWithRules({
     state,
@@ -1682,7 +1681,10 @@ export async function handleLeaveCodeDecision(opts: { fromWaId: string; text: st
     decidedBy: byName,
     approverStaffId: approverStaff!.id,
     isLeadership: true,
-    confirmLwp: true,
+    // WhatsApp never files unpaid leave on its own: a short balance under
+    // an "LWP" rule is refused with "decide it on the web".
+    channel: "whatsapp",
+    confirmLwp: false,
   });
   if (!result.ok) {
     await releaseSendClaim(claimKey);
@@ -1713,11 +1715,11 @@ export async function handleLeaveCodeDecision(opts: { fromWaId: string; text: st
       });
     }
     await say(
-      `✅ Approved and posted to the ERP: ${whoName} · ${label} · ${dates}. The day is marked as leave.${result.notice ? `\nBalance short: ${result.notice}.` : ""}`,
+      `✅ Approved and posted to the ERP: ${whoName} · ${label} · ${dates}. The day is marked as leave.`,
     );
     await sendWhatsAppText({
       toMobile: entry.staffMobile10,
-      body: `✅ Your ${label} for ${dates} is approved by ${byName}, and marked in attendance.${result.notice ? `\nYour balance was short: ${result.notice}.` : ""}`,
+      body: `✅ Your ${label} for ${dates} is approved by ${byName}, and marked in attendance.`,
     });
   } else if (after.status === "rejected") {
     await say(`Refused: ${whoName} · ${label} · ${dates}. They have been told.`);
