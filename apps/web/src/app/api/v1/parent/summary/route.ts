@@ -12,6 +12,7 @@ import { fetchStudentOpenDuesFromCache } from "@/lib/feesDeskAncillary.server";
 import { loadMasters } from "@/lib/masters";
 import { schoolWhatsAppContact } from "@/lib/schoolWhatsApp.server";
 import { loadSis } from "@/lib/sis";
+import { stampParentAppPresence } from "@/lib/parentAppPresence.server";
 
 export const runtime = "nodejs";
 
@@ -51,6 +52,9 @@ export async function GET(request: Request) {
     const sis = loadSis();
     const household = sis.households.find((h) => h.id === householdId);
     if (!household) throw new ApiError("not_found", "Household not found", 404);
+    // "Opened the app" for Comms → Parents on app — a parent's own household,
+    // once resolved; at most hourly, never more than 1.5 s.
+    if (ctx.session.persona === "parent") await stampParentAppPresence(household.id, request);
 
     // SIS keeps one student row per academic year; collapse to one child
     // each, preferring the session AY's row, else the newest AY.
