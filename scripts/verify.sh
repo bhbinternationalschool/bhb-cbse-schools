@@ -284,6 +284,7 @@ SELFTESTS=(
   test:transport-crew-access
   test:transport-crew
   test:transport-stop-links
+  test:transport-boarding-log
   test:transport-concession
   test:transport-by-class
   test:transport-staff-riders

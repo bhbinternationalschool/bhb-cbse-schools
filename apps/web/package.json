@@ -250,6 +250,7 @@
     "test:transport-crew-access": "npx tsx src/lib/transportCrewAccess.selftest.ts",
     "test:transport-crew": "npx tsx src/lib/transportCrew.selftest.ts",
     "test:transport-stop-links": "npx tsx src/lib/transportStopLinks.selftest.ts",
+    "test:transport-boarding-log": "npx tsx src/lib/transportBoardingLog.selftest.ts",
     "test:transport-concession": "npx tsx src/lib/transportConcession.selftest.ts",
     "test:transport-by-class": "npx tsx src/lib/transportByClass.selftest.ts",
     "test:transport-staff-riders": "npx tsx src/lib/transportStaffRiders.selftest.ts",
