@@ -71,6 +71,7 @@
     "test:secure-id": "npx tsx src/lib/secureId.selftest.ts",
     "test:payouts": "npx tsx src/lib/payouts.selftest.ts",
     "test:cashgram": "npx tsx src/lib/cashgram.selftest.ts",
+    "test:fee-bulk-pdc-templates": "npx tsx src/lib/feeBulkPdcTemplates.selftest.ts",
     "test:payout-requests": "npx tsx src/lib/payoutRequests.selftest.ts",
     "test:diksha-index": "npx tsx src/lib/dikshaIndex.selftest.ts",
     "test:teacher-contact": "npx tsx src/lib/teacherContact.selftest.ts",
