@@ -212,6 +212,39 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     } else if (msg && msg.type === "profile-plan") {
       const q = new URLSearchParams({ section: msg.section || "", ay: msg.academicYear || "" });
       reply(await erpFetch(`/api/v1/udise/robot/school-profile?${q}`));
+    } else if (msg && msg.type === "propel-calendar") {
+      // Propel / LEAD Nucleus (12 Oct 2026): what Propel's calendar holds, so
+      // the ERP answers only what is missing. No child's data.
+      reply(
+        await erpFetch("/api/v1/propel/robot/calendar", {
+          method: "POST",
+          body: JSON.stringify({ holidays: msg.holidays || [], events: msg.events || [], subjects: msg.subjects || [] }),
+        }),
+      );
+    } else if (msg && msg.type === "propel-teachers") {
+      // Only what matching needs: name, mobile (the Propel login), role, status.
+      const teachers = (msg.teachers || []).map((t) =>
+        pick(t, ["school_user_id", "first_name", "last_name", "mobile", "role_id", "school_user_status"]),
+      );
+      reply(await erpFetch("/api/v1/propel/robot/teachers", { method: "POST", body: JSON.stringify({ teachers }) }));
+    } else if (msg && msg.type === "propel-students-file") {
+      // Propel's blank template in, the filled sheet back.
+      reply(await erpFetch("/api/v1/propel/robot/students-file", { method: "POST", body: JSON.stringify({ template: msg.template || "" }) }));
+    } else if (msg && msg.type === "propel-progress") {
+      // Progress numbers, and only the staff mobile that matches an account to ERP staff.
+      const PROGRESS_FIELDS = ["teacherId", "schoolUserId", "teacherName", "className", "divName", "subjectName", "total_days",
+        "required_day_plans_completed", "current_day_plans_completed", "progress", "current_unitno", "required_unitno", "dailyDate"];
+      reply(
+        await erpFetch("/api/v1/propel/robot/progress", {
+          method: "POST",
+          body: JSON.stringify({
+            rows: (msg.rows || []).map((r) => pick(r, PROGRESS_FIELDS)),
+            teachers: (msg.teachers || []).map((t) => pick(t, ["school_user_id", "mobile"])),
+          }),
+        }),
+      );
+    } else if (msg && msg.type === "propel-tests") {
+      reply(await erpFetch("/api/v1/propel/robot/tests", { method: "POST", body: JSON.stringify({ assessments: msg.assessments || [] }) }));
     } else if (msg && msg.type === "fill-data") {
       reply(await erpFetch(`/api/v1/udise/robot/fill?pen=${encodeURIComponent(msg.pen || "")}&v=2`));
     } else {

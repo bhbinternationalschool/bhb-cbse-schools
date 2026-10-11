@@ -67,3 +67,17 @@ Aadhaar never leaves the portal tab (staff mobile and email do go to the ERP on 
 - `POST|GET /api/v1/udise/robot/teacher-details`, `POST /api/v1/udise/robot/teacher-details/apply` → `lib/udiseTeacherSync.ts` (+ `.server.ts`); `TEACHER_FORM_FIELDS` in `background.js` must match `PORTAL_FORM_FIELDS` there.
 - `POST /api/v1/udise/robot/apaar-queue`, `GET /api/v1/udise/robot/apaar-fill` → `lib/udiseApaarFill.ts`
 - The field whitelist in `background.js` must match `UDISE_PORTAL_FIELDS` in `lib/udisePortalApi.ts`.
+
+## Propel / LEAD Nucleus (1.5.0, 12 Oct 2026)
+
+On nucleus.leadgroup.co.in (sign in yourself, OTP), a "BHB Office Robot · Propel" panel appears. Each job is **Check** (read Propel, ask the ERP what is missing, show the list) then **Send** (you confirm; only then does the robot save on Propel):
+
+| Button | What happens |
+|---|---|
+| **Check holidays & exams** → **Send to Propel calendar** | Published ERP student holidays (weekly rules become one entry per day) and the exam date sheet as **Offline assessment** events, one per exam, subject and day with every class sitting it. Subjects Propel does not teach (Sanskrit, Drawing…) go as Academic Event. Already on Propel = skipped. Propel refuses dates before today. |
+| **Check teachers** → **Create teachers on Propel** | Active ERP teaching staff whose mobile (the Propel login) no Propel account has. Role from designation. Propel accounts the ERP does not know are only listed. |
+| **Make student upload sheet** | Downloads Propel's own blank sheet, the ERP fills one row per current child, the file saves to your computer — upload it on Propel: Student Details → Upload List. Children it could not include are listed with the reason. |
+| **Bring tests & chapters to ERP** | Propel's question papers (FA 1–4, SA 1–2) and their chapters go to the ERP; it lists chapters the ERP's books lack. |
+| **Bring teacher progress to ERP** | Propel's Teacher Timeliness (day plans done vs schedule, per teacher, class and subject) → ERP Staff → Appraisal → Propel progress, with the last-7-days change. |
+
+The robot never edits, deactivates or deletes anything already on Propel. ERP side: `/api/v1/propel/robot/*`, logic in `apps/web/src/lib/propelRobot.ts`.
