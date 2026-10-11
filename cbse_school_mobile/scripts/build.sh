@@ -154,7 +154,14 @@ if [ "$FLAVOR" = parent ]; then
     exit 1
   fi
   echo "$PERMS" | grep -q RECORD_AUDIO || { echo "FAIL: parent app lost RECORD_AUDIO; the tutor's voice input will not work" >&2; exit 1; }
-  echo "OK: parent app carries no restricted permission (microphone kept for tutor voice input)"
+  # Say exactly what is carried: "no restricted permission" read as "no
+  # location" to the owner when the pickup-point pin had added foreground
+  # location (11 Oct 2026).
+  if echo "$PERMS" | grep -q 'ACCESS_FINE_LOCATION\|ACCESS_COARSE_LOCATION'; then
+    echo "OK: parent app has foreground location only (bus pickup-point pin) and the microphone (tutor voice); nothing needing a Play declaration"
+  else
+    echo "OK: parent app has no location; microphone kept for tutor voice; nothing needing a Play declaration"
+  fi
 else
   # Since 1.0.16 the staff app uses location only in the foreground (punch,
   # survey day). Background location is a Play-restricted permission that
