@@ -42,7 +42,7 @@ export type CashgramFeeEffect = "excess" | "void" | "none";
  *   staff_pay   a posted salary line (fee effect none); collected → its UTR
  *               is recorded against the line like any payout
  */
-export type CashgramPurpose = "fee_refund" | "staff_pay";
+export type CashgramPurpose = "fee_refund" | "staff_pay" | "payout_request";
 
 /**
  * Why a salary line cannot be paid by link now, or "" when it can.

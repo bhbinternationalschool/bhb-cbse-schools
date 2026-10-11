@@ -19,6 +19,9 @@ export type PayoutState = {
   /** Who approves a fee-refund link: "owner" | "above" | "none". */
   refundApproval: "owner" | "above" | "none";
   refundApprovalAbovePaise: number;
+  /** Who approves a vendor bill / voucher paid from the wallet. */
+  paymentApproval: "owner" | "above" | "none";
+  paymentApprovalAbovePaise: number;
   updatedBy: string;
   updatedAt: string | null;
   /** null = could not be read — neither zero nor plenty. */

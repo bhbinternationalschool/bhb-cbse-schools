@@ -22,6 +22,8 @@ import {
   buildCashgramBody,
   cashgramCommitsWallet,
   cashgramExpiryDate,
+  cashgramIsDead,
+  cashgramStatusSentence,
   cashgramIsOpen,
   cashgramNeedsApproval,
   cashgramPhone,
@@ -87,7 +89,7 @@ function rowTo(r: Record<string, unknown>): CashgramRefundRow {
   const status = String(r.status ?? "");
   return {
     cashgramId: String(r.cashgram_id ?? ""),
-    purpose: r.purpose === "staff_pay" ? "staff_pay" : "fee_refund",
+    purpose: r.purpose === "staff_pay" ? "staff_pay" : r.purpose === "payout_request" ? "payout_request" : "fee_refund",
     feeEffect: r.fee_effect === "void" ? "void" : r.fee_effect === "none" ? "none" : "excess",
     targetKind: String(r.target_kind ?? ""),
     targetId: String(r.target_id ?? ""),
@@ -156,7 +158,7 @@ export async function listCashgramRefunds(filter: {
 }
 
 /** Every link that may still draw on the wallet, school-wide. */
-async function walletCommittedPaise(exceptId?: string): Promise<{ ok: true; paise: number } | { ok: false; error: string }> {
+export async function walletCommittedPaise(exceptId?: string): Promise<{ ok: true; paise: number } | { ok: false; error: string }> {
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "No tenant context" };
   const { data, error } = await ctx.sb
@@ -436,7 +438,7 @@ async function v1(
   }
 }
 
-async function sendCashgramRefund(cashgramId: string): Promise<CashgramResult> {
+export async function sendCashgramRefund(cashgramId: string): Promise<CashgramResult> {
   const row = await getCashgramRefund(cashgramId);
   if (!row) return { ok: false, error: "No such refund" };
   if (row.status !== "PENDING_APPROVAL") return { ok: true, refund: row, message: "Already sent." };
@@ -467,8 +469,8 @@ async function sendCashgramRefund(cashgramId: string): Promise<CashgramResult> {
     email: row.payeeEmail,
     expiryDate: row.linkExpiry,
     remarks:
-      row.purpose === "staff_pay"
-        ? row.targetLabel || "Salary"
+      row.purpose === "staff_pay" || row.purpose === "payout_request"
+        ? row.targetLabel || "School payment"
         : row.receiptNo
           ? `Refund ${row.receiptNo}`
           : "School fee refund",
@@ -608,6 +610,9 @@ export async function applyCashgramView(view: CashgramView): Promise<{ applied: 
       ...(view.link ? { cashgram_link: view.link } : {}),
     });
   }
+
+  // A vendor bill or voucher paid by link: its request does the booking.
+  if (row.purpose === "payout_request") return applyRequestLink(row, view);
 
   // Once: a redelivered REVERSED must not reverse the ledger entry again.
   if (view.status === "REVERSED" && row.appliedAt && row.status !== "REVERSED") return reverseApplied(row);
@@ -919,4 +924,33 @@ async function applyStaffPaid(row: CashgramRefundRow, view: CashgramView): Promi
   });
   await logEvent("cashgram.staff_paid", row, { utr });
   return { applied: true, reason: utr ? "UTR recorded" : "Paid by link (no UTR)" };
+}
+
+/* ── links sent for a payout request (vendor bill / voucher) ─────────── */
+
+/**
+ * The request (payoutRequests.server) owns the money; the link only reports.
+ * REDEEMED books the request once; a link that dies before that frees it.
+ */
+async function applyRequestLink(row: CashgramRefundRow, view: CashgramView): Promise<{ applied: boolean; reason: string }> {
+  const req = await import("@/lib/payoutRequests.server");
+  if (view.status === "REDEEMED") {
+    if (row.appliedAt) return { applied: false, reason: "Already applied" };
+    const utr = /^\d{12}$/.test(view.utr) ? view.utr : /^\d{12}$/.test(row.utr) ? row.utr : "";
+    const done = await req.applyPayoutRequest(row.targetId, utr || `cashgram ${row.cashgramId}`, utr);
+    if (done.ok) {
+      await update(row.cashgramId, { applied_at: new Date().toISOString(), ...(utr ? { utr } : {}), last_error: "" });
+      return { applied: true, reason: "Request booked" };
+    }
+    await update(row.cashgramId, { last_error: `Collected; not booked yet (${done.error}) — Check status retries it` });
+    return { applied: false, reason: done.error };
+  }
+  if (view.status === "REVERSED" && row.appliedAt && row.status !== "REVERSED") {
+    await req.flagRequestReversed(row.targetId);
+    return { applied: false, reason: "Reversed after booking" };
+  }
+  if (cashgramIsDead(view.status) && !row.appliedAt) {
+    await req.requestChildDied(row.targetId, cashgramStatusSentence(view.status));
+  }
+  return { applied: false, reason: `Link is ${view.status}` };
 }
