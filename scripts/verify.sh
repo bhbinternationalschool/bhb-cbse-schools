@@ -248,6 +248,7 @@ SELFTESTS=(
   test:school-comms-newer-wins
   test:class-gallery
   test:class-media-link
+  test:app-popup-responses
   test:staff-attendance-row-stamps
   test:admissions-row-stamps
   test:payment-link-status-guard

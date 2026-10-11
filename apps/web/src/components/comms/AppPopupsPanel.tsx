@@ -8,6 +8,7 @@ import type { AadhaarGapCounts, AadhaarScope, AppPopup } from "@/lib/appPopups";
 import { loadMasters } from "@/lib/masters";
 import { uploadMedia } from "@/lib/mediaUpload";
 import { AppPopupPreview, popupStatus } from "@/components/comms/AppPopupPreview";
+import { AppPopupResponses } from "@/components/comms/AppPopupResponses";
 import { looksHindi, POPUP_CONSENT_MAX, POPUP_TITLE_MAX, popupBodyMax } from "@/lib/appPopupText";
 
 /** The paired fields: English and Hindi of the title, message and consent. */
@@ -92,6 +93,7 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
   const [busy, setBusy] = useState(false);
   /** Which list item's phone preview is open, and the language it shows. */
   const [previewId, setPreviewId] = useState("");
+  const [responsesId, setResponsesId] = useState("");
   const [lang, setLang] = useState<"hi" | "en">("hi");
   /** Fields the AI filled (and nobody has changed since) — only these are refilled. */
   const [aiFilled, setAiFilled] = useState<Set<string>>(new Set());
@@ -555,6 +557,14 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
                   <button type="button" className={btnOutline} onClick={() => setPreviewId(open ? "" : p.id)} aria-expanded={open}>
                     {open ? "Hide preview" : "Preview"}
                   </button>
+                  <button
+                    type="button"
+                    className={btnOutline}
+                    onClick={() => setResponsesId(responsesId === p.id ? "" : p.id)}
+                    aria-expanded={responsesId === p.id}
+                  >
+                    {responsesId === p.id ? "Hide responses" : "Responses"}
+                  </button>
                   {canEdit ? (
                     <>
                       <button type="button" className={btnOutline} onClick={() => setDraft(p)}>
@@ -613,6 +623,12 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
                 <div className="space-y-2 pt-1">
                   <LangSwitch lang={lang} setLang={setLang} />
                   <AppPopupPreview popup={p} lang={lang} />
+                </div>
+              ) : null}
+
+              {responsesId === p.id ? (
+                <div className="pt-1">
+                  <AppPopupResponses popupId={p.id} isAadhaar={p.form === "aadhaar"} canVerify={canEdit} />
                 </div>
               ) : null}
             </li>

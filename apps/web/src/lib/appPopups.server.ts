@@ -14,7 +14,11 @@ import {
   type PopupEvent,
   type RuleFacts,
 } from "@/lib/appPopups";
+import { aadhaarSlot, popupOutcome, sortResponses, type ResponseRow } from "@/lib/appPopupResponses";
 import { writeAudit } from "@/lib/audit.server";
+import { loadMasters } from "@/lib/masters";
+import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 import { readModuleLocalState, writeModuleLocalState } from "@/lib/moduleLocalState.server";
 import { REQUIRED_STUDENT_DOCS } from "@/lib/parentProfile";
 import { getServerTenantContext } from "@/lib/serverTenant";
@@ -178,7 +182,7 @@ export function popupsFor(
     .filter((p) => (p.form === "aadhaar" || p.form === "documents" ? p.targets.length > 0 : true));
 }
 
-async function saveStudent(
+export async function saveStudent(
   studentId: string,
   change: (s: SisStudent) => SisStudent,
 ): Promise<{ ok: true; before: SisStudent; after: SisStudent } | { ok: false }> {
@@ -282,4 +286,144 @@ export async function saveApaarConsentFromApp(
     }).catch(() => null);
   }
   return { ok: saved.length > 0, saved };
+}
+
+/**
+ * The Responses list for one pop-up (lib/appPopupResponses): every family
+ * that met it, and — for a rule pop-up — every family the rule still matches,
+ * seen or not. Full Aadhaar numbers never leave the server here.
+ */
+export async function popupResponses(popup: AppPopup, sessionAy: string): Promise<ResponseRow[] | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { data, error } = await ctx.sb
+    .from("app_popup_events")
+    .select("subject_key, event, value, created_at")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("popup_id", popup.id)
+    .order("created_at", { ascending: true })
+    .limit(20000);
+  if (error) return null;
+  type Ev = { shown: number; dismissed: number; done: number; first: string; last: string; doneAt: string; gave: Set<string> };
+  const byFamily = new Map<string, Ev>();
+  for (const r of data ?? []) {
+    const key = String(r.subject_key);
+    if (!key.startsWith("hh:")) continue;
+    const hh = key.slice(3);
+    const e = byFamily.get(hh) ?? { shown: 0, dismissed: 0, done: 0, first: "", last: "", doneAt: "", gave: new Set<string>() };
+    const at = String(r.created_at);
+    if (r.event === "shown") {
+      e.shown += 1;
+      e.first ||= at;
+      e.last = at;
+    } else if (r.event === "dismissed") e.dismissed += 1;
+    else if (r.event === "done") {
+      e.done += 1;
+      e.doneAt = at;
+      const v = (r.value ?? {}) as { aadhaarFor?: unknown };
+      if (Array.isArray(v.aadhaarFor)) for (const k of v.aadhaarFor) e.gave.add(String(k));
+    }
+    byFamily.set(hh, e);
+  }
+
+  await ensureSisHydratedServer();
+  await ensureSchoolMirrorHydrated();
+  const sis = loadSis();
+  const masters = loadMasters();
+  // The stored rows, not this server's cached copy: a number a parent saved a
+  // minute ago (on another server) must show here, not read as missing.
+  const read = await fetchAllPages<Record<string, unknown>>((from, to) =>
+    ctx.sb.from("sis_students").select("*").eq("tenant_id", ctx.tenantId).order("id").range(from, to),
+  );
+  if (read.error) return null;
+  const students = read.rows.map((r) => rowToStudent(r as Parameters<typeof rowToStudent>[0]));
+  const kidsOf = new Map<string, SisStudent[]>();
+  for (const s of childrenOnRoll(students.filter((x) => x.householdId), sessionAy)) {
+    kidsOf.set(s.householdId, [...(kidsOf.get(s.householdId) ?? []), s]);
+  }
+  const pendingFor = (kids: SisStudent[]) => {
+    if (popup.targetMode !== "rule") return false;
+    const f = familyFacts(kids, popup.consentKey && popup.consentKey !== "apaar" ? [popup.consentKey] : []);
+    if (popup.rule === "missing_aadhaar") return aadhaarInScope(f.missingAadhaar, popup.aadhaarScope).length > 0;
+    if (popup.rule === "missing_docs") return f.missingDocs.length > 0;
+    if (popup.rule === "consent_pending") return (popup.consentKey || "apaar") === "apaar" && f.pendingConsents.includes("apaar");
+    return false;
+  };
+  const families = new Set<string>(byFamily.keys());
+  if (popup.targetMode === "rule") for (const [hh, kids] of kidsOf) if (pendingFor(kids)) families.add(hh);
+
+  const className = (classId: string, sectionId: string) => {
+    const c = masters.classes.find((x) => x.id === classId)?.name || "";
+    const sec = masters.sections.find((x) => x.id === sectionId)?.name || "";
+    return [c, sec].filter(Boolean).join("-");
+  };
+  const rows: ResponseRow[] = [];
+  for (const hh of families) {
+    const kids = kidsOf.get(hh) ?? [];
+    const e = byFamily.get(hh) ?? { shown: 0, dismissed: 0, done: 0, first: "", last: "", doneAt: "", gave: new Set<string>() };
+    const house = sis.households.find((h) => h.id === hh);
+    rows.push({
+      householdId: hh,
+      family: house?.guardianName || kids[0]?.fatherName || kids[0]?.fullName || hh,
+      outcome: popupOutcome({ shown: e.shown, dismissed: e.dismissed, done: e.done }, pendingFor(kids)),
+      shown: e.shown,
+      later: e.dismissed,
+      firstSeen: e.first,
+      lastSeen: e.last,
+      doneAt: e.doneAt,
+      gave: [...e.gave],
+      children: kids.map((k) => ({
+        id: k.id,
+        name: k.fullName,
+        classLabel: className(k.classId, k.sectionId),
+        child: aadhaarSlot(k.aadhaarNumber, k.aadhaarLast4, k.aadhaarVerification),
+        father: aadhaarSlot(k.fatherAadhaarNumber, k.fatherAadhaarLast4, k.fatherAadhaarVerification),
+        mother: aadhaarSlot(k.motherAadhaarNumber, k.motherAadhaarLast4, k.motherAadhaarVerification),
+      })),
+    });
+  }
+  return sortResponses(rows);
+}
+
+/**
+ * The office checked a number against the card and entered it on UDISE+:
+ * mark it verified. A parent's number is marked on every child of the family.
+ */
+export async function markAadhaarVerified(
+  studentId: string,
+  who: "child" | "father" | "mother",
+  by: string,
+): Promise<{ ok: true; marked: number } | { ok: false; error: string }> {
+  await ensureSisHydratedServer();
+  const student = loadSis().students.find((s) => s.id === studentId);
+  if (!student) return { ok: false, error: "Student not found" };
+  const ids =
+    who === "child" || !student.householdId
+      ? [studentId]
+      : [...new Set(loadSis().students.filter((s) => s.householdId === student.householdId).map((s) => s.id))];
+  let marked = 0;
+  for (const id of ids) {
+    const r = await saveStudent(id, (s) => {
+      const next: SisStudent = { ...s };
+      if (who === "child" && hasStoredAadhaar({ number: s.aadhaarNumber, last4: s.aadhaarLast4 })) next.aadhaarVerification = "verified_udise";
+      if (who === "father" && hasStoredAadhaar({ number: s.fatherAadhaarNumber, last4: s.fatherAadhaarLast4 })) next.fatherAadhaarVerification = "verified_udise";
+      if (who === "mother" && hasStoredAadhaar({ number: s.motherAadhaarNumber, last4: s.motherAadhaarLast4 })) next.motherAadhaarVerification = "verified_udise";
+      return next;
+    });
+    if (!r.ok) continue;
+    const field = who === "child" ? "aadhaarVerification" : who === "father" ? "fatherAadhaarVerification" : "motherAadhaarVerification";
+    if (r.before[field] === r.after[field]) continue;
+    marked += 1;
+    await writeAudit({
+      module: "sis",
+      action: "edit",
+      entityType: "student",
+      entityId: id,
+      summary: `${who === "child" ? "Child's" : who === "father" ? "Father's" : "Mother's"} Aadhaar marked verified on UDISE+`,
+      before: { [field]: r.before[field] },
+      after: { [field]: r.after[field], by },
+    }).catch(() => null);
+  }
+  if (!marked) return { ok: false, error: "Nothing to mark — no number on record, or already verified." };
+  return { ok: true, marked };
 }
