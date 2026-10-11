@@ -5,8 +5,11 @@ import {
   APP_INVITE_FITS,
   APP_INVITE_TEMPLATE_FAMILY,
   appInviteClaimKey,
+  inviteLogStatusFor,
+  liveInviteConfirmError,
   realInviteNumbers,
 } from "./parentAppInvite";
+import { claimMayBeTakenOver, SEND_CLAIM_STALE_MS } from "./waSendClaimPolicy";
 import { PARENT_APP_URL } from "./classGroupMoveNotice";
 import {
   adoptionStatus,
@@ -210,5 +213,27 @@ assert.deepEqual(realInviteNumbers({ mobile: "0000000000", fallbackMobile: "9876
 assert.deepEqual(realInviteNumbers({ mobile: "919999999999", fallbackMobile: "1234567890" }), null);
 assert.deepEqual(realInviteNumbers({ mobile: "9876500011", fallbackMobile: "9999999999" }), { mobile: "9876500011" });
 assert.deepEqual(realInviteNumbers({ mobile: "9876500011", fallbackMobile: "9876500012" }), { mobile: "9876500011", fallbackMobile: "9876500012" });
+
+// The day's invite claim is never taken over, however old; other claims keep
+// the 10-minute takeover from a dead caller.
+const old = new Date(now.getTime() - 6 * 3_600_000).toISOString();
+const fresh = new Date(now.getTime() - 60_000).toISOString();
+assert.equal(claimMayBeTakenOver(old, now), true, "default: a stale claim may be taken over");
+assert.equal(claimMayBeTakenOver(fresh, now), false);
+assert.equal(claimMayBeTakenOver(new Date(now.getTime() - SEND_CLAIM_STALE_MS).toISOString(), now), true);
+assert.equal(claimMayBeTakenOver(old, now, { neverStale: true }), false, "app_invite: held whatever its age");
+assert.equal(claimMayBeTakenOver("", now, { neverStale: true }), false);
+
+// A send, or a dispatch that threw (may have gone), is logged and keeps the
+// claim; an explicit non-send releases it.
+assert.equal(inviteLogStatusFor("sent"), "sent");
+assert.equal(inviteLogStatusFor("unknown"), "unknown");
+for (const st of ["failed", "deferred", "queued_stub", ""]) assert.equal(inviteLogStatusFor(st), null, st);
+
+// A live invite must carry the approved count.
+assert.match(liveInviteConfirmError(undefined, 5)!, /Check who gets it first/);
+assert.match(liveInviteConfirmError("5", 5)!, /Check who gets it first/);
+assert.match(liveInviteConfirmError(4, 5)!, /now 5, you approved 4/);
+assert.equal(liveInviteConfirmError(5, 5), null);
 
 console.log("parentsOnApp.selftest.ts: ok");

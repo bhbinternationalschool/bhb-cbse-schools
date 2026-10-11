@@ -46,3 +46,29 @@ export function realInviteNumbers(r: { mobile: string; fallbackMobile?: string }
 
 /** Send-once key: one invite per family per India day, across presses and tabs. */
 export const appInviteClaimKey = (householdId: string, istDayIso: string) => `app_invite:${householdId}:${istDayIso}`;
+
+export type InviteLogStatus = "sent" | "unknown";
+
+/**
+ * How one family's dispatch outcome is handled. "sent", and "unknown" (the
+ * dispatch threw — it may have gone), are logged in parent_app_invites, keep
+ * the family out of re-invites, and keep the day's claim. Anything else
+ * (failed, deferred for quiet hours, no provider) is null: not sent, the
+ * claim is released so a later press can try again.
+ */
+export function inviteLogStatusFor(dispatchStatus: string): InviteLogStatus | null {
+  if (dispatchStatus === "sent") return "sent";
+  if (dispatchStatus === "unknown") return "unknown";
+  return null;
+}
+
+/** A live invite must echo the dry run's count; null when it does. */
+export function liveInviteConfirmError(confirmCount: unknown, recipientCount: number): string | null {
+  if (typeof confirmCount !== "number" || !Number.isInteger(confirmCount)) {
+    return "Check who gets it first — a live invite needs the count you approved.";
+  }
+  if (confirmCount !== recipientCount) {
+    return `The families changed since you checked — now ${recipientCount}, you approved ${confirmCount}. Check again before sending.`;
+  }
+  return null;
+}
