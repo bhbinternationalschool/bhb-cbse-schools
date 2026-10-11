@@ -233,7 +233,7 @@ export function PayoutWalletPanel({ state, onChanged }: { state: PayoutState; on
                   {inr(p.amountPaise)} to {p.payeeName} {p.channel === "link" ? `· link to ${p.payeePhone}` : "· bank transfer"}
                 </span>
                 <span className="text-[11px] text-[var(--muted)]">
-                  {p.kind === "vendor_bill" ? `vendor bill ${p.billNo}` : "voucher"} · by {p.requestedBy}
+                  {p.kind === "vendor_bill" ? `vendor bill ${p.billNo}` : p.kind === "visiting_fee" ? p.billNo || "visiting fees" : "voucher"} · by {p.requestedBy}
                 </span>
               </div>
               <p className="mt-1 text-[12px]">{p.reason}</p>

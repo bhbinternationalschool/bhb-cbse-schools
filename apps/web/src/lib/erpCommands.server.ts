@@ -2896,11 +2896,15 @@ async function attendanceSummary(
 
   let staff: Parameters<typeof formatAttendanceSummaryReply>[0]["staff"] = null;
   if (school) {
-    const active = (masters.staff ?? []).filter((s) => s.status === "active");
     const reg = (loadStaffAttendance().registers ?? []).find(
       (r) => r.date === date && r.academicYearCode === ay,
     );
     const marks = new Map((reg?.marks ?? []).map((m) => [m.staffId, m.status]));
+    // Visiting staff count only on a day they are on the register — never as
+    // "not punched in" on a day nobody expected them.
+    const active = (masters.staff ?? []).filter(
+      (s) => s.status === "active" && (s.category !== "visiting" || marks.has(s.id)),
+    );
     const namesWith = (code: string) =>
       active
         .filter((s) => marks.get(s.id) === code)

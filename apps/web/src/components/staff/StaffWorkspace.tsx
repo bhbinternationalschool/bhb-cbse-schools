@@ -73,6 +73,7 @@ import { StaffOutdoorDutyPanel } from "@/components/staff/StaffOutdoorDutyPanel"
 import { StaffLeaveReportsPanel } from "@/components/staff/StaffLeaveReportsPanel";
 import { StaffAppraisalPanel } from "@/components/staff/StaffAppraisalPanel";
 import { StaffPayslipsPanel } from "@/components/staff/StaffPayslipsPanel";
+import { VisitingPayPanel } from "@/components/staff/VisitingPayPanel";
 import { StaffMyProfileDocs } from "@/components/staff/StaffMyProfileDocs";
 import { StaffAgreementPanel, StaffAgreementSelfPanel } from "@/components/staff/StaffAgreementPanel";
 import { DutyRosterPanel } from "@/components/staff/DutyRosterPanel";
@@ -123,6 +124,7 @@ type StaffMainTab =
   | "appraisal"
   | "reports"
   | "payslips"
+  | "visiting_pay"
   | "my_docs"
   | "doc_verify"
   | "agreements"
@@ -144,6 +146,7 @@ const STAFF_TABS: ModuleTabItem[] = [
   { id: "outdoor_duty", label: "Outdoor duty", tone: "sky" },
   { id: "appraisal", label: "Appraisal", tone: "violet" },
   { id: "payslips", label: "Payslips", tone: "green" },
+  { id: "visiting_pay", label: "Visiting pay", tone: "amber" },
   { id: "reports", label: "Reports", tone: "amber" },
   { id: "presence", label: "My presence", tone: "green" },
   { id: "gps", label: "GPS presence", tone: "coral" },
@@ -171,6 +174,7 @@ export function StaffWorkspace() {
       "appraisal",
       "reports",
       "payslips",
+      "visiting_pay",
       "my_docs",
       "doc_verify",
       "agreements",
@@ -520,6 +524,7 @@ export function StaffWorkspace() {
         </>
       ) : null}
       {tab === "payslips" ? <StaffPayslipsPanel /> : null}
+      {tab === "visiting_pay" ? <VisitingPayPanel /> : null}
 
       {tab === "roster" ? (
       <>

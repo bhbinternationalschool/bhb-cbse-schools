@@ -17,7 +17,12 @@
 import { L_PAYOUTS_WALLET } from "@/lib/ledger/coa";
 import type { LedgerLineInput } from "@/lib/ledger/types";
 
-export type PayoutRequestKind = "vendor_bill" | "voucher";
+/** visiting_fee: a visiting staff member's approved month sheet (lib/visitingPay.ts). */
+export type PayoutRequestKind = "vendor_bill" | "voucher" | "visiting_fee";
+
+export function readRequestKind(raw: unknown): PayoutRequestKind {
+  return raw === "voucher" ? "voucher" : raw === "visiting_fee" ? "visiting_fee" : "vendor_bill";
+}
 export type PayoutRequestChannel = "transfer" | "link";
 export type PayoutRequestStatus = "PENDING_APPROVAL" | "REJECTED" | "SENT" | "PAID" | "FAILED" | "CANCELLED";
 

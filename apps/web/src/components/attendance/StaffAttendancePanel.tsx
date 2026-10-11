@@ -170,10 +170,17 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
 
   const roster = useMemo(() => {
     if (!masters) return [];
+    // Visiting staff (paid per period / hour / day) are on the day's register
+    // only when they punched — never listed as "Not punched" on a day nobody
+    // expected them. Their missed days are settled on Staff → Visiting pay.
+    const marked = new Set(
+      (findStaffRegister(attState, date, ay)?.marks ?? []).map((m) => m.staffId),
+    );
     return (masters.staff ?? [])
       .filter((s) => s.status === "active" && !exemptIds.has(s.id))
+      .filter((s) => s.category !== "visiting" || marked.has(s.id))
       .sort((a, b) => a.empCode.localeCompare(b.empCode));
-  }, [masters, exemptIds]);
+  }, [masters, exemptIds, date, ay, attState]);
 
   const selfStaff = useMemo(() => {
     if (!masters) return null;
