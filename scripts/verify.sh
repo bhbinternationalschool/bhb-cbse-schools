@@ -326,6 +326,7 @@ SELFTESTS=(
   test:admissions-ai
   test:admissions-enquiry-form
   test:admissions-kb
+  test:admission-entrance-test
   test:birthday-cards
   test:collections-ai
   test:concession-per-due

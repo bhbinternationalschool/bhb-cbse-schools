@@ -146,7 +146,7 @@ function leadToRow(tenantId: string, l: AdmissionLead): Record<string, unknown> 
   };
 }
 
-function rowToLead(r: Record<string, unknown>): AdmissionLead {
+export function rowToLead(r: Record<string, unknown>): AdmissionLead {
   const fromJson = r.lead_json as Partial<AdmissionLead> | undefined;
   if (fromJson?.id) return normalizeAdmissionLead(fromJson);
   return normalizeAdmissionLead({
