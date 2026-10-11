@@ -30,6 +30,8 @@ import { StaffAgreementPanel } from "@/components/staff/StaffAgreementPanel";
 import { StaffMessageTimelinePanel } from "@/components/staff/StaffMessageTimelinePanel";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { pushToast } from "@/components/shell/Toast";
+import { useDemoSession } from "@/components/shell/SessionContext";
+import { hasPermission } from "@/lib/rbac";
 import {
   CustomFieldsSection,
   type CustomFieldsHandle,
@@ -106,6 +108,7 @@ type Props =
 
 export function StaffProfileForm(props: Props) {
   const router = useRouter();
+  const session = useDemoSession();
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [tab, setTab] = useState<Tab>("basic");
   const [draft, setDraft] = useState<StaffRecord | null>(null);
@@ -1237,6 +1240,9 @@ export function StaffProfileForm(props: Props) {
             entity="staff"
             mode={props.mode}
             entityId={draft.id}
+            // View-only staff see the values but get no Save (the server
+            // refuses their write anyway: staff · edit).
+            readOnly={!hasPermission(session, masters, "staff", "edit")}
           />
         </div>
 

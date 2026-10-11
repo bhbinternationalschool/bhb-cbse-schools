@@ -467,25 +467,3 @@ export function planCustomImport(
   return { changes, errors };
 }
 
-/**
- * The student row an import line landed on: same admission number (or the
- * old-ERP number the import keeps when it assigns new ones) AND same name,
- * in the session the import wrote. Ambiguous or missing → null, and the
- * line's custom cells are reported, not guessed onto someone.
- */
-export function findImportedStudentId(
-  students: { id: string; admissionNo?: string; legacyErpAdmissionNo?: string; fullName?: string; academicYearCode?: string }[],
-  line: { admissionNo: string; fullName: string },
-  session: string,
-): string | null {
-  const adm = squash(line.admissionNo).toUpperCase();
-  const name = labelKey(line.fullName);
-  if (!adm || !name) return null;
-  const hits = students.filter(
-    (s) =>
-      s.academicYearCode === session &&
-      labelKey(s.fullName ?? "") === name &&
-      (squash(s.admissionNo ?? "").toUpperCase() === adm || squash(s.legacyErpAdmissionNo ?? "").toUpperCase() === adm),
-  );
-  return hits.length === 1 ? hits[0]!.id : null;
-}

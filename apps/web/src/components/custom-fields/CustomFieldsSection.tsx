@@ -77,8 +77,16 @@ export const CustomFieldsSection = forwardRef<CustomFieldsHandle, Props>(functio
   editedRef.current = edited;
 
   const loadSeq = useRef(0);
-  const reload = useCallback(async () => {
+  /**
+   * `keepEdits` (the default): an input the user has already changed keeps
+   * what they typed — e.g. the child's other-session rows arriving a moment
+   * after the first load must not wipe it. After a save the page takes the
+   * stored values as they now are.
+   */
+  const reload = useCallback(async (keepEdits = true) => {
     const seq = ++loadSeq.current;
+    const before = loadRef.current;
+    const typed = editedRef.current;
     setLoad({ state: "loading" });
     try {
       const [all, rows] = await Promise.all([
@@ -89,7 +97,21 @@ export const CustomFieldsSection = forwardRef<CustomFieldsHandle, Props>(functio
       if (seq !== loadSeq.current) return;
       const defs = activeDefsFor(all, entity);
       const resolved = resolveEntityValues(rows, readIds);
-      setEdited(Object.fromEntries(defs.map((d) => [d.id, valueForInput(d, resolved.get(d.id)?.value ?? "")])));
+      const wasInput = (id: string) => {
+        if (before.state !== "ready") return "";
+        const d = before.defs.find((x) => x.id === id);
+        return d ? valueForInput(d, before.resolved.get(id)?.value ?? "") : "";
+      };
+      setEdited(
+        Object.fromEntries(
+          defs.map((d) => {
+            const fresh = valueForInput(d, resolved.get(d.id)?.value ?? "");
+            const mine = typed[d.id];
+            const dirty = keepEdits && mine !== undefined && mine !== wasInput(d.id);
+            return [d.id, dirty ? mine : fresh];
+          }),
+        ),
+      );
       setErrors({});
       setLoad({ state: "ready", defs, resolved });
     } catch (e) {
@@ -153,7 +175,7 @@ export const CustomFieldsSection = forwardRef<CustomFieldsHandle, Props>(functio
         if (r.rejected.length) parts.push(r.rejected.map((x) => x.error).join("; "));
         const ok = !r.conflicts.length && !r.rejected.length;
         // Re-read so the next save starts from the stamps just written.
-        if (mode === "edit" || r.conflicts.length) await reload();
+        if (mode === "edit" || r.conflicts.length) await reload(false);
         return { ok, message: parts.join(" · ") };
       } catch (e) {
         return { ok: false, message: `More details not saved — ${e instanceof Error ? e.message : "server error"}` };

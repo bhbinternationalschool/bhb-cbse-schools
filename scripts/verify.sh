@@ -127,6 +127,7 @@ SELFTESTS=(
   test:masters-subject-guard
   test:subject-requests
   test:custom-fields
+  test:custom-fields-import
   test:udise-nudge
   test:apaar-consent
   test:aadhaar-certificate

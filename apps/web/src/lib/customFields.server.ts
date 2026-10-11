@@ -1,3 +1,4 @@
+import { reservedCustomLabel } from "@/lib/customFieldsReserved";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
 import {
@@ -95,7 +96,7 @@ type DefResult = { ok: true; def: CustomFieldDef } | { ok: false; error: string;
 export async function createCustomFieldDef(input: CustomFieldDefInput, by: string): Promise<DefResult> {
   const all = await listCustomFieldDefs(input.entityType);
   if (!all) return { ok: false, error: "Could not read the existing fields — try again.", status: 503 };
-  const v = validateDefInput(input, all, null);
+  const v = validateDefInput(input, all, null, reservedCustomLabel(input.entityType));
   if (!v.ok) return { ok: false, error: v.error, status: 400 };
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "Database unavailable", status: 503 };
@@ -137,7 +138,12 @@ export async function updateCustomFieldDef(
   const current = all.find((d) => d.id === id);
   if (!current) return { ok: false, error: "That field is no longer there — reload.", status: 404 };
   const typeChanging = current.fieldType !== input.fieldType;
-  const v = validateDefInput(input, all, { ...current, valueCount: typeChanging ? await anyValueRows(id) : 0 });
+  const v = validateDefInput(
+    input,
+    all,
+    { ...current, valueCount: typeChanging ? await anyValueRows(id) : 0 },
+    reservedCustomLabel(input.entityType),
+  );
   if (!v.ok) return { ok: false, error: v.error, status: 400 };
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "Database unavailable", status: 503 };

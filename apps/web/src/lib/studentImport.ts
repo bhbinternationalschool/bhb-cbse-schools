@@ -109,6 +109,13 @@ export type StudentImportResult = StudentImportPreview & {
   targetSession: string;
   /** Admission nos created/updated in this run (for prior-year gap check) */
   importedAdmissionNos: string[];
+  /**
+   * File line → id of the student row this run actually created or
+   * updated. Lines the import refused (upsert off, unresolved class, no
+   * admission number…) are absent — the custom-field ("more details")
+   * columns are written only for lines in here.
+   */
+  writtenLineIds: Record<number, string>;
 };
 
 const HEADER_TO_KEY: Record<string, string> = {};
@@ -1265,6 +1272,7 @@ export function applyStudentImport(
         options.targetSession || DEFAULT_AY,
       ),
       importedAdmissionNos: [],
+      writtenLineIds: {},
     };
   }
 
@@ -1283,6 +1291,7 @@ export function applyStudentImport(
   let created = 0;
   let updated = 0;
   const importedAdmissionNos: string[] = [];
+  const writtenLineIds: Record<number, string> = {};
   const errors: StudentImportRowError[] = [...preview.errors];
   let resolvedTargetSession = normalizeSessionCode(
     options.targetSession || DEFAULT_AY,
@@ -1591,6 +1600,7 @@ export function applyStudentImport(
 
     const normalized = normalizeStudent(patch);
     importedAdmissionNos.push(adm.toUpperCase());
+    writtenLineIds[r.lineNo] = normalized.id;
     if (existing) {
       students = students.map((s) =>
         s.id === existing.id ? normalized : s,
@@ -1629,6 +1639,7 @@ export function applyStudentImport(
     state,
     targetSession: resolvedTargetSession,
     importedAdmissionNos: [...new Set(importedAdmissionNos)],
+    writtenLineIds,
   };
 }
 
@@ -1943,29 +1954,4 @@ export function studentImportRawGrid(text: string): {
   const lines: { lineNo: number; cells: string[] }[] = [];
   for (let i = hi + 1; i < grid.length; i++) lines.push({ lineNo: i + 1, cells: grid[i]!.map((c) => String(c ?? "")) });
   return { headers: grid[hi]!.map((h) => String(h ?? "")), lines };
-}
-
-/**
- * Per imported line: the admission number, name and the session the import
- * writes it into (same placement rule as the import itself). Lines the
- * session filter skips are left out.
- */
-export function studentImportLineTargets(
-  text: string,
-  options: StudentImportOptions,
-): Map<number, { admissionNo: string; fullName: string; session: string }> {
-  const out = new Map<number, { admissionNo: string; fullName: string; session: string }>();
-  const filterAy = options.sourceSessionFilter ? normalizeSessionCode(options.sourceSessionFilter) : "";
-  for (const r of rowsToFieldMaps(text).rows) {
-    const f = r.fields;
-    const csvSession = (f.academicYear ?? "").trim();
-    const csvAy = csvSession ? normalizeSessionCode(csvSession) : "";
-    if (filterAy && csvAy && csvAy !== filterAy) continue;
-    out.set(r.lineNo, {
-      admissionNo: (f.admissionNo ?? "").trim(),
-      fullName: (f.fullName ?? "").trim(),
-      session: applyPlacementSession(csvAy || csvSession, options),
-    });
-  }
-  return out;
 }

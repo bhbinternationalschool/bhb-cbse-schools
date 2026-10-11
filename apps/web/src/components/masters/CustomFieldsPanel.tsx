@@ -14,7 +14,7 @@ import {
   type CustomFieldType,
 } from "@/lib/customFields";
 import { fetchCustomFieldDefs, postCustomFieldDef } from "@/lib/customFieldsClient";
-import { isBuiltInStudentImportHeader } from "@/lib/studentImport";
+import { reservedCustomLabel } from "@/lib/customFieldsReserved";
 
 /**
  * Masters → Custom fields (old SStudy ERP: Configuration → Custom Field).
@@ -107,7 +107,7 @@ export function CustomFieldsPanel({ canEdit }: { canEdit: boolean }) {
       input,
       rows,
       current,
-      entity === "student" ? isBuiltInStudentImportHeader : undefined,
+      reservedCustomLabel(entity),
     );
     if (!v.ok) {
       flash(false, v.error);

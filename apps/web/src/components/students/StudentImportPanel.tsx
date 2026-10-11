@@ -23,7 +23,6 @@ import {
   listMissingFromImport,
   previewStudentImport,
   isBuiltInStudentImportHeader,
-  studentImportLineTargets,
   studentImportRawGrid,
   workbookToStudentImportCsv,
   type SessionGapRow,
@@ -33,7 +32,6 @@ import {
 import { SessionImportGapDialog } from "@/components/students/SessionImportGapDialog";
 import {
   activeDefsFor,
-  findImportedStudentId,
   matchCustomImportHeaders,
   planCustomImport,
 } from "@/lib/customFields";
@@ -53,14 +51,16 @@ type Props = {
 /**
  * Optional "more details" columns: a column whose header is the name of a
  * student custom field (Masters → Custom fields, English or Hindi) fills
- * that field on the student the line landed on. Saved apart from the
- * student record, after it (lib/customFields). Blank cells are skipped —
- * an empty column means "not in this file", never "erase".
+ * that field on the student the line landed on. Only lines the import
+ * actually created or updated (`writtenLineIds`) are written: a line it
+ * refused ("Update existing" off, unknown class…) must not change that
+ * child's details either. Saved apart from the student record, after it
+ * (lib/customFields). Blank cells are skipped — an empty column means "not
+ * in this file", never "erase".
  */
 async function importCustomColumns(
   text: string,
-  state: SisState,
-  options: Parameters<typeof studentImportLineTargets>[1],
+  writtenLineIds: Record<number, string>,
 ): Promise<string> {
   const grid = studentImportRawGrid(text);
   if (!grid) return "";
@@ -74,17 +74,13 @@ async function importCustomColumns(
   }
   const match = matchCustomImportHeaders(grid.headers, defs, isBuiltInStudentImportHeader);
   if (!match.columns.length) return "";
-  const targets = studentImportLineTargets(text, options);
   const lines = grid.lines
-    .filter((l) => targets.has(l.lineNo))
-    .map((l) => {
-      const t = targets.get(l.lineNo)!;
-      return {
-        lineNo: l.lineNo,
-        entityId: findImportedStudentId(state.students, t, t.session),
-        cells: match.columns.map((c) => ({ def: c.def, raw: l.cells[c.index] ?? "" })),
-      };
-    });
+    .filter((l) => writtenLineIds[l.lineNo])
+    .map((l) => ({
+      lineNo: l.lineNo,
+      entityId: writtenLineIds[l.lineNo]!,
+      cells: match.columns.map((c) => ({ def: c.def, raw: l.cells[c.index] ?? "" })),
+    }));
   const ids = [...new Set(lines.map((l) => l.entityId).filter((x): x is string => Boolean(x)))];
   const stamps = new Map<string, { value: string; updatedAt: string }>();
   try {
@@ -280,7 +276,16 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
           source: fileName || "pasted-csv",
         },
       });
-      const customNote = await importCustomColumns(csvText, result.state, options);
+      // Its own try: the roster is already saved and pushed above, so a
+      // failure here must never skip onApplied — a parent left holding the
+      // pre-import roster could import the same children twice.
+      let customNote = "";
+      try {
+        customNote = await importCustomColumns(csvText, result.writtenLineIds);
+      } catch (e) {
+        console.error("[sisImport] more-details columns failed:", e);
+        customNote = ` · More details columns NOT imported — ${e instanceof Error ? e.message : "unexpected error"}; import the file again to retry`;
+      }
       onApplied(
         result.state,
         `Imported ${result.created} new, updated ${result.updated}` +

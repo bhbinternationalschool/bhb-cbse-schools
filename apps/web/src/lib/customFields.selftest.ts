@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import {
   diffCustomValues,
-  findImportedStudentId,
   isoToDdMmYyyy,
   isoToLongDate,
   matchCustomImportHeaders,
@@ -192,18 +191,5 @@ const plan = planCustomImport(
 );
 assert.deepEqual(plan.changes, [{ entityId: "s26", fieldId: "house", value: "Blue", base: "T1" }], "blank cells and unchanged values send nothing");
 assert.deepEqual(plan.errors.map((e) => e.lineNo), [5, 6]);
-
-// ── Which row an import line landed on ──
-const landed = [
-  { id: "a", admissionNo: "BHB-1", fullName: "Riya Singh", academicYearCode: "2026-27" },
-  { id: "b", admissionNo: "BHB-1", fullName: "Riya Singh", academicYearCode: "2025-26" },
-  { id: "c", admissionNo: "BHB-9", legacyErpAdmissionNo: "OLD-7", fullName: "Aman", academicYearCode: "2026-27" },
-  { id: "d1", admissionNo: "BHB-5", fullName: "Twin", academicYearCode: "2026-27" },
-  { id: "d2", admissionNo: "BHB-5", fullName: "Twin", academicYearCode: "2026-27" },
-];
-assert.equal(findImportedStudentId(landed, { admissionNo: "bhb-1", fullName: "RIYA SINGH" }, "2026-27"), "a", "the session written, not last year's row");
-assert.equal(findImportedStudentId(landed, { admissionNo: "OLD-7", fullName: "Aman" }, "2026-27"), "c", "old-ERP number kept by auto-numbering");
-assert.equal(findImportedStudentId(landed, { admissionNo: "BHB-1", fullName: "Someone Else" }, "2026-27"), null, "number alone is not enough");
-assert.equal(findImportedStudentId(landed, { admissionNo: "BHB-5", fullName: "Twin" }, "2026-27"), null, "ambiguous → nobody");
 
 console.log("customFields.selftest.ts: all assertions passed");
