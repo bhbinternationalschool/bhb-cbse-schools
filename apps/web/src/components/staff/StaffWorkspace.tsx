@@ -489,7 +489,7 @@ export function StaffWorkspace() {
         </ErpPanel>
       ) : null}
 
-      {tab === "leave" ? <StaffLeavePanel ay={ay} /> : null}
+      {tab === "leave" ? <StaffLeavePanel ay={ay} onOpenLeaveRules={() => setTab("leave_rules")} /> : null}
       {tab === "leave_rules" ? (
         <StaffLeaveRulesPanel
           ay={ay}
