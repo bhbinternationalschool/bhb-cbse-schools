@@ -5,16 +5,25 @@
  * (module_local_state "propel_tests") and answers which chapters Propel's
  * tests name that the ERP's loaded book for that class and subject lacks —
  * a new or changed chapter to check, since the AI tutor and lesson plans
- * follow the ERP's list. No student data: Propel has none. Compliance · edit.
+ * follow the ERP's list. For Nursery–UKG, whose books Propel lists in full
+ * (its unit list), the whole book is compared both ways. No student data:
+ * Propel has none. Compliance · edit.
  */
 
 import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
-import { normalizePropelTests, propelChapterGaps } from "@/lib/propelRobot";
+import {
+  normalizePropelTests,
+  propelChapterGaps,
+  propelFullBookCheck,
+  propelPrePrimaryBooks,
+} from "@/lib/propelRobot";
 import {
   propelClassGrade,
   propelSubjectKey,
   readErpBookChapters,
+  readPropelBooks,
+  writePropelBooks,
   writePropelTests,
 } from "@/lib/propelRobot.server";
 
@@ -23,7 +32,7 @@ export const runtime = "nodejs";
 export async function POST(req: Request) {
   const auth = await requireStaffPermission(req, "compliance", "edit");
   if (!auth.ok) return auth.response;
-  let body: { assessments?: unknown };
+  let body: { assessments?: unknown; units?: unknown; subjects?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -36,16 +45,32 @@ export async function POST(req: Request) {
   const by = auth.ctx.session.fullName || auth.ctx.session.email || "office";
   const saved = await writePropelTests(tests, by);
   if (!saved.ok) return NextResponse.json({ ok: false, error: saved.error }, { status: 500 });
-  const gaps = propelChapterGaps(tests, (className, subject) => {
+  const erpChapters = (className: string, subject: string) => {
     const grade = propelClassGrade(className);
     const key = propelSubjectKey(subject);
     return grade === null || !key ? null : (books.get(`${grade}|${key}`) ?? null);
-  });
+  };
+  const gaps = propelChapterGaps(tests, erpChapters);
+  const subjects = (Array.isArray(body.subjects) ? body.subjects : [])
+    .filter((x): x is { id: number; name: string } => !!x && typeof (x as { id?: unknown }).id === "number")
+    .map((x) => ({ id: x.id, name: String(x.name || "") }));
+  const propelBooks = propelPrePrimaryBooks(body.units, subjects);
+  let bookChecks: ReturnType<typeof propelFullBookCheck> = [];
+  if (propelBooks.length) {
+    const previous = await readPropelBooks();
+    if (previous === null) {
+      return NextResponse.json({ ok: false, error: "Could not read the last book check — try again." }, { status: 503 });
+    }
+    bookChecks = propelFullBookCheck(propelBooks, erpChapters, previous === "none" ? null : previous);
+    const kept = await writePropelBooks(propelBooks, by);
+    if (!kept.ok) return NextResponse.json({ ok: false, error: kept.error }, { status: 500 });
+  }
   return NextResponse.json({
     ok: true,
     kept: tests.length,
     ready: tests.filter((t) => t.chapters.length > 0).length,
     gaps,
+    bookChecks,
     updatedAt: saved.updatedAt,
   });
 }

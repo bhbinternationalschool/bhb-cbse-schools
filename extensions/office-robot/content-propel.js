@@ -290,10 +290,33 @@
       const j = await propel("GET", `v2/${schoolId()}/assessments/recommended`, "lead_assessments");
       const list = (j.data && j.data.assessmentsList) || [];
       if (!list.length) return say("Propel lists no tests for this year.", "err");
-      const res = await ask({ type: "propel-tests", assessments: list });
+      // Nursery–UKG books Propel lists in full (its unit list), with subject names.
+      say("Reading Propel's pre-primary books…");
+      const um = await propel("GET", `v1/${schoolId()}/reports/unit/master?board_id=1&module=performance`, "reports");
+      const units = (um.data && um.data.master) || [];
+      const sj = await fetch(`https://nucleus.leadschool.in/api/subjects?school_id=${schoolId()}`, { headers: headers("reports") });
+      const subjects = sj.ok ? ((await sj.json()).subjects || []).map((x) => ({ id: x.id, name: x.name })) : [];
+      const res = await ask({ type: "propel-tests", assessments: list, units, subjects });
       if (!res.ok) return say(res.error, "err");
-      const { kept, ready, gaps } = res.body;
+      const { kept, ready, gaps, bookChecks } = res.body;
       const lines = [`Kept ${kept} Propel test(s) in the ERP (${ready} with chapters).`];
+      if (bookChecks && bookChecks.length) {
+        lines.push("", "Pre-primary books (full check):");
+        for (const b of bookChecks) {
+          const head = `  ${b.className} ${b.subject}: Propel ${b.propelUnits} unit(s) · ERP ${b.erpChapters} chapter(s)`;
+          const notes = [];
+          if (!b.erpHasBook) notes.push("no ERP book loaded");
+          else if (b.sameStructure) {
+            if (!b.missingInErp.length && !b.notOnPropel.length) notes.push("same");
+            if (b.missingInErp.length) notes.push(`not in ERP: ${b.missingInErp.slice(0, 4).join("; ")}`);
+            if (b.notOnPropel.length) notes.push(`not on Propel: ${b.notOnPropel.slice(0, 4).join("; ")}`);
+          } else notes.push("Propel groups lessons into units — compared by changes only");
+          if (b.changedOnPropel && (b.changedOnPropel.added.length || b.changedOnPropel.removed.length)) {
+            notes.push(`CHANGED on Propel since last check: +${b.changedOnPropel.added.join("; ") || "—"} / −${b.changedOnPropel.removed.join("; ") || "—"}`);
+          } else if (!b.changedOnPropel) notes.push("first check — changes show from next time");
+          lines.push(`${head} — ${notes.join(" · ")}`);
+        }
+      }
       if (gaps.length) {
         lines.push("", "Chapters Propel's tests name that the ERP's books lack — check the book list:");
         for (const g of gaps.slice(0, 20)) lines.push(`  · ${g.className} ${g.subject}: ${g.missing.slice(0, 6).join("; ")}${g.missing.length > 6 ? " …" : ""}`);

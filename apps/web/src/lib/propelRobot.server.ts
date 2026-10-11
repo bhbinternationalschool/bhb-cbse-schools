@@ -9,6 +9,7 @@ import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
 import {
   addProgressSnapshot,
+  type PropelBook,
   type PropelProgressRecord,
   type PropelProgressSnapshot,
   type PropelTestRecord,
@@ -16,6 +17,35 @@ import {
 
 export const PROPEL_TESTS_KEY = "propel_tests";
 export const PROPEL_PROGRESS_KEY = "propel_teacher_progress";
+export const PROPEL_BOOKS_KEY = "propel_books";
+
+/** Propel's pre-primary unit lists as of the last check; null = read failed. */
+export async function readPropelBooks(): Promise<PropelBook[] | "none" | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { data, error } = await ctx.sb
+    .from("module_local_state")
+    .select("state")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("module_key", PROPEL_BOOKS_KEY)
+    .maybeSingle();
+  if (error) return null;
+  const books = (data?.state as { books?: unknown } | null)?.books;
+  return Array.isArray(books) ? (books as PropelBook[]) : "none";
+}
+
+export async function writePropelBooks(books: PropelBook[], by: string): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Tenant unavailable" };
+  const now = new Date().toISOString();
+  const { error } = await ctx.sb
+    .from("module_local_state")
+    .upsert(
+      { tenant_id: ctx.tenantId, module_key: PROPEL_BOOKS_KEY, state: { books, fetchedAt: now, fetchedBy: by }, updated_at: now },
+      { onConflict: "tenant_id,module_key" },
+    );
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
 
 export type PropelProgressState = {
   rows: PropelProgressRecord[];

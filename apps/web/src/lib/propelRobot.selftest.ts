@@ -4,6 +4,8 @@ import { join } from "node:path";
 import {
   addProgressSnapshot,
   normalizePropelProgress,
+  propelFullBookCheck,
+  propelPrePrimaryBooks,
   buildPropelExamPlan,
   buildPropelHolidayPlan,
   buildPropelStudentRows,
@@ -260,6 +262,58 @@ const base = {
   assert.deepEqual(h.map((x) => x.on), ["2026-10-05", "2026-10-12"], "one snapshot a day, latest wins");
   assert.equal(h[1].done["Class1|A|Propel Hindi"], 11);
   console.log("  ok  teacher progress: matched by mobile, behind first, daily snapshots for the trend");
+}
+
+// ── Pre-primary full book check (real Nursery lists, 12 Oct 2026) ─────
+{
+  const master = [
+    { classId: 1, subjectId: 365, unit: [
+      { shellLabelCode: "UN", shellTitle: "Pre-Number Concepts" }, { shellLabelCode: "UN", shellTitle: "Formative Assessment 1" },
+      { shellLabelCode: "UN", shellTitle: "Shapes" }, { shellLabelCode: "UN", shellTitle: "Measurement" },
+      { shellLabelCode: "MOY", shellTitle: "Middle of the Year Assessment" }, { shellLabelCode: "UN", shellTitle: "Numbers 1 to 5" },
+    ] },
+    { classId: 1, subjectId: 364, unit: [
+      { shellLabelCode: "UN", shellTitle: "Stories, Rhymes, and Letters A to D" }, { shellLabelCode: "UN", shellTitle: "Stories, Rhymes, and Letters E to H" },
+    ] },
+    { classId: 1, subjectId: 366, unit: [{ shellLabelCode: "TH", shellTitle: "Who Am I?" }, { shellLabelCode: "UN", shellTitle: "Formative Assessment 1" }] },
+    { classId: 102, subjectId: 352, unit: [{ shellLabelCode: "UN", shellTitle: "Formative Assessment 1" }] },
+  ];
+  const subjects = [
+    { id: 365, name: "Propel Numeracy" },
+    { id: 364, name: "Propel English Literacy" },
+    { id: 366, name: "Propel Understanding Our World" },
+    { id: 352, name: "Propel English" },
+  ];
+  const books = propelPrePrimaryBooks(master, subjects);
+  assert.deepEqual(books.map((b) => b.subject), ["Propel English Literacy", "Propel Numeracy", "Propel Understanding Our World"], "only Nursery–UKG; Class 1 groupings are not books");
+  assert.deepEqual(books.find((b) => b.subject === "Propel Numeracy")!.units, ["Pre-Number Concepts", "Shapes", "Measurement", "Numbers 1 to 5"], "assessment entries are dropped");
+  assert.deepEqual(books.find((b) => /World/.test(b.subject))!.units, ["Who Am I?"], "themes count as units");
+
+  const erp: Record<string, string[]> = {
+    "Propel Numeracy": ["Pre-Number Concepts", "Shapes", "Measurement", "Numbers 1 to 5", "Patterns"],
+    "Propel English Literacy": ["Story—Manu's First Day", "Letter Aa", "Letter Bb", "Letter Cc"],
+  };
+  const first = propelFullBookCheck(books, (_c, subject) => erp[subject] ?? null, null);
+  const num = first.find((b) => b.subject === "Propel Numeracy")!;
+  assert.equal(num.sameStructure, true, "Numeracy is listed chapter by chapter on both sides");
+  assert.deepEqual(num.notOnPropel, ["Patterns"]);
+  assert.deepEqual(num.missingInErp, []);
+  const eng = first.find((b) => b.subject === "Propel English Literacy")!;
+  assert.equal(eng.sameStructure, false, "Propel groups English lessons into units");
+  assert.deepEqual(eng.missingInErp, [], "grouped books are not called all-different");
+  assert.equal(first.find((b) => /World/.test(b.subject))!.erpHasBook, false, "no ERP book = said so, not 'everything missing'");
+  assert.equal(num.changedOnPropel, null, "first check: no change history yet");
+
+  const later = propelPrePrimaryBooks(
+    [{ classId: 1, subjectId: 365, unit: [
+      { shellLabelCode: "UN", shellTitle: "Pre-Number Concepts" }, { shellLabelCode: "UN", shellTitle: "Shapes" },
+      { shellLabelCode: "UN", shellTitle: "Numbers 1 to 10" },
+    ] }],
+    subjects,
+  );
+  const second = propelFullBookCheck(later, (_c, subject) => erp[subject] ?? null, books);
+  assert.deepEqual(second[0].changedOnPropel, { added: ["Numbers 1 to 10"], removed: ["Measurement", "Numbers 1 to 5"] }, "what Propel changed since last time");
+  console.log("  ok  pre-primary books: full lists, structure-aware comparison, Propel changes tracked");
 }
 
 // ── Wiring ─────────────────────────────────────────────────────────────

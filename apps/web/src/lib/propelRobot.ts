@@ -804,3 +804,103 @@ export function addProgressSnapshot(
   const kept = (Array.isArray(history) ? history : []).filter((h) => h && h.on !== on);
   return [...kept, { on, done }].sort((a, b) => a.on.localeCompare(b.on)).slice(-60);
 }
+
+// ─── Pre-primary full book check (Propel → ERP) ───────────────────────
+
+/** One class × subject of Propel's unit list (…/reports/unit/master). */
+export type PropelUnitMaster = {
+  classId?: number;
+  subjectId?: number;
+  unit?: { shellLabelCode?: string; shellTitle?: string }[];
+};
+
+export type PropelBook = { className: string; subject: string; units: string[] };
+
+const PRE_PRIMARY_NAMES: Record<number, string> = { 1: "Nursery", 154: "LKG", 155: "UKG" };
+
+/**
+ * Propel's complete pre-primary books — Nursery, LKG, UKG — from its unit
+ * list: units (UN) and themes (TH), without the assessment entries the list
+ * mixes in. For Classes 1–8 that list holds only assessment groupings
+ * (FA 1–4, MOY, EOY), never chapters, so it is not read for them. Subject
+ * names come from Propel's own subject list.
+ */
+export function propelPrePrimaryBooks(master: unknown, subjects: { id: number; name: string }[]): PropelBook[] {
+  if (!Array.isArray(master)) return [];
+  const subjectName = new Map(subjects.map((s) => [s.id, s.name]));
+  const out: PropelBook[] = [];
+  for (const raw of master.slice(0, 500)) {
+    const m = raw as PropelUnitMaster;
+    const className = PRE_PRIMARY_NAMES[m?.classId ?? -1];
+    if (!className) continue;
+    const units = (m.unit ?? [])
+      .filter((u) => u && (u.shellLabelCode === "UN" || u.shellLabelCode === "TH"))
+      .map((u) => String(u.shellTitle || "").trim())
+      .filter((t) => t && !/assessment/i.test(t))
+      .map((t) => t.slice(0, 160));
+    const subject = subjectName.get(m.subjectId ?? -1) || "";
+    if (!units.length || !subject) continue;
+    out.push({ className, subject: subject.slice(0, 80), units: units.slice(0, 200) });
+  }
+  return out.sort((a, b) => a.className.localeCompare(b.className) || a.subject.localeCompare(b.subject));
+}
+
+export type BookCheck = {
+  className: string;
+  subject: string;
+  propelUnits: number;
+  erpChapters: number;
+  /** false when the ERP has no book loaded for this class and subject. */
+  erpHasBook: boolean;
+  /**
+   * Propel lists this book chapter by chapter, as the ERP does (most of its
+   * unit names are ERP chapter names) — so the two are compared both ways.
+   * Otherwise Propel groups lessons into units (Letters A to D) and a name
+   * comparison would call everything different; only counts are shown.
+   */
+  sameStructure: boolean;
+  /** Same structure only: on Propel, not in the ERP's book. */
+  missingInErp: string[];
+  /** Same structure only: in the ERP's book, not on Propel. */
+  notOnPropel: string[];
+  /** What Propel changed in this book since the last check; null on the first. */
+  changedOnPropel: { added: string[]; removed: string[] } | null;
+};
+
+/**
+ * The pre-primary books Propel lists in full, against the ERP's loaded books
+ * and against Propel's own list from the last check. A book the ERP has not
+ * loaded is reported as such, never as "everything missing".
+ */
+export function propelFullBookCheck(
+  books: PropelBook[],
+  erpChapters: (className: string, subject: string) => string[] | null,
+  previous: PropelBook[] | null,
+): BookCheck[] {
+  const before = new Map((previous ?? []).map((b) => [`${b.className}|${b.subject}`, b.units]));
+  return books.map((b) => {
+    const prev = before.get(`${b.className}|${b.subject}`);
+    const changedOnPropel = prev
+      ? {
+          added: b.units.filter((u) => !prev.some((p) => chapterKey(p) === chapterKey(u))),
+          removed: prev.filter((p) => !b.units.some((u) => chapterKey(u) === chapterKey(p))),
+        }
+      : null;
+    const erp = erpChapters(b.className, b.subject) ?? [];
+    const erpKeys = new Set(erp.map(chapterKey));
+    const propelKeys = new Set(b.units.map(chapterKey));
+    const matched = b.units.filter((u) => erpKeys.has(chapterKey(u))).length;
+    const sameStructure = erp.length > 0 && matched * 2 >= b.units.length;
+    return {
+      className: b.className,
+      subject: b.subject,
+      propelUnits: b.units.length,
+      erpChapters: erp.length,
+      erpHasBook: erp.length > 0,
+      sameStructure,
+      missingInErp: sameStructure ? b.units.filter((u) => !erpKeys.has(chapterKey(u))) : [],
+      notOnPropel: sameStructure ? erp.filter((c) => !propelKeys.has(chapterKey(c))) : [],
+      changedOnPropel,
+    };
+  });
+}
