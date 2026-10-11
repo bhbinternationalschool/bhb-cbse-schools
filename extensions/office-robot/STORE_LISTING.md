@@ -12,7 +12,7 @@ The listing link and the installs stay the same; Chrome updates installed copies
 ## Store listing tab
 
 - **Name** (from the manifest): BHB Office Robot
-- **Summary** (from the manifest, ≤132): BHB International School staff: syncs UDISE+ and Propel (calendar, teachers, students, tests) with the ERP. You check and save.
+- **Summary** (from the manifest, ≤132): BHB International School staff: syncs UDISE+ and Propel with the ERP, and checks Pinnacle books' chapters. You check and save.
 - **Category:** Workflow & Planning
 - **Language:** English
 - **Description** (paste):
@@ -35,6 +35,8 @@ On the UDISE+ School Profile module: copies each section into the ERP and fills 
 
 On the school's Propel / LEAD Nucleus portal: checks the academic calendar and staff list against the ERP, then — after you confirm the list on screen — adds the missing holidays, exams (as Offline assessments) and teacher logins; fills Propel's own student upload sheet for you to upload; and brings Propel's question papers, their chapters and each teacher's course progress into the ERP. It never edits, deactivates or deletes anything already on Propel.
 
+On Pinnacle Smart Teach (the publisher's teacher site for the school's books): reads each book's table of contents in the Book Library and shows which chapters differ from the school ERP's book list. It saves nothing on Smart Teach.
+
 You sign in yourself; the robot never signs in, never presses Save / Submit / Approve on UDISE+, saves on Propel only what you confirm, runs nothing in the background, and sends data only between these portals and the school's own ERP. It is useful only to the school's staff.
 ```
 
@@ -44,12 +46,13 @@ You sign in yourself; the robot never signs in, never presses Save / Submit / Ap
 ## Privacy practices tab
 
 - **Single purpose** (paste):
-  `Moves the school's own records between the UDISE+ portals (Student, Teacher and School Profile modules), the school's Propel / LEAD Nucleus portal and the school's ERP, in both directions, only when a staff member clicks — so office staff do not re-type them.`
+  `Moves the school's own records between the UDISE+ portals (Student, Teacher and School Profile modules), the school's Propel / LEAD Nucleus portal, the Pinnacle Smart Teach book library and the school's ERP, in both directions, only when a staff member clicks — so office staff do not re-type them.`
 - **Permission justification:**
   - `storage`: remembers the last send time, the list of children still to do while staff work through them, and whether One-click is on.
   - Host `https://bhbinternational.school/*`: the school's ERP — it supplies form values and receives the portal's records for staff review, using the staff member's own ERP sign-in; on ERP pages the extension only marks its version so the ERP can show it is installed.
   - Content scripts on `https://sdms.udiseplus.gov.in/g1/*`, `https://teacher.udiseplus.gov.in/*`, `https://profile.udiseplus.gov.in/*`: show the panel, read the school's own records that the portal shows the signed-in staff member, and fill the open form.
   - Content script on `https://nucleus.leadgroup.co.in/*` (the school's Propel / LEAD Nucleus portal): shows the panel, reads the school's calendar, staff list, subject list, blank student sheet, question papers and Teacher Timeliness through the portal's own API in the staff member's session, and — only after they confirm — adds the missing calendar entries and teacher logins.
+  - Content script on `https://teacher.pinnaclelearning.in/*` (Pinnacle Smart Teach): shows the panel and, when the staff member clicks, reads the Book Library's book list and each book's table of contents (the e-book contents files on books-cdn.leadschool.in). Saves nothing there.
 - **Remote code:** No. All code ships in the package.
 - **Data usage — tick:** Personally identifiable information · Personal communications? **No** · **Website content** · leave health, financial, authentication, location, web history, user activity UNticked.
   (Staff mobile numbers and emails, children's names, dates of birth and parents' names are "personally identifiable information".)

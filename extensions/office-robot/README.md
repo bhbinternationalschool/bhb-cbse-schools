@@ -81,3 +81,7 @@ On nucleus.leadgroup.co.in (sign in yourself, OTP), a "BHB Office Robot · Prope
 | **Bring teacher progress to ERP** | Propel's Teacher Timeliness (day plans done vs schedule, per teacher, class and subject) → ERP Staff → Appraisal → Propel progress, with the last-7-days change. |
 
 The robot never edits, deactivates or deletes anything already on Propel. ERP side: `/api/v1/propel/robot/*`, logic in `apps/web/src/lib/propelRobot.ts`.
+
+## Pinnacle Smart Teach (1.6.0, 12 Oct 2026)
+
+On teacher.pinnaclelearning.in (sign in yourself), open **Book Library**; a "BHB Office Robot · Pinnacle" panel appears with one button, **Check books against ERP**. The robot reads each book's table of contents from its e-book (the cover on the page points at the book's folder on books-cdn.leadschool.in) — the publisher's complete chapter list for Click Code Connect 1–8, Know and Grow 1–8, New Longman Vistas 1–5 and Tip-Tap-Toe Nursery–UKG — and the ERP compares each with its loaded book for that class and subject: chapters not in the ERP, chapters only the ERP has, a different edition (fewer than half the names match), and what changed since the last check. A report only: nothing is saved on Smart Teach and the ERP's books are not edited. ERP side: `/api/v1/propel/robot/pinnacle-books`, logic in `apps/web/src/lib/pinnacleBooks.ts`.
