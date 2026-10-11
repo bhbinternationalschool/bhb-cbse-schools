@@ -34,7 +34,8 @@ export default function OfficeRobotPrivacyPage() {
           Only school staff who are signed in to UDISE+ (the Student module at
           sdms.udiseplus.gov.in, the Teacher module at teacher.udiseplus.gov.in
           and the School Profile module at profile.udiseplus.gov.in) or to the
-          school&rsquo;s Propel / LEAD Nucleus portal (nucleus.leadgroup.co.in),
+          school&rsquo;s Propel / LEAD Nucleus portal (nucleus.leadgroup.co.in)
+          or to Pinnacle Smart Teach (teacher.pinnaclelearning.in),
           and to the school ERP (bhbinternational.school) in the same browser,
           with UDISE permission in the ERP. It is of no use to anyone else.
         </p>
@@ -108,6 +109,11 @@ export default function OfficeRobotPrivacyPage() {
             subject). Propel holds no children&rsquo;s marks for the robot to read.
           </li>
           <li>
+            On Pinnacle Smart Teach, when a staff member presses its button: the
+            titles of the books in the Book Library and each book&rsquo;s table of
+            contents (its chapter names). No personal data.
+          </li>
+          <li>
             From the school ERP, for Propel: the school&rsquo;s published student
             holidays, the exam date sheet, active teaching staff (name, mobile,
             email, designation) and, for the student upload sheet, each current
@@ -129,6 +135,10 @@ export default function OfficeRobotPrivacyPage() {
             school&rsquo;s ERP. The ERP&rsquo;s holidays, exams and new teachers go only to the school&rsquo;s own
             Propel account, in the staff member&rsquo;s signed-in session, and only after they confirm the list
             on screen.
+          </li>
+          <li>
+            Pinnacle&rsquo;s book titles and chapter names go only to the school&rsquo;s ERP, which compares
+            them with its own book list. Nothing is sent to Smart Teach.
           </li>
           <li>
             The filled student upload sheet is saved to the staff member&rsquo;s own computer; they upload it to
