@@ -89,12 +89,21 @@ export function familyFacts(children: SisStudent[], customConsentKeys: string[])
  * twice), the Play review family left out.
  */
 export async function schoolAadhaarGaps(sessionAy: string): Promise<AadhaarGapCounts> {
+  // Hydrate once and group in memory. Asking householdChildren per family
+  // re-checked the store with the database every time — ~160 round trips,
+  // and the App pop-ups page took 45–70 s to open (10–11 Oct 2026).
   await ensureSisHydratedServer();
   const visible = loadSisForStaff().students.filter((s) => s.status === "active" && s.householdId);
   const visibleIds = new Set(visible.map((s) => s.id));
+  const families = new Set(visible.map((s) => s.householdId));
+  const kidsOf = new Map<string, SisStudent[]>();
+  for (const k of childrenOnRoll(loadSis().students.filter((s) => families.has(s.householdId)), sessionAy)) {
+    if (!visibleIds.has(k.id)) continue;
+    kidsOf.set(k.householdId, [...(kidsOf.get(k.householdId) ?? []), k]);
+  }
   const rows: { children: number; missing: string[] }[] = [];
-  for (const hh of new Set(visible.map((s) => s.householdId))) {
-    const kids = (await householdChildren(hh, sessionAy)).filter((k) => visibleIds.has(k.id));
+  for (const hh of families) {
+    const kids = kidsOf.get(hh) ?? [];
     rows.push({ children: kids.length, missing: familyFacts(kids, []).missingAadhaar });
   }
   return countAadhaarGaps(rows);
