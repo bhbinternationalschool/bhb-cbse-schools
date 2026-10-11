@@ -295,6 +295,7 @@
     "test:collections-ai": "npx tsx src/lib/collectionsAi.selftest.ts",
     "test:admissions-ai": "npx tsx src/lib/admissionsAi.selftest.ts",
     "test:admissions-kb": "npx tsx src/lib/admissionsKb.selftest.ts",
+    "test:admission-entrance-test": "npx tsx src/lib/admissionEntranceTest.selftest.ts",
     "test:admissions-enquiry-form": "npx tsx src/lib/admissionsEnquiryForm.selftest.ts",
     "test:salary-additional": "npx tsx src/lib/salaryAdditional.selftest.ts",
     "test:salary-gross-up": "npx tsx src/lib/salaryGrossUp.selftest.ts",

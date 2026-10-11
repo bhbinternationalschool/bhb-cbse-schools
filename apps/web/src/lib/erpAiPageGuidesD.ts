@@ -1182,6 +1182,29 @@ export const PAGE_GUIDES_D: ErpAiPageGuideDef[] = [
       'If you see "Could not reach WhatsApp dispatch API", check the WhatsApp setup and try again.',
     ],
   },
+  {
+    id: "admissions-entrance",
+    paths: ["/admissions"],
+    tab: "entrance",
+    pageLabel: "Admissions · Entrance test",
+    title: "Run the admission entrance test",
+    module: "admissions",
+    chipLabel: "How Entrance test works",
+    steps: [
+      "**Test setup**: click **New test** — name, date, time, venue, the classes, subjects with maximum marks, and the pass mark (optional waitlist mark).",
+      "**Roll & attendance**: click **Add applicants**, tick the children and add them; print the **Attendance sheet (PDF)** or export the roll list.",
+      "**Marks**: type marks per subject (Enter moves down), tick **Absent** for a child who did not come, then **Save marks**.",
+      "**Results**: click **Apply pass mark to all**, then change any child from the row menu or the bulk bar. A result set by hand is never overwritten.",
+      "**Message families**: tick children, choose Invitation or Result, click **Preview**, then **Send** once the template is approved.",
+      "**Summary**: class by class — on the roll, appeared, selected, waitlisted.",
+    ],
+    stuckTips: [
+      'If you see "changed on another screen", click **Reload** and enter those marks again.',
+      'If the preview says the template "is not approved on WhatsApp yet", submit it from Masters → WhatsApp templates and wait for Meta.',
+      'If "Remove every child from this test\'s roll before deleting it" appears, remove the roll first.',
+      'If a child is "skipped — marks incomplete", fill every subject or tick Absent.',
+    ],
+  },
 
   // ───────────── Part B: Comms (other tabs) ─────────────
   {

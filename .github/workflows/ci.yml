@@ -432,6 +432,7 @@ jobs:
           npm run test:admissions-ai
           npm run test:admissions-enquiry-form
           npm run test:admissions-kb
+          npm run test:admission-entrance-test
           npm run test:birthday-cards
           npm run test:collections-ai
           npm run test:concession-per-due
