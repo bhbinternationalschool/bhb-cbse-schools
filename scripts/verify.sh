@@ -443,6 +443,7 @@ SELFTESTS=(
   test:salary-additional
   test:salary-gross-up
   test:school-receipt-no
+  test:fee-tender-ref
   test:session-cookie-edge
   test:staff-geo
   test:punch-screen-geofence

@@ -543,6 +543,7 @@ jobs:
           npm run test:salary-additional
           npm run test:salary-gross-up
           npm run test:school-receipt-no
+          npm run test:fee-tender-ref
           npm run test:session-cookie-edge
           npm run test:staff-geo
           npm run test:punch-screen-geofence

@@ -1,7 +1,7 @@
 "use client";
 
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
-import { startTransition, useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { IndianRupee } from "lucide-react";
 import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
@@ -139,6 +139,12 @@ import { ReceiptWaStatus } from "@/components/fees/ReceiptWaStatus";
 import { ReceiptDeliveryPanel } from "@/components/fees/ReceiptDeliveryPanel";
 import { ReceiptRepairDialog } from "@/components/fees/ReceiptRepairDialog";
 import { CashgramRefundPanel } from "@/components/fees/CashgramRefundPanel";
+import {
+  findRefUses,
+  splitRefs,
+  tenderRefWarnings,
+  type RefUse,
+} from "@/lib/feeTenderRefCheck";
 
 /**
  * The search box owns its keystrokes. Typing re-renders ONLY this input;
@@ -1420,6 +1426,69 @@ export function FeeTakeWorkspace() {
     );
   }
 
+  const refCheckBusy = useRef(false);
+
+  /**
+   * Look at the typed payment references before anything is saved: a date
+   * or a phone number where a UTR belongs, or a reference already on another
+   * live receipt. Asks; never blocks. Two receipts on one reference is right
+   * when one transfer pays for two children.
+   */
+  async function onCollectChecked() {
+    if (!selectedStudent || refCheckBusy.current) return;
+    const tenders = tenderLines.map((t) => ({ mode: t.mode, ref: t.ref ?? "" }));
+    const refs = [...new Set(tenders.flatMap((t) => splitRefs(t.ref)))];
+    if (refs.length === 0) {
+      onCollect();
+      return;
+    }
+    refCheckBusy.current = true;
+    let uses: RefUse[] = findRefUses(receipts, refs);
+    let serverChecked = false;
+    try {
+      const res = await fetch(
+        `/api/fees/tender-ref-uses?refs=${encodeURIComponent(refs.join(","))}`,
+      );
+      const body = (await res.json().catch(() => null)) as
+        | { ok?: boolean; uses?: RefUse[] }
+        | null;
+      if (res.ok && body?.ok) {
+        uses = [...uses, ...(body.uses ?? [])];
+        serverChecked = true;
+      }
+    } catch {
+      /* said below */
+    } finally {
+      refCheckBusy.current = false;
+    }
+    const familyName = (householdId: string) => {
+      const kids = (sis?.students ?? [])
+        .filter((s) => s.householdId === householdId)
+        .map((s) => s.fullName);
+      return kids.length > 0 ? `family of ${kids.slice(0, 2).join(", ")}` : "another family";
+    };
+    const warnings = tenderRefWarnings({
+      tenders,
+      householdId: selectedStudent.householdId,
+      collectionDate,
+      uses,
+      familyName,
+    });
+    const hasBankRef = tenders.some((t) => t.mode !== "cash" && t.ref.trim());
+    if (!serverChecked && hasBankRef) {
+      warnings.push(
+        "Could not check other computers' receipts for this reference (no reply from the server) — only this browser's receipts were checked.",
+      );
+    }
+    if (warnings.length > 0) {
+      const ok = window.confirm(
+        `Check the payment reference before saving:\n\n• ${warnings.join("\n\n• ")}\n\nSave this receipt anyway?`,
+      );
+      if (!ok) return;
+    }
+    onCollect();
+  }
+
   function onCollect() {
     if (!selectedStudent || !sis || !masters) return;
     setCollectError(null);
@@ -1617,10 +1686,11 @@ export function FeeTakeWorkspace() {
       realisation: t.mode === "cheque" ? "subject_to_clearance" : "cleared",
     }));
 
-    const primaryTxn =
-      voucherTenders.find((t) => t.ref)?.ref ??
-      voucherTenders.find((t) => t.instrumentDate)?.instrumentDate ??
-      "";
+    // A receipt with no reference typed has no transaction id. It used to
+    // fall back to the instrument date, and by Oct 2026 hundreds of receipts
+    // carried a bare date as their "transaction id" — many families sharing
+    // one, none of them matchable to a bank credit.
+    const primaryTxn = voucherTenders.find((t) => t.ref.trim())?.ref.trim() ?? "";
     const primaryTxnDate =
       voucherTenders.find((t) => t.instrumentDate)?.instrumentDate ||
       collectionDate;
@@ -2433,7 +2503,7 @@ export function FeeTakeWorkspace() {
               onCollectionDate={setCollectionDate}
               onSchoolReceiptNo={setSchoolReceiptNo}
               onNote={setNote}
-              onCollect={onCollect}
+              onCollect={() => void onCollectChecked()}
               collectError={collectError}
               onSendUpiLink={() => void onSendUpiLink()}
               masters={masters}
