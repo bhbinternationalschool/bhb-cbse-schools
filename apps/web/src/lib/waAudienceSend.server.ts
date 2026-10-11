@@ -50,6 +50,12 @@ export async function sendTemplateToAudience(opts: {
   variables: Record<string, string>;
   originUrl: string;
   audienceKind: string;
+  /**
+   * Optional: each chunk's per-recipient outcome (refId + dispatch status:
+   * "sent", "failed", "deferred", "queued_stub"), awaited before the next
+   * chunk — for callers that record who was reached as it happens.
+   */
+  onChunkResults?: (results: { refId: string; status: string }[]) => Promise<void>;
 }): Promise<WaAudienceSendResult> {
   const out: WaAudienceSendResult = {
     sent: 0,
@@ -87,6 +93,7 @@ export async function sendTemplateToAudience(opts: {
   };
 
   const messages: Msg[] = [];
+  const refIdOf = new Map<string, string>();
   const reasons = new Set<string>();
   for (const r of opts.recipients) {
     const resolved = resolveTemplateForSend({
@@ -100,8 +107,10 @@ export async function sendTemplateToAudience(opts: {
       continue;
     }
     const tpl = resolved.template;
+    const messageId = `aud_${opts.audienceKind}_${r.refId}_${r.mobile}`;
+    refIdOf.set(messageId, r.refId);
     messages.push({
-      messageId: `aud_${opts.audienceKind}_${r.refId}_${r.mobile}`,
+      messageId,
       mobile: r.mobile,
       fallbackMobile: r.fallbackMobile,
       fromPhoneNumberId: resolved.sender?.phoneNumberId || undefined,
@@ -138,7 +147,7 @@ export async function sendTemplateToAudience(opts: {
     try {
       const res = await dispatchPost(req);
       const json = (await res.json()) as {
-        results?: { status?: string; error?: string }[];
+        results?: { messageId?: string; status?: string; error?: string }[];
         error?: string;
       };
       if (json.error && !out.error) out.error = json.error;
@@ -157,6 +166,14 @@ export async function sendTemplateToAudience(opts: {
           out.failed++;
           if (r.error && !out.error) out.error = r.error;
         }
+      }
+      if (opts.onChunkResults) {
+        await opts.onChunkResults(
+          (json.results ?? []).map((r) => ({
+            refId: refIdOf.get(String(r.messageId ?? "")) ?? "",
+            status: String(r.status ?? "failed"),
+          })),
+        );
       }
     } catch (e) {
       out.failed += chunk.length;

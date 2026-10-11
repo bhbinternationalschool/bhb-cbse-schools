@@ -1,6 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import type { PdcRecord } from "@/lib/feePdc";
+import { toolsGet } from "@/lib/feeToolsClient";
 import {
   bounceCheque,
   chequeStats,
@@ -31,6 +34,26 @@ export function ChequesPanel({
   const [slipById, setSlipById] = useState<Record<string, string>>({});
   const [reasonById, setReasonById] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  // Post-dated cheques that bounced BEFORE they became receipts live on the
+  // server (Fees → Bulk & PDC); the bounced view shows them too, read fresh.
+  const [pdcBounced, setPdcBounced] = useState<PdcRecord[] | null>(null);
+  const [pdcBouncedError, setPdcBouncedError] = useState("");
+  useEffect(() => {
+    if (filter !== "bounced") return;
+    let live = true;
+    void toolsGet<{ pdcs: PdcRecord[] }>("/api/fees/tools/pdc?bounced=1").then((r) => {
+      if (!live) return;
+      if (r.ok) {
+        setPdcBounced(r.pdcs);
+        setPdcBouncedError("");
+      } else {
+        setPdcBouncedError(r.error);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [filter, tick]);
 
   const cheques = useMemo(() => {
     void tick;
@@ -273,6 +296,48 @@ export function ChequesPanel({
           </ul>
         )}
       </div>
+
+      {filter === "bounced" ? (
+        <div className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.12)] bg-white">
+          <div className="border-b border-[rgba(32,48,80,0.08)] px-4 py-3">
+            <h2 className="text-sm font-bold text-[var(--brand-deep)]">
+              Post-dated cheques bounced before deposit
+            </h2>
+            <p className="text-xs text-[var(--muted)]">
+              Never became receipts, so no dues were reopened ·{" "}
+              <Link href="/fees/tools" className="font-semibold text-[var(--brand-mid)] hover:underline">
+                Bulk &amp; PDC
+              </Link>
+            </p>
+          </div>
+          {pdcBouncedError ? (
+            <p className="px-4 py-4 text-sm font-medium text-[var(--danger)]">
+              Could not load: {pdcBouncedError}
+            </p>
+          ) : pdcBounced === null ? (
+            <p className="px-4 py-4 text-sm text-[var(--muted)]">Loading…</p>
+          ) : pdcBounced.length === 0 ? (
+            <p className="px-4 py-4 text-sm text-[var(--muted)]">None.</p>
+          ) : (
+            <ul className="divide-y divide-[rgba(32,48,80,0.08)]">
+              {pdcBounced.map((p) => (
+                <li key={p.id} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm font-bold text-[var(--brand-deep)]">Chq {p.chequeNo}</span>
+                    <p className="mt-0.5 text-xs text-[var(--muted)]">
+                      {p.chequeDate} · {p.bankName} · {p.guardianName}
+                      {p.statusReason ? ` · ${p.statusReason}` : ""}
+                    </p>
+                  </div>
+                  <div className="text-sm font-bold tabular-nums text-[var(--brand-deep)]">
+                    {formatInr(p.amountPaise)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

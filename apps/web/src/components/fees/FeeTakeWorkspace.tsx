@@ -1985,6 +1985,14 @@ export function FeeTakeWorkspace() {
               Defaulters
             </Link>
           ) : null}
+          {feesWhole ? (
+            <Link
+              href="/fees/tools"
+              className="inline-flex items-center rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--brand-deep)] transition hover:bg-[var(--surface-sunken)]"
+            >
+              Bulk &amp; PDC
+            </Link>
+          ) : null}
         </div>
       }
     >
