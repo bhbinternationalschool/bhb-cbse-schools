@@ -91,6 +91,8 @@
   "chatInApp": "Chat in app",
   "noTeachersAreLinkedToThis": "No teachers are linked to this class yet. The school office assigns the class teacher and publishes the timetable.",
   "whatsappIsNotInstalledOnThis": "WhatsApp is not installed on this phone.",
+  "publisherAssetsHeading": "FROM THE PUBLISHER (SMART TEACH)",
+  "openInSmartTeach": "Open in Smart Teach",
   "content": "CONTENT",
   "notTaught": "Not taught",
   "thatLinkIsNotAValid": "That link is not a valid web address.",

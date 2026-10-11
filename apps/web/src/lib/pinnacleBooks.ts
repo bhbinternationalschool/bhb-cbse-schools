@@ -28,6 +28,11 @@ const SERIES: { re: RegExp; subject: string }[] = [
   { re: /tip.?tap.?toe|rhymes/i, subject: "Rhymes and Stories" },
 ];
 
+/** The series' subject name ("Computer", …) for a book, or "" if unknown. */
+export function pinnacleSeriesSubject(title: string, path: string): string {
+  return SERIES.find((x) => x.re.test(title) || x.re.test(path))?.subject ?? "";
+}
+
 /** "Nursery" / "LKG" / "UKG" / "Class3", from the title, else the folder. */
 export function pinnacleClassName(title: string, path: string): string {
   const t = title.toLowerCase();

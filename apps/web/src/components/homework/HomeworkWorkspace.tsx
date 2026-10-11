@@ -1,5 +1,6 @@
 "use client";
 
+import { PublisherAssetsList } from "@/components/teaching/PublisherAssetsList";
 import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -1210,6 +1211,18 @@ export function HomeworkWorkspace() {
               placeholder="e.g. MATH-FRAC-01"
             />
           </label>
+          {/* The chapter in the hint ("Ch 7 — …") → the publisher's printable
+              worksheets for it on Smart Teach, to set instead of writing one. */}
+          <PublisherAssetsList
+            className={masters?.classes.find((c) => c.id === classId)?.name ?? ""}
+            subjectName={masters?.subjects?.find((s) => s.id === subjectId)?.nameEn ?? ""}
+            codes={(() => {
+              const m = /(?:ch|chapter|अध्याय|पाठ)\s*(\d{1,2})/i.exec(aiHint);
+              return m ? [m[1]!] : [];
+            })()}
+            only="worksheet"
+            heading="Worksheets for this chapter — from the publisher (Smart Teach)"
+          />
           <div className="block text-xs text-[var(--muted)]">
             <div className="flex flex-wrap items-center gap-2">
               <span>Reference answer / rubric (optional — grounds the AI grading assist on submitted photos, never shown to students)</span>

@@ -306,6 +306,12 @@ class LHi extends L {
   String get whatsappIsNotInstalledOnThis => 'इस फ़ोन में व्हाट्सएप नहीं है।';
 
   @override
+  String get publisherAssetsHeading => 'प्रकाशक से (Smart Teach)';
+
+  @override
+  String get openInSmartTeach => 'Smart Teach में खोलें';
+
+  @override
   String get content => 'विषय-वस्तु';
 
   @override

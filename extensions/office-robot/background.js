@@ -257,6 +257,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
           body: JSON.stringify({ books: msg.books || [] }),
         }),
       );
+    } else if (msg && msg.type === "pinnacle-assets") {
+      reply(
+        await erpFetch("/api/v1/propel/robot/pinnacle-assets", {
+          method: "POST",
+          body: JSON.stringify({ books: msg.books || [] }),
+        }),
+      );
     } else if (msg && msg.type === "fill-data") {
       reply(await erpFetch(`/api/v1/udise/robot/fill?pen=${encodeURIComponent(msg.pen || "")}&v=2`));
     } else {

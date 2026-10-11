@@ -643,6 +643,18 @@ abstract class L {
   /// **'WhatsApp is not installed on this phone.'**
   String get whatsappIsNotInstalledOnThis;
 
+  /// No description provided for @publisherAssetsHeading.
+  ///
+  /// In en, this message translates to:
+  /// **'FROM THE PUBLISHER (SMART TEACH)'**
+  String get publisherAssetsHeading;
+
+  /// No description provided for @openInSmartTeach.
+  ///
+  /// In en, this message translates to:
+  /// **'Open in Smart Teach'**
+  String get openInSmartTeach;
+
   /// No description provided for @content.
   ///
   /// In en, this message translates to:

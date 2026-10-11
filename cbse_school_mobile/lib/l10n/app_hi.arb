@@ -91,6 +91,8 @@
   "chatInApp": "ऐप में बात करें",
   "noTeachersAreLinkedToThis": "इस कक्षा से अभी कोई अध्यापक नहीं जुड़ा है। स्कूल दफ़्तर कक्षा अध्यापक तय करता है और समय-सारणी प्रकाशित करता है।",
   "whatsappIsNotInstalledOnThis": "इस फ़ोन में व्हाट्सएप नहीं है।",
+  "publisherAssetsHeading": "प्रकाशक से (Smart Teach)",
+  "openInSmartTeach": "Smart Teach में खोलें",
   "content": "विषय-वस्तु",
   "notTaught": "नहीं पढ़ाया",
   "thatLinkIsNotAValid": "यह लिंक सही वेब पता नहीं है।",
