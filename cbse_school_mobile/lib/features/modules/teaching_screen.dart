@@ -6,6 +6,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "lesson_plan_editor_screen.dart";
 import "module_shell.dart";
+import "smart_teach_screen.dart";
 import "../../core/i18n/locale_controller.dart";
 
 /// Sentinel returned by the plan picker to mean "write a new one".
@@ -392,7 +393,8 @@ IconData _resourceIcon(String kind) {
   }
 }
 
-/// Opens a content link in the device browser / e-book app.
+/// Opens a content link in the device browser / e-book app (Smart Teach
+/// links in the app's own Smart Teach screen).
 Future<void> _openResource(
   BuildContext context,
   TeachingResource resource,
@@ -404,6 +406,17 @@ Future<void> _openResource(
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(context.l10n.thatLinkIsNotAValid)));
+    return;
+  }
+  // Smart Teach links open inside the app, sharing the one Smart Teach
+  // sign-in the teacher made there.
+  if (SmartTeachScreen.isSmartTeachUrl(resource.url)) {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            SmartTeachScreen(title: resource.title, url: resource.url),
+      ),
+    );
     return;
   }
   final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -655,14 +668,14 @@ class _PeriodCard extends StatelessWidget {
               for (final chapter in _publisherChapters)
                 InkWell(
                   borderRadius: BorderRadius.circular(10),
-                  onTap: () => _openResource(
-                    context,
-                    TeachingResource(
-                      id: "",
-                      kind: "link",
-                      title: chapter.title,
-                      url: chapter.publisherAssets!.url,
-                      locator: "",
+                  // Inside the app, where the teacher's Smart Teach sign-in
+                  // is kept between visits.
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => SmartTeachScreen(
+                        title: chapter.label,
+                        url: chapter.publisherAssets!.url,
+                      ),
                     ),
                   ),
                   child: Padding(
