@@ -1,18 +1,18 @@
 import "package:flutter/material.dart";
-import "package:flutter/services.dart";
 import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
+import "ebook_reader_screen.dart";
 import "module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
 
 /// The school's e-book shelf for a signed-in parent.
 ///
-/// Books live on FlipHTML5 and open in the browser; some need a pass key,
-/// which the server hands out only to a signed-in reader. The key is shown
-/// next to the book with a copy button so the parent is not left guessing on
-/// the publisher's page.
+/// Books live on FlipHTML5 and need a password, which the server hands out
+/// only to a signed-in reader. They open inside the app, which types the
+/// password in by itself (12 Oct 2026) — it is never shown or copyable, so
+/// it cannot be passed on from a parent's screen.
 class EbookShelfScreen extends StatelessWidget {
   const EbookShelfScreen({super.key, required this.api});
 
@@ -46,7 +46,7 @@ class EbookShelfScreen extends StatelessWidget {
               Card(
                 color: AppColors.primary,
                 child: ListTile(
-                  onTap: () => _open(context, shelf.shelfUrl),
+                  onTap: () => _open(context, shelf, shelf.shelfUrl, null),
                   leading: const Icon(Icons.auto_stories, color: Colors.white),
                   title: Text(
                     context.l10n.openTheWholeShelf,
@@ -57,11 +57,7 @@ class EbookShelfScreen extends StatelessWidget {
                   ),
                   subtitle: shelf.shelfKey.isEmpty
                       ? null
-                      : _KeyLine(
-                          label: context.l10n.tutShelfKey,
-                          value: shelf.shelfKey,
-                          light: true,
-                        ),
+                      : const _KeyLine(light: true),
                   trailing: const Icon(
                     Icons.open_in_new,
                     color: Colors.white,
@@ -96,12 +92,14 @@ class EbookShelfScreen extends StatelessWidget {
               if (entry.value.length > 1)
                 _SubjectCarousel(
                   books: entry.value,
-                  onOpen: (b) => _open(context, b.url),
+                  onOpen: (b) => _open(context, shelf, b.url, b),
                 ),
               for (final b in entry.value)
                 Card(
                   child: ListTile(
-                    onTap: b.url.isEmpty ? null : () => _open(context, b.url),
+                    onTap: b.url.isEmpty
+                        ? null
+                        : () => _open(context, shelf, b.url, b),
                     leading: Container(
                       width: 40,
                       height: 40,
@@ -135,13 +133,7 @@ class EbookShelfScreen extends StatelessWidget {
                             ].join(" · "),
                             style: AppText.labelMediumMuted,
                           ),
-                        if (b.passKey.isNotEmpty)
-                          _KeyLine(
-                            label: b.passKeyLabel.isEmpty
-                                ? context.l10n.tutKey
-                                : b.passKeyLabel,
-                            value: b.passKey,
-                          ),
+                        if (b.passKey.isNotEmpty) const _KeyLine(),
                       ],
                     ),
                     trailing: const Icon(
@@ -158,7 +150,29 @@ class EbookShelfScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _open(BuildContext context, String url) async {
+  Future<void> _open(
+    BuildContext context,
+    EbookShelf shelf,
+    String url,
+    LibraryEbook? book,
+  ) async {
+    // A FlipHTML5 shelf opens here, where its password is filled in for
+    // the reader; anything else goes to the phone's browser as before.
+    if (EbookReaderScreen.isPublisherUrl(url)) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => EbookReaderScreen(
+            title: book?.title ?? context.l10n.openTheWholeShelf,
+            url: url,
+            shelfKey: book == null || book.passKey.isEmpty
+                ? shelf.shelfKey
+                : book.passKey,
+            bookKey: shelf.bookKey,
+          ),
+        ),
+      );
+      return;
+    }
     final uri = Uri.tryParse(url);
     final ok =
         uri != null &&
@@ -235,15 +249,11 @@ class _SubjectCarousel extends StatelessWidget {
   }
 }
 
+/// Says the book needs a password and that the app fills it in — the
+/// password itself is never on screen.
 class _KeyLine extends StatelessWidget {
-  const _KeyLine({
-    required this.label,
-    required this.value,
-    this.light = false,
-  });
+  const _KeyLine({this.light = false});
 
-  final String label;
-  final String value;
   final bool light;
 
   @override
@@ -252,23 +262,12 @@ class _KeyLine extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          context.l10n.tutKeyLine(label, value),
-          style: AppText.labelMedium.copyWith(color: color),
-        ),
+        Icon(Icons.lock_outline, size: 13, color: color),
         const SizedBox(width: 4),
-        InkWell(
-          onTap: () async {
-            await Clipboard.setData(ClipboardData(text: value));
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(context.l10n.tutKeyCopied(label))),
-              );
-            }
-          },
-          child: Padding(
-            padding: const EdgeInsets.all(2),
-            child: Icon(Icons.copy, size: 14, color: color),
+        Flexible(
+          child: Text(
+            context.l10n.ebookPasswordFillsItself,
+            style: AppText.labelMedium.copyWith(color: color),
           ),
         ),
       ],

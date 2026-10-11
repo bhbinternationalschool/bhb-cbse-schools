@@ -470,6 +470,7 @@
     }
   },
   "tutKey": "Key",
+  "ebookPasswordFillsItself": "Password: •••••• — fills in by itself",
   "tutKeyLine": "{label}: {value}",
   "@tutKeyLine": {
     "placeholders": {

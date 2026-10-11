@@ -784,6 +784,7 @@ class EbookShelf {
     required this.configured,
     required this.shelfUrl,
     required this.shelfKey,
+    this.bookKey = "",
     required this.note,
     required this.books,
   });
@@ -792,6 +793,7 @@ class EbookShelf {
     configured: j["configured"] == true,
     shelfUrl: (j["shelfUrl"] as String?) ?? "",
     shelfKey: (j["shelfKey"] as String?) ?? "",
+    bookKey: (j["bookKey"] as String?) ?? "",
     note: (j["note"] as String?) ?? "",
     books: ((j["books"] as List?) ?? const [])
         .map((b) => LibraryEbook.fromJson(b as Map<String, dynamic>))
@@ -801,6 +803,10 @@ class EbookShelf {
   final bool configured;
   final String shelfUrl;
   final String shelfKey;
+
+  /// The password each book on a shelf asks for; typed in by the reader,
+  /// never shown.
+  final String bookKey;
   final String note;
   final List<LibraryEbook> books;
 }

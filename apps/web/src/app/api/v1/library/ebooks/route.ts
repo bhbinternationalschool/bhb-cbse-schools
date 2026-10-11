@@ -40,7 +40,7 @@ export async function GET(request: Request) {
         missing: access.missing,
         shelfUrl: access.shelfUrl || null,
         books: [],
-        note: "The e-book shelf is not configured yet. Set EBOOK_SHELF_URL and EBOOK_SHELF_KEY on the server.",
+        note: "The e-book shelf is not configured yet. Set EBOOK_SHELF_KEY on the server.",
       });
     }
 
@@ -88,6 +88,9 @@ export async function GET(request: Request) {
       configured: true,
       shelfUrl: access.shelfUrl,
       shelfKey: access.shelfKey,
+      // A shelf's books each ask for their own password (12 Oct 2026); the
+      // app fills it into the book's password box without showing it.
+      bookKey: access.bookKey,
       books,
       // Zero books with a working shelf is a real state — the catalogue is
       // empty, but the shelf link still works.
