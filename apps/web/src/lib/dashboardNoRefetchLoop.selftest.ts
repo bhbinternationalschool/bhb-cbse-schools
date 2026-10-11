@@ -23,6 +23,7 @@ const read = (f: string) => readFileSync(join(__dirname, f), "utf8");
   assert.equal(deps, "}, [moduleId]", "the hydrating effect depends on the module only");
   assert.ok(!/mastersTick/.test(deps), "bumping mastersTick must not re-run hydration");
   assert.ok(/if \(!gone\) setMastersTick/.test(src.slice(hydrate, effectEnd)), "the tick is bumped once, and not after unmount");
+  assert.ok(/addEventListener\("bhb-desk-hydrated", onDataUpdated\)/.test(src), "a desk landing after mount redraws the dashboard");
 }
 
 // ── Home: the anomaly scan is not tied to the redraw tick ──────────────────
@@ -41,7 +42,7 @@ const read = (f: string) => readFileSync(join(__dirname, f), "utf8");
 {
   const src = read("attendancePersistence.ts");
   const body = src.slice(src.indexOf("export function ensureAttendanceHydrated("), src.indexOf("async function hydrateAttendanceOnce("));
-  assert.ok(/if \(!hydrating\)/.test(body) && /return hydrating;/.test(body), "concurrent hydrations share one promise");
+  assert.ok(/return dedupeHydration\(MODULE, hydrateAttendanceOnce\)/.test(body), "concurrent hydrations share one load, cleared by resetDeskHydrated");
 }
 
 console.log("dashboardNoRefetchLoop: ok");

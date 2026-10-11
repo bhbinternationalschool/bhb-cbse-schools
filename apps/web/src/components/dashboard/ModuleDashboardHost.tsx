@@ -33,9 +33,13 @@ export function ModuleDashboardHost({
     const onDataUpdated = () => setMastersTick((t) => t + 1);
     window.addEventListener("bhb-masters-updated", onDataUpdated);
     window.addEventListener("bhb-sis-updated", onDataUpdated);
+    // Desks loaded on first read (admissions, fees, payments, attendance)
+    // land after mount; redraw then rather than showing their empty memory.
+    window.addEventListener("bhb-desk-hydrated", onDataUpdated);
     return () => {
       window.removeEventListener("bhb-masters-updated", onDataUpdated);
       window.removeEventListener("bhb-sis-updated", onDataUpdated);
+      window.removeEventListener("bhb-desk-hydrated", onDataUpdated);
     };
   }, []);
 

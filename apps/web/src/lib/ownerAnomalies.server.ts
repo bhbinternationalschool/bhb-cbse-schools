@@ -27,6 +27,8 @@ export function buildOwnerAnomalies(academicYearCode?: string): Promise<OwnerAno
   const hit = anomalyCache.get(key);
   if (hit && Date.now() - hit.at < ANOMALY_TTL_MS) return hit.value;
   const value = scanOwnerAnomalies(academicYearCode);
+  // The key is caller-supplied: drop expired entries so it cannot grow.
+  for (const [k, v] of anomalyCache) if (Date.now() - v.at >= ANOMALY_TTL_MS) anomalyCache.delete(k);
   anomalyCache.set(key, { at: Date.now(), value });
   value.catch(() => {
     if (anomalyCache.get(key)?.value === value) anomalyCache.delete(key);
