@@ -1,5 +1,9 @@
 "use client";
 
+// ratchet-allow: grids_without_row_menu — a read-only report of what Propel
+// says, refreshed by the Office Robot. Its rows are not ERP records; there is
+// nothing to edit or delete here, only to read.
+
 import { useEffect, useMemo, useState } from "react";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import type { PropelProgressRecord, PropelProgressSnapshot } from "@/lib/propelRobot";
