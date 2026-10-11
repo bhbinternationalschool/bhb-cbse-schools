@@ -22,12 +22,24 @@ import {
   listImportSessions,
   listMissingFromImport,
   previewStudentImport,
+  isBuiltInStudentImportHeader,
+  studentImportRawGrid,
   workbookToStudentImportCsv,
   type SessionGapRow,
   type StudentImportPlacement,
   type StudentImportPreview,
 } from "@/lib/studentImport";
 import { SessionImportGapDialog } from "@/components/students/SessionImportGapDialog";
+import {
+  activeDefsFor,
+  matchCustomImportHeaders,
+  planCustomImport,
+} from "@/lib/customFields";
+import {
+  fetchCustomFieldDefs,
+  fetchCustomFieldValues,
+  saveCustomFieldValues,
+} from "@/lib/customFieldsClient";
 import { useDemoSession } from "@/components/shell/SessionContext";
 
 type Props = {
@@ -35,6 +47,72 @@ type Props = {
   sis: SisState;
   onApplied: (next: SisState, message: string) => void;
 };
+
+/**
+ * Optional "more details" columns: a column whose header is the name of a
+ * student custom field (Masters → Custom fields, English or Hindi) fills
+ * that field on the student the line landed on. Only lines the import
+ * actually created or updated (`writtenLineIds`) are written: a line it
+ * refused ("Update existing" off, unknown class…) must not change that
+ * child's details either. Saved apart from the student record, after it
+ * (lib/customFields). Blank cells are skipped — an empty column means "not
+ * in this file", never "erase".
+ */
+async function importCustomColumns(
+  text: string,
+  writtenLineIds: Record<number, string>,
+): Promise<string> {
+  const grid = studentImportRawGrid(text);
+  if (!grid) return "";
+  const unknownHeaders = grid.headers.filter((h) => h.trim() && !isBuiltInStudentImportHeader(h));
+  if (!unknownHeaders.length) return "";
+  let defs;
+  try {
+    defs = activeDefsFor(await fetchCustomFieldDefs("student"), "student");
+  } catch {
+    return " · More details columns NOT imported — could not load the custom fields; import the file again later";
+  }
+  const match = matchCustomImportHeaders(grid.headers, defs, isBuiltInStudentImportHeader);
+  if (!match.columns.length) return "";
+  const lines = grid.lines
+    .filter((l) => writtenLineIds[l.lineNo])
+    .map((l) => ({
+      lineNo: l.lineNo,
+      entityId: writtenLineIds[l.lineNo]!,
+      cells: match.columns.map((c) => ({ def: c.def, raw: l.cells[c.index] ?? "" })),
+    }));
+  const ids = [...new Set(lines.map((l) => l.entityId).filter((x): x is string => Boolean(x)))];
+  const stamps = new Map<string, { value: string; updatedAt: string }>();
+  try {
+    for (let i = 0; i < ids.length; i += 200) {
+      for (const r of await fetchCustomFieldValues("student", ids.slice(i, i + 200))) {
+        stamps.set(`${r.entityId}|${r.fieldId}`, { value: r.value, updatedAt: r.updatedAt });
+      }
+    }
+  } catch {
+    return " · More details columns NOT imported — could not read the saved values; import the file again later";
+  }
+  const plan = planCustomImport(lines, stamps);
+  let saved = 0;
+  let conflicts = 0;
+  const problems = plan.errors.map((e) => `line ${e.lineNo}: ${e.message}`);
+  if (plan.changes.length) {
+    try {
+      const r = await saveCustomFieldValues("student", plan.changes, "import");
+      saved = Object.keys(r.stamps).length;
+      conflicts = r.conflicts.length;
+      problems.push(...r.rejected.map((x) => x.error));
+    } catch (e) {
+      return ` · More details NOT saved — ${e instanceof Error ? e.message : "server error"}`;
+    }
+  }
+  const cols = match.columns.map((c) => c.def.labelEn).join(", ");
+  return (
+    ` · More details (${cols}): ${saved} value(s) saved` +
+    (conflicts ? `, ${conflicts} changed on another screen meanwhile (kept)` : "") +
+    (problems.length ? `, ${problems.length} skipped — ${problems.slice(0, 5).join("; ")}${problems.length > 5 ? "…" : ""}` : "")
+  );
+}
 
 type GapReview = {
   sis: SisState;
@@ -198,10 +276,21 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
           source: fileName || "pasted-csv",
         },
       });
+      // Its own try: the roster is already saved and pushed above, so a
+      // failure here must never skip onApplied — a parent left holding the
+      // pre-import roster could import the same children twice.
+      let customNote = "";
+      try {
+        customNote = await importCustomColumns(csvText, result.writtenLineIds);
+      } catch (e) {
+        console.error("[sisImport] more-details columns failed:", e);
+        customNote = ` · More details columns NOT imported — ${e instanceof Error ? e.message : "unexpected error"}; import the file again to retry`;
+      }
       onApplied(
         result.state,
         `Imported ${result.created} new, updated ${result.updated}` +
-          (result.skipped ? `, skipped ${result.skipped} (session filter)` : ""),
+          (result.skipped ? `, skipped ${result.skipped} (session filter)` : "") +
+          customNote,
       );
       setCsvText("");
       setFileName("");
@@ -287,7 +376,9 @@ export function StudentImportPanel({ masters, sis, onApplied }: Props) {
           </div>
           <p className="mt-0.5 text-[11px] text-[var(--muted)]">
             Upload session-wise CSV or Excel Student Report (e.g. 2023-24).
-            Template matches the full register export.
+            Template matches the full register export. A column named like a
+            custom field (Masters → Custom fields) fills that field under More
+            details; blank cells leave it unchanged.
             {isLikelyDemoRoster(sis)
               ? " Demo roster still present — clear before live data."
               : sis.students.length === 0

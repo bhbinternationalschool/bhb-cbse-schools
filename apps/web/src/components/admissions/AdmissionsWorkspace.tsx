@@ -139,6 +139,8 @@ import { LEAD_CONCERNS, PREVIOUS_BOARDS } from "@/lib/admissionsEnquiryForm";
 import { AdmissionReportsPanel } from "@/components/admissions/AdmissionReportsPanel";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
+import { EntranceTestPanel } from "@/components/admissions/EntranceTestPanel";
+import { LeadEntranceTestBadge } from "@/components/admissions/LeadEntranceTestBadge";
 
 type AdmTab =
   | "dashboard"
@@ -147,6 +149,7 @@ type AdmTab =
   | "leads"
   | "import"
   | "registration"
+  | "entrance"
   | "rte"
   | "campaigns"
   | "crm_chat"
@@ -166,6 +169,7 @@ const ADM_TABS: (ModuleTabItem & { id: AdmTab })[] = [
   { id: "leads", label: "Lead details (CRM)", tone: "navy" },
   { id: "import", label: "Upload leads", tone: "amber" },
   { id: "registration", label: "Registration", tone: "green" },
+  { id: "entrance", label: "Entrance test", tone: "violet" },
   { id: "rte", label: "RTE / EWS", tone: "sky" },
   { id: "campaigns", label: "WA campaigns", tone: "teal" },
   { id: "crm_chat", label: "CRM parent chat", tone: "navy" },
@@ -201,6 +205,8 @@ export function AdmissionsWorkspace() {
   const [showWaCheck, setShowWaCheck] = useState(false);
   const [tab, setTab] = useState<AdmTab>("dashboard");
   const [enquiryStep, setEnquiryStep] = useState<EnquiryStep>("household");
+  /** Entrance test sitting to open first — set by a lead's badge link. */
+  const [entranceFocus, setEntranceFocus] = useState("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -212,6 +218,7 @@ export function AdmissionsWorkspace() {
       "leads",
       "import",
       "registration",
+      "entrance",
       "rte",
       "campaigns",
       "crm_chat",
@@ -450,6 +457,7 @@ export function AdmissionsWorkspace() {
       !canBrowseLeadLists &&
       (tab === "leads" ||
         tab === "registration" ||
+        tab === "entrance" ||
         tab === "rte" ||
         tab === "import" ||
         tab === "campaigns" ||
@@ -1220,6 +1228,7 @@ export function AdmissionsWorkspace() {
             !canBrowseLeadLists &&
             (next === "leads" ||
               next === "registration" ||
+              next === "entrance" ||
               next === "rte" ||
               next === "import" ||
               next === "campaigns" ||
@@ -2050,6 +2059,15 @@ export function AdmissionsWorkspace() {
               onCall={() => setFollowUpFor({ lead: selected, channel: "call" })}
               onWhatsApp={() => setFollowUpFor({ lead: selected, channel: "whatsapp" })}
             />
+            {tabItems.some((t) => t.id === "entrance") ? (
+              <LeadEntranceTestBadge
+                leadId={selected.id}
+                onOpen={(sessionId) => {
+                  setEntranceFocus(sessionId);
+                  setTab("entrance");
+                }}
+              />
+            ) : null}
             <LeadDetail
               key={selected.id}
               lead={selected}
@@ -2087,6 +2105,18 @@ export function AdmissionsWorkspace() {
           canEdit={canWriteTab("registration")}
           onCommit={commit}
           onOpenCrmLead={(id) => openLead(id)}
+        />
+      ) : null}
+
+      {tab === "entrance" && masters ? (
+        <EntranceTestPanel
+          classes={classes}
+          academicYearCode={session.academicYearCode || ""}
+          canCreate={!sessionReadOnly && canWriteModuleTab(session, masters, "admissions", "entrance", "create")}
+          canEdit={!sessionReadOnly && canWriteModuleTab(session, masters, "admissions", "entrance", "edit")}
+          canDelete={!sessionReadOnly && canWriteModuleTab(session, masters, "admissions", "entrance", "delete")}
+          focusSessionId={entranceFocus}
+          onOpenLead={(id) => openLead(id)}
         />
       ) : null}
 

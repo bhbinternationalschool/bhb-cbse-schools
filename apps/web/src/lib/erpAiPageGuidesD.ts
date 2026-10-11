@@ -857,6 +857,28 @@ export const PAGE_GUIDES_D: ErpAiPageGuideDef[] = [
     ],
   },
   {
+    id: "masters-custom-fields",
+    paths: ["/masters"],
+    tab: "custom-fields",
+    pageLabel: "Masters · Custom fields",
+    title: "Add your own fields to student and staff records",
+    module: "masters",
+    chipLabel: "How Custom fields works",
+    steps: [
+      "Pick **Students** or **Staff**, then click **+ Add field**.",
+      "Give it a name (Hindi name optional), choose the type — Text, Number, Date, Single choice or Yes / No — and for Single choice type one choice per line.",
+      "Tick **Required when adding a new student** if the office must fill it at admission.",
+      "The field then shows on every student (or staff) edit page under **More details**. Dates are typed DD/MM/YYYY.",
+      "To add it to the register export, tick **+ More details** beside **Export data**. In the student import, a column with the field's name fills it.",
+      "Use **…** → **Switch off** to hide a field. Its saved values are kept; only a field nobody has filled can be deleted.",
+    ],
+    stuckTips: [
+      'If you see "already uses that name", another field (or its Hindi name) has it — the import matches columns by name, so names must be unique.',
+      'If "the type cannot change" appears, records already hold values. Add a new field instead.',
+      'If "Someone changed this field since you opened it" appears, the list was edited on another screen — it has been reloaded; make your change again.',
+    ],
+  },
+  {
     id: "masters-academic",
     paths: ["/masters"],
     tab: "academic",
@@ -1164,6 +1186,29 @@ export const PAGE_GUIDES_D: ErpAiPageGuideDef[] = [
       'If you see "Could not reach WhatsApp dispatch API", check the WhatsApp setup and try again.',
     ],
   },
+  {
+    id: "admissions-entrance",
+    paths: ["/admissions"],
+    tab: "entrance",
+    pageLabel: "Admissions · Entrance test",
+    title: "Run the admission entrance test",
+    module: "admissions",
+    chipLabel: "How Entrance test works",
+    steps: [
+      "**Test setup**: click **New test** — name, date, time, venue, the classes, subjects with maximum marks, and the pass mark (optional waitlist mark).",
+      "**Roll & attendance**: click **Add applicants**, tick the children and add them; print the **Attendance sheet (PDF)** or export the roll list.",
+      "**Marks**: type marks per subject (Enter moves down), tick **Absent** for a child who did not come, then **Save marks**.",
+      "**Results**: click **Apply pass mark to all**, then change any child from the row menu or the bulk bar. A result set by hand is never overwritten.",
+      "**Message families**: tick children, choose Invitation or Result, click **Preview**, then **Send** once the template is approved.",
+      "**Summary**: class by class — on the roll, appeared, selected, waitlisted.",
+    ],
+    stuckTips: [
+      'If you see "changed on another screen", click **Reload** and enter those marks again.',
+      'If the preview says the template "is not approved on WhatsApp yet", submit it from Masters → WhatsApp templates and wait for Meta.',
+      'If "Remove every child from this test\'s roll before deleting it" appears, remove the roll first.',
+      'If a child is "skipped — marks incomplete", fill every subject or tick Absent.',
+    ],
+  },
 
   // ───────────── Part B: Comms (other tabs) ─────────────
   {
@@ -1360,6 +1405,29 @@ export const PAGE_GUIDES_D: ErpAiPageGuideDef[] = [
     stuckTips: [
       'If you see "Describe the fault", fill in the symptom.',
       'If it says "Request needs Principal approval (over threshold)", wait for the Principal to approve.',
+    ],
+  },
+  {
+    id: "transport-register",
+    paths: ["/transport"],
+    tab: "register",
+    pageLabel: "Transport · Bus register",
+    title: "Mark each child on and off the bus, and keep the log book",
+    module: "transport",
+    chipLabel: "How Bus register works",
+    steps: [
+      "**Runs & marking** lists today's runs. Tap **Open list** on your run.",
+      "Children are in stop order (reversed for the drop). Tap **Boarded**, **Not boarded** or **Dropped** once per child — each tap saves on its own.",
+      "Tap the lit button again to undo a mark. A child with no tap is **not marked**, never absent.",
+      "**Log book**: start and end odometer per vehicle (GPS figures are filled in where the bus has a tracker — edit if wrong), fuel filled with an optional receipt photo, and remarks.",
+      "**Reports**: month-wise boarding per child, and vehicle km & fuel with ₹/km. Use **Export data** for Excel / PDF.",
+      "The office also sees **Bus register vs class register** under the runs: children on the bus but absent in class, or present but not on the bus.",
+    ],
+    stuckTips: [
+      'If it says "You are not linked to a bus yet", the office must link you in Staff → Duties (vehicle) or as the driver in Transport → Fleet.',
+      'If a child shows "Not saved — retrying", keep the page open; it saves when the signal returns.',
+      'If "Someone else saved this log" appears, tap Reload and save again.',
+      'If "Only today and yesterday can be changed" appears, ask the office to correct an older day.',
     ],
   },
   {

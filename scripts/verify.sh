@@ -126,6 +126,8 @@ SELFTESTS=(
   test:fee-store-discount
   test:masters-subject-guard
   test:subject-requests
+  test:custom-fields
+  test:custom-fields-import
   test:udise-nudge
   test:apaar-consent
   test:aadhaar-certificate
@@ -284,6 +286,7 @@ SELFTESTS=(
   test:transport-crew-access
   test:transport-crew
   test:transport-stop-links
+  test:transport-boarding-log
   test:transport-concession
   test:transport-by-class
   test:transport-staff-riders
@@ -326,6 +329,7 @@ SELFTESTS=(
   test:admissions-ai
   test:admissions-enquiry-form
   test:admissions-kb
+  test:admission-entrance-test
   test:birthday-cards
   test:collections-ai
   test:concession-per-due

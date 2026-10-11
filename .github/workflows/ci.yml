@@ -171,6 +171,14 @@ jobs:
         working-directory: apps/web
         run: npm run test:subject-masters
 
+      - name: Self-test — custom fields — day-first dates, typed values, no blanking by import
+        working-directory: apps/web
+        run: npm run test:custom-fields
+
+      - name: Self-test — custom fields only for lines the import wrote, never a built-in column name
+        working-directory: apps/web
+        run: npm run test:custom-fields-import
+
       - name: Self-test — UPI pay link and success-screenshot reading
         working-directory: apps/web
         run: npm run test:upi-pay
@@ -424,6 +432,7 @@ jobs:
           npm run test:admissions-ai
           npm run test:admissions-enquiry-form
           npm run test:admissions-kb
+          npm run test:admission-entrance-test
           npm run test:birthday-cards
           npm run test:collections-ai
           npm run test:concession-per-due
@@ -554,6 +563,7 @@ jobs:
           npm run test:transport-shifts
           npm run test:transport-phone-empty-desk
           npm run test:transport-stop-links
+          npm run test:transport-boarding-log
           npm run test:transport-seats
           npm run test:boarding-suggest
           npm run test:defaulter-hold-policy
