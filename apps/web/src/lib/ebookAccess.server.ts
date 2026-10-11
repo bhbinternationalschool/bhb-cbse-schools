@@ -32,7 +32,8 @@ export function ebookAccess(): EbookAccess {
   const bookKey = (process.env.EBOOK_BOOK_KEY || "").trim();
 
   const missing: string[] = [];
-  if (!shelfUrl) missing.push("EBOOK_SHELF_URL");
+  // Each class's shelf carries its own link in the catalogue (12 Oct 2026),
+  // so the one whole-shelf URL is optional; the key is what opens them all.
   if (!shelfKey) missing.push("EBOOK_SHELF_KEY");
 
   return {
@@ -40,8 +41,8 @@ export function ebookAccess(): EbookAccess {
     shelfKey,
     bookKey,
     // The book key is optional — some shelves use one key for everything.
-    // The shelf URL and key are not: without them there is nothing to open.
-    configured: Boolean(shelfUrl && shelfKey),
+    // The shelf key is not: without it no shelf opens.
+    configured: Boolean(shelfKey),
     missing,
   };
 }

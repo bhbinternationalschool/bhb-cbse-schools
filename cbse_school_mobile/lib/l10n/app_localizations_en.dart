@@ -1272,6 +1272,10 @@ class LEn extends L {
   String get tutKey => 'Key';
 
   @override
+  String get ebookPasswordFillsItself =>
+      'Password: •••••• — fills in by itself';
+
+  @override
   String tutKeyLine(String label, String value) {
     return '$label: $value';
   }
