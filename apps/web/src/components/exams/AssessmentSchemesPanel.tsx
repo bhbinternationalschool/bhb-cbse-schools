@@ -20,6 +20,7 @@ import {
   SCHEME_PRESETS,
   schemeFromPreset,
   schemeSummary,
+  subjectSplitProblems,
   type AssessmentScheme,
   type CoScholasticScale,
   type DisplayMode,
@@ -132,6 +133,11 @@ export function AssessmentSchemesPanel({
     }
     if (!draft.isDefault && draft.classIds.length === 0) {
       onError("Tick at least one class for this scheme, or remove it (the fallback scheme may have none)");
+      return;
+    }
+    const splitProblem = (draft.subjectSplits ?? []).flatMap(subjectSplitProblems)[0];
+    if (splitProblem) {
+      onError(splitProblem);
       return;
     }
     const exists = policy.schemes.some((s) => s.id === draft.id);

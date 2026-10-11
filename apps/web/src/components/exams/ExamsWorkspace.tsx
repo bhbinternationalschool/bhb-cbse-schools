@@ -22,6 +22,7 @@ import {
   parseCoScholasticRating,
   coScholasticDomainLabel,
   componentsForSubject,
+  gradedPartsForSubject,
   createExamTerm,
   deactivateExamTerm,
   deleteExamTerm,
@@ -173,7 +174,7 @@ const SETUP_STEPS: StepDef<SetupStep>[] = [
   {
     id: "schemes",
     title: "Assessment schemes",
-    what: "How each class band is graded: marks or grades, grade bands, subject splits (e.g. written + oral) and co-scholastic areas. Classes not given a scheme use the default.",
+    what: "How each class band is graded: marks or grades, grade bands, subject splits (e.g. written + oral, with a graded part like Handwriting A/B/C that is not counted in the total) and co-scholastic areas. Classes not given a scheme use the default.",
   },
   {
     id: "exams",
@@ -191,8 +192,10 @@ function cellKey(studentId: string, subjectId: string, component = "") {
   return `${studentId}:${subjectId}:${component}`;
 }
 
-/** One column of the marks grid: a subject, or one component of it. */
-type GridColumn = { subject: ExamSubject; component: SchemeComponent | null };
+/** One column of the marks grid: a subject, or one component of it. A
+ * graded part (Handwriting A/B/C) carries `grades` — a letter picker, never
+ * a number, and outside every total. */
+type GridColumn = { subject: ExamSubject; component: SchemeComponent | null; grades?: string[] };
 
 function columnKey(col: GridColumn): string {
   return `${col.subject.id}:${col.component?.code ?? ""}`;
@@ -335,6 +338,23 @@ const MarkRow = memo(function MarkRow({
               >
                 —
               </span>
+            ) : col.grades ? (
+              <select
+                className="field !w-16 !px-1 !py-1 text-center"
+                disabled={locked}
+                value={values[key] ?? ""}
+                onChange={(e) => onGrade(st.id, sub.id, code, e.target.value)}
+                aria-label={`${st.fullName} ${name} grade`}
+                title="Graded — type the letter to pick it. Not counted in the total."
+              >
+                <option value="">—</option>
+                {col.grades.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+                <option value="AB">AB · absent</option>
+              </select>
             ) : entryMode === "grades" ? (
               <select
                 className="field !w-16 !px-1 !py-1 text-center"
@@ -846,6 +866,14 @@ export function ExamsWorkspace() {
       const parts = scheme ? componentsForSubject(scheme, term.code, subject.code) : [];
       if (parts.length === 0) out.push({ subject, component: null });
       else for (const component of parts) out.push({ subject, component });
+      // Graded parts after the marks: English Oral · Written · Handwriting.
+      for (const g of scheme ? gradedPartsForSubject(scheme, term.code, subject.code) : []) {
+        out.push({
+          subject,
+          component: { code: g.code, label: g.label, maxMarks: 0, kind: "internal" },
+          grades: g.grades,
+        });
+      }
     }
     return out;
   }, [subjects, scheme, term]);
@@ -871,7 +899,7 @@ export function ExamsWorkspace() {
         const c = gridIndex.get(cellKey(st.id, col.subject.id, col.component?.code ?? ""));
         values[columnKey(col)] = absentCells.has(absenceKey(st.id, col.subject.id))
           ? "AB"
-          : entryMode === "grades"
+          : entryMode === "grades" || col.grades
             ? c?.grade && c.grade !== "—"
               ? c.grade
               : ""
@@ -2638,8 +2666,13 @@ export function ExamsWorkspace() {
                               {col.component.label}
                             </span>
                           ) : null}
-                          <div className="text-[10px] font-normal text-[var(--muted)]">
-                            {entryMode === "grades"
+                          <div
+                            className="text-[10px] font-normal text-[var(--muted)]"
+                            title={col.grades ? "Graded part — not counted in the subject total" : undefined}
+                          >
+                            {col.grades
+                              ? `graded ${col.grades.join("/")} · not in total`
+                              : entryMode === "grades"
                               ? "grade"
                               : `/${col.component ? col.component.maxMarks : term ? effectiveMaxMarks(term, col.subject) : "—"}`}
                           </div>

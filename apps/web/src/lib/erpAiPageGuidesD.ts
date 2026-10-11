@@ -699,7 +699,7 @@ export const PAGE_GUIDES_D: ErpAiPageGuideDef[] = [
     chipLabel: "How Exams & policy works",
     steps: [
       "**School policy**: set the pass % and default max marks, then click **Save policy**.",
-      "**Assessment schemes**: marks or grades, grade bands and subject splits for each class band.",
+      "**Assessment schemes**: marks or grades, grade bands and subject splits for each class band (a split part can be graded A/B/C, e.g. Handwriting, and is not counted in the total).",
       "**Session exams**: enter a code and name, then click **Create exam**.",
       "**Report cards**: choose the report-card template for each class band.",
       "Use **Edit**, **Activate** / **Deactivate** or **Delete** on an exam in the list.",

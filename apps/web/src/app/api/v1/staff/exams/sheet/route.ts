@@ -7,7 +7,9 @@ import {
   effectiveMaxMarks,
   findMarkSheet,
   getExamPolicy,
+  gradedPartsForSubject,
   loadExams,
+  schemeForClassId,
   subjectsForMarkEntry,
 } from "@/lib/exams";
 import { loadSisForStaff } from "@/lib/sis";
@@ -20,6 +22,12 @@ export const runtime = "nodejs";
  * entry grid for one section and exam: subjects with their max marks, the
  * roster in roll order, and whatever is already entered. Only the section's
  * teachers (or the office) can open it.
+ *
+ * Since 2026-10-11 a subject may carry `gradedParts` (Handwriting graded
+ * A/B/C — `assess: "grade"` with the allowed `grades`) and each student's
+ * mark entry the picked letters in `gradedParts`. Both are additive: the
+ * old fields keep their meaning, and `marksObtained` is always the whole
+ * subject mark, never a graded part.
  */
 export async function GET(request: Request) {
   try {
@@ -60,6 +68,7 @@ export async function GET(request: Request) {
       });
 
     // Only the subjects this teacher teaches here (a class teacher sees all).
+    const scheme = schemeForClassId(classId, getExamPolicy(state));
     const subjects = subjectsForMarkEntry(classId, students, state)
       .filter((s) => scopeAllowsSubjectCode(scope, classId, sectionId, s.code))
       .map((s) => ({
@@ -67,9 +76,24 @@ export async function GET(request: Request) {
       code: s.code,
       name: s.name,
       maxMarks: effectiveMaxMarks(term, s),
+      gradedParts: gradedPartsForSubject(scheme, term.code, s.code).map((g) => ({
+        code: g.code,
+        label: g.label,
+        assess: "grade" as const,
+        grades: g.grades,
+      })),
     }));
     const sheet = findMarkSheet(ay, termId, sectionId, state);
-    const marks = new Map((sheet?.marks ?? []).map((m) => [`${m.studentId}:${m.subjectId}`, m]));
+    // The whole-subject row only: a graded part's row (marksObtained null)
+    // must never stand in for the subject's mark.
+    const marks = new Map(
+      (sheet?.marks ?? []).filter((m) => !m.component).map((m) => [`${m.studentId}:${m.subjectId}`, m]),
+    );
+    const partRows = new Map(
+      (sheet?.marks ?? [])
+        .filter((m) => m.component)
+        .map((m) => [`${m.studentId}:${m.subjectId}:${m.component}`, m]),
+    );
 
     return apiOk({
       academicYearCode: ay,
@@ -91,6 +115,10 @@ export async function GET(request: Request) {
             subjectId: sub.id,
             marksObtained: m?.marksObtained ?? null,
             grade: m?.grade ?? "",
+            gradedParts: sub.gradedParts.map((g) => {
+              const got = partRows.get(`${st.id}:${sub.id}:${g.code}`)?.grade ?? "";
+              return { component: g.code, grade: got && got !== "—" ? got : "" };
+            }),
           };
         }),
       })),
