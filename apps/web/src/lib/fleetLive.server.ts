@@ -322,14 +322,19 @@ export async function runFleetAlertsTick(opts: { dryRun?: boolean; nowMs?: numbe
   return result;
 }
 
-/** Thirty days of track is plenty for a school bus; older rows go. */
+/** Thirty days of track is plenty for a school bus; older rows go. Raw pushes: 90 days. */
 async function prunePositions(nowMs: number): Promise<number> {
   const ctx = await getServerTenantContext();
   if (!ctx) return 0;
   const cutoff = new Date(nowMs - 30 * 86_400_000).toISOString();
   const { data, error } = await ctx.sb.from("fleet_vehicle_positions").delete().eq("tenant_id", ctx.tenantId).lt("recorded_at", cutoff).select("id");
+  // Raw Tata telemetry/details pushes are kept 90 days (reports and the
+  // halt analysis read them); alerts are never pruned. Batched, so a tick
+  // never stalls on a backlog.
+  const raw = await ctx.sb.rpc("fleet_prune_raw_events", { p_tenant_id: ctx.tenantId, p_keep_days: 90, p_batch: 5000 });
+  if (raw.error) console.warn("[fleetLive] raw event prune failed", raw.error.message);
   if (error) return 0;
-  return (data ?? []).length;
+  return (data ?? []).length + (typeof raw.data === "number" ? raw.data : 0);
 }
 
 export type { FleetAlert };
