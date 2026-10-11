@@ -424,6 +424,7 @@ SELFTESTS=(
   test:secure-id
   test:payouts
   test:cashgram
+  test:fee-bulk-pdc-templates
   test:payout-requests
   test:diksha-index
   test:teacher-contact
