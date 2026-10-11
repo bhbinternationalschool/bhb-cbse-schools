@@ -93,6 +93,15 @@
   "whatsappIsNotInstalledOnThis": "WhatsApp is not installed on this phone.",
   "publisherAssetsHeading": "FROM THE PUBLISHER (SMART TEACH)",
   "openInSmartTeach": "Open in Smart Teach",
+  "reviseInLeadApp": "Revise in LEAD app",
+  "leadRevisionHint": "Revise in the LEAD app: {book} → {chapter}",
+  "@leadRevisionHint": {
+    "placeholders": {
+      "book": {"type": "String"},
+      "chapter": {"type": "String"}
+    }
+  },
+  "couldNotOpenLeadApp": "Could not open the LEAD app",
   "content": "CONTENT",
   "notTaught": "Not taught",
   "thatLinkIsNotAValid": "That link is not a valid web address.",

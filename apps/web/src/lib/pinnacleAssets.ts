@@ -65,6 +65,21 @@ export function isWorksheetAsset(a: PinnacleAsset): boolean {
   return /worksheet|lab activity/i.test(a.type);
 }
 
+/**
+ * True for an asset a child opens themselves in the LEAD Student App:
+ * animations, videos, games, interactive exercises, mind maps, picture
+ * studies, timelines — not the printable worksheets or lab sheets.
+ */
+export function isStudentAsset(a: PinnacleAsset): boolean {
+  return /animation|video|game|interactivity|mind map|picture study|timeline/i.test(a.type);
+}
+
+/** The LEAD Group Student App, where a family revises with these assets. */
+export const LEAD_STUDENT_APP = {
+  android: "https://play.google.com/store/apps/details?id=com.leadschool.parentapp",
+  ios: "https://apps.apple.com/app/id1571090872",
+} as const;
+
 /** True for an asset suited to quick revision before an exam. */
 export function isRevisionAsset(a: PinnacleAsset): boolean {
   return /mind map|timeline|animation|video/i.test(a.type);

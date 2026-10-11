@@ -655,6 +655,24 @@ abstract class L {
   /// **'Open in Smart Teach'**
   String get openInSmartTeach;
 
+  /// No description provided for @reviseInLeadApp.
+  ///
+  /// In en, this message translates to:
+  /// **'Revise in LEAD app'**
+  String get reviseInLeadApp;
+
+  /// No description provided for @leadRevisionHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Revise in the LEAD app: {book} → {chapter}'**
+  String leadRevisionHint(String book, String chapter);
+
+  /// No description provided for @couldNotOpenLeadApp.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open the LEAD app'**
+  String get couldNotOpenLeadApp;
+
   /// No description provided for @content.
   ///
   /// In en, this message translates to:

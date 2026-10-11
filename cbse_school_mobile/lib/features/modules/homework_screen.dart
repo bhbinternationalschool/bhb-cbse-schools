@@ -1,4 +1,5 @@
 import "package:flutter/material.dart";
+import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
@@ -133,6 +134,10 @@ class HomeworkScreen extends StatelessWidget {
                         item.body,
                         style: AppText.bodySmallInk.copyWith(height: 1.4),
                       ),
+                    ],
+                    if (item.leadRevision != null) ...[
+                      const SizedBox(height: 10),
+                      _LeadRevisionCard(revision: item.leadRevision!),
                     ],
                     const SizedBox(height: 8),
                     Row(
@@ -306,6 +311,74 @@ class _ComposeSheetState extends State<_ComposeSheet> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : Text(context.l10n.publish),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The chapter's animations, games and mind maps in the LEAD Group Student
+/// App (director, 12 Oct 2026). The app holds and plays them under the
+/// family's own LEAD sign-in; the button opens it from its store page
+/// ("Open" when installed, "Install" when not).
+class _LeadRevisionCard extends StatelessWidget {
+  const _LeadRevisionCard({required this.revision});
+
+  final LeadRevision revision;
+
+  static const _android =
+      "https://play.google.com/store/apps/details?id=com.leadschool.parentapp";
+  static const _ios = "https://apps.apple.com/app/id1571090872";
+
+  Future<void> _open(BuildContext context) async {
+    final ios = Theme.of(context).platform == TargetPlatform.iOS;
+    final ok = await launchUrl(
+      Uri.parse(ios ? _ios : _android),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.couldNotOpenLeadApp)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: ModuleTone.blue.background,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            context.l10n.leadRevisionHint(revision.book, revision.chapter),
+            style: AppText.labelMedium.copyWith(
+              color: ModuleTone.blue.foreground,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          for (final a in revision.items)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                a.title.isEmpty || a.title == a.type
+                    ? "• ${a.type}"
+                    : "• ${a.type}: ${a.title}",
+                style: AppText.labelSmallMuted,
+              ),
+            ),
+          const SizedBox(height: 6),
+          FilledButton.tonalIcon(
+            onPressed: () => _open(context),
+            icon: const Icon(Icons.play_circle_outline, size: 18),
+            label: Text(context.l10n.reviseInLeadApp),
           ),
         ],
       ),

@@ -313,6 +313,17 @@ class LEn extends L {
   String get openInSmartTeach => 'Open in Smart Teach';
 
   @override
+  String get reviseInLeadApp => 'Revise in LEAD app';
+
+  @override
+  String leadRevisionHint(String book, String chapter) {
+    return 'Revise in the LEAD app: $book → $chapter';
+  }
+
+  @override
+  String get couldNotOpenLeadApp => 'Could not open the LEAD app';
+
+  @override
   String get content => 'CONTENT';
 
   @override

@@ -1653,6 +1653,41 @@ class AttendanceHistory {
   final List<({String date, String status})> entries;
 }
 
+/// "Revise in the LEAD app": the publisher's animations, games and mind maps
+/// for the chapter a homework names, which the child opens in the LEAD Group
+/// Student App (the app plays them; this only says what to look for).
+class LeadRevision {
+  const LeadRevision({
+    required this.book,
+    required this.chapter,
+    required this.items,
+  });
+
+  static LeadRevision? fromJson(Object? raw) {
+    if (raw is! Map<String, dynamic>) return null;
+    final items = ((raw["items"] as List?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(
+          (e) => (
+            type: (e["type"] as String?) ?? "",
+            title: (e["title"] as String?) ?? "",
+          ),
+        )
+        .where((e) => e.type.isNotEmpty)
+        .toList();
+    if (items.isEmpty) return null;
+    return LeadRevision(
+      book: (raw["book"] as String?) ?? "",
+      chapter: (raw["chapter"] as String?) ?? "",
+      items: items,
+    );
+  }
+
+  final String book;
+  final String chapter;
+  final List<({String type, String title})> items;
+}
+
 class HomeworkItem {
   const HomeworkItem({
     required this.date,
@@ -1662,7 +1697,11 @@ class HomeworkItem {
     required this.teacherName,
     required this.dueAt,
     required this.isDiary,
+    this.leadRevision,
   });
+
+  /// Publisher assets to revise this chapter with in the LEAD app, or null.
+  final LeadRevision? leadRevision;
 
   final String date;
   final String title;
@@ -1706,6 +1745,7 @@ class HomeworkFeed {
           teacherName: (p["teacherName"] as String?) ?? "",
           dueAt: p["dueAt"] as String?,
           isDiary: false,
+          leadRevision: LeadRevision.fromJson(p["leadRevision"]),
         );
       }),
       ...((j["diary"] as List?) ?? const []).map((raw) {
