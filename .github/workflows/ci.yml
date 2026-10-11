@@ -520,6 +520,8 @@ jobs:
           npm run test:cashgram
           npm run test:fee-bulk-pdc-templates
           npm run test:payout-requests
+          npm run test:visiting-pay
+          npm run test:visiting-exclusions
           npm run test:diksha-index
           npm run test:teacher-contact
           npm run test:parent-profile

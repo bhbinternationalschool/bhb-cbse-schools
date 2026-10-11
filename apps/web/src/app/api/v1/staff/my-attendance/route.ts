@@ -1,3 +1,4 @@
+import { isVisitingStaff } from "@/lib/visitingPay";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -53,6 +54,7 @@ export async function GET(request: Request) {
       month,
       today,
       exempt,
+      visiting: isVisitingStaff(staff),
       markOn: (d) => byDate.get(d)?.marks.find((m) => m.staffId === staffId) ?? null,
       holidayOn: (d) => classifyStaffHolidayDay(ctx.masters, d, ay, staff.stream),
       approvedLeaveOn: (d) =>

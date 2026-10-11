@@ -692,7 +692,14 @@ async function readStaffAttendance(
 
   let present = 0;
   const absentRows: BriefStaffRow[] = [];
-  for (const s of staff) {
+  // Visiting staff (paid per period / hour / day) come on their own days:
+  // present when they punched, never an absentee or part of the strength.
+  const counted = staff.filter((s) => {
+    if (s.category !== "visiting") return true;
+    const m = marks.get(s.id);
+    return m === "P" || m === "L" || m === "HD";
+  });
+  for (const s of counted) {
     const mark = marks.get(s.id);
     // Late and half day are at work — the same rule as staffMarkTotals.
     if (mark === "P" || mark === "L" || mark === "HD") {
@@ -736,7 +743,7 @@ async function readStaffAttendance(
       : await lastRegisterBefore("staff_attendance_desk_registers", dateIso),
     present,
     absent: absentRows.length,
-    strength: staff.length,
+    strength: counted.length,
     absentRows,
     // Not "none waiting": nobody could look.
     ...(hr.ok ? {} : { leaveUnreadable: true }),

@@ -13,6 +13,7 @@ import {
 } from "@/lib/holidayPolicy";
 import type { MastersState } from "@/lib/masters";
 import { DEFAULT_AY, loadMasters } from "@/lib/masters";
+import { isVisitingStaff } from "@/lib/visitingPay";
 import {
   findStaffRegister,
   attendanceExemptStaffIds,
@@ -401,6 +402,9 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
 
   const roster = (opts.masters.staff ?? []).filter((s) => {
     if (s.status !== "active") return false;
+    // Visiting staff are paid from their month work sheet (Staff → Visiting
+    // pay), never from payroll — no salary, PF, ESIC, payslip or bank file.
+    if (isVisitingStaff(s)) return false;
     if (opts.staffIds?.length) return opts.staffIds.includes(s.id);
     return true;
   });

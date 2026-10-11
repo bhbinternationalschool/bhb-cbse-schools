@@ -5,6 +5,7 @@
 
 import type { StaffRecord } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
+import { isVisitingStaff } from "@/lib/visitingPay";
 import {
   downloadTextFile,
   formatInr,
@@ -153,6 +154,8 @@ export function buildBankExportPreview(input: {
       if (amount <= 0) continue;
 
       const staff = staffById.get(line.staffId);
+      // Visiting staff are paid from their work sheet, never the salary file.
+      if (isVisitingStaff(staff)) continue;
       rows.push(buildRow(line, staff, amount, input.month));
     }
   }

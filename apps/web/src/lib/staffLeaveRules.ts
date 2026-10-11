@@ -96,7 +96,7 @@ export type RequestLite = Pick<
 /** true = not a working day for this person (holiday, Sunday). */
 export type IsOffFn = (isoDate: string, staffId: string) => boolean;
 
-export const STAFF_CATEGORY_KEYS = ["permanent", "contract", "part_time"] as const;
+export const STAFF_CATEGORY_KEYS = ["permanent", "contract", "part_time", "visiting"] as const;
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
