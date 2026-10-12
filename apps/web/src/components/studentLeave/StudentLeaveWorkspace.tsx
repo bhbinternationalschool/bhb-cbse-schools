@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useAccessData } from "@/components/shell/useAccessData";
 import Link from "next/link";
 import {
   BarChart3,
@@ -443,20 +444,26 @@ function OfficeStudentLeaveWorkspace({
   // tabs. The whole Student leave module opens all of them, and so does the
   // Attendance module: it has always reached this desk under Attendance →
   // Student leave, and that must not narrow.
+  const access = useAccessData();
   const tabItems = useMemo(
-    () =>
-      hasPermission(session, masters, "attendance", "view")
+    () => {
+      if (!access.ready) return [];
+      const am = access.masters;
+      const ar = access.rbac ?? undefined;
+      return hasPermission(session, am, "attendance", "view", ar)
         ? allTabItems
-        : visibleModuleTabs(allTabItems, session, masters, "student_leave"),
-    [allTabItems, session, masters],
+        : visibleModuleTabs(allTabItems, session, am, "student_leave", ar);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [allTabItems, session, access.ready, access.version],
   );
   useEffect(() => {
-    // Not before Masters load: roles are read from it.
-    if (!masters) return;
+    // Not before the roles and roster load.
+    if (!access.ready) return;
     if (tabItems.length > 0 && !tabItems.some((t) => t.id === tab)) {
       setTab(tabItems[0]!.id as LeaveTab);
     }
-  }, [masters, tabItems, tab, setTab]);
+  }, [access.ready, tabItems, tab, setTab]);
 
   const allRequests = useMemo(() => {
     if (!state) return [];

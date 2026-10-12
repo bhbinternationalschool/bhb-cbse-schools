@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, Fragment } from "react";
+import { useAccessData } from "@/components/shell/useAccessData";
 import Link from "next/link";
 import { Wallet } from "lucide-react";
 import { loadMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
@@ -225,12 +226,14 @@ export function PayrollWorkspace() {
   // "Payroll runs & payslips", "Payroll audit log") for someone without the
   // whole module. Runs,
   // approvals, holds and increments write payroll and stay with the module.
+  const access = useAccessData();
   const fnTabs = useMemo(() => {
-    if (allowed) return [] as PayTab[];
+    if (allowed || !access.ready) return [] as PayTab[];
     return (["payslips", "print", "reports", "audit"] as PayTab[]).filter((t) =>
-      canSeeModuleTab(session, masters, "payroll", t),
+      canSeeModuleTab(session, access.masters, "payroll", t, access.rbac ?? undefined),
     );
-  }, [allowed, session, masters]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+  }, [allowed, session, access.ready, access.version]);
   const seesTab = (t: PayTab) => allowed || fnTabs.includes(t);
 
   const advancesEdit = useMemo(() => {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useAccessData } from "@/components/shell/useAccessData";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
@@ -113,7 +114,16 @@ export function VaultWorkspace() {
   // Every vault tab is the whole-module grant's (one register — see
   // rbacFeatureCatalog/store.ts); the list still goes through the gate so a
   // future vault function opens exactly its tab.
-  const shownTabs = useMemo(() => visibleModuleTabs(TABS, session, null, "vault"), [session]);
+  // Decided from the loaded roles + roster (assignments count), never before.
+  const access = useAccessData();
+  const shownTabs = useMemo(
+    () =>
+      access.ready
+        ? visibleModuleTabs(TABS, session, access.masters, "vault", access.rbac ?? undefined)
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [session, access.ready, access.version],
+  );
   const [state, setState] = useState<VaultState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

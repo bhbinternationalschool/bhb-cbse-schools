@@ -12,6 +12,7 @@ import {
   WorksPanel,
 } from "@/components/trust/TrustPanels";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
@@ -72,15 +73,26 @@ export function TrustWorkspace() {
 
   const actorName = session.fullName || "Trust user";
 
-  // Someone holding only some Trust functions sees only their tabs.
-  const shownTabs = useMemo(() => visibleModuleTabs(TABS, session, null, "trust"), [session]);
+  // Someone holding only some Trust functions sees only their tabs —
+  // decided from the loaded roles + roster (assignments count), not before.
+  const access = useAccessData();
+  const shownTabs = useMemo(
+    () =>
+      access.ready
+        ? visibleModuleTabs(TABS, session, access.masters, "trust", access.rbac ?? undefined)
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [session, access.ready, access.version],
+  );
   useEffect(() => {
+    if (!access.ready) return;
     if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
       setTab(shownTabs[0]!.id as TrustTab);
     }
-  }, [shownTabs, tab]);
+  }, [access.ready, shownTabs, tab]);
   // Paying labour or a bill posts to the accounts — the whole module's job.
-  const canPay = hasPermission(session, null, "trust", "edit");
+  const canPay =
+    access.ready && hasPermission(session, access.masters, "trust", "edit", access.rbac ?? undefined);
 
   function flash(message: string) {
     setNotice(message);

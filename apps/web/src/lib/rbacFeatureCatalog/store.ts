@@ -146,6 +146,30 @@ export const LIBRARY_READER_FUNCTIONS = [
   "store.library_reports",
 ] as const;
 
+/**
+ * What the library-desk GET sends each library function. The counter,
+ * copies and circulation need titles, copies, loans and the loan / fine
+ * rules; only the reports reader also gets the procurement documents
+ * (vendors, bills) and the e-book shelves. A cut key comes back empty and
+ * the response says `functionOnly` — these holders never save the desk (the
+ * POST is the Store grant's), so an empty list can never be pushed back.
+ */
+export const LIBRARY_FUNCTION_DESK_KEYS: Record<(typeof LIBRARY_READER_FUNCTIONS)[number], readonly string[]> = {
+  "store.library_counter": ["titles", "copies", "issues", "settings"],
+  "store.library_copies": ["titles", "copies", "issues", "settings"],
+  "store.library_fines": ["titles", "copies", "issues", "settings"],
+  "store.library_reports": ["titles", "copies", "issues", "settings", "procurementDocs", "ebooks"],
+};
+
+/** The desk keys a holder of these library functions may read. */
+export function libraryDeskKeysFor(held: readonly string[]): Set<string> {
+  const out = new Set<string>();
+  for (const id of held) {
+    for (const k of LIBRARY_FUNCTION_DESK_KEYS[id as keyof typeof LIBRARY_FUNCTION_DESK_KEYS] ?? []) out.add(k);
+  }
+  return out;
+}
+
 const LIBRARY_FEATURES: RbacFeatureDef[] = [
   {
     id: "store.library_counter",

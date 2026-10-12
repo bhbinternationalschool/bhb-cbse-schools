@@ -5,7 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { DEMO_USERS, demoSessionCookieName, type DemoSession } from "@/lib/auth";
 import { appSessionCookieOptions } from "@/lib/authCookies.server";
 import { signSession } from "@/lib/sessionCookie.server";
-import { loadServerMasters } from "@/lib/api/v1/auth";
+import { loadServerMasters, loadServerRbacIfKnown } from "@/lib/api/v1/auth";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { superAdminRoleCode } from "@/lib/superAdmin";
 import { TENANT, type Persona } from "@/lib/types";
@@ -179,6 +179,9 @@ export async function POST(request: Request) {
       roleCode = staffRoleCodeFor(
         { email, fullName, staffId },
         await loadServerMasters(),
+        "teacher",
+        // Masters → Roles assignment first; null (unreadable) = roster only.
+        await loadServerRbacIfKnown(),
       );
     } catch (e) {
       console.warn("[session] roleCode inference failed", e);

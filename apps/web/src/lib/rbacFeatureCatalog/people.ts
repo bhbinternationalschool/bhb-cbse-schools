@@ -236,10 +236,10 @@ export const PEOPLE_FEATURES: RbacFeatureDef[] = [
     routes: ["/api/staff-geo/board", "/api/staff-geo/settings"],
   },
   {
-    // One owner: the Staff screen's tab. The route takes Staff view / change
-    // (module, or this function via `routes`) and keeps accepting Payroll
-    // view / change as before (PR #562); approving, reopening and paying a
-    // sheet stays Payroll (approve) only — the money rule.
+    // The Staff screen's tab. The route takes Payroll view / change as before
+    // (PR #562) or THIS function held as a function grant — never the Staff
+    // module grant (teachers hold Staff · view; the sheets carry PAN, rates
+    // and payouts). Approving, reopening and paying stay Payroll (approve).
     id: "staff.visiting_pay",
     module: "staff",
     group: "Visiting staff",
@@ -247,8 +247,10 @@ export const PEOPLE_FEATURES: RbacFeatureDef[] = [
     blurb:
       "Visiting staff's month work sheets: build, check and correct lines, and the report. Approving and paying needs Payroll (approve).",
     actions: ["view", "edit"],
+    // No `routes`: listing the route would let the whole Staff module grant
+    // through requireStaffPermission. The route checks this function
+    // itself (requireStaffPermissionOrFeature — Payroll, or this grant).
     tabs: ["visiting_pay"],
-    routes: ["/api/staff/visiting-pay"],
   },
 
   // ── Certificates ───────────────────────────────────────────────────────

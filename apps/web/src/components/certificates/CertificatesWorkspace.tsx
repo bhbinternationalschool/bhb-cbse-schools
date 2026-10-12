@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { Award, Sparkles } from "lucide-react";
 import {
@@ -165,9 +166,15 @@ export function CertificatesWorkspace() {
 
   // The tabs this person may open: the whole module, or a Certificates
   // function (lib/rbacFeatureCatalog/people.ts) opening its tabs.
+  // Decided from the loaded roles + roster (assignments count), never before.
+  const access = useAccessData();
   const shownTabs = useMemo(
-    () => (masters ? visibleModuleTabs(CERT_TABS, session, masters, "certificates") : CERT_TABS),
-    [session, masters],
+    () =>
+      access.ready
+        ? visibleModuleTabs(CERT_TABS, session, access.masters, "certificates", access.rbac ?? undefined)
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [session, access.ready, access.version],
   );
   useEffect(() => {
     if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {

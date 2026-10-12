@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { isbnChecksumOk } from "@/lib/openLookups";
 import { lookupIsbnApi } from "@/lib/openLookupsClient";
 import Link from "next/link";
@@ -267,9 +268,15 @@ export function LibraryWorkspace() {
 
   // The Store grant sees every tab; a library function (Masters → Roles)
   // opens its own tabs only (lib/rbacFeatureCatalog/store.ts).
+  // Decided from the loaded roles + roster (assignments count), never before.
+  const access = useAccessData();
   const shownTabs = useMemo(
-    () => visibleModuleTabs(TABS, session, masters, "store"),
-    [session, masters],
+    () =>
+      access.ready
+        ? visibleModuleTabs(TABS, session, access.masters, "store", access.rbac ?? undefined)
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [session, access.ready, access.version],
   );
   const shownIds = useMemo(() => new Set<string>(shownTabs.map((t) => t.id)), [shownTabs]);
   const on = (t: LibTab) => tab === t && shownIds.has(t);
@@ -278,7 +285,10 @@ export function LibraryWorkspace() {
   }, [shownTabs, shownIds, tab]);
   // Loan days, limits and the fine rule are the Store grant's, not the
   // counter clerk's (the server refuses a function save of them too).
-  const rulesReadOnly = readOnly || !hasPermission(session, masters, "store", "edit");
+  const rulesReadOnly =
+    readOnly ||
+    !access.ready ||
+    !hasPermission(session, access.masters, "store", "edit", access.rbac ?? undefined);
 
   const state = useMemo(() => {
     void tick;

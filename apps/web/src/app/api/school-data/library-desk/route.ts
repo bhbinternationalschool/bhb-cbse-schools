@@ -16,22 +16,25 @@ import { readStampsParam } from "@/lib/rowStampClient";
 import { isLibraryMigrationPending, LIBRARY_NOT_MIGRATED } from "@/lib/libraryCounter";
 import { mergeLibraryEbooks, readLibraryEbooks } from "@/lib/libraryEbooks.server";
 import { deskReadGate } from "@/lib/deskFeatureGate.server";
-import { LIBRARY_READER_FUNCTIONS } from "@/lib/rbacFeatureCatalog/store";
+import { LIBRARY_READER_FUNCTIONS, libraryDeskKeysFor } from "@/lib/rbacFeatureCatalog/store";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  // The Store grant, or a library function (counter, copies, circulation,
-  // reports — Masters → Roles), each of which owns every desk key: its
-  // reader gets the whole desk, never a cut-down copy. A store function
-  // that is not a library one (the store counter) reads nothing here.
-  // Saving the desk stays module-level (POST below).
+  // The Store grant reads the whole desk. A library function (counter,
+  // copies, circulation, reports — Masters → Roles) reads what its job
+  // needs (LIBRARY_FUNCTION_DESK_KEYS): procurement documents and e-books go
+  // to the reports reader only. A store function that is not a library one
+  // (the store counter) reads nothing here. Saving the desk stays
+  // module-level (POST below).
   const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["library-desk"]);
   if (gate.mode === "deny") return gate.response;
+  let keys: Set<string> | null = null;
   if (gate.mode === "feature") {
     const holds = (id: string) =>
       (["view", "create", "edit", "approve", "export"] as const).some((a) => gate.access(id, a).allowed);
-    if (!LIBRARY_READER_FUNCTIONS.some(holds)) {
+    keys = libraryDeskKeysFor(LIBRARY_READER_FUNCTIONS.filter(holds));
+    if (keys.size === 0) {
       return NextResponse.json(
         {
           ok: false,
@@ -51,15 +54,23 @@ export async function GET(req: Request) {
   }
   // The e-book shelves live in their own server store; a failed read sends
   // none (the browser keeps what it has) rather than an empty shelf.
-  const ebooks = await readLibraryEbooks();
+  const ebooks = !keys || keys.has("ebooks") ? await readLibraryEbooks() : null;
+  if (keys) {
+    if (!keys.has("procurementDocs")) bundle.procurementDocs = [];
+  }
+  const sentStamps =
+    keys && stamps && typeof stamps === "object"
+      ? Object.fromEntries(Object.entries(stamps).filter(([k]) => keys!.has(k)))
+      : stamps;
   return NextResponse.json({
     ok: true,
     ...bundle,
     ...(ebooks ? { ebooks } : {}),
+    ...(keys ? { functionOnly: true } : {}),
     titleCount: bundle.titles.length,
     updatedAt: meta?.updatedAt || new Date().toISOString(),
     meta,
-    stamps,
+    stamps: sentStamps,
     settingsStamp,
   });
 }

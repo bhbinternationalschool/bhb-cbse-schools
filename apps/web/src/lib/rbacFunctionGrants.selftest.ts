@@ -7,8 +7,11 @@
  * Run: npx tsx src/lib/rbacFunctionGrants.selftest.ts
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { defaultMobileAccess, resolveMobileFeatures } from "./mobileFeatures";
+import { libraryDeskKeysFor } from "./rbacFeatureCatalog/store";
 import {
   BUILT_IN_GRANT_ADDITIONS,
   canSeeModuleTab,
@@ -89,6 +92,10 @@ const as = (roleCode: string): SessionLike => ({ roleCode, fullName: "X", person
   const twice = normalizeRbacState(once);
   assert.deepEqual(twice.roles.find((r) => r.code === "office")!.featureGrants, office.featureGrants);
   assert.equal(twice.audit.filter((e) => e.detail.includes(ADD)).length, 1);
+  // Before the role row is saved, every load rebuilds the same line.
+  const again = normalizeRbacState({ version: 1, roles: [stored as RbacRole] });
+  assert.deepEqual(again.audit.find((e) => e.detail.includes(ADD)), once.audit.find((e) => e.detail.includes(ADD)));
+  assert.equal(once.audit.find((e) => e.detail.includes(ADD))!.at, "2026-10-12T00:00:00.000Z");
 
   // The office cleared the box afterwards → that decision stands.
   const cleared = normalizeRbacState({
@@ -127,6 +134,35 @@ const as = (roleCode: string): SessionLike => ({ roleCode, fullName: "X", person
   assert.deepEqual(fn.blockedByRbac, ["gate_pass_release"]);
   const mod = resolveMobileFeatures({ roleCodes: ["gate"], access, can: () => true });
   assert.equal(mod.features.length, 2, "module holders unchanged");
+}
+
+/* ── Library desk: each function reads its own keys ───────────────── */
+{
+  const counter = libraryDeskKeysFor(["store.library_counter"]);
+  assert.ok(counter.has("copies") && counter.has("issues") && counter.has("settings"));
+  assert.ok(!counter.has("procurementDocs") && !counter.has("ebooks"), "the counter clerk sees no procurement or e-books");
+  assert.ok(libraryDeskKeysFor(["store.library_reports"]).has("procurementDocs"));
+  assert.equal(libraryDeskKeysFor(["store.counter"]).size, 0, "a non-library store function reads nothing");
+}
+
+/* ── Visiting pay: Payroll or its function, never the Staff module ──── */
+{
+  const st = state([
+    role("teacher", { permissions: [{ module: "staff", actions: ["view", "edit"] }] }),
+    role("driver", { featureGrants: [{ feature: "staff.visiting_pay", actions: ["view"] }] }),
+    role("accounts", { permissions: [{ module: "payroll", actions: ["view"] }] }),
+  ]);
+  // The route's rule (requireStaffPermissionOrFeature(payroll, a, staff.visiting_pay, a)).
+  const routeAllows = (s: SessionLike, a: "view" | "edit") =>
+    hasPermission(s, null, "payroll", a, st) || featureGrantHeld(s, null, "staff.visiting_pay", a, st);
+  assert.ok(!routeAllows(as("teacher"), "view"), "a teacher (Staff view/edit) is refused → 403");
+  assert.ok(!routeAllows(as("teacher"), "edit"));
+  assert.ok(routeAllows(as("driver"), "view"), "the function opens it");
+  assert.ok(!routeAllows(as("driver"), "edit"), "…at its own actions only");
+  assert.ok(routeAllows(as("accounts"), "view"), "Payroll view as before");
+  const src = readFileSync(join(__dirname, "../app/api/staff/visiting-pay/route.ts"), "utf8");
+  assert.ok(!/requireStaffPermission\(req, "staff"/.test(src), "the route never asks the Staff module");
+  assert.ok(/requireStaffPermissionOrFeature\(req, "payroll", action, "staff\.visiting_pay", action\)/.test(src));
 }
 
 console.log("rbacFunctionGrants.selftest.ts: OK");

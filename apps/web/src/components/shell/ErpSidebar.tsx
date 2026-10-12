@@ -12,10 +12,10 @@ import {
 } from "lucide-react";
 import { HUB_GROUPS, TONE } from "@/lib/erpNav";
 import { commsTabIsOfficeOnly, commsTabOfHref, commsTabOpenedByFunction } from "@/lib/commsTabAccess";
-import { defaultMasters, loadMasters } from "@/lib/masters";
 import { markModuleRegistryClientReady } from "@/lib/moduleRegistry";
-import { canAccessHref, defaultRbacState, hasPermission, loadRbac } from "@/lib/rbac";
+import { canAccessHref, hasPermission } from "@/lib/rbac";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { useAccessData } from "@/components/shell/useAccessData";
 
 type NavView = "main" | "sub";
 
@@ -51,6 +51,8 @@ function SidebarPanel({
   navView,
   activeGroup,
   groups,
+  menuStatus,
+  onRetryMenu,
   pathname,
   search,
   sessionYear,
@@ -62,6 +64,9 @@ function SidebarPanel({
   navView: NavView;
   activeGroup: (typeof HUB_GROUPS)[number] | null;
   groups: Array<(typeof HUB_GROUPS)[number] & { hubs: (typeof HUB_GROUPS)[number]["hubs"] }>;
+  /** "loading"/"failed" = roles or roster not known yet: say so, never show a cut menu. */
+  menuStatus: "loading" | "ready" | "failed";
+  onRetryMenu: () => void;
   pathname: string;
   search: string;
   sessionYear: string;
@@ -131,6 +136,21 @@ function SidebarPanel({
             <p className="mb-2 px-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--muted)]">
               Choose area
             </p>
+            {menuStatus === "loading" ? (
+              <p className="px-2 py-2 text-sm text-[var(--muted)]">Loading your menu…</p>
+            ) : null}
+            {menuStatus === "failed" ? (
+              <div className="px-2 py-2 text-sm text-[var(--muted)]">
+                <p>Your menu could not be loaded.</p>
+                <button
+                  type="button"
+                  onClick={onRetryMenu}
+                  className="mt-1 font-semibold text-[var(--brand-deep)] underline"
+                >
+                  Try again
+                </button>
+              </div>
+            ) : null}
             <ul className="space-y-1">
               {groups.map((group) => {
                 const gTone = TONE[group.tone];
@@ -269,9 +289,14 @@ export function ErpSidebar({
     return () => window.removeEventListener("bhb-module-registry", onRegistry);
   }, []);
 
+  // Built only once the roles and the roster are both known — before, the
+  // first draw used the built-in defaults and the designation alone, so an
+  // assigned office role lost its menu entries until something re-rendered.
+  const access = useAccessData();
   const groups = useMemo(() => {
-    const masters = navTick > 0 ? loadMasters() : defaultMasters();
-    const rbac = navTick > 0 ? loadRbac() : defaultRbacState();
+    if (!access.ready || navTick === 0) return [];
+    const masters = access.masters;
+    const rbac = access.rbac ?? undefined;
     return HUB_GROUPS.map((g) => ({
       ...g,
       hubs: g.hubs.filter(
@@ -284,8 +309,8 @@ export function ErpSidebar({
             commsTabOpenedByFunction(session, masters, commsTabOfHref(h.href)!, rbac)),
       ),
     })).filter((g) => g.hubs.length > 0);
-     
-  }, [session, navTick]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+  }, [session, navTick, access.ready, access.version]);
 
   useEffect(() => {
     if (isMobile === null) return;
@@ -330,6 +355,8 @@ export function ErpSidebar({
     navView,
     activeGroup,
     groups,
+    menuStatus: access.status,
+    onRetryMenu: access.retry,
     pathname,
     search,
     sessionYear: session.academicYearCode,

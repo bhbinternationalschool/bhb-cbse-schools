@@ -17,6 +17,7 @@ import { BulkPaymentPanel } from "@/components/fees/BulkPaymentPanel";
 import { ConcessionTemplatesPanel } from "@/components/fees/ConcessionTemplatesPanel";
 import { PdcPanel } from "@/components/fees/PdcPanel";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { ModuleTabButton } from "@/components/ui/ModuleTabs";
 import { MODULE_TAB_CONTAINER_CLASS } from "@/components/ui/modern-tab-bar";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
@@ -52,19 +53,23 @@ export function FeeToolsTabs() {
   }
 
   // Each tab opens on the Fees grant or its own function (fees.pdc,
-  // fees.bulk_payment, fees.concession_templates). The buttons follow the
-  // server's rules; the server enforces them anyway.
-  const shown = TAB_ORDER.filter((t) => canSeeModuleTab(session, null, "fees", t));
+  // fees.bulk_payment, fees.concession_templates), decided from the loaded
+  // roles + roster (assignments count), never before. The buttons follow
+  // the server's rules; the server enforces them anyway.
+  const access = useAccessData();
+  const am = access.masters;
+  const ar = access.rbac ?? undefined;
+  const shown = access.ready ? TAB_ORDER.filter((t) => canSeeModuleTab(session, am, "fees", t, ar)) : [];
   const firstShown = shown[0] ?? null;
   useEffect(() => {
     if (firstShown && !shown.includes(tab)) setTab(firstShown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firstShown, tab]);
-  const canView = shown.includes(tab);
-  const canCollect = !readOnly && canWriteModuleTab(session, null, "fees", tab, "create");
-  const canClose = !readOnly && canWriteModuleTab(session, null, "fees", tab, "edit");
-  const canGrant = !readOnly && canGrantConcession(session, null);
-  const canApprove = canApproveConcession(session, null);
+  const canView = access.ready && shown.includes(tab);
+  const canCollect = access.ready && !readOnly && canWriteModuleTab(session, am, "fees", tab, "create", ar);
+  const canClose = access.ready && !readOnly && canWriteModuleTab(session, am, "fees", tab, "edit", ar);
+  const canGrant = access.ready && !readOnly && canGrantConcession(session, am, ar);
+  const canApprove = access.ready && canApproveConcession(session, am, ar);
 
   return (
     <ErpWorkspaceShell
@@ -98,7 +103,9 @@ export function FeeToolsTabs() {
       }
     >
       <div className="mt-6">
-        {!canView ? (
+        {!access.ready ? (
+          <p className="text-sm text-[var(--muted)]">Checking access…</p>
+        ) : !canView ? (
           <p className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-medium text-[var(--danger)]">
             You need access to Fees to use this screen.
           </p>

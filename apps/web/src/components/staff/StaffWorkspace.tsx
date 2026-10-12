@@ -1,6 +1,7 @@
 "use client";
 
 import { PropelProgressPanel } from "@/components/staff/PropelProgressPanel";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -83,7 +84,7 @@ import { DocVerificationQueuePanel } from "@/components/students/DocVerification
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { StaffPresenceCard } from "@/components/staff/StaffPresenceCard";
 import { StaffGeoAdminPanel } from "@/components/staff/StaffGeoAdminPanel";
-import { canWriteModuleTab, hasFeaturePermission, hasPermission, visibleModuleTabs } from "@/lib/rbac";
+import { canWriteModuleTab, featureGrantHeld, hasFeaturePermission, hasPermission, visibleModuleTabs } from "@/lib/rbac";
 import {
   CustomExportToggle,
   useCustomFieldExport,
@@ -192,16 +193,22 @@ export function StaffWorkspace() {
 
   // Someone holding only some Staff functions (director, 6 Oct 2026 — e.g.
   // Leave approvals) sees only their tabs.
-  // Visiting pay follows its route (api/staff/visiting-pay): Staff view —
-  // the module or staff.visiting_pay — or Payroll view, as before PR #562.
+  // Visiting pay follows its route (api/staff/visiting-pay): Payroll view,
+  // or the staff.visiting_pay function — never the Staff module alone (it
+  // shows visiting staff's PAN, rates and payouts).
+  // Decided from the loaded roles + roster (assignments count), never before.
+  const access = useAccessData();
   const shownTabs = useMemo(() => {
-    const m = state ?? loadMasters();
-    const own = new Set(visibleModuleTabs(STAFF_TABS, session, m, "staff").map((t) => t.id));
-    return STAFF_TABS.filter(
-      (t) =>
-        own.has(t.id) || (t.id === "visiting_pay" && hasPermission(session, m, "payroll", "view")),
-    );
-  }, [session, state]);
+    if (!access.ready) return [];
+    const m = access.masters;
+    const r = access.rbac ?? undefined;
+    const own = new Set(visibleModuleTabs(STAFF_TABS, session, m, "staff", r).map((t) => t.id));
+    const visitingPay =
+      hasPermission(session, m, "payroll", "view", r) ||
+      (["view", "edit"] as const).some((a) => featureGrantHeld(session, m, "staff.visiting_pay", a, r));
+    return STAFF_TABS.filter((t) => (t.id === "visiting_pay" ? visitingPay : own.has(t.id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+  }, [session, access.ready, access.version]);
   useEffect(() => {
     if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
       setTab(shownTabs[0]!.id as StaffMainTab);
@@ -523,7 +530,7 @@ export function StaffWorkspace() {
         </div>
       ) : null}
       {tab === "gps" ? (
-        <StaffGeoAdminPanel canEdit={canWriteModuleTab(session, state ?? loadMasters(), "staff", "gps")} />
+        <StaffGeoAdminPanel canEdit={access.ready && canWriteModuleTab(session, access.masters, "staff", "gps", "edit", access.rbac ?? undefined)} />
       ) : null}
       {tab === "reports" ? (
         <StaffLeaveReportsPanel ay={ay} scope="leave" />

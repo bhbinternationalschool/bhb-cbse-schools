@@ -30,6 +30,7 @@ import {
   featuresForMastersTab,
   featuresForTab,
 } from "./rbacFeatures";
+import { SESSION_ONLY_ROUTE_BASELINE } from "./rbacRouteBaseline";
 import { RBAC_SCREEN_TABS } from "./rbacScreenTabs";
 
 console.log("rbacCatalogCompleteness.selftest.ts");
@@ -115,6 +116,67 @@ for (const screen of RBAC_SCREEN_TABS) {
     }
   }
 }
+/* ── 1b: every screen with tabs is registered (auto-discovered) ─────── */
+
+/**
+ * Screens with a tab bar that are not module screens: their tabs are the
+ * signed-in person's own pages, or sub-views inside a registered screen's
+ * tab (gated by that tab), so there is nothing to grant.
+ */
+const NOT_RBAC_SCREENS: Record<string, string> = {
+  "components/staff/MyPayWorkspace.tsx": "the signed-in person's own attendance, leave, payslips and advances",
+  "components/reports/ReportsCenterWorkspace.tsx": "hub views (dashboard / catalog / recent); each report is gated by its module (REPORTS_CENTER_RBAC_MODULES)",
+};
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) walk(p, out);
+    else if (/(Workspace|Tabs)\.tsx$/.test(name)) out.push(p);
+  }
+  return out;
+}
+/** Tab ids a file declares: a `…Tab` string union, or a TABS-like const of `{ id }`. */
+function discoveredTabs(file: string): string[] {
+  const sf = parse(file);
+  const out = new Set<string>();
+  const visit = (n: ts.Node) => {
+    if (ts.isTypeAliasDeclaration(n) && /Tab$/.test(n.name.text) && ts.isUnionTypeNode(n.type)) {
+      for (const t of n.type.types) {
+        if (ts.isLiteralTypeNode(t) && ts.isStringLiteral(t.literal)) out.add(t.literal.text);
+      }
+    }
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && /^[A-Z_]*TABS?$|TAB_ITEMS$/.test(n.name.text) && n.initializer) {
+      const ids = (m: ts.Node) => {
+        if (ts.isPropertyAssignment(m) && ts.isIdentifier(m.name) && m.name.text === "id" && ts.isStringLiteral(m.initializer)) {
+          out.add(m.initializer.text);
+        }
+        ts.forEachChild(m, ids);
+      };
+      ids(n.initializer);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return [...out];
+}
+const registeredFiles = new Set(RBAC_SCREEN_TABS.flatMap((x) => [x.file, ...(x.gatedBy ? [x.gatedBy] : [])]));
+let discovered = 0;
+for (const abs of walk(join(SRC, "components"))) {
+  const file = relative(SRC, abs);
+  if (discoveredTabs(file).length < 2) continue;
+  discovered += 1;
+  if (registeredFiles.has(file)) continue;
+  if (NOT_RBAC_SCREENS[file]) continue;
+  fail(
+    `${file} has a tab bar but is not in lib/rbacScreenTabs.ts — register its tabs (and give each a ` +
+      `function or exemption), or list it in NOT_RBAC_SCREENS with the reason`,
+  );
+}
+for (const f of Object.keys(NOT_RBAC_SCREENS)) {
+  if (!existsSync(join(SRC, f))) fail(`NOT_RBAC_SCREENS lists ${f}, which no longer exists`);
+}
+
 for (const e of RBAC_WHOLE_MODULE_TABS) {
   if (!e.reason || e.reason.trim().length < 12) fail(`exemption ${e.module}|${e.tab} needs a real reason`);
   if (!screenTabs.has(`${e.module}|${e.tab}`)) fail(`exemption ${e.module}|${e.tab} names no screen tab (stale)`);
@@ -254,16 +316,71 @@ const PUBLIC_API_ROUTES: Record<string, string> = {
   "whatsapp/webhook": "re-export of wa/webhook (Meta signature checked there)",
 };
 
+/**
+ * Gates that tie a route to an RBAC module or function (or to a kind of
+ * caller with its own rule: a cron secret, a parent household, a signed
+ * webhook, a mobile feature, a super-admin check).
+ */
+const MODULE_GATES = new RegExp(
+  "\\b(" +
+    [
+      "requireStaffPermission",
+      "requireStaffPermissionOrFeature",
+      "assertPermission",
+      "authorizeSchoolDataDesk",
+      "deskReadGate",
+      "deskWriteGate",
+      "deskFeatureGateFor",
+      "requireAnyStaffPermission",
+      "invRoute",
+      "requireWaStaffApi",
+      "requireJobSecret",
+      "requireParentHousehold",
+      "parentHouseholdFrom",
+      "verify[A-Z][A-Za-z]+",
+      "assertMobileFeature",
+      "hasPermission",
+      "requireStaffPrincipal",
+      "authorizeDocumentAction",
+      "authorizeChatThread",
+      "authorizePaymentLinkAccess",
+      "assertSchoolWide",
+      "staffSectionScope",
+      "featureAccess",
+      "hasFeaturePermission",
+      "orCommsFunction",
+      "isSuperAdmin[A-Za-z]*",
+      "isProtectedSuperAdmin[A-Za-z]*",
+    ].join("|") +
+    ")\\(",
+);
+const baseline = new Set(SESSION_ONLY_ROUTE_BASELINE);
+
 let gated = 0;
+let sessionOnly = 0;
 for (const f of ROUTE_FILES) {
   const rel = relative(apiRoot, f).replace(/\/route\.ts$/, "");
   const src = readFileSync(f, "utf8");
   if (PUBLIC_API_ROUTES[rel]) continue;
-  if (AUTH_GATES.test(src)) {
-    gated += 1;
+  if (!AUTH_GATES.test(src)) {
+    fail(`app/api/${rel}: calls no auth gate — gate it, or add it to PUBLIC_API_ROUTES with the reason`);
     continue;
   }
-  fail(`app/api/${rel}: calls no auth gate — gate it, or add it to PUBLIC_API_ROUTES with the reason`);
+  gated += 1;
+  if (MODULE_GATES.test(src)) {
+    if (baseline.has(rel)) fail(`app/api/${rel} now names its module — remove it from SESSION_ONLY_ROUTE_BASELINE`);
+    continue;
+  }
+  sessionOnly += 1;
+  if (!baseline.has(rel)) {
+    fail(
+      `app/api/${rel}: signed in, but names no RBAC module or function — gate it with ` +
+        `requireStaffPermission(module, action) (or a desk / function gate)`,
+    );
+  }
+}
+for (const rel of SESSION_ONLY_ROUTE_BASELINE) {
+  if (!existsSync(join(apiRoot, rel, "route.ts"))) fail(`SESSION_ONLY_ROUTE_BASELINE lists app/api/${rel}, which no longer exists`);
 }
 for (const rel of Object.keys(PUBLIC_API_ROUTES)) {
   if (!existsSync(join(apiRoot, rel, "route.ts"))) fail(`PUBLIC_API_ROUTES lists app/api/${rel}, which no longer exists`);
@@ -280,5 +397,9 @@ console.log(
   `  ✓ ${tabCount} screen tabs across ${RBAC_SCREEN_TABS.length} screens map to ${RBAC_FEATURES.length} functions ` +
     `(${RBAC_WHOLE_MODULE_TABS.length} whole-module-only with reasons)`,
 );
-console.log(`  ✓ ${gated} API routes gated, ${Object.keys(PUBLIC_API_ROUTES).length} public on purpose`);
+console.log(`  ✓ ${discovered} screens with tab bars discovered, all registered or exempt`);
+console.log(
+  `  ✓ ${gated} API routes gated (${gated - sessionOnly} name a module/function; ${sessionOnly} session-only, frozen baseline), ` +
+    `${Object.keys(PUBLIC_API_ROUTES).length} public on purpose`,
+);
 console.log("rbacCatalogCompleteness.selftest.ts: OK");

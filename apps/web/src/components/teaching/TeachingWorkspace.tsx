@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { urlAsksForTab } from "@/lib/nucleusHandoff";
 import { BookMarked } from "lucide-react";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
@@ -79,6 +80,7 @@ function pct(v: number | null): string {
 
 export function TeachingWorkspace() {
   const session = useDemoSession();
+  const access = useAccessData();
   const [tab, setTab] = useState<TeachTab>("today");
 
   // The Nucleus bookmark opens this workspace straight at Nucleus progress, so the
@@ -535,9 +537,12 @@ export function TeachingWorkspace() {
           // Every tab is whole-module (lib/rbacFeatureCatalog/academics.ts:
           // the saves are /api/v1/teaching/* routes function grants do not
           // reach), so this passes the list through for every module holder.
-          // Until Masters load (roles are read from it) the page gate's
-          // answer stands rather than an empty tab bar.
-          items={masters ? visibleModuleTabs(teachTabs, session, masters, "teaching") : teachTabs}
+          // Decided from the loaded roles + roster, never before.
+          items={
+            access.ready
+              ? visibleModuleTabs(teachTabs, session, access.masters, "teaching", access.rbac ?? undefined)
+              : []
+          }
           value={tab}
           onChange={(id) => setTab(id as TeachTab)}
           aria-label="Teaching sections"
