@@ -2,6 +2,7 @@
  * Accounts state — jsonb blob on accounts_state + normalized accounts_desk_*.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   accountsSeedAllowed,
@@ -41,6 +42,8 @@ const blob = createDomainBlobPersistence<AccountsState>({
 
 export const accountsRemoteEnabled = blob.remoteEnabled;
 export const scheduleAccountsSync = (state: AccountsState) => {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureAccountsHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushAccountsRemoteServer(state));
     return;

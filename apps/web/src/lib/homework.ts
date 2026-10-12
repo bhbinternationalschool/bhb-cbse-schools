@@ -3,6 +3,7 @@
  * Demo store: localStorage `bhb_homework_v1`.
  */
 
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import {
@@ -313,6 +314,11 @@ export function homeworkStateIsEmpty(state: HomeworkState): boolean {
 export function seedHomeworkIfEmpty(ay?: string): HomeworkState {
   const existing = loadHomework();
   if (existing.posts.length > 0 || existing.diary.length > 0) return existing;
+  // Not a default: made-up rows that this used to save to the live desk
+  // whenever a page opened before its desk loaded (12 Oct 2026: a "practice"
+  // post under a real teacher's name reached parents). A school's desk holds
+  // only what its staff create; only the offline dev build gets the sample.
+  if (isSupabaseConfigured()) return existing;
   const masters = loadMasters();
   const section = masters.sections.find((s) => s.isActive !== false);
   const subject = (masters.subjects ?? []).find(

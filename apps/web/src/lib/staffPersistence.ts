@@ -26,6 +26,7 @@ import {
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 import {
   dedupeHydration,
+  hasDeskLoaded,
   isDeskHydrated,
   markDeskHydrated,
   resetDeskHydrated,
@@ -707,7 +708,7 @@ export function scheduleStaffSync(state: MastersState) {
   // the server's stamps every edited row goes as "new" and is dropped.
   // Every Masters save comes through here, most with no staff edit, so the
   // notice is shown only when there were staff rows that could have changed.
-  if (!isDeskHydrated(MODULE)) {
+  if (!hasDeskLoaded(MODULE)) {
     const held = STAFF_STAMPED_SLICES.some(
       (k) => ((state as unknown as Record<string, unknown[] | undefined>)[k] ?? []).length > 0,
     );

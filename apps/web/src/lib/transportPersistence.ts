@@ -2,6 +2,7 @@
  * Transport remote sync — jsonb blob on transport_state + normalized desk slices.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   loadTransport,
@@ -40,6 +41,8 @@ export function resetTransportPersistenceCache() {
 }
 
 export function scheduleTransportSync(state: TransportState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureTransportHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushTransportRemoteServer(state));
     return;

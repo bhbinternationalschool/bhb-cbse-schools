@@ -6,6 +6,20 @@
 const hydrated = new Map<string, number>();
 const DESK_HYDRATE_TTL_MS = 15_000;
 
+/**
+ * Desks this page has loaded from the server at least once since the last
+ * reset (12 Oct 2026). Unlike `isDeskHydrated` — a 15 s "loaded recently"
+ * cache that decides when to re-read — this never expires on its own, so it
+ * answers "is this page holding the real copy?" for the save guards
+ * (lib/deskLoadGuard). A reset (conflict reload, merge, logout) clears it
+ * until the next load lands.
+ */
+const loadedOnce = new Set<string>();
+
+export function hasDeskLoaded(module: string): boolean {
+  return loadedOnce.has(module);
+}
+
 export function isDeskHydrated(module: string): boolean {
   const last = hydrated.get(module);
   if (!last) return false;
@@ -26,6 +40,7 @@ export function deskEverHydrated(module: string): boolean {
 
 export function markDeskHydrated(module: string): void {
   hydrated.set(module, Date.now());
+  loadedOnce.add(module);
   if (everHydrated.has(module)) return;
   everHydrated.add(module);
   // Once per desk per page. Callers mark AFTER writing what they read (the
@@ -40,11 +55,16 @@ export function markDeskHydrated(module: string): void {
 }
 
 export function resetDeskHydrated(module?: string): void {
+  // loadedOnce clears (the save guards need a fresh load before saving);
   // everHydrated survives: a reset asks for a fresh read, it does not make
-  // what was read unknown (a re-pull after a merge must not send every
-  // screen back to "Checking access…").
-  if (module) hydrated.delete(module);
-  else hydrated.clear();
+  // what was read unknown to permission checks (no "Checking access…" flash).
+  if (module) {
+    hydrated.delete(module);
+    loadedOnce.delete(module);
+  } else {
+    hydrated.clear();
+    loadedOnce.clear();
+  }
   inFlight.clear();
 }
 
