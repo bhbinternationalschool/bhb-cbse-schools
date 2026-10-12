@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { attendanceCoverageNote, todayAttendanceFigures } from "./attendanceToday";
+import { attendanceCoverageNote, todayAttendanceCard, todayAttendanceFigures } from "./attendanceToday";
 
 console.log("attendanceToday.selftest.ts");
 
@@ -33,4 +33,28 @@ const m = (status: string) => ({ studentId: Math.random().toString(36), status }
 }
 
 assert.equal(todayAttendanceFigures([]).pct, 0);
+
+// 12 Oct 2026: 5 of 13 classes, 63 of 228 children, 50 present — the headline
+// is the coverage, not "79%".
+{
+  const regs = [
+    { sectionId: "a", marks: [...Array(2)].map(() => m("P")) },
+    { sectionId: "b", marks: [...Array(14)].map(() => m("P")).concat([m("A"), m("A")]) },
+    { sectionId: "c", marks: [...Array(18)].map(() => m("P")).concat([...Array(4)].map(() => m("A"))) },
+    { sectionId: "d", marks: [...Array(7)].map(() => m("P")).concat([...Array(5)].map(() => m("A"))) },
+    { sectionId: "e", marks: [...Array(9)].map(() => m("P")).concat([m("A"), m("A")]) },
+  ];
+  const f = todayAttendanceFigures(regs);
+  assert.equal(f.marked, 63);
+  assert.equal(f.pct, 79);
+  const card = todayAttendanceCard(f, 13, 228);
+  assert.equal(card.value, "5/13 classes", "partial morning: coverage is the headline");
+  assert.ok(card.hint.startsWith("79% present in marked classes"), card.hint);
+  assert.ok(card.hint.includes("50 present") && card.hint.includes("13 absent"), card.hint);
+  assert.ok(card.hint.includes("165 children not marked yet"), card.hint);
+  const full = todayAttendanceCard(f, 5, 63);
+  assert.equal(full.value, "79%", "every class marked: the percentage is the headline");
+  assert.ok(!full.hint.includes("not marked"), full.hint);
+  assert.deepEqual(todayAttendanceCard(todayAttendanceFigures([]), 13, 228), { value: "—", hint: "No registers marked yet today" });
+}
 console.log("attendanceToday.selftest: all assertions passed");

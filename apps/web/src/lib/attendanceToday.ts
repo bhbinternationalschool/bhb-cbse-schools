@@ -63,3 +63,30 @@ export function attendanceCoverageNote(f: TodayAttendanceFigures, activeSections
   if (activeStudents) parts.push(`${f.marked} of ${activeStudents} children marked`);
   return parts.join(" · ");
 }
+
+/**
+ * What the home "Attendance today" card shows (director, 12 Oct 2026: "still
+ * showing wrong"). With 5 of 13 classes marked the card said 79% in large
+ * type and the coverage only in the small print, so it read as the school's
+ * figure while 165 of 228 children had no mark. Until every class is marked
+ * the headline is the coverage ("5/13 classes"); the percentage of the marked
+ * children moves to the line underneath. Once all classes are in, the
+ * percentage is the headline. Pure.
+ */
+export function todayAttendanceCard(
+  f: TodayAttendanceFigures,
+  activeSections: number,
+  activeStudents: number,
+): { value: string; hint: string } {
+  if (!f.marked) return { value: "—", hint: "No registers marked yet today" };
+  const counts = `${f.present + f.late} present${f.halfDay ? ` · ${f.halfDay} half-day` : ""} · ${f.absent} absent · ${f.leave} leave`;
+  const complete = !activeSections || f.sectionsMarked >= activeSections;
+  if (complete) return { value: `${f.pct}%`, hint: counts };
+  const notMarked = activeStudents > f.marked ? activeStudents - f.marked : 0;
+  return {
+    value: `${f.sectionsMarked}/${activeSections} classes`,
+    hint: [`${f.pct}% present in marked classes`, counts, notMarked ? `${notMarked} children not marked yet` : ""]
+      .filter(Boolean)
+      .join(" · "),
+  };
+}

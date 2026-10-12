@@ -33,7 +33,7 @@ import { listUnifiedPayables } from "@/lib/accountsPayables";
 import { dashboardSnapshot } from "@/lib/accountsReports";
 import { loadAccounts } from "@/lib/accountsStore";
 import { loadAttendance, summarizeMarks } from "@/lib/attendance";
-import { attendanceCoverageNote, todayAttendanceFigures } from "@/lib/attendanceToday";
+import { todayAttendanceCard, todayAttendanceFigures } from "@/lib/attendanceToday";
 import { loadCertificates } from "@/lib/certificates";
 import { loadExams } from "@/lib/exams";
 import { buildFeesDashboardModel, feeCollectionModeBreakupRupees } from "@/lib/feeDashboard";
@@ -2684,9 +2684,7 @@ export function buildSchoolDashboard(
       (r) => inAcademicYear(r, ay) && r.date === today,
     );
     const todayAtt = todayAttendanceFigures(todayRegs);
-    const stuMarked = todayAtt.marked;
-    const attPct = todayAtt.pct;
-    const attCoverage = attendanceCoverageNote(
+    const attCard = todayAttendanceCard(
       todayAtt,
       new Set(activeStudents.map((s) => s.sectionId).filter(Boolean)).size,
       activeStudents.length,
@@ -2779,15 +2777,8 @@ export function buildSchoolDashboard(
             {
               id: "attendance",
               label: "Attendance today",
-              value: stuMarked ? `${attPct}%` : "—",
-              hint: stuMarked
-                ? [
-                    `${todayAtt.present + todayAtt.late} present${todayAtt.halfDay ? ` · ${todayAtt.halfDay} half-day` : ""} · ${todayAtt.absent} absent · ${todayAtt.leave} leave`,
-                    attCoverage ? `only ${attCoverage}` : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" — ")
-                : "No registers marked yet today",
+              value: attCard.value,
+              hint: attCard.hint,
               tone: "green",
               href: "/attendance",
             },
