@@ -65,7 +65,11 @@ const ROUTE_IDS: Record<string, DeskHydrateId[]> = {
   staff: ["staff", "staffHr", "staffAdvances", "staffAgreements", "staffAttendance", "salarySetup"],
   // Transport bills, links stops to fee lines and shows dues on the fleet.
   transport: ["transport", "fees", "payments"],
-  masters: ["salarySetup"],
+  // Masters edits leave setup (staff HR) and staff records: load them with
+  // the page, not in the idle sweep — an edit made before its desk loads is
+  // refused (createDeskSlicePersistence, staffPersistence). Roles &
+  // permissions are a core desk, loaded first on every page.
+  masters: ["salarySetup", "staffHr", "staff"],
   students: ["fees", "payments", "attendance"],
   comms: ["waTemplates", "erpChat", "staffChat", "automation"],
   payroll: ["staff", "staffHr", "staffAdvances", "salarySetup"],

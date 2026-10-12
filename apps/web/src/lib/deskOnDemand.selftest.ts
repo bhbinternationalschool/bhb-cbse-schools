@@ -40,6 +40,11 @@ void (async () => {
   assert.ok(priorityDeskHydrateIds("/students").has("attendance"), "student profile shows attendance");
   assert.ok(priorityDeskHydrateIds("/exams").has("attendance"), "report cards use attendance");
   assert.ok(priorityDeskHydrateIds("/field/calling").has("admissions"), "field apps read leads");
+  // 12 Oct 2026: Masters edits leave setup and staff records — both load with
+  // the page (an edit before its desk loads is refused, never sent).
+  const masters = priorityDeskHydrateIds("/masters");
+  assert.ok(masters.has("staffHr") && masters.has("staff"), "Masters loads staff HR and staff records up front");
+  assert.ok(masters.has("rbac"), "roles & permissions are a core desk");
   // Everyone lands on home: it forces nothing heavy; its dashboards load on first read.
   for (const id of HEAVY_ON_DEMAND_IDS) assert.equal(priorityDeskHydrateIds("/").has(id), false, `home does not force ${id}`);
   console.log("  ok  heavy desks load on their routes only");
