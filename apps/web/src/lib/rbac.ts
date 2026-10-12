@@ -151,19 +151,54 @@ export type UserRoleAssignment = {
  * handing it to every teacher in the school. Deliberately narrow: no scope
  * fields, an optional expiry, and it shows up in the access summary and the
  * audit trail so it can never be a quiet back door.
+ *
+ * Four kinds, exactly one target field set (12 Oct 2026, Assign to user):
+ *   module      — module-wide ALLOW (the original shape)
+ *   feature     — one function, ALLOW or DENY (`effect`)
+ *   denyModule  — module-wide DENY
+ * Resolution: personal deny > personal allow > roles. A protected super
+ * admin is never denied (nobody locks the school out of its own settings).
+ *
+ * Only a module-wide allow carries `module`. A browser or server on an older
+ * build reads every row with `module` as a module ALLOW and drops rows
+ * without it — so a deny or a function row must never carry `module`, or an
+ * old copy would read "take fees away from Shreya" as "give her fees".
  */
+export type UserGrantEffect = "allow" | "deny";
+
 export type UserPermissionGrant = {
   id: string;
   staffId: string;
-  module: RbacModule;
+  /** Module-wide allow. Absent on function rows and on denies (see above). */
+  module?: RbacModule;
+  /** One function (lib/rbacFeatures id) — allow or deny. */
+  feature?: string;
+  /** Module-wide deny. */
+  denyModule?: RbacModule;
+  effect: UserGrantEffect;
   actions: RbacAction[];
   /** Why it was given — read back in the access summary. */
   note: string;
   grantedBy: string;
   grantedAt: string;
-  /** ISO date (YYYY-MM-DD); empty = no expiry */
+  /** ISO date (YYYY-MM-DD); empty = no expiry. The day itself still counts. */
   expiresOn: string;
 };
+
+/** What a personal row points at. */
+export type PersonalGrantTarget = { level: "module" | "feature"; id: string };
+
+export function personalGrantTarget(g: UserPermissionGrant): PersonalGrantTarget {
+  if (g.feature) return { level: "feature", id: g.feature };
+  return { level: "module", id: (g.module || g.denyModule || "") as string };
+}
+
+/** The module a personal row belongs to (a function's own module). */
+export function personalGrantModule(g: UserPermissionGrant): RbacModule | null {
+  if (g.module) return g.module;
+  if (g.denyModule) return g.denyModule;
+  return g.feature ? findFeature(g.feature)?.module ?? null : null;
+}
 
 export type RbacAuditEntry = {
   id: string;
@@ -381,6 +416,23 @@ function moduleActionFor(action: RbacAction): RbacAction {
 }
 
 const ALL_ACTIONS: RbacAction[] = RBAC_ACTIONS.map((a) => a.id);
+
+/**
+ * Today in India (YYYY-MM-DD). Expiry dates are the school's calendar days:
+ * a grant "until 12 Oct" must still hold at 2 a.m. IST on the 12th, which
+ * the UTC date (still the 11th) would get right only by luck.
+ */
+export function rbacTodayIst(nowMs: number = Date.now()): string {
+  return new Date(nowMs + 330 * 60_000).toISOString().slice(0, 10);
+}
+
+/** An expiry the screens may save: empty (none) or a real YYYY-MM-DD date. */
+export function isValidRbacExpiry(v: string): boolean {
+  if (!v) return true;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+}
 
 function nid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -999,22 +1051,51 @@ function normalizeUserGrant(
   g: Partial<UserPermissionGrant> | null | undefined,
 ): UserPermissionGrant | null {
   const staffId = String(g?.staffId || "").trim();
-  if (!staffId || !g?.module) return null;
-  if (!RBAC_MODULES.some((m) => m.id === g.module)) return null;
+  if (!staffId || !g) return null;
+  const effect: UserGrantEffect = g.effect === "deny" ? "deny" : "allow";
+  let allowModule: RbacModule | undefined;
+  let feature: string | undefined;
+  let denyModule: RbacModule | undefined;
+  let allowed: RbacAction[] = ALL_ACTIONS;
+  if (g.feature) {
+    // A function the catalogue no longer has is dropped, not widened.
+    const def = findFeature(String(g.feature));
+    if (!def) return null;
+    feature = def.id;
+    allowed = def.actions;
+  } else {
+    const mod = (g.denyModule || g.module) as RbacModule | undefined;
+    if (!mod || !RBAC_MODULES.some((m) => m.id === mod)) return null;
+    // A deny that somehow carries `module` is still a deny — never an allow.
+    if (effect === "deny" || g.denyModule) denyModule = mod;
+    else allowModule = mod;
+  }
   const actions = (Array.isArray(g.actions) ? g.actions : []).filter(
-    (a): a is RbacAction => ALL_ACTIONS.includes(a as RbacAction),
+    (a): a is RbacAction => allowed.includes(a as RbacAction),
   );
   if (actions.length === 0) return null;
-  return {
+  // A malformed expiry must never read as "already expired" (that would
+  // silently lift a deny) nor as "never" for an allow (that would widen it):
+  // a deny keeps denying with no end date, an allow is dropped.
+  let expiresOn = String(g.expiresOn || "").trim();
+  if (!isValidRbacExpiry(expiresOn)) {
+    if (denyModule || effect === "deny") expiresOn = "";
+    else return null;
+  }
+  const row: UserPermissionGrant = {
     id: String(g.id || nid("ug")),
     staffId,
-    module: g.module,
+    effect: denyModule ? "deny" : effect,
     actions: [...new Set(actions)],
     note: String(g.note || ""),
     grantedBy: String(g.grantedBy || ""),
     grantedAt: String(g.grantedAt || new Date().toISOString()),
-    expiresOn: String(g.expiresOn || ""),
+    expiresOn,
   };
+  if (allowModule) row.module = allowModule;
+  if (feature) row.feature = feature;
+  if (denyModule) row.denyModule = denyModule;
+  return row;
 }
 
 /** Live per-person grants for the staff member this session resolves to. */
@@ -1026,7 +1107,7 @@ export function userGrantsFor(
   const self = masters ? resolveStaffForRbac(session, masters) : null;
   const staffId = self?.id || session.staffId || "";
   if (!staffId) return [];
-  const today = new Date().toISOString().slice(0, 10);
+  const today = rbacTodayIst();
   return (rbac.userGrants ?? []).filter(
     (g) => g.staffId === staffId && (!g.expiresOn || g.expiresOn >= today),
   );
@@ -1047,7 +1128,7 @@ export function setUserGrant(
   const staffId = input.staffId.trim();
   if (!staffId) return state;
   const rest = (state.userGrants ?? []).filter(
-    (g) => !(g.staffId === staffId && g.module === input.module),
+    (g) => !(g.staffId === staffId && g.module === input.module && g.effect === "allow"),
   );
   const actions = [...new Set(input.actions)].filter((a) =>
     ALL_ACTIONS.includes(a),
@@ -1057,6 +1138,7 @@ export function setUserGrant(
     id: nid("ug"),
     staffId,
     module: input.module,
+    effect: "allow",
     actions,
     note: input.note || "",
     grantedBy: input.grantedBy || "",
@@ -1071,6 +1153,137 @@ export function removeUserGrant(state: RbacState, id: string): RbacState {
     ...state,
     userGrants: (state.userGrants ?? []).filter((g) => g.id !== id),
   };
+}
+
+/**
+ * Set one person's actions on one target (a module or a function), as an
+ * allow or a deny. The row keeps its id when it already exists — an edit,
+ * not a delete and a fresh insert — and empty actions remove it (a named
+ * delete on the next save).
+ */
+export function setPersonalGrant(
+  state: RbacState,
+  input: {
+    staffId: string;
+    target: PersonalGrantTarget;
+    effect: UserGrantEffect;
+    actions: RbacAction[];
+    note?: string;
+    grantedBy?: string;
+    expiresOn?: string;
+  },
+): RbacState {
+  const staffId = input.staffId.trim();
+  if (!staffId || !input.target.id) return state;
+  if (input.expiresOn !== undefined && !isValidRbacExpiry(input.expiresOn)) {
+    throw new Error(`"${input.expiresOn}" is not a date — use YYYY-MM-DD, or leave the expiry empty.`);
+  }
+  const all = state.userGrants ?? [];
+  const same = (g: UserPermissionGrant) => {
+    if (g.staffId !== staffId || g.effect !== input.effect) return false;
+    const t = personalGrantTarget(g);
+    return t.level === input.target.level && t.id === input.target.id;
+  };
+  const prev = all.find(same);
+  const rest = all.filter((g) => !same(g));
+  const row = normalizeUserGrant({
+    id: prev?.id || nid("ug"),
+    staffId,
+    effect: input.effect,
+    actions: input.actions,
+    note: input.note ?? prev?.note ?? "",
+    grantedBy: input.grantedBy ?? prev?.grantedBy ?? "",
+    grantedAt: prev && sameActions(prev.actions, input.actions) ? prev.grantedAt : new Date().toISOString(),
+    expiresOn: input.expiresOn ?? prev?.expiresOn ?? "",
+    ...(input.target.level === "feature"
+      ? { feature: input.target.id }
+      : input.effect === "deny"
+        ? { denyModule: input.target.id as RbacModule }
+        : { module: input.target.id as RbacModule }),
+  });
+  if (!row) return { ...state, userGrants: rest };
+  // Keep the row where it was, so a save sends one changed row.
+  const next = prev
+    ? all.filter((g) => g === prev || !same(g)).map((g) => (g === prev ? row : g))
+    : [...all, row];
+  return { ...state, userGrants: next };
+}
+
+function sameActions(a: RbacAction[], b: RbacAction[]): boolean {
+  return a.length === b.length && a.every((x) => b.includes(x));
+}
+
+/**
+ * Has the office turned this off for this one person? A personal deny on
+ * the function, or on its whole module. Never true for a protected super
+ * admin.
+ */
+export function isFeaturePersonallyDenied(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  featureId: string,
+  action: RbacAction,
+  rbac?: RbacState,
+): boolean {
+  if (isProtectedSuperAdminEmail(session.email)) return false;
+  const def = findFeature(featureId);
+  if (!def) return false;
+  const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+  // Nearly every school has no denies at all; skip the roster lookup then.
+  if (!state.userGrants?.some((g) => g.effect === "deny")) return false;
+  // A module deny is on the module's actions: "send" is the module's
+  // "edit" (FEATURE_ACTION_IMPLIED_BY), so a Notices · edit deny blocks it.
+  const modAction = moduleActionFor(action);
+  return userGrantsFor(state, session, masters).some(
+    (g) =>
+      g.effect === "deny" &&
+      ((g.feature === def.id && g.actions.includes(action)) ||
+        (g.denyModule === def.module && g.actions.includes(modAction))),
+  );
+}
+
+function moduleDeniedFor(
+  personal: UserPermissionGrant[],
+  session: SessionLike,
+  module: RbacModule,
+  action: RbacAction,
+): boolean {
+  if (isProtectedSuperAdminEmail(session.email)) return false;
+  return personal.some(
+    (g) => g.effect === "deny" && g.denyModule === module && g.actions.includes(action),
+  );
+}
+
+/** Does this person carry any personal function deny inside `module`? */
+function hasFeatureDeniesIn(
+  state: RbacState,
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+): boolean {
+  if (isProtectedSuperAdminEmail(session.email)) return false;
+  if (!state.userGrants?.some((g) => g.effect === "deny")) return false;
+  return userGrantsFor(state, session, masters).some(
+    (g) => g.effect === "deny" && !!g.feature && findFeature(g.feature)?.module === module,
+  );
+}
+
+/**
+ * A tab the person holds through the whole module, but where the office
+ * has personally denied `action` on every function the tab serves. A tab
+ * no function lists is never closed this way — deny the module instead.
+ */
+function tabPersonallyDenied(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  tab: string,
+  action: RbacAction,
+  state: RbacState,
+): boolean {
+  const fns = featuresForTab(module, tab);
+  if (fns.length === 0) return false;
+  return fns.every((f) => isFeaturePersonallyDenied(session, masters, f.id, action, state));
 }
 
 export function loadRbac(): RbacState {
@@ -1381,6 +1594,10 @@ export function featureAccess(
   const def = findFeature(featureId);
   if (!def) return { allowed: false, ownClassesOnly: false };
   const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+  // Personal deny > personal allow > roles (Masters → Roles → Assign to user).
+  if (isFeaturePersonallyDenied(session, masters, featureId, action, state)) {
+    return { allowed: false, ownClassesOnly: false };
+  }
   if (hasPermission(session, masters, def.module, action, state)) {
     return { allowed: true, ownClassesOnly: false };
   }
@@ -1388,7 +1605,10 @@ export function featureAccess(
   const granting = roles.filter((r) =>
     (r.featureGrants ?? []).some((g) => g.feature === featureId && g.actions.includes(action)),
   );
-  if (granting.length === 0) return { allowed: false, ownClassesOnly: false };
+  const personalAllow = userGrantsFor(state, session, masters).some(
+    (g) => g.effect === "allow" && g.feature === featureId && g.actions.includes(action),
+  );
+  if (granting.length === 0 && !personalAllow) return { allowed: false, ownClassesOnly: false };
   // A class-scoped function always reaches the person's own classes only —
   // whichever role (or clone of one) carries it. Leadership and office
   // reach every class through the server's teaching scope, and the whole
@@ -1413,8 +1633,18 @@ export function featureGrantHeld(
   const def = findFeature(featureId);
   if (!def || !def.actions.includes(action)) return false;
   const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
-  return resolveSessionRoles(state, session, masters).some((r) =>
-    (r.featureGrants ?? []).some((g) => g.feature === featureId && g.actions.includes(action)),
+  // Personal deny (the function, or its module at the module action) wins;
+  // then a role's function grant, or a personal allow of the function.
+  if (isFeaturePersonallyDenied(session, masters, featureId, action, state)) return false;
+  if (
+    resolveSessionRoles(state, session, masters).some((r) =>
+      (r.featureGrants ?? []).some((g) => g.feature === featureId && g.actions.includes(action)),
+    )
+  ) {
+    return true;
+  }
+  return userGrantsFor(state, session, masters).some(
+    (g) => g.effect === "allow" && g.feature === featureId && g.actions.includes(action),
   );
 }
 
@@ -1453,7 +1683,10 @@ export function canSeeModuleTab(
   tab: string,
   rbac?: RbacState,
 ): boolean {
-  if (hasPermission(session, masters, module, "view", rbac)) return true;
+  if (hasPermission(session, masters, module, "view", rbac)) {
+    const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+    return !tabPersonallyDenied(session, masters, module, tab, "view", state);
+  }
   // Any action the function carries opens its tab — a person given only
   // "Send" on Parents on the app still has to reach the button.
   return featuresForTab(module, tab).some((f) =>
@@ -1473,7 +1706,10 @@ export function canWriteModuleTab(
   action: RbacAction = "edit",
   rbac?: RbacState,
 ): boolean {
-  if (hasPermission(session, masters, module, action, rbac)) return true;
+  if (hasPermission(session, masters, module, action, rbac)) {
+    const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+    return !tabPersonallyDenied(session, masters, module, tab, action, state);
+  }
   return featuresForTab(module, tab).some(
     (f) => featureAccess(session, masters, f.id, action, rbac).allowed,
   );
@@ -1487,7 +1723,10 @@ export function visibleModuleTabs<T extends { id: string }>(
   module: RbacModule,
   rbac?: RbacState,
 ): T[] {
-  if (hasPermission(session, masters, module, "view", rbac)) return items;
+  if (hasPermission(session, masters, module, "view", rbac)) {
+    const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+    if (!hasFeatureDeniesIn(state, session, masters, module)) return items;
+  }
   return items.filter((t) => canSeeModuleTab(session, masters, module, t.id, rbac));
 }
 
@@ -1598,7 +1837,7 @@ export function moduleForHref(href: string): RbacModule | null {
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return rbacTodayIst();
 }
 
 function assignmentActive(a: UserRoleAssignment): boolean {
@@ -1794,14 +2033,18 @@ export function hasPermission(
 ): boolean {
   const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
   // A function-only action ("send") is held at module level through the
-  // module action that always carried it ("edit").
+  // module action that always carried it ("edit") — and a personal deny of
+  // that module action blocks it too.
   const modAction = moduleActionFor(action);
+  const personal = userGrantsFor(state, session, masters);
+  // A personal deny on the whole module beats every role and grant.
+  if (moduleDeniedFor(personal, session, module, modAction)) return false;
   const roles = resolveSessionRoles(state, session, masters);
   const eff = effectivePermissions(roles);
   if (eff.get(module)?.has(modAction)) return true;
   // …then anything the office gave this person alone.
-  return userGrantsFor(state, session, masters).some(
-    (g) => g.module === module && g.actions.includes(modAction),
+  return personal.some(
+    (g) => g.effect === "allow" && g.module === module && g.actions.includes(modAction),
   );
 }
 
@@ -1857,15 +2100,21 @@ export function hasScopedPermission(
   entity?: EntityScope,
 ): boolean {
   const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+  // A function-only action ("send") is held at module level through the
+  // module action that always carried it ("edit") — and a personal deny of
+  // that module action blocks it too.
   const modAction = moduleActionFor(action);
+  const personal = userGrantsFor(state, session, masters);
+  // A personal deny on the whole module beats every role and grant.
+  if (moduleDeniedFor(personal, session, module, modAction)) return false;
   const scopedRoles = resolveSessionRoleScopes(state, session, masters);
   for (const { role, scope } of scopedRoles) {
     const grant = role.permissions.find((g) => g.module === module);
     if (!grant?.actions.includes(modAction)) continue;
     if (scopeAllows(scope, entity)) return true;
   }
-  return userGrantsFor(state, session, masters).some(
-    (g) => g.module === module && g.actions.includes(modAction),
+  return personal.some(
+    (g) => g.effect === "allow" && g.module === module && g.actions.includes(modAction),
   );
 }
 

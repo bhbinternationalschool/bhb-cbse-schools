@@ -1,6 +1,7 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, resolveApiAuth, type ApiAuthContext } from "@/lib/api/v1/auth";
-import { featureGrantHeld, type RbacAction } from "@/lib/rbac";
+import { functionGrantHeldOnServer } from "@/lib/apiRouteAuth.server";
+import { isFeaturePersonallyDenied, type RbacAction } from "@/lib/rbac";
 import { writeAudit } from "@/lib/audit.server";
 import { requestMeta } from "@/lib/api/v1/auth";
 import {
@@ -14,10 +15,14 @@ export const runtime = "nodejs";
 
 /**
  * The wa_chatbot module grant, or the Answer book function
- * (lib/rbacFeatureCatalog/comms.ts) holding the same action.
+ * (lib/rbacFeatureCatalog/comms.ts) holding the same action. A personal
+ * deny of the function (Masters → Roles → Assign to user) wins over both.
  */
 function assertAnswerBook(ctx: ApiAuthContext, action: RbacAction) {
-  if (featureGrantHeld(ctx.session, ctx.masters, "wa_chatbot.answer_book", action, ctx.rbac)) return;
+  if (isFeaturePersonallyDenied(ctx.session, ctx.masters, "wa_chatbot.answer_book", action, ctx.rbac)) {
+    throw new ApiError("forbidden", "The answer book is turned off for you", 403);
+  }
+  if (functionGrantHeldOnServer(ctx, "wa_chatbot.answer_book", action)) return;
   assertPermission(ctx, "wa_chatbot", action);
 }
 

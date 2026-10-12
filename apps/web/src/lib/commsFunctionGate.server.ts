@@ -1,5 +1,5 @@
-import { requireStaffApi, type RouteAuthResult } from "@/lib/apiRouteAuth.server";
-import { featureGrantHeld, type RbacAction } from "@/lib/rbac";
+import { functionGrantHeldOnServer, requireStaffApi, type RouteAuthResult } from "@/lib/apiRouteAuth.server";
+import type { RbacAction } from "@/lib/rbac";
 
 /**
  * The WhatsApp inbox routes (chats, class channels, household log) sit
@@ -21,6 +21,5 @@ export async function orCommsFunction(
   if (base.ok || base.response.status !== 403) return base;
   const staff = await requireStaffApi(req);
   if (!staff.ok) return base;
-  const { session, masters, rbac } = staff.ctx;
-  return featureGrantHeld(session, masters, featureId, action, rbac) ? staff : base;
+  return functionGrantHeldOnServer(staff.ctx, featureId, action) ? staff : base;
 }

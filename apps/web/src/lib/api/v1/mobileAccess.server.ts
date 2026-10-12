@@ -1,6 +1,8 @@
 import type { ApiAuthContext } from "@/lib/api/v1/auth";
 import { ApiError } from "@/lib/api/v1/errors";
-import { featureGrantHeld, hasPermission, resolveSessionRoles } from "@/lib/rbac";
+import { functionGrantHeldOnServer } from "@/lib/apiRouteAuth.server";
+import { hasPermission, isFeaturePersonallyDenied, resolveSessionRoles } from "@/lib/rbac";
+import { findFeature } from "@/lib/rbacFeatures";
 import {
   MOBILE_FEATURES,
   defaultMobileAccess,
@@ -16,17 +18,53 @@ import {
  * Both gates are applied here — the RBAC grants that already exist, and the
  * mobile map the office edits in Masters → Roles. See lib/mobileFeatures.ts.
  */
+/**
+ * The web functions (lib/rbacFeatureCatalog) behind an app screen. When the
+ * office has personally turned off every one of them for the screen's
+ * action (Masters → Roles → Assign to user), the screen is refused too —
+ * a whole-module deny already is, through hasPermission.
+ */
+export const MOBILE_FEATURE_FUNCTIONS: Partial<Record<MobileFeatureId, string[]>> = {
+  admission_leads: ["admissions.leads"],
+  field_survey: ["admissions.field_survey"],
+  attendance_mark: ["attendance.student_register"],
+  homework_post: ["homework.assign"],
+  marks_entry: ["exams.marks"],
+  student_leave_decide: ["student_leave.requests"],
+  complaints_handle: ["complaints.desk"],
+  student_notes: ["discipline.register"],
+  ptm_meet: ["ptm.events", "ptm.slots", "ptm.bookings", "ptm.feedback"],
+  staff_leave_approve: ["staff.leave"],
+  broadcast: ["notices.circulars"],
+  visitor_gate: ["visitors.register"],
+  gate_pass_release: ["visitors.register"],
+};
+
+export function mobileFeaturePersonallyDenied(ctx: ApiAuthContext, feature: MobileFeatureId): boolean {
+  const meta = mobileFeature(feature);
+  const fns = (MOBILE_FEATURE_FUNCTIONS[feature] ?? []).filter((id) => findFeature(id));
+  if (!meta || fns.length === 0) return false;
+  return fns.every((id) =>
+    isFeaturePersonallyDenied(ctx.session, ctx.masters, id, meta.action, ctx.rbac),
+  );
+}
+
 export function resolveMobileAccess(ctx: ApiAuthContext): MobileFeatureResolution {
   const roles = resolveSessionRoles(ctx.rbac, ctx.session, ctx.masters);
-  return resolveMobileFeatures({
+  const res = resolveMobileFeatures({
     roleCodes: roles.map((r) => r.code),
     staffId: ctx.session.staffId,
     access: ctx.rbac.mobile ?? defaultMobileAccess(),
     can: (module, action) =>
       hasPermission(ctx.session, ctx.masters, module, action, ctx.rbac),
-    canFeature: (featureId, action) =>
-      featureGrantHeld(ctx.session, ctx.masters, featureId, action, ctx.rbac),
+    canFeature: (featureId, action) => functionGrantHeldOnServer(ctx, featureId, action),
   });
+  const off = res.features.filter((f) => mobileFeaturePersonallyDenied(ctx, f));
+  if (off.length === 0) return res;
+  return {
+    features: res.features.filter((f) => !off.includes(f)),
+    blockedByRbac: [...res.blockedByRbac, ...off],
+  };
 }
 
 export function hasMobileFeature(

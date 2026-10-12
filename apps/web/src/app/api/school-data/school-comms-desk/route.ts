@@ -3,6 +3,7 @@ import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
 import {
   deskReadGate,
   deskWriteGate,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
   stripDeskForFeatures,
@@ -65,6 +66,20 @@ export async function POST(req: Request) {
   // stored desk, their notices only — never the body as sent. Their copy of
   // news and albums is empty (GET serves them only their slices), and this
   // push would otherwise prune the school's news and gallery with it.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (gate.mode === "full") {
+    const refused = await deniedSliceGuard(
+      req,
+      "notices",
+      async () => {
+        const s = await fetchSchoolCommsDeskFromDb();
+        return s.ok ? (canonicalCommsDesk(s.bundle) as unknown as Record<string, unknown>) : null;
+      },
+      canonicalCommsDesk(body),
+    );
+    if (refused) return refused;
+  }
   if (gate.mode === "feature") {
     const stored = await fetchSchoolCommsDeskFromDb();
     if (!stored.ok) {

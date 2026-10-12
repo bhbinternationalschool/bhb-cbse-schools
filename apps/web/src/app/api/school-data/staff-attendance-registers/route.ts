@@ -7,6 +7,7 @@ import {
 import type { StaffAttendanceState } from "@/lib/staffAttendance";
 import {
   deskFeatureGateFor,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
   stripDeskForFeatures,
@@ -149,6 +150,26 @@ export async function POST(req: Request) {
 
   // Function holders: merged onto the stored desk, only their functions'
   // slices — never the body as sent.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (!gate) {
+    const refused = await deniedSliceGuard(
+      req,
+      "attendance",
+      async () => {
+        const [desk, settings] = await Promise.all([
+          fetchStaffAttendanceDeskFromDb(),
+          readStaffAttendanceSettings(),
+        ]);
+        return desk.ok && settings.ok
+          ? { registers: desk.registers, settings: settings.settings, outdoorDuty: desk.ancillary.outdoorDuty ?? [] }
+          : null;
+      },
+      body,
+      { prefix: STAFF_PREFIX },
+    );
+    if (refused) return refused;
+  }
   if (gate) {
     const [desk, settings] = await Promise.all([
       fetchStaffAttendanceDeskFromDb(),

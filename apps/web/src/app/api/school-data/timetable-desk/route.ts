@@ -3,6 +3,7 @@ import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
 import {
   deskReadGate,
   deskWriteGate,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
 } from "@/lib/deskFeatureGate.server";
@@ -66,6 +67,20 @@ export async function POST(req: Request) {
   // The version this save was made from. A function holder's save is merged
   // onto the copy read just below, so that read is its version.
   let baseUpdatedAt = body.baseUpdatedAt ?? null;
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (gate.mode === "full") {
+    const refused = await deniedSliceGuard(
+      req,
+      "timetable",
+      async () => {
+        const s = await fetchTimetableDeskFromDb();
+        return s.ok ? (s.bundle as unknown as Record<string, unknown>) : null;
+      },
+      body,
+    );
+    if (refused) return refused;
+  }
   if (gate.mode === "feature") {
     const stored = await fetchTimetableDeskFromDb();
     if (!stored.ok) {

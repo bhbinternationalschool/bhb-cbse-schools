@@ -3,6 +3,7 @@ import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
 import {
   deskReadGate,
   deskWriteGate,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
   stripDeskForFeatures,
@@ -67,6 +68,20 @@ export async function POST(req: Request) {
 
   // Function-only writers (Gallery → Albums & photos): merged onto the
   // stored desk, row by row — never the body as sent.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (gate.mode === "full") {
+    const refused = await deniedSliceGuard(
+      req,
+      "gallery",
+      async () => {
+        const s = await fetchGalleryDeskFromDb();
+        return s.ok ? (canonicalCommsDesk(s.bundle) as unknown as Record<string, unknown>) : null;
+      },
+      canonicalCommsDesk({ albums: Array.isArray(body.albums) ? body.albums : [], photos: Array.isArray(body.photos) ? body.photos : [] }),
+    );
+    if (refused) return refused;
+  }
   if (gate.mode === "feature") {
     const stored = await fetchGalleryDeskFromDb();
     if (!stored.ok) {

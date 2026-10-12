@@ -4,6 +4,7 @@ import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
 import {
   deskReadGate,
   deskWriteGate,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
   stripDeskForFeatures,
@@ -88,6 +89,20 @@ export async function POST(req: Request) {
 
   // Function-only writers (e.g. Transport → Fuel log): merged onto the
   // stored desk, only their functions' slices — never the body as sent.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (gate.mode === "full") {
+    const refused = await deniedSliceGuard(
+      req,
+      "transport",
+      async () => {
+        const s = await fetchTransportDeskFromDb();
+        return s.ok ? (s.bundle as unknown as Record<string, unknown>) : null;
+      },
+      body,
+    );
+    if (refused) return refused;
+  }
   if (gate.mode === "feature") {
     const stored = await fetchTransportDeskFromDb();
     if (!stored.ok) {

@@ -6,6 +6,7 @@ import {
 } from "@/lib/apiRouteAuth.server";
 import {
   deskFeatureGateFor,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
   stripDeskForFeatures,
@@ -189,6 +190,20 @@ export async function POST(req: Request) {
 
   // Function holders (e.g. PTM → Meeting slots): merged onto the stored
   // desk, only their functions' slices — never the body as sent.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (!gate) {
+    const refused = await deniedSliceGuard(
+      req,
+      "ptm",
+      async () => {
+        const s = await fetchPtmDeskFromDb();
+        return s.ok ? (s.bundle as unknown as Record<string, unknown>) : null;
+      },
+      body,
+    );
+    if (refused) return refused;
+  }
   if (gate) {
     const stored = await fetchPtmDeskFromDb();
     if (!stored.ok) {

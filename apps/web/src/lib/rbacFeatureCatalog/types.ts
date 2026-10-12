@@ -9,9 +9,9 @@ export type RbacFeatureDef = {
   label: string;
   blurb: string;
   /**
-   * Sub-heading the role editor groups the function under, mirroring the
-   * old ERP's tree (e.g. Fees → "Cheques" → Manage cheques / PDC / Bounced).
-   * Optional; ungrouped functions sit directly under the module.
+   * Optional sub-heading inside the module in Masters → Roles (e.g. "Fee
+   * masters", "Reports"). Display only — functions sharing a group are shown
+   * under it; functions without one sit directly under the module.
    */
   group?: string;
   /** The actions that mean something for this function. */

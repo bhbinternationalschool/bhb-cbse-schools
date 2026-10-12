@@ -12,6 +12,7 @@ import { join } from "node:path";
 
 import { defaultMobileAccess, resolveMobileFeatures } from "./mobileFeatures";
 import { libraryDeskKeysFor } from "./rbacFeatureCatalog/store";
+import { emptyMastersShell } from "./masters";
 import {
   BUILT_IN_GRANT_ADDITIONS,
   canSeeModuleTab,
@@ -19,6 +20,7 @@ import {
   featureAccess,
   featureGrantHeld,
   hasPermission,
+  isFeaturePersonallyDenied,
   normalizeRbacState,
   roleHasAction,
   type RbacRole,
@@ -143,6 +145,56 @@ const as = (roleCode: string): SessionLike => ({ roleCode, fullName: "X", person
   assert.ok(!counter.has("procurementDocs") && !counter.has("ebooks"), "the counter clerk sees no procurement or e-books");
   assert.ok(libraryDeskKeysFor(["store.library_reports"]).has("procurementDocs"));
   assert.equal(libraryDeskKeysFor(["store.counter"]).size, 0, "a non-library store function reads nothing");
+}
+
+/* ── Personal deny / allow (#575) on function grants ─────────────────── */
+{
+  const m = emptyMastersShell();
+  m.staff = [
+    { id: "stf_shreya", fullName: "Shreya Like", empCode: "S1", stream: "non_teaching", category: "permanent",
+      departmentId: null, designationId: null, campusId: null, mobile: "9000000009", email: "" } as (typeof m.staff)[number],
+  ];
+  const shreya: SessionLike = { roleCode: "support", staffId: "stf_shreya", fullName: "Shreya Like", persona: "staff" };
+  const office = defaultBuiltInRoles().find((r) => r.code === "office")!;
+  const row = (over: Record<string, unknown>) => ({
+    id: `ug_${Math.random().toString(36).slice(2, 8)}`, staffId: "stf_shreya", note: "", grantedBy: "t",
+    grantedAt: "2026-10-12T00:00:00.000Z", expiresOn: "", ...over,
+  });
+  const st = (grants: Record<string, unknown>[]) =>
+    normalizeRbacState({
+      version: 1,
+      roles: [office],
+      assignments: [{ id: "a1", staffId: "stf_shreya", roleId: office.id, isPrimary: true,
+        scope: { campusIds: [], classIds: [], departmentIds: [] }, expiresOn: "", note: "" }],
+      userGrants: grants as never,
+    });
+
+  // Office by assignment holds the invite function by default.
+  assert.ok(featureGrantHeld(shreya, m, FN, "send", st([])), "assigned office member sends the invite");
+  // Personal deny of the function: refused, and the module-holder door too.
+  const denyFn = st([row({ feature: FN, effect: "deny", actions: ["view", "send"] })]);
+  assert.ok(!featureGrantHeld(shreya, m, FN, "send", denyFn), "deny wins over the role's function grant");
+  assert.ok(isFeaturePersonallyDenied(shreya, m, FN, "view", denyFn), "the list route refuses (requireStaffPermissionOrFeature)");
+  assert.ok(isFeaturePersonallyDenied(shreya, m, FN, "send", denyFn), "the invite route refuses");
+  // A Notices · edit module deny also blocks "send" (send = the module's edit).
+  const denyMod = st([row({ denyModule: "notices", effect: "deny", actions: ["edit"] })]);
+  assert.ok(!hasPermission(shreya, m, "notices", "send", denyMod), "module deny of edit blocks send at module level");
+  assert.ok(isFeaturePersonallyDenied(shreya, m, FN, "send", denyMod), "…and on the function");
+  assert.ok(!featureGrantHeld(shreya, m, FN, "send", denyMod));
+  assert.ok(!featureAccess(shreya, m, FN, "send", denyMod).allowed);
+  // A personal allow of a function the roles lack opens it.
+  const allow = st([row({ feature: "wa_chatbot.answer_book", effect: "allow", actions: ["view"] })]);
+  assert.ok(featureGrantHeld(shreya, m, "wa_chatbot.answer_book", "view", allow), "personal allow counts");
+  assert.ok(!featureGrantHeld(shreya, m, "wa_chatbot.answer_book", "edit", allow), "…at its own actions only");
+
+  // Server: never-read rbac refuses function-only access; deny closes the module door.
+  const auth = readFileSync(join(__dirname, "apiRouteAuth.server.ts"), "utf8");
+  assert.ok(/if \(ctx\.rbacKnown === false\) return false;\s*return featureGrantHeld/.test(auth), "unknown roles → no function door");
+  assert.ok(/functionPersonallyDenied\(base\.ctx, featureId, featureAction\)/.test(auth), "a function deny closes the module door");
+  for (const f of ["../app/api/comms/parents-on-app/route.ts", "../app/api/comms/parents-on-app/invite/route.ts"]) {
+    assert.ok(/requireStaffPermissionOrFeature\(\s*req,\s*"notices",/.test(readFileSync(join(__dirname, f), "utf8")), f);
+  }
+  assert.ok(/functionGrantHeldOnServer/.test(readFileSync(join(__dirname, "commsFunctionGate.server.ts"), "utf8")));
 }
 
 /* ── Visiting pay: Payroll or its function, never the Staff module ──── */
