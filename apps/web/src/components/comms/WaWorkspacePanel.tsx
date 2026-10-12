@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { loadMasters } from "@/lib/masters";
-import { canSeeModuleTab, hasPermission, loadRbac, type RbacModule } from "@/lib/rbac";
+import { canWriteModuleTab, hasPermission, loadRbac, type RbacModule } from "@/lib/rbac";
+import { commsTabOpenedByFunction } from "@/lib/commsTabAccess";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ClassChannelsPanel } from "@/components/comms/ClassChannelsPanel";
 import { HouseholdMessageLogPanel } from "@/components/comms/HouseholdMessageLogPanel";
@@ -90,19 +91,26 @@ export function WaWorkspacePanel({
   const session = useDemoSession();
   const [tab, setTab] = useState<WaWorkspaceTab>(initialTab);
 
-  // Holding Notices, every section shows, as it always has. Holding only
-  // some WhatsApp functions (Masters → Roles), only their sections — each
-  // section's server route accepts exactly those functions.
+  // The office (notices · edit — the only people the Comms screen showed
+  // this tab to before functions) sees every section, as it always has.
+  // Holding only some WhatsApp functions (Masters → Roles), only their
+  // sections — each section's server route accepts exactly those functions.
+  // A module's edit grant opens its sections too; a view grant alone does
+  // not — a teacher's notices / notifications · view opens none of them.
   const [shownTabs, setShownTabs] = useState<ModuleTabItem[]>(TABS);
   useEffect(() => {
     const masters = loadMasters();
     const rbac = loadRbac();
     setShownTabs(
-      hasPermission(session, masters, "notices", "view", rbac)
+      hasPermission(session, masters, "notices", "edit", rbac)
         ? TABS
-        : TABS.filter((t) =>
-            canSeeModuleTab(session, masters, SECTION_MODULE[t.id as WaWorkspaceTab], t.id, rbac),
-          ),
+        : TABS.filter((t) => {
+            const mod = SECTION_MODULE[t.id as WaWorkspaceTab];
+            return (
+              commsTabOpenedByFunction(session, masters, t.id, rbac) ||
+              (mod !== "notices" && canWriteModuleTab(session, masters, mod, t.id, "edit", rbac))
+            );
+          }),
     );
   }, [session]);
   useEffect(() => {

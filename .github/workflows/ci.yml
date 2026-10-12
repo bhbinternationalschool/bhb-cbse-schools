@@ -539,6 +539,8 @@ jobs:
           npm run test:rbac-infer
           npm run test:rbac-scope
           npm run test:rbac-user-grants
+          npm run test:rbac-catalog-complete
+          npm run test:rbac-function-grants
           npm run test:visitor-gate
           npm run test:play-billing
           npm run test:ai-content-report

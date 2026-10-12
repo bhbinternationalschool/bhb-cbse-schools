@@ -7,6 +7,8 @@ import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
+import { visibleModuleTabs } from "@/lib/rbac";
+import { useDemoSession } from "@/components/shell/SessionContext";
 import {
   composeWhatsAppVaultExpiryDigest,
   deleteVaultDocument,
@@ -107,6 +109,11 @@ export function VaultWorkspace() {
     "add",
     "reports",
   ]);
+  const session = useDemoSession();
+  // Every vault tab is the whole-module grant's (one register — see
+  // rbacFeatureCatalog/store.ts); the list still goes through the gate so a
+  // future vault function opens exactly its tab.
+  const shownTabs = useMemo(() => visibleModuleTabs(TABS, session, null, "vault"), [session]);
   const [state, setState] = useState<VaultState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -248,7 +255,7 @@ export function VaultWorkspace() {
       }
     >
       <ModuleTabs
-        items={TABS.map((t) =>
+        items={shownTabs.map((t) =>
           t.id === "alerts"
             ? { ...t, badge: alerts.length || undefined }
             : t,

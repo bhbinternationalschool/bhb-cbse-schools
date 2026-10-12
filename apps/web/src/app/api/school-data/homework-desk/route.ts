@@ -41,11 +41,20 @@ export async function GET(req: Request) {
       (["view", "create", "edit", "delete"] as const).some((a) => g.access(id, a).allowed);
     const own = <T extends { classId: string }>(rows: T[]) =>
       g.ownClassIds ? rows.filter((r) => g.ownClassIds!.has(r.classId)) : rows;
+    // Homework → Dashboard (read only) owns no slice; it reads the posts,
+    // the diary and the submissions to those posts.
+    const overview = holds("homework.overview");
     const cut = stripDeskForFeatures("homework", full, g);
+    const posts =
+      holds("homework.assign") || holds("homework.review") || overview ? own(full.posts) : [];
+    const postIds = new Set(posts.map((p) => p.id));
     bundle = {
       ...cut,
-      posts: holds("homework.assign") || holds("homework.review") ? own(full.posts) : [],
-      diary: holds("homework.diary") ? own(full.diary) : [],
+      posts,
+      diary: holds("homework.diary") || overview ? own(full.diary) : [],
+      submissions: overview
+        ? full.submissions.filter((s) => postIds.has(s.postId))
+        : cut.submissions,
     };
   }
   return NextResponse.json({

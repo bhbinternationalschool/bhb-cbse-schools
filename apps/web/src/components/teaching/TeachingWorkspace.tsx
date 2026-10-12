@@ -27,7 +27,7 @@ import {
   type TeachingLogStatus,
   type TeachingState,
 } from "@/lib/teaching";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
@@ -514,6 +514,15 @@ export function TeachingWorkspace() {
         u.subjectId === row.expected.subjectId,
     );
 
+  const teachTabs = [
+    { id: "today", label: "Period log" },
+    { id: "plan", label: "Syllabus" },
+    { id: "lessons", label: "Lesson plans" },
+    { id: "coverage", label: "Coverage" },
+    { id: "outcomes", label: "Learning outcomes" },
+    ...(showNucleus ? [{ id: "nucleus", label: "Nucleus progress" }] : []),
+  ];
+
   return (
     <ErpWorkspaceShell
       title="Teaching & syllabus"
@@ -523,14 +532,12 @@ export function TeachingWorkspace() {
       notice={notice}
       toolbar={
         <ModuleTabs
-          items={[
-            { id: "today", label: "Period log" },
-            { id: "plan", label: "Syllabus" },
-            { id: "lessons", label: "Lesson plans" },
-            { id: "coverage", label: "Coverage" },
-            { id: "outcomes", label: "Learning outcomes" },
-            ...(showNucleus ? [{ id: "nucleus", label: "Nucleus progress" }] : []),
-          ]}
+          // Every tab is whole-module (lib/rbacFeatureCatalog/academics.ts:
+          // the saves are /api/v1/teaching/* routes function grants do not
+          // reach), so this passes the list through for every module holder.
+          // Until Masters load (roles are read from it) the page gate's
+          // answer stands rather than an empty tab bar.
+          items={masters ? visibleModuleTabs(teachTabs, session, masters, "teaching") : teachTabs}
           value={tab}
           onChange={(id) => setTab(id as TeachTab)}
           aria-label="Teaching sections"

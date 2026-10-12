@@ -1,4 +1,4 @@
-import { CRUD, type RbacFeatureDef } from "@/lib/rbacFeatureCatalog/types";
+import { CRUD, type RbacFeatureDef, type RbacWholeModuleTab } from "@/lib/rbacFeatureCatalog/types";
 
 /**
  * People — Admissions, RTE / EWS, Students, Staff, Certificates, ID cards.
@@ -118,7 +118,8 @@ export const PEOPLE_FEATURES: RbacFeatureDef[] = [
       "Admission test sittings, the roll and attendance sheet, marks, results (Selected / Waitlisted / Not selected) and messaging families (change).",
     actions: CRUD,
     tabs: ["entrance"],
-    routes: ["/api/admissions/entrance-test"],
+    // notify: dry run (preview) asks view, sending asks edit.
+    routes: ["/api/admissions/entrance-test", "/api/admissions/entrance-test/notify"],
   },
 
   // ── RTE / EWS ──────────────────────────────────────────────────────────
@@ -130,7 +131,9 @@ export const PEOPLE_FEATURES: RbacFeatureDef[] = [
     blurb: "RTE / EWS seats per class, the mandated share and the fee-waiver rule.",
     actions: CRUD,
     slices: ["seats", "settings"],
-    tabs: ["dashboard", "settings"],
+    // "rte" is the RTE / EWS tab of the Admissions screen, which embeds
+    // this module's own (function-gated) workspace.
+    tabs: ["dashboard", "settings", "rte"],
   },
   {
     id: "rte.applications",
@@ -140,7 +143,7 @@ export const PEOPLE_FEATURES: RbacFeatureDef[] = [
       "The government's allotted list, lottery, admit / waitlist / reject and the enrolled register. Tagging the child in Students needs Students.",
     actions: CRUD,
     slices: ["applications"],
-    tabs: ["kpis", "applications", "enrolled", "reports"],
+    tabs: ["kpis", "applications", "enrolled", "reports", "rte"],
   },
 
   // ── Students ───────────────────────────────────────────────────────────
@@ -209,6 +212,44 @@ export const PEOPLE_FEATURES: RbacFeatureDef[] = [
     slices: ["module-state/duty_roster"],
     tabs: ["duty_roster"],
   },
+  {
+    id: "staff.assignments",
+    module: "staff",
+    group: "Teaching",
+    label: "Who teaches what (read only)",
+    blurb:
+      "The teaching allocation by teacher, class and subject. Changing it (Allocate teaching) needs Staff (change).",
+    actions: ["view"],
+    // Read from the masters copy and the staff directory, both of which
+    // every member of staff already loads.
+    tabs: ["assignments"],
+  },
+  {
+    id: "staff.gps_presence",
+    module: "staff",
+    group: "Attendance & presence",
+    label: "GPS presence board",
+    blurb:
+      "The live GPS presence board, today's incidents, and (change) the tracking settings — hours, radius, who is tracked.",
+    actions: ["view", "edit"],
+    tabs: ["gps"],
+    routes: ["/api/staff-geo/board", "/api/staff-geo/settings"],
+  },
+  {
+    // One owner: the Staff screen's tab. The route takes Staff view / change
+    // (module, or this function via `routes`) and keeps accepting Payroll
+    // view / change as before (PR #562); approving, reopening and paying a
+    // sheet stays Payroll (approve) only — the money rule.
+    id: "staff.visiting_pay",
+    module: "staff",
+    group: "Visiting staff",
+    label: "Visiting pay work sheets",
+    blurb:
+      "Visiting staff's month work sheets: build, check and correct lines, and the report. Approving and paying needs Payroll (approve).",
+    actions: ["view", "edit"],
+    tabs: ["visiting_pay"],
+    routes: ["/api/staff/visiting-pay"],
+  },
 
   // ── Certificates ───────────────────────────────────────────────────────
   // One register (desk-slice certificates/issues). Certificates are voided,
@@ -243,5 +284,78 @@ export const PEOPLE_FEATURES: RbacFeatureDef[] = [
     actions: ["view", "edit"],
     slices: ["module-state/id_card_template"],
     tabs: ["design"],
+  },
+];
+
+/** Tabs of these modules that only the whole-module grant opens, and why. */
+const SIS_ROSTER =
+  "reads and writes the SIS roster (sis-roster desk), which stays module-level: its GET serves only the Students grant and its POST carries deletes, merges and per-record version guards a function slice cannot safely merge";
+
+export const PEOPLE_WHOLE_MODULE_TABS: RbacWholeModuleTab[] = [
+  // ── Students — everything below sits on the SIS roster ──────────────────
+  { module: "students", tab: "dashboard", reason: `Whole-module dashboard: aggregates every child; ${SIS_ROSTER}` },
+  { module: "students", tab: "roster", reason: `Student overview / search: ${SIS_ROSTER}` },
+  { module: "students", tab: "register", reason: `New admission / edit student: ${SIS_ROSTER}` },
+  { module: "students", tab: "update", reason: `Update student (single and bulk): ${SIS_ROSTER}` },
+  { module: "students", tab: "duplicates", reason: `Merging duplicate children rewrites households and ids: ${SIS_ROSTER}` },
+  { module: "students", tab: "doc_verify", reason: `Verifying a child's documents writes the student record: ${SIS_ROSTER}` },
+  { module: "students", tab: "siblings", reason: `Linking / separating siblings (/api/sis/separate-sibling asks Students change): ${SIS_ROSTER}` },
+  { module: "students", tab: "upgrade", reason: `Class upgrade / promotion (sis-promote desk route, Students change): ${SIS_ROSTER}` },
+  { module: "students", tab: "reports", reason: `Student reports read the whole roster: ${SIS_ROSTER}` },
+  { module: "students", tab: "tags", reason: `Tags are stored on the student records: ${SIS_ROSTER}` },
+
+  // ── Staff ────────────────────────────────────────────────────────────────
+  {
+    module: "staff",
+    tab: "dashboard",
+    reason: "Whole-module dashboard: aggregates every Staff desk (roster, leave, attendance, documents).",
+  },
+  {
+    module: "staff",
+    tab: "roster",
+    reason:
+      "The staff roster (staff-roster desk) POST/DELETE ask Staff change/remove and there is no function-scoped save; colleagues' Aadhaar, PAN, bank and salary are unredacted only for Staff change.",
+  },
+  {
+    module: "staff",
+    tab: "allocate",
+    reason:
+      "Allocating teaching saves the masters / staff roster copy (saveMasters), which has no function-scoped save; the read-only view is staff.assignments.",
+  },
+  {
+    module: "staff",
+    tab: "doc_verify",
+    reason:
+      "Verifying a member of staff's documents writes their staff roster record, which has no function-scoped save.",
+  },
+  {
+    module: "staff",
+    tab: "requests",
+    reason:
+      "Staff requests live in the staff_hr jsonb blob (staffRequests is not a desk slice), so no function slice can save them; the staff app files them for everyone.",
+  },
+  {
+    module: "staff",
+    tab: "outdoor_duty",
+    reason:
+      "Outdoor duty sessions are in the staff attendance store (staff_attendance), owned by the Attendance desk — no Staff function can read or save it.",
+  },
+  {
+    module: "staff",
+    tab: "my_docs",
+    reason:
+      "A person's own agreement and documents: every member of staff reaches their own through the staff app; on the web this tab is not a grantable office function.",
+  },
+  {
+    module: "staff",
+    tab: "payslips",
+    reason:
+      "A person's own approved payslips (self-service); everyone's payslips are Payroll → payroll.payslips, so no Staff function belongs here.",
+  },
+  {
+    module: "staff",
+    tab: "presence",
+    reason:
+      "A person's own GPS presence card (/api/staff-geo/ping is any member of staff, for themselves); not a grantable office function.",
   },
 ];

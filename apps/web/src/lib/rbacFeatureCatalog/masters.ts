@@ -1,4 +1,4 @@
-import { CRUD, type RbacFeatureDef } from "@/lib/rbacFeatureCatalog/types";
+import { CRUD, type RbacFeatureDef, type RbacWholeModuleTab } from "@/lib/rbacFeatureCatalog/types";
 
 /** Masters — wired 6 Oct 2026 (masters-desk POST, lib/deskFeatureAuth). */
 export const MASTERS_FEATURES: RbacFeatureDef[] = [
@@ -98,5 +98,50 @@ export const MASTERS_FEATURES: RbacFeatureDef[] = [
     actions: CRUD,
     slices: ["departments", "designations"],
     tabs: ["staff"],
+  },
+  {
+    id: "masters.custom_fields",
+    module: "masters",
+    label: "Custom fields",
+    blurb: "Extra fields on the student and staff forms (e.g. house, bus pass no.) — add, change, retire.",
+    // POST /api/custom-fields/defs asks masters · edit for create, update
+    // and delete alike; it is not a masters-desk slice.
+    actions: ["view", "edit"],
+    tabs: ["custom-fields"],
+    routes: ["/api/custom-fields/defs"],
+  },
+];
+
+/** Tabs of these modules that only the whole-module grant opens, and why. */
+export const MASTERS_WHOLE_MODULE_TABS: RbacWholeModuleTab[] = [
+  {
+    module: "masters",
+    tab: "overview",
+    reason:
+      "The Masters landing dashboard: MastersWorkspace shows it to everyone who reaches the page (any Masters function opens the page); it changes nothing, so it is not granted on its own.",
+  },
+  {
+    module: "masters",
+    tab: "leave",
+    reason:
+      "Leave types and approval rules save to the Staff HR desk, attendance settings and rules to the Attendance staff desk — other modules' books a Masters function cannot lift. Attendance → Staff attendance rules covers the attendance half.",
+  },
+  {
+    module: "masters",
+    tab: "salary",
+    reason:
+      "Salary heads and structures save as payroll data (saveSalarySetup asserts payroll · edit, salary_setup_state); payroll writes stay module-level under the money rule.",
+  },
+  {
+    module: "masters",
+    tab: "tutor-passes",
+    reason:
+      "Passes are granted through /api/v1/tutor/access (fees · view / fees · approve), a v1 route function grants do not reach; a free pass is a fee waiver, which stays with the Fees grant.",
+  },
+  {
+    module: "settings",
+    tab: "roles",
+    reason:
+      "Roles & permissions configures RBAC itself; it stays with the Settings grant (canConfigureRbac) so nobody can hand themselves more access through a function.",
   },
 ];

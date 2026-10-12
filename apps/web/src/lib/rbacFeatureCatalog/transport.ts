@@ -1,4 +1,4 @@
-import { CRUD, type RbacFeatureDef } from "@/lib/rbacFeatureCatalog/types";
+import { CRUD, type RbacFeatureDef, type RbacWholeModuleTab } from "@/lib/rbacFeatureCatalog/types";
 
 /**
  * Transport — wired 6 Oct 2026 (transport-desk POST/GET, TransportWorkspace
@@ -94,4 +94,19 @@ export const TRANSPORT_FEATURES: RbacFeatureDef[] = [
       "/api/transport/fleet-edge/vehicle-status",
     ],
   },
+  {
+    id: "transport.reports",
+    module: "transport",
+    group: "Reports",
+    label: "Transport dashboard & reports (read only)",
+    blurb: "The transport dashboard and every transport report (riders, routes, vehicles, renewals, fuel, boarding, loans) — see and download. Changes nothing.",
+    actions: ["view"],
+    // Read-only, and no slices (each list has one owner): transport-desk
+    // serves this function every list the dashboard and the report
+    // catalogue (lib/transportReportCatalog) read — TRANSPORT_REPORT_KEYS.
+    tabs: ["dashboard", "reports"],
+  },
 ];
+
+/** Tabs of these modules that only the whole-module grant opens, and why. */
+export const TRANSPORT_WHOLE_MODULE_TABS: RbacWholeModuleTab[] = [];

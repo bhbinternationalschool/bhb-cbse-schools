@@ -46,7 +46,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  const auth = await requireStaffPermission(req, "notifications", "edit");
+  // Sending the invitation: Notifications · edit as before, or "Send" on the
+  // function "Parents on the app" — which the office role carries by
+  // default (director, 12 Oct 2026) and the module's edit implies.
+  const viaFunction = await requireStaffPermission(req, "notices", "send");
+  const auth = viaFunction.ok ? viaFunction : await requireStaffPermission(req, "notifications", "edit");
   if (!auth.ok) return auth.response;
 
   let body: { householdIds?: unknown; dryRun?: boolean; confirmCount?: number } = {};

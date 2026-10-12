@@ -1,5 +1,6 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
-import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
+import { assertPermission, resolveApiAuth, type ApiAuthContext } from "@/lib/api/v1/auth";
+import { featureGrantHeld, type RbacAction } from "@/lib/rbac";
 import { writeAudit } from "@/lib/audit.server";
 import { requestMeta } from "@/lib/api/v1/auth";
 import {
@@ -11,6 +12,15 @@ import {
 
 export const runtime = "nodejs";
 
+/**
+ * The wa_chatbot module grant, or the Answer book function
+ * (lib/rbacFeatureCatalog/comms.ts) holding the same action.
+ */
+function assertAnswerBook(ctx: ApiAuthContext, action: RbacAction) {
+  if (featureGrantHeld(ctx.session, ctx.masters, "wa_chatbot.answer_book", action, ctx.rbac)) return;
+  assertPermission(ctx, "wa_chatbot", action);
+}
+
 /** GET /api/v1/wa/answer-book — the book, newest first. */
 export async function GET(request: Request) {
   try {
@@ -18,7 +28,7 @@ export async function GET(request: Request) {
     if (ctx.session.persona !== "staff") {
       throw new ApiError("forbidden", "Staff session required", 403);
     }
-    assertPermission(ctx, "wa_chatbot", "view");
+    assertAnswerBook(ctx, "view");
     const status = new URL(request.url).searchParams.get("status") || undefined;
     return apiOk({ entries: await listAnswerBook({ status }) });
   } catch (e) {
@@ -56,7 +66,7 @@ export async function POST(request: Request) {
     const by = ctx.session.fullName || ctx.session.roleCode || "Staff";
 
     if (action === "save") {
-      assertPermission(ctx, "wa_chatbot", "edit");
+      assertAnswerBook(ctx, "edit");
       const r = await saveAnswerEntry({
         id: body.id,
         question: String(body.question || ""),
@@ -73,7 +83,7 @@ export async function POST(request: Request) {
     if (!body.id) throw new ApiError("bad_request", "Which entry?", 400);
 
     if (action === "approve") {
-      assertPermission(ctx, "wa_chatbot", "approve");
+      assertAnswerBook(ctx, "approve");
       const r = await approveAnswerEntry({ id: body.id, by });
       if (!r.ok) throw new ApiError("bad_request", r.error || "Could not approve", 400);
       const meta = requestMeta(request);
@@ -91,7 +101,7 @@ export async function POST(request: Request) {
     }
 
     if (action === "retire") {
-      assertPermission(ctx, "wa_chatbot", "approve");
+      assertAnswerBook(ctx, "approve");
       const r = await retireAnswerEntry({ id: body.id });
       if (!r.ok) throw new ApiError("bad_request", r.error || "Could not retire", 400);
       return apiOk({ id: body.id });

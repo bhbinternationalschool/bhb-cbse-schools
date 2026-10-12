@@ -27,6 +27,8 @@ export async function POST(req: Request) {
   const action = String((body as { action?: unknown }).action ?? "");
   // Forgiving money is an approval, not an edit.
   const rbac = action === "waive" ? "approve" : "edit";
+  // Collect and waive are separate jobs for the Circulation & fines function.
+  const operation = /^[a-z_]+$/.test(action) ? `/api/library/fines/${action}` : undefined;
   return invRoute(req, rbac, async ({ actor }) => withLibraryDb(async () => {
     const b = await invBody<Record<string, unknown>>(req);
     const issueId = String(b.issueId ?? "");
@@ -45,5 +47,5 @@ export async function POST(req: Request) {
       return waiveFine({ issueId, reason: String(b.reason ?? ""), waivedBy: actor });
     }
     throw new InvError("Unknown action");
-  }));
+  }), { operation });
 }

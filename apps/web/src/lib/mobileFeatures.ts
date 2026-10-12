@@ -74,6 +74,15 @@ export type MobileFeature = {
     | "Self service";
   module: RbacModule;
   action: RbacAction;
+  /**
+   * The catalog function (lib/rbacFeatureCatalog) that also carries this
+   * screen, for someone given the function rather than the whole module —
+   * e.g. the gate clerk given Visitors → Visitor register. Set only where
+   * every route behind the screen is gated by assertMobileFeature alone, so
+   * the function honestly opens what the tile shows. Additive: the module
+   * grant still opens it as before.
+   */
+  feature?: { id: string; action: RbacAction };
   /** One line the office reads before switching it on. */
   note: string;
 };
@@ -109,6 +118,7 @@ export const MOBILE_FEATURES: MobileFeature[] = [
     group: "Admissions",
     module: "admissions",
     action: "view",
+    feature: { id: "admissions.leads", action: "view" },
     note: "Counsellor's follow-up list — call, WhatsApp and log the outcome.",
   },
   {
@@ -117,6 +127,7 @@ export const MOBILE_FEATURES: MobileFeature[] = [
     group: "Admissions",
     module: "admissions",
     action: "create",
+    feature: { id: "admissions.field_survey", action: "create" },
     note: "Door-to-door capture of a family into the admissions pipeline.",
   },
   {
@@ -269,6 +280,7 @@ export const MOBILE_FEATURES: MobileFeature[] = [
     group: "Gate",
     module: "visitors",
     action: "create",
+    feature: { id: "visitors.register", action: "create" },
     note: "Check visitors in and out at the gate. The mobile lookup says whose parent they are before they are let in.",
   },
   {
@@ -277,6 +289,7 @@ export const MOBILE_FEATURES: MobileFeature[] = [
     group: "Gate",
     module: "visitors",
     action: "edit",
+    feature: { id: "visitors.register", action: "edit" },
     note: "Hand a child over for an early pickup against an approved pass, and record who collected them.",
   },
   {
@@ -491,6 +504,8 @@ export function resolveMobileFeatures(input: {
   staffId?: string;
   access: MobileAccessState;
   can: (module: RbacModule, action: RbacAction) => boolean;
+  /** A FUNCTION grant check (featureId, action) — optional, additive. */
+  canFeature?: (featureId: string, action: RbacAction) => boolean;
 }): MobileFeatureResolution {
   const access = input.access;
   const wanted = new Set<MobileFeatureId>();
@@ -516,7 +531,9 @@ export function resolveMobileFeatures(input: {
   for (const id of MOBILE_FEATURE_IDS) {
     if (!wanted.has(id) || denied.has(id)) continue;
     const meta = FEATURE_BY_ID.get(id)!;
-    if (input.can(meta.module, meta.action)) features.push(id);
+    const viaFunction =
+      !!meta.feature && !!input.canFeature?.(meta.feature.id, meta.feature.action);
+    if (input.can(meta.module, meta.action) || viaFunction) features.push(id);
     else blockedByRbac.push(id);
   }
   return { features, blockedByRbac };

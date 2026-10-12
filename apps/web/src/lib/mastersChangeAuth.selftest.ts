@@ -249,6 +249,11 @@ const label = (id: string) => ({ c6: "Class 6", c7: "Class 7" })[id] ?? id;
       assert.ok(r.startsWith("/api/"), `${f.id}: route ${r} must be an /api/ path`);
       assert.ok(!r.startsWith("/api/school-data/"), `${f.id}: desk routes are gated by slices, not routes`);
     }
+    // A slice has at most one WRITING owner: a desk save lifts a key only
+    // for a function holding create/edit/delete on it. Read-only functions
+    // (reports, audit) may share a slice — they never lift anything.
+    const writes = f.actions.some((x) => x === "create" || x === "edit" || x === "delete");
+    if (!writes) continue;
     for (const k of f.slices ?? []) {
       const key = `${f.module}:${k}`;
       assert.ok(!owner.has(key), `${key} owned by both ${owner.get(key)} and ${f.id}`);

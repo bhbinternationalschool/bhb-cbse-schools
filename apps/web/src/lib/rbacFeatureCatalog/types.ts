@@ -8,6 +8,12 @@ export type RbacFeatureDef = {
   module: RbacModule;
   label: string;
   blurb: string;
+  /**
+   * Sub-heading the role editor groups the function under, mirroring the
+   * old ERP's tree (e.g. Fees → "Cheques" → Manage cheques / PDC / Bounced).
+   * Optional; ungrouped functions sit directly under the module.
+   */
+  group?: string;
   /** The actions that mean something for this function. */
   actions: RbacAction[];
   /**
@@ -37,3 +43,15 @@ export type RbacFeatureDef = {
 };
 
 export const CRUD: RbacAction[] = ["view", "create", "edit", "delete"];
+
+/**
+ * A tab of a module's screen that deliberately has no function: only the
+ * whole-module grant opens it. Every such tab is named here with the reason,
+ * so lib/rbacCatalogCompleteness.selftest.ts can fail on a tab nobody
+ * decided about.
+ */
+export type RbacWholeModuleTab = {
+  module: RbacModule;
+  tab: string;
+  reason: string;
+};

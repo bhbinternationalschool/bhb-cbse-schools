@@ -83,7 +83,7 @@ import { DocVerificationQueuePanel } from "@/components/students/DocVerification
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { StaffPresenceCard } from "@/components/staff/StaffPresenceCard";
 import { StaffGeoAdminPanel } from "@/components/staff/StaffGeoAdminPanel";
-import { hasFeaturePermission, hasPermission, visibleModuleTabs } from "@/lib/rbac";
+import { canWriteModuleTab, hasFeaturePermission, hasPermission, visibleModuleTabs } from "@/lib/rbac";
 import {
   CustomExportToggle,
   useCustomFieldExport,
@@ -192,10 +192,16 @@ export function StaffWorkspace() {
 
   // Someone holding only some Staff functions (director, 6 Oct 2026 — e.g.
   // Leave approvals) sees only their tabs.
-  const shownTabs = useMemo(
-    () => visibleModuleTabs(STAFF_TABS, session, state ?? loadMasters(), "staff"),
-    [session, state],
-  );
+  // Visiting pay follows its route (api/staff/visiting-pay): Staff view —
+  // the module or staff.visiting_pay — or Payroll view, as before PR #562.
+  const shownTabs = useMemo(() => {
+    const m = state ?? loadMasters();
+    const own = new Set(visibleModuleTabs(STAFF_TABS, session, m, "staff").map((t) => t.id));
+    return STAFF_TABS.filter(
+      (t) =>
+        own.has(t.id) || (t.id === "visiting_pay" && hasPermission(session, m, "payroll", "view")),
+    );
+  }, [session, state]);
   useEffect(() => {
     if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
       setTab(shownTabs[0]!.id as StaffMainTab);
@@ -512,7 +518,7 @@ export function StaffWorkspace() {
         </div>
       ) : null}
       {tab === "gps" ? (
-        <StaffGeoAdminPanel canEdit={hasPermission(session, state ?? loadMasters(), "staff", "edit")} />
+        <StaffGeoAdminPanel canEdit={canWriteModuleTab(session, state ?? loadMasters(), "staff", "gps")} />
       ) : null}
       {tab === "reports" ? (
         <StaffLeaveReportsPanel ay={ay} scope="leave" />

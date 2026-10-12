@@ -15,6 +15,7 @@ import {
   Repeat2,
 } from "lucide-react";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
+import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import {
   ErpTable,
@@ -77,25 +78,31 @@ import type { RowAction } from "@/components/ui/erp-grid";
 
 type LibTab =
   | "dashboard"
-  | "catalogue"
+  | "titles"
   | "copies"
   | "issue"
   | "circulation"
   | "history"
   | "procurement"
   | "ebooks"
-  | "reports";
+  | "lib_reports";
 
+/*
+ * Tab ids are the library's own: the library shares the store module with
+ * the Store screen, and a tab id is how a function (Masters → Roles) opens a
+ * tab — "catalogue"/"reports" would also open the Store's tabs of that name.
+ * Old links (?tab=catalogue, ?tab=reports) still land on the right tab.
+ */
 const TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
-  { id: "catalogue", label: "Catalogue", tone: "teal" },
+  { id: "titles", label: "Catalogue", tone: "teal" },
   { id: "copies", label: "Copies & labels", tone: "sky" },
   { id: "issue", label: "Counter", tone: "amber" },
   { id: "circulation", label: "Circulation & fines", tone: "rose" },
   { id: "history", label: "History", tone: "green" },
   { id: "procurement", label: "Procurement", tone: "violet" },
   { id: "ebooks", label: "E-books", tone: "coral" },
-  { id: "reports", label: "Reports", tone: "slate" },
+  { id: "lib_reports", label: "Reports", tone: "slate" },
 ];
 
 function todayIso() {
@@ -231,17 +238,18 @@ export function LibraryWorkspace() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const raw = new URLSearchParams(window.location.search).get("tab");
+    const asked = new URLSearchParams(window.location.search).get("tab");
+    const raw = asked === "catalogue" ? "titles" : asked === "reports" ? "lib_reports" : asked;
     const allowed: LibTab[] = [
       "dashboard",
-      "catalogue",
+      "titles",
       "copies",
       "issue",
       "circulation",
       "history",
       "procurement",
       "ebooks",
-      "reports",
+      "lib_reports",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as LibTab);
   }, []);
@@ -256,6 +264,21 @@ export function LibraryWorkspace() {
       window.setTimeout(() => setNotice(null), 2800);
     }
   }
+
+  // The Store grant sees every tab; a library function (Masters → Roles)
+  // opens its own tabs only (lib/rbacFeatureCatalog/store.ts).
+  const shownTabs = useMemo(
+    () => visibleModuleTabs(TABS, session, masters, "store"),
+    [session, masters],
+  );
+  const shownIds = useMemo(() => new Set<string>(shownTabs.map((t) => t.id)), [shownTabs]);
+  const on = (t: LibTab) => tab === t && shownIds.has(t);
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownIds.has(tab)) setTab(shownTabs[0]!.id as LibTab);
+  }, [shownTabs, shownIds, tab]);
+  // Loan days, limits and the fine rule are the Store grant's, not the
+  // counter clerk's (the server refuses a function save of them too).
+  const rulesReadOnly = readOnly || !hasPermission(session, masters, "store", "edit");
 
   const state = useMemo(() => {
     void tick;
@@ -640,10 +663,10 @@ export function LibraryWorkspace() {
       <ModuleTabs
         value={tab}
         onChange={(id) => setTab(id as LibTab)}
-        items={TABS}
+        items={shownTabs}
       />
 
-      {tab === "dashboard" ? (
+      {on("dashboard") ? (
         <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             {[
@@ -684,7 +707,7 @@ export function LibraryWorkspace() {
         </div>
       ) : null}
 
-      {tab === "catalogue" ? (
+      {on("titles") ? (
         <div className="space-y-4">
           <div className="flex flex-wrap items-end gap-3">
             <label className="block min-w-[12rem] flex-1 text-xs text-[var(--muted)]">
@@ -1028,23 +1051,24 @@ export function LibraryWorkspace() {
         </div>
       ) : null}
 
-      {tab === "issue" ? (
+      {on("issue") ? (
         <LibraryCounterPanel
           state={state}
           students={studentPeople}
           staff={staffPeople}
           ay={ay}
           readOnly={readOnly}
+          rulesReadOnly={rulesReadOnly}
           onChanged={afterServerChange}
           onError={flashErr}
         />
       ) : null}
 
-      {tab === "copies" ? (
+      {on("copies") ? (
         <LibraryCopiesPanel state={state} readOnly={readOnly} onChanged={afterServerChange} onError={flashErr} />
       ) : null}
 
-      {tab === "circulation" ? (
+      {on("circulation") ? (
         <LibraryCirculationPanel
           state={state}
           students={studentPeople}
@@ -1055,7 +1079,7 @@ export function LibraryWorkspace() {
         />
       ) : null}
 
-      {tab === "history" ? (
+      {on("history") ? (
         <div className="space-y-4">
           <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <label className="block text-xs text-[var(--muted)]">
@@ -1265,7 +1289,7 @@ export function LibraryWorkspace() {
         </div>
       ) : null}
 
-      {tab === "procurement" ? (
+      {on("procurement") ? (
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--brand-deep)]">
@@ -1427,7 +1451,7 @@ export function LibraryWorkspace() {
         </div>
       ) : null}
 
-      {tab === "ebooks" ? (
+      {on("ebooks") ? (
         <EbooksPanel
           tick={tick}
           readOnly={readOnly}
@@ -1435,7 +1459,7 @@ export function LibraryWorkspace() {
         />
       ) : null}
 
-      {tab === "reports" ? (
+      {on("lib_reports") ? (
         <div className="max-w-lg space-y-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--brand-deep)]">
             <BarChart3 className="size-4" aria-hidden />

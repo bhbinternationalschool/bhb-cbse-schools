@@ -222,11 +222,12 @@ export function PayrollWorkspace() {
   }, [masters, session]);
 
   // Read-only payroll tabs a Payroll FUNCTION opens (Masters → Roles →
-  // "Payroll runs & payslips") for someone without the whole module. Runs,
+  // "Payroll runs & payslips", "Payroll audit log") for someone without the
+  // whole module. Runs,
   // approvals, holds and increments write payroll and stay with the module.
   const fnTabs = useMemo(() => {
     if (allowed) return [] as PayTab[];
-    return (["payslips", "print", "reports"] as PayTab[]).filter((t) =>
+    return (["payslips", "print", "reports", "audit"] as PayTab[]).filter((t) =>
       canSeeModuleTab(session, masters, "payroll", t),
     );
   }, [allowed, session, masters]);
@@ -685,6 +686,9 @@ export function PayrollWorkspace() {
           ...(fnTabs.includes("reports")
             ? [{ id: "reports" as const, label: "Reports", tone: "slate" as const }]
             : []),
+          ...(fnTabs.includes("audit")
+            ? [{ id: "audit" as const, label: "Audit", tone: "coral" as const }]
+            : []),
           ...(advancesDesk
             ? [
                 { id: "advances" as const, label: "Staff advances", tone: "teal" as const },
@@ -1017,7 +1021,7 @@ export function PayrollWorkspace() {
         <TallySyncPanel academicYearCode={ay} />
       ) : null}
 
-      {tab === "audit" && allowed ? <PayrollAuditPanel /> : null}
+      {tab === "audit" && seesTab("audit") ? <PayrollAuditPanel /> : null}
 
       {tab === "holds" && allowed ? <JuneHoldPanel /> : null}
 

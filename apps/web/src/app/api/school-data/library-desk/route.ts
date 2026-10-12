@@ -15,12 +15,33 @@ import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { readStampsParam } from "@/lib/rowStampClient";
 import { isLibraryMigrationPending, LIBRARY_NOT_MIGRATED } from "@/lib/libraryCounter";
 import { mergeLibraryEbooks, readLibraryEbooks } from "@/lib/libraryEbooks.server";
+import { deskReadGate } from "@/lib/deskFeatureGate.server";
+import { LIBRARY_READER_FUNCTIONS } from "@/lib/rbacFeatureCatalog/store";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["library-desk"], "GET");
-  if (!auth.ok) return auth.response
+  // The Store grant, or a library function (counter, copies, circulation,
+  // reports — Masters → Roles), each of which owns every desk key: its
+  // reader gets the whole desk, never a cut-down copy. A store function
+  // that is not a library one (the store counter) reads nothing here.
+  // Saving the desk stays module-level (POST below).
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["library-desk"]);
+  if (gate.mode === "deny") return gate.response;
+  if (gate.mode === "feature") {
+    const holds = (id: string) =>
+      (["view", "create", "edit", "approve", "export"] as const).some((a) => gate.access(id, a).allowed);
+    if (!LIBRARY_READER_FUNCTIONS.some(holds)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Reading the library needs the Store grant or a library function.",
+          reason: "feature_forbidden",
+        },
+        { status: 403 },
+      );
+    }
+  }
   const { bundle, meta, ok, stamps, settingsStamp, error } = await fetchLibraryDeskFromDb();
   if (!ok) {
     return NextResponse.json(

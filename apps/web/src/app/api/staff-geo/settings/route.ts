@@ -1,25 +1,24 @@
 import { NextResponse } from "next/server";
-import { getDemoSession } from "@/lib/auth";
-import { loadMasters } from "@/lib/masters";
-import { hasPermission } from "@/lib/rbac";
+import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { normalizeStaffGeoSettings, type StaffGeoSettings } from "@/lib/staffGeo";
 import { readStaffGeoState, writeStaffGeoState } from "@/lib/staffGeo.server";
 import { TENANT } from "@/lib/types";
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  const session = await getDemoSession();
-  if (!session || session.persona !== "staff") return NextResponse.json({ error: "Staff login required" }, { status: 403 });
-  if (!hasPermission(session, loadMasters(), "staff", "view")) return NextResponse.json({ error: "Staff module access required" }, { status: 403 });
+// Staff view / change, or the staff.gps_presence function (lib/rbacFeatureCatalog/people.ts).
+export async function GET(req: Request) {
+  const auth = await requireStaffPermission(req, "staff", "view");
+  if (!auth.ok) return auth.response;
   const st = await readStaffGeoState();
   return NextResponse.json({ ok: true, settings: st.settings, consents: st.consents, school: { lat: TENANT.schoolLat, lng: TENANT.schoolLng } });
 }
 
 export async function PUT(req: Request) {
-  const session = await getDemoSession();
-  if (!session || session.persona !== "staff") return NextResponse.json({ error: "Staff login required" }, { status: 403 });
-  if (!hasPermission(session, loadMasters(), "staff", "edit")) return NextResponse.json({ error: "Staff edit access required" }, { status: 403 });
+  const auth = await requireStaffPermission(req, "staff", "edit");
+  if (!auth.ok) return auth.response;
+  if (auth.viaMirrorSecret) return NextResponse.json({ error: "Settings are changed by a person, not a service" }, { status: 403 });
+  const session = auth.ctx.session;
   let body: Partial<StaffGeoSettings>;
   try {
     body = (await req.json()) as Partial<StaffGeoSettings>;

@@ -17,6 +17,7 @@ import { defaultMasters, DEFAULT_AY } from "@/lib/masters";
 import {
   defaultRbacState,
   featureAccess,
+  featureGrantHeld,
   hasPermission,
   type RbacAction,
   type RbacModule,
@@ -163,6 +164,30 @@ export async function requireStaffPermission(
     if (holdsRouteFeature(base.ctx, module, action, request)) return base;
     return authFailure(403, e instanceof ApiError ? e.message : "Forbidden");
   }
+}
+
+/**
+ * Staff + the module grant for `action`, OR one named function held as a
+ * function grant for `featureAction`. For a route whose module grant is a
+ * stricter action than the function needs (Parents on app: the list is
+ * notices · edit for module holders, but a person given only the function
+ * "Parents on the app" reads it with its own "view") — without opening the
+ * route to every holder of the module's view.
+ */
+export async function requireStaffPermissionOrFeature(
+  request: Request,
+  module: RbacModule,
+  action: RbacAction,
+  featureId: string,
+  featureAction: RbacAction,
+): Promise<RouteAuthResult> {
+  const base = await requireStaffPermission(request, module, action);
+  if (base.ok) return base;
+  const staff = await requireStaffApi(request);
+  if (!staff.ok) return staff;
+  const { session, masters, rbac } = staff.ctx;
+  if (featureGrantHeld(session, masters, featureId, featureAction, rbac)) return staff;
+  return base;
 }
 
 function holdsRouteFeature(

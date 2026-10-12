@@ -1,6 +1,6 @@
 import type { ApiAuthContext } from "@/lib/api/v1/auth";
 import { ApiError } from "@/lib/api/v1/errors";
-import { hasPermission, resolveSessionRoles } from "@/lib/rbac";
+import { featureGrantHeld, hasPermission, resolveSessionRoles } from "@/lib/rbac";
 import {
   MOBILE_FEATURES,
   defaultMobileAccess,
@@ -24,6 +24,8 @@ export function resolveMobileAccess(ctx: ApiAuthContext): MobileFeatureResolutio
     access: ctx.rbac.mobile ?? defaultMobileAccess(),
     can: (module, action) =>
       hasPermission(ctx.session, ctx.masters, module, action, ctx.rbac),
+    canFeature: (featureId, action) =>
+      featureGrantHeld(ctx.session, ctx.masters, featureId, action, ctx.rbac),
   });
 }
 

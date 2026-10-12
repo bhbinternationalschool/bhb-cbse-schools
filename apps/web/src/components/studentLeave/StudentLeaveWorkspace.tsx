@@ -38,6 +38,7 @@ import { TabsContent, WorkspaceTabs, type WorkspaceTabItem } from "@/components/
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
 import { loadSis, type SisState } from "@/lib/sis";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
 import {
@@ -407,7 +408,7 @@ function OfficeStudentLeaveWorkspace({
     );
   }, [state, ay]);
 
-  const tabItems = useMemo<WorkspaceTabItem[]>(
+  const allTabItems = useMemo<WorkspaceTabItem[]>(
     () => [
       {
         id: "dashboard",
@@ -438,6 +439,24 @@ function OfficeStudentLeaveWorkspace({
     ],
     [pending.length],
   );
+  // A function grant (Student leave → requests / reports) opens its own
+  // tabs. The whole Student leave module opens all of them, and so does the
+  // Attendance module: it has always reached this desk under Attendance →
+  // Student leave, and that must not narrow.
+  const tabItems = useMemo(
+    () =>
+      hasPermission(session, masters, "attendance", "view")
+        ? allTabItems
+        : visibleModuleTabs(allTabItems, session, masters, "student_leave"),
+    [allTabItems, session, masters],
+  );
+  useEffect(() => {
+    // Not before Masters load: roles are read from it.
+    if (!masters) return;
+    if (tabItems.length > 0 && !tabItems.some((t) => t.id === tab)) {
+      setTab(tabItems[0]!.id as LeaveTab);
+    }
+  }, [masters, tabItems, tab, setTab]);
 
   const allRequests = useMemo(() => {
     if (!state) return [];

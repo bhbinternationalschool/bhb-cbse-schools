@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { HUB_GROUPS, TONE } from "@/lib/erpNav";
-import { commsTabIsOfficeOnly, commsTabOfHref } from "@/lib/commsTabAccess";
+import { commsTabIsOfficeOnly, commsTabOfHref, commsTabOpenedByFunction } from "@/lib/commsTabAccess";
 import { defaultMasters, loadMasters } from "@/lib/masters";
 import { markModuleRegistryClientReady } from "@/lib/moduleRegistry";
 import { canAccessHref, defaultRbacState, hasPermission, loadRbac } from "@/lib/rbac";
@@ -279,7 +279,9 @@ export function ErpSidebar({
           canAccessHref(session, masters, h.href, rbac) &&
           // Office-only Comms screens stay off a teacher's menu.
           (!commsTabIsOfficeOnly(commsTabOfHref(h.href)) ||
-            hasPermission(session, masters, "notices", "edit", rbac)),
+            hasPermission(session, masters, "notices", "edit", rbac) ||
+            // …or a function (Masters → Roles) that opens that tab.
+            commsTabOpenedByFunction(session, masters, commsTabOfHref(h.href)!, rbac)),
       ),
     })).filter((g) => g.hubs.length > 0);
      

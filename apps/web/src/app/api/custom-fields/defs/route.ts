@@ -15,16 +15,22 @@ export const dynamic = "force-dynamic";
 /**
  * Custom field definitions (Masters → Custom fields; lib/customFields).
  * GET  ?entity=student|staff&counts=1 — anyone who can see Masters,
- *      Students or Staff (the edit pages and exports need the list).
+ *      Students or Staff (the edit pages and exports need the list), or
+ *      who holds Masters → Custom fields.
  * POST { action: "create" | "update" | "delete", ... } — masters · edit.
  */
 
 export async function GET(req: Request) {
-  const auth = await requireAnyStaffPermission(req, [
+  let auth = await requireAnyStaffPermission(req, [
     { module: "masters", action: "view" },
     { module: "students", action: "view" },
     { module: "staff", action: "view" },
   ]);
+  if (!auth.ok && auth.response.status === 403) {
+    // Masters → Custom fields (a function listing this route) reads it too.
+    const fn = await requireStaffPermission(req, "masters", "view");
+    if (fn.ok) auth = fn;
+  }
   if (!auth.ok) return auth.response;
   const url = new URL(req.url);
   const entity = url.searchParams.get("entity");

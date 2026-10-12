@@ -14,15 +14,19 @@
  */
 import type { RbacModule } from "@/lib/rbac";
 import type { RbacFeatureDef } from "@/lib/rbacFeatureCatalog/types";
-import { MASTERS_FEATURES } from "@/lib/rbacFeatureCatalog/masters";
-import { TRANSPORT_FEATURES } from "@/lib/rbacFeatureCatalog/transport";
-import { PEOPLE_FEATURES } from "@/lib/rbacFeatureCatalog/people";
-import { MONEY_FEATURES } from "@/lib/rbacFeatureCatalog/money";
-import { ACADEMICS_FEATURES } from "@/lib/rbacFeatureCatalog/academics";
-import { COMMS_FEATURES } from "@/lib/rbacFeatureCatalog/comms";
-import { CAMPUS_FEATURES } from "@/lib/rbacFeatureCatalog/campus";
+import { MASTERS_FEATURES, MASTERS_WHOLE_MODULE_TABS } from "@/lib/rbacFeatureCatalog/masters";
+import { TRANSPORT_FEATURES, TRANSPORT_WHOLE_MODULE_TABS } from "@/lib/rbacFeatureCatalog/transport";
+import { PEOPLE_FEATURES, PEOPLE_WHOLE_MODULE_TABS } from "@/lib/rbacFeatureCatalog/people";
+import { MONEY_FEATURES, MONEY_WHOLE_MODULE_TABS } from "@/lib/rbacFeatureCatalog/money";
+import { PAYROLL_FEATURES, PAYROLL_WHOLE_MODULE_TABS } from "@/lib/rbacFeatureCatalog/payroll";
+import { STORE_FEATURES, STORE_WHOLE_MODULE_TABS } from "@/lib/rbacFeatureCatalog/store";
+import { ACADEMICS_FEATURES, ACADEMICS_WHOLE_MODULE_TABS } from "@/lib/rbacFeatureCatalog/academics";
+import { COMMS_FEATURES, COMMS_WHOLE_MODULE_TABS } from "@/lib/rbacFeatureCatalog/comms";
+import { CAMPUS_FEATURES, CAMPUS_WHOLE_MODULE_TABS } from "@/lib/rbacFeatureCatalog/campus";
 
-export type { RbacFeatureDef, RbacFeatureId } from "@/lib/rbacFeatureCatalog/types";
+import type { RbacWholeModuleTab } from "@/lib/rbacFeatureCatalog/types";
+
+export type { RbacFeatureDef, RbacFeatureId, RbacWholeModuleTab } from "@/lib/rbacFeatureCatalog/types";
 
 /**
  * Every module's functions. Each module keeps its list in
@@ -35,10 +39,46 @@ export const RBAC_FEATURES: RbacFeatureDef[] = [
   ...TRANSPORT_FEATURES,
   ...PEOPLE_FEATURES,
   ...MONEY_FEATURES,
+  ...PAYROLL_FEATURES,
+  ...STORE_FEATURES,
   ...ACADEMICS_FEATURES,
   ...COMMS_FEATURES,
   ...CAMPUS_FEATURES,
 ];
+
+/**
+ * Tabs no function opens on purpose (whole-module grant only), each with its
+ * reason. The completeness self-test fails on any screen tab that is
+ * neither a function's nor listed here.
+ */
+export const RBAC_WHOLE_MODULE_TABS: RbacWholeModuleTab[] = [
+  ...MASTERS_WHOLE_MODULE_TABS,
+  ...TRANSPORT_WHOLE_MODULE_TABS,
+  ...PEOPLE_WHOLE_MODULE_TABS,
+  ...MONEY_WHOLE_MODULE_TABS,
+  ...PAYROLL_WHOLE_MODULE_TABS,
+  ...STORE_WHOLE_MODULE_TABS,
+  ...ACADEMICS_WHOLE_MODULE_TABS,
+  ...COMMS_WHOLE_MODULE_TABS,
+  ...CAMPUS_WHOLE_MODULE_TABS,
+];
+
+/** Functions under one sub-heading of a module, in catalog order. */
+export function featureGroupsForModule(
+  module: RbacModule,
+): { group: string | null; features: RbacFeatureDef[] }[] {
+  const out: { group: string | null; features: RbacFeatureDef[] }[] = [];
+  for (const f of featuresForModule(module)) {
+    const g = f.group ?? null;
+    let bucket = out.find((b) => b.group === g);
+    if (!bucket) {
+      bucket = { group: g, features: [] };
+      out.push(bucket);
+    }
+    bucket.features.push(f);
+  }
+  return out;
+}
 
 /** Masters keys that are not checked here — they sync through their own
  * routes and permission checks (staff roster, demo students). */

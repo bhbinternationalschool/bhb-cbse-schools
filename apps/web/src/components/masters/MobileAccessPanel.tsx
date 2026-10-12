@@ -115,6 +115,10 @@ export function MobileAccessPanel({
         can: (m, a) =>
           !!perms.get(m)?.has(a) ||
           personal.some((g) => g.module === m && g.actions.includes(a)),
+        canFeature: (featureId, a) =>
+          held.some((r) =>
+            (r.featureGrants ?? []).some((g) => g.feature === featureId && g.actions.includes(a)),
+          ),
       }),
     };
   }, [staffMember, masters, state, access]);

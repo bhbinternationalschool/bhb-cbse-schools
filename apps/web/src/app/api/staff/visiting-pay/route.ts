@@ -20,10 +20,17 @@
  * (the same grant that pays staff salary from the Cashfree wallet). The
  * person who built or changed a sheet does not approve it, unless they are
  * the owner.
+ *
+ * The tab lives on the Staff screen, so read / build / correct also take
+ * Staff (view / change) — the module grant, or its function
+ * staff.visiting_pay (lib/rbacFeatureCatalog/people.ts lists this route, so
+ * requireStaffPermission accepts it). Payroll view / change holders keep
+ * everything they had (PR #562). Approve, reopen and pay stay Payroll
+ * (approve) only — the money rule.
  */
 
 import { NextResponse } from "next/server";
-import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
+import { requireStaffPermission, type RouteAuthResult } from "@/lib/apiRouteAuth.server";
 import { isSuperAdminSession } from "@/lib/superAdmin";
 import {
   addLine,
@@ -46,8 +53,25 @@ function bad(error: string, status = 400) {
   return NextResponse.json({ ok: false, error }, { status });
 }
 
+/** Staff (module or staff.visiting_pay) for `action`, else Payroll as before. */
+async function staffOrPayroll(req: Request, action: "view" | "edit"): Promise<RouteAuthResult> {
+  const staff = await requireStaffPermission(req, "staff", action);
+  if (staff.ok) return staff;
+  const payroll = await requireStaffPermission(req, "payroll", action);
+  if (payroll.ok) return payroll;
+  // Not a signed-in member of staff: pass that answer on; else name both doors.
+  if (staff.response.status !== 403) return staff;
+  return {
+    ok: false,
+    response: NextResponse.json(
+      { error: `Forbidden — needs Staff (${action}) or Payroll (${action})` },
+      { status: 403 },
+    ),
+  };
+}
+
 export async function GET(req: Request) {
-  const auth = await requireStaffPermission(req, "payroll", "view");
+  const auth = await staffOrPayroll(req, "view");
   if (!auth.ok) return auth.response;
   const q = new URL(req.url).searchParams;
   const id = (q.get("id") || "").trim();
@@ -93,7 +117,9 @@ export async function POST(req: Request) {
   }
   const action = String(b.action || "");
   const needsApprove = ["approve", "reopen", "pay_hand", "pay_cashfree", "refresh_payout"].includes(action);
-  const auth = await requireStaffPermission(req, "payroll", needsApprove ? "approve" : "edit");
+  const auth = needsApprove
+    ? await requireStaffPermission(req, "payroll", "approve")
+    : await staffOrPayroll(req, "edit");
   if (!auth.ok) return auth.response;
   if (auth.viaMirrorSecret) return bad("Work sheets are changed by a person, not a service", 403);
   const session = auth.ctx.session;

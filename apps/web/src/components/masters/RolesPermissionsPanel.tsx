@@ -17,6 +17,7 @@ import {
   setRolePermission,
   staffAccessOverview,
   RBAC_ACTIONS,
+  RBAC_FEATURE_ONLY_ACTIONS,
   RBAC_MODULES,
   RBAC_MODULE_GROUPS,
   type RbacAction,
@@ -554,12 +555,39 @@ export function RolesPermissionsPanel() {
                                 className="py-1 pl-6 pr-2 text-[var(--foreground)]"
                                 title={f.blurb}
                               >
-                                ↳ {f.label}
+                                ↳{" "}
+                                {f.group ? (
+                                  <span className="text-[11px] text-[var(--muted)]">{f.group} · </span>
+                                ) : null}
+                                {f.label}
                                 {f.classScoped ? (
                                   <span className="ml-1 text-[10px] text-[var(--muted)]">
                                     (own classes)
                                   </span>
                                 ) : null}
+                                {/* Function-only actions (e.g. Send) have no
+                                    module column — ticked here instead. */}
+                                {RBAC_FEATURE_ONLY_ACTIONS.filter((a) => f.actions.includes(a.id)).map((a) => {
+                                  const viaModule = roleHasAction(selected, m.id, a.id);
+                                  const on =
+                                    viaModule ||
+                                    !!selected.featureGrants?.some(
+                                      (g) => g.feature === f.id && g.actions.includes(a.id),
+                                    );
+                                  return (
+                                    <label key={a.id} className="ml-2 inline-flex items-center gap-1 text-[11px] text-[var(--muted)]">
+                                      <input
+                                        type="checkbox"
+                                        checked={on}
+                                        disabled={viaModule}
+                                        title={viaModule ? `Given by the whole ${m.label} edit tick` : undefined}
+                                        onChange={(e) => toggleFeature(f.id, a.id, e.target.checked)}
+                                        aria-label={`${m.label} — ${f.label} ${a.label}`}
+                                      />
+                                      {a.label}
+                                    </label>
+                                  );
+                                })}
                               </td>
                               {RBAC_ACTIONS.map((a) => {
                                 if (!f.actions.includes(a.id)) {
