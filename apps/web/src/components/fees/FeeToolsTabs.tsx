@@ -17,6 +17,7 @@ import { BulkPaymentPanel } from "@/components/fees/BulkPaymentPanel";
 import { ConcessionTemplatesPanel } from "@/components/fees/ConcessionTemplatesPanel";
 import { PdcPanel } from "@/components/fees/PdcPanel";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { ModuleTabButton } from "@/components/ui/ModuleTabs";
 import { MODULE_TAB_CONTAINER_CLASS } from "@/components/ui/modern-tab-bar";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
@@ -51,11 +52,15 @@ export function FeeToolsTabs() {
   }
 
   // The buttons follow the server's rules; the server enforces them anyway.
-  const canView = hasPermission(session, null, "fees", "view");
-  const canCollect = !readOnly && hasPermission(session, null, "fees", "create");
-  const canClose = !readOnly && hasPermission(session, null, "fees", "edit");
-  const canGrant = !readOnly && canGrantConcession(session, null);
-  const canApprove = canApproveConcession(session, null);
+  // Decided from the loaded roles + roster (assignments count), never before.
+  const access = useAccessData();
+  const am = access.masters;
+  const ar = access.rbac ?? undefined;
+  const canView = access.ready && hasPermission(session, am, "fees", "view", ar);
+  const canCollect = access.ready && !readOnly && hasPermission(session, am, "fees", "create", ar);
+  const canClose = access.ready && !readOnly && hasPermission(session, am, "fees", "edit", ar);
+  const canGrant = access.ready && !readOnly && canGrantConcession(session, am, ar);
+  const canApprove = access.ready && canApproveConcession(session, am, ar);
 
   return (
     <ErpWorkspaceShell
@@ -83,7 +88,9 @@ export function FeeToolsTabs() {
       }
     >
       <div className="mt-6">
-        {!canView ? (
+        {!access.ready ? (
+          <p className="text-sm text-[var(--muted)]">Checking access…</p>
+        ) : !canView ? (
           <p className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-medium text-[var(--danger)]">
             You need access to Fees to use this screen.
           </p>

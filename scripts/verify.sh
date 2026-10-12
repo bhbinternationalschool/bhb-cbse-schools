@@ -440,6 +440,7 @@ SELFTESTS=(
   test:teacher-contact
   test:question-bank
   test:rbac-infer
+  test:rbac-assigned-roles
   test:rbac-scope
   test:rbac-user-grants
   test:visitor-gate

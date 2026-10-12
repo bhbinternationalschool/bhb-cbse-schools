@@ -30,6 +30,7 @@ import { ensureMastersHydrated } from "@/lib/mastersPersistence";
 import { loadMasters } from "@/lib/masters";
 import { Button } from "@/components/ui/button";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { visibleModuleTabs } from "@/lib/rbac";
 
 type Tab =
@@ -119,17 +120,23 @@ export function InventoryWorkspace() {
   // Someone holding only some Store functions (Counter, Purchase, …) sees
   // only their tabs. The inventory routes enforce the same split, writes
   // included (lib/inventory/route.server.ts).
+  // Roles + roster as loaded (assignments count); no tabs until known.
   const session = useDemoSession();
+  const access = useAccessData();
   const tabItems = useMemo(
     () =>
-      visibleModuleTabs(TABS, session, null, "store").map((t) => ({
-        id: t.id,
-        label: t.label,
-        tone: t.tone,
-      })),
-    [session],
+      access.ready
+        ? visibleModuleTabs(TABS, session, access.masters, "store", access.rbac ?? undefined).map((t) => ({
+            id: t.id,
+            label: t.label,
+            tone: t.tone,
+          }))
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [session, access.ready, access.version],
   );
   useEffect(() => {
+    if (!access.ready) return;
     if (tabItems.length > 0 && !tabItems.some((t) => t.id === tab)) {
       setTab(tabItems[0]!.id as Tab);
     }

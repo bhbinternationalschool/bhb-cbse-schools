@@ -17,5 +17,13 @@ const desk = createDeskSlicePersistence<RbacState>({
 });
 
 export const scheduleRbacSync = desk.scheduleSync;
-export const ensureRbacHydrated = desk.ensureHydrated;
+/** Pull the rbac slice; tells open screens when roles/assignments changed
+ * so their tab lists are worked out again (components/shell/useAccessData). */
+export async function ensureRbacHydrated(): Promise<boolean> {
+  const changed = await desk.ensureHydrated();
+  if (changed && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("bhb-rbac-updated"));
+  }
+  return changed;
+}
 export const resetRbacPersistenceCache = desk.resetCache;
