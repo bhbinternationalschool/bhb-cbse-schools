@@ -158,10 +158,23 @@ export function AppShell({
         });
       });
     }
+    function onDeskNotLoaded(e: Event) {
+      const d = (e as CustomEvent<{ id?: string }>).detail;
+      const what = (d?.id === "staff" ? "staff records" : labels[d?.id ?? ""]) || d?.id || "this module";
+      void import("@/components/shell/Toast").then(({ pushToast }) => {
+        pushToast({
+          kind: "error",
+          message: `${what[0]!.toUpperCase()}${what.slice(1)} were still loading from the server, so that change was NOT saved. The screen now shows the saved version — please make your change again.`,
+          durationMs: 12000,
+        });
+      });
+    }
+    window.addEventListener("bhb-desk-not-loaded", onDeskNotLoaded);
     window.addEventListener("bhb-desk-conflict", onDeskConflict);
     window.addEventListener("bhb-sync-error", onSyncError);
     window.addEventListener("bhb:sync-status", onSyncStatus);
     return () => {
+      window.removeEventListener("bhb-desk-not-loaded", onDeskNotLoaded);
       window.removeEventListener("bhb-desk-conflict", onDeskConflict);
       window.removeEventListener("bhb-sync-error", onSyncError);
       window.removeEventListener("bhb:sync-status", onSyncStatus);

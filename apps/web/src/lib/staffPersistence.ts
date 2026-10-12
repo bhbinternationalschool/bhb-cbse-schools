@@ -702,6 +702,18 @@ export function scheduleStaffSync(state: MastersState) {
     void trackServerWork(pushStaffRemoteServer(state));
     return;
   }
+  // Never save staff records this page has not loaded (12 Oct 2026): without
+  // the server's stamps every edited row goes as "new" and is dropped.
+  // Every Masters save comes through here, most with no staff edit, so the
+  // notice is shown only when there were staff rows that could have changed.
+  if (!isDeskHydrated(MODULE)) {
+    const held = STAFF_STAMPED_SLICES.some(
+      (k) => ((state as unknown as Record<string, unknown[] | undefined>)[k] ?? []).length > 0,
+    );
+    if (held) window.dispatchEvent(new CustomEvent("bhb-desk-not-loaded", { detail: { id: "staff" } }));
+    void ensureStaffHydrated();
+    return;
+  }
   pendingPush = state;
   if (pushTimer) clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
