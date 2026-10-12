@@ -443,6 +443,7 @@ SELFTESTS=(
   test:rbac-assigned-roles
   test:rbac-scope
   test:rbac-user-grants
+  test:rbac-editor
   test:visitor-gate
   test:play-billing
   test:ai-content-report

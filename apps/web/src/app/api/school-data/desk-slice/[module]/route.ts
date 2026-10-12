@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { rbacChangeRefusal } from "@/lib/rbacEditGuard";
 import { readRevsParam } from "@/lib/sliceRevMerge";
 import {
   DESK_SLICE_RBAC,
@@ -6,9 +7,10 @@ import {
   requireStaffPermission,
 } from "@/lib/apiRouteAuth.server";
 import type { DeskModuleId } from "@/lib/deskCutover";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, isValidRbacExpiry, normalizeRbacState, type RbacState } from "@/lib/rbac";
 import {
   deskFeatureGateFor,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
   stripDeskForFeatures,
@@ -237,6 +239,60 @@ export async function POST(req: Request, ctx: RouteCtx) {
       merged.state as Record<string, unknown>,
     );
     body = { ...(merged.state as typeof body), version: body.version };
+  }
+  if (id === "rbac" && auth.ok && !auth.viaMirrorSecret) {
+    // Who may change whose permissions: never your own, and the owner /
+    // principal / admin people and roles only by the director (lib/rbacEditGuard).
+    const storedRbac = await fetchDeskSliceFromDb("rbac");
+    if (!storedRbac.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Could not read the saved permissions — nothing was written. Try again." },
+        { status: 503 },
+      );
+    }
+    const raw = storedRbac.bundle as Record<string, unknown>;
+    const storedN = normalizeRbacState(raw as Partial<RbacState>);
+    const merged = normalizeRbacState({ ...raw, ...body } as Partial<RbacState>);
+    const incoming: Partial<RbacState> = {};
+    for (const k of ["roles", "assignments", "userGrants", "mobile"] as const) {
+      if (k in body) (incoming as Record<string, unknown>)[k] = merged[k];
+    }
+    const badExpiry = (Array.isArray(body.userGrants) ? (body.userGrants as { expiresOn?: unknown }[]) : []).find(
+      (g) => typeof g?.expiresOn === "string" && !isValidRbacExpiry(g.expiresOn),
+    );
+    if (badExpiry) {
+      return NextResponse.json(
+        { ok: false, error: `"${String(badExpiry.expiresOn)}" is not a date — use YYYY-MM-DD or leave the expiry empty.` },
+        { status: 400 },
+      );
+    }
+    const editorSession = auth.ctx.session;
+    const refusal = rbacChangeRefusal(
+      { session: editorSession, staffId: editorSession.staffId || "" },
+      storedN,
+      incoming,
+      auth.ctx.masters,
+      deletes,
+    );
+    if (refusal) {
+      console.warn(`[rbac-desk] refused save from ${editorSession.staffId || "?"}: ${refusal}`);
+      return NextResponse.json({ ok: false, error: refusal, reason: "rbac_protected" }, { status: 403 });
+    }
+  }
+  if (!featureGate) {
+    // A whole-module holder: refused only where the office has turned a
+    // function of this desk off for them.
+    const refused = await deniedSliceGuard(
+      req,
+      rbacModule,
+      async () => {
+        const s = await fetchDeskSliceFromDb(id);
+        return s.ok ? (s.bundle as Record<string, unknown>) : null;
+      },
+      body,
+      { prefix: `${id}/`, deletes },
+    );
+    if (refused) return refused;
   }
   const result = await pushDeskSliceToDb(id, body, { allowShrink, deletes, revs });
   if (!result.ok) {

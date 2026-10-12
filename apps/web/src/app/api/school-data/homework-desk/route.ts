@@ -6,6 +6,7 @@ import {
 } from "@/lib/apiRouteAuth.server";
 import {
   deskFeatureGateFor,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
   stripDeskForFeatures,
@@ -116,6 +117,20 @@ export async function POST(req: Request) {
 
   // Function holders: merged onto the stored desk, only their functions'
   // slices, class-scoped rows only in their classes — never the body as sent.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (!gate) {
+    const refused = await deniedSliceGuard(
+      req,
+      "homework",
+      async () => {
+        const s = await fetchHomeworkDeskFromDb();
+        return s.ok ? (s.bundle as unknown as Record<string, unknown>) : null;
+      },
+      body,
+    );
+    if (refused) return refused;
+  }
   if (gate) {
     const stored = await fetchHomeworkDeskFromDb();
     if (!stored.ok) {

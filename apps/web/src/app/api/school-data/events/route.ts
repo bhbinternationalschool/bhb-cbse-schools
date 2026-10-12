@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { requireStaffPermission, type RouteAuthResult } from "@/lib/apiRouteAuth.server";
 import { deskFeatureGateFor } from "@/lib/deskFeatureGate.server";
-import type { RbacAction } from "@/lib/rbac";
+import { isFeaturePersonallyDenied, type RbacAction } from "@/lib/rbac";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -77,6 +77,25 @@ async function eventsAuth(
   featureIds: string[],
 ): Promise<RouteAuthResult> {
   const auth = await requireStaffPermission(req, "events", action);
+  if (
+    auth.ok &&
+    !auth.viaMirrorSecret &&
+    action !== "view" &&
+    featureIds.length > 0 &&
+    featureIds.every((id) =>
+      isFeaturePersonallyDenied(auth.ctx.session, auth.ctx.masters, id, action, auth.ctx.rbac),
+    )
+  ) {
+    // The office has turned this off for this person, though their role
+    // holds all of Events (Masters → Roles → Assign to user).
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { ok: false, error: "This is turned off for you — ask the office to give your role this.", reason: "feature_forbidden" },
+        { status: 403 },
+      ),
+    };
+  }
   if (auth.ok || auth.response.status !== 403) return auth;
   const gate = await deskFeatureGateFor(req, "events", action === "view" ? "read" : "write");
   if (!gate) return auth;

@@ -8,6 +8,12 @@ export type RbacFeatureDef = {
   module: RbacModule;
   label: string;
   blurb: string;
+  /**
+   * Optional sub-heading inside the module in Masters → Roles (e.g. "Fee
+   * masters", "Reports"). Display only — functions sharing a group are shown
+   * under it; functions without one sit directly under the module.
+   */
+  group?: string;
   /** The actions that mean something for this function. */
   actions: RbacAction[];
   /**

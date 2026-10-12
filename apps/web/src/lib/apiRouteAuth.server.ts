@@ -18,6 +18,7 @@ import {
   defaultRbacState,
   featureAccess,
   hasPermission,
+  isFeaturePersonallyDenied,
   type RbacAction,
   type RbacModule,
 } from "@/lib/rbac";
@@ -156,6 +157,12 @@ export async function requireStaffPermission(
   if (base.viaMirrorSecret) return base;
   try {
     assertPermission(base.ctx, module, action);
+    // The office may have switched this one function off for this person
+    // (Masters → Roles → Assign to user): a route that only that function
+    // serves is refused even though their role holds the whole module.
+    if (routePersonallyDenied(base.ctx, module, action, request)) {
+      return authFailure(403, "Turned off for you in Masters → Roles & permissions");
+    }
     return base;
   } catch (e) {
     // A function of the module that lists this route (lib/rbacFeatureCatalog)
@@ -180,8 +187,36 @@ function holdsRouteFeature(
   // Desk stores are never opened whole by a function: their routes merge
   // a function holder's save slice by slice (lib/deskFeatureGate.server).
   if (pathname.startsWith("/api/school-data/")) return false;
+  // Saved roles and grants unreadable: function-only access is refused,
+  // never answered from the built-in defaults.
+  if (ctx.rbacKnown === false) return false;
   return featuresForRoute(module, pathname).some(
     (f) => featureAccess(ctx.session, ctx.masters, f.id, action, ctx.rbac).allowed,
+  );
+}
+
+/**
+ * Every function listing this route is personally denied to this person for
+ * `action`. A route no function lists is decided by the module alone; a
+ * route two functions share stays open while either is still held.
+ */
+function routePersonallyDenied(
+  ctx: ApiAuthContext,
+  module: RbacModule,
+  action: RbacAction,
+  request: Request,
+): boolean {
+  let pathname = "";
+  try {
+    pathname = new URL(request.url).pathname;
+  } catch {
+    return false;
+  }
+  if (pathname.startsWith("/api/school-data/")) return false;
+  const fns = featuresForRoute(module, pathname);
+  if (fns.length === 0) return false;
+  return fns.every((f) =>
+    isFeaturePersonallyDenied(ctx.session, ctx.masters, f.id, action, ctx.rbac),
   );
 }
 
@@ -206,6 +241,9 @@ export async function requireAnyStaffPermission(
   for (const g of grants) {
     try {
       assertPermission(base.ctx, g.module, g.action);
+      // A desk whose function serving this route is turned off for this
+      // person does not count (Masters → Roles → Assign to user).
+      if (routePersonallyDenied(base.ctx, g.module, g.action, request)) continue;
       return base;
     } catch {
       // Try the next desk.

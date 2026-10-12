@@ -6,6 +6,7 @@ import {
 } from "@/lib/apiRouteAuth.server";
 import {
   deskFeatureGateFor,
+  deniedSliceGuard,
   deskReadGate,
   featurePushOutcome,
   featureSavedResponse,
@@ -100,6 +101,20 @@ export async function POST(req: Request) {
   let deletes = readNamedDeletes(body.deletes, STUDENT_LEAVE_DELETABLE_TABLES);
 
   // Function holders: merged onto the stored desk, request by request.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (!gate) {
+    const refused = await deniedSliceGuard(
+      req,
+      "student_leave",
+      async () => {
+        const s = await fetchStudentLeaveDeskFromDb();
+        return s.ok ? (s.bundle as unknown as Record<string, unknown>) : null;
+      },
+      body,
+    );
+    if (refused) return refused;
+  }
   if (gate) {
     const stored = await fetchStudentLeaveDeskFromDb();
     if (!stored.ok) {

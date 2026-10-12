@@ -219,6 +219,7 @@
     "test:exam-seating": "npx tsx src/lib/examSeating.selftest.ts",
     "test:rbac-scope": "npx tsx src/lib/rbacScope.selftest.ts",
     "test:rbac-user-grants": "npx tsx src/lib/rbacUserGrants.selftest.ts",
+    "test:rbac-editor": "npx tsx src/lib/rbacEditorModel.selftest.ts",
     "test:visitor-gate": "npx tsx src/lib/visitorGate.selftest.ts",
     "test:play-billing": "npx tsx src/lib/playBilling.selftest.ts",
     "test:ai-content-report": "npx tsx src/lib/aiContentReport.selftest.ts",

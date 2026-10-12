@@ -6,6 +6,7 @@ import {
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import {
   deskFeatureGateFor,
+  deniedSliceGuard,
   deskReadGate,
   featurePushOutcome,
   featureSavedResponse,
@@ -163,6 +164,20 @@ export async function POST(req: Request) {
   // Function holders (e.g. Exams → Date sheet): merged onto the stored
   // setup, only their functions' slices — never the body as sent. Sheets
   // are never written here, so a stray copy is dropped before the check.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (!gate) {
+    const refused = await deniedSliceGuard(
+      req,
+      "exams",
+      async () => {
+        const s = await fetchExamSetupFromDb();
+        return s.ok ? (s.bundle as unknown as Record<string, unknown>) : null;
+      },
+      (({ sheets: _s, deletes: _d, ...rest }) => (void _s, void _d, rest))(body),
+    );
+    if (refused) return refused;
+  }
   if (gate) {
     const stored = await fetchExamSetupFromDb();
     if (!stored.ok) {
