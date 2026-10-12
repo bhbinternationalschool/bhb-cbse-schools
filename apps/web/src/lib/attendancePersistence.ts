@@ -2,6 +2,7 @@
  * Attendance remote sync — jsonb blob on attendance_state + normalized attendance_desk_*.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   attendanceStateIsEmpty,
@@ -38,6 +39,8 @@ export function resetAttendancePersistenceCache() {
 }
 
 export function scheduleAttendanceSync(state: AttendanceState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureAttendanceHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushAttendanceRemoteServer(state));
     return;

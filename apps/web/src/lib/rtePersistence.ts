@@ -2,6 +2,7 @@
  * RTE remote sync — jsonb blob on rte_state + normalized rte_desk_*.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   loadRte,
@@ -42,6 +43,8 @@ export function resetRtePersistenceCache() {
 }
 
 export function scheduleRteSync(state: RteState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureRteHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushRteRemoteServer(state));
     return;

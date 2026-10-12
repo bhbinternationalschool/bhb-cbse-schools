@@ -7,6 +7,7 @@
  * explicit save) is the right shape.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   loadSalarySetup,
@@ -34,6 +35,8 @@ const blob = createDomainBlobPersistence<SalarySetupState>({
 export const salarySetupRemoteEnabled = blob.remoteEnabled;
 
 export function scheduleSalarySetupSync(state: SalarySetupState): void {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureSalarySetupHydrated())) return;
   blob.scheduleSync(state);
 }
 

@@ -2,6 +2,7 @@
  * Timetable remote sync — jsonb blob on timetable_state + normalized desk slices.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   loadTimetable,
@@ -41,6 +42,8 @@ export function resetTimetablePersistenceCache() {
 }
 
 export function scheduleTimetableSync(state: TimetableState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureTimetableHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushTimetableRemoteServer(state));
     return;

@@ -8,6 +8,7 @@
  * `mergeTeachingStates` for the rule.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   loadTeaching,
@@ -46,6 +47,8 @@ export function resetTeachingPersistenceCache() {
 }
 
 export function scheduleTeachingSync(state: TeachingState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureTeachingHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushTeachingRemoteServer(state));
     return;

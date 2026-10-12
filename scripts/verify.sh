@@ -242,6 +242,7 @@ SELFTESTS=(
   test:pinnacle-books
   test:pinnacle-assets
   test:serial-save
+  test:desk-load-guard
   test:desk-on-demand
   test:masters-section-saves
   test:accounts-row-stamps

@@ -230,6 +230,11 @@ export function StaffWorkspace() {
       await withHydrationSlot(() => ensureStaffHydrated());
       setState(loadMasters());
     })();
+    // Masters (classes, sections, subjects) can land after staff records:
+    // redraw then too, or Allocate teaching shows no classes or subjects.
+    const onMasters = () => setState(loadMasters());
+    window.addEventListener("bhb-masters-updated", onMasters);
+    return () => window.removeEventListener("bhb-masters-updated", onMasters);
   }, []);
 
   function commit(next: MastersState, msg?: string) {

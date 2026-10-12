@@ -393,6 +393,7 @@
     "test:pinnacle-books": "npx tsx src/lib/pinnacleBooks.selftest.ts",
     "test:pinnacle-assets": "npx tsx src/lib/pinnacleAssets.selftest.ts",
     "test:serial-save": "npx tsx src/lib/serialSave.selftest.ts",
+    "test:desk-load-guard": "npx tsx src/lib/deskLoadGuard.selftest.ts",
     "test:desk-on-demand": "npx tsx src/lib/deskOnDemand.selftest.ts",
     "test:masters-section-saves": "npx tsx src/lib/mastersSectionSaves.selftest.ts",
     "test:accounts-row-stamps": "npx tsx src/lib/accountsRowStamps.selftest.ts",
