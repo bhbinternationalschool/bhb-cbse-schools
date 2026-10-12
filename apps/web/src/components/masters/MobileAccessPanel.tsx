@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Search } from "lucide-react";
 import type { MastersState } from "@/lib/masters";
 import {
   MOBILE_FEATURES,
@@ -14,11 +15,13 @@ import {
 import {
   appendRbacAudit,
   effectivePermissions,
+  hasPermission,
   removeUserGrant,
   resolveSessionRoles,
   setUserGrant,
   type RbacState,
 } from "@/lib/rbac";
+import { describePersonalRow } from "@/lib/rbacEditorModel";
 import { MastersWorkCard } from "@/components/masters/MastersLayout";
 
 /**
@@ -35,27 +38,38 @@ import { MastersWorkCard } from "@/components/masters/MastersLayout";
 export function MobileAccessPanel({
   state,
   masters,
-  commit,
+  commit: commitRaw,
   actorName,
+  editable = true,
 }: {
   state: RbacState;
   masters: MastersState | null;
   commit: (next: RbacState, msg?: string) => void;
   /** Who is making the change — stamped on personal grants and the audit. */
   actorName?: string;
+  /** False when the saved permissions could not be read — look, don't touch. */
+  editable?: boolean;
 }) {
+  const commit = (next: RbacState, msg?: string) => {
+    if (editable) commitRaw(next, msg);
+  };
   const access = state.mobile ?? defaultMobileAccess();
-  const roles = useMemo(
-    () => state.roles.filter((r) => r.isActive && r.code !== "parent"),
-    [state.roles],
-  );
+  // Parent is listed so the office finds it where the old ERP had it; its
+  // screens are the parent app's own and are not switched per role here.
+  const roles = useMemo(() => state.roles.filter((r) => r.isActive), [state.roles]);
   const [roleCode, setRoleCode] = useState(
     () => roles.find((r) => r.code === "teacher")?.code || roles[0]?.code || "",
   );
   const [staffId, setStaffId] = useState("");
 
   const role = roles.find((r) => r.code === roleCode) || null;
-  const enabled = new Set(access.roleFeatures[roleCode] ?? []);
+  const isParentRole = roleCode === "parent";
+  const saved = useMemo(() => new Set(access.roleFeatures[roleCode] ?? []), [access, roleCode]);
+  // Ticks are staged and saved together, like the old ERP's Save button.
+  const [roleDraft, setRoleDraft] = useState<Set<MobileFeatureId> | null>(null);
+  const enabled = roleDraft ?? saved;
+  const [query, setQuery] = useState("");
+  const [closed, setClosed] = useState<Set<string>>(() => new Set());
 
   /** What this role's permission matrix allows — the ceiling for the grid. */
   const rolePerms = useMemo(() => {
@@ -67,17 +81,37 @@ export function MobileAccessPanel({
     return !!rolePerms.get(f.module)?.has(f.action);
   }
 
-  function toggleRoleFeature(id: MobileFeatureId, on: boolean) {
-    const next = on
-      ? [...enabled, id]
-      : [...enabled].filter((x) => x !== id);
+  function pickRole(code: string) {
+    if (roleDraft && !window.confirm("Discard the unsaved phone-app changes for this role?")) return;
+    setRoleDraft(null);
+    setRoleCode(code);
+  }
+
+  function setRoleFeatures(ids: MobileFeatureId[], on: boolean) {
+    if (!editable || isParentRole) return;
+    const next = new Set(enabled);
+    for (const id of ids) {
+      if (on) next.add(id);
+      else next.delete(id);
+    }
+    setRoleDraft(next);
+  }
+
+  function saveRoleFeatures() {
+    if (!roleDraft || !role) return;
+    const added = [...roleDraft].filter((f) => !saved.has(f));
+    const removed = [...saved].filter((f) => !roleDraft.has(f));
+    const name = (f: MobileFeatureId) => MOBILE_FEATURES.find((x) => x.id === f)?.label || f;
     commit(
-      {
-        ...state,
-        mobile: setRoleMobileFeatures(access, roleCode, next as MobileFeatureId[]),
-      },
-      on ? "Feature switched on for this role" : "Feature switched off for this role",
+      appendRbacAudit(
+        { ...state, mobile: setRoleMobileFeatures(access, roleCode, [...roleDraft]) },
+        actorName || "",
+        "mobile.role",
+        `${role.code}: ${added.length ? `+ ${added.map(name).join(", ")}` : ""}${added.length && removed.length ? " · " : ""}${removed.length ? `− ${removed.map(name).join(", ")}` : ""}`,
+      ),
+      `Phone app saved for ${role.name}`,
     );
+    setRoleDraft(null);
   }
 
   const activeStaff = useMemo(
@@ -98,23 +132,15 @@ export function MobileAccessPanel({
       staffId: staffMember.id,
     };
     const held = resolveSessionRoles(state, session, masters);
-    const perms = effectivePermissions(held) as unknown as Map<string, Set<string>>;
-    // Whatever the office handed this one person counts too — that is the
-    // whole point of a personal grant, and the preview has to say so.
-    const personal = (state.userGrants ?? []).filter(
-      (g) =>
-        g.staffId === staffMember.id &&
-        (!g.expiresOn || g.expiresOn >= new Date().toISOString().slice(0, 10)),
-    );
     return {
       roleCodes: held.map((r) => r.code),
       ...resolveMobileFeatures({
         roleCodes: held.map((r) => r.code),
         staffId: staffMember.id,
         access,
-        can: (m, a) =>
-          !!perms.get(m)?.has(a) ||
-          personal.some((g) => g.module === m && g.actions.includes(a)),
+        // The same check the app uses: roles, plus whatever the office gave
+        // or took from this one person (personal deny > allow > roles).
+        can: (m, a) => hasPermission(session, masters, m, a, state),
       }),
     };
   }, [staffMember, masters, state, access]);
@@ -162,7 +188,7 @@ export function MobileAccessPanel({
         removeUserGrant(state, id),
         actorName || "",
         "user.grant.remove",
-        `${staffMember.fullName}: ${g.module} · ${g.actions.join(", ")}`,
+        `${staffMember.fullName}: ${describePersonalRow(g)}`,
       ),
       "Personal permission removed",
     );
@@ -190,12 +216,22 @@ export function MobileAccessPanel({
     }
     return [...out.entries()];
   }, []);
+  const q = query.trim().toLowerCase();
+  const shownGroups = groups
+    .map(([group, features]) => [
+      group,
+      q && !group.toLowerCase().includes(q)
+        ? features.filter((f) => f.label.toLowerCase().includes(q) || f.note.toLowerCase().includes(q) || f.id.includes(q))
+        : features,
+    ] as const)
+    .filter(([, features]) => features.length > 0);
+  const modulesOn = groups.filter(([, fs]) => fs.some((f) => enabled.has(f.id))).length;
 
   return (
     <div className="space-y-4">
       <MastersWorkCard
-        title="Mobile app by role"
-        hint="What each role sees in the staff app. A feature also needs the module permission above — one that is missing is shown here, not hidden."
+        title="Phone app by role"
+        hint="Which screens each role gets in the staff app. A screen also needs the module permission behind it — one that is missing is shown here, not hidden. Tick, then Save."
       >
         <div className="mb-3 flex flex-wrap items-end gap-3">
           <label className="text-xs text-[var(--muted)]">
@@ -203,7 +239,7 @@ export function MobileAccessPanel({
             <select
               className="mt-1 block rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
               value={roleCode}
-              onChange={(e) => setRoleCode(e.target.value)}
+              onChange={(e) => pickRole(e.target.value)}
             >
               {roles.map((r) => (
                 <option key={r.id} value={r.code}>
@@ -212,48 +248,131 @@ export function MobileAccessPanel({
               ))}
             </select>
           </label>
-          <p className="text-xs text-[var(--muted)]">
-            {enabled.size} of {MOBILE_FEATURES.length} features on
-          </p>
+          <label className="relative min-w-[12rem] flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-[var(--muted)]" aria-hidden />
+            <input
+              type="search"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] py-2 pl-8 pr-3 text-sm"
+              placeholder="Search screens…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Search phone-app screens"
+            />
+          </label>
+          <button type="button" className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm" onClick={() => setClosed(new Set())}>
+            Expand all
+          </button>
+          <button type="button" className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm" onClick={() => setClosed(new Set(groups.map(([g]) => g)))}>
+            Collapse all
+          </button>
+          {roleDraft ? (
+            <>
+              <button type="button" className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm" onClick={() => setRoleDraft(null)}>
+                Discard
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
+                onClick={saveRoleFeatures}
+              >
+                Save
+              </button>
+            </>
+          ) : null}
         </div>
+        <p className="mb-3 flex flex-wrap gap-x-4 text-xs text-[var(--muted)]">
+          <span>Total modules <strong className="text-[var(--foreground)]">{groups.length}</strong></span>
+          <span>Enabled modules <strong className="text-[var(--foreground)]">{modulesOn}</strong></span>
+          <span>Total features <strong className="text-[var(--foreground)]">{MOBILE_FEATURES.length}</strong></span>
+          <span>Enabled features <strong className="text-[var(--foreground)]">{enabled.size}</strong></span>
+        </p>
 
-        <div className="space-y-4">
-          {groups.map(([group, features]) => (
-            <div key={group}>
-              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
-                {group}
-              </h4>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {features.map((f) => {
-                  const on = enabled.has(f.id);
-                  const allowed = roleAllows(f);
-                  return (
-                    <label
-                      key={f.id}
-                      className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] p-2"
-                    >
-                      <input
-                        type="checkbox"
-                        className="mt-1"
-                        checked={on}
-                        onChange={(e) => toggleRoleFeature(f.id, e.target.checked)}
-                      />
-                      <span className="text-xs">
-                        <span className="font-medium">{f.label}</span>
-                        <span className="block text-[var(--muted)]">{f.note}</span>
-                        {on && !allowed ? (
-                          <span className="mt-1 block text-[var(--danger,#b42318)]">
-                            Needs {f.module} · {f.action} in the permission matrix —
-                            switched on here but the app will still refuse it.
+        {isParentRole ? (
+          <p className="rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-sm text-[var(--muted)]">
+            The parent app shows each family its own children&apos;s screens (fees, attendance, homework, notices,
+            transport …). They are not switched on or off per role here; the screens below are the staff app&apos;s.
+          </p>
+        ) : null}
+
+        <div className="space-y-3">
+          {shownGroups.map(([group, features]) => {
+            const open = q ? true : !closed.has(group);
+            const on = features.filter((f) => enabled.has(f.id)).length;
+            return (
+              <div key={group} className="rounded-lg border border-[var(--border)]">
+                <div className="flex flex-wrap items-center gap-2 bg-[var(--surface-sunken)] px-3 py-2">
+                  <button
+                    type="button"
+                    className="flex-1 text-left text-xs font-semibold uppercase tracking-wide text-[var(--brand-deep)]"
+                    onClick={() =>
+                      setClosed((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(group)) next.delete(group);
+                        else next.add(group);
+                        return next;
+                      })
+                    }
+                    aria-expanded={open}
+                  >
+                    {open ? "▾" : "▸"} {group}
+                    <span className="ml-2 font-normal normal-case text-[var(--muted)]">
+                      {on}/{features.length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="text-[11px] font-semibold text-[var(--primary)] disabled:opacity-50"
+                    disabled={!editable || isParentRole}
+                    onClick={() => setRoleFeatures(features.map((f) => f.id), true)}
+                  >
+                    Select all
+                  </button>
+                  <span className="text-[var(--muted)]">|</span>
+                  <button
+                    type="button"
+                    className="text-[11px] font-semibold text-[var(--primary)] disabled:opacity-50"
+                    disabled={!editable || isParentRole}
+                    onClick={() => setRoleFeatures(features.map((f) => f.id), false)}
+                  >
+                    Clear all
+                  </button>
+                </div>
+                {open ? (
+                  <div className="grid gap-2 p-2 sm:grid-cols-2">
+                    {features.map((f) => {
+                      const isOn = enabled.has(f.id);
+                      const allowed = roleAllows(f);
+                      return (
+                        <label
+                          key={f.id}
+                          className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] p-2"
+                        >
+                          <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={isOn}
+                            disabled={!editable || isParentRole}
+                            onChange={(e) => setRoleFeatures([f.id], e.target.checked)}
+                          />
+                          <span className="text-xs">
+                            <span className="font-medium">{f.label}</span>
+                            <span className="ml-1 font-mono text-[10px] text-[var(--muted)]">{f.id}</span>
+                            <span className="block text-[var(--muted)]">{f.note}</span>
+                            {isOn && !allowed ? (
+                              <span className="mt-1 block text-[var(--danger)]">
+                                Needs {f.module} · {f.action} in the role&apos;s permissions — switched on here but the
+                                app will still refuse it.
+                              </span>
+                            ) : null}
                           </span>
-                        ) : null}
-                      </span>
-                    </label>
-                  );
-                })}
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </MastersWorkCard>
 
@@ -362,9 +481,7 @@ export function MobileAccessPanel({
                     className="flex items-center justify-between gap-3 text-xs"
                   >
                     <span>
-                      <span className="font-medium">
-                        {g.module} · {g.actions.join(", ")}
-                      </span>
+                      <span className="font-medium">{describePersonalRow(g)}</span>
                       <span className="block text-[var(--muted)]">
                         {g.note || "No note"}
                         {g.grantedBy ? ` · by ${g.grantedBy}` : ""}

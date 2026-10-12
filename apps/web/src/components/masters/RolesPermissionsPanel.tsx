@@ -30,6 +30,9 @@ import { useDemoSession } from "@/components/shell/SessionContext";
 import { isSuperAdminSession } from "@/lib/superAdmin";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { MobileAccessPanel } from "@/components/masters/MobileAccessPanel";
+import { RbacAssignToUser } from "@/components/masters/RbacAssignToUser";
+import { RbacRoleTree } from "@/components/masters/RbacRoleTree";
+import { describePersonalRow } from "@/lib/rbacEditorModel";
 import {
   ErpTable,
   ErpTableBody,
@@ -44,7 +47,12 @@ import {
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
-type RbacTab = "matrix" | "mobile" | "roles" | "assignments" | "summary" | "audit";
+type RbacTab = "user" | "role" | "matrix" | "mobile" | "roles" | "assignments" | "summary" | "audit";
+
+/** Whether this browser holds the school's SAVED permissions. "failed"
+ * never falls back to the built-in defaults as if they were the saved ones
+ * — editing on that copy would overwrite what the school configured. */
+type RbacLoad = "loading" | "ok" | "failed";
 
 function emptyScope() {
   return {
@@ -84,7 +92,9 @@ export function RolesPermissionsPanel() {
     "code",
     "asc",
   );
-  const [tab, setTab] = useState<RbacTab>("matrix");
+  const [tab, setTab] = useState<RbacTab>("user");
+  const [rbacLoad, setRbacLoad] = useState<RbacLoad>("loading");
+  const [loadTick, setLoadTick] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [roleId, setRoleId] = useState<string>("");
   const [cloneCode, setCloneCode] = useState("");
@@ -114,22 +124,50 @@ export function RolesPermissionsPanel() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    let live = true;
+    setRbacLoad("loading");
     void (async () => {
-      const [{ ensureRbacHydrated }, { withHydrationSlot }] =
+      const [{ ensureRbacHydrated }, { withHydrationSlot, isDeskHydrated }, { isSupabaseConfigured }] =
         await Promise.all([
           import("@/lib/rbacPersistence"),
           import("@/lib/deskHydrateGuard"),
+          import("@/lib/supabase/client"),
         ]);
-      await withHydrationSlot(() => ensureRbacHydrated());
+      try {
+        await withHydrationSlot(() => ensureRbacHydrated());
+      } catch {
+        // Reported below as not loaded.
+      }
+      if (!live) return;
       const r = loadRbac();
       setState(r);
+      setRbacLoad(!isSupabaseConfigured() || isDeskHydrated("rbac") ? "ok" : "failed");
     })();
+    return () => {
+      live = false;
+    };
+  }, [loadTick]);
+
+  // The staff roster is loaded on demand (memory-only storage): ask for it,
+  // and pick it up whenever it lands.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const refresh = () => setMasters(loadMasters());
+    window.addEventListener("bhb-masters-updated", refresh);
+    void Promise.all([import("@/lib/staffPersistence"), import("@/lib/deskHydrateGuard")])
+      .then(([{ ensureStaffHydrated }, { withHydrationSlot }]) =>
+        withHydrationSlot(() => ensureStaffHydrated()),
+      )
+      .then(refresh)
+      .catch(() => undefined);
+    return () => window.removeEventListener("bhb-masters-updated", refresh);
   }, []);
 
   const allowed = useMemo(() => {
     if (!masters || !state) return false;
     return canConfigureRbac(session, masters, state);
   }, [masters, session, state]);
+  const editable = allowed && rbacLoad === "ok";
 
   const selected = useMemo(
     () => state?.roles.find((r) => r.id === roleId) ?? null,
@@ -180,8 +218,8 @@ export function RolesPermissionsPanel() {
       staffName:
         (masters?.staff ?? []).find((s) => s.id === g.staffId)?.fullName ||
         g.staffId,
-      module: g.module,
-      actions: g.actions.join(", "),
+      permission: describePersonalRow(g),
+      deny: g.effect === "deny",
       note: g.note,
       grantedBy: g.grantedBy,
       expiresOn: g.expiresOn,
@@ -194,13 +232,21 @@ export function RolesPermissionsPanel() {
     grantRows,
     {
       staff: (g) => g.staffName,
-      permission: (g) => g.module,
+      permission: (g) => g.permission,
     },
     "staff",
     "asc",
   );
 
   function commit(next: RbacState, msg?: string) {
+    if (!editable) {
+      setNotice(
+        rbacLoad === "ok"
+          ? "Only the Principal, Admin or Super Admin can change permissions."
+          : "The saved permissions have not loaded — nothing can be changed until they do.",
+      );
+      return;
+    }
     setState(next);
     saveRbac(next);
     if (msg) {
@@ -432,14 +478,36 @@ export function RolesPermissionsPanel() {
       {notice ? (
         <p className="text-sm font-medium text-[var(--brand-deep)]">{notice}</p>
       ) : null}
+      {rbacLoad === "loading" ? (
+        <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--muted)]">
+          Loading the school&apos;s saved permissions… editing opens once they are here.
+        </p>
+      ) : null}
+      {rbacLoad === "failed" ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--danger)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--danger)]">
+          <span className="flex-1">
+            The saved roles and permissions could not be read from the server. What is shown below may be the
+            built-in defaults, not what the school saved — so editing is switched off until they load.
+          </span>
+          <button
+            type="button"
+            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm text-[var(--foreground)]"
+            onClick={() => setLoadTick((n) => n + 1)}
+          >
+            Try again
+          </button>
+        </div>
+      ) : null}
 
       <ModuleTabs
         aria-label="Roles and permissions"
         value={tab}
         onChange={(id) => setTab(id as RbacTab)}
         items={[
-          { id: "matrix", label: "Permission matrix", tone: "navy" },
-          { id: "mobile", label: "Mobile app", tone: "sky" },
+          { id: "user", label: "Assign to user", tone: "navy" },
+          { id: "role", label: "Role permissions", tone: "teal" },
+          { id: "matrix", label: "Compact matrix", tone: "slate" },
+          { id: "mobile", label: "Phone app", tone: "sky" },
           { id: "roles", label: "Roles", tone: "teal" },
           { id: "assignments", label: "Assignments", tone: "violet" },
           { id: "summary", label: "Access summary", tone: "amber" },
@@ -447,6 +515,26 @@ export function RolesPermissionsPanel() {
         ]}
       />
 
+      {tab === "user" ? (
+        <RbacAssignToUser
+          state={state}
+          masters={masters}
+          editable={editable}
+          actorName={session.fullName}
+          commit={commit}
+        />
+      ) : null}
+
+      {tab === "role" ? (
+        <RbacRoleTree
+          state={state}
+          editable={editable}
+          actorName={session.fullName}
+          commit={commit}
+        />
+      ) : null}
+
+      <fieldset disabled={!editable} className="contents">
       {tab === "matrix" ? (
         <MastersWorkCard
           title="Permission matrix"
@@ -600,14 +688,19 @@ export function RolesPermissionsPanel() {
         </MastersWorkCard>
       ) : null}
 
+      </fieldset>
+
       {tab === "mobile" && state ? (
         <MobileAccessPanel
           state={state}
           masters={masters}
           commit={commit}
           actorName={session.fullName}
+          editable={editable}
         />
       ) : null}
+
+      <fieldset disabled={!editable} className="contents">
 
       {tab === "roles" ? (
         <div className="space-y-4">
@@ -958,8 +1051,8 @@ export function RolesPermissionsPanel() {
                           </span>
                         ) : null}
                       </td>
-                      <td className="px-3 py-2 font-mono text-[12px]">
-                        {g.module} · {g.actions}
+                      <td className={`px-3 py-2 text-[12px] ${g.deny ? "text-[var(--danger)]" : ""}`}>
+                        {g.permission}
                       </td>
                       <td className="px-3 py-2 text-[12px] text-[var(--muted)]">
                         {g.note || "No note"}
@@ -974,6 +1067,8 @@ export function RolesPermissionsPanel() {
           </MastersTableCard>
         </MastersTablesRow>
       ) : null}
+
+      </fieldset>
 
       {tab === "audit" ? (
         <MastersTableCard title="Permission change audit">
