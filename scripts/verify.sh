@@ -241,6 +241,7 @@ SELFTESTS=(
   test:library-ebooks
   test:pinnacle-books
   test:pinnacle-assets
+  test:parent-aadhaar-on-record
   test:serial-save
   test:desk-load-guard
   test:desk-on-demand

@@ -1987,6 +1987,52 @@ class LHi extends L {
   String get profDocumentsSchoolNeeds => 'स्कूल को चाहिए ये दस्तावेज़';
 
   @override
+  String get profAadhaarSection => 'आधार नंबर';
+
+  @override
+  String get profAadhaarIntro =>
+      'नंबर छिपा दिखता है। कोई नंबर गलत हो तो यहाँ सुधारें — स्कूल द्वारा सत्यापित नंबर ऑफिस ही सुधारेगा।';
+
+  @override
+  String get profAadhaarFather => 'पिता';
+
+  @override
+  String get profAadhaarMother => 'माता';
+
+  @override
+  String get profAadhaarNotGiven => 'नहीं दिया गया';
+
+  @override
+  String get profAadhaarVerified => 'स्कूल द्वारा सत्यापित';
+
+  @override
+  String get profAadhaarAdd => 'जोड़ें';
+
+  @override
+  String get profAadhaarCorrect => 'सुधारें';
+
+  @override
+  String profAadhaarDialogTitle(String who) {
+    return '$who — आधार नंबर';
+  }
+
+  @override
+  String get profAadhaarInvalid =>
+      'यह सही 12 अंकों का आधार नंबर नहीं है — कृपया जाँचें।';
+
+  @override
+  String profAadhaarSaved(String last4) {
+    return 'सेव हो गया — XXXX-XXXX-$last4';
+  }
+
+  @override
+  String get profAadhaarUnchanged => 'यह नंबर पहले से रिकॉर्ड में है।';
+
+  @override
+  String get profAadhaarKeptVerified =>
+      'स्कूल यह आधार पहले ही सत्यापित कर चुका है, इसलिए बदला नहीं गया। कृपया स्कूल ऑफिस से संपर्क करें।';
+
+  @override
   String get profDetailsOnRecord => 'रिकॉर्ड में दर्ज जानकारी';
 
   @override

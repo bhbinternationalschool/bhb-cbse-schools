@@ -1067,6 +1067,7 @@ class StudentProfile {
     required this.photoUrl,
     required this.completeness,
     required this.docs,
+    this.aadhaar = const [],
   });
 
   factory StudentProfile.fromJson(Map<String, dynamic> j) {
@@ -1123,6 +1124,17 @@ class StudentProfile {
       docs: ((j["docs"] as List?) ?? const [])
           .map((d) => StudentDocInfo.fromJson(d as Map<String, dynamic>))
           .toList(),
+      aadhaar: ((j["aadhaar"] as List?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(
+            (a) => (
+              who: (a["who"] as String?) ?? "",
+              last4: (a["last4"] as String?) ?? "",
+              status: (a["status"] as String?) ?? "missing",
+            ),
+          )
+          .where((a) => a.who.isNotEmpty)
+          .toList(),
     );
   }
 
@@ -1134,6 +1146,10 @@ class StudentProfile {
   final String photoUrl;
   final int completeness;
   final List<StudentDocInfo> docs;
+
+  /// The child's, father's and mother's Aadhaar as the school holds them:
+  /// last 4 digits and missing / received / verified (12 Oct 2026).
+  final List<({String who, String last4, String status})> aadhaar;
 
   int get requiredMissing =>
       docs.where((d) => d.required && (!d.hasFile || d.isRejected)).length;
@@ -3815,6 +3831,23 @@ class ApiClient {
 
   Future<ParentProfile> fetchProfile() async =>
       ParentProfile.fromJson(await _getData("/api/v1/profile"));
+
+  /// Adds or corrects an Aadhaar number from the child's profile ("Correct
+  /// Aadhaar"). `who` is child, father or mother. Returns the outcome
+  /// `{status: saved|corrected|unchanged|kept_verified, last4}`; throws
+  /// [ApiException] with the server's reason when it was not saved.
+  Future<Map<String, dynamic>> correctAadhaar({
+    required String studentId,
+    required String who,
+    required String number,
+  }) async {
+    final data = await _postData("/api/v1/profile/aadhaar", {
+      "studentId": studentId,
+      "who": who,
+      "number": number,
+    });
+    return (data["outcome"] as Map<String, dynamic>?) ?? const {};
+  }
 
   /// Only the fields the server lists as editable are sent; it validates
   /// formats and returns the household as now stored.

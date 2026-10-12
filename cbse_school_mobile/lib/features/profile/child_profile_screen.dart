@@ -7,6 +7,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/popups/app_popups.dart" show aadhaarLooksValid;
 
 /// One child: the full record as the school holds it, and the document
 /// checklist with upload.
@@ -62,6 +63,36 @@ class ChildProfileScreen extends StatelessWidget {
                 onUpload: () =>
                     _upload(context, child, doc, hints[doc.key], reload),
               ),
+            if (child.aadhaar.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _Section(context.l10n.profAadhaarSection),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+                child: Text(
+                  context.l10n.profAadhaarIntro,
+                  style: AppText.bodySmallMuted.copyWith(height: 1.4),
+                ),
+              ),
+              Card(
+                child: Column(
+                  children: [
+                    for (final a in child.aadhaar)
+                      _AadhaarTile(
+                        who: _aadhaarWho(context, child, a.who),
+                        last4: a.last4,
+                        status: a.status,
+                        onEdit: () => _editAadhaar(
+                          context,
+                          child,
+                          a.who,
+                          _aadhaarWho(context, child, a.who),
+                          reload,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             _Section(context.l10n.profDetailsOnRecord),
             Card(
@@ -86,6 +117,103 @@ class ChildProfileScreen extends StatelessWidget {
         );
       },
     );
+  }
+
+  static String _aadhaarWho(
+    BuildContext context,
+    StudentProfile child,
+    String who,
+  ) => switch (who) {
+    "father" => context.l10n.profAadhaarFather,
+    "mother" => context.l10n.profAadhaarMother,
+    _ => child.fullName,
+  };
+
+  /// "Correct Aadhaar" (12 Oct 2026): a family fixes a mistyped number, or
+  /// adds a missing one. The checksum is checked here first; the server
+  /// refuses to change a number the school has verified.
+  Future<void> _editAadhaar(
+    BuildContext context,
+    StudentProfile child,
+    String who,
+    String label,
+    Future<void> Function() reload,
+  ) async {
+    final ctl = TextEditingController();
+    String error = "";
+    final number = await showDialog<String>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text(context.l10n.profAadhaarDialogTitle(label)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: ctl,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                maxLength: 14,
+                decoration: const InputDecoration(
+                  hintText: "1234 5678 9012",
+                  border: OutlineInputBorder(),
+                  counterText: "",
+                ),
+              ),
+              if (error.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  error,
+                  style: AppText.bodySmall.copyWith(color: AppColors.danger),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(context.l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () {
+                final n = ctl.text.replaceAll(RegExp(r"\D"), "");
+                if (!aadhaarLooksValid(n)) {
+                  setState(() => error = context.l10n.profAadhaarInvalid);
+                  return;
+                }
+                Navigator.pop(context, n);
+              },
+              child: Text(context.l10n.save),
+            ),
+          ],
+        ),
+      ),
+    );
+    ctl.dispose();
+    if (number == null || !context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final o = await api.correctAadhaar(
+        studentId: child.id,
+        who: who,
+        number: number,
+      );
+      final last4 =
+          (o["last4"] as String?) ?? number.substring(number.length - 4);
+      final text = switch (o["status"]) {
+        "kept_verified" =>
+          context.mounted ? context.l10n.profAadhaarKeptVerified : "",
+        "unchanged" => context.mounted ? context.l10n.profAadhaarUnchanged : "",
+        _ => context.mounted ? context.l10n.profAadhaarSaved(last4) : "",
+      };
+      if (text.isNotEmpty) {
+        messenger.showSnackBar(SnackBar(content: Text(text)));
+      }
+      await reload();
+    } on ApiException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
   }
 
   Future<void> _upload(
@@ -631,6 +759,55 @@ class _Row extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// One person's Aadhaar on the record: hidden number, and "Add" / "Correct"
+/// unless the school has verified it.
+class _AadhaarTile extends StatelessWidget {
+  const _AadhaarTile({
+    required this.who,
+    required this.last4,
+    required this.status,
+    required this.onEdit,
+  });
+
+  final String who;
+  final String last4;
+  final String status;
+  final VoidCallback onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final verified = status == "verified";
+    return ListTile(
+      dense: true,
+      title: Text(who, style: AppText.bodyMediumInk),
+      subtitle: Text(
+        last4.isEmpty ? context.l10n.profAadhaarNotGiven : "XXXX-XXXX-$last4",
+        style: AppText.bodySmallMuted,
+      ),
+      trailing: verified
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.verified, size: 16, color: AppColors.success),
+                const SizedBox(width: 4),
+                Text(
+                  context.l10n.profAadhaarVerified,
+                  style: AppText.labelSmall.copyWith(color: AppColors.success),
+                ),
+              ],
+            )
+          : TextButton(
+              onPressed: onEdit,
+              child: Text(
+                last4.isEmpty
+                    ? context.l10n.profAadhaarAdd
+                    : context.l10n.profAadhaarCorrect,
+              ),
+            ),
     );
   }
 }
