@@ -257,11 +257,16 @@ Acceptance: `npm run verify` green; a self-test per item that **executes** the c
 (not a `readFileSync` grep); post-deploy, Cloud Run `/api/v1/principal/snapshot` calls per hour
 fall and no `ensureAllDeskHydrated` storm follows a conflict (beacon from 1.2 once it exists).
 
-**0.6 Migration drift.** Two tables that migrations create are absent in production:
-`purchase_desk_sync_meta`, `store_desk_sync_meta` (35 live vs 37 defined). Compare
-`ls supabase/migrations` with Supabase `list_migrations`, apply what is missing, and record the
-result in this file. The `fleet_edge_events` index from `20261011120000_db_cleanup_stage2.sql:42`
-must be confirmed applied (71,072 sequential scans of a 93 MB table since 12 Aug).
+**0.6 Migration drift — DONE 13 Oct 2026, nothing to apply.** The two `*_sync_meta` tables
+defined in migrations but absent in production (`purchase_desk_sync_meta`,
+`store_desk_sync_meta`) were dropped on purpose by `20260823220000_inventory_phase5_drop_legacy.sql`
+(the store rebuild). 47 repo migration files have no same-named entry in `list_migrations`
+because they were applied under other names; the objects they create were checked and all exist
+(`fee_ledger_post_collection`, `inv_collect_on_sale`, `ledger_fiscal_years`,
+`sis_student_transport_point`, `village_lead_coverage`, …). The `fleet_edge_events` index from
+`20261011120000_db_cleanup_stage2.sql:42` exists; `seq_scan` was 71,072 at 13 Oct 00:26 IST —
+re-check that it stops rising. A version-aligned comparison (repo file name ↔ applied name) is
+worth automating in the trigger smoke step later.
 
 ### Phase 1 — The kernel (one executor; nothing user-visible yet)
 
