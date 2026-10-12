@@ -442,6 +442,7 @@ SELFTESTS=(
   test:payout-requests
   test:visiting-pay
   test:visiting-exclusions
+  test:payroll-staggered-runs
   test:diksha-index
   test:teacher-contact
   test:question-bank

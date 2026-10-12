@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState, Fragment } from "react";
 import { useAccessData } from "@/components/shell/useAccessData";
 import Link from "next/link";
 import { Wallet } from "lucide-react";
+import { pushToast } from "@/components/shell/Toast";
+import { isVisitingStaff } from "@/lib/visitingPay";
 import { loadMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { UpiPayButton, type UpiPaid } from "@/components/payments/UpiPayButton";
@@ -37,7 +39,7 @@ import {
   payrollRunPaymentDate,
   todayIstDate,
   mergePreservedAdjustments,
-  monthHasCommittedRun,
+  committedStaffInMonth,
   payrollAuditActionLabel,
   payrollStatusLabel,
   payrollTallyCsv,
@@ -168,7 +170,8 @@ export function PayrollWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [slipStaffId, setSlipStaffId] = useState("");
-  const [processStaffId, setProcessStaffId] = useState("");
+  const [processStaffIds, setProcessStaffIds] = useState<string[]>([]);
+  const [staffFilter, setStaffFilter] = useState("");
   const [expandedStaffId, setExpandedStaffId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -178,6 +181,15 @@ export function PayrollWorkspace() {
     // created or fetched (director, 8 Oct 2026: dated lists in date order).
     setRuns([...loadPayroll().runs].sort((a, b) => b.month.localeCompare(a.month) || (b.createdAt || "").localeCompare(a.createdAt || "")));
   }, [tick]);
+
+  // The staff roster can land after this screen mounts (the shell waits for
+  // it at most 5 s); re-read Masters when it does, or the staff picker and
+  // "due" counts stay empty.
+  useEffect(() => {
+    const onMasters = () => setTick((t) => t + 1);
+    window.addEventListener("bhb-masters-updated", onMasters);
+    return () => window.removeEventListener("bhb-masters-updated", onMasters);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -256,23 +268,42 @@ export function PayrollWorkspace() {
   const processStaffOptions = useMemo(
     () =>
       (masters?.staff ?? [])
-        .filter((s) => s.status === "active")
+        // Visiting staff are paid from their work sheet, never from payroll.
+        .filter((s) => s.status === "active" && !isVisitingStaff(s))
         .sort((a, b) => a.empCode.localeCompare(b.empCode)),
     [masters],
   );
+
+  // A refusal stays on screen until closed, in a toast wherever the page is
+  // scrolled: a 3-second note at the top of the page let a refused action
+  // look done (13 Oct 2026). Success notes still fade.
+  // Who already has this month's salary approved / posted / paid — shown
+  // ticked-off in the picker and left out of any new draft.
+  const committedInMonth = useMemo(
+    () => committedStaffInMonth(month, ay),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tick tracks payroll writes
+    [month, ay, tick],
+  );
+  const pickableStaff = useMemo(() => {
+    const q = staffFilter.trim().toLowerCase();
+    return q
+      ? processStaffOptions.filter((st) =>
+          `${st.empCode} ${st.fullName}`.toLowerCase().includes(q),
+        )
+      : processStaffOptions;
+  }, [processStaffOptions, staffFilter]);
 
   function flash(msg: string, isErr = false) {
     if (isErr) {
       setError(msg);
       setNotice(null);
-    } else {
-      setNotice(msg);
-      setError(null);
+      pushToast({ kind: "error", message: msg, durationMs: 0 });
+      return;
     }
-    window.setTimeout(() => {
-      setNotice(null);
-      setError(null);
-    }, 3200);
+    setNotice(msg);
+    setError(null);
+    pushToast({ kind: "success", message: msg });
+    window.setTimeout(() => setNotice(null), 3200);
   }
 
   function refresh() {
@@ -343,7 +374,9 @@ export function PayrollWorkspace() {
     setSelectedId(r.run.id);
     setTab("detail");
     flash(
-      `Bulk draft ${month}: ${r.run.lines.length} staff — not in accounts until published`,
+      `Bulk draft ${month}: ${r.run.lines.length} staff — not in accounts until published${r.skipped.length
+        ? ` · skipped ${r.skipped.length} already paid/approved for ${month}: ${r.skipped.slice(0, 4).join(", ")}${r.skipped.length > 4 ? "…" : ""}`
+        : ""}`,
     );
     refresh();
   }
@@ -356,8 +389,8 @@ export function PayrollWorkspace() {
 
   function processIndividualNow() {
     if (!masters || !allowed) return;
-    if (!processStaffId) {
-      flash("Select a staff member", true);
+    if (processStaffIds.length === 0) {
+      flash("Select at least one staff member — nothing was created.", true);
       return;
     }
     const r = processPayrollDraft({
@@ -366,7 +399,7 @@ export function PayrollWorkspace() {
       academicYearCode: ay,
       createdBy: session.fullName,
       mode: "individual",
-      staffIds: [processStaffId],
+      staffIds: processStaffIds,
     });
     if (!r.ok) {
       flash(r.error, true);
@@ -375,10 +408,15 @@ export function PayrollWorkspace() {
     setSelectedId(r.run.id);
     setTab("detail");
     flash(
-      r.merged
-        ? `Merged staff into draft — still editable, not in accounts`
-        : `Individual draft for ${month} — edit freely until publish`,
+      `${
+        r.merged
+          ? `Added to the open ${month} draft (now ${r.run.lines.length} staff) — still editable, not in accounts`
+          : `Draft for ${month}: ${r.run.lines.length} staff — edit freely until publish`
+      }${r.skipped.length
+        ? ` · skipped ${r.skipped.length} already paid/approved for ${month}: ${r.skipped.slice(0, 4).join(", ")}${r.skipped.length > 4 ? "…" : ""}`
+        : ""}`,
     );
+    setProcessStaffIds([]);
     refresh();
   }
 
@@ -470,7 +508,11 @@ export function PayrollWorkspace() {
       flash(r.error, true);
       return;
     }
-    flash("Recalled to draft — accounts unchanged / voided for this run");
+    flash(
+      r.run && selected.status === "posted"
+        ? "Recalled to draft — this run's salary-account entries were voided"
+        : "Recalled to draft — nothing had reached the accounts",
+    );
     setSelectedId(r.run.id);
     refresh();
   }
@@ -791,20 +833,20 @@ export function PayrollWorkspace() {
         <div className="space-y-4">
           <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <p className="text-xs text-[var(--muted)]">
-            Process salary as <strong>draft</strong> (bulk or individual). Edit
-            freely until you <strong>publish to salary account</strong> — draft
-            never changes accounts. Approved/posted months are locked (one
-            committed run per month).
+            Process salary as <strong>draft</strong> — everyone at once, or
+            the staff you tick. Edit freely until you{" "}
+            <strong>publish to salary account</strong>; a draft never changes
+            accounts. A month can be paid in parts: staff already paid for it
+            are left out, so nobody is paid twice.
           </p>
-          {(() => {
-            const committed = monthHasCommittedRun(month, ay);
-            return committed ? (
-              <p className="mt-2 rounded-lg bg-[var(--danger-soft)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--danger)]">
-                {month} is already {payrollStatusLabel(committed.status)} —
-                recall that run before creating a new draft.
-              </p>
-            ) : null;
-          })()}
+          {committedInMonth.size > 0 ? (
+            <p className="mt-2 rounded-lg bg-[rgba(32,48,80,0.05)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--brand-deep)]">
+              {committedInMonth.size} staff already have {month} salary
+              approved, posted or paid — they are skipped.{" "}
+              {processStaffOptions.filter((st) => !committedInMonth.has(st.id)).length}{" "}
+              still to process.
+            </p>
+          ) : null}
             <div className="flex flex-wrap items-end gap-3">
               <label className="text-xs font-semibold text-[var(--muted)]">
                 Month
@@ -820,31 +862,74 @@ export function PayrollWorkspace() {
                 className="rounded-lg bg-[var(--primary)] px-3 py-2 text-xs font-semibold text-[var(--primary-foreground)]"
                 onClick={() => processBulk(false)}
               >
-                Process bulk draft
+                Process all due staff
               </button>
             </div>
-            <div className="flex flex-wrap items-end gap-3 border-t border-[var(--border)] pt-3">
-              <label className="text-xs font-semibold text-[var(--muted)]">
-                Individual staff
-                <select
-                  className="field mt-1 min-w-[220px] !py-2"
-                  value={processStaffId}
-                  onChange={(e) => setProcessStaffId(e.target.value)}
+            <div className="space-y-2 border-t border-[var(--border)] pt-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-xs font-semibold text-[var(--muted)]">
+                  Selected staff ({processStaffIds.length})
+                </span>
+                <input
+                  type="search"
+                  className="field !py-1.5 text-xs"
+                  placeholder="Find staff…"
+                  value={staffFilter}
+                  onChange={(e) => setStaffFilter(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="text-[11px] font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline"
+                  onClick={() =>
+                    setProcessStaffIds(
+                      pickableStaff.filter((st) => !committedInMonth.has(st.id)).map((st) => st.id),
+                    )
+                  }
                 >
-                  <option value="">Select staff…</option>
-                  {processStaffOptions.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.empCode} — {s.fullName}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  Tick all shown
+                </button>
+                <button
+                  type="button"
+                  className="text-[11px] font-semibold text-[var(--muted)] underline-offset-2 hover:underline"
+                  onClick={() => setProcessStaffIds([])}
+                >
+                  Clear
+                </button>
+              </div>
+              <div className="grid max-h-48 gap-1 overflow-y-auto rounded-lg border border-[var(--border)] p-2 sm:grid-cols-2 lg:grid-cols-3">
+                {pickableStaff.map((st) => {
+                  const done = committedInMonth.get(st.id);
+                  return (
+                    <label
+                      key={st.id}
+                      className={`flex items-center gap-2 text-xs ${done ? "text-[var(--muted)]" : "text-[var(--brand-deep)]"}`}
+                      title={done ? `${month} salary already approved / posted / paid` : undefined}
+                    >
+                      <input
+                        type="checkbox"
+                        disabled={!!done}
+                        checked={!done && processStaffIds.includes(st.id)}
+                        onChange={() =>
+                          setProcessStaffIds((prev) =>
+                            prev.includes(st.id)
+                              ? prev.filter((x) => x !== st.id)
+                              : [...prev, st.id],
+                          )
+                        }
+                      />
+                      {st.empCode} — {st.fullName}
+                      {done ? <span className="text-[10px]">· paid</span> : null}
+                    </label>
+                  );
+                })}
+              </div>
               <button
                 type="button"
-                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                disabled={processStaffIds.length === 0}
                 onClick={processIndividual}
               >
-                Process individual draft
+                Process selected ({processStaffIds.length})
               </button>
             </div>
           </div>

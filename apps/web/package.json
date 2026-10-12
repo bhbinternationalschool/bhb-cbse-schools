@@ -76,6 +76,7 @@
     "test:payout-requests": "npx tsx src/lib/payoutRequests.selftest.ts",
     "test:visiting-pay": "npx tsx src/lib/visitingPay.selftest.ts",
     "test:visiting-exclusions": "npx tsx src/lib/visitingExclusions.selftest.ts",
+    "test:payroll-staggered-runs": "npx tsx src/lib/payrollStaggeredRuns.selftest.ts",
     "test:diksha-index": "npx tsx src/lib/dikshaIndex.selftest.ts",
     "test:teacher-contact": "npx tsx src/lib/teacherContact.selftest.ts",
     "test:academic-risk": "npx tsx src/lib/academicRisk.selftest.ts",

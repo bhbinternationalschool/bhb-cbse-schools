@@ -753,6 +753,35 @@ export function staffCommittedInMonth(
   return hit;
 }
 
+/**
+ * Staff whose salary for the month is already approved, posted or paid, in
+ * any run (staff id → "EMP-CODE Name"). A month is no longer one run: the
+ * school pays staff on different days (director, 13 Oct 2026), so the rule is
+ * per person — nobody is paid twice for a month — never per month.
+ */
+export function committedStaffInMonth(
+  month: string,
+  academicYearCode: string,
+  exceptRunId?: string,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const r of loadPayroll().runs) {
+    if (exceptRunId && r.id === exceptRunId) continue;
+    if (r.month !== month || r.academicYearCode !== academicYearCode) continue;
+    if (!isPayrollLocked(r)) continue;
+    for (const l of r.lines) {
+      if (!out.has(l.staffId)) out.set(l.staffId, `${l.empCode} ${l.fullName}`.trim());
+    }
+  }
+  return out;
+}
+
+function namesList(names: string[], max = 4): string {
+  return names.length <= max
+    ? names.join(", ")
+    : `${names.slice(0, max).join(", ")} and ${names.length - max} more`;
+}
+
 export function appendPayrollAudit(
   entry: Omit<PayrollAuditEntry, "id" | "at">,
 ): PayrollState {
@@ -1150,35 +1179,41 @@ export function processPayrollDraft(opts: {
   staffIds?: string[];
   replaceExistingDraft?: boolean;
 }):
-  | { ok: true; run: PayrollRun; merged: boolean }
+  | { ok: true; run: PayrollRun; merged: boolean; skipped: string[] }
   | { ok: false; error: string } {
   if (opts.mode === "individual" && !opts.staffIds?.length) {
     return { ok: false, error: "Select at least one staff member" };
   }
 
-  const committed = monthHasCommittedRun(
-    opts.month,
-    opts.academicYearCode,
-  );
-  if (committed) {
-    return {
-      ok: false,
-      error: `Month ${opts.month} already has ${payrollStatusLabel(committed.status)} payroll — recall that run before reprocessing`,
-    };
-  }
-
-  if (opts.mode === "individual" && opts.staffIds?.length) {
-    const clash = staffCommittedInMonth(
-      opts.month,
-      opts.academicYearCode,
-      opts.staffIds,
-    );
-    if (clash.length) {
+  // Staff already paid (or approved/posted) for this month are left out —
+  // whoever is still due can be processed now, one, several or all at once.
+  const committed = committedStaffInMonth(opts.month, opts.academicYearCode);
+  const skipped: string[] = [];
+  let staffIds = opts.staffIds;
+  if (opts.mode === "individual" && staffIds?.length) {
+    for (const id of staffIds) {
+      const name = committed.get(id);
+      if (name) skipped.push(name);
+    }
+    staffIds = staffIds.filter((id) => !committed.has(id));
+    if (staffIds.length === 0) {
       return {
         ok: false,
-        error: `Staff already on committed payroll this month: ${clash.join(", ")}`,
+        error: `Nothing was created — ${namesList(skipped)} already ${skipped.length === 1 ? "has" : "have"} ${opts.month} salary approved, posted or paid.`,
       };
     }
+  } else if (opts.mode === "bulk" && committed.size > 0) {
+    const due = (opts.masters.staff ?? [])
+      .filter((s) => s.status === "active" && !committed.has(s.id))
+      .map((s) => s.id);
+    skipped.push(...committed.values());
+    if (due.length === 0) {
+      return {
+        ok: false,
+        error: `Nothing was created — every active staff member already has ${opts.month} salary approved, posted or paid.`,
+      };
+    }
+    staffIds = due;
   }
 
   const state = loadPayroll();
@@ -1210,6 +1245,7 @@ export function processPayrollDraft(opts: {
       month: opts.month,
       academicYearCode: opts.academicYearCode,
       createdBy: opts.createdBy,
+      staffIds,
       kind: "bulk",
     });
     if (open) {
@@ -1232,7 +1268,7 @@ export function processPayrollDraft(opts: {
         academicYearCode: next.academicYearCode,
         detail: `Bulk replace · ${next.lines.length} staff`,
       });
-      return { ok: true, run: next, merged: false };
+      return { ok: true, run: next, merged: false, skipped };
     }
     upsertPayrollRun(built);
     appendPayrollAudit({
@@ -1243,7 +1279,7 @@ export function processPayrollDraft(opts: {
       academicYearCode: built.academicYearCode,
       detail: `Bulk draft · ${built.lines.length} staff`,
     });
-    return { ok: true, run: built, merged: false };
+    return { ok: true, run: built, merged: false, skipped };
   }
 
   const built = buildPayrollDraft({
@@ -1251,7 +1287,7 @@ export function processPayrollDraft(opts: {
     month: opts.month,
     academicYearCode: opts.academicYearCode,
     createdBy: opts.createdBy,
-    staffIds: opts.staffIds,
+    staffIds,
     kind: "individual",
   });
   if (built.lines.length === 0) {
@@ -1263,7 +1299,7 @@ export function processPayrollDraft(opts: {
 
   if (open && open.status === "draft") {
     const keep = open.lines.filter(
-      (l) => !opts.staffIds!.includes(l.staffId),
+      (l) => !staffIds!.includes(l.staffId),
     );
     const next: PayrollRun = {
       ...open,
@@ -1280,9 +1316,9 @@ export function processPayrollDraft(opts: {
       runId: next.id,
       month: next.month,
       academicYearCode: next.academicYearCode,
-      detail: `Merged ${opts.staffIds!.length} staff · now ${next.lines.length} lines`,
+      detail: `Merged ${staffIds!.length} staff · now ${next.lines.length} lines`,
     });
-    return { ok: true, run: next, merged: true };
+    return { ok: true, run: next, merged: true, skipped };
   }
 
   upsertPayrollRun(built);
@@ -1294,7 +1330,7 @@ export function processPayrollDraft(opts: {
     academicYearCode: built.academicYearCode,
     detail: `Individual draft · ${built.lines.map((l) => l.empCode).join(", ")}`,
   });
-  return { ok: true, run: built, merged: false };
+  return { ok: true, run: built, merged: false, skipped };
 }
 
 export function upsertPayrollRun(run: PayrollRun): PayrollState {
@@ -1342,15 +1378,12 @@ export function submitPayrollForApproval(
   if (run.lines.length === 0) {
     return { ok: false, error: "No staff lines in this run" };
   }
-  const clash = monthHasCommittedRun(
-    run.month,
-    run.academicYearCode,
-    run.id,
-  );
-  if (clash) {
+  const already = committedStaffInMonth(run.month, run.academicYearCode, run.id);
+  const twice = run.lines.filter((l) => already.has(l.staffId)).map((l) => `${l.empCode} ${l.fullName}`.trim());
+  if (twice.length) {
     return {
       ok: false,
-      error: `Month already has ${payrollStatusLabel(clash.status)} payroll`,
+      error: `Not submitted — ${namesList(twice)} already ${twice.length === 1 ? "has" : "have"} ${run.month} salary in another approved, posted or paid run. Remove ${twice.length === 1 ? "that line" : "those lines"} from this draft first.`,
     };
   }
   const next: PayrollRun = {
@@ -1391,15 +1424,12 @@ export function approvePayrollRun(
   if (run.lines.length === 0) {
     return { ok: false, error: "No staff lines in this run" };
   }
-  const clash = monthHasCommittedRun(
-    run.month,
-    run.academicYearCode,
-    run.id,
-  );
-  if (clash) {
+  const already = committedStaffInMonth(run.month, run.academicYearCode, run.id);
+  const twice = run.lines.filter((l) => already.has(l.staffId)).map((l) => `${l.empCode} ${l.fullName}`.trim());
+  if (twice.length) {
     return {
       ok: false,
-      error: `Cannot approve — month already has ${payrollStatusLabel(clash.status)} payroll`,
+      error: `Not approved — ${namesList(twice)} already ${twice.length === 1 ? "has" : "have"} ${run.month} salary in another approved, posted or paid run. Remove ${twice.length === 1 ? "that line" : "those lines"} from this draft first.`,
     };
   }
   const note = (approvalNote || "").trim();
@@ -1500,19 +1530,8 @@ export function publishPayrollToAccounts(
       error: "Payroll changed since you opened it — refresh and try again",
     };
   }
-  const otherPosted = state.runs.find(
-    (r) =>
-      r.id !== run.id &&
-      r.month === run.month &&
-      r.academicYearCode === run.academicYearCode &&
-      (r.status === "posted" || r.status === "paid"),
-  );
-  if (otherPosted) {
-    return {
-      ok: false,
-      error: `Double-publish blocked — ${otherPosted.month} already ${payrollStatusLabel(otherPosted.status)}`,
-    };
-  }
+  // Another run of the same month may be posted — staff are paid on
+  // different days. What may never happen is one person posted twice.
   const staffClash = staffCommittedInMonth(
     run.month,
     run.academicYearCode,
@@ -1522,7 +1541,7 @@ export function publishPayrollToAccounts(
   if (staffClash.length) {
     return {
       ok: false,
-      error: `Staff already posted this month: ${staffClash.join(", ")}`,
+      error: `Not published — ${namesList(staffClash)} already ${staffClash.length === 1 ? "has" : "have"} ${run.month} salary in another approved, posted or paid run. Nothing was posted.`,
     };
   }
 
@@ -1585,7 +1604,10 @@ export function recallPayrollToDraft(
   const run = state.runs.find((r) => r.id === runId);
   if (!run) return { ok: false, error: "Run not found" };
   if (run.status === "paid") {
-    return { ok: false, error: "Paid runs cannot be recalled — reverse payment first" };
+    return {
+      ok: false,
+      error: "Not recalled — this salary is already marked paid, so it cannot go back to draft. Nothing was changed.",
+    };
   }
   if (run.status === "draft") {
     return { ok: true, run };
@@ -1980,6 +2002,36 @@ export function pickPayslipRun(
   const rank = (s: PayrollRunStatus) =>
     s === "paid" ? 3 : s === "posted" ? 2 : 1;
   return [...list].sort((a, b) => rank(b.status) - rank(a.status))[0];
+}
+
+/**
+ * Every staff member's salary line for the month, across all its runs — a
+ * month can be paid in several runs (staff paid on different days). Each
+ * person comes from their best run (paid → posted → approved); `run` is the
+ * run that line belongs to, for its status and dates.
+ */
+export function monthPayslipLines(
+  runs: PayrollRun[],
+  month: string,
+  ay: string,
+  statuses: PayrollRunStatus[] = ["paid", "posted", "approved"],
+): { run: PayrollRun; line: PayrollStaffLine }[] {
+  const rank = (s: PayrollRunStatus) =>
+    s === "paid" ? 3 : s === "posted" ? 2 : 1;
+  const best = new Map<string, { run: PayrollRun; line: PayrollStaffLine }>();
+  for (const r of runs) {
+    if (r.month !== month || r.academicYearCode !== ay) continue;
+    if (!statuses.includes(r.status)) continue;
+    for (const line of r.lines) {
+      const have = best.get(line.staffId);
+      if (!have || rank(r.status) > rank(have.run.status)) {
+        best.set(line.staffId, { run: r, line });
+      }
+    }
+  }
+  return [...best.values()].sort((a, b) =>
+    a.line.empCode.localeCompare(b.line.empCode),
+  );
 }
 
 export type { SalaryHead, StaffRecord };

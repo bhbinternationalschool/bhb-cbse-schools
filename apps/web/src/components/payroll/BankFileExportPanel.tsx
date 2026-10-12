@@ -244,7 +244,7 @@ export function BankFileExportPanel({
           ) : (
             <>
               <p className="text-sm text-[var(--brand-deep)]">
-                Run{" "}
+                {preview.runs.length > 1 ? `${preview.runs.length} runs` : "Run"}{" "}
                 <strong>{payrollStatusLabel(preview.run.status)}</strong> ·{" "}
                 {preview.readyCount} ready · {preview.blockedCount} blocked ·
                 Total credit{" "}
