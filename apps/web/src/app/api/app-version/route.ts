@@ -35,9 +35,20 @@ function buildId(): string {
   return (cached = process.env.K_REVISION || "unknown");
 }
 
+/**
+ * The git commit this image was built from (13 Oct 2026), set by the deploy
+ * as APP_COMMIT_SHA. Answers "is the fix live?" without hashing a source
+ * tarball: compare it with `git rev-parse origin/main`. Null on a build that
+ * did not pass one. A commit sha is public in the repository anyway.
+ */
+function commitSha(): string | null {
+  const sha = (process.env.APP_COMMIT_SHA || "").trim().toLowerCase();
+  return /^[0-9a-f]{7,40}$/.test(sha) ? sha : null;
+}
+
 export function GET() {
   return NextResponse.json(
-    { build: buildId() },
+    { build: buildId(), commit: commitSha() },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

@@ -77,11 +77,16 @@ gcloud builds repositories describe "$REPO_NAME" --connection="$CONNECTION" --re
   || gcloud builds repositories create "$REPO_NAME" --remote-uri="$REPO_URL" \
        --connection="$CONNECTION" --region="$REGION" --project="$PROJECT"
 
-step "6/7 The trigger: every push to main deploys"
+step "6/7 The trigger: every push to main that changes the app deploys"
 REPO_RES="projects/${PROJECT}/locations/${REGION}/connections/${CONNECTION}/repositories/${REPO_NAME}"
+# Only merges that change what runs deploy (13 Oct 2026). A docs-only or
+# mobile-only merge must not start a school-hours deploy: each deploy starts a
+# fresh revision and evicts the warm instance.
+INCLUDED_FILES='apps/web/**,packages/**,cloudbuild.yaml,cloudbuild.deploy-on-merge.yaml,deploy/**,scripts/deploy-online.sh,scripts/sync-lite-service.sh,scripts/lib/**,package.json,package-lock.json,.gcloudignore'
 if ! gcloud builds triggers describe "$TRIGGER" --region="$REGION" --project="$PROJECT" >/dev/null 2>&1; then
   gcloud builds triggers create github --name="$TRIGGER" --region="$REGION" --project="$PROJECT" \
     --repository="$REPO_RES" --branch-pattern='^main$' \
+    --included-files="$INCLUDED_FILES" \
     --build-config=cloudbuild.deploy-on-merge.yaml \
     --service-account="projects/${PROJECT}/serviceAccounts/${SA}" \
     --include-logs-with-status \

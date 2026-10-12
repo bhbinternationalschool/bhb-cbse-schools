@@ -60,7 +60,7 @@ Per day: ~20 `[masters-desk] function-only push by stf_…` (teacher phones push
 
 ## Database facts that shape the design
 
-- 573 tables (50 are `*_pre_*` / `*_backup_*` copies); 35 `*_sync_meta` tables in production, each with `updated_at`. Migrations define 37: `purchase_desk_sync_meta` and `store_desk_sync_meta` are NOT in production (drift — see COMMAND.md 0.6). Bumped by the `*Normalized.server.ts` pushes, `sis_push_guarded` and `masters_write_slices`; NOT by `desk_write_guarded`, `rowStampWrite` or `sliceCas`. No sync_meta exists for staff (`sis_staff.updated_at` only), the 29 `module_local_state` books or the `*_state` blobs.
+- 573 tables (50 are `*_pre_*` / `*_backup_*` copies); 35 `*_sync_meta` tables in production, each with `updated_at`. Migrations define 37: `purchase_desk_sync_meta` and `store_desk_sync_meta` were dropped on purpose by the 23 Aug store rebuild (not drift — COMMAND.md 0.6). Bumped by the `*Normalized.server.ts` pushes, `sis_push_guarded` and `masters_write_slices`; NOT by `desk_write_guarded`, `rowStampWrite` or `sliceCas`. No sync_meta exists for staff (`sis_staff.updated_at` only), the 29 `module_local_state` books or the `*_state` blobs.
 - `sis_students`: 717 rows, 671 "active", per academic year 2023-24: 88 · 2024-25: 142 · 2025-26: 235 · 2026-27: 252. One row per child per year; every screen that is not year-scoped double counts.
 - `masters_desk_slices`: 29 slices, ~60 KB total payload (concessionGrants 13 KB, students projection 9 KB, feeStructureLines 5 KB, classSubjects 2.5 KB). Masters is tiny; it is the parse-per-read and the copy model that make it expensive.
 - No table is published to Supabase Realtime (`pg_publication_tables` for `supabase_realtime` is empty).

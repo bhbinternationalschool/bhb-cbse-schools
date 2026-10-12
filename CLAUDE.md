@@ -1,3 +1,28 @@
+## Data layer — read before touching loading, saving or sync (13 Oct 2026)
+
+The ERP's "not showing / stale / slow" problems come from one cause: a
+hand-merged copy of every module in every browser tab and every Cloud Run
+instance. The director approved a rebuild: `docs/data-layer-rebuild/COMMAND.md`.
+
+- Work only on a numbered step of that plan, one step per PR, in a worktree.
+- These files are **frozen** until its Phase 6: a change may only delete code,
+  turn a path into a no-op, or stop a verified production data loss (the last
+  with the director's written OK and a regression test in the same PR):
+  `apps/web/src/lib/*Persistence.ts`, `*NormalizedClient.ts`,
+  `deskHydrationSchedule.ts`, `deskHydrateGuard.ts`, `deskLazyHydrate.ts`,
+  `deskLoadGuard.ts`, `browserStorage.ts`, `createDeskSlicePersistence.ts`,
+  `domainBlobPersistence.ts`, `moduleStatePersistence.ts`, `sliceRevClient.ts`,
+  `rowStampClient.ts`, `deskStampsClient.ts`, `serialSave.ts`,
+  `syncRetryStatus.ts`, `deskSyncStatus.ts`, `deskNamedDeletes*.ts`, `*Guard.ts`,
+  `schoolDataMirror*.ts`, `schoolMirrorRemote.server.ts`,
+  `components/shell/CoreDataGate.tsx`.
+- No new guard, merge function, `ensure*Hydrated`, `bhb-*` event or
+  client-side module copy. New screens read through server queries and write
+  single rows with a base revision (`COMMAND.md` §3).
+- Merged is not deployed. Before saying anything is live, compare
+  `curl -s https://bhbinternational.school/api/app-version` (`commit`) with
+  `git rev-parse origin/main`.
+
 ## Cashfree Payments — Integration Skills
 
 You are helping a developer integrate Cashfree Payments.

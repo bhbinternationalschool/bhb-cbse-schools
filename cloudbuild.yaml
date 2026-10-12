@@ -87,6 +87,19 @@ substitutions:
   _CASHFREE_PAYOUT_CLIENT_ID: ""
   _CASHFREE_PAYOUT_ENV: "sandbox"
   _CASHFREE_PAYOUTS_ARMED: "false"
+  # The commit this image was built from (13 Oct 2026). Cloud Build fills
+  # $COMMIT_SHA only for trigger-sourced builds; deploy-online.sh submits a
+  # tarball, so it passes the sha itself. It lands on the revision as the
+  # `commit` label and as APP_COMMIT_SHA (served by /api/app-version), so
+  # "is the fix live?" is one command instead of hashing a source tarball.
+  _COMMIT_SHA: ""
+  # BigQuery nightly sync settings. These used to be applied by a separate
+  # `gcloud run services update` after the build, which made an extra
+  # revision. They are now part of the single deploy below.
+  _BIGQUERY_PROJECT_ID: ""
+  _BIGQUERY_DATASET: "bhb_erp"
+  _BIGQUERY_LOCATION: "asia-south1"
+  _BIGQUERY_TENANT_SLUG: "bhb-international"
 
 steps:
   - name: gcr.io/cloud-builders/docker
@@ -122,84 +135,92 @@ steps:
       - --all-tags
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}
 
-  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: gcloud
-    args:
-      - run
-      - deploy
-      - ${_SERVICE}
-      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID
-      - --region=${_REGION}
-      - --platform=managed
-      - --allow-unauthenticated
-      - --port=3000
-      - --memory=2Gi
-      # 1, not 2 (2026-09-15). Measured p99 over three days: CPU 18% of two
-      # vCPU, memory 40% of 2 GiB. CPU is ~90% of the Cloud Run line under
-      # instance-based billing, so this halves it; memory stays at 2 GiB for
-      # PDF / spreadsheet spikes.
-      - --cpu=1
-      # 0, not 1. A warm 2 vCPU / 2 GiB instance billed around the clock was
-      # the largest single line on the GCP bill, for a school ERP used in
-      # office hours. The trade is a few seconds of cold start on the first
-      # request after an idle spell.
-      #
-      # This lives here rather than being set with `gcloud run services
-      # update`, because every deploy re-applies these flags — a value set only
-      # on the service is one deploy away from silently reverting. That is
-      # exactly what happened on 2026-08-22: min-instances was set to 0, and
-      # the next deploy put it straight back to 1.
-      - --min-instances=0
-      - --max-instances=20
-      # 20 requests per instance, not Cloud Run's default 80 (2026-09-29).
-      # One Node process on one vCPU: when 13 staff signed in together while
-      # the WhatsApp bot was saving on every message, every page queued
-      # behind the same CPU and the ERP "froze". A burst now starts another
-      # instance instead. Billing is per request (--cpu-throttling), so the
-      # extra instances cost only while the burst lasts.
-      - --concurrency=20
-      # Request-based billing (2026-09-16). CPU is allocated only while a
-      # request is being handled, and an idle instance costs nothing.
-      #
-      # This used to be --no-cpu-throttling, so that work started without
-      # awaiting it (after() in the WhatsApp webhook, `void push…()` after a
-      # save) could finish after the reply. That billed CPU for the whole life
-      # of every instance: ₹375–409/day on 12–13 Sep with no app users.
-      #
-      # It is safe now because the reply itself waits for that work:
-      # lib/serverWorkTracker.server.ts (PR #217) holds res.end until every
-      # tracked task has settled, capped at 25 s. If Cloud Run logs ever show
-      # "[serverWork] reply released after … still running", that task needs
-      # a queue, not a longer hold.
-      - --cpu-throttling
-      # SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET, WA_DISPATCH_SECRET,
-      # MIRROR_SYNC_SECRET, WHATSAPP_TOKEN, WHATSAPP_VERIFY_TOKEN,
-      # GOOGLE_MAPS_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, and
-      # GOOGLE_OAUTH_CLIENT_SECRET moved to Secret Manager on 2026-08-12 (the
-      # plain value was readable via `gcloud run services describe`). This
-      # step used to push all ten back as literal strings on every deploy,
-      # which Cloud Run refuses once a var is secret-backed — "Cannot update
-      # environment variable [...] because it has already been set with a
-      # different type." They now go through --set-secrets below instead.
-      - --set-env-vars=^|^NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}|NEXT_PUBLIC_DEMO_AUTH=${_NEXT_PUBLIC_DEMO_AUTH}|NEXT_PUBLIC_SUPABASE_URL=${_NEXT_PUBLIC_SUPABASE_URL}|NEXT_PUBLIC_SUPABASE_ANON_KEY=${_NEXT_PUBLIC_SUPABASE_ANON_KEY}|NEXT_PUBLIC_SCHOOL_NAME=BHB International School|NEXT_PUBLIC_TENANT_SLUG=bhb-international|NODE_ENV=production|WHATSAPP_PHONE_ID=${_WHATSAPP_PHONE_ID}|WHATSAPP_WABA_ID=${_WHATSAPP_WABA_ID}|WHATSAPP_DEFAULT_COUNTRY_CODE=${_WHATSAPP_DEFAULT_COUNTRY_CODE}|WHATSAPP_GRAPH_VERSION=${_WHATSAPP_GRAPH_VERSION}|AI_TUTOR_MODEL=${_AI_TUTOR_MODEL}|AI_PREFERRED_ENGINE=${_AI_PREFERRED_ENGINE}|AI_DAILY_CALLS_PER_TENANT=${_AI_DAILY_CALLS_PER_TENANT}|AI_DAILY_TOKENS_PER_TENANT=${_AI_DAILY_TOKENS_PER_TENANT}|GOOGLE_OAUTH_CLIENT_ID=${_GOOGLE_OAUTH_CLIENT_ID}|PROTECTED_SUPER_ADMIN_EMAILS=${_PROTECTED_SUPER_ADMIN_EMAILS}|NEXT_PUBLIC_VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}|VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}|FLEET_EDGE_ALLOWED_IPS=${_FLEET_EDGE_ALLOWED_IPS}|FLEET_EDGE_SOS_NOTIFY_MOBILE=${_FLEET_EDGE_SOS_NOTIFY_MOBILE}|FEE_INTEGRITY_NOTIFY_MOBILE=${_FEE_INTEGRITY_NOTIFY_MOBILE}|NEXT_PUBLIC_PAYMENT_GATEWAY=${_NEXT_PUBLIC_PAYMENT_GATEWAY}|CASHFREE_APP_ID=${_CASHFREE_APP_ID}|CASHFREE_ENV=${_CASHFREE_ENV}|CASHFREE_VERIFICATION_APP_ID=${_CASHFREE_VERIFICATION_APP_ID}|CASHFREE_VERIFICATION_ENV=${_CASHFREE_VERIFICATION_ENV}|CASHFREE_PAYOUT_CLIENT_ID=${_CASHFREE_PAYOUT_CLIENT_ID}|CASHFREE_PAYOUT_ENV=${_CASHFREE_PAYOUT_ENV}|CASHFREE_PAYOUTS_ARMED=${_CASHFREE_PAYOUTS_ARMED}|REVIEW_LOGIN_MOBILE=${_REVIEW_LOGIN_MOBILE}|REVIEW_LOGIN_CODE=${_REVIEW_LOGIN_CODE}|REVIEW_LOGIN_HOUSEHOLD_ID=${_REVIEW_LOGIN_HOUSEHOLD_ID}
-      - --set-secrets=^|^SUPABASE_SERVICE_ROLE_KEY=school-erp-supabase-service-role-key:latest|CRON_SECRET=school-erp-cron-secret:latest|WA_DISPATCH_SECRET=school-erp-wa-dispatch-secret:latest|MIRROR_SYNC_SECRET=school-erp-mirror-sync-secret:latest|WHATSAPP_TOKEN=school-erp-whatsapp-token:latest|WHATSAPP_VERIFY_TOKEN=school-erp-whatsapp-verify-token:latest|GOOGLE_MAPS_API_KEY=school-erp-google-maps-api-key:latest|GEMINI_API_KEY=school-erp-gemini-api-key:latest|OPENAI_API_KEY=school-erp-openai-api-key:latest|GOOGLE_OAUTH_CLIENT_SECRET=school-erp-google-oauth-client-secret:latest|DIRECT_URL=school-erp-direct-url:latest|VAPID_PRIVATE_KEY=school-erp-vapid-private-key:latest|WA_APP_SECRET=school-erp-wa-app-secret:latest|SARVAM_API_KEY=school-erp-sarvam-api-key:latest|GMAIL_SA_KEY_JSON=school-erp-gmail-sa-key:latest|CASHFREE_SECRET_KEY=school-erp-cashfree-secret-key:latest|CASHFREE_PAYOUT_CLIENT_SECRET=school-erp-cashfree-payout-client-secret:latest|CASHFREE_PAYOUT_PUBLIC_KEY=school-erp-cashfree-payout-public-key:latest|GOOGLE_CALENDAR_API_KEY=school-erp-google-calendar-key:latest|YOUTUBE_API_KEY=school-erp-youtube-api-key:latest|BHASHINI_USER_ID=school-erp-bhashini-user-id:latest|BHASHINI_ULCA_API_KEY=school-erp-bhashini-ulca-api-key:latest|BHASHINI_INFERENCE_API_KEY=school-erp-bhashini-inference-api-key:latest|EBOOK_SHELF_KEY=school-erp-ebook-shelf-key:latest|EBOOK_BOOK_KEY=school-erp-ebook-book-key:latest
-
-  # Desk-cutover runtime flags. Applied as an additive env update from the
-  # COMMITTED deploy/desk-cutover-runtime.env — the trigger has no .env.local,
-  # so this is where those ~114 flags come from. This mirrors exactly what
-  # scripts/deploy-online.sh does after a local build; the values are all
-  # "true" (cutover complete) and match the live service.
+  # The deploy: ONE revision, every variable at once (13 Oct 2026).
+  #
+  # --set-env-vars REPLACES the whole environment. The ~115 desk-cutover
+  # flags (*_READ_FROM_DB / *_DUAL_WRITE_DB, committed in
+  # deploy/desk-cutover-runtime.env) and the BigQuery settings used to be
+  # added afterwards by two more `gcloud run services update` calls, so every
+  # deploy first served, for 20–60 s, a revision with all of those flags
+  # missing, then two more revisions, then the final one. They are now folded
+  # into the same --set-env-vars. Checked before the change: the live
+  # revision's 152 plain variables were exactly the 33 listed below + the 115
+  # in the desk file + the 4 BigQuery ones.
+  #
+  # The flags, and why each is what it is:
+  #
+  # --cpu=1, not 2 (2026-09-15). Measured p99 over three days: CPU 18% of two
+  #   vCPU, memory 40% of 2 GiB. Memory stays at 2 GiB for PDF and
+  #   spreadsheet spikes.
+  #
+  # --min-instances=0. A warm 2 vCPU instance with always-on CPU billing was
+  #   once the largest line on the GCP bill. A warm instance is also not
+  #   needed in the day: Cloud Scheduler already calls this service every 5
+  #   min (bhb-online-classes-tick, 07–21 Mon–Sat) and every 10 min
+  #   (bhb-comms-scheduled-publish, 06–22), inside the ~15 min an idle
+  #   instance survives, so one stays up through school hours at no cost
+  #   (checked 13 Oct 2026; decided with the director). Most fresh instances
+  #   come from deploys and bursts, which min-instances would not prevent.
+  #   This lives here, not in `gcloud run services update`: every deploy
+  #   re-applies these flags (that is how 0 came back as 1 on 2026-08-22).
+  #
+  # --concurrency=20, not Cloud Run's default 80 (2026-09-29). One Node
+  #   process on one vCPU: when 13 staff signed in together while the WhatsApp
+  #   bot saved on every message, every page queued behind the same CPU and the
+  #   ERP "froze". A burst now starts another instance instead.
+  #
+  # --cpu-throttling (2026-09-16): request-based billing, CPU only while a
+  #   request is handled. It used to be --no-cpu-throttling so that work
+  #   started without awaiting it could finish after the reply, which billed
+  #   CPU for the whole life of every instance (₹375–409/day on 12–13 Sep with
+  #   no app users). Safe now because lib/serverWorkTracker.server.ts holds
+  #   res.end until tracked work settles (cap 25 s). "[serverWork] reply
+  #   released after … still running" in the logs means that task needs a
+  #   queue, not a longer hold.
+  #
+  # Secrets (SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET, WA_DISPATCH_SECRET,
+  #   MIRROR_SYNC_SECRET, WHATSAPP_TOKEN, WHATSAPP_VERIFY_TOKEN,
+  #   GOOGLE_MAPS_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY,
+  #   GOOGLE_OAUTH_CLIENT_SECRET and the rest) moved to Secret Manager on
+  #   2026-08-12 and are bound with --set-secrets. They must never appear in
+  #   --set-env-vars: Cloud Run refuses "already been set with a different
+  #   type".
+  #
+  # Quoting: the --set-env-vars and --set-secrets lists are single-quoted so
+  # bash never expands anything in a value; Cloud Build has already put the
+  # substitutions in. Bash's own variables are written $$NAME (Cloud Build's
+  # escape for a literal $).
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
       - -c
       - |
-        VARS=$$(grep -E '^[A-Za-z0-9_]+=' deploy/desk-cutover-runtime.env | paste -sd '@' -)
-        if [ -n "$$VARS" ]; then
-          gcloud run services update ${_SERVICE} \
-            --project=$PROJECT_ID --region=${_REGION} \
-            --update-env-vars="^@^$${VARS}"
+        set -euo pipefail
+        DESK=$$(grep -E '^[A-Za-z0-9_]+=' deploy/desk-cutover-runtime.env | paste -sd '|' -)
+        if [ -z "$$DESK" ]; then
+          echo "deploy/desk-cutover-runtime.env has no flags; refusing to deploy without them"
+          exit 1
         fi
+        BQ=""
+        if [ -n "${_BIGQUERY_PROJECT_ID}" ]; then
+          BQ="|BIGQUERY_PROJECT_ID=${_BIGQUERY_PROJECT_ID}|BIGQUERY_DATASET=${_BIGQUERY_DATASET}|BIGQUERY_LOCATION=${_BIGQUERY_LOCATION}|BIGQUERY_TENANT_SLUG=${_BIGQUERY_TENANT_SLUG}"
+        fi
+        echo "Deploying commit '${_COMMIT_SHA}' with $$(printf '%s\n' "$$DESK" | awk -F'|' '{print NF}') desk flags; BigQuery: $${BQ:+on}"
+        gcloud run deploy ${_SERVICE} \
+          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID \
+          --region=${_REGION} \
+          --platform=managed \
+          --allow-unauthenticated \
+          --port=3000 \
+          --memory=2Gi \
+          --cpu=1 \
+          --min-instances=0 \
+          --max-instances=20 \
+          --concurrency=20 \
+          --cpu-throttling \
+          --labels=commit=${_COMMIT_SHA} \
+          --set-env-vars='^|^NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL}|NEXT_PUBLIC_DEMO_AUTH=${_NEXT_PUBLIC_DEMO_AUTH}|NEXT_PUBLIC_SUPABASE_URL=${_NEXT_PUBLIC_SUPABASE_URL}|NEXT_PUBLIC_SUPABASE_ANON_KEY=${_NEXT_PUBLIC_SUPABASE_ANON_KEY}|NEXT_PUBLIC_SCHOOL_NAME=BHB International School|NEXT_PUBLIC_TENANT_SLUG=bhb-international|NODE_ENV=production|WHATSAPP_PHONE_ID=${_WHATSAPP_PHONE_ID}|WHATSAPP_WABA_ID=${_WHATSAPP_WABA_ID}|WHATSAPP_DEFAULT_COUNTRY_CODE=${_WHATSAPP_DEFAULT_COUNTRY_CODE}|WHATSAPP_GRAPH_VERSION=${_WHATSAPP_GRAPH_VERSION}|AI_TUTOR_MODEL=${_AI_TUTOR_MODEL}|AI_PREFERRED_ENGINE=${_AI_PREFERRED_ENGINE}|AI_DAILY_CALLS_PER_TENANT=${_AI_DAILY_CALLS_PER_TENANT}|AI_DAILY_TOKENS_PER_TENANT=${_AI_DAILY_TOKENS_PER_TENANT}|GOOGLE_OAUTH_CLIENT_ID=${_GOOGLE_OAUTH_CLIENT_ID}|PROTECTED_SUPER_ADMIN_EMAILS=${_PROTECTED_SUPER_ADMIN_EMAILS}|NEXT_PUBLIC_VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}|VAPID_PUBLIC_KEY=${_NEXT_PUBLIC_VAPID_PUBLIC_KEY}|FLEET_EDGE_ALLOWED_IPS=${_FLEET_EDGE_ALLOWED_IPS}|FLEET_EDGE_SOS_NOTIFY_MOBILE=${_FLEET_EDGE_SOS_NOTIFY_MOBILE}|FEE_INTEGRITY_NOTIFY_MOBILE=${_FEE_INTEGRITY_NOTIFY_MOBILE}|NEXT_PUBLIC_PAYMENT_GATEWAY=${_NEXT_PUBLIC_PAYMENT_GATEWAY}|CASHFREE_APP_ID=${_CASHFREE_APP_ID}|CASHFREE_ENV=${_CASHFREE_ENV}|CASHFREE_VERIFICATION_APP_ID=${_CASHFREE_VERIFICATION_APP_ID}|CASHFREE_VERIFICATION_ENV=${_CASHFREE_VERIFICATION_ENV}|CASHFREE_PAYOUT_CLIENT_ID=${_CASHFREE_PAYOUT_CLIENT_ID}|CASHFREE_PAYOUT_ENV=${_CASHFREE_PAYOUT_ENV}|CASHFREE_PAYOUTS_ARMED=${_CASHFREE_PAYOUTS_ARMED}|REVIEW_LOGIN_MOBILE=${_REVIEW_LOGIN_MOBILE}|REVIEW_LOGIN_CODE=${_REVIEW_LOGIN_CODE}|REVIEW_LOGIN_HOUSEHOLD_ID=${_REVIEW_LOGIN_HOUSEHOLD_ID}|APP_COMMIT_SHA=${_COMMIT_SHA}'"|$${DESK}$${BQ}" \
+          --set-secrets='^|^SUPABASE_SERVICE_ROLE_KEY=school-erp-supabase-service-role-key:latest|CRON_SECRET=school-erp-cron-secret:latest|WA_DISPATCH_SECRET=school-erp-wa-dispatch-secret:latest|MIRROR_SYNC_SECRET=school-erp-mirror-sync-secret:latest|WHATSAPP_TOKEN=school-erp-whatsapp-token:latest|WHATSAPP_VERIFY_TOKEN=school-erp-whatsapp-verify-token:latest|GOOGLE_MAPS_API_KEY=school-erp-google-maps-api-key:latest|GEMINI_API_KEY=school-erp-gemini-api-key:latest|OPENAI_API_KEY=school-erp-openai-api-key:latest|GOOGLE_OAUTH_CLIENT_SECRET=school-erp-google-oauth-client-secret:latest|DIRECT_URL=school-erp-direct-url:latest|VAPID_PRIVATE_KEY=school-erp-vapid-private-key:latest|WA_APP_SECRET=school-erp-wa-app-secret:latest|SARVAM_API_KEY=school-erp-sarvam-api-key:latest|GMAIL_SA_KEY_JSON=school-erp-gmail-sa-key:latest|CASHFREE_SECRET_KEY=school-erp-cashfree-secret-key:latest|CASHFREE_PAYOUT_CLIENT_SECRET=school-erp-cashfree-payout-client-secret:latest|CASHFREE_PAYOUT_PUBLIC_KEY=school-erp-cashfree-payout-public-key:latest|GOOGLE_CALENDAR_API_KEY=school-erp-google-calendar-key:latest|YOUTUBE_API_KEY=school-erp-youtube-api-key:latest|BHASHINI_USER_ID=school-erp-bhashini-user-id:latest|BHASHINI_ULCA_API_KEY=school-erp-bhashini-ulca-api-key:latest|BHASHINI_INFERENCE_API_KEY=school-erp-bhashini-inference-api-key:latest|EBOOK_SHELF_KEY=school-erp-ebook-shelf-key:latest|EBOOK_BOOK_KEY=school-erp-ebook-book-key:latest'
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID
