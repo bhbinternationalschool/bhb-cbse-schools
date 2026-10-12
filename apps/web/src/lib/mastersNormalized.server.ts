@@ -444,15 +444,21 @@ export async function fetchMastersDeskFromDb(): Promise<{
  */
 export async function fetchMastersSyncMeta(
   bundle: MastersDeskBundle,
-): Promise<MastersDeskSyncMeta | null> {
+): Promise<{ meta: MastersDeskSyncMeta | null; readFailed: boolean }> {
   const ctx = await resolveCtx();
-  if (!ctx) return null;
-  const { data } = await ctx.sb
+  if (!ctx) return { meta: null, readFailed: true };
+  const { data, error } = await ctx.sb
     .from("masters_desk_sync_meta")
     .select(META_SELECT)
     .eq("tenant_id", ctx.tenantId)
     .maybeSingle();
-  return metaFromRow(data, bundle);
+  // A failed read is not "no revision yet": that would hand the browser a
+  // fresh `updatedAt` as its save base (data-layer 0.5b).
+  if (error) {
+    console.error("[masters-desk] sync meta read FAILED — reporting unknown:", error.message);
+    return { meta: null, readFailed: true };
+  }
+  return { meta: metaFromRow(data, bundle), readFailed: false };
 }
 
 /**

@@ -492,6 +492,13 @@ SELFTESTS=(
   test:dashboard-no-refetch-loop
   test:short-promise-cache
   test:library-fine
+  test:desk-conflict-reload
+  test:masters-desk-read-failed
+  test:server-masters-cache
+  test:school-mirror-disk-off
+  test:coalesced-refresh
+  test:desk-probe-ancillary
+  test:update-reload
   # Added 2026-09-12, in CI's order, after the drift check below reported that
   # ci.yml had been running these for weeks while this script did not:
   # WhatsApp failure reasons, household numbers, audience specs, the tutor and

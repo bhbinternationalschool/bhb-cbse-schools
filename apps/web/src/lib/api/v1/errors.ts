@@ -23,6 +23,15 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The status a caller that turns an auth failure into a response should
+ * use: a server-side read failure (503) stays a 503 — answering it as 401
+ * would sign the person out because the database was slow (data-layer 0.5c).
+ */
+export function authFailureStatus(error: unknown): number {
+  return error instanceof ApiError && error.status >= 500 ? error.status : 401;
+}
+
 export function apiOk<T>(data: T, init?: ResponseInit) {
   return NextResponse.json({ ok: true, data }, init);
 }

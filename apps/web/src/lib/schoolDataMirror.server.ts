@@ -28,12 +28,34 @@ const DATA_FILE = path.join(process.cwd(), ".data", "school_mirror.json");
 let registered = false;
 let writing = false;
 let writeQueued = false;
+/** Production: the disk copy has been read once in this process. */
+let diskReadOnce = false;
+
+/**
+ * Whether the disk copy is used at all (data-layer 0.5d).
+ *
+ * The in-memory mirror (lib/schoolDataMirror.ts `memory`) is one per server
+ * process: every App Router route handler is bundled with the single shared
+ * `webpack-runtime` chunk (next/dist/build/entries.js finalizeEntrypoint) and
+ * the rsc layer, so they share one module cache and one `memory`. The file
+ * synced nothing between instances — it re-read, per call, what this same
+ * process had written (a ~4 MB JSON.parse on every mobile request, and a
+ * whole-mirror JSON.stringify + write held on every reply). It could even
+ * put back an older snapshot over a newer memory copy while a write was
+ * queued. Cloud Run's disk is per instance and empty at start, so in
+ * production the file is off: read at most once per process, never written.
+ * Local dev keeps it (a restarted `next dev` picks its mirror back up).
+ */
+function diskMirrorEnabled(): boolean {
+  return process.env.NODE_ENV !== "production";
+}
 
 function nowIso() {
   return new Date().toISOString();
 }
 
 async function persistMirrorQuiet() {
+  if (!diskMirrorEnabled()) return;
   if (writing) {
     writeQueued = true;
     return;
@@ -57,6 +79,8 @@ function ensurePersistHook() {
   if (registered) return;
   registered = true;
   registerSchoolMirrorDiskPersist(() => {
+    // Production: no write, and nothing for the reply to wait on.
+    if (!diskMirrorEnabled()) return;
     void trackServerWork(persistMirrorQuiet());
   });
 }
@@ -65,6 +89,10 @@ ensurePersistHook();
 
 export async function ensureSchoolMirrorLoaded(): Promise<SchoolMirrorBundle> {
   ensurePersistHook();
+  if (!diskMirrorEnabled()) {
+    if (diskReadOnce) return getSchoolMirrorSync();
+    diskReadOnce = true;
+  }
   try {
     const raw = await fs.readFile(DATA_FILE, "utf8");
     const parsed = JSON.parse(raw) as SchoolMirrorBundle;

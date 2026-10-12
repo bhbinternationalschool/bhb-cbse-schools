@@ -126,12 +126,9 @@ export function onStampConflicts(module: string, conflicts: RowConflicts | undef
   if (!count || typeof window === "undefined") return;
   forgetRowStamps(module);
   window.dispatchEvent(new CustomEvent("bhb-desk-conflict", { detail: { id: module, count } }));
-  void Promise.all([import("@/lib/deskHydrateGuard"), import("@/lib/deskHydrationSchedule")]).then(
-    ([guard, sched]) => {
-      guard.resetDeskHydrated(module);
-      return sched.ensureAllDeskHydrated();
-    },
-  );
+  // Only this desk reloads (data-layer 0.5a). Reloading every desk here
+  // pulled the heavy on-demand desks too — megabytes per refused row.
+  void import("@/lib/deskHydrationSchedule").then((sched) => sched.reloadDeskAfterConflict(module));
 }
 
 /** `stamps: { table: { id: stamp } }` from a push, for the given tables only. */

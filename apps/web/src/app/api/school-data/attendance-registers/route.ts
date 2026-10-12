@@ -1,6 +1,7 @@
 import { sectionKey, staffSectionScope } from "@/lib/api/v1/staffScope";
 import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
+import { ATTENDANCE_REGISTERS_PROBE_TABLES } from "@/lib/deskProbeTables";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
@@ -125,7 +126,7 @@ export async function GET(req: Request) {
   try {
     const result = await cachedDeskJson({
       cacheKey: "attendance-registers",
-      tables: ["attendance_desk_registers", "attendance_desk_marks"],
+      tables: [...ATTENDANCE_REGISTERS_PROBE_TABLES],
       // The shared cache and its ETag describe the WHOLE desk. A scoped
       // caller must never get a 304 against a whole-desk body its browser
       // may hold from an office login, so it always gets a fresh body.

@@ -43,7 +43,7 @@ assert.equal(linkStatusRegresses("paid", "refunded-ish"), true, "an unknown stat
   assert.ok(one.indexOf("linkStatusRegresses(") < one.indexOf('.from("payment_desk_links").upsert(header)'));
 
   const client = readFileSync(join(__dirname, "paymentsNormalizedClient.ts"), "utf8");
-  assert.ok(/if \(body\.kept\?\.length\)[\s\S]*?resetDeskHydrated\("payments"\)/.test(client), "a browser whose links were kept reloads them");
+  assert.ok(/if \(body\.kept\?\.length\)[\s\S]*?reloadDeskAfterConflict\("payments"\)/.test(client), "a browser whose links were kept reloads them");
 }
 
 console.log("paymentLinkStatusGuard.selftest: all assertions passed");

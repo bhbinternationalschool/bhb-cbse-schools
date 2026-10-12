@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "crypto";
 import { getDemoSession, type DemoSession } from "@/lib/auth";
-import { defaultMasters, type MastersState } from "@/lib/masters";
+import { type MastersState } from "@/lib/masters";
 import {
   deskBundleToMastersState,
   fetchMastersDeskFromDb,
@@ -188,38 +188,91 @@ export async function loadServerRbacIfKnown(): Promise<RbacState | null> {
  */
 const MASTERS_CACHE_TTL_MS = 30_000;
 let mastersCache: { state: MastersState; at: number } | null = null;
+/** One read at a time: N concurrent misses on a cold instance share it. */
+let mastersInFlight: Promise<MastersState> | null = null;
+/** Bumped by invalidation, so a read started before it is not cached after it. */
+let mastersGeneration = 0;
 
 /** Drop the cached roster + masters — call after a server-side write to sis_staff. */
 export function invalidateServerMastersCache(): void {
   mastersCache = null;
+  mastersGeneration++;
 }
 
+/** A database is configured for this server (else there is nothing to fail). */
+function serverDatabaseConfigured(): boolean {
+  return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+/**
+ * Masters + staff roster for this request, cached for 30 s.
+ *
+ * Unknown is never empty (data-layer 0.5c). A failed read keeps the copy
+ * this process already has — served as it is, its timestamp NOT refreshed,
+ * so the next request tries again — and with no copy at all it is a 503.
+ * Until 13 Oct 2026 a failed read became an empty masters book cached for
+ * 30 s, and any exception became defaultMasters(): a demo book with freshly
+ * random class ids, which every app request on that instance then used.
+ */
 export async function loadServerMasters(): Promise<MastersState> {
   const now = Date.now();
   if (mastersCache && now - mastersCache.at < MASTERS_CACHE_TTL_MS) {
     return mastersCache.state;
   }
-  try {
-    const [{ bundle }, staffBundle] = await Promise.all([
-      fetchMastersDeskFromDb(),
-      fetchStaffRemoteServer(),
-    ]);
-    const state = deskBundleToMastersState(bundle);
-    if (staffBundle) {
-      if (staffBundle.staff.length > 0) state.staff = staffBundle.staff;
-      if (staffBundle.departments.length > 0) {
-        state.departments = staffBundle.departments;
-      }
-      if (staffBundle.designations.length > 0) {
-        state.designations = staffBundle.designations;
-      }
-    }
-    mastersCache = { state, at: now };
-    return state;
-  } catch (e) {
-    console.warn("[apiAuth] server masters load failed", e);
-    return defaultMasters();
+  if (!mastersInFlight) {
+    mastersInFlight = readServerMasters().finally(() => {
+      mastersInFlight = null;
+    });
   }
+  return mastersInFlight;
+}
+
+async function readServerMasters(): Promise<MastersState> {
+  const generation = mastersGeneration;
+  const startedAt = Date.now();
+  const fail = (why: string): MastersState => {
+    const prev = mastersCache;
+    if (prev) {
+      console.error(
+        `[apiAuth] server masters read failed (${why}) — keeping the copy from ${Math.round((Date.now() - prev.at) / 1000)} s ago`,
+      );
+      return prev.state;
+    }
+    console.error(`[apiAuth] server masters read failed (${why}) and this process has no copy — 503`);
+    throw new ApiError("server_error", "Could not read the school setup — please try again.", 503);
+  };
+
+  let read: Awaited<ReturnType<typeof fetchMastersDeskFromDb>>;
+  let staffBundle: Awaited<ReturnType<typeof fetchStaffRemoteServer>>;
+  try {
+    [read, staffBundle] = await Promise.all([fetchMastersDeskFromDb(), fetchStaffRemoteServer()]);
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+
+  if (read.readFailed) {
+    // No database at all (a local demo): nothing failed, there is nothing to read.
+    if (!serverDatabaseConfigured()) return deskBundleToMastersState(read.bundle);
+    return fail("masters_desk_slices");
+  }
+  const state = deskBundleToMastersState(read.bundle);
+  if (!staffBundle) {
+    // The roster is unknown, not empty. With a copy, keep the copy; without
+    // one, answer with no roster (revalidateStaffSession then leaves the
+    // cookie as it is) and do not cache it, so the next request re-reads.
+    if (mastersCache) return fail("staff roster");
+    console.error("[apiAuth] staff roster read failed — masters served without a roster, not cached");
+    return state;
+  }
+  if (staffBundle.staff.length > 0) state.staff = staffBundle.staff;
+  if (staffBundle.departments.length > 0) {
+    state.departments = staffBundle.departments;
+  }
+  if (staffBundle.designations.length > 0) {
+    state.designations = staffBundle.designations;
+  }
+  if (generation === mastersGeneration) mastersCache = { state, at: startedAt };
+  return state;
 }
 
 async function authFromApiKey(request: Request): Promise<ApiAuthContext | null> {

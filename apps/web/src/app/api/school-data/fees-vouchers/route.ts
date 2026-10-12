@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
+import { FEES_VOUCHERS_PROBE_TABLES } from "@/lib/deskProbeTables";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
@@ -58,7 +59,7 @@ export async function GET(req: Request) {
   try {
     const result = await cachedDeskJson({
       cacheKey: "fees-vouchers",
-      tables: ["fee_desk_vouchers", "fee_desk_voucher_lines", "fee_desk_voucher_tenders", "fee_desk_open_dues"],
+      tables: [...FEES_VOUCHERS_PROBE_TABLES],
       ifNoneMatch: req.headers.get("if-none-match"),
       build: async () => {
         const desk = await fetchFeeDeskFromDb();
