@@ -24,6 +24,7 @@ import { batchNeedsApproval } from "@/lib/data/approvalGate";
 import { collectionDef } from "@/lib/data/registry";
 import { list, write, type Row } from "@/lib/data/server/repo";
 import type { Cursor, FailCode, WriteOp } from "@/lib/data/types";
+import { withBuildCheck } from "@/lib/staleBuild.server";
 
 export const runtime = "nodejs";
 
@@ -76,7 +77,14 @@ export async function GET(req: Request, ctx: RouteCtx) {
   return NextResponse.json(result);
 }
 
-export async function POST(req: Request, ctx: RouteCtx) {
+/**
+ * A write from a page on an older build is recorded (one log line and
+ * `X-Bhb-Build-Stale: 1`) and otherwise handled exactly as any other —
+ * never refused here; see lib/staleBuild.server.ts.
+ */
+export const POST = withBuildCheck(postOps);
+
+async function postOps(req: Request, ctx: RouteCtx) {
   const { collection } = await ctx.params;
   const def = collectionDef(collection);
   if (!def) {

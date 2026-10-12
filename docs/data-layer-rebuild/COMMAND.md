@@ -328,21 +328,45 @@ Acceptance: the job runs on this PR; `counts` passes on desktop; `propagation` a
 **fail** on today's code (prove the gate sees the disease) and are recorded on the scoreboard.
 > Executor brief: do not change the app to make specs pass; this step builds the instrument.
 
-**1.2 Observability and the build handshake.** (a) Expose the build id to the client as
-`NEXT_PUBLIC_BUILD_ID` (`generateBuildId` in `next.config.ts`, or read once from
-`/api/app-version`). (b) `lib/data/erpFetch.ts`: the one fetch wrapper every new hook uses; it
-sends `X-Bhb-Build`, times the call, and on a 426 reloads the page. (c) The server compares
-`X-Bhb-Build` with its `BUILD_ID` on every POST/PUT/DELETE and answers 426
-`{ok:false, reason:'build_stale', reload:true}`; from this step on, every removed accept path
-keeps a 410 stub returning the same body for one release. (d) `POST /api/client-metrics`:
-session cookie required (`sendBeacon` sends cookies), body ≤ 2 KB, rate-limited per session,
-sampled 1-in-5 for timings and 1-in-1 for `rendered-zero-rows` and `query-error`; one
-structured log line `jsonPayload.event = 'client-metric'` with `{build, persona, route, event,
-ms, bytes, rows}`. (e) A Logging query in `evidence/production-measurements.md` style that prints
-p50/p95 of `page-ready` per route per build and the daily count of `rendered-zero-rows` per
-screen. (f) The Flutter counterpart (`platform:'flutter'`, route, ms, build) from
-`api_client.dart`, so Phase 4 can be measured. Acceptance: the query shows numbers from an office
-PC and a phone within an hour of deploy; `stale-writer.spec.ts` can assert the 426.
+**1.2 Observability and the build handshake.** (a) The client knows its build id. Not as
+`NEXT_PUBLIC_BUILD_ID` from `generateBuildId`: the commit sha reaches the service only at run
+time, a hand deploy can ship different code under one sha, and a random id made in
+`next.config.ts` must come out identical in every process `next build` starts or every tab
+looks stale forever. Instead the page keeps the first answer of `/api/app-version` — the one
+the update bar already fetches and compares (`lib/clientBuild.ts`, fed by `UpdateBar`); the
+server compares against the same function that endpoint serves (`lib/serverBuild.server.ts`).
+(b) `lib/data/erpFetch.ts`: the one fetch wrapper every new hook uses; it sends `X-Bhb-Build`,
+times the call, and changes nothing else about the request. (c) **Recorded, not refused.** A
+POST/PUT/PATCH/DELETE whose `X-Bhb-Build` differs from the server's build gets one log line
+`jsonPayload.event = 'stale-build-write'` and the reply header `X-Bhb-Build-Stale: 1`, and is
+otherwise handled exactly as before (`lib/staleBuild.server.ts`, `withBuildCheck`, on
+`POST /api/data/<collection>` now and on each kernel write route as it is built). Why not 426:
+a tab opened before a deploy holds whatever a person has typed into it; refusing every write
+from it would throw that away for routes whose body shape has not changed at all. An old build
+is refused **per route, only when that route's old body shape is retired**: from this step on,
+every removed accept path keeps a 410 stub returning `{ok:false, reason:'build_stale',
+reload:true}` for one release, and only then does `erpFetch` (or the stub's caller) reload the
+page. Why a helper and not `middleware.ts`: the middleware runs on the edge runtime (it cannot
+read `.next/BUILD_ID`), matches page prefixes only, and widening it to `/api/*` would put a
+new hop in front of every webhook, upload and mobile call. (d) `POST /api/client-metrics`:
+session cookie required (`sendBeacon` sends cookies; 401 otherwise), body ≤ 2 KB (413),
+60 a minute per session in-process (429), fields validated (400), sampled 1-in-5 for timings
+and 1-in-1 for `rendered-zero-rows` and `query-error`; one structured log line
+`jsonPayload.event = 'client-metric'` with `{build, platform, persona, roleCode, route, metric,
+key, ms, bytes, rows}` — persona and role from the session, never the body; no database
+write. Producers now: `page-ready` per route and `desk-hydrate` per desk from AppShell
+(`components/shell/useClientMetrics.ts`; `desk-hydrate` rides the existing
+`bhb-desk-first-hydrated` event — when 2.3a deletes that event, re-emit it from the query
+hooks). (e) `evidence/metrics-queries.md` (the filters) and `scripts/metrics-report.sh` (reads
+logs only): p50/p95 of `page-ready` per route per build, the daily count of
+`rendered-zero-rows` per screen, `desk-hydrate` p95 per desk. (f) The Flutter counterpart
+(`platform:'flutter'`, route, ms, build `<flavor>-<versionCode>`) from `api_client.dart` for
+the home-screen calls, reusing the app's existing `X-App-Flavor`/`X-App-Build` headers, so
+Phase 4 can be measured. Acceptance: the self-tests `test:client-metrics-route`,
+`test:client-metrics-sender`, `test:stale-build`, `test:erp-fetch` in CI; after deploy,
+`bash scripts/metrics-report.sh 1` shows numbers from an office PC and a phone within an hour;
+`stale-writer.spec.ts` can assert `X-Bhb-Build-Stale: 1` and the log line (and, from the first
+410 stub on, the 410).
 
 **1.3 Server read kernel.** New migration `erp_versions(p_tenant uuid) returns jsonb`
 (SECURITY DEFINER, `service_role` only — remember the explicit grant) that returns, in one round
@@ -467,7 +491,8 @@ measure: no `function-only push by` / `rejected unversioned push` lines in Cloud
 
 **2.3a Delete the gate and the events.** With every component reader on hooks: delete
 `CoreDataGate` (React Query's loading state replaces it), the `bhb-masters-updated` /
-`bhb-rbac-updated` / `bhb-desk-first-hydrated` events and their listeners; re-implement
+`bhb-rbac-updated` / `bhb-desk-first-hydrated` events and their listeners (one is the
+`desk-hydrate` metric in `components/shell/useClientMetrics.ts`: re-emit it from the query hooks); re-implement
 `useAccessData` (`components/shell/useAccessData.ts`, 23 consumers) on `useRbac()` +
 `useStaffList()` with the same return type. Acceptance: `counts.spec.ts` on the throttled
 375 px profile shows classes and staff within 2 s.

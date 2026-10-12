@@ -285,6 +285,8 @@ const PUBLIC_API_ROUTES: Record<string, string> = {
   "app-version": "the app's update check runs before login",
   "public/app-version": "the app's update check runs before login",
   "auth/demo": "sign-in itself (refused in production by the route)",
+  "client-metrics":
+    "telemetry: any signed-in session, checked in lib/clientMetrics.server (sessionFromRequest, 401 otherwise); reads no school data, writes one log line",
   "auth/first-login/request-otp": "sign-in: sends an OTP to a registered number",
   "auth/link/office": "parent number linking before login; the office approves",
   "auth/link/start": "parent number linking before login; a code goes to the registered phone",

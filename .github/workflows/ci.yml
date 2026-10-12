@@ -619,6 +619,10 @@ jobs:
           npm run test:coalesced-refresh
           npm run test:desk-probe-ancillary
           npm run test:update-reload
+          npm run test:client-metrics-route
+          npm run test:client-metrics-sender
+          npm run test:stale-build
+          npm run test:erp-fetch
 
   build:
     name: Production build

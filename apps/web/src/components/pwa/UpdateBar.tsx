@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { RefreshCw } from "lucide-react";
 import { isEditableElement, shouldReloadForUpdate } from "@/lib/updateReload";
 import { failingDeskSyncs } from "@/lib/deskSyncStatus";
+import { noteLoadedBuild } from "@/lib/clientBuild";
 
 /** Least time between two checks, however often the phone is reopened. */
 const MIN_GAP_MS = 60_000;
@@ -79,7 +80,13 @@ export function UpdateBar() {
         const res = await fetch("/api/app-version", { cache: "no-store" });
         if (!res.ok) return;
         const { build } = (await res.json()) as { build?: string };
-        if (!alive || !build || build === "unknown") return;
+        if (!build || build === "unknown") return;
+        // The page's first answer is also the build every ERP request and
+        // client metric reports (lib/clientBuild; later answers are ignored
+        // there). Recorded before the `alive` check: a remount (React's dev
+        // double effect) must not leave the page without a build.
+        noteLoadedBuild(build);
+        if (!alive) return;
         if (loaded.current === null) loaded.current = build;
         else if (build !== loaded.current) setStale(true);
       } catch {
