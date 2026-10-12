@@ -147,6 +147,8 @@
     "test:closing-balance": "npx tsx src/lib/ledger/closingBalance.selftest.ts",
     "test:accounts-position-rbac": "npx tsx src/lib/accountsPositionRbac.selftest.ts",
     "test:voucher-filter": "npx tsx src/lib/ledger/voucherFilter.selftest.ts",
+    "test:accounts-today-tile": "npx tsx src/lib/accountsTodayTile.selftest.ts",
+    "test:attendance-exception-ids": "npx tsx src/lib/attendanceExceptionIds.selftest.ts",
     "test:voucher-amend": "npx tsx src/lib/ledger/voucherAmend.selftest.ts",
     "test:wa-templates-automation": "npx tsx src/lib/waTemplatesAutomation.selftest.ts",
     "test:wa-template-seeds": "npx tsx src/lib/waTemplateSeeds.selftest.ts",
