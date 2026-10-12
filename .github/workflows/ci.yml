@@ -676,3 +676,93 @@ jobs:
           # together, and raise the Cloud Build machineType before raising these.
           NODE_OPTIONS: --max-old-space-size=6144
         run: npm run build
+
+  # The local test stack (data-layer step 1.0): Postgres 17 with every
+  # migration, PostgREST, the /rest/v1 proxy, the seeded fixture school, the
+  # app built and started against it, and the acceptance check. See
+  # scripts/e2e-stack.sh and docs/data-layer-rebuild/COMMAND.md step 1.0.
+  #
+  # It uses no secret of any kind: every key is minted per run from a random
+  # secret, and every URL is 127.0.0.1.
+  e2e-stack:
+    name: E2E stack (Postgres 17 + PostgREST, seeded school)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # Not a merge gate yet — the director makes it required once it has run green.
+    continue-on-error: true
+    steps:
+      # A secret named *SERVICE_ROLE* visible to this workflow, or any such
+      # variable in the job's environment, stops the job before checkout.
+      # Only the boolean leaves the expression; no secret value is exposed.
+      - name: Refuse production credentials
+        env:
+          SERVICE_ROLE_SECRET_PRESENT: ${{ contains(toJSON(secrets), 'SERVICE_ROLE') }}
+        run: |
+          if [ "$SERVICE_ROLE_SECRET_PRESENT" != "false" ]; then
+            echo "A secret whose name contains SERVICE_ROLE is visible to this workflow — the e2e job must run without production credentials." >&2
+            exit 1
+          fi
+          if env | cut -d= -f1 | grep -q SERVICE_ROLE; then
+            echo "The job environment carries a *SERVICE_ROLE* variable — refusing." >&2
+            exit 1
+          fi
+          echo "no SERVICE_ROLE secret or variable present"
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Same Linux-binary install as the verify and build jobs.
+      - name: Install
+        run: |
+          npm ci
+          npm install --no-save --workspace=web \
+            lightningcss-linux-x64-gnu@1.32.0 \
+            @tailwindcss/oxide-linux-x64-gnu@4.3.2
+
+      # Production is Postgres 17; the runner's own Postgres is not.
+      - name: Install Postgres 17 (PostgreSQL apt repository)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -q postgresql-17
+          /usr/lib/postgresql/17/bin/postgres --version
+
+      # The release tarball pinned in scripts/e2e-stack.sh, sha256-verified.
+      - name: Install PostgREST (pinned, checksum-verified)
+        run: bash scripts/e2e-stack.sh install-postgrest "$RUNNER_TEMP/postgrest"
+
+      - name: Stack up — migrations, PostgREST, proxy, seed
+        env:
+          PGBIN: /usr/lib/postgresql/17/bin
+          POSTGREST_BIN: ${{ runner.temp }}/postgrest/postgrest
+        run: bash scripts/e2e-stack.sh up
+
+      # NEXT_PUBLIC_* are baked in at build time, so the build reads
+      # apps/web/.env.e2e (127.0.0.1 URL, this run's anon key) and nothing else.
+      - name: Build the app against the stack
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: bash scripts/e2e-stack.sh build
+
+      - name: Start the app on 127.0.0.1:3700
+        run: bash scripts/e2e-stack.sh app
+
+      - name: Acceptance check
+        run: bash scripts/e2e-stack.sh check
+
+      - name: Stack logs (on failure)
+        if: failure()
+        run: |
+          S="${TMPDIR:-/tmp}/bhb-e2e-stack"
+          for f in migrations.log postgrest.log proxy.log app.log pg.log; do
+            echo "::group::$f"; tail -n 200 "$S/$f" 2>/dev/null || echo "(none)"; echo "::endgroup::"
+          done
+
+      - name: Stack down
+        if: always()
+        run: bash scripts/e2e-stack.sh down

@@ -16,6 +16,8 @@ apps/web/out/
 .env
 .env.local
 apps/web/.env.local
+# The local test stack's env (scripts/e2e-stack.sh up) — per-run keys.
+apps/web/.env.e2e
 deploy/.generated/
 *.pem
 
