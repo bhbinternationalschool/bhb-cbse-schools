@@ -133,8 +133,10 @@ const shreya = s("stf_shreya", "Shreya Sharma", "shreya@example.com");
 const nihal = s("stf_nihal", "Nihal Rajak", "nihal@example.com");
 const director = s("stf_dir", "Director", "director@bhbinternational.school");
 
-const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
-const today = new Date().toISOString().slice(0, 10);
+// India's calendar day, as the grants use — a UTC date here failed every
+// night from 00:00 to 05:30 IST.
+const yesterday = rbacTodayIst(Date.now() - 86_400_000);
+const today = rbacTodayIst(Date.now());
 
 /* 1. Precedence on functions: deny > allow > role. */
 assert.equal(featureAccess(shreya, masters, F, "edit", base).allowed, true, "role's module grant opens the function");
