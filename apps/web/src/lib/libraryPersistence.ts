@@ -2,6 +2,7 @@
  * Library state — jsonb blob on library_state + normalized library_desk_*.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   libraryStateIsEmpty,
@@ -36,6 +37,8 @@ const blob = createDomainBlobPersistence<LibraryState>({
 
 export const libraryRemoteEnabled = blob.remoteEnabled;
 export const scheduleLibrarySync = (state: LibraryState) => {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureLibraryHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushLibraryRemoteServer(state));
     return;

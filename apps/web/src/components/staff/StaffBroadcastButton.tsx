@@ -1,5 +1,7 @@
 "use client";
 
+import { hasDeskLoaded } from "@/lib/deskHydrateGuard";
+import { ensureStaffHrHydrated } from "@/lib/staffHrPersistence";
 import { useEffect, useMemo, useState } from "react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
@@ -123,6 +125,10 @@ export function StaffBroadcastButton() {
 
   // Leave-request fields
   const [hr, setHr] = useState(() => loadStaffHr());
+  // Staff HR loaded from the server on this page (12 Oct 2026): until then
+  // loadStaffHr() is the placeholder CL/EL/ML/LWP list, so leave types and
+  // request tickets wait for the real copy.
+  const [hrReady, setHrReady] = useState(() => hasDeskLoaded("staff_hr"));
   const [leaveType, setLeaveType] = useState<LeaveTypeCode>("");
   const [fromDate, setFromDate] = useState(() =>
     new Date().toISOString().slice(0, 10),
@@ -157,6 +163,17 @@ export function StaffBroadcastButton() {
     const freshHr = loadStaffHr();
     setHr(freshHr);
     setLeaveType((cur) => cur || freshHr.leaveTypes[0]?.code || "");
+    setHrReady(hasDeskLoaded("staff_hr"));
+    void withHydrationSlot(() => ensureStaffHrHydrated()).then(() => {
+      const loaded = loadStaffHr();
+      setHr(loaded);
+      // A type picked from the placeholder that the school does not have
+      // (e.g. EL after it was removed) is replaced by the school's first one.
+      setLeaveType((cur) =>
+        cur && loaded.leaveTypes.some((t) => t.code === cur) ? cur : loaded.leaveTypes[0]?.code || "",
+      );
+      setHrReady(hasDeskLoaded("staff_hr"));
+    });
   }, [open]);
 
   const actor = useMemo(() => {
@@ -738,7 +755,7 @@ export function StaffBroadcastButton() {
                     ) : null}
                     <button
                       type="button"
-                      disabled={busy || !reason.trim() || !leaveType}
+                      disabled={busy || !hrReady || !reason.trim() || !leaveType}
                       className="w-full rounded-lg bg-[var(--primary)] py-2 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
                       onClick={() => void submitLeave()}
                     >
@@ -805,7 +822,7 @@ export function StaffBroadcastButton() {
                     ) : null}
                     <button
                       type="button"
-                      disabled={busy || !requestSubject.trim()}
+                      disabled={busy || !hrReady || !requestSubject.trim()}
                       className="w-full rounded-lg bg-[var(--primary)] py-2 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
                       onClick={() => void submitRequest()}
                     >
