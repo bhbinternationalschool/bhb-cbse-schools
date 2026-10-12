@@ -12,11 +12,37 @@ export function isDeskHydrated(module: string): boolean {
   return Date.now() - last < DESK_HYDRATE_TTL_MS;
 }
 
+/**
+ * Desks this page has loaded from the server at least once. Unlike
+ * isDeskHydrated (a 15 s freshness window) this never lapses, so it answers
+ * "do we know this yet?" — what a permission check must ask before it says
+ * no (components/shell/useAccessData.ts).
+ */
+const everHydrated = new Set<string>();
+
+export function deskEverHydrated(module: string): boolean {
+  return everHydrated.has(module);
+}
+
 export function markDeskHydrated(module: string): void {
   hydrated.set(module, Date.now());
+  if (everHydrated.has(module)) return;
+  everHydrated.add(module);
+  // Once per desk per page, after the caller has written what it read (the
+  // write follows this mark in the same tick).
+  if (typeof window !== "undefined") {
+    window.setTimeout(() => {
+      window.dispatchEvent(
+        new CustomEvent("bhb-desk-first-hydrated", { detail: { id: module } }),
+      );
+    }, 0);
+  }
 }
 
 export function resetDeskHydrated(module?: string): void {
+  // everHydrated survives: a reset asks for a fresh read, it does not make
+  // what was read unknown (a re-pull after a merge must not send every
+  // screen back to "Checking access…").
   if (module) hydrated.delete(module);
   else hydrated.clear();
   inFlight.clear();

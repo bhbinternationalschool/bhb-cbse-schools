@@ -36,9 +36,9 @@ import {
 import { readAll } from "@/lib/data/client/query";
 import { writeRecords } from "@/lib/data/client/mutate";
 import { getSessionActor } from "@/lib/sessionActor";
-import { canWriteModuleTab, loadRbac, visibleModuleTabs } from "@/lib/rbac";
-import { loadMasters } from "@/lib/masters";
+import { canWriteModuleTab, visibleModuleTabs } from "@/lib/rbac";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { useAccessData } from "@/components/shell/useAccessData";
 import {
   HOME_SLUG,
   LANGUAGES,
@@ -82,8 +82,12 @@ export function WebsiteWorkspace() {
    * whether someone is shown a button that would fail, or told why.
    */
   const session = useDemoSession();
+  // Roles + roster as loaded (assignments count); nothing decided before.
+  const access = useAccessData();
   // The module's approve, or Website → Publish to the website.
-  const canPublish = canWriteModuleTab(session, null, "website", "pages", "approve");
+  const canPublish =
+    access.ready &&
+    canWriteModuleTab(session, access.masters, "website", "pages", "approve", access.rbac ?? undefined);
 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -92,15 +96,20 @@ export function WebsiteWorkspace() {
 
   // Someone holding only some Website functions (Masters → Roles) sees only
   // their tabs: the server (/api/data/site.*) refuses the rest anyway.
-  const [shownTabs, setShownTabs] = useState<(typeof TABS)[number][]>([...TABS]);
+  const shownTabs = useMemo<(typeof TABS)[number][]>(
+    () =>
+      access.ready
+        ? visibleModuleTabs([...TABS], session, access.masters, "website", access.rbac ?? undefined)
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [session, access.ready, access.version],
+  );
   useEffect(() => {
-    setShownTabs(visibleModuleTabs([...TABS], session, loadMasters(), "website", loadRbac()));
-  }, [session]);
-  useEffect(() => {
+    if (!access.ready) return;
     if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
       setTab(shownTabs[0]!.id);
     }
-  }, [shownTabs, tab]);
+  }, [access.ready, shownTabs, tab]);
   const [busy, setBusy] = useState(false);
 
   // The site ships English; the picker exists so a Hindi twin can be made

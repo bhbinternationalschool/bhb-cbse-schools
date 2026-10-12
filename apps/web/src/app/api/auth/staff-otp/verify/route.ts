@@ -7,7 +7,7 @@ import { resolveLoginAcademicYearCode } from "@/lib/workspaceSession.server";
 import { verifyParentOtp } from "@/lib/parentOtp.server";
 import { resolvePersonByMobile } from "@/lib/authProvisioning.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { loadServerMasters } from "@/lib/api/v1/auth";
+import { loadServerMasters, loadServerRbacIfKnown } from "@/lib/api/v1/auth";
 import { resolveStaffHomeKind } from "@/lib/staffHomeKind.server";
 import { TENANT } from "@/lib/types";
 import { writeAudit } from "@/lib/audit.server";
@@ -63,6 +63,9 @@ export async function POST(request: Request) {
       roleCode = staffRoleCodeFor(
         { email: person.email, fullName: person.fullName, staffId: person.staffId },
         await loadServerMasters(),
+        "teacher",
+        // Masters → Roles assignment first; null (unreadable) = roster only.
+        await loadServerRbacIfKnown(),
       );
     } catch (e) {
       console.warn("[staff-otp/verify] roleCode inference failed, keeping default", e);
