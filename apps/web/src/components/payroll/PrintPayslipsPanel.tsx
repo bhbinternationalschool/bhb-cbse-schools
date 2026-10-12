@@ -9,6 +9,7 @@ import {
   loadPayroll,
   paymentModeLabel,
   payrollStatusLabel,
+  monthPayslipLines,
   pickPayslipRun,
   type PayrollRun,
   type PayrollStaffLine,
@@ -79,22 +80,28 @@ export function PrintPayslipsPanel({
     }
   }, [monthsAvailable, month]);
 
-  const run = useMemo(
-    () => pickPayslipRun(runs, month, academicYearCode),
+  // Every staff member paid for the month, from whichever run paid them —
+  // a month can be paid in several runs.
+  const entries = useMemo(
+    () => monthPayslipLines(runs, month, academicYearCode),
     [runs, month, academicYearCode],
   );
+  const runByStaff = useMemo(
+    () => new Map(entries.map((e) => [e.line.staffId, e.run])),
+    [entries],
+  );
+  const run = entries[0]?.run ?? null;
+  const statuses = [...new Set(entries.map((e) => e.run.status))];
+  const runKey = entries.map((e) => `${e.run.id}:${e.line.staffId}`).join(",");
 
-  const lines = useMemo(() => {
-    if (!run) return [];
-    return [...run.lines].sort((a, b) => a.empCode.localeCompare(b.empCode));
-  }, [run]);
+  const lines = useMemo(() => entries.map((e) => e.line), [entries]);
 
   useEffect(() => {
     setSelectedIds(lines.map((l) => l.staffId));
     if (lines.length && !lines.some((l) => l.staffId === staffId)) {
       setStaffId(lines[0]?.staffId || "");
     }
-  }, [run?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [runKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const printLines = useMemo(() => {
     if (!run) return [];
@@ -208,8 +215,12 @@ export function PrintPayslipsPanel({
           </p>
         ) : (
           <p className="text-xs text-[var(--muted)]">
-            Using run status <strong>{payrollStatusLabel(run.status)}</strong> ·{" "}
+            Status{" "}
+            <strong>{statuses.map((st) => payrollStatusLabel(st)).join(" / ")}</strong> ·{" "}
             {lines.length} staff in month
+            {new Set(entries.map((e) => e.run.id)).size > 1
+              ? ` · from ${new Set(entries.map((e) => e.run.id)).size} runs`
+              : ""}
           </p>
         )}
 
@@ -256,7 +267,7 @@ export function PrintPayslipsPanel({
             <PrintablePayslip
               key={line.staffId}
               masters={masters}
-              run={run}
+              run={runByStaff.get(line.staffId) ?? run!}
               line={line}
             />
           ))

@@ -12,7 +12,7 @@ import {
   loadPayroll,
   type PayrollRun,
   type PayrollStaffLine,
-  pickPayslipRun,
+  monthPayslipLines,
 } from "@/lib/payroll";
 import {
   loadSalarySetup,
@@ -80,6 +80,8 @@ export type BankExportRow = {
 export type BankExportPreview = {
   month: string;
   run: PayrollRun | null;
+  /** Every run whose lines are in the file (a month can be paid in parts). */
+  runs: PayrollRun[];
   rows: BankExportRow[];
   totalAmount: number;
   readyCount: number;
@@ -119,20 +121,19 @@ export function buildBankExportPreview(input: {
   const salary = loadSalarySetup();
   const settings = normalizeSalarySettings(salary.settings);
   const runs = loadPayroll().runs;
-  let run = pickPayslipRun(runs, input.month, input.academicYearCode);
-
-  if (input.requirePosted !== false && run) {
-    if (run.status !== "posted" && run.status !== "paid") {
-      // Prefer posted/paid only when available; else fall through if nothing better
-      const better = runs.find(
-        (r) =>
-          r.month === input.month &&
-          r.academicYearCode === input.academicYearCode &&
-          (r.status === "posted" || r.status === "paid"),
-      );
-      run = better || null;
-    }
+  // A month can be paid in several runs (staff paid on different days). The
+  // file carries the posted runs still waiting to be paid — never someone
+  // already marked paid next to them, or the bank would pay them twice. When
+  // nothing is waiting, the paid month can be downloaded again.
+  let entries =
+    input.requirePosted === false
+      ? monthPayslipLines(runs, input.month, input.academicYearCode)
+      : monthPayslipLines(runs, input.month, input.academicYearCode, ["posted"]);
+  if (entries.length === 0 && input.requirePosted !== false) {
+    entries = monthPayslipLines(runs, input.month, input.academicYearCode, ["paid"]);
   }
+  const fileRuns = [...new Map(entries.map((e) => [e.run.id, e.run])).values()];
+  const run = fileRuns[0] ?? null;
 
   const staffById = new Map(
     (input.masters.staff ?? []).map((s) => [s.id, s]),
@@ -146,8 +147,8 @@ export function buildBankExportPreview(input: {
       );
 
   const rows: BankExportRow[] = [];
-  if (run) {
-    for (const line of run.lines) {
+  {
+    for (const { line } of entries) {
       const mode = line.paymentMode || "bank_transfer";
       if (modeFilter && !modeFilter.has(mode as "bank_transfer" | "upi")) {
         continue;
@@ -177,6 +178,7 @@ export function buildBankExportPreview(input: {
   return {
     month: input.month,
     run,
+    runs: fileRuns,
     rows,
     totalAmount,
     readyCount,
