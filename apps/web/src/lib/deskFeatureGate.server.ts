@@ -31,8 +31,18 @@ import {
 } from "@/lib/apiRouteAuth.server";
 import type { ApiAuthContext } from "@/lib/api/v1/auth";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
-import { authorizeFeatureChange, type FeatureAccessFn } from "@/lib/deskFeatureAuth";
-import { featureAccess, type RbacAction, type RbacModule } from "@/lib/rbac";
+import {
+  authorizeFeatureChange,
+  deniedSliceChange,
+  moduleHasDeniedSliceWrites,
+  type FeatureAccessFn,
+} from "@/lib/deskFeatureAuth";
+import {
+  featureAccess,
+  isFeaturePersonallyDenied,
+  type RbacAction,
+  type RbacModule,
+} from "@/lib/rbac";
 import { featuresForModule } from "@/lib/rbacFeatures";
 
 export type FeatureGate = {
@@ -67,6 +77,8 @@ async function featureGate(
   const staff = await requireStaffApi(req);
   if (!staff.ok || staff.viaMirrorSecret) return null;
   const ctx = staff.ctx;
+  // Saved roles and grants unreadable: no function-only access.
+  if (ctx.rbacKnown === false) return null;
   const access: FeatureAccessFn = (featureId, action) =>
     featureAccess(ctx.session, ctx.masters, featureId, action, ctx.rbac);
   const held = featuresForModule(module).filter((f) =>
@@ -220,4 +232,56 @@ export function stripDeskForFeatures<T extends object>(
     else out[k] = v;
   }
   return { ...(out as T), functionOnly: true };
+}
+
+/**
+ * The whole-module holder's save, checked against what the office has
+ * personally turned off for them (Masters → Roles → Assign to user). Call
+ * on the FULL path of a desk save, after the body is read; `loadStored`
+ * is only called when this person carries a denied write on one of the
+ * module's slice-owning functions, so everyone else pays nothing.
+ *
+ * Returns the refusal to send, or null to go on with the save.
+ */
+export async function deniedSliceGuard(
+  req: Request,
+  module: RbacModule,
+  loadStored: () => Promise<Record<string, unknown> | null>,
+  incoming: object,
+  opts: { prefix?: string; deletes?: Record<string, readonly string[]> } = {},
+): Promise<NextResponse | null> {
+  const staff = await requireStaffApi(req);
+  if (!staff.ok || staff.viaMirrorSecret) return null;
+  const ctx = staff.ctx;
+  // Saved grants unreadable on this instance (never read): a deny we cannot
+  // see is not "no deny". The save waits for a good read.
+  if (ctx.rbacKnown === false) {
+    return NextResponse.json(
+      { ok: false, error: "Your permissions could not be read just now — nothing was written. Try again." },
+      { status: 503 },
+    );
+  }
+  const denied = (featureId: string, action: RbacAction) =>
+    isFeaturePersonallyDenied(ctx.session, ctx.masters, featureId, action, ctx.rbac);
+  if (!moduleHasDeniedSliceWrites(module, denied)) return null;
+  const stored = await loadStored().catch(() => null);
+  if (!stored) {
+    return NextResponse.json(
+      { ok: false, error: "Could not read the saved desk — nothing was written. Try again." },
+      { status: 503 },
+    );
+  }
+  const prefix = opts.prefix ?? "";
+  const deletes: Record<string, readonly string[]> = {};
+  for (const [k, v] of Object.entries(opts.deletes ?? {})) deletes[`${prefix}${k}`] = v;
+  const reason = deniedSliceChange(
+    module,
+    prefixed(stored, prefix),
+    prefixed(incoming, prefix),
+    denied,
+    deletes,
+  );
+  if (!reason) return null;
+  console.warn(`[${module}-desk] refused save from ${ctx.session.staffId || "?"}: ${reason}`);
+  return NextResponse.json({ ok: false, error: reason, reason: "feature_forbidden" }, { status: 403 });
 }

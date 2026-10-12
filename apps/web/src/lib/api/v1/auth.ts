@@ -18,11 +18,14 @@ import { getServerTenantContext } from "@/lib/serverTenant";
 import { ApiError } from "@/lib/api/v1/errors";
 import { staffRoleCodeFor } from "@/lib/staffSessionRole";
 import { trackServerWork } from "@/lib/serverWork";
+import { rbacReadOutcome } from "@/lib/rbacReadOutcome";
 
 export type ApiAuthContext = {
   session: DemoSession;
   masters: MastersState;
   rbac: RbacState;
+  /** false = the saved roles/grants could not be read; `rbac` is defaults. */
+  rbacKnown?: boolean;
   authKind: "session" | "api_key";
   apiKeyId?: string;
 };
@@ -40,30 +43,70 @@ function hashKey(raw: string): string {
  * enforcement and the browser were looking at two different role sets.
  * Cached briefly — this runs on every authenticated request (31 089 blob
  * reads in six days).
+ *
+ * Personal denies (12 Oct 2026) make a stale or unknown copy matter: a
+ * deny the office just set must bite within seconds on every instance, and
+ * a failed read must not answer with defaults that carry no denies at all.
+ * So: the copy is re-validated against rbac_desk_sync_meta.updated_at (one
+ * tiny row) every RBAC_PROBE_MS, and a failed read keeps the last copy this
+ * instance read successfully. With no good copy ever read, `known` is
+ * false — function-only access is refused (lib/apiRouteAuth.server).
  */
 const RBAC_CACHE_TTL_MS = 30_000;
-let rbacCache: { state: RbacState; at: number } | null = null;
+const RBAC_PROBE_MS = 5_000;
+let rbacCache: {
+  state: RbacState;
+  at: number;
+  probedAt: number;
+  known: boolean;
+  updatedAt: string;
+} | null = null;
+/** The last copy read successfully on this instance — kept across failures. */
+let lastKnownRbac: { state: RbacState; updatedAt: string } | null = null;
 
 export function invalidateServerRbacCache(): void {
   rbacCache = null;
 }
 
+async function rbacDeskUpdatedAt(): Promise<string | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const { data, error } = await ctx.sb
+    .from("rbac_desk_sync_meta")
+    .select("updated_at")
+    .eq("tenant_id", ctx.tenantId)
+    .maybeSingle();
+  if (error) return null;
+  return String((data as { updated_at?: string } | null)?.updated_at || "");
+}
+
 export async function loadServerRbac(): Promise<RbacState> {
   const now = Date.now();
-  if (rbacCache && now - rbacCache.at < RBAC_CACHE_TTL_MS) {
+  if (rbacCache && rbacCache.known && now - rbacCache.at < RBAC_CACHE_TTL_MS) {
+    if (now - rbacCache.probedAt < RBAC_PROBE_MS) return rbacCache.state;
+    const stamp = await rbacDeskUpdatedAt().catch(() => null);
+    if (stamp !== null && stamp === rbacCache.updatedAt) {
+      rbacCache.probedAt = now;
+      return rbacCache.state;
+    }
+  } else if (rbacCache && !rbacCache.known && now - rbacCache.at < RBAC_PROBE_MS) {
     return rbacCache.state;
   }
   const ctx = await getServerTenantContext();
   if (!ctx) return defaultRbacState();
 
   let state: RbacState | undefined;
+  let deskOk = false;
+  let updatedAt = "";
   try {
     const { fetchDeskSliceFromDb } = await import(
       "@/lib/deskSliceNormalized.server"
     );
-    const { bundle } = await fetchDeskSliceFromDb("rbac");
+    const { bundle, ok, meta } = await fetchDeskSliceFromDb("rbac");
+    deskOk = ok;
+    updatedAt = meta?.updatedAt || "";
     const roles = Array.isArray(bundle.roles) ? bundle.roles : [];
-    if (roles.length > 0) {
+    if (ok && roles.length > 0) {
       state = normalizeRbacState({
         version: 1,
         roles,
@@ -75,6 +118,19 @@ export async function loadServerRbac(): Promise<RbacState> {
     }
   } catch (e) {
     console.warn("[apiAuth] rbac desk read failed", e);
+  }
+
+  if (!deskOk) {
+    // Unknown is not empty: keep the last good copy (its denies included)
+    // rather than answer with defaults that deny nothing.
+    const out = rbacReadOutcome({
+      readOk: false,
+      read: null,
+      lastKnown: lastKnownRbac?.state ?? null,
+      defaults: defaultRbacState,
+    });
+    rbacCache = { state: out.state, at: now, probedAt: now, known: out.known, updatedAt: lastKnownRbac?.updatedAt ?? "" };
+    return out.state;
   }
 
   if (!state) {
@@ -94,8 +150,25 @@ export async function loadServerRbac(): Promise<RbacState> {
   const resolved = state?.roles?.length
     ? normalizeRbacState(state)
     : defaultRbacState();
-  rbacCache = { state: resolved, at: now };
+  rbacCache = { state: resolved, at: now, probedAt: now, known: true, updatedAt };
+  lastKnownRbac = { state: resolved, updatedAt };
   return resolved;
+}
+
+async function rbacWithKnown(): Promise<{ rbac: RbacState; rbacKnown: boolean }> {
+  const rbac = await loadServerRbac();
+  return { rbac, rbacKnown: !!rbacCache?.known && rbacCache.state === rbac };
+}
+
+/**
+ * The school's roles, assignments and personal grants, or null when they
+ * could not be read and this instance has never read them (loadServerRbac
+ * then answers with the built-in defaults, which carry no assignments and
+ * no personal denies).
+ */
+export async function loadServerRbacIfKnown(): Promise<RbacState | null> {
+  const state = await loadServerRbac();
+  return rbacCache?.known && rbacCache.state === state ? state : null;
 }
 
 /**
@@ -183,7 +256,7 @@ async function authFromApiKey(request: Request): Promise<ApiAuthContext | null> 
   return {
     session,
     masters: await loadServerMasters(),
-    rbac: await loadServerRbac(),
+    ...(await rbacWithKnown()),
     authKind: "api_key",
     apiKeyId: row.id as string,
   };
@@ -250,7 +323,7 @@ export async function resolveApiAuth(request: Request): Promise<ApiAuthContext> 
   return {
     session,
     masters,
-    rbac: await loadServerRbac(),
+    ...(await rbacWithKnown()),
     authKind: "session",
   };
 }

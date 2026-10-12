@@ -23,6 +23,7 @@ import { guardMastersOverwrite, guardSubjectsOverwrite } from "@/lib/mastersWrit
 import { guardMastersRevision } from "@/lib/mastersRevisionGuard";
 import {
   deskWriteGate,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
 } from "@/lib/deskFeatureGate.server";
@@ -305,6 +306,18 @@ export async function POST(req: Request) {
       },
       { status: 409 },
     );
+  }
+
+  // Whole-module holder: refused only where the office has turned one of
+  // the Masters functions off for them (Masters → Roles → Assign to user).
+  if (!featureGate) {
+    const refused = await deniedSliceGuard(
+      req,
+      "masters",
+      async () => stored as unknown as Record<string, unknown>,
+      state,
+    );
+    if (refused) return refused;
   }
 
   // Function-only writers: the stored desk is the base, and only the slices

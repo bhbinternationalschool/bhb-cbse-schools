@@ -23,7 +23,8 @@ import {
   setStaffLeaves,
   type TreeLeaf,
 } from "@/lib/rbacEditorModel";
-import { newRbacId } from "@/lib/rbac";
+import { isValidRbacExpiry, newRbacId, rbacTodayIst } from "@/lib/rbac";
+import { isProtectedTarget, isRbacSuperEditor } from "@/lib/rbacEditGuard";
 import { MastersTableCard, MastersWorkCard } from "@/components/masters/MastersLayout";
 import { RbacPermissionTree, TreeButton, type LeafView } from "@/components/masters/RbacPermissionTree";
 import { RbacChangePreview } from "@/components/masters/RbacChangePreview";
@@ -53,14 +54,17 @@ type Preview = {
 export function RbacAssignToUser({
   state,
   masters,
-  editable,
+  editable: canEdit,
   actorName,
+  editorSession,
   commit,
 }: {
   state: RbacState;
   masters: MastersState;
   editable: boolean;
   actorName: string;
+  /** Who is editing — nobody edits themselves; protected people need the director. */
+  editorSession: SessionLike;
   commit: (next: RbacState, msg?: string) => void;
 }) {
   const tree = useMemo(() => buildPermissionTree(), []);
@@ -80,8 +84,25 @@ export function RbacAssignToUser({
   const [preview, setPreview] = useState<Preview | null>(null);
 
   const person = staff.find((s) => s.id === staffId) ?? null;
+  // The same rule the server applies to the save (lib/rbacEditGuard).
+  const editorStaffId = useMemo(() => {
+    if (editorSession.staffId) return editorSession.staffId;
+    const email = (editorSession.email || "").trim().toLowerCase();
+    return (masters.staff ?? []).find((s) => email && (s.email || "").trim().toLowerCase() === email)?.id || "";
+  }, [editorSession, masters.staff]);
+  const lockReason = useMemo(() => {
+    if (!person) return null;
+    const editor = { session: editorSession, staffId: editorStaffId };
+    if (isRbacSuperEditor(editor, state, masters)) return null;
+    if (person.id === editorStaffId) return "You cannot change your own permissions — ask the principal or the director.";
+    if (isProtectedTarget(person.id, state, {}, masters)) {
+      return `${person.fullName} holds the owner, principal or admin role — only the director (owner) can change their permissions.`;
+    }
+    return null;
+  }, [person, editorSession, editorStaffId, state, masters]);
+  const editable = canEdit && !lockReason;
   const working = draft ?? state;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = rbacTodayIst();
 
   function rolesIn(s: RbacState, who: StaffRecord): RbacRole[] {
     return resolveSessionRoles(s, staffSession(who), masters);
@@ -125,6 +146,10 @@ export function RbacAssignToUser({
 
   function setLeaves(leaves: TreeLeaf[], on: boolean) {
     if (!editable || !person) return;
+    if (expires && !isValidRbacExpiry(expires)) {
+      setNotice("The expiry is not a date — pick one, or clear it.");
+      return;
+    }
     const r = setStaffLeaves(working, roles, person.id, leaves, on, {
       grantedBy: actorName,
       ...(reason.trim() ? { note: reason.trim() } : {}),
@@ -250,7 +275,7 @@ export function RbacAssignToUser({
     const v = window.prompt("Expires on (YYYY-MM-DD) — leave empty for no expiry", row.expiresOn || "");
     if (v === null) return;
     const clean = v.trim();
-    if (clean && !/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    if (!isValidRbacExpiry(clean)) {
       setNotice("Use a date like 2026-12-31.");
       return;
     }
@@ -321,6 +346,11 @@ export function RbacAssignToUser({
           ) : null}
         </div>
 
+        {lockReason ? (
+          <p className="mt-3 rounded-lg border border-[var(--warning)] bg-[var(--surface-sunken)] px-3 py-2 text-sm text-[var(--warning)]">
+            {lockReason} You can look, but not change.
+          </p>
+        ) : null}
         {person ? (
           <div className="mt-4 grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <Fact label="Name" value={`${person.fullName} (${person.empCode})`} />
@@ -344,7 +374,7 @@ export function RbacAssignToUser({
       {person ? (
         <MastersWorkCard
           title={`What ${person.fullName} can do`}
-          hint="Unticking a role tick takes it away from this person only (a personal deny). Ticking something their roles do not give is a personal grant. A function denied here also closes its tabs and its own API routes; to take a whole screen away, untick the module's “Whole module” row."
+          hint="Unticking a role tick takes it away from this person only (a personal deny). Ticking something their roles do not give is a personal grant. A function denied here closes its tabs, its own API routes and phone-app screens, and refuses saves that change that function's records; to take a whole screen away, untick the module's “Whole module” row."
         >
           <div className="mb-3 flex flex-wrap items-end gap-3">
             <label className="min-w-[14rem] flex-1 text-sm">

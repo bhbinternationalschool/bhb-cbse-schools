@@ -381,6 +381,23 @@ export const RBAC_ACTIONS: { id: RbacAction; label: string }[] = [
 
 const ALL_ACTIONS: RbacAction[] = RBAC_ACTIONS.map((a) => a.id);
 
+/**
+ * Today in India (YYYY-MM-DD). Expiry dates are the school's calendar days:
+ * a grant "until 12 Oct" must still hold at 2 a.m. IST on the 12th, which
+ * the UTC date (still the 11th) would get right only by luck.
+ */
+export function rbacTodayIst(nowMs: number = Date.now()): string {
+  return new Date(nowMs + 330 * 60_000).toISOString().slice(0, 10);
+}
+
+/** An expiry the screens may save: empty (none) or a real YYYY-MM-DD date. */
+export function isValidRbacExpiry(v: string): boolean {
+  if (!v) return true;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+}
+
 function nid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -936,6 +953,14 @@ function normalizeUserGrant(
     (a): a is RbacAction => allowed.includes(a as RbacAction),
   );
   if (actions.length === 0) return null;
+  // A malformed expiry must never read as "already expired" (that would
+  // silently lift a deny) nor as "never" for an allow (that would widen it):
+  // a deny keeps denying with no end date, an allow is dropped.
+  let expiresOn = String(g.expiresOn || "").trim();
+  if (!isValidRbacExpiry(expiresOn)) {
+    if (denyModule || effect === "deny") expiresOn = "";
+    else return null;
+  }
   const row: UserPermissionGrant = {
     id: String(g.id || nid("ug")),
     staffId,
@@ -944,7 +969,7 @@ function normalizeUserGrant(
     note: String(g.note || ""),
     grantedBy: String(g.grantedBy || ""),
     grantedAt: String(g.grantedAt || new Date().toISOString()),
-    expiresOn: String(g.expiresOn || "").slice(0, 10),
+    expiresOn,
   };
   if (allowModule) row.module = allowModule;
   if (feature) row.feature = feature;
@@ -961,7 +986,7 @@ export function userGrantsFor(
   const self = masters ? resolveStaffForRbac(session, masters) : null;
   const staffId = self?.id || session.staffId || "";
   if (!staffId) return [];
-  const today = new Date().toISOString().slice(0, 10);
+  const today = rbacTodayIst();
   return (rbac.userGrants ?? []).filter(
     (g) => g.staffId === staffId && (!g.expiresOn || g.expiresOn >= today),
   );
@@ -1029,6 +1054,9 @@ export function setPersonalGrant(
 ): RbacState {
   const staffId = input.staffId.trim();
   if (!staffId || !input.target.id) return state;
+  if (input.expiresOn !== undefined && !isValidRbacExpiry(input.expiresOn)) {
+    throw new Error(`"${input.expiresOn}" is not a date — use YYYY-MM-DD, or leave the expiry empty.`);
+  }
   const all = state.userGrants ?? [];
   const same = (g: UserPermissionGrant) => {
     if (g.staffId !== staffId || g.effect !== input.effect) return false;
@@ -1653,7 +1681,7 @@ export function moduleForHref(href: string): RbacModule | null {
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return rbacTodayIst();
 }
 
 function assignmentActive(a: UserRoleAssignment): boolean {

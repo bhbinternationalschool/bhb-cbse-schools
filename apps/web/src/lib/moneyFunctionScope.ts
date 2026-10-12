@@ -13,7 +13,13 @@
  * Pure: no I/O.
  */
 import type { ApiAuthContext } from "@/lib/api/v1/auth";
-import { featureAccess, hasPermission, type RbacAction, type RbacModule } from "@/lib/rbac";
+import {
+  featureAccess,
+  hasPermission,
+  isFeaturePersonallyDenied,
+  type RbacAction,
+  type RbacModule,
+} from "@/lib/rbac";
 
 type Who = Pick<ApiAuthContext, "session" | "masters" | "rbac">;
 
@@ -30,7 +36,17 @@ export function functionWriteAllowed(
   operation: string,
   covers: (listed: string, operation: string) => boolean = (a, b) => a === b,
 ): boolean {
-  if (hasPermission(who.session, who.masters, module, action, who.rbac)) return true;
+  if (hasPermission(who.session, who.masters, module, action, who.rbac)) {
+    // The whole module — unless every function naming this operation has
+    // been turned off for this person (Masters → Roles → Assign to user).
+    const naming = Object.entries(writes).filter(([, ops]) => ops.some((op) => covers(op, operation)));
+    return (
+      naming.length === 0 ||
+      !naming.every(([featureId]) =>
+        isFeaturePersonallyDenied(who.session, who.masters, featureId, action, who.rbac),
+      )
+    );
+  }
   return Object.entries(writes).some(
     ([featureId, ops]) =>
       ops.some((op) => covers(op, operation)) &&

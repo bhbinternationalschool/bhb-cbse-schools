@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { requireStaffPermission, type RouteAuthResult } from "@/lib/apiRouteAuth.server";
 import { deskFeatureGateFor } from "@/lib/deskFeatureGate.server";
 import { featuresForModule } from "@/lib/rbacFeatures";
+import { isFeaturePersonallyDenied } from "@/lib/rbac";
 import { isModuleStateKey, MODULE_STATE_DEFS } from "@/lib/moduleStateRegistry";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { complaintScopeFilter } from "@/lib/api/v1/staffComplaints";
@@ -39,6 +40,30 @@ async function bookAuth(
 ): Promise<RouteAuthResult> {
   const rbacModule = MODULE_STATE_DEFS[book].rbac;
   const auth = await requireStaffPermission(req, rbacModule, action);
+  if (auth.ok && !auth.viaMirrorSecret && action === "edit") {
+    // The book is saved whole, so its functions are book-level: one the
+    // office has turned off for this person closes the save, even though
+    // their role holds the whole module (Masters → Roles → Assign to user).
+    const slice = `module-state/${book}`;
+    const off = featuresForModule(rbacModule).find(
+      (f) =>
+        f.slices?.includes(slice) &&
+        isFeaturePersonallyDenied(auth.ctx.session, auth.ctx.masters, f.id, "edit", auth.ctx.rbac),
+    );
+    if (off) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          {
+            ok: false,
+            error: `You may not change ${off.label.toLowerCase()} — it is turned off for you; ask the office to give your role this.`,
+            reason: "feature_forbidden",
+          },
+          { status: 403 },
+        ),
+      };
+    }
+  }
   if (auth.ok || auth.response.status !== 403) return auth;
   const gate = await deskFeatureGateFor(req, rbacModule, action === "view" ? "read" : "write");
   if (!gate) return auth;

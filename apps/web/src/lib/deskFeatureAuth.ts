@@ -221,3 +221,77 @@ export function authorizeFeatureChange(
 
   return { ok: true, merged, changedSlices };
 }
+
+/**
+ * A save from someone who DOES hold the whole module, but whom the office
+ * has personally denied some action on one of its functions (Masters →
+ * Roles → Assign to user, 12 Oct 2026). Their push is taken as it is — the
+ * module grant stands — except that a slice owned by a denied function may
+ * not change in a way that needs the denied action. One such change refuses
+ * the whole save, with the reason; nothing is silently dropped.
+ *
+ * Rows are compared by id: a new id needs `create`, a changed row `edit`,
+ * and a row the save NAMES as deleted needs `delete` (saves never delete by
+ * absence). A slice that is not an id'd list needs `edit` to change at all.
+ * A row someone else changed since this browser loaded reads as a change
+ * too — the refusal is visible, never a silent overwrite of the deny.
+ *
+ * @param denied true when this person is personally denied `action` on the function
+ * @param deletes ids the save names as deleted, per slice key (when known)
+ */
+export function deniedSliceChange(
+  module: RbacModule,
+  stored: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+  denied: (featureId: string, action: RbacAction) => boolean,
+  deletes: Record<string, readonly string[]> = {},
+): string | null {
+  const unchecked = DESK_UNCHECKED_KEYS[module];
+  const refuse = (f: RbacFeatureDef, action: RbacAction) =>
+    `You may not ${ACTION_WORD[action] ?? action} ${f.label.toLowerCase()} — it is turned off for you; ask the office to give your role this.`;
+  for (const f of RBAC_FEATURES) {
+    if (f.module !== module || !f.slices?.length) continue;
+    const writesDenied = (["create", "edit", "delete"] as RbacAction[]).filter((a) => denied(f.id, a));
+    if (writesDenied.length === 0) continue;
+    for (const key of f.slices) {
+      if (key === "version" || unchecked?.has(key)) continue;
+      const named = deletes[key] ?? [];
+      if (named.length) {
+        const before = rowsById(stored[key] ?? []);
+        if (named.some((id) => !before || before.has(id)) && denied(f.id, "delete")) return refuse(f, "delete");
+      }
+      if (!(key in incoming)) continue;
+      const before = stored[key];
+      const after = incoming[key];
+      if (same(before, after)) continue;
+      const oldRows = rowsById(before ?? []);
+      const newRows = rowsById(after ?? []);
+      if (!oldRows || !newRows) {
+        if (denied(f.id, "edit")) return refuse(f, "edit");
+        continue;
+      }
+      for (const [id, row] of newRows) {
+        const prev = oldRows.get(id);
+        if (!prev) {
+          if (denied(f.id, "create")) return refuse(f, "create");
+        } else if (!same(prev, row)) {
+          if (denied(f.id, "edit")) return refuse(f, "edit");
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** Does any function of this module that owns desk slices carry a denied write? */
+export function moduleHasDeniedSliceWrites(
+  module: RbacModule,
+  denied: (featureId: string, action: RbacAction) => boolean,
+): boolean {
+  return RBAC_FEATURES.some(
+    (f) =>
+      f.module === module &&
+      !!f.slices?.length &&
+      (["create", "edit", "delete"] as RbacAction[]).some((a) => denied(f.id, a)),
+  );
+}

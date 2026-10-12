@@ -55,6 +55,13 @@ import {
   type TreeLeaf,
 } from "./rbacEditorModel";
 import { ROLE_TEMPLATES, resolveRoleTemplate } from "./rbacRoleTemplates";
+import { deniedSliceChange, moduleHasDeniedSliceWrites } from "./deskFeatureAuth";
+import { rbacChangeRefusal } from "./rbacEditGuard";
+import { functionWriteAllowed } from "./moneyFunctionScope";
+import { MOBILE_FEATURE_FUNCTIONS, mobileFeaturePersonallyDenied } from "./api/v1/mobileAccess.server";
+import { findFeature } from "./rbacFeatures";
+import { isValidRbacExpiry, rbacTodayIst, defaultRbacState } from "./rbac";
+import { rbacReadOutcome } from "./rbacReadOutcome";
 
 console.log("rbacEditorModel.selftest.ts");
 
@@ -351,5 +358,130 @@ assert.equal(counters.modulesOn, 0);
 const searched = filterTree(tree, subjectFns[0]!.label);
 assert.ok(searched.some((c) => c.modules.some((m) => m.module === "masters")), "search finds a function by label");
 assert.ok(allLeaves(searched).length < allLeaves(tree).length);
+
+/* 11. Server desk saves: a whole-module holder with a function deny. */
+{
+  const csDenied = setPersonalGrant(base, {
+    staffId: "stf_shreya",
+    target: { level: "feature", id: "masters.class_subjects" },
+    effect: "deny",
+    actions: ["create", "edit", "delete"],
+  });
+  const denied = (fid: string, a: "view" | "create" | "edit" | "delete" | "void" | "approve" | "export" | "unlock" | "impersonate") =>
+    isFeaturePersonallyDenied(shreya, masters, fid, a, csDenied);
+  assert.equal(hasPermission(shreya, masters, "masters", "edit", csDenied), true, "still holds the whole module");
+  assert.equal(moduleHasDeniedSliceWrites("masters", denied), true);
+  assert.equal(moduleHasDeniedSliceWrites("transport", denied), false, "other modules untouched");
+  const stored = { classSubjects: [{ id: "cs1", classId: "c1", subjectId: "s1" }], classes: [{ id: "c1", name: "1" }] };
+  const added = { ...stored, classSubjects: [...stored.classSubjects, { id: "cs2", classId: "c1", subjectId: "s2" }] };
+  assert.match(deniedSliceChange("masters", stored, added, denied) ?? "", /turned off for you; ask the office to give your role this\.$/, "saving the denied slice is refused");
+  const changed = { ...stored, classSubjects: [{ id: "cs1", classId: "c1", subjectId: "s9" }] };
+  assert.ok(deniedSliceChange("masters", stored, changed, denied), "editing a denied row is refused");
+  assert.ok(deniedSliceChange("masters", stored, stored, denied, { classSubjects: ["cs1"] }), "a named delete is refused");
+  const other = { ...stored, classes: [{ id: "c1", name: "One" }] };
+  assert.equal(deniedSliceChange("masters", stored, other, denied), null, "other slices of the module still save");
+  assert.equal(deniedSliceChange("masters", stored, stored, denied), null, "an unchanged denied slice passes");
+  // Only the denied action counts.
+  const editOnly = setPersonalGrant(base, {
+    staffId: "stf_shreya", target: { level: "feature", id: "masters.class_subjects" }, effect: "deny", actions: ["delete"],
+  });
+  const d2 = (fid: string, a: Parameters<typeof denied>[1]) => isFeaturePersonallyDenied(shreya, masters, fid, a, editOnly);
+  assert.equal(deniedSliceChange("masters", stored, added, d2), null, "create still allowed when only delete is denied");
+  assert.ok(deniedSliceChange("masters", stored, stored, d2, { classSubjects: ["cs1"] }));
+
+  // Money routes shared by many jobs: the module grant, minus denied functions.
+  const ledgerDeny = setPersonalGrant(base, {
+    staffId: "stf_shreya", target: { level: "feature", id: F }, effect: "deny", actions: ["edit"],
+  });
+  const demo = { ...shreya, tenantSlug: "t", academicYearCode: "2026-27" } as const;
+  const who = { session: demo as never, masters, rbac: ledgerDeny };
+  assert.equal(functionWriteAllowed(who, "masters", "edit", { [F]: ["op_a"] }, "op_a"), false, "operation of a denied function refused");
+  assert.equal(functionWriteAllowed(who, "masters", "edit", { [F]: ["op_a"] }, "op_b"), true, "other operations still pass");
+}
+
+/* 12. Phone app: a screen whose functions are all denied is refused. */
+{
+  for (const [feat, ids] of Object.entries(MOBILE_FEATURE_FUNCTIONS)) {
+    for (const id of ids ?? []) assert.ok(findFeature(id), `${feat}: ${id} is in the catalogue`);
+  }
+  const officeWithAtt: RbacRole = { ...office, permissions: [...office.permissions, { module: "attendance", actions: ["view", "edit"] }] };
+  const st: RbacState = { ...base, roles: [officeWithAtt, blank] };
+  const ctx = { session: { ...shreya, tenantSlug: "t", academicYearCode: "2026-27" } as never, masters, rbac: st, authKind: "session" as const };
+  assert.equal(mobileFeaturePersonallyDenied(ctx, "attendance_mark"), false);
+  const off = setPersonalGrant(st, {
+    staffId: "stf_shreya", target: { level: "feature", id: "attendance.student_register" }, effect: "deny", actions: ["edit"],
+  });
+  assert.equal(mobileFeaturePersonallyDenied({ ...ctx, rbac: off }, "attendance_mark"), true, "mobile gate honours the deny");
+}
+
+/* 13. Who may edit whom (server rule on the rbac save). */
+{
+  const principalRole: RbacRole = { ...office, id: "role_principal", code: "principal", name: "Principal" };
+  const adminRole: RbacRole = { ...office, id: "role_admin", code: "admin", name: "Admin", permissions: [{ module: "settings", actions: ["view", "edit"] }] };
+  const ownerRole: RbacRole = { ...office, id: "role_owner", code: "owner", name: "Owner" };
+  const st: RbacState = {
+    ...base,
+    roles: [office, blank, principalRole, adminRole, ownerRole],
+    assignments: [
+      assign("stf_shreya", "role_admin"),
+      { ...assign("stf_nihal", "role_blank") },
+      { ...assign("stf_dir", "role_owner") },
+      { ...assign("stf_pri", "role_principal"), id: "asn_pri" },
+    ],
+  };
+  const m2 = emptyMastersShell();
+  m2.staff = [...masters.staff, person("stf_pri", "Beena Singh", "beena@example.com")];
+  const editorAdmin = { session: shreya, staffId: "stf_shreya" };
+  const editorOwner = { session: director, staffId: "stf_dir" };
+  const giveSelf = setPersonalGrant(st, { staffId: "stf_shreya", target: { level: "module", id: "payroll" }, effect: "allow", actions: ["view"] });
+  assert.match(rbacChangeRefusal(editorAdmin, st, { userGrants: giveSelf.userGrants }, m2) ?? "", /own permissions/, "no self-editing");
+  const denyPrincipal = setPersonalGrant(st, { staffId: "stf_pri", target: { level: "module", id: "fees" }, effect: "deny", actions: ["view"] });
+  assert.match(rbacChangeRefusal(editorAdmin, st, { userGrants: denyPrincipal.userGrants }, m2) ?? "", /principal or admin role/, "principal is protected");
+  const giveNihal = setPersonalGrant(st, { staffId: "stf_nihal", target: { level: "module", id: "fees" }, effect: "allow", actions: ["view"] });
+  assert.equal(rbacChangeRefusal(editorAdmin, st, { userGrants: giveNihal.userGrants }, m2), null, "an ordinary person can be edited");
+  assert.equal(rbacChangeRefusal(editorOwner, st, { userGrants: denyPrincipal.userGrants }, m2), null, "the owner may edit the principal");
+  const editAdminRole = { roles: st.roles.map((r) => (r.code === "admin" ? { ...r, permissions: [...r.permissions, { module: "payroll" as const, actions: ["view" as const] }] } : r)) };
+  assert.ok(rbacChangeRefusal(editorAdmin, st, editAdminRole, m2), "admin cannot widen the admin role");
+  const editOffice = { roles: st.roles.map((r) => (r.code === "office" ? { ...r, note: "x" } : r)) };
+  assert.equal(rbacChangeRefusal(editorAdmin, st, editOffice, m2), null, "admin may edit the office role");
+  const dropOwnAssign = rbacChangeRefusal(editorAdmin, st, {}, m2, { assignments: ["asn_stf_shreya"] });
+  assert.ok(dropOwnAssign, "a named delete of your own assignment is refused too");
+  assert.equal(rbacChangeRefusal(editorAdmin, st, { userGrants: st.userGrants, roles: st.roles }, m2), null, "an unchanged save passes");
+}
+
+/* 14. Expiry: IST calendar day, and malformed dates never lift a deny. */
+{
+  // 2026-10-11 20:00 UTC is already 12 Oct in India.
+  assert.equal(rbacTodayIst(Date.UTC(2026, 9, 11, 20, 0)), "2026-10-12");
+  assert.equal(isValidRbacExpiry("2026-10-12"), true);
+  assert.equal(isValidRbacExpiry(""), true);
+  assert.equal(isValidRbacExpiry("12/10/2026"), false);
+  assert.equal(isValidRbacExpiry("2026-02-30"), false);
+  const n = normalizeRbacState({
+    ...base,
+    userGrants: [
+      { id: "d", staffId: "stf_shreya", feature: F, effect: "deny", actions: ["edit"], note: "", grantedBy: "", grantedAt: "", expiresOn: "12-10-2026" },
+      { id: "a", staffId: "stf_nihal", feature: F, effect: "allow", actions: ["edit"], note: "", grantedBy: "", grantedAt: "", expiresOn: "soon" },
+    ],
+  });
+  assert.equal(n.userGrants.length, 1, "a malformed allow is dropped (never widened)");
+  assert.equal(n.userGrants[0]!.expiresOn, "", "a malformed deny keeps denying");
+  assert.equal(featureAccess(shreya, masters, F, "edit", n).allowed, false);
+  assert.throws(() =>
+    setPersonalGrant(base, { staffId: "stf_shreya", target: { level: "feature", id: F }, effect: "deny", actions: ["edit"], expiresOn: "tomorrow" }),
+  );
+}
+
+/* 15. Saved grants unreadable: last known copy, else UNKNOWN (never "no denies"). */
+{
+  const withDeny = setPersonalGrant(base, { staffId: "stf_shreya", target: { level: "feature", id: F }, effect: "deny", actions: ["edit"] });
+  const ok = rbacReadOutcome({ readOk: true, read: withDeny, lastKnown: null, defaults: defaultRbacState });
+  assert.deepEqual([ok.known, ok.remember], [true, true]);
+  const failedWithLast = rbacReadOutcome({ readOk: false, read: null, lastKnown: withDeny, defaults: defaultRbacState });
+  assert.equal(failedWithLast.state, withDeny, "a failed read keeps the last copy and its denies");
+  assert.equal(featureAccess(shreya, masters, F, "edit", failedWithLast.state).allowed, false);
+  const cold = rbacReadOutcome({ readOk: false, read: null, lastKnown: null, defaults: defaultRbacState });
+  assert.equal(cold.known, false, "no good copy ever read: unknown, not defaults-as-fact");
+}
 
 console.log("rbacEditorModel.selftest.ts: all assertions passed");

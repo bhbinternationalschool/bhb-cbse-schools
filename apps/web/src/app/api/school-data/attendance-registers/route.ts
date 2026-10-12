@@ -22,6 +22,7 @@ import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { featureAuthorizedDeletes } from "@/lib/deskNamedDeletesFeature.server";
 import {
   deskFeatureGateFor,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
   stripDeskForFeatures,
@@ -214,6 +215,23 @@ export async function POST(req: Request) {
 
   // Function holders (e.g. Attendance → Exceptions): merged onto the stored
   // desk, only their functions' slices — never the body as sent.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (!gate) {
+    const refused = await deniedSliceGuard(
+      req,
+      "attendance",
+      async () => {
+        const [regs, anc] = await Promise.all([
+          fetchAttendanceRegistersFromDb(),
+          readAttendanceDeskAncillary(),
+        ]);
+        return regs.ok && anc.ok ? { registers: regs.registers, ...anc.ancillary } : null;
+      },
+      body,
+    );
+    if (refused) return refused;
+  }
   if (gate) {
     const [regs, anc] = await Promise.all([
       fetchAttendanceRegistersFromDb(),

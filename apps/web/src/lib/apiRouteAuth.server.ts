@@ -187,6 +187,9 @@ function holdsRouteFeature(
   // Desk stores are never opened whole by a function: their routes merge
   // a function holder's save slice by slice (lib/deskFeatureGate.server).
   if (pathname.startsWith("/api/school-data/")) return false;
+  // Saved roles and grants unreadable: function-only access is refused,
+  // never answered from the built-in defaults.
+  if (ctx.rbacKnown === false) return false;
   return featuresForRoute(module, pathname).some(
     (f) => featureAccess(ctx.session, ctx.masters, f.id, action, ctx.rbac).allowed,
   );
@@ -238,6 +241,9 @@ export async function requireAnyStaffPermission(
   for (const g of grants) {
     try {
       assertPermission(base.ctx, g.module, g.action);
+      // A desk whose function serving this route is turned off for this
+      // person does not count (Masters → Roles → Assign to user).
+      if (routePersonallyDenied(base.ctx, g.module, g.action, request)) continue;
       return base;
     } catch {
       // Try the next desk.

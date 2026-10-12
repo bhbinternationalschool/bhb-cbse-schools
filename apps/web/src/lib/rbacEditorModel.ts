@@ -13,6 +13,7 @@
  */
 import {
   RBAC_MODULES,
+  rbacTodayIst,
   personalGrantTarget,
   setPersonalGrant,
   type FeatureGrant,
@@ -367,7 +368,7 @@ export type StaffLeafState = {
 export function livePersonalRows(
   rows: UserPermissionGrant[],
   staffId: string,
-  today: string = new Date().toISOString().slice(0, 10),
+  today: string = rbacTodayIst(),
 ): UserPermissionGrant[] {
   return rows.filter((g) => g.staffId === staffId && (!g.expiresOn || g.expiresOn >= today));
 }
@@ -655,7 +656,7 @@ export function copyStaffPermissions(
   const roleIds = [...new Set(input.sourceRoleIds)].filter((id) =>
     state.roles.some((r) => r.id === id && r.isActive),
   );
-  const today = input.today ?? new Date().toISOString().slice(0, 10);
+  const today = input.today ?? rbacTodayIst();
   const stamp = `Copied from ${input.fromLabel}`;
 
   const sourceAssign = state.assignments.filter(

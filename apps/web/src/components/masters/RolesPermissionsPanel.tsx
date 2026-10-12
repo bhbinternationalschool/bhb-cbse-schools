@@ -10,6 +10,7 @@ import {
   defaultBuiltInRoles,
   loadRbac,
   newRbacId,
+  rbacTodayIst,
   principalAccessSummary,
   roleHasAction,
   saveRbac,
@@ -212,7 +213,7 @@ export function RolesPermissionsPanel() {
    * is exactly the quiet back door RBAC exists to prevent.
    */
   const grantRows = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = rbacTodayIst();
     return (state?.userGrants ?? []).map((g) => ({
       id: g.id,
       staffName:
@@ -521,6 +522,7 @@ export function RolesPermissionsPanel() {
           masters={masters}
           editable={editable}
           actorName={session.fullName}
+          editorSession={session}
           commit={commit}
         />
       ) : null}
@@ -528,8 +530,10 @@ export function RolesPermissionsPanel() {
       {tab === "role" ? (
         <RbacRoleTree
           state={state}
+          masters={masters}
           editable={editable}
           actorName={session.fullName}
+          editorSession={session}
           commit={commit}
         />
       ) : null}

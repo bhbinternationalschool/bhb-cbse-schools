@@ -1,10 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { MastersState } from "@/lib/masters";
+import { PROTECTED_ROLE_CODES, isRbacSuperEditor } from "@/lib/rbacEditGuard";
 import {
   appendRbacAudit,
   cloneRole,
   newRbacId,
+  resolveSessionRoles,
+  type SessionLike,
   type FeatureGrant,
   type PermissionGrant,
   type RbacRole,
@@ -69,13 +73,17 @@ type Preview = {
  */
 export function RbacRoleTree({
   state,
-  editable,
+  masters,
+  editable: canEdit,
   actorName,
+  editorSession,
   commit,
 }: {
   state: RbacState;
+  masters: MastersState;
   editable: boolean;
   actorName: string;
+  editorSession: SessionLike;
   commit: (next: RbacState, msg?: string) => void;
 }) {
   const tree = useMemo(() => buildPermissionTree(), []);
@@ -92,6 +100,20 @@ export function RbacRoleTree({
   const [preview, setPreview] = useState<Preview | null>(null);
 
   const role = state.roles.find((r) => r.id === roleId) ?? null;
+  // The same rule the server applies to the save (lib/rbacEditGuard).
+  const lockReason = useMemo(() => {
+    if (!role) return null;
+    const editor = { session: editorSession, staffId: editorSession.staffId || "" };
+    if (isRbacSuperEditor(editor, state, masters)) return null;
+    if ((PROTECTED_ROLE_CODES as readonly string[]).includes(role.code)) {
+      return `Only the director (owner) can change the ${role.name} role.`;
+    }
+    if (resolveSessionRoles(state, editorSession, masters).some((r) => r.id === role.id)) {
+      return `You hold the ${role.name} role, so you cannot change it — ask the principal or the director.`;
+    }
+    return null;
+  }, [role, editorSession, state, masters]);
+  const editable = canEdit && !lockReason;
   const working: Grants | null = role ? draft ?? grantsOf(role) : null;
 
   const view = (leaf: TreeLeaf): LeafView => {
@@ -146,7 +168,7 @@ export function RbacRoleTree({
   }
 
   function duplicate() {
-    if (!role || !editable) return;
+    if (!role || !canEdit) return;
     if (draft) {
       setNotice("Save or discard the changes first.");
       return;
@@ -164,7 +186,11 @@ export function RbacRoleTree({
 
   function reviewTemplate() {
     const t = ROLE_TEMPLATES.find((x) => x.id === templateId);
-    if (!t || !editable) return;
+    if (!t || !canEdit) return;
+    if (templateTarget === "this" && lockReason) {
+      setNotice(lockReason);
+      return;
+    }
     if (draft) {
       setNotice("Save or discard the changes first.");
       return;
@@ -290,7 +316,7 @@ export function RbacRoleTree({
               placeholder="New role name"
               value={dupName}
               onChange={(e) => setDupName(e.target.value)}
-              disabled={!editable}
+              disabled={!canEdit}
             />
           </label>
           <input
@@ -298,10 +324,10 @@ export function RbacRoleTree({
             placeholder="code (optional)"
             value={dupCode}
             onChange={(e) => setDupCode(e.target.value)}
-            disabled={!editable}
+            disabled={!canEdit}
             aria-label="New role code"
           />
-          <TreeButton onClick={duplicate} disabled={!editable || !dupName.trim()}>
+          <TreeButton onClick={duplicate} disabled={!canEdit || !dupName.trim()}>
             Duplicate role
           </TreeButton>
         </div>
@@ -324,7 +350,7 @@ export function RbacRoleTree({
               className="min-w-[14rem] rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
               value={templateId}
               onChange={(e) => setTemplateId(e.target.value)}
-              disabled={!editable}
+              disabled={!canEdit}
             >
               <option value="">Choose…</option>
               {ROLE_TEMPLATES.map((t) => (
@@ -340,7 +366,7 @@ export function RbacRoleTree({
               className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
               value={templateTarget}
               onChange={(e) => setTemplateTarget(e.target.value as "this" | "new")}
-              disabled={!editable}
+              disabled={!canEdit}
             >
               <option value="this">{role ? `The ${role.name} role` : "This role"}</option>
               <option value="new">A new role</option>
@@ -353,14 +379,14 @@ export function RbacRoleTree({
                 className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                 value={templateMode}
                 onChange={(e) => setTemplateMode(e.target.value as "replace" | "add")}
-                disabled={!editable}
+                disabled={!canEdit}
               >
                 <option value="replace">Replace what the role has</option>
                 <option value="add">Only add to it</option>
               </select>
             </label>
           ) : null}
-          <TreeButton onClick={reviewTemplate} disabled={!editable || !templateId}>
+          <TreeButton onClick={reviewTemplate} disabled={!canEdit || !templateId}>
             Preview template
           </TreeButton>
         </div>
@@ -369,6 +395,11 @@ export function RbacRoleTree({
         ) : null}
       </MastersWorkCard>
 
+      {lockReason ? (
+        <p className="rounded-lg border border-[var(--warning)] bg-[var(--surface-sunken)] px-3 py-2 text-sm text-[var(--warning)]">
+          {lockReason} You can look, but not change — Duplicate role still works.
+        </p>
+      ) : null}
       {notice ? <p className="text-sm font-medium text-[var(--danger)]">{notice}</p> : null}
 
       {role && working ? (
