@@ -85,5 +85,14 @@ void (async () => {
   assert.ok(gate.includes('hasDeskLoaded("masters")') && gate.includes("setTimeout(r, 5000)"), "gate needs Masters; waits for staff at most 5 s");
   const staffWs = readFileSync(join(process.cwd(), "src/components/staff/StaffWorkspace.tsx"), "utf8");
   assert.ok(staffWs.includes('addEventListener("bhb-masters-updated", onMasters)'), "Staff screen redraws when Masters lands");
+  // The Masters hydrate merges into the copy as it is when the reply lands:
+  // the staff roster written meanwhile must survive (12 Oct 2026: Staff
+  // showed 0 on every refresh).
+  const mp = readFileSync(join(dir, "mastersPersistence.ts"), "utf8");
+  assert.ok(mp.includes("mergeDbDeskIntoMastersState(loadMasters(), bundle"), "masters hydrate merges into the current copy");
+  assert.ok(!mp.includes("mergeDbDeskIntoMastersState(localBefore"), "never writes back the pre-fetch snapshot");
+  const mastersSrc = readFileSync(join(dir, "masters.ts"), "utf8");
+  const mirror = mastersSrc.slice(mastersSrc.indexOf("export function hydrateMastersFromMirror"), mastersSrc.indexOf("export function hydrateMastersFromMirror") + 1400);
+  assert.ok(mirror.includes("STAFF_OWNED_MASTERS_SLICES") && mirror.includes("loadMasters()"), "mirror hydrate keeps the staff roster");
   console.log("deskLoadGuard.selftest.ts\n  ok");
 })();

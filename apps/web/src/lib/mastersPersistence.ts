@@ -159,8 +159,13 @@ async function hydrateMastersOnce(): Promise<boolean> {
       bundle.feeHeads.length > 0 ||
       mastersMirrorIsEmpty(localBefore))
   ) {
+    // Merge into the copy as it is NOW, not localBefore: the staff hydrate
+    // runs in parallel and writes the roster while this fetch is out. Writing
+    // localBefore back put staff to [] on every load where the roster landed
+    // first — the Staff page showed 0 however often it was refreshed
+    // (12 Oct 2026), and the staff desk, already marked loaded, never re-read.
     writeMastersLocalRaw(
-      mergeDbDeskIntoMastersState(localBefore, bundle, {
+      mergeDbDeskIntoMastersState(loadMasters(), bundle, {
         preferDb: readFromDb,
       }),
     );

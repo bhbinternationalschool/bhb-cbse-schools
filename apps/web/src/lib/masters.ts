@@ -32,6 +32,7 @@ import { readCache, writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
 import { resolveAcademicYear, fallbackAcademicYear } from "@/lib/academicYearResolve";
 import { trackServerWork } from "@/lib/serverWork";
+import { STAFF_OWNED_MASTERS_SLICES, staffReadFromDbEnabled } from "@/lib/staffDbConfig";
 
 export type Campus = {
   id: string;
@@ -2219,9 +2220,17 @@ export function hydrateMastersFromMirror(
   const takeRemote =
     remoteIsNewer && (!localAt || (!!remoteAt && remoteAt > localAt));
   if (!takeRemote) return false;
-  const normalized = ensureFeeSetup(
-    migrateDemoStaffToTeacherRoster(raw as MastersState),
-  );
+  let incoming = raw as MastersState;
+  // The mirror blob is written stripped of staff (stripStaffFromMastersForBlob),
+  // so its [] is "not carried here", never "no staff": keep what the staff
+  // hydrate already wrote.
+  if (staffReadFromDbEnabled()) {
+    const current = loadMasters() as unknown as Record<string, unknown>;
+    const kept = { ...incoming } as unknown as Record<string, unknown>;
+    for (const key of STAFF_OWNED_MASTERS_SLICES) kept[key] = current[key];
+    incoming = kept as unknown as MastersState;
+  }
+  const normalized = ensureFeeSetup(migrateDemoStaffToTeacherRoster(incoming));
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({ ...normalized, version: 2 }),
