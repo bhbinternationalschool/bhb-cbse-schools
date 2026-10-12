@@ -2,6 +2,7 @@
  * Client → server sync for normalized library desk.
  */
 
+import { serialSave } from "@/lib/serialSave";
 import type { LibraryState } from "@/lib/library";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
@@ -86,7 +87,12 @@ const LIBRARY_SLICES = ["titles", "copies", "issues", "procurementDocs"] as cons
  */
 let ebooksBase: number | null = null;
 
-async function pushLibraryDeskApi(state: LibraryState) {
+/** One save at a time for this desk — see lib/serialSave. */
+function pushLibraryDeskApi(...args: Parameters<typeof pushLibraryDeskApiNow>): ReturnType<typeof pushLibraryDeskApiNow> {
+  return serialSave("library", () => pushLibraryDeskApiNow(...args)) as ReturnType<typeof pushLibraryDeskApiNow>;
+}
+
+async function pushLibraryDeskApiNow(state: LibraryState) {
   const sentDeletes = pendingDeskDeletes(LIBRARY_DESK);
   const holder = {
     titles: state.titles,

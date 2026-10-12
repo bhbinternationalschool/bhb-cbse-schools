@@ -2,6 +2,7 @@
  * Client → server sync for normalized payroll desk.
  */
 
+import { serialSave } from "@/lib/serialSave";
 import type { PayrollState } from "@/lib/payroll";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
@@ -70,7 +71,12 @@ export function schedulePayrollDeskSync(state: PayrollState) {
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
-async function pushPayrollDeskApi(state: PayrollState) {
+/** One save at a time for this desk — see lib/serialSave. */
+function pushPayrollDeskApi(...args: Parameters<typeof pushPayrollDeskApiNow>): ReturnType<typeof pushPayrollDeskApiNow> {
+  return serialSave("payroll", () => pushPayrollDeskApiNow(...args)) as ReturnType<typeof pushPayrollDeskApiNow>;
+}
+
+async function pushPayrollDeskApiNow(state: PayrollState) {
   const sentDeletes = pendingDeskDeletes(PAYROLL_DESK);
   const holder = { runs: state.runs, audit: state.audit } as Record<string, unknown>;
   // Only the runs (and new audit rows) this browser changed, with their stamps.

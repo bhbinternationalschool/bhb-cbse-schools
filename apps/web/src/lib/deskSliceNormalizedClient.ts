@@ -2,6 +2,7 @@
  * Generic client sync for desk-slice modules.
  */
 
+import { serialSave } from "@/lib/serialSave";
 import type { DeskModuleId } from "@/lib/deskCutover";
 import { deskSliceDef, deskSliceEnvReadFromDb } from "@/lib/deskSliceRegistry";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
@@ -183,12 +184,24 @@ function reportDeskPushFailure(id: DeskModuleId, error: string) {
   );
 }
 
-async function pushDeskSliceApi(
+/** One save at a time per desk module — see lib/serialSave. */
+function pushDeskSliceApi(
   id: DeskModuleId,
   state: { version: number } & Record<string, unknown>,
   attempt = 1,
   generation = generations.get(id) ?? 0,
+): Promise<void> {
+  return serialSave(deskKey(id), () => pushDeskSliceApiNow(id, state, attempt, generation));
+}
+
+async function pushDeskSliceApiNow(
+  id: DeskModuleId,
+  state: { version: number } & Record<string, unknown>,
+  attempt: number,
+  generation: number,
 ) {
+  // Checked when the save RUNS: a newer edit queued behind this one sends
+  // the newer state, so this older copy is skipped.
   if (generation !== (generations.get(id) ?? 0)) return; // superseded
   try {
     const sentDeletes = pendingDeskDeletes(deskKey(id));

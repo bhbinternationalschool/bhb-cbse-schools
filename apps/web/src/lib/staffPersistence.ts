@@ -3,6 +3,7 @@
  * Masters localStorage remains the working copy; Supabase overlays when configured.
  */
 
+import { serialSave } from "@/lib/serialSave";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
@@ -556,7 +557,12 @@ export async function pushStaffRemoteServer(
 }
 
 /** Browser: push the roster rows this browser changed, with their stamps. */
-export async function pushStaffSlice(
+/** One save at a time for this desk — see lib/serialSave. */
+export function pushStaffSlice(...args: Parameters<typeof pushStaffSliceNow>): ReturnType<typeof pushStaffSliceNow> {
+  return serialSave("staff-roster", () => pushStaffSliceNow(...args)) as ReturnType<typeof pushStaffSliceNow>;
+}
+
+async function pushStaffSliceNow(
   state: MastersState,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!staffRemoteEnabled()) return { ok: true };

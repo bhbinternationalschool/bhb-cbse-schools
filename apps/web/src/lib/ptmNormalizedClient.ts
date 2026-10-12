@@ -2,6 +2,7 @@
  * Client → server sync for normalized PTM desk.
  */
 
+import { serialSave } from "@/lib/serialSave";
 import type { PtmState } from "@/lib/ptm";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
@@ -89,7 +90,12 @@ export function schedulePtmDeskSync(state: PtmState) {
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
-async function pushPtmDeskApi(state: PtmState) {
+/** One save at a time for this desk — see lib/serialSave. */
+function pushPtmDeskApi(...args: Parameters<typeof pushPtmDeskApiNow>): ReturnType<typeof pushPtmDeskApiNow> {
+  return serialSave("ptm", () => pushPtmDeskApiNow(...args)) as ReturnType<typeof pushPtmDeskApiNow>;
+}
+
+async function pushPtmDeskApiNow(state: PtmState) {
   const sentDeletes = pendingDeskDeletes(PTM_DESK);
   // Only the rows this browser changed, each with the stamp it loaded —
   // never a stale copy of a row someone else changed since.

@@ -2,6 +2,7 @@
  * Client → server sync for normalized RTE desk.
  */
 
+import { serialSave } from "@/lib/serialSave";
 import type { RteState } from "@/lib/rteEws";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
@@ -76,7 +77,12 @@ export function scheduleRteDeskSync(state: RteState) {
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
-async function pushRteDeskApi(state: RteState) {
+/** One save at a time for this desk — see lib/serialSave. */
+function pushRteDeskApi(...args: Parameters<typeof pushRteDeskApiNow>): ReturnType<typeof pushRteDeskApiNow> {
+  return serialSave("rte", () => pushRteDeskApiNow(...args)) as ReturnType<typeof pushRteDeskApiNow>;
+}
+
+async function pushRteDeskApiNow(state: RteState) {
   const sentDeletes = pendingDeskDeletes(RTE_DESK);
   const holder = {
     seats: state.seats,

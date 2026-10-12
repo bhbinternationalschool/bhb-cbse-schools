@@ -2,6 +2,7 @@
  * Client → server sync for trust desk slices.
  */
 
+import { serialSave } from "@/lib/serialSave";
 import type { TrustState } from "@/lib/trust";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
@@ -78,7 +79,12 @@ export function captureTrustRevs(server: Record<string, unknown> | undefined, lo
   if (server) captureRevBase("trust", server, local as unknown as Record<string, unknown>, TRUST_REV);
 }
 
-async function pushTrustDeskApi(state: TrustState) {
+/** One save at a time for this desk — see lib/serialSave. */
+function pushTrustDeskApi(...args: Parameters<typeof pushTrustDeskApiNow>): ReturnType<typeof pushTrustDeskApiNow> {
+  return serialSave("trust", () => pushTrustDeskApiNow(...args)) as ReturnType<typeof pushTrustDeskApiNow>;
+}
+
+async function pushTrustDeskApiNow(state: TrustState) {
   try {
     // Which rows this save changed, and from which server version: only
     // those are written, and only if nobody changed them first.

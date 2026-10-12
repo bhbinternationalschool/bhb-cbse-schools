@@ -2,6 +2,7 @@
  * Client → server sync for normalized attendance desk (registers + ancillary).
  */
 
+import { serialSave } from "@/lib/serialSave";
 import type { AttendanceState } from "@/lib/attendance";
 import type { AttendanceDeskAncillary } from "@/lib/attendanceDeskAncillary.server";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
@@ -86,7 +87,12 @@ export function scheduleAttendanceDeskSync(state: AttendanceState) {
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
-async function pushAttendanceDeskApi(
+/** One save at a time for this desk — see lib/serialSave. */
+function pushAttendanceDeskApi(...args: Parameters<typeof pushAttendanceDeskApiNow>): ReturnType<typeof pushAttendanceDeskApiNow> {
+  return serialSave("attendance", () => pushAttendanceDeskApiNow(...args)) as ReturnType<typeof pushAttendanceDeskApiNow>;
+}
+
+async function pushAttendanceDeskApiNow(
   state: AttendanceState,
 ): Promise<{ ok: boolean; error?: string }> {
   const sentDeletes = pendingDeskDeletes(ATTENDANCE_DESK);
