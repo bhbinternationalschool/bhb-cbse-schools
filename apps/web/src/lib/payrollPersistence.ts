@@ -2,6 +2,7 @@
  * Payroll state — jsonb blob on payroll_state + normalized payroll_desk_*.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   loadPayroll,
@@ -36,6 +37,8 @@ const blob = createDomainBlobPersistence<PayrollState>({
 
 export const payrollRemoteEnabled = blob.remoteEnabled;
 export const schedulePayrollSync = (state: PayrollState) => {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensurePayrollHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushPayrollRemoteServer(state));
     return;

@@ -2,6 +2,7 @@
  * Student leave remote sync — jsonb blob on student_leave_state + normalized desk.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   loadStudentLeave,
@@ -41,6 +42,8 @@ export function resetStudentLeavePersistenceCache() {
 }
 
 export function scheduleStudentLeaveSync(state: StudentLeaveState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureStudentLeaveHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushStudentLeaveRemoteServer(state));
     return;

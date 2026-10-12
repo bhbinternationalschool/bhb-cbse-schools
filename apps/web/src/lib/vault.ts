@@ -3,6 +3,7 @@
  * Demo store: localStorage `bhb_vault_v1`.
  */
 
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { TENANT } from "@/lib/types";
 import {
@@ -149,6 +150,11 @@ export function vaultStateIsEmpty(state: VaultState): boolean {
 export function seedVaultIfEmpty(): VaultState {
   const existing = loadVault();
   if (existing.documents.length > 0) return existing;
+  // Not a default: made-up rows that this used to save to the live desk
+  // whenever a page opened before its desk loaded (12 Oct 2026: a "practice"
+  // post under a real teacher's name reached parents). A school's desk holds
+  // only what its staff create; only the offline dev build gets the sample.
+  if (isSupabaseConfigured()) return existing;
   const today = todayIso();
   const y = Number(today.slice(0, 4));
   const docs: VaultDocument[] = [

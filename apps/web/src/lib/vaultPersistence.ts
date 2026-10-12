@@ -2,6 +2,7 @@
  * Document vault remote sync — jsonb blob on vault_state + normalized vault_desk_*.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   loadVault,
@@ -41,6 +42,8 @@ export function resetVaultPersistenceCache() {
 }
 
 export function scheduleVaultSync(state: VaultState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureVaultHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushVaultRemoteServer(state));
     return;

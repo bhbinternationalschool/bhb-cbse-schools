@@ -15,7 +15,7 @@ import {
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
 import { deskSliceDef, deskSliceEnvReadFromDb } from "@/lib/deskSliceRegistry";
-import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import {
   hydrateDeskSliceFromDb,
   scheduleDeskSliceSync,
@@ -69,11 +69,7 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
     // carries no row versions and no known ids, so a removal is never sent
     // and every change is refused as "changed elsewhere". Refuse it plainly,
     // load the desk, and let the person make the change on the real copy.
-    if (isSupabaseConfigured() && !isDeskHydrated(opts.moduleId)) {
-      window.dispatchEvent(new CustomEvent("bhb-desk-not-loaded", { detail: { id: opts.moduleId } }));
-      void ensureHydrated();
-      return;
-    }
+    if (refuseSaveBeforeLoad(opts.moduleId, () => ensureHydrated())) return;
     if (!deskSkipBlobPushClient(opts.moduleId)) blob.scheduleSync(state);
     scheduleDeskSliceSync(
       opts.moduleId,

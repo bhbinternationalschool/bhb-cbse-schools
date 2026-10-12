@@ -2,6 +2,7 @@
  * Fees remote sync — jsonb blob on fees_state + normalized fee_desk_* tables.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   feesStateIsEmpty,
@@ -37,6 +38,8 @@ export function resetFeesPersistenceCache() {
 }
 
 export function scheduleFeesSync(state: FeesState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureFeesHydrated())) return;
   if (typeof window === "undefined") return;
   if (!deskSkipBlobPushClient("fees")) {
     blob.scheduleSync(state);

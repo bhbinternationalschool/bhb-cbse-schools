@@ -2,6 +2,7 @@
  * Notifications remote sync — jsonb blob on notifications_state + normalized desk.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   loadNotifications,
@@ -41,6 +42,8 @@ export function resetNotificationsPersistenceCache() {
 }
 
 export function scheduleNotificationsSync(state: NotificationsState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureNotificationsHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushNotificationsRemoteServer(state));
     return;
