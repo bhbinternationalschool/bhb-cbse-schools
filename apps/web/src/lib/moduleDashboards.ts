@@ -115,17 +115,19 @@ export type DashboardModuleId =
   | "comms"
   | "rte";
 
+// The school's calendar day (IST). `toISOString()` is UTC, so from midnight
+// to 05:30 every dashboard's "today" was yesterday.
+const IST_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" });
+
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return IST_DAY.format(new Date());
 }
 
 function lastNDays(n: number): string[] {
   const out: string[] = [];
-  const d = new Date();
+  const now = Date.now();
   for (let i = n - 1; i >= 0; i -= 1) {
-    const x = new Date(d);
-    x.setDate(d.getDate() - i);
-    out.push(x.toISOString().slice(0, 10));
+    out.push(IST_DAY.format(new Date(now - i * 86_400_000)));
   }
   return out;
 }
