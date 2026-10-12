@@ -182,6 +182,15 @@ export function PayrollWorkspace() {
     setRuns([...loadPayroll().runs].sort((a, b) => b.month.localeCompare(a.month) || (b.createdAt || "").localeCompare(a.createdAt || "")));
   }, [tick]);
 
+  // The staff roster can land after this screen mounts (the shell waits for
+  // it at most 5 s); re-read Masters when it does, or the staff picker and
+  // "due" counts stay empty.
+  useEffect(() => {
+    const onMasters = () => setTick((t) => t + 1);
+    window.addEventListener("bhb-masters-updated", onMasters);
+    return () => window.removeEventListener("bhb-masters-updated", onMasters);
+  }, []);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     void (async () => {
