@@ -211,13 +211,21 @@ export async function saveStudent(
 /**
  * Aadhaar numbers a family typed: the child's onto that child; the father's
  * and mother's onto every child of theirs (where the ERP keeps them).
- * Only gaps are filled — a number already on the record is left alone.
+ *
+ * Fills gaps, and lets the family CORRECT a number that is on the record but
+ * not yet verified by the school (status "received" or blank) — 12 Oct 2026:
+ * a mistyped number used to be locked in, the pop-up stopped asking for it
+ * and a re-entry was silently ignored while the app said "saved". A number
+ * the office has verified for UDISE+ ("verified_udise") is never replaced
+ * from the app; the family is told to contact the office instead.
  */
+export type AadhaarSaveOutcome = { key: string; who: string; status: "saved" | "corrected" | "unchanged" | "kept_verified"; last4: string };
+
 export async function saveFamilyAadhaar(
   children: SisStudent[],
   numbers: Record<string, string>,
   by: string,
-): Promise<{ ok: true; saved: string[] } | { ok: false; error: string }> {
+): Promise<{ ok: true; saved: string[]; outcomes: AadhaarSaveOutcome[] } | { ok: false; error: string }> {
   const clean: Record<string, string> = {};
   for (const [k, v] of Object.entries(numbers)) {
     const n = aadhaarDigits(v);
@@ -228,6 +236,23 @@ export async function saveFamilyAadhaar(
   }
   if (!Object.keys(clean).length) return { ok: false, error: "No Aadhaar number to save." };
 
+  const outcomes = new Map<string, AadhaarSaveOutcome>();
+  const note = (key: string, who: string, status: AadhaarSaveOutcome["status"], n: string) => {
+    // A person shared by several children (a parent) reports its strongest result once.
+    const rank = { kept_verified: 3, corrected: 2, saved: 1, unchanged: 0 } as const;
+    const prev = outcomes.get(key);
+    if (!prev || rank[status] > rank[prev.status]) outcomes.set(key, { key, who, status, last4: n.slice(-4) });
+  };
+  /** What to do with one Aadhaar field: write it, or why not. */
+  const decide = (stored: { number?: string; last4?: string; verification?: string }, incoming: string) => {
+    const has = hasStoredAadhaar({ number: stored.number, last4: stored.last4 });
+    if (!has) return "saved" as const;
+    const same = (stored.number || "").replace(/\D/g, "") === incoming;
+    if (same) return "unchanged" as const;
+    if (stored.verification === "verified_udise") return "kept_verified" as const;
+    return "corrected" as const;
+  };
+
   const saved: string[] = [];
   for (const child of children) {
     const own = clean[child.id];
@@ -236,38 +261,51 @@ export async function saveFamilyAadhaar(
     if (!own && !father && !mother) continue;
     const r = await saveStudent(child.id, (s) => {
       const next: SisStudent = { ...s };
-      if (own && !hasStoredAadhaar({ number: s.aadhaarNumber, last4: s.aadhaarLast4 })) {
-        next.aadhaarNumber = own;
-        next.aadhaarLast4 = own.slice(-4);
-        next.aadhaarVerification = "received";
+      if (own) {
+        const d = decide({ number: s.aadhaarNumber, last4: s.aadhaarLast4, verification: s.aadhaarVerification }, own);
+        note(child.id, child.fullName, d, own);
+        if (d === "saved" || d === "corrected") {
+          next.aadhaarNumber = own;
+          next.aadhaarLast4 = own.slice(-4);
+          next.aadhaarVerification = "received";
+        }
       }
-      if (father && !hasStoredAadhaar({ number: s.fatherAadhaarNumber, last4: s.fatherAadhaarLast4 })) {
-        next.fatherAadhaarNumber = father;
-        next.fatherAadhaarLast4 = father.slice(-4);
-        next.fatherAadhaarVerification = "received";
+      if (father) {
+        const d = decide({ number: s.fatherAadhaarNumber, last4: s.fatherAadhaarLast4, verification: s.fatherAadhaarVerification }, father);
+        note("father", "Father", d, father);
+        if (d === "saved" || d === "corrected") {
+          next.fatherAadhaarNumber = father;
+          next.fatherAadhaarLast4 = father.slice(-4);
+          next.fatherAadhaarVerification = "received";
+        }
       }
-      if (mother && !hasStoredAadhaar({ number: s.motherAadhaarNumber, last4: s.motherAadhaarLast4 })) {
-        next.motherAadhaarNumber = mother;
-        next.motherAadhaarLast4 = mother.slice(-4);
-        next.motherAadhaarVerification = "received";
+      if (mother) {
+        const d = decide({ number: s.motherAadhaarNumber, last4: s.motherAadhaarLast4, verification: s.motherAadhaarVerification }, mother);
+        note("mother", "Mother", d, mother);
+        if (d === "saved" || d === "corrected") {
+          next.motherAadhaarNumber = mother;
+          next.motherAadhaarLast4 = mother.slice(-4);
+          next.motherAadhaarVerification = "received";
+        }
       }
       return next;
     });
     if (!r.ok) continue;
     saved.push(child.fullName);
+    const changed = [...outcomes.values()].filter((o) => o.status === "saved" || o.status === "corrected");
     await writeAudit({
       module: "sis",
       action: "edit",
       entityType: "student",
       entityId: child.id,
-      // Never the numbers themselves in the audit trail — which ones arrived.
-      summary: `Aadhaar given by the family in the app: ${[own ? "child" : "", father ? "father" : "", mother ? "mother" : ""].filter(Boolean).join(", ")}`,
+      // Never the numbers themselves in the audit trail — which ones arrived, and whether they corrected one.
+      summary: `Aadhaar given by the family in the app: ${[own ? "child" : "", father ? "father" : "", mother ? "mother" : ""].filter(Boolean).join(", ")}${changed.some((o) => o.status === "corrected") ? " (corrected an unverified number)" : ""}`,
       before: {},
       after: { by },
     }).catch(() => null);
   }
   if (!saved.length) return { ok: false, error: "Could not save just now — please try again in a minute." };
-  return { ok: true, saved };
+  return { ok: true, saved, outcomes: [...outcomes.values()] };
 }
 
 /** APAAR consent from the app, recorded exactly as the WhatsApp answer is (with its printable record). */

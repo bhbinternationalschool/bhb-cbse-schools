@@ -101,6 +101,11 @@ class _PopupDialogState extends State<_PopupDialog> {
   bool _busy = false;
   String _error = "";
 
+  /// After an Aadhaar save: what the school stored, per person (12 Oct 2026).
+  /// Shown before the pop-up closes, with "Correct a number" — a mistyped
+  /// number used to be locked in with no way to fix it from the app.
+  List<Map<String, dynamic>> _outcomes = const [];
+
   bool get _hi => Localizations.localeOf(context).languageCode == "hi";
   String _t(String en, String hi) => _hi && hi.isNotEmpty ? hi : en;
 
@@ -131,8 +136,16 @@ class _PopupDialogState extends State<_PopupDialog> {
       _error = "";
     });
     try {
-      await widget.api.appPopupDone(widget.popup.id, value);
-      if (mounted) Navigator.of(context).pop();
+      final res = await widget.api.appPopupDone(widget.popup.id, value);
+      final outcomes = ((res["outcomes"] as List?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .toList();
+      if (!mounted) return;
+      if (widget.popup.form == "aadhaar" && outcomes.isNotEmpty) {
+        setState(() => _outcomes = outcomes);
+      } else {
+        Navigator.of(context).pop();
+      }
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
@@ -178,6 +191,45 @@ class _PopupDialogState extends State<_PopupDialog> {
     await _done({"aadhaar": numbers});
   }
 
+  /// One person's result after saving: what is on the school's record now.
+  Widget _outcomeLine(Map<String, dynamic> o, TextStyle base) {
+    final who = (o["who"] as String?) ?? "";
+    final last4 = (o["last4"] as String?) ?? "";
+    final masked = "XXXX-XXXX-$last4";
+    final status = (o["status"] as String?) ?? "";
+    final kept = status == "kept_verified";
+    final text = switch (status) {
+      "corrected" => _t(
+        "$who — corrected to $masked",
+        "$who — सुधारकर $masked किया गया",
+      ),
+      "unchanged" => _t(
+        "$who — $masked is already on record",
+        "$who — $masked पहले से रिकॉर्ड में है",
+      ),
+      "kept_verified" => _t(
+        "$who — the school has already verified this Aadhaar, so it was not changed. To correct it, please contact the school office.",
+        "$who — स्कूल यह आधार पहले ही सत्यापित कर चुका है, इसलिए बदला नहीं गया। सुधार के लिए स्कूल ऑफिस से संपर्क करें।",
+      ),
+      _ => _t("$who — $masked saved", "$who — $masked सेव हो गया"),
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            kept ? Icons.info_outline : Icons.check_circle_outline,
+            size: 18,
+            color: kept ? AppColors.warning : AppColors.success,
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: base)),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = widget.popup;
@@ -216,7 +268,28 @@ class _PopupDialogState extends State<_PopupDialog> {
                 Text(_t(p.body, p.bodyHi), style: base),
               ],
               const SizedBox(height: 12),
-              if (p.form == "aadhaar") ...[
+              if (p.form == "aadhaar" && _outcomes.isNotEmpty) ...[
+                for (final o in _outcomes) _outcomeLine(o, base),
+                const SizedBox(height: 4),
+                Text(
+                  _t(
+                    "Is a number wrong? Correct it now — the school will use the corrected one.",
+                    "कोई नंबर गलत है? अभी सुधारें — स्कूल सुधरा हुआ नंबर ही रखेगा।",
+                  ),
+                  style: base.copyWith(color: AppColors.muted, fontSize: 12),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton(
+                  onPressed: () => setState(() => _outcomes = const []),
+                  child: Text(_t("Correct a number", "नंबर सुधारें")),
+                ),
+                const SizedBox(height: 6),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(_t("Done", "हो गया")),
+                ),
+              ],
+              if (p.form == "aadhaar" && _outcomes.isEmpty) ...[
                 Text(
                   _t(
                     "Used only for the school's records, UDISE+ and APAAR. The app shows it hidden (XXXX-XXXX-1234).",
@@ -282,7 +355,7 @@ class _PopupDialogState extends State<_PopupDialog> {
                     style: base.copyWith(color: AppColors.danger),
                   ),
                 ),
-              if (p.form == "aadhaar")
+              if (p.form == "aadhaar" && _outcomes.isEmpty)
                 FilledButton(
                   onPressed: _busy ? null : _saveAadhaar,
                   child: Text(_t("Save", "सेव करें")),

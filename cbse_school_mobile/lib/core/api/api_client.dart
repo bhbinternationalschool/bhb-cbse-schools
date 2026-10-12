@@ -3466,13 +3466,18 @@ class ApiClient {
 
   /// Completes a pop-up's form (Aadhaar numbers, a consent answer). Throws
   /// [ApiException] with the server's reason if it was not saved.
-  Future<void> appPopupDone(String popupId, Map<String, dynamic> value) async {
-    await _postData("/api/v1/app/popups", {
-      "popupId": popupId,
-      "action": "done",
-      ...value,
-    });
-  }
+  ///
+  /// Returns the server's answer — for an Aadhaar form, `outcomes`: per
+  /// person `{key, who, status: saved|corrected|unchanged|kept_verified,
+  /// last4}`, so the pop-up can show what was stored and offer a correction.
+  Future<Map<String, dynamic>> appPopupDone(
+    String popupId,
+    Map<String, dynamic> value,
+  ) => _postData("/api/v1/app/popups", {
+    "popupId": popupId,
+    "action": "done",
+    ...value,
+  });
 
   /// Reports an AI reply as wrong, unsafe or offensive.
   ///
