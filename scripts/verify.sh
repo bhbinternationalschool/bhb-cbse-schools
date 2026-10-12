@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 #
-# Local stand-in for the CI merge gate.
+# Local twin of the CI merge gate.
 #
-# GitHub Actions cannot currently run on this repo — every workflow dies at
-# startup with zero jobs — so nothing checks a change before it reaches main
-# or production. This runs the same steps .github/workflows/ci.yml would, in
-# one command, so a change can be verified without Actions.
+# GitHub Actions runs .github/workflows/ci.yml on every pull request and on
+# main (it has since the repo moved to bhbinternationalschool in Aug 2026; an
+# older note here said Actions could not run — that was the locked
+# ashishsingh80-web account). This runs the same steps locally in one command,
+# so a change can be checked before it is pushed.
+#
+# Green here, or in CI, proves the code type-checks, lints and passes the
+# self-tests. It does NOT prove a screen shows the right data: no test here
+# opens a page (docs/data-layer-rebuild/COMMAND.md step 1.1 adds that).
 #
 #   npm run verify              typecheck, lint, self-tests, production build
 #   SKIP_BUILD=1 npm run verify  everything except the build (~2 min faster)

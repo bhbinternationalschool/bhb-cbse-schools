@@ -133,10 +133,11 @@ const shreya = s("stf_shreya", "Shreya Sharma", "shreya@example.com");
 const nihal = s("stf_nihal", "Nihal Rajak", "nihal@example.com");
 const director = s("stf_dir", "Director", "director@bhbinternational.school");
 
-// India's calendar day, as the grants use — a UTC date here failed every
-// night from 00:00 to 05:30 IST.
+// The school's calendar day, as the model counts expiry (rbacTodayIst). The
+// UTC date made this test fail every night from 00:00 to 05:30 IST — on any
+// branch, whatever it changed (13 Oct 2026: a docs-only PR went red at 00:19).
 const yesterday = rbacTodayIst(Date.now() - 86_400_000);
-const today = rbacTodayIst(Date.now());
+const today = rbacTodayIst();
 
 /* 1. Precedence on functions: deny > allow > role. */
 assert.equal(featureAccess(shreya, masters, F, "edit", base).allowed, true, "role's module grant opens the function");
