@@ -1,5 +1,6 @@
 import type { ApiAuthContext } from "@/lib/api/v1/auth";
 import { ApiError } from "@/lib/api/v1/errors";
+import { functionGrantHeldOnServer } from "@/lib/apiRouteAuth.server";
 import { hasPermission, isFeaturePersonallyDenied, resolveSessionRoles } from "@/lib/rbac";
 import { findFeature } from "@/lib/rbacFeatures";
 import {
@@ -56,6 +57,7 @@ export function resolveMobileAccess(ctx: ApiAuthContext): MobileFeatureResolutio
     access: ctx.rbac.mobile ?? defaultMobileAccess(),
     can: (module, action) =>
       hasPermission(ctx.session, ctx.masters, module, action, ctx.rbac),
+    canFeature: (featureId, action) => functionGrantHeldOnServer(ctx, featureId, action),
   });
   const off = res.features.filter((f) => mobileFeaturePersonallyDenied(ctx, f));
   if (off.length === 0) return res;

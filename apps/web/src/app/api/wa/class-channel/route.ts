@@ -11,6 +11,7 @@ import {
 import type { ClassChannelIntentKind } from "@/lib/waClassChannelEngine";
 import { waOutboundConfigured } from "@/lib/waSend";
 import { requireWaStaffApi } from "@/lib/apiRouteAuth.server";
+import { orCommsFunction } from "@/lib/commsFunctionGate.server";
 import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
 
 export const runtime = "nodejs";
@@ -30,7 +31,12 @@ async function channelScope(auth: Extract<Awaited<ReturnType<typeof requireWaSta
 export async function GET(req: Request) {
   // Channels carry every parent's mobile per section — staff only, like
   // the WhatsApp hub next door. This route answered anyone before.
-  const auth = await requireWaStaffApi(req, { allowTeachers: true });
+  const auth = await orCommsFunction(
+    req,
+    await requireWaStaffApi(req, { allowTeachers: true }),
+    "notices.wa_class_groups",
+    "view",
+  );
   if (!auth.ok) return auth.response;
   const sc = await channelScope(auth);
   // Cheap by default: the roster walk + store write runs at most every 10
@@ -58,7 +64,12 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const auth = await requireWaStaffApi(req, { allowTeachers: true });
+  const auth = await orCommsFunction(
+    req,
+    await requireWaStaffApi(req, { allowTeachers: true }),
+    "notices.wa_class_groups",
+    "send",
+  );
   if (!auth.ok) return auth.response;
   const sc = await channelScope(auth);
   let body: {

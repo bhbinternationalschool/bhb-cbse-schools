@@ -51,7 +51,7 @@ console.log("attendanceRowStamps.selftest.ts");
   const route = read("../app/api/school-data/attendance-registers/route.ts");
   assert.ok(/readStampsParam\(body\.stamps, \["registers"\]\)\?\.registers/.test(route) && /\}, deletes, stamps\);/.test(route));
   assert.ok(/stamps: \{ registers: desk\.stamps \}/.test(route), "GET carries the stamps");
-  assert.ok(/stamps: stampsOf\(registers, desk\)/.test(route) && /stamps: stampsOf\(cut\.registers, desk\)/.test(route), "a cut desk carries only its registers' stamps");
+  assert.ok(/stamps: stampsOf\(registers, desk\)/.test(route) && /: cut\.registers;\s*return \{\s*\.\.\.desk,\s*registers,\s*stamps: stampsOf\(registers, desk\)/.test(route), "a cut desk carries only its registers' stamps");
   const client = read("attendanceNormalizedClient.ts");
   assert.ok(/stamps: sentStamps/.test(client) && /applyStampedSave\(ATTENDANCE_DESK/.test(client) && /onStampConflicts\(ATTENDANCE_DESK, body\.conflicts\)/.test(client));
   assert.ok(/captureAttendanceStamps\(stamps, loadAttendance\(\)\)/.test(read("attendancePersistence.ts")), "every load captures stamps");

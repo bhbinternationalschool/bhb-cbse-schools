@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ATTENDANCE_STATUSES, loadAttendance, type AttendanceStatus } from "@/lib/attendance";
 import { loadMasters, type MastersState } from "@/lib/masters";
-import { hasPermission } from "@/lib/rbac";
+import { hasFeaturePermission } from "@/lib/rbac";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import { loadSis, type SisState } from "@/lib/sis";
@@ -95,9 +95,10 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
   );
 
   // Excel / PDF / the table's own export are downloads; viewing on screen
-  // is not. A teacher holds attendance view/edit but not export.
+  // is not. A teacher holds attendance view/edit but not export. The
+  // module's export, or Attendance → Dashboard & reports with Export.
   const canExport = useMemo(
-    () => hasPermission(session, masters, "attendance", "export"),
+    () => hasFeaturePermission(session, masters, "attendance.reports", "export"),
     [session, masters],
   );
 

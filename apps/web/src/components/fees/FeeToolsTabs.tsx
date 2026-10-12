@@ -21,9 +21,10 @@ import { useAccessData } from "@/components/shell/useAccessData";
 import { ModuleTabButton } from "@/components/ui/ModuleTabs";
 import { MODULE_TAB_CONTAINER_CLASS } from "@/components/ui/modern-tab-bar";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
-import { canApproveConcession, canGrantConcession, hasPermission } from "@/lib/rbac";
+import { canApproveConcession, canGrantConcession, canSeeModuleTab, canWriteModuleTab } from "@/lib/rbac";
 
 type Tab = "pdc" | "bulk" | "templates";
+const TAB_ORDER: Tab[] = ["pdc", "bulk", "templates"];
 
 function tabFromUrl(): Tab {
   if (typeof window === "undefined") return "pdc";
@@ -51,14 +52,22 @@ export function FeeToolsTabs() {
     window.history.replaceState({}, "", url.toString());
   }
 
-  // The buttons follow the server's rules; the server enforces them anyway.
-  // Decided from the loaded roles + roster (assignments count), never before.
+  // Each tab opens on the Fees grant or its own function (fees.pdc,
+  // fees.bulk_payment, fees.concession_templates), decided from the loaded
+  // roles + roster (assignments count), never before. The buttons follow
+  // the server's rules; the server enforces them anyway.
   const access = useAccessData();
   const am = access.masters;
   const ar = access.rbac ?? undefined;
-  const canView = access.ready && hasPermission(session, am, "fees", "view", ar);
-  const canCollect = access.ready && !readOnly && hasPermission(session, am, "fees", "create", ar);
-  const canClose = access.ready && !readOnly && hasPermission(session, am, "fees", "edit", ar);
+  const shown = access.ready ? TAB_ORDER.filter((t) => canSeeModuleTab(session, am, "fees", t, ar)) : [];
+  const firstShown = shown[0] ?? null;
+  useEffect(() => {
+    if (firstShown && !shown.includes(tab)) setTab(firstShown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstShown, tab]);
+  const canView = access.ready && shown.includes(tab);
+  const canCollect = access.ready && !readOnly && canWriteModuleTab(session, am, "fees", tab, "create", ar);
+  const canClose = access.ready && !readOnly && canWriteModuleTab(session, am, "fees", tab, "edit", ar);
   const canGrant = access.ready && !readOnly && canGrantConcession(session, am, ar);
   const canApprove = access.ready && canApproveConcession(session, am, ar);
 
@@ -69,15 +78,21 @@ export function FeeToolsTabs() {
       icon={<Layers className="size-6" aria-hidden />}
       toolbar={
         <div className={MODULE_TAB_CONTAINER_CLASS}>
-          <ModuleTabButton active={tab === "pdc"} onClick={() => choose("pdc")} tone="amber" size="md">
-            Post-dated cheques
-          </ModuleTabButton>
-          <ModuleTabButton active={tab === "bulk"} onClick={() => choose("bulk")} tone="green" size="md">
-            Bulk payment
-          </ModuleTabButton>
-          <ModuleTabButton active={tab === "templates"} onClick={() => choose("templates")} tone="violet" size="md">
-            Concession templates
-          </ModuleTabButton>
+          {shown.includes("pdc") ? (
+            <ModuleTabButton active={tab === "pdc"} onClick={() => choose("pdc")} tone="amber" size="md">
+              Post-dated cheques
+            </ModuleTabButton>
+          ) : null}
+          {shown.includes("bulk") ? (
+            <ModuleTabButton active={tab === "bulk"} onClick={() => choose("bulk")} tone="green" size="md">
+              Bulk payment
+            </ModuleTabButton>
+          ) : null}
+          {shown.includes("templates") ? (
+            <ModuleTabButton active={tab === "templates"} onClick={() => choose("templates")} tone="violet" size="md">
+              Concession templates
+            </ModuleTabButton>
+          ) : null}
           <Link
             href="/fees"
             className="inline-flex items-center rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--brand-deep)] hover:bg-[var(--surface-sunken)]"

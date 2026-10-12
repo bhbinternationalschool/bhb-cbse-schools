@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { Award, Sparkles } from "lucide-react";
 import {
@@ -41,7 +42,8 @@ import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
-import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { visibleModuleTabs } from "@/lib/rbac";
 import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { CertificatesReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -69,6 +71,12 @@ function todayIso() {
 }
 
 type Tab = "dashboard" | "desk" | "reports";
+
+const CERT_TABS: ModuleTabItem[] = [
+  { id: "dashboard", label: "Dashboard", tone: "navy" },
+  { id: "desk", label: "Issue & register", tone: "amber" },
+  { id: "reports", label: "Reports", tone: "teal" },
+];
 
 type CertStep = "student" | "type" | "details" | "draft" | "issue";
 
@@ -155,6 +163,24 @@ export function CertificatesWorkspace() {
   const [customBody, setCustomBody] = useState("");
   const [customIsAi, setCustomIsAi] = useState(false);
   const [aiGenerationId, setAiGenerationId] = useState("");
+
+  // The tabs this person may open: the whole module, or a Certificates
+  // function (lib/rbacFeatureCatalog/people.ts) opening its tabs.
+  // Decided from the loaded roles + roster (assignments count), never before.
+  const access = useAccessData();
+  const shownTabs = useMemo(
+    () =>
+      access.ready
+        ? visibleModuleTabs(CERT_TABS, session, access.masters, "certificates", access.rbac ?? undefined)
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [session, access.ready, access.version],
+  );
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as Tab);
+    }
+  }, [shownTabs, tab]);
 
   function refresh() {
     const m = loadMasters();
@@ -494,11 +520,7 @@ export function CertificatesWorkspace() {
         aria-label="Certificates sections"
         value={tab}
         onChange={(id) => setTab(id as Tab)}
-        items={[
-          { id: "dashboard", label: "Dashboard", tone: "navy" },
-          { id: "desk", label: "Issue & register", tone: "amber" },
-          { id: "reports", label: "Reports", tone: "teal" },
-        ]}
+        items={shownTabs}
       />
 
       {tab === "dashboard" ? (

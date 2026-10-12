@@ -23,7 +23,12 @@
  */
 
 import { NextResponse } from "next/server";
-import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
+import {
+  functionPersonallyDenied,
+  requireStaffApi,
+  requireStaffPermission,
+  requireStaffPermissionOrFeature,
+} from "@/lib/apiRouteAuth.server";
 import {
   APP_INVITE_BODY,
   APP_INVITE_TEMPLATE_FAMILY,
@@ -45,8 +50,29 @@ import { claimSendOnce, releaseSendClaim } from "@/lib/waSendClaim.server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** The office turned "Parents on the app · send" off for this person. */
+async function deniedHere(req: Request): Promise<boolean> {
+  const staff = await requireStaffApi(req);
+  return staff.ok && !staff.viaMirrorSecret && functionPersonallyDenied(staff.ctx, "notices.parent_app_usage", "send");
+}
+
 export async function POST(req: Request) {
-  const auth = await requireStaffPermission(req, "notifications", "edit");
+  // Sending the invitation: Notifications · edit as before, or "Send" on the
+  // function "Parents on the app" — which the office role carries by
+  // default (director, 12 Oct 2026) and the module's edit implies.
+  // A personal deny of the function closes it even to a module holder.
+  const viaFunction = await requireStaffPermissionOrFeature(
+    req,
+    "notices",
+    "send",
+    "notices.parent_app_usage",
+    "send",
+  );
+  const auth = viaFunction.ok
+    ? viaFunction
+    : viaFunction.response.status === 403 && !(await deniedHere(req))
+      ? await requireStaffPermission(req, "notifications", "edit")
+      : viaFunction;
   if (!auth.ok) return auth.response;
 
   let body: { householdIds?: unknown; dryRun?: boolean; confirmCount?: number } = {};

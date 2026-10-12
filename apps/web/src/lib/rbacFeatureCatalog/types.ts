@@ -43,3 +43,15 @@ export type RbacFeatureDef = {
 };
 
 export const CRUD: RbacAction[] = ["view", "create", "edit", "delete"];
+
+/**
+ * A tab of a module's screen that deliberately has no function: only the
+ * whole-module grant opens it. Every such tab is named here with the reason,
+ * so lib/rbacCatalogCompleteness.selftest.ts can fail on a tab nobody
+ * decided about.
+ */
+export type RbacWholeModuleTab = {
+  module: RbacModule;
+  tab: string;
+  reason: string;
+};

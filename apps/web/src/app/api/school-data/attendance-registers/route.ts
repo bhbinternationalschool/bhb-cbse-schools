@@ -84,14 +84,19 @@ function featureDeskBody(desk: DeskBody, gate: FeatureGate): DeskBody {
     exceptions: desk.ancillary?.exceptions ?? [],
   };
   const cut = stripDeskForFeatures("attendance", flat, gate);
+  // Attendance → Dashboard & reports (read only) owns no slice and reads
+  // every register this desk was already cut to (a teacher's own sections).
+  const registers = gate.access("attendance.reports", "view").allowed
+    ? flat.registers
+    : cut.registers;
   return {
     ...desk,
-    registers: cut.registers,
-    stamps: stampsOf(cut.registers, desk),
+    registers,
+    stamps: stampsOf(registers, desk),
     ancillary: desk.ancillary
       ? { ...desk.ancillary, absentNudges: cut.absentNudges, exceptions: cut.exceptions }
       : desk.ancillary,
-    count: cut.registers.length,
+    count: registers.length,
     functionOnly: true,
   };
 }

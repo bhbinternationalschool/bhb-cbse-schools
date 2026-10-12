@@ -11,14 +11,16 @@
  */
 
 import { NextResponse } from "next/server";
-import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
+import { requireStaffPermissionOrFeature } from "@/lib/apiRouteAuth.server";
 import { loadParentsOnAppReport } from "@/lib/parentsOnAppReport.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const auth = await requireStaffPermission(req, "notices", "edit");
+  // Office tab (every parent's mobile number): notices · edit, or the
+  // function "Parents on the app" (Masters → Roles) on its own.
+  const auth = await requireStaffPermissionOrFeature(req, "notices", "edit", "notices.parent_app_usage", "view");
   if (!auth.ok) return auth.response;
   const loaded = await loadParentsOnAppReport(auth.ctx.session.academicYearCode || "");
   if (!loaded.ok) return NextResponse.json({ ok: false, error: loaded.error }, { status: loaded.status });

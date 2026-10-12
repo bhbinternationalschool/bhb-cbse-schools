@@ -70,7 +70,10 @@ export async function GET(req: Request) {
     const cut = stripDeskForFeatures("attendance", { registers, outdoorDuty }, gate, {
       prefix: STAFF_PREFIX,
     });
-    registers = cut.registers;
+    // Attendance → Dashboard & reports (read only) owns no slice and reads
+    // the registers (already cut to the person's own marks above when
+    // their scope is restricted).
+    if (!gate.access("attendance.reports", "view").allowed) registers = cut.registers;
     outdoorDuty = cut.outdoorDuty;
   }
   // Each register's updated_at (only for the registers served): the

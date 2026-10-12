@@ -20,10 +20,22 @@
  * (the same grant that pays staff salary from the Cashfree wallet). The
  * person who built or changed a sheet does not approve it, unless they are
  * the owner.
+ *
+ * The tab lives on the Staff screen, but the Staff module grant does NOT
+ * open it: the sheets carry visiting staff's PAN, rates, mobiles and
+ * payouts, and Staff · view is held by teachers, accounts, transport and
+ * auditors. Read / build / correct take Payroll (view / change) as before
+ * PR #562, or the function staff.visiting_pay held as a function grant
+ * (Masters → Roles). Approve, reopen and pay stay Payroll (approve) only —
+ * the money rule.
  */
 
 import { NextResponse } from "next/server";
-import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
+import {
+  requireStaffPermission,
+  requireStaffPermissionOrFeature,
+  type RouteAuthResult,
+} from "@/lib/apiRouteAuth.server";
 import { isSuperAdminSession } from "@/lib/superAdmin";
 import {
   addLine,
@@ -46,8 +58,13 @@ function bad(error: string, status = 400) {
   return NextResponse.json({ ok: false, error }, { status });
 }
 
+/** Payroll for `action` as before, or the staff.visiting_pay function. */
+function payrollOrFunction(req: Request, action: "view" | "edit"): Promise<RouteAuthResult> {
+  return requireStaffPermissionOrFeature(req, "payroll", action, "staff.visiting_pay", action);
+}
+
 export async function GET(req: Request) {
-  const auth = await requireStaffPermission(req, "payroll", "view");
+  const auth = await payrollOrFunction(req, "view");
   if (!auth.ok) return auth.response;
   const q = new URL(req.url).searchParams;
   const id = (q.get("id") || "").trim();
@@ -93,7 +110,9 @@ export async function POST(req: Request) {
   }
   const action = String(b.action || "");
   const needsApprove = ["approve", "reopen", "pay_hand", "pay_cashfree", "refresh_payout"].includes(action);
-  const auth = await requireStaffPermission(req, "payroll", needsApprove ? "approve" : "edit");
+  const auth = needsApprove
+    ? await requireStaffPermission(req, "payroll", "approve")
+    : await payrollOrFunction(req, "edit");
   if (!auth.ok) return auth.response;
   if (auth.viaMirrorSecret) return bad("Work sheets are changed by a person, not a service", 403);
   const session = auth.ctx.session;

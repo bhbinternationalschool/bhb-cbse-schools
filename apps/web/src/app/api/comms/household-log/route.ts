@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireWaStaffApi } from "@/lib/apiRouteAuth.server";
+import { orCommsFunction } from "@/lib/commsFunctionGate.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { getHouseholdMessageTimeline } from "@/lib/householdMessageLog.server";
 
@@ -18,7 +19,7 @@ export const runtime = "nodejs";
  * IVRS and email are not tracked yet — see lib/householdMessageLog.server.ts.
  */
 export async function GET(req: Request) {
-  const auth = await requireWaStaffApi(req);
+  const auth = await orCommsFunction(req, await requireWaStaffApi(req), "notices.household_log", "view");
   if (!auth.ok) return auth.response;
   await ensureSchoolMirrorHydrated();
 

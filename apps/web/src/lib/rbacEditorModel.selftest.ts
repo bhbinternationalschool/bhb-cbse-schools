@@ -367,7 +367,7 @@ assert.ok(allLeaves(searched).length < allLeaves(tree).length);
     effect: "deny",
     actions: ["create", "edit", "delete"],
   });
-  const denied = (fid: string, a: "view" | "create" | "edit" | "delete" | "void" | "approve" | "export" | "unlock" | "impersonate") =>
+  const denied = (fid: string, a: import("./rbac").RbacAction) =>
     isFeaturePersonallyDenied(shreya, masters, fid, a, csDenied);
   assert.equal(hasPermission(shreya, masters, "masters", "edit", csDenied), true, "still holds the whole module");
   assert.equal(moduleHasDeniedSliceWrites("masters", denied), true);

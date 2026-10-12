@@ -1,4 +1,4 @@
-import { CRUD, type RbacFeatureDef } from "@/lib/rbacFeatureCatalog/types";
+import { CRUD, type RbacFeatureDef, type RbacWholeModuleTab } from "@/lib/rbacFeatureCatalog/types";
 
 /**
  * Campus — discipline, health, visitors, complaints (6 Oct 2026).
@@ -80,5 +80,15 @@ export const CAMPUS_FEATURES: RbacFeatureDef[] = [
     blurb: "Tutor replies a parent flagged: read them and mark reviewed or dismissed.",
     actions: ["view", "edit"],
     tabs: ["ai"],
+  },
+];
+
+/** Tabs of these modules that only the whole-module grant opens, and why. */
+export const CAMPUS_WHOLE_MODULE_TABS: RbacWholeModuleTab[] = [
+  {
+    module: "visitors",
+    tab: "gateduty",
+    reason:
+      "Gate duty reads the staff duty roster, a Staff-module book (module-state/duty_roster) a Visitors function cannot read — the tab would say nobody is on duty when it simply could not read the roster. Grant Staff → Duty roster for it.",
   },
 ];

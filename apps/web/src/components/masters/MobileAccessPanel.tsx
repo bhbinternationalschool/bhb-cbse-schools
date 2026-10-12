@@ -15,6 +15,7 @@ import {
 import {
   appendRbacAudit,
   effectivePermissions,
+  featureGrantHeld,
   hasPermission,
   removeUserGrant,
   resolveSessionRoles,
@@ -141,6 +142,9 @@ export function MobileAccessPanel({
         // The same check the app uses: roles, plus whatever the office gave
         // or took from this one person (personal deny > allow > roles).
         can: (m, a) => hasPermission(session, masters, m, a, state),
+        // A function grant opens its mapped screen (featureGrantHeld honours
+        // the same personal deny / allow).
+        canFeature: (featureId, a) => featureGrantHeld(session, masters, featureId, a, state),
       }),
     };
   }, [staffMember, masters, state, access]);

@@ -17,6 +17,7 @@ import { defaultMasters, DEFAULT_AY } from "@/lib/masters";
 import {
   defaultRbacState,
   featureAccess,
+  featureGrantHeld,
   hasPermission,
   isFeaturePersonallyDenied,
   type RbacAction,
@@ -170,6 +171,61 @@ export async function requireStaffPermission(
     if (holdsRouteFeature(base.ctx, module, action, request)) return base;
     return authFailure(403, e instanceof ApiError ? e.message : "Forbidden");
   }
+}
+
+/**
+ * Staff + the module grant for `action`, OR one named function held as a
+ * function grant for `featureAction`. For a route whose module grant is a
+ * stricter action than the function needs (Parents on app: the list is
+ * notices · edit for module holders, but a person given only the function
+ * "Parents on the app" reads it with its own "view") — without opening the
+ * route to every holder of the module's view.
+ */
+export async function requireStaffPermissionOrFeature(
+  request: Request,
+  module: RbacModule,
+  action: RbacAction,
+  featureId: string,
+  featureAction: RbacAction,
+): Promise<RouteAuthResult> {
+  const base = await requireStaffPermission(request, module, action);
+  if (base.ok) {
+    // A personal deny of the function (Masters → Roles → Assign to user)
+    // closes this door even to a module holder — the office turned THIS
+    // job off for this person.
+    if (!base.viaMirrorSecret && functionPersonallyDenied(base.ctx, featureId, featureAction)) {
+      return authFailure(403, "This is turned off for you (Masters → Roles)");
+    }
+    return base;
+  }
+  const staff = await requireStaffApi(request);
+  if (!staff.ok) return staff;
+  if (functionGrantHeldOnServer(staff.ctx, featureId, featureAction)) return staff;
+  return base;
+}
+
+/** Has the office personally turned this function off for this person? */
+export function functionPersonallyDenied(
+  ctx: ApiAuthContext,
+  featureId: string,
+  action: RbacAction,
+): boolean {
+  return isFeaturePersonallyDenied(ctx.session, ctx.masters, featureId, action, ctx.rbac);
+}
+
+/**
+ * A function grant held by this request's person (personal deny > allow >
+ * roles — featureGrantHeld). Refused outright when this instance has never
+ * read the school's roles (#575): the built-in defaults standing in carry
+ * no personal denies, so a function-only door must stay shut.
+ */
+export function functionGrantHeldOnServer(
+  ctx: ApiAuthContext,
+  featureId: string,
+  action: RbacAction,
+): boolean {
+  if (ctx.rbacKnown === false) return false;
+  return featureGrantHeld(ctx.session, ctx.masters, featureId, action, ctx.rbac);
 }
 
 function holdsRouteFeature(

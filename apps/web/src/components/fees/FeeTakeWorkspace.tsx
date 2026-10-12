@@ -320,6 +320,14 @@ export function FeeTakeWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feesWhole, firstShownTab, tab]);
   const showDefaulters = feesWhole || ["list", "policy", "autopay"].some((t) => showTab(t));
+  // Bulk & PDC (/fees/tools) has functions of its own (post-dated cheques,
+  // bulk payment, concession templates).
+  const showTools = feesWhole || ["pdc", "bulk", "templates"].some((t) => showTab(t));
+  // Someone holding only Bulk & PDC functions has no tab here — send them
+  // to the page they do hold rather than an empty fee counter.
+  useEffect(() => {
+    if (!feesWhole && !firstShownTab && showTools) window.location.replace("/fees/tools");
+  }, [feesWhole, firstShownTab, showTools]);
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
   // The search box owns its keystrokes (FeeSearchInput above) — only the
@@ -2062,7 +2070,7 @@ export function FeeTakeWorkspace() {
               Defaulters
             </Link>
           ) : null}
-          {feesWhole ? (
+          {showTools ? (
             <Link
               href="/fees/tools"
               className="inline-flex items-center rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--brand-deep)] transition hover:bg-[var(--surface-sunken)]"

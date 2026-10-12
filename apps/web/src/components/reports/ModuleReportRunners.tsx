@@ -731,7 +731,7 @@ export function LibraryReportsRunner() {
             <option value="pdf">PDF</option>
           </select>
         </label>
-        <Link href="/library?tab=reports" className={btnOutline}>
+        <Link href="/library?tab=lib_reports" className={btnOutline}>
           Open in Library
         </Link>
       </div>

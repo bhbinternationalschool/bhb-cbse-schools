@@ -12,7 +12,7 @@ import type { ApiAuthContext } from "@/lib/api/v1/auth";
 import type { RbacAction } from "@/lib/rbac";
 import { InvError } from "@/lib/inventory/db.server";
 import { functionWriteAllowed, pathCovers } from "@/lib/moneyFunctionScope";
-import { STORE_FUNCTION_WRITES } from "@/lib/rbacFeatureCatalog/money";
+import { STORE_FUNCTION_WRITES } from "@/lib/rbacFeatureCatalog/store";
 
 export type InvHandlerCtx = {
   ctx: ApiAuthContext;
@@ -30,6 +30,15 @@ export async function invRoute(
   request: Request,
   action: RbacAction,
   handler: (h: InvHandlerCtx) => Promise<unknown>,
+  opts: {
+    /**
+     * The job a write does, as a sub-path of the route (e.g.
+     * "/api/library/counter/issue"), for a route whose one path does
+     * several jobs. A function writes only where STORE_FUNCTION_WRITES
+     * names the job; without this the path itself is the job.
+     */
+    operation?: string;
+  } = {},
 ): Promise<NextResponse> {
   const auth = await requireStaffPermission(request, "store", action);
   if (!auth.ok) return auth.response;
@@ -43,6 +52,10 @@ export async function invRoute(
       pathname = new URL(request.url).pathname;
     } catch {
       // No path, no function match: only the module grant passes below.
+    }
+    // The job is named under the route's own path, never another route's.
+    if (pathname && opts.operation && opts.operation.startsWith(`${pathname}/`)) {
+      pathname = opts.operation;
     }
     if (!functionWriteAllowed(auth.ctx, "store", action, STORE_FUNCTION_WRITES, pathname, pathCovers)) {
       return NextResponse.json(

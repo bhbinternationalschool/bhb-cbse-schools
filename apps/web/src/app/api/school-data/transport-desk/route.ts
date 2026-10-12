@@ -19,12 +19,36 @@ import {
 
 export const runtime = "nodejs";
 
+/**
+ * The lists Transport → Dashboard & reports (read only) reads: the
+ * dashboard and every report in lib/transportReportCatalog. That function
+ * owns no slice (each list has one owner), so they are served to it here.
+ */
+const TRANSPORT_REPORT_KEYS = [
+  "routes",
+  "assignments",
+  "staffRiders",
+  "vehicles",
+  "insurancePolicies",
+  "certificateRenewals",
+  "fuelRefillLogs",
+  "boardingEvents",
+  "dealers",
+  "vehicleLoans",
+  "emiSchedule",
+] as const;
+
 export async function GET(req: Request) {
   // The whole desk, or — holding Transport functions only — their slices.
   const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["transport-desk"]);
   if (gate.mode === "deny") return gate.response;
   const { bundle: full, meta, ok } = await fetchTransportDeskFromDb();
-  const bundle = gate.mode === "feature" ? stripDeskForFeatures("transport", full, gate) : full;
+  let bundle = gate.mode === "feature" ? stripDeskForFeatures("transport", full, gate) : full;
+  if (gate.mode === "feature" && gate.access("transport.reports", "view").allowed) {
+    const add: Partial<typeof full> = {};
+    for (const k of TRANSPORT_REPORT_KEYS) Object.assign(add, { [k]: full[k] });
+    bundle = { ...bundle, ...add };
+  }
   if (!ok) {
     return NextResponse.json(
       { ok: false, error: "Transport desk fetch failed — tenant/db unavailable" },

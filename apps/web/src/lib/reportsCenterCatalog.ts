@@ -239,7 +239,7 @@ export const REPORTS_CENTER_MODULES: ReportsCenterModuleDef[] = [
     // Library has no dedicated RBAC module — it's gated under "store"
     // (see lib/library.ts's assertModulePermission calls).
     rbacModule: "store",
-    href: "/library?tab=reports",
+    href: "/library?tab=lib_reports",
     embeddable: true,
   },
   {
@@ -537,7 +537,7 @@ export function listReportsCenterEntries(): ReportsCenterEntry[] {
       entry(
         "library",
         "store",
-        "/library?tab=reports",
+        "/library?tab=lib_reports",
         r.id,
         r.label,
         "library",

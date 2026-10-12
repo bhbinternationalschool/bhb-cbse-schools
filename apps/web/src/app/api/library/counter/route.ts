@@ -59,6 +59,10 @@ export async function POST(req: Request) {
   const action = String((body as { action?: unknown }).action ?? "");
   // Issuing creates a loan; everything else edits the library.
   const rbac = action === "issue" || action === "add_copies" ? "create" : "edit";
+  // Each job is its own sub-path for the library functions (Masters → Roles):
+  // the counter issues and returns, Copies adds and moves copies, and the
+  // loan rules stay with the Store grant (rbacFeatureCatalog/store.ts).
+  const operation = /^[a-z_]+$/.test(action) ? `/api/library/counter/${action}` : undefined;
   return invRoute(req, rbac, async ({ actor, academicYearCode }) => withLibraryDb(async () => {
     const b = await invBody<Record<string, unknown>>(req);
     if (action === "issue") {
@@ -109,5 +113,5 @@ export async function POST(req: Request) {
       return { rules: await saveLibraryRules(pick) };
     }
     throw new InvError("Unknown action");
-  }));
+  }), { operation });
 }

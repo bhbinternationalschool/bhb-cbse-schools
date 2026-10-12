@@ -32,7 +32,12 @@ export async function GET(req: Request) {
   const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["student-leave-desk"]);
   if (gate.mode === "deny") return gate.response;
   const { bundle: full, meta, ok } = await fetchStudentLeaveDeskFromDb();
-  const bundle = gate.mode === "feature" ? stripDeskForFeatures("student_leave", full, gate) : full;
+  // Student leave → Dashboard & reports (read only) owns no slice — the
+  // requests have one owner — and reads every request.
+  const readsAll =
+    gate.mode === "feature" && gate.access("student_leave.reports", "view").allowed;
+  const bundle =
+    gate.mode === "feature" && !readsAll ? stripDeskForFeatures("student_leave", full, gate) : full;
   if (!ok) {
     return NextResponse.json(
       { ok: false, error: "Failed to fetch student leave desk" },

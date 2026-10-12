@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { useDemoSession } from "@/components/shell/SessionContext";
-import { loadMasters } from "@/lib/masters";
-import { canSeeModuleTab, hasPermission, loadRbac, type RbacModule } from "@/lib/rbac";
+import { canWriteModuleTab, hasPermission, type RbacModule } from "@/lib/rbac";
+import { commsTabOpenedByFunction } from "@/lib/commsTabAccess";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ClassChannelsPanel } from "@/components/comms/ClassChannelsPanel";
 import { HouseholdMessageLogPanel } from "@/components/comms/HouseholdMessageLogPanel";
@@ -90,26 +91,35 @@ export function WaWorkspacePanel({
   const session = useDemoSession();
   const [tab, setTab] = useState<WaWorkspaceTab>(initialTab);
 
-  // Holding Notices, every section shows, as it always has. Holding only
-  // some WhatsApp functions (Masters → Roles), only their sections — each
-  // section's server route accepts exactly those functions.
-  const [shownTabs, setShownTabs] = useState<ModuleTabItem[]>(TABS);
+  // The office (notices · edit — the only people the Comms screen showed
+  // this tab to before functions) sees every section, as it always has.
+  // Holding only some WhatsApp functions (Masters → Roles), only their
+  // sections — each section's server route accepts exactly those functions.
+  // A module's edit grant opens its sections too; a view grant alone does
+  // not — a teacher's notices / notifications · view opens none of them.
+  // Decided from the loaded roles + roster (assignments count), never before.
+  const access = useAccessData();
+  const shownTabs = useMemo<ModuleTabItem[]>(() => {
+    if (!access.ready) return [];
+    const masters = access.masters;
+    const rbac = access.rbac ?? undefined;
+    return hasPermission(session, masters, "notices", "edit", rbac)
+      ? TABS
+      : TABS.filter((t) => {
+          const mod = SECTION_MODULE[t.id as WaWorkspaceTab];
+          return (
+            commsTabOpenedByFunction(session, masters, t.id, rbac) ||
+            (mod !== "notices" && canWriteModuleTab(session, masters, mod, t.id, "edit", rbac))
+          );
+        });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+  }, [session, access.ready, access.version]);
   useEffect(() => {
-    const masters = loadMasters();
-    const rbac = loadRbac();
-    setShownTabs(
-      hasPermission(session, masters, "notices", "view", rbac)
-        ? TABS
-        : TABS.filter((t) =>
-            canSeeModuleTab(session, masters, SECTION_MODULE[t.id as WaWorkspaceTab], t.id, rbac),
-          ),
-    );
-  }, [session]);
-  useEffect(() => {
+    if (!access.ready) return;
     if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
       setTab(shownTabs[0]!.id as WaWorkspaceTab);
     }
-  }, [shownTabs, tab]);
+  }, [access.ready, shownTabs, tab]);
 
   const hint = useMemo(() => {
     switch (tab) {

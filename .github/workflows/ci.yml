@@ -540,6 +540,8 @@ jobs:
           npm run test:rbac-assigned-roles
           npm run test:rbac-scope
           npm run test:rbac-user-grants
+          npm run test:rbac-catalog-complete
+          npm run test:rbac-function-grants
           npm run test:rbac-editor
           npm run test:visitor-gate
           npm run test:play-billing

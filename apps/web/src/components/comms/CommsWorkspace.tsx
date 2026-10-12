@@ -2,11 +2,11 @@
 
 import { AppPopupsPanel } from "@/components/comms/AppPopupsPanel";
 import { ParentsOnAppPanel } from "@/components/comms/ParentsOnAppPanel";
-import { commsTabIsOfficeOnly } from "@/lib/commsTabAccess";
+import { commsTabIsOfficeOnly, commsTabOpenedByFunction } from "@/lib/commsTabAccess";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Images, Megaphone } from "lucide-react";
-import { canAccessHref, hasPermission } from "@/lib/rbac";
+import { canAccessHref, canWriteModuleTab, hasPermission } from "@/lib/rbac";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { useAccessData } from "@/components/shell/useAccessData";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
@@ -422,8 +422,27 @@ export function CommsWorkspace() {
       ? TABS
       : TABS.filter((t) => canAccessHref(session, masters, `/comms?tab=${t.id}`, rbac));
     // Office tabs (WhatsApp chats, pop-ups, Parents on app…) need notices ·
-    // edit; a teacher's view grant reads notices, news and the gallery.
-    return office ? base : base.filter((t) => !commsTabIsOfficeOnly(t.id));
+    // edit; a teacher's view grant reads notices, news and the gallery. A
+    // function naming the tab (Masters → Roles) opens that tab alone — held
+    // as a function grant, so notices · view never counts.
+    return office
+      ? base
+      : base.filter(
+          (t) => !commsTabIsOfficeOnly(t.id) || commsTabOpenedByFunction(session, masters, t.id, rbac),
+        );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+  }, [session, access.ready, access.version]);
+  // Write buttons on the function-capable office tabs: the module grant or
+  // the tab's function holding the action — the server refuses anyone else.
+  const tabWrite = useMemo(() => {
+    if (!access.ready) return { popups: false, answers: false, approveAnswers: false };
+    const masters = access.masters;
+    const rbac = access.rbac ?? undefined;
+    return {
+      popups: canWriteModuleTab(session, masters, "notices", "popups", "edit", rbac),
+      answers: canWriteModuleTab(session, masters, "wa_chatbot", "answers", "edit", rbac),
+      approveAnswers: canWriteModuleTab(session, masters, "wa_chatbot", "answers", "approve", rbac),
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
   }, [session, access.ready, access.version]);
   useEffect(() => {
@@ -1404,7 +1423,7 @@ export function CommsWorkspace() {
         <EmailIntegrationPanel canEdit={!readOnly} />
       ) : null}
 
-      {tab === "popups" ? <AppPopupsPanel canEdit={!readOnly} /> : null}
+      {tab === "popups" ? <AppPopupsPanel canEdit={!readOnly && tabWrite.popups} /> : null}
       {tab === "onapp" ? <ParentsOnAppPanel /> : null}
 
       {tab === "social" ? (
@@ -1483,7 +1502,7 @@ export function CommsWorkspace() {
       ) : null}
 
       {tab === "answers" ? (
-        <AnswerBookPanel canEdit={!readOnly} canApprove={!readOnly && canApproveAnswers} />
+        <AnswerBookPanel canEdit={!readOnly && tabWrite.answers} canApprove={!readOnly && (canApproveAnswers || tabWrite.approveAnswers)} />
       ) : null}
 
       {tab === "inbox" ? (

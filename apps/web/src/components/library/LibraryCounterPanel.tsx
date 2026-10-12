@@ -38,6 +38,7 @@ export function LibraryCounterPanel({
   staff,
   ay,
   readOnly,
+  rulesReadOnly,
   onChanged,
   onError,
 }: {
@@ -46,6 +47,8 @@ export function LibraryCounterPanel({
   staff: Person[];
   ay: string;
   readOnly: boolean;
+  /** The loan rules card: the Store grant's only. Defaults to readOnly. */
+  rulesReadOnly?: boolean;
   /** Reload the desk from the server, then show the message. */
   onChanged: (msg: string) => Promise<void>;
   onError: (msg: string) => void;
@@ -449,7 +452,7 @@ export function LibraryCounterPanel({
             )}
           </div>
         ) : null}
-        <LibraryRulesCard readOnly={readOnly} onChanged={onChanged} onError={onError} />
+        <LibraryRulesCard readOnly={rulesReadOnly ?? readOnly} onChanged={onChanged} onError={onError} />
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useAccessData } from "@/components/shell/useAccessData";
 import Link from "next/link";
 import {
   BarChart3,
@@ -38,6 +39,7 @@ import { TabsContent, WorkspaceTabs, type WorkspaceTabItem } from "@/components/
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
 import { loadSis, type SisState } from "@/lib/sis";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
 import {
@@ -407,7 +409,7 @@ function OfficeStudentLeaveWorkspace({
     );
   }, [state, ay]);
 
-  const tabItems = useMemo<WorkspaceTabItem[]>(
+  const allTabItems = useMemo<WorkspaceTabItem[]>(
     () => [
       {
         id: "dashboard",
@@ -438,6 +440,30 @@ function OfficeStudentLeaveWorkspace({
     ],
     [pending.length],
   );
+  // A function grant (Student leave → requests / reports) opens its own
+  // tabs. The whole Student leave module opens all of them, and so does the
+  // Attendance module: it has always reached this desk under Attendance →
+  // Student leave, and that must not narrow.
+  const access = useAccessData();
+  const tabItems = useMemo(
+    () => {
+      if (!access.ready) return [];
+      const am = access.masters;
+      const ar = access.rbac ?? undefined;
+      return hasPermission(session, am, "attendance", "view", ar)
+        ? allTabItems
+        : visibleModuleTabs(allTabItems, session, am, "student_leave", ar);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [allTabItems, session, access.ready, access.version],
+  );
+  useEffect(() => {
+    // Not before the roles and roster load.
+    if (!access.ready) return;
+    if (tabItems.length > 0 && !tabItems.some((t) => t.id === tab)) {
+      setTab(tabItems[0]!.id as LeaveTab);
+    }
+  }, [access.ready, tabItems, tab, setTab]);
 
   const allRequests = useMemo(() => {
     if (!state) return [];
