@@ -13,7 +13,8 @@ prove the gain. Nothing in this file is inferred from code.
 | Merged but NOT live | PR #578 (Staff 0 fix, merged 15:46 IST) | same diff: only `lib/mastersPersistence.ts`, `lib/masters.ts`, `lib/deskLoadGuard.selftest.ts` differ |
 | Deploy trigger | none (`gcloud builds triggers list` is empty); 12 hand deploys in 6 days, each a working-tree tarball with no commit label | `gcloud builds list` |
 | Service shape | 1 vCPU, 2 GiB, concurrency 20, min-instances 0, max 20, cpu-throttling on, startup-cpu-boost on | `gcloud run revisions describe … --format=json` |
-| Cold starts in 24 h | 126 startup-probe lines; 63 distinct instance ids served `/api/school-data/*` | Cloud Logging |
+| Cold starts in 24 h | 63 distinct instance ids served `/api/school-data/*` (126 startup-probe log lines; a start logs more than one) | Cloud Logging |
+| Missing route on live | `GET /api/inventory/assets` → 404: `.gcloudignore:13` (`assets/`) strips `apps/web/src/app/api/inventory/assets/` from every build upload (in git since 23 Aug) | `curl -s -o /dev/null -w '%{http_code}' https://bhbinternational.school/api/inventory/assets` |
 | Live env | `MASTERS_READ_FROM_ROWS` ABSENT (masters-desk GET is therefore never probe-cached: 266,245 bytes every call); `LEAN_WIRE_PAYLOAD` ABSENT; every `*_READ_FROM_DB` / `*_DUAL_WRITE_DB` = true | revision env list (177 vars) |
 
 ## Browser → server, last 24 h (Cloud Run request logs)
@@ -53,13 +54,13 @@ Since the stats reset on 12 Aug: `sis_students` whole-tenant selects ≈ 77,000;
 
 Database health is fine: 60 max connections, 1 active at measurement, no statement timeouts or deadlocks in the last 24 h. The database is not the bottleneck; the number of whole-table reads is.
 
-## Masters writes from phones (Cloud Run app logs, 8–10 Oct)
+## Masters writes from phones (Cloud Run app logs, 8–10 Oct — the build BEFORE PR #483 went live on 11 Oct 21:50 UTC)
 
-Per day: ~20 `[masters-desk] function-only push by stf_…` (teacher phones pushing the class-subject slice from a snapshot), ~25 `unversioned push accepted (legacy client)`, 1–2 `rejected wipe push stored=15 incoming=0` (a browser tried to push an empty Masters and was refused by the guard). 8 `[desk-slice] … rows changed elsewhere first` on 12 Oct. Zero `stored-state read FAILED` in 7 days (the failed-read-as-empty path is latent, not daily).
+Per day: ~20 `[masters-desk] function-only push by stf_…` (teacher phones pushing the class-subject slice from a snapshot), ~25 `unversioned push accepted (legacy client)`, 1–2 `rejected wipe push stored=15 incoming=0` (a browser tried to push an empty Masters and was refused by the guard). 8 `[desk-slice] … rows changed elsewhere first` on 12 Oct. Zero `stored-state read FAILED` in 7 days (the failed-read-as-empty path is latent, not daily). **After the 11 Oct deploy (rev 00851+, PR #483 'unversioned refused'): zero `unversioned push`, `function-only push` or `rejected wipe push` lines through 12 Oct** — legacy whole-book pushes from phones have stopped; the row-level staleness mechanisms in `evidence/propagation.md` remain.
 
 ## Database facts that shape the design
 
-- 573 tables (50 are `*_pre_*` / `*_backup_*` copies); 35 `*_sync_meta` tables, each with `updated_at`, bumped by every desk write — a ready-made change signal.
+- 573 tables (50 are `*_pre_*` / `*_backup_*` copies); 35 `*_sync_meta` tables in production, each with `updated_at`. Migrations define 37: `purchase_desk_sync_meta` and `store_desk_sync_meta` are NOT in production (drift — see COMMAND.md 0.6). Bumped by the `*Normalized.server.ts` pushes, `sis_push_guarded` and `masters_write_slices`; NOT by `desk_write_guarded`, `rowStampWrite` or `sliceCas`. No sync_meta exists for staff (`sis_staff.updated_at` only), the 29 `module_local_state` books or the `*_state` blobs.
 - `sis_students`: 717 rows, 671 "active", per academic year 2023-24: 88 · 2024-25: 142 · 2025-26: 235 · 2026-27: 252. One row per child per year; every screen that is not year-scoped double counts.
 - `masters_desk_slices`: 29 slices, ~60 KB total payload (concessionGrants 13 KB, students projection 9 KB, feeStructureLines 5 KB, classSubjects 2.5 KB). Masters is tiny; it is the parse-per-read and the copy model that make it expensive.
 - No table is published to Supabase Realtime (`pg_publication_tables` for `supabase_realtime` is empty).
