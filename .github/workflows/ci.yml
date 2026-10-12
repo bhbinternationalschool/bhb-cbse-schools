@@ -612,6 +612,13 @@ jobs:
           npm run test:dashboard-no-refetch-loop
           npm run test:short-promise-cache
           npm run test:library-fine
+          npm run test:desk-conflict-reload
+          npm run test:masters-desk-read-failed
+          npm run test:server-masters-cache
+          npm run test:school-mirror-disk-off
+          npm run test:coalesced-refresh
+          npm run test:desk-probe-ancillary
+          npm run test:update-reload
 
   build:
     name: Production build

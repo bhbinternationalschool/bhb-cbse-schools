@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BookOpen,
   GraduationCap,
@@ -13,6 +13,7 @@ import {
 import { formatInr } from "@/lib/masters";
 import { AlertBannerList } from "@/components/dashboard/AlertBannerList";
 import { duesFreshnessHint } from "@/lib/feeStoreDuesKpi";
+import { createCoalescedRefresh, type CoalescedRefresh } from "@/lib/coalescedRefresh";
 import { WaNumberGapBanner } from "@/components/comms/WaNumberGapBanner";
 import type { PrincipalSnapshot } from "@/lib/principalSnapshot.server";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
@@ -51,6 +52,9 @@ function KpiCard({
     />
   );
 }
+
+/** Least time between two snapshot requests (each is ~5 s of server work). */
+const SNAPSHOT_MIN_INTERVAL_MS = 10_000;
 
 export function PrincipalCockpit() {
   const session = useDemoSession();
@@ -125,16 +129,25 @@ export function PrincipalCockpit() {
     }
   }
 
+  // One snapshot request in flight at a time, at most one per 10 s; the
+  // desk events, focus and visibility changes coalesce (data-layer 0.5e).
+  // Each snapshot is seven whole-desk hydrates on the server.
+  const refreshRef = useRef<CoalescedRefresh | null>(null);
   useEffect(() => {
-    void fetchSnapshot();
+    const refresh = createCoalescedRefresh({
+      run: fetchSnapshot,
+      minIntervalMs: SNAPSHOT_MIN_INTERVAL_MS,
+    });
+    refreshRef.current = refresh;
+    refresh.request();
 
     function onDataUpdate() {
-      void fetchSnapshot();
+      refresh.request();
     }
 
     function onVisibilityChange() {
       if (document.visibilityState === "visible") {
-        void fetchSnapshot();
+        refresh.request();
       }
     }
 
@@ -145,6 +158,8 @@ export function PrincipalCockpit() {
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
+      refresh.dispose();
+      if (refreshRef.current === refresh) refreshRef.current = null;
       window.removeEventListener("bhb-desk-hydrated", onDataUpdate);
       window.removeEventListener("bhb-desk-synced", onDataUpdate);
       window.removeEventListener("bhb-masters-updated", onDataUpdate);
@@ -158,7 +173,7 @@ export function PrincipalCockpit() {
       <div className="p-4">
         <p className="text-sm text-[var(--danger)]">{err}</p>
         <button
-          onClick={() => void fetchSnapshot()}
+          onClick={() => refreshRef.current?.request({ force: true })}
           className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--brand-deep)] underline"
         >
           Retry
@@ -231,7 +246,7 @@ export function PrincipalCockpit() {
             Principal desk · {displaySnap.academicYearCode}
           </p>
           <button
-            onClick={() => void fetchSnapshot()}
+            onClick={() => refreshRef.current?.request({ force: true })}
             disabled={loading}
             title="Refresh Dashboard Data"
             className="flex items-center gap-1.5 rounded-lg bg-[var(--primary-foreground)]/10 px-3 py-1 text-xs font-medium text-[var(--primary-foreground)] transition hover:bg-[var(--primary-foreground)]/20 disabled:opacity-50"

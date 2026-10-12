@@ -58,14 +58,18 @@ export function resetDeskHydrated(module?: string): void {
   // loadedOnce clears (the save guards need a fresh load before saving);
   // everHydrated survives: a reset asks for a fresh read, it does not make
   // what was read unknown to permission checks (no "Checking access…" flash).
+  // Only this module's in-flight read is forgotten (data-layer 0.5a): the
+  // others are still current, and dropping their entries let a second copy of
+  // each start alongside the first.
   if (module) {
     hydrated.delete(module);
     loadedOnce.delete(module);
+    inFlight.delete(module);
   } else {
     hydrated.clear();
     loadedOnce.clear();
+    inFlight.clear();
   }
-  inFlight.clear();
 }
 
 /**

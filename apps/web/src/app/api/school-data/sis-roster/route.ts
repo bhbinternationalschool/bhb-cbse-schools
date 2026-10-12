@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
+import { SIS_ROSTER_PROBE_TABLES } from "@/lib/deskProbeTables";
 import { stripEmptyDocsList, stripEmptyList } from "@/lib/wirePayload";
 import {
   authorizeSchoolDataDesk,
@@ -65,7 +66,7 @@ export async function GET(req: Request) {
   try {
     const result = await cachedDeskJson({
       cacheKey: "sis-roster",
-      tables: ["sis_students", "sis_households", "sis_enrollments", "sis_student_identities"],
+      tables: [...SIS_ROSTER_PROBE_TABLES],
       ifNoneMatch: req.headers.get("if-none-match"),
       build: async () => {
         const { bundle, meta, ok } = sisIdentitySplitEnabled()

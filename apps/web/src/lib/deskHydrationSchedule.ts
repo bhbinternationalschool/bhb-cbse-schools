@@ -3,7 +3,11 @@
  */
 
 import { yieldToMain } from "@/lib/runWhenIdle";
-import { withHydrationSlot } from "@/lib/deskHydrateGuard";
+import {
+  deskEverHydrated,
+  resetDeskHydrated,
+  withHydrationSlot,
+} from "@/lib/deskHydrateGuard";
 import { trackServerWork } from "@/lib/serverWork";
 
 export type DeskHydrateId =
@@ -369,6 +373,80 @@ export function startDeskHydrationBackground(pathname: string): void {
 
 export function deskHydrationBackgroundDone(): Promise<void> | null {
   return backgroundPromise;
+}
+
+/**
+ * The hydrate-guard key each desk marks itself with (markDeskHydrated /
+ * resetDeskHydrated) → its task above. The two vocabularies differ
+ * ("staff_hr" vs "staffHr"); desks with no task here (ptm, trust, accounts,
+ * library, vault, rte, payroll, statutory, module states, …) are reloaded by
+ * their own screen's next ensure call once their guard entry is reset.
+ */
+const DESK_HYDRATE_ID_BY_MODULE: Readonly<Record<string, DeskHydrateId>> = {
+  rbac: "rbac",
+  masters: "masters",
+  module_registry: "moduleRegistry",
+  sis: "sis",
+  admissions: "admissions",
+  fees: "fees",
+  payments: "payments",
+  fee_recovery_tasks: "feeRecoveryTasks",
+  attendance: "attendance",
+  staff_attendance: "staffAttendance",
+  exams: "exams",
+  exam_papers: "examPapers",
+  certificates: "certificates",
+  staff: "staff",
+  staff_hr: "staffHr",
+  staff_advances: "staffAdvances",
+  staff_agreements: "staffAgreements",
+  transport: "transport",
+  wa_templates: "waTemplates",
+  automation: "automation",
+  erp_chat: "erpChat",
+  staff_chat: "staffChat",
+  salary_setup: "salarySetup",
+};
+
+export function deskHydrateIdForModule(module: string): DeskHydrateId | null {
+  return Object.prototype.hasOwnProperty.call(DESK_HYDRATE_ID_BY_MODULE, module)
+    ? DESK_HYDRATE_ID_BY_MODULE[module]
+    : null;
+}
+
+/**
+ * Run only the named desks' hydrators (through the same slot cap). A
+ * conflict on one desk reloads that desk — not every desk, which is what
+ * ensureAllDeskHydrated did (data-layer 0.5a).
+ */
+export async function ensureDesksHydrated(ids: readonly DeskHydrateId[]): Promise<void> {
+  const want = new Set(ids);
+  if (want.size === 0) return;
+  await runDeskTasks(allDeskHydrateTasks().filter((t) => want.has(t.id)));
+}
+
+/**
+ * Some rows of a save on `module` were refused (changed elsewhere first):
+ * forget that desk's load and reload it alone.
+ */
+export async function reloadDeskAfterConflict(module: string): Promise<void> {
+  resetDeskHydrated(module);
+  const id = deskHydrateIdForModule(module);
+  if (id) await ensureDesksHydrated([id]);
+}
+
+/**
+ * After a student merge: ids moved on the server, so every desk copy this
+ * page holds is stale — but only those. Forget every desk's load (each
+ * screen re-reads on its next ensure call) and re-pull now only the desks
+ * this page has loaded; a heavy desk the page never opened stays unloaded.
+ */
+export async function reloadLoadedDesks(): Promise<void> {
+  const ids = Object.entries(DESK_HYDRATE_ID_BY_MODULE)
+    .filter(([module]) => deskEverHydrated(module))
+    .map(([, id]) => id);
+  resetDeskHydrated();
+  await ensureDesksHydrated(ids);
 }
 
 /** Await every desk hydrator (tests / explicit full sync). */

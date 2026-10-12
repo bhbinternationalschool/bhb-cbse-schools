@@ -245,16 +245,12 @@ async function pushSisDeskApi(
       persistPendingDeletes();
 
       // A merge moved fee lines / marks / etc. to the kept id on the server;
-      // every module's browser copy still holds the dropped ids. Re-pull them
-      // all now, so a save made in the meantime cannot push the old ids back.
+      // every module copy this page holds still has the dropped ids. Re-pull
+      // the ones it holds now, so a save made in the meantime cannot push the
+      // old ids back — not every desk (data-layer 0.5a): a desk never loaded
+      // here holds no old ids, and the heavy ones cost megabytes.
       if (sentMerges > 0) {
-        void Promise.all([
-          import("@/lib/deskHydrateGuard"),
-          import("@/lib/deskHydrationSchedule"),
-        ]).then(([guard, sched]) => {
-          guard.resetDeskHydrated();
-          return sched.ensureAllDeskHydrated();
-        });
+        void import("@/lib/deskHydrationSchedule").then((sched) => sched.reloadLoadedDesks());
       }
 
       writeMeta({

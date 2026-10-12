@@ -9,7 +9,7 @@
 import "server-only";
 
 import { resolveApiAuth } from "@/lib/api/v1/auth";
-import { ApiError } from "@/lib/api/v1/errors";
+import { ApiError, authFailureStatus } from "@/lib/api/v1/errors";
 import { computeHouseholdDues, loadFees, openFeeDues } from "@/lib/fees";
 import {
   GATEWAY_METHOD_GROUPS,
@@ -34,7 +34,7 @@ export async function parentHouseholdFrom(req: Request): Promise<ParentAuth> {
     }
     return { ok: true, householdId: ctx.session.householdId };
   } catch (e) {
-    return { ok: false, status: 401, error: e instanceof ApiError ? e.message : "Unauthorized" };
+    return { ok: false, status: authFailureStatus(e), error: e instanceof ApiError ? e.message : "Unauthorized" };
   }
 }
 

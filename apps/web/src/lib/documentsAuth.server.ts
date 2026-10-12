@@ -14,7 +14,7 @@ import { NextResponse } from "next/server";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { hasMirrorSyncSecret } from "@/lib/apiRouteAuth.server";
 import { hasPermission, type RbacAction } from "@/lib/rbac";
-import { ApiError } from "@/lib/api/v1/errors";
+import { ApiError, authFailureStatus } from "@/lib/api/v1/errors";
 import { subjectRbacModule, type DocumentSubject } from "@/lib/documentsRouting";
 
 export type DocumentAuthResult =
@@ -46,7 +46,7 @@ export async function authorizeDocumentAction(
       ok: false,
       response: NextResponse.json(
         { error: e instanceof ApiError ? e.message : "Unauthorized" },
-        { status: 401 },
+        { status: authFailureStatus(e) },
       ),
     };
   }

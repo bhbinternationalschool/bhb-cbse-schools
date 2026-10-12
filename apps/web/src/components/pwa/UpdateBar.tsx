@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { RefreshCw } from "lucide-react";
+import { isEditableElement, shouldReloadForUpdate } from "@/lib/updateReload";
+import { failingDeskSyncs } from "@/lib/deskSyncStatus";
 
 /** Least time between two checks, however often the phone is reopened. */
 const MIN_GAP_MS = 60_000;
@@ -22,11 +25,48 @@ const POLL_MS = 15 * 60_000;
  * 15 minutes while it is on screen — never in the background. A code chunk
  * that fails to load (the old build's files are gone after a deploy) shows
  * the bar straight away. Unknown is not "new": a failed check shows nothing.
+ *
+ * Once stale, the tab also reloads itself on the next client-side
+ * navigation (data-layer 0.5g) — never mid-form and never with a save
+ * outstanding; the rule is lib/updateReload.ts.
  */
 export function UpdateBar() {
   const [stale, setStale] = useState(false);
   const loaded = useRef<string | null>(null);
   const lastCheck = useRef(0);
+  const pathname = usePathname();
+  const previousPath = useRef<string | null>(null);
+  /** Save keys (lib/syncRetryStatus) not back to idle yet. */
+  const unsaved = useRef(new Set<string>());
+
+  useEffect(() => {
+    function onSyncStatus(e: Event) {
+      const d = (e as CustomEvent<{ key?: string; state?: { status?: string } }>).detail;
+      if (!d?.key) return;
+      if (d.state?.status && d.state.status !== "idle") unsaved.current.add(d.key);
+      else unsaved.current.delete(d.key);
+    }
+    window.addEventListener("bhb:sync-status", onSyncStatus);
+    return () => window.removeEventListener("bhb:sync-status", onSyncStatus);
+  }, []);
+
+  useEffect(() => {
+    const prev = previousPath.current;
+    previousPath.current = pathname;
+    if (
+      shouldReloadForUpdate({
+        stale,
+        previousPath: prev,
+        path: pathname,
+        editing: isEditableElement(document.activeElement as HTMLInputElement | null),
+        savesPending: unsaved.current.size > 0 || failingDeskSyncs().length > 0,
+      })
+    ) {
+      window.location.reload();
+    }
+    // Runs on navigation only: a build turning stale mid-page waits for the next one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   useEffect(() => {
     let alive = true;

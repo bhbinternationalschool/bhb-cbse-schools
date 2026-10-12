@@ -125,7 +125,8 @@ export async function GET(req: Request) {
       build: async () => {
         const rows = await fetchMastersFromRowTables();
         if (!rows.ok) throw new Error("row path failed");
-        const meta = await fetchMastersSyncMeta(rows.bundle);
+        const { meta, readFailed } = await fetchMastersSyncMeta(rows.bundle);
+        if (readFailed) throw new Error("masters sync meta read failed");
         const sliceStamps = await fetchMastersSliceStamps();
         return {
           ok: true,
@@ -143,11 +144,13 @@ export async function GET(req: Request) {
     }).catch(() => null);
     if (cachedRows) return deskJsonResponse(cachedRows);
     const rows = await fetchMastersFromRowTables();
-    if (rows.ok) {
-      // The revision still comes from masters_desk_sync_meta, so the
-      // optimistic-locking base is identical whichever source served the
-      // bundle. Anything else would make every save falsely stale.
-      const meta = await fetchMastersSyncMeta(rows.bundle);
+    // The revision still comes from masters_desk_sync_meta, so the
+    // optimistic-locking base is identical whichever source served the
+    // bundle. Anything else would make every save falsely stale — and a
+    // failed meta read is not a revision (it falls to the slices below).
+    const rowsMeta = rows.ok ? await fetchMastersSyncMeta(rows.bundle) : null;
+    if (rows.ok && rowsMeta && !rowsMeta.readFailed) {
+      const meta = rowsMeta.meta;
       const sliceStamps = await fetchMastersSliceStamps();
       return NextResponse.json({
         ok: true,
@@ -173,7 +176,15 @@ export async function GET(req: Request) {
     );
   }
 
-  const { bundle, meta, sliceStamps } = await fetchMastersDeskFromDb();
+  const { bundle, meta, sliceStamps, readFailed } = await fetchMastersDeskFromDb();
+  // Unknown is not empty (data-layer 0.5b): a failed read answered 200 with
+  // zero classes, and the browser took that as the school's masters.
+  if (readFailed) {
+    return NextResponse.json(
+      { ok: false, error: "Could not read the school setup — please try again." },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     ...bundle,

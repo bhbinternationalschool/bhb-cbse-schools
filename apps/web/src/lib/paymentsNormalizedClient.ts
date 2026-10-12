@@ -86,12 +86,7 @@ async function pushPaymentsDeskApi(state: PaymentsState) {
       // This browser held some links at an older status than the server
       // (paid since it loaded): reload them rather than keep showing "open".
       if (body.kept?.length) {
-        void Promise.all([import("@/lib/deskHydrateGuard"), import("@/lib/deskHydrationSchedule")]).then(
-          ([guard, sched]) => {
-            guard.resetDeskHydrated("payments");
-            return sched.ensureAllDeskHydrated();
-          },
-        );
+        void import("@/lib/deskHydrationSchedule").then((sched) => sched.reloadDeskAfterConflict("payments"));
       }
     } else if (!res.ok) {
       console.warn("[payments-db] desk push failed", body?.error || res.status);

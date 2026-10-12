@@ -10,6 +10,7 @@ import {
   loadServerRbacIfKnown,
   revalidateStaffSession,
 } from "@/lib/api/v1/auth";
+import { ApiError } from "@/lib/api/v1/errors";
 import { pwaManifestHref } from "@/lib/pwaApps";
 import { TENANT } from "@/lib/types";
 
@@ -51,8 +52,11 @@ export default async function AuthenticatedLayout({
       loadServerRbacIfKnown(),
     ]);
     session = revalidateStaffSession(cookieSession, masters, rbac);
-  } catch {
-    redirect("/login");
+  } catch (e) {
+    // The roster could not be read (503): nothing is decided, the cookie
+    // stands — exactly as when the roster is unknown. Only a real verdict
+    // (an inactive staff record, 401) signs the person out.
+    if (!(e instanceof ApiError && e.status >= 500)) redirect("/login");
   }
   return (
     <div className="bhb-pwa-staff min-h-dvh">

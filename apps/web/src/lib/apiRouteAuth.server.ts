@@ -10,7 +10,7 @@ import {
   resolveApiAuth,
   type ApiAuthContext,
 } from "@/lib/api/v1/auth";
-import { ApiError } from "@/lib/api/v1/errors";
+import { ApiError, authFailureStatus } from "@/lib/api/v1/errors";
 import { featuresForRoute } from "@/lib/rbacFeatures";
 import type { DeskModuleId } from "@/lib/deskCutover";
 import { defaultMasters, DEFAULT_AY } from "@/lib/masters";
@@ -144,7 +144,7 @@ export async function requireStaffApi(
     }
     return authSuccess(ctx, false);
   } catch (e) {
-    return authFailure(401, e instanceof ApiError ? e.message : "Unauthorized");
+    return authFailure(authFailureStatus(e), e instanceof ApiError ? e.message : "Unauthorized");
   }
 }
 
