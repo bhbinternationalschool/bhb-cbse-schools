@@ -105,6 +105,7 @@ import {
   useDemoSession,
   useSessionReadOnly,
 } from "@/components/shell/SessionContext";
+import { useAccessData } from "@/components/shell/useAccessData";
 import {
   buildEnrichedPaymentSharePayload,
   buildPaymentShareUrl,
@@ -291,8 +292,14 @@ export function FeeTakeWorkspace() {
   // Someone holding only some Fees functions (reports, receipt delivery, …)
   // sees only their tabs. Collecting, voiding and adjustments write the fee
   // desk, which stays with the Fees grant — no function opens those tabs.
-  const feesWhole = hasPermission(session, null, "fees", "view");
-  const showTab = (id: string) => feesWhole || canSeeModuleTab(session, null, "fees", id);
+  // Decided from the loaded roles + roster (assignments count); no tab is
+  // shown — and none redirected away from — until both are known.
+  const access = useAccessData();
+  const accessRbac = access.rbac ?? undefined;
+  const feesWhole = access.ready && hasPermission(session, access.masters, "fees", "view", accessRbac);
+  const showTab = (id: string) =>
+    feesWhole ||
+    (access.ready && canSeeModuleTab(session, access.masters, "fees", id, accessRbac));
   const FEE_TAB_ORDER: Tab[] = [
     "dashboard",
     "collect",

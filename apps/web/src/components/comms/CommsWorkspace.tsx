@@ -6,9 +6,9 @@ import { commsTabIsOfficeOnly } from "@/lib/commsTabAccess";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Images, Megaphone } from "lucide-react";
-import { canAccessHref, hasPermission, loadRbac } from "@/lib/rbac";
-import { loadMasters } from "@/lib/masters";
+import { canAccessHref, hasPermission } from "@/lib/rbac";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { CommsReportsRunner } from "@/components/reports/ModuleReportRunners";
@@ -173,7 +173,10 @@ export function CommsWorkspace() {
   const readOnly = useSessionReadOnly();
   // Writing an answer and approving one are different acts: an approved
   // answer is the school speaking to every parent who asks it next.
-  const canApproveAnswers = hasPermission(session, null, "wa_chatbot", "approve");
+  const access = useAccessData();
+  const canApproveAnswers =
+    access.ready &&
+    hasPermission(session, access.masters, "wa_chatbot", "approve", access.rbac ?? undefined);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -405,26 +408,30 @@ export function CommsWorkspace() {
     Notifications, and WA chatbot answers). Someone who holds only some of
     them, or only some of their functions (Masters → Roles), sees the tabs
     they may open — exactly the ones the page gate (ErpModuleGate) lets
-    through, so a tab never leads to "Access restricted". Read in an effect:
-    roles and masters live in this browser's storage, not on the server.
+    through, so a tab never leads to "Access restricted". Worked out again
+    whenever the roles or the roster land or change; until both are known
+    there is no list and no redirect (12 Oct 2026: computed once on mount,
+    it cut the office's App pop-ups / Parents on app for good).
   */
-  const [shownTabs, setShownTabs] = useState<ModuleTabItem[]>(TABS);
-  useEffect(() => {
-    const masters = loadMasters();
-    const rbac = loadRbac();
+  const shownTabs = useMemo<ModuleTabItem[]>(() => {
+    if (!access.ready) return [];
+    const masters = access.masters;
+    const rbac = access.rbac ?? undefined;
     const office = hasPermission(session, masters, "notices", "edit", rbac);
     const base = hasPermission(session, masters, "notices", "view", rbac)
       ? TABS
       : TABS.filter((t) => canAccessHref(session, masters, `/comms?tab=${t.id}`, rbac));
     // Office tabs (WhatsApp chats, pop-ups, Parents on app…) need notices ·
     // edit; a teacher's view grant reads notices, news and the gallery.
-    setShownTabs(office ? base : base.filter((t) => !commsTabIsOfficeOnly(t.id)));
-  }, [session]);
+    return office ? base : base.filter((t) => !commsTabIsOfficeOnly(t.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+  }, [session, access.ready, access.version]);
   useEffect(() => {
+    if (!access.ready) return;
     if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
       setTab(shownTabs[0]!.id as CommsTab);
     }
-  }, [shownTabs, tab]);
+  }, [access.ready, shownTabs, tab]);
 
   function setTab(next: CommsTab) {
     const url = new URL(window.location.href);

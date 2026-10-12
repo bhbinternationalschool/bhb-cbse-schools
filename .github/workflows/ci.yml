@@ -537,6 +537,7 @@ jobs:
           npm run test:ptm-brief-ai
           npm run test:question-bank
           npm run test:rbac-infer
+          npm run test:rbac-assigned-roles
           npm run test:rbac-scope
           npm run test:rbac-user-grants
           npm run test:rbac-editor

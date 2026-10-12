@@ -5,7 +5,11 @@ import { AppShell } from "@/components/shell/AppShell";
 import { ErpModuleGate } from "@/components/shell/ErpModuleGate";
 import { SkeletonModulePage } from "@/components/ui/skeleton";
 import { getDemoSession } from "@/lib/auth";
-import { loadServerMasters, revalidateStaffSession } from "@/lib/api/v1/auth";
+import {
+  loadServerMasters,
+  loadServerRbacIfKnown,
+  revalidateStaffSession,
+} from "@/lib/api/v1/auth";
 import { pwaManifestHref } from "@/lib/pwaApps";
 import { TENANT } from "@/lib/types";
 
@@ -38,11 +42,15 @@ export default async function AuthenticatedLayout({
   if (cookieSession.persona === "parent") redirect("/parent");
   if (cookieSession.persona === "field") redirect("/field");
   // The screens decide menus and pages from this session's role, so give
-  // them the role the roster says TODAY (same re-check as every v1 API
-  // call), not the one frozen into the cookie at sign-in.
+  // them the role their assignment (else the roster) says TODAY — same
+  // re-check as every v1 API call — not the one frozen into the cookie.
   let session = cookieSession;
   try {
-    session = revalidateStaffSession(cookieSession, await loadServerMasters());
+    const [masters, rbac] = await Promise.all([
+      loadServerMasters(),
+      loadServerRbacIfKnown(),
+    ]);
+    session = revalidateStaffSession(cookieSession, masters, rbac);
   } catch {
     redirect("/login");
   }

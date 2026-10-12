@@ -34,6 +34,7 @@ import {
   OwnerLoansPanel,
 } from "@/components/accounts/AccountsPanels";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
 import { ClosingBalancePanel } from "@/components/accounts/ClosingBalancePanel";
 import { DaySheetPanel } from "@/components/accounts/DaySheetPanel";
@@ -122,9 +123,13 @@ const ACCOUNTS_MASTERS_STEPS: StepDef<AccountsMastersStep>[] = [
 
 export function AccountsWorkspace() {
   const session = useDemoSession();
+  // Roles + roster as loaded (assignments count); nothing decided before.
+  const access = useAccessData();
+  const am = access.masters;
+  const ar = access.rbac ?? undefined;
   // Running the projection is a bulk write to the book; the button only
   // renders for someone the API would let through anyway.
-  const canApprove = hasPermission(session, null, "accounts", "approve");
+  const canApprove = access.ready && hasPermission(session, am, "accounts", "approve", ar);
   /**
    * What the school is worth, as against what the counter did today. Cash and
    * bank balances, and income and expenditure for the session, are management
@@ -132,22 +137,28 @@ export function AccountsWorkspace() {
    * The API enforces the same split, so hiding a tab is a courtesy, not the
    * control.
    */
-  const canSeePosition = hasPermission(session, null, "accounts_position", "view");
+  const canSeePosition = access.ready && hasPermission(session, am, "accounts_position", "view", ar);
   const [tab, setTab] = useState<AccountsTab>("dashboard");
   // Someone holding only some Accounts functions (voucher entry, bank recon,
   // …) sees only their tabs; the ledger route enforces the same split.
-  const shownTabs = useMemo(() => visibleModuleTabs(TABS, session, null, "accounts"), [session]);
+  const shownTabs = useMemo(
+    () => (access.ready ? visibleModuleTabs(TABS, session, am, "accounts", ar) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [session, access.ready, access.version],
+  );
   useEffect(() => {
+    if (!access.ready) return;
     // The module holder's landing tab is unchanged; only a function holder,
     // whose tab bar may not include the dashboard, is moved to one they hold.
-    if (hasPermission(session, null, "accounts", "view")) return;
+    if (hasPermission(session, am, "accounts", "view", ar)) return;
     const open = shownTabs.filter(
       (t) => canSeePosition || !["dashboard", "book", "bookreports", "recon", "closing"].includes(t.id),
     );
     if (open.length > 0 && !open.some((t) => t.id === tab)) {
       setTab(open[0]!.id as AccountsTab);
     }
-  }, [session, shownTabs, tab, canSeePosition]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- am/ar follow access.version via shownTabs
+  }, [session, access.ready, shownTabs, tab, canSeePosition]);
   const [mastersStep, setMastersStep] = useState<AccountsMastersStep>("banks");
 
   useEffect(() => {

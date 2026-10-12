@@ -1732,6 +1732,10 @@ export function inferRoleCodes(
     matched.push("gate");
   }
   if (/parent|guardian/.test(rc)) matched.push("parent");
+  // The server mints "support" for a roster member whose designation
+  // matches nothing. Read back without the roster it matched no pattern and
+  // fell through to the blank-login fallback below — principal.
+  if (rc === "support") matched.push("support");
 
   let onRoster = false;
   if (masters) {
@@ -1787,12 +1791,30 @@ export type ScopedRole = { role: RbacRole; scope: RoleScope | null };
 
 function activeAssignmentsFor(
   rbac: RbacState,
-  self: { id: string } | null,
+  staffId: string,
 ): UserRoleAssignment[] {
-  if (!self) return [];
-  return rbac.assignments.filter(
-    (a) => a.staffId === self.id && assignmentActive(a),
+  if (!staffId) return [];
+  return (rbac.assignments ?? []).filter(
+    (a) => a.staffId === staffId && assignmentActive(a),
   );
+}
+
+/**
+ * The roles Masters → Roles explicitly assigned to one staff member (live,
+ * unexpired assignments to active roles), each with its assignment scope.
+ * Keyed on the staff id alone: the rbac slice is enough to answer it, so it
+ * never waits on — or silently skips for want of — the staff roster.
+ */
+export function assignedRoleScopes(
+  rbac: RbacState,
+  staffId: string | null | undefined,
+): ScopedRole[] {
+  return activeAssignmentsFor(rbac, (staffId || "").trim())
+    .map((a): ScopedRole | null => {
+      const role = rbac.roles.find((r) => r.id === a.roleId);
+      return role && role.isActive ? { role, scope: a.scope } : null;
+    })
+    .filter((x): x is ScopedRole => !!x);
 }
 
 /**
@@ -1805,18 +1827,15 @@ export function resolveSessionRoleScopes(
   session: SessionLike,
   masters?: MastersState | null,
 ): ScopedRole[] {
+  // Explicit assignments come first, found by the session's own staff id
+  // when the roster is not in this browser yet. Until 12 Oct 2026 they were
+  // looked up only through the roster, so every check made before
+  // masters.staff landed — and every caller passing masters = null — fell
+  // back to designation guessing: the office (a "Computer Operator" assigned
+  // the office role) lost Comms → App pop-ups and Parents on app.
   const self = masters ? resolveStaffForRbac(session, masters) : null;
-  const fromAssign = activeAssignmentsFor(rbac, self);
-
-  if (fromAssign.length > 0) {
-    const scoped = fromAssign
-      .map((a): ScopedRole | null => {
-        const role = rbac.roles.find((r) => r.id === a.roleId);
-        return role && role.isActive ? { role, scope: a.scope } : null;
-      })
-      .filter((x): x is ScopedRole => !!x);
-    if (scoped.length) return scoped;
-  }
+  const scoped = assignedRoleScopes(rbac, self?.id || session.staffId);
+  if (scoped.length) return scoped;
 
   const codes = inferRoleCodes(session, masters);
   return rbac.roles

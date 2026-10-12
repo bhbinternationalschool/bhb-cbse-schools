@@ -150,8 +150,10 @@ export async function loadServerRbac(): Promise<RbacState> {
   const resolved = state?.roles?.length
     ? normalizeRbacState(state)
     : defaultRbacState();
-  rbacCache = { state: resolved, at: now, probedAt: now, known: true, updatedAt };
-  lastKnownRbac = { state: resolved, updatedAt };
+  // Known = a real saved role set (#574): defaults stand in for nothing.
+  const known = !!state?.roles?.length;
+  rbacCache = { state: resolved, at: now, probedAt: now, known, updatedAt };
+  if (known) lastKnownRbac = { state: resolved, updatedAt };
   return resolved;
 }
 
@@ -162,9 +164,12 @@ async function rbacWithKnown(): Promise<{ rbac: RbacState; rbacKnown: boolean }>
 
 /**
  * The school's roles, assignments and personal grants, or null when they
- * could not be read and this instance has never read them (loadServerRbac
- * then answers with the built-in defaults, which carry no assignments and
- * no personal denies).
+ * could not be read and this instance never read a good copy (a failed read
+ * after a good one returns that last copy, its denies included — see
+ * loadServerRbac). loadServerRbac then answers with the built-in defaults,
+ * which carry no assignments and no personal denies. A session's role code must not be decided from that
+ * stand-in: "no assignment" read off a failed load would strip the office
+ * role from everyone who holds it by assignment.
  */
 export async function loadServerRbacIfKnown(): Promise<RbacState | null> {
   const state = await loadServerRbac();
@@ -272,10 +277,16 @@ async function authFromApiKey(request: Request): Promise<ApiAuthContext | null> 
  *
  * When the roster could not be read (loadServerMasters falls back to an
  * empty default), nothing is decided: the cookie stands as it is.
+ *
+ * Explicit Masters → Roles assignments decide first (12 Oct 2026), so a
+ * person given the office role gets roleCode "office" on their next page
+ * load or API call — no sign-out. `rbac` null = roles could not be read:
+ * the cookie's role is kept rather than re-guessed from the designation.
  */
 export function revalidateStaffSession(
   session: DemoSession,
   masters: MastersState,
+  rbac: RbacState | null,
 ): DemoSession {
   if (session.persona !== "staff" || !session.staffId) return session;
   const roster = masters.staff ?? [];
@@ -288,11 +299,13 @@ export function revalidateStaffSession(
       401,
     );
   }
+  if (!rbac) return session;
   try {
     const roleCode = staffRoleCodeFor(
       { email: session.email, fullName: session.fullName, staffId: session.staffId },
       masters,
       session.roleCode,
+      rbac,
     );
     return roleCode === session.roleCode ? session : { ...session, roleCode };
   } catch {
@@ -308,8 +321,11 @@ export async function resolveApiAuth(request: Request): Promise<ApiAuthContext> 
   if (!cookieSession) {
     throw new ApiError("unauthorized", "Sign in or provide a valid API key", 401);
   }
-  const masters = await loadServerMasters();
-  const session = revalidateStaffSession(cookieSession, masters);
+  const [masters, knownRbac] = await Promise.all([
+    loadServerMasters(),
+    loadServerRbacIfKnown(),
+  ]);
+  const session = revalidateStaffSession(cookieSession, masters, knownRbac);
 
   // A family the school has made inactive (every child) is signed out of
   // the app, with the reason — not left on a screen of errors.
@@ -323,7 +339,8 @@ export async function resolveApiAuth(request: Request): Promise<ApiAuthContext> 
   return {
     session,
     masters,
-    ...(await rbacWithKnown()),
+    rbac: knownRbac ?? (await loadServerRbac()),
+    rbacKnown: knownRbac !== null,
     authKind: "session",
   };
 }
