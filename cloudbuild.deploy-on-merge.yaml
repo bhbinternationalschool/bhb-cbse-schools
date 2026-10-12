@@ -66,8 +66,12 @@ steps:
     entrypoint: bash
     env:
       - NEXT_PUBLIC_DEMO_AUTH_OVERRIDE=false
-      # Both need the app's node_modules, which this image does not have;
-      # the manual deploy has always treated them as optional warnings.
+      # The merge commit this trigger checked out. deploy-online.sh passes it
+      # on to the inner (tarball-sourced) build, where Cloud Build's own
+      # $COMMIT_SHA is empty, so the revision is labelled with it.
+      - COMMIT_SHA=$COMMIT_SHA
+      # bootstrap:go-live and wa:subscribe are opt-in since 13 Oct 2026
+      # (RUN_BOOTSTRAP=1 / RUN_WA_SUBSCRIBE=1); kept for older script copies.
       - SKIP_BOOTSTRAP=1
       - SKIP_WA_SUBSCRIBE=1
       # No key file: the build's own service account is the credential.

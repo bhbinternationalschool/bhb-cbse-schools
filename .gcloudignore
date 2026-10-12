@@ -10,7 +10,12 @@ apps/web/.env*
 .env*
 .cursor
 cbse_school_mobile/
-assets/
+# The repo-root marketing images (10 MB of PNGs), anchored with a leading
+# slash. The unanchored `assets/` also matched
+# apps/web/src/app/api/inventory/assets/ and silently left that route out of
+# every build: /api/inventory/assets answered 404 in production from 23 Aug
+# to 13 Oct 2026.
+/assets/
 
 # Session worktrees: other Claude sessions check the repo out under here, so
 # this is several copies of the same source. 1,441 files and 42% of the upload
