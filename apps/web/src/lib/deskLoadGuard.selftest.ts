@@ -77,5 +77,13 @@ void (async () => {
     const body = src.slice(src.indexOf(`export function ${fn}`), src.indexOf(`export function ${fn}`) + 900);
     assert.ok(body.includes("if (isSupabaseConfigured()) return existing;"), `${fn} never seeds a school desk`);
   }
+  // Screens wait for Masters (12 Oct 2026: Allocate teaching showed no
+  // classes or subjects when it mounted before Masters landed).
+  const shell = readFileSync(join(process.cwd(), "src/components/shell/AppShell.tsx"), "utf8");
+  assert.ok(/<CoreDataGate bootReady=\{bootReady\}>\{children\}<\/CoreDataGate>/.test(shell), "every ERP screen renders inside CoreDataGate");
+  const gate = readFileSync(join(process.cwd(), "src/components/shell/CoreDataGate.tsx"), "utf8");
+  assert.ok(gate.includes('hasDeskLoaded("masters")') && gate.includes("setTimeout(r, 5000)"), "gate needs Masters; waits for staff at most 5 s");
+  const staffWs = readFileSync(join(process.cwd(), "src/components/staff/StaffWorkspace.tsx"), "utf8");
+  assert.ok(staffWs.includes('addEventListener("bhb-masters-updated", onMasters)'), "Staff screen redraws when Masters lands");
   console.log("deskLoadGuard.selftest.ts\n  ok");
 })();

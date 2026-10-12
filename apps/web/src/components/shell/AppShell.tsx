@@ -1,5 +1,6 @@
 "use client";
 
+import { CoreDataGate } from "@/components/shell/CoreDataGate";
 import Image from "next/image";
 import Link from "next/link";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -472,7 +473,7 @@ export function AppShell({
             mobileApp ? "max-sm:px-3 max-sm:py-4" : ""
           }`}
         >
-          {children}
+          <CoreDataGate bootReady={bootReady}>{children}</CoreDataGate>
         </main>
         {mobileApp ? (
           <StaffBottomNav onOpenMenu={() => setMobileNavOpen(true)} />
