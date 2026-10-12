@@ -160,11 +160,31 @@ export function AppShell({
     }
     function onDeskNotLoaded(e: Event) {
       const d = (e as CustomEvent<{ id?: string }>).detail;
-      const what = (d?.id === "staff" ? "staff records" : labels[d?.id ?? ""]) || d?.id || "this module";
+      const extra: Record<string, string> = {
+        staff: "staff records",
+        staff_attendance: "the staff register and punch settings",
+        homework: "homework",
+        exams: "exams",
+        fees: "the fee book",
+        payments: "payments",
+        accounts: "accounts",
+        library: "the library",
+        payroll: "payroll",
+        vault: "the document vault",
+        timetable: "the timetable",
+        teaching: "lesson plans and syllabus",
+        notifications: "notifications",
+        school_comms: "notices",
+        student_leave: "student leave",
+        salary_setup: "salary setup",
+        curriculum: "the curriculum",
+        rte: "RTE",
+      };
+      const what = extra[d?.id ?? ""] || labels[d?.id ?? ""] || d?.id || "this screen";
       void import("@/components/shell/Toast").then(({ pushToast }) => {
         pushToast({
           kind: "error",
-          message: `${what[0]!.toUpperCase()}${what.slice(1)} were still loading from the server, so that change was NOT saved. The screen now shows the saved version — please make your change again.`,
+          message: `Still loading ${what} from the server, so that change was NOT saved. The screen now shows the saved version — please make your change again.`,
           durationMs: 12000,
         });
       });

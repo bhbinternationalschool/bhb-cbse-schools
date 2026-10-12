@@ -55,7 +55,8 @@ const ROUTE_IDS: Record<string, DeskHydrateId[]> = {
   // assignments arrived, and the transport fee simply wasn't offered.
   fees: ["fees", "payments", "feeRecoveryTasks", "transport"],
   admissions: ["admissions"],
-  attendance: ["attendance", "staffAttendance"],
+  // The staff register applies approved leave and files leave (staff HR).
+  attendance: ["attendance", "staffAttendance", "staffHr", "staff"],
   exams: ["exams", "examPapers", "certificates", "attendance"],
   // Staff field apps (lead capture, calling, registration collect).
   field: ["admissions"],
@@ -65,15 +66,17 @@ const ROUTE_IDS: Record<string, DeskHydrateId[]> = {
   staff: ["staff", "staffHr", "staffAdvances", "staffAgreements", "staffAttendance", "salarySetup"],
   // Transport bills, links stops to fee lines and shows dues on the fleet.
   transport: ["transport", "fees", "payments"],
-  // Masters edits leave setup (staff HR) and staff records: load them with
-  // the page, not in the idle sweep — an edit made before its desk loads is
-  // refused (createDeskSlicePersistence, staffPersistence). Roles &
+  // Masters edits leave setup (staff HR), staff records and the staff punch
+  // settings: load them with the page, not in the idle sweep — an edit made
+  // before its desk loads is refused (lib/deskLoadGuard). Roles &
   // permissions are a core desk, loaded first on every page.
-  masters: ["salarySetup", "staffHr", "staff"],
+  masters: ["salarySetup", "staffHr", "staff", "staffAttendance"],
   students: ["fees", "payments", "attendance"],
   comms: ["waTemplates", "erpChat", "staffChat", "automation"],
   payroll: ["staff", "staffHr", "staffAdvances", "salarySetup"],
   reports: ["fees", "payments", "attendance", "exams"],
+  // Day close and fuel refills write the fee book and transport.
+  accounts: ["fees", "payments", "transport"],
 };
 
 /**
@@ -86,17 +89,18 @@ const ROUTE_MODULE_STATES: Record<string, import("@/lib/moduleStateRegistry").Mo
   payroll: ["salary_increment", "salary_hold", "salary_account", "tally_sync"],
   staff: ["duty_roster", "staff_attendance_rules"],
   attendance: ["staff_attendance_rules"],
-  exams: ["exam_invigilation", "attendance_result_overrides"],
+  exams: ["exam_invigilation", "attendance_result_overrides", "fee_holds"],
   complaints: ["complaints"],
   discipline: ["discipline"],
   health: ["health"],
   visitors: ["visitors"],
-  students: ["udise_compliance", "fee_holds"],
-  admissions: ["wa_campaigns", "crm_parent_chat"],
-  masters: ["wa_chatbot_flows"],
+  students: ["udise_compliance", "fee_holds", "birthday_settings", "compliance_facts"],
+  admissions: ["wa_campaigns", "crm_parent_chat", "admissions_kb", "marketing_spend", "school_achievements", "referrals"],
+  masters: ["wa_chatbot_flows", "staff_attendance_rules", "salary_increment"],
   "id-cards": ["id_card_template"],
   certificates: ["fee_holds"],
   accounts: ["tally_sync"],
+  transport: ["fee_holds"],
 };
 
 /**

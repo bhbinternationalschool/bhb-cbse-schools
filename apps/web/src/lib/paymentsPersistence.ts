@@ -2,6 +2,7 @@
  * Payments remote sync — jsonb blob on payments_state + normalized payment_desk_*.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   loadPayments,
@@ -38,6 +39,8 @@ export function resetPaymentsPersistenceCache() {
 }
 
 export function schedulePaymentsSync(state: PaymentsState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensurePaymentsHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushPaymentsRemoteServer(state));
     return;

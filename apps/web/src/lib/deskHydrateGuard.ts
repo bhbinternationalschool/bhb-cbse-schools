@@ -6,6 +6,20 @@
 const hydrated = new Map<string, number>();
 const DESK_HYDRATE_TTL_MS = 15_000;
 
+/**
+ * Desks this page has loaded from the server at least once since the last
+ * reset (12 Oct 2026). Unlike `isDeskHydrated` — a 15 s "loaded recently"
+ * cache that decides when to re-read — this never expires on its own, so it
+ * answers "is this page holding the real copy?" for the save guards
+ * (lib/deskLoadGuard). A reset (conflict reload, merge, logout) clears it
+ * until the next load lands.
+ */
+const loadedOnce = new Set<string>();
+
+export function hasDeskLoaded(module: string): boolean {
+  return loadedOnce.has(module);
+}
+
 export function isDeskHydrated(module: string): boolean {
   const last = hydrated.get(module);
   if (!last) return false;
@@ -14,11 +28,17 @@ export function isDeskHydrated(module: string): boolean {
 
 export function markDeskHydrated(module: string): void {
   hydrated.set(module, Date.now());
+  loadedOnce.add(module);
 }
 
 export function resetDeskHydrated(module?: string): void {
-  if (module) hydrated.delete(module);
-  else hydrated.clear();
+  if (module) {
+    hydrated.delete(module);
+    loadedOnce.delete(module);
+  } else {
+    hydrated.clear();
+    loadedOnce.clear();
+  }
   inFlight.clear();
 }
 

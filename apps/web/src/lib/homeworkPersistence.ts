@@ -2,6 +2,7 @@
  * Homework remote sync — jsonb blob on homework_state + normalized homework_desk_*.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   homeworkStateIsEmpty,
@@ -41,6 +42,8 @@ export function resetHomeworkPersistenceCache() {
 }
 
 export function scheduleHomeworkSync(state: HomeworkState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureHomeworkHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushHomeworkRemoteServer(state));
     return;
