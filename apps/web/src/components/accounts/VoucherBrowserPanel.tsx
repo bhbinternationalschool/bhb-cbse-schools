@@ -30,6 +30,7 @@ import {
   type PartyRow,
 } from "@/components/accounts/VoucherAmendDialogs";
 import {
+  ENTRY_VIEWS,
   childCodesByParent,
   headGaps,
   type ChartAccount,
@@ -79,7 +80,17 @@ async function ledgerApi<T>(body: Record<string, unknown>): Promise<T> {
   return (await res.json()) as T;
 }
 
-export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
+export function VoucherBrowserPanel({
+  canEdit,
+  initialView,
+  title = "Vouchers",
+}: {
+  canEdit: boolean;
+  /** Open on one of ENTRY_VIEWS (e.g. "trustee" on the Owner loans tab). */
+  initialView?: string;
+  title?: string;
+}) {
+  const startView = ENTRY_VIEWS.find((x) => x.id === initialView) ?? null;
   const [chart, setChart] = useState<ChartRow[]>([]);
   const [result, setResult] = useState<SearchResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -93,8 +104,9 @@ export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
 
   // The draft is what the operator is typing; `applied` is what was searched.
   // Separating them stops every keystroke hitting a query that reads the book.
-  const [draft, setDraft] = useState<VoucherFilter>({ status: "live" });
-  const [applied, setApplied] = useState<VoucherFilter>({ status: "live" });
+  const [draft, setDraft] = useState<VoucherFilter>(startView?.filter ?? { status: "live" });
+  const [applied, setApplied] = useState<VoucherFilter>(startView?.filter ?? { status: "live" });
+  const [viewId, setViewId] = useState<string | null>(startView?.id ?? null);
 
   const chartForFilter: ChartAccount[] = useMemo(
     () =>
@@ -148,13 +160,23 @@ export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
 
   function run() {
     setPage(0);
+    setViewId(null);
     setApplied(draft);
   }
   function clear() {
     const fresh: VoucherFilter = { status: "live" };
     setDraft(fresh);
     setPage(0);
+    setViewId(null);
     setApplied(fresh);
+  }
+  function openView(id: string) {
+    const v = ENTRY_VIEWS.find((x) => x.id === id);
+    if (!v) return;
+    setDraft(v.filter);
+    setPage(0);
+    setViewId(id);
+    setApplied(v.filter);
   }
 
   const rows = result?.rows ?? [];
@@ -170,7 +192,7 @@ export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
   return (
     <section className={CARD}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h4 className="text-sm font-bold text-[var(--brand-deep)]">Vouchers</h4>
+        <h4 className="text-sm font-bold text-[var(--brand-deep)]">{title}</h4>
         <p className="text-[11px] text-[var(--muted)]">
           {busy
             ? "Reading the book…"
@@ -178,6 +200,34 @@ export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
                 total > PAGE ? ` · showing ${page * PAGE + 1}–${Math.min((page + 1) * PAGE, total)}` : ""
               }`}
         </p>
+      </div>
+
+      {/* ── ready-made views: check here before keying an entry ─ */}
+      <div className="mt-3">
+        <p className={LABEL}>Already in the books — check before entering</p>
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {ENTRY_VIEWS.map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              title={v.hint}
+              aria-pressed={viewId === v.id}
+              onClick={() => openView(v.id)}
+              className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
+                viewId === v.id
+                  ? "border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]"
+                  : "border-[var(--border)] text-[var(--ink)] hover:bg-[var(--surface-sunken)]"
+              }`}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+        {viewId ? (
+          <p className="mt-1 text-[10px] text-[var(--muted)]">
+            {ENTRY_VIEWS.find((x) => x.id === viewId)?.hint} · reversed entries are hidden
+          </p>
+        ) : null}
       </div>
 
       {/* ── filters ─────────────────────────────────────────── */}

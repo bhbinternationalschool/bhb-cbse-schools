@@ -10,6 +10,7 @@ import {
   SpendTagsPanel,
 } from "@/components/accounts/LedgerEntryPanels";
 import { UnpostedEntriesBanner } from "@/components/accounts/UnpostedEntriesBanner";
+import { VoucherBrowserPanel } from "@/components/accounts/VoucherBrowserPanel";
 import { DeskSyncBanner } from "@/components/accounts/DeskSyncBanner";
 import {
   BankReconPanel,
@@ -401,6 +402,9 @@ export function AccountsWorkspace() {
         </>
       ) : tab === "owner" ? (
         <>
+          {/* What the book holds for trustee money — in and repaid. The panel
+              below reads the old browser book, which never had these. */}
+          <VoucherBrowserPanel canEdit={canApprove} initialView="trustee" title="Trustee loans in the book" />
           <LegacyBookNotice tab="Owner loans — use the owner-loan presets in Vouchers" />
           <OwnerLoansPanel {...panelProps} />
         </>

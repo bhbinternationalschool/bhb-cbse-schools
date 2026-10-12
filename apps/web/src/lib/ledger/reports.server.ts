@@ -690,6 +690,8 @@ export async function ledgerSearchVouchers(input: {
       if (f.to) q = q.lte("voucher_date", f.to);
       if (f.voucherType) q = q.eq("voucher_type", f.voucherType);
       if (f.sourceType) q = q.eq("source_type", f.sourceType === "manual" ? "" : f.sourceType);
+      const skip = (f.excludeSourceTypes ?? []).filter((t) => /^[a-z0-9_]+$/.test(t));
+      if (skip.length) q = q.not("source_type", "in", `(${skip.join(",")})`);
       const { data, error } = await q
         .order("voucher_date", { ascending: false })
         .order("voucher_no", { ascending: false })
