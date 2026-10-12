@@ -1988,6 +1988,52 @@ class LEn extends L {
   String get profDocumentsSchoolNeeds => 'Documents the school needs';
 
   @override
+  String get profAadhaarSection => 'Aadhaar numbers';
+
+  @override
+  String get profAadhaarIntro =>
+      'Shown hidden. If a number is wrong, correct it here — numbers the school has already verified are corrected by the office.';
+
+  @override
+  String get profAadhaarFather => 'Father';
+
+  @override
+  String get profAadhaarMother => 'Mother';
+
+  @override
+  String get profAadhaarNotGiven => 'Not given';
+
+  @override
+  String get profAadhaarVerified => 'Verified by school';
+
+  @override
+  String get profAadhaarAdd => 'Add';
+
+  @override
+  String get profAadhaarCorrect => 'Correct';
+
+  @override
+  String profAadhaarDialogTitle(String who) {
+    return '$who — Aadhaar number';
+  }
+
+  @override
+  String get profAadhaarInvalid =>
+      'This is not a valid 12-digit Aadhaar number — please check it.';
+
+  @override
+  String profAadhaarSaved(String last4) {
+    return 'Saved — XXXX-XXXX-$last4';
+  }
+
+  @override
+  String get profAadhaarUnchanged => 'That number is already on record.';
+
+  @override
+  String get profAadhaarKeptVerified =>
+      'The school has already verified this Aadhaar, so it was not changed. Please contact the school office.';
+
+  @override
   String get profDetailsOnRecord => 'Details on record';
 
   @override

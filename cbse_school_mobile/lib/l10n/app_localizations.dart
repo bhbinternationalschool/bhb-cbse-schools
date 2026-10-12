@@ -3549,6 +3549,84 @@ abstract class L {
   /// **'Documents the school needs'**
   String get profDocumentsSchoolNeeds;
 
+  /// No description provided for @profAadhaarSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Aadhaar numbers'**
+  String get profAadhaarSection;
+
+  /// No description provided for @profAadhaarIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'Shown hidden. If a number is wrong, correct it here — numbers the school has already verified are corrected by the office.'**
+  String get profAadhaarIntro;
+
+  /// No description provided for @profAadhaarFather.
+  ///
+  /// In en, this message translates to:
+  /// **'Father'**
+  String get profAadhaarFather;
+
+  /// No description provided for @profAadhaarMother.
+  ///
+  /// In en, this message translates to:
+  /// **'Mother'**
+  String get profAadhaarMother;
+
+  /// No description provided for @profAadhaarNotGiven.
+  ///
+  /// In en, this message translates to:
+  /// **'Not given'**
+  String get profAadhaarNotGiven;
+
+  /// No description provided for @profAadhaarVerified.
+  ///
+  /// In en, this message translates to:
+  /// **'Verified by school'**
+  String get profAadhaarVerified;
+
+  /// No description provided for @profAadhaarAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Add'**
+  String get profAadhaarAdd;
+
+  /// No description provided for @profAadhaarCorrect.
+  ///
+  /// In en, this message translates to:
+  /// **'Correct'**
+  String get profAadhaarCorrect;
+
+  /// No description provided for @profAadhaarDialogTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'{who} — Aadhaar number'**
+  String profAadhaarDialogTitle(String who);
+
+  /// No description provided for @profAadhaarInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'This is not a valid 12-digit Aadhaar number — please check it.'**
+  String get profAadhaarInvalid;
+
+  /// No description provided for @profAadhaarSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved — XXXX-XXXX-{last4}'**
+  String profAadhaarSaved(String last4);
+
+  /// No description provided for @profAadhaarUnchanged.
+  ///
+  /// In en, this message translates to:
+  /// **'That number is already on record.'**
+  String get profAadhaarUnchanged;
+
+  /// No description provided for @profAadhaarKeptVerified.
+  ///
+  /// In en, this message translates to:
+  /// **'The school has already verified this Aadhaar, so it was not changed. Please contact the school office.'**
+  String get profAadhaarKeptVerified;
+
   /// No description provided for @profDetailsOnRecord.
   ///
   /// In en, this message translates to:

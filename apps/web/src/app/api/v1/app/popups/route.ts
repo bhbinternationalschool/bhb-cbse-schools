@@ -6,7 +6,8 @@
  * POST { popupId, action: "done", aadhaar?: {stu_…|father|mother: digits} }
  * POST { popupId, action: "done", consent: "yes" | "no" }
  *   A form is "done" only once its answer is saved: Aadhaar numbers onto the
- *   children's records (checked, never written over an existing number), an
+ *   children's records (checked; a family may correct its own unverified
+ *   number, never one the school verified for UDISE+), an
  *   APAAR consent exactly as WhatsApp records it.
  */
 
@@ -80,7 +81,10 @@ export async function POST(request: Request) {
       if (!r.ok) throw new ApiError("bad_request", r.error, 400);
       // Which ones were given — never the numbers.
       await recordPopupEvent(popupId, who.subjectKey, "done", { aadhaarFor: Object.keys(numbers) });
-      return apiOk({ saved: r.saved });
+      // Per person: saved / corrected / unchanged / kept (verified by the
+      // school) with the last 4 digits, so the app can show what was stored
+      // and offer a correction (12 Oct 2026).
+      return apiOk({ saved: r.saved, outcomes: r.outcomes });
     }
 
     if (popup.form === "consent") {

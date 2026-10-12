@@ -137,3 +137,38 @@ export function householdForParent(h: Household) {
     pincode: h.pincode,
   };
 }
+
+
+/**
+ * The family's Aadhaar numbers on one child's record, as the parent app shows
+ * them (12 Oct 2026): last 4 digits only, and whether the school has verified
+ * each — a verified number is corrected by the office, an unverified one by
+ * the family from the app (POST /api/v1/profile/aadhaar).
+ */
+export type AadhaarOnRecord = {
+  who: "child" | "father" | "mother";
+  last4: string;
+  status: "missing" | "received" | "verified";
+};
+
+export function aadhaarOnRecord(s: SisStudent): AadhaarOnRecord[] {
+  const one = (
+    who: AadhaarOnRecord["who"],
+    number: string | undefined,
+    last4: string | undefined,
+    verification: string | undefined,
+  ): AadhaarOnRecord => {
+    const full = (number || "").replace(/\D/g, "");
+    const l4 = full.length === 12 ? full.slice(-4) : (last4 || "").replace(/\D/g, "").slice(-4);
+    return {
+      who,
+      last4: l4.length === 4 ? l4 : "",
+      status: l4.length !== 4 ? "missing" : verification === "verified_udise" ? "verified" : "received",
+    };
+  };
+  return [
+    one("child", s.aadhaarNumber, s.aadhaarLast4, s.aadhaarVerification),
+    one("father", s.fatherAadhaarNumber, s.fatherAadhaarLast4, s.fatherAadhaarVerification),
+    one("mother", s.motherAadhaarNumber, s.motherAadhaarLast4, s.motherAadhaarVerification),
+  ];
+}

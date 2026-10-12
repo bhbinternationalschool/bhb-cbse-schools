@@ -392,6 +392,7 @@
     "test:library-ebooks": "npx tsx src/lib/libraryEbooks.selftest.ts",
     "test:pinnacle-books": "npx tsx src/lib/pinnacleBooks.selftest.ts",
     "test:pinnacle-assets": "npx tsx src/lib/pinnacleAssets.selftest.ts",
+    "test:parent-aadhaar-on-record": "npx tsx src/lib/parentAadhaarOnRecord.selftest.ts",
     "test:serial-save": "npx tsx src/lib/serialSave.selftest.ts",
     "test:desk-load-guard": "npx tsx src/lib/deskLoadGuard.selftest.ts",
     "test:desk-on-demand": "npx tsx src/lib/deskOnDemand.selftest.ts",
