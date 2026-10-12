@@ -2,6 +2,7 @@
  * Client → server sync for normalized accounts desk.
  */
 
+import { serialSave } from "@/lib/serialSave";
 import type { AccountsState } from "@/lib/accountsTypes";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
@@ -171,7 +172,12 @@ export function stampedPayload(state: AccountsState) {
  * message is passed through rather than replaced with a generic one: "Your
  * role cannot write accounts" is actionable and "save failed" is not.
  */
-async function pushAccountsDeskApi(state: AccountsState) {
+/** One save at a time for this desk — see lib/serialSave. */
+function pushAccountsDeskApi(...args: Parameters<typeof pushAccountsDeskApiNow>): ReturnType<typeof pushAccountsDeskApiNow> {
+  return serialSave("accounts", () => pushAccountsDeskApiNow(...args)) as ReturnType<typeof pushAccountsDeskApiNow>;
+}
+
+async function pushAccountsDeskApiNow(state: AccountsState) {
   await trackDeskPush("accounts", async () => {
     const sentDeletes = pendingDeskDeletes(ACCOUNTS_DESK);
     const sent = stampedPayload(state);

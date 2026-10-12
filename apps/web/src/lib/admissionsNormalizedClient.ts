@@ -2,6 +2,7 @@
  * Client → server sync for normalized admission desk.
  */
 
+import { serialSave } from "@/lib/serialSave";
 import type { AdmissionsState } from "@/lib/admissions";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
@@ -82,7 +83,12 @@ export function scheduleAdmissionsDeskSync(state: AdmissionsState) {
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
-async function pushAdmissionsDeskApi(state: AdmissionsState) {
+/** One save at a time for this desk — see lib/serialSave. */
+function pushAdmissionsDeskApi(...args: Parameters<typeof pushAdmissionsDeskApiNow>): ReturnType<typeof pushAdmissionsDeskApiNow> {
+  return serialSave("admissions", () => pushAdmissionsDeskApiNow(...args)) as ReturnType<typeof pushAdmissionsDeskApiNow>;
+}
+
+async function pushAdmissionsDeskApiNow(state: AdmissionsState) {
   // Only the leads, households and payments this browser changed, each with
   // the stamp it loaded — never a stale copy of one changed elsewhere since.
   const sentStamps = buildStampedSave(

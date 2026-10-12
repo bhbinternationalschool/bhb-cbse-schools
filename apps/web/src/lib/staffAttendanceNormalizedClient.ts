@@ -2,6 +2,7 @@
  * Client → server sync for normalized staff attendance desk.
  */
 
+import { serialSave } from "@/lib/serialSave";
 import {
   defaultAttendanceSettings,
   type StaffAttendanceState,
@@ -91,7 +92,12 @@ export function scheduleStaffAttendanceDeskSync(state: StaffAttendanceState) {
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
-async function pushStaffAttendanceDeskApi(state: StaffAttendanceState) {
+/** One save at a time for this desk — see lib/serialSave. */
+function pushStaffAttendanceDeskApi(...args: Parameters<typeof pushStaffAttendanceDeskApiNow>): ReturnType<typeof pushStaffAttendanceDeskApiNow> {
+  return serialSave("staff-attendance", () => pushStaffAttendanceDeskApiNow(...args)) as ReturnType<typeof pushStaffAttendanceDeskApiNow>;
+}
+
+async function pushStaffAttendanceDeskApiNow(state: StaffAttendanceState) {
   // Only the registers this browser changed, each with the stamp it loaded
   // — never its old copy of a day someone has punched into since.
   const sentStamps = buildStampedSave(STAFF_ATTENDANCE_DESK, state as unknown as Record<string, unknown>, STAMP_SLICES);

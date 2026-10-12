@@ -2,6 +2,7 @@
  * Client → server sync for normalized exam desk.
  */
 
+import { serialSave } from "@/lib/serialSave";
 import type { ExamsState } from "@/lib/exams";
 import { defaultExamPolicy } from "@/lib/exams";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
@@ -80,7 +81,12 @@ export function scheduleExamsDeskSync(state: ExamsState) {
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
-async function pushExamsDeskApi(state: ExamsState) {
+/** One save at a time for this desk — see lib/serialSave. */
+function pushExamsDeskApi(...args: Parameters<typeof pushExamsDeskApiNow>): ReturnType<typeof pushExamsDeskApiNow> {
+  return serialSave("exams", () => pushExamsDeskApiNow(...args)) as ReturnType<typeof pushExamsDeskApiNow>;
+}
+
+async function pushExamsDeskApiNow(state: ExamsState) {
   const sentDeletes = pendingDeskDeletes(EXAMS_DESK);
   // Setup only. Sheets go one at a time through examsSheetSync.ts — sending
   // them here replaced (and pruned) every sheet on the server. Only the rows

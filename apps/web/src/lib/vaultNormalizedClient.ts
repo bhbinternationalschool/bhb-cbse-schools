@@ -2,6 +2,7 @@
  * Client → server sync for normalized vault desk.
  */
 
+import { serialSave } from "@/lib/serialSave";
 import type { VaultState } from "@/lib/vault";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
@@ -76,7 +77,12 @@ export function scheduleVaultDeskSync(state: VaultState) {
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
-async function pushVaultDeskApi(state: VaultState) {
+/** One save at a time for this desk — see lib/serialSave. */
+function pushVaultDeskApi(...args: Parameters<typeof pushVaultDeskApiNow>): ReturnType<typeof pushVaultDeskApiNow> {
+  return serialSave("vault", () => pushVaultDeskApiNow(...args)) as ReturnType<typeof pushVaultDeskApiNow>;
+}
+
+async function pushVaultDeskApiNow(state: VaultState) {
   const sentDeletes = pendingDeskDeletes(VAULT_DESK);
   const holder = { documents: state.documents, settings: state.settings } as Record<string, unknown>;
   // Only the documents this browser changed, each with the stamp it loaded.

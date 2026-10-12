@@ -9,6 +9,7 @@
  * marker. Status tracked here is a separate, additive concern.
  */
 
+import { serialSave } from "@/lib/serialSave";
 import { trackServerWork } from "@/lib/serverWork";
 export type SyncStatus = "idle" | "pending" | "retrying" | "failed";
 
@@ -80,7 +81,11 @@ function attempt(key: string, entry: RetryEntry) {
     status: entry.attempts === 0 ? "pending" : "retrying",
     attempts: entry.attempts,
   });
-  void trackServerWork(entry.run().then((result) => {
+  // One save at a time per key (lib/serialSave): a save queued behind a newer
+  // call for the same key is skipped, so only the newest state is sent.
+  const run = () =>
+    entries.get(key) === entry ? entry.run() : Promise.resolve({ ok: true } as Awaited<ReturnType<PushRunner>>);
+  void trackServerWork(serialSave(`retrying:${key}`, run).then((result) => {
     // A newer call for this key may have replaced this entry mid-flight.
     if (entries.get(key) !== entry) return;
     if (result.ok) {
