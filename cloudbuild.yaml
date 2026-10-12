@@ -153,15 +153,14 @@ steps:
   #   vCPU, memory 40% of 2 GiB. Memory stays at 2 GiB for PDF and
   #   spreadsheet spikes.
   #
-  # --min-instances=1 (13 Oct 2026, data-layer plan step 0.2). It was 0
-  #   because a warm 2 vCPU instance with always-on CPU billing was the largest
-  #   line on the GCP bill. Since 16 Sep the instance is 1 vCPU with
-  #   --cpu-throttling, so an idle instance bills at Cloud Run's idle rate
-  #   (roughly US$10–27 a month for 1 vCPU + 2 GiB in this region). What it
-  #   buys: the first office request after a quiet spell no longer starts Node
-  #   and rebuilds every whole-desk server copy from scratch (63 fresh
-  #   instances served traffic on 11–12 Oct; desk GETs had a p99 of 11.9 s).
-  #   Bursts still start extra instances (--concurrency=20).
+  # --min-instances=0. A warm 2 vCPU instance with always-on CPU billing was
+  #   once the largest line on the GCP bill. A warm instance is also not
+  #   needed in the day: Cloud Scheduler already calls this service every 5
+  #   min (bhb-online-classes-tick, 07–21 Mon–Sat) and every 10 min
+  #   (bhb-comms-scheduled-publish, 06–22), inside the ~15 min an idle
+  #   instance survives, so one stays up through school hours at no cost
+  #   (checked 13 Oct 2026; decided with the director). Most fresh instances
+  #   come from deploys and bursts, which min-instances would not prevent.
   #   This lives here, not in `gcloud run services update`: every deploy
   #   re-applies these flags (that is how 0 came back as 1 on 2026-08-22).
   #
@@ -215,7 +214,7 @@ steps:
           --port=3000 \
           --memory=2Gi \
           --cpu=1 \
-          --min-instances=1 \
+          --min-instances=0 \
           --max-instances=20 \
           --concurrency=20 \
           --cpu-throttling \
