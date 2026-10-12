@@ -7,6 +7,7 @@
  */
 import assert from "node:assert/strict";
 import {
+  ENTRY_VIEWS,
   childCodesByParent,
   headGapForLine,
   headGaps,
@@ -194,5 +195,30 @@ assert.equal(
   }).ok,
   false,
 );
+
+/* ── ready-made "already in the book" views (13 Oct 2026) ─────── */
+{
+  const view = (id: string) => ENTRY_VIEWS.find((x) => x.id === id)!.filter;
+  const line = (accountCode: string, debitPaise: number, creditPaise: number) =>
+    ({ accountCode, accountName: accountCode, partyName: "", debitPaise, creditPaise });
+  const fuel = voucher({ lines: [line("5031", 1000, 0), line("1000", 0, 1000)] });
+  const salary = voucher({ lines: [line("5070", 9000, 0), line("1070", 0, 1000), line("1012", 0, 8000)] });
+  const fee = voucher({ sourceType: "fee_voucher", voucherType: "receipt", lines: [line("1000", 500, 0), line("4000", 0, 500)] });
+  const trusteeIn = voucher({ voucherType: "receipt", lines: [line("1012", 100000, 0), line("2100", 0, 100000)] });
+  const emi = voucher({ sourceType: "vehicle_loan", lines: [line("2151", 15000, 0), line("1012", 0, 15000)] });
+  const reversed = voucher({ reversed: true, lines: [line("5031", 1000, 0), line("1000", 0, 1000)] });
+  const m = (v: VoucherFacts, id: string) => matchesVoucherFilter(v, view(id), chart, byParent);
+
+  assert.equal(m(fuel, "expenses"), true, "an expense is in Expenses");
+  assert.equal(m(salary, "expenses"), false, "salary is not an Expense — it has its own view");
+  assert.equal(m(salary, "salary"), true);
+  assert.equal(m(salary, "advances"), true, "a salary that recovered an advance shows under advances too");
+  assert.equal(m(fee, "in_book"), false, "fees are never keyed in Vouchers, so they are left out");
+  assert.equal(m(fuel, "in_book"), true);
+  assert.equal(m(trusteeIn, "trustee"), true, "trustee money in shows with the repayments");
+  assert.equal(m(emi, "vehicle_loans"), true, "any of the three loan heads");
+  assert.equal(m(reversed, "expenses"), false, "a reversed entry is hidden — it is no longer in the book");
+  assert.ok(ENTRY_VIEWS.every((x) => x.filter.status === "live"), "every view hides reversed entries");
+}
 
 console.log("voucherFilter self-test passed");
