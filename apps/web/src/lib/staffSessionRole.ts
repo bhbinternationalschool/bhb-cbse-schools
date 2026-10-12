@@ -56,15 +56,25 @@ function grantCount(role: RbacRole): number {
  * Built-in codes rank by ASSIGNED_PRIORITY; a custom role (cloned or new)
  * ranks after them by how many grants it holds. Empty = no assignment.
  */
+function hasScope(scope: unknown): boolean {
+  if (!scope || typeof scope !== "object") return false;
+  return Object.values(scope as Record<string, unknown>).some((v) =>
+    Array.isArray(v) ? v.length > 0 : v != null && v !== "",
+  );
+}
+
 export function assignedRoleCodesFor(
   staffId: string | null | undefined,
   rbac: RbacState,
+  opts: { unscopedOnly?: boolean } = {},
 ): string[] {
   const rank = (r: RbacRole) => {
     const i = (ASSIGNED_PRIORITY as readonly string[]).indexOf(r.code);
     return i >= 0 ? i : ASSIGNED_PRIORITY.length;
   };
-  const roles = assignedRoleScopes(rbac, staffId).map((x) => x.role);
+  const roles = assignedRoleScopes(rbac, staffId)
+    .filter((x) => !opts.unscopedOnly || !hasScope(x.scope))
+    .map((x) => x.role);
   roles.sort((a, b) => rank(a) - rank(b) || grantCount(b) - grantCount(a));
   return [...new Set(roles.map((r) => r.code).filter(Boolean))];
 }
@@ -83,7 +93,11 @@ export function staffRoleCodeFor(
   const owner = superAdminRoleCode(person.email);
   if (owner) return owner;
   if (rbac && person.staffId) {
-    const assigned = assignedRoleCodesFor(person.staffId, rbac);
+    // The label comes from UNSCOPED assignments only. Some checks still read
+    // the label alone (attendance unlock, social credentials, admissions
+    // manager), so "office for Class V" must not make a session "office"
+    // school-wide; scoped grants still apply through the permission checks.
+    const assigned = assignedRoleCodesFor(person.staffId, rbac, { unscopedOnly: true });
     if (assigned.length > 0) return assigned[0]!;
   }
   const codes = inferRoleCodes(

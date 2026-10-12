@@ -184,4 +184,23 @@ for (const ev of ["bhb-desk-first-hydrated", "bhb-masters-updated", "bhb-desk-hy
   assert.ok(hook.includes(`"${ev}"`), `useAccessData recomputes on ${ev}`);
 }
 
+// A SCOPED assignment never becomes the session label: "office for one class"
+// must not read as school-wide office in label-only checks (review of #574).
+{
+  const scoped: RbacState = {
+    ...rbac,
+    assignments: [
+      ...rbac.assignments,
+      { ...assign("stf_teacher", "role_office"), scope: { campusIds: [], classIds: ["cls_v"], departmentIds: [] } },
+    ],
+  };
+  assert.notEqual(
+    staffRoleCodeFor(person("stf_teacher", "Teacher Person"), masters, "teacher", scoped),
+    "office",
+    "a class-scoped office assignment does not make the session label office",
+  );
+  assert.ok(assignedRoleCodesFor("stf_teacher", scoped).includes("office"), "the scoped grant itself still exists");
+  assert.deepEqual(assignedRoleCodesFor("stf_teacher", scoped, { unscopedOnly: true }), []);
+}
+
 console.log("rbacAssignedRoles.selftest.ts: ok");

@@ -28,8 +28,8 @@ export function markDeskHydrated(module: string): void {
   hydrated.set(module, Date.now());
   if (everHydrated.has(module)) return;
   everHydrated.add(module);
-  // Once per desk per page, after the caller has written what it read (the
-  // write follows this mark in the same tick).
+  // Once per desk per page. Callers mark AFTER writing what they read (the
+  // event is also deferred a tick), so a listener finds the data in place.
   if (typeof window !== "undefined") {
     window.setTimeout(() => {
       window.dispatchEvent(

@@ -25,6 +25,7 @@ import {
 } from "@/lib/staffDbConfig";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 import {
+  dedupeHydration,
   isDeskHydrated,
   markDeskHydrated,
   resetDeskHydrated,
@@ -728,15 +729,21 @@ export function scheduleStaffSync(state: MastersState) {
 /**
  * Pull staff slice once, merge into Masters localStorage, then push desk.
  */
-export async function ensureStaffHydrated(): Promise<boolean> {
-  if (!staffRemoteEnabled()) return false;
+export function ensureStaffHydrated(): Promise<boolean> {
+  if (!staffRemoteEnabled()) return Promise.resolve(false);
+  if (isDeskHydrated(MODULE)) return Promise.resolve(false);
+  // One load at a time: the hydrated mark now lands at the end, so it can no
+  // longer double as the guard against a second concurrent pull.
+  return dedupeHydration(MODULE, hydrateStaffOnce);
+}
+
+async function hydrateStaffOnce(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
 
   const readFromDb = staffReadFromDbEnabled();
   const remote = await fetchStaffRemote();
   if (!remote) return false;
 
-  markDeskHydrated(MODULE);
   const { loadMasters } = await import("@/lib/masters");
   const { writeMastersLocalRaw } = await import("@/lib/mastersPersistence");
   let next = loadMasters();
@@ -786,6 +793,10 @@ export async function ensureStaffHydrated(): Promise<boolean> {
       window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
     }
   }
+  // Marked only once the roster is written: markDeskHydrated fires
+  // bhb-desk-first-hydrated, and access checks listening for it must find the
+  // roster already in masters (review of #574).
+  markDeskHydrated(MODULE);
   // The roster as this browser now holds it, at the server's stamps, is the
   // base of the next save: only rows changed from here are sent.
   if (remote.stamps) {
