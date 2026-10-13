@@ -358,6 +358,7 @@ SELFTESTS=(
   test:exams
   test:exam-date-sheet
   test:parent-results
+  test:bus-mark-push
   test:exams-sheet-safety
   test:exam-schemes
   test:exam-readiness

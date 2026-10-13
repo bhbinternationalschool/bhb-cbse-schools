@@ -451,6 +451,7 @@ jobs:
           npm run test:exams
           npm run test:exam-date-sheet
           npm run test:parent-results
+          npm run test:bus-mark-push
           npm run test:exams-sheet-safety
           npm run test:exam-schemes
           npm run test:exam-readiness
