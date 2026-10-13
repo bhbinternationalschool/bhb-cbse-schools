@@ -199,15 +199,18 @@ async function addSubject(a: Page, via: EditVia, code: string, name: string): Pr
   }
   const desk = await mastersDesk(a.request);
   const subject = normalizeSubject({ id: `e2e_sub_${code.toLowerCase()}`, code, nameEn: name, sortOrder: desk.subjects.length + 1 });
-  // The row the editor builds (SubjectsPanel saveEditor): isOptional is required by
-  // masters_desk_class_subjects.is_optional (NOT NULL).
+  // The row the editor builds (SubjectsPanel saveEditor). isOptional must be
+  // sent: masters_desk_class_subjects.is_optional is NOT NULL, and a link
+  // without it is ACCEPTED into the classSubjects slice and then fails the row
+  // sync (500 "Masters saved, but the row tables did not update") — after
+  // which every later Masters save fails the same way (seen 13 Oct 2026).
   const link: ClassSubjectLink = {
     id: `e2e_cs_${code.toLowerCase()}`,
     classId: CLASS_V,
     subjectId: subject.id,
     periodsPerWeek: 2,
     isActive: true,
-    isOptional: subject.isElective,
+    isOptional: false,
   };
   await postMasters(a.request, {
     subjects: [...desk.subjects, subject],
@@ -257,7 +260,9 @@ async function scenario(
   current: (a: Page) => Promise<string>,
   edit: (a: Page, current: string) => Promise<string>,
   inDatabase: (a: Page, next: string) => Promise<boolean>,
-  out: { propagatedAfterMs: number | null; visibleAfterReload?: boolean | string },
+  out: { propagatedAfterMs: number | null; visibleAfterReload?: boolean | string; controlShown?: boolean },
+  /** false: a control failure is recorded (controlShown:false) and the edit still runs. */
+  controlMustPass = true,
 ): Promise<void> {
   const A = await openAs(browser, "principal");
   const B = await openAs(browser, "office");
@@ -265,7 +270,13 @@ async function scenario(
     const cur = await current(A.page);
     await test.step(`control: B on ${observer.path} shows the current value`, async () => {
       await B.page.goto(observer.path);
-      await observer.open(B.page, cur);
+      try {
+        await observer.open(B.page, cur);
+        out.controlShown = true;
+      } catch (err) {
+        out.controlShown = false;
+        if (controlMustPass) throw err;
+      }
     });
     let next = "";
     await test.step("edit: A makes the change", async () => {
@@ -304,7 +315,7 @@ for (const via of ["editor", "api"] as const) {
       const t = tag();
       const code = `CMP${t}`;
       const name = `Computer ${t}`;
-      const r: { propagatedAfterMs: number | null; visibleAfterReload?: boolean | string } = { propagatedAfterMs: null };
+      const r: { propagatedAfterMs: number | null; visibleAfterReload?: boolean | string; controlShown?: boolean } = { propagatedAfterMs: null };
       await scenario(
         browser,
         obs,
@@ -331,7 +342,7 @@ for (const via of ["editor", "api"] as const) {
     test(`section V-A renamed via ${via} → visible on ${obs.path}`, async ({ browser }, testInfo) => {
       test.fail(true, UNTIL);
       const next = `S${tag()}`;
-      const r: { propagatedAfterMs: number | null; visibleAfterReload?: boolean | string } = { propagatedAfterMs: null };
+      const r: { propagatedAfterMs: number | null; visibleAfterReload?: boolean | string; controlShown?: boolean } = { propagatedAfterMs: null };
       await scenario(
         browser,
         obs,
@@ -355,11 +366,12 @@ for (const obs of STAFF_OBSERVERS) {
   test(`staff record renamed via api → visible on ${obs.path}`, async ({ browser }, testInfo) => {
     test.fail(
       true,
-      `${UNTIL}. Today it fails earlier, at the control step: this screen lists no staff at all (the /staff count defect, S1), ` +
-        "so staff propagation cannot be observed until that is fixed.",
+      `${UNTIL}. Today the observer lists no staff at all, even before the edit (the /staff count defect, S1): ` +
+        "the control is recorded (metric controlShown:false) and the edit still runs, so the write path is proven, " +
+        "but propagation cannot be told apart from the empty list until that is fixed.",
     );
     const next = `Rohit Renamed ${tag()}`;
-    const r: { propagatedAfterMs: number | null; visibleAfterReload?: boolean | string } = { propagatedAfterMs: null };
+    const r: { propagatedAfterMs: number | null; visibleAfterReload?: boolean | string; controlShown?: boolean } = { propagatedAfterMs: null };
     await scenario(
       browser,
       obs,
@@ -370,6 +382,7 @@ for (const obs of STAFF_OBSERVERS) {
       },
       async (a) => (await staffRoster(a.request)).staff.find((s) => s.id === STAFF_EDITED)?.fullName === next,
       r,
+      false,
     ).catch(async (e: unknown) => {
       await metric(testInfo, "propagation", { change: "staff", via: "api", observer: obs.path, ...r });
       throw e;
