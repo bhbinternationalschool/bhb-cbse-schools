@@ -485,6 +485,7 @@ SELFTESTS=(
   test:report-data-guard
   test:reports-center-hub
   test:reports-academic-new
+  test:reports-registers-new
   test:reports-wrong-figures
   test:fee-reports-year-scope
   test:report-export-format

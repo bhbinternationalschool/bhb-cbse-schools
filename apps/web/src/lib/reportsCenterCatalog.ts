@@ -26,6 +26,7 @@ import { LIBRARY_REPORTS } from "@/lib/library";
 import { CERTIFICATES_REPORTS } from "@/lib/certificatesReportCatalog";
 import { COMMS_REPORTS } from "@/lib/commsReportCatalog";
 import { TEACHING_REPORTS } from "@/lib/teachingReportCatalog";
+import { COMPLAINTS_REPORTS } from "@/lib/complaintsReportCatalog";
 import { isModuleEnabled } from "@/lib/moduleRegistry";
 import type { RbacModule } from "@/lib/rbac";
 
@@ -56,7 +57,8 @@ export type ReportsCenterModuleId =
   | "health"
   | "discipline"
   | "online_classes"
-  | "teaching";
+  | "teaching"
+  | "complaints";
 
 export type ReportsCenterEntry = {
   /** Stable id: module:reportId */
@@ -269,6 +271,14 @@ export const REPORTS_CENTER_MODULES: ReportsCenterModuleDef[] = [
   },
   // Modules whose registers are exported on their own screens: listed so
   // they can be found, each opening its module.
+  {
+    id: "complaints",
+    label: "Complaints",
+    blurb: "Register · open complaints ageing · by category",
+    rbacModule: "complaints",
+    href: "/complaints",
+    embeddable: true,
+  },
   {
     id: "visitors",
     label: "Visitors",
@@ -579,6 +589,9 @@ export function listReportsCenterEntries(): ReportsCenterEntry[] {
         r.hint,
       ),
     );
+  }
+  for (const r of COMPLAINTS_REPORTS) {
+    out.push(entry("complaints", "complaints", "/complaints", r.id, r.label, r.category, r.hint));
   }
   for (const r of TEACHING_REPORTS) {
     out.push(entry("teaching", "teaching", "/teaching", r.id, r.label, r.category, r.hint));
