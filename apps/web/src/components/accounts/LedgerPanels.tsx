@@ -21,7 +21,7 @@
  * imply "checked and nil".
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BookOpenCheck,
@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { VoucherBrowserPanel } from "@/components/accounts/VoucherBrowserPanel";
 import { formatInr } from "@/lib/fees";
+import { hideCancelledLines, type StatementLineLike } from "@/lib/ledger/cancelledPairs";
 import {
   ErpTable,
   ErpTableBody,
@@ -873,6 +874,10 @@ export function LedgerReportsPanel() {
   // kind switch) is a crash, not a curiosity — this gate closes it.
   const [dataKind, setDataKind] = useState<ReportKind | null>(null);
   const [accounts, setAccounts] = useState<{ code: string; name: string }[]>([]);
+  // A reversed voucher and its reversal net to nothing; listing both buried
+  // Salary & Wages 2026-27 under 422 lines of the 13 Oct clean-up. Hidden by
+  // default, one click away, and never touching the opening or closing.
+  const [hideCancelled, setHideCancelled] = useState(true);
 
   useEffect(() => {
     void fetch("/api/ledger", { cache: "no-store" })
@@ -921,6 +926,26 @@ export function LedgerReportsPanel() {
   }, [kind]);
 
   const report = (data?.report ?? null) as Record<string, unknown> | null;
+
+  // The statement as shown: with the cancelled pairs taken out the running
+  // balance is recomputed from the opening, so it still ends on the closing.
+  const statement = useMemo(() => {
+    if (dataKind !== "statement" || !Array.isArray(data?.rows)) return null;
+    type Row = StatementLineLike & {
+      date: string;
+      narration: string;
+      partyName: string;
+    };
+    const all = data.rows as Row[];
+    const openingPaise = Number(data.openingPaise ?? 0);
+    const closingPaise = Number(data.closingPaise ?? 0);
+    const debitNormal = data.debitNormal !== false;
+    if (!hideCancelled) {
+      return { rows: all, hiddenCount: 0, openingPaise, closingPaise, total: all.length };
+    }
+    const shown = hideCancelledLines(all, { openingPaise, debitNormal });
+    return { ...shown, openingPaise, total: all.length };
+  }, [data, dataKind, hideCancelled]);
 
   return (
     <div className="mt-4 space-y-4">
@@ -1116,6 +1141,9 @@ export function LedgerReportsPanel() {
           <p className="mt-1 text-xs text-[var(--muted)]">
             Opening cash {formatInr(Number(report.openingCashPaise))} → closing{" "}
             {formatInr(Number(report.closingCashPaise))} · true cash basis, contras excluded
+            {Number(data?.cancelledVouchersLeftOut ?? 0) > 0
+              ? ` · ${Number(data?.cancelledVouchersLeftOut)} cancelled voucher(s) left out (reversed pairs net to zero)`
+              : ""}
           </p>
           <div className="mt-3 grid gap-4 lg:grid-cols-2">
             <SectionTable
@@ -1133,11 +1161,35 @@ export function LedgerReportsPanel() {
       ) : null}
 
       {/* Account statement */}
-      {kind === "statement" && dataKind === "statement" && data?.rows ? (
+      {kind === "statement" && statement ? (
         <section className={CARD}>
-          <h4 className="text-sm font-bold text-[var(--brand-deep)]">
-            Statement · account {code} · {from} → {to}
-          </h4>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <h4 className="text-sm font-bold text-[var(--brand-deep)]">
+              Statement · account {code} · {from} → {to}
+            </h4>
+            <label className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--brand-deep)]">
+              <input
+                type="checkbox"
+                checked={hideCancelled}
+                onChange={(e) => setHideCancelled(e.target.checked)}
+              />
+              Hide cancelled entries (reversed + their reversals)
+            </label>
+          </div>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            Opening {formatInr(statement.openingPaise)} → closing{" "}
+            {formatInr(statement.closingPaise)} · {statement.rows.length} of {statement.total} line(s)
+            {hideCancelled && statement.hiddenCount > 0
+              ? ` · ${statement.hiddenCount} cancelled line(s) hidden`
+              : ""}
+          </p>
+          {hideCancelled && statement.hiddenCount > 0 ? (
+            <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+              Each hidden voucher was cancelled by a reversal in the same period;
+              the pair nets to zero, so the opening and closing are the same
+              either way and the running balance is worked over the lines shown.
+            </p>
+          ) : null}
           <div className="mt-2 overflow-x-auto">
             <ErpTable minWidth="min-w-[44rem]">
               <ErpTableHead>
@@ -1152,10 +1204,17 @@ export function LedgerReportsPanel() {
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {(data.rows as Record<string, unknown>[]).map((r, i) => (
+                {(statement.rows as unknown as Record<string, unknown>[]).map((r, i) => (
                   <tr key={i}>
                     <td className="py-1">{String(r.date)}</td>
-                    <td className="py-1 font-mono text-xs">{String(r.voucherNo)}</td>
+                    <td className="py-1 font-mono text-xs">
+                      {String(r.voucherNo)}
+                      {r.cancelledPair ? (
+                        <span className="ml-1 rounded bg-[var(--warning-soft)] px-1 font-sans text-[10px] font-bold text-[var(--muted)]">
+                          cancelled
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="py-1 text-xs text-[var(--muted)]">{String(r.narration)}</td>
                     <td className="py-1 text-xs">{String(r.partyName) || "—"}</td>
                     <td className="py-1 text-right tabular-nums">
@@ -1172,8 +1231,12 @@ export function LedgerReportsPanel() {
               </ErpTableBody>
             </ErpTable>
           </div>
-          {(data.rows as unknown[]).length === 0 ? (
-            <p className="mt-2 text-sm text-[var(--muted)]">No movement on this account in the period.</p>
+          {statement.rows.length === 0 ? (
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              {statement.total > 0
+                ? "Every line in the period was cancelled — untick the box to see them."
+                : "No movement on this account in the period."}
+            </p>
           ) : null}
         </section>
       ) : null}

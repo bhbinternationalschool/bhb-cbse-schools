@@ -70,6 +70,7 @@ import {
   ledgerVendors,
   ledgerVendorStatement,
   accountStatement,
+  ledgerLastEntries,
   ledgerSearchVouchers,
   ledgerReclassifyHead,
   ledgerVoidVoucher,
@@ -215,6 +216,7 @@ type PostBody =
   | { action: "fee-advances" }
   | { action: "release-fee-advances"; academicYearCode: string; date?: string }
   | { action: "find-voucher"; voucherNo: string }
+  | { action: "last-entries" }
   | { action: "vendor-bills"; vendorId?: string }
   | {
       action: "pay-vendor-bill";
@@ -289,6 +291,10 @@ export async function POST(req: Request) {
     "closing-position",
     // One day only, so the counter may run it without seeing any balance.
     "day-sheet",
+    // Dates and voucher numbers, no amounts — the "Entered up to" strip on
+    // the voucher forms. Deliberately not a position action: the office
+    // keying the vouchers is exactly who needs it.
+    "last-entries",
   ]);
 
   /**
@@ -640,6 +646,10 @@ export async function POST(req: Request) {
         toDate: body.toDate,
       });
       return NextResponse.json({ ok: true, rows });
+    }
+    case "last-entries": {
+      const res = await ledgerLastEntries();
+      return NextResponse.json(res, { status: res.ok ? 200 : 502 });
     }
     case "find-voucher": {
       // A reversal needs the id behind the number a statement line shows.

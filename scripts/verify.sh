@@ -393,6 +393,7 @@ SELFTESTS=(
   test:accounts-today-tile
   test:attendance-exception-ids
   test:voucher-amend
+  test:last-entry-cancelled-pairs
   test:lesson-plan-ai
   test:marketing-content-ai
   test:module-filters
