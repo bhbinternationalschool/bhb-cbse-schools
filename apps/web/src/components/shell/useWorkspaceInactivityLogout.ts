@@ -96,8 +96,19 @@ export function useWorkspaceInactivityLogout(enabled = true) {
       schedule(WORKSPACE_INACTIVITY_MS);
     }
 
+    // Coming back to a tab is activity only if the browser was not already
+    // idle: a laptop woken after two hours must log out, not write a fresh
+    // stamp that rescues every other tab (review of the cross-tab change).
     function onVisibility() {
-      if (document.visibilityState === "visible") onActivity();
+      if (document.visibilityState !== "visible") return;
+      const remaining = idleRemainingMs({
+        now: Date.now(),
+        localLastActivity,
+        sharedLastActivity: readSharedLastActivity(storage),
+        limitMs: WORKSPACE_INACTIVITY_MS,
+      });
+      if (remaining === 0) void logoutIdle();
+      else onActivity();
     }
 
     onActivity();

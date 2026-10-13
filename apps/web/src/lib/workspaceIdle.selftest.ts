@@ -72,5 +72,9 @@ assert.ok(hook.includes("idleRemainingMs("), "the logout hook checks every tab's
 assert.ok(hook.includes("limitMs: WORKSPACE_INACTIVITY_MS"), "the period is the standing 30-minute policy");
 assert.ok(hook.includes('removeEventListener("visibilitychange"'), "visibility listener is removed on unmount");
 assert.ok(WORKSPACE_INACTIVITY_MS >= 30 * MIN);
+// Waking a tab after the period has passed logs out instead of counting as
+// activity (a stamp written on wake would rescue every other tab).
+const vis = hook.slice(hook.indexOf("function onVisibility"), hook.indexOf("onActivity();\n    for"));
+assert.ok(vis.includes("idleRemainingMs(") && vis.includes("logoutIdle()"), "visibility checks idleness before counting as activity");
 
 console.log("workspaceIdle.selftest.ts: ok");

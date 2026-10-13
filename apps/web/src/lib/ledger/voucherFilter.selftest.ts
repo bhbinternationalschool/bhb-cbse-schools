@@ -107,6 +107,19 @@ assert.equal(headGaps(voucher(), chart, byParent)[0]!.index, 0);
     "parent_with_subheads",
     "a hand-keyed salary voucher on the parent is still flagged",
   );
+  assert.equal(
+    headGaps(voucher({ sourceType: "payroll_reclass", lines: salaryLines }), salaryChart, salaryByParent).length,
+    0,
+  );
+  assert.equal(
+    headGaps(
+      voucher({ sourceType: "ledger_reversal", isReversal: true, lines: salaryLines }),
+      salaryChart,
+      salaryByParent,
+    ).length,
+    0,
+    "a reversal mirrors its original and is not flagged for the parent head",
+  );
   // A catch-all is still a catch-all, payroll or not.
   assert.equal(headGaps(voucher({ sourceType: "payroll_run" }), chart, byParent).length, 1);
 }

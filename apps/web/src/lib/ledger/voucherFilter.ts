@@ -126,7 +126,7 @@ export function headGapForLine(
  * payment keyed by hand. Flagging every payroll voucher once a sub-head
  * exists asked the office to reclassify what was already right (13 Oct 2026).
  */
-const PAYROLL_SOURCES = new Set(["payroll_run", "payroll_payment"]);
+const PAYROLL_SOURCES = new Set(["payroll_run", "payroll_payment", "payroll_reclass"]);
 
 /** Every unclassified line on this voucher, by line index. */
 export function headGaps(
@@ -135,7 +135,10 @@ export function headGaps(
   byParent = childCodesByParent(chart),
 ): { index: number; line: VoucherLineFacts; gap: HeadGap }[] {
   const out: { index: number; line: VoucherLineFacts; gap: HeadGap }[] = [];
-  const fromPayroll = PAYROLL_SOURCES.has(v.sourceType);
+  // A reversal mirrors its original line for line; the head question
+  // belongs to the original, and a payroll reversal would otherwise carry
+  // the flag the payroll voucher no longer does.
+  const fromPayroll = PAYROLL_SOURCES.has(v.sourceType) || v.isReversal;
   v.lines.forEach((line, index) => {
     const gap = headGapForLine(line, chart, byParent);
     if (!gap) return;
