@@ -385,6 +385,7 @@ SELFTESTS=(
   test:closing-balance
   test:accounts-position-rbac
   test:voucher-filter
+  test:notice-push
   test:staff-self-profile
   test:attendance-cover
   test:udise-robot-fetch-all

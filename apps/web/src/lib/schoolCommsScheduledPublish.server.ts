@@ -241,6 +241,14 @@ export async function processScheduledCommsPublish(): Promise<ScheduledPublishTi
     };
   }
 
+  // Phones: each notice published now, to its audience, once.
+  const { pushPublishedNotice } = await import("@/lib/noticePush.server");
+  for (const item of due) {
+    if (item.kind !== "notice") continue;
+    const n = next.notices.find((x) => x.id === item.id);
+    if (n) await pushPublishedNotice(n);
+  }
+
   let crossPosted = 0;
   for (const item of due) {
     try {
