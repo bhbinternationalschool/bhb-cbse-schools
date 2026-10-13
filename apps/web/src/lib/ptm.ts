@@ -650,9 +650,11 @@ export function runPtmReport(
   const masters = filters.masters ?? loadMasters();
   const sis = loadSis();
   const students = filters.students ?? sis.students;
+  // No event picked → the most recent one (it took whichever was stored
+  // first, often last year's).
   const event = filters.eventId
     ? ptm.events.find((e) => e.id === filters.eventId)
-    : ptm.events[0];
+    : [...ptm.events].sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
   const note = describeFilters([
     event ? `Event ${event.name}` : "All events",
   ]);
@@ -742,7 +744,12 @@ export function runPtmReport(
         : r;
     }
     case "feedback_list": {
-      const rows = ptm.feedback.map((f) => ({
+      // The event's feedback only — it listed every event's feedback under
+      // a filter note naming one.
+      const eventOfBooking = new Map(ptm.bookings.map((b) => [b.id, b.eventId]));
+      const rows = ptm.feedback
+        .filter((f) => !event || eventOfBooking.get(f.bookingId) === event.id)
+        .map((f) => ({
         student: nameOf(f.studentId),
         strengths: f.strengths,
         areas: f.areas,
