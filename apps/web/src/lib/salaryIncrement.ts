@@ -7,6 +7,7 @@
 import type { StaffStream } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
 import { isVisitingStaff } from "@/lib/visitingPay";
+import { carryNotOnPayroll } from "@/lib/payrollNotOnPayroll";
 import {
   additionalFromLink,
   computeStructureAmounts,
@@ -20,7 +21,6 @@ import {
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
-import { carryNotOnPayroll } from "@/lib/payrollNotOnPayroll";
 export type IncrementCycle = "april" | "anniversary" | "hold_month";
 export type IncrementMode = "percent" | "fixed";
 

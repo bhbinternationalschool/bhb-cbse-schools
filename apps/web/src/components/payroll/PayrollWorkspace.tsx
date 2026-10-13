@@ -183,8 +183,6 @@ export function PayrollWorkspace() {
   const [processStaffIds, setProcessStaffIds] = useState<string[]>([]);
   const [staffFilter, setStaffFilter] = useState("");
   const [expandedStaffId, setExpandedStaffId] = useState<string | null>(null);
-  /** The last process's "Left out — not on payroll" list. */
-  const [leftOut, setLeftOut] = useState<NotOnPayrollEntry[]>([]);
 
   useEffect(() => {
     setMasters(loadMasters());
@@ -277,6 +275,18 @@ export function PayrollWorkspace() {
 
   const selected = runs.find((r) => r.id === selectedId) ?? null;
 
+  /** The last process's "Left out — not on payroll" list. */
+  const [leftOut, setLeftOut] = useState<NotOnPayrollEntry[]>([]);
+  // Marked not on payroll in Masters → Salary setup: shown greyed with the
+  // reason, never selectable — payroll leaves them out.
+  const notOnPayrollById = useMemo(() => {
+    const links = loadSalarySetup().staffLinks;
+    return new Map(
+      links.filter((l) => !isOnPayroll(l)).map((l) => [l.staffId, l.notOnPayrollReason || ""]),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tick tracks salary setup hydration
+  }, [tick]);
+
   const processStaffOptions = useMemo(
     () =>
       (masters?.staff ?? [])
@@ -296,15 +306,6 @@ export function PayrollWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tick tracks payroll writes
     [month, ay, tick],
   );
-  // Marked not on payroll in Masters → Salary setup: shown greyed with the
-  // reason, never selectable — payroll leaves them out.
-  const notOnPayrollById = useMemo(() => {
-    const links = loadSalarySetup().staffLinks;
-    return new Map(
-      links.filter((l) => !isOnPayroll(l)).map((l) => [l.staffId, l.notOnPayrollReason || ""]),
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- tick tracks salary setup hydration
-  }, [tick]);
   const pickableStaff = useMemo(() => {
     const q = staffFilter.trim().toLowerCase();
     return q
@@ -398,7 +399,7 @@ export function PayrollWorkspace() {
     flash(
       `Bulk draft ${month}: ${r.run.lines.length} staff — not in accounts until published${r.skipped.length
         ? ` · skipped ${r.skipped.length} already paid/approved for ${month}: ${r.skipped.slice(0, 4).join(", ")}${r.skipped.length > 4 ? "…" : ""}`
-        : ""}${r.leftOut.length ? ` · left out ${r.leftOut.length} not on payroll` : ""}`,
+        : ""}`,
     );
     refresh();
   }
@@ -437,7 +438,7 @@ export function PayrollWorkspace() {
           : `Draft for ${month}: ${r.run.lines.length} staff — edit freely until publish`
       }${r.skipped.length
         ? ` · skipped ${r.skipped.length} already paid/approved for ${month}: ${r.skipped.slice(0, 4).join(", ")}${r.skipped.length > 4 ? "…" : ""}`
-        : ""}${r.leftOut.length ? ` · left out ${r.leftOut.length} not on payroll` : ""}`,
+        : ""}`,
     );
     setProcessStaffIds([]);
     refresh();
