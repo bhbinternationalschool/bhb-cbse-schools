@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ReportsTab } from "@/components/inventory/ReportsTab";
+import { useInvBootstrap } from "@/lib/inventory/client";
+import { PTM_REPORTS, loadPtm, runPtmReport, type PtmReportId } from "@/lib/ptm";
+import { STUDENT_LEAVE_REPORTS, runStudentLeaveReport, type StudentLeaveReportId } from "@/lib/studentLeave";
+import { VAULT_REPORTS, runVaultReport, type VaultReportId } from "@/lib/vault";
+import { RTE_REPORTS, runRteReport, type RteReportId } from "@/lib/rteEws";
 import Link from "next/link";
 import {
   ACCOUNTS_REPORTS,
@@ -85,18 +91,24 @@ function todayIso() {
  * run server-side against the stock ledger and the sale documents, so this
  * points at them rather than shipping a second, weaker copy.
  */
-export function StoreReportsRunner() {
-  return (
-    <div className="space-y-3">
-      <p className="text-sm text-[var(--muted)]">
-        Stock register, item margin, sales day book and purchases by vendor are
-        run inside Store &amp; purchase, against the live ledger.
+export function StoreReportsRunner({ initialReport }: { initialReport?: string }) {
+  // The store's own reports, run server-side against the stock ledger and
+  // the sale documents — embedded here rather than a second, weaker copy.
+  const boot = useInvBootstrap();
+  if (boot.loading && !boot.data) {
+    return <p className="text-sm text-[var(--muted)]">Loading the store from the server…</p>;
+  }
+  if (boot.error || !boot.data) {
+    return (
+      <p className="text-sm text-[var(--danger)]">
+        {boot.error || "Could not load the store."}{" "}
+        <button type="button" className="underline" onClick={() => boot.reload()}>
+          Try again
+        </button>
       </p>
-      <Link href="/inventory?tab=reports" className={btnOutline}>
-        Open store reports
-      </Link>
-    </div>
-  );
+    );
+  }
+  return <ReportsTab boot={boot.data} initialReport={initialReport} />;
 }
 
 export function AccountsReportsRunner() {
@@ -218,8 +230,8 @@ export function AccountsReportsRunner() {
       <ul className="space-y-1.5">
         {ACCOUNTS_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -306,8 +318,8 @@ export function TransportReportsRunner() {
       <ul className="space-y-1.5">
         {TRANSPORT_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -391,8 +403,8 @@ export function TrustReportsRunner() {
       <ul className="space-y-1.5">
         {TRUST_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -523,8 +535,8 @@ export function HomeworkReportsRunner({ ay }: { ay: string }) {
       <ul className="space-y-1.5">
         {HOMEWORK_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -644,8 +656,8 @@ export function ExamReportsRunner({ ay }: { ay: string }) {
       <ul className="space-y-1.5">
         {EXAM_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -745,8 +757,8 @@ export function LibraryReportsRunner() {
           <ul className="space-y-1.5">
             {g.reports.map((r) => (
               <li
-                key={r.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+                key={r.id} data-report-id={r.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
               >
                 <div>
                   <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -852,8 +864,8 @@ export function CertificatesReportsRunner() {
       <ul className="space-y-1.5">
         {CERTIFICATES_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -952,8 +964,8 @@ export function CommsReportsRunner() {
       <ul className="space-y-1.5">
         {COMMS_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -1054,8 +1066,8 @@ export function TimetableReportsRunner({ ay }: { ay: string }) {
       <ul className="space-y-1.5">
         {TIMETABLE_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -1075,3 +1087,172 @@ export function TimetableReportsRunner({ ay }: { ay: string }) {
   );
 }
 
+
+/* ── Runners for modules that only had a link (14 Oct 2026) ─────────── */
+
+function ExportList<T extends { id: string; label: string; hint?: string }>({
+  reports,
+  onRun,
+}: {
+  reports: readonly T[];
+  onRun: (id: T["id"]) => void;
+}) {
+  return (
+    <ul className="space-y-1.5">
+      {reports.map((r) => (
+        <li
+          key={r.id}
+          data-report-id={r.id}
+          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
+        >
+          <div>
+            <p className="text-sm font-medium text-[var(--brand-deep)]">{r.label}</p>
+            {r.hint ? <p className="text-xs text-[var(--muted)]">{r.hint}</p> : null}
+          </div>
+          <button type="button" className={btn} onClick={() => onRun(r.id)}>
+            Export
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function FormatPicker({ value, onChange }: { value: "excel" | "pdf"; onChange: (v: "excel" | "pdf") => void }) {
+  return (
+    <label className="text-xs text-[var(--muted)]">
+      Format
+      <select className={`${field} mt-1 block`} value={value} onChange={(e) => onChange(e.target.value as "excel" | "pdf")}>
+        <option value="excel">Excel</option>
+        <option value="pdf">PDF</option>
+      </select>
+    </label>
+  );
+}
+
+function useRunResult() {
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const show = (r: { ok: true; message: string } | { ok: false; error: string }) => {
+    if (r.ok) {
+      setError(null);
+      setNotice(r.message);
+    } else {
+      setNotice(null);
+      setError(r.error);
+    }
+  };
+  const view = (
+    <>
+      {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+      {notice ? <p className="text-sm text-[var(--success)]">{notice}</p> : null}
+    </>
+  );
+  return { show, view };
+}
+
+export function PtmReportsRunner() {
+  const [format, setFormat] = useState<"excel" | "pdf">("excel");
+  const events = useMemo(
+    () => [...loadPtm().events].sort((a, b) => (b.date || "").localeCompare(a.date || "")),
+    [],
+  );
+  const [eventId, setEventId] = useState(() => events[0]?.id ?? "");
+  const { show, view } = useRunResult();
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-xs text-[var(--muted)]">
+          PTM
+          <select className={`${field} mt-1 block`} value={eventId} onChange={(e) => setEventId(e.target.value)}>
+            {events.length === 0 ? <option value="">No PTM yet</option> : null}
+            {events.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.name}
+                {e.date ? ` · ${e.date}` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        <FormatPicker value={format} onChange={setFormat} />
+        <Link href="/ptm?tab=reports" className={btnOutline}>
+          Open in PTM
+        </Link>
+      </div>
+      {view}
+      <ExportList
+        reports={PTM_REPORTS}
+        onRun={(id) => show(runPtmReport(id as PtmReportId, { eventId: eventId || undefined, format }))}
+      />
+    </div>
+  );
+}
+
+export function StudentLeaveReportsRunner({ ay }: { ay: string }) {
+  const [format, setFormat] = useState<"excel" | "pdf">("excel");
+  const [fromDate, setFromDate] = useState(`${ay.slice(0, 4)}-04-01`);
+  const [toDate, setToDate] = useState(todayIso);
+  const { show, view } = useRunResult();
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-xs text-[var(--muted)]">
+          From
+          <input type="date" className={`${field} mt-1 block`} value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+        </label>
+        <label className="text-xs text-[var(--muted)]">
+          To
+          <input type="date" className={`${field} mt-1 block`} value={toDate} onChange={(e) => setToDate(e.target.value)} />
+        </label>
+        <FormatPicker value={format} onChange={setFormat} />
+        <Link href="/attendance?tab=leave" className={btnOutline}>
+          Open student leave
+        </Link>
+      </div>
+      {view}
+      <ExportList
+        reports={STUDENT_LEAVE_REPORTS}
+        onRun={(id) =>
+          show(runStudentLeaveReport(id as StudentLeaveReportId, { academicYearCode: ay, fromDate, toDate, format }))
+        }
+      />
+    </div>
+  );
+}
+
+export function VaultReportsRunner() {
+  const [format, setFormat] = useState<"excel" | "pdf">("excel");
+  const { show, view } = useRunResult();
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <FormatPicker value={format} onChange={setFormat} />
+        <Link href="/vault?tab=reports" className={btnOutline}>
+          Open the vault
+        </Link>
+      </div>
+      {view}
+      <ExportList reports={VAULT_REPORTS} onRun={(id) => show(runVaultReport(id as VaultReportId, { format }))} />
+    </div>
+  );
+}
+
+export function RteReportsRunner({ ay }: { ay: string }) {
+  const [format, setFormat] = useState<"excel" | "pdf">("excel");
+  const { show, view } = useRunResult();
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <FormatPicker value={format} onChange={setFormat} />
+        <Link href="/admissions?tab=rte" className={btnOutline}>
+          Open RTE / EWS
+        </Link>
+      </div>
+      {view}
+      <ExportList
+        reports={RTE_REPORTS}
+        onRun={(id) => show(runRteReport(id as RteReportId, { format, academicYearCode: ay }))}
+      />
+    </div>
+  );
+}

@@ -296,6 +296,7 @@
     "test:module-filters": "npx tsx src/lib/moduleFilters.selftest.ts",
     "test:report-export": "npx tsx src/lib/reportExport.selftest.ts",
     "test:report-data-guard": "npx tsx src/lib/reportDataGuard.selftest.ts",
+    "test:reports-center-hub": "npx tsx src/lib/reportsCenterHub.selftest.ts",
     "test:wa-contact-state": "npx tsx src/lib/waContactState.selftest.ts",
     "test:wa-delivery-log": "npx tsx src/lib/waDeliveryLog.selftest.ts",
     "test:wa-meta-account-alerts": "npx tsx src/lib/waMetaAccountAlerts.selftest.ts",

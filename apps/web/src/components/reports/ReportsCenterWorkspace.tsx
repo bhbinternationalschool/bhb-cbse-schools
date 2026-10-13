@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { FileBarChart2, Search } from "lucide-react";
 import { AdmissionReportsPanel } from "@/components/admissions/AdmissionReportsPanel";
@@ -11,6 +11,10 @@ import {
   AccountsReportsRunner,
   CertificatesReportsRunner,
   CommsReportsRunner,
+  PtmReportsRunner,
+  RteReportsRunner,
+  StudentLeaveReportsRunner,
+  VaultReportsRunner,
   ExamReportsRunner,
   HomeworkReportsRunner,
   LibraryReportsRunner,
@@ -34,7 +38,6 @@ import {
   canAccessModule,
   hasPermission,
   loadRbac,
-  type RbacModule,
 } from "@/lib/rbac";
 import {
   clearReportsCenterRecent,
@@ -43,6 +46,7 @@ import {
   type ReportsCenterRecentItem,
 } from "@/lib/reportsCenter";
 import {
+  allowedEntryRbac,
   filterReportsCenterEntries,
   isStaffRecordsEntry,
   listReportsCenterEntries,
@@ -73,6 +77,10 @@ export function ReportsCenterWorkspace() {
   >("all");
   const [recent, setRecent] = useState<ReportsCenterRecentItem[]>([]);
   const [ay, setAy] = useState("");
+  // The report "Run here" / a ?report= link asked for: the module panel
+  // scrolls to it and highlights it (it opened the module and left the
+  // person to find the report again).
+  const [focusReport, setFocusReport] = useState("");
 
   // Teacher mode (2026-09-29): no reports about colleagues (staff leave,
   // staff attendance), and the class-based runners narrow to the teacher's
@@ -92,7 +100,11 @@ export function ReportsCenterWorkspace() {
       if (m.id === "rte") return isModuleEnabled("rte_ews");
       return true;
     });
-    const set = new Set<RbacModule>(mods.map((m) => m.rbacModule));
+    // Every module an entry is gated by, not only the tabs' own: the news
+    // register is gated by "news" and was filtered out for everyone.
+    const set = allowedEntryRbac(mods, listReportsCenterEntries(), (m) =>
+      canAccessModule(session, masters, m, rbac),
+    );
     return { allowedModules: mods, allowedRbac: set };
   }, [session, hideStaffRecords]);
 
@@ -108,13 +120,15 @@ export function ReportsCenterWorkspace() {
     setRecent(loadReportsCenterRecent());
     setAy(session.academicYearCode || currentAcademicYearCode() || "");
     if (typeof window === "undefined") return;
-    const raw = new URLSearchParams(window.location.search).get("module");
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get("module");
     if (
       raw &&
       REPORTS_CENTER_MODULES.some((m) => m.id === raw) &&
       allowedModules.some((m) => m.id === raw)
     ) {
       setTab(raw as ReportsCenterModuleId);
+      setFocusReport(params.get("report") || "");
       return;
     }
     const tabRaw = new URLSearchParams(window.location.search).get("tab");
@@ -267,24 +281,31 @@ export function ReportsCenterWorkspace() {
                     </td>
                     <td className="px-3 py-2.5 text-right">
                       <div className="flex flex-wrap justify-end gap-1.5">
-                        <button
-                          type="button"
-                          className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-medium text-[var(--brand-deep)]"
-                          onClick={() => {
-                            recordReportsCenterOpen(e);
-                            setRecent(loadReportsCenterRecent());
-                            setTab(e.moduleId);
-                          }}
-                        >
-                          Run here
-                        </button>
-                        <Link
-                          href={e.href}
-                          className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-xs font-medium text-[var(--primary-foreground)]"
-                          onClick={(ev) => openEntry(e, ev)}
-                        >
-                          Open module
-                        </Link>
+                        {e.runHere ? (
+                          <button
+                            type="button"
+                            className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-medium text-[var(--brand-deep)]"
+                            onClick={() => {
+                              recordReportsCenterOpen(e);
+                              setRecent(loadReportsCenterRecent());
+                              setFocusReport(e.reportId);
+                              setTab(e.moduleId);
+                            }}
+                          >
+                            Run here
+                          </button>
+                        ) : null}
+                        {/* Entries that only run here (accounts desk registers) point
+                            back at /reports — a same-page link would do nothing. */}
+                        {e.href.startsWith("/reports") ? null : (
+                          <Link
+                            href={e.href}
+                            className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-xs font-medium text-[var(--primary-foreground)]"
+                            onClick={(ev) => openEntry(e, ev)}
+                          >
+                            {e.runHere ? "Open module" : "Open"}
+                          </Link>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -352,21 +373,26 @@ export function ReportsCenterWorkspace() {
                       </p>
                     </div>
                     <div className="flex gap-1.5">
-                      <button
-                        type="button"
-                        className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-medium"
-                        onClick={() =>
-                          setTab(r.moduleId as ReportsCenterModuleId)
-                        }
-                      >
-                        Run here
-                      </button>
-                      <Link
-                        href={r.href}
-                        className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-xs font-medium text-[var(--primary-foreground)]"
-                      >
-                        Open
-                      </Link>
+                      {allEntries.find((x) => x.key === r.key)?.runHere !== false ? (
+                        <button
+                          type="button"
+                          className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-medium"
+                          onClick={() => {
+                            setFocusReport(r.reportId);
+                            setTab(r.moduleId as ReportsCenterModuleId);
+                          }}
+                        >
+                          Run here
+                        </button>
+                      ) : null}
+                      {r.href.startsWith("/reports") ? null : (
+                        <Link
+                          href={r.href}
+                          className="rounded-lg bg-[var(--primary)] px-2.5 py-1 text-xs font-medium text-[var(--primary-foreground)]"
+                        >
+                          Open
+                        </Link>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -394,8 +420,23 @@ export function ReportsCenterWorkspace() {
           {/* Each module's panel mounts only once the records its reports
               read have loaded — keyed by tab so switching modules re-gates. */}
           <ReportDataGate key={tab} desks={moduleReportDesks(tab, hideStaffRecords)}>
-            <ModuleRunner id={tab} ay={ay} hideStaffRecords={hideStaffRecords} />
+            <FocusReport reportId={focusReport} onDone={() => setFocusReport("")}>
+              <ModuleRunner id={tab} ay={ay} hideStaffRecords={hideStaffRecords} focusReportId={focusReport} />
+            </FocusReport>
           </ReportDataGate>
+          <LinkedReports
+            entries={allEntries.filter(
+              (e) =>
+                e.moduleId === tab &&
+                !e.runHere &&
+                allowedRbac.has(e.rbacModule) &&
+                (!hideStaffRecords || !isStaffRecordsEntry(e)),
+            )}
+            onOpen={(e) => {
+              recordReportsCenterOpen(e);
+              setRecent(loadReportsCenterRecent());
+            }}
+          />
         </section>
       ) : null}
     </ErpWorkspaceShell>
@@ -414,6 +455,10 @@ function moduleReportDesks(id: ReportsCenterModuleId, hideStaffRecords: boolean)
     staff: ["staff_leave"],
     attendance: hideStaffRecords ? ["student_attendance"] : ["student_attendance", "staff_leave"],
     homework: ["homework"],
+    ptm: ["ptm"],
+    student_leave: ["student_leave"],
+    vault: ["vault"],
+    rte: ["rte"],
     payroll: ["payroll"],
     transport: ["transport"],
     accounts: ["accounts"],
@@ -427,14 +472,83 @@ function moduleReportDesks(id: ReportsCenterModuleId, hideStaffRecords: boolean)
   return [...new Set((cats[id] ?? []).flatMap((c) => reportDesksFor(c)))];
 }
 
+/**
+ * Scroll to and highlight the report a "Run here" asked for, once the
+ * module's panel has drawn it (the panels tag each report row with
+ * data-report-id).
+ */
+function FocusReport({ reportId, onDone, children }: { reportId: string; onDone: () => void; children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!reportId) return;
+    let tries = 0;
+    let cleanup: (() => void) | null = null;
+    const timer = window.setInterval(() => {
+      tries += 1;
+      const el = box.current?.querySelector<HTMLElement>(`[data-report-id="${CSS.escape(reportId)}"]`);
+      if (!el && tries < 40) return;
+      window.clearInterval(timer);
+      if (!el) return onDone();
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-2", "ring-[var(--primary)]", "ring-offset-2");
+      const off = window.setTimeout(() => {
+        el.classList.remove("ring-2", "ring-[var(--primary)]", "ring-offset-2");
+        onDone();
+      }, 4000);
+      cleanup = () => window.clearTimeout(off);
+    }, 150);
+    return () => {
+      window.clearInterval(timer);
+      cleanup?.();
+    };
+    // onDone is a fresh closure each render; the report id drives this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportId]);
+  return <div ref={box}>{children}</div>;
+}
+
+/** Reports of this module that live on its own screen — listed with "Open". */
+function LinkedReports({
+  entries,
+  onOpen,
+}: {
+  entries: ReturnType<typeof listReportsCenterEntries>;
+  onOpen: (e: ReturnType<typeof listReportsCenterEntries>[number]) => void;
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <div className="mt-6">
+      <h3 className="mb-2 text-sm font-semibold text-[var(--brand-deep)]">On the module&apos;s own screen</h3>
+      <ul className="space-y-1.5">
+        {entries.map((e) => (
+          <li
+            key={e.key}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
+          >
+            <div>
+              <p className="text-sm font-medium text-[var(--brand-deep)]">{e.label}</p>
+              {e.hint ? <p className="text-xs text-[var(--muted)]">{e.hint}</p> : null}
+            </div>
+            <Link href={e.href} className={btnOutline} onClick={() => onOpen(e)}>
+              Open
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function ModuleRunner({
   id,
   ay,
   hideStaffRecords,
+  focusReportId,
 }: {
   id: ReportsCenterModuleId;
   ay: string;
   hideStaffRecords: boolean;
+  focusReportId: string;
 }) {
   switch (id) {
     case "fees":
@@ -470,59 +584,17 @@ function ModuleRunner({
     case "homework":
       return <HomeworkReportsRunner ay={ay} />;
     case "ptm":
-      return (
-        <p className="text-sm text-[var(--muted)]">
-          Open{" "}
-          <Link href="/ptm?tab=reports" className="underline">
-            PTM → Reports
-          </Link>{" "}
-          to export bookings, slot fill, and feedback.
-        </p>
-      );
+      return <PtmReportsRunner />;
     case "student_leave":
-      return (
-        <p className="text-sm text-[var(--muted)]">
-          Open{" "}
-          <Link href="/attendance?tab=leave" className="underline">
-            Attendance → Student leave
-          </Link>{" "}
-          (Reports sub-tab) to export the leave register and alerts.
-        </p>
-      );
+      return <StudentLeaveReportsRunner ay={ay} />;
     case "vault":
-      return (
-        <p className="text-sm text-[var(--muted)]">
-          Open{" "}
-          <Link href="/vault?tab=reports" className="underline">
-            Vault → Reports
-          </Link>{" "}
-          for inventory and expiry calendar.
-        </p>
-      );
+      return <VaultReportsRunner />;
     case "rte":
-      return (
-        <p className="text-sm text-[var(--muted)]">
-          Open{" "}
-          <Link href="/admissions?tab=rte" className="underline">
-            Admissions → RTE / EWS → Reports
-          </Link>{" "}
-          for quota dashboard, applications, and enrolled students.
-        </p>
-      );
+      return <RteReportsRunner ay={ay} />;
     case "payroll":
       return <PayrollReportsPanel academicYearCode={ay} />;
     case "store":
-      return <StoreReportsRunner />;
-    case "purchase":
-      return (
-        <p className="text-sm text-[var(--muted)]">
-          Open{" "}
-          <Link href="/store?tab=purchase" className="underline">
-            Store → Purchase → Reports
-          </Link>{" "}
-          for indent register, open POs, and GRNs.
-        </p>
-      );
+      return <StoreReportsRunner initialReport={focusReportId || undefined} />;
     case "transport":
       return <TransportReportsRunner />;
     case "accounts":

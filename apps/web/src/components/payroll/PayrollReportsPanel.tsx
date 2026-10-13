@@ -285,7 +285,7 @@ export function PayrollReportsPanel({
       <div className="grid gap-3 sm:grid-cols-2">
         {reports.map((r) => (
           <div
-            key={r.id}
+            key={r.id} data-report-id={r.id}
             className="rounded-xl border border-[rgba(32,48,80,0.12)] bg-white p-4"
           >
             <h3 className="text-sm font-bold text-[var(--brand-deep)]">

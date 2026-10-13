@@ -147,7 +147,8 @@ void (async () => {
 
   await check("wiring: Reports Center gates module panels; runners never write", () => {
     const rc = readFileSync(join(__dirname, "../components/reports/ReportsCenterWorkspace.tsx"), "utf8");
-    assert.match(rc, /<ReportDataGate key=\{tab\} desks=\{moduleReportDesks\(tab, hideStaffRecords\)\}>\s*<ModuleRunner/);
+    // The runner sits inside the gate (other wrappers, e.g. FocusReport, may sit between).
+    assert.match(rc, /<ReportDataGate key=\{tab\} desks=\{moduleReportDesks\(tab, hideStaffRecords\)\}>[\s\S]{0,300}<ModuleRunner[\s\S]{0,300}<\/ReportDataGate>/);
     const runners = readFileSync(join(__dirname, "../components/reports/ModuleReportRunners.tsx"), "utf8");
     for (const w of ["seedTransportIfEmpty(", "migrateDemoFleetToReal(", "ensureAccountsSeeded(", "seedTrustIfEmpty("]) {
       assert.ok(!runners.includes(w), `report runners do not call ${w}`);
