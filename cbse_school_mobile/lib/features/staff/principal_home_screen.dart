@@ -14,6 +14,8 @@ import "../modules/bus_routes_screen.dart";
 import "transport_requests_screen.dart";
 import "attendance_screen.dart";
 import "broadcast_screen.dart";
+import "class_message_screen.dart";
+import "ptm_teacher_screen.dart";
 import "admission_leads_screen.dart";
 import "documents_screen.dart";
 import "fee_counter_screen.dart";
@@ -277,8 +279,9 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
   }
 
   /// Every action tile with the feature whose heading it sits under. The
-  /// gating is unchanged: only the five tiles that were feature-gated
-  /// before are gated now; the others were always shown.
+  /// gating is unchanged: only the tiles that were feature-gated before are
+  /// gated now (plus Message my classes and PTM, 13 Oct 2026); the others
+  /// were always shown.
   List<(String, Widget)> _actionTiles() => [
     (
       "transport_requests",
@@ -298,6 +301,26 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
         onTap: () => _push(BroadcastScreen(api: widget.api)),
       ),
     ),
+    if (_features.has("class_broadcast"))
+      (
+        "class_broadcast",
+        _Action(
+          icon: Icons.forum_outlined,
+          label: "Message my classes",
+          tone: ModuleTone.coral,
+          onTap: () => _push(ClassMessageScreen(api: widget.api)),
+        ),
+      ),
+    if (_features.has("ptm_meet"))
+      (
+        "ptm_meet",
+        _Action(
+          icon: Icons.groups_outlined,
+          label: "PTM",
+          tone: ModuleTone.purple,
+          onTap: () => _push(PtmTeacherScreen(api: widget.api)),
+        ),
+      ),
     (
       "staff_leave_approve",
       _Action(

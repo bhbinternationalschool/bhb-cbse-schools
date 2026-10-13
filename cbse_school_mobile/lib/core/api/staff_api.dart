@@ -487,6 +487,8 @@ class PtmTeacherEvent {
     : id = _s(j, "id"),
       name = _s(j, "name"),
       date = _s(j, "date"),
+      endDate = _s(j, "endDate"),
+      canAddSlots = _b(j, "canAddSlots"),
       modeLabel = _s(j, "modeLabel"),
       note = _s(j, "note"),
       bookingCount = _i(j, "bookingCount"),
@@ -495,6 +497,12 @@ class PtmTeacherEvent {
   final String id;
   final String name;
   final String date;
+
+  /// Last day of a multi-day PTM ("" or == [date] for one day).
+  final String endDate;
+
+  /// The server would accept my own new slots in this event.
+  final bool canAddSlots;
   final String modeLabel;
   final String note;
   final int bookingCount;
