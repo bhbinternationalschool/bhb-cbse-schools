@@ -71,3 +71,7 @@ concession-grants-closed-2027-03-31.json
 
 # Generated greeting-card PNGs (scripts/greeting-card.mjs) — regenerate, never commit.
 /out/
+# Playwright gate (step 1.1) outputs — uploaded as CI artifacts, never committed.
+apps/web/e2e/report/
+apps/web/e2e/test-results/
+apps/web/e2e/scoreboard.json

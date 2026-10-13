@@ -1,0 +1,86 @@
+/**
+ * Playwright — the behavioural gate (data-layer step 1.1).
+ *
+ *   bash scripts/e2e-stack.sh up && bash scripts/e2e-stack.sh build && bash scripts/e2e-stack.sh app
+ *   cd apps/web && node ../../scripts/e2e/with-env.mjs .env.e2e -- npx playwright test
+ *
+ * Runs against the local stack that is ALREADY UP (scripts/e2e-stack.sh). This
+ * config starts nothing, seeds nothing and builds nothing: there is no
+ * webServer and no globalSetup, so nothing here can reach production. It
+ * refuses to load unless the app URL and the Supabase URL are both
+ * http://127.0.0.1:<port> and E2E=1 — i.e. unless apps/web/.env.e2e was loaded
+ * through scripts/e2e/with-env.mjs (which also refuses to run beside an
+ * .env.local).
+ *
+ * The suite expects a FRESHLY seeded stack (`up`): counts are asserted against
+ * the fixture (e2e/fixture.ts), and the propagation project — which runs last —
+ * writes to it (a subject, a section name, a staff record). A second run on the
+ * same stack needs `down && up` first.
+ *
+ * Results: e2e/report (HTML) and e2e/scoreboard.json (e2e/scoreboard-reporter.ts):
+ * every test is pass / expected-fail (test.fail with the reason) / FAIL /
+ * UNEXPECTED-PASS / fixme. The run is green when every test is pass, expected-fail
+ * or fixme; an expected failure that starts passing turns the run red, so the
+ * fix must remove its test.fail().
+ */
+import { defineConfig, devices } from "@playwright/test";
+import type { GateOptions } from "./e2e/support";
+
+const LOCAL = /^http:\/\/127\.0\.0\.1:\d+$/;
+const APP_URL = process.env.E2E_APP_URL ?? "";
+const API_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+if (!LOCAL.test(APP_URL)) {
+  throw new Error(`playwright.config: E2E_APP_URL is "${APP_URL}", not http://127.0.0.1:<port> — load .env.e2e via scripts/e2e/with-env.mjs`);
+}
+if (!LOCAL.test(API_URL)) {
+  throw new Error(`playwright.config: NEXT_PUBLIC_SUPABASE_URL is "${API_URL}", not the 127.0.0.1 e2e stack — refusing`);
+}
+if (process.env.E2E !== "1") {
+  throw new Error("playwright.config: E2E=1 is not set — load apps/web/.env.e2e via scripts/e2e/with-env.mjs");
+}
+
+const desktop = { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } };
+
+export default defineConfig<GateOptions>({
+  testDir: "./e2e/specs",
+  outputDir: "./e2e/test-results",
+  // One app, one database, one browser at a time: timings and byte counts are
+  // only comparable without neighbours, and the propagation specs write.
+  fullyParallel: false,
+  workers: 1,
+  retries: 0,
+  timeout: 120_000,
+  expect: { timeout: 5_000 },
+  forbidOnly: !!process.env.CI,
+  reporter: [
+    ["list"],
+    ["html", { outputFolder: "e2e/report", open: "never" }],
+    ["./e2e/scoreboard-reporter.ts"],
+  ],
+  use: {
+    baseURL: APP_URL,
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+  },
+  projects: [
+    {
+      name: "desktop",
+      testIgnore: /propagation\.spec\.ts/,
+      use: { ...desktop },
+    },
+    {
+      // A phone: 375 px wide, touch, and the CPU slowed 4× through CDP
+      // (Emulation.setCPUThrottlingRate, see e2e/support.ts).
+      name: "phone-375-cpu4x",
+      testMatch: /counts\.spec\.ts/,
+      use: { ...devices["Pixel 7"], viewport: { width: 375, height: 812 }, cpuThrottle: 4 },
+    },
+    {
+      // Writes to the stack, so it runs after everything that reads it.
+      name: "propagation",
+      testMatch: /propagation\.spec\.ts/,
+      dependencies: ["desktop", "phone-375-cpu4x"],
+      use: { ...desktop },
+    },
+  ],
+});
