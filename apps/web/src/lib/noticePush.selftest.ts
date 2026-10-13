@@ -28,8 +28,12 @@ assert.ok(/pushPublishedNotice\(notice\)/.test(readFileSync(join(lib, "schoolNot
 const desk = readFileSync(join(app, "school-data/school-comms-desk/route.ts"), "utf8");
 assert.ok(/pushPublishedNotice\(saved\)/.test(desk) && /saved\?\.status === "published"/.test(desk), "the ERP screen's save, read back first");
 
-// Payslips: one per month, best run wins.
-const slips = readFileSync(join(app, "v1/staff/payslips/route.ts"), "utf8");
+// Payslips: one per month, best run wins. The pick lives in
+// lib/staffPayslips.ts (shared with the payslip PDF since 13 Oct 2026;
+// behaviour tested in staffPayslips.selftest.ts) — the list must use it.
+const slipsRoute = readFileSync(join(app, "v1/staff/payslips/route.ts"), "utf8");
+assert.ok(/bestPayslipRunsForStaff\(payroll\.runs, staffId\)/.test(slipsRoute), "the payslip list uses the shared pick");
+const slips = readFileSync(join(lib, "staffPayslips.ts"), "utf8");
 assert.ok(/best\.set\(run\.month, run\)/.test(slips) && /rank\(run\.status\) > rank\(have\.status\)/.test(slips), "one payslip per month, paid first");
 assert.ok(/\.filter\(\(m\) => !best\.has\(m\)\)/.test(slips), "'being prepared' only for months with no payslip");
 
