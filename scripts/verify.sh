@@ -478,6 +478,7 @@ SELFTESTS=(
   test:receipt-lookup
   test:referrals
   test:report-export
+  test:fee-reports-year-scope
   test:report-remark-ai
   test:salary-additional
   test:salary-gross-up
