@@ -8,6 +8,7 @@ import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../modules/dictate_field.dart";
 import "ptm_slots_screen.dart";
+import "ai_ptm_brief_screen.dart";
 
 /// The teacher's PTM day: their slots, who has booked each, and a one-tap
 /// record of the meeting (met + note, or no-show). Parents see the note in
@@ -17,9 +18,12 @@ import "ptm_slots_screen.dart";
 /// to a PTM the office opened (PtmAddSlotsScreen), and change or cancel one
 /// nobody has booked. A booked slot is the family's — the office moves them.
 class PtmTeacherScreen extends StatelessWidget {
-  const PtmTeacherScreen({super.key, required this.api});
+  const PtmTeacherScreen({super.key, required this.api, this.canBrief = false});
 
   final ApiClient api;
+
+  /// Offer the AI brief on each booking (the AI tools grant).
+  final bool canBrief;
 
   @override
   Widget build(BuildContext context) {
@@ -116,7 +120,12 @@ class PtmTeacherScreen extends StatelessWidget {
                         style: AppText.labelMediumMuted,
                       ),
                       for (final b in s.bookings)
-                        _Booking(api: api, b: b, reload: reload),
+                        _Booking(
+                          api: api,
+                          b: b,
+                          reload: reload,
+                          canBrief: canBrief,
+                        ),
                     ],
                   ),
                 ),
@@ -349,16 +358,38 @@ class _EditSlotSheetState extends State<_EditSlotSheet> {
 }
 
 class _Booking extends StatelessWidget {
-  const _Booking({required this.api, required this.b, required this.reload});
+  const _Booking({
+    required this.api,
+    required this.b,
+    required this.reload,
+    this.canBrief = false,
+  });
 
   final ApiClient api;
   final PtmTeacherBooking b;
   final Future<void> Function() reload;
+  final bool canBrief;
 
-  Future<void> _met(BuildContext context) async {
-    final strengths = TextEditingController();
-    final areas = TextEditingController();
-    final followUp = TextEditingController();
+  /// The AI brief; "Use as meeting note" starts the note with it — the
+  /// teacher edits before saving, as on the web PTM tab.
+  Future<void> _brief(BuildContext context) async {
+    final brief = await Navigator.of(context).push<AiPtmBrief>(
+      MaterialPageRoute(
+        builder: (_) => AiPtmBriefScreen(
+          api: api,
+          bookingId: b.id,
+          studentName: b.studentName,
+        ),
+      ),
+    );
+    if (brief == null || !context.mounted) return;
+    await _met(context, prefill: brief);
+  }
+
+  Future<void> _met(BuildContext context, {AiPtmBrief? prefill}) async {
+    final strengths = TextEditingController(text: prefill?.observations ?? "");
+    final areas = TextEditingController(text: prefill?.concerns ?? "");
+    final followUp = TextEditingController(text: prefill?.suggestions ?? "");
     final ok = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -384,14 +415,16 @@ class _Booking extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                context.l10n.aShortNoteForTheParent,
+                prefill == null
+                    ? context.l10n.aShortNoteForTheParent
+                    : "Started from the AI brief — shorten and edit it; parents see this note.",
                 style: AppText.bodySmallMuted,
               ),
               const SizedBox(height: 12),
               DictateField(
                 label: context.l10n.doingWell,
                 controller: strengths,
-                maxLines: 2,
+                maxLines: prefill == null ? 2 : 5,
                 textCapitalization: TextCapitalization.sentences,
               ),
               const SizedBox(height: 8),
@@ -519,6 +552,12 @@ class _Booking extends StatelessWidget {
                     size: 20,
                     color: AppColors.primary,
                   ),
+                ),
+              if (canBrief && b.status == "booked")
+                TextButton.icon(
+                  onPressed: () => _brief(context),
+                  icon: const Icon(Icons.auto_awesome, size: 16),
+                  label: const Text("AI brief"),
                 ),
               if (b.status == "booked") ...[
                 TextButton(

@@ -28,6 +28,7 @@ import "fee_counter_screen.dart";
 import "fee_defaulters_screen.dart";
 import "my_collections_screen.dart";
 import "survey_day_screen.dart";
+import "teacher_ai_tools_screen.dart";
 import "marks_screen.dart";
 import "payslips_screen.dart";
 import "ptm_teacher_screen.dart";
@@ -199,6 +200,15 @@ const _staffModules = [
     Icons.document_scanner_outlined,
     ModuleTone.blue,
     "syllabus_scan",
+  ),
+  // The web ERP's teacher AI helpers (answer-sheet marks, question paper,
+  // worksheet, lesson plan, PTM brief); the server grants it to anyone with
+  // marks entry, the period log or PTM meetings.
+  _StaffModule(
+    "AI tools",
+    Icons.auto_awesome_outlined,
+    ModuleTone.amber,
+    "teacher_ai_tools",
   ),
   // Office and leadership grants a teacher may also hold (a co-ordinator,
   // the gate duty, the transport in-charge). They had no tile here, so a
@@ -536,7 +546,19 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         );
       case "Marks":
         await _pushScreen(
-          MarksScreen(api: widget.api, classes: summary.classes),
+          MarksScreen(
+            api: widget.api,
+            classes: summary.classes,
+            canScan: _features.has("teacher_ai_tools"),
+          ),
+        );
+      case "AI tools":
+        await _pushScreen(
+          TeacherAiToolsScreen(
+            api: widget.api,
+            features: _features,
+            classes: summary.classes,
+          ),
         );
       case "My leave":
         await _pushScreen(StaffLeaveScreen(api: widget.api));
@@ -555,7 +577,12 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       case "Complaints":
         await _pushScreen(StaffComplaintsScreen(api: widget.api));
       case "PTM":
-        await _pushScreen(PtmTeacherScreen(api: widget.api));
+        await _pushScreen(
+          PtmTeacherScreen(
+            api: widget.api,
+            canBrief: _features.has("teacher_ai_tools"),
+          ),
+        );
       case "Message my classes":
         await _pushScreen(ClassMessageScreen(api: widget.api));
       case "Class gallery":

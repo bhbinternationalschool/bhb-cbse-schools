@@ -32,6 +32,7 @@ import "my_class_screen.dart";
 import "month_register_screen.dart";
 import "payslips_screen.dart";
 import "marks_screen.dart";
+import "teacher_ai_tools_screen.dart";
 import "staff_complaints_screen.dart";
 import "staff_leave_screen.dart";
 import "staff_roster_screen.dart";
@@ -370,10 +371,32 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
           var staff = _staff;
           staff ??= await widget.api.fetchStaffSummary();
           if (!mounted) return;
-          _push(MarksScreen(api: widget.api, classes: staff.classes));
+          _push(
+            MarksScreen(
+              api: widget.api,
+              classes: staff.classes,
+              canScan: _features.has("teacher_ai_tools"),
+            ),
+          );
         },
       ),
     ),
+    if (_features.has("teacher_ai_tools"))
+      (
+        "teacher_ai_tools",
+        _Action(
+          icon: Icons.auto_awesome_outlined,
+          label: "AI tools",
+          tone: ModuleTone.amber,
+          onTap: () => _push(
+            TeacherAiToolsScreen(
+              api: widget.api,
+              features: _features,
+              classes: _staff?.classes,
+            ),
+          ),
+        ),
+      ),
     (
       "timetable_view",
       _Action(
