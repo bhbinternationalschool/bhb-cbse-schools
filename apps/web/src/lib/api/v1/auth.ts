@@ -19,6 +19,7 @@ import { ApiError } from "@/lib/api/v1/errors";
 import { staffRoleCodeFor } from "@/lib/staffSessionRole";
 import { trackServerWork } from "@/lib/serverWork";
 import { rbacReadOutcome } from "@/lib/rbacReadOutcome";
+import { referenceCache, type BuildResult } from "@/lib/data/server/referenceCache";
 
 export type ApiAuthContext = {
   session: DemoSession;
@@ -41,70 +42,38 @@ function hashKey(raw: string): string {
  * had stopped writing once the desk became the source of truth, and which
  * bootstrap-go-live reset to defaults on every deploy: server-side
  * enforcement and the browser were looking at two different role sets.
- * Cached briefly — this runs on every authenticated request (31 089 blob
- * reads in six days).
+ * This runs on every authenticated request (31 089 blob reads in six days),
+ * so it is a reference cache (data-layer 1.3, lib/data/server/referenceCache):
+ * rebuilt when erp_versions says the rbac desk ("rbac" — rbac_desk_sync_meta,
+ * which every desk-slice push bumps) or the legacy blob (rbac_state) moved,
+ * and not otherwise. Until 13 Oct 2026 it was a 30 s TTL re-validated against
+ * rbac_desk_sync_meta every 5 s.
  *
- * Personal denies (12 Oct 2026) make a stale or unknown copy matter: a
- * deny the office just set must bite within seconds on every instance, and
- * a failed read must not answer with defaults that carry no denies at all.
- * So: the copy is re-validated against rbac_desk_sync_meta.updated_at (one
- * tiny row) every RBAC_PROBE_MS, and a failed read keeps the last copy this
- * instance read successfully. With no good copy ever read, `known` is
- * false — function-only access is refused (lib/apiRouteAuth.server).
+ * Personal denies (12 Oct 2026) make a stale or unknown copy matter: a deny
+ * the office just set must bite within seconds on every instance (now: the
+ * next versions window, 2 s), and a failed read must not answer with
+ * defaults that carry no denies at all. So a failed read keeps the last copy
+ * this instance read; with no copy ever read, `known` is false (rbacReadOutcome)
+ * — function-only access is refused (lib/apiRouteAuth.server).
  */
-const RBAC_CACHE_TTL_MS = 30_000;
-const RBAC_PROBE_MS = 5_000;
-let rbacCache: {
-  state: RbacState;
-  at: number;
-  probedAt: number;
-  known: boolean;
-  updatedAt: string;
-} | null = null;
-/** The last copy read successfully on this instance — kept across failures. */
-let lastKnownRbac: { state: RbacState; updatedAt: string } | null = null;
+type RbacCopy = { state: RbacState; known: boolean };
 
-export function invalidateServerRbacCache(): void {
-  rbacCache = null;
-}
-
-async function rbacDeskUpdatedAt(): Promise<string | null> {
+async function buildServerRbac(): Promise<BuildResult<RbacCopy>> {
   const ctx = await getServerTenantContext();
-  if (!ctx) return null;
-  const { data, error } = await ctx.sb
-    .from("rbac_desk_sync_meta")
-    .select("updated_at")
-    .eq("tenant_id", ctx.tenantId)
-    .maybeSingle();
-  if (error) return null;
-  return String((data as { updated_at?: string } | null)?.updated_at || "");
-}
-
-export async function loadServerRbac(): Promise<RbacState> {
-  const now = Date.now();
-  if (rbacCache && rbacCache.known && now - rbacCache.at < RBAC_CACHE_TTL_MS) {
-    if (now - rbacCache.probedAt < RBAC_PROBE_MS) return rbacCache.state;
-    const stamp = await rbacDeskUpdatedAt().catch(() => null);
-    if (stamp !== null && stamp === rbacCache.updatedAt) {
-      rbacCache.probedAt = now;
-      return rbacCache.state;
-    }
-  } else if (rbacCache && !rbacCache.known && now - rbacCache.at < RBAC_PROBE_MS) {
-    return rbacCache.state;
+  // No database configured (a local demo): nothing failed, nothing is saved.
+  if (!ctx) {
+    if (!serverDatabaseConfigured()) return { ok: true, value: { state: defaultRbacState(), known: false } };
+    return { ok: false, error: "tenant unavailable" };
   }
-  const ctx = await getServerTenantContext();
-  if (!ctx) return defaultRbacState();
 
   let state: RbacState | undefined;
   let deskOk = false;
-  let updatedAt = "";
   try {
     const { fetchDeskSliceFromDb } = await import(
       "@/lib/deskSliceNormalized.server"
     );
-    const { bundle, ok, meta } = await fetchDeskSliceFromDb("rbac");
+    const { bundle, ok } = await fetchDeskSliceFromDb("rbac");
     deskOk = ok;
-    updatedAt = meta?.updatedAt || "";
     const roles = Array.isArray(bundle.roles) ? bundle.roles : [];
     if (ok && roles.length > 0) {
       state = normalizeRbacState({
@@ -120,18 +89,9 @@ export async function loadServerRbac(): Promise<RbacState> {
     console.warn("[apiAuth] rbac desk read failed", e);
   }
 
-  if (!deskOk) {
-    // Unknown is not empty: keep the last good copy (its denies included)
-    // rather than answer with defaults that deny nothing.
-    const out = rbacReadOutcome({
-      readOk: false,
-      read: null,
-      lastKnown: lastKnownRbac?.state ?? null,
-      defaults: defaultRbacState,
-    });
-    rbacCache = { state: out.state, at: now, probedAt: now, known: out.known, updatedAt: lastKnownRbac?.updatedAt ?? "" };
-    return out.state;
-  }
+  // Unknown is not empty: the cache keeps the last copy (its denies
+  // included) rather than answer with defaults that deny nothing.
+  if (!deskOk) return { ok: false, error: "rbac desk read failed" };
 
   if (!state) {
     const { data } = await ctx.sb
@@ -151,15 +111,35 @@ export async function loadServerRbac(): Promise<RbacState> {
     ? normalizeRbacState(state)
     : defaultRbacState();
   // Known = a real saved role set (#574): defaults stand in for nothing.
-  const known = !!state?.roles?.length;
-  rbacCache = { state: resolved, at: now, probedAt: now, known, updatedAt };
-  if (known) lastKnownRbac = { state: resolved, updatedAt };
-  return resolved;
+  return { ok: true, value: { state: resolved, known: !!state?.roles?.length } };
+}
+
+const rbacCache = referenceCache<RbacCopy>("rbac", ["rbac", "rbac_state"], buildServerRbac);
+
+/** Force the next RBAC read to rebuild — call after a server-side write to the rbac desk. */
+export function invalidateServerRbacCache(): void {
+  rbacCache.invalidate();
+}
+
+/**
+ * The roles copy and whether it is a real saved role set. A failed rebuild
+ * is served the previous copy by the cache (its `known` with it); with no
+ * copy at all, rbacReadOutcome's rule: built-in defaults, marked unknown.
+ */
+async function readServerRbac(): Promise<RbacCopy> {
+  const r = await rbacCache.read();
+  if (r.ok) return r.value;
+  const out = rbacReadOutcome({ readOk: false, read: null, lastKnown: null, defaults: defaultRbacState });
+  return { state: out.state, known: out.known };
+}
+
+export async function loadServerRbac(): Promise<RbacState> {
+  return (await readServerRbac()).state;
 }
 
 async function rbacWithKnown(): Promise<{ rbac: RbacState; rbacKnown: boolean }> {
-  const rbac = await loadServerRbac();
-  return { rbac, rbacKnown: !!rbacCache?.known && rbacCache.state === rbac };
+  const { state, known } = await readServerRbac();
+  return { rbac: state, rbacKnown: known };
 }
 
 /**
@@ -172,31 +152,8 @@ async function rbacWithKnown(): Promise<{ rbac: RbacState; rbacKnown: boolean }>
  * role from everyone who holds it by assignment.
  */
 export async function loadServerRbacIfKnown(): Promise<RbacState | null> {
-  const state = await loadServerRbac();
-  return rbacCache?.known && rbacCache.state === state ? state : null;
-}
-
-/**
- * Server-side Masters for RBAC resolution. Without the real staff roster,
- * resolveSessionRoles can never match a per-staff role assignment and every
- * request silently falls back to inferRoleCodes() regex matching — i.e. the
- * assignments made in Masters → Roles were only ever enforced in the browser.
- * Masters desk slices carry everything except staff/departments/designations,
- * which live in the sis_* roster tables; merge both. Cached briefly because
- * this runs on every authenticated API request (single-tenant per deploy —
- * serverTenant resolves one TENANT.slug).
- */
-const MASTERS_CACHE_TTL_MS = 30_000;
-let mastersCache: { state: MastersState; at: number } | null = null;
-/** One read at a time: N concurrent misses on a cold instance share it. */
-let mastersInFlight: Promise<MastersState> | null = null;
-/** Bumped by invalidation, so a read started before it is not cached after it. */
-let mastersGeneration = 0;
-
-/** Drop the cached roster + masters — call after a server-side write to sis_staff. */
-export function invalidateServerMastersCache(): void {
-  mastersCache = null;
-  mastersGeneration++;
+  const { state, known } = await readServerRbac();
+  return known ? state : null;
 }
 
 /** A database is configured for this server (else there is nothing to fail). */
@@ -205,64 +162,50 @@ function serverDatabaseConfigured(): boolean {
 }
 
 /**
- * Masters + staff roster for this request, cached for 30 s.
- *
- * Unknown is never empty (data-layer 0.5c). A failed read keeps the copy
- * this process already has — served as it is, its timestamp NOT refreshed,
- * so the next request tries again — and with no copy at all it is a 503.
- * Until 13 Oct 2026 a failed read became an empty masters book cached for
- * 30 s, and any exception became defaultMasters(): a demo book with freshly
- * random class ids, which every app request on that instance then used.
+ * Server-side Masters for RBAC resolution. Without the real staff roster,
+ * resolveSessionRoles can never match a per-staff role assignment and every
+ * request silently falls back to inferRoleCodes() regex matching — i.e. the
+ * assignments made in Masters → Roles were only ever enforced in the browser.
+ * Masters desk slices carry everything except staff/departments/designations,
+ * which live in the sis_* roster tables; merge both. This runs on every
+ * authenticated API request (single-tenant per deploy — serverTenant
+ * resolves one TENANT.slug), so it is a reference cache (data-layer 1.3):
+ * rebuilt when erp_versions says Masters ("masters" — masters_desk_sync_meta,
+ * bumped by masters_write_slices and pushMastersDeskToDb) or the roster
+ * (sis_staff, sis_departments, sis_designations: max(updated_at) + count)
+ * moved, and not otherwise. Until 13 Oct 2026 it was a 30 s TTL.
  */
-export async function loadServerMasters(): Promise<MastersState> {
-  const now = Date.now();
-  if (mastersCache && now - mastersCache.at < MASTERS_CACHE_TTL_MS) {
-    return mastersCache.state;
-  }
-  if (!mastersInFlight) {
-    mastersInFlight = readServerMasters().finally(() => {
-      mastersInFlight = null;
-    });
-  }
-  return mastersInFlight;
-}
+const MASTERS_DESK_KEYS = ["masters", "sis_staff", "sis_departments", "sis_designations"] as const;
 
-async function readServerMasters(): Promise<MastersState> {
-  const generation = mastersGeneration;
-  const startedAt = Date.now();
-  const fail = (why: string): MastersState => {
-    const prev = mastersCache;
-    if (prev) {
-      console.error(
-        `[apiAuth] server masters read failed (${why}) — keeping the copy from ${Math.round((Date.now() - prev.at) / 1000)} s ago`,
-      );
-      return prev.state;
-    }
-    console.error(`[apiAuth] server masters read failed (${why}) and this process has no copy — 503`);
-    throw new ApiError("server_error", "Could not read the school setup — please try again.", 503);
-  };
-
+/**
+ * Unknown is never empty (data-layer 0.5c). A failed read keeps the copy
+ * this process already has (the cache serves it `stale` and tries again on
+ * the next read), and with no copy at all it is a 503. Until 13 Oct 2026 a
+ * failed read became an empty masters book cached for 30 s, and any
+ * exception became defaultMasters(): a demo book with freshly random class
+ * ids, which every app request on that instance then used.
+ */
+async function buildServerMasters(): Promise<BuildResult<MastersState>> {
   let read: Awaited<ReturnType<typeof fetchMastersDeskFromDb>>;
   let staffBundle: Awaited<ReturnType<typeof fetchStaffRemoteServer>>;
   try {
     [read, staffBundle] = await Promise.all([fetchMastersDeskFromDb(), fetchStaffRemoteServer()]);
   } catch (e) {
-    return fail(e instanceof Error ? e.message : String(e));
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 
   if (read.readFailed) {
     // No database at all (a local demo): nothing failed, there is nothing to read.
-    if (!serverDatabaseConfigured()) return deskBundleToMastersState(read.bundle);
-    return fail("masters_desk_slices");
+    if (!serverDatabaseConfigured()) return { ok: true, value: deskBundleToMastersState(read.bundle) };
+    return { ok: false, error: "masters_desk_slices" };
   }
   const state = deskBundleToMastersState(read.bundle);
   if (!staffBundle) {
-    // The roster is unknown, not empty. With a copy, keep the copy; without
-    // one, answer with no roster (revalidateStaffSession then leaves the
-    // cookie as it is) and do not cache it, so the next request re-reads.
-    if (mastersCache) return fail("staff roster");
-    console.error("[apiAuth] staff roster read failed — masters served without a roster, not cached");
-    return state;
+    // The roster is unknown, not empty. With a copy, the cache keeps the
+    // copy; without one, answer with no roster (revalidateStaffSession then
+    // leaves the cookie as it is) and do not store it, so the next request
+    // re-reads.
+    return { ok: false, error: "staff roster", fallback: state };
   }
   if (staffBundle.staff.length > 0) state.staff = staffBundle.staff;
   if (staffBundle.departments.length > 0) {
@@ -271,8 +214,22 @@ async function readServerMasters(): Promise<MastersState> {
   if (staffBundle.designations.length > 0) {
     state.designations = staffBundle.designations;
   }
-  if (generation === mastersGeneration) mastersCache = { state, at: startedAt };
-  return state;
+  return { ok: true, value: state };
+}
+
+const mastersCache = referenceCache<MastersState>("masters", MASTERS_DESK_KEYS, buildServerMasters);
+
+/** Force the next read to rebuild — call after a server-side write to sis_staff or Masters. */
+export function invalidateServerMastersCache(): void {
+  mastersCache.invalidate();
+}
+
+/** Masters + staff roster for this request (see buildServerMasters). */
+export async function loadServerMasters(): Promise<MastersState> {
+  const r = await mastersCache.read();
+  if (r.ok) return r.value;
+  console.error(`[apiAuth] server masters read failed (${r.error}) and this process has no copy — 503`);
+  throw new ApiError("server_error", "Could not read the school setup — please try again.", 503);
 }
 
 async function authFromApiKey(request: Request): Promise<ApiAuthContext | null> {
