@@ -93,24 +93,15 @@ export function ProfileChangeRequestsCard() {
           <p className="text-sm font-semibold text-[var(--brand-deep)]">
             {r.staffName} <span className="text-[11px] font-normal text-[var(--muted)]">· {when(r.createdAt)}</span>
           </p>
-          <table className="mt-2 w-full text-xs">
-            <thead>
-              <tr className="text-left text-[var(--muted)]">
-                <th className="py-1 pr-2 font-medium">Field</th>
-                <th className="py-1 pr-2 font-medium">Now</th>
-                <th className="py-1 font-medium">Asked for</th>
-              </tr>
-            </thead>
-            <tbody>
-              {r.fields.map((f) => (
-                <tr key={f.key} className="border-t border-[var(--border)]">
-                  <td className="py-1 pr-2">{f.label}</td>
-                  <td className="py-1 pr-2 text-[var(--muted)]">{f.from || "—"}</td>
-                  <td className="py-1 font-semibold text-[var(--brand-deep)]">{f.to || "(clear)"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <dl className="mt-2 divide-y divide-[var(--border)] rounded-md border border-[var(--border)] text-xs">
+            {r.fields.map((f) => (
+              <div key={f.key} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 px-2 py-1.5">
+                <dt className="font-medium text-[var(--muted)]">{f.label}</dt>
+                <dd className="text-[var(--muted)]">Now: {f.from || "—"}</dd>
+                <dd className="font-semibold text-[var(--brand-deep)]">Asked: {f.to || "(clear)"}</dd>
+              </div>
+            ))}
+          </dl>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <input
               className="field !py-1.5 text-xs"
