@@ -120,10 +120,102 @@ class NoticeDetailScreen extends StatelessWidget {
   }
 }
 
+/// The notice id a `/notices?notice=<id>` link carries (the push the ERP
+/// sends when a notice is published), or null.
+String? noticeIdFromRoute(Uri? uri) {
+  final id = uri?.queryParameters["notice"]?.trim() ?? "";
+  return id.isEmpty ? null : id;
+}
+
+/// The item [id] names in the feed — a notice before a news item, should the
+/// two ever share an id.
+CommsItem? findCommsItem(List<CommsItem> feed, String id) {
+  CommsItem? news;
+  for (final item in feed) {
+    if (item.id != id) continue;
+    if (!item.isNews) return item;
+    news ??= item;
+  }
+  return news;
+}
+
 /// The screen a "/notices" deep link opens: the full broadcast a tapped
-/// notification carried (see BroadcastInbox), else the notices list.
+/// notification carried (see BroadcastInbox), the published notice a
+/// `?notice=<id>` link names, else the notices list.
 Widget noticesScreenForRoute(ApiClient api, Uri? uri) {
   final broadcast = uri == null ? null : BroadcastInbox.take(uri);
   if (broadcast != null) return NoticeDetailScreen(api: api, item: broadcast);
+  final noticeId = noticeIdFromRoute(uri);
+  if (noticeId != null) return NoticeByIdScreen(api: api, noticeId: noticeId);
   return NoticesScreen(api: api);
+}
+
+/// Loads the feed and opens the notice [noticeId] in full. When it is not
+/// there (taken down, not for this reader, or the feed has not caught up)
+/// the list opens instead with a short note, so a tap never lands nowhere.
+class NoticeByIdScreen extends StatefulWidget {
+  const NoticeByIdScreen({
+    super.key,
+    required this.api,
+    required this.noticeId,
+  });
+
+  final ApiClient api;
+  final String noticeId;
+
+  @override
+  State<NoticeByIdScreen> createState() => _NoticeByIdScreenState();
+}
+
+class _NoticeByIdScreenState extends State<NoticeByIdScreen> {
+  CommsItem? _item;
+  bool _missing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _find();
+  }
+
+  Future<void> _find() async {
+    CommsItem? found;
+    try {
+      found = findCommsItem(await widget.api.fetchCommsFeed(), widget.noticeId);
+    } catch (_) {
+      found = null;
+    }
+    if (!mounted) return;
+    setState(() {
+      _item = found;
+      _missing = found == null;
+    });
+    if (found == null) {
+      final hindi = Localizations.localeOf(context).languageCode == "hi";
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(
+            content: Text(
+              hindi
+                  ? "वह सूचना अभी नहीं मिली — सभी सूचनाएँ नीचे हैं।"
+                  : "That notice could not be found — showing all notices.",
+            ),
+          ),
+        );
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final item = _item;
+    if (item != null) return NoticeDetailScreen(api: widget.api, item: item);
+    if (_missing) return NoticesScreen(api: widget.api);
+    return Scaffold(
+      appBar: AppBar(title: Text(context.l10n.homeNotice)),
+      body: const Center(
+        child: CircularProgressIndicator(color: AppColors.primary),
+      ),
+    );
+  }
 }

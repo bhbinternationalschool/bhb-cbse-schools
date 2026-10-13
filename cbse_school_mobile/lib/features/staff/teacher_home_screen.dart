@@ -25,6 +25,7 @@ import "payslips_screen.dart";
 import "ptm_teacher_screen.dart";
 import "my_subjects_screen.dart";
 import "home_groups.dart";
+import "my_attendance_calendar_screen.dart";
 import "my_profile_screen.dart";
 import "section_picker.dart";
 import "self_attendance_screen.dart";
@@ -174,7 +175,13 @@ const _staffModules = [
     ModuleTone.gray,
     "my_payslips",
   ),
-  // Everyone's own record — not a grant, so always shown.
+  // Everyone's own records — not grants, so always shown.
+  _StaffModule(
+    "My attendance",
+    Icons.calendar_month_outlined,
+    ModuleTone.teal,
+    "my_attendance",
+  ),
   _StaffModule(
     "My profile",
     Icons.badge_outlined,
@@ -270,6 +277,13 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         _openModule("Payslips");
       case "/profile":
         _openModule("My profile");
+      case "/my-attendance":
+        _pushScreen(
+          MyAttendanceCalendarScreen(
+            api: widget.api,
+            initialMonth: uri.queryParameters["month"],
+          ),
+        );
     }
   }
 
@@ -436,6 +450,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         await _pushScreen(OnlineClassesTeacherScreen(api: widget.api));
       case "Payslips":
         await _pushScreen(PayslipsScreen(api: widget.api));
+      case "My attendance":
+        await _pushScreen(MyAttendanceCalendarScreen(api: widget.api));
       case "Leave requests":
         await _pushScreen(StudentLeaveQueueScreen(api: widget.api));
       case "Complaints":
@@ -654,9 +670,15 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                         context.l10n.gpsPunchInOutFromCampus,
                         style: AppText.labelMediumMuted,
                       ),
-                      trailing: const Icon(
-                        Icons.chevron_right,
-                        color: AppColors.muted,
+                      // The punch stays the tap; the month calendar is
+                      // its own button beside it.
+                      trailing: IconButton(
+                        tooltip: "My month · मेरा महीना",
+                        onPressed: () => _openModule("My attendance"),
+                        icon: Icon(
+                          Icons.calendar_month_outlined,
+                          color: ModuleTone.teal.foreground,
+                        ),
                       ),
                     ),
                   ),
@@ -722,7 +744,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                   for (final (group, modules) in groupStaffTiles(
                     _staffModules.where(
                       (m) =>
-                          m.feature == "my_profile" || _features.has(m.feature),
+                          kAlwaysShownStaffFeatures.contains(m.feature) ||
+                          _features.has(m.feature),
                     ),
                     (m) => staffGroupOf(_features, m.feature),
                     order: _features.groupOrder,

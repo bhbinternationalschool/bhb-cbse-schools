@@ -58,7 +58,11 @@ List<RouteBase> staffRoutes(
   GoRoute(
     path: "/driver",
     builder: (context, state) =>
-        DriverHomeScreen(api: api, onLogout: () => context.go("/login")),
+        DriverHomeScreen(
+          api: api,
+          onLogout: () => context.go("/login"),
+          openRoute: state.uri.queryParameters["open"],
+        ),
   ),
   GoRoute(
     path: "/wrong-app",

@@ -10,7 +10,7 @@ const VISIBLE = new Set(["approved", "posted", "paid"]);
 
 /**
  * GET /api/v1/staff/payslips — the signed-in staff member's own payslips:
- * one per approved / posted / paid payroll run that carries their line.
+ * one per month, from the best approved / posted / paid run with their line.
  * Draft and pending runs are counted, not shown, so the app can say
  * "September is being prepared" instead of "no payslips".
  */
@@ -32,15 +32,26 @@ export async function GET(request: Request) {
     const modeLabel = (m: string) =>
       PAYROLL_PAYMENT_MODES.find((x) => x.value === m)?.label || m;
 
-    let preparing = 0;
-    const slips: Record<string, unknown>[] = [];
+    // One payslip per month (13 Oct 2026): a month can be paid in several
+    // runs, and a person may also sit on a draft of that month — the paid
+    // run wins, then posted, then approved; a month counts as "being
+    // prepared" only while it has no payslip at all.
+    const rank = (st: string) => (st === "paid" ? 3 : st === "posted" ? 2 : st === "approved" ? 1 : 0);
+    const best = new Map<string, (typeof payroll.runs)[number]>();
+    const draftMonths = new Set<string>();
     for (const run of payroll.runs) {
-      const line = run.lines.find((l) => l.staffId === staffId);
-      if (!line) continue;
+      if (!run.lines.some((l) => l.staffId === staffId)) continue;
       if (!VISIBLE.has(run.status)) {
-        preparing += 1;
+        draftMonths.add(run.month);
         continue;
       }
+      const have = best.get(run.month);
+      if (!have || rank(run.status) > rank(have.status)) best.set(run.month, run);
+    }
+    const preparing = [...draftMonths].filter((m) => !best.has(m)).length;
+    const slips: Record<string, unknown>[] = [];
+    for (const run of best.values()) {
+      const line = run.lines.find((l) => l.staffId === staffId)!;
       slips.push({
         runId: run.id,
         month: run.month,

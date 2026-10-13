@@ -64,5 +64,8 @@ export async function publishNoticeServer(input: {
       error: e instanceof Error ? e.message : "Could not save the notice",
     };
   }
+  // Phones (WhatsApp class-channel drafts publish here): once per notice.
+  const { pushPublishedNotice } = await import("@/lib/noticePush.server");
+  await pushPublishedNotice(notice);
   return { ok: true, notice };
 }

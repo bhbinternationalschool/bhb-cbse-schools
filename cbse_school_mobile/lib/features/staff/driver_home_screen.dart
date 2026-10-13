@@ -8,6 +8,8 @@ import "package:url_launcher/url_launcher.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "route_manifest_screen.dart";
+import "../modules/notice_detail_screen.dart";
+import "my_attendance_calendar_screen.dart";
 import "self_attendance_screen.dart";
 import "transport_requests_screen.dart";
 import "../../core/i18n/locale_controller.dart";
@@ -23,10 +25,15 @@ class DriverHomeScreen extends StatefulWidget {
     super.key,
     required this.api,
     required this.onLogout,
+    this.openRoute,
   });
 
   final ApiClient api;
   final VoidCallback onLogout;
+
+  /// Deep link from a notification tap ("/notices?notice=…",
+  /// "/my-attendance"), opened once the routes have loaded.
+  final String? openRoute;
 
   @override
   State<DriverHomeScreen> createState() => _DriverHomeScreenState();
@@ -41,6 +48,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   List<TransportRouteInfo>? _routes;
   String? _name;
   String? _error;
+  bool _deepLinkDone = false;
 
   @override
   void initState() {
@@ -62,12 +70,31 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         _routes = routes;
         _name = name;
       });
+      WidgetsBinding.instance.addPostFrameCallback((_) => _consumeDeepLink());
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
       if (mounted) {
         setState(() => _error = "स्कूल सर्वर से संपर्क नहीं हुआ।");
       }
+    }
+  }
+
+  void _consumeDeepLink() {
+    final raw = widget.openRoute;
+    if (raw == null || _deepLinkDone || !mounted) return;
+    _deepLinkDone = true;
+    final uri = Uri.tryParse(raw);
+    final Widget? screen = switch (uri?.path ?? raw) {
+      "/notices" => noticesScreenForRoute(widget.api, uri),
+      "/my-attendance" => MyAttendanceCalendarScreen(
+        api: widget.api,
+        initialMonth: uri?.queryParameters["month"],
+      ),
+      _ => null,
+    };
+    if (screen != null) {
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
     }
   }
 
@@ -274,9 +301,19 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         context.l10n.gpsPunchCampus,
                         style: AppText.labelMediumMuted,
                       ),
-                      trailing: const Icon(
-                        Icons.chevron_right,
-                        color: AppColors.muted,
+                      // The punch stays the tap; the month is beside it.
+                      trailing: IconButton(
+                        tooltip: "मेरा महीना · My month",
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                MyAttendanceCalendarScreen(api: widget.api),
+                          ),
+                        ),
+                        icon: Icon(
+                          Icons.calendar_month_outlined,
+                          color: ModuleTone.teal.foreground,
+                        ),
                       ),
                     ),
                   ),

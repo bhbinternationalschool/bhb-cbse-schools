@@ -23,7 +23,9 @@ import "survey_screen.dart";
 import "visitor_gate_screen.dart";
 import "home_groups.dart";
 import "leave_approvals_screen.dart";
+import "my_attendance_calendar_screen.dart";
 import "my_profile_screen.dart";
+import "payslips_screen.dart";
 import "marks_screen.dart";
 import "staff_complaints_screen.dart";
 import "staff_leave_screen.dart";
@@ -119,6 +121,15 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
         _postHomework();
       case "/profile":
         _openProfile();
+      case "/payslips":
+        _push(PayslipsScreen(api: widget.api));
+      case "/my-attendance":
+        _push(
+          MyAttendanceCalendarScreen(
+            api: widget.api,
+            initialMonth: Uri.tryParse(raw)?.queryParameters["month"],
+          ),
+        );
     }
   }
 
@@ -507,6 +518,24 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
         label: "My GPS punch",
         tone: ModuleTone.teal,
         onTap: () => _push(SelfAttendanceScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "my_payslips",
+      _Action(
+        icon: Icons.receipt_long_outlined,
+        label: "Payslips · वेतन पर्ची",
+        tone: ModuleTone.gray,
+        onTap: () => _push(PayslipsScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "my_attendance",
+      _Action(
+        icon: Icons.calendar_month_outlined,
+        label: "My attendance",
+        tone: ModuleTone.teal,
+        onTap: () => _push(MyAttendanceCalendarScreen(api: widget.api)),
       ),
     ),
     (

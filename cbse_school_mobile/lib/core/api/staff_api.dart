@@ -252,6 +252,82 @@ class PayslipList {
   final List<Payslip> slips;
 }
 
+// ------------------------------------------------------- my attendance month
+
+/// One day of the signed-in staff member's month, as
+/// /api/v1/staff/my-attendance returns it (lib/staffMonthCalendar.ts).
+class StaffCalendarDay {
+  StaffCalendarDay.fromJson(Map<String, dynamic> j)
+    : date = _s(j, "date"),
+      kind = _s(j, "kind"),
+      label = _s(j, "label"),
+      inTime = _s(j, "inTime"),
+      outTime = _s(j, "outTime"),
+      way = _s(j, "way");
+
+  /// YYYY-MM-DD
+  final String date;
+
+  /// present | late | half_day | absent | leave | holiday | unpaid_holiday |
+  /// not_marked | exempt | future
+  final String kind;
+  final String label;
+  final String inTime;
+  final String outTime;
+
+  /// How the punch was made, in words ("GPS punch", "Office QR"…).
+  final String way;
+}
+
+/// The month's totals, counted the way payroll counts them.
+class StaffCalendarCounts {
+  StaffCalendarCounts.fromJson(Map<String, dynamic> j)
+    : present = _i(j, "present"),
+      late = _i(j, "late"),
+      halfDay = _i(j, "halfDay"),
+      absent = _i(j, "absent"),
+      notMarked = _i(j, "notMarked"),
+      leave = _i(j, "leave"),
+      holidays = _i(j, "holidays"),
+      lwpDays = _d(j, "lwpDays");
+
+  final int present;
+  final int late;
+  final int halfDay;
+  final int absent;
+  final int notMarked;
+  final int leave;
+  final int holidays;
+
+  /// Loss-of-pay days: absent + not marked + ½ per half day.
+  final double lwpDays;
+}
+
+class StaffAttendanceMonth {
+  StaffAttendanceMonth.fromJson(Map<String, dynamic> j)
+    : staffId = _s(j, "staffId"),
+      fullName = _s(j, "fullName"),
+      month = _s(j, "month"),
+      today = _s(j, "today"),
+      exempt = _b(j, "exempt"),
+      days = _list(j, "days").map(StaffCalendarDay.fromJson).toList(),
+      counts = StaffCalendarCounts.fromJson(
+        Map<String, dynamic>.from((j["counts"] as Map?) ?? const {}),
+      );
+
+  final String staffId;
+  final String fullName;
+
+  /// YYYY-MM
+  final String month;
+
+  /// The school's today (IST), YYYY-MM-DD.
+  final String today;
+  final bool exempt;
+  final List<StaffCalendarDay> days;
+  final StaffCalendarCounts counts;
+}
+
 // -------------------------------------------------------------------- exams
 
 class ExamTermInfo {
@@ -1225,6 +1301,12 @@ extension StaffApi on ApiClient {
 
   Future<PayslipList> fetchPayslips() async =>
       PayslipList.fromJson(await _getData("/api/v1/staff/payslips"));
+
+  /// My own attendance for a month (YYYY-MM), day by day.
+  Future<StaffAttendanceMonth> fetchMyAttendance(String month) async =>
+      StaffAttendanceMonth.fromJson(
+        await _getData("/api/v1/staff/my-attendance?month=$month"),
+      );
 
   Future<List<ExamTermInfo>> fetchExamTerms() async {
     final data = await _getData("/api/v1/staff/exams/terms");
