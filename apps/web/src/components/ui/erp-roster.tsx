@@ -99,7 +99,8 @@ export function ErpMetricCard({
       <div className="min-w-0">
         <div className={cn("text-sm font-semibold", t.title)}>{title}</div>
         <div className="mt-1 flex items-baseline gap-2">
-          <span className="text-3xl font-bold tabular-nums text-[var(--foreground)]">
+          {/* data-testid: the e2e gate reads a dashboard number here (step 1.1). */}
+          <span data-testid="metric-value" className="text-3xl font-bold tabular-nums text-[var(--foreground)]">
             {value}
           </span>
           {delta ? (

@@ -70,7 +70,15 @@ class ScoreboardReporter implements Reporter {
       }
     }
     const step = innermostFailedStep(result.steps);
-    const annotations = [...test.annotations, ...result.annotations].map((a) => ({ type: a.type, description: a.description }));
+    const seenAnn = new Set<string>();
+    const annotations = [...test.annotations, ...result.annotations]
+      .map((a) => ({ type: a.type, description: a.description }))
+      .filter((a) => {
+        const k = `${a.type}\u0000${a.description ?? ""}`;
+        if (seenAnn.has(k)) return false;
+        seenAnn.add(k);
+        return true;
+      });
     this.rows.push({
       project,
       file: test.location.file.split("/e2e/specs/").pop() ?? test.location.file,
