@@ -11,7 +11,7 @@ import { isFeaturePersonallyDenied } from "@/lib/rbac";
 import { isModuleStateKey, MODULE_STATE_DEFS } from "@/lib/moduleStateRegistry";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { complaintScopeFilter } from "@/lib/api/v1/staffComplaints";
-import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
+import { scopeAllows, readStaffScopeForDesk } from "@/lib/api/v1/staffScope";
 import type { ComplaintTicket } from "@/lib/complaints";
 import { isMergedModuleState, mergeModuleState } from "@/lib/moduleStateMerge";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -126,7 +126,9 @@ export async function GET(req: Request, ctx: RouteCtx) {
     // discipline.view / health.view are held by teachers, and these rows are
     // the whole school's registers (health: children's medical notes). A
     // teacher's browser gets only their own sections' children (2026-09-29).
-    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(auth.ctx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope) {
       return NextResponse.json({ ok: false, error: "Could not work out your classes" }, { status: 503 });
     }
@@ -165,7 +167,9 @@ export async function POST(req: Request, ctx: RouteCtx) {
     // Same rule for discipline / health: a teacher's copy is filtered to
     // their classes, so pushing it whole would erase every other class.
     // Teachers log entries through /api/v1/staff/discipline|health.
-    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(auth.ctx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope?.unrestricted) {
       return NextResponse.json(
         {
@@ -185,7 +189,9 @@ export async function POST(req: Request, ctx: RouteCtx) {
     // class's tickets. Teachers move their own tickets one at a time through
     // /api/v1/staff/complaints/update; this route is the office's
     // (2026-09-29, same rule as the attendance register push).
-    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(auth.ctx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope?.unrestricted) {
       return NextResponse.json(
         {

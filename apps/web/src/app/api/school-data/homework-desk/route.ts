@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
+import { scopeAllows, readStaffScopeForDesk } from "@/lib/api/v1/staffScope";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
@@ -112,7 +112,9 @@ export async function POST(req: Request) {
   let teacher: HomeworkTeacherSave | undefined;
   const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
   if (scopeCtx) {
-    const scope = await staffSectionScope(scopeCtx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(scopeCtx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope) {
       return NextResponse.json({ ok: false, error: "Could not work out your classes — try again" }, { status: 503 });
     }

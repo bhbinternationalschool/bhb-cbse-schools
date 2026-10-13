@@ -16,7 +16,7 @@ import {
   timingSafeStringEqual,
 } from "@/lib/apiRouteAuth.server";
 import type { RbacModule } from "@/lib/rbac";
-import { sectionKey, staffSectionScope } from "@/lib/api/v1/staffScope";
+import { sectionKey, readStaffScopeForDesk } from "@/lib/api/v1/staffScope";
 import { loadSis } from "@/lib/sis";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import {
@@ -139,7 +139,9 @@ export async function POST(req: Request) {
     // WhatsApp. A teacher (not school-wide) may message only the families
     // of children in the sections they teach.
     if (!auth.viaMirrorSecret) {
-      const scope = await staffSectionScope(auth.ctx).catch(() => null);
+      const scopeRead = await readStaffScopeForDesk(auth.ctx);
+      if (!scopeRead.ok) return scopeRead.response;
+      const scope = scopeRead.scope;
       if (scope && !scope.unrestricted) {
         await ensureSisHydratedServer().catch(() => false);
         const sis = loadSis();

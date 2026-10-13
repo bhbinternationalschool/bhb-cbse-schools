@@ -8,7 +8,7 @@ import {
 } from "@/lib/apiRouteAuth.server";
 import type { SisState } from "@/lib/sis";
 import { hasPermission } from "@/lib/rbac";
-import { sectionKey, staffSectionScope } from "@/lib/api/v1/staffScope";
+import { sectionKey, readStaffScopeForDesk } from "@/lib/api/v1/staffScope";
 import { sisDualWriteDbEnabled } from "@/lib/sisDbConfig";
 import {
   deleteSisRecordsInDb,
@@ -31,10 +31,20 @@ export async function GET(req: Request) {
   // students.view downloaded all ~700 students, their parents' mobiles,
   // addresses and Aadhaar last-4. A teacher cannot push SIS (students.edit),
   // so a partial copy here can never be written back over the full one.
-  if (!auth.viaMirrorSecret) {
-    const scope = await staffSectionScope(auth.ctx).catch(() => null);
-    const canEditStudents = hasPermission(auth.ctx.session, auth.ctx.masters, "students", "edit", auth.ctx.rbac);
-    if (scope && !scope.unrestricted && !canEditStudents) {
+  // Unknown scope (the timetable could not be read) is a 503: until
+  // 13 Oct 2026 a failed scope fell through to the whole school.
+  // The scoped answer names the sections (`scoped`, `sections`) so a teacher
+  // with no sections is told so, distinct from a failed read.
+  // A students.edit holder gets the whole roster whatever their scope, so
+  // their scope is not computed (a timetable read failure cannot 503 them).
+  const canEditStudents =
+    !auth.viaMirrorSecret &&
+    hasPermission(auth.ctx.session, auth.ctx.masters, "students", "edit", auth.ctx.rbac);
+  if (!auth.viaMirrorSecret && !canEditStudents) {
+    const scopeRead = await readStaffScopeForDesk(auth.ctx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
+    if (scope && !scope.unrestricted) {
       const { bundle, meta, ok } = sisIdentitySplitEnabled()
         ? await fetchSisFromDbViaIdentitySplit()
         : await fetchSisFromDb();
@@ -49,6 +59,13 @@ export async function GET(req: Request) {
       return NextResponse.json(
         {
           ok: true,
+          scoped: true,
+          sections: scope.teaching.map((t) => ({
+            classId: t.classId,
+            sectionId: t.sectionId,
+            className: t.className,
+            sectionName: t.sectionName,
+          })),
           households,
           students: stripEmptyDocsList(students as unknown as Record<string, unknown>[]),
           tags: bundle.tags,
