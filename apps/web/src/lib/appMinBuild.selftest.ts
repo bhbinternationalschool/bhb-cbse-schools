@@ -19,6 +19,9 @@ assert.equal(appBuildTooOld(null, 1), false, "no flavour — never refused");
 assert.equal(appBuildTooOld("parent", 1), APP_MIN_BUILD.parent > 1);
 assert.equal(appBuildTooOld("parent", 25), true, "parent 1.0.24 must update");
 assert.equal(appBuildTooOld("parent", 26), false, "parent 1.0.25 runs");
+assert.equal(appBuildTooOld("staff", 25), true, "staff 1.0.24 must update (13 Oct 2026)");
+assert.equal(appBuildTooOld("staff", 31), true, "staff 1.0.30 must update");
+assert.equal(appBuildTooOld("staff", 32), false, "staff 1.0.31 runs");
 
 // garbled builds count as unknown
 for (const bad of ["", "abc", "1.0.13", "-3", "0", "14x", "1234567890"]) {
