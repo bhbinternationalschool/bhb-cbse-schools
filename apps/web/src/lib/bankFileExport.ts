@@ -21,6 +21,7 @@ import {
 } from "@/lib/salarySetup";
 
 export type BankFileFormat =
+  | "ubi_salary_upload"
   | "ubi_neft"
   | "generic_neft"
   | "sbi_corporate"
@@ -33,8 +34,13 @@ export const BANK_FILE_FORMATS: {
   hint: string;
 }[] = [
   {
+    value: "ubi_salary_upload",
+    label: "Union Bank salary upload (bank's own format)",
+    hint: "FILEHDR row · one DR row for the total · one CR row per Union Bank account — staff at other banks go by NEFT",
+  },
+  {
     value: "ubi_neft",
-    label: "Union Bank NEFT (recommended)",
+    label: "Union Bank NEFT",
     hint: `UBI Murdaha Bazar · IFSC ${SCHOOL_SALARY_BANK.ifsc} · beneficiary a/c, IFSC, name, amount, debit a/c, remarks`,
   },
   {
@@ -90,6 +96,8 @@ export type BankExportPreview = {
   debitIfsc: string;
   debitBankName: string;
   debitBranch: string;
+  /** Union Bank corporate ID (Masters → Salary setup). */
+  debitCorporateId: string;
 };
 
 function csvEscape(v: string | number): string {
@@ -218,6 +226,7 @@ export function buildBankExportPreview(input: {
     debitIfsc: settings.salaryBankIfsc.trim().toUpperCase(),
     debitBankName: settings.salaryBankName.trim(),
     debitBranch: settings.salaryBankBranch.trim(),
+    debitCorporateId: (settings.salaryBankCorporateId || "").trim(),
   };
 }
 
@@ -302,11 +311,68 @@ export function bankFileServerConflicts(
   return out;
 }
 
+const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+/** No commas anywhere in the bank's file; trimmed to a field's length. */
+function ubiField(v: string, max: number): string {
+  return String(v ?? "").replace(/[,"\r\n]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max).trim();
+}
+
+/** A Union Bank account: digits only, at most 15 (the file's limit); its first five digits are the branch SOL ID. */
+export function isUbiAccount(accountNo: string, ifsc: string): boolean {
+  return /^UBIN/i.test(ifsc || "") && /^\d{5,15}$/.test(accountNo || "");
+}
+
+/**
+ * Union Bank's own salary upload (the bank's "SALARY File Upload in CSV
+ * Format", supplied by the school 14 Oct 2026):
+ *   FILEHDR,<corporate id ≤32>,<file sequence no ≤6 digits, optional>
+ *   <sol id = first 5 digits>,<debit a/c ≤15>,INR,DR,<total>,<remark ≤13>
+ *   <sol id>,<credit a/c ≤15>,INR,CR,<amount>,<remark ≤13>   (one per staff)
+ * No headings, no commas, credits sum to the debit, plain "CSV (MS-DOS)":
+ * no byte-order mark, CRLF lines. It credits Union Bank accounts only (no
+ * IFSC in the format) — anyone else is left out and named for NEFT.
+ */
+export function renderUbiSalaryUpload(
+  preview: Pick<BankExportPreview, "month" | "debitAccountNo" | "debitCorporateId">,
+  rows: BankExportRow[],
+  fileSequence = "",
+): { ok: true; content: string; included: BankExportRow[]; otherBank: BankExportRow[] } | { ok: false; error: string } {
+  const debit = (preview.debitAccountNo || "").replace(/\s+/g, "");
+  if (!/^\d{5,15}$/.test(debit)) {
+    return { ok: false, error: "Enter the school's Union Bank salary a/c (digits only, up to 15) in Masters → Salary setup" };
+  }
+  const corp = ubiField(preview.debitCorporateId, 32);
+  if (!corp) return { ok: false, error: "Enter the Union Bank Corporate ID in Masters → Salary setup" };
+  const seq = (fileSequence || "").trim();
+  if (seq && !/^\d{1,6}$/.test(seq)) return { ok: false, error: "File sequence number: up to 6 digits" };
+  const included = rows.filter((r) => isUbiAccount(r.accountNo, r.ifsc));
+  const otherBank = rows.filter((r) => !isUbiAccount(r.accountNo, r.ifsc));
+  if (included.length === 0) return { ok: false, error: "No staff with a Union Bank account in this month's file — use a NEFT format" };
+  const [y, m] = preview.month.split("-");
+  const mon = MONTHS[Number(m) - 1] ?? "";
+  const total = included.reduce((sum, r) => sum + r.amount, 0);
+  const lines = [
+    ["FILEHDR", corp, seq],
+    [debit.slice(0, 5), debit, "INR", "DR", String(total), ubiField(`SAL ${mon} ${y}`, 13)],
+    ...included.map((r) => [
+      r.accountNo.slice(0, 5),
+      r.accountNo,
+      "INR",
+      "CR",
+      String(r.amount),
+      ubiField(`SAL ${mon}${(y || "").slice(2)} ${r.empCode}`, 13),
+    ]),
+  ];
+  return { ok: true, content: lines.map((l) => l.join(",")).join("\r\n") + "\r\n", included, otherBank };
+}
+
 export function renderBankFile(
   preview: BankExportPreview,
   format: BankFileFormat,
   onlyReady = true,
-): { ok: true; content: string; filename: string; count: number; total: number }
+  opts: { fileSequence?: string } = {},
+): { ok: true; content: string; filename: string; count: number; total: number; otherBank?: BankExportRow[] }
   | { ok: false; error: string } {
   const rows = onlyReady ? preview.rows.filter((r) => r.ok) : preview.rows;
   if (rows.length === 0) {
@@ -315,6 +381,18 @@ export function renderBankFile(
       error: onlyReady
         ? "No rows ready — fix missing bank A/c / IFSC on staff profiles"
         : "No payable bank lines for this month",
+    };
+  }
+  if (format === "ubi_salary_upload") {
+    const u = renderUbiSalaryUpload(preview, rows, opts.fileSequence);
+    if (!u.ok) return u;
+    return {
+      ok: true,
+      content: u.content,
+      filename: `salary_ubi_${preview.month}.csv`,
+      count: u.included.length,
+      total: u.included.reduce((sum, r) => sum + r.amount, 0),
+      otherBank: u.otherBank,
     };
   }
   if (
@@ -462,13 +540,17 @@ export function renderBankFile(
 export function downloadBankFile(
   preview: BankExportPreview,
   format: BankFileFormat,
+  opts: { fileSequence?: string } = {},
 ): { ok: true; message: string } | { ok: false; error: string } {
-  const built = renderBankFile(preview, format, true);
+  const built = renderBankFile(preview, format, true, opts);
   if (!built.ok) return built;
   downloadTextFile(built.filename, built.content);
+  const others = built.otherBank?.length
+    ? ` · NOT in this file (other banks — pay by NEFT): ${built.otherBank.map((r) => `${r.empCode} ${r.fullName}`).join(", ")}`
+    : "";
   return {
     ok: true,
-    message: `Downloaded ${built.filename}: ${built.count} credits · ${formatInr(built.total)}`,
+    message: `Downloaded ${built.filename}: ${built.count} credits · ${formatInr(built.total)}${others}`,
   };
 }
 
@@ -481,6 +563,7 @@ export function downloadBankFile(
 export async function downloadBankFileChecked(
   preview: BankExportPreview,
   format: BankFileFormat,
+  opts: { fileSequence?: string } = {},
 ): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
   const { fetchPayrollDeskFromApi, payrollNormalizedSyncEnabled } = await import("@/lib/payrollNormalizedClient");
   if (payrollNormalizedSyncEnabled()) {
@@ -496,7 +579,7 @@ export async function downloadBankFileChecked(
       };
     }
   }
-  return downloadBankFile(preview, format);
+  return downloadBankFile(preview, format, opts);
 }
 
 export function downloadBankExceptionReport(

@@ -28,7 +28,7 @@ const store = new Map<string, string>();
 };
 
 void (async () => {
-  const { bankSafeName, bankFileServerConflicts, buildBankExportPreview } = await import("./bankFileExport");
+  const { bankSafeName, bankFileServerConflicts, buildBankExportPreview, renderUbiSalaryUpload } = await import("./bankFileExport");
   const { writePayrollLocalRaw, loadPayroll } = await import("./payroll");
   const { defaultMasters } = await import("./masters");
 
@@ -73,6 +73,39 @@ void (async () => {
   assert.match(bankFileServerConflicts(preview, [] as never)[0]!, /not on the server/);
   const otherPaid = { id: "run_sep_part", month, academicYearCode: AY, status: "paid", lines: [line("s1", "E1", "Asha")] };
   assert.match(bankFileServerConflicts(preview, server("posted", [otherPaid])).join(" "), /Already paid for 2026-09 in another run: E1 Asha/);
+
+  // Union Bank's own salary upload (the bank's CSV format, 14 Oct 2026).
+  const ubiRow = (empCode: string, accountNo: string, ifsc: string, amount: number) =>
+    ({ empCode, fullName: empCode, accountNo, ifsc, amount, ok: true, issues: [] }) as never;
+  const ubi = renderUbiSalaryUpload(
+    { month: "2026-10", debitAccountNo: "566802080000111", debitCorporateId: "BHB, INTL" },
+    [ubiRow("E1", "344502090000222", "UBIN0548847", 25000), ubiRow("E2", "455602090000333", "UBIN0544560", 18500), ubiRow("E3", "30112233445", "SBIN0001234", 12000)],
+    "7",
+  );
+  assert.ok(ubi.ok);
+  const out = (ubi as { content: string }).content;
+  assert.equal(
+    out,
+    [
+      "FILEHDR,BHB INTL,7",
+      "56680,566802080000111,INR,DR,43500,SAL OCT 2026",
+      "34450,344502090000222,INR,CR,25000,SAL OCT26 E1",
+      "45560,455602090000333,INR,CR,18500,SAL OCT26 E2",
+      "",
+    ].join("\r\n"),
+    "header, one debit for the total, one credit per Union Bank account; commas removed",
+  );
+  assert.ok(!out.startsWith("\uFEFF"), "plain CSV (MS-DOS): no byte-order mark");
+  for (const line of out.trim().split("\r\n").slice(1)) {
+    const f = line.split(",");
+    assert.equal(f.length, 6);
+    assert.ok(f[1]!.length <= 15 && f[5]!.length <= 13, `field limits: ${line}`);
+  }
+  assert.deepEqual((ubi as { otherBank: { empCode: string }[] }).otherBank.map((r) => r.empCode), ["E3"], "the SBI account goes by NEFT, named");
+  const noCorp = renderUbiSalaryUpload({ month: "2026-10", debitAccountNo: "566802080000111", debitCorporateId: "" }, [ubiRow("E1", "344502090000222", "UBIN0548847", 1)]);
+  assert.equal(noCorp.ok, false, "no corporate ID: refused");
+  const badDebit = renderUbiSalaryUpload({ month: "2026-10", debitAccountNo: "5668-0208", debitCorporateId: "X" }, [ubiRow("E1", "344502090000222", "UBIN0548847", 1)]);
+  assert.equal(badDebit.ok, false, "debit a/c must be digits");
 
   console.log("bankFileSafety.selftest.ts: ok");
 })();

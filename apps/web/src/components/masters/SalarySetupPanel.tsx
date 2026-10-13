@@ -269,6 +269,18 @@ function PayCyclePanel({
           />
         </label>
         <label className="text-[11px] text-[var(--muted)]">
+          Corporate ID (Union Bank salary upload)
+          <input
+            className="field mt-1 !py-1.5"
+            value={form.salaryBankCorporateId}
+            placeholder="As on your Union Bank corporate login"
+            maxLength={32}
+            onChange={(e) =>
+              setForm({ ...form, salaryBankCorporateId: e.target.value })
+            }
+          />
+        </label>
+        <label className="text-[11px] text-[var(--muted)]">
           IFSC (UBIN0548847)
           <input
             className="field mt-1 !py-1.5"

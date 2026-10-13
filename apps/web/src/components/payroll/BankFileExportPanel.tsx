@@ -32,7 +32,8 @@ export function BankFileExportPanel({
 }) {
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [month, setMonth] = useState(currentMonthIso);
-  const [format, setFormat] = useState<BankFileFormat>("ubi_neft");
+  const [format, setFormat] = useState<BankFileFormat>("ubi_salary_upload");
+  const [fileSequence, setFileSequence] = useState("");
   const [includeUpi, setIncludeUpi] = useState(false);
   const [tick, setTick] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
@@ -96,17 +97,18 @@ export function BankFileExportPanel({
       setNotice(msg);
       setError(null);
     }
+    // Long enough to read who was left out of a Union Bank file.
     window.setTimeout(() => {
       setNotice(null);
       setError(null);
-    }, 4000);
+    }, 12000);
   }
 
   async function onDownload() {
     if (!preview) return;
     // Checked against the server's payroll first: a run marked paid on
     // another device must not be paid again from this screen's copy.
-    const r = await downloadBankFileChecked(preview, format);
+    const r = await downloadBankFileChecked(preview, format, { fileSequence });
     if (!r.ok) flash(r.error, true);
     else flash(r.message);
   }
@@ -196,6 +198,20 @@ export function BankFileExportPanel({
               ))}
             </select>
           </label>
+
+          {format === "ubi_salary_upload" ? (
+            <label className="text-xs font-semibold text-[var(--muted)]">
+              File no. (optional)
+              <input
+                className="field mt-1 block !py-2"
+                inputMode="numeric"
+                maxLength={6}
+                value={fileSequence}
+                placeholder="e.g. 1"
+                onChange={(e) => setFileSequence(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              />
+            </label>
+          ) : null}
 
           <label className="flex items-center gap-2 self-end pb-2 text-xs font-medium text-[var(--brand-deep)]">
             <input
