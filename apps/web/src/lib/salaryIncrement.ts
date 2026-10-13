@@ -20,6 +20,7 @@ import {
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { carryNotOnPayroll } from "@/lib/payrollNotOnPayroll";
 export type IncrementCycle = "april" | "anniversary" | "hold_month";
 export type IncrementMode = "percent" | "fixed";
 
@@ -796,6 +797,8 @@ export function applyIncrementBatch(
       statutoryGrossUp: existing?.statutoryGrossUp === true,
       effectiveFrom: batch.effectiveFrom,
       salaryAccountNote: existing?.salaryAccountNote || "",
+      // A raise never puts someone back on payroll (Masters → Salary setup).
+      ...carryNotOnPayroll(existing),
     };
     links = [...links.filter((l) => l.staffId !== line.staffId), row];
   }

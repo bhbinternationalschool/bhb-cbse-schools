@@ -13,6 +13,7 @@ import { DEFAULT_AY } from "@/lib/masters";
 import { isVisitingStaff } from "@/lib/visitingPay";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { normalizeNotOnPayroll, type NotOnPayrollFields } from "@/lib/payrollNotOnPayroll";
 
 export type SalaryHeadKind = "earning" | "deduction" | "employer";
 
@@ -92,7 +93,7 @@ export type StaffSalaryLink = {
   statutoryGrossUp: boolean;
   effectiveFrom: string;
   salaryAccountNote: string;
-};
+} & NotOnPayrollFields;
 
 /** Virtual earning head for the per-staff additional amount (no master row). */
 export const ADDITIONAL_HEAD_CODE = "ADDL";
@@ -557,6 +558,7 @@ function normalizeLink(l: Partial<StaffSalaryLink>): StaffSalaryLink {
     statutoryGrossUp: l.statutoryGrossUp === true,
     effectiveFrom: String(l.effectiveFrom || "").slice(0, 10),
     salaryAccountNote: String(l.salaryAccountNote || ""),
+    ...normalizeNotOnPayroll(l),
   };
 }
 

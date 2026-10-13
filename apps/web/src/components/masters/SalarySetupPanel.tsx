@@ -53,6 +53,15 @@ import {
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { IncrementPanel } from "@/components/payroll/IncrementPanel";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { NotOnPayrollSwitch } from "@/components/masters/NotOnPayrollSwitch";
+import { recordAudit } from "@/lib/auditClient";
+import {
+  carryNotOnPayroll,
+  clearSalaryAssignment,
+  hasSalaryAssignment,
+  isOnPayroll,
+  setNotOnPayroll,
+} from "@/lib/payrollNotOnPayroll";
 
 type SalTab = "settings" | "heads" | "structures" | "assign" | "increment";
 
@@ -683,8 +692,9 @@ function StructuresPanel({
                           structures: state.structures.filter(
                             (x) => x.id !== s.id,
                           ),
-                          staffLinks: state.staffLinks.filter(
-                            (l) => l.structureId !== s.id,
+                          staffLinks: clearSalaryAssignment(
+                            state.staffLinks,
+                            (l) => l.structureId === s.id,
                           ),
                         });
                         if (editId === s.id) setEditId(null);
@@ -1009,6 +1019,7 @@ function AssignPanel({
   commit: (s: SalarySetupState, msg?: string) => void;
   masters: MastersState;
 }) {
+  const session = useDemoSession();
   type Draft = {
     structureId: string;
     basicOverride: string;
@@ -1032,7 +1043,7 @@ function AssignPanel({
     roster,
     {
       staff: (s) => s.fullName,
-      saved: (s) => (state.staffLinks.some((l) => l.staffId === s.id) ? 1 : 0),
+      saved: (s) => (hasSalaryAssignment(state.staffLinks.find((l) => l.staffId === s.id)) ? 1 : 0),
       structure: (s) => {
         const link = state.staffLinks.find((l) => l.staffId === s.id);
         return state.structures.find((x) => x.id === link?.structureId)?.name ?? "";
@@ -1046,7 +1057,9 @@ function AssignPanel({
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
 
   function savedDraft(staffId: string): Draft {
-    const link = state.staffLinks.find((l) => l.staffId === staffId);
+    // A link carrying only the "not on payroll" switch is no assignment.
+    const found = state.staffLinks.find((l) => l.staffId === staffId);
+    const link = hasSalaryAssignment(found) ? found : undefined;
     return {
       structureId: link?.structureId || "",
       basicOverride:
@@ -1099,7 +1112,7 @@ function AssignPanel({
       commit(
         {
           ...state,
-          staffLinks: state.staffLinks.filter((l) => l.staffId !== staffId),
+          staffLinks: clearSalaryAssignment(state.staffLinks, (l) => l.staffId === staffId),
         },
         "Assignment cleared — using auto structure",
       );
@@ -1119,6 +1132,7 @@ function AssignPanel({
       effectiveFrom:
         existing?.effectiveFrom || new Date().toISOString().slice(0, 10),
       salaryAccountNote: existing?.salaryAccountNote || "",
+      ...carryNotOnPayroll(existing),
     };
     commit(
       {
@@ -1131,6 +1145,34 @@ function AssignPanel({
       "Staff salary assignment saved",
     );
     cancelDraft(staffId);
+  }
+
+  /** The "Not on payroll" switch — saved at once, and audited. */
+  function setPayrollSwitch(staffId: string, on: boolean, reason: string) {
+    const staff = roster.find((s) => s.id === staffId);
+    const r = setNotOnPayroll(state.staffLinks, staffId, {
+      on,
+      reason,
+      by: session.fullName,
+      at: new Date().toISOString(),
+    });
+    commit(
+      { ...state, staffLinks: r.links },
+      on
+        ? `${staff?.fullName ?? "Staff"} marked not on payroll — left out of new salary runs`
+        : `${staff?.fullName ?? "Staff"} is back on payroll`,
+    );
+    recordAudit({
+      module: "masters",
+      action: "update",
+      entityType: "salary_payroll_switch",
+      entityId: staffId,
+      summary: `${staff?.fullName ?? staffId} (${staff?.empCode ?? ""}): ${
+        on ? `not on payroll${reason ? ` — ${reason}` : ""}` : "back on payroll"
+      }`,
+      before: r.before,
+      after: r.after,
+    });
   }
 
   const dirtyCount = roster.filter((s) => isDirty(s.id)).length;
@@ -1151,7 +1193,11 @@ function AssignPanel({
         <strong className="text-[var(--brand-deep)]">School pays the PF/ESIC cut</strong>{" "}
         when the staff member is to take home the agreed figure — the amount is
         worked out from that month&rsquo;s own deductions, so it never goes stale when
-        the basic changes.
+        the basic changes.{" "}
+        <strong className="text-[var(--brand-deep)]">Not on payroll</strong>{" "}
+        (owner, trustee, honorary) leaves someone out of every new salary run
+        while they stay active for attendance, the staff app and roles — it is
+        saved at once, no Assign needed.
         {dirtyCount > 0 ? (
           <span className="ml-1 font-semibold text-[var(--warning)]">
             · {dirtyCount} unsaved row{dirtyCount > 1 ? "s" : ""}
@@ -1159,7 +1205,7 @@ function AssignPanel({
         ) : null}
       </p>
       <div className="overflow-x-auto">
-        <ErpTable minWidth="min-w-[860px]">
+        <ErpTable minWidth="min-w-[980px]">
           <ErpTableHead>
             <tr className="text-[11px] text-[var(--muted)]">
               <ErpSortTh sort={salarySort} field="staff">Staff</ErpSortTh>
@@ -1170,6 +1216,12 @@ function AssignPanel({
                 Additional ₹ / month
               </th>
               <th className="px-3 py-2 font-medium">PF / ESIC</th>
+              <th
+                className="px-3 py-2 font-medium"
+                title="Not on payroll: left out of every new salary run; still active for attendance, the staff app and roles"
+              >
+                Payroll
+              </th>
               <th className="px-3 py-2 font-medium">Action</th>
             </tr>
           </ErpTableHead>
@@ -1195,8 +1247,8 @@ function AssignPanel({
                     draft.statutoryGrossUp,
                   )
                 : null;
-              const savedLabel = link
-                ? state.structures.find((x) => x.id === link.structureId)
+              const savedLabel = hasSalaryAssignment(link)
+                ? state.structures.find((x) => x.id === link!.structureId)
                     ?.name ?? "Assigned"
                 : "Auto (by stream)";
               // What is actually saved for this staff (not the unsaved draft):
@@ -1227,7 +1279,13 @@ function AssignPanel({
               return (
                 <tr
                   key={s.id}
-                  className={dirty ? "bg-[rgba(197,160,40,0.08)]" : ""}
+                  className={
+                    dirty
+                      ? "bg-[rgba(197,160,40,0.08)]"
+                      : isOnPayroll(link)
+                        ? ""
+                        : "opacity-70"
+                  }
                 >
                   <td className="px-3 py-2">
                     <div className="font-semibold text-[var(--brand-deep)]">
@@ -1369,6 +1427,13 @@ function AssignPanel({
                         </option>
                       ))}
                     </select>
+                  </td>
+                  <td className="px-3 py-2">
+                    <NotOnPayrollSwitch
+                      link={link}
+                      staffName={s.fullName}
+                      onChange={(on, reason) => setPayrollSwitch(s.id, on, reason)}
+                    />
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap gap-1.5">

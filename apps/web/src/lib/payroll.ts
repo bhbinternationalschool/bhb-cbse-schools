@@ -53,6 +53,7 @@ import {
 } from "@/lib/salarySetup";
 import { trackServerWork } from "@/lib/serverWork";
 import { recordPayrollRunDeletion } from "@/lib/payrollNormalizedClient";
+import { isOnPayroll, partitionDueStaff, type NotOnPayrollEntry } from "@/lib/payrollNotOnPayroll";
 
 export type PayrollRunStatus =
   | "draft"
@@ -432,6 +433,8 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
   const todayIso = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
   for (const staff of roster) {
+    // Marked "not on payroll" in Masters → Salary setup: no line at all.
+    if (!isOnPayroll(salary.staffLinks.find((l) => l.staffId === staff.id))) continue;
     const structure = resolveStructureForStaff(salary, staff);
     if (!structure) continue;
     const link = salary.staffLinks.find((l) => l.staffId === staff.id);
@@ -1179,10 +1182,37 @@ export function processPayrollDraft(opts: {
   staffIds?: string[];
   replaceExistingDraft?: boolean;
 }):
-  | { ok: true; run: PayrollRun; merged: boolean; skipped: string[] }
+  | {
+      ok: true;
+      run: PayrollRun;
+      merged: boolean;
+      skipped: string[];
+      /** Left out — marked not on payroll in Masters → Salary setup. */
+      leftOut: NotOnPayrollEntry[];
+    }
   | { ok: false; error: string } {
   if (opts.mode === "individual" && !opts.staffIds?.length) {
     return { ok: false, error: "Select at least one staff member" };
+  }
+
+  // Not on payroll (Masters → Salary setup): never built, in either mode —
+  // and said, so nobody wonders where they went.
+  const salaryLinks = loadSalarySetup().staffLinks;
+  const { leftOut } = partitionDueStaff(
+    (opts.masters.staff ?? []).filter(
+      (s) =>
+        s.status === "active" &&
+        !isVisitingStaff(s) &&
+        (opts.mode === "bulk" || opts.staffIds!.includes(s.id)),
+    ),
+    salaryLinks,
+  );
+  const notOnPayroll = new Set(leftOut.map((x) => x.staffId));
+  if (opts.mode === "individual" && opts.staffIds!.every((id) => notOnPayroll.has(id))) {
+    return {
+      ok: false,
+      error: `Nothing was created — ${namesList(leftOut.map((x) => x.fullName))} ${leftOut.length === 1 ? "is" : "are"} marked not on payroll in Masters → Salary setup.`,
+    };
   }
 
   // Staff already paid (or approved/posted) for this month are left out —
@@ -1195,7 +1225,7 @@ export function processPayrollDraft(opts: {
       const name = committed.get(id);
       if (name) skipped.push(name);
     }
-    staffIds = staffIds.filter((id) => !committed.has(id));
+    staffIds = staffIds.filter((id) => !committed.has(id) && !notOnPayroll.has(id));
     if (staffIds.length === 0) {
       return {
         ok: false,
@@ -1204,7 +1234,7 @@ export function processPayrollDraft(opts: {
     }
   } else if (opts.mode === "bulk" && committed.size > 0) {
     const due = (opts.masters.staff ?? [])
-      .filter((s) => s.status === "active" && !committed.has(s.id))
+      .filter((s) => s.status === "active" && !committed.has(s.id) && !notOnPayroll.has(s.id))
       .map((s) => s.id);
     skipped.push(...committed.values());
     if (due.length === 0) {
@@ -1268,7 +1298,7 @@ export function processPayrollDraft(opts: {
         academicYearCode: next.academicYearCode,
         detail: `Bulk replace · ${next.lines.length} staff`,
       });
-      return { ok: true, run: next, merged: false, skipped };
+      return { ok: true, run: next, merged: false, skipped, leftOut };
     }
     upsertPayrollRun(built);
     appendPayrollAudit({
@@ -1279,7 +1309,7 @@ export function processPayrollDraft(opts: {
       academicYearCode: built.academicYearCode,
       detail: `Bulk draft · ${built.lines.length} staff`,
     });
-    return { ok: true, run: built, merged: false, skipped };
+    return { ok: true, run: built, merged: false, skipped, leftOut };
   }
 
   const built = buildPayrollDraft({
@@ -1318,7 +1348,7 @@ export function processPayrollDraft(opts: {
       academicYearCode: next.academicYearCode,
       detail: `Merged ${staffIds!.length} staff · now ${next.lines.length} lines`,
     });
-    return { ok: true, run: next, merged: true, skipped };
+    return { ok: true, run: next, merged: true, skipped, leftOut };
   }
 
   upsertPayrollRun(built);
@@ -1330,7 +1360,7 @@ export function processPayrollDraft(opts: {
     academicYearCode: built.academicYearCode,
     detail: `Individual draft · ${built.lines.map((l) => l.empCode).join(", ")}`,
   });
-  return { ok: true, run: built, merged: false, skipped };
+  return { ok: true, run: built, merged: false, skipped, leftOut };
 }
 
 export function upsertPayrollRun(run: PayrollRun): PayrollState {
