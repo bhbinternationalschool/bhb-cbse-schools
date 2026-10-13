@@ -3,10 +3,9 @@ import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensurePayrollHydratedServer } from "@/lib/payrollPersistence";
 import { loadPayroll, PAYROLL_PAYMENT_MODES } from "@/lib/payroll";
+import { bestPayslipRunsForStaff } from "@/lib/staffPayslips";
 
 export const runtime = "nodejs";
-
-const VISIBLE = new Set(["approved", "posted", "paid"]);
 
 /**
  * GET /api/v1/staff/payslips — the signed-in staff member's own payslips:
@@ -32,29 +31,17 @@ export async function GET(request: Request) {
     const modeLabel = (m: string) =>
       PAYROLL_PAYMENT_MODES.find((x) => x.value === m)?.label || m;
 
-    // One payslip per month (13 Oct 2026): a month can be paid in several
-    // runs, and a person may also sit on a draft of that month — the paid
-    // run wins, then posted, then approved; a month counts as "being
-    // prepared" only while it has no payslip at all.
-    const rank = (st: string) => (st === "paid" ? 3 : st === "posted" ? 2 : st === "approved" ? 1 : 0);
-    const best = new Map<string, (typeof payroll.runs)[number]>();
-    const draftMonths = new Set<string>();
-    for (const run of payroll.runs) {
-      if (!run.lines.some((l) => l.staffId === staffId)) continue;
-      if (!VISIBLE.has(run.status)) {
-        draftMonths.add(run.month);
-        continue;
-      }
-      const have = best.get(run.month);
-      if (!have || rank(run.status) > rank(have.status)) best.set(run.month, run);
-    }
-    const preparing = [...draftMonths].filter((m) => !best.has(m)).length;
+    // One payslip per month — the same pick the payslip PDF makes.
+    const { best, preparing } = bestPayslipRunsForStaff(payroll.runs, staffId);
     const slips: Record<string, unknown>[] = [];
     for (const run of best.values()) {
       const line = run.lines.find((l) => l.staffId === staffId)!;
       slips.push({
         runId: run.id,
         month: run.month,
+        // The same slip, printed on the letterhead (the app shows a PDF
+        // button only when the server offers one).
+        pdfUrl: `/api/v1/staff/payslips/${run.month}/pdf`,
         status: run.status,
         dayCount: run.dayCount,
         daysPresent: line.daysPresent,

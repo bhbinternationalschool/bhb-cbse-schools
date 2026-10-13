@@ -13,6 +13,7 @@ import "../../core/i18n/locale_controller.dart";
 import "../../core/punch/punch_device_key.dart";
 import "../../core/punch/phone_id.dart";
 import "my_attendance_calendar_screen.dart";
+import "outdoor_duty_card.dart";
 
 /// The six digits from the office QR ("…/punch?c=482913") or as typed.
 String punchCodeFrom(String raw) {
@@ -396,6 +397,14 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
                   onPressed: _openMonth,
                   icon: const Icon(Icons.calendar_month_outlined),
                   label: const Text("My month · मेरा महीना"),
+                ),
+                const SizedBox(height: 16),
+                // Official work off campus: check out, check back in.
+                OutdoorDutyCard(
+                  api: widget.api,
+                  staffName: state.staffName,
+                  position: pos,
+                  onChanged: _load,
                 ),
               ],
             ),

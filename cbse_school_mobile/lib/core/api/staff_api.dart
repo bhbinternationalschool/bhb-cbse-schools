@@ -212,6 +212,7 @@ class Payslip {
       paymentModeLabel = _s(j, "paymentModeLabel"),
       paidAt = _s(j, "paidAt"),
       bonus = _d(j, "bonus"),
+      pdfUrl = _s(j, "pdfUrl"),
       earnings = _list(j, "earnings").map(PayslipLine.fromJson).toList(),
       deductions = _list(j, "deductions").map(PayslipLine.fromJson).toList();
 
@@ -239,6 +240,10 @@ class Payslip {
   final String paymentModeLabel;
   final String paidAt;
   final double bonus;
+
+  /// The same slip on the letterhead, as a PDF — empty from a server that
+  /// does not offer one yet (then the app shows no PDF button).
+  final String pdfUrl;
   final List<PayslipLine> earnings;
   final List<PayslipLine> deductions;
 }
