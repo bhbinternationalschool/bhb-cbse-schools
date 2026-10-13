@@ -488,6 +488,7 @@ SELFTESTS=(
   test:reports-registers-new
   test:reports-wrong-figures
   test:fee-reports-year-scope
+  test:report-export-format
   test:report-remark-ai
   test:salary-additional
   test:salary-gross-up
