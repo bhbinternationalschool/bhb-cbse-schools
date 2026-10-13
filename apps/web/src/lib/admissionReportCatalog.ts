@@ -41,6 +41,8 @@ import {
   type ReportColumn,
 } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type AdmissionReportFormat = "excel" | "pdf";
 
@@ -317,7 +319,7 @@ export const CUSTOM_LEAD_COLUMNS: { key: string; header: string }[] = [
 ];
 
 function todayYmd(): string {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */;
 }
 
 function classNameOf(masters: MastersState, id: string): string {
@@ -573,6 +575,9 @@ export function runAdmissionReport(
   id: AdmissionReportId,
   filters: AdmissionReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("admissions", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const state = filters.admissions ?? loadAdmissions();
   const masters = filters.masters ?? loadMasters();
   const base = {

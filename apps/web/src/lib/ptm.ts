@@ -9,6 +9,8 @@ import {
   householdWhatsApp,
   loadSis,
   normalizeMobile,
+  studentsInSession,
+  type SisState,
   type SisStudent,
 } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
@@ -21,6 +23,8 @@ import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { recordPtmDeletion } from "@/lib/ptmNormalizedClient";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 const STORAGE_KEY = "bhb_ptm_v1";
 
@@ -623,13 +627,58 @@ export function markPtmWhatsApp(
   savePtm({ ...state, bookings });
 }
 
-export type PtmReportId = "bookings_register" | "slot_fill" | "feedback_list";
+export type PtmReportId = "bookings_register" | "slot_fill" | "feedback_list" | "attendance";
 
 export const PTM_REPORTS: { id: PtmReportId; label: string; hint?: string }[] = [
   { id: "bookings_register", label: "Bookings register", hint: "All bookings for event" },
   { id: "slot_fill", label: "Slot fill rate", hint: "Booked vs capacity" },
   { id: "feedback_list", label: "Feedback list", hint: "Strengths / areas / follow-up" },
+  { id: "attendance", label: "PTM attendance", hint: "Per class: attended, no-show, not booked" },
 ];
+
+/**
+ * PTM attendance per class · section: the event's year, each child once
+ * (studentsInSession); the event's classes, or every class when it names
+ * none. A child counts as attended / no-show / booked-not-marked by their
+ * bookings for this event (cancelled ones ignored); otherwise not booked.
+ */
+export function ptmAttendanceRows(event: PtmEvent, ptm: PtmState, sis: SisState, masters: MastersState) {
+  const roster = studentsInSession(sis, event.academicYearCode).filter(
+    (s) => event.classIds.length === 0 || event.classIds.includes(s.classId),
+  );
+  const live = ptm.bookings.filter((b) => b.eventId === event.id && b.status !== "cancelled");
+  const byStudent = new Map<string, PtmBookingStatus[]>();
+  for (const b of live) byStudent.set(b.studentId, [...(byStudent.get(b.studentId) ?? []), b.status]);
+  const map = new Map<string, { cls: string; invited: number; booked: number; attended: number; noShow: number; pending: number; notBooked: number }>();
+  for (const s of roster) {
+    const cls = [masters.classes.find((c) => c.id === s.classId)?.name, masters.sections.find((x) => x.id === s.sectionId)?.name]
+      .filter(Boolean)
+      .join(" · ");
+    const row = map.get(cls) ?? { cls, invited: 0, booked: 0, attended: 0, noShow: 0, pending: 0, notBooked: 0 };
+    row.invited += 1;
+    const st = byStudent.get(s.id) ?? [];
+    if (st.length === 0) row.notBooked += 1;
+    else {
+      row.booked += 1;
+      if (st.includes("completed")) row.attended += 1;
+      else if (st.includes("no_show")) row.noShow += 1;
+      else row.pending += 1;
+    }
+    map.set(cls, row);
+  }
+  return [...map.values()]
+    .sort((a, b) => a.cls.localeCompare(b.cls))
+    .map((r) => ({
+      class: r.cls,
+      invited: r.invited,
+      booked: r.booked,
+      attended: r.attended,
+      noShow: r.noShow,
+      pending: r.pending,
+      notBooked: r.notBooked,
+      attendedPct: r.invited ? `${Math.round((r.attended / r.invited) * 1000) / 10}%` : "—",
+    }));
+}
 
 export function runPtmReport(
   id: PtmReportId,
@@ -641,13 +690,18 @@ export function runPtmReport(
     students?: SisStudent[];
   },
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("ptm", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const ptm = filters.ptm ?? loadPtm();
   const masters = filters.masters ?? loadMasters();
   const sis = loadSis();
   const students = filters.students ?? sis.students;
+  // No event picked → the most recent one (it took whichever was stored
+  // first, often last year's).
   const event = filters.eventId
     ? ptm.events.find((e) => e.id === filters.eventId)
-    : ptm.events[0];
+    : [...ptm.events].sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
   const note = describeFilters([
     event ? `Event ${event.name}` : "All events",
   ]);
@@ -736,8 +790,38 @@ export function runPtmReport(
         ? { ok: true, message: `Slots: ${rows.length} row(s)` }
         : r;
     }
+    case "attendance": {
+      if (!event) return { ok: false, error: "Pick a PTM" };
+      const rows = ptmAttendanceRows(event, ptm, sis, masters);
+      const r = exportFilterReport(
+        {
+          title: `PTM attendance — ${event.name}`,
+          subtitle: TENANT.shortName,
+          filterNote: note,
+          columns: [
+            { key: "class", header: "Class · section" },
+            { key: "invited", header: "Students", align: "right" },
+            { key: "booked", header: "Booked", align: "right" },
+            { key: "attended", header: "Attended", align: "right" },
+            { key: "noShow", header: "No-show", align: "right" },
+            { key: "pending", header: "Booked, not marked", align: "right" },
+            { key: "notBooked", header: "Not booked", align: "right" },
+            { key: "attendedPct", header: "Attended %", align: "right" },
+          ],
+          rows,
+          fileBaseName: "ptm_attendance",
+        },
+        filters.format,
+      );
+      return r.ok ? { ok: true, message: `PTM attendance: ${rows.length} class(es)` } : r;
+    }
     case "feedback_list": {
-      const rows = ptm.feedback.map((f) => ({
+      // The event's feedback only — it listed every event's feedback under
+      // a filter note naming one.
+      const eventOfBooking = new Map(ptm.bookings.map((b) => [b.id, b.eventId]));
+      const rows = ptm.feedback
+        .filter((f) => !event || eventOfBooking.get(f.bookingId) === event.id)
+        .map((f) => ({
         student: nameOf(f.studentId),
         strengths: f.strengths,
         areas: f.areas,

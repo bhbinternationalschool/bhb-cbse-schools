@@ -38,7 +38,7 @@ export function AdmissionReportsPanel({
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [surveyDate, setSurveyDate] = useState(() =>
-    new Date().toISOString().slice(0, 10),
+    new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */,
   );
   const [stage, setStage] = useState<AdmissionStage | "all" | "open">("all");
   const [source, setSource] = useState<AdmissionSource | "all">("all");
@@ -191,7 +191,7 @@ export function AdmissionReportsPanel({
   function clearFilters() {
     setFromDate("");
     setToDate("");
-    setSurveyDate(new Date().toISOString().slice(0, 10));
+    setSurveyDate(new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */);
     setStage("all");
     setSource("all");
     setAcademicYearCode("");
@@ -519,7 +519,7 @@ export function AdmissionReportsPanel({
             <ul className="divide-y divide-[rgba(32,48,80,0.06)]">
               {(byCat[cat.id] ?? []).map((r) => (
                 <li
-                  key={r.id}
+                  key={r.id} data-report-id={r.id}
                   className="flex items-start justify-between gap-2 bg-white px-3 py-2.5"
                 >
                   <div className="min-w-0">

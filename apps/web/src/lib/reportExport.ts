@@ -4,13 +4,38 @@
 
 import { TENANT } from "@/lib/types";
 import { trackServerWork } from "@/lib/serverWork";
+import {
+  buildTotalsRow,
+  classifyColumns,
+  csvValue,
+  xlsxNumFmt,
+  xlsxValue,
+  type ReportCellKind,
+} from "@/lib/reportCells";
+import { bandColumns as bandColumnsImpl, drawReportPdf } from "@/lib/pdfReportTable";
+import {
+  createCanvasGlyphRenderer,
+  hasDevanagari,
+  loadGlyphFonts,
+  needsGlyphs,
+} from "@/lib/pdfRichText";
 
 export type ReportColumn = {
   key: string;
   header: string;
   /** Relative width hint for PDF (default 1) */
   width?: number;
+  /** Default: right for money / number / percent columns, else left. */
   align?: "left" | "right";
+  /**
+   * What the column holds. Omitted = inferred from the header and every
+   * value (lib/reportCells.ts): money, number, percent, date, datetime or
+   * text. Identifier-like headers (roll, adm no, phone, receipt no…) stay
+   * text.
+   */
+  type?: ReportCellKind;
+  /** Add this column to the TOTAL row (true) or never (false). Default: money and count columns. */
+  total?: boolean;
 };
 
 export type ReportSheet = {
@@ -18,6 +43,8 @@ export type ReportSheet = {
   name: string;
   columns: ReportColumn[];
   rows: Record<string, string | number | null | undefined>[];
+  /** false = no automatic TOTAL row on this sheet. */
+  totals?: boolean;
 };
 
 export type ReportExportInput = {
@@ -32,15 +59,12 @@ export type ReportExportInput = {
    * reconciliation pack's "By mode" / "By class" breakdown sheets
    * alongside the full receipt list. XLSX only; ignored for CSV/PDF. */
   extraSheets?: ReportSheet[];
+  /** false = no automatic TOTAL row (default: added when the report has money or count columns). */
+  totals?: boolean;
 };
 
 function stamp(): string {
   return new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-}
-
-function safeCell(v: string | number | null | undefined): string {
-  if (v == null) return "";
-  return String(v);
 }
 
 function downloadBlob(filename: string, blob: Blob) {
@@ -59,14 +83,18 @@ function csvEscape(value: string): string {
   return value;
 }
 
-/** UTF-8 CSV with BOM — opens cleanly in Excel. */
+/**
+ * UTF-8 CSV with BOM — opens cleanly in Excel. Numbers go out plain (no ₹,
+ * no grouping commas) so Excel reads them as numbers; times are IST.
+ */
 export function downloadExcelCsv(input: ReportExportInput): void {
+  const kinds = classifyColumns(input.columns, input.rows);
+  const totals = input.totals === false ? null : buildTotalsRow(input.columns, input.rows, kinds);
   const header = input.columns.map((c) => csvEscape(c.header)).join(",");
-  const lines = input.rows.map((row) =>
-    input.columns
-      .map((c) => csvEscape(safeCell(row[c.key])))
-      .join(","),
-  );
+  const line = (row: Record<string, string | number | null | undefined>) =>
+    input.columns.map((c, i) => csvEscape(csvValue(kinds[i]!, row[c.key]))).join(",");
+  const lines = input.rows.map(line);
+  if (totals) lines.push(line(totals.row));
   const body = [header, ...lines].join("\r\n");
   const blob = new Blob(["\uFEFF" + body], {
     type: "text/csv;charset=utf-8",
@@ -101,23 +129,38 @@ export function safeSheetName(name: string, usedNames: Set<string>): string {
  * one workbook with the main sheet plus any `extraSheets`.
  */
 export async function downloadXlsxReport(input: ReportExportInput): Promise<void> {
-  const ExcelJS = await import("exceljs");
+  const buf = await buildXlsxReport(input);
+  const blob = new Blob([buf], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  downloadBlob(`${input.fileBaseName}_${stamp()}.xlsx`, blob);
+}
+
+/** The workbook bytes (split out so the self-test can read them back). */
+export async function buildXlsxReport(input: ReportExportInput): Promise<ArrayBuffer> {
+  const mod = await import("exceljs");
+  // Bundlers hand back the namespace; Node's CJS interop puts it on default.
+  type ExcelModule = typeof import("exceljs");
+  const ExcelJS: ExcelModule =
+    "Workbook" in mod ? (mod as ExcelModule) : (mod as unknown as { default: ExcelModule }).default;
   const wb = new ExcelJS.Workbook();
   wb.creator = TENANT.shortName;
   wb.created = new Date();
 
   const usedNames = new Set<string>();
   const sheets: ReportSheet[] = [
-    { name: input.title, columns: input.columns, rows: input.rows },
+    { name: input.title, columns: input.columns, rows: input.rows, totals: input.totals },
     ...(input.extraSheets ?? []),
   ];
 
   for (const sheetDef of sheets) {
     const ws = wb.addWorksheet(safeSheetName(sheetDef.name, usedNames));
-    ws.columns = sheetDef.columns.map((c) => ({
+    const kinds = classifyColumns(sheetDef.columns, sheetDef.rows);
+    ws.columns = sheetDef.columns.map((c, i) => ({
       header: c.header,
       key: c.key,
       width: Math.max(10, Math.round((c.width ?? 1) * 14)),
+      style: { numFmt: xlsxNumFmt(kinds[i]!, c, sheetDef.rows) },
     }));
 
     const headerRow = ws.getRow(1);
@@ -127,10 +170,18 @@ export async function downloadXlsxReport(input: ReportExportInput): Promise<void
       pattern: "solid",
       fgColor: { argb: "FF203050" },
     };
-    headerRow.alignment = { vertical: "middle" };
+    headerRow.alignment = { vertical: "middle", wrapText: true };
+
+    const rightAligned = sheetDef.columns.map(
+      (c, i) => c.align === "right" || (c.align === undefined && ["money", "number", "percent"].includes(kinds[i]!)),
+    );
 
     sheetDef.rows.forEach((row, i) => {
-      const r = ws.addRow(row);
+      const values: Record<string, string | number | Date | null> = {};
+      sheetDef.columns.forEach((c, ci) => {
+        values[c.key] = xlsxValue(kinds[ci]!, row[c.key]);
+      });
+      const r = ws.addRow(values);
       if (i % 2 === 1) {
         r.fill = {
           type: "pattern",
@@ -138,192 +189,108 @@ export async function downloadXlsxReport(input: ReportExportInput): Promise<void
           fgColor: { argb: "FFF6F5EF" },
         };
       }
-      sheetDef.columns.forEach((c, colIdx) => {
-        if (c.align === "right") {
+      sheetDef.columns.forEach((_, colIdx) => {
+        if (rightAligned[colIdx]) {
           r.getCell(colIdx + 1).alignment = { horizontal: "right" };
         }
       });
     });
 
+    // TOTAL row: live SUM formulas, so an edited cell re-totals.
+    const totals = sheetDef.totals === false ? null : buildTotalsRow(sheetDef.columns, sheetDef.rows, kinds);
+    if (totals) {
+      const first = 2;
+      const last = sheetDef.rows.length + 1;
+      const tr = ws.addRow({});
+      sheetDef.columns.forEach((c, ci) => {
+        const cell = tr.getCell(ci + 1);
+        if (totals.summed[ci]) {
+          const col = ws.getColumn(ci + 1).letter;
+          cell.value = { formula: `SUM(${col}${first}:${col}${last})`, result: Number(totals.row[c.key] ?? 0) };
+          cell.alignment = { horizontal: "right" };
+        } else if (totals.row[c.key] === "TOTAL") {
+          cell.value = "TOTAL";
+        }
+      });
+      tr.font = { bold: true };
+      tr.border = { top: { style: "thin", color: { argb: "FF203050" } } };
+      tr.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8ECF4" } };
+    }
+
     ws.views = [{ state: "frozen", ySplit: 1 }];
     ws.autoFilter = {
       from: { row: 1, column: 1 },
-      to: { row: 1, column: sheetDef.columns.length },
+      to: { row: 1 + sheetDef.rows.length, column: sheetDef.columns.length },
     };
   }
 
-  const buf = await wb.xlsx.writeBuffer();
-  const blob = new Blob([buf], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-  downloadBlob(`${input.fileBaseName}_${stamp()}.xlsx`, blob);
+  return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
 }
+
+/** Split wide reports into page-width column bands (see lib/pdfReportTable.ts). */
+export function bandColumns(cols: ReportColumn[], usableWidth: number): ReportColumn[][] {
+  return bandColumnsImpl(cols, usableWidth);
+}
+
+/** Thrown when Hindi text cannot be drawn (no browser canvas): refuse, never print junk. */
+export class PdfGlyphError extends Error {}
 
 /**
- * A wide report (more columns than comfortably fit one landscape A4 table)
- * used to silently drop every column past the first 12 that matched a
- * hardcoded priority list — the PDF looked complete but was missing data
- * with no indication anything was cut. Instead, split wide reports into
- * column "bands": each band repeats the first (identifying) column plus a
- * page-width slice of the rest, so every column ends up in the PDF
- * somewhere — nothing is silently dropped — and each band's header says
- * which slice and of how many it is.
+ * Multi-page PDF table of the filtered rows, with the school letterhead on
+ * every page. Layout, wrapping, totals and the ₹/Hindi drawing live in
+ * lib/pdfReportTable.ts and lib/pdfRichText.ts.
  */
-const MIN_COL_WIDTH_PT = 46;
-
-export function bandColumns(
-  cols: ReportColumn[],
-  usableWidth: number,
-): ReportColumn[][] {
-  if (cols.length <= 1) return [cols];
-  const maxDataColsPerBand = Math.max(
-    1,
-    Math.floor((usableWidth - MIN_COL_WIDTH_PT) / MIN_COL_WIDTH_PT),
-  );
-  const [keyCol, ...rest] = cols;
-  if (rest.length <= maxDataColsPerBand) return [cols];
-
-  const bands: ReportColumn[][] = [];
-  for (let i = 0; i < rest.length; i += maxDataColsPerBand) {
-    bands.push([keyCol!, ...rest.slice(i, i + maxDataColsPerBand)]);
-  }
-  return bands;
-}
-
-/** Simple multi-page PDF table of the filtered rows. */
 export async function downloadPdfReport(input: ReportExportInput): Promise<void> {
   const { jsPDF } = await import("jspdf");
-
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const margin = 36;
-  const usable = pageW - margin * 2;
 
-  const bands = bandColumns(input.columns, usable);
-  const titleSize = 14;
+  const sheets = [
+    {
+      title: input.title,
+      subtitle: input.subtitle,
+      filterNote: input.filterNote,
+      columns: input.columns,
+      rows: input.rows,
+      totals: input.totals,
+    },
+    ...(input.extraSheets ?? []).map((x) => ({
+      title: `${input.title} — ${x.name}`,
+      subtitle: input.subtitle,
+      filterNote: input.filterNote,
+      columns: x.columns,
+      rows: x.rows,
+      totals: x.totals,
+    })),
+  ];
+
+  const allText = sheets.flatMap((sh) => [
+    sh.title,
+    sh.subtitle ?? "",
+    sh.filterNote ?? "",
+    ...sh.columns.map((c) => c.header),
+    ...sh.rows.flatMap((row) => sh.columns.map((c) => String(row[c.key] ?? ""))),
+  ]);
+  let renderer = null;
+  if (allText.some(needsGlyphs)) {
+    await loadGlyphFonts();
+    renderer = createCanvasGlyphRenderer();
+    if (!renderer && allText.some(hasDevanagari)) {
+      throw new PdfGlyphError("This report has Hindi text, which could not be drawn here. Download it as Excel instead.");
+    }
+  }
+
   // Every exported page carries the school's letterhead — logo, name in the
-  // brand navy, address. This is the salary register's PDF and forty other
-  // "Export → PDF" buttons; they used to start with the report title alone.
+  // brand navy, address.
   const { drawPdfLetterhead, resolvePdfLetterhead } = await import("@/lib/pdfLetterhead");
   const letterhead = await resolvePdfLetterhead();
 
-  bands.forEach((cols, bandIndex) => {
-    if (bandIndex > 0) doc.addPage();
-
-    const totalWeight = cols.reduce((s, c) => s + (c.width ?? 1), 0);
-    const colWidths = cols.map((c) => ((c.width ?? 1) / totalWeight) * usable);
-    const bodySize = cols.length > 10 ? 7 : 8;
-    const lineH = bodySize + 4;
-    let y = margin;
-
-    function drawHeaderBlock() {
-      y = drawPdfLetterhead(doc, letterhead, margin, usable, pageW) + 4;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(titleSize);
-      doc.setTextColor(32, 48, 80);
-      doc.text(input.title, margin, y);
-      y += 16;
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(92, 100, 120);
-      doc.text(
-        input.subtitle ?? `${TENANT.shortName} · ${TENANT.city}`,
-        margin,
-        y,
-      );
-      y += 12;
-      if (input.filterNote) {
-        doc.text(`Filter: ${input.filterNote}`, margin, y);
-        y += 12;
-      }
-      doc.text(
-        `${input.rows.length} row(s) · ${new Date().toLocaleString("en-IN")}`,
-        margin,
-        y,
-      );
-      y += 12;
-      if (bands.length > 1) {
-        doc.setTextColor(180, 83, 9);
-        doc.text(
-          `Columns ${bandIndex + 1}/${bands.length} of this report — same rows, ` +
-            `next set of columns on the following page(s).`,
-          margin,
-          y,
-        );
-        y += 12;
-        doc.setTextColor(92, 100, 120);
-      }
-      y += 6;
-    }
-
-    function drawTableHeader() {
-      doc.setFillColor(32, 48, 80);
-      doc.rect(margin, y - 9, usable, lineH + 4, "F");
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(bodySize);
-      doc.setTextColor(255, 255, 255);
-      let x = margin;
-      cols.forEach((c, i) => {
-        const w = colWidths[i]!;
-        const align = c.align === "right" ? "right" : "left";
-        doc.text(c.header, align === "right" ? x + w - 2 : x + 2, y, {
-          align,
-          maxWidth: w - 4,
-        });
-        x += w;
-      });
-      y += lineH + 6;
-      doc.setTextColor(32, 48, 80);
-      doc.setFont("helvetica", "normal");
-    }
-
-    drawHeaderBlock();
-    drawTableHeader();
-
-    if (input.rows.length === 0) {
-      doc.setFontSize(10);
-      doc.setTextColor(92, 100, 120);
-      doc.text("No rows match the current filter.", margin, y + 8);
-    }
-
-    input.rows.forEach((row, rowIndex) => {
-      if (y > pageH - margin - 20) {
-        doc.addPage();
-        drawHeaderBlock();
-        drawTableHeader();
-      }
-      if (rowIndex % 2 === 1) {
-        doc.setFillColor(246, 245, 239);
-        doc.rect(margin, y - 9, usable, lineH + 2, "F");
-      }
-      let x = margin;
-      cols.forEach((c, i) => {
-        const w = colWidths[i]!;
-        const text = safeCell(row[c.key]);
-        const align = c.align === "right" ? "right" : "left";
-        doc.text(text, align === "right" ? x + w - 2 : x + 2, y, {
-          align,
-          maxWidth: w - 4,
-        });
-        x += w;
-      });
-      y += lineH + 2;
-    });
+  drawReportPdf(doc, sheets, {
+    letterhead: (d, margin, usable, pageW) => drawPdfLetterhead(d, letterhead, margin, usable, pageW),
+    renderer,
+    defaultSubtitle: `${TENANT.shortName} · ${TENANT.city}`,
+    footerLabel: TENANT.shortName,
+    generatedAt: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
   });
-
-  const pageCount = doc.getNumberOfPages();
-  for (let i = 1; i <= pageCount; i++) {
-    doc.setPage(i);
-    doc.setFontSize(8);
-    doc.setTextColor(92, 100, 120);
-    doc.text(
-      `${TENANT.shortName} · page ${i}/${pageCount}`,
-      pageW / 2,
-      pageH - 16,
-      { align: "center" },
-    );
-  }
 
   doc.save(`${input.fileBaseName}_${stamp()}.pdf`);
 }
@@ -335,8 +302,22 @@ export function exportFilterReport(
   if (!input.columns.length) {
     return { ok: false, error: "Nothing to export" };
   }
-  if (format === "excel") void trackServerWork(downloadXlsxReport(input));
-  else void trackServerWork(downloadPdfReport(input));
+  // The file is built after this returns. A failure used to vanish — the
+  // screen had already said "exported". Now it says so, plainly.
+  const work = format === "excel" ? downloadXlsxReport(input) : downloadPdfReport(input);
+  void trackServerWork(
+    work.catch((e: unknown) => {
+      console.error("[reportExport] export failed", e);
+      const why = e instanceof PdfGlyphError ? e.message : "Please try again.";
+      void import("@/components/shell/Toast").then(({ pushToast }) =>
+        pushToast({
+          kind: "error",
+          message: `"${input.title}" was NOT downloaded — the ${format === "excel" ? "Excel" : "PDF"} file could not be built. ${why}`,
+          durationMs: 0,
+        }),
+      );
+    }),
+  );
   return { ok: true };
 }
 

@@ -32,6 +32,8 @@ import {
   type RegisterDayMark,
   type RegisterTrip,
 } from "@/lib/transportBoardingLog";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type TransportReportFormat = "excel" | "pdf";
 
@@ -159,14 +161,21 @@ export type TransportReportFilters = {
   registerMarks?: RegisterDayMark[] | null;
 };
 
+/** Today in IST (toISOString() is UTC: before 05:30 it named yesterday). */
 function todayYmd() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 }
 
 function daysBetween(from: string, to: string): number {
   const a = new Date(from.slice(0, 10));
   const b = new Date(to.slice(0, 10));
   return Math.round((b.getTime() - a.getTime()) / 86_400_000);
+}
+
+/** Days left for a cell: "—" when a date is missing (it printed NaN). */
+function daysLeftCell(from: string, to: string): number | string {
+  const d = daysBetween(from, to || "");
+  return Number.isFinite(d) ? d : "—";
 }
 
 function agingBucket(daysOverdue: number): string {
@@ -178,6 +187,9 @@ function agingBucket(daysOverdue: number): string {
 }
 
 function expiryStatus(expiryDate: string, asOf: string): string {
+  // No expiry on record is not "OK" — it is unknown (a blank date gave NaN
+  // days, which fell through every check to "OK").
+  if (!/^\d{4}-\d{2}-\d{2}/.test(expiryDate || "")) return "No expiry date";
   const days = daysBetween(asOf, expiryDate);
   if (days < 0) return "Expired";
   if (days <= 30) return "Due soon";
@@ -304,6 +316,9 @@ export function runTransportReport(
   id: TransportReportId,
   filters: TransportReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("transport", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const transport = filters.transport ?? loadTransport();
   const masters = filters.masters ?? loadMasters();
   const sis = filters.sis ?? loadSis();
@@ -332,7 +347,8 @@ export function runTransportReport(
           busNo: route?.busNo || "",
           vehicleReg: route?.vehicleReg || "",
           stop: a.stopName,
-          monthlyFee: formatInr(fee),
+          // 0 means the route was never priced, not that the bus is free.
+          monthlyFee: fee > 0 ? formatInr(fee) : "Not priced",
           effectiveFrom: a.effectiveFrom,
           suspended: a.boardingSuspended ? "Yes" : "",
         };
@@ -388,7 +404,7 @@ export function runTransportReport(
           vehicleStatus: veh ? vehicleStatusLabel(veh.status) : "",
           activeRiders: riders.length,
           stops: rt.stops.length,
-          monthlyFee: formatInr(rt.monthlyFeePaise),
+          monthlyFee: rt.monthlyFeePaise > 0 ? formatInr(rt.monthlyFeePaise) : "Not priced",
           lastGps: ping
             ? `${ping.recordedAt.slice(0, 16).replace("T", " ")} (${ping.lat.toFixed(4)}, ${ping.lng.toFixed(4)})`
             : "",
@@ -842,7 +858,7 @@ export function runTransportReport(
       const rows: Record<string, string | number>[] = [];
       for (const v of vehicles) {
         for (const doc of v.compliance) {
-          const daysLeft = daysBetween(date, doc.expiryDate);
+          const daysLeft = daysLeftCell(date, doc.expiryDate);
           rows.push({
             registration: v.registrationNo,
             vehicle: v.name,
@@ -879,7 +895,7 @@ export function runTransportReport(
           vehicle: veh?.name || route?.busNo || "",
           certType: alert.code.replace(/^TR_/, "").replace(/_/g, " "),
           expiryDate: alert.date,
-          daysLeft: daysBetween(date, alert.date),
+          daysLeft: daysLeftCell(date, alert.date),
           status: alert.severity,
           renewalCost: alert.amountPaise ? formatInr(alert.amountPaise) : "",
           vendor: route ? `${route.code} · ${route.name}` : "",
@@ -996,7 +1012,7 @@ export function runTransportReport(
           reference: pol.policyNo,
           periodStart: pol.periodStart,
           expiryDate: pol.periodEnd,
-          daysLeft: daysBetween(date, pol.periodEnd),
+          daysLeft: daysLeftCell(date, pol.periodEnd),
           status: expiryStatus(pol.periodEnd, date),
           amount: formatInr(pol.premiumPaise),
           vendor: dealerName(pol.dealerId, transport),
@@ -1013,7 +1029,7 @@ export function runTransportReport(
           reference: cert.billNo,
           periodStart: cert.issuedDate,
           expiryDate: cert.expiryDate,
-          daysLeft: daysBetween(date, cert.expiryDate),
+          daysLeft: daysLeftCell(date, cert.expiryDate),
           status: expiryStatus(cert.expiryDate, date),
           amount: formatInr(cert.feePaise),
           vendor: dealerName(cert.dealerId, transport),
