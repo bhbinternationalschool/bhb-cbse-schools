@@ -202,6 +202,7 @@ SELFTESTS=(
   test:upi-proof-match
   test:expense-range
   test:payroll-paid-on
+  test:payroll-deduction-heads
   test:masters-change-auth
   test:timetable-free-grid
   test:udise-teacher-apaar
