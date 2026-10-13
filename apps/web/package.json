@@ -148,6 +148,7 @@
     "test:closing-balance": "npx tsx src/lib/ledger/closingBalance.selftest.ts",
     "test:accounts-position-rbac": "npx tsx src/lib/accountsPositionRbac.selftest.ts",
     "test:voucher-filter": "npx tsx src/lib/ledger/voucherFilter.selftest.ts",
+    "test:udise-robot-fetch-all": "npx tsx src/lib/udiseRobotFetchAll.selftest.ts",
     "test:staff-otp-mobile": "npx tsx src/lib/staffOtpMobile.selftest.ts",
     "test:accounts-today-tile": "npx tsx src/lib/accountsTodayTile.selftest.ts",
     "test:attendance-exception-ids": "npx tsx src/lib/attendanceExceptionIds.selftest.ts",
