@@ -1,4 +1,4 @@
-import { staffSectionScope } from "@/lib/api/v1/staffScope";
+import { readStaffScopeForDesk } from "@/lib/api/v1/staffScope";
 import { NextResponse } from "next/server";
 import {
   authorizeSchoolDataDesk,
@@ -56,7 +56,9 @@ export async function GET(req: Request) {
   let outdoorDuty = desk.ancillary.outdoorDuty;
   const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
   if (scopeCtx) {
-    const scope = await staffSectionScope(scopeCtx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(scopeCtx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope?.unrestricted) {
       const me = scopeCtx.session.staffId || "";
       registers = desk.registers.map((r) => ({ ...r, marks: r.marks.filter((m) => !!me && m.staffId === me) }));
@@ -117,7 +119,9 @@ export async function POST(req: Request) {
   // not that a teacher's browser may push every colleague's register.
   const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
   if (scopeCtx) {
-    const scope = await staffSectionScope(scopeCtx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(scopeCtx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope?.unrestricted) {
       return NextResponse.json(
         {

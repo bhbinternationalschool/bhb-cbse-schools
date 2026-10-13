@@ -1,9 +1,10 @@
+import { NextResponse } from "next/server";
 import { ApiError } from "@/lib/api/v1/errors";
 import type { ApiAuthContext } from "@/lib/api/v1/auth";
 import { resolveSessionRoles } from "@/lib/rbac";
 import { currentAcademicYearCode } from "@/lib/masters";
-import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
-import { loadTimetable } from "@/lib/timetable";
+import { loadScopeTimetable } from "@/lib/api/v1/timetableScope.server";
+import type { TimetableGrid } from "@/lib/timetable";
 import { resolveStaffHomeKind } from "@/lib/staffHomeKind.server";
 import type { StaffHomeKind } from "@/lib/staffHomeKind";
 import {
@@ -72,20 +73,84 @@ export function isSchoolWideSession(ctx: ApiAuthContext, kind: StaffHomeKind): b
  *
  * Sources, all for the working year: class-teacher links, subject-teacher
  * links (Staff → Duties / Allocate teaching — until 2026-09-29 these were
- * never read, so every subject teacher was refused), and the timetable.
+ * never read, so every subject teacher was refused), and the timetable —
+ * read from the database (timetableScope.server.ts). Until 13 Oct 2026 the
+ * timetable came from loadTimetable(), which is always empty on the server,
+ * so a teacher whose only tie was the timetable had no sections at all.
+ *
+ * Throws ApiError 403 for a session that is not staff, and ApiError 503 when
+ * the timetable cannot be read and this process has no copy and the session
+ * is not school-wide: the scope is then unknown, which is not the same as
+ * "no sections". A school-wide session does not depend on the timetable.
+ *
+ * Computed once per request: the answer is kept against the request's
+ * ApiAuthContext (a new object per resolveApiAuth), so a route that checks
+ * scope twice — or a gate and then the route — does the work once.
  */
 export async function staffSectionScope(ctx: ApiAuthContext): Promise<StaffScope> {
   if (ctx.session.persona !== "staff") {
     throw new ApiError("forbidden", "Staff session required", 403);
   }
+  const held = scopeByRequest.get(ctx);
+  if (held) return held;
+  const pending = computeStaffSectionScope(ctx);
+  scopeByRequest.set(ctx, pending);
+  // A failure is not kept: a later call in the same request reads again.
+  pending.catch(() => {
+    if (scopeByRequest.get(ctx) === pending) scopeByRequest.delete(ctx);
+  });
+  return pending;
+}
+
+const scopeByRequest = new WeakMap<ApiAuthContext, Promise<StaffScope>>();
+
+/**
+ * For the school-data routes, whose whole-desk rule applies to callers that
+ * are not staff: null = not a staff session. Any other failure (the scope is
+ * unknown) is a 503 response, never a null — a null there has meant "not a
+ * teacher, give the whole desk".
+ */
+export async function readStaffScopeForDesk(
+  ctx: ApiAuthContext,
+): Promise<{ ok: true; scope: StaffScope | null } | { ok: false; response: NextResponse }> {
+  if (ctx.session.persona !== "staff") return { ok: true, scope: null };
+  try {
+    return { ok: true, scope: await staffSectionScope(ctx) };
+  } catch (e) {
+    const message =
+      e instanceof ApiError && e.status >= 500 ? e.message : "Could not work out your classes — please try again.";
+    if (!(e instanceof ApiError)) console.error("[staffScope] scope failed", e);
+    return {
+      ok: false,
+      response: NextResponse.json({ ok: false, error: message, scopeUnknown: true }, { status: 503 }),
+    };
+  }
+}
+
+async function computeStaffSectionScope(ctx: ApiAuthContext): Promise<StaffScope> {
   const ay = staffWorkingYear(ctx);
   const staffId = ctx.session.staffId || "";
 
-  let grids: Awaited<ReturnType<typeof loadTimetable>>["grids"] = [];
+  // School-wide reach never depends on the timetable (leadership is read
+  // before teaching in staffHomeKind, and roles do not look at it), so it is
+  // known before the timetable is read. For a school-wide session a failed
+  // timetable read changes nothing it may do: it goes on without the
+  // timetable (logged). For anyone else it makes the scope unknown: 503.
+  const schoolWide = isSchoolWideSession(
+    ctx,
+    resolveStaffHomeKind(ctx.session, ctx.masters, { teachesClasses: false }),
+  );
+  let grids: TimetableGrid[] = [];
   if (staffId) {
-    await ensureTimetableHydratedServer();
-    const tt = loadTimetable();
-    grids = tt.publishedGrids.length ? tt.publishedGrids : tt.grids;
+    try {
+      grids = (await loadScopeTimetable()).grids;
+    } catch (e) {
+      if (!schoolWide) throw e;
+      console.warn(
+        `[staffScope] timetable unknown for school-wide ${staffId} — scope built without it:`,
+        e instanceof Error ? e.message : e,
+      );
+    }
   }
 
   const teaching = teachingSectionsFor({
@@ -108,7 +173,7 @@ export async function staffSectionScope(ctx: ApiAuthContext): Promise<StaffScope
   const kind = resolveStaffHomeKind(ctx.session, ctx.masters, {
     teachesClasses: teaching.length > 0,
   });
-  const unrestricted = isSchoolWideSession(ctx, kind);
+  const unrestricted = schoolWide || isSchoolWideSession(ctx, kind);
   return {
     kind,
     unrestricted,
