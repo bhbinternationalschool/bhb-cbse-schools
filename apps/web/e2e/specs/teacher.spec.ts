@@ -118,11 +118,8 @@ test.describe("class teacher (Nursery-A)", () => {
 
 test.describe("timetable-only teacher (III-A, V-A by the published timetable)", () => {
   test("/attendance: she is offered her two sections", async ({ browser }, testInfo) => {
-    test.fail(
-      true,
-      "she gets 0 sections — 'No classes are assigned to you yet': on the server the published timetable is never " +
-        "loaded (loadTimetable() is browser-only), so staffSectionScope() never sees her periods. Until step 1.7.",
-    );
+    // Was an expected failure ("No classes are assigned to you yet") until
+    // step 1.7 (#588) made the server read the published timetable.
     const { context, page } = await openAs(browser, "timetableTeacher");
     let seen: string[] = [];
     try {
