@@ -87,6 +87,9 @@ jobs:
       - name: Test — a cold client does not invent a school
         working-directory: apps/web
         run: npm run test:masters-cold-client
+      - name: Test — a teacher's Masters keeps its staff without a fee structure
+        working-directory: apps/web
+        run: npm run test:masters-teacher-no-fees
 
       - name: Test — a stale wipe signal expires
         working-directory: apps/web

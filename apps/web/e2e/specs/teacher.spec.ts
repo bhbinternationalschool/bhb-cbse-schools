@@ -96,7 +96,7 @@ test.describe("class teacher (Nursery-A)", () => {
   });
 
   test("/students: Active students = her section's 2026-27 children", async ({ browser }, testInfo) => {
-    test.fail(true, "the page crashes with React #185 (Maximum update depth exceeded) whenever the roster holds students (S2). Until step 3.x.");
+    test.fail(true, "shows 27 (seeded 20): her section's blank-year rows counted as this year's, and two of her children twice. Production has no blank-year rows today. Until step 3.1. (Crashed with React #185 until 13 Oct 2026; fixed by fix/teacher-masters-fee-reset.)");
     const { context, page } = await openAs(browser, "teacher");
     const errors = collectPageErrors(page);
     try {
@@ -146,8 +146,9 @@ test.describe("timetable-only teacher (III-A, V-A by the published timetable)", 
   test("/students: Active students = her sections' 2026-27 children", async ({ browser }, testInfo) => {
     test.fail(
       true,
-      "until step 1.7 it showed 0 (the server found no section for her); since 1.7 (#588) her roster holds her 61 " +
-        "rows and the page crashes with React #185 like every /students with students (S2). Until step 3.x.",
+      "shows 42 (seeded 38): blank-year rows counted as this year's. Production has no blank-year rows today. " +
+        "Until step 3.1. (Showed 0 until step 1.7; crashed with React #185 until 13 Oct 2026, fixed by " +
+        "fix/teacher-masters-fee-reset.)",
     );
     const { context, page } = await openAs(browser, "timetableTeacher");
     const errors = collectPageErrors(page);
