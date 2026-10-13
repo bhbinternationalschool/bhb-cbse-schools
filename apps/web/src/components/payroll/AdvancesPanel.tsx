@@ -34,12 +34,17 @@ import {
 } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { EnteredUpToLine } from "@/components/accounts/LastEntryStrip";
+import { pickLastEntries } from "@/lib/ledger/lastEntries";
 
 export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
   const session = useDemoSession();
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [advances, setAdvances] = useState<StaffAdvance[]>([]);
   const [tick, setTick] = useState(0);
+  // Until the register has been read from the server, an empty list means
+  // "not known yet", never "no advances entered".
+  const [hydrated, setHydrated] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,6 +84,7 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
           import("@/lib/deskHydrateGuard"),
         ]);
       await withHydrationSlot(() => ensureStaffAdvancesHydrated());
+      setHydrated(true);
       setTick((t) => t + 1);
     })();
   }, []);
@@ -116,6 +122,24 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
     },
     "given",
     "desc",
+  );
+
+  // "Entered up to" for the issue form: the register holds live advances only
+  // (deleting one removes it), and advances issued with salary are keyed on
+  // the payroll draft, not here, so they do not say how far THIS pile got.
+  const lastIssued = useMemo(
+    () =>
+      pickLastEntries(
+        advances
+          .filter((a) => a.source !== "with_salary")
+          .map((a) => ({
+            date: a.givenDate,
+            keyedAt: a.createdAt,
+            createdBy: a.createdBy,
+            label: `${a.fullName || a.empCode} ${formatInr(a.amount)}`,
+          })),
+      ),
+    [advances],
   );
 
   const viewDue = viewStaffId ? outstandingForStaff(viewStaffId) : 0;
@@ -275,6 +299,16 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
         <p className="sm:col-span-2 lg:col-span-3 text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
           Issue advance (cash / direct)
         </p>
+        <div className="sm:col-span-2 lg:col-span-3">
+          {hydrated || advances.length > 0 ? (
+            <EnteredUpToLine
+              noun="advances"
+              latest={lastIssued.latestDate}
+              lastKeyed={lastIssued.lastKeyed}
+              describe={(e) => e.label}
+            />
+          ) : null}
+        </div>
         <label className="text-xs font-semibold text-[var(--muted)] sm:col-span-2 lg:col-span-1">
           Staff
           <select

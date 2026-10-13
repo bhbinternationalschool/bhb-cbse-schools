@@ -327,6 +327,7 @@ export function AccountsWorkspace() {
               .map((b) => ({ id: b.id, name: b.name }))}
             actor={actorName}
             onPosted={() => setEntryTick((n) => n + 1)}
+            refreshKey={entryTick}
           />
           </div>
           {/* Between the one-head quick form and the raw double-entry
@@ -338,6 +339,7 @@ export function AccountsWorkspace() {
               .map((b) => ({ id: b.id, name: b.name }))}
             actor={actorName}
             onPosted={() => setEntryTick((n) => n + 1)}
+            refreshKey={entryTick}
           />
           </div>
           <div className={voucherForm === "voucher" ? "" : "hidden"}>
@@ -347,6 +349,7 @@ export function AccountsWorkspace() {
               .map((b) => ({ id: b.id, name: b.name }))}
             actor={actorName}
             onPosted={() => setEntryTick((n) => n + 1)}
+            refreshKey={entryTick}
           />
           </div>
           <div className={voucherForm === "cheques" ? "" : "hidden"}>
