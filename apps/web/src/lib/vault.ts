@@ -14,6 +14,8 @@ import {
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import { recordVaultDocumentDeletion } from "@/lib/vaultNormalizedClient";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 const STORAGE_KEY = "bhb_vault_v1";
 
@@ -308,6 +310,9 @@ export function runVaultReport(
   id: VaultReportId,
   filters: { format: "excel" | "pdf"; vault?: VaultState },
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("vault", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const vault = filters.vault ?? loadVault();
   const note = describeFilters([TENANT.shortName, todayIso()]);
   const asOf = todayIso();

@@ -1,8 +1,8 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
-import { loadTimetable, teachingPeriods } from "@/lib/timetable";
+import { readTimetableStateServer } from "@/lib/api/v1/teachingServer.server";
+import { teachingPeriods } from "@/lib/timetable";
 import {
   assertSectionScope,
   sectionKey,
@@ -135,8 +135,9 @@ export async function GET(request: Request) {
     });
     const counts = await joinCountsFor(sessions.map((s) => s.id));
 
-    await ensureTimetableHydratedServer();
-    const tt = loadTimetable();
+    // The bell from the timetable desk slices (loadTimetable() is empty on
+    // the server, so the form offered no periods). Unreadable = 503.
+    const tt = await readTimetableStateServer();
     const bell = teachingPeriods(tt.bellTemplate).map((b) => ({
       no: b.no,
       label: b.label || `Period ${b.no}`,

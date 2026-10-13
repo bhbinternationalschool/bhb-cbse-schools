@@ -1,7 +1,8 @@
 /**
- * One day of money, by tender — what the counter hands to the principal.
+ * Days of money, by tender — what the counter hands to the principal.
  *
- * Deliberately a day and nothing more. The office keys vouchers and runs this
+ * Deliberately movements over a short range (a day by default, at most
+ * DAY_SHEET_MAX_DAYS) and nothing more. The office keys vouchers and runs this
  * sheet; what the school holds in cash and bank, and what it has earned and
  * spent across the session, sit behind `accounts_position` and are not read
  * here. So this is safe to leave open to whoever works the counter.
@@ -15,173 +16,162 @@
 import "server-only";
 
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
+import {
+  buildDaySheet,
+  daySheetRange,
+  type DaySheet,
+  type DsAccount,
+  type DsLine,
+  type DsVoucher,
+} from "@/lib/ledger/daySheet";
 
-export type DaySheetHead = {
-  code: string;
-  name: string;
-  paise: number;
-  count: number;
+export type {
+  DaySheet,
+  DaySheetCancelled,
+  DaySheetDay,
+  DaySheetHead,
+  DaySheetSide,
+  DaySheetTender,
+} from "@/lib/ledger/daySheet";
+
+const EMPTY_SIDE = { totalPaise: 0, count: 0, tenders: [] };
+
+type VoucherRow = {
+  id: string;
+  voucher_no: string;
+  voucher_date: string;
+  narration: string | null;
+  reverses_voucher_id: string | null;
 };
 
-export type DaySheetTender = {
-  code: string;
-  name: string;
-  paise: number;
-  count: number;
-  heads: DaySheetHead[];
-};
+const toVoucher = (r: VoucherRow): DsVoucher => ({
+  id: String(r.id),
+  voucherNo: String(r.voucher_no ?? ""),
+  date: String(r.voucher_date ?? "").slice(0, 10),
+  narration: String(r.narration ?? ""),
+  reversesVoucherId: r.reverses_voucher_id ? String(r.reverses_voucher_id) : "",
+});
 
-export type DaySheetSide = {
-  totalPaise: number;
-  count: number;
-  tenders: DaySheetTender[];
-};
-
-export type DaySheet = {
-  ok: boolean;
-  error?: string;
-  date: string;
-  collections: DaySheetSide;
-  expenses: DaySheetSide;
-  /** True when the day hit the row cap and the sheet may be short. */
-  truncated: boolean;
-};
-
-const EMPTY_SIDE: DaySheetSide = { totalPaise: 0, count: 0, tenders: [] };
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-/** One day of a school's book is far below this; the guard is for a bad date. */
-const MAX_LINES = 5000;
-
-export async function readDaySheet(date: string): Promise<DaySheet> {
+/**
+ * Every read is paged: PostgREST stops at 1,000 rows and calls it success,
+ * and a month of this school's book is several thousand lines. A failed read
+ * is an error on the sheet, never a shorter sheet.
+ */
+export async function readDaySheet(input: {
+  date?: string;
+  from?: string;
+  to?: string;
+}): Promise<DaySheet> {
+  const range = daySheetRange(input);
   const blank: DaySheet = {
     ok: false,
-    date,
+    date: range.from,
+    from: range.from,
+    to: range.to,
     collections: EMPTY_SIDE,
     expenses: EMPTY_SIDE,
+    days: [],
+    cancelled: [],
+    crossRange: [],
     truncated: false,
   };
-  if (!ISO_DATE.test(date)) return { ...blank, error: "Date must be yyyy-mm-dd" };
+  if (!range.ok) return { ...blank, error: range.error };
 
   const ctx = await getServerTenantContext();
   if (!ctx) return { ...blank, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
+  const cols = "id, voucher_no, voucher_date, narration, reverses_voucher_id";
 
-  const [vouchersRes, accountsRes] = await Promise.all([
-    sb
-      .from("ledger_vouchers")
-      .select("id, voucher_no, voucher_type, narration")
-      .eq("tenant_id", tenantId)
-      .eq("voucher_date", date),
+  const [vouchersRes, accountsRes, reversalsRes] = await Promise.all([
+    fetchAllPages<VoucherRow>((from, to) =>
+      sb
+        .from("ledger_vouchers")
+        .select(cols)
+        .eq("tenant_id", tenantId)
+        .gte("voucher_date", range.from)
+        .lte("voucher_date", range.to)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
     sb
       .from("ledger_accounts")
       .select("id, code, name, is_cash, is_bank")
       .eq("tenant_id", tenantId),
+    // Every reversal in the book, whatever its date: a voucher on this sheet
+    // cancelled months later is still counted here, but labelled (66 of 982
+    // were dated off their original's day on 13 Oct 2026 — voided fee
+    // receipts, mostly).
+    fetchAllPages<VoucherRow>((from, to) =>
+      sb
+        .from("ledger_vouchers")
+        .select(cols)
+        .eq("tenant_id", tenantId)
+        .not("reverses_voucher_id", "is", null)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
   ]);
-  if (vouchersRes.error) return { ...blank, error: vouchersRes.error.message };
+  if (vouchersRes.error) return { ...blank, error: vouchersRes.error };
   if (accountsRes.error) return { ...blank, error: accountsRes.error.message };
+  if (reversalsRes.error) return { ...blank, error: reversalsRes.error };
 
-  const voucherIds = (vouchersRes.data ?? []).map((v) => String((v as { id: string }).id));
-  if (voucherIds.length === 0) {
-    return { ok: true, date, collections: EMPTY_SIDE, expenses: EMPTY_SIDE, truncated: false };
-  }
+  const vouchers = vouchersRes.rows.map(toVoucher);
+  const accounts: DsAccount[] = ((accountsRes.data ?? []) as Record<string, unknown>[]).map((a) => ({
+    id: String(a.id),
+    code: String(a.code ?? ""),
+    name: String(a.name ?? ""),
+    isMoney: !!a.is_cash || !!a.is_bank,
+  }));
 
-  type Acct = { id: string; code: string; name: string; isMoney: boolean };
-  const accounts = new Map<string, Acct>();
-  for (const a of (accountsRes.data ?? []) as Record<string, unknown>[]) {
-    accounts.set(String(a.id), {
-      id: String(a.id),
-      code: String(a.code ?? ""),
-      name: String(a.name ?? ""),
-      isMoney: !!a.is_cash || !!a.is_bank,
-    });
-  }
+  const linesRes = await fetchByIds<Record<string, unknown>>(
+    vouchers.map((v) => v.id),
+    (chunk, from, to) =>
+      sb
+        .from("ledger_lines")
+        .select("id, voucher_id, account_id, debit_paise, credit_paise")
+        .eq("tenant_id", tenantId)
+        .in("voucher_id", chunk)
+        .order("id", { ascending: true })
+        .range(from, to),
+  );
+  if (linesRes.error) return { ...blank, error: linesRes.error };
+  const lines: DsLine[] = linesRes.rows.map((l) => ({
+    voucherId: String(l.voucher_id),
+    accountId: String(l.account_id),
+    debitPaise: Number(l.debit_paise ?? 0),
+    creditPaise: Number(l.credit_paise ?? 0),
+  }));
 
-  // PostgREST caps a response at 1,000 rows, so the lines are read in chunks
-  // of voucher ids rather than one `.in()` over the whole day.
-  const lines: Record<string, unknown>[] = [];
-  let truncated = false;
-  for (let i = 0; i < voucherIds.length; i += 100) {
-    const { data, error } = await sb
-      .from("ledger_lines")
-      .select("voucher_id, account_id, debit_paise, credit_paise")
+  // The originals that in-range reversals cancel but that fall outside the
+  // range: read only for their number and date, to label the reversal.
+  const inRange = new Set(vouchers.map((v) => v.id));
+  const missing = vouchers
+    .map((v) => v.reversesVoucherId)
+    .filter((id) => id && !inRange.has(id));
+  const originalsRes = await fetchByIds<VoucherRow>(missing, (chunk, from, to) =>
+    sb
+      .from("ledger_vouchers")
+      .select(cols)
       .eq("tenant_id", tenantId)
-      .in("voucher_id", voucherIds.slice(i, i + 100))
-      .limit(1000);
-    if (error) return { ...blank, error: error.message };
-    lines.push(...((data ?? []) as Record<string, unknown>[]));
-    if (lines.length > MAX_LINES) {
-      truncated = true;
-      break;
-    }
-  }
+      .in("id", chunk)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  if (originalsRes.error) return { ...blank, error: originalsRes.error };
 
-  // Group the lines of each voucher, so a money line can be told what it was
-  // for: the contra side of the same voucher.
-  const byVoucher = new Map<string, Record<string, unknown>[]>();
-  for (const l of lines) {
-    const id = String(l.voucher_id);
-    const arr = byVoucher.get(id);
-    if (arr) arr.push(l);
-    else byVoucher.set(id, [l]);
-  }
-
-  const collect = new Map<string, DaySheetTender>();
-  const spend = new Map<string, DaySheetTender>();
-
-  const bump = (
-    side: Map<string, DaySheetTender>,
-    tender: Acct,
-    head: Acct | undefined,
-    paise: number,
-  ) => {
-    let t = side.get(tender.code);
-    if (!t) {
-      t = { code: tender.code, name: tender.name, paise: 0, count: 0, heads: [] };
-      side.set(tender.code, t);
-    }
-    t.paise += paise;
-    t.count += 1;
-    const code = head?.code ?? "—";
-    const name = head?.name ?? "Unclassified";
-    let h = t.heads.find((x) => x.code === code);
-    if (!h) {
-      h = { code, name, paise: 0, count: 0 };
-      t.heads.push(h);
-    }
-    h.paise += paise;
-    h.count += 1;
+  return {
+    ok: true,
+    // Real, not assumed: the paged reader stops at its row ceiling and says so.
+    truncated: vouchersRes.truncated || reversalsRes.truncated,
+    ...buildDaySheet({
+      from: range.from,
+      to: range.to,
+      vouchers,
+      lines,
+      accounts,
+      reversals: reversalsRes.rows.map(toVoucher),
+      originals: originalsRes.rows.map(toVoucher),
+    }),
   };
-
-  for (const [voucherId, vLines] of byVoucher) {
-    void voucherId;
-    // The contra is whatever the voucher touched that was NOT cash or bank.
-    // Where several heads share one money line, the largest is named — a
-    // hand-over sheet wants the head, not a full double-entry dissection.
-    const nonMoney = vLines
-      .map((l) => accounts.get(String(l.account_id)))
-      .filter((a): a is Acct => !!a && !a.isMoney);
-    const head = nonMoney.length === 1 ? nonMoney[0] : nonMoney[0];
-
-    for (const l of vLines) {
-      const acct = accounts.get(String(l.account_id));
-      if (!acct?.isMoney) continue;
-      const debit = Number(l.debit_paise ?? 0);
-      const credit = Number(l.credit_paise ?? 0);
-      // Money in is a debit to cash/bank; money out is a credit.
-      if (debit > 0) bump(collect, acct, head, debit);
-      else if (credit > 0) bump(spend, acct, head, credit);
-    }
-  }
-
-  const side = (m: Map<string, DaySheetTender>): DaySheetSide => {
-    const tenders = [...m.values()].sort((a, b) => b.paise - a.paise);
-    for (const t of tenders) t.heads.sort((a, b) => b.paise - a.paise);
-    return {
-      tenders,
-      totalPaise: tenders.reduce((n, t) => n + t.paise, 0),
-      count: tenders.reduce((n, t) => n + t.count, 0),
-    };
-  };
-
-  return { ok: true, date, collections: side(collect), expenses: side(spend), truncated };
 }

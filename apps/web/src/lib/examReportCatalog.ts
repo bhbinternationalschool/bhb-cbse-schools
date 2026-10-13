@@ -23,6 +23,8 @@ import {
   type ReportColumn,
 } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type ExamReportFormat = "excel" | "pdf";
 
@@ -279,6 +281,9 @@ export function runExamReport(
   id: ExamReportId,
   filters: ExamReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("exams", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const masters = filters.masters ?? loadMasters();
   const sis = filters.sis ?? loadSis();
   const exams = filters.exams ?? loadExams();

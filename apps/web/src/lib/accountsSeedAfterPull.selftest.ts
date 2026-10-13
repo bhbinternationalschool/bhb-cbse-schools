@@ -74,8 +74,11 @@ const workspace = read("../components/accounts/AccountsWorkspace.tsx");
 assert.ok(/withHydrationSlot\(\(\) => ensureAccountsSeeded\(\)\)/.test(workspace), "Accounts page pulls, then seeds");
 
 const reports = read("../components/reports/ModuleReportRunners.tsx");
-assert.equal(/seedAccountsIfEmpty/.test(reports), false, "reports runner seeds only via ensureAccountsSeeded");
-assert.ok(/await ensureAccountsSeeded\(\)/.test(reports), "reports runner awaits the pull");
+// Since 14 Oct 2026 the reports runner never seeds at all: it only reads,
+// behind the Reports Center's ReportDataGate (which loads the desk first).
+assert.equal(/seedAccountsIfEmpty/.test(reports), false, "reports runner never seeds the books");
+assert.equal(/ensureAccountsSeeded/.test(reports), false, "reports runner never seeds the books");
+assert.ok(/loadAccounts\(\)/.test(reports), "reports runner reads the loaded desk");
 
 const trust = read("../components/trust/TrustWorkspace.tsx");
 assert.ok(/ensureAccountsSeeded\(\)/.test(trust), "trust (capex postings) pulls the accounts desk");

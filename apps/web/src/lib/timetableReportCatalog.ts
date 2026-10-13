@@ -23,6 +23,8 @@ import {
   teachingPeriods,
   type TimetableState,
 } from "@/lib/timetable";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type TimetableReportFormat = "excel" | "pdf";
 
@@ -316,6 +318,9 @@ export function runTimetableReport(
   id: TimetableReportId,
   filters: TimetableReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("timetable", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const masters = filters.masters ?? loadMasters();
   const tt = filters.timetable ?? loadTimetable();
   const ay = filters.academicYearCode || currentAcademicYearCode(masters);

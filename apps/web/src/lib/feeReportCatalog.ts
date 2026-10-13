@@ -44,6 +44,8 @@ import {
   listRteFeeRows,
 } from "@/lib/feeFinance";
 import { trackServerWork } from "@/lib/serverWork";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type FeeReportCategory = "collection" | "dues" | "student" | "general";
 
@@ -504,6 +506,9 @@ export function runFeeReport(
   id: FeeReportId,
   options: FeeReportRunOptions = {},
 ): { ok: true; rows: number; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("fees", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const sis = options.sis ?? loadSis();
   const masters = options.masters ?? loadMasters();
   const fees = options.fees ?? loadFees();

@@ -46,8 +46,8 @@ import {
 import { loadStaffAttendance } from "@/lib/staffAttendance";
 import { ensureStaffAttendanceHydratedServer } from "@/lib/staffAttendancePersistence";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
-import { loadTimetable, periodInterval, teachingPeriods, WEEKDAY_SHORT } from "@/lib/timetable";
-import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
+import { periodInterval, teachingPeriods, WEEKDAY_SHORT, type TimetableState } from "@/lib/timetable";
+import { readTimetableStateServer } from "@/lib/api/v1/teachingServer.server";
 import {
   absentTeachersForDate,
   affectedPeriodsForDate,
@@ -3359,17 +3359,27 @@ function istHhmm(now = new Date()): string {
   return `${String(ist.getUTCHours()).padStart(2, "0")}:${String(ist.getUTCMinutes()).padStart(2, "0")}`;
 }
 
-async function freeTeachers(
+/** Exported for timetableServerCallers.selftest. */
+export async function freeTeachers(
   resolved: Record<string, string>,
   periodAsk: string,
   session: DemoSession,
   todayIso: string,
 ): Promise<string> {
-  await Promise.all([ensureTimetableHydratedServer(), ensureStaffAttendanceHydratedServer()]);
+  // The timetable from its desk slices: loadTimetable() is empty on the
+  // server, so this answered "No bell timetable is set up yet" every time.
+  const staffAttendance = ensureStaffAttendanceHydratedServer();
+  let state: TimetableState;
+  try {
+    state = await readTimetableStateServer();
+  } catch {
+    await staffAttendance.catch(() => false);
+    return "I couldn't read the timetable just now — please try again in a minute.";
+  }
+  await staffAttendance;
   const ay = session.academicYearCode;
   const date = resolved.date || todayIso;
   const masters = loadMasters();
-  const state = loadTimetable();
   const periods = teachingPeriods(state.bellTemplate);
   if (!periods.length) return "No bell timetable is set up yet (Timetable → Bell template).";
   const weekday = isoDateWeekday(date);
