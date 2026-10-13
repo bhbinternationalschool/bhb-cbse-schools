@@ -20,6 +20,8 @@ import {
   type CertificateKind,
   type CertificatesState,
 } from "@/lib/certificates";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type CertificatesReportFormat = "excel" | "pdf";
 
@@ -154,6 +156,9 @@ export function runCertificatesReport(
   id: CertificatesReportId,
   filters: CertificatesReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("certificates", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const state = filters.state ?? loadCertificates();
   const scoped = inScope(state.issues, filters);
   const def = CERTIFICATES_REPORTS.find((r) => r.id === id);

@@ -26,6 +26,8 @@ import {
   type StaffHrState,
 } from "@/lib/staffHr";
 import { TENANT } from "@/lib/types";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type StaffLeaveReportFormat = "excel" | "pdf" | "preview";
 
@@ -1045,6 +1047,9 @@ export function runStaffLeaveReport(
       preview?: Built;
     }
   | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("staff_leave", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const def = STAFF_LEAVE_REPORTS.find((r) => r.id === id);
   if (!def) return { ok: false, error: "Unknown report" };
 

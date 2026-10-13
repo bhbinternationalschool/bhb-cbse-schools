@@ -21,14 +21,14 @@ import {
   runTransportReport,
   type TransportReportFormat,
 } from "@/lib/transportReportCatalog";
-import { loadTransport, migrateDemoFleetToReal, seedTransportIfEmpty } from "@/lib/transport";
+import { loadTransport } from "@/lib/transport";
 import {
   TRUST_REPORTS,
   runTrustReport,
   type TrustReportFormat,
   type TrustReportId,
 } from "@/lib/trustReportCatalog";
-import { loadTrust, seedTrustIfEmpty } from "@/lib/trust";
+import { loadTrust } from "@/lib/trust";
 import {
   TIMETABLE_REPORTS,
   runTimetableReport,
@@ -110,20 +110,13 @@ export function AccountsReportsRunner() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Read only: the Reports Center loads the desk first (ReportDataGate).
+  // This used to seed a chart of accounts when the desk looked empty — a
+  // report screen must never write the school's books.
   useEffect(() => {
-    let live = true;
-    void (async () => {
-      // Pull the school's desk before seeding; a fresh browser would
-      // otherwise push a seeded chart of its own.
-      const { ensureAccountsSeeded } = await import("@/lib/accountsPersistence");
-      const s = await ensureAccountsSeeded();
-      if (!live) return;
-      setState(s);
-      if (!coaId && s.coaAccounts[0]) setCoaId(s.coaAccounts[0].id);
-    })();
-    return () => {
-      live = false;
-    };
+    const s = loadAccounts();
+    setState(s);
+    if (s.coaAccounts[0]) setCoaId((cur) => cur || s.coaAccounts[0]!.id);
   }, []);
 
   function run(id: AccountsReportId) {
@@ -252,11 +245,6 @@ export function TransportReportsRunner() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    migrateDemoFleetToReal();
-    seedTransportIfEmpty();
-  }, []);
-
   async function run(id: (typeof TRANSPORT_REPORTS)[number]["id"]) {
     // The boarding day sheet reads the bus register (server truth).
     let registerMarks: RegisterDayMark[] | null = null;
@@ -344,10 +332,8 @@ export function TrustReportsRunner() {
   const [projectId, setProjectId] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const projects = useMemo(() => {
-    const t = seedTrustIfEmpty();
-    return t.projects;
-  }, []);
+  // Read only (loaded first by ReportDataGate).
+  const projects = useMemo(() => loadTrust().projects, []);
 
   useEffect(() => {
     if (!projectId && projects[0]) setProjectId(projects[0].id);
