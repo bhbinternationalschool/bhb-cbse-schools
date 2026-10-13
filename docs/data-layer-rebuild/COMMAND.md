@@ -358,6 +358,75 @@ Acceptance: the job runs on this PR; `counts` passes on desktop; `propagation` a
 **fail** on today's code (prove the gate sees the disease) and are recorded on the scoreboard.
 > Executor brief: do not change the app to make specs pass; this step builds the instrument.
 
+*(Built 13 Oct 2026, PR #591.)* **What exists.** `@playwright/test` 1.63.0 (exact pin, Chromium
+only) in `apps/web`; `apps/web/playwright.config.ts` starts and seeds nothing (no `webServer`, no
+`globalSetup`) and refuses to load unless `E2E_APP_URL` and `NEXT_PUBLIC_SUPABASE_URL` are
+`http://127.0.0.1:<port>` and `E2E=1`, so it only runs through `scripts/e2e/with-env.mjs`:
+`cd apps/web && node ../../scripts/e2e/with-env.mjs .env.e2e -- npx playwright test` after
+`e2e-stack.sh up && build && app`. It needs a **freshly seeded** stack (the propagation project
+writes; a second run needs `down && up`). Projects: `desktop` (1440 px; every spec but
+propagation), `phone-375-cpu4x` (Pixel 7 profile at 375 px, CPU 4× via CDP
+`Emulation.setCPUThrottlingRate`; counts only), `propagation` (desktop; depends on the other two,
+so it runs last). One worker. Logins: the minted `bhb_demo_session` cookie (`e2e/session.ts`) for
+the fixture's office, class teacher, timetable-only teacher, and — new — the Principal
+(`fixture.sessions.principal`): the fixture's Office role may only *view* Masters (built-in rbac;
+a save as office is refused "Missing permission masters.edit"), so propagation's context A edits as
+the Principal. Helpers in `e2e/support.ts`; the one app change is `data-testid="metric-value"` on
+the number of `ErpMetricCard` (`components/ui/erp-roster.tsx`), which every module dashboard card
+uses; everything else is found by role, label or visible text. The fixture's class–subject links
+now carry `isOptional:false` as every app-written link does (see the finding below).
+
+**The scoreboard rule.** `e2e/scoreboard-reporter.ts` writes `apps/web/e2e/scoreboard.json` and the
+CI job summary: each test is `pass`, `expected-fail` (marked `test.fail()` with its reason — a known
+defect the gate sees), `fixme`, `UNEXPECTED-PASS` or `FAIL`, with the innermost `test.step` that
+failed and the measurements (`metric:*` attachments). **Green = only pass / expected-fail /
+fixme.** An expected failure that starts passing is an UNEXPECTED-PASS and turns the run red: the
+step that fixed it removes its `test.fail()` in the same PR (that is the "flip to required"). An
+expected failure must fail at the right step: propagation tests at "propagation" (after the
+control, the edit and a database read-back have passed, and with `visibleAfterReload: true` —
+the same locator finds the change once B reloads), counts at the count, teacher tests at the
+scope check.
+
+**The scoreboard on origin/main 0a9ae0c3 (two clean local runs + CI).** 13 pass, 30
+expected-fail, 2 fixme, 0 fail:
+- counts — pass: `/masters` (15 classes, 44 subjects), `/timetable` (15 classes; V's Subject
+  rules "45 periods a week asked"), `/homework` (15 classes; 22 subjects in Compose HW), on
+  desktop (1.1–2.6 s) and on the phone (2.6–5.2 s — on the phone the 5 s line is measured, not
+  gated: it moved with machine load alone). Expected-fail: `/staff` shows **0** active staff
+  (seeded 34) although the page's GET staff-roster returned all 35 (S1); `/students` **crashes**,
+  React #185 "Maximum update depth exceeded" (a dev build points at ErpSidebar's route effect),
+  whenever the roster holds students (S2); `/attendance` V-A's 2026-27 register shows **0** for
+  30 s although sis-roster arrived ~1.3 s after navigation, or **21** (seeded 19: the two V-A
+  rows with a blank academic year counted as this year's).
+- teacher — the class teacher's register lists 27 for Nursery-A (seeded 20: the section's 7
+  blank-year rows — 5 other children, 2 of hers twice); her `/students` crashes (#185); the
+  timetable-only teacher gets "No classes are assigned to you yet" and 0 students (until 1.7).
+  Pass: her picker offers exactly Nursery (the control for the picker check); with masters-desk
+  503 both teachers see "could not load" + Try again.
+- error — pass on `/masters`, `/attendance`, `/timetable`, `/homework`: CoreDataGate turns the 503
+  into "Could not load the school's classes, subjects and staff from the server." + Try again
+  (shown ~7 s after navigation), draws no picker, and Try again recovers without a reload.
+- budget — all six pages expected-fail: 23–36 `/api` requests and ~1,100 KB per open; every
+  screen boots the whole replica (sis-roster 893 KB alone — `next start` sends it uncompressed —
+  staff-roster 136 KB, masters-desk 36 KB, rbac 26 KB, ~20 small reads).
+- propagation — all 12 subject/section cases (3 observers × editor/api × 2 changes)
+  expected-fail **at the propagation step** with the change stored and `visibleAfterReload:
+  true`; the 2 staff cases cannot be observed yet (every staff screen lists no staff, the S1
+  defect) — the control is recorded `controlShown:false` and the API edit is proven; the staff
+  *editor* case is `fixme` (no staff row to drive).
+- stale-writer — `fixme`, lands with 1.5.
+
+**Found while building it.** A masters-desk POST whose `classSubjects` rows lack `isOptional` is
+*accepted into the slice* and then fails the row sync (`500 "Masters saved, but the row tables
+did not update: … is_optional … not-null"`); every later Masters save then fails the same way
+until the slice is repaired. Non-atomic (slice written, rows not); for 1.5.
+
+**Not done / not proven here.** The scoreboard is a CI job summary and artifact, not a PR comment
+(the workflow has `contents: read` only). Root causes of the `/staff` 0, the #185 crash and the
+register 0 are not established — the specs prove the symptoms and what the page received.
+Timings are from a Mac shared with other sessions and from `ubuntu-latest`; production may
+differ.
+
 **1.2 Observability and the build handshake.** (a) The client knows its build id. Not as
 `NEXT_PUBLIC_BUILD_ID` from `generateBuildId`: the commit sha reaches the service only at run
 time, a hand deploy can ship different code under one sha, and a random id made in

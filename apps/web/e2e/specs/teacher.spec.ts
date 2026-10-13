@@ -33,6 +33,14 @@ const CT_SECTION = CLASS_TEACHER - 3;
 const ctChildren = currentRows([CT_SECTION]);
 const ttChildren = currentRows(TIMETABLE_TEACHER_SECTIONS);
 
+/** The real options of the first "Class" picker (no "Select…" placeholder). */
+async function classOptions(page: Page): Promise<string[]> {
+  const cls = page.getByRole("combobox", { name: "Class", exact: true }).first();
+  return (await cls.locator("option").allTextContents().catch(() => [] as string[]))
+    .map((t) => t.trim())
+    .filter((t) => t && !/^select/i.test(t));
+}
+
 async function registerAdmissionNos(page: Page): Promise<string[]> {
   const items = await page.getByRole("listitem").filter({ hasText: /E2E-\d{4}/ }).allTextContents();
   return items.map((t) => /E2E-\d{4}/.exec(t)?.[0] ?? "").filter(Boolean);
@@ -75,6 +83,18 @@ test.describe("class teacher (Nursery-A)", () => {
     }
   });
 
+  test("/attendance: her Class picker offers exactly Nursery (control for the picker check)", async ({ browser }) => {
+    // Passes today. It shows the timetable-only teacher's picker check below
+    // can pass: same selector, same poll, a teacher whose tie the server sees.
+    const { context, page } = await openAs(browser, "teacher");
+    try {
+      await page.goto("/attendance");
+      await expect.poll(() => classOptions(page), { timeout: 20_000 }).toEqual(["Nursery"]);
+    } finally {
+      await context.close();
+    }
+  });
+
   test("/students: Active students = her section's 2026-27 children", async ({ browser }, testInfo) => {
     test.fail(true, "the page crashes with React #185 (Maximum update depth exceeded) whenever the roster holds students (S2). Until step 3.x.");
     const { context, page } = await openAs(browser, "teacher");
@@ -97,23 +117,31 @@ test.describe("class teacher (Nursery-A)", () => {
 });
 
 test.describe("timetable-only teacher (III-A, V-A by the published timetable)", () => {
-  test("/attendance: she is offered her two sections", async ({ browser }) => {
+  test("/attendance: she is offered her two sections", async ({ browser }, testInfo) => {
     test.fail(
       true,
       "she gets 0 sections — 'No classes are assigned to you yet': on the server the published timetable is never " +
         "loaded (loadTimetable() is browser-only), so staffSectionScope() never sees her periods. Until step 1.7.",
     );
     const { context, page } = await openAs(browser, "timetableTeacher");
+    let seen: string[] = [];
     try {
       await page.goto("/attendance");
       await expect(page.getByText(/^Mark register$/).first()).toBeVisible({ timeout: 20_000 });
-      await test.step("her sections are offered", async () => {
-        await expect(page.getByText(/No classes are assigned to you yet/)).toHaveCount(0, { timeout: 10_000 });
-        const cls = page.getByRole("combobox", { name: "Class", exact: true }).first();
-        await expect(cls.locator("option", { hasText: /^III$/ })).toHaveCount(1);
-        await expect(cls.locator("option", { hasText: /^V$/ })).toHaveCount(1);
+      await test.step("her sections — and only hers — are offered", async () => {
+        // A teacher's Class picker lists only her classes (the class teacher's
+        // shows exactly "Nursery"). Hers must become exactly III and V; the
+        // whole school's 15, or none, are both wrong. Polled, because the
+        // picker is drawn before her scope arrives.
+        await expect.poll(async () => (seen = await classOptions(page)), { timeout: 20_000 }).toEqual(["III", "V"]);
+        await expect(page.getByText(/No classes are assigned to you yet/)).toHaveCount(0);
       });
     } finally {
+      await metric(testInfo, "picker", {
+        expected: ["III", "V"],
+        seen,
+        noClassesMessage: await page.getByText(/No classes are assigned to you yet/).count().catch(() => -1),
+      });
       await context.close();
     }
   });
