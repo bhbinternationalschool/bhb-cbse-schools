@@ -1,5 +1,6 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
+import { requireParentHousehold } from "@/lib/api/v1/household";
 import { albumVisibleTo, parentMaySee } from "@/lib/classGallery";
 import { parentSections } from "@/lib/classGallery.server";
 import { fetchGalleryDeskFromDb } from "@/lib/schoolCommsNormalized.server";
@@ -35,7 +36,10 @@ export async function GET(request: Request) {
     let viewer: Parameters<typeof albumVisibleTo>[1] = { staff: true };
     if (ctx.session.persona !== "staff") {
       await ensureSisHydratedServer();
-      const hh = loadSis().students.filter((st) => st.householdId === ctx.session.householdId);
+      // A parent sees their own household's classes only; no household on
+      // the session is refused, never matched against unset ids.
+      const householdId = ctx.session.persona === "parent" ? requireParentHousehold(ctx) : ctx.session.householdId;
+      const hh = householdId ? loadSis().students.filter((st) => st.householdId === householdId) : [];
       viewer = { staff: false, sections: parentSections(hh, ctx.session.academicYearCode || "") };
     }
 

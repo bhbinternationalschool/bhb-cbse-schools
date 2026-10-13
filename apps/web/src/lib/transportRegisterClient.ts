@@ -4,6 +4,8 @@
  * No storage here — every figure comes from the server on each load.
  */
 
+import type { RegisterDayMark } from "@/lib/transportBoardingLog";
+
 export class RegisterCallError extends Error {
   constructor(
     message: string,
@@ -70,3 +72,16 @@ export const regBtn =
   "inline-flex min-h-10 items-center justify-center rounded-lg bg-[var(--primary)] px-4 text-sm font-semibold text-[var(--primary-foreground)] disabled:opacity-50";
 export const regBtnOutline =
   "inline-flex min-h-10 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 text-sm font-semibold text-[var(--foreground)] disabled:opacity-50";
+
+/**
+ * One day's bus register marks across every bus the caller may see (undone
+ * taps left out). Throws when the register could not be read — a caller must
+ * never treat that as "nobody was marked".
+ */
+export async function fetchRegisterDayMarks(date: string): Promise<RegisterDayMark[]> {
+  const v = await registerGet<{ marks?: RegisterDayMark[] }>(
+    `/api/v1/transport/register/runs?date=${encodeURIComponent(date)}&marks=1`,
+  );
+  if (!Array.isArray(v.marks)) throw new RegisterCallError("The server did not return the marks", 502);
+  return v.marks;
+}

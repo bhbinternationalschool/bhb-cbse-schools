@@ -35,6 +35,7 @@ export type MobileFeatureId =
   | "period_log"
   | "syllabus_scan"
   | "students_view"
+  | "class_broadcast"
   // care of students
   | "student_leave_decide"
   | "complaints_handle"
@@ -187,6 +188,19 @@ export const MOBILE_FEATURES: MobileFeature[] = [
     note: "Photograph a syllabus page and import it.",
   },
   {
+    // 13 Oct 2026. Not `broadcast` (notices.create, the principal's
+    // school-wide send): this is /api/v1/staff/broadcast, which lets any
+    // member of staff message only the families of the sections they teach
+    // (checked server-side). home.view like `messages` — the audience, not a
+    // module grant, is the restriction.
+    id: "class_broadcast",
+    label: "Message my classes",
+    group: "Teaching",
+    module: "home",
+    action: "view",
+    note: "WhatsApp + app message to the families of the teacher's own sections only.",
+  },
+  {
     id: "students_view",
     label: "Student roster",
     group: "Students",
@@ -232,7 +246,7 @@ export const MOBILE_FEATURES: MobileFeature[] = [
     group: "Students",
     module: "ptm",
     action: "edit",
-    note: "Mark a booking met or no-show and write the meeting note.",
+    note: "Add, change or cancel own slots for a PTM the office opened; mark a booking met or no-show and write the meeting note.",
   },
   {
     id: "school_snapshot",
@@ -294,11 +308,11 @@ export const MOBILE_FEATURES: MobileFeature[] = [
   },
   {
     id: "route_manifest",
-    label: "Route & boarding",
+    label: "Route, bus register & log book",
     group: "Transport",
     module: "transport",
     action: "view",
-    note: "The bus route, stops and the day's boarding list.",
+    note: "The bus route and stops, the bus register (children on and off each run) and the vehicle log book (odometer, fuel). The server shows a driver only their own bus.",
   },
   {
     id: "gps_punch",
@@ -388,6 +402,7 @@ const TEACHING: MobileFeatureId[] = [
   "period_log",
   "syllabus_scan",
   "students_view",
+  "class_broadcast",
   "student_leave_decide",
   "complaints_handle",
   "documents_verify",

@@ -1,7 +1,9 @@
 /**
  * Assemble `PtmBriefFacts` for one student from the browser-side stores
- * (exams, attendance via report cards, homework, discipline, PTM). Client
- * only — reads localStorage-backed state through each module's loader.
+ * (exams, attendance via report cards, homework, discipline, PTM). Reads
+ * each module's loader — the browser's local copy, or on the server the
+ * copy its ensure*HydratedServer() filled (the conduct log is passed in
+ * there; see `discipline`).
  *
  * Every source that has no data for this student yields `null` / `[]`, so
  * the prompt can say "not available" instead of a number that isn't true.
@@ -13,6 +15,7 @@ import {
   escalationLevelLabel,
   listIncidentsForStudent,
   loadDiscipline,
+  type DisciplineState,
 } from "@/lib/discipline";
 import { buildReportCard, listExamTerms, loadExams, type ReportCard } from "@/lib/exams";
 import { loadHomework, submissionForStudent } from "@/lib/homework";
@@ -34,6 +37,13 @@ export function buildPtmBriefFacts(input: {
   excludeBookingId?: string;
   academicYearCode: string;
   teacherNote?: string;
+  /**
+   * The conduct log, when the caller read it itself. The browser's loader
+   * reads the desk's local copy; on the server that loader is always empty,
+   * so the staff app's route (api/v1/staff/ai/ptm-brief) passes the stored
+   * state here. Omitted = the module's own loader, as before.
+   */
+  discipline?: DisciplineState;
 }): PtmBriefFacts | null {
   const st = input.sis.students.find((s) => s.id === input.studentId);
   if (!st) return null;
@@ -86,7 +96,7 @@ export function buildPtmBriefFacts(input: {
     : null;
 
   // ── Conduct log ──
-  const disc = loadDiscipline();
+  const disc = input.discipline ?? loadDiscipline();
   const incidents = listIncidentsForStudent(disc, st.id).filter((i) => i.academicYearCode === ay);
   const discipline =
     disc.incidents.length === 0

@@ -6,6 +6,7 @@ import { ensurePtmHydratedServer } from "@/lib/ptmPersistence";
 import { loadPtm, modeLabel, ptmBookingMobile } from "@/lib/ptm";
 import { loadSisForStaff } from "@/lib/sis";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
+import { ptmEventReachesScope } from "@/lib/ptmTeacherScope.server";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,11 @@ export const runtime = "nodejs";
  * with the slots that are theirs and who has booked each one (child, class,
  * parent, WhatsApp number), plus feedback already written. Leadership sees
  * every teacher's slots.
+ *
+ * 13 Oct 2026: an event that includes one of my classes is listed even
+ * before I have a slot in it (`canAddSlots`), so the app can add my first
+ * slots — the same rule POST /api/v1/staff/ptm/slots enforces. Until then a
+ * teacher only ever saw events they already had slots in.
  */
 export async function GET(request: Request) {
   try {
@@ -24,6 +30,13 @@ export async function GET(request: Request) {
     assertPermission(ctx, "ptm", "view");
     const staffId = ctx.session.staffId || "";
     const scope = await staffSectionScope(ctx);
+    let canEditPtm = false;
+    try {
+      assertPermission(ctx, "ptm", "edit");
+      canEditPtm = true;
+    } catch {
+      canEditPtm = false;
+    }
 
     await ensureSchoolMirrorHydrated();
     await Promise.all([ensureSisHydratedServer(), ensurePtmHydratedServer()]);
@@ -83,6 +96,9 @@ export async function GET(request: Request) {
           });
         return {
           id: event.id,
+          // Mirrors POST /api/v1/staff/ptm/slots: ptm.edit, a linked staff
+          // record, an open event, and one that reaches my classes.
+          canAddSlots: canEditPtm && !!staffId && ptmEventReachesScope(event, scope),
           name: event.name,
           date: event.date,
           endDate: event.endDate,
@@ -93,7 +109,7 @@ export async function GET(request: Request) {
           bookingCount: slots.reduce((n, s) => n + s.bookings.length, 0),
         };
       })
-      .filter((e) => e.slots.length > 0 || scope.unrestricted);
+      .filter((e) => e.slots.length > 0 || scope.unrestricted || e.canAddSlots);
 
     return apiOk({ staffId, events });
   } catch (e) {

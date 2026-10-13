@@ -27,6 +27,8 @@ import {
   istDayBounds,
   liveRouteAssignments,
   monthCell,
+  registerDayLabel,
+  registerDayMarks,
   monthDates,
   odometerField,
   parseKm,
@@ -330,5 +332,31 @@ assert.equal(monthCell(bhavna.days["2026-10-12"]), "", "an undone tap leaves the
 const aarav = month.find((r) => r.studentId === "kid_ukg")!;
 assert.equal(aarav.daysRidden, 0, "a rider with no marks is listed, with nothing claimed");
 assert.equal(Object.keys(aarav.days).length, 0);
+
+/* ── the register as other screens read it ── */
+
+{
+  const base = { runDate: "2026-10-13", routeId: "r1", studentId: "s1", tappedAt: "2026-10-13T02:00:00.000Z", markedByName: "Ram" };
+  const out = registerDayMarks([
+    { ...base, trip: "AM", status: "boarded", lat: 25.4, lng: 82.9, accuracyM: 8 },
+    { ...base, trip: "PM", status: "unmarked" },
+    { ...base, studentId: "s2", trip: "AM", status: "not_boarded", lat: null, lng: Number.NaN },
+  ]);
+  assert.equal(out.length, 2, "an undone tap is no mark at all");
+  assert.deepEqual(
+    out.map((m) => `${m.studentId}${m.trip}:${m.status}`),
+    ["s1AM:boarded", "s2AM:not_boarded"],
+  );
+  assert.equal(out[0]!.date, "2026-10-13");
+  assert.equal(out[0]!.lat, 25.4);
+  assert.equal(out[1]!.lat, null, "no location stays null");
+  assert.equal(out[1]!.lng, null, "a broken number is not a coordinate");
+  assert.equal(out[1]!.accuracyM, null);
+
+  assert.equal(registerDayLabel(null, null), "", "nothing marked → nothing said");
+  assert.equal(registerDayLabel("boarded", "dropped"), "AM boarded · PM dropped");
+  assert.equal(registerDayLabel("not_boarded", null), "AM not boarded · PM not marked");
+  assert.equal(registerDayLabel(null, "boarded"), "AM not marked · PM boarded");
+}
 
 console.log("transportBoardingLog.selftest.ts: all assertions passed");

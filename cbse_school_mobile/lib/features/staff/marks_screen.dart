@@ -6,6 +6,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
+import "ai_answer_sheet_screen.dart";
 import "section_picker.dart";
 import "../../core/i18n/locale_controller.dart";
 
@@ -14,10 +15,18 @@ import "../../core/i18n/locale_controller.dart";
 /// subject at a time into the section's mark sheet on the exams desk; the
 /// desk's max-marks rule and lock apply exactly as on the web.
 class MarksScreen extends StatelessWidget {
-  const MarksScreen({super.key, required this.api, required this.classes});
+  const MarksScreen({
+    super.key,
+    required this.api,
+    required this.classes,
+    this.canScan = false,
+  });
 
   final ApiClient api;
   final List<ClassRef> classes;
+
+  /// Offer "Scan answer sheet" on each child's row (the AI tools grant).
+  final bool canScan;
 
   @override
   Widget build(BuildContext context) {
@@ -98,6 +107,7 @@ class MarksScreen extends StatelessWidget {
           classId: target.$1,
           sectionId: target.$2,
           title: target.$3,
+          canScan: canScan,
         ),
       ),
     );
@@ -112,6 +122,7 @@ class MarkEntryScreen extends StatefulWidget {
     required this.classId,
     required this.sectionId,
     required this.title,
+    this.canScan = false,
   });
 
   final ApiClient api;
@@ -119,6 +130,7 @@ class MarkEntryScreen extends StatefulWidget {
   final String classId;
   final String sectionId;
   final String title;
+  final bool canScan;
 
   @override
   State<MarkEntryScreen> createState() => _MarkEntryScreenState();
@@ -244,13 +256,51 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
     }
   }
 
+  /// The AI reads the child's sheet; the confirmed total lands in their box
+  /// and is saved only with the screen's own Save, like a typed mark.
+  Future<void> _scan(MarkSheetStudent st, ExamSubjectInfo sub) async {
+    final total = await Navigator.of(context).push<double>(
+      MaterialPageRoute(
+        builder: (_) => AnswerSheetScanScreen(
+          api: widget.api,
+          termId: widget.term.id,
+          classId: widget.classId,
+          sectionId: widget.sectionId,
+          subjectCode: sub.code,
+          subjectName: sub.name,
+          subjectMax: sub.maxMarks,
+          studentId: st.id,
+          studentName: st.fullName,
+        ),
+      ),
+    );
+    if (total == null || !mounted) return;
+    setState(() {
+      _ctl
+          .putIfAbsent(st.id, () => TextEditingController())
+          .text = total == total.roundToDouble()
+          ? total.toInt().toString()
+          : total.toString();
+      _dirty = true;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          "${st.fullName}: ${_ctl[st.id]!.text} filled in — press Save ${sub.name} to save it.",
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = _sheet;
     final sub = _subject;
     return Scaffold(
       appBar: AppBar(
-        actions: [ScreenGuideButton(guideId: "mark-entry", screenLabel: "mark-entry")],
+        actions: [
+          ScreenGuideButton(guideId: "mark-entry", screenLabel: "mark-entry"),
+        ],
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -389,6 +439,20 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
                                   ],
                                 ),
                               ),
+                              if (widget.canScan &&
+                                  !s.locked &&
+                                  sub != null &&
+                                  sub.code.isNotEmpty)
+                                IconButton(
+                                  tooltip: "Scan answer sheet (AI)",
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () => _scan(st, sub),
+                                  icon: const Icon(
+                                    Icons.document_scanner_outlined,
+                                    size: 20,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
                               SizedBox(
                                 width: 72,
                                 child: TextField(

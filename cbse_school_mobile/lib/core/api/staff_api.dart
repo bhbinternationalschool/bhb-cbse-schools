@@ -212,6 +212,7 @@ class Payslip {
       paymentModeLabel = _s(j, "paymentModeLabel"),
       paidAt = _s(j, "paidAt"),
       bonus = _d(j, "bonus"),
+      pdfUrl = _s(j, "pdfUrl"),
       earnings = _list(j, "earnings").map(PayslipLine.fromJson).toList(),
       deductions = _list(j, "deductions").map(PayslipLine.fromJson).toList();
 
@@ -239,6 +240,10 @@ class Payslip {
   final String paymentModeLabel;
   final String paidAt;
   final double bonus;
+
+  /// The same slip on the letterhead, as a PDF — empty from a server that
+  /// does not offer one yet (then the app shows no PDF button).
+  final String pdfUrl;
   final List<PayslipLine> earnings;
   final List<PayslipLine> deductions;
 }
@@ -487,6 +492,8 @@ class PtmTeacherEvent {
     : id = _s(j, "id"),
       name = _s(j, "name"),
       date = _s(j, "date"),
+      endDate = _s(j, "endDate"),
+      canAddSlots = _b(j, "canAddSlots"),
       modeLabel = _s(j, "modeLabel"),
       note = _s(j, "note"),
       bookingCount = _i(j, "bookingCount"),
@@ -495,6 +502,12 @@ class PtmTeacherEvent {
   final String id;
   final String name;
   final String date;
+
+  /// Last day of a multi-day PTM ("" or == [date] for one day).
+  final String endDate;
+
+  /// The server would accept my own new slots in this event.
+  final bool canAddSlots;
   final String modeLabel;
   final String note;
   final int bookingCount;

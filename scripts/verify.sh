@@ -357,6 +357,7 @@ SELFTESTS=(
   test:exam-invigilation
   test:exams
   test:exam-date-sheet
+  test:parent-results
   test:exams-sheet-safety
   test:exam-schemes
   test:exam-readiness
@@ -452,6 +453,7 @@ SELFTESTS=(
   test:visiting-pay
   test:visiting-exclusions
   test:payroll-staggered-runs
+  test:staff-payslips
   test:diksha-index
   test:teacher-contact
   test:question-bank

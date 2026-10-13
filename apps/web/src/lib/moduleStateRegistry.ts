@@ -36,7 +36,8 @@ export type ModuleStateKey =
   | "login_unknown_numbers"
   | "module_requests"
   | "app_popups"
-  | "parent_linked_mobiles";
+  | "parent_linked_mobiles"
+  | "staff_broadcasts";
 
 export const MODULE_STATE_DEFS: Record<
   ModuleStateKey,
@@ -71,6 +72,7 @@ export const MODULE_STATE_DEFS: Record<
   module_requests: { rbac: "settings", label: "module change requests & stuck points" },
   app_popups: { rbac: "notices", label: "app pop-ups" },
   parent_linked_mobiles: { rbac: "students", label: "parent numbers linked from the app" },
+  staff_broadcasts: { rbac: "notifications", label: "staff messages to class parents" },
 };
 
 export function isModuleStateKey(raw: string): raw is ModuleStateKey {

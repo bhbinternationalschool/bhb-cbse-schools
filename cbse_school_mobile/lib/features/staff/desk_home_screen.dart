@@ -9,6 +9,9 @@ import "../modules/chat_inbox_screen.dart";
 import "../modules/notice_detail_screen.dart";
 import "../modules/notices_screen.dart";
 import "admission_leads_screen.dart";
+import "class_message_screen.dart";
+import "ptm_teacher_screen.dart";
+import "bus_register_screen.dart";
 import "documents_screen.dart";
 import "fee_counter_screen.dart";
 import "fee_defaulters_screen.dart";
@@ -18,7 +21,10 @@ import "survey_day_screen.dart";
 import "home_groups.dart";
 import "leave_approvals_screen.dart";
 import "my_attendance_calendar_screen.dart";
+import "my_advances_screen.dart";
 import "my_profile_screen.dart";
+import "my_class_screen.dart";
+import "month_register_screen.dart";
 import "payslips_screen.dart";
 import "self_attendance_screen.dart";
 import "staff_complaints_screen.dart";
@@ -26,6 +32,7 @@ import "staff_leave_screen.dart";
 import "staff_roster_screen.dart";
 import "student_leave_queue_screen.dart";
 import "transport_requests_screen.dart";
+import "vehicle_logbook_screen.dart";
 import "waiting_card.dart";
 import "../../core/i18n/locale_controller.dart";
 
@@ -202,6 +209,43 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       "transport_requests",
       (api) => TransportRequestsScreen(api: api),
     ),
+    // A desk person given the class grants (an office in-charge who keeps a
+    // class): the class records and the month register. The server still
+    // decides whose children each one shows.
+    _Tile(
+      "My class",
+      "मेरी कक्षा",
+      Icons.diversity_3_outlined,
+      ModuleTone.purple,
+      "students_view",
+      (api) => MyClassScreen(api: api),
+    ),
+    _Tile(
+      "Month register",
+      "मासिक रजिस्टर",
+      Icons.calendar_view_month_outlined,
+      ModuleTone.teal,
+      "attendance_mark",
+      (api) => MonthRegisterScreen(api: api),
+    ),
+    // The transport in-charge works from this home: the bus register and
+    // log book, every bus when the server grants the whole fleet.
+    _Tile(
+      "Bus register",
+      "बस रजिस्टर",
+      Icons.fact_check_outlined,
+      ModuleTone.blue,
+      "route_manifest",
+      (api) => BusRegisterScreen(api: api),
+    ),
+    _Tile(
+      "Log book",
+      "लॉग बुक",
+      Icons.local_gas_station_outlined,
+      ModuleTone.amber,
+      "route_manifest",
+      (api) => VehicleLogbookScreen(api: api),
+    ),
     _Tile(
       "Messages",
       "संदेश",
@@ -209,6 +253,24 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       ModuleTone.teal,
       "messages",
       (api) => ChatInboxScreen(api: api),
+    ),
+    // An office-like member of staff may teach a section too; both tiles
+    // show only when the ERP grants them.
+    _Tile(
+      "Message my classes",
+      "कक्षा को संदेश",
+      Icons.forum_outlined,
+      ModuleTone.coral,
+      "class_broadcast",
+      (api) => ClassMessageScreen(api: api),
+    ),
+    _Tile(
+      "PTM",
+      "पीटीएम",
+      Icons.groups_outlined,
+      ModuleTone.purple,
+      "ptm_meet",
+      (api) => PtmTeacherScreen(api: api),
     ),
     _Tile(
       "Staff contacts",
@@ -228,6 +290,16 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
     ModuleTone.teal,
     "my_profile",
     (api) => MyProfileScreen(api: api),
+  );
+
+  /// My salary advances — the person's own record, always shown.
+  static final _advancesTile = _Tile(
+    "My advances",
+    "मेरा एडवांस",
+    Icons.account_balance_wallet_outlined,
+    ModuleTone.amber,
+    "my_advances",
+    (api) => MyAdvancesScreen(api: api),
   );
 
   /// My month of attendance — the person's own record, always shown.
@@ -358,7 +430,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
     ].where((t) => _features.has(t.feature)).toList();
     // My profile is everyone's own record, not a grant — always shown.
     final groups = groupStaffTiles(
-      [...tiles, _attendanceTile, _profileTile],
+      [...tiles, _advancesTile, _attendanceTile, _profileTile],
       (t) => staffGroupOf(_features, t.feature),
       order: _features.groupOrder,
     );

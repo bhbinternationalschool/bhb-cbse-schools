@@ -8,6 +8,7 @@ import { ParentPtmPortal } from "@/components/parent/ParentPtmPortal";
 import { ParentStudentLeavePortal } from "@/components/parent/ParentStudentLeavePortal";
 import { ParentComplaintsPortal } from "@/components/parent/ParentComplaintsPortal";
 import { ParentSubjectsPortal } from "@/components/parent/ParentSubjectsPortal";
+import { ParentResultsPortal } from "@/components/parent/ParentResultsPortal";
 import { ParentCommsPortal } from "@/components/parent/ParentCommsPortal";
 import { ParentProfileDocsPortal } from "@/components/parent/ParentProfileDocsPortal";
 import { NotificationBell } from "@/components/shell/NotificationBell";
@@ -26,6 +27,7 @@ type PortalTab =
   | "ptm"
   | "leave"
   | "subjects"
+  | "results"
   | "notices"
   | "news"
   | "gallery"
@@ -55,6 +57,7 @@ export function ParentPortalClient({
         raw === "ptm" ||
         raw === "leave" ||
         raw === "subjects" ||
+        raw === "results" ||
         raw === "fees" ||
         raw === "profile" ||
         raw === "complaints"
@@ -96,6 +99,7 @@ export function ParentPortalClient({
   const tabs = [
     ["fees", "Fees"],
     ["homework", "HW"],
+    ["results", "Results"],
     ["profile", "Profile"],
     ["notices", "Notices"],
     ["news", "News"],
@@ -115,6 +119,8 @@ export function ParentPortalClient({
           ? "Leave"
           : portalTab === "complaints"
             ? "Complaints"
+            : portalTab === "results"
+            ? "Results"
             : portalTab === "notices"
             ? "Notices"
             : portalTab === "news"
@@ -229,6 +235,7 @@ export function ParentPortalClient({
               householdId={householdId}
             />
           ) : null}
+          {portalTab === "results" ? <ParentResultsPortal /> : null}
           {portalTab === "complaints" ? (
             <ParentComplaintsPortal
               guardianDisplayName={guardianName}
@@ -256,8 +263,8 @@ export function ParentPortalClient({
               householdId={householdId}
             />
               <p className="mt-6 px-4 text-[11px] text-[var(--muted)]">
-                Parent portal: fees, homework, profile &amp; docs, notices,
-                news, gallery, PTM, leave &amp; subjects.
+                Parent portal: fees, homework, results, profile &amp; docs,
+                notices, news, gallery, PTM, leave &amp; subjects.
               </p>
             </>
           ) : null}

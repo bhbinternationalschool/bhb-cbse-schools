@@ -15,10 +15,13 @@ import "../modules/syllabus_scan_screen.dart";
 import "../modules/teaching_screen.dart";
 import "attendance_screen.dart";
 import "broadcast_screen.dart";
+import "class_message_screen.dart";
+import "bus_register_screen.dart";
 import "leave_approvals_screen.dart";
 import "principal_lists.dart";
 import "staff_roster_screen.dart";
 import "transport_requests_screen.dart";
+import "vehicle_logbook_screen.dart";
 import "visitor_gate_screen.dart";
 import "admission_leads_screen.dart";
 import "command_bar.dart";
@@ -27,13 +30,17 @@ import "fee_counter_screen.dart";
 import "fee_defaulters_screen.dart";
 import "my_collections_screen.dart";
 import "survey_day_screen.dart";
+import "teacher_ai_tools_screen.dart";
 import "marks_screen.dart";
 import "payslips_screen.dart";
 import "ptm_teacher_screen.dart";
 import "my_subjects_screen.dart";
 import "home_groups.dart";
 import "my_attendance_calendar_screen.dart";
+import "my_advances_screen.dart";
 import "my_profile_screen.dart";
+import "my_class_screen.dart";
+import "month_register_screen.dart";
 import "section_picker.dart";
 import "self_attendance_screen.dart";
 import "staff_complaints_screen.dart";
@@ -68,6 +75,12 @@ const _staffModules = [
   _StaffModule(
     "Attendance",
     Icons.fact_check_outlined,
+    ModuleTone.teal,
+    "attendance_mark",
+  ),
+  _StaffModule(
+    "Month register",
+    Icons.calendar_view_month_outlined,
     ModuleTone.teal,
     "attendance_mark",
   ),
@@ -107,6 +120,15 @@ const _staffModules = [
     ModuleTone.green,
     "students_view",
   ),
+  // The class teacher's own children: call the family, fill the UDISE+
+  // class sheet. Same grant as the roster; the server refuses anyone who is
+  // not a class teacher (or the office) with its own words.
+  _StaffModule(
+    "My class",
+    Icons.diversity_3_outlined,
+    ModuleTone.purple,
+    "students_view",
+  ),
   _StaffModule(
     "Leave requests",
     Icons.event_busy_outlined,
@@ -120,6 +142,13 @@ const _staffModules = [
     "complaints_handle",
   ),
   _StaffModule("PTM", Icons.groups_outlined, ModuleTone.purple, "ptm_meet"),
+  // My own sections' families (not the principal's school-wide Broadcast).
+  _StaffModule(
+    "Message my classes",
+    Icons.forum_outlined,
+    ModuleTone.coral,
+    "class_broadcast",
+  ),
   _StaffModule(
     "Class gallery",
     Icons.photo_library_outlined,
@@ -174,6 +203,15 @@ const _staffModules = [
     ModuleTone.blue,
     "syllabus_scan",
   ),
+  // The web ERP's teacher AI helpers (answer-sheet marks, question paper,
+  // worksheet, lesson plan, PTM brief); the server grants it to anyone with
+  // marks entry, the period log or PTM meetings.
+  _StaffModule(
+    "AI tools",
+    Icons.auto_awesome_outlined,
+    ModuleTone.amber,
+    "teacher_ai_tools",
+  ),
   // Office and leadership grants a teacher may also hold (a co-ordinator,
   // the gate duty, the transport in-charge). They had no tile here, so a
   // grant made in Masters → Roles never reached a teacher's phone.
@@ -221,6 +259,20 @@ const _staffModules = [
     ModuleTone.blue,
     "route_manifest",
   ),
+  // The transport in-charge's crew tools — the same register and log book
+  // the drivers fill, every bus for whoever the server lets see the fleet.
+  _StaffModule(
+    "Bus register",
+    Icons.fact_check_outlined,
+    ModuleTone.blue,
+    "route_manifest",
+  ),
+  _StaffModule(
+    "Log book",
+    Icons.local_gas_station_outlined,
+    ModuleTone.amber,
+    "route_manifest",
+  ),
   _StaffModule(
     "Transport requests",
     Icons.alt_route_outlined,
@@ -236,6 +288,12 @@ const _staffModules = [
     "my_payslips",
   ),
   // Everyone's own records — not grants, so always shown.
+  _StaffModule(
+    "My advances",
+    Icons.account_balance_wallet_outlined,
+    ModuleTone.amber,
+    "my_advances",
+  ),
   _StaffModule(
     "My attendance",
     Icons.calendar_month_outlined,
@@ -456,6 +514,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     switch (label) {
       case "Attendance":
         await _openAttendance();
+      case "Month register":
+        await _pushScreen(MonthRegisterScreen(api: widget.api));
+      case "My class":
+        await _pushScreen(MyClassScreen(api: widget.api));
       case "Period log":
         await Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => TeachingScreen(api: widget.api)),
@@ -500,7 +562,19 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         );
       case "Marks":
         await _pushScreen(
-          MarksScreen(api: widget.api, classes: summary.classes),
+          MarksScreen(
+            api: widget.api,
+            classes: summary.classes,
+            canScan: _features.has("teacher_ai_tools"),
+          ),
+        );
+      case "AI tools":
+        await _pushScreen(
+          TeacherAiToolsScreen(
+            api: widget.api,
+            features: _features,
+            classes: summary.classes,
+          ),
         );
       case "My leave":
         await _pushScreen(StaffLeaveScreen(api: widget.api));
@@ -510,6 +584,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         await _pushScreen(OnlineClassesTeacherScreen(api: widget.api));
       case "Payslips":
         await _pushScreen(PayslipsScreen(api: widget.api));
+      case "My advances":
+        await _pushScreen(MyAdvancesScreen(api: widget.api));
       case "My attendance":
         await _pushScreen(MyAttendanceCalendarScreen(api: widget.api));
       case "Leave requests":
@@ -517,7 +593,14 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       case "Complaints":
         await _pushScreen(StaffComplaintsScreen(api: widget.api));
       case "PTM":
-        await _pushScreen(PtmTeacherScreen(api: widget.api));
+        await _pushScreen(
+          PtmTeacherScreen(
+            api: widget.api,
+            canBrief: _features.has("teacher_ai_tools"),
+          ),
+        );
+      case "Message my classes":
+        await _pushScreen(ClassMessageScreen(api: widget.api));
       case "Class gallery":
         await _pushScreen(ClassGalleryScreen(api: widget.api));
       case "My subjects":
@@ -552,6 +635,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         await _pushScreen(VisitorGateScreen(api: widget.api));
       case "Transport":
         await _pushScreen(BusRoutesScreen(api: widget.api));
+      case "Bus register":
+        await _pushScreen(BusRegisterScreen(api: widget.api));
+      case "Log book":
+        await _pushScreen(VehicleLogbookScreen(api: widget.api));
       case "Transport requests":
         await _pushScreen(TransportRequestsScreen(api: widget.api));
       case "My profile":
@@ -701,6 +788,51 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 ),
               ),
             ),
+            // A class teacher's own class, one tap from the banner.
+            if (ct != null &&
+                (_features.has("students_view") ||
+                    _features.has("attendance_mark")))
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Transform.translate(
+                  offset: const Offset(0, -12),
+                  child: Row(
+                    children: [
+                      if (_features.has("students_view"))
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => _openModule("My class"),
+                            icon: const Icon(
+                              Icons.diversity_3_outlined,
+                              size: 18,
+                            ),
+                            label: const Text(
+                              "My class · मेरी कक्षा",
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      if (_features.has("students_view") &&
+                          _features.has("attendance_mark"))
+                        const SizedBox(width: 8),
+                      if (_features.has("attendance_mark"))
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => _openModule("Month register"),
+                            icon: const Icon(
+                              Icons.calendar_view_month_outlined,
+                              size: 18,
+                            ),
+                            label: const Text(
+                              "Month register",
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: Column(
@@ -824,7 +956,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                           // One gate tile: the visitor gate already shows
                           // the passes.
                           !(m.feature == "gate_pass_release" &&
-                              _features.has("visitor_gate")),
+                              _features.has("visitor_gate")) &&
+                          // My class is the class teacher's own children;
+                          // a subject teacher would only be refused.
+                          (m.label != "My class" || ct != null),
                     ),
                     (m) => staffGroupOf(_features, m.feature),
                     order: _features.groupOrder,

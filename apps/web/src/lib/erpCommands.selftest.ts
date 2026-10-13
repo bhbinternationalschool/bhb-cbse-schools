@@ -997,7 +997,7 @@ const masters = {
         name: "Sabzi Mandi",
         distanceLabel: "3.2 km",
         riders: [
-          { fullName: "Aarav Sharma", classLabel: "V A", rollNo: "4", suspended: false, mark: "boarded" },
+          { fullName: "Aarav Sharma", classLabel: "V A", rollNo: "4", suspended: false, mark: "AM boarded · PM dropped" },
           { fullName: "Riya Verma", classLabel: "V A", rollNo: "11", suspended: false, mark: "" },
         ],
       },
@@ -1005,7 +1005,7 @@ const masters = {
         name: "Gandhi Chowk",
         distanceLabel: "5 km",
         riders: [
-          { fullName: "Kabir Ali", classLabel: "VI B", rollNo: "9", suspended: false, mark: "absent" },
+          { fullName: "Kabir Ali", classLabel: "VI B", rollNo: "9", suspended: false, mark: "AM not boarded · PM not marked" },
           { fullName: "Old Rider", classLabel: "VII A", rollNo: "2", suspended: true, mark: "" },
         ],
       },
@@ -1016,10 +1016,23 @@ const masters = {
   });
   assert.ok(t.startsWith("*Bus 3 · Civil Lines* · today\n3 riders · 3 stops"), t);
   assert.ok(t.includes("Driver: Ram Singh 98xxxxxx10 · UP80 AB 1234"), t);
-  assert.ok(t.includes("*Sabzi Mandi* · 3.2 km · 2\nAarav Sharma (V A, 4) · boarded\nRiya Verma (V A, 11)"), t);
-  assert.ok(t.includes("*Gandhi Chowk* · 5 km · 1\nKabir Ali (VI B, 9) · absent"), t);
+  assert.ok(t.includes("*Sabzi Mandi* · 3.2 km · 2\nAarav Sharma (V A, 4) · AM boarded · PM dropped\nRiya Verma (V A, 11)"), t);
+  assert.ok(t.includes("*Gandhi Chowk* · 5 km · 1\nKabir Ali (VI B, 9) · AM not boarded · PM not marked"), t);
   assert.ok(!t.includes("Empty Stop"), "a stop with nobody on it is not listed");
-  assert.ok(t.includes("2 of 3 marked today."), t);
+  assert.ok(t.includes("2 of 3 marked on the bus register today."), t);
+
+  // A register that could not be read is said, never shown as "nobody marked".
+  const unread = formatBusManifestReply({
+    routeLabel: "Bus 3", vehicleReg: "", driver: { name: "", mobile: "" },
+    date: "2026-09-05", todayIso: "2026-09-05",
+    stops: [{ name: "Sabzi Mandi", distanceLabel: "", riders: [
+      { fullName: "Aarav Sharma", classLabel: "V A", rollNo: "", suspended: false, mark: "" },
+    ] }],
+    markedCount: 0,
+    registerUnavailable: true,
+  });
+  assert.ok(unread.includes("Bus register could not be read"), unread);
+  assert.ok(!unread.includes("marked on the bus register"), unread);
   assert.ok(t.includes("*Boarding suspended:* Old Rider"), t);
 
   const empty = formatBusManifestReply({

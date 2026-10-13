@@ -13,20 +13,9 @@ import { getDemoSession } from "@/lib/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadMasters } from "@/lib/masters";
 import { hasPermission } from "@/lib/rbac";
-import { TENANT } from "@/lib/types";
-import { generatePtmBriefJson, llmStatus } from "@/lib/aiLlm.server";
-import { geminiModel } from "@/lib/erpAiGemini.server";
-import { openAiModel } from "@/lib/openAi.server";
+import { llmStatus } from "@/lib/aiLlm.server";
 import { cleanPtmBriefFacts } from "@/lib/ptmBriefAi";
-import {
-  normalizeHouseholdLanguage,
-  sarvamTargetFor,
-  waTemplateLanguageFor,
-} from "@/lib/householdPrefs";
-import {
-  type SarvamLang,
-} from "@/lib/sarvam.server";
-import { translateMany, translationConfigured } from "@/lib/translate.server";
+import { draftPtmBrief } from "@/lib/ptmBriefDraft.server";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { ApiError } from "@/lib/api/v1/errors";
 import { assertSectionScope, staffSectionScope } from "@/lib/api/v1/staffScope";
@@ -111,51 +100,22 @@ export async function POST(req: Request) {
     );
   }
 
-  const preferred = normalizeHouseholdLanguage(body.language);
-  const prefs = { preferredLanguage: preferred };
-  const draftLanguage = waTemplateLanguageFor(prefs);
-  const sarvamTarget = sarvamTargetFor(prefs);
-
-  const r = await generatePtmBriefJson({
-    facts,
-    language: draftLanguage,
-    schoolName: TENANT.nameDisplay,
-  });
+  // Generation + family-language rendering: lib/ptmBriefDraft.server.ts,
+  // shared with the staff app's route.
+  const r = await draftPtmBrief({ facts, householdLanguage: body.language });
   if (!r.ok) {
     return NextResponse.json({ error: r.error, engine: r.engine }, { status: 502 });
-  }
-
-  let draft = r.draft;
-  let renderedLanguage: string = draftLanguage;
-  const warnings: string[] = [];
-  if (sarvamTarget) {
-    if (translationConfigured()) {
-      const t = await translateMany({
-        texts: [draft.observations, draft.concerns, draft.suggestions],
-        from: draftLanguage === "hi" ? "hi-IN" : "en-IN",
-        to: sarvamTarget as SarvamLang,
-        mode: "formal",
-      });
-      if (t.texts[0] && t.texts[2]) {
-        draft = { observations: t.texts[0], concerns: t.texts[1] || draft.concerns, suggestions: t.texts[2] };
-        renderedLanguage = preferred;
-      } else {
-        warnings.push(...t.errors.slice(0, 2));
-      }
-    } else {
-      warnings.push(`Family prefers ${preferred}; no translation engine configured — brief in ${draftLanguage}`);
-    }
   }
 
   return NextResponse.json({
     ok: true,
     engine: r.engine,
-    model: r.engine === "gemini" ? geminiModel() : r.engine === "openai" ? openAiModel() : "",
-    language: renderedLanguage,
-    requestedLanguage: preferred,
+    model: r.model,
+    language: r.language,
+    requestedLanguage: r.requestedLanguage,
     generatedAt: new Date().toISOString(),
     generationId: r.generationId,
-    draft,
-    warnings,
+    draft: r.draft,
+    warnings: r.warnings,
   });
 }
