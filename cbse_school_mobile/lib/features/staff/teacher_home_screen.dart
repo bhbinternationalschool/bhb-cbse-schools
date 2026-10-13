@@ -15,10 +15,12 @@ import "../modules/syllabus_scan_screen.dart";
 import "../modules/teaching_screen.dart";
 import "attendance_screen.dart";
 import "broadcast_screen.dart";
+import "bus_register_screen.dart";
 import "leave_approvals_screen.dart";
 import "principal_lists.dart";
 import "staff_roster_screen.dart";
 import "transport_requests_screen.dart";
+import "vehicle_logbook_screen.dart";
 import "visitor_gate_screen.dart";
 import "admission_leads_screen.dart";
 import "command_bar.dart";
@@ -219,6 +221,20 @@ const _staffModules = [
     "Transport",
     Icons.directions_bus_outlined,
     ModuleTone.blue,
+    "route_manifest",
+  ),
+  // The transport in-charge's crew tools — the same register and log book
+  // the drivers fill, every bus for whoever the server lets see the fleet.
+  _StaffModule(
+    "Bus register",
+    Icons.fact_check_outlined,
+    ModuleTone.blue,
+    "route_manifest",
+  ),
+  _StaffModule(
+    "Log book",
+    Icons.local_gas_station_outlined,
+    ModuleTone.amber,
     "route_manifest",
   ),
   _StaffModule(
@@ -552,6 +568,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         await _pushScreen(VisitorGateScreen(api: widget.api));
       case "Transport":
         await _pushScreen(BusRoutesScreen(api: widget.api));
+      case "Bus register":
+        await _pushScreen(BusRegisterScreen(api: widget.api));
+      case "Log book":
+        await _pushScreen(VehicleLogbookScreen(api: widget.api));
       case "Transport requests":
         await _pushScreen(TransportRequestsScreen(api: widget.api));
       case "My profile":

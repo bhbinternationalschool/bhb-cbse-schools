@@ -294,11 +294,11 @@ export const MOBILE_FEATURES: MobileFeature[] = [
   },
   {
     id: "route_manifest",
-    label: "Route & boarding",
+    label: "Route, bus register & log book",
     group: "Transport",
     module: "transport",
     action: "view",
-    note: "The bus route, stops and the day's boarding list.",
+    note: "The bus route and stops, the bus register (children on and off each run) and the vehicle log book (odometer, fuel). The server shows a driver only their own bus.",
   },
   {
     id: "gps_punch",
