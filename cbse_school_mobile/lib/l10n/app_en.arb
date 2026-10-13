@@ -1525,7 +1525,7 @@
   "resultsAggregateNote": "Weighted result of the exams that count toward it.",
   "resultsNoMarks": "Marks for this exam are not ready yet. Please check again later.",
   "resultsHeld": "This report card is being held by the school office. Please contact the office.",
-  "resultsUnavailable": "Could not check this report card right now. Please try again in a few minutes.",
+  "resultsUnavailable": "This report card is not available right now. Please try again later.",
   "resultsPrintHint": "To print or save the report card as a PDF, open the parent portal on the school website and go to Results.",
   "dateSheetTitle": "Date sheet",
   "dateSheetNone": "No upcoming exams have been published for this child yet.",

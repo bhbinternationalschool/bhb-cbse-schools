@@ -22,13 +22,16 @@ import {
   type ReportCard,
 } from "@/lib/exams";
 import { ensureExamsHydratedServer } from "@/lib/examsPersistence";
-import { loadFees } from "@/lib/fees";
+import type { FeesState } from "@/lib/fees";
 import { studentHoldContext, type HoldCheck } from "@/lib/holds";
-import { indexStandingDecisions, resolveHold, standingKey } from "@/lib/holdResolve";
+import { indexStandingDecisions, standingKey } from "@/lib/holdResolve";
 import type { MastersState } from "@/lib/masters";
 import { readModuleLocalState } from "@/lib/moduleLocalState.server";
 import { classLabelForStudent, householdForSession } from "@/lib/parentPortal";
 import {
+  decideReportCardHold,
+  feeCopyCovers,
+  type FeeDeskIds,
   toParentPrintableCard,
   toParentReportCardView,
   type ParentChildDateSheet,
@@ -36,7 +39,9 @@ import {
   type ParentDateSheetExam,
   type ParentTermResult,
 } from "@/lib/parentResults";
+import { getSchoolMirrorSync } from "@/lib/schoolDataMirror";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { childrenOfHousehold, loadSis, type SisState, type SisStudent } from "@/lib/sis";
 
@@ -44,7 +49,7 @@ const NO_MARKS = "Marks for this exam are not ready yet. Please check again late
 const HELD =
   "This report card is being held by the school office. Please contact the office.";
 const UNKNOWN_HOLD =
-  "Could not check this report card right now. Please try again in a few minutes.";
+  "This report card is not available right now. Please try again later.";
 
 function ayKey(code: string): string {
   const t = (code || "").trim().replace(/\s+/g, "").replace(/–/g, "-");
@@ -85,46 +90,85 @@ export function sessionChildren(sis: SisState, householdId: string, ay: string):
 
 const ALLOWED: HoldCheck = { allowed: true, stage: "S0", overdueDays: 0, overdueAmountPaise: 0 };
 
+/** Ids only, every page: what the fee desk tables hold right now. */
+async function readFeeDeskIds(): Promise<FeeDeskIds | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const ids = (table: string) =>
+    fetchAllPages<{ id: string }>((from, to) =>
+      ctx.sb.from(table).select("id").eq("tenant_id", ctx.tenantId).order("id").range(from, to),
+    );
+  const [v, c, p, cf] = await Promise.all([
+    ids("fee_desk_vouchers"),
+    ids("fee_desk_charge_vouchers"),
+    ids("fee_desk_installment_plans"),
+    ids("fee_desk_carried_forward"),
+  ]);
+  if (v.error || c.error || p.error || cf.error) return null;
+  const list = (r: { rows: { id: string }[] }) => r.rows.map((x) => String(x.id));
+  return { vouchers: list(v), chargeVouchers: list(c), installmentPlans: list(p), carriedForwardDues: list(cf) };
+}
+
+/**
+ * Is the server's fee copy complete against the fee desk tables? One forced
+ * re-pull of the mirror when it is behind; still behind (or anything
+ * unreadable) → false, and every report card says "not available right now".
+ */
+async function feeCopyTrusted(): Promise<boolean> {
+  const db = await readFeeDeskIds();
+  if (!db) {
+    console.warn("[parent-results] fee desk ids unreadable — report cards unavailable");
+    return false;
+  }
+  let check = feeCopyCovers(db, getSchoolMirrorSync().fees as FeesState | null);
+  if (!check.ok) {
+    await ensureSchoolMirrorHydrated({ force: true });
+    check = feeCopyCovers(db, getSchoolMirrorSync().fees as FeesState | null);
+  }
+  if (!check.ok) console.warn("[parent-results] fee copy not trusted:", check.reason);
+  return check.ok;
+}
+
 /**
  * HOLD_REPORT_CARD, decided on the server from server truth: the defaulter
- * policy, the standing decisions and the child's dues. The office's
- * browser-only Principal PIN override is not visible here, so a child the
- * principal let through by PIN is still held in the app — the safe side.
- * Returns null when any input could not be read (unknown, never "allowed").
+ * policy, the standing decisions and the child's dues — and it FAILS CLOSED:
+ * a fee copy that is missing or behind the fee desk, an unreadable policy or
+ * decision list, or a child the fee engine cannot find all come back
+ * "unavailable", never "clear". The office's browser-only Principal PIN
+ * override is not visible here, so a child let through by PIN still shows
+ * as held in the app.
  */
 async function reportCardHoldChecker(
   sis: SisState,
   masters: MastersState,
-): Promise<((studentId: string) => boolean) | null> {
+): Promise<(studentId: string) => "unavailable" | "held" | "clear"> {
   const ctx = await getServerTenantContext();
-  if (!ctx) return null;
-  const [policy, decisions] = await Promise.all([
+  if (!ctx) return () => "unavailable";
+  const [policy, decisions, feesOk] = await Promise.all([
     fetchDefaulterPolicy(ctx.sb, ctx.tenantId),
     fetchLiveHoldDecisions(ctx.sb, ctx.tenantId, "HOLD_REPORT_CARD"),
+    feeCopyTrusted(),
   ]);
-  if (!policy.ok || !decisions.ok) return null;
+  if (!policy.ok || !decisions.ok || !feesOk) return () => "unavailable";
   const gate = gateFor(policy.policy, "HOLD_REPORT_CARD");
   const standing = indexStandingDecisions(decisions.decisions);
-  const fees = loadFees();
+  const fees = getSchoolMirrorSync().fees as FeesState;
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   return (studentId: string) => {
     const hold = studentHoldContext(studentId, today, { sis, masters, fees });
-    if (!hold) return true;
-    const verdict = resolveHold({
-      holdCode: "HOLD_REPORT_CARD",
-      label: "Report card",
+    return decideReportCardHold({
+      inputsTrusted: true,
+      facts: hold
+        ? {
+            studentId,
+            stage: hold.stage,
+            overdueDays: hold.overdueDays,
+            overdueAmountPaise: hold.overdueAmountPaise,
+          }
+        : null,
       gate,
-      facts: {
-        studentId,
-        stage: hold.stage,
-        overdueDays: hold.overdueDays,
-        overdueAmountPaise: hold.overdueAmountPaise,
-      },
       standing: standing.get(standingKey(studentId, "HOLD_REPORT_CARD")) ?? null,
-      decisionsKnown: true,
-      pinOverrideUntil: null,
     });
-    return !verdict.allowed;
   };
 }
 
@@ -222,7 +266,7 @@ export async function buildParentResults(
     attendance: loadAttendance(),
     attendanceOverrides: normalizeAttendanceResultOverrides(overridesRow?.state ?? null),
   };
-  const isHeld = await reportCardHoldChecker(sis, masters);
+  const holdOf = await reportCardHoldChecker(sis, masters);
 
   const children: ParentChildResults[] = kids.map((kid) => {
     const terms: ParentTermResult[] = [];
@@ -236,11 +280,12 @@ export async function buildParentResults(
         academicYearCode: term.academicYearCode,
         releasedAt: releaseSwitchFor(release.state, term.id, "results")?.at ?? "",
       };
-      if (!isHeld) {
+      const hold = holdOf(row.id);
+      if (hold === "unavailable") {
         terms.push({ ...base, status: "unavailable", message: UNKNOWN_HOLD, card: null, printable: null });
         continue;
       }
-      if (isHeld(row.id)) {
+      if (hold === "held") {
         terms.push({ ...base, status: "held", message: HELD, card: null, printable: null });
         continue;
       }

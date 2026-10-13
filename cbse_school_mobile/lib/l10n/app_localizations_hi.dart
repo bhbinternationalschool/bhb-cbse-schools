@@ -2579,7 +2579,7 @@ class LHi extends L {
 
   @override
   String get resultsUnavailable =>
-      'अभी यह रिपोर्ट कार्ड जाँचा नहीं जा सका। कृपया कुछ मिनट बाद फिर कोशिश करें।';
+      'यह रिपोर्ट कार्ड अभी उपलब्ध नहीं है। कृपया बाद में फिर कोशिश करें।';
 
   @override
   String get resultsPrintHint =>

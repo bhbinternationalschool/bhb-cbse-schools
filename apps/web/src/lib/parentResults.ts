@@ -11,7 +11,10 @@
  * Pure — no I/O — so the selftest pins every rule.
  */
 
+import type { DefaulterFacts, HoldGate } from "@/lib/defaulterHoldPolicy";
 import type { ReportCard } from "@/lib/exams";
+import type { FeesState } from "@/lib/fees";
+import { resolveHold, type StandingDecision } from "@/lib/holdResolve";
 
 export type ParentSubjectResult = {
   subjectId: string;
@@ -223,3 +226,81 @@ export type ParentChildDateSheet = {
   exams: ParentDateSheetExam[];
 };
 
+
+/* ── report-card fee hold, failing CLOSED ─────────────────────────── */
+
+/**
+ * Ids of every fee record that can ADD to what a child owes or settle it,
+ * as freshly read from the fee desk tables: receipts (fee_desk_vouchers),
+ * supplementary charges, recovery plans and carried-forward balances.
+ */
+export type FeeDeskIds = {
+  vouchers: string[];
+  chargeVouchers: string[];
+  installmentPlans: string[];
+  carriedForwardDues: string[];
+};
+
+/**
+ * Pure — can the server's in-memory fee copy be trusted to say what this
+ * family owes? Only when it exists and holds EVERY record the fee desk
+ * tables hold right now. A copy that is missing, or behind the tables by
+ * even one receipt / charge / carried-forward balance, is "unknown": a child
+ * whose new charge is not in it would read as owing nothing and see a card
+ * the school is holding.
+ *
+ * Deliberately not "a child with zero dues lines is suspicious": a child on
+ * a full concession, or who joined after the cut-off, has none and is
+ * owed their card. A child's lines come from Masters' fee structure; the fee
+ * store settles them (receipts) or adds to them (charges, recovery plans,
+ * carried-forward balances) — exactly the four record kinds checked here.
+ */
+export function feeCopyCovers(
+  db: FeeDeskIds,
+  fees: FeesState | null | undefined,
+): { ok: true } | { ok: false; reason: string } {
+  if (!fees || !Array.isArray(fees.vouchers)) {
+    return { ok: false, reason: "fee data not loaded on the server" };
+  }
+  const checks: [keyof FeeDeskIds, { id: string }[] | undefined][] = [
+    ["vouchers", fees.vouchers],
+    ["chargeVouchers", fees.chargeVouchers],
+    ["installmentPlans", fees.installmentPlans],
+    ["carriedForwardDues", fees.carriedForwardDues],
+  ];
+  for (const [kind, list] of checks) {
+    if (!Array.isArray(list)) return { ok: false, reason: `fee data has no ${kind} list` };
+    const have = new Set(list.map((x) => x.id));
+    const missing = db[kind].filter((id) => !have.has(id));
+    if (missing.length > 0) {
+      return { ok: false, reason: `fee copy is missing ${missing.length} ${kind} the fee desk holds` };
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * Pure — the report card's fate for one child. "unavailable" whenever the
+ * fee facts are not trustworthy: unknown never becomes "not held".
+ */
+export function decideReportCardHold(input: {
+  /** feeCopyCovers(...).ok AND the policy and standing decisions were read. */
+  inputsTrusted: boolean;
+  /** null = the child could not be found in the fee engine. */
+  facts: DefaulterFacts | null;
+  gate: HoldGate | null;
+  standing: StandingDecision | null;
+}): "unavailable" | "held" | "clear" {
+  if (!input.inputsTrusted || !input.facts) return "unavailable";
+  const verdict = resolveHold({
+    holdCode: "HOLD_REPORT_CARD",
+    label: "Report card",
+    gate: input.gate,
+    facts: input.facts,
+    standing: input.standing,
+    decisionsKnown: true,
+    // The office's PIN override lives in one browser; not visible here.
+    pinOverrideUntil: null,
+  });
+  return verdict.allowed ? "clear" : "held";
+}

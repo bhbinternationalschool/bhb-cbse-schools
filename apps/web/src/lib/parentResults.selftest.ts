@@ -16,7 +16,18 @@ import {
 import { normalizeReportCardTemplates, resolvePresentation } from "./examReportTemplates";
 import type { ReportCard } from "./exams";
 import { normalizeStudent } from "./sis";
-import { toParentPrintableCard, toParentReportCardView } from "./parentResults";
+import {
+  decideReportCardHold,
+  feeCopyCovers,
+  toParentPrintableCard,
+  toParentReportCardView,
+  type FeeDeskIds,
+} from "./parentResults";
+import { defaultDefaulterPolicy, gateFor } from "./defaulterHoldPolicy";
+import { emptyFeesState, type FeesState } from "./fees";
+import { resolveStage } from "./playbook";
+import { assertParentOwnsChild } from "./api/v1/household";
+import type { ApiAuthContext } from "./api/v1/auth";
 
 console.log("parentResults.selftest.ts");
 
@@ -263,6 +274,110 @@ function card(over: Partial<ReportCard["presentation"]> = {}, extra: Partial<Rep
   const shown = toParentPrintableCard(card({ showDob: true, showParents: true }));
   assert.equal(shown.student.dob, "2015-04-02");
   assert.equal(shown.student.fatherName, p.student.fatherName === "" ? card().student.fatherName : "");
+}
+
+/* ── report-card fee hold fails CLOSED ────────────────────────────── */
+
+{
+  const gate = gateFor(defaultDefaulterPolicy(), "HOLD_REPORT_CARD"); // auto from S2
+  const fees: FeesState = {
+    ...emptyFeesState(),
+    vouchers: [{ id: "v1" } as FeesState["vouchers"][number]],
+  };
+  const db: FeeDeskIds = { vouchers: ["v1"], chargeVouchers: [], installmentPlans: [], carriedForwardDues: [] };
+
+  // Fees unreadable → unavailable, never "not held".
+  assert.equal(feeCopyCovers(db, null).ok, false, "no fee copy on the server");
+  assert.equal(feeCopyCovers(db, { ...fees, vouchers: undefined } as unknown as FeesState).ok, false);
+  assert.equal(
+    feeCopyCovers({ ...db, vouchers: ["v1", "v2"] }, fees).ok,
+    false,
+    "a receipt in the fee desk the copy lacks",
+  );
+  assert.equal(
+    feeCopyCovers({ ...db, carriedForwardDues: ["cf1"] }, fees).ok,
+    false,
+    "a carried-forward balance the copy lacks would hide a debt",
+  );
+  assert.equal(feeCopyCovers({ ...db, chargeVouchers: ["cv1"] }, fees).ok, false);
+  const noDues = { studentId: "stu_1", stage: resolveStage(-3), overdueDays: -3, overdueAmountPaise: 0 };
+  assert.equal(
+    decideReportCardHold({ inputsTrusted: feeCopyCovers(db, null).ok, facts: noDues, gate, standing: null }),
+    "unavailable",
+    "fees unreadable → unavailable",
+  );
+  assert.equal(
+    decideReportCardHold({ inputsTrusted: true, facts: null, gate, standing: null }),
+    "unavailable",
+    "child unknown to the fee engine → unavailable",
+  );
+
+  // Fees readable, nothing owed → the card shows.
+  assert.equal(feeCopyCovers(db, fees).ok, true);
+  assert.equal(feeCopyCovers(db, { ...fees, vouchers: [...fees.vouchers, { id: "local" } as FeesState["vouchers"][number]] }).ok, true);
+  assert.equal(
+    decideReportCardHold({ inputsTrusted: feeCopyCovers(db, fees).ok, facts: noDues, gate, standing: null }),
+    "clear",
+    "fees readable + no dues → ready",
+  );
+
+  // Dues past the policy's stage → held.
+  const overdue = { studentId: "stu_1", stage: resolveStage(20), overdueDays: 20, overdueAmountPaise: 1_200_000 };
+  assert.equal(
+    decideReportCardHold({ inputsTrusted: true, facts: overdue, gate, standing: null }),
+    "held",
+    "dues over policy → held",
+  );
+  const slight = { studentId: "stu_1", stage: resolveStage(3), overdueDays: 3, overdueAmountPaise: 50_000 };
+  assert.equal(decideReportCardHold({ inputsTrusted: true, facts: slight, gate, standing: null }), "clear", "below S2");
+  assert.equal(
+    decideReportCardHold({
+      inputsTrusted: true,
+      facts: overdue,
+      gate,
+      standing: { studentId: "stu_1", holdCode: "HOLD_REPORT_CARD", decision: "allow", reason: "paid by cheque", decidedAt: "x", decidedBy: "P" },
+    }),
+    "clear",
+    "the office let this family through",
+  );
+  assert.equal(
+    decideReportCardHold({
+      inputsTrusted: true,
+      facts: noDues,
+      gate,
+      standing: { studentId: "stu_1", holdCode: "HOLD_REPORT_CARD", decision: "disallow", reason: "", decidedAt: "x", decidedBy: "P" },
+    }),
+    "held",
+    "a standing disallow holds even with nothing overdue",
+  );
+}
+
+/* ── a parent may only reach their own household's child ──────────── */
+
+{
+  const ctxFor = (session: Record<string, unknown>) => ({ session } as unknown as ApiAuthContext);
+  const status = (fn: () => void) => {
+    try {
+      fn();
+      return 200;
+    } catch (e) {
+      return (e as { status?: number }).status ?? 500;
+    }
+  };
+  const mine = { householdId: "hh_1" };
+  assert.equal(status(() => assertParentOwnsChild(ctxFor({ persona: "parent", householdId: "hh_1" }), mine)), 200);
+  assert.equal(
+    status(() => assertParentOwnsChild(ctxFor({ persona: "parent" }), mine)),
+    403,
+    "a parent session with no household is refused (it used to skip the check)",
+  );
+  assert.equal(status(() => assertParentOwnsChild(ctxFor({ persona: "parent", householdId: "hh_2" }), mine)), 403);
+  assert.equal(
+    status(() => assertParentOwnsChild(ctxFor({ persona: "parent", householdId: "hh_1" }), { householdId: "" })),
+    403,
+    "a child with no household belongs to nobody's session",
+  );
+  assert.equal(status(() => assertParentOwnsChild(ctxFor({ persona: "staff", householdId: "hh_1" }), mine)), 403);
 }
 
 console.log("parentResults.selftest.ts: OK");

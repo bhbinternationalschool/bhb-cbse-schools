@@ -29,3 +29,18 @@ export function childOfHousehold(
   }
   return student;
 }
+
+/**
+ * A parent may only read or act for a child of the household on their
+ * session. A parent session WITHOUT a household is refused outright — it
+ * used to skip the check and so could read any child by id.
+ */
+export function assertParentOwnsChild(
+  ctx: ApiAuthContext,
+  student: Pick<SisStudent, "householdId">,
+): void {
+  const householdId = requireParentHousehold(ctx);
+  if (!student.householdId || student.householdId !== householdId) {
+    throw new ApiError("forbidden", "Not your child", 403);
+  }
+}

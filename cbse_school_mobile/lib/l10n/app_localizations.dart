@@ -4506,7 +4506,7 @@ abstract class L {
   /// No description provided for @resultsUnavailable.
   ///
   /// In en, this message translates to:
-  /// **'Could not check this report card right now. Please try again in a few minutes.'**
+  /// **'This report card is not available right now. Please try again later.'**
   String get resultsUnavailable;
 
   /// No description provided for @resultsPrintHint.

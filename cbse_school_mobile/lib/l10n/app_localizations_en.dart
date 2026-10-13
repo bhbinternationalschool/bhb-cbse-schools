@@ -2578,7 +2578,7 @@ class LEn extends L {
 
   @override
   String get resultsUnavailable =>
-      'Could not check this report card right now. Please try again in a few minutes.';
+      'This report card is not available right now. Please try again later.';
 
   @override
   String get resultsPrintHint =>
