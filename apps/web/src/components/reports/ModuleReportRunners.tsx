@@ -7,6 +7,7 @@ import { PTM_REPORTS, loadPtm, runPtmReport, type PtmReportId } from "@/lib/ptm"
 import { STUDENT_LEAVE_REPORTS, runStudentLeaveReport, type StudentLeaveReportId } from "@/lib/studentLeave";
 import { VAULT_REPORTS, runVaultReport, type VaultReportId } from "@/lib/vault";
 import { RTE_REPORTS, runRteReport, type RteReportId } from "@/lib/rteEws";
+import { TEACHING_REPORTS, runTeachingReport, type TeachingReportId } from "@/lib/teachingReportCatalog";
 import Link from "next/link";
 import {
   ACCOUNTS_REPORTS,
@@ -1252,6 +1253,65 @@ export function RteReportsRunner({ ay }: { ay: string }) {
       <ExportList
         reports={RTE_REPORTS}
         onRun={(id) => show(runRteReport(id as RteReportId, { format, academicYearCode: ay }))}
+      />
+    </div>
+  );
+}
+
+export function TeachingReportsRunner({ ay }: { ay: string }) {
+  const session = useDemoSession();
+  const { my } = useMyTeaching();
+  // A teacher's period delivery is their own; leadership sees everyone's.
+  const ownOnly = isRestrictedTeacher(my);
+  const [format, setFormat] = useState<"excel" | "pdf">("excel");
+  const classes = useMemo(() => loadMasters().classes.filter((c) => c.isActive !== false), []);
+  const [classId, setClassId] = useState("");
+  const [fromDate, setFromDate] = useState(`${todayIso().slice(0, 7)}-01`);
+  const [toDate, setToDate] = useState(todayIso);
+  const { show, view } = useRunResult();
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-xs text-[var(--muted)]">
+          Class
+          <select className={`${field} mt-1 block`} value={classId} onChange={(e) => setClassId(e.target.value)}>
+            <option value="">All classes</option>
+            {classes.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-[var(--muted)]">
+          From (delivery)
+          <input type="date" className={`${field} mt-1 block`} value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+        </label>
+        <label className="text-xs text-[var(--muted)]">
+          To
+          <input type="date" className={`${field} mt-1 block`} value={toDate} onChange={(e) => setToDate(e.target.value)} />
+        </label>
+        <FormatPicker value={format} onChange={setFormat} />
+        <Link href="/teaching" className={btnOutline}>
+          Open Teaching
+        </Link>
+      </div>
+      {ownOnly ? <p className="text-xs text-[var(--muted)]">Period delivery shows your own periods.</p> : null}
+      {view}
+      <ExportList
+        reports={TEACHING_REPORTS}
+        onRun={(id) =>
+          show(
+            runTeachingReport(id as TeachingReportId, {
+              academicYearCode: ay,
+              classId: classId || undefined,
+              fromDate,
+              toDate,
+              staffId: ownOnly ? session.staffId || "__none__" : undefined,
+              format,
+            }),
+          )
+        }
       />
     </div>
   );

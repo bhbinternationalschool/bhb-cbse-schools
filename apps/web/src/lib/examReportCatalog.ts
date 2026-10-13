@@ -28,7 +28,13 @@ import { reportDesksFor } from "@/lib/reportDesks";
 
 export type ExamReportFormat = "excel" | "pdf";
 
-export type ExamReportId = "result_analysis" | "toppers" | "result_summary";
+export type ExamReportId =
+  | "result_analysis"
+  | "toppers"
+  | "result_summary"
+  | "subject_analysis"
+  | "tabulation"
+  | "grade_distribution";
 
 export type ExamReportCategory = "results";
 
@@ -63,6 +69,24 @@ export const EXAM_REPORTS: ExamReportDef[] = [
     category: "results",
     label: "CBSE-style result summary",
     hint: "Pass/fail/promoted counts per class",
+  },
+  {
+    id: "subject_analysis",
+    category: "results",
+    label: "Subject-wise result analysis",
+    hint: "Per subject: appeared, absent, average, highest, lowest, pass %",
+  },
+  {
+    id: "tabulation",
+    category: "results",
+    label: "Class tabulation register",
+    hint: "Every subject's marks per student (AB = absent), total, %, rank",
+  },
+  {
+    id: "grade_distribution",
+    category: "results",
+    label: "Grade distribution",
+    hint: "How many children got each overall grade, per class",
   },
 ];
 
@@ -101,7 +125,7 @@ function scopeSections(
     .map((s) => ({ classId: s.classId, sectionId: s.id }));
 }
 
-type ResultRowWithScope = ClassResultRow & { classId: string; sectionId: string };
+export type ResultRowWithScope = ClassResultRow & { classId: string; sectionId: string };
 
 /**
  * Subjects whose marks count toward the card's total. An absent paper (AB)
@@ -330,6 +354,221 @@ function runResultSummary(
   };
 }
 
+
+/** A subject line passes when its marks reach its own pass line (else the school's 33%). */
+function linePassed(l: { marksObtained: number | null; maxMarks: number; absent: boolean; passPercent?: number }): boolean | null {
+  if (l.absent || l.marksObtained == null || !(l.maxMarks > 0)) return null;
+  return (l.marksObtained / l.maxMarks) * 100 >= (l.passPercent ?? 33);
+}
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/**
+ * Per class/section and subject: appeared (marks entered, not absent),
+ * absent, average %, highest, lowest, passed and pass %. Absent and
+ * not-entered papers are counted apart, never as zero marks.
+ */
+function runSubjectAnalysis(
+  masters: MastersState,
+  sis: SisState,
+  ay: string,
+  term: ExamTerm,
+  filters: Pick<ExamReportFilters, "classId" | "sectionId">,
+) {
+  return subjectAnalysisFromRows(masters, buildResultRows(masters, sis, ay, term, filters));
+}
+
+export function subjectAnalysisFromRows(masters: MastersState, resultRows: ResultRowWithScope[]) {
+  type Agg = { className: string; section: string; subject: string; appeared: number; absent: number; notEntered: number; pctSum: number; hi: number; lo: number; passed: number };
+  const map = new Map<string, Agg>();
+  for (const r of resultRows) {
+    if (!r.card) continue;
+    for (const l of r.card.lines) {
+      const key = `${r.classId}|${r.sectionId}|${l.subjectId}`;
+      const a = map.get(key) ?? {
+        className: classLabel(masters, r.classId),
+        section: sectionLabel(masters, r.sectionId),
+        subject: l.subjectName,
+        appeared: 0,
+        absent: 0,
+        notEntered: 0,
+        pctSum: 0,
+        hi: -Infinity,
+        lo: Infinity,
+        passed: 0,
+      };
+      if (l.absent) a.absent += 1;
+      else if (l.marksObtained == null || !(l.maxMarks > 0)) a.notEntered += 1;
+      else {
+        const pct = (l.marksObtained / l.maxMarks) * 100;
+        a.appeared += 1;
+        a.pctSum += pct;
+        a.hi = Math.max(a.hi, pct);
+        a.lo = Math.min(a.lo, pct);
+        if (linePassed(l)) a.passed += 1;
+      }
+      map.set(key, a);
+    }
+  }
+  return {
+    columns: [
+      { key: "className", header: "Class", width: 0.7 },
+      { key: "section", header: "Sec", width: 0.5 },
+      { key: "subject", header: "Subject", width: 1.3 },
+      { key: "appeared", header: "Appeared", width: 0.7, align: "right" as const },
+      { key: "absent", header: "Absent", width: 0.6, align: "right" as const },
+      { key: "notEntered", header: "Not entered", width: 0.7, align: "right" as const },
+      { key: "average", header: "Average %", width: 0.7, align: "right" as const },
+      { key: "highest", header: "Highest %", width: 0.7, align: "right" as const },
+      { key: "lowest", header: "Lowest %", width: 0.7, align: "right" as const },
+      { key: "passed", header: "Passed", width: 0.6, align: "right" as const },
+      { key: "passPercent", header: "Pass %", width: 0.6, align: "right" as const },
+    ],
+    rows: [...map.values()].map((a) => ({
+      className: a.className,
+      section: a.section,
+      subject: a.subject,
+      appeared: a.appeared,
+      absent: a.absent,
+      notEntered: a.notEntered,
+      average: a.appeared ? `${round1(a.pctSum / a.appeared)}%` : "—",
+      highest: a.appeared ? `${round1(a.hi)}%` : "—",
+      lowest: a.appeared ? `${round1(a.lo)}%` : "—",
+      passed: a.passed,
+      passPercent: a.appeared ? `${round1((a.passed / a.appeared) * 100)}%` : "—",
+    })),
+  };
+}
+
+/**
+ * The class tabulation register (one section, or each section of a class in
+ * turn): a row per student, a column per subject — marks, "AB" when absent,
+ * "—" when not entered — then total, %, grade, result and rank (competition
+ * ranking among children with every subject counted).
+ */
+function runTabulation(
+  masters: MastersState,
+  sis: SisState,
+  ay: string,
+  term: ExamTerm,
+  filters: Pick<ExamReportFilters, "classId" | "sectionId">,
+): { columns: ReportColumn[]; rows: Record<string, string | number>[] } | { error: string } {
+  if (!filters.classId && !filters.sectionId) {
+    return { error: "Pick a class (or section) — the tabulation register is one class's sheet." };
+  }
+  return tabulationFromRows(masters, buildResultRows(masters, sis, ay, term, filters));
+}
+
+export function tabulationFromRows(
+  masters: MastersState,
+  resultRows: ResultRowWithScope[],
+): { columns: ReportColumn[]; rows: Record<string, string | number>[] } {
+  const rows = resultRows.filter((r) => r.card);
+  const subjects: { id: string; name: string }[] = [];
+  for (const r of rows) {
+    for (const l of r.card!.lines) {
+      if (!subjects.some((x) => x.id === l.subjectId)) subjects.push({ id: l.subjectId, name: l.subjectName });
+    }
+  }
+  const complete = rows.filter((r) => {
+    if (r.card!.absent) return false;
+    const c = subjectsCounted(r.card!);
+    return c.total > 0 && c.counted === c.total;
+  });
+  const sorted = [...complete].sort((a, b) => b.card!.percent - a.card!.percent);
+  const ranks = competitionRanks(sorted, (r) => r.card!.percent);
+  const rankOf = new Map(sorted.map((r, i) => [r.student.id, ranks[i]!]));
+  const ordered = [...rows].sort(
+    (a, b) =>
+      (a.sectionId || "").localeCompare(b.sectionId || "") ||
+      (Number(a.student.rollNo) || 9999) - (Number(b.student.rollNo) || 9999) ||
+      a.student.fullName.localeCompare(b.student.fullName),
+  );
+  return {
+    columns: [
+      { key: "rollNo", header: "Roll", width: 0.4 },
+      { key: "name", header: "Student", width: 1.4 },
+      { key: "section", header: "Sec", width: 0.4 },
+      ...subjects.map((sub) => ({ key: `s_${sub.id}`, header: sub.name, width: 0.6, align: "right" as const, type: "text" as const })),
+      { key: "obtained", header: "Total", width: 0.6, align: "right" as const },
+      { key: "max", header: "Max", width: 0.5, align: "right" as const },
+      { key: "percent", header: "%", width: 0.5, align: "right" as const },
+      { key: "grade", header: "Grade", width: 0.5 },
+      { key: "result", header: "Result", width: 0.6 },
+      { key: "rank", header: "Rank", width: 0.4, align: "right" as const },
+    ],
+    rows: ordered.map((r) => {
+      const card = r.card!;
+      const row: Record<string, string | number> = {
+        rollNo: r.student.rollNo ?? "",
+        name: r.student.fullName,
+        section: sectionLabel(masters, r.sectionId),
+        obtained: card.totalObtained,
+        max: card.totalMax,
+        percent: card.absent ? "—" : `${card.percent.toFixed(1)}%`,
+        grade: card.absent ? "" : card.overallGrade,
+        result: resultWord(r),
+        rank: rankOf.get(r.student.id) ?? "",
+      };
+      for (const sub of subjects) {
+        const l = card.lines.find((x) => x.subjectId === sub.id);
+        row[`s_${sub.id}`] = !l ? "" : l.absent ? "AB" : l.marksObtained == null ? "—" : l.marksObtained;
+      }
+      return row;
+    }),
+  };
+}
+
+/** Overall grades per class/section: how many children got each. */
+function runGradeDistribution(
+  masters: MastersState,
+  sis: SisState,
+  ay: string,
+  term: ExamTerm,
+  filters: Pick<ExamReportFilters, "classId" | "sectionId">,
+) {
+  return gradeDistributionFromRows(masters, buildResultRows(masters, sis, ay, term, filters));
+}
+
+export function gradeDistributionFromRows(masters: MastersState, resultRows: ResultRowWithScope[]) {
+  const grades: string[] = [];
+  const map = new Map<string, { className: string; section: string; counts: Map<string, number>; absent: number; total: number }>();
+  for (const r of resultRows) {
+    if (!r.card) continue;
+    const key = `${r.classId}|${r.sectionId}`;
+    const a = map.get(key) ?? {
+      className: classLabel(masters, r.classId),
+      section: sectionLabel(masters, r.sectionId),
+      counts: new Map<string, number>(),
+      absent: 0,
+      total: 0,
+    };
+    a.total += 1;
+    if (r.card.absent) a.absent += 1;
+    else {
+      const g = r.card.overallGrade || "—";
+      if (!grades.includes(g)) grades.push(g);
+      a.counts.set(g, (a.counts.get(g) ?? 0) + 1);
+    }
+    map.set(key, a);
+  }
+  grades.sort();
+  return {
+    columns: [
+      { key: "className", header: "Class", width: 0.7 },
+      { key: "section", header: "Sec", width: 0.5 },
+      ...grades.map((g) => ({ key: `g_${g}`, header: `Grade ${g}`, width: 0.6, align: "right" as const, total: true })),
+      { key: "absent", header: "Absent", width: 0.6, align: "right" as const, total: true },
+      { key: "total", header: "Students", width: 0.6, align: "right" as const },
+    ],
+    rows: [...map.values()].map((a) => {
+      const row: Record<string, string | number> = { className: a.className, section: a.section, absent: a.absent, total: a.total };
+      for (const g of grades) row[`g_${g}`] = a.counts.get(g) ?? 0;
+      return row;
+    }),
+  };
+}
+
 export function runExamReport(
   id: ExamReportId,
   filters: ExamReportFilters,
@@ -362,6 +601,18 @@ export function runExamReport(
       break;
     case "result_summary":
       built = runResultSummary(masters, sis, ay, term, filters);
+      break;
+    case "subject_analysis":
+      built = runSubjectAnalysis(masters, sis, ay, term, filters);
+      break;
+    case "tabulation": {
+      const t = runTabulation(masters, sis, ay, term, filters);
+      if ("error" in t) return { ok: false, error: t.error };
+      built = t;
+      break;
+    }
+    case "grade_distribution":
+      built = runGradeDistribution(masters, sis, ay, term, filters);
       break;
     default:
       return { ok: false, error: "Unknown report" };

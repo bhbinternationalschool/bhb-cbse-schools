@@ -484,6 +484,7 @@ SELFTESTS=(
   test:report-export
   test:report-data-guard
   test:reports-center-hub
+  test:reports-academic-new
   test:reports-wrong-figures
   test:report-remark-ai
   test:salary-additional

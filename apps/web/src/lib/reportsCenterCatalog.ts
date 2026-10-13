@@ -25,6 +25,7 @@ import { EXAM_REPORTS } from "@/lib/examReportCatalog";
 import { LIBRARY_REPORTS } from "@/lib/library";
 import { CERTIFICATES_REPORTS } from "@/lib/certificatesReportCatalog";
 import { COMMS_REPORTS } from "@/lib/commsReportCatalog";
+import { TEACHING_REPORTS } from "@/lib/teachingReportCatalog";
 import { isModuleEnabled } from "@/lib/moduleRegistry";
 import type { RbacModule } from "@/lib/rbac";
 
@@ -54,7 +55,8 @@ export type ReportsCenterModuleId =
   | "visitors"
   | "health"
   | "discipline"
-  | "online_classes";
+  | "online_classes"
+  | "teaching";
 
 export type ReportsCenterEntry = {
   /** Stable id: module:reportId */
@@ -218,6 +220,14 @@ export const REPORTS_CENTER_MODULES: ReportsCenterModuleDef[] = [
     blurb: "Teacher load · free periods · substitutions",
     rbacModule: "timetable",
     href: "/timetable?tab=reports",
+    embeddable: true,
+  },
+  {
+    id: "teaching",
+    label: "Teaching",
+    blurb: "Syllabus coverage · chapter status · period delivery",
+    rbacModule: "teaching",
+    href: "/teaching",
     embeddable: true,
   },
   {
@@ -569,6 +579,9 @@ export function listReportsCenterEntries(): ReportsCenterEntry[] {
         r.hint,
       ),
     );
+  }
+  for (const r of TEACHING_REPORTS) {
+    out.push(entry("teaching", "teaching", "/teaching", r.id, r.label, r.category, r.hint));
   }
   for (const r of EXAM_REPORTS) {
     out.push(
