@@ -19,6 +19,8 @@ import "home_groups.dart";
 import "leave_approvals_screen.dart";
 import "my_attendance_calendar_screen.dart";
 import "my_profile_screen.dart";
+import "my_class_screen.dart";
+import "month_register_screen.dart";
 import "payslips_screen.dart";
 import "self_attendance_screen.dart";
 import "staff_complaints_screen.dart";
@@ -201,6 +203,25 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       ModuleTone.blue,
       "transport_requests",
       (api) => TransportRequestsScreen(api: api),
+    ),
+    // A desk person given the class grants (an office in-charge who keeps a
+    // class): the class records and the month register. The server still
+    // decides whose children each one shows.
+    _Tile(
+      "My class",
+      "मेरी कक्षा",
+      Icons.diversity_3_outlined,
+      ModuleTone.purple,
+      "students_view",
+      (api) => MyClassScreen(api: api),
+    ),
+    _Tile(
+      "Month register",
+      "मासिक रजिस्टर",
+      Icons.calendar_view_month_outlined,
+      ModuleTone.teal,
+      "attendance_mark",
+      (api) => MonthRegisterScreen(api: api),
     ),
     _Tile(
       "Messages",

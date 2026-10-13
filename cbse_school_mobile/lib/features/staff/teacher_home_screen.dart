@@ -34,6 +34,8 @@ import "my_subjects_screen.dart";
 import "home_groups.dart";
 import "my_attendance_calendar_screen.dart";
 import "my_profile_screen.dart";
+import "my_class_screen.dart";
+import "month_register_screen.dart";
 import "section_picker.dart";
 import "self_attendance_screen.dart";
 import "staff_complaints_screen.dart";
@@ -72,6 +74,12 @@ const _staffModules = [
     "attendance_mark",
   ),
   _StaffModule(
+    "Month register",
+    Icons.calendar_view_month_outlined,
+    ModuleTone.teal,
+    "attendance_mark",
+  ),
+  _StaffModule(
     "Period log",
     Icons.bookmark_added_outlined,
     ModuleTone.green,
@@ -105,6 +113,15 @@ const _staffModules = [
     "Students",
     Icons.school_outlined,
     ModuleTone.green,
+    "students_view",
+  ),
+  // The class teacher's own children: call the family, fill the UDISE+
+  // class sheet. Same grant as the roster; the server refuses anyone who is
+  // not a class teacher (or the office) with its own words.
+  _StaffModule(
+    "My class",
+    Icons.diversity_3_outlined,
+    ModuleTone.purple,
     "students_view",
   ),
   _StaffModule(
@@ -456,6 +473,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     switch (label) {
       case "Attendance":
         await _openAttendance();
+      case "Month register":
+        await _pushScreen(MonthRegisterScreen(api: widget.api));
+      case "My class":
+        await _pushScreen(MyClassScreen(api: widget.api));
       case "Period log":
         await Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => TeachingScreen(api: widget.api)),
@@ -701,6 +722,51 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 ),
               ),
             ),
+            // A class teacher's own class, one tap from the banner.
+            if (ct != null &&
+                (_features.has("students_view") ||
+                    _features.has("attendance_mark")))
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Transform.translate(
+                  offset: const Offset(0, -12),
+                  child: Row(
+                    children: [
+                      if (_features.has("students_view"))
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => _openModule("My class"),
+                            icon: const Icon(
+                              Icons.diversity_3_outlined,
+                              size: 18,
+                            ),
+                            label: const Text(
+                              "My class · मेरी कक्षा",
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      if (_features.has("students_view") &&
+                          _features.has("attendance_mark"))
+                        const SizedBox(width: 8),
+                      if (_features.has("attendance_mark"))
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => _openModule("Month register"),
+                            icon: const Icon(
+                              Icons.calendar_view_month_outlined,
+                              size: 18,
+                            ),
+                            label: const Text(
+                              "Month register",
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: Column(
@@ -824,7 +890,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                           // One gate tile: the visitor gate already shows
                           // the passes.
                           !(m.feature == "gate_pass_release" &&
-                              _features.has("visitor_gate")),
+                              _features.has("visitor_gate")) &&
+                          // My class is the class teacher's own children;
+                          // a subject teacher would only be refused.
+                          (m.label != "My class" || ct != null),
                     ),
                     (m) => staffGroupOf(_features, m.feature),
                     order: _features.groupOrder,

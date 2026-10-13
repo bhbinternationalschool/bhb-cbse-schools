@@ -25,6 +25,8 @@ import "home_groups.dart";
 import "leave_approvals_screen.dart";
 import "my_attendance_calendar_screen.dart";
 import "my_profile_screen.dart";
+import "my_class_screen.dart";
+import "month_register_screen.dart";
 import "payslips_screen.dart";
 import "marks_screen.dart";
 import "staff_complaints_screen.dart";
@@ -459,6 +461,24 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
         label: "Students",
         tone: ModuleTone.blue,
         onTap: _openStudents,
+      ),
+    ),
+    (
+      "students_view",
+      _Action(
+        icon: Icons.diversity_3_outlined,
+        label: "Class records",
+        tone: ModuleTone.purple,
+        onTap: () => _push(MyClassScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "attendance_mark",
+      _Action(
+        icon: Icons.calendar_view_month_outlined,
+        label: "Month register",
+        tone: ModuleTone.teal,
+        onTap: () => _push(MonthRegisterScreen(api: widget.api)),
       ),
     ),
     (
