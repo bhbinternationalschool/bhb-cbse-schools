@@ -482,10 +482,11 @@ SELFTESTS=(
   test:receipt-lookup
   test:referrals
   test:report-export
-  test:reports-wrong-figures
-  test:fee-reports-year-scope
   test:report-data-guard
   test:reports-center-hub
+  test:reports-academic-new
+  test:reports-wrong-figures
+  test:fee-reports-year-scope
   test:report-export-format
   test:report-remark-ai
   test:salary-additional

@@ -21,9 +21,9 @@ import {
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import { recordHomeworkDiaryDeletion } from "@/lib/homeworkNormalizedClient";
-import { classCalendar } from "@/lib/studentWorkingDays";
 import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
 import { reportDesksFor } from "@/lib/reportDesks";
+import { classCalendar } from "@/lib/studentWorkingDays";
 
 const STORAGE_KEY = "bhb_homework_v1";
 

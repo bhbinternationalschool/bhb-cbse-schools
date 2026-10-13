@@ -29,7 +29,8 @@ export type ReportCatalog =
   | "exams"
   | "library"
   | "certificates"
-  | "comms";
+  | "comms"
+  | "teaching";
 
 const BASE: Record<ReportCatalog, ReportDesk[]> = {
   fees: ["masters", "sis", "fees", "payments"],
@@ -60,6 +61,7 @@ const BASE: Record<ReportCatalog, ReportDesk[]> = {
   library: ["library"],
   certificates: ["certificates"],
   comms: ["school_comms"],
+  teaching: ["masters", "teaching"],
 };
 
 const EXTRA: Partial<Record<ReportCatalog, Record<string, ReportDesk[]>>> = {
@@ -77,6 +79,9 @@ const EXTRA: Partial<Record<ReportCatalog, Record<string, ReportDesk[]>>> = {
   },
   sis: {
     udise_compliance: ["module_state:udise_compliance"],
+  },
+  teaching: {
+    period_delivery: ["timetable"],
   },
 };
 

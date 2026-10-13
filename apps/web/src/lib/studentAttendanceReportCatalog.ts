@@ -22,6 +22,7 @@ import {
   attendanceStartFor,
   classCalendar,
   marksByDateFor,
+  sessionDaysSummary,
   sessionStartFor,
   studentDaysSummary,
 } from "@/lib/studentWorkingDays";
@@ -38,7 +39,9 @@ export type StudentAttReportId =
   | "class_section_wise"
   | "student_absent"
   | "monthly_percentage"
-  | "leave_excused";
+  | "leave_excused"
+  | "session_percentage"
+  | "not_marked";
 
 export type StudentAttReportDef = {
   id: StudentAttReportId;
@@ -91,7 +94,7 @@ export const STUDENT_ATT_REPORTS: StudentAttReportDef[] = [
   {
     id: "monthly_percentage",
     label: "Monthly Attendance Percentage Report",
-    hint: "Attendance % from marked days in a month",
+    hint: "Working days of the month (school rule) — not-marked days shown",
     filters: ["month", "class", "section", "student", "gender", "percentBand"],
   },
   {
@@ -99,6 +102,18 @@ export const STUDENT_ATT_REPORTS: StudentAttReportDef[] = [
     label: "Leave / Excused Report",
     hint: "Students marked LE in range",
     filters: ["date", "fromTo", "month", "class", "section", "student"],
+  },
+  {
+    id: "session_percentage",
+    label: "Session Attendance % (75% rule)",
+    hint: "Session to date, working days from admission — below 75% flagged",
+    filters: ["class", "section", "student", "gender", "percentBand"],
+  },
+  {
+    id: "not_marked",
+    label: "Attendance Not Marked",
+    hint: "Sections with no register on a working day",
+    filters: ["date", "class"],
   },
 ];
 
@@ -544,6 +559,116 @@ function buildReport(
             { key: "leaveDays", header: "Leave", align: "right" },
             { key: "unmarkedDays", header: "Not marked", align: "right" },
             { key: "percent", header: "%", align: "right" },
+          ],
+          rows,
+        },
+      };
+    }
+
+    case "session_percentage": {
+      // CBSE's 75% rule is on the session to date. Same rule as the report
+      // card (studentWorkingDays): working days of the class from the
+      // holiday calendar, from the day after admission, up to today.
+      const today = todayIso();
+      const people = f.studentId ? students.filter((s) => s.id === f.studentId) : students;
+      const rows = people
+        .map((s) => {
+          const sum = sessionDaysSummary({
+            masters,
+            ay: f.academicYearCode,
+            classId: s.classId,
+            studentId: s.id,
+            joinedOn: s.joinedOn,
+            registers: regs,
+            today,
+          });
+          const known = sum.workingDays > 0 && sum.unmarkedDays < sum.workingDays ? sum.percent : null;
+          return {
+            admissionNo: s.admissionNo,
+            student: s.fullName,
+            rollNo: s.rollNo,
+            className: className(masters, s.classId),
+            section: sectionName(masters, s.sectionId),
+            from: sum.from,
+            workingDays: sum.workingDays,
+            presentDays: Math.round(sum.presentDays * 10) / 10,
+            absentDays: sum.absentDays,
+            leaveDays: sum.leaveDays,
+            unmarkedDays: sum.unmarkedDays,
+            percent: known === null ? "—" : `${known}%`,
+            below75: known === null ? "Not known" : known < 75 ? "Yes" : "",
+            _pct: known,
+          };
+        })
+        .filter((r) => f.maxPercent == null || (r._pct !== null && r._pct <= f.maxPercent))
+        .map((r) => {
+          const out: Record<string, string | number | null> = { ...r };
+          delete out._pct;
+          return out;
+        });
+      return {
+        ok: true,
+        built: {
+          title: `Session Attendance % — ${f.academicYearCode} (to ${today})`,
+          columns: [
+            { key: "admissionNo", header: "Adm no" },
+            { key: "student", header: "Student" },
+            { key: "rollNo", header: "Roll" },
+            { key: "className", header: "Class" },
+            { key: "section", header: "Section" },
+            { key: "from", header: "Counted from" },
+            { key: "workingDays", header: "Working days", align: "right" },
+            { key: "presentDays", header: "Present days", align: "right" },
+            { key: "absentDays", header: "Absent", align: "right" },
+            { key: "leaveDays", header: "Leave", align: "right" },
+            { key: "unmarkedDays", header: "Not marked", align: "right" },
+            { key: "percent", header: "%", align: "right" },
+            { key: "below75", header: "Below 75%" },
+          ],
+          rows,
+        },
+      };
+    }
+
+    case "not_marked": {
+      // Sections whose register is missing for a day their class was open
+      // (holiday calendar). Classes with no children this session are left out.
+      const date = f.date || todayIso();
+      const markedSections = new Set(regs.filter((r) => r.date === date).map((r) => r.sectionId));
+      const rosterBySection = new Map<string, number>();
+      for (const s of students) rosterBySection.set(s.sectionId, (rosterBySection.get(s.sectionId) ?? 0) + 1);
+      const staff = (masters as { staff?: { fullName: string; status?: string; classTeacherLinks?: { classId: string; sectionId: string; academicYearCode?: string }[] }[] }).staff ?? [];
+      const classTeacher = (classId: string, sectionId: string) =>
+        staff
+          .filter((t) => t.status !== "inactive")
+          .filter((t) =>
+            (t.classTeacherLinks ?? []).some(
+              (l) => l.classId === classId && l.sectionId === sectionId && (!l.academicYearCode || l.academicYearCode === f.academicYearCode),
+            ),
+          )
+          .map((t) => t.fullName)
+          .join(", ");
+      const rows = masters.sections
+        .filter((sec) => sec.isActive !== false)
+        .filter((sec) => !f.classId || sec.classId === f.classId)
+        .filter((sec) => (rosterBySection.get(sec.id) ?? 0) > 0)
+        .filter((sec) => classCalendar(masters, f.academicYearCode, sec.classId, date, date)[0]?.working)
+        .filter((sec) => !markedSections.has(sec.id))
+        .map((sec) => ({
+          className: className(masters, sec.classId),
+          section: sec.name,
+          students: rosterBySection.get(sec.id) ?? 0,
+          classTeacher: classTeacher(sec.classId, sec.id) || "—",
+        }));
+      return {
+        ok: true,
+        built: {
+          title: `Attendance Not Marked — ${date}`,
+          columns: [
+            { key: "className", header: "Class" },
+            { key: "section", header: "Section" },
+            { key: "students", header: "Students", align: "right" },
+            { key: "classTeacher", header: "Class teacher" },
           ],
           rows,
         },

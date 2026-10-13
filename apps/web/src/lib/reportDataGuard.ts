@@ -52,6 +52,7 @@ export type ReportDesk =
   | "statutory"
   | "accounts"
   | "school_comms"
+  | "teaching"
   | `module_state:${ModuleStateKey}`;
 
 const LABEL: Record<string, string> = {
@@ -80,6 +81,7 @@ const LABEL: Record<string, string> = {
   statutory: "PF / ESIC remittances",
   accounts: "accounts",
   school_comms: "notices",
+  teaching: "lesson plans and syllabus",
 };
 
 function labelOf(desk: ReportDesk): string {
@@ -155,6 +157,8 @@ function loader(desk: ReportDesk): () => Promise<unknown> {
       return () => import("@/lib/accountsPersistence").then((m) => m.ensureAccountsHydrated());
     case "school_comms":
       return () => import("@/lib/schoolCommsPersistence").then((m) => m.ensureSchoolCommsHydrated());
+    case "teaching":
+      return () => import("@/lib/teachingPersistence").then((m) => m.ensureTeachingHydrated());
   }
   return () => Promise.resolve();
 }
