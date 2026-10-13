@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_AY } from "@/lib/masters";
 import {
   classLabelForStudent,
-  resolveParentHousehold,
+  householdForSession,
 } from "@/lib/parentPortal";
 import { loadSis, type Household, type SisStudent, childrenOfHousehold} from "@/lib/sis";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
@@ -28,8 +28,11 @@ function todayIso() {
 
 export function ParentStudentLeavePortal({
   guardianDisplayName,
+  householdId,
 }: {
   guardianDisplayName: string;
+  /** From the signed-in session — the only household this page may show. */
+  householdId?: string;
 }) {
   const [household, setHousehold] = useState<Household | null>(null);
   const [children, setChildren] = useState<SisStudent[]>([]);
@@ -52,10 +55,7 @@ export function ParentStudentLeavePortal({
   function reload() {
     const sis = loadSis();
     setLeave(loadStudentLeave());
-    const hh = resolveParentHousehold(sis, {
-      guardianName: guardianDisplayName,
-      mobile: "9876543210",
-    });
+    const hh = householdForSession(sis, householdId);
     setHousehold(hh);
     if (!hh) {
       setChildren([]);
@@ -77,7 +77,7 @@ export function ParentStudentLeavePortal({
   useEffect(() => {
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guardianDisplayName]);
+  }, [guardianDisplayName, householdId]);
 
   const child = useMemo(
     () => children.find((c) => c.id === activeId) ?? null,

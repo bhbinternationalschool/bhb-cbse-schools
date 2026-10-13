@@ -10,9 +10,16 @@ import "../modules/chat_inbox_screen.dart";
 import "../modules/homework_screen.dart";
 import "../modules/notice_detail_screen.dart";
 import "../modules/notices_screen.dart";
+import "../modules/bus_routes_screen.dart";
 import "../modules/syllabus_scan_screen.dart";
 import "../modules/teaching_screen.dart";
 import "attendance_screen.dart";
+import "broadcast_screen.dart";
+import "leave_approvals_screen.dart";
+import "principal_lists.dart";
+import "staff_roster_screen.dart";
+import "transport_requests_screen.dart";
+import "visitor_gate_screen.dart";
 import "admission_leads_screen.dart";
 import "command_bar.dart";
 import "documents_screen.dart";
@@ -166,6 +173,59 @@ const _staffModules = [
     Icons.document_scanner_outlined,
     ModuleTone.blue,
     "syllabus_scan",
+  ),
+  // Office and leadership grants a teacher may also hold (a co-ordinator,
+  // the gate duty, the transport in-charge). They had no tile here, so a
+  // grant made in Masters → Roles never reached a teacher's phone.
+  _StaffModule(
+    "Broadcast",
+    Icons.campaign_outlined,
+    ModuleTone.coral,
+    "broadcast",
+  ),
+  _StaffModule(
+    "Staff leave",
+    Icons.event_busy_outlined,
+    ModuleTone.amber,
+    "staff_leave_approve",
+  ),
+  _StaffModule(
+    "Staff today",
+    Icons.badge_outlined,
+    ModuleTone.teal,
+    "school_snapshot",
+  ),
+  _StaffModule(
+    "Staff contacts",
+    Icons.contact_phone_outlined,
+    ModuleTone.green,
+    "staff_roster",
+  ),
+  _StaffModule(
+    "Visitor gate",
+    Icons.meeting_room_outlined,
+    ModuleTone.purple,
+    "visitor_gate",
+  ),
+  // Gate passes live on the visitor-gate screen; this tile is for someone
+  // who may release children but does not keep the visitor register.
+  _StaffModule(
+    "Gate passes",
+    Icons.directions_walk_outlined,
+    ModuleTone.purple,
+    "gate_pass_release",
+  ),
+  _StaffModule(
+    "Transport",
+    Icons.directions_bus_outlined,
+    ModuleTone.blue,
+    "route_manifest",
+  ),
+  _StaffModule(
+    "Transport requests",
+    Icons.alt_route_outlined,
+    ModuleTone.pink,
+    "transport_requests",
   ),
   _StaffModule("Notices", Icons.campaign_outlined, ModuleTone.pink, "notices"),
   _StaffModule("My leave", Icons.event_outlined, ModuleTone.coral, "my_leave"),
@@ -479,6 +539,21 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         await _pushScreen(AdmissionLeadsScreen(api: widget.api));
       case "Field survey":
         await _pushScreen(SurveyScreen(api: widget.api));
+      case "Broadcast":
+        await _pushScreen(BroadcastScreen(api: widget.api));
+      case "Staff leave":
+        await _pushScreen(LeaveApprovalsScreen(api: widget.api));
+      case "Staff today":
+        await _pushScreen(StaffAttendanceTodayScreen(api: widget.api));
+      case "Staff contacts":
+        await _pushScreen(StaffRosterScreen(api: widget.api));
+      case "Visitor gate":
+      case "Gate passes":
+        await _pushScreen(VisitorGateScreen(api: widget.api));
+      case "Transport":
+        await _pushScreen(BusRoutesScreen(api: widget.api));
+      case "Transport requests":
+        await _pushScreen(TransportRequestsScreen(api: widget.api));
       case "My profile":
         await Navigator.of(context).push(
           MaterialPageRoute(
@@ -744,8 +819,12 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                   for (final (group, modules) in groupStaffTiles(
                     _staffModules.where(
                       (m) =>
-                          kAlwaysShownStaffFeatures.contains(m.feature) ||
-                          _features.has(m.feature),
+                          (kAlwaysShownStaffFeatures.contains(m.feature) ||
+                              _features.has(m.feature)) &&
+                          // One gate tile: the visitor gate already shows
+                          // the passes.
+                          !(m.feature == "gate_pass_release" &&
+                              _features.has("visitor_gate")),
                     ),
                     (m) => staffGroupOf(_features, m.feature),
                     order: _features.groupOrder,

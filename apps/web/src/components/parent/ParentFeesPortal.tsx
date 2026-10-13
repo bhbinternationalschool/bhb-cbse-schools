@@ -22,7 +22,7 @@ import {
   formatParentDueHint,
   householdReceipts,
   parentOpenDueTotals,
-  resolveParentHousehold,
+  householdForSession,
 } from "@/lib/parentPortal";
 import {
   buildEnrichedPaymentSharePayload,
@@ -41,9 +41,12 @@ type Tab = "dues" | "receipts";
 
 export function ParentFeesPortal({
   guardianDisplayName,
+  householdId,
   onSignOut,
 }: {
   guardianDisplayName: string;
+  /** From the signed-in session — the only household this page may show. */
+  householdId?: string;
   onSignOut: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("dues");
@@ -67,10 +70,7 @@ export function ParentFeesPortal({
     const sis = loadSis();
     const masters = loadMasters();
     const fees = loadFees();
-    const hh = resolveParentHousehold(sis, {
-      guardianName: guardianDisplayName,
-      mobile: "9876543210",
-    });
+    const hh = householdForSession(sis, householdId);
     setHousehold(hh);
     if (!hh) {
       setBundle([]);
@@ -96,7 +96,7 @@ export function ParentFeesPortal({
 
   useEffect(() => {
     reload();
-  }, [guardianDisplayName, tick]);
+  }, [guardianDisplayName, householdId, tick]);
 
   const activeRow = useMemo(
     () => bundle.find((r) => r.student.id === activeStudentId) ?? bundle[0],

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
-import { resolveParentHousehold } from "@/lib/parentPortal";
+import { householdForSession } from "@/lib/parentPortal";
 import { loadSis, type Household, type SisStudent, childrenOfHousehold} from "@/lib/sis";
 import {
   isSeen,
@@ -23,8 +23,11 @@ import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
 export function ParentHomeworkPortal({
   guardianDisplayName,
+  householdId,
 }: {
   guardianDisplayName: string;
+  /** From the signed-in session — the only household this page may show. */
+  householdId?: string;
 }) {
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [household, setHousehold] = useState<Household | null>(null);
@@ -46,10 +49,7 @@ export function ParentHomeworkPortal({
     const m = loadMasters();
     const sis = loadSis();
     setMasters(m);
-    const hh = resolveParentHousehold(sis, {
-      guardianName: guardianDisplayName,
-      mobile: "9876543210",
-    });
+    const hh = householdForSession(sis, householdId);
     setHousehold(hh);
     if (!hh) {
       setChildren([]);
@@ -75,7 +75,7 @@ export function ParentHomeworkPortal({
   useEffect(() => {
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guardianDisplayName]);
+  }, [guardianDisplayName, householdId]);
 
   const child = useMemo(
     () => children.find((c) => c.id === activeId) ?? null,
