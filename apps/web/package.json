@@ -298,6 +298,7 @@
     "test:reports-wrong-figures": "npx tsx src/lib/reportsWrongFigures.selftest.ts",
     "test:fee-reports-year-scope": "npx tsx src/lib/feeReportsYearScope.selftest.ts",
     "test:report-data-guard": "npx tsx src/lib/reportDataGuard.selftest.ts",
+    "test:reports-center-hub": "npx tsx src/lib/reportsCenterHub.selftest.ts",
     "test:report-export-format": "npx tsx src/lib/reportExportFormat.selftest.ts",
     "test:wa-contact-state": "npx tsx src/lib/waContactState.selftest.ts",
     "test:wa-delivery-log": "npx tsx src/lib/waDeliveryLog.selftest.ts",
