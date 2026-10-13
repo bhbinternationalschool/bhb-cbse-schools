@@ -19,6 +19,26 @@ import {
 
 export const DEMO_PARENT_MOBILE = "9876543210";
 
+/**
+ * The household a signed-in parent may see: exactly the one on their session.
+ * No guessing — a missing or unknown id shows nothing rather than another
+ * family's children, fees or homework.
+ */
+export function householdForSession(
+  sis: SisState | undefined,
+  householdId: string | undefined | null,
+): Household | null {
+  const id = (householdId ?? "").trim();
+  if (!id) return null;
+  const s = sis ?? loadSis();
+  return s.households.find((h) => h.id === id) ?? null;
+}
+
+/**
+ * Demo sign-in only (LoginPanel's demoAuth path). Falls back to name, the demo
+ * mobile and finally the largest family — never use it to choose what a real
+ * parent sees; use householdForSession.
+ */
 export function resolveParentHousehold(
   sis?: SisState,
   hint?: { mobile?: string; guardianName?: string },

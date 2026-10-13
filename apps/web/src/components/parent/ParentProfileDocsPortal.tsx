@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
-import { classLabelForStudent, resolveParentHousehold } from "@/lib/parentPortal";
+import { classLabelForStudent, householdForSession } from "@/lib/parentPortal";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
   submitStudentDocForVerification,
@@ -71,14 +71,7 @@ export function ParentProfileDocsPortal({
 
   function reload() {
     const sis = loadSis();
-    const hh =
-      (householdId
-        ? sis.households.find((h) => h.id === householdId) ?? null
-        : null) ||
-      resolveParentHousehold(sis, {
-        guardianName: guardianDisplayName,
-        mobile: "9876543210",
-      });
+    const hh = householdForSession(sis, householdId);
     setHousehold(hh);
     if (!hh) {
       setChildren([]);

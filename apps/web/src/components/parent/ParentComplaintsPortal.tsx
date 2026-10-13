@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { resolveParentHousehold } from "@/lib/parentPortal";
+import { householdForSession } from "@/lib/parentPortal";
 import { loadSis, type Household, type SisStudent, childrenOfHousehold} from "@/lib/sis";
 import { DEFAULT_AY } from "@/lib/masters";
 import { btn, field } from "@/components/ui/erp-ui";
@@ -19,8 +19,11 @@ import {
 
 export function ParentComplaintsPortal({
   guardianDisplayName,
+  householdId,
 }: {
   guardianDisplayName: string;
+  /** From the signed-in session — the only household this page may show. */
+  householdId?: string;
 }) {
   const [household, setHousehold] = useState<Household | null>(null);
   const [children, setChildren] = useState<SisStudent[]>([]);
@@ -42,10 +45,7 @@ export function ParentComplaintsPortal({
   function reload() {
     const sis = loadSis();
     setComplaints(loadComplaints());
-    const hh = resolveParentHousehold(sis, {
-      guardianName: guardianDisplayName,
-      mobile: "9876543210",
-    });
+    const hh = householdForSession(sis, householdId);
     setHousehold(hh);
     if (!hh) {
       setChildren([]);
@@ -66,7 +66,7 @@ export function ParentComplaintsPortal({
       reload();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guardianDisplayName]);
+  }, [guardianDisplayName, householdId]);
 
   const tickets = useMemo((): ComplaintTicket[] => {
     if (!complaints || !household) return [];

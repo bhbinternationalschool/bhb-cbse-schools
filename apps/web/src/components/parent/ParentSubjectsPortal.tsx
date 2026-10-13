@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import {
   classLabelForStudent,
-  resolveParentHousehold,
+  householdForSession,
 } from "@/lib/parentPortal";
 import {
   loadSis,
@@ -28,8 +28,11 @@ import { StudentNameLabel } from "@/components/students/StudentAvatar";
 
 export function ParentSubjectsPortal({
   guardianDisplayName,
+  householdId,
 }: {
   guardianDisplayName: string;
+  /** From the signed-in session — the only household this page may show. */
+  householdId?: string;
 }) {
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [household, setHousehold] = useState<Household | null>(null);
@@ -49,10 +52,7 @@ export function ParentSubjectsPortal({
     const m = loadMasters();
     const sis = loadSis();
     setMasters(m);
-    const hh = resolveParentHousehold(sis, {
-      guardianName: guardianDisplayName,
-      mobile: "9876543210",
-    });
+    const hh = householdForSession(sis, householdId);
     setHousehold(hh);
     if (!hh) {
       setChildren([]);
@@ -97,7 +97,7 @@ export function ParentSubjectsPortal({
       reload();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guardianDisplayName]);
+  }, [guardianDisplayName, householdId]);
 
   const active = useMemo(
     () => children.find((c) => c.id === activeId) ?? null,
@@ -158,8 +158,8 @@ export function ParentSubjectsPortal({
   if (!household || !masters) {
     return (
       <p className="px-4 py-8 text-sm text-[var(--muted)]">
-        Household not found. Sign in as the demo parent (Ramesh Singh /
-        9876543210).
+        We could not find your family&apos;s record. Please contact the school
+        office.
       </p>
     );
   }

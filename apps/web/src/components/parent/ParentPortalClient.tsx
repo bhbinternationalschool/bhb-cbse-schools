@@ -185,6 +185,7 @@ export function ParentPortalClient({
         <div className={mobileApp ? "bhb-parent-app-content" : ""}>
           <ParentFeesPortal
             guardianDisplayName={guardianName}
+            householdId={householdId}
             onSignOut={() => {
               void signOut();
             }}
@@ -211,16 +212,28 @@ export function ParentPortalClient({
             </div>
           ) : null}
           {portalTab === "homework" ? (
-            <ParentHomeworkPortal guardianDisplayName={guardianName} />
+            <ParentHomeworkPortal
+              guardianDisplayName={guardianName}
+              householdId={householdId}
+            />
           ) : null}
           {portalTab === "ptm" ? (
-            <ParentPtmPortal guardianDisplayName={guardianName} />
+            <ParentPtmPortal
+              guardianDisplayName={guardianName}
+              householdId={householdId}
+            />
           ) : null}
           {portalTab === "leave" ? (
-            <ParentStudentLeavePortal guardianDisplayName={guardianName} />
+            <ParentStudentLeavePortal
+              guardianDisplayName={guardianName}
+              householdId={householdId}
+            />
           ) : null}
           {portalTab === "complaints" ? (
-            <ParentComplaintsPortal guardianDisplayName={guardianName} />
+            <ParentComplaintsPortal
+              guardianDisplayName={guardianName}
+              householdId={householdId}
+            />
           ) : null}
           {portalTab === "profile" ? (
             <ParentProfileDocsPortal
@@ -238,7 +251,10 @@ export function ParentPortalClient({
           ) : null}
           {portalTab === "subjects" ? (
             <>
-              <ParentSubjectsPortal guardianDisplayName={guardianName} />
+              <ParentSubjectsPortal
+              guardianDisplayName={guardianName}
+              householdId={householdId}
+            />
               <p className="mt-6 px-4 text-[11px] text-[var(--muted)]">
                 Parent portal: fees, homework, profile &amp; docs, notices,
                 news, gallery, PTM, leave &amp; subjects.
