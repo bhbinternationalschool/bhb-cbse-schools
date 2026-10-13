@@ -4,7 +4,8 @@
  * The two answers this record must never blur:
  *   * a SUSPENDED seat is not a cancelled one — the child is still on the
  *     list and must not be let on the bus;
- *   * an unmarked bus register is not a child who failed to board.
+ *   * an unmarked bus register is not a child who failed to board;
+ *   * boarding is bus register v2 (passed in), never the old boardingEvents.
  */
 import assert from "node:assert/strict";
 import type { TransportAssignment, TransportState } from "./transport";
@@ -177,49 +178,66 @@ const student = { id: "st1", academicYearCode: AY };
   assert.equal(r.seat?.serviceLabel, "Pickup only");
 }
 
-// --- boarding counts, and the safety one -------------------------------
+// --- boarding comes from the bus register (v2), not the old slice ------
 {
-  const ev = (
-    date: string,
-    trip: "AM" | "PM",
-    status: "boarded" | "absent" | "unauthorized",
-  ) => ({
-    id: `${date}${trip}`,
-    date,
-    routeId: "r1",
-    trip,
-    studentId: "st1",
-    status,
-    note: "",
-    createdAt: `${date}T03:00:00.000Z`,
-  });
   const r = studentTransportRecord(
     state({
       assignments: [asg({})],
+      // The old boarding slice is no longer read — this must not count.
       boardingEvents: [
-        ev("2026-09-09", "AM", "boarded"),
-        ev("2026-09-09", "PM", "boarded"),
-        ev("2026-09-10", "AM", "absent"),
-        ev("2026-09-10", "PM", "unauthorized"),
-        // Another child's event must not land on this record.
-        { ...ev("2026-09-10", "AM", "boarded"), id: "x", studentId: "st9" },
+        { id: "x", date: "2026-09-10", routeId: "r1", trip: "AM", studentId: "st1", status: "boarded", note: "", createdAt: "" },
       ],
-    }),
+    } as Partial<TransportState>),
     student,
     { today: TODAY },
   );
-  assert.equal(r.marked, 4, "four events for this child");
-  assert.equal(r.boarded, 2);
-  assert.equal(r.absent, 1);
-  assert.equal(r.unauthorized, 1, "got on a bus that was not theirs");
-  assert.equal(r.boardedRate, 50);
+  assert.equal(r.registerRead, false, "no register passed → not read");
+  assert.equal(r.marked, 0);
+  assert.equal(r.boardedRate, null, "an unread register is never 0%");
+  assert.equal(r.events.length, 0, "the old boardingEvents slice is not read");
+}
+
+{
+  const r = studentTransportRecord(
+    state({ assignments: [asg({})] }),
+    student,
+    {
+      today: TODAY,
+      register: {
+        from: "2026-08-01",
+        to: TODAY,
+        days: {
+          "2026-09-09": { am: "boarded", pm: "dropped" },
+          "2026-09-10": { am: "not_boarded", pm: null },
+          // A day with no mark on either trip is no mark at all.
+          "2026-09-08": { am: null, pm: null },
+        },
+      },
+    },
+  );
+  assert.equal(r.registerRead, true);
+  assert.equal(r.registerFrom, "2026-08-01");
+  assert.equal(r.marked, 3, "three marked trips; the unmarked PM is not counted");
+  assert.equal(r.boarded, 2, "boarded and dropped both mean the child rode");
+  assert.equal(r.notBoarded, 1);
+  assert.equal(r.boardedRate, 66.7);
   assert.equal(r.lastSeenOnBus, "2026-09-09");
   assert.deepEqual(
-    r.events.map((e) => `${e.date}${e.trip}`),
-    ["2026-09-10PM", "2026-09-10AM", "2026-09-09PM", "2026-09-09AM"],
+    r.events.map((e) => `${e.date}${e.trip}:${e.status}`),
+    ["2026-09-10AM:not_boarded", "2026-09-09PM:dropped", "2026-09-09AM:boarded"],
     "newest first, PM before AM within a day",
   );
   assert.equal(transportRecordIsEmpty(r), false);
+}
+
+// --- marks with no seat still make a card ------------------------------
+{
+  const r = studentTransportRecord(state({}), student, {
+    today: TODAY,
+    register: { from: "2026-08-01", to: TODAY, days: { "2026-09-09": { am: "boarded", pm: null } } },
+  });
+  assert.equal(r.seat, null);
+  assert.equal(transportRecordIsEmpty(r), false, "a child marked on a bus has a bus record");
 }
 
 // --- last year's seat stays out ----------------------------------------

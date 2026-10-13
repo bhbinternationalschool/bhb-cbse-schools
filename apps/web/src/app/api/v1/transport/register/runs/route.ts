@@ -12,6 +12,7 @@ import {
 import {
   effectiveStatus,
   istDate,
+  registerDayMarks,
   ridersOnRun,
   runCounts,
   runsForRoute,
@@ -29,6 +30,10 @@ export const runtime = "nodejs";
  * Office and leadership see the whole fleet; a driver or attendant sees only
  * their own bus (Staff → Duties or Fleet), and an empty list with
  * `unlinked: true` when nobody has linked them to one.
+ *
+ * `&marks=1` also returns the day's marks themselves (undone taps left out),
+ * for screens outside the register that show a child's mark — the fleet
+ * roster and the boarding day sheet. Same scope as the runs.
  */
 export async function GET(request: Request) {
   try {
@@ -36,6 +41,7 @@ export async function GET(request: Request) {
     const today = istDate();
     const url = new URL(request.url);
     const date = dayParam(url.searchParams.get("date"), today);
+    const withMarks = url.searchParams.get("marks") === "1";
 
     const transport = await loadTransportDesk();
     const access = registerAccess(ctx, transport, date);
@@ -83,6 +89,7 @@ export async function GET(request: Request) {
       editableDaysBack: editableDaysBack(access),
       classesKnown: desk.classesKnown,
       runs,
+      ...(withMarks ? { marks: registerDayMarks(marksRes.marks) } : {}),
     });
   } catch (e) {
     return apiErr(e);

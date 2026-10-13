@@ -1,7 +1,7 @@
 "use client";
 
 import { SchoolLetterhead } from "@/components/shared/SchoolLetterhead";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { formatInr } from "@/lib/fees";
 import type { MastersState } from "@/lib/masters";
 import type { SisState } from "@/lib/sis";
@@ -15,6 +15,8 @@ import {
   type FleetRosterRow,
 } from "@/lib/transportPlanner";
 import { TransportBusBadge } from "@/components/transport/TransportBusBadge";
+import { istDate, STATUS_LABEL, type RegisterDayMark } from "@/lib/transportBoardingLog";
+import { fetchRegisterDayMarks } from "@/lib/transportRegisterClient";
 import {
   ErpTable,
   ErpTableBody,
@@ -71,6 +73,27 @@ export function FleetRosterPanel({
   ) => void;
 }) {
   const [openRoute, setOpenRoute] = useState<string | null>(null);
+  // Today's marks come from the bus register (server truth), not the desk
+  // copy. Until they are read — or if the read fails — the column says so
+  // rather than showing every child as "not marked".
+  const [boardingDay] = useState(() => istDate());
+  const [register, setRegister] = useState<
+    { kind: "loading" } | { kind: "ok"; marks: RegisterDayMark[] } | { kind: "error"; message: string }
+  >({ kind: "loading" });
+  useEffect(() => {
+    let alive = true;
+    fetchRegisterDayMarks(boardingDay)
+      .then((marks) => {
+        if (alive) setRegister({ kind: "ok", marks });
+      })
+      .catch((e: unknown) => {
+        if (alive) setRegister({ kind: "error", message: e instanceof Error ? e.message : "Could not read the bus register" });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [boardingDay]);
+  const registerMarks = register.kind === "ok" ? register.marks : undefined;
 
   const { rosters, misrouted, plans, shares } = useMemo(() => {
     if (!sis || !masters)
@@ -88,6 +111,8 @@ export function FleetRosterPanel({
     const plans = planAfternoonWaves(state, sis, masters, academicYearCode);
     return {
       rosters: buildFleetRosters(state, profiles, fathers, crew, {
+        boardingDate: boardingDay,
+        registerMarks,
         staff: {
           riders: listActiveStaffRiders(state, academicYearCode),
           nameById: new Map(
@@ -124,7 +149,7 @@ export function FleetRosterPanel({
       plans,
       shares: suggestVehicleSharing(plans),
     };
-  }, [state, masters, sis, academicYearCode]);
+  }, [state, masters, sis, academicYearCode, boardingDay, registerMarks]);
 
   const totalRiders = rosters.reduce((n, r) => n + r.riders.length, 0);
   const totalUnbilled = rosters.reduce((n, r) => n + r.unbilledRiders, 0);
@@ -414,6 +439,7 @@ export function FleetRosterPanel({
           }
           onRepair={onRepairStopLinks}
           onRiderAction={onRiderAction}
+          register={register.kind === "error" ? { kind: "error", message: register.message } : { kind: register.kind }}
         />
       ))}
     </div>
@@ -426,12 +452,15 @@ function RosterCard({
   onToggle,
   onRepair,
   onRiderAction,
+  register,
 }: {
   roster: FleetRosterRow;
   open: boolean;
   onToggle: () => void;
   onRepair?: () => void;
   onRiderAction?: (action: RiderAction, rider: FleetRiderRow, routeId: string) => void;
+  /** Whether today's bus register marks were read — "not marked" needs it. */
+  register: { kind: "loading" | "ok" } | { kind: "error"; message: string };
 }) {
   // Staff occupy seats exactly as children do. Counting only the children
   // reports room on a bus that is already full.
@@ -696,7 +725,7 @@ function RosterCard({
                     Shortfall
                   </ErpSortTh>
                   <ErpSortTh sort={sort} field="from">From</ErpSortTh>
-                  <th className="px-3 py-2 font-bold">Today</th>
+                  <th className="px-3 py-2 font-bold" title="Bus register, this morning's pick-up">Today AM</th>
                   <th className="px-3 py-2 font-bold print:hidden">Do</th>
                 </tr>
               </ErpTableHead>
@@ -831,17 +860,25 @@ function RosterCard({
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span
                             className={
-                              r.todayBoarding.status === "boarded"
-                                ? "font-semibold text-[var(--success)]"
-                                : "font-semibold text-[var(--danger)]"
+                              r.todayBoarding.status === "not_boarded"
+                                ? "font-semibold text-[var(--danger)]"
+                                : "font-semibold text-[var(--success)]"
                             }
                           >
                             {r.todayBoarding.status === "boarded"
                               ? "on board"
-                              : r.todayBoarding.status}
+                              : STATUS_LABEL[r.todayBoarding.status].toLowerCase()}
                           </span>
-                          <span className="text-[10px] text-[var(--muted)]">
-                            {r.todayBoarding.markedAt.slice(11, 16)}
+                          <span
+                            className="text-[10px] text-[var(--muted)]"
+                            title={r.todayBoarding.markedByName ? `Marked by ${r.todayBoarding.markedByName}` : undefined}
+                          >
+                            {new Date(r.todayBoarding.markedAt).toLocaleTimeString("en-IN", {
+                              timeZone: "Asia/Kolkata",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              hour12: false,
+                            })}
                           </span>
                           {r.todayBoarding.lat != null &&
                           r.todayBoarding.lng != null ? (
@@ -850,22 +887,31 @@ function RosterCard({
                               target="_blank"
                               rel="noreferrer"
                               href={`https://www.google.com/maps?q=${r.todayBoarding.lat},${r.todayBoarding.lng}`}
-                              title={`Marked ${r.todayBoarding.accuracyM ?? "?"} m accuracy, ${r.todayBoarding.distanceFromSchoolKm ?? "?"} km from school`}
+                              title={`Marked with ${r.todayBoarding.accuracyM ?? "unknown"} m accuracy`}
                             >
                               📍 pin
                             </a>
                           ) : (
                             <span
                               className="text-[10px] text-[var(--muted)]"
-                              title="Marked without a location — older record"
+                              title="The phone gave no location for this tap"
                             >
                               no pin
                             </span>
                           )}
                         </div>
-                      ) : (
+                      ) : register.kind === "ok" ? (
                         <span className="text-[10px] text-[var(--muted)]">
                           not marked
+                        </span>
+                      ) : register.kind === "loading" ? (
+                        <span className="text-[10px] text-[var(--muted)]">…</span>
+                      ) : (
+                        <span
+                          className="text-[10px] font-semibold text-[var(--danger)]"
+                          title={"message" in register ? register.message : undefined}
+                        >
+                          register not read
                         </span>
                       )}
                     </td>

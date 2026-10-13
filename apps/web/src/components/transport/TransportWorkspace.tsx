@@ -98,6 +98,8 @@ import {
   runTransportReport,
   type TransportReportFormat,
 } from "@/lib/transportReportCatalog";
+import type { RegisterDayMark } from "@/lib/transportBoardingLog";
+import { fetchRegisterDayMarks } from "@/lib/transportRegisterClient";
 import { useHoldDecisions } from "@/lib/useHoldDecisions";
 
 type TransportTab =
@@ -1799,7 +1801,18 @@ function ReportsPanel({
   const [vehicleId, setVehicleId] = useState("");
   const [format, setFormat] = useState<TransportReportFormat>("excel");
 
-  function run(id: (typeof TRANSPORT_REPORTS)[number]["id"]) {
+  async function run(id: (typeof TRANSPORT_REPORTS)[number]["id"]) {
+    // The boarding day sheet reads the bus register (server truth), not the
+    // desk copy; a failed read refuses the sheet instead of printing blanks.
+    let registerMarks: RegisterDayMark[] | null = null;
+    if (id === "boarding_day_sheet") {
+      try {
+        registerMarks = await fetchRegisterDayMarks(date);
+      } catch (e) {
+        onError(`Bus register could not be read — ${e instanceof Error ? e.message : "try again"}`);
+        return;
+      }
+    }
     const result = runTransportReport(id, {
       date,
       routeId: routeId || undefined,
@@ -1808,6 +1821,7 @@ function ReportsPanel({
       transport: state,
       masters: masters ?? undefined,
       sis: sis ?? undefined,
+      registerMarks,
     });
     if (!result.ok) {
       onError(result.error);
@@ -1913,7 +1927,7 @@ function ReportsPanel({
                   <button
                     type="button"
                     className="shrink-0 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-bold text-[var(--brand-deep)]"
-                    onClick={() => run(report.id)}
+                    onClick={() => void run(report.id)}
                   >
                     Run
                   </button>

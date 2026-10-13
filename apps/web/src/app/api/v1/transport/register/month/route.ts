@@ -23,6 +23,9 @@ export const runtime = "nodejs";
  * attendance report. Rows are every child who rode a route in the scope at
  * any point in the month, plus anyone marked; a child with no marks is listed
  * with blank days, not counted absent. Crew see only their own bus.
+ *
+ * `&studentId=` narrows the rows to one child (the student profile's bus
+ * card); the scope is unchanged, so crew still see only their own bus.
  */
 export async function GET(request: Request) {
   try {
@@ -32,6 +35,7 @@ export async function GET(request: Request) {
     const month = (url.searchParams.get("month") || today.slice(0, 7)).trim();
     if (!isMonth(month)) throw new ApiError("bad_request", "month must be YYYY-MM", 400);
     const askedRoute = (url.searchParams.get("routeId") || "").trim();
+    const askedStudent = (url.searchParams.get("studentId") || "").trim();
     const dates = monthDates(month);
     const from = dates[0]!;
     const to = dates[dates.length - 1]!;
@@ -69,7 +73,11 @@ export async function GET(request: Request) {
         };
       });
 
-    const rows = boardingMonthReport({ month, riders, marks: marksRes.marks }).map((r) => {
+    const rows = boardingMonthReport({
+      month,
+      riders: askedStudent ? riders.filter((r) => r.studentId === askedStudent) : riders,
+      marks: askedStudent ? marksRes.marks.filter((m) => m.studentId === askedStudent) : marksRes.marks,
+    }).map((r) => {
       if (r.fullName) return r;
       const st = desk.students.get(r.studentId);
       return {

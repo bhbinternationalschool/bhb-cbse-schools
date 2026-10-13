@@ -19,7 +19,6 @@ import {
   lastGpsPingByVehicle,
   listActiveRiders,
   listActiveRoutes,
-  listBoardingForTrip,
   listOpenPayables,
   loadTransport,
   vehicleTcoPaise,
@@ -27,6 +26,12 @@ import {
   dealerTypeLabel,
   type TransportState,
 } from "@/lib/transport";
+
+import {
+  STATUS_LABEL,
+  type RegisterDayMark,
+  type RegisterTrip,
+} from "@/lib/transportBoardingLog";
 
 export type TransportReportFormat = "excel" | "pdf";
 
@@ -81,7 +86,7 @@ export const TRANSPORT_REPORTS: TransportReportDef[] = [
     id: "boarding_day_sheet",
     category: "ops",
     label: "Boarding day sheet",
-    hint: "AM/PM boarding for report date",
+    hint: "AM/PM bus register for report date",
   },
   {
     id: "unauthorized_boarding",
@@ -146,6 +151,12 @@ export type TransportReportFilters = {
   masters?: MastersState;
   sis?: SisState;
   fees?: FeesState;
+  /**
+   * The day's bus register v2 marks (GET /api/v1/transport/register/runs
+   * ?date=&marks=1). The boarding day sheet refuses without them rather than
+   * printing a sheet of blanks that reads as "nobody was marked".
+   */
+  registerMarks?: RegisterDayMark[] | null;
 };
 
 function todayYmd() {
@@ -219,6 +230,74 @@ function filterNoteParts(
       ? `Vehicle ${getVehicle(filters.vehicleId, transport)?.registrationNo || filters.vehicleId}`
       : null,
   ]);
+}
+
+function istClock(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "";
+  return new Date(t + 330 * 60_000).toISOString().slice(11, 16);
+}
+
+/**
+ * The boarding day sheet's rows from bus register v2 marks: every live rider
+ * of each route plus anyone marked on it. A trip with no mark says "not
+ * marked" — never absent. The register keeps no free-text note, so the old
+ * note columns are now who marked the trip and when (IST).
+ */
+export function boardingDaySheetRows(input: {
+  transport: TransportState;
+  date: string;
+  routeId?: string;
+  marks: RegisterDayMark[];
+  studentInfo: (studentId: string) => {
+    student: string;
+    admissionNo: string;
+    className: string;
+    section: string;
+  };
+}): Record<string, string | number>[] {
+  let routes = listActiveRoutes(input.transport);
+  if (input.routeId) routes = routes.filter((rt) => rt.id === input.routeId);
+  const riders = listActiveRiders(input.transport);
+  const rows: Record<string, string | number>[] = [];
+  for (const rt of routes) {
+    const onRoute = input.marks.filter((m) => m.date === input.date && m.routeId === rt.id);
+    const pick = (trip: RegisterTrip) => {
+      const by = new Map<string, RegisterDayMark>();
+      for (const m of onRoute) {
+        if (m.trip !== trip) continue;
+        const held = by.get(m.studentId);
+        if (!held || m.tappedAt >= held.tappedAt) by.set(m.studentId, m);
+      }
+      return by;
+    };
+    const amMap = pick("AM");
+    const pmMap = pick("PM");
+    const riderIds = new Set([
+      ...riders.filter((a) => a.routeId === rt.id).map((a) => a.studentId),
+      ...onRoute.map((m) => m.studentId),
+    ]);
+    const label = (m: RegisterDayMark | undefined) => (m ? STATUS_LABEL[m.status] : "not marked");
+    const by = (m: RegisterDayMark | undefined) =>
+      m ? [m.markedByName, istClock(m.tappedAt)].filter(Boolean).join(" ") : "";
+    for (const sid of riderIds) {
+      const asg = riders.find((a) => a.studentId === sid && a.routeId === rt.id);
+      const am = amMap.get(sid);
+      const pm = pmMap.get(sid);
+      rows.push({
+        date: input.date,
+        route: rt.code,
+        routeName: rt.name,
+        ...input.studentInfo(sid),
+        stop: asg?.stopName || (asg ? "" : "not on this route's list"),
+        amStatus: label(am),
+        pmStatus: label(pm),
+        amBy: by(am),
+        pmBy: by(pm),
+      });
+    }
+  }
+  return rows;
 }
 
 export function runTransportReport(
@@ -342,43 +421,19 @@ export function runTransportReport(
     }
 
     case "boarding_day_sheet": {
-      let routes = listActiveRoutes(transport);
-      if (filters.routeId) {
-        routes = routes.filter((rt) => rt.id === filters.routeId);
+      if (!filters.registerMarks) {
+        return {
+          ok: false,
+          error: "The bus register could not be read, so the boarding day sheet was not made. Try again.",
+        };
       }
-      const rows: Record<string, string | number>[] = [];
-      for (const rt of routes) {
-        const am = listBoardingForTrip(date, rt.id, "AM", transport);
-        const pm = listBoardingForTrip(date, rt.id, "PM", transport);
-        const amMap = new Map(am.map((e) => [e.studentId, e]));
-        const pmMap = new Map(pm.map((e) => [e.studentId, e]));
-        const riderIds = new Set([
-          ...listActiveRiders(transport)
-            .filter((a) => a.routeId === rt.id)
-            .map((a) => a.studentId),
-          ...am.map((e) => e.studentId),
-          ...pm.map((e) => e.studentId),
-        ]);
-        for (const sid of riderIds) {
-          const info = studentRow(sid, sis, masters);
-          const asg = listActiveRiders(transport).find(
-            (a) => a.studentId === sid && a.routeId === rt.id,
-          );
-          const amEv = amMap.get(sid);
-          const pmEv = pmMap.get(sid);
-          rows.push({
-            date,
-            route: rt.code,
-            routeName: rt.name,
-            ...info,
-            stop: asg?.stopName || "",
-            amStatus: amEv?.status || "—",
-            pmStatus: pmEv?.status || "—",
-            amNote: amEv?.note || "",
-            pmNote: pmEv?.note || "",
-          });
-        }
-      }
+      const rows = boardingDaySheetRows({
+        transport,
+        date,
+        routeId: filters.routeId,
+        marks: filters.registerMarks,
+        studentInfo: (sid) => studentRow(sid, sis, masters),
+      });
       rows.sort((a, b) =>
         String(a.route).localeCompare(String(b.route)) ||
         String(a.student).localeCompare(String(b.student)),
@@ -398,8 +453,8 @@ export function runTransportReport(
             { key: "stop", header: "Stop", width: 0.9 },
             { key: "amStatus", header: "AM", width: 0.7 },
             { key: "pmStatus", header: "PM", width: 0.7 },
-            { key: "amNote", header: "AM note", width: 0.9 },
-            { key: "pmNote", header: "PM note", width: 0.9 },
+            { key: "amBy", header: "AM marked", width: 0.9 },
+            { key: "pmBy", header: "PM marked", width: 0.9 },
           ],
           rows,
           fileBaseName: "transport_boarding_sheet",

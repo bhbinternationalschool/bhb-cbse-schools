@@ -14,15 +14,18 @@
  *     fees — and an attendant who reads "Route 3, Gandhi Chowk" without that
  *     line will let them on.
  *   * "Nobody marked the bus register" is not "the child did not board".
- *     Days with no event are simply not counted, and the boarded figure
- *     always carries the number of days it is out of.
+ *     Trips with no mark are simply not counted, and the boarded figure
+ *     always carries the number of trips it is out of.
+ *
+ * Boarding comes from bus register v2 (transport_boarding_marks, read through
+ * GET /api/v1/transport/register/month?studentId=), passed in by the caller.
+ * The old state.boardingEvents slice is no longer read. The register records
+ * boarded / dropped / not boarded per trip; it has no "unauthorised" mark and
+ * no free-text note, so neither is shown.
  */
 
-import type {
-  BoardingEvent,
-  TransportAssignment,
-  TransportState,
-} from "@/lib/transport";
+import type { TransportAssignment, TransportState } from "@/lib/transport";
+import { rode, type RegisterStatus } from "@/lib/transportBoardingLog";
 
 export type StudentTransportSeat = {
   assignment: TransportAssignment;
@@ -40,8 +43,18 @@ export type StudentTransportSeat = {
 export type StudentBoardingDay = {
   date: string;
   trip: "AM" | "PM";
-  status: BoardingEvent["status"];
-  note: string;
+  status: RegisterStatus;
+};
+
+/**
+ * The child's bus register days over a window (the month route's `days` for
+ * this child, months merged). `from`/`to` say which window was read, so the
+ * card can say what its figures are out of.
+ */
+export type StudentRegisterDays = {
+  from: string;
+  to: string;
+  days: Record<string, { am: RegisterStatus | null; pm: RegisterStatus | null }>;
 };
 
 export type StudentTransportRecord = {
@@ -49,13 +62,23 @@ export type StudentTransportRecord = {
   seat: StudentTransportSeat | null;
   /** Earlier seats this session, newest first. */
   past: StudentTransportSeat[];
+  /**
+   * False when the bus register was not read (failed, or not passed). Then
+   * every boarding figure below is empty and the card must say "not read",
+   * never "nothing marked".
+   */
+  registerRead: boolean;
+  /** The window the register was read for ("" when not read). */
+  registerFrom: string;
+  registerTo: string;
   /** Newest first. */
   events: StudentBoardingDay[];
+  /** Trips with a mark. */
   marked: number;
+  /** Trips ridden: boarded, or dropped (which means they got on). */
   boarded: number;
-  absent: number;
-  /** Got on a bus that was not theirs, or without a seat. A safety event. */
-  unauthorized: number;
+  /** Trips marked not boarded. */
+  notBoarded: number;
   /** boarded ÷ marked, or null when the register was never marked. */
   boardedRate: number | null;
   lastSeenOnBus: string;
@@ -99,7 +122,7 @@ function seatOf(
 export function studentTransportRecord(
   state: TransportState,
   student: { id: string; academicYearCode?: string },
-  opts?: { today?: string; eventLimit?: number },
+  opts?: { today?: string; eventLimit?: number; register?: StudentRegisterDays | null },
 ): StudentTransportRecord {
   const today = opts?.today || new Date().toISOString().slice(0, 10);
   const ay = (student.academicYearCode || "").trim();
@@ -120,38 +143,34 @@ export function studentTransportRecord(
   const seat = seats.find((s) => s.current) || seats[0] || null;
   const past = seats.filter((s) => s !== seat);
 
-  const events: StudentBoardingDay[] = (state.boardingEvents || [])
-    .filter((e) => e.studentId === student.id)
-    .map((e) => ({
-      date: e.date,
-      trip: e.trip,
-      status: e.status,
-      note: e.note || "",
-    }))
-    .sort(
-      (a, b) => b.date.localeCompare(a.date) || b.trip.localeCompare(a.trip),
-    );
+  const register = opts?.register ?? null;
+  const events: StudentBoardingDay[] = [];
+  for (const [date, cell] of Object.entries(register?.days ?? {})) {
+    if (cell.am) events.push({ date, trip: "AM", status: cell.am });
+    if (cell.pm) events.push({ date, trip: "PM", status: cell.pm });
+  }
+  events.sort((a, b) => b.date.localeCompare(a.date) || b.trip.localeCompare(a.trip));
 
   let boarded = 0;
-  let absent = 0;
-  let unauthorized = 0;
+  let notBoarded = 0;
   for (const e of events) {
-    if (e.status === "boarded") boarded += 1;
-    else if (e.status === "absent") absent += 1;
-    else if (e.status === "unauthorized") unauthorized += 1;
+    if (rode(e.status)) boarded += 1;
+    else if (e.status === "not_boarded") notBoarded += 1;
   }
   const marked = events.length;
 
   return {
     seat,
     past,
+    registerRead: !!register,
+    registerFrom: register?.from ?? "",
+    registerTo: register?.to ?? "",
     events: opts?.eventLimit ? events.slice(0, opts.eventLimit) : events,
     marked,
     boarded,
-    absent,
-    unauthorized,
+    notBoarded,
     boardedRate: marked > 0 ? round1((boarded / marked) * 100) : null,
-    lastSeenOnBus: events.find((e) => e.status === "boarded")?.date || "",
+    lastSeenOnBus: events.find((e) => rode(e.status))?.date || "",
   };
 }
 
