@@ -1,6 +1,5 @@
-import { readFileSync } from "fs";
-import path from "path";
 import { NextResponse } from "next/server";
+import { serverBuildId } from "@/lib/serverBuild.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,27 +13,10 @@ export const dynamic = "force-dynamic";
  * open, so its screens are the old ones (2026-09-30: teachers keep the ERP
  * open on their phones for days and never reload).
  *
- * Next writes .next/BUILD_ID once per `next build`, and the standalone
- * server ships it. Cloud Run's K_REVISION is the fallback. Public on
- * purpose — it says nothing but an opaque id.
+ * The id is lib/serverBuild.server.ts — the same function the stale-build
+ * check compares `X-Bhb-Build` against. Public on purpose — it says nothing
+ * but an opaque id.
  */
-let cached: string | null = null;
-function buildId(): string {
-  if (cached) return cached;
-  for (const p of [
-    path.join(process.cwd(), ".next", "BUILD_ID"),
-    path.join(process.cwd(), "apps", "web", ".next", "BUILD_ID"),
-  ]) {
-    try {
-      const id = readFileSync(p, "utf8").trim();
-      if (id) return (cached = id);
-    } catch {
-      /* try the next place */
-    }
-  }
-  return (cached = process.env.K_REVISION || "unknown");
-}
-
 /**
  * The git commit this image was built from (13 Oct 2026), set by the deploy
  * as APP_COMMIT_SHA. Answers "is the fix live?" without hashing a source
@@ -48,7 +30,7 @@ function commitSha(): string | null {
 
 export function GET() {
   return NextResponse.json(
-    { build: buildId(), commit: commitSha() },
+    { build: serverBuildId(), commit: commitSha() },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

@@ -37,6 +37,7 @@ import { applyFeeDiscountSeedNow } from "@/lib/feeDiscountImportHydrate";
 import { consumeFreshLoginSession, flushAllDeskSyncPending, resetAllWorkspacePersistenceCaches } from "@/lib/workspaceClientSession";
 import { useWorkspaceInactivityLogout } from "./useWorkspaceInactivityLogout";
 import { ToastHost } from "./Toast";
+import { useClientMetrics } from "./useClientMetrics";
 
 export function AppShell({
   session,
@@ -47,6 +48,8 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  // page-ready per route + desk-hydrate per desk (data-layer 1.2).
+  useClientMetrics(pathname);
   const mobileApp = useMobileAppShell();
   const standalone = usePwaStandalone();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);

@@ -1,4 +1,6 @@
+import "dart:async" show unawaited;
 import "dart:convert";
+import "dart:math" as math;
 import "dart:typed_data";
 
 import "package:flutter_secure_storage/flutter_secure_storage.dart";
@@ -3009,6 +3011,74 @@ class ApiClient {
     };
   }
 
+  /// The home-screen calls whose duration the ERP records (data-layer 1.2,
+  /// web lib/clientMetrics.server.ts): one in five successes, every failure.
+  static const _timedHomePaths = {
+    "/api/v1/parent/summary",
+    "/api/v1/staff/summary",
+    "/api/v1/principal/snapshot",
+    "/api/v1/staff/approvals",
+    "/api/v1/comms/feed",
+    "/api/v1/app/popups",
+  };
+  static final _sample = math.Random();
+
+  /// GET with the session, exactly as before, timed for [_timedHomePaths].
+  Future<http.Response> _timedGet(String path) async {
+    final headers = await _authHeaders();
+    final watch = Stopwatch()..start();
+    try {
+      final res = await http.get(_uri(path), headers: headers);
+      _noteTiming(
+        path,
+        watch.elapsedMilliseconds,
+        res.statusCode,
+        res.bodyBytes.length,
+      );
+      return res;
+    } catch (_) {
+      _noteTiming(path, watch.elapsedMilliseconds, null, null);
+      rethrow;
+    }
+  }
+
+  /// Sends one `/api/client-metrics` report in the background. Never awaited,
+  /// never throws, never changes what the caller gets.
+  void _noteTiming(String path, int ms, int? status, int? bytes) {
+    try {
+      final route = path.split("?").first;
+      if (!_timedHomePaths.contains(route)) return;
+      final failed = status == null || status >= 500;
+      if (!failed && _sample.nextInt(5) != 0) return;
+      final build = AppBuild.flavor.isNotEmpty && AppBuild.build > 0
+          ? "${AppBuild.flavor}-${AppBuild.build}"
+          : "unknown";
+      unawaited(() async {
+        try {
+          await http
+              .post(
+                _uri("/api/client-metrics"),
+                headers: await _authHeaders(),
+                body: jsonEncode({
+                  "event": failed ? "query-error" : "query",
+                  "route": route,
+                  "key": "GET",
+                  "ms": ms,
+                  "bytes": ?bytes,
+                  "platform": "flutter",
+                  "build": build,
+                }),
+              )
+              .timeout(const Duration(seconds: 10));
+        } catch (_) {
+          /* telemetry is never worth an error on the phone */
+        }
+      }());
+    } catch (_) {
+      /* never */
+    }
+  }
+
   void _captureCookie(http.Response res) {
     final setCookie = res.headers["set-cookie"];
     if (setCookie == null) return;
@@ -3241,10 +3311,7 @@ class ApiClient {
 
   /// The parent home screen payload — real children + fee dues.
   Future<ParentSummary> fetchParentSummary() async {
-    final res = await http.get(
-      _uri("/api/v1/parent/summary"),
-      headers: await _authHeaders(),
-    );
+    final res = await _timedGet("/api/v1/parent/summary");
     if (res.statusCode != 200) _throwFrom(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     return ParentSummary.fromJson(body["data"] as Map<String, dynamic>);
@@ -3260,10 +3327,7 @@ class ApiClient {
   }
 
   Future<StaffSummary> fetchStaffSummary() async {
-    final res = await http.get(
-      _uri("/api/v1/staff/summary"),
-      headers: await _authHeaders(),
-    );
+    final res = await _timedGet("/api/v1/staff/summary");
     if (res.statusCode != 200) _throwFrom(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final summary = StaffSummary.fromJson(body["data"] as Map<String, dynamic>);
@@ -3290,7 +3354,7 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> _getData(String path) async {
-    final res = await http.get(_uri(path), headers: await _authHeaders());
+    final res = await _timedGet(path);
     if (res.statusCode != 200) _throwFrom(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     return body["data"] as Map<String, dynamic>;
