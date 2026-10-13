@@ -1,10 +1,15 @@
 /**
  * counts — every main screen shows the seeded school, read from the DOM.
  *
- * As the office, each page is opened cold and must show the seeded numbers
- * within 5 s of the navigation starting (`DEADLINE_MS`). Runs in the `desktop`
- * project and in `phone-375-cpu4x` (375 px, touch, CPU throttled 4× via CDP).
- * The time each page took to show its numbers is recorded on the scoreboard.
+ * As the office, each page is opened cold. Two separate assertions, so a
+ * failure says which one broke:
+ *   1. count  — the screen shows the seeded number (polled for up to
+ *               CORRECT_WITHIN_MS = 30 s: a wrong number is a wrong number,
+ *               however long one waits);
+ *   2. speed  — it showed it within SPEED_MS = 5 s of the navigation starting
+ *               (step "speed"; only reachable when the count is right).
+ * Runs in the `desktop` project and in `phone-375-cpu4x` (375 px, touch, CPU
+ * throttled 4× via CDP). The time each page took is on the scoreboard.
  *
  * What each screen renders, and the selector used (roles / labels / visible
  * text; one data-testid):
@@ -37,7 +42,8 @@ import type { Page, TestInfo } from "@playwright/test";
 import { AY_CURRENT, classId, sectionId } from "../fixture";
 import { collectPageErrors, expect, fx, leadingNumber, metric, note, test } from "../support";
 
-const DEADLINE_MS = 5_000;
+const SPEED_MS = 5_000;
+const CORRECT_WITHIN_MS = 30_000;
 
 const e = fx.expected;
 const CLASS_V = classId(8);
@@ -185,13 +191,13 @@ const PAGES: { path: string; prepare?: (page: Page) => Promise<void>; checks: Ch
 async function checkPage(page: Page, testInfo: TestInfo, path: string, prepare: ((p: Page) => Promise<void>) | undefined, checks: Check[]) {
   const errors = collectPageErrors(page);
   const t0 = Date.now();
-  const deadline = t0 + DEADLINE_MS;
+  const deadline = t0 + CORRECT_WITHIN_MS;
   const timings: Record<string, number | null> = {};
   const seen: Record<string, number | null> = {};
   const diagnosis: Record<string, unknown> = {};
   try {
     await test.step(`open ${path}`, async () => {
-      await page.goto(path, { timeout: DEADLINE_MS });
+      await page.goto(path, { timeout: CORRECT_WITHIN_MS });
     });
     if (prepare) {
       await test.step("prepare", async () => {
@@ -220,10 +226,14 @@ async function checkPage(page: Page, testInfo: TestInfo, path: string, prepare: 
         timings[c.what] = Date.now() - t0;
       });
     }
+    await test.step(`speed: every number shown within ${SPEED_MS} ms`, async () => {
+      const slowest = Math.max(...Object.values(timings).map((v) => v ?? Infinity));
+      expect(slowest, `${path}: ms until the last number was right (${JSON.stringify(timings)})`).toBeLessThanOrEqual(SPEED_MS);
+    });
   } finally {
     await metric(testInfo, "dom", {
       page: path,
-      deadlineMs: DEADLINE_MS,
+      speedLimitMs: SPEED_MS,
       expected: Object.fromEntries(checks.map((c) => [c.what, c.expected])),
       seen,
       msToShow: timings,
