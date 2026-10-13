@@ -481,6 +481,7 @@
     "test:payroll-deduction-heads": "npx tsx src/lib/payrollDeductionHeads.selftest.ts",
     "test:masters-change-auth": "npx tsx src/lib/mastersChangeAuth.selftest.ts",
     "test:timetable-free-grid": "npx tsx src/lib/timetableFreeGrid.selftest.ts",
+    "test:teacher-load-published": "npx tsx src/lib/teacherLoadPublished.selftest.ts",
     "test:udise-teacher-apaar": "npx tsx src/lib/udiseTeacherApaar.selftest.ts",
     "test:udise-teacher-sync": "npx tsx src/lib/udiseTeacherSync.selftest.ts",
     "test:login-unknown-numbers": "npx tsx src/lib/loginUnknownNumbers.selftest.ts",

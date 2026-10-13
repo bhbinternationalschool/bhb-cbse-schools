@@ -206,6 +206,7 @@ SELFTESTS=(
   test:payroll-deduction-heads
   test:masters-change-auth
   test:timetable-free-grid
+  test:teacher-load-published
   test:udise-teacher-apaar
   test:udise-teacher-sync
   test:login-unknown-numbers
