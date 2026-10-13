@@ -287,6 +287,8 @@ const PUBLIC_API_ROUTES: Record<string, string> = {
   "auth/demo": "sign-in itself (refused in production by the route)",
   "client-metrics":
     "telemetry: any signed-in session, checked in lib/clientMetrics.server (sessionFromRequest, 401 otherwise); reads no school data, writes one log line",
+  "data/views/versions":
+    "the change signal (data-layer 1.3): any signed-in staff or parent session by design, checked in the route (resolveApiAuth, 401 otherwise); answers a timestamp and a count per desk, no rows",
   "auth/first-login/request-otp": "sign-in: sends an OTP to a registered number",
   "auth/link/office": "parent number linking before login; the office approves",
   "auth/link/start": "parent number linking before login; a code goes to the registered phone",

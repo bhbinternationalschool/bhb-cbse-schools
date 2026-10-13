@@ -16,8 +16,8 @@
  * and that answer is held for the same window, so an outage costs one call
  * per window too, not one per request.
  */
-import "server-only";
-
+// Server code, but no `import "server-only"`: lib/api/v1/auth.ts imports this,
+// and many self-tests import auth.ts under plain tsx.
 import { getServerTenantContext } from "@/lib/serverTenant";
 
 export const VERSIONS_TTL_MS = 2_000;

@@ -27,8 +27,8 @@
  *    it): the next read rebuilds, and a build that started before the
  *    invalidation is returned to its own callers but not stored.
  */
-import "server-only";
-
+// Server code, but no `import "server-only"`: lib/api/v1/auth.ts imports this,
+// and many self-tests import auth.ts under plain tsx.
 import { forgetErpVersions, readErpVersions, type VersionsSnapshot } from "./versions";
 
 export type BuildResult<T> =
