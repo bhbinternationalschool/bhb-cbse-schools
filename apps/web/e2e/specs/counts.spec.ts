@@ -7,7 +7,10 @@
  *               CORRECT_WITHIN_MS = 30 s: a wrong number is a wrong number,
  *               however long one waits);
  *   2. speed  — it showed it within SPEED_MS = 5 s of the navigation starting
- *               (step "speed"; only reachable when the count is right).
+ *               (step "speed"; only reachable when the count is right). A
+ *               gate on desktop; on the throttled phone it is measured and
+ *               annotated ("slow on phone") but not gated — there it moved
+ *               between 2.6 and 5.2 s with machine load alone (13 Oct).
  * Runs in the `desktop` project and in `phone-375-cpu4x` (375 px, touch, CPU
  * throttled 4× via CDP). The time each page took is on the scoreboard.
  *
@@ -68,13 +71,15 @@ const KNOWN: Record<string, Partial<Record<string, string>>> = {
       "the page crashes — React #185 'Maximum update depth exceeded' (a dev build points at ErpSidebar's route " +
       "effect) whenever the roster holds students; no count is drawn (S2). Until step 3.x.",
     "/attendance":
-      "V-A's 2026-27 register counts rows with a BLANK academic year as this year's: other children's old rows " +
-      "join it (unknown became fact, S2); the admission numbers are in the metric. Until step 3.1.",
+      "V-A's 2026-27 register is wrong either way (S2): in most desktop opens it stays at Strength 0 for 30 s although " +
+      "the page's GET sis-roster (all 401 rows) completed ~1.3 s after navigation (metric desksLoadedAtMs) — the data " +
+      "arrived and the screen did not draw it; otherwise it shows 21: rows with a BLANK academic " +
+      "year counted as this year's (admission numbers in the metric). Until step 3.1.",
   },
   "phone-375-cpu4x": {
     "/staff": "as desktop: 0 active staff (seeded 34). Until steps 1.4/2.1.",
     "/students": "no Active students card within 5 s; the same page crashes with React #185 on desktop. Until step 3.x.",
-    "/attendance": "as desktop: blank-year rows counted into V-A's 2026-27 register. Until step 3.1.",
+    "/attendance": "as desktop: V-A's register shows blank-year rows as this year's (21, seeded 19), or stays at 0. Until step 3.1.",
   },
 };
 
@@ -145,7 +150,7 @@ const PAGES: { path: string; prepare?: (page: Page) => Promise<void>; checks: Ch
           const cls = p.getByRole("combobox", { name: "Class", exact: true }).first();
           if ((await cls.inputValue()) !== CLASS_V) await cls.selectOption({ label: "V" });
           const sec = p.getByRole("combobox", { name: "Section", exact: true }).first();
-          if ((await sec.inputValue()) !== SECTION_VA) await sec.selectOption({ label: "A" }).catch(() => undefined);
+          if ((await sec.inputValue()) !== SECTION_VA) await sec.selectOption({ value: SECTION_VA }).catch(() => undefined);
           const m = /Strength\s+(\d+)/.exec((await p.getByText(/^Strength\s+\d+$/).first().textContent().catch(() => null)) ?? "");
           return m ? Number(m[1]) : null;
         },
@@ -191,6 +196,14 @@ const PAGES: { path: string; prepare?: (page: Page) => Promise<void>; checks: Ch
 async function checkPage(page: Page, testInfo: TestInfo, path: string, prepare: ((p: Page) => Promise<void>) | undefined, checks: Check[]) {
   const errors = collectPageErrors(page);
   const t0 = Date.now();
+  // When the page's own reads of the three big desks completed (ms after the
+  // navigation started) — to tell "the data never came" from "it came and the
+  // screen did not draw it".
+  const loadedAtMs: Record<string, string> = {};
+  page.on("response", (r) => {
+    const m = /\/api\/school-data\/(sis-roster|staff-roster|masters-desk)(?:\?|$)/.exec(r.url());
+    if (m && r.request().method() === "GET" && loadedAtMs[m[1]!] === undefined) loadedAtMs[m[1]!] = `${Date.now() - t0} ms, HTTP ${r.status()}`;
+  });
   const deadline = t0 + CORRECT_WITHIN_MS;
   const timings: Record<string, number | null> = {};
   const seen: Record<string, number | null> = {};
@@ -226,10 +239,17 @@ async function checkPage(page: Page, testInfo: TestInfo, path: string, prepare: 
         timings[c.what] = Date.now() - t0;
       });
     }
-    await test.step(`speed: every number shown within ${SPEED_MS} ms`, async () => {
-      const slowest = Math.max(...Object.values(timings).map((v) => v ?? Infinity));
-      expect(slowest, `${path}: ms until the last number was right (${JSON.stringify(timings)})`).toBeLessThanOrEqual(SPEED_MS);
-    });
+    const slowest = Math.max(...Object.values(timings).map((v) => v ?? Infinity));
+    if (testInfo.project.name === "desktop") {
+      await test.step(`speed: every number shown within ${SPEED_MS} ms`, async () => {
+        expect(slowest, `${path}: ms until the last number was right (${JSON.stringify(timings)})`).toBeLessThanOrEqual(SPEED_MS);
+      });
+    } else if (slowest > SPEED_MS) {
+      // On the 4×-throttled phone the speed is measured and shown, not gated:
+      // on 13 Oct the same pages took 2.6–5.2 s depending only on how busy the
+      // machine was, so a hard 5 s line there would flip on load, not on code.
+      note(testInfo, "slow on phone", `last number right after ${slowest} ms (> ${SPEED_MS} ms)`);
+    }
   } finally {
     await metric(testInfo, "dom", {
       page: path,
@@ -237,6 +257,7 @@ async function checkPage(page: Page, testInfo: TestInfo, path: string, prepare: 
       expected: Object.fromEntries(checks.map((c) => [c.what, c.expected])),
       seen,
       msToShow: timings,
+      desksLoadedAtMs: loadedAtMs,
       pageErrors: errors.slice(0, 3),
       ...(Object.keys(diagnosis).length ? { diagnosis } : {}),
     });
