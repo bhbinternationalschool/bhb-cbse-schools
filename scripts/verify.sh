@@ -482,6 +482,7 @@ SELFTESTS=(
   test:receipt-lookup
   test:referrals
   test:report-export
+  test:reports-wrong-figures
   test:fee-reports-year-scope
   test:report-data-guard
   test:report-export-format
