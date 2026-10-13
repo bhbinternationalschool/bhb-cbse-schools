@@ -51,6 +51,9 @@ import {
   type ReportsCenterModuleId,
 } from "@/lib/reportsCenterCatalog";
 import { isModuleEnabled } from "@/lib/moduleRegistry";
+import { ReportDataGate } from "@/components/reports/ReportDataGate";
+import type { ReportDesk } from "@/lib/reportDataGuard";
+import { reportDesksFor, type ReportCatalog } from "@/lib/reportDesks";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
   ErpTable,
@@ -388,11 +391,40 @@ export function ReportsCenterWorkspace() {
               Open full module →
             </Link>
           </div>
-          <ModuleRunner id={tab} ay={ay} hideStaffRecords={hideStaffRecords} />
+          {/* Each module's panel mounts only once the records its reports
+              read have loaded — keyed by tab so switching modules re-gates. */}
+          <ReportDataGate key={tab} desks={moduleReportDesks(tab, hideStaffRecords)}>
+            <ModuleRunner id={tab} ay={ay} hideStaffRecords={hideStaffRecords} />
+          </ReportDataGate>
         </section>
       ) : null}
     </ErpWorkspaceShell>
   );
+}
+
+/**
+ * The stores a Reports Center module tab reads (lib/reportDesks). Link-only
+ * tabs and the store (server reports) need none.
+ */
+function moduleReportDesks(id: ReportsCenterModuleId, hideStaffRecords: boolean): ReportDesk[] {
+  const cats: Partial<Record<ReportsCenterModuleId, ReportCatalog[]>> = {
+    fees: ["fees"],
+    students: ["sis"],
+    admissions: ["admissions"],
+    staff: ["staff_leave"],
+    attendance: hideStaffRecords ? ["student_attendance"] : ["student_attendance", "staff_leave"],
+    homework: ["homework"],
+    payroll: ["payroll"],
+    transport: ["transport"],
+    accounts: ["accounts"],
+    trust: ["trust"],
+    timetable: ["timetable"],
+    exams: ["exams"],
+    library: ["library"],
+    certificates: ["certificates"],
+    comms: ["comms"],
+  };
+  return [...new Set((cats[id] ?? []).flatMap((c) => reportDesksFor(c)))];
 }
 
 function ModuleRunner({

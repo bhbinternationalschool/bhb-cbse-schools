@@ -21,6 +21,8 @@ import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { recordPtmDeletion } from "@/lib/ptmNormalizedClient";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 const STORAGE_KEY = "bhb_ptm_v1";
 
@@ -641,6 +643,9 @@ export function runPtmReport(
     students?: SisStudent[];
   },
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("ptm", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const ptm = filters.ptm ?? loadPtm();
   const masters = filters.masters ?? loadMasters();
   const sis = loadSis();

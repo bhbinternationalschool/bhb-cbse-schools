@@ -39,6 +39,8 @@ import {
   isUdiseFullyCompliant,
   loadUdiseComplianceSettings,
 } from "@/lib/udiseCompliance";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type SisReportFormat = "excel" | "pdf";
 
@@ -762,6 +764,9 @@ export function runSisReport(
   id: SisReportId,
   filters: SisReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("sis", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   // Every format here is a file download of children's records (names,
   // DOB, category, Aadhaar-bearing registers). "students.view" — which
   // every teacher holds — used to be enough.
