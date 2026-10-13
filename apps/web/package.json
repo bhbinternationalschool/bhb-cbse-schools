@@ -450,6 +450,8 @@
     "test:client-metrics-sender": "npx tsx src/lib/clientMetricsSender.selftest.ts",
     "test:stale-build": "npx tsx src/lib/staleBuild.selftest.ts",
     "test:erp-fetch": "npx tsx src/lib/data/erpFetch.selftest.ts",
+    "test:reference-cache": "npx tsx src/lib/data/server/referenceCache.selftest.ts",
+    "test:versions-route": "npx tsx src/lib/data/server/versionsRoute.selftest.ts",
     "test:outdoor-duty-staff-id": "npx tsx src/lib/outdoorDutyStaffId.selftest.ts",
     "test:outdoor-duty-persistence": "npx tsx src/lib/outdoorDutyPersistence.selftest.ts",
     "test:puter-ai": "npx tsx src/lib/puterAi.selftest.ts",
