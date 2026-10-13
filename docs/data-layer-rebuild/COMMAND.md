@@ -388,8 +388,8 @@ control, the edit and a database read-back have passed, and with `visibleAfterRe
 the same locator finds the change once B reloads), counts at the count, teacher tests at the
 scope check.
 
-**The scoreboard on origin/main 0a9ae0c3 (two clean local runs + CI).** 13 pass, 30
-expected-fail, 2 fixme, 0 fail:
+**The scoreboard on origin/main eb966b7f (with 1.7 merged; clean local runs + CI).** 14 pass,
+29 expected-fail, 2 fixme, 0 fail:
 - counts — pass: `/masters` (15 classes, 44 subjects), `/timetable` (15 classes; V's Subject
   rules "45 periods a week asked"), `/homework` (15 classes; 22 subjects in Compose HW), on
   desktop (1.1–2.6 s) and on the phone (2.6–5.2 s — on the phone the 5 s line is measured, not
@@ -401,9 +401,10 @@ expected-fail, 2 fixme, 0 fail:
   rows with a blank academic year counted as this year's).
 - teacher — the class teacher's register lists 27 for Nursery-A (seeded 20: the section's 7
   blank-year rows — 5 other children, 2 of hers twice); her `/students` crashes (#185); the
-  timetable-only teacher gets "No classes are assigned to you yet" and 0 students (until 1.7).
-  Pass: her picker offers exactly Nursery (the control for the picker check); with masters-desk
-  503 both teachers see "could not load" + Try again.
+  timetable-only teacher's `/students` crashes too now that 1.7 gives her 61 rows (before 1.7 it
+  showed 0). Pass: the class teacher's picker offers exactly Nursery; the timetable-only teacher's
+  offers exactly III and V (an expected failure until 1.7 — CI caught the flip on the merge ref);
+  with masters-desk 503 both see "could not load" + Try again.
 - error — pass on `/masters`, `/attendance`, `/timetable`, `/homework`: CoreDataGate turns the 503
   into "Could not load the school's classes, subjects and staff from the server." + Try again
   (shown ~7 s after navigation), draws no picker, and Try again recovers without a reload.

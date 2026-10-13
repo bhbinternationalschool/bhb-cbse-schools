@@ -144,8 +144,13 @@ test.describe("timetable-only teacher (III-A, V-A by the published timetable)", 
   });
 
   test("/students: Active students = her sections' 2026-27 children", async ({ browser }, testInfo) => {
-    test.fail(true, "shows 0 active students: the server finds no section for her (timetable never loaded server-side). Until step 1.7.");
+    test.fail(
+      true,
+      "until step 1.7 it showed 0 (the server found no section for her); since 1.7 (#588) her roster holds her 61 " +
+        "rows and the page crashes with React #185 like every /students with students (S2). Until step 3.x.",
+    );
     const { context, page } = await openAs(browser, "timetableTeacher");
+    const errors = collectPageErrors(page);
     let seen: number | null = null;
     try {
       await page.goto("/students");
@@ -156,7 +161,7 @@ test.describe("timetable-only teacher (III-A, V-A by the published timetable)", 
           .toBe(ttChildren.length);
       });
     } finally {
-      await metric(testInfo, "students", { expected: ttChildren.length, seen });
+      await metric(testInfo, "students", { expected: ttChildren.length, seen, pageErrors: errors.slice(0, 2) });
       await context.close();
     }
   });
