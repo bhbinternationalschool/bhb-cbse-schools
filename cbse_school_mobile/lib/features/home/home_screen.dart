@@ -21,6 +21,7 @@ import "../modules/gallery_screen.dart";
 import "../modules/fees_screen.dart";
 import "../modules/homework_screen.dart";
 import "../modules/leave_screen.dart";
+import "../modules/notice_detail_screen.dart";
 import "../modules/notices_screen.dart";
 import "../modules/ptm_screen.dart";
 import "../modules/receipts_screen.dart";
@@ -165,7 +166,12 @@ class _HomeScreenState extends State<HomeScreen> {
       case "/fees":
         _openModule("Fees", child);
       case "/notices":
-        _openModule("Notices", child);
+        // A tapped broadcast opens in full; otherwise the notices list.
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => noticesScreenForRoute(widget.api, uri),
+          ),
+        );
       case "/ptm":
         _openModule("PTM", child);
       case "/transport":

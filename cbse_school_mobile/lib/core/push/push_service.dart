@@ -10,6 +10,7 @@ import "package:package_info_plus/package_info_plus.dart";
 
 import "../api/api_client.dart";
 import "../i18n/locale_controller.dart";
+import "broadcast_inbox.dart";
 
 /// FCM push for the app. One instance per app; `init()` once at startup,
 /// `registerWithServer()` after every sign-in / session resume, and
@@ -47,8 +48,11 @@ class PushService {
     final parts = id.split("_"); // bhb voice <kind> <lang>
     final names = _voiceKinds[parts[2]];
     if (names == null) return id;
-    return parts[3] == "hi" ? "${names.$2} (हिंदी आवाज़)" : "${names.$1} (English voice)";
+    return parts[3] == "hi"
+        ? "${names.$2} (हिंदी आवाज़)"
+        : "${names.$1} (English voice)";
   }
+
   // Shown in the phone's notification settings, so in the app's language.
   // Re-creating the channel at every start renames it after a switch.
   static String get _channelName => LocaleController.strings.sysPushChannelName;
@@ -227,6 +231,14 @@ class PushService {
     // The spoken line the server chose, when this app has that channel.
     final voice = m.data["voice"];
     final voiced = voice is String && _voiceChannelIds.contains(voice);
+    // The notification body is cut at 200 characters by the server; a
+    // broadcast carries its whole text, so the expanded notification shows
+    // all of it (and a tap opens it in full — BroadcastInbox).
+    final full = m.data["fullText"];
+    final expanded = full is String && full.trim().isNotEmpty
+        ? full
+        : (body ?? "");
+    final style = BigTextStyleInformation(expanded, contentTitle: title);
     await _local.show(
       m.hashCode,
       title,
@@ -241,6 +253,7 @@ class PushService {
                 priority: Priority.high,
                 playSound: true,
                 sound: RawResourceAndroidNotificationSound(voice),
+                styleInformation: style,
               )
             : AndroidNotificationDetails(
                 _channelId,
@@ -248,25 +261,26 @@ class PushService {
                 channelDescription: _channelDescription,
                 importance: Importance.high,
                 priority: Priority.high,
+                styleInformation: style,
               ),
       ),
-      payload: jsonEncode(m.data),
+      payload: jsonEncode({...m.data, "title": ?title}),
     );
   }
 
-  static String? _routeFromMessage(RemoteMessage m) {
-    final url = m.data["url"];
-    if (url is String && url.startsWith("/")) return url;
-    return null;
-  }
+  /// A tapped broadcast routes to its full text (BroadcastInbox), anything
+  /// else to the `url` the server sent.
+  static String? _routeFromMessage(RemoteMessage m) => BroadcastInbox.routeFor({
+    ...m.data,
+    if (m.notification?.title != null) "title": m.notification!.title,
+  });
 
   static String? _routeFromPayload(String? payload) {
     if (payload == null || payload.isEmpty) return null;
     try {
       final data = jsonDecode(payload);
-      if (data is Map && data["url"] is String) {
-        final url = data["url"] as String;
-        if (url.startsWith("/")) return url;
+      if (data is Map) {
+        return BroadcastInbox.routeFor(Map<String, dynamic>.from(data));
       }
     } catch (_) {
       /* ignore */

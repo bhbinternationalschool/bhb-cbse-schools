@@ -47,11 +47,9 @@ class _RunningStripState extends State<RunningStrip>
   Future<void> _load() async {
     try {
       final all = await widget.api.fetchCommsFeed();
-      final sorted = [...all]
-        ..sort((a, b) {
-          if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
-          return b.publishedAt.compareTo(a.publishedAt);
-        });
+      // The same order the notices list opens in, so a tap on the strip
+      // lands on the notice it led with, at the top, one tap from in full.
+      final sorted = [...all]..sort(CommsItem.stripOrder);
       if (!mounted) return;
       setState(() => _items = sorted.take(8).toList());
       WidgetsBinding.instance.addPostFrameCallback((_) => _start());

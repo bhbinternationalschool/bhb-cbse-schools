@@ -1,5 +1,6 @@
 import "dart:async" show unawaited;
 import "dart:convert";
+import "dart:io" show File;
 import "dart:math" as math;
 import "dart:typed_data";
 
@@ -319,6 +320,7 @@ class StaffSummary {
     required this.periodsToday,
     required this.classes,
     this.homeKind = "",
+    this.photoUrl = "",
   });
 
   factory StaffSummary.fromJson(Map<String, dynamic> j) => StaffSummary(
@@ -336,9 +338,13 @@ class StaffSummary {
         .map((c) => ClassRef.fromJson(c as Map<String, dynamic>))
         .toList(),
     homeKind: (j["homeKind"] as String?) ?? "",
+    photoUrl: ((j["staff"] as Map?)?["photoUrl"] as String?) ?? "",
   );
 
   final String fullName;
+
+  /// The staff member's own photo — an ERP path (/api/file/…) or "".
+  final String photoUrl;
   final String date;
   final ClassTeacherInfo? classTeacherOf;
   final List<PeriodToday> periodsToday;
@@ -1800,20 +1806,38 @@ class HomeworkFeed {
 
 class CommsItem {
   const CommsItem({
+    this.id = "",
     required this.title,
     required this.body,
     required this.publishedAt,
     required this.pinned,
     required this.isNews,
     required this.summary,
+    this.coverUrl = "",
+    this.sender = "",
   });
 
+  /// The ERP's notice / news id; empty for a broadcast opened from a push.
+  final String id;
   final String title;
   final String body;
   final String publishedAt;
   final bool pinned;
   final bool isNews;
   final String summary;
+
+  /// News cover image — a full URL (own-server paths are made absolute).
+  final String coverUrl;
+
+  /// Who sent it — set only for a broadcast opened from a notification.
+  final String sender;
+
+  /// Pinned first, then newest first — the order the running strip shows,
+  /// so the list opens on the same notice the strip led with.
+  static int stripOrder(CommsItem a, CommsItem b) {
+    if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+    return b.publishedAt.compareTo(a.publishedAt);
+  }
 }
 
 class PtmSlotInfo {
@@ -4059,6 +4083,11 @@ class ApiClient {
   /// for storage or any other host — the session must not leave the school.
   bool isOwnServer(String url) => url.startsWith(config.apiBaseUrl);
 
+  /// An ERP-relative path ("/api/file/…") as a full URL; anything else as is.
+  /// Load it with [imageHeaders] when [isOwnServer] says it is ours.
+  String erpUrl(String url) =>
+      url.startsWith("/") ? "${config.apiBaseUrl}$url" : url;
+
   /// A ten-minute link to a class-gallery video, for the phone's player.
   Future<String> galleryVideoLink(String photoId) async {
     final data = await _getData(
@@ -4269,6 +4298,7 @@ class ApiClient {
       ...((data["notices"] as List?) ?? const []).map((raw) {
         final n = raw as Map<String, dynamic>;
         return CommsItem(
+          id: "${n["id"] ?? ""}",
           title: (n["title"] as String?) ?? "",
           body: (n["body"] as String?) ?? "",
           publishedAt: (n["publishedAt"] as String?) ?? "",
@@ -4280,12 +4310,14 @@ class ApiClient {
       ...((data["news"] as List?) ?? const []).map((raw) {
         final n = raw as Map<String, dynamic>;
         return CommsItem(
+          id: "${n["id"] ?? ""}",
           title: (n["title"] as String?) ?? "",
           body: (n["body"] as String?) ?? "",
           publishedAt: (n["publishedAt"] as String?) ?? "",
           pinned: false,
           isNews: true,
           summary: (n["summary"] as String?) ?? "",
+          coverUrl: erpUrl("${n["coverUrl"] ?? ""}"),
         );
       }),
     ];
