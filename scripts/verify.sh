@@ -452,6 +452,7 @@ SELFTESTS=(
   test:visiting-pay
   test:visiting-exclusions
   test:payroll-staggered-runs
+  test:staff-payslips
   test:diksha-index
   test:teacher-contact
   test:question-bank

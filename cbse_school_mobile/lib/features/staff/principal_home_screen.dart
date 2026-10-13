@@ -24,6 +24,7 @@ import "visitor_gate_screen.dart";
 import "home_groups.dart";
 import "leave_approvals_screen.dart";
 import "my_attendance_calendar_screen.dart";
+import "my_advances_screen.dart";
 import "my_profile_screen.dart";
 import "payslips_screen.dart";
 import "marks_screen.dart";
@@ -527,6 +528,15 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
         label: "Payslips · वेतन पर्ची",
         tone: ModuleTone.gray,
         onTap: () => _push(PayslipsScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "my_advances",
+      _Action(
+        icon: Icons.account_balance_wallet_outlined,
+        label: "My advances",
+        tone: ModuleTone.amber,
+        onTap: () => _push(MyAdvancesScreen(api: widget.api)),
       ),
     ),
     (

@@ -162,6 +162,8 @@ const List<ScreenGuide> staffScreenGuides = [
       "Tap **Punch IN** in the morning or **Punch OUT** when you leave.",
       "Scan the QR on the office screen, or type the code in **Or type the 6-digit code**.",
       "Tap **Punch IN** / **Punch OUT** again; the time shows under **IN** and **OUT**.",
+      "Going out for school work? Under **Outdoor duty**, pick the purpose, write where you are going and tap **Check out for outdoor duty**.",
+      "When you are back, tap **Check in — I'm back** on the same card.",
     ],
     stepsHi: [
       "लोकेशन (जीपीएस) चालू करें और विद्यालय परिसर के अंदर रहें।",
@@ -169,16 +171,20 @@ const List<ScreenGuide> staffScreenGuides = [
       "सुबह **Punch IN** और जाते समय **Punch OUT** दबाएँ।",
       "ऑफ़िस स्क्रीन का QR स्कैन करें, या **Or type the 6-digit code** में कोड लिखें।",
       "फिर **Punch IN** / **Punch OUT** दबाएँ; समय **IN** और **OUT** के नीचे दिखेगा।",
+      "स्कूल के काम से बाहर जा रहे हैं? **Outdoor duty** में काम चुनें, कहाँ जा रहे हैं लिखें और **Check out for outdoor duty** दबाएँ।",
+      "लौटने पर उसी कार्ड पर **Check in — I'm back** दबाएँ।",
     ],
     tipsEn: [
       "If you see **Turn on location (GPS) to punch attendance.**, switch on GPS in your phone.",
       "If you see **too vague** next to GPS accuracy, move outdoors and wait a moment.",
       "If you see **Mock location is ON**, turn off the fake-GPS app; mock punches are rejected.",
+      "Outdoor duty counts the day as present and sends the school leadership a short note; no office QR is needed for it.",
     ],
     tipsHi: [
       "अगर **Turn on location (GPS) to punch attendance.** दिखे, तो फ़ोन में जीपीएस चालू करें।",
       "अगर जीपीएस सटीकता के साथ **too vague** दिखे, तो खुले में जाएँ और थोड़ा रुकें।",
       "अगर **नक़ली लोकेशन चालू है** दिखे, तो फ़ेक-जीपीएस ऐप बंद करें; नक़ली पंच अस्वीकार होते हैं।",
+      "बाहर की ड्यूटी पर दिन हाज़िर गिना जाता है और स्कूल प्रबंधन को छोटी सूचना जाती है; इसके लिए ऑफ़िस QR नहीं चाहिए।",
     ],
   ),
   ScreenGuide(
@@ -1136,6 +1142,52 @@ const List<ScreenGuide> staffScreenGuides = [
       "अगर **अभी कोई वेतन पर्ची जारी नहीं हुई है।** दिखे, तो वेतन स्वीकृत होने पर पर्ची आएगी।",
       "अगर **salary is being prepared** दिखे, तो दफ़्तर के स्वीकृत करने तक रुकें।",
       "अगर महीने पर **on hold** लिखा है, तो दफ़्तर से बात करें।",
+    ],
+  ),
+  ScreenGuide(
+    id: "payslip-pdf",
+    titleEn: "Your payslip as the school prints it",
+    titleHi: "स्कूल की छपी हुई वेतन पर्ची",
+    stepsEn: [
+      "Open **Payslips**, tap a month, then tap **Payslip PDF**.",
+      "The slip opens on the school letterhead; pinch to zoom.",
+      "Check **Earnings**, **Deductions** and **Net pay**.",
+    ],
+    stepsHi: [
+      "**Payslips** खोलें, महीना दबाएँ, फिर **Payslip PDF** दबाएँ।",
+      "पर्ची स्कूल के लेटरहेड पर खुलेगी; बड़ा करने के लिए दो उँगलियों से फैलाएँ।",
+      "**Earnings**, **Deductions** और **Net pay** देखें।",
+    ],
+    tipsEn: [
+      "If you see **No released payslip for that month yet.**, the office has not approved that month.",
+      "Need a printed copy with a signature? Ask the office.",
+    ],
+    tipsHi: [
+      "अगर **No released payslip for that month yet.** दिखे, तो दफ़्तर ने उस महीने का वेतन अभी स्वीकृत नहीं किया है।",
+      "हस्ताक्षर वाली छपी प्रति चाहिए तो दफ़्तर से माँगें।",
+    ],
+  ),
+  ScreenGuide(
+    id: "my-advances",
+    titleEn: "See your salary advances",
+    titleHi: "अपना वेतन एडवांस देखें",
+    stepsEn: [
+      "**Still to recover** at the top is the total you still owe.",
+      "Each card is one advance: the amount, the date it was given and the **Balance**.",
+      "Tap a card to see **Recovered so far** and the payslip months it was cut from.",
+    ],
+    stepsHi: [
+      "ऊपर **Still to recover** कुल बाकी राशि है।",
+      "हर कार्ड एक एडवांस है: राशि, दिए जाने की तारीख़ और **Balance**।",
+      "कार्ड दबाकर **Recovered so far** और जिन महीनों की वेतन पर्ची से कटा, वे देखें।",
+    ],
+    tipsEn: [
+      "How much is cut each month is set by the office in that month's payroll.",
+      "To ask for an advance, or if an amount looks wrong, speak to the office.",
+    ],
+    tipsHi: [
+      "हर महीने कितना कटेगा, यह दफ़्तर उस महीने के वेतन में तय करता है।",
+      "एडवांस चाहिए या राशि ग़लत लगे, तो दफ़्तर से बात करें।",
     ],
   ),
   ScreenGuide(

@@ -33,6 +33,7 @@ import "ptm_teacher_screen.dart";
 import "my_subjects_screen.dart";
 import "home_groups.dart";
 import "my_attendance_calendar_screen.dart";
+import "my_advances_screen.dart";
 import "my_profile_screen.dart";
 import "section_picker.dart";
 import "self_attendance_screen.dart";
@@ -236,6 +237,12 @@ const _staffModules = [
     "my_payslips",
   ),
   // Everyone's own records — not grants, so always shown.
+  _StaffModule(
+    "My advances",
+    Icons.account_balance_wallet_outlined,
+    ModuleTone.amber,
+    "my_advances",
+  ),
   _StaffModule(
     "My attendance",
     Icons.calendar_month_outlined,
@@ -510,6 +517,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         await _pushScreen(OnlineClassesTeacherScreen(api: widget.api));
       case "Payslips":
         await _pushScreen(PayslipsScreen(api: widget.api));
+      case "My advances":
+        await _pushScreen(MyAdvancesScreen(api: widget.api));
       case "My attendance":
         await _pushScreen(MyAttendanceCalendarScreen(api: widget.api));
       case "Leave requests":

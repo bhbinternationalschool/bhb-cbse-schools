@@ -1,6 +1,10 @@
+import "dart:typed_data";
+
 import "package:flutter/material.dart";
+import "package:pdfx/pdfx.dart";
 
 import "../../core/api/api_client.dart";
+import "../../core/guide/screen_guides.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
@@ -137,7 +141,7 @@ class PayslipsScreen extends StatelessWidget {
                   ),
                 ),
               ),
-            for (final s in slips) _SlipCard(s: s),
+            for (final s in slips) _SlipCard(s: s, api: api),
           ],
         ],
       ),
@@ -146,9 +150,10 @@ class PayslipsScreen extends StatelessWidget {
 }
 
 class _SlipCard extends StatelessWidget {
-  const _SlipCard({required this.s});
+  const _SlipCard({required this.s, required this.api});
 
   final Payslip s;
+  final ApiClient api;
 
   @override
   Widget build(BuildContext context) {
@@ -245,6 +250,19 @@ class _SlipCard extends StatelessWidget {
                 style: AppText.bodySmall.copyWith(color: AppColors.warning),
               ),
             ),
+          // The printed slip, on the letterhead — only when the server
+          // offers it (an older server sends no pdfUrl).
+          if (s.pdfUrl.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: () => openPayslipPdf(context, api, s),
+                icon: const Icon(Icons.picture_as_pdf_outlined),
+                label: const Text("Payslip PDF · वेतन पर्ची PDF"),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -307,6 +325,103 @@ class _Row extends StatelessWidget {
           Text(value, style: style.copyWith(color: AppColors.ink)),
         ],
       ),
+    );
+  }
+}
+
+/// Fetch my payslip PDF for the month (with the session) and show it.
+Future<void> openPayslipPdf(
+  BuildContext context,
+  ApiClient api,
+  Payslip s,
+) async {
+  final hindi = Localizations.localeOf(context).languageCode == "hi";
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => AlertDialog(
+      content: Row(
+        children: [
+          const SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(
+              hindi ? "वेतन पर्ची ला रहे हैं…" : "Fetching your payslip…",
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+  try {
+    final bytes = await api.fetchPayslipPdf(s.pdfUrl);
+    if (!context.mounted) return;
+    Navigator.of(context).pop();
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PayslipPdfScreen(
+          title: fullMonthLabel(s.month, hindi: hindi),
+          bytes: Uint8List.fromList(bytes),
+        ),
+      ),
+    );
+  } on ApiException catch (e) {
+    if (!context.mounted) return;
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(e.message)));
+  } catch (_) {
+    if (!context.mounted) return;
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          hindi
+              ? "वेतन पर्ची नहीं आ सकी — इंटरनेट देखें और फिर कोशिश करें।"
+              : "Could not fetch the payslip — check the connection and try again.",
+        ),
+      ),
+    );
+  }
+}
+
+/// The month's payslip as the school prints it, in the app. Pinch to zoom.
+class PayslipPdfScreen extends StatefulWidget {
+  const PayslipPdfScreen({super.key, required this.title, required this.bytes});
+
+  final String title;
+  final Uint8List bytes;
+
+  @override
+  State<PayslipPdfScreen> createState() => _PayslipPdfScreenState();
+}
+
+class _PayslipPdfScreenState extends State<PayslipPdfScreen> {
+  late final PdfControllerPinch _controller = PdfControllerPinch(
+    document: PdfDocument.openData(widget.bytes),
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Payslip · ${widget.title}", style: AppText.titleMedium),
+        actions: const [
+          ScreenGuideButton(guideId: "payslip-pdf", screenLabel: "payslip-pdf"),
+        ],
+      ),
+      body: PdfViewPinch(controller: _controller),
     );
   }
 }

@@ -9,7 +9,9 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "route_manifest_screen.dart";
 import "../modules/notice_detail_screen.dart";
+import "my_advances_screen.dart";
 import "my_attendance_calendar_screen.dart";
+import "payslips_screen.dart";
 import "self_attendance_screen.dart";
 import "transport_requests_screen.dart";
 import "../../core/i18n/locale_controller.dart";
@@ -49,6 +51,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   String? _name;
   String? _error;
   bool _deepLinkDone = false;
+  StaffFeatureSet _features = const StaffFeatureSet.empty();
 
   @override
   void initState() {
@@ -71,6 +74,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         _name = name;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) => _consumeDeepLink());
+      // Grants for the pay tiles (payslips follow my_payslips, as on every
+      // other home). Best effort: without it the payslip card stays hidden.
+      try {
+        final f = await widget.api.fetchStaffFeatures();
+        if (mounted) setState(() => _features = f);
+      } catch (_) {}
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
@@ -79,6 +88,32 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       }
     }
   }
+
+  Widget _payCard({
+    required IconData icon,
+    required ModuleTone tone,
+    required String title,
+    required Widget Function() open,
+  }) => Card(
+    child: ListTile(
+      onTap: () =>
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => open())),
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: tone.background,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: tone.foreground, size: 22),
+      ),
+      title: Text(
+        title,
+        style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
+      ),
+      trailing: const Icon(Icons.chevron_right, color: AppColors.muted),
+    ),
+  );
 
   void _consumeDeepLink() {
     final raw = widget.openRoute;
@@ -316,6 +351,21 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         ),
                       ),
                     ),
+                  ),
+                  // My pay: payslips (with the grant) and my advances
+                  // (everyone's own record, always shown).
+                  if (_features.has("my_payslips"))
+                    _payCard(
+                      icon: Icons.receipt_long_outlined,
+                      tone: ModuleTone.gray,
+                      title: "वेतन पर्ची · Payslips",
+                      open: () => PayslipsScreen(api: widget.api),
+                    ),
+                  _payCard(
+                    icon: Icons.account_balance_wallet_outlined,
+                    tone: ModuleTone.amber,
+                    title: "मेरा एडवांस · My advances",
+                    open: () => MyAdvancesScreen(api: widget.api),
                   ),
                   const SizedBox(height: 14),
                   Text(

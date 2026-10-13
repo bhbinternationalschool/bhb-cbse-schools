@@ -67,6 +67,7 @@ const kLocalFeatureGroups = <String, String>{
   "gps_punch": "Self service",
   "my_leave": "Self service",
   "my_payslips": "Self service",
+  "my_advances": "Self service",
   "notices": "Self service",
   "messages": "Self service",
   "my_profile": "Self service",
@@ -75,7 +76,11 @@ const kLocalFeatureGroups = <String, String>{
 
 /// App-side tiles for a person's own records — not grants, so every staff
 /// home shows them whatever the ERP's feature list says.
-const kAlwaysShownStaffFeatures = <String>{"my_profile", "my_attendance"};
+const kAlwaysShownStaffFeatures = <String>{
+  "my_profile",
+  "my_attendance",
+  "my_advances",
+};
 
 /// The heading a feature's tile sits under: the server's word first, then
 /// the local mirror, then "Self service".

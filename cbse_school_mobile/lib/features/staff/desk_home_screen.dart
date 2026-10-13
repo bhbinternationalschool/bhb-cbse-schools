@@ -18,6 +18,7 @@ import "survey_day_screen.dart";
 import "home_groups.dart";
 import "leave_approvals_screen.dart";
 import "my_attendance_calendar_screen.dart";
+import "my_advances_screen.dart";
 import "my_profile_screen.dart";
 import "payslips_screen.dart";
 import "self_attendance_screen.dart";
@@ -230,6 +231,16 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
     (api) => MyProfileScreen(api: api),
   );
 
+  /// My salary advances — the person's own record, always shown.
+  static final _advancesTile = _Tile(
+    "My advances",
+    "मेरा एडवांस",
+    Icons.account_balance_wallet_outlined,
+    ModuleTone.amber,
+    "my_advances",
+    (api) => MyAdvancesScreen(api: api),
+  );
+
   /// My month of attendance — the person's own record, always shown.
   static final _attendanceTile = _Tile(
     "My attendance",
@@ -358,7 +369,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
     ].where((t) => _features.has(t.feature)).toList();
     // My profile is everyone's own record, not a grant — always shown.
     final groups = groupStaffTiles(
-      [...tiles, _attendanceTile, _profileTile],
+      [...tiles, _advancesTile, _attendanceTile, _profileTile],
       (t) => staffGroupOf(_features, t.feature),
       order: _features.groupOrder,
     );
