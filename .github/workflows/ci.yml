@@ -624,6 +624,8 @@ jobs:
           npm run test:client-metrics-sender
           npm run test:stale-build
           npm run test:erp-fetch
+          npm run test:reference-cache
+          npm run test:versions-route
 
   build:
     name: Production build

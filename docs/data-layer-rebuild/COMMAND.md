@@ -399,21 +399,60 @@ Phase 4 can be measured. Acceptance: the self-tests `test:client-metrics-route`,
 `stale-writer.spec.ts` can assert `X-Bhb-Build-Stale: 1` and the log line (and, from the first
 410 stub on, the 410).
 
-**1.3 Server read kernel.** New migration `erp_versions(p_tenant uuid) returns jsonb`
-(SECURITY DEFINER, `service_role` only — remember the explicit grant) that returns, in one round
-trip, `{<desk>: {updated_at, count}}` for every `*_sync_meta` table (read the list from
-`information_schema` at creation time; verify against §0.6) plus `max(updated_at)` of
-`sis_staff`, `sis_departments`, `sis_designations`, `masters_desk_settings`, per-module
-`module_local_state`, and each `*_state` blob table. `GET /api/data/views/versions` serves it,
-cached in-process for 2 s, and returns `ok:false` (not `{}`) when the RPC fails.
-`lib/data/server/referenceCache.ts`: `referenceCache(name, deskKey, build)` — per-process,
-in-flight-deduped, rebuilt only when that desk's `erp_versions` value moved, previous value kept
-with `stale:true` when a rebuild fails, never an empty value from a failed read. Convert
-`loadServerMasters` / `mastersCache` and `loadServerRbac` (`lib/api/v1/auth.ts:55-224`) to it in
-this PR (they are the code it replaces; the `defaultMasters()` fallback was deleted in 0.5c).
-Acceptance: unit tests on the local stack — cold instance = one read; version moved = rebuild;
-failure = previous value + `stale:true`; `versions` answers in < 50 ms warm with one DB request
-per poll.
+**1.3 Server read kernel.** *(Built 13 Oct 2026 — migration
+`20261013120000_erp_versions.sql` must be applied to production before deploy.)*
+- **`erp_versions(p_tenant uuid) returns jsonb`** (SECURITY DEFINER, `search_path public`,
+  STABLE; execute revoked from public/anon/authenticated, granted to `service_role`). One round
+  trip, `{<key>: {updated_at, count}}`: (1) every `*_sync_meta` table **present at call time**,
+  looked up in `pg_catalog` on each call (a dropped table — `purchase_`/`store_desk_sync_meta`
+  since 23 Aug — simply disappears; a new desk appears with no migration; a table missing a
+  needed column is skipped), keyed by its name without `_desk_sync_meta`/`_sync_meta`
+  (`masters`, `sis`, `fee`, `rbac`, …), count = one documented column per desk (`masters`
+  class_count, `sis` student_count, desk-slice modules row_count, … — the mapping is in the SQL),
+  `{null, null}` when the tenant has no row; (2) `sis_staff`, `sis_departments`,
+  `sis_designations`, `masters_desk_settings`: `max(updated_at)` + `count(*)` (the count is what
+  a delete moves); (3) `module_state:<module_key>` per `module_local_state` book (count 1 —
+  counting items would de-TOAST every book per poll); (4) the 36 named `*_state` blobs (count
+  0/1). On the seeded local stack: 75 keys, median 6–10 ms over PostgREST, ~3.5 ms in Postgres.
+- **`lib/data/server/versions.ts`** `readErpVersions()`: one RPC per tenant per 2 s, shared by
+  every caller and every cache in the process, in-flight deduped; a failure is `{ok:false}`
+  (held for the same window, so an outage costs one call per window), never `{}`.
+- **`GET /api/data/views/versions`** (`app/api/data/views/versions/route.ts`, handler
+  `lib/data/server/versionsRoute.ts`): guard = `resolveApiAuth`, then **staff session or API key
+  only** — a parent gets 403, because the answer carries school-wide counts and no parent screen
+  uses it (director's review, 13 Oct 2026); 401 without a session, 503 when the guard's own
+  reads fail;
+  `{ok:true, versions, at}` with `Cache-Control: no-store`; 503 `{ok:false}` when the versions
+  cannot be read.
+- **`lib/data/server/referenceCache.ts`** `referenceCache(name, deskKeys, build)` →
+  `{read(), invalidate()}`: rebuilt only when the versions of its `deskKeys` moved (the versions
+  are read before the build starts); in-flight deduped; a failed rebuild returns the previous
+  value with `stale:true` and retries on the next read; no previous value = `{ok:false}`; a
+  build may offer a `fallback` (served stale, never stored); with the versions unreadable, at
+  most one rebuild per versions snapshot (2 s); `invalidate()` drops the value and the held
+  versions, and a build started before it is not stored. One log line per rebuild:
+  `[reference-cache] <name> rebuilt (<why>)`.
+- **`lib/api/v1/auth.ts`**: `loadServerMasters` = `referenceCache("masters", ["masters",
+  "sis_staff", "sis_departments", "sis_designations"])`; `loadServerRbac` /
+  `loadServerRbacIfKnown` = `referenceCache("rbac", ["rbac", "rbac_state"])`. The 30 s TTLs and
+  the 5 s `rbac_desk_sync_meta` probe are gone. Kept from 0.5c: no `defaultMasters()`, previous
+  copy on failure, 503 with no copy, roster unreadable with no copy = masters without a roster,
+  not stored; a no-database local demo is not a failure. `invalidateServerMastersCache` (udise
+  teacher-details apply, staff/roster/mobile) and `invalidateServerRbacCache` (desk-slice POST)
+  force the next read to rebuild.
+- Tests: `test:reference-cache` (every branch, fakes), `test:versions-route` (reader window,
+  handler statuses, the real route through the real guard by API key), `test:server-masters-cache`
+  (rewritten: a `masters_desk_sync_meta` bump = one rebuild, no change = no rebuild after 31 s and
+  10 min, failures keep the copy, staff and rbac the same) — each shown to fail with its
+  predicate reverted; the masters test fails on the old `auth.ts`. Local stack:
+  `apps/web/e2e/versions.acceptance.ts`, run by `bash scripts/e2e-stack.sh check` after
+  `acceptance.ts` (it reads the app log to count rebuilds): 35 desk keys, counts = seed, anon
+  refused, median < 50 ms, one request per app read, the route 401/200/403 and not
+  `[collection]`, a masters-desk POST moves `masters` and `loadServerMasters` rebuilds exactly
+  once, no rebuild after 31 s unchanged.
+- Not in this step: no browser code changed (1.4 polls the route). Writers that bump no
+  sync_meta (R3) stay invisible to the signal until 1.5. After deploy, a Masters save reaches the
+  mobile API's copy within one versions window (2 s) instead of up to 30 s.
 
 **1.4 Client query kernel.** Add `@tanstack/react-query`; `QueryClientProvider` in `AppShell`.
 Build on what exists: wrap `readPage` / `readAll` (`lib/data/client/query.ts`) in

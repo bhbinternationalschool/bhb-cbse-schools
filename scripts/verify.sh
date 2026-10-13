@@ -509,6 +509,8 @@ SELFTESTS=(
   test:client-metrics-sender
   test:stale-build
   test:erp-fetch
+  test:reference-cache
+  test:versions-route
   # Added 2026-09-12, in CI's order, after the drift check below reported that
   # ci.yml had been running these for weeks while this script did not:
   # WhatsApp failure reasons, household numbers, audience specs, the tutor and
