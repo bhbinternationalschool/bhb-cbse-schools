@@ -11,7 +11,11 @@ import { getDemoSession } from "@/lib/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadMasters } from "@/lib/masters";
 import { hasPermission } from "@/lib/rbac";
-import { cleanUnitFacts, suggestMoreQuestionsLlm } from "@/lib/examPaperAiLlm.server";
+import {
+  cleanUnitFacts,
+  cleanWeakLabels,
+  suggestRemedialWorksheetLlm,
+} from "@/lib/examPaperAiLlm.server";
 import type { ExamPaperHardness } from "@/lib/examPapers";
 
 export const runtime = "nodejs";
@@ -53,23 +57,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "classId and subjectId required" }, { status: 400 });
   }
   const units = cleanUnitFacts(body.units);
-  const weakLabels = (Array.isArray(body.weakLabels) ? body.weakLabels : [])
-    .map((x) => String(x ?? "").trim().slice(0, 80))
-    .filter(Boolean)
-    .slice(0, 8);
+  const weakLabels = cleanWeakLabels(body.weakLabels);
   if (units.length === 0 && weakLabels.length === 0) {
     return NextResponse.json({ error: "Give at least one weak unit or area" }, { status: 400 });
   }
-  const count = Math.min(12, Math.max(3, Math.floor(Number(body.count) || 8)));
-  const r = await suggestMoreQuestionsLlm({
+  const r = await suggestRemedialWorksheetLlm({
     masters,
     classId,
     subjectId,
-    hardness: body.hardness === "easy" || body.hardness === "hard" ? body.hardness : "medium",
-    count,
     units,
-    focus: `Remedial practice worksheet for students who scored under 50% on: ${weakLabels.join("; ") || units.map((u) => u.title).join("; ")}. Start with two scaffolded items (worked pattern, then a near copy), then build to application. Every question must carry a full markingScheme and, where a unit has LO codes, a competencyCode.`,
-    promptVersion: "v2-remedial",
+    weakLabels,
+    count: Number(body.count),
+    hardness: body.hardness || "medium",
   });
   if (!r.ok) return NextResponse.json({ error: r.error }, { status: 502 });
   return NextResponse.json({

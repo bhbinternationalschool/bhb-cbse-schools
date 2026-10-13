@@ -49,6 +49,7 @@ const kLocalFeatureGroups = <String, String>{
   "period_log": "Teaching",
   "syllabus_scan": "Teaching",
   "subject_requests": "Teaching",
+  "teacher_ai_tools": "Teaching",
   "students_view": "Students",
   "student_leave_decide": "Students",
   "complaints_handle": "Students",

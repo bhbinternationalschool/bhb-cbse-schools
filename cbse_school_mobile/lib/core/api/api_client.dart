@@ -1,4 +1,4 @@
-import "dart:async" show unawaited;
+import "dart:async" show TimeoutException, unawaited;
 import "dart:convert";
 import "dart:io" show File;
 import "dart:math" as math;
@@ -16,6 +16,7 @@ import "../update/app_build.dart";
 
 part "staff_api.dart";
 part "online_classes_api.dart";
+part "teacher_ai_api.dart";
 
 /// Session cookie minted by the ERP (see web /api/auth/*).
 const _cookieName = "bhb_demo_session";
@@ -4480,8 +4481,13 @@ class ApiClient {
     String activities = "",
     String assessment = "",
     String homework = "",
+    /// "ai" / "ai_edited" when the plan started as an AI draft; "" = typed.
+    String source = "",
+    String aiModel = "",
   }) async {
     final data = await _postData("/api/v1/teaching/lesson-plan", {
+      if (source.isNotEmpty) "source": source,
+      if (aiModel.isNotEmpty) "aiModel": aiModel,
       "id": ?id,
       "classId": classId,
       "subjectId": subjectId,
