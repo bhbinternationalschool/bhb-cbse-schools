@@ -90,7 +90,7 @@ void (async () => {
     const req = new Request("https://example.test/api/data/views/versions");
     const okRead = async () => ({ ok: true as const, versions: VERSIONS, at: "2026-10-13T00:00:01.000Z", seq: 1 });
     const badRead = async () => ({ ok: false as const, error: "boom", seq: 2 });
-    const okAuth = async () => ({});
+    const okAuth = async () => ({ authKind: "session", session: { persona: "staff" } });
 
     const r401 = await versionsGet(req, { auth: async () => { throw new ApiError("unauthorized", "Sign in", 401); }, read: okRead });
     assert.equal(r401.status, 401, "no session = 401");
@@ -98,6 +98,12 @@ void (async () => {
     assert.equal(r401b.status, 401, "any other auth failure = 401");
     const r403 = await versionsGet(req, { auth: async () => { throw new ApiError("family_inactive", "closed", 403); }, read: okRead });
     assert.equal(r403.status, 403, "an inactive family = 403");
+    const rParent = await versionsGet(req, { auth: async () => ({ authKind: "session", session: { persona: "parent" } }), read: okRead });
+    assert.equal(rParent.status, 403, "a parent session = 403 (school-wide counts are staff-only)");
+    const rUnknown = await versionsGet(req, { auth: async () => ({}), read: okRead });
+    assert.equal(rUnknown.status, 403, "a context with no staff session = 403");
+    const rKey = await versionsGet(req, { auth: async () => ({ authKind: "api_key" }), read: okRead });
+    assert.equal(rKey.status, 200, "a server API key may read it");
     const r503auth = await versionsGet(req, { auth: async () => { throw new ApiError("server_error", "setup unreadable", 503); }, read: okRead });
     assert.equal(r503auth.status, 503, "a 503 from the guard stays a 503");
 

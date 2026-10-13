@@ -418,8 +418,10 @@ Phase 4 can be measured. Acceptance: the self-tests `test:client-metrics-route`,
   every caller and every cache in the process, in-flight deduped; a failure is `{ok:false}`
   (held for the same window, so an outage costs one call per window), never `{}`.
 - **`GET /api/data/views/versions`** (`app/api/data/views/versions/route.ts`, handler
-  `lib/data/server/versionsRoute.ts`): guard = `resolveApiAuth` (staff/parent cookie or API
-  key: 401, 403 for an inactive family, 503 when the guard's own reads fail);
+  `lib/data/server/versionsRoute.ts`): guard = `resolveApiAuth`, then **staff session or API key
+  only** — a parent gets 403, because the answer carries school-wide counts and no parent screen
+  uses it (director's review, 13 Oct 2026); 401 without a session, 503 when the guard's own
+  reads fail;
   `{ok:true, versions, at}` with `Cache-Control: no-store`; 503 `{ok:false}` when the versions
   cannot be read.
 - **`lib/data/server/referenceCache.ts`** `referenceCache(name, deskKeys, build)` →

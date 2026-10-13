@@ -16,8 +16,8 @@
  *  3. The app's own reader makes exactly ONE request per read, and none for
  *     reads inside the 2 s window.
  *  4. GET /api/data/views/versions through the running app: 401 without a
- *     session; 200 {ok:true, versions, at} for office staff and for a parent;
- *     403 for a family the school has made inactive; it is the static route,
+ *     session; 200 {ok:true, versions, at} for office staff; 403 for a
+ *     parent (school-wide counts are staff-only) and for an inactive family; it is the static route,
  *     not /api/data/[collection].
  *  5. A Masters change made through the app's own masters-desk POST moves the
  *     "masters" version, and the server's loadServerMasters rebuilds exactly
@@ -186,9 +186,9 @@ async function main(): Promise<void> {
     });
     if (activeHh) {
       const p = await req(`${app}/api/data/views/versions`, { headers: { cookie: sessionCookieHeader(parent(activeHh.id)) } });
-      record("app: versions as a parent = 200", p.status === 200 && p.body.ok === true, `HTTP ${p.status} (household ${activeHh.id})`);
+      record("app: versions as a parent = 403 (staff only)", p.status === 403, `HTTP ${p.status} (household ${activeHh.id})`);
     } else {
-      record("app: versions as a parent = 200", false, "fixture has no household with an active child");
+      record("app: versions as a parent = 403 (staff only)", false, "fixture has no household with an active child");
     }
     if (inactiveHh) {
       const p = await req(`${app}/api/data/views/versions`, { headers: { cookie: sessionCookieHeader(parent(inactiveHh.id)) } });
