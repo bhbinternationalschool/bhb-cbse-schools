@@ -7,6 +7,7 @@ import { findRegister, loadAttendance } from "@/lib/attendance";
 import { loadTimetable, periodBell } from "@/lib/timetable";
 import { loadSisForStaff, studentsInSession } from "@/lib/sis";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
+import { attendanceCoverToday } from "@/lib/attendanceCover.server";
 
 export const runtime = "nodejs";
 
@@ -53,6 +54,7 @@ export async function GET(request: Request) {
 
     const scope = await staffSectionScope(ctx);
     const ay = scope.academicYearCode;
+    const cover = scope.unrestricted ? [] : await attendanceCoverToday(ctx, ay);
     const { date, weekday } = todayInKolkata();
 
     const classNameOf = (id: string) =>
@@ -135,6 +137,20 @@ export async function GET(request: Request) {
               byClass.set(t.classId, c);
             }
             c.sections.push({ id: t.sectionId, name: t.sectionName });
+          }
+          // Today's attendance cover — a substitute or the class's
+          // co-ordinator while its teacher is away (13 Oct 2026). Named
+          // "· cover today" so the teacher knows why it is there; any other
+          // screen using this picker refuses it on save.
+          for (const cv of cover) {
+            let c = byClass.get(cv.classId);
+            if (!c) {
+              c = { id: cv.classId, name: classNameOf(cv.classId), sections: [] };
+              byClass.set(cv.classId, c);
+            }
+            if (!c.sections.some((x) => x.id === cv.sectionId)) {
+              c.sections.push({ id: cv.sectionId, name: `${sectionNameOf(cv.sectionId)} · cover today` });
+            }
           }
           return [...byClass.values()];
         })();

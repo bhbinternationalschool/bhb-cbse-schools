@@ -1,6 +1,7 @@
 "use client";
 
 import { PropelProgressPanel } from "@/components/staff/PropelProgressPanel";
+import { CoordinatorsPanel } from "@/components/staff/CoordinatorsPanel";
 import { useAccessData } from "@/components/shell/useAccessData";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -468,6 +469,14 @@ export function StaffWorkspace() {
           description="Pick a teacher, then give them a class-teacher section and the subjects they teach."
         >
           <TeachingAllocationPanel masters={state} ay={ay} onCommit={commit} />
+          {state ? (
+            <div className="mt-4">
+              <CoordinatorsPanel
+                masters={state}
+                canEdit={hasPermission(session, state, "staff", "edit")}
+              />
+            </div>
+          ) : null}
         </ErpPanel>
       ) : null}
 

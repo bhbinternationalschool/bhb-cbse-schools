@@ -156,17 +156,34 @@ export function AttendanceWorkspace() {
     })();
   }, []);
 
+  /** Today's cover classes (substitute / co-ordinator) — register only. */
+  const coverSections = useMemo(
+    () =>
+      teacherMode
+        ? (my.attendanceCover ?? [])
+            .filter((c) => !my.teaching.some((t) => t.classId === c.classId && t.sectionId === c.sectionId))
+            .map((c) => ({
+              classId: c.classId,
+              sectionId: c.sectionId,
+              label: `${c.className} · ${c.sectionName} — cover today (${c.detail})`,
+            }))
+        : [],
+    [teacherMode, my],
+  );
+
+  /** A teacher's own sections (not today's cover) — the month register's list. */
+  const ownSections = useMemo(() => {
+    if (!teacherMode) return [];
+    return my.teaching.map((t) => ({
+      classId: t.classId,
+      sectionId: t.sectionId,
+      label: `${t.className} · ${t.sectionName}` + (t.isClassTeacher ? " (class teacher)" : ""),
+    }));
+  }, [teacherMode, my]);
+
   /** Sections this staff is class teacher of (for phone/tablet quick mark). */
   const myClassSections = useMemo(() => {
-    if (teacherMode) {
-      return my.teaching.map((t) => ({
-        classId: t.classId,
-        sectionId: t.sectionId,
-        label:
-          `${t.className} · ${t.sectionName}` +
-          (t.isClassTeacher ? " (class teacher)" : ""),
-      }));
-    }
+    if (teacherMode) return [...ownSections, ...coverSections];
     if (!masters) return [];
     const staff = resolveSessionStaff(session, masters);
     if (!staff) return [];
@@ -183,7 +200,7 @@ export function AttendanceWorkspace() {
       });
     }
     return out;
-  }, [masters, session, ay, tick, teacherMode, my]);
+  }, [masters, session, ay, tick, teacherMode, ownSections, coverSections]);
 
   useEffect(() => {
     if (myClassAutoDone || myClassSections.length === 0) return;
@@ -199,7 +216,8 @@ export function AttendanceWorkspace() {
 
   /** Month register classes: a teacher's own; the office, every active section. */
   const monthSections = useMemo(() => {
-    if (teacherMode) return myClassSections;
+    // Cover is for today's register only, never the month register.
+    if (teacherMode) return ownSections;
     if (!masters) return [];
     const order = new Map(masters.classes.map((c, i) => [c.id, i]));
     return masters.sections
@@ -210,13 +228,13 @@ export function AttendanceWorkspace() {
         sectionId: sec.id,
         label: `${masters.classes.find((c) => c.id === sec.classId)?.name || "Class"} · ${sec.name || ""}`.trim(),
       }));
-  }, [teacherMode, myClassSections, masters]);
+  }, [teacherMode, ownSections, masters]);
 
   const classOptions = useMemo(() => {
     if (!masters) return [];
     const active = masters.classes.filter((c) => c.isActive);
     if (teacherMode) {
-      const mine = new Set(my.teaching.map((t) => t.classId));
+      const mine = new Set([...my.teaching, ...(my.attendanceCover ?? [])].map((t) => t.classId));
       return active.filter((c) => mine.has(c.id));
     }
     // A class-scoped assignment (Masters → Roles) restricts which classes
@@ -237,7 +255,7 @@ export function AttendanceWorkspace() {
     const all = masters.sections.filter((s) => s.classId === classId && s.isActive);
     if (!teacherMode) return all;
     const mine = new Set(
-      my.teaching.filter((t) => t.classId === classId).map((t) => t.sectionId),
+      [...my.teaching, ...(my.attendanceCover ?? [])].filter((t) => t.classId === classId).map((t) => t.sectionId),
     );
     return all.filter((s) => mine.has(s.id));
   }, [masters, classId, teacherMode, my]);
