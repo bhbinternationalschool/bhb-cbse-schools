@@ -120,6 +120,9 @@ function buildClassSubjects(): ClassSubjectLink[] {
         subjectId: subjectId(code),
         periodsPerWeek: 5,
         isActive: true,
+        // As every link the app writes has it (masters_desk_class_subjects.is_optional
+        // is NOT NULL); a slice row without it fails the row sync of the next save.
+        isOptional: false,
       });
     }
   }

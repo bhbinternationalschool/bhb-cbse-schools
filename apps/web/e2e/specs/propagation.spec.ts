@@ -214,7 +214,7 @@ async function addSubject(a: Page, via: EditVia, code: string, name: string): Pr
   };
   await postMasters(a.request, {
     subjects: [...desk.subjects, subject],
-    classSubjects: [...desk.classSubjects, link],
+    classSubjects: [...desk.classSubjects.map((l) => ({ ...l, isOptional: l.isOptional ?? false })), link],
     sliceBases: { subjects: desk.sliceStamps?.subjects ?? "", classSubjects: desk.sliceStamps?.classSubjects ?? "" },
   });
 }
