@@ -278,8 +278,11 @@ function runSubstitutionRegister(
   tt: TimetableState,
   fromDate?: string,
   toDate?: string,
+  ay?: string,
 ) {
+  // The selected session only (with no dates it listed every year's).
   const rows = tt.substitutions
+    .filter((s) => !ay || !s.academicYearCode || s.academicYearCode === ay)
     .filter((s) => (!fromDate || s.date >= fromDate) && (!toDate || s.date <= toDate))
     .sort((a, b) => a.date.localeCompare(b.date) || a.periodNo - b.periodNo)
     .map((s) => ({
@@ -338,7 +341,7 @@ export function runTimetableReport(
       built = runFreePeriods(masters, tt, ay, filters.weekday);
       break;
     case "substitution_register":
-      built = runSubstitutionRegister(masters, tt, filters.fromDate, filters.toDate);
+      built = runSubstitutionRegister(masters, tt, filters.fromDate, filters.toDate, ay);
       break;
     default:
       return { ok: false, error: "Unknown report" };

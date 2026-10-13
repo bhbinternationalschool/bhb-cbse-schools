@@ -75,7 +75,7 @@ import type { RegisterDayMark } from "@/lib/transportBoardingLog";
 import { fetchRegisterDayMarks } from "@/lib/transportRegisterClient";
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */;
 }
 
 /**

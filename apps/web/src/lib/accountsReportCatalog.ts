@@ -6,6 +6,7 @@ import {
 } from "@/lib/accountsCashBank";
 import {
   coaLedgerRows,
+  coaOpeningBalance,
   listJournals,
 } from "@/lib/accountsJournal";
 import { listOwnerLoanDue } from "@/lib/accountsLoans";
@@ -196,7 +197,7 @@ export type AccountsReportFilters = {
 };
 
 function todayYmd() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */;
 }
 
 function inRange(d: string, from: string, to: string) {
@@ -454,15 +455,27 @@ export function runAccountsReport(
       if (!coa) {
         return { ok: false, error: "Pick a ledger account (COA)" };
       }
-      const rows = coaLedgerRows(coaId, from, to, accounts).map((r) => ({
-        date: r.date,
-        voucher: r.voucherNo,
-        narration: r.narration,
-        source: r.sourceType,
-        debit: r.debitPaise ? formatInr(r.debitPaise) : "",
-        credit: r.creditPaise ? formatInr(r.creditPaise) : "",
-        balance: formatInr(r.balancePaise),
-      }));
+      const opening = coaOpeningBalance(coaId, from, accounts);
+      const rows = [
+        {
+          date: from,
+          voucher: "",
+          narration: "Opening balance",
+          source: "",
+          debit: "",
+          credit: "",
+          balance: formatInr(opening),
+        },
+        ...coaLedgerRows(coaId, from, to, accounts).map((r) => ({
+          date: r.date,
+          voucher: r.voucherNo,
+          narration: r.narration,
+          source: r.sourceType,
+          debit: r.debitPaise ? formatInr(r.debitPaise) : "",
+          credit: r.creditPaise ? formatInr(r.creditPaise) : "",
+          balance: formatInr(r.balancePaise),
+        })),
+      ];
       const r = exportFilterReport(
         {
           title: `Ledger · ${coa.code} ${coa.name}`,
@@ -483,7 +496,7 @@ export function runAccountsReport(
         filters.format,
       );
       return r.ok
-        ? { ok: true, message: `Ledger ${coa.code}: ${rows.length} line(s)` }
+        ? { ok: true, message: `Ledger ${coa.code}: ${rows.length - 1} line(s)` }
         : r;
     }
     case "headwise_receipts_payments": {

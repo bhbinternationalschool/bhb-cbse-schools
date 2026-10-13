@@ -101,6 +101,41 @@ function scopeSections(
 
 type ResultRowWithScope = ClassResultRow & { classId: string; sectionId: string };
 
+/**
+ * Subjects whose marks count toward the card's total. An absent paper (AB)
+ * and a subject with no marks entered are left out of BOTH marks and
+ * maximum, so a child who sat 2 of 5 papers had a percentage over those 2.
+ */
+export function subjectsCounted(card: { lines: { marksObtained: number | null; absent: boolean }[] }): {
+  counted: number;
+  total: number;
+} {
+  return {
+    counted: card.lines.filter((l) => l.marksObtained != null && !l.absent).length,
+    total: card.lines.length,
+  };
+}
+
+/** Result word: an absent child did not fail, and a child with no marks has no result. */
+export function resultWord(r: Pick<ClassResultRow, "error" | "card" | "passed">): string {
+  if (r.error || !r.card) return "No marks";
+  if (r.card.absent) return "Absent";
+  return r.passed ? "PASS" : "FAIL";
+}
+
+/**
+ * Standard competition ranking: equal percentages share a rank and the next
+ * rank skips (1, 1, 3) — as the report card ranks. The list used i + 1, so
+ * two children on 92.5% were "1st" and "2nd".
+ */
+export function competitionRanks<T>(sorted: T[], score: (t: T) => number): number[] {
+  const ranks: number[] = [];
+  sorted.forEach((t, i) => {
+    ranks.push(i > 0 && score(sorted[i - 1]!) === score(t) ? ranks[i - 1]! : i + 1);
+  });
+  return ranks;
+}
+
 function buildResultRows(
   masters: MastersState,
   sis: SisState,
@@ -147,6 +182,7 @@ function runResultAnalysis(
       { key: "max", header: "Max", width: 0.7, align: "right" as const },
       { key: "percent", header: "%", width: 0.6, align: "right" as const },
       { key: "grade", header: "Grade", width: 0.6 },
+      { key: "subjects", header: "Subjects counted", width: 0.8, align: "right" as const },
       { key: "result", header: "Result", width: 0.7 },
       { key: "failedSubjects", header: "Failed in", width: 1.4 },
     ],
@@ -159,7 +195,8 @@ function runResultAnalysis(
       max: r.card?.totalMax ?? "",
       percent: r.card ? `${r.card.percent.toFixed(1)}%` : "",
       grade: r.card?.overallGrade ?? "",
-      result: r.error ? "No marks" : r.passed ? "PASS" : "FAIL",
+      subjects: r.card ? `${subjectsCounted(r.card).counted}/${subjectsCounted(r.card).total}` : "",
+      result: resultWord(r),
       failedSubjects: r.failedSubjects.join(", "),
     })),
   };
@@ -173,7 +210,14 @@ function runToppers(
   filters: Pick<ExamReportFilters, "classId" | "sectionId" | "topN">,
 ) {
   const topN = Math.max(1, filters.topN ?? 10);
-  const rows = buildResultRows(masters, sis, ay, term, filters).filter((r) => r.card);
+  const withCards = buildResultRows(masters, sis, ay, term, filters).filter((r) => r.card && !r.card.absent);
+  // Only children with every subject counted are ranked: a percentage over
+  // the papers a child happened to sit is not comparable.
+  const rows = withCards.filter((r) => {
+    const c = subjectsCounted(r.card!);
+    return c.total > 0 && c.counted === c.total;
+  });
+  const leftOut = withCards.length - rows.length;
 
   // Rank within each class so "toppers" means "top of class", not just
   // whichever class happens to have easier papers dominating a school-wide
@@ -188,12 +232,13 @@ function runToppers(
 
   const out: Record<string, string | number>[] = [];
   for (const [classId, list] of byClass) {
-    const ranked = [...list]
-      .sort((a, b) => (b.card!.percent ?? 0) - (a.card!.percent ?? 0))
-      .slice(0, topN);
-    ranked.forEach((r, i) => {
+    const sorted = [...list].sort((a, b) => (b.card!.percent ?? 0) - (a.card!.percent ?? 0));
+    const ranks = competitionRanks(sorted, (r) => r.card!.percent ?? 0);
+    // Top N by rank: a tie on the last place keeps every child on it.
+    sorted.forEach((r, i) => {
+      if (ranks[i]! > topN) return;
       out.push({
-        rank: i + 1,
+        rank: ranks[i]!,
         className: classLabel(masters, classId),
         admissionNo: r.student.admissionNo,
         name: r.student.fullName,
@@ -219,6 +264,7 @@ function runToppers(
       { key: "grade", header: "Grade", width: 0.6 },
     ],
     rows: out,
+    leftOut,
   };
 }
 
@@ -243,14 +289,20 @@ function runResultSummary(
     });
     if ("error" in sheet) continue;
     const s = sheet.summary;
+    // Absent is its own count: the sheet's summary called an absent child
+    // "appeared" and "failed", which lowered the pass %.
+    const absent = sheet.rows.filter((r) => r.card?.absent).length;
+    const appeared = sheet.rows.filter((r) => r.card && !r.card.absent).length;
+    const passed = sheet.rows.filter((r) => r.card && !r.card.absent && r.passed).length;
     rows.push({
       className: classLabel(masters, classId),
       section: sectionLabel(masters, sectionId),
       total: s.total,
-      withMarks: s.withMarks,
-      passed: s.passed,
-      failed: s.failed,
-      passPercent: s.withMarks ? `${((s.passed / s.withMarks) * 100).toFixed(1)}%` : "",
+      withMarks: appeared,
+      absent,
+      passed,
+      failed: appeared - passed,
+      passPercent: appeared ? `${((passed / appeared) * 100).toFixed(1)}%` : "—",
       promoted: s.promoted,
       detained: s.detained,
       conditional: s.conditional,
@@ -263,6 +315,7 @@ function runResultSummary(
       { key: "section", header: "Sec", width: 0.6 },
       { key: "total", header: "Total", width: 0.6, align: "right" as const },
       { key: "withMarks", header: "Appeared", width: 0.8, align: "right" as const },
+      { key: "absent", header: "Absent", width: 0.7, align: "right" as const },
       { key: "passed", header: "Passed", width: 0.7, align: "right" as const },
       { key: "failed", header: "Failed", width: 0.7, align: "right" as const },
       { key: "passPercent", header: "Pass %", width: 0.7, align: "right" as const },
@@ -294,7 +347,7 @@ export function runExamReport(
     filters.sectionId ? `Sec ${sectionLabel(masters, filters.sectionId)}` : "",
   ]);
 
-  let built: { columns: ReportColumn[]; rows: Record<string, string | number>[] };
+  let built: { columns: ReportColumn[]; rows: Record<string, string | number>[]; leftOut?: number };
   switch (id) {
     case "result_analysis":
       built = runResultAnalysis(masters, sis, ay, term, filters);
@@ -317,7 +370,9 @@ export function runExamReport(
     {
       title,
       subtitle: `${TENANT.shortName} · Exams`,
-      filterNote: note,
+      filterNote: built.leftOut
+        ? `${note} · ${built.leftOut} child(ren) not ranked: absent or no marks in a subject`
+        : note,
       columns: built.columns,
       rows: built.rows,
       fileBaseName: `exams_${id}`,

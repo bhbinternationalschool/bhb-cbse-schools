@@ -317,7 +317,7 @@ export const CUSTOM_LEAD_COLUMNS: { key: string; header: string }[] = [
 ];
 
 function todayYmd(): string {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */;
 }
 
 function classNameOf(masters: MastersState, id: string): string {

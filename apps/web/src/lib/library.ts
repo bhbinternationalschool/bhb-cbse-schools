@@ -946,7 +946,7 @@ export function runLibraryReport(input: {
 }): { ok: true } | { ok: false; error: string } {
   const state = input.state ?? loadLibrary();
   const from = input.fromDate || "2000-01-01";
-  const to = input.toDate || new Date().toISOString().slice(0, 10);
+  const to = input.toDate || new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */;
   const today = libraryToday();
   const titles = listActiveTitles(state);
   const titleById = new Map(titles.map((t) => [t.id, t]));
