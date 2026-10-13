@@ -212,7 +212,7 @@ export type StaffLeaveReportFilters = {
 };
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */;
 }
 
 function ymOf(iso: string): string {
@@ -281,6 +281,37 @@ type Built = {
   columns: ReportColumn[];
   rows: Record<string, string | number | null | undefined>[];
 };
+
+/**
+ * One staff member's balance for a leave type, honestly. With a balance on
+ * record: its allotment, used and remaining (carry-forward and encashment
+ * included). Without one, the reports used to print the type's default
+ * allotment and "0 used" as if they were the record — now used is counted
+ * from approved leave and the row says the allotment is only the default.
+ */
+function leaveBalanceView(
+  hr: StaffHrState,
+  staffId: string,
+  type: { code: string; defaultDaysPerYear: number },
+  ay: string,
+): { allotted: number; used: number; remaining: number; source: string } {
+  const bal = hr.leaveBalances.find(
+    (b) => b.staffId === staffId && b.typeCode === type.code && b.academicYearCode === ay,
+  );
+  if (bal) {
+    return { allotted: bal.allotted, used: bal.used, remaining: remainingBalance(bal), source: "Recorded" };
+  }
+  const used = hr.leaveRequests
+    .filter((r) => r.staffId === staffId && r.typeCode === type.code && r.academicYearCode === ay && r.status === "approved")
+    .reduce((sum, r) => sum + r.days, 0);
+  const allotted = type.defaultDaysPerYear;
+  return {
+    allotted,
+    used: Math.round(used * 10) / 10,
+    remaining: Math.max(0, Math.round((allotted - used) * 2) / 2),
+    source: "Default — no balance set",
+  };
+}
 
 function buildReport(
   id: StaffLeaveReportId,
@@ -513,13 +544,8 @@ function buildReport(
       const rows: Record<string, string | number>[] = [];
       for (const s of people) {
         for (const t of hr.leaveTypes) {
-          const bal = hr.leaveBalances.find(
-            (b) =>
-              b.staffId === s.id &&
-              b.typeCode === t.code &&
-              b.academicYearCode === f.academicYearCode,
-          );
-          let used = bal?.used ?? 0;
+          const view = leaveBalanceView(hr, s.id, t, f.academicYearCode);
+          let used = view.used;
           if (from && to) {
             used = hr.leaveRequests
               .filter(
@@ -532,14 +558,16 @@ function buildReport(
               )
               .reduce((sum, r) => sum + r.days, 0);
           }
-          const allotted = bal?.allotted ?? t.defaultDaysPerYear;
           rows.push({
             empCode: s.empCode,
             staff: s.fullName,
             type: t.code,
-            allotted,
+            allotted: view.allotted,
             used: Math.round(used * 10) / 10,
-            remaining: Math.round((allotted - used) * 10) / 10,
+            // The year's remaining balance (same rule as Monthly Balance
+            // Leave); "Used" above is the chosen period's when one is set.
+            remaining: view.remaining,
+            source: view.source,
           });
         }
       }
@@ -553,7 +581,8 @@ function buildReport(
             { key: "type", header: "Type" },
             { key: "allotted", header: "Allotted", align: "right" },
             { key: "used", header: "Used", align: "right" },
-            { key: "remaining", header: "Remaining", align: "right" },
+            { key: "remaining", header: "Remaining (year)", align: "right" },
+            { key: "source", header: "Allotment" },
           ],
           rows,
         },
@@ -617,22 +646,16 @@ function buildReport(
       const rows: Record<string, string | number>[] = [];
       for (const s of people) {
         for (const t of types) {
-          const bal = hr.leaveBalances.find(
-            (b) =>
-              b.staffId === s.id &&
-              b.typeCode === t.code &&
-              b.academicYearCode === f.academicYearCode,
-          );
-          const allotted = bal?.allotted ?? t.defaultDaysPerYear;
-          const used = bal?.used ?? 0;
+          const view = leaveBalanceView(hr, s.id, t, f.academicYearCode);
           rows.push({
             empCode: s.empCode,
             staff: s.fullName,
             department: deptName(s.departmentId),
             type: t.code,
-            allotted,
-            used,
-            remaining: bal ? remainingBalance(bal) : allotted,
+            allotted: view.allotted,
+            used: view.used,
+            remaining: view.remaining,
+            source: view.source,
           });
         }
       }
@@ -648,6 +671,7 @@ function buildReport(
             { key: "allotted", header: "Allotted", align: "right" },
             { key: "used", header: "Used", align: "right" },
             { key: "remaining", header: "Remaining", align: "right" },
+            { key: "source", header: "Allotment" },
           ],
           rows,
         },
@@ -785,9 +809,9 @@ function buildReport(
             { key: "department", header: "Department" },
             { key: "present", header: "P", align: "right" },
             { key: "absent", header: "A", align: "right" },
-            { key: "late", header: "L", align: "right" },
-            { key: "halfDay", header: "HD", align: "right" },
-            { key: "leave", header: "LE", align: "right" },
+            { key: "late", header: "Late", align: "right" },
+            { key: "halfDay", header: "Half day", align: "right" },
+            { key: "leave", header: "Leave", align: "right" },
             { key: "marked", header: "Marked", align: "right" },
           ],
           rows,

@@ -25,6 +25,7 @@ import {
   type SisState,
   type SisStudent,
   type StudentDocKey,
+  studentsInSession,
 } from "@/lib/sis";
 import {
   STUDENT_REGISTER_EXPORT_COLUMNS,
@@ -208,6 +209,13 @@ function classSection(
   };
 }
 
+/** A child's class position in the school's own order (Masters sortOrder). */
+function classOrder(masters: MastersState, s: { classId?: string; sectionId?: string }): number {
+  const classId = s.classId || masters.sections.find((x) => x.id === s.sectionId)?.classId || "";
+  const c = masters.classes.find((x) => x.id === classId);
+  return typeof c?.sortOrder === "number" ? c.sortOrder : 9999;
+}
+
 export function filterSisStudents(
   sis: SisState,
   masters: MastersState,
@@ -225,13 +233,19 @@ export function filterSisStudents(
     filters.academicYearCode === "all"
       ? ""
       : filters.academicYearCode || currentAcademicYearCode();
-  if (reportAy) {
-    rows = rows.filter(
-      (s) => !s.academicYearCode || s.academicYearCode === reportAy,
-    );
-  }
-  if (status !== "all") {
-    rows = rows.filter((s) => s.status === status);
+  if (status === "active" && reportAy) {
+    // The session's children ONCE each (studentsInSession): a child can
+    // carry two rows in one year, and every report row is a child.
+    rows = studentsInSession(sis, reportAy);
+  } else {
+    if (reportAy) {
+      rows = rows.filter(
+        (s) => !s.academicYearCode || s.academicYearCode === reportAy,
+      );
+    }
+    if (status !== "all") {
+      rows = rows.filter((s) => s.status === status);
+    }
   }
   if (filters.classId) {
     rows = rows.filter((s) => {
@@ -259,6 +273,11 @@ export function filterSisStudents(
   }
 
   return rows.sort((a, b) => {
+    // School order (Masters sortOrder), not alphabetical — "IX" sorted
+    // before "LKG" and "X" after "VIII".
+    const oa = classOrder(masters, a);
+    const ob = classOrder(masters, b);
+    if (oa !== ob) return oa - ob;
     const ca = classSection(a, masters).className;
     const cb = classSection(b, masters).className;
     if (ca !== cb) return ca.localeCompare(cb);
@@ -543,8 +562,9 @@ function runStrength(
     cur.total += 1;
     map.set(key, cur);
   }
-  const rows = [...map.values()].sort((a, b) =>
-    `${a.className}-${a.section}`.localeCompare(`${b.className}-${b.section}`),
+  const order = (name: string) => masters.classes.find((c) => c.name === name)?.sortOrder ?? 9999;
+  const rows = [...map.values()].sort(
+    (a, b) => order(a.className) - order(b.className) || `${a.className}-${a.section}`.localeCompare(`${b.className}-${b.section}`),
   );
   const totals = rows.reduce(
     (acc, r) => ({

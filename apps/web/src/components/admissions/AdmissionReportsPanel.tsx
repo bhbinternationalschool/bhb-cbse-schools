@@ -38,7 +38,7 @@ export function AdmissionReportsPanel({
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [surveyDate, setSurveyDate] = useState(() =>
-    new Date().toISOString().slice(0, 10),
+    new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */,
   );
   const [stage, setStage] = useState<AdmissionStage | "all" | "open">("all");
   const [source, setSource] = useState<AdmissionSource | "all">("all");
@@ -191,7 +191,7 @@ export function AdmissionReportsPanel({
   function clearFilters() {
     setFromDate("");
     setToDate("");
-    setSurveyDate(new Date().toISOString().slice(0, 10));
+    setSurveyDate(new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */);
     setStage("all");
     setSource("all");
     setAcademicYearCode("");

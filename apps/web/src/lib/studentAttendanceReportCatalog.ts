@@ -17,7 +17,14 @@ import {
   describeFilters,
   type ReportColumn,
 } from "@/lib/reportExport";
-import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
+import { loadSis, studentsInSession, type SisState, type SisStudent } from "@/lib/sis";
+import {
+  attendanceStartFor,
+  classCalendar,
+  marksByDateFor,
+  sessionStartFor,
+  studentDaysSummary,
+} from "@/lib/studentWorkingDays";
 import { TENANT } from "@/lib/types";
 import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
 import { reportDesksFor } from "@/lib/reportDesks";
@@ -115,8 +122,9 @@ export type StudentAttReportFilters = {
   format?: StudentAttReportFormat;
 };
 
+/** Today in IST — toISOString() is UTC and named yesterday before 05:30. */
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 }
 
 function ymOf(iso: string): string {
@@ -145,11 +153,8 @@ function filterStudents(
   sis: SisState,
   f: StudentAttReportFilters,
 ): SisStudent[] {
-  return (sis.students ?? []).filter((s) => {
-    if (s.status !== "active") return false;
-    if (f.academicYearCode && s.academicYearCode && s.academicYearCode !== f.academicYearCode) {
-      return false;
-    }
+  // The session's children once each: SIS keeps a row per child per year.
+  return studentsInSession(sis, f.academicYearCode).filter((s) => {
     if (f.classId && s.classId !== f.classId) return false;
     if (f.sectionId && s.sectionId !== f.sectionId) return false;
     if (f.studentId && s.id !== f.studentId) return false;
@@ -473,45 +478,56 @@ function buildReport(
     }
 
     case "monthly_percentage": {
+      // The school's rule (lib/studentWorkingDays, director 8 Oct 2026):
+      // working days of the child's class from the Masters holiday calendar,
+      // counted from the day after admission, up to today. It divided by
+      // "days a register was marked" — a skipped week read as 100% — and a
+      // child with no marks got 0%, so "≤ 75%" listed them as defaulters.
+      // No working days yet → "—", never 0%.
       const month = f.month || ymOf(todayIso());
       const bounds = monthBounds(month);
       if (!bounds) return { ok: false, error: "Select a valid month" };
-      const monthRegs = regs.filter(
-        (r) =>
-          r.date >= bounds.from &&
-          r.date <= bounds.to &&
-          (!f.classId || r.classId === f.classId) &&
-          (!f.sectionId || r.sectionId === f.sectionId),
-      );
+      const today = todayIso();
+      const ay = f.academicYearCode;
+      const sessionStart = sessionStartFor(masters, ay);
       const people = f.studentId
         ? students.filter((s) => s.id === f.studentId)
         : students;
       const rows = people
         .map((s) => {
-          let presentish = 0;
-          let marked = 0;
-          for (const reg of monthRegs) {
-            const m = reg.marks.find((x) => x.studentId === s.id);
-            if (!m) continue;
-            marked += 1;
-            if (m.status === "P" || m.status === "L" || m.status === "HD") {
-              presentish += m.status === "HD" ? 0.5 : 1;
-            }
-          }
-          const pct =
-            marked > 0 ? Math.round((presentish / marked) * 1000) / 10 : 0;
+          const start = [attendanceStartFor(s.joinedOn, sessionStart), bounds.from].sort()[1]!;
+          const until = [bounds.to, today].sort()[0]!;
+          const sum = studentDaysSummary({
+            calendar: start <= until ? classCalendar(masters, ay, s.classId, start, until) : [],
+            start,
+            until,
+            marks: marksByDateFor(regs, s.id, ay),
+          });
+          const known = sum.workingDays > 0 && sum.unmarkedDays < sum.workingDays ? sum.percent : null;
           return {
             admissionNo: s.admissionNo,
             student: s.fullName,
             rollNo: s.rollNo,
             className: className(masters, s.classId),
             section: sectionName(masters, s.sectionId),
-            marked,
-            presentDays: Math.round(presentish * 10) / 10,
-            percent: pct,
+            workingDays: sum.workingDays,
+            presentDays: Math.round(sum.presentDays * 10) / 10,
+            absentDays: sum.absentDays,
+            leaveDays: sum.leaveDays,
+            unmarkedDays: sum.unmarkedDays,
+            // Nothing marked at all = unknown, not 0%: shown "—" and never
+            // listed as a defaulter. Partly marked: the school's figure,
+            // with the unmarked days beside it.
+            percent: known === null ? "—" : `${known}%`,
+            _pct: known,
           };
         })
-        .filter((r) => f.maxPercent == null || r.percent <= f.maxPercent);
+        .filter((r) => f.maxPercent == null || (r._pct !== null && r._pct <= f.maxPercent))
+        .map((r) => {
+          const out: Record<string, string | number | null> = { ...r };
+          delete out._pct;
+          return out;
+        });
       return {
         ok: true,
         built: {
@@ -522,8 +538,11 @@ function buildReport(
             { key: "rollNo", header: "Roll" },
             { key: "className", header: "Class" },
             { key: "section", header: "Section" },
-            { key: "marked", header: "Days marked", align: "right" },
+            { key: "workingDays", header: "Working days", align: "right" },
             { key: "presentDays", header: "Present days", align: "right" },
+            { key: "absentDays", header: "Absent", align: "right" },
+            { key: "leaveDays", header: "Leave", align: "right" },
+            { key: "unmarkedDays", header: "Not marked", align: "right" },
             { key: "percent", header: "%", align: "right" },
           ],
           rows,

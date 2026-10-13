@@ -1945,7 +1945,7 @@ export function countActiveHouseholds(
 }
 
 /** `2023-2024` / `2023–24` → `2023-24` for cross-record comparison. */
-function normalizeAyCode(code: string): string {
+export function normalizeAyCode(code: string): string {
   const t = (code || "").trim().replace(/\s+/g, "").replace(/–/g, "-");
   const full = t.match(/^(20\d{2})-(20\d{2})$/);
   if (full) return `${full[1]}-${full[2]!.slice(2)}`;
