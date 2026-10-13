@@ -62,13 +62,21 @@ export function lineDelta(
   return debitNormal ? r.debitPaise - r.creditPaise : r.creditPaise - r.debitPaise;
 }
 
-/** The balance before the first line, read back off its running figure. */
-export function statementOpeningPaise(
-  rows: StatementLineLike[],
-  debitNormal: boolean,
-): number {
-  if (rows.length === 0) return 0;
-  return rows[0]!.runningPaise - lineDelta(rows[0]!, debitNormal);
+/**
+ * Do the lines carry the book from its opening to its closing? Opening and
+ * closing are the book's own period balances — never read off the first line,
+ * which an account with a balance and no movement in the period does not
+ * have (it showed ₹0 → ₹0 for a ₹30.48 lakh suspense balance). A mismatch
+ * means a page of lines is missing, and the statement must not be shown.
+ */
+export function statementTies(input: {
+  openingPaise: number;
+  closingPaise: number;
+  rows: Pick<StatementLineLike, "debitPaise" | "creditPaise">[];
+  debitNormal: boolean;
+}): boolean {
+  const moved = input.rows.reduce((n, r) => n + lineDelta(r, input.debitNormal), 0);
+  return input.openingPaise + moved === input.closingPaise;
 }
 
 /**

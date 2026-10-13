@@ -10,10 +10,12 @@
  * Collections on the left of the page, expenses on the right, totals, a
  * per-day breakdown for a range, and a signature block.
  *
- * Cancelled entries — a reversed voucher and its reversal — are on neither
- * side. The 13 Oct 2026 clean-up dated each reversal on its original's day,
- * so a removed salary payment showed as an expense AND, through its
- * reversal, as a collection. They are counted, and listed apart on request.
+ * A cancelled pair — a reversed voucher and its reversal — with both halves
+ * in the range is on neither side. The 13 Oct 2026 clean-up dated each
+ * reversal on its original's day, so a removed salary payment showed as an
+ * expense AND, through its reversal, as a collection. Such pairs are counted,
+ * and listed apart on request. A half whose partner is outside the range
+ * stays in its place, labelled: the cash moved that day.
  *
  * It shows movements and never a balance. What the school holds, and what it has
  * earned and spent across the session, sit behind `accounts_position`; this
@@ -29,6 +31,7 @@ import {
   toggleAllDays,
   type DaySheet,
   type DaySheetCancelled,
+  type DaySheetCrossRange,
   type DaySheetDay,
   type DaySheetEntry,
   type DaySheetSide as Side,
@@ -195,6 +198,7 @@ export function DaySheetPanel({ onError, actorName }: AccountsPanelProps) {
           expenses: sideForDay(sheet.expenses, d),
           days: [],
           cancelled: sheet.cancelled.filter((c) => c.date === d),
+          crossRange: sheet.crossRange.filter((c) => c.date === d),
           truncated: sheet.truncated,
         },
         actorName,
@@ -224,8 +228,9 @@ export function DaySheetPanel({ onError, actorName }: AccountsPanelProps) {
         A day of money — or a range of up to 92 days — split by the account it
         moved through and by what it was for. Print it for the principal to
         sign and keep with the day&rsquo;s records. It carries no cash or bank
-        balance. Cancelled entries (a reversed voucher and its reversal) are
-        left out of both sides.
+        balance. A cancelled entry and its reversal are left out of both sides
+        when both fall in the range; when one is outside, the other is counted
+        where it happened and labelled.
       </div>
 
       <div className={`${CARD} flex flex-wrap items-end gap-3`}>
@@ -285,8 +290,8 @@ export function DaySheetPanel({ onError, actorName }: AccountsPanelProps) {
         <>
           {sheet.truncated ? (
             <div className={`${CARD} text-sm font-medium text-[var(--warning)]`}>
-              This day has more entries than the sheet reads in one pass, so the
-              totals below may be short. Do not sign this one — tell the office.
+              The sheet could not read every entry in this range, so the totals
+              below may be short. Do not sign this one — tell the office.
             </div>
           ) : null}
 
@@ -386,6 +391,41 @@ export function DaySheetPanel({ onError, actorName }: AccountsPanelProps) {
                   </ErpTable></div></ErpTableShell>
                 </div>
               )}
+            </div>
+          ) : null}
+
+          {sheet.crossRange.length > 0 ? (
+            <div className={CARD}>
+              <p className="text-sm text-[var(--muted)]">
+                {sheet.crossRange.length} {sheet.crossRange.length === 1 ? "entry is" : "entries are"} counted
+                above although {sheet.crossRange.length === 1 ? "its" : "their"} other half is outside this
+                range — the money moved on {sheet.crossRange.length === 1 ? "its" : "their"} own day, so the
+                sheet still agrees with the cash counted then.
+              </p>
+              <div className="mt-3">
+                <ErpTableShell><div className="overflow-x-auto"><ErpTable minWidth="min-w-[32rem]">
+                  <ErpTableHead>
+                    <tr className="text-[11px] text-[var(--muted)]">
+                      <th className="px-3 py-2 text-left font-medium">Date</th>
+                      <th className="px-3 py-2 text-left font-medium">Voucher</th>
+                      <th className="px-3 py-2 text-left font-medium">Other half</th>
+                      <th className="px-3 py-2 text-right font-medium">In</th>
+                      <th className="px-3 py-2 text-right font-medium">Out</th>
+                    </tr>
+                  </ErpTableHead>
+                  <ErpTableBody>
+                    {sheet.crossRange.map((c: DaySheetCrossRange) => (
+                      <tr key={c.voucherId} {...rowOpenProps(() => setOpenVoucher(c.voucherNo), `Open voucher ${c.voucherNo}`)}>
+                        <td className="px-3 py-2 text-[13px]">{shortDate(c.date)}</td>
+                        <td className="px-3 py-2 font-mono text-xs">{c.voucherNo}</td>
+                        <td className="px-3 py-2 text-[13px]">{c.note}</td>
+                        <td className="px-3 py-2 text-right text-[13px]">{c.inPaise ? inr(c.inPaise) : "—"}</td>
+                        <td className="px-3 py-2 text-right text-[13px]">{c.outPaise ? inr(c.outPaise) : "—"}</td>
+                      </tr>
+                    ))}
+                  </ErpTableBody>
+                </ErpTable></div></ErpTableShell>
+              </div>
             </div>
           ) : null}
 
@@ -536,6 +576,7 @@ type PrintPart = {
   expenses: Side;
   days: DaySheetDay[];
   cancelled: DaySheetCancelled[];
+  crossRange: DaySheetCrossRange[];
   truncated: boolean;
 };
 
@@ -591,6 +632,19 @@ function printableSheetBody(part: PrintPart, actorName: string, withCancelled: b
             .join("") +
           `</table>`
         : `<div class="sub">${n} cancelled entr${n === 1 ? "y" : "ies"} (reversed vouchers and their reversals) left out of both sides.</div>`;
+  // Counted, so always printed: the reader must see why a voided receipt is
+  // still in this day's total.
+  const cross =
+    part.crossRange.length === 0
+      ? ""
+      : `<h2 style="margin-top:16px">Counted here — other half outside this ${isRange ? "range" : "day"}</h2><table>` +
+        part.crossRange
+          .map(
+            (c) =>
+              `<tr><td>${esc(shortDate(c.date))}</td><td>${esc(c.voucherNo)}</td><td>${esc(c.note)}</td><td class="amt">${inr(Math.max(c.inPaise, c.outPaise))}</td></tr>`,
+          )
+          .join("") +
+        `</table>`;
   return `<section class="sheet">
 ${printLetterheadHtml()}
 <h1>${isRange ? "Collection &amp; expense sheet" : "Daily collection &amp; expense sheet"}</h1>
@@ -610,6 +664,7 @@ ${part.truncated ? `<div class="warn">INCOMPLETE — the sheet could not read ev
 </div>
 <div class="net"><span>Net movement for ${isRange ? "the period" : "the day"}</span><span>${inr(net)}</span></div>
 ${days}
+${cross}
 ${cancelled}
 <div class="sign">
   <div>Prepared by (counter)</div>

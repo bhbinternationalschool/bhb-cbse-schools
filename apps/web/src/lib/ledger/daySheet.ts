@@ -7,12 +7,16 @@
  *   - collections and expenses per tender (the cash or bank account the money
  *     moved through) and per head, over a date range;
  *   - a per-day breakdown when the range is longer than a day;
- *   - every cancelled entry — a reversed voucher AND its reversal — kept OUT
- *     of both sides and listed apart. The 13 Oct 2026 clean-up dated each
- *     reversal on its original's date, so a removed salary payment showed
- *     under Expenses and its reversal under Collections, as if money had come
- *     in. Both halves go, whatever their dates: the sheet shows what actually
- *     happened.
+ *   - a cancelled pair — a reversed voucher AND its reversal — with BOTH
+ *     halves inside the range is kept out of both sides and listed apart. The
+ *     13 Oct 2026 clean-up dated each reversal on its original's date, so a
+ *     removed salary payment showed under Expenses and its reversal under
+ *     Collections, as if money had come in;
+ *   - a half whose partner falls OUTSIDE the range stays where it is, counted,
+ *     and labelled ("cancelled later on 9 Sep — RV/…", "cancels RC/… of
+ *     29 Aug"). Those are mostly fee receipts voided weeks later: the cash was
+ *     counted on the original's day, and that day's sheet must still agree
+ *     with the cash that was counted.
  *
  * Still a sheet of movements, never a balance — see daySheet.server.ts.
  */
@@ -24,6 +28,18 @@ export type DaySheetEntry = {
   date: string;
   narration: string;
   paise: number;
+  /** Set when the other half of a reversed pair is outside the range. */
+  note?: string;
+};
+
+/** A half counted on the sheet whose partner is outside the range. */
+export type DaySheetCrossRange = {
+  voucherId: string;
+  voucherNo: string;
+  date: string;
+  note: string;
+  inPaise: number;
+  outPaise: number;
 };
 
 export type DaySheetHead = {
@@ -76,8 +92,10 @@ export type DaySheet = {
   expenses: DaySheetSide;
   /** One row per day with movement, oldest first. */
   days: DaySheetDay[];
-  /** Hidden from both sides; listed only when asked for. */
+  /** Pairs wholly inside the range: hidden from both sides, listed on request. */
   cancelled: DaySheetCancelled[];
+  /** Halves of pairs that straddle the range edge: counted, and labelled. */
+  crossRange: DaySheetCrossRange[];
   /** True when the read stopped short and the sheet may be incomplete. */
   truncated: boolean;
 };
@@ -137,8 +155,9 @@ export function parseReversalNarration(n: string): { of: string; reason: string 
  * @param vouchers every voucher dated in the range
  * @param lines    their lines
  * @param reversals every reversal in the book (any date) — the pairs are read
- *                  from these, so a reversal dated outside the range still
- *                  takes its original out of the sheet
+ *                  from these
+ * @param originals vouchers outside the range that an in-range reversal
+ *                  cancels — only for their number and date in the label
  */
 export function buildDaySheet(input: {
   from: string;
@@ -147,11 +166,13 @@ export function buildDaySheet(input: {
   lines: DsLine[];
   accounts: DsAccount[];
   reversals: DsVoucher[];
+  originals?: DsVoucher[];
 }): Omit<DaySheet, "ok" | "error" | "truncated"> {
   const accounts = new Map(input.accounts.map((a) => [a.id, a]));
   const reversalOf = new Map<string, DsVoucher>();
   for (const r of input.reversals) if (r.reversesVoucherId) reversalOf.set(r.reversesVoucherId, r);
   const byId = new Map(input.vouchers.map((v) => [v.id, v]));
+  const outside = new Map((input.originals ?? []).map((v) => [v.id, v]));
 
   const linesByVoucher = new Map<string, DsLine[]>();
   for (const l of input.lines) {
@@ -164,6 +185,7 @@ export function buildDaySheet(input: {
   const spend = new Map<string, DaySheetTender>();
   const days = new Map<string, DaySheetDay>();
   const cancelled: DaySheetCancelled[] = [];
+  const crossRange: DaySheetCrossRange[] = [];
 
   const bump = (
     side: Map<string, DaySheetTender>,
@@ -171,6 +193,7 @@ export function buildDaySheet(input: {
     head: DsAccount | undefined,
     paise: number,
     v: DsVoucher,
+    note: string,
   ) => {
     let t = side.get(tender.code);
     if (!t) {
@@ -188,7 +211,14 @@ export function buildDaySheet(input: {
     }
     h.paise += paise;
     h.count += 1;
-    h.entries.push({ voucherId: v.id, voucherNo: v.voucherNo, date: v.date, narration: v.narration, paise });
+    h.entries.push({
+      voucherId: v.id,
+      voucherNo: v.voucherNo,
+      date: v.date,
+      narration: v.narration,
+      paise,
+      ...(note ? { note } : {}),
+    });
   };
 
   for (const v of input.vouchers) {
@@ -203,7 +233,19 @@ export function buildDaySheet(input: {
     }
 
     const undoneBy = reversalOf.get(v.id);
-    if (v.reversesVoucherId || undoneBy) {
+    // A pair is hidden only when both halves are on this sheet.
+    const pairInRange = v.reversesVoucherId
+      ? byId.has(v.reversesVoucherId)
+      : !!undoneBy && byId.has(undoneBy.id);
+    let note = "";
+    if (v.reversesVoucherId && !pairInRange) {
+      const orig = outside.get(v.reversesVoucherId);
+      const no = orig?.voucherNo || parseReversalNarration(v.narration).of || "an entry";
+      note = `cancels ${no}${orig?.date ? ` of ${orig.date}` : ""}`;
+    } else if (undoneBy && !pairInRange) {
+      note = `cancelled ${undoneBy.date >= v.date ? "later" : "earlier"} on ${undoneBy.date} — ${undoneBy.voucherNo}`;
+    }
+    if (pairInRange) {
       if (v.reversesVoucherId) {
         const parsed = parseReversalNarration(v.narration);
         cancelled.push({
@@ -240,9 +282,10 @@ export function buildDaySheet(input: {
     for (const l of vLines) {
       const acct = accounts.get(l.accountId);
       if (!acct?.isMoney) continue;
-      if (l.debitPaise > 0) bump(collect, acct, head, l.debitPaise, v);
-      else if (l.creditPaise > 0) bump(spend, acct, head, l.creditPaise, v);
+      if (l.debitPaise > 0) bump(collect, acct, head, l.debitPaise, v, note);
+      else if (l.creditPaise > 0) bump(spend, acct, head, l.creditPaise, v, note);
     }
+    if (note) crossRange.push({ voucherId: v.id, voucherNo: v.voucherNo, date: v.date, note, inPaise, outPaise });
     if (inPaise || outPaise) {
       const d = days.get(v.date) ?? { date: v.date, inPaise: 0, outPaise: 0 };
       d.inPaise += inPaise;
@@ -270,6 +313,7 @@ export function buildDaySheet(input: {
     expenses: side(spend),
     days: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)),
     cancelled: cancelled.sort((a, b) => a.date.localeCompare(b.date) || a.voucherNo.localeCompare(b.voucherNo)),
+    crossRange: crossRange.sort((a, b) => a.date.localeCompare(b.date) || a.voucherNo.localeCompare(b.voucherNo)),
   };
 }
 

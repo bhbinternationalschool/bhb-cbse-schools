@@ -73,6 +73,7 @@ export async function readDaySheet(input: {
     expenses: EMPTY_SIDE,
     days: [],
     cancelled: [],
+    crossRange: [],
     truncated: false,
   };
   if (!range.ok) return { ...blank, error: range.error };
@@ -97,9 +98,10 @@ export async function readDaySheet(input: {
       .from("ledger_accounts")
       .select("id, code, name, is_cash, is_bank")
       .eq("tenant_id", tenantId),
-    // Every reversal in the book, whatever its date: one of them dated next
-    // month still cancels a voucher on this sheet (66 of 982 were dated off
-    // their original's day on 13 Oct 2026).
+    // Every reversal in the book, whatever its date: a voucher on this sheet
+    // cancelled months later is still counted here, but labelled (66 of 982
+    // were dated off their original's day on 13 Oct 2026 — voided fee
+    // receipts, mostly).
     fetchAllPages<VoucherRow>((from, to) =>
       sb
         .from("ledger_vouchers")
@@ -132,7 +134,6 @@ export async function readDaySheet(input: {
         .in("voucher_id", chunk)
         .order("id", { ascending: true })
         .range(from, to),
-    { chunkSize: 150 },
   );
   if (linesRes.error) return { ...blank, error: linesRes.error };
   const lines: DsLine[] = linesRes.rows.map((l) => ({
@@ -142,9 +143,27 @@ export async function readDaySheet(input: {
     creditPaise: Number(l.credit_paise ?? 0),
   }));
 
+  // The originals that in-range reversals cancel but that fall outside the
+  // range: read only for their number and date, to label the reversal.
+  const inRange = new Set(vouchers.map((v) => v.id));
+  const missing = vouchers
+    .map((v) => v.reversesVoucherId)
+    .filter((id) => id && !inRange.has(id));
+  const originalsRes = await fetchByIds<VoucherRow>(missing, (chunk, from, to) =>
+    sb
+      .from("ledger_vouchers")
+      .select(cols)
+      .eq("tenant_id", tenantId)
+      .in("id", chunk)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  if (originalsRes.error) return { ...blank, error: originalsRes.error };
+
   return {
     ok: true,
-    truncated: false,
+    // Real, not assumed: the paged reader stops at its row ceiling and says so.
+    truncated: vouchersRes.truncated || reversalsRes.truncated,
     ...buildDaySheet({
       from: range.from,
       to: range.to,
@@ -152,6 +171,7 @@ export async function readDaySheet(input: {
       lines,
       accounts,
       reversals: reversalsRes.rows.map(toVoucher),
+      originals: originalsRes.rows.map(toVoucher),
     }),
   };
 }

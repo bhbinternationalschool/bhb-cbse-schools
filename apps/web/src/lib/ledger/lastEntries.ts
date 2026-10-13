@@ -94,6 +94,16 @@ export function lastEntriesByKind(
   return out;
 }
 
+/**
+ * The first live voucher of a newest-first page: not a reversal, not
+ * reversed. The server walks pages until it finds one.
+ */
+export function firstLiveVoucher(rows: HandVoucher[], reversedIds: Set<string>): HandVoucher | null {
+  return (
+    rows.find((r) => !r.reversesVoucherId && r.voucherType !== "reversal" && !reversedIds.has(r.id)) ?? null
+  );
+}
+
 /** "13 Oct 2026, 4:05 pm" in IST — when an entry was keyed. */
 export function formatKeyedAtIst(iso: string): string {
   const d = new Date(iso);

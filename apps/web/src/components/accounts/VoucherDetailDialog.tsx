@@ -32,6 +32,8 @@ const BTN_OUTLINE =
  */
 export function rowOpenProps(onOpen: () => void, label: string) {
   return {
+    // A row that acts as a button says so, so its label is announced.
+    role: "button" as const,
     tabIndex: 0,
     "aria-label": label,
     onClick: onOpen,
@@ -247,7 +249,7 @@ export function VoucherListDialog({
 }: {
   title: string;
   subtitle?: string;
-  entries: { voucherId: string; voucherNo: string; date: string; narration: string; paise: number }[];
+  entries: { voucherId: string; voucherNo: string; date: string; narration: string; paise: number; note?: string }[];
   onClose: () => void;
 }) {
   const [open, setOpen] = useState<VoucherRef | null>(null);
@@ -288,7 +290,12 @@ export function VoucherListDialog({
                     <tr key={`${e.voucherId}:${i}`} {...p}>
                       <td className="py-1 whitespace-nowrap">{e.date}</td>
                       <td className="py-1 font-mono text-xs">{e.voucherNo}</td>
-                      <td className="py-1 text-xs text-[var(--muted)]">{e.narration || "—"}</td>
+                      <td className="py-1 text-xs text-[var(--muted)]">
+                        {e.narration || "—"}
+                        {e.note ? (
+                          <span className="block font-semibold text-[var(--warning)]">{e.note}</span>
+                        ) : null}
+                      </td>
                       <td className="py-1 text-right tabular-nums">{formatInr(e.paise)}</td>
                     </tr>
                   );
