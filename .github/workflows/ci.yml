@@ -685,9 +685,9 @@ jobs:
   # It uses no secret of any kind: every key is minted per run from a random
   # secret, and every URL is 127.0.0.1.
   e2e-stack:
-    name: E2E stack (Postgres 17 + PostgREST, seeded school)
+    name: E2E stack (Postgres 17 + PostgREST, seeded school) + Playwright gate
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 75
     # Not a merge gate yet — the director makes it required once it has run green.
     continue-on-error: true
     steps:
@@ -750,6 +750,68 @@ jobs:
 
       - name: Acceptance check
         run: bash scripts/e2e-stack.sh check
+
+      # The behavioural gate (data-layer step 1.1): Playwright, Chromium only,
+      # against the app started above. Version pinned in apps/web/package.json;
+      # the browser is cached on that version.
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('./apps/web/node_modules/@playwright/test/package.json').version" 2>/dev/null || node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      - name: Install Chromium (and its system libraries)
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+
+      # Through with-env.mjs: the run gets apps/web/.env.e2e and nothing else,
+      # and playwright.config.ts refuses any URL that is not 127.0.0.1.
+      # Green = every spec passes or is an annotated expected failure
+      # (test.fail with its reason); see apps/web/e2e/scoreboard-reporter.ts.
+      - name: Playwright gate
+        working-directory: apps/web
+        run: node ../../scripts/e2e/with-env.mjs .env.e2e -- npx playwright test
+
+      - name: Scoreboard → job summary
+        if: always()
+        working-directory: apps/web
+        run: |
+          [ -f e2e/scoreboard.json ] || { echo "no scoreboard.json (the run did not finish)" >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+          node -e '
+            const s = require("./e2e/scoreboard.json");
+            const esc = (t) => String(t ?? "").replace(/\|/g, "\\|").replace(/\n/g, " ");
+            const out = [];
+            out.push("## Playwright gate — scoreboard");
+            out.push("");
+            out.push(`pass ${s.summary.pass} · expected-fail ${s.summary.expectedFail} · fixme ${s.summary.fixme} · UNEXPECTED-PASS ${s.summary.unexpectedPass} · FAIL ${s.summary.fail}`);
+            out.push("");
+            out.push("| outcome | project | test | reason / failed at | numbers |");
+            out.push("|---|---|---|---|---|");
+            for (const t of s.tests) {
+              const why = [t.reasons.join(" / "), t.failedStep ? `failed at: ${t.failedStep}` : ""].filter(Boolean).join(" — ");
+              const m = t.metrics.budget ? `${t.metrics.budget.requests} req, ${t.metrics.budget.encodedKB} KB` :
+                        t.metrics.dom ? JSON.stringify(t.metrics.dom.seen) + " in " + JSON.stringify(t.metrics.dom.msToShow) :
+                        Object.keys(t.metrics).length ? JSON.stringify(t.metrics).slice(0, 200) : "";
+              out.push(`| ${t.outcome} | ${t.project} | ${esc(t.file + " › " + t.title)} | ${esc(why)} | ${esc(m)} |`);
+            }
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, out.join("\n") + "\n");
+          '
+
+      - name: Upload the Playwright report and scoreboard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-gate
+          path: |
+            apps/web/e2e/report
+            apps/web/e2e/scoreboard.json
+            apps/web/e2e/test-results
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Stack logs (on failure)
         if: failure()
