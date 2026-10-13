@@ -321,10 +321,11 @@ export function PrintablePayslip({
           <span className="text-[var(--muted)]">Status: </span>
           {payrollStatusLabel(run.status)}
         </p>
-        {line.paymentDate ? (
+        {line.paidOn || line.paymentDate ? (
           <p>
-            <span className="text-[var(--muted)]">Pay date: </span>
-            {line.paymentDate}
+            <span className="text-[var(--muted)]">{line.paidOn ? "Paid on: " : "Pay date: "}</span>
+            {line.paidOn || line.paymentDate}
+            {line.paymentRef ? ` · ref ${line.paymentRef}` : ""}
           </p>
         ) : null}
         {line.paymentMode ? (

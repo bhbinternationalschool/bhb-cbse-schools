@@ -53,6 +53,7 @@ import {
 } from "@/lib/salarySetup";
 import { trackServerWork } from "@/lib/serverWork";
 import { recordPayrollRunDeletion } from "@/lib/payrollNormalizedClient";
+import { payrollPaidProgress } from "@/lib/payrollPayGroups";
 
 export type PayrollRunStatus =
   | "draft"
@@ -76,6 +77,7 @@ export type PayrollPaymentMode =
   | "cash"
   | "cheque"
   | "upi"
+  | "neft"
   | "other";
 
 export const PAYROLL_PAYMENT_MODES: {
@@ -84,6 +86,7 @@ export const PAYROLL_PAYMENT_MODES: {
 }[] = [
   { value: "bank_transfer", label: "Bank transfer" },
   { value: "upi", label: "UPI" },
+  { value: "neft", label: "NEFT / RTGS" },
   { value: "cash", label: "Cash" },
   { value: "cheque", label: "Cheque" },
   { value: "other", label: "Other" },
@@ -139,6 +142,16 @@ export type PayrollStaffLine = {
   paymentDate: string;
   paymentMode: PayrollPaymentMode;
   note: string;
+  /**
+   * Day this person's salary was actually paid (YYYY-MM-DD), "" = not yet.
+   * Set only by marking the line paid on a posted run (14 Oct 2026): the book
+   * posts one payment voucher per (day paid, money account) from these.
+   * paymentDate stays the planned day the draft carried.
+   */
+  paidOn?: string;
+  paidBy?: string;
+  /** UTR / cheque no. / reference of this person's payment. */
+  paymentRef?: string;
 };
 
 export type PayrollRun = {
@@ -273,6 +286,7 @@ function normalizePaymentMode(v?: string | null): PayrollPaymentMode {
     v === "cash" ||
     v === "cheque" ||
     v === "upi" ||
+    v === "neft" ||
     v === "other" ||
     v === "bank_transfer"
   ) {
@@ -325,6 +339,9 @@ export function normalizePayrollLine(
     paymentDate: String(l.paymentDate || "").slice(0, 10),
     paymentMode: normalizePaymentMode(l.paymentMode),
     note: String(l.note || ""),
+    paidOn: String(l.paidOn || "").slice(0, 10),
+    paidBy: String(l.paidBy || ""),
+    paymentRef: String(l.paymentRef || ""),
   };
 }
 
@@ -1084,6 +1101,10 @@ export function mergePreservedAdjustments(
     paymentDate: previous.paymentDate || "",
     paymentMode: previous.paymentMode || "bank_transfer",
     note: previous.note || fresh.note,
+    // A recalled run keeps who was already paid, and on which day.
+    paidOn: previous.paidOn || "",
+    paidBy: previous.paidBy || "",
+    paymentRef: previous.paymentRef || "",
   });
 }
 
@@ -1333,6 +1354,20 @@ export function processPayrollDraft(opts: {
   return { ok: true, run: built, merged: false, skipped };
 }
 
+/** The payment fields of a line — all a posted run's line may change. */
+const LINE_PAYMENT_FIELDS = ["paymentDate", "paymentMode", "note", "paidOn", "paidBy", "paymentRef"] as const;
+
+/** Same staff, same order, same amounts — at most the payment fields differ. */
+export function onlyPaymentFieldsDiffer(before: PayrollStaffLine[], after: PayrollStaffLine[]): boolean {
+  if (before.length !== after.length) return false;
+  const strip = (l: PayrollStaffLine) => {
+    const o: Record<string, unknown> = { ...l };
+    for (const k of LINE_PAYMENT_FIELDS) delete o[k];
+    return JSON.stringify(o, Object.keys(o).sort());
+  };
+  return before.every((l, i) => strip(normalizePayrollLine(l)) === strip(normalizePayrollLine(after[i]!)));
+}
+
 export function upsertPayrollRun(run: PayrollRun): PayrollState {
   const state = loadPayroll();
   const existing = state.runs.find((r) => r.id === run.id);
@@ -1340,9 +1375,12 @@ export function upsertPayrollRun(run: PayrollRun): PayrollState {
     existing &&
     accountsTouched(existing) &&
     accountsTouched(run) &&
-    JSON.stringify(run.lines) !== JSON.stringify(existing.lines)
+    !onlyPaymentFieldsDiffer(existing.lines, run.lines)
   ) {
-    // Hard lock: never mutate posted/paid salary lines in place
+    // Hard lock: never mutate posted/paid salary lines in place. Who was
+    // paid, on which day, how and with what reference are the only fields a
+    // posted run's lines take (14 Oct 2026) — the amounts never move. This
+    // lock used to drop "Pay by UPI" line payments silently as well.
     return state;
   }
 
@@ -1599,6 +1637,8 @@ export function publishPayrollToAccounts(
 export function recallPayrollToDraft(
   runId: string,
   by = "system",
+  /** What the server book reversed (lib/payrollBookClient) — for the audit trail. */
+  book?: { reversed: { voucherNo: string; reversalNo: string }[] },
 ): { ok: true; run: PayrollRun } | { ok: false; error: string } {
   const state = loadPayroll();
   const run = state.runs.find((r) => r.id === runId);
@@ -1639,52 +1679,11 @@ export function recallPayrollToDraft(
     runId: next.id,
     month: next.month,
     academicYearCode: next.academicYearCode,
-    detail: `Recalled from ${fromStatus} · accounts/advances voided if posted · lock v${next.lockVersion}`,
-  });
-  return { ok: true, run: next };
-}
-
-/**
- * One staff member's salary was paid (by UPI, from the ERP's "Pay by UPI" —
- * director, 7 Oct 2026): record the mode, the day and the UPI reference on
- * their line. Only on a posted or paid run, and only these three fields —
- * the amounts the book already holds do not move. The reference is added to
- * the line's note, where the payslip and the registers already show it.
- */
-export function recordPayrollLinePayment(
-  runId: string,
-  staffId: string,
-  paid: { mode: PayrollPaymentMode; date: string; ref: string },
-  by: string,
-): { ok: true; run: PayrollRun } | { ok: false; error: string } {
-  const state = loadPayroll();
-  const run = state.runs.find((r) => r.id === runId);
-  if (!run) return { ok: false, error: "Run not found" };
-  if (run.status !== "posted" && run.status !== "paid") {
-    return { ok: false, error: "Publish the run before recording a salary payment" };
-  }
-  const line = run.lines.find((l) => l.staffId === staffId);
-  if (!line) return { ok: false, error: "That staff member is not on this run" };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(paid.date)) return { ok: false, error: "Enter the date it was paid" };
-  const ref = paid.ref.trim();
-  const note = ref && !(line.note || "").includes(ref)
-    ? [line.note?.trim(), `UTR ${ref}`].filter(Boolean).join(" · ")
-    : line.note || "";
-  const next: PayrollRun = {
-    ...run,
-    lines: run.lines.map((l) =>
-      l.staffId === staffId ? { ...l, paymentMode: paid.mode, paymentDate: paid.date, note } : l,
-    ),
-    lockVersion: (run.lockVersion || 0) + 1,
-  };
-  upsertPayrollRun(next);
-  appendPayrollAudit({
-    by,
-    action: "line_edited",
-    runId: next.id,
-    month: next.month,
-    academicYearCode: next.academicYearCode,
-    detail: `${line.fullName}: paid by ${paid.mode} on ${paid.date}${ref ? ` · UTR ${ref}` : ""}`,
+    detail: `Recalled from ${fromStatus} · accounts/advances voided if posted${
+      book?.reversed.length
+        ? ` · book reversed ${book.reversed.map((r) => `${r.voucherNo} → ${r.reversalNo}`).join(", ")}`
+        : ""
+    } · lock v${next.lockVersion}`,
   });
   return { ok: true, run: next };
 }
@@ -1716,10 +1715,160 @@ export function payrollRunPaymentDate(run: Pick<PayrollRun, "lines">): string {
   return dates.length === 1 ? dates[0]! : "";
 }
 
+export type PayrollLinePaymentInput = {
+  /** Day paid, YYYY-MM-DD (India). */
+  date: string;
+  /** Leave out to keep each line's own (planned) mode. */
+  mode?: PayrollPaymentMode;
+  /** UTR / cheque no. / reference. */
+  ref?: string;
+};
+
+/**
+ * Mark staff paid on a posted run, each on the day they were actually paid
+ * (director, 14 Oct 2026: "I have to pay on different dates for every
+ * staff"). Sets the line's paid day, mode and reference — never an amount.
+ * The book (payroll_ledger_post, run on save) posts one payment voucher per
+ * (day paid, money account). When every line with something payable is
+ * paid, the run becomes paid on the latest of those days; until then it is
+ * "posted · partly paid (n of m)".
+ */
+export function markPayrollLinesPaid(
+  runId: string,
+  staffIds: string[],
+  paid: PayrollLinePaymentInput,
+  by: string,
+  now = new Date(),
+): { ok: true; run: PayrollRun; marked: number } | { ok: false; error: string } {
+  const state = loadPayroll();
+  const run = state.runs.find((r) => r.id === runId);
+  if (!run) return { ok: false, error: "Run not found" };
+  if (run.status !== "posted" && run.status !== "paid") {
+    return { ok: false, error: "Publish the run to the salary account before marking anyone paid" };
+  }
+  const err = payrollPaidOnError(run.month, paid.date, todayIstDate(now));
+  if (err) return { ok: false, error: err };
+  if (run.status === "paid" && !run.lines.some((l) => l.paidOn)) {
+    return { ok: false, error: "This run was marked paid as a whole before per-person dates — its payment is already one voucher in the book" };
+  }
+  const wanted = new Set(staffIds);
+  const targets = run.lines.filter((l) => wanted.has(l.staffId));
+  if (!targets.length) return { ok: false, error: "Choose the staff who were paid" };
+  const ref = (paid.ref || "").trim();
+  const mode = paid.mode ? normalizePaymentMode(paid.mode) : null;
+  let marked = 0;
+  const lines = run.lines.map((l) => {
+    if (!wanted.has(l.staffId)) return l;
+    marked += 1;
+    const note = ref && !(l.note || "").includes(ref)
+      ? [l.note?.trim(), `${(mode ?? l.paymentMode) === "cheque" ? "Cheque" : "UTR"} ${ref}`].filter(Boolean).join(" · ")
+      : l.note || "";
+    return {
+      ...l,
+      paidOn: paid.date,
+      paidBy: by,
+      paymentDate: paid.date,
+      paymentMode: mode ?? l.paymentMode,
+      paymentRef: ref || l.paymentRef || "",
+      note,
+    };
+  });
+  const next = settlePaidStatus({ ...run, lines, lockVersion: (run.lockVersion || 0) + 1 }, by);
+  upsertPayrollRun(next);
+  const names = namesList(targets.map((l) => l.fullName));
+  appendPayrollAudit({
+    by,
+    action: next.status === "paid" && run.status !== "paid" ? "paid" : "line_edited",
+    runId: next.id,
+    month: next.month,
+    academicYearCode: next.academicYearCode,
+    detail: `${names}: paid on ${paid.date}${mode ? ` by ${paymentModeLabel(mode)}` : ""}${ref ? ` · ref ${ref}` : ""}${next.status === "paid" && run.status !== "paid" ? " · every line paid — run marked paid" : ""} · lock v${next.lockVersion}`,
+  });
+  return { ok: true, run: next, marked };
+}
+
+/**
+ * A line marked paid by mistake. Allowed only for a line marked paid on its
+ * own (one with a paid day). Its payment group in the book is reversed and
+ * re-posted for the others paid that day by the same means — the book does
+ * that on save (payroll_ledger_post regroups); a voucher in a locked period
+ * makes the save's book step fail, and the screen says so. A run paid as a
+ * whole before 14 Oct (no line has a paid day) is not un-marked here.
+ */
+export function unmarkPayrollLinePaid(
+  runId: string,
+  staffId: string,
+  by: string,
+): { ok: true; run: PayrollRun } | { ok: false; error: string } {
+  const state = loadPayroll();
+  const run = state.runs.find((r) => r.id === runId);
+  if (!run) return { ok: false, error: "Run not found" };
+  const line = run.lines.find((l) => l.staffId === staffId);
+  if (!line) return { ok: false, error: "That staff member is not on this run" };
+  if (!line.paidOn) {
+    return {
+      ok: false,
+      error: run.status === "paid"
+        ? "This run was marked paid as a whole — its payment is one voucher in the book. Reverse it in Accounts if it is wrong."
+        : `${line.fullName} is not marked paid`,
+    };
+  }
+  const lines = run.lines.map((l) =>
+    l.staffId === staffId ? { ...l, paidOn: "", paidBy: "", paymentRef: "" } : l,
+  );
+  const next = settlePaidStatus({ ...run, lines, lockVersion: (run.lockVersion || 0) + 1 }, by);
+  upsertPayrollRun(next);
+  appendPayrollAudit({
+    by,
+    action: "line_edited",
+    runId: next.id,
+    month: next.month,
+    academicYearCode: next.academicYearCode,
+    detail: `${line.fullName}: paid on ${line.paidOn} un-marked — the book regroups that day's payment · lock v${next.lockVersion}`,
+  });
+  return { ok: true, run: next };
+}
+
+/** posted ⇄ paid from the lines: paid only when everyone with something payable is. */
+function settlePaidStatus(run: PayrollRun, by: string): PayrollRun {
+  const p = payrollPaidProgress(run.lines);
+  if (p.allPaid) {
+    return {
+      ...run,
+      status: "paid",
+      paidBy: run.status === "paid" ? run.paidBy || by : by,
+      paidAt: new Date(`${p.lastPaidOn}T12:00:00+05:30`).toISOString(),
+    };
+  }
+  if (run.status === "paid") return { ...run, status: "posted", paidBy: "", paidAt: "" };
+  return run;
+}
+
+/**
+ * One staff member's salary was paid (by UPI, from the ERP's "Pay by UPI" —
+ * director, 7 Oct 2026): their line is marked paid on that day with the UPI
+ * reference.
+ */
+export function recordPayrollLinePayment(
+  runId: string,
+  staffId: string,
+  paid: { mode: PayrollPaymentMode; date: string; ref: string },
+  by: string,
+): { ok: true; run: PayrollRun } | { ok: false; error: string } {
+  const r = markPayrollLinesPaid(runId, [staffId], paid, by);
+  return r.ok ? { ok: true, run: r.run } : r;
+}
+
+/**
+ * The whole run paid on one day: every line not yet paid is marked paid on
+ * that day (each by its own mode unless one is given). Lines already paid on
+ * their own day keep it.
+ */
 export function markPayrollPaid(
   runId: string,
   by: string,
   paidOn?: string,
+  mode?: PayrollPaymentMode,
 ): { ok: true; run: PayrollRun } | { ok: false; error: string } {
   const state = loadPayroll();
   const run = state.runs.find((r) => r.id === runId);
@@ -1730,33 +1879,25 @@ export function markPayrollPaid(
       error: "Publish to salary account before marking paid",
     };
   }
-  const now = new Date();
-  const todayIst = todayIstDate(now);
-  let paidAt = now.toISOString();
-  if (paidOn !== undefined) {
-    const err = payrollPaidOnError(run.month, paidOn, todayIst);
-    if (err) return { ok: false, error: err };
-    // Midday in India, so the date reads the same in every zone the book
-    // and the screens use.
-    paidAt = new Date(`${paidOn}T12:00:00+05:30`).toISOString();
+  const day = paidOn ?? todayIstDate();
+  const unpaid = run.lines.filter((l) => !l.paidOn).map((l) => l.staffId);
+  if (!unpaid.length) {
+    return { ok: false, error: "Everyone on this run is already marked paid" };
   }
-  const next: PayrollRun = {
-    ...run,
-    status: "paid",
-    paidBy: by,
-    paidAt,
-    lockVersion: (run.lockVersion || 0) + 1,
-  };
-  upsertPayrollRun(next);
-  appendPayrollAudit({
-    by,
-    action: "paid",
-    runId: next.id,
-    month: next.month,
-    academicYearCode: next.academicYearCode,
-    detail: `Marked paid${paidOn ? ` · paid on ${paidOn}` : ""} · lock v${next.lockVersion}`,
-  });
-  return { ok: true, run: next };
+  const r = markPayrollLinesPaid(runId, unpaid, { date: day, mode }, by);
+  if (!r.ok) return r;
+  // Nothing payable at all (every line held): still a paid run.
+  if (r.run.status !== "paid") {
+    const next: PayrollRun = {
+      ...r.run,
+      status: "paid",
+      paidBy: by,
+      paidAt: new Date(`${day}T12:00:00+05:30`).toISOString(),
+    };
+    upsertPayrollRun(next);
+    return { ok: true, run: next };
+  }
+  return { ok: true, run: r.run };
 }
 
 export function deletePayrollRun(runId: string, by = "system"): boolean {

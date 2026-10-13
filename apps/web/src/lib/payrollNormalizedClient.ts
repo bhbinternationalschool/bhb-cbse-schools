@@ -71,6 +71,25 @@ export function schedulePayrollDeskSync(state: PayrollState) {
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
+/**
+ * Send a waiting payroll save now and wait until every queued one has
+ * finished — before asking the server book about a run just changed
+ * (lib/payrollBookClient, 14 Oct 2026).
+ */
+export async function flushPayrollDeskSync(): Promise<void> {
+  // savePayroll schedules through a dynamic import; let it run first.
+  await import("@/lib/payrollPersistence");
+  await Promise.resolve();
+  if (pushTimer) {
+    clearTimeout(pushTimer);
+    pushTimer = null;
+    const batch = pending;
+    pending = null;
+    if (batch) await pushPayrollDeskApi(batch);
+  }
+  await serialSave("payroll", async () => undefined);
+}
+
 /** One save at a time for this desk — see lib/serialSave. */
 function pushPayrollDeskApi(...args: Parameters<typeof pushPayrollDeskApiNow>): ReturnType<typeof pushPayrollDeskApiNow> {
   return serialSave("payroll", () => pushPayrollDeskApiNow(...args)) as ReturnType<typeof pushPayrollDeskApiNow>;

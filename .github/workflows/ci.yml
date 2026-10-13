@@ -201,6 +201,18 @@ jobs:
         working-directory: apps/web
         run: npm run test:payroll-deduction-heads
 
+      - name: Self-test — staff and account pickers search, A→Z, recent first
+        working-directory: apps/web
+        run: npm run test:picker-search
+
+      - name: Self-test — salary paid on each person's own date; recall reverses the book
+        working-directory: apps/web
+        run: npm run test:payroll-per-date-pay
+
+      - name: Test — the live payroll_ledger_post keeps recall, re-post and per-day payments
+        working-directory: apps/web
+        run: npm run test:payroll-ledger-post-definer
+
       - name: Self-test — Masters function grants, own classes only
         working-directory: apps/web
         run: npm run test:masters-change-auth

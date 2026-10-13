@@ -29,6 +29,7 @@
  */
 
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { payrollRunIdFromSourceId } from "@/lib/payrollPayGroups";
 import {
   ensureFiscalYearForDate,
   ledgerPost,
@@ -596,7 +597,12 @@ export async function projectPayrollRuns(opts?: {
       refused?: string;
       skipped?: string;
       accrual?: { voucher_no?: string; created?: boolean } | null;
-      payment?: { voucher_no?: string; created?: boolean; skipped?: string } | null;
+      payment?: {
+        voucher_no?: string;
+        created?: boolean;
+        skipped?: string;
+        groups?: { voucher_no?: string | null; created?: boolean; reversed_by?: string }[];
+      } | null;
     };
     if (!r.ok) {
       outcome.refused.push({ sourceId: run.id, reason: r.refused ?? "refused" });
@@ -607,8 +613,16 @@ export async function projectPayrollRuns(opts?: {
       continue;
     }
     if (r.accrual?.created) outcome.posted += 1;
-    else outcome.alreadyPosted += 1;
-    if (r.payment?.voucher_no) {
+    else if (r.accrual?.voucher_no) outcome.alreadyPosted += 1;
+    else outcome.skipped += 1;
+    // One payment voucher per day paid and money account (14 Oct 2026).
+    const groups = (r.payment?.groups ?? []).filter((g) => g.voucher_no && !g.reversed_by);
+    if (groups.length) {
+      for (const g of groups) {
+        if (g.created) outcome.posted += 1;
+        else outcome.alreadyPosted += 1;
+      }
+    } else if (r.payment?.voucher_no) {
       if (r.payment.created) outcome.posted += 1;
       else outcome.alreadyPosted += 1;
     }
@@ -639,7 +653,7 @@ export async function payrollLedgerStatus(): Promise<{
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured", rows: [] };
 
-  const [{ data: runs, error }, { data: lines }, { data: vouchers }] = await Promise.all([
+  const [{ data: runs, error }, { data: lines }, { data: vouchers }, { data: reversals }] = await Promise.all([
     ctx.sb
       .from("payroll_desk_runs")
       .select("id, month, status")
@@ -658,19 +672,38 @@ export async function payrollLedgerStatus(): Promise<{
       .eq("tenant_id", ctx.tenantId)
       .in("source_type", ["payroll_run", "payroll_payment"])
       .order("id", { ascending: true })
-      .range(0, 999),
+      .range(0, 4999),
+    // Reversals are vouchers of their own (source ledger_reversal): reading
+    // reverses_voucher_id off the payroll vouchers found none, so a reversed
+    // accrual still showed as the run's voucher.
+    ctx.sb
+      .from("ledger_vouchers")
+      .select("reverses_voucher_id")
+      .eq("tenant_id", ctx.tenantId)
+      .not("reverses_voucher_id", "is", null)
+      .order("id", { ascending: true })
+      .range(0, 9999),
   ]);
   if (error) return { ok: false, error: error.message, rows: [] };
 
   const reversed = new Set(
-    ((vouchers ?? []) as { reverses_voucher_id?: string | null }[])
+    ((reversals ?? []) as { reverses_voucher_id?: string | null }[])
       .map((v) => String(v.reverses_voucher_id ?? ""))
       .filter(Boolean),
   );
-  const voucherFor = (sourceType: string, sourceId: string) =>
+  // A run's vouchers: 'pr_x', after a recall 'pr_x#2', payments by day
+  // 'pr_x:pay:2026-07-30:cash' (14 Oct 2026) — live ones only.
+  const voucherFor = (sourceType: string, runId: string) =>
     ((vouchers ?? []) as { id: string; voucher_no: string; source_type: string; source_id: string }[])
-      .find((v) => v.source_type === sourceType && v.source_id === sourceId && !reversed.has(v.id))
-      ?.voucher_no ?? "";
+      .filter(
+        (v) =>
+          v.source_type === sourceType &&
+          payrollRunIdFromSourceId(v.source_id) === runId &&
+          !reversed.has(v.id),
+      )
+      .map((v) => v.voucher_no)
+      .sort()
+      .join(", ");
 
   const totals = new Map<string, { staff: number; gross: number; net: number }>();
   for (const l of (lines ?? []) as { run_id: string; gross: number; net_pay: number }[]) {

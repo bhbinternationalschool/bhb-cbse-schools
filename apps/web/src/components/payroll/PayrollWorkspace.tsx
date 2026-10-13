@@ -35,6 +35,8 @@ import {
   listPayrollAudit,
   loadPayroll,
   markPayrollPaid,
+  markPayrollLinesPaid,
+  unmarkPayrollLinePaid,
   recordPayrollLinePayment,
   payrollRunPaymentDate,
   todayIstDate,
@@ -75,6 +77,7 @@ import { loadIncrementState } from "@/lib/salaryIncrement";
 import { canSeeModuleTab } from "@/lib/rbac";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { filterPickItems, pushRecentPick, readRecentPicks, RECENT_GROUP } from "@/lib/pickerSearch";
 import { StepChainGuide, type StepDef } from "@/components/ui/StepTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import {
@@ -99,12 +102,17 @@ import {
   StaffMyPayslips,
 } from "@/components/payroll/StaffSelfService";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { describeBookState, postRunInBook, recallRunInBook } from "@/lib/payrollBookClient";
+import { payrollPaidProgress, payrollPaidStatusLabel } from "@/lib/payrollPayGroups";
 
 /**
  * One month's salary, in order: make the run, check it, get it approved,
  * then pay and record it. The tabs stay as they are; a guide over them
  * says which step this is and what comes next.
  */
+/** Recent-picks key for the individual-run staff checklist (lib/pickerSearch). */
+const INDIVIDUAL_RUN_RECENT = "payroll.individualRun.staff";
+
 const PAYROLL_CYCLE_STEPS: StepDef<PayTab>[] = [
   { id: "runs", title: "Runs", what: "Start the month's payroll run (a draft) from the assigned salary structures, attendance and leave." },
   { id: "detail", title: "Run detail", what: "Check every staff line — days, earnings, deductions, advances — then submit the run." },
@@ -172,6 +180,11 @@ export function PayrollWorkspace() {
   const [slipStaffId, setSlipStaffId] = useState("");
   const [processStaffIds, setProcessStaffIds] = useState<string[]>([]);
   const [staffFilter, setStaffFilter] = useState("");
+  // Staff this browser last processed individually — listed first. masters
+  // is null on the server render, so the list is empty there either way.
+  const [recentRunStaff, setRecentRunStaff] = useState<string[]>(() =>
+    readRecentPicks(INDIVIDUAL_RUN_RECENT),
+  );
   const [expandedStaffId, setExpandedStaffId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -284,14 +297,26 @@ export function PayrollWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tick tracks payroll writes
     [month, ay, tick],
   );
-  const pickableStaff = useMemo(() => {
-    const q = staffFilter.trim().toLowerCase();
-    return q
-      ? processStaffOptions.filter((st) =>
-          `${st.empCode} ${st.fullName}`.toLowerCase().includes(q),
-        )
-      : processStaffOptions;
-  }, [processStaffOptions, staffFilter]);
+  // Every word typed must match the name, emp code or designation; the list
+  // reads A→Z by name with recently processed staff on top (director,
+  // 14 Oct 2026: "make easier to pick name"). Same helper as the advances
+  // and account pickers — lib/pickerSearch.
+  const { pickableStaff, recentShown } = useMemo(() => {
+    const desig = new Map((masters?.designations ?? []).map((d) => [d.id, d.name]));
+    const byId = new Map(processStaffOptions.map((st) => [st.id, st]));
+    const rows = filterPickItems(
+      processStaffOptions.map((st) => {
+        const designation = (st.designationId && desig.get(st.designationId)) || "";
+        return { id: st.id, label: st.fullName || st.empCode, sub: st.empCode, keywords: [designation] };
+      }),
+      staffFilter,
+      recentRunStaff,
+    );
+    return {
+      pickableStaff: rows.map((r) => byId.get(r.id)!),
+      recentShown: new Set(rows.filter((r) => r.group === RECENT_GROUP).map((r) => r.id)),
+    };
+  }, [processStaffOptions, staffFilter, recentRunStaff, masters]);
 
   function flash(msg: string, isErr = false) {
     if (isErr) {
@@ -490,36 +515,64 @@ export function PayrollWorkspace() {
     flash("Published to salary account");
     setSelectedId(r.run.id);
     refresh();
+    reportBook(r.run.id, "Published to salary account");
   }
 
-  function onRecall() {
+  /**
+   * Ask the server book what it now holds for a run (after publishing or
+   * marking staff paid) and say it — the desk save's own book step is silent
+   * when it fails (14 Oct 2026).
+   */
+  function reportBook(runId: string, lead: string) {
+    void postRunInBook(runId).then((b) => {
+      flash(`${lead} · ${describeBookState(b)}`, !b.ok);
+    });
+  }
+
+  async function onRecall() {
     if (!selected) return;
+    const progress = payrollPaidProgress(selected.lines);
     if (
       !window.confirm(
         selected.status === "posted"
-          ? "Recall posted run to draft? Salary account entries for this run will be voided."
+          ? `Recall posted run to draft? Its salary entries are reversed in the books${progress.paid ? ` — including the payments of the ${progress.paid} staff already marked paid (they stay marked paid and are booked again when the run is posted again)` : ""}.`
           : "Recall to draft for further edits?",
       )
     ) {
       return;
     }
-    const r = recallPayrollToDraft(selected.id, session.fullName);
+    // The book first: a run back in draft with its salary still in the
+    // server book is what happened to July 2026. No reversal, no recall.
+    let book: { reversed: { voucherNo: string; reversalNo: string }[] } | undefined;
+    if (selected.status === "posted") {
+      const b = await recallRunInBook(selected.id);
+      if (!b.ok) {
+        flash(`Not recalled — the books could not be reversed: ${b.error}. Nothing was changed.`, true);
+        return;
+      }
+      book = { reversed: b.reversed };
+    }
+    const r = recallPayrollToDraft(selected.id, session.fullName, book);
     if (!r.ok) {
       flash(r.error, true);
       return;
     }
     flash(
-      r.run && selected.status === "posted"
-        ? "Recalled to draft — this run's salary-account entries were voided"
+      selected.status === "posted"
+        ? `Recalled to draft — ${
+            book?.reversed.length
+              ? `reversed in the book: ${book.reversed.map((x) => `${x.voucherNo} → ${x.reversalNo}`).join(", ")}`
+              : "nothing of it was in the server book"
+          }; salary-account entries voided`
         : "Recalled to draft — nothing had reached the accounts",
     );
     setSelectedId(r.run.id);
     refresh();
   }
 
-  function onPaid(paidOn: string) {
+  function onPaid(paidOn: string, mode?: PayrollPaymentMode) {
     if (!selected) return;
-    const r = markPayrollPaid(selected.id, session.fullName, paidOn);
+    const r = markPayrollPaid(selected.id, session.fullName, paidOn, mode);
     if (!r.ok) {
       flash(r.error, true);
       return;
@@ -527,6 +580,43 @@ export function PayrollWorkspace() {
     flash(`Marked as paid on ${paidOn}`);
     setSelectedId(r.run.id);
     refresh();
+    reportBook(r.run.id, `Marked as paid on ${paidOn}`);
+  }
+
+  /** Many staff paid on one day by one means (director, 14 Oct 2026). */
+  function onMarkLinesPaid(staffIds: string[], paid: { date: string; mode?: PayrollPaymentMode; ref?: string }) {
+    if (!selected) return false;
+    const r = markPayrollLinesPaid(selected.id, staffIds, paid, session.fullName);
+    if (!r.ok) {
+      flash(r.error, true);
+      return false;
+    }
+    const lead = `${r.marked} staff marked paid on ${paid.date}${r.run.status === "paid" ? " — everyone is paid, run marked paid" : ""}`;
+    flash(lead);
+    setSelectedId(r.run.id);
+    refresh();
+    reportBook(r.run.id, lead);
+    return true;
+  }
+
+  function onUnmarkLinePaid(staffId: string) {
+    if (!selected) return;
+    const line = selected.lines.find((l) => l.staffId === staffId);
+    if (
+      !window.confirm(
+        `Un-mark ${line?.fullName || "this person"} as paid on ${line?.paidOn || "?"}? The book reverses that day's payment voucher and books it again for the others paid that day.`,
+      )
+    ) {
+      return;
+    }
+    const r = unmarkPayrollLinePaid(selected.id, staffId, session.fullName);
+    if (!r.ok) {
+      flash(r.error, true);
+      return;
+    }
+    setSelectedId(r.run.id);
+    refresh();
+    reportBook(r.run.id, `${line?.fullName || "Line"} un-marked`);
   }
 
   function onDelete() {
@@ -873,7 +963,7 @@ export function PayrollWorkspace() {
                 <input
                   type="search"
                   className="field !py-1.5 text-xs"
-                  placeholder="Find staff…"
+                  placeholder="Name, code or designation…"
                   value={staffFilter}
                   onChange={(e) => setStaffFilter(e.target.value)}
                 />
@@ -917,7 +1007,12 @@ export function PayrollWorkspace() {
                           )
                         }
                       />
-                      {st.empCode} — {st.fullName}
+                      <span className="min-w-0 break-words">
+                        {st.fullName} — {st.empCode}
+                      </span>
+                      {recentShown.has(st.id) ? (
+                        <span className="text-[10px] text-[var(--muted)]">· recent</span>
+                      ) : null}
                       {done ? <span className="text-[10px]">· paid</span> : null}
                     </label>
                   );
@@ -927,7 +1022,15 @@ export function PayrollWorkspace() {
                 type="button"
                 className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs font-semibold text-[var(--brand-deep)] disabled:opacity-50"
                 disabled={processStaffIds.length === 0}
-                onClick={processIndividual}
+                onClick={() => {
+                  // Remember who was processed so they lead the list next time.
+                  let next = recentRunStaff;
+                  for (const id of [...processStaffIds].reverse()) {
+                    next = pushRecentPick(INDIVIDUAL_RUN_RECENT, id, 12);
+                  }
+                  setRecentRunStaff(next);
+                  processIndividual();
+                }}
               >
                 Process selected ({processStaffIds.length})
               </button>
@@ -1022,6 +1125,8 @@ export function PayrollWorkspace() {
             onPublish={onPublish}
             onRecall={onRecall}
             onPaid={onPaid}
+            onMarkLinesPaid={onMarkLinesPaid}
+            onUnmarkLinePaid={onUnmarkLinePaid}
             onDelete={onDelete}
             onExport={onExport}
             onExportRegister={onExportRegister}
@@ -1052,8 +1157,13 @@ export function PayrollWorkspace() {
               });
               flash(`UTR ${p.utr} recorded`);
               refresh();
+              reportBook(selected.id, `UTR ${p.utr} recorded`);
             }}
             staffById={(id) => masters?.staff.find((x) => x.id === id)}
+            roleOf={(id) => {
+              const st = masters?.staff.find((x) => x.id === id);
+              return masters?.designations.find((d) => d.id === st?.designationId)?.name || "";
+            }}
             readOnly={readOnly}
           />
         ) : (
@@ -1146,6 +1256,8 @@ function RunDetail({
   onPublish,
   onRecall,
   onPaid,
+  onMarkLinesPaid,
+  onUnmarkLinePaid,
   onDelete,
   onExport,
   onExportRegister,
@@ -1156,6 +1268,7 @@ function RunDetail({
   onEditAdjustments,
   onLinePaid,
   staffById,
+  roleOf,
   readOnly = false,
 }: {
   run: PayrollRun;
@@ -1168,7 +1281,9 @@ function RunDetail({
   canApprove: boolean;
   onPublish: () => void;
   onRecall: () => void;
-  onPaid: (paidOn: string) => void;
+  onPaid: (paidOn: string, mode?: PayrollPaymentMode) => void;
+  onMarkLinesPaid: (staffIds: string[], paid: { date: string; mode?: PayrollPaymentMode; ref?: string }) => boolean;
+  onUnmarkLinePaid: (staffId: string) => void;
   onDelete: () => void;
   onExport: () => void;
   onExportRegister: (format: "xlsx" | "pdf") => void;
@@ -1182,6 +1297,8 @@ function RunDetail({
   ) => void;
   onLinePaid: (staffId: string, paid: UpiPaid) => void;
   staffById: (id: string) => StaffRecord | undefined;
+  /** Designation name, for finding a person in the lines. */
+  roleOf: (staffId: string) => string;
   readOnly?: boolean;
 }) {
   const [workflowNote, setWorkflowNote] = useState("");
@@ -1201,6 +1318,18 @@ function RunDetail({
   );
   // The day the salary was paid; empty = the lines' own date, else today.
   const [paidOnDraft, setPaidOnDraft] = useState("");
+  // "" = each line's own (planned) mode.
+  const [paidModeDraft, setPaidModeDraft] = useState<PayrollPaymentMode | "">("");
+  // Staff ticked to mark paid together, and how (director, 14 Oct 2026:
+  // "I have to pay on different dates for every staff").
+  const [payPick, setPayPick] = useState<Set<string>>(() => new Set());
+  const [payDate, setPayDate] = useState("");
+  const [payMode, setPayMode] = useState<PayrollPaymentMode | "">("");
+  const [payRef, setPayRef] = useState("");
+  // Find a person in a long run by name, emp code, structure or designation.
+  const [lineQuery, setLineQuery] = useState("");
+  const paidProgress = payrollPaidProgress(run.lines);
+  const partlyPaid = payrollPaidStatusLabel(run.status, run.lines);
   const net = run.lines.reduce((s, l) => s + l.netPay, 0);
   const payable = run.lines.reduce(
     (s, l) => s + (l.amountPayable ?? (l.juneHold ? 0 : l.netPay)),
@@ -1234,6 +1363,7 @@ function RunDetail({
         <div>
           <h2 className="text-lg font-bold text-[var(--brand-deep)]">
             {run.month} · {payrollStatusLabel(run.status)}
+            {partlyPaid ? ` · ${partlyPaid}` : ""}
           </h2>
           <p className="mt-1 text-[11px] text-[var(--muted)]">
             {run.kind === "individual" ? "Individual" : "Bulk"} · Day count{" "}
@@ -1403,12 +1533,28 @@ function RunDetail({
                   onChange={(e) => setPaidOnDraft(e.target.value)}
                 />
               </label>
+              <label className="flex items-center gap-1 text-[11px] font-semibold">
+                By
+                <select
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-1.5 py-1 text-[11px]"
+                  value={paidModeDraft}
+                  onChange={(e) => setPaidModeDraft(e.target.value as PayrollPaymentMode | "")}
+                >
+                  <option value="">each line&apos;s own mode</option>
+                  {PAYROLL_PAYMENT_MODES.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <button
                 type="button"
                 className="rounded-lg bg-[var(--primary)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--primary-foreground)]"
-                onClick={() => onPaid(paidOnDraft || payrollRunPaymentDate(run) || todayIstDate())}
+                title="Everyone not yet marked paid, on this day. Staff paid on other days: tick them below and mark them paid on their own day."
+                onClick={() => onPaid(paidOnDraft || payrollRunPaymentDate(run) || todayIstDate(), paidModeDraft || undefined)}
               >
-                Mark paid
+                {paidProgress.paid ? `Mark the other ${paidProgress.payable - paidProgress.paid} paid` : "Mark all paid"}
               </button>
               <button
                 type="button"
@@ -1463,11 +1609,61 @@ function RunDetail({
         </div>
       </div>
 
+      {inAccounts && !readOnly ? (
+        <PayLinesBar
+          run={run}
+          picked={payPick}
+          setPicked={setPayPick}
+          date={payDate}
+          setDate={setPayDate}
+          mode={payMode}
+          setMode={setPayMode}
+          payRef={payRef}
+          setPayRef={setPayRef}
+          onMark={(ids, paid) => {
+            if (onMarkLinesPaid(ids, paid)) {
+              setPayPick(new Set());
+              setPayRef("");
+            }
+          }}
+        />
+      ) : null}
+
+      <label className="flex max-w-sm items-center gap-2 text-[11px] font-semibold text-[var(--muted)]">
+        Find staff
+        <input
+          type="search"
+          className="field !py-1 !text-xs"
+          placeholder="Name, emp code, designation…"
+          value={lineQuery}
+          onChange={(e) => setLineQuery(e.target.value)}
+        />
+      </label>
+
       <ErpTableShell exportAs="payroll_run_lines" exportTitle="Payroll run lines">
         <div className="overflow-x-auto">
-        <ErpTable minWidth="min-w-[780px]">
+        <ErpTable minWidth="min-w-[880px]">
           <ErpTableHead>
             <tr>
+              {inAccounts && !readOnly ? (
+                <th className="px-2 py-2.5">
+                  <input
+                    type="checkbox"
+                    aria-label="Tick everyone not yet paid"
+                    checked={(() => {
+                      const unpaid = run.lines.filter((l) => !l.paidOn);
+                      return unpaid.length > 0 && unpaid.every((l) => payPick.has(l.staffId));
+                    })()}
+                    onChange={(e) =>
+                      setPayPick(
+                        e.target.checked
+                          ? new Set(run.lines.filter((l) => !l.paidOn).map((l) => l.staffId))
+                          : new Set(),
+                      )
+                    }
+                  />
+                </th>
+              ) : null}
               <ErpSortTh sort={lineSort} field="staff">Staff</ErpSortTh>
               <ErpSortTh sort={lineSort} field="present">P / A / HD / LWP</ErpSortTh>
               <ErpSortTh sort={lineSort} field="gross">Gross</ErpSortTh>
@@ -1475,11 +1671,12 @@ function RunDetail({
               <th className="px-4 py-2.5 font-bold">Payable</th>
               <th className="px-4 py-2.5 font-bold">Govt PF/ESIC</th>
               <th className="px-4 py-2.5 font-bold">Hold</th>
+              <th className="px-4 py-2.5 font-bold">Paid</th>
               <th className="px-4 py-2.5 font-bold" />
             </tr>
           </ErpTableHead>
           <ErpTableBody>
-            {lineSort.rows.map((l) => {
+            {lineSort.rows.filter((l) => lineMatches(l, lineQuery, roleOf)).map((l) => {
               const open = expandedStaffId === l.staffId;
               const lockedDue = editable
                 ? outstandingForStaff(l.staffId)
@@ -1487,6 +1684,21 @@ function RunDetail({
               return (
                 <Fragment key={l.staffId}>
                   <tr className="border-b border-[var(--border)]">
+                    {inAccounts && !readOnly ? (
+                      <td className="px-2 py-2">
+                        <input
+                          type="checkbox"
+                          aria-label={`Tick ${l.fullName}`}
+                          checked={payPick.has(l.staffId)}
+                          onChange={(e) => {
+                            const next = new Set(payPick);
+                            if (e.target.checked) next.add(l.staffId);
+                            else next.delete(l.staffId);
+                            setPayPick(next);
+                          }}
+                        />
+                      </td>
+                    ) : null}
                     <td className="px-3 py-2">
                       <div className="font-semibold text-[var(--brand-deep)]">
                         {l.fullName}
@@ -1554,6 +1766,38 @@ function RunDetail({
                           ? "Held · not drawable"
                           : "Held (June)"
                         : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-[11px]">
+                      {/* Each person's own paid day and means (14 Oct 2026). */}
+                      {l.paidOn ? (
+                        <span className="inline-flex flex-wrap items-center gap-1">
+                          <span className="font-semibold text-[var(--tone-green)]">
+                            ✓ {l.paidOn}
+                          </span>
+                          <span className="text-[var(--muted)]">
+                            {paymentModeLabel(l.paymentMode)}
+                            {l.paymentRef ? ` · ${l.paymentRef}` : ""}
+                          </span>
+                          {inAccounts && !readOnly ? (
+                            <button
+                              type="button"
+                              className="text-[10px] font-semibold text-[var(--danger)]"
+                              onClick={() => onUnmarkLinePaid(l.staffId)}
+                            >
+                              Un-mark
+                            </button>
+                          ) : null}
+                        </span>
+                      ) : run.status === "paid" ? (
+                        <span className="text-[var(--muted)]">
+                          with the run · {(run.paidAt || "").slice(0, 10)}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--muted)]">
+                          {l.paymentDate ? `planned ${l.paymentDate} · ` : ""}
+                          {inAccounts ? "not paid" : "—"}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right">
                       <span className="inline-flex items-center gap-1">
@@ -1662,7 +1906,7 @@ function RunDetail({
                   </tr>
                   {open ? (
                     <tr className="border-b border-[var(--border)] bg-[var(--surface-sunken)]">
-                      <td colSpan={8} className="px-3 py-3">
+                      <td colSpan={inAccounts && !readOnly ? 10 : 9} className="px-3 py-3">
                         <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                           <label className="text-[10px] font-semibold text-[var(--muted)]">
                             Bonus (this month)
@@ -1891,6 +2135,124 @@ function RunDetail({
         </ErpTable>
         </div>
       </ErpTableShell>
+    </div>
+  );
+}
+
+/** Every typed word found in the line's name, emp code, structure or role. */
+function lineMatches(
+  l: PayrollStaffLine,
+  query: string,
+  roleOf: (staffId: string) => string,
+): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = [l.fullName, l.empCode, l.structureName, l.stream, roleOf(l.staffId)]
+    .join(" ")
+    .toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
+
+/**
+ * Mark the ticked staff paid on one day by one means — many at once, or one
+ * by one on their own days (director, 14 Oct 2026). The book posts one
+ * payment voucher per day and money account.
+ */
+function PayLinesBar({
+  run,
+  picked,
+  setPicked,
+  date,
+  setDate,
+  mode,
+  setMode,
+  payRef,
+  setPayRef,
+  onMark,
+}: {
+  run: PayrollRun;
+  picked: Set<string>;
+  setPicked: (s: Set<string>) => void;
+  date: string;
+  setDate: (d: string) => void;
+  mode: PayrollPaymentMode | "";
+  setMode: (m: PayrollPaymentMode | "") => void;
+  payRef: string;
+  setPayRef: (r: string) => void;
+  onMark: (staffIds: string[], paid: { date: string; mode?: PayrollPaymentMode; ref?: string }) => void;
+}) {
+  const progress = payrollPaidProgress(run.lines);
+  const pickedLines = run.lines.filter((l) => picked.has(l.staffId));
+  const total = pickedLines.reduce((n, l) => n + (l.amountPayable ?? (l.juneHold ? 0 : l.netPay)), 0);
+  // The planned day the ticked lines agree on, else today.
+  const planned = [...new Set(pickedLines.map((l) => l.paymentDate).filter(Boolean))];
+  const day = date || (planned.length === 1 ? planned[0]! : "") || todayIstDate();
+  const paidWhole = run.status === "paid" && !run.lines.some((l) => l.paidOn);
+  if (paidWhole) return null;
+  return (
+    <div className="flex flex-wrap items-end gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 text-[11px]">
+      <div className="min-w-[10rem] flex-1">
+        <div className="font-bold text-[var(--brand-deep)]">
+          Paid {progress.paid} of {progress.payable}
+        </div>
+        <div className="text-[var(--muted)]">
+          {picked.size
+            ? `${picked.size} ticked · ${formatInr(total)}`
+            : "Tick the staff paid on the same day by the same means"}
+        </div>
+      </div>
+      <label className="flex flex-col font-semibold">
+        Paid on
+        <input
+          type="date"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-1.5 py-1"
+          value={day}
+          min={`${run.month}-01`}
+          max={todayIstDate()}
+          onChange={(e) => setDate(e.target.value)}
+        />
+      </label>
+      <label className="flex flex-col font-semibold">
+        By
+        <select
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-1.5 py-1"
+          value={mode}
+          onChange={(e) => setMode(e.target.value as PayrollPaymentMode | "")}
+        >
+          <option value="">each line&apos;s own mode</option>
+          {PAYROLL_PAYMENT_MODES.map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col font-semibold">
+        UTR / cheque no.
+        <input
+          className="w-36 rounded-lg border border-[var(--border)] bg-[var(--card)] px-1.5 py-1"
+          value={payRef}
+          placeholder="optional"
+          onChange={(e) => setPayRef(e.target.value)}
+        />
+      </label>
+      <button
+        type="button"
+        className="rounded-lg bg-[var(--primary)] px-2.5 py-1.5 font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+        disabled={!picked.size}
+        onClick={() => onMark([...picked], { date: day, mode: mode || undefined, ref: payRef.trim() || undefined })}
+      >
+        Mark {picked.size || ""} paid
+      </button>
+      {picked.size ? (
+        <button
+          type="button"
+          className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 font-semibold"
+          onClick={() => setPicked(new Set())}
+        >
+          Clear
+        </button>
+      ) : null}
     </div>
   );
 }

@@ -18,6 +18,8 @@
  * ignored within a fortnight, and then the real one is ignored too.
  */
 
+import { payrollRunIdFromSourceId } from "@/lib/payrollPayGroups";
+
 export type AnomalySeverity = "critical" | "warning" | "info";
 
 export type Anomaly = {
@@ -359,13 +361,16 @@ export function findStaleReconciliation(
  */
 export function findUnaccruedPayroll(facts: AnomalyFacts): Anomaly[] {
   const live = facts.vouchers.filter((v) => !v.reversed);
+  // Source ids carry a version after a recall ('pr_x#2') and payments are
+  // one voucher per day paid ('pr_x:pay:2026-07-30:cash') — both belong to
+  // run 'pr_x' (14 Oct 2026).
   const accrued = new Set(
-    live.filter((v) => v.sourceType === "payroll_run").map((v) => v.sourceId),
+    live.filter((v) => v.sourceType === "payroll_run").map((v) => payrollRunIdFromSourceId(v.sourceId)),
   );
   const out: Anomaly[] = [];
   for (const v of live) {
     if (v.sourceType !== "payroll_payment") continue;
-    if (accrued.has(v.sourceId)) continue;
+    if (accrued.has(payrollRunIdFromSourceId(v.sourceId))) continue;
     const amount = facts.lines
       .filter((l) => l.voucherId === v.id)
       .reduce((n, l) => n + l.debitPaise, 0);

@@ -204,6 +204,9 @@ SELFTESTS=(
   test:expense-range
   test:payroll-paid-on
   test:payroll-deduction-heads
+  test:picker-search
+  test:payroll-per-date-pay
+  test:payroll-ledger-post-definer
   test:masters-change-auth
   test:timetable-free-grid
   test:udise-teacher-apaar
