@@ -475,8 +475,10 @@ selftests and definitions excluded. Acceptance: CI fails when any count rises.
 **1.7 Teacher scope from SQL (own step; 3.1 and 4.2 depend on it).** *(Built 13 Oct 2026.)*
 `staffSectionScope` (`lib/api/v1/staffScope.ts`) computes sections from `sis_staff.profile` links
 **and the timetable as the database holds it**: `lib/api/v1/timetableScope.server.ts`
-(`loadScopeTimetable`) reads the `publishedGrids` and `grids` rows of `timetable_desk_slices` —
-published first, the draft only when nothing is published (the old code's intent). Per-process
+(`loadScopeTimetable`) reads the `publishedGrids` row of `timetable_desk_slices` — **published
+only; an unpublished draft never grants access**, even when nothing is published (director's
+decision, 13 Oct 2026: production's 13 draft grids would have given 8 teachers 3–6 extra sections
+each). Publishing the timetable is the deliberate act that grants timetable access. Per-process
 copy keyed on `timetable_desk_sync_meta.updated_at`: one select of that row per call, the slices
 re-read only when it moved (in-flight deduped); slices older than the meta value (a versioned save
 caught between its meta claim and its slice write) are served but not cached; a failed read keeps

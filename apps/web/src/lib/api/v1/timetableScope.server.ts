@@ -8,9 +8,13 @@
  * browser-only no-op — so the grids were always [] and a teacher whose only
  * tie to a section is the published timetable was given no students at all.
  *
- * What this reads: `timetable_desk_slices` rows `publishedGrids` and `grids`
- * for the tenant; the published grids win, the draft grids are used only when
- * nothing is published (the rule the old code meant to apply).
+ * What this reads: the `publishedGrids` row of `timetable_desk_slices` for the
+ * tenant. ONLY the published timetable grants a teacher sections — never the
+ * draft (`grids`), even when nothing is published (director's decision, 13 Oct
+ * 2026: production had 13 unpublished draft grids that would have given 8
+ * teachers 3–6 extra sections each — student records, parents' contacts,
+ * marks, WhatsApp — from an unfinished draft). Publishing is the deliberate act
+ * that grants timetable access.
  *
  * Cache (per process): keyed on `timetable_desk_sync_meta.updated_at`. Every
  * call does one select of that one row; the slices are read again only when it
@@ -27,7 +31,7 @@ import { normalizeTimetableState, type TimetableGrid } from "@/lib/timetable";
 export type ScopeTimetable = {
   grids: TimetableGrid[];
   /** Which list `grids` is. "none" = the database holds no timetable at all. */
-  source: "published" | "draft" | "none";
+  source: "published" | "none";
   /** The sync-meta value the copy was read under ("" = no meta row). */
   version: string;
   /** true = this read failed and the previous copy was served. */
@@ -72,21 +76,18 @@ async function readSlices(version: string): Promise<Copy> {
     .from("timetable_desk_slices")
     .select("slice_key, payload, updated_at")
     .eq("tenant_id", ctx.tenantId)
-    .in("slice_key", ["grids", "publishedGrids"]);
+    .eq("slice_key", "publishedGrids");
   if (error) throw new Error(error.message || "timetable_desk_slices");
   const rows = (data ?? []) as { slice_key: string; payload: unknown; updated_at?: string }[];
   const payload = (key: string) => rows.find((r) => r.slice_key === key)?.payload;
   const state = normalizeTimetableState({
-    grids: Array.isArray(payload("grids")) ? payload("grids") : [],
+    grids: [],
     publishedGrids: Array.isArray(payload("publishedGrids")) ? payload("publishedGrids") : [],
   });
-  const source: Copy["source"] = state.publishedGrids.length
-    ? "published"
-    : state.grids.length
-      ? "draft"
-      : "none";
+  // Published only: an unpublished draft never grants access (see above).
+  const source: Copy["source"] = state.publishedGrids.length ? "published" : "none";
   const out: Copy = {
-    grids: source === "published" ? state.publishedGrids : state.grids,
+    grids: state.publishedGrids,
     source,
     version,
   };

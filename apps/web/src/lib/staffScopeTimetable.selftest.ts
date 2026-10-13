@@ -8,8 +8,8 @@
  *
  * Runs the real scope (lib/api/v1/staffScope.ts + timetableScope.server.ts)
  * on the e2e fixture's school against a fake PostgREST (no database):
- *  - a published grid gives its sections; the published grids win over the
- *    draft; the draft is used only when nothing is published;
+ *  - a published grid gives its sections; an unpublished draft grants
+ *    nothing, even when nothing is published (director, 13 Oct 2026);
  *  - a failed read with no copy is UNKNOWN (ApiError 503, and a 503 response
  *    from readStaffScopeForDesk) — not an empty scope;
  *  - a school-wide session (office role, leadership) does not depend on the
@@ -142,10 +142,10 @@ void (async () => {
     assert.ok(!got.includes(draftKey), "a draft-only section is not hers while a timetable is published");
   });
 
-  await check("nothing published → the draft grids are used", async () => {
+  await check("nothing published → a draft grants nothing", async () => {
     reset();
-    setTimetable({ meta: "2026-10-13T03:00:00.000Z", published: [], grids: [draftOnly] });
-    assert.deepEqual(await sectionsOf(), [draftKey]);
+    setTimetable({ meta: "2026-10-13T03:00:00.000Z", published: [], grids: [draftOnly, ...published] });
+    assert.deepEqual(await sectionsOf(), [], "an unpublished draft must not grant any section");
   });
 
   // ── The process copy.
@@ -187,13 +187,13 @@ void (async () => {
     assert.ok(ttMod, "timetableScope.server exists");
     assert.equal((await ttMod.loadScopeTimetable()).stale, true, "a kept copy is reported stale");
     // Recovery: the next good read replaces it.
-    setTimetable({ meta: "2026-10-13T06:45:00.000Z", published: [], grids: [draftOnly] });
+    setTimetable({ meta: "2026-10-13T06:45:00.000Z", published: [draftOnly], grids: [draftOnly] });
     assert.deepEqual(await sectionsOf(), [draftKey]);
   });
 
   await check("a save caught half-way (slices older than meta) is served but not cached", async () => {
     reset();
-    setTimetable({ meta: "2026-10-13T07:00:00.000Z", slicesAt: "2026-10-13T06:59:00.000Z", published: [], grids: [draftOnly] });
+    setTimetable({ meta: "2026-10-13T07:00:00.000Z", slicesAt: "2026-10-13T06:59:00.000Z", published: [draftOnly], grids: [draftOnly] });
     assert.deepEqual(await sectionsOf(), [draftKey]);
     // The save finishes: same meta value, new slices.
     setTimetable({ meta: "2026-10-13T07:00:00.000Z", published, grids: published });
