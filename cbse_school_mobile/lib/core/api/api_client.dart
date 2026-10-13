@@ -1,4 +1,4 @@
-import "dart:async" show unawaited;
+import "dart:async" show TimeoutException, unawaited;
 import "dart:convert";
 import "dart:io" show File;
 import "dart:math" as math;
@@ -16,6 +16,12 @@ import "../update/app_build.dart";
 
 part "staff_api.dart";
 part "online_classes_api.dart";
+part "my_class_api.dart";
+part "self_service_api.dart";
+part "teacher_tools_api.dart";
+part "teacher_ai_api.dart";
+part "transport_register_api.dart";
+part "results_api.dart";
 
 /// Session cookie minted by the ERP (see web /api/auth/*).
 const _cookieName = "bhb_demo_session";
@@ -4370,37 +4376,9 @@ class ApiClient {
         .toList();
   }
 
-  /// Driver / attendant manifest: stops in boarding order with the children
-  /// due at each, and what has already been marked today.
-  Future<Map<String, dynamic>> fetchTransportManifest({
-    required String routeId,
-    required String trip,
-  }) async =>
-      _getData("/api/v1/transport/manifest?routeId=$routeId&trip=$trip");
-
-  /// Mark one child on or off the bus. Location is required by the server for
-  /// anything but "absent" — a mark with no pin is not evidence of anything.
-  Future<void> markBoarding({
-    required String routeId,
-    required String studentId,
-    required String trip,
-    required String kind,
-    double? lat,
-    double? lng,
-    double? accuracyM,
-    String note = "",
-  }) async {
-    await _postData("/api/v1/transport/boarding", {
-      "routeId": routeId,
-      "studentId": studentId,
-      "trip": trip,
-      "kind": kind,
-      "lat": ?lat,
-      "lng": ?lng,
-      "accuracyM": ?accuracyM,
-      "note": note,
-    });
-  }
+  // The driver's marking moved to the bus register (v2) in
+  // transport_register_api.dart — /api/v1/transport/manifest and
+  // /api/v1/transport/boarding are no longer called from the app.
 
   /// Staff (class teacher) inbox: one thread per student in their section.
   Future<List<ChatThreadInfo>> fetchChatThreads() async {
@@ -4480,8 +4458,13 @@ class ApiClient {
     String activities = "",
     String assessment = "",
     String homework = "",
+    /// "ai" / "ai_edited" when the plan started as an AI draft; "" = typed.
+    String source = "",
+    String aiModel = "",
   }) async {
     final data = await _postData("/api/v1/teaching/lesson-plan", {
+      if (source.isNotEmpty) "source": source,
+      if (aiModel.isNotEmpty) "aiModel": aiModel,
       "id": ?id,
       "classId": classId,
       "subjectId": subjectId,

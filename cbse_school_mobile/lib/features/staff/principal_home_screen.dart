@@ -12,8 +12,12 @@ import "../modules/notice_detail_screen.dart";
 import "../modules/notices_screen.dart";
 import "../modules/bus_routes_screen.dart";
 import "transport_requests_screen.dart";
+import "bus_register_screen.dart";
+import "vehicle_logbook_screen.dart";
 import "attendance_screen.dart";
 import "broadcast_screen.dart";
+import "class_message_screen.dart";
+import "ptm_teacher_screen.dart";
 import "admission_leads_screen.dart";
 import "documents_screen.dart";
 import "fee_counter_screen.dart";
@@ -24,9 +28,13 @@ import "visitor_gate_screen.dart";
 import "home_groups.dart";
 import "leave_approvals_screen.dart";
 import "my_attendance_calendar_screen.dart";
+import "my_advances_screen.dart";
 import "my_profile_screen.dart";
+import "my_class_screen.dart";
+import "month_register_screen.dart";
 import "payslips_screen.dart";
 import "marks_screen.dart";
+import "teacher_ai_tools_screen.dart";
 import "staff_complaints_screen.dart";
 import "staff_leave_screen.dart";
 import "staff_roster_screen.dart";
@@ -277,8 +285,9 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
   }
 
   /// Every action tile with the feature whose heading it sits under. The
-  /// gating is unchanged: only the five tiles that were feature-gated
-  /// before are gated now; the others were always shown.
+  /// gating is unchanged: only the tiles that were feature-gated before are
+  /// gated now (plus Message my classes and PTM, 13 Oct 2026); the others
+  /// were always shown.
   List<(String, Widget)> _actionTiles() => [
     (
       "transport_requests",
@@ -298,6 +307,26 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
         onTap: () => _push(BroadcastScreen(api: widget.api)),
       ),
     ),
+    if (_features.has("class_broadcast"))
+      (
+        "class_broadcast",
+        _Action(
+          icon: Icons.forum_outlined,
+          label: "Message my classes",
+          tone: ModuleTone.coral,
+          onTap: () => _push(ClassMessageScreen(api: widget.api)),
+        ),
+      ),
+    if (_features.has("ptm_meet"))
+      (
+        "ptm_meet",
+        _Action(
+          icon: Icons.groups_outlined,
+          label: "PTM",
+          tone: ModuleTone.purple,
+          onTap: () => _push(PtmTeacherScreen(api: widget.api)),
+        ),
+      ),
     (
       "staff_leave_approve",
       _Action(
@@ -344,10 +373,32 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
           var staff = _staff;
           staff ??= await widget.api.fetchStaffSummary();
           if (!mounted) return;
-          _push(MarksScreen(api: widget.api, classes: staff.classes));
+          _push(
+            MarksScreen(
+              api: widget.api,
+              classes: staff.classes,
+              canScan: _features.has("teacher_ai_tools"),
+            ),
+          );
         },
       ),
     ),
+    if (_features.has("teacher_ai_tools"))
+      (
+        "teacher_ai_tools",
+        _Action(
+          icon: Icons.auto_awesome_outlined,
+          label: "AI tools",
+          tone: ModuleTone.amber,
+          onTap: () => _push(
+            TeacherAiToolsScreen(
+              api: widget.api,
+              features: _features,
+              classes: _staff?.classes,
+            ),
+          ),
+        ),
+      ),
     (
       "timetable_view",
       _Action(
@@ -462,6 +513,24 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
       ),
     ),
     (
+      "students_view",
+      _Action(
+        icon: Icons.diversity_3_outlined,
+        label: "Class records",
+        tone: ModuleTone.purple,
+        onTap: () => _push(MyClassScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "attendance_mark",
+      _Action(
+        icon: Icons.calendar_view_month_outlined,
+        label: "Month register",
+        tone: ModuleTone.teal,
+        onTap: () => _push(MonthRegisterScreen(api: widget.api)),
+      ),
+    ),
+    (
       "fee_defaulters",
       _Action(
         icon: Icons.currency_rupee,
@@ -512,6 +581,24 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
       ),
     ),
     (
+      "route_manifest",
+      _Action(
+        icon: Icons.fact_check_outlined,
+        label: "Bus register",
+        tone: ModuleTone.blue,
+        onTap: () => _push(BusRegisterScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "route_manifest",
+      _Action(
+        icon: Icons.local_gas_station_outlined,
+        label: "Log book",
+        tone: ModuleTone.amber,
+        onTap: () => _push(VehicleLogbookScreen(api: widget.api)),
+      ),
+    ),
+    (
       "gps_punch",
       _Action(
         icon: Icons.where_to_vote_outlined,
@@ -527,6 +614,15 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
         label: "Payslips · वेतन पर्ची",
         tone: ModuleTone.gray,
         onTap: () => _push(PayslipsScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "my_advances",
+      _Action(
+        icon: Icons.account_balance_wallet_outlined,
+        label: "My advances",
+        tone: ModuleTone.amber,
+        onTap: () => _push(MyAdvancesScreen(api: widget.api)),
       ),
     ),
     (

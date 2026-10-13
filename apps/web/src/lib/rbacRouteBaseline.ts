@@ -58,7 +58,6 @@ export const SESSION_ONLY_ROUTE_BASELINE: readonly string[] = [
   "v1/chat/threads",
   "v1/commands",
   "v1/comms/feed",
-  "v1/gallery/albums",
   "v1/library/ebooks",
   "v1/parent/online-classes/answer",
   "v1/parent/online-classes/join",

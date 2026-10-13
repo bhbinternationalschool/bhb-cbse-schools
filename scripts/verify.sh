@@ -71,6 +71,7 @@ SELFTESTS=(
   test:session-year
   test:academic-year-resolve
   test:workspace-policy
+  test:workspace-idle
   test:tone-tokens
   test:masters-read-failure
   test:save-full-cache
@@ -202,6 +203,7 @@ SELFTESTS=(
   test:upi-proof-match
   test:expense-range
   test:payroll-paid-on
+  test:payroll-deduction-heads
   test:masters-change-auth
   test:timetable-free-grid
   test:udise-teacher-apaar
@@ -357,6 +359,8 @@ SELFTESTS=(
   test:exam-invigilation
   test:exams
   test:exam-date-sheet
+  test:parent-results
+  test:bus-mark-push
   test:exams-sheet-safety
   test:exam-schemes
   test:exam-readiness
@@ -453,6 +457,7 @@ SELFTESTS=(
   test:visiting-pay
   test:visiting-exclusions
   test:payroll-staggered-runs
+  test:staff-payslips
   test:diksha-index
   test:teacher-contact
   test:question-bank

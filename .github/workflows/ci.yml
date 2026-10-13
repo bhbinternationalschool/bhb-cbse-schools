@@ -197,6 +197,9 @@ jobs:
       - name: Self-test — payroll Mark paid uses the real pay date
         working-directory: apps/web
         run: npm run test:payroll-paid-on
+      - name: Test — payroll loss of pay and advance recoveries are not posted as statutory dues
+        working-directory: apps/web
+        run: npm run test:payroll-deduction-heads
 
       - name: Self-test — Masters function grants, own classes only
         working-directory: apps/web
@@ -268,6 +271,9 @@ jobs:
       - name: Test — idle logout is thirty minutes for every session (standing policy)
         working-directory: apps/web
         run: npm run test:workspace-policy
+      - name: Test — idle logout counts activity in every tab
+        working-directory: apps/web
+        run: npm run test:workspace-idle
       - name: Test — accent tone tokens are not used in each other's place
         working-directory: apps/web
         run: npm run test:tone-tokens
@@ -450,6 +456,8 @@ jobs:
           npm run test:exam-invigilation
           npm run test:exams
           npm run test:exam-date-sheet
+          npm run test:parent-results
+          npm run test:bus-mark-push
           npm run test:exams-sheet-safety
           npm run test:exam-schemes
           npm run test:exam-readiness

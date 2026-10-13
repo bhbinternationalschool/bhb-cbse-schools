@@ -13,6 +13,7 @@
 import { emptyModuleRequestsState } from "@/lib/moduleRequests";
 import { emptyAppPopupsState } from "@/lib/appPopups";
 import { emptyParentLinkState } from "@/lib/parentNumberLink";
+import { emptyStaffBroadcastLog } from "@/lib/staffBroadcastLog";
 import {
   createModuleStatePersistence,
   type ModuleStatePersistence,
@@ -138,6 +139,13 @@ const registry: Record<ModuleStateKey, ModuleStatePersistence<any>> = {
     key: "parent_linked_mobiles",
     isEmpty: () => true,
     loadLocal: emptyParentLinkState,
+    writeLocalRaw: () => undefined,
+  }),
+  // Written only by the server (each live send of /api/v1/staff/broadcast).
+  staff_broadcasts: createModuleStatePersistence({
+    key: "staff_broadcasts",
+    isEmpty: () => true,
+    loadLocal: emptyStaffBroadcastLog,
     writeLocalRaw: () => undefined,
   }),
   // Written only by the server (Comms → App pop-ups saves through its route).

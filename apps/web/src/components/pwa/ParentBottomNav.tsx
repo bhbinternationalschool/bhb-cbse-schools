@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  Award,
   BookOpen,
   Calendar,
   GraduationCap,
@@ -23,6 +24,7 @@ export type ParentNavTab =
   | "ptm"
   | "leave"
   | "subjects"
+  | "results"
   | "news"
   | "gallery"
   | "profile"
@@ -45,6 +47,7 @@ const PRIMARY: {
 
 const MORE_ITEMS: { tab: ParentNavTab; label: string; icon: typeof Newspaper }[] =
   [
+    { tab: "results", label: "Results", icon: Award },
     { tab: "profile", label: "Profile", icon: UserRound },
     { tab: "news", label: "News", icon: Newspaper },
     { tab: "gallery", label: "Gallery", icon: Images },

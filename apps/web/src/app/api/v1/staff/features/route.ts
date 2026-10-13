@@ -15,7 +15,18 @@ const FEATURE_GROUP: Record<string, string> = {
   ...Object.fromEntries(MOBILE_FEATURES.map((f) => [f.id, f.group])),
   subject_requests: "Teaching",
   class_gallery: "Students",
+  teacher_ai_tools: "Teaching",
 };
+
+/**
+ * The app screens whose AI helpers the "AI tools" tile gathers (2026-10-13):
+ * answer-sheet marks, question paper and remedial worksheet sit on marks
+ * entry (exams.edit), the lesson-plan draft on the period log
+ * (teaching.edit), the PTM brief on PTM meetings (ptm.edit). The web ERP
+ * offers these to anyone holding those grants, with no switch of its own, so
+ * the tile follows them; switching the underlying screen off removes it.
+ */
+const AI_TOOL_BASES = ["marks_entry", "period_log", "ptm_meet"];
 
 export const runtime = "nodejs";
 
@@ -49,6 +60,9 @@ export async function GET(request: Request) {
     // and videos; only that class's families see them.
     if (scope.classTeacherOf.size > 0 && !features.includes("class_gallery")) {
       features.push("class_gallery");
+    }
+    if (AI_TOOL_BASES.some((f) => features.includes(f)) && !features.includes("teacher_ai_tools")) {
+      features.push("teacher_ai_tools");
     }
     return apiOk({
       staffId: ctx.session.staffId || "",

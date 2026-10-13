@@ -71,6 +71,8 @@ import { hasPermission } from "@/lib/rbac";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+import type { RegisterDayMark } from "@/lib/transportBoardingLog";
+import { fetchRegisterDayMarks } from "@/lib/transportRegisterClient";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -255,13 +257,25 @@ export function TransportReportsRunner() {
     seedTransportIfEmpty();
   }, []);
 
-  function run(id: (typeof TRANSPORT_REPORTS)[number]["id"]) {
+  async function run(id: (typeof TRANSPORT_REPORTS)[number]["id"]) {
+    // The boarding day sheet reads the bus register (server truth).
+    let registerMarks: RegisterDayMark[] | null = null;
+    if (id === "boarding_day_sheet") {
+      try {
+        registerMarks = await fetchRegisterDayMarks(date);
+      } catch (e) {
+        setError(`Bus register could not be read — ${e instanceof Error ? e.message : "try again"}`);
+        setNotice(null);
+        return;
+      }
+    }
     const r = runTransportReport(id, {
       date,
       format,
       transport: loadTransport(),
       masters: loadMasters(),
       sis: loadSis(),
+      registerMarks,
     });
     if (!r.ok) {
       setError(r.error);
@@ -315,7 +329,7 @@ export function TransportReportsRunner() {
                 <p className="text-xs text-[var(--muted)]">{r.hint}</p>
               ) : null}
             </div>
-            <button type="button" className={btn} onClick={() => run(r.id)}>
+            <button type="button" className={btn} onClick={() => void run(r.id)}>
               Export
             </button>
           </li>

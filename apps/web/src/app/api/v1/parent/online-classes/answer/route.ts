@@ -1,4 +1,5 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
+import { assertParentOwnsChild } from "@/lib/api/v1/household";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
@@ -38,9 +39,7 @@ export async function POST(request: Request) {
     await ensureSisHydratedServer();
     const student = loadSis().students.find((s) => s.id === studentId);
     if (!student) throw new ApiError("not_found", "Student not found", 404);
-    if (ctx.session.householdId && student.householdId !== ctx.session.householdId) {
-      throw new ApiError("forbidden", "Not your child", 403);
-    }
+    assertParentOwnsChild(ctx, student);
     const s = await getSession(sessionId);
     if (!s || s.sectionId !== student.sectionId) throw new ApiError("not_found", "Class not found", 404);
     if (s.status === "cancelled") throw new ApiError("bad_request", "This class was cancelled", 400);

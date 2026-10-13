@@ -7,15 +7,19 @@ import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
-import "route_manifest_screen.dart";
+import "bus_register_screen.dart";
+import "vehicle_logbook_screen.dart";
 import "../modules/notice_detail_screen.dart";
+import "my_advances_screen.dart";
 import "my_attendance_calendar_screen.dart";
+import "payslips_screen.dart";
 import "self_attendance_screen.dart";
 import "transport_requests_screen.dart";
 import "../../core/i18n/locale_controller.dart";
 
-/// Driver home (field persona): the school's routes with ordered stops and
-/// vehicle details, GPS self-attendance, and the day's boarding list.
+/// Driver home (field persona): the bus register and log book for the
+/// driver's own bus, GPS self-attendance, and the school's routes with
+/// ordered stops and vehicle details.
 ///
 /// In Hindi, because the drivers and attendants who use it read Hindi. The
 /// rest of the app stays in English — this is the one screen whose audience
@@ -47,6 +51,9 @@ const _schoolLng = 82.9439863;
 class _DriverHomeScreenState extends State<DriverHomeScreen> {
   List<TransportRouteInfo>? _routes;
   String? _name;
+
+  /// The server's mobile grants; null until read (or when the read failed).
+  StaffFeatureSet? _features;
   String? _error;
   bool _deepLinkDone = false;
 
@@ -71,6 +78,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         _name = name;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) => _consumeDeepLink());
+      // Grants for the tiles (bus register, log book, payslips). Unknown:
+      // the tiles stay and the server answers for itself.
+      try {
+        final f = await widget.api.fetchStaffFeatures();
+        if (mounted) setState(() => _features = f);
+      } catch (_) {
+        /* unknown: the tiles stay and the server answers for itself */
+      }
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
@@ -79,6 +94,32 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       }
     }
   }
+
+  Widget _payCard({
+    required IconData icon,
+    required ModuleTone tone,
+    required String title,
+    required Widget Function() open,
+  }) => Card(
+    child: ListTile(
+      onTap: () =>
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => open())),
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: tone.background,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: tone.foreground, size: 22),
+      ),
+      title: Text(
+        title,
+        style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
+      ),
+      trailing: const Icon(Icons.chevron_right, color: AppColors.muted),
+    ),
+  );
 
   void _consumeDeepLink() {
     final raw = widget.openRoute;
@@ -126,6 +167,40 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     );
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
+
+  /// The bus register and log book sit behind `route_manifest` (Masters →
+  /// Roles → Mobile app). They are hidden only when the server has said this
+  /// person does not hold it; an unread grant list hides nothing, and the
+  /// server still decides which bus each screen shows.
+  bool get _crewTools => _features == null || _features!.has("route_manifest");
+
+  Widget _toolTile({
+    required IconData icon,
+    required ModuleTone tone,
+    required String title,
+    required String subtitle,
+    required Widget Function() open,
+  }) => Card(
+    child: ListTile(
+      onTap: () =>
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => open())),
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: tone.background,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: tone.foreground, size: 22),
+      ),
+      title: Text(
+        title,
+        style: AppText.bodyMediumInk.copyWith(fontWeight: FontWeight.w600),
+      ),
+      subtitle: Text(subtitle, style: AppText.labelMediumMuted),
+      trailing: const Icon(Icons.chevron_right, color: AppColors.muted),
+    ),
+  );
 
   Future<void> _signOut() async {
     await widget.api.signOut();
@@ -244,6 +319,22 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (_crewTools) ...[
+                    _toolTile(
+                      icon: Icons.fact_check_outlined,
+                      tone: ModuleTone.blue,
+                      title: "Bus register · बस रजिस्टर",
+                      subtitle: "Mark children on and off the bus · हाज़िरी",
+                      open: () => BusRegisterScreen(api: widget.api),
+                    ),
+                    _toolTile(
+                      icon: Icons.local_gas_station_outlined,
+                      tone: ModuleTone.amber,
+                      title: "Log book · लॉग बुक",
+                      subtitle: "Odometer and fuel · मीटर और ईंधन",
+                      open: () => VehicleLogbookScreen(api: widget.api),
+                    ),
+                  ],
                   // The transport in-charge signs in through this home too
                   // (their role reads as transport crew). The office queue is
                   // theirs; a driver tapping it is told by the server it is not.
@@ -317,6 +408,21 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                       ),
                     ),
                   ),
+                  // My pay: payslips (with the grant) and my advances
+                  // (everyone's own record, always shown).
+                  if (_features?.has("my_payslips") == true)
+                    _payCard(
+                      icon: Icons.receipt_long_outlined,
+                      tone: ModuleTone.gray,
+                      title: "वेतन पर्ची · Payslips",
+                      open: () => PayslipsScreen(api: widget.api),
+                    ),
+                  _payCard(
+                    icon: Icons.account_balance_wallet_outlined,
+                    tone: ModuleTone.amber,
+                    title: "मेरा एडवांस · My advances",
+                    open: () => MyAdvancesScreen(api: widget.api),
+                  ),
                   const SizedBox(height: 14),
                   Text(
                     context.l10n.route,
@@ -388,49 +494,15 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                 style: AppText.bodySmallMuted,
                               ),
                               const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: FilledButton.icon(
-                                      onPressed: () =>
-                                          Navigator.of(context).push(
-                                            MaterialPageRoute(
-                                              builder: (_) =>
-                                                  RouteManifestScreen(
-                                                    api: widget.api,
-                                                    routeId: route.id,
-                                                    routeLabel:
-                                                        route.name.isEmpty
-                                                        ? route.code
-                                                        : route.name,
-                                                  ),
-                                            ),
-                                          ),
-                                      icon: const Icon(
-                                        Icons.fact_check_outlined,
-                                        size: 18,
-                                      ),
-                                      label: Text(
-                                        context.l10n.takeAttendance,
-                                        style: AppText.bodyLarge.copyWith(
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  OutlinedButton.icon(
-                                    onPressed: () => _openRouteMap(route),
-                                    icon: const Icon(
-                                      Icons.map_outlined,
-                                      size: 18,
-                                    ),
-                                    label: Text(
-                                      context.l10n.routeWay,
-                                      style: AppText.bodyLarge,
-                                    ),
-                                  ),
-                                ],
+                              // Marking children is the bus register's
+                              // (above): it shows only this driver's own bus.
+                              OutlinedButton.icon(
+                                onPressed: () => _openRouteMap(route),
+                                icon: const Icon(Icons.map_outlined, size: 18),
+                                label: Text(
+                                  context.l10n.routeWay,
+                                  style: AppText.bodyLarge,
+                                ),
                               ),
                               const SizedBox(height: 12),
                               for (var i = 0; i < route.stops.length; i++)

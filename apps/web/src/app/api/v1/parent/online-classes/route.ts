@@ -1,4 +1,5 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
+import { assertParentOwnsChild } from "@/lib/api/v1/household";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
@@ -34,9 +35,7 @@ export async function GET(request: Request) {
     const student = sis.students.find((s) => s.id === studentId);
     if (!student) throw new ApiError("not_found", "Student not found", 404);
     if (ctx.session.persona === "parent") {
-      if (ctx.session.householdId && student.householdId !== ctx.session.householdId) {
-        throw new ApiError("forbidden", "Not your child", 403);
-      }
+      assertParentOwnsChild(ctx, student);
     } else {
       assertPermission(ctx, "online_classes", "view");
     }
