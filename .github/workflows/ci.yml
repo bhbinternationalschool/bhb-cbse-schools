@@ -499,6 +499,8 @@ jobs:
           npm run test:staff-home-kind
           npm run test:staff-teaching-scope
           npm run test:staff-scope-timetable
+          npm run test:teaching-server-read
+          npm run test:timetable-server-callers
           npm run test:teacher-contacts
           npm run test:staff-month-calendar
           npm run test:staff-roster-redact
