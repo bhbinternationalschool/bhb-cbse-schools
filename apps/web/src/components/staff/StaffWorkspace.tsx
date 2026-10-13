@@ -2,6 +2,7 @@
 
 import { PropelProgressPanel } from "@/components/staff/PropelProgressPanel";
 import { CoordinatorsPanel } from "@/components/staff/CoordinatorsPanel";
+import { ProfileChangeRequestsCard } from "@/components/staff/ProfileChangeRequestsCard";
 import { useAccessData } from "@/components/shell/useAccessData";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -531,7 +532,12 @@ export function StaffWorkspace() {
           }
         />
       ) : null}
-      {tab === "requests" ? <StaffRequestsPanel /> : null}
+      {tab === "requests" ? (
+        <>
+          {hasPermission(session, state ?? loadMasters(), "staff", "edit") ? <ProfileChangeRequestsCard /> : null}
+          <StaffRequestsPanel />
+        </>
+      ) : null}
       {tab === "outdoor_duty" ? <StaffOutdoorDutyPanel /> : null}
       {tab === "presence" ? (
         <div className="mt-4 max-w-xl">

@@ -5,7 +5,8 @@ import { ParentsOnAppPanel } from "@/components/comms/ParentsOnAppPanel";
 import { commsTabIsOfficeOnly, commsTabOpenedByFunction } from "@/lib/commsTabAccess";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Images, Megaphone } from "lucide-react";
+import { Images, Megaphone, X } from "lucide-react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { canAccessHref, canWriteModuleTab, hasPermission } from "@/lib/rbac";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
 import { useAccessData } from "@/components/shell/useAccessData";
@@ -475,6 +476,17 @@ export function CommsWorkspace() {
     () => (comms ? listNotices(comms) : []),
     [comms],
   );
+
+  // The whole notice, for everyone who can see the list (13 Oct 2026: the
+  // table shows two lines and only "Edit" showed the rest, which read-only
+  // staff do not have). Opened from the row, its menu, or a link
+  // (?notice=<id>) from the running strip and the bell.
+  const [viewNoticeId, setViewNoticeId] = useState<string | null>(null);
+  useEffect(() => {
+    const id = searchParams.get("notice");
+    if (id) setViewNoticeId(id);
+  }, [searchParams]);
+  const viewNotice = viewNoticeId ? notices.find((n) => n.id === viewNoticeId) ?? null : null;
   const noticesFiltered = useMemo(
     () =>
       notices.filter((n) =>
@@ -629,6 +641,7 @@ export function CommsWorkspace() {
   ];
 
   const noticeActions: RowAction<(typeof noticesFiltered)[number]>[] = [
+    { id: "view", label: "Read full notice", onSelect: (n) => setViewNoticeId(n.id) },
     { id: "edit", label: "Edit", hidden: () => readOnly, onSelect: (n) => beginEditNotice(n) },
     {
       id: "publish",
@@ -939,6 +952,34 @@ export function CommsWorkspace() {
     }
   }
 
+  const closeNotice = () => {
+    setViewNoticeId(null);
+    if (searchParams.get("notice")) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("notice");
+      window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}`);
+    }
+  };
+  const noticeDialog = viewNotice ? (
+    <Dialog open onOpenChange={(o) => !o && closeNotice()}>
+      <DialogPopup className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] p-4">
+          <div>
+            <h3 className="text-base font-bold text-[var(--brand-deep)]">{viewNotice.title}</h3>
+            <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+              {viewNotice.pinned ? "📌 Pinned · " : ""}For {viewNotice.audience}
+              {viewNotice.publishedAt ? ` · ${new Date(viewNotice.publishedAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}` : ` · ${viewNotice.status}`}
+            </p>
+          </div>
+          <button type="button" onClick={closeNotice} className="text-[var(--muted)]" aria-label="Close">
+            <X className="size-4" aria-hidden />
+          </button>
+        </div>
+        <div className="whitespace-pre-wrap break-words p-4 text-sm leading-relaxed text-[var(--ink)]">{viewNotice.body}</div>
+      </DialogPopup>
+    </Dialog>
+  ) : null;
+
   return (
     <ErpWorkspaceShell
       title="Notices · News · Gallery"
@@ -1080,6 +1121,7 @@ export function CommsWorkspace() {
                   rows={noticesFiltered}
                   rowKey={(n) => n.id}
                   rowActions={noticeActions}
+                  onRowClick={(n) => setViewNoticeId(n.id)}
                   rowActionsLabel="Notice actions"
                   minWidth="min-w-[860px]"
                   exportFileBaseName="notices"
@@ -1545,7 +1587,8 @@ export function CommsWorkspace() {
                   onClick={() => {
                     markNotificationRead(n.id, recipientKey);
                     setInbox(loadNotifications());
-                    if (n.href) router.push(n.href);
+                    if (n.kind === "notice" && n.sourceId) setViewNoticeId(n.sourceId);
+                    else if (n.href) router.push(n.href);
                   }}
                   className={`block w-full rounded-xl border px-3 py-2.5 text-left ${
                     unread
@@ -1577,6 +1620,7 @@ export function CommsWorkspace() {
           <CommsReportsRunner />
         </div>
       ) : null}
+      {noticeDialog}
     </ErpWorkspaceShell>
   );
 }

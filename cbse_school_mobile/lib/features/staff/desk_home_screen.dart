@@ -6,6 +6,7 @@ import "../../core/guide/screen_guides.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/chat_inbox_screen.dart";
+import "../modules/notice_detail_screen.dart";
 import "../modules/notices_screen.dart";
 import "admission_leads_screen.dart";
 import "documents_screen.dart";
@@ -14,7 +15,9 @@ import "fee_defaulters_screen.dart";
 import "visitor_gate_screen.dart";
 import "my_collections_screen.dart";
 import "survey_screen.dart";
+import "home_groups.dart";
 import "leave_approvals_screen.dart";
+import "my_profile_screen.dart";
 import "payslips_screen.dart";
 import "self_attendance_screen.dart";
 import "staff_complaints_screen.dart";
@@ -77,6 +80,7 @@ class DeskHomeScreen extends StatefulWidget {
 
 class _DeskHomeScreenState extends State<DeskHomeScreen> {
   String _name = "";
+  String _photoUrl = "";
   String _kind = "support";
   int _refresh = 0;
   StaffFeatureSet _features = const StaffFeatureSet.empty();
@@ -215,6 +219,16 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
     ),
   ];
 
+  /// Everyone's own record (the desk home has no bottom bar to carry it).
+  static final _profileTile = _Tile(
+    "My profile",
+    "मेरी प्रोफ़ाइल",
+    Icons.badge_outlined,
+    ModuleTone.teal,
+    "my_profile",
+    (api) => MyProfileScreen(api: api),
+  );
+
   @override
   void initState() {
     super.initState();
@@ -233,6 +247,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       if (mounted) {
         setState(() {
           _name = s.fullName;
+          _photoUrl = s.photoUrl;
           _kind = s.homeKind.isEmpty ? (kind ?? "support") : s.homeKind;
           _refresh += 1;
         });
@@ -277,7 +292,10 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       case "/chat":
         _push(ChatInboxScreen(api: widget.api));
       case "/notices":
-        _push(NoticesScreen(api: widget.api));
+        // A tapped broadcast opens in full; otherwise the notices list.
+        _push(noticesScreenForRoute(widget.api, Uri.tryParse(raw)));
+      case "/profile":
+        _openProfile();
     }
   }
 
@@ -299,6 +317,16 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
     if (mounted) widget.onLogout();
   }
 
+  Future<void> _openProfile() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MyProfileScreen(api: widget.api, onSignOut: _signOut),
+      ),
+    );
+    // A new photo shows in the header straight away.
+    if (mounted) _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     // What appears is the ERP's answer, not a guess from the role name: an
@@ -308,6 +336,12 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       ..._common,
       ..._work,
     ].where((t) => _features.has(t.feature)).toList();
+    // My profile is everyone's own record, not a grant — always shown.
+    final groups = groupStaffTiles(
+      [...tiles, _profileTile],
+      (t) => staffGroupOf(_features, t.feature),
+      order: _features.groupOrder,
+    );
     return Scaffold(
       body: RefreshIndicator(
         onRefresh: _load,
@@ -331,6 +365,14 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
               ),
               child: Row(
                 children: [
+                  StaffAvatar(
+                    key: ValueKey(_photoUrl),
+                    api: widget.api,
+                    name: _name,
+                    photoUrl: _photoUrl,
+                    onTap: _openProfile,
+                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -418,52 +460,59 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
                       onTap: () => _push(SelfAttendanceScreen(api: widget.api)),
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  GridView.count(
-                    crossAxisCount: 3,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 8,
-                    childAspectRatio: 0.95,
-                    children: [
-                      for (final t in tiles)
-                        InkWell(
-                          borderRadius: BorderRadius.circular(16),
-                          onTap: () => _push(t.open(widget.api)),
-                          child: Column(
-                            children: [
-                              Container(
-                                width: 52,
-                                height: 52,
-                                decoration: BoxDecoration(
-                                  color: t.tone.background,
-                                  borderRadius: BorderRadius.circular(16),
+                  const SizedBox(height: 2),
+                  // Tiles under their headings, in the ERP's order — both
+                  // languages, as the tiles themselves carry.
+                  for (final (group, list) in groups) ...[
+                    StaffGroupHeading(group, bilingual: true),
+                    GridView.count(
+                      crossAxisCount: 3,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      mainAxisSpacing: 10,
+                      crossAxisSpacing: 8,
+                      childAspectRatio: 0.95,
+                      children: [
+                        for (final t in list)
+                          InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: identical(t, _profileTile)
+                                ? _openProfile
+                                : () => _push(t.open(widget.api)),
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: 52,
+                                  height: 52,
+                                  decoration: BoxDecoration(
+                                    color: t.tone.background,
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Icon(
+                                    t.icon,
+                                    color: t.tone.foreground,
+                                    size: 26,
+                                  ),
                                 ),
-                                child: Icon(
-                                  t.icon,
-                                  color: t.tone.foreground,
-                                  size: 26,
+                                const SizedBox(height: 5),
+                                Text(
+                                  t.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppText.labelMediumInk,
                                 ),
-                              ),
-                              const SizedBox(height: 5),
-                              Text(
-                                t.label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppText.labelMediumInk,
-                              ),
-                              Text(
-                                t.hindi,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppText.labelSmallMuted,
-                              ),
-                            ],
+                                Text(
+                                  t.hindi,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppText.labelSmallMuted,
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                    ],
-                  ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),

@@ -3,6 +3,19 @@ import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { resolveMobileAccess } from "@/lib/api/v1/mobileAccess.server";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { MOBILE_FEATURES } from "@/lib/mobileFeatures";
+
+/**
+ * The heading each tile sits under on the app's home (director, 13 Oct 2026:
+ * "put actions in their grouping"). The same groups the office sees in
+ * Masters → Roles → Mobile app; tiles the server injects carry their own.
+ */
+const GROUP_ORDER = ["Teaching", "Students", "Fees", "Admissions", "Leadership", "Gate", "Transport", "Self service"] as const;
+const FEATURE_GROUP: Record<string, string> = {
+  ...Object.fromEntries(MOBILE_FEATURES.map((f) => [f.id, f.group])),
+  subject_requests: "Teaching",
+  class_gallery: "Students",
+};
 
 export const runtime = "nodejs";
 
@@ -42,6 +55,8 @@ export async function GET(request: Request) {
       fullName: ctx.session.fullName,
       homeKind: scope.kind,
       features,
+      groups: Object.fromEntries(features.map((f) => [f, FEATURE_GROUP[f] || "Self service"])),
+      groupOrder: GROUP_ORDER,
       blockedByRbac: access.blockedByRbac,
     });
   } catch (e) {

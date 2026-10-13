@@ -42,7 +42,7 @@ function buildItems(audience: CommsStripAudience): StripItem[] {
     href:
       audience === "parents"
         ? "/parent"
-        : "/comms?tab=notices",
+        : `/comms?tab=notices&notice=${encodeURIComponent(n.id)}`,
   }));
 
   const newsItems: StripItem[] = news.slice(0, 5).map((n: SchoolNewsItem) => ({

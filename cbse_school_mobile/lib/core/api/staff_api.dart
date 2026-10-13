@@ -670,16 +670,31 @@ class StaffFeatureSet {
       fullName = _s(j, "fullName"),
       features = ((j["features"] as List?) ?? const [])
           .map((e) => e.toString())
-          .toSet();
+          .toSet(),
+      groups = ((j["groups"] as Map?) ?? const {}).map(
+        (k, v) => MapEntry("$k", "$v"),
+      ),
+      groupOrder = ((j["groupOrder"] as List?) ?? const [])
+          .map((e) => e.toString())
+          .toList();
 
   const StaffFeatureSet.empty()
     : homeKind = "",
       fullName = "",
-      features = const {};
+      features = const {},
+      groups = const {},
+      groupOrder = const [];
 
   final String homeKind;
   final String fullName;
   final Set<String> features;
+
+  /// featureId → the heading its tile sits under ("Teaching", "Fees", …).
+  /// Empty from a server older than 13 Oct 2026 — see staff/home_groups.dart.
+  final Map<String, String> groups;
+
+  /// The headings in the order the home shows them.
+  final List<String> groupOrder;
 
   bool has(String id) => features.contains(id);
 }
@@ -1415,6 +1430,89 @@ extension StaffApi on ApiClient {
   Future<StaffFeatureSet> fetchStaffFeatures() async =>
       StaffFeatureSet.fromJson(await _getData("/api/v1/staff/features"));
 
+  // ---- my profile (self service) ----------------------------------------
+
+  /// The signed-in staff member's own record: masked where it must be, the
+  /// fields they may change, and their open request to the office.
+  Future<StaffProfile> fetchMyProfile() async =>
+      StaffProfile.fromJson(await _getData("/api/v1/staff/me/profile"), erpUrl);
+
+  /// Send ONLY the values the person changed — never a masked one back.
+  /// Contact / personal fields save at once; identity, bank and statutory
+  /// ones become a request the office approves.
+  Future<StaffProfileSaveResult> updateMyProfile(
+    Map<String, String> fields,
+  ) async {
+    final res = await http.patch(
+      _uri("/api/v1/staff/me/profile"),
+      headers: await _authHeaders(),
+      body: jsonEncode({"fields": fields}),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+    final data =
+        ((jsonDecode(res.body) as Map<String, dynamic>)["data"]
+            as Map<String, dynamic>?) ??
+        const {};
+    return StaffProfileSaveResult(
+      saved: ((data["saved"] as List?) ?? const []).map((e) => "$e").toList(),
+      sentForApproval: ((data["sentForApproval"] as List?) ?? const [])
+          .map((e) => "$e")
+          .toList(),
+      profile: StaffProfile.fromJson(
+        Map<String, dynamic>.from((data["profile"] as Map?) ?? const {}),
+        erpUrl,
+      ),
+    );
+  }
+
+  /// Withdraw the open request to the office.
+  Future<StaffProfile> withdrawMyProfileRequest() async {
+    final res = await http.delete(
+      _uri("/api/v1/staff/me/profile"),
+      headers: await _authHeaders(),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+    final data =
+        ((jsonDecode(res.body) as Map<String, dynamic>)["data"]
+            as Map<String, dynamic>?) ??
+        const {};
+    return StaffProfile.fromJson(
+      Map<String, dynamic>.from((data["profile"] as Map?) ?? const {}),
+      erpUrl,
+    );
+  }
+
+  /// Upload a new profile photo (jpg / png / webp, at most 5 MB). It shows
+  /// at once and waits in the office's document queue. Returns the photo's
+  /// full URL.
+  Future<String> uploadMyPhoto(File file) async {
+    final name = file.path.split("/").last.toLowerCase();
+    final mime = name.endsWith(".png")
+        ? "image/png"
+        : name.endsWith(".webp")
+        ? "image/webp"
+        : "image/jpeg";
+    final req = http.MultipartRequest("POST", _uri("/api/v1/staff/me/photo"));
+    final headers = await _authHeaders();
+    headers.remove("Content-Type");
+    req.headers.addAll(headers);
+    req.files.add(
+      await http.MultipartFile.fromPath(
+        "file",
+        file.path,
+        filename: "photo.${mime.split("/").last.replaceAll("jpeg", "jpg")}",
+        contentType: MediaType.parse(mime),
+      ),
+    );
+    final res = await http.Response.fromStream(await req.send());
+    if (res.statusCode != 200) _throwFrom(res);
+    final data =
+        ((jsonDecode(res.body) as Map<String, dynamic>)["data"]
+            as Map<String, dynamic>?) ??
+        const {};
+    return erpUrl("${data["photoUrl"] ?? ""}");
+  }
+
   Future<List<FeeStudentHit>> searchFeeStudents(String q) async {
     final data = await _getData(
       "/api/v1/staff/fees/search?q=${Uri.encodeQueryComponent(q)}",
@@ -1436,6 +1534,7 @@ extension StaffApi on ApiClient {
     required List<({String studentId, String dueKey, int paise})> lines,
     required List<({String mode, int paise, String ref})> tenders,
     String note = "",
+
     /// The day the money was handed over, YYYY-MM-DD. Empty means today.
     ///
     /// Whether a past date is accepted is the school's Masters setting and
@@ -1623,4 +1722,142 @@ extension StaffApi on ApiClient {
     if (res.statusCode != 200) _throwFrom(res);
     return (res.bodyBytes, res.headers["content-type"] ?? "");
   }
+}
+
+// --------------------------------------------------------------- my profile
+
+/// One field the staff member may change (mirror of the ERP's
+/// STAFF_PROFILE_FIELDS, lib/staffSelfProfile.ts).
+class StaffProfileField {
+  StaffProfileField.fromJson(Map<String, dynamic> j)
+    : key = _s(j, "key"),
+      label = _s(j, "label"),
+      hindi = _s(j, "hindi"),
+      kind = _s(j, "kind"),
+      group = _s(j, "group"),
+      approval = _b(j, "approval"),
+      masked = _b(j, "masked"),
+      options = ((j["options"] as List?) ?? const []).map((e) => "$e").toList();
+
+  const StaffProfileField({
+    required this.key,
+    required this.label,
+    this.hindi = "",
+    this.kind = "text",
+    this.group = "Contact",
+    this.approval = false,
+    this.masked = false,
+    this.options = const [],
+  });
+
+  final String key;
+  final String label;
+  final String hindi;
+
+  /// text | mobile | email | pincode | date | number | aadhaar | pan | ifsc
+  /// | account | select
+  final String kind;
+
+  /// Contact | Personal | Qualification | Identity | Bank | Statutory
+  final String group;
+
+  /// true = the office approves the change before it counts.
+  final bool approval;
+
+  /// Shown as ••••1234; never pre-filled, never sent back.
+  final bool masked;
+  final List<String> options;
+}
+
+/// A change request as the staff member sees it (masked fields masked).
+class StaffProfileRequest {
+  StaffProfileRequest.fromJson(Map<String, dynamic> j)
+    : id = _s(j, "id"),
+      status = _s(j, "status"),
+      note = _s(j, "note"),
+      createdAt = _s(j, "createdAt"),
+      decidedAt = _s(j, "decidedAt"),
+      fields = ((j["fields"] as Map?) ?? const {}).map((k, v) {
+        final m = (v as Map?) ?? const {};
+        return MapEntry("$k", ("${m["from"] ?? ""}", "${m["to"] ?? ""}"));
+      });
+
+  final String id;
+
+  /// pending | approved | rejected
+  final String status;
+  final String note;
+  final String createdAt;
+  final String decidedAt;
+
+  /// key → (from, to)
+  final Map<String, (String, String)> fields;
+}
+
+class StaffProfile {
+  StaffProfile.fromJson(Map<String, dynamic> j, String Function(String) url)
+    : id = _s(_m(j, "staff"), "id"),
+      empCode = _s(_m(j, "staff"), "empCode"),
+      fullName = _s(_m(j, "staff"), "fullName"),
+      photoUrl = url(_s(_m(j, "staff"), "photoUrl")),
+      photoStatus = _s(_m(j, "staff"), "photoStatus"),
+      photoNote = _s(_m(j, "staff"), "photoNote"),
+      designation = _s(_m(j, "staff"), "designation"),
+      department = _s(_m(j, "staff"), "department"),
+      joiningDate = _s(_m(j, "staff"), "joiningDate"),
+      category = _s(_m(j, "staff"), "category"),
+      status = _s(_m(j, "staff"), "status"),
+      values = _m(j, "values").map((k, v) => MapEntry(k, "${v ?? ""}")),
+      fields = _list(j, "fields").map(StaffProfileField.fromJson).toList(),
+      pendingRequest = j["pendingRequest"] is Map
+          ? StaffProfileRequest.fromJson(
+              Map<String, dynamic>.from(j["pendingRequest"] as Map),
+            )
+          : null,
+      lastDecision = j["lastDecision"] is Map
+          ? StaffProfileRequest.fromJson(
+              Map<String, dynamic>.from(j["lastDecision"] as Map),
+            )
+          : null,
+      requestsUnknown = _b(j, "requestsUnknown");
+
+  static Map<String, dynamic> _m(Map<String, dynamic> j, String k) =>
+      j[k] is Map ? Map<String, dynamic>.from(j[k] as Map) : const {};
+
+  final String id;
+  final String empCode;
+  final String fullName;
+
+  /// Full URL, or "" when there is no photo.
+  final String photoUrl;
+
+  /// pending | verified | rejected | ""
+  final String photoStatus;
+  final String photoNote;
+  final String designation;
+  final String department;
+  final String joiningDate;
+  final String category;
+  final String status;
+
+  /// key → current value (Aadhaar / bank account already masked).
+  final Map<String, String> values;
+  final List<StaffProfileField> fields;
+  final StaffProfileRequest? pendingRequest;
+  final StaffProfileRequest? lastDecision;
+
+  /// The office's request list could not be read — the banner may be stale.
+  final bool requestsUnknown;
+}
+
+class StaffProfileSaveResult {
+  const StaffProfileSaveResult({
+    required this.saved,
+    required this.sentForApproval,
+    required this.profile,
+  });
+
+  final List<String> saved;
+  final List<String> sentForApproval;
+  final StaffProfile profile;
 }

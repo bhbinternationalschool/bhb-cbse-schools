@@ -159,7 +159,7 @@ export async function POST(req: Request) {
       title: `${ctx.session.fullName}${pushSubjectType === "parent" ? " (class teacher)" : ""}`,
       body: text.length > 200 ? `${text.slice(0, 197)}…` : text,
       url: "/notices",
-      data: { kind: "broadcast" },
+      data: { kind: "broadcast", fullText: text.slice(0, 3000), sender: ctx.session.fullName || "" },
     }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));
   }
 

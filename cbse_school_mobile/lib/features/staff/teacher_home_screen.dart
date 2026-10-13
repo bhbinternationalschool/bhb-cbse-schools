@@ -8,6 +8,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/chat_inbox_screen.dart";
 import "../modules/homework_screen.dart";
+import "../modules/notice_detail_screen.dart";
 import "../modules/notices_screen.dart";
 import "../modules/syllabus_scan_screen.dart";
 import "../modules/teaching_screen.dart";
@@ -23,6 +24,8 @@ import "marks_screen.dart";
 import "payslips_screen.dart";
 import "ptm_teacher_screen.dart";
 import "my_subjects_screen.dart";
+import "home_groups.dart";
+import "my_profile_screen.dart";
 import "section_picker.dart";
 import "self_attendance_screen.dart";
 import "staff_complaints_screen.dart";
@@ -171,6 +174,13 @@ const _staffModules = [
     ModuleTone.gray,
     "my_payslips",
   ),
+  // Everyone's own record — not a grant, so always shown.
+  _StaffModule(
+    "My profile",
+    Icons.badge_outlined,
+    ModuleTone.teal,
+    "my_profile",
+  ),
 ];
 
 class TeacherHomeScreen extends StatefulWidget {
@@ -232,7 +242,12 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           MaterialPageRoute(builder: (_) => ChatInboxScreen(api: widget.api)),
         );
       case "/notices":
-        _openModule("Notices");
+        // A tapped broadcast opens in full; otherwise the notices list.
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => noticesScreenForRoute(widget.api, uri),
+          ),
+        );
       case "/homework":
         _openModule("Homework");
       case "/attendance":
@@ -253,6 +268,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         _openModule("Marks");
       case "/payslips":
         _openModule("Payslips");
+      case "/profile":
+        _openModule("My profile");
     }
   }
 
@@ -446,6 +463,15 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         await _pushScreen(AdmissionLeadsScreen(api: widget.api));
       case "Field survey":
         await _pushScreen(SurveyScreen(api: widget.api));
+      case "My profile":
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) =>
+                MyProfileScreen(api: widget.api, onSignOut: _signOut),
+          ),
+        );
+        // A new photo shows in the header straight away.
+        if (mounted) _load();
     }
   }
 
@@ -511,23 +537,12 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               ),
               child: Row(
                 children: [
-                  CircleAvatar(
-                    radius: 24,
-                    backgroundColor: AppColors.accentSoft,
-                    child: Text(
-                      summary.fullName.isEmpty
-                          ? "S"
-                          : summary.fullName
-                                .split(" ")
-                                .where((p) => p.isNotEmpty)
-                                .take(2)
-                                .map((p) => p[0].toUpperCase())
-                                .join(),
-                      style: const TextStyle(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                  StaffAvatar(
+                    key: ValueKey(summary.photoUrl),
+                    api: widget.api,
+                    name: summary.fullName,
+                    photoUrl: summary.photoUrl,
+                    onTap: () => _openModule("My profile"),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -702,54 +717,57 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                     refreshKey: _refresh,
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    context.l10n.modules,
-                    style: AppText.bodyLargeInk.copyWith(
-                      fontWeight: FontWeight.w600,
+                  // Tiles under their headings (Teaching, Students, Fees…)
+                  // in the ERP's order; empty headings are left out.
+                  for (final (group, modules) in groupStaffTiles(
+                    _staffModules.where(
+                      (m) =>
+                          m.feature == "my_profile" || _features.has(m.feature),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  GridView.count(
-                    crossAxisCount: 4,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 8,
-                    childAspectRatio: 0.82,
-                    children: [
-                      for (final m in _staffModules.where(
-                        (m) => _features.has(m.feature),
-                      ))
-                        InkWell(
-                          borderRadius: BorderRadius.circular(16),
-                          onTap: () => _openModule(m.label),
-                          child: Column(
-                            children: [
-                              Container(
-                                width: 52,
-                                height: 52,
-                                decoration: BoxDecoration(
-                                  color: m.tone.background,
-                                  borderRadius: BorderRadius.circular(16),
+                    (m) => staffGroupOf(_features, m.feature),
+                    order: _features.groupOrder,
+                  )) ...[
+                    StaffGroupHeading(group),
+                    GridView.count(
+                      crossAxisCount: 4,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      mainAxisSpacing: 12,
+                      crossAxisSpacing: 8,
+                      childAspectRatio: 0.82,
+                      children: [
+                        for (final m in modules)
+                          InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () => _openModule(m.label),
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: 52,
+                                  height: 52,
+                                  decoration: BoxDecoration(
+                                    color: m.tone.background,
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Icon(
+                                    m.icon,
+                                    color: m.tone.foreground,
+                                    size: 26,
+                                  ),
                                 ),
-                                child: Icon(
-                                  m.icon,
-                                  color: m.tone.foreground,
-                                  size: 26,
+                                const SizedBox(height: 5),
+                                Text(
+                                  m.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppText.labelMediumInk,
                                 ),
-                              ),
-                              const SizedBox(height: 5),
-                              Text(
-                                m.label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppText.labelMediumInk,
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
-                    ],
-                  ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -769,34 +787,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 ),
               );
             case 3:
-              showModalBottomSheet<void>(
-                context: context,
-                backgroundColor: Colors.white,
-                shape: const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-                ),
-                builder: (sheet) => SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(summary.fullName, style: AppText.titleMediumInk),
-                        const SizedBox(height: 16),
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            Navigator.pop(sheet);
-                            _signOut();
-                          },
-                          icon: const Icon(Icons.logout, size: 18),
-                          label: Text(context.l10n.signOut),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
+              _openModule("My profile");
           }
         },
         destinations: const [
