@@ -327,7 +327,8 @@ cookie sis-roster returns exactly her section's 51 rows and masters-desk the tea
 **Found by the stack:** the timetable-only teacher gets **0** students — on the server
 `loadTimetable()` is always empty and `ensureTimetableHydratedServer()` writes through a
 browser-only no-op, so `staffSectionScope()` never sees a published grid. The check records it
-as an expected failure (XFAIL) that turns red the day it is fixed. CI: job `e2e-stack`
+as an expected failure (XFAIL) that turns red the day it is fixed (fixed and promoted to a plain
+check by 1.7). CI: job `e2e-stack`
 (`continue-on-error` until the director makes it required; later steps call it the `e2e` job)
 runs `up`, `build`, `app`, `check`, `down` on `ubuntu-latest`, uses no secret, and stops before
 checkout if a `*SERVICE_ROLE*` secret is visible to the workflow or such a variable is in its
@@ -471,13 +472,35 @@ components (70), `readCache(` files in `src` (69), `readFileSync` inside `*.self
 the Phase 2.3b / 3.4 gates: `loadMasters(` occurrences (476) and `loadSis(` occurrences (426),
 selftests and definitions excluded. Acceptance: CI fails when any count rises.
 
-**1.7 Teacher scope from SQL (own step; 3.1 and 4.2 depend on it).** `staffSectionScope`
-(`lib/api/v1/staffScope.ts:77-96`) computes sections from `sis_staff.profile` links **and
-timetable rows read from `timetable_desk_slices` on the server** (today it awaits a timetable
-hydrate whose result is always empty on the server, `lib/timetable.ts:471`), cached per request.
-The sis-roster teacher branch answers `{ok:true, scoped:true, sections:[…], students:[…]}` so
-"no sections" is distinguishable from "unknown". Acceptance: `teacher.spec.ts` passes, including
-the timetable-only teacher.
+**1.7 Teacher scope from SQL (own step; 3.1 and 4.2 depend on it).** *(Built 13 Oct 2026.)*
+`staffSectionScope` (`lib/api/v1/staffScope.ts`) computes sections from `sis_staff.profile` links
+**and the timetable as the database holds it**: `lib/api/v1/timetableScope.server.ts`
+(`loadScopeTimetable`) reads the `publishedGrids` and `grids` rows of `timetable_desk_slices` —
+published first, the draft only when nothing is published (the old code's intent). Per-process
+copy keyed on `timetable_desk_sync_meta.updated_at`: one select of that row per call, the slices
+re-read only when it moved (in-flight deduped); slices older than the meta value (a versioned save
+caught between its meta claim and its slice write) are served but not cached; a failed read keeps
+the previous copy (`stale:true`, warning); with no copy it throws `ApiError` 503 — never "no
+timetable". This small cache moves to `referenceCache` (1.3) when that lands. The dead
+`ensureTimetableHydratedServer()` / `loadTimetable()` calls are gone from the scope path. A
+school-wide session (leadership, or an owner/principal/admin/office role) does not depend on the
+timetable — that is decided before it is read — so for it a failed read is logged and the scope
+built without it; for everyone else the scope is unknown (503). The scope is cached per request
+(a `WeakMap` on the request's `ApiAuthContext`; a failure is not kept). The school-data routes
+that did `staffSectionScope(ctx).catch(() => null)` now call `readStaffScopeForDesk(ctx)`: `null`
+only for a non-staff session (their old rule), a `503 {ok:false, scopeUnknown:true}` for an unknown
+scope — before, a null fell through to **the whole school** in sis-roster and to an unrestricted
+send in `wa/dispatch`, and to an empty list in attendance-registers. sis-roster computes no scope
+for a `students.edit` holder (they get the whole roster anyway). The sis-roster teacher branch
+answers `{ok:true, scoped:true, sections:[{classId, sectionId, className, sectionName}],
+students:[…]}` plus all its old fields (`scopedToTeacher`, counts, `meta`). Proof:
+`test:staff-scope-timetable` (fake PostgREST, the e2e fixture's school; 12 of its 13 checks fail on
+the pre-1.7 code); the acceptance check's former XFAIL is a plain check: the timetable-only teacher
+gets 61 rows, 0 outside her two sections, `sections` = exactly those two. Still to do in 1.1:
+`teacher.spec.ts`. **Not fixed here (same defect, outside the scope path):** `v1/staff/timetable`,
+`v1/staff/summary`, `v1/teaching/today`, `v1/teaching/log`, `v1/staff/online-classes` still
+read `loadTimetable()` on the server after `ensureTimetableHydratedServer()`, so they see no
+periods; they should read `loadScopeTimetable()` (or its successor) in a later step.
 
 ### Phase 2 — Reference data: removes S1, S3, S5 on the web
 
