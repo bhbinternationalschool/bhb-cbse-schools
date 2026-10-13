@@ -298,7 +298,10 @@ async function scenario(
           await observer.open(B.page, next).catch(() => undefined);
           await expect(observer.sees(B.page, next).first()).toBeAttached({ timeout: 20_000 });
           return true;
-        })().catch((x: unknown) => `not even after a reload: ${String(x).split("\n")[0]}`);
+        })().catch(
+          // eslint-disable-next-line no-control-regex -- strip the terminal colours from the message
+          (x: unknown) => `not even after a reload: ${String(x).replace(/\u001b\[[0-9;]*m/g, "").split("\n")[0]}`,
+        );
         throw err;
       }
     });
