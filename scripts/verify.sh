@@ -476,6 +476,7 @@ SELFTESTS=(
   test:receipt-lookup
   test:referrals
   test:report-export
+  test:report-export-format
   test:report-remark-ai
   test:salary-additional
   test:salary-gross-up
