@@ -24,6 +24,7 @@ import { AlertTriangle, Filter, RotateCcw, Search, X } from "lucide-react";
 import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { VoucherDetailDialog, rowOpenProps } from "@/components/accounts/VoucherDetailDialog";
 import {
   AmendVoucherDialog,
   VoidVoucherDialog,
@@ -99,6 +100,8 @@ export function VoucherBrowserPanel({
   const [fixing, setFixing] = useState<VoucherFacts | null>(null);
   const [amending, setAmending] = useState<VoucherFacts | null>(null);
   const [voiding, setVoiding] = useState<VoucherFacts | null>(null);
+  // The row opened in the shared detail view; its actions are the row menu's.
+  const [viewing, setViewing] = useState<VoucherFacts | null>(null);
   const [parties, setParties] = useState<PartyRow[]>([]);
   const [notice, setNotice] = useState("");
 
@@ -423,8 +426,9 @@ export function VoucherBrowserPanel({
                 v.lines.reduce((n, l) => n + l.debitPaise, 0),
                 v.lines.reduce((n, l) => n + l.creditPaise, 0),
               );
+              const open = rowOpenProps(() => setViewing(v), `Open voucher ${v.voucherNo}`);
               return (
-                <tr key={v.id} className="align-top">
+                <tr key={v.id} {...open} className={`align-top ${open.className}`}>
                   <td className="py-1.5 font-mono text-[11px]">{v.voucherNo}</td>
                   <td className="py-1.5 whitespace-nowrap">{v.date}</td>
                   <td className="py-1.5">
@@ -461,7 +465,12 @@ export function VoucherBrowserPanel({
                   </td>
                   <td className="py-1.5 text-right font-mono tabular-nums">{rupees(amount)}</td>
                   <td className="py-1.5 text-[10px] text-[var(--muted)]">{v.sourceType || "manual"}</td>
-                  <td className="px-2 py-1.5 text-right">
+                  {/* The menu is its own control: a click on it is not a row open. */}
+                  <td
+                    className="px-2 py-1.5 text-right"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                  >
                     <RowActionMenu
                       row={v}
                       label="Voucher actions"
@@ -535,6 +544,49 @@ export function VoucherBrowserPanel({
             Page {page + 1} of {Math.ceil(total / PAGE)}
           </span>
         </div>
+      ) : null}
+
+      {viewing ? (
+        <VoucherDetailDialog
+          target={{ voucherId: viewing.id, voucherNo: viewing.voucherNo }}
+          onClose={() => setViewing(null)}
+          // Same rights and the same guards as the row menu: a reversed
+          // voucher is history, and a reversal is the record of a void.
+          actions={
+            canEdit && viewing.id
+              ? [
+                  {
+                    id: "head",
+                    label: "Change the head",
+                    hidden: (d) => !!d.reversedBy || d.id !== viewing.id,
+                    onSelect: () => {
+                      setViewing(null);
+                      setFixing(viewing);
+                    },
+                  },
+                  {
+                    id: "amend",
+                    label: "Change it…",
+                    hidden: (d) => !!d.reversedBy || !!d.reverses || d.id !== viewing.id,
+                    onSelect: () => {
+                      setViewing(null);
+                      setAmending(viewing);
+                    },
+                  },
+                  {
+                    id: "void",
+                    label: "Void it…",
+                    tone: "danger",
+                    hidden: (d) => !!d.reversedBy || !!d.reverses || d.id !== viewing.id,
+                    onSelect: () => {
+                      setViewing(null);
+                      setVoiding(viewing);
+                    },
+                  },
+                ]
+              : []
+          }
+        />
       ) : null}
 
       {amending ? (

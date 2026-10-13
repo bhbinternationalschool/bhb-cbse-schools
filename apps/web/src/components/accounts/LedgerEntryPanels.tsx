@@ -53,6 +53,7 @@ import {
 } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { LastEntryStrip } from "@/components/accounts/LastEntryStrip";
 
 const CARD = "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
 const BTN =
@@ -255,10 +256,13 @@ export function VoucherEntryPanel({
   banks,
   actor,
   onPosted,
+  refreshKey,
 }: {
   banks: { id: string; name: string }[];
   actor: string;
   onPosted?: () => void;
+  /** Bumped by the workspace after any form posts — the "Entered up to" strip re-reads. */
+  refreshKey?: number;
 }) {
   const accounts = useChart();
   const [kind, setKind] = useState<VoucherKind>("payment");
@@ -444,6 +448,11 @@ export function VoucherEntryPanel({
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Follows the Type picker: a journal's progress is not a payment's. */}
+      <div className="mt-3">
+        <LastEntryStrip kind={kind} refreshKey={refreshKey} />
       </div>
 
       <div className="mt-3 flex flex-wrap items-end gap-2">
@@ -1004,10 +1013,13 @@ export function QuickExpensePanel({
   banks,
   actor,
   onPosted,
+  refreshKey,
 }: {
   banks: { id: string; name: string }[];
   actor: string;
   onPosted?: () => void;
+  /** Bumped by the workspace after any form posts — the "Entered up to" strip re-reads. */
+  refreshKey?: number;
 }) {
   const accounts = useChart();
   const [centres, setCentres] = useState<{ code: string; name: string }[]>([]);
@@ -1270,6 +1282,9 @@ export function QuickExpensePanel({
         Head, amount, paid by — the balanced voucher is written for you. For
         anything unusual, the full voucher screen below still does everything.
       </p>
+      <div className="mt-2">
+        <LastEntryStrip kind="payment" refreshKey={refreshKey} />
+      </div>
 
       {/* The repeating daily expense — milk, newspapers — is the one the
           office most often shortcuts into a single lump on one date. */}
@@ -2100,10 +2115,13 @@ export function MultiLineExpensePanel({
   banks,
   actor,
   onPosted,
+  refreshKey,
 }: {
   banks: { id: string; name: string }[];
   actor: string;
   onPosted?: () => void;
+  /** Bumped by the workspace after any form posts — the "Entered up to" strip re-reads. */
+  refreshKey?: number;
 }) {
   const accounts = useChart();
   const [centres, setCentres] = useState<{ code: string; name: string }[]>([]);
@@ -2442,6 +2460,9 @@ export function MultiLineExpensePanel({
         vendor and tag. Pay all of it or part — whatever is left stays owing to
         the vendor it belongs to.
       </p>
+      <div className="mt-2">
+        <LastEntryStrip kind="payment" refreshKey={refreshKey} />
+      </div>
 
       {notice ? (
         <p
