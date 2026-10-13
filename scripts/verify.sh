@@ -483,6 +483,7 @@ SELFTESTS=(
   test:receipt-lookup
   test:referrals
   test:report-export
+  test:aadhaar-export-mask
   test:report-data-guard
   test:reports-center-hub
   test:reports-academic-new

@@ -17,7 +17,7 @@ import {
 import {
   DOC_LABELS,
   countDocsWithFiles,
-  displayAadhaar,
+  aadhaarForExport,
   docHasFile,
   householdOf,
   loadSis,
@@ -835,6 +835,11 @@ function runTagsReport(
   };
 }
 
+/** Self-test access to the UDISE register rows (lib/aadhaarExportMask.selftest.ts). */
+export function udiseComplianceRowsForTests(students: SisStudent[], sis: SisState, masters: MastersState) {
+  return runUdiseCompliance(students, sis, masters);
+}
+
 function runUdiseCompliance(
   students: SisStudent[],
   _sis: SisState,
@@ -889,23 +894,12 @@ function runUdiseCompliance(
       rollNo: s.rollNo,
       fatherName: s.fatherName,
       motherName: s.motherName,
-      studentAadhaar: displayAadhaar({
-        number: s.aadhaarNumber,
-        last4: s.aadhaarLast4,
-        verification: s.aadhaarVerification,
-      }),
+      // Files carry the last four digits only (aadhaarForExport).
+      studentAadhaar: aadhaarForExport({ number: s.aadhaarNumber, last4: s.aadhaarLast4 }),
       aadhaarVerification: s.aadhaarVerification || "missing",
       udiseAadhaarValidation: s.udiseAadhaarValidationStatus || "",
-      fatherAadhaar: displayAadhaar({
-        number: s.fatherAadhaarNumber,
-        last4: s.fatherAadhaarLast4,
-        verification: s.fatherAadhaarVerification,
-      }),
-      motherAadhaar: displayAadhaar({
-        number: s.motherAadhaarNumber,
-        last4: s.motherAadhaarLast4,
-        verification: s.motherAadhaarVerification,
-      }),
+      fatherAadhaar: aadhaarForExport({ number: s.fatherAadhaarNumber, last4: s.fatherAadhaarLast4 }),
+      motherAadhaar: aadhaarForExport({ number: s.motherAadhaarNumber, last4: s.motherAadhaarLast4 }),
       pen: s.pen || "",
       apaarId: s.apaarId || "",
       mbuStatus: s.udiseMbuStatus || "",
