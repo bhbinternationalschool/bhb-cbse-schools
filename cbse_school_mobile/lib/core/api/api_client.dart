@@ -21,6 +21,7 @@ part "self_service_api.dart";
 part "teacher_tools_api.dart";
 part "teacher_ai_api.dart";
 part "transport_register_api.dart";
+part "results_api.dart";
 
 /// Session cookie minted by the ERP (see web /api/auth/*).
 const _cookieName = "bhb_demo_session";

@@ -96,6 +96,7 @@
     "test:syllabus-outcomes-import": "npx tsx src/lib/syllabusOutcomesImport.selftest.ts",
     "test:exams": "npx tsx src/lib/exams.selftest.ts",
     "test:exam-date-sheet": "npx tsx src/lib/examDateSheet.selftest.ts",
+    "test:parent-results": "npx tsx src/lib/parentResults.selftest.ts",
     "test:exams-sheet-safety": "npx tsx src/lib/examsSheetSafety.selftest.ts",
     "test:exam-schemes": "npx tsx src/lib/examSchemes.selftest.ts",
     "test:exam-readiness": "npx tsx src/lib/examReadiness.selftest.ts",

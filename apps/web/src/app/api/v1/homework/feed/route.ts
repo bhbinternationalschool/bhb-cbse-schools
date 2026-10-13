@@ -1,5 +1,6 @@
 import { assertSectionScope } from "@/lib/api/v1/staffScope";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
+import { assertParentOwnsChild } from "@/lib/api/v1/household";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureHomeworkHydratedServer } from "@/lib/homeworkPersistence";
@@ -39,12 +40,7 @@ export async function GET(request: Request) {
       const sis = loadSis();
       const student = sis.students.find((s) => s.id === studentId);
       if (!student) throw new ApiError("not_found", "Student not found", 404);
-      if (
-        ctx.session.householdId &&
-        student.householdId !== ctx.session.householdId
-      ) {
-        throw new ApiError("forbidden", "Not your child", 403);
-      }
+      assertParentOwnsChild(ctx, student);
       classId = student.classId;
       sectionId = student.sectionId;
     } else {

@@ -13,6 +13,8 @@ import "../../core/ui/haptics.dart";
 import "../../core/ui/motion.dart";
 import "../../core/ui/spacing.dart";
 import "../modules/attendance_history_screen.dart";
+import "../modules/exam_date_sheet_screen.dart";
+import "../modules/results_screen.dart";
 import "../modules/chat_thread_screen.dart";
 import "../modules/complaints_screen.dart";
 import "../modules/ebook_shelf_screen.dart";
@@ -48,10 +50,11 @@ const _modules = [
   _Module("Tutor", Icons.school_outlined, ModuleTone.amber),
   _Module("Notices", Icons.campaign_outlined, ModuleTone.coral),
   _Module("Transport", Icons.directions_bus_outlined, ModuleTone.pink),
-  // Exams (date sheets, report cards) is deliberately absent. It was a tile
-  // that opened a "coming soon" sheet, and Google Play rejects placeholder
-  // features under Minimum Functionality. Put it back the same day the exams
-  // endpoint returns real published results — not before.
+  // Results and Date sheet open real data: only exams the school released
+  // to parents (Exams desk → "Show to parents"); until then each screen says
+  // "not published yet" rather than showing a placeholder.
+  _Module("Results", Icons.workspace_premium_outlined, ModuleTone.green),
+  _Module("Date sheet", Icons.event_note_outlined, ModuleTone.amber),
   _Module("Online class", Icons.videocam_outlined, ModuleTone.blue),
   _Module("Library", Icons.local_library_outlined, ModuleTone.green),
   _Module("PTM", Icons.groups_outlined, ModuleTone.gray),
@@ -79,6 +82,8 @@ String _moduleLabel(BuildContext context, String id) {
     "Complaints" => l.homeModuleComplaints,
     "Receipts" => l.homeModuleReceipts,
     "Gallery" => l.gallery,
+    "Results" => l.homeModuleResults,
+    "Date sheet" => l.homeModuleDateSheet,
     _ => id,
   };
 }
@@ -338,6 +343,10 @@ class _HomeScreenState extends State<HomeScreen> {
         screen = LeaveScreen(api: api, child: child);
       case "Receipts":
         screen = ReceiptsScreen(api: api);
+      case "Results":
+        screen = ResultsScreen(api: api, child: child);
+      case "Date sheet":
+        screen = ExamDateSheetScreen(api: api, child: child);
       case "Complaints":
         screen = ComplaintsScreen(
           api: api,

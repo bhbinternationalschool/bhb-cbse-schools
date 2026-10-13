@@ -357,6 +357,7 @@ SELFTESTS=(
   test:exam-invigilation
   test:exams
   test:exam-date-sheet
+  test:parent-results
   test:exams-sheet-safety
   test:exam-schemes
   test:exam-readiness
