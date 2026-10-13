@@ -1191,9 +1191,9 @@ export async function pushAccountsDeskToDb(
     count("accounts_desk_vendor_bills"),
     sb
       .from("accounts_desk_expense_vouchers")
-      .select("date")
+      .select("voucher_date")
       .eq("tenant_id", tenantId)
-      .order("date", { ascending: false })
+      .order("voucher_date", { ascending: false })
       .limit(1)
       .maybeSingle(),
   ]);
@@ -1204,7 +1204,7 @@ export async function pushAccountsDeskToDb(
       voucher_count: voucherCount,
       journal_count: journalCount,
       vendor_bill_count: billCount,
-      last_voucher_at: (lastVoucher.data as { date?: string } | null)?.date ?? null,
+      last_voucher_at: (lastVoucher.data as { voucher_date?: string } | null)?.voucher_date ?? null,
       updated_at: now,
     },
     { onConflict: "tenant_id" },

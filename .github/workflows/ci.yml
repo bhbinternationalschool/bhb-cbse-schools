@@ -268,6 +268,9 @@ jobs:
       - name: Test — idle logout is thirty minutes for every session (standing policy)
         working-directory: apps/web
         run: npm run test:workspace-policy
+      - name: Test — idle logout counts activity in every tab
+        working-directory: apps/web
+        run: npm run test:workspace-idle
       - name: Test — accent tone tokens are not used in each other's place
         working-directory: apps/web
         run: npm run test:tone-tokens

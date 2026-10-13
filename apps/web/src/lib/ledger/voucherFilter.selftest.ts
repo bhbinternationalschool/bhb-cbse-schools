@@ -80,6 +80,50 @@ assert.equal(headGapForLine({ accountCode: "9999" }, chart, byParent), null);
 assert.equal(headGaps(voucher(), chart, byParent).length, 1);
 assert.equal(headGaps(voucher(), chart, byParent)[0]!.index, 0);
 
+// Payroll's own vouchers book regular pay to the parent on purpose: once the
+// office adds sub-heads under Salary & Wages, the payroll run is not flagged
+// (13 Oct 2026), while a hand-keyed salary voucher on the parent still is.
+{
+  const salaryChart: ChartAccount[] = [
+    ...chart,
+    { code: "5070.01", name: "Extra Work Salary", parentCode: "5070" },
+  ];
+  const salaryByParent = childCodesByParent(salaryChart);
+  const salaryLines = [
+    { accountCode: "5070", accountName: "Salary & Wages", partyName: "", debitPaise: 900000, creditPaise: 0 },
+    { accountCode: "1000", accountName: "Cash in Hand", partyName: "", debitPaise: 0, creditPaise: 900000 },
+  ];
+  assert.equal(
+    headGaps(voucher({ sourceType: "payroll_run", lines: salaryLines }), salaryChart, salaryByParent).length,
+    0,
+    "a payroll run on Salary & Wages is not a head gap",
+  );
+  assert.equal(
+    headGaps(voucher({ sourceType: "payroll_payment", lines: salaryLines }), salaryChart, salaryByParent).length,
+    0,
+  );
+  assert.equal(
+    headGaps(voucher({ sourceType: "", lines: salaryLines }), salaryChart, salaryByParent)[0]?.gap.kind,
+    "parent_with_subheads",
+    "a hand-keyed salary voucher on the parent is still flagged",
+  );
+  assert.equal(
+    headGaps(voucher({ sourceType: "payroll_reclass", lines: salaryLines }), salaryChart, salaryByParent).length,
+    0,
+  );
+  assert.equal(
+    headGaps(
+      voucher({ sourceType: "ledger_reversal", isReversal: true, lines: salaryLines }),
+      salaryChart,
+      salaryByParent,
+    ).length,
+    0,
+    "a reversal mirrors its original and is not flagged for the parent head",
+  );
+  // A catch-all is still a catch-all, payroll or not.
+  assert.equal(headGaps(voucher({ sourceType: "payroll_run" }), chart, byParent).length, 1);
+}
+
 /* ── filtering ────────────────────────────────────────────── */
 
 const v = voucher();
