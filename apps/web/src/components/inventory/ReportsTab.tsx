@@ -61,11 +61,12 @@ const REPORTS: { id: ReportId; label: string }[] = [
   { id: "repeats", label: "Bought twice" },
 ];
 
-function monthStart(): string {
-  return `${new Date().toISOString().slice(0, 7)}-01`;
-}
+/** IST — toISOString() is UTC and named yesterday before 05:30. */
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+}
+function monthStart(): string {
+  return `${today().slice(0, 7)}-01`;
 }
 
 /**
@@ -81,8 +82,13 @@ function weekStart(): string {
   return d.toISOString().slice(0, 10);
 }
 
-export function ReportsTab({ boot }: { boot: InvBootstrap }) {
-  const [report, setReport] = useState<ReportId>("dashboard");
+export const STORE_REPORT_IDS: readonly string[] = REPORTS.map((r) => r.id);
+
+export function ReportsTab({ boot, initialReport }: { boot: InvBootstrap; initialReport?: string }) {
+  // Reports Center "Run here" opens a named report.
+  const [report, setReport] = useState<ReportId>(() =>
+    initialReport && STORE_REPORT_IDS.includes(initialReport) ? (initialReport as ReportId) : "dashboard",
+  );
   const [from, setFrom] = useState(monthStart());
   const [to, setTo] = useState(today());
   const [locationId, setLocationId] = useState("");
@@ -93,6 +99,7 @@ export function ReportsTab({ boot }: { boot: InvBootstrap }) {
         {REPORTS.map((r) => (
           <button
             key={r.id}
+            data-report-id={r.id}
             type="button"
             onClick={() => setReport(r.id)}
             className={

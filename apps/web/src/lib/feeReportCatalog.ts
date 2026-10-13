@@ -13,6 +13,7 @@ import {
   formatInr,
   loadFees,
   openFeeDues,
+  paidByDueKey,
   tenderModeLabel,
   type CollectionVoucher,
   type FeesState,
@@ -32,6 +33,8 @@ import {
   householdOf,
   householdWhatsApp,
   loadSis,
+  normalizeAyCode,
+  studentsInSession,
   type SisState,
   type SisStudent,
 } from "@/lib/sis";
@@ -41,6 +44,8 @@ import {
   listRteFeeRows,
 } from "@/lib/feeFinance";
 import { trackServerWork } from "@/lib/serverWork";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type FeeReportCategory = "collection" | "dues" | "student" | "general";
 
@@ -206,13 +211,6 @@ export const FEE_REPORTS: FeeReportDef[] = [
     requiresStudent: true,
   },
   {
-    id: "student_hostel_report",
-    category: "student",
-    label: "Student Hostel Report",
-    hint: "Hostel module not enabled — empty template",
-    requiresStudent: true,
-  },
-  {
     id: "student_head_wise_fee_report",
     category: "student",
     label: "Student Head Wise Fee Report",
@@ -235,6 +233,7 @@ export const FEE_REPORTS: FeeReportDef[] = [
     id: "student_ledger_report",
     category: "student",
     label: "Student Ledger Report",
+    hint: "Statement: dues, concessions and receipts by date, running balance",
     requiresStudent: true,
   },
   {
@@ -243,20 +242,6 @@ export const FEE_REPORTS: FeeReportDef[] = [
     label: "Fee Agreement",
     requiresStudent: true,
     hint: "Formal PDF with head × month grid + signatures",
-  },
-  {
-    id: "student_wallet_report",
-    category: "student",
-    label: "Student Wallet Report",
-    hint: "Wallet not enabled — empty template",
-    requiresStudent: true,
-  },
-  {
-    id: "complete_wallet_report",
-    category: "student",
-    label: "Complete Wallet Report",
-    hint: "Wallet not enabled — empty template",
-    requiresStudent: true,
   },
   // General
   {
@@ -313,8 +298,14 @@ export type FeeReportRunOptions = {
   fees?: FeesState;
 };
 
+/** The IST calendar date of an instant (default now). toISOString() is UTC: before 05:30 IST it named yesterday. */
+function istDate(at: string | number | Date = Date.now()): string {
+  const t = new Date(at).getTime();
+  return new Date(t + 5.5 * 3600_000).toISOString().slice(0, 10);
+}
+
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return istDate();
 }
 
 function inRange(date: string, from?: string, to?: string) {
@@ -434,26 +425,57 @@ function paidLines(
   return out;
 }
 
+/**
+ * The selected year's children, once each (studentsInSession): SIS keeps a
+ * row per child per year and every one stays "active", so looping
+ * `sis.students` counted a child's 2025-26 row beside their 2026-27 one.
+ * With `includeInactive`, children made inactive in that year are added.
+ */
+function yearStudents(sis: SisState, ay: string, includeInactive = false): SisStudent[] {
+  const active = studentsInSession(sis, ay);
+  if (!includeInactive) return active;
+  const seen = new Set(active.map((s) => `${(s.admissionNo || "").trim().toUpperCase()}::${(s.fullName || "").trim().toUpperCase()}`));
+  const inactive = sis.students.filter((s) => {
+    if (s.status === "active") return false;
+    if (s.academicYearCode && normalizeAyCode(s.academicYearCode) !== normalizeAyCode(ay)) return false;
+    const k = `${(s.admissionNo || "").trim().toUpperCase()}::${(s.fullName || "").trim().toUpperCase()}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return [...active, ...inactive];
+}
+
+/**
+ * Open dues of the selected year's children.
+ *
+ * "Outstanding" means due by `asOf` — the same instalments the fee counter
+ * offers (includeFuture: false keeps the running month). Until 14 Oct 2026
+ * every dues report passed includeFuture: true and listed the whole year's
+ * remaining instalments, March included, as outstanding.
+ */
 function allOpenDues(
   sis: SisState,
   masters: MastersState,
   fees: FeesState,
   asOf: string,
-  includeInactive = false,
+  ay: string,
+  opts: { includeInactive?: boolean; includeFuture?: boolean } = {},
 ) {
   const out: {
     student: SisStudent;
     classLabel: string;
     due: ReturnType<typeof computeStudentDues>[number];
   }[] = [];
-  for (const student of sis.students) {
-    if (!includeInactive && student.status !== "active") continue;
+  const paidMap = paidByDueKey(fees);
+  for (const student of yearStudents(sis, ay, opts.includeInactive)) {
     const dues = openFeeDues(
       computeStudentDues(student, masters, fees, {
         asOf,
-        includeFuture: true,
+        includeFuture: opts.includeFuture ?? false,
         includePaid: false,
         includeInactive: student.status !== "active",
+        paidMap,
       }),
     );
     for (const due of dues) {
@@ -463,10 +485,93 @@ function allOpenDues(
   return out;
 }
 
+/** dueKeys that are due by `asOf` for one child (the counter's "payable now"). */
+function dueNowKeys(
+  student: SisStudent,
+  masters: MastersState,
+  fees: FeesState,
+  asOf: string,
+  paidMap: Map<string, number>,
+): Set<string> {
+  return new Set(
+    computeStudentDues(student, masters, fees, { asOf, includeFuture: false, includePaid: true, paidMap }).map(
+      (d) => d.dueKey,
+    ),
+  );
+}
+
+/** Self-test access to the scoping helpers (lib/feeReportsYearScope.selftest.ts). */
+export const __feeReportInternalsForTests = { yearStudents, allOpenDues, activeVouchers, dueNowKeys };
+
+/**
+ * One child's fee statement for the session to `asOf`: each due on its due
+ * date (debit), its concession (credit), each receipt line on its
+ * collection date (credit, cancelled receipts left out), the running
+ * balance after every line, and — last, outside the balance — what is still
+ * to fall due this session. A receipt paid ahead of its due date shows as a
+ * credit balance until the due arrives.
+ */
+export function studentLedgerLines(
+  student: SisStudent,
+  masters: MastersState,
+  fees: FeesState,
+  asOf: string,
+): { date: string; particulars: string; ref: string; debit: number; credit: number; balance: number | null }[] {
+  const dues = computeStudentDues(student, masters, fees, {
+    asOf,
+    includeFuture: true,
+    includePaid: true,
+    includeInactive: student.status !== "active",
+  });
+  type Ev = { date: string; order: number; particulars: string; ref: string; debit: number; credit: number };
+  const events: Ev[] = [];
+  let notYetDue = 0;
+  for (const d of dues) {
+    if (d.dueOn > asOf) {
+      notYetDue += d.billedPaise - d.concessionPaise;
+      continue;
+    }
+    events.push({ date: d.dueOn, order: 0, particulars: d.label, ref: "", debit: d.billedPaise, credit: 0 });
+    if (d.concessionPaise > 0) {
+      events.push({ date: d.dueOn, order: 1, particulars: `Concession — ${d.label}`, ref: "", debit: 0, credit: d.concessionPaise });
+    }
+  }
+  const myKeys = new Set(dues.map((d) => d.dueKey));
+  for (const v of fees.vouchers) {
+    if (v.voidedAt || v.collectionDate > asOf) continue;
+    const mode = v.tenders.map((t) => tenderModeLabel(t.mode)).join("+");
+    for (const line of v.lines) {
+      if (line.studentId !== student.id && !myKeys.has(line.dueKey)) continue;
+      events.push({
+        date: v.collectionDate,
+        order: 2,
+        particulars: `Paid — ${line.label}${mode ? ` (${mode})` : ""}`,
+        ref: v.receiptNo,
+        debit: 0,
+        credit: line.amountPaise,
+      });
+    }
+  }
+  events.sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order);
+  let bal = 0;
+  const out: { date: string; particulars: string; ref: string; debit: number; credit: number; balance: number | null }[] = events.map((e) => {
+    bal += e.debit - e.credit;
+    return { date: e.date, particulars: e.particulars, ref: e.ref, debit: e.debit, credit: e.credit, balance: bal };
+  });
+  out.push({ date: asOf, particulars: bal < 0 ? "Closing balance (advance paid)" : "Closing balance due", ref: "", debit: 0, credit: 0, balance: bal });
+  if (notYetDue > 0) {
+    out.push({ date: "", particulars: "Still to fall due this session (not in the balance)", ref: "", debit: 0, credit: 0, balance: notYetDue });
+  }
+  return out;
+}
+
 export function runFeeReport(
   id: FeeReportId,
   options: FeeReportRunOptions = {},
 ): { ok: true; rows: number; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("fees", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const sis = options.sis ?? loadSis();
   const masters = options.masters ?? loadMasters();
   const fees = options.fees ?? loadFees();
@@ -514,11 +619,7 @@ export function runFeeReport(
 
   function scopedStudents(activeOnly = true): SisStudent[] {
     if (selectedStudent) return [selectedStudent];
-    return sis.students.filter(
-      (s) =>
-        (!activeOnly || s.status === "active") &&
-        s.academicYearCode === ay,
-    );
+    return yearStudents(sis, ay, !activeOnly);
   }
 
   function scopedPaid() {
@@ -534,7 +635,7 @@ export function runFeeReport(
           string,
           { date: string; receipts: number; amount: number }
         >();
-        for (const v of activeVouchers(fees, from, to)) {
+        for (const v of activeVouchers(fees, from, to, ay)) {
           const row = map.get(v.collectionDate) ?? {
             date: v.collectionDate,
             receipts: 0,
@@ -673,7 +774,7 @@ export function runFeeReport(
           string,
           { date: string; head: string; amount: number; lines: number }
         >();
-        for (const p of paidLines(fees, sis, masters, from, to)) {
+        for (const p of paidLines(fees, sis, masters, from, to, ay)) {
           const key = `${p.date}|${p.head}`;
           const row = map.get(key) ?? {
             date: p.date,
@@ -718,7 +819,7 @@ export function runFeeReport(
           string,
           { date: string; installment: string; amount: number }
         >();
-        for (const p of paidLines(fees, sis, masters, from, to)) {
+        for (const p of paidLines(fees, sis, masters, from, to, ay)) {
           const key = `${p.date}|${p.installment}`;
           const row = map.get(key) ?? {
             date: p.date,
@@ -752,7 +853,7 @@ export function runFeeReport(
 
       case "yearly_headwise_paid_summary": {
         const map = new Map<string, number>();
-        for (const p of paidLines(fees, sis, masters, from, to)) {
+        for (const p of paidLines(fees, sis, masters, from, to, ay)) {
           map.set(p.head, (map.get(p.head) ?? 0) + p.amountPaise);
         }
         const rows = [...map.entries()]
@@ -777,7 +878,7 @@ export function runFeeReport(
           string,
           { date: string; classLabel: string; installment: string; amount: number }
         >();
-        for (const p of paidLines(fees, sis, masters, from, to)) {
+        for (const p of paidLines(fees, sis, masters, from, to, ay)) {
           const key = `${p.date}|${p.classLabel}|${p.installment}`;
           const row = map.get(key) ?? {
             date: p.date,
@@ -813,7 +914,7 @@ export function runFeeReport(
       }
 
       case "complete_paid_report": {
-        const rows = paidLines(fees, sis, masters, from, to).map((p) => ({
+        const rows = paidLines(fees, sis, masters, from, to, ay).map((p) => ({
           date: p.date,
           receiptNo: p.receiptNo,
           admissionNo: p.admissionNo,
@@ -851,7 +952,7 @@ export function runFeeReport(
 
       case "online_fee_transaction":
       case "daily_online_fee_payment": {
-        const online = activeVouchers(fees, from, to).filter(
+        const online = activeVouchers(fees, from, to, ay).filter(
           (v) =>
             v.source === "payment_link" ||
             v.tenders.some((t) => t.mode === "upi"),
@@ -885,20 +986,33 @@ export function runFeeReport(
       }
 
       case "yearly_headwise_dues_summary": {
-        const map = new Map<string, number>();
-        for (const { due } of allOpenDues(sis, masters, fees, asOf)) {
+        // The whole year, split: what is due by the as-of date, and the
+        // instalments still to come (they were all called "outstanding").
+        const nowKeys = new Set(allOpenDues(sis, masters, fees, asOf, ay).map(({ due }) => due.dueKey));
+        const map = new Map<string, { now: number; later: number }>();
+        for (const { due } of allOpenDues(sis, masters, fees, asOf, ay, { includeFuture: true })) {
           const head = due.feeHeadName || due.label.split(" · ")[0] || due.kind;
-          map.set(head, (map.get(head) ?? 0) + due.balancePaise);
+          const row = map.get(head) ?? { now: 0, later: 0 };
+          if (nowKeys.has(due.dueKey)) row.now += due.balancePaise;
+          else row.later += due.balancePaise;
+          map.set(head, row);
         }
         const rows = [...map.entries()]
-          .sort((a, b) => b[1] - a[1])
-          .map(([head, amount]) => ({ head, amount: paise(amount) }));
+          .sort((a, b) => b[1].now - a[1].now)
+          .map(([head, r]) => ({
+            head,
+            now: paise(r.now),
+            later: paise(r.later),
+            year: paise(r.now + r.later),
+          }));
         const n = emit(
           def.label,
           id,
           [
             { key: "head", header: "Fee head" },
-            { key: "amount", header: "Outstanding ₹" },
+            { key: "now", header: `Due till ${asOf} ₹` },
+            { key: "later", header: "Not yet due ₹" },
+            { key: "year", header: "Year balance ₹" },
           ],
           rows,
           filterNote,
@@ -913,7 +1027,7 @@ export function runFeeReport(
           { students: number; amount: number; lines: number }
         >();
         const seen = new Set<string>();
-        for (const { student, due } of allOpenDues(sis, masters, fees, asOf)) {
+        for (const { student, due } of allOpenDues(sis, masters, fees, asOf, ay)) {
           const head = due.feeHeadName || due.kind;
           const row = map.get(head) ?? { students: 0, amount: 0, lines: 0 };
           row.amount += due.balancePaise;
@@ -957,6 +1071,7 @@ export function runFeeReport(
           masters,
           fees,
           asOf,
+          ay,
         )) {
           const row = map.get(cl) ?? {
             classLabel: cl,
@@ -990,7 +1105,7 @@ export function runFeeReport(
       }
 
       case "complete_outstanding_dues": {
-        const rows = allOpenDues(sis, masters, fees, asOf).map(
+        const rows = allOpenDues(sis, masters, fees, asOf, ay).map(
           ({ student, classLabel: cl, due }) => ({
             admissionNo: student.admissionNo,
             studentName: student.fullName,
@@ -1037,33 +1152,39 @@ export function runFeeReport(
             classLabel: string;
             billed: number;
             paid: number;
-            open: number;
+            now: number;
+            later: number;
           }
         >();
+        const paidMap = paidByDueKey(fees);
         for (const student of scopedStudents(true)) {
           const dues = computeStudentDues(student, masters, fees, {
             asOf,
             includeFuture: true,
             includePaid: true,
+            paidMap,
           });
-          const open = openFeeDues(dues);
           if (dues.length === 0) continue;
+          const nowKeys = dueNowKeys(student, masters, fees, asOf, paidMap);
+          const open = openFeeDues(dues);
           map.set(student.id, {
             admissionNo: student.admissionNo,
             studentName: student.fullName,
             classLabel: classLabel(student, masters),
             billed: dues.reduce((s, d) => s + d.billedPaise, 0),
             paid: dues.reduce((s, d) => s + d.paidPaise, 0),
-            open: open.reduce((s, d) => s + d.balancePaise, 0),
+            now: open.filter((d) => nowKeys.has(d.dueKey)).reduce((s, d) => s + d.balancePaise, 0),
+            later: open.filter((d) => !nowKeys.has(d.dueKey)).reduce((s, d) => s + d.balancePaise, 0),
           });
         }
         const rows = [...map.values()]
-          .sort((a, b) => b.open - a.open)
+          .sort((a, b) => b.now - a.now)
           .map((r) => ({
             ...r,
             billed: paise(r.billed),
             paid: paise(r.paid),
-            open: paise(r.open),
+            now: paise(r.now),
+            later: paise(r.later),
           }));
         const n = emit(
           def.label,
@@ -1072,9 +1193,10 @@ export function runFeeReport(
             { key: "admissionNo", header: "Adm no" },
             { key: "studentName", header: "Student" },
             { key: "classLabel", header: "Class" },
-            { key: "billed", header: "Billed ₹" },
+            { key: "billed", header: "Billed (year) ₹" },
             { key: "paid", header: "Paid ₹" },
-            { key: "open", header: "Open ₹" },
+            { key: "now", header: `Due till ${asOf} ₹` },
+            { key: "later", header: "Not yet due ₹" },
           ],
           rows,
           filterNote,
@@ -1084,7 +1206,7 @@ export function runFeeReport(
       }
 
       case "fee_student_follow_up": {
-        const rows = allOpenDues(sis, masters, fees, asOf)
+        const rows = allOpenDues(sis, masters, fees, asOf, ay)
           .filter(({ due }) => due.dueOn <= asOf)
           .map(({ student, classLabel: cl, due }) => {
             const hh = householdOf(sis, student.householdId);
@@ -1165,32 +1287,9 @@ export function runFeeReport(
       case "student_hostel_report":
       case "student_wallet_report":
       case "complete_wallet_report": {
-        const who = selectedStudent
-          ? `${selectedStudent.admissionNo} · ${selectedStudent.fullName}`
-          : "All students";
-        const n = emit(
-          def.label,
-          id,
-          [
-            { key: "student", header: "Student" },
-            { key: "note", header: "Note" },
-            { key: "status", header: "Status" },
-          ],
-          [
-            {
-              student: who,
-              note: def.hint || "Module not enabled in this ERP",
-              status: "N/A",
-            },
-          ],
-          filterNote,
-          format,
-        );
-        return {
-          ok: true,
-          rows: n,
-          message: def.hint || `${def.label} · ${fmt} · template`,
-        };
+        // Unreachable from the menu since 14 Oct 2026: this ERP has no
+        // hostel or wallet, and a one-row "N/A" file read like a report.
+        return { ok: false, error: "This ERP has no hostel or wallet module — there is nothing to report." };
       }
 
       case "student_head_wise_fee_report": {
@@ -1300,8 +1399,47 @@ export function runFeeReport(
         return { ok: true, rows: n, message: `${def.label} · ${fmt} · ${n} type(s)` };
       }
 
-      case "student_wise_fee_details":
       case "student_ledger_report": {
+        // A statement, not a dues list: what fell due, what was conceded
+        // and what was paid, by date, with the balance after each line.
+        const rows: Record<string, string>[] = [];
+        for (const student of scopedStudents(false)) {
+          for (const l of studentLedgerLines(student, masters, fees, asOf)) {
+            rows.push({
+              admissionNo: student.admissionNo,
+              studentName: student.fullName,
+              classLabel: classLabel(student, masters),
+              date: l.date,
+              particulars: l.particulars,
+              ref: l.ref,
+              debit: l.debit ? paise(l.debit) : "",
+              credit: l.credit ? paise(l.credit) : "",
+              balance: l.balance === null ? "" : paise(l.balance),
+            });
+          }
+        }
+        const n = emit(
+          def.label,
+          id,
+          [
+            { key: "admissionNo", header: "Adm no" },
+            { key: "studentName", header: "Student" },
+            { key: "classLabel", header: "Class" },
+            { key: "date", header: "Date" },
+            { key: "particulars", header: "Particulars", width: 2 },
+            { key: "ref", header: "Receipt / ref" },
+            { key: "debit", header: "Due ₹", total: true },
+            { key: "credit", header: "Paid / conceded ₹", total: true },
+            { key: "balance", header: "Balance ₹", total: false },
+          ] as ReportColumn[],
+          rows,
+          filterNote,
+          format,
+        );
+        return { ok: true, rows: n, message: `${def.label} · ${fmt} · ${n} line(s)` };
+      }
+
+      case "student_wise_fee_details": {
         const rows: Record<string, string>[] = [];
         for (const student of scopedStudents()) {
           const dues = computeStudentDues(student, masters, fees, {
@@ -1375,14 +1513,17 @@ export function runFeeReport(
       case "class_installment_wise_summary": {
         const map = new Map<
           string,
-          { classLabel: string; installment: string; billed: number; paid: number; open: number }
+          { classLabel: string; installment: string; billed: number; paid: number; now: number; later: number }
         >();
+        const paidMap = paidByDueKey(fees);
         for (const student of scopedStudents(true)) {
           const cl = classLabel(student, masters);
+          const nowKeys = dueNowKeys(student, masters, fees, asOf, paidMap);
           for (const d of computeStudentDues(student, masters, fees, {
             asOf,
             includeFuture: true,
             includePaid: true,
+            paidMap,
           })) {
             const inst = d.installmentLabel || "—";
             const key = `${cl}|${inst}`;
@@ -1391,11 +1532,13 @@ export function runFeeReport(
               installment: inst,
               billed: 0,
               paid: 0,
-              open: 0,
+              now: 0,
+              later: 0,
             };
             row.billed += d.billedPaise;
             row.paid += d.paidPaise;
-            row.open += d.balancePaise;
+            if (nowKeys.has(d.dueKey)) row.now += d.balancePaise;
+            else row.later += d.balancePaise;
             map.set(key, row);
           }
         }
@@ -1404,7 +1547,8 @@ export function runFeeReport(
           installment: r.installment,
           billed: paise(r.billed),
           paid: paise(r.paid),
-          open: paise(r.open),
+          now: paise(r.now),
+          later: paise(r.later),
         }));
         const n = emit(
           def.label,
@@ -1414,7 +1558,8 @@ export function runFeeReport(
             { key: "installment", header: "Installment" },
             { key: "billed", header: "Billed ₹" },
             { key: "paid", header: "Paid ₹" },
-            { key: "open", header: "Open ₹" },
+            { key: "now", header: `Due till ${asOf} ₹` },
+            { key: "later", header: "Not yet due ₹" },
           ],
           rows,
           filterNote,
@@ -1424,9 +1569,12 @@ export function runFeeReport(
       }
 
       case "fee_cancellation_report": {
+        // By the date the receipt was CANCELLED (it filtered on the
+        // collection date, so a March receipt voided in October was missing
+        // from October's cancellations).
         const rows = fees.vouchers
           .filter((v) => !!v.voidedAt)
-          .filter((v) => inRange(v.collectionDate, from, to))
+          .filter((v) => inRange(istDate(v.voidedAt!), from, to))
           .map((v: CollectionVoucher) => ({
             date: v.collectionDate,
             voidedAt: v.voidedAt?.slice(0, 19) ?? "",
@@ -1456,20 +1604,27 @@ export function runFeeReport(
       case "summary_report": {
         let billed = 0;
         let paid = 0;
-        let open = 0;
+        let openNow = 0;
+        let openLater = 0;
         let students = 0;
+        const paidMap = paidByDueKey(fees);
         for (const student of scopedStudents(true)) {
           students += 1;
           const dues = computeStudentDues(student, masters, fees, {
             asOf,
             includeFuture: true,
             includePaid: true,
+            paidMap,
           });
+          const nowKeys = dueNowKeys(student, masters, fees, asOf, paidMap);
           billed += dues.reduce((s, d) => s + d.billedPaise, 0);
           paid += dues.reduce((s, d) => s + d.paidPaise, 0);
-          open += openFeeDues(dues).reduce((s, d) => s + d.balancePaise, 0);
+          for (const d of openFeeDues(dues)) {
+            if (nowKeys.has(d.dueKey)) openNow += d.balancePaise;
+            else openLater += d.balancePaise;
+          }
         }
-        const collected = activeVouchers(fees, from, to).reduce(
+        const collected = activeVouchers(fees, from, to, ay).reduce(
           (s, v) => s + v.totalPaise,
           0,
         );
@@ -1482,9 +1637,10 @@ export function runFeeReport(
           ],
           [
             { metric: "Active students", value: String(students) },
-            { metric: "Billed ₹", value: paise(billed) },
+            { metric: "Billed (year) ₹", value: paise(billed) },
             { metric: "Paid (ledger) ₹", value: paise(paid) },
-            { metric: "Open dues ₹", value: paise(open) },
+            { metric: `Dues till ${asOf} ₹`, value: paise(openNow) },
+            { metric: "Not yet due ₹", value: paise(openLater) },
             {
               metric: "Collections in date range ₹",
               value: paise(collected),
@@ -1549,7 +1705,7 @@ export function runFeeReport(
             amount: number;
           }
         >();
-        for (const { student, due } of allOpenDues(sis, masters, fees, asOf)) {
+        for (const { student, due } of allOpenDues(sis, masters, fees, asOf, ay)) {
           const hh = householdOf(sis, student.householdId);
           const guardian =
             hh?.guardianName || student.fatherName || "Unknown guardian";
@@ -1590,7 +1746,7 @@ export function runFeeReport(
       }
 
       case "miscellaneous_fee_report": {
-        const rows = allOpenDues(sis, masters, fees, asOf, true)
+        const rows = allOpenDues(sis, masters, fees, asOf, ay, { includeInactive: true })
           .filter(
             ({ due }) =>
               due.kind === "special" ||

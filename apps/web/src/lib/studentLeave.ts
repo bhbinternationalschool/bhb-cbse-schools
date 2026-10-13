@@ -21,6 +21,8 @@ import {
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import { recordStudentLeaveDeletion } from "@/lib/studentLeaveNormalizedClient";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 const STORAGE_KEY = "bhb_student_leave_v1";
 
@@ -404,6 +406,9 @@ export function runStudentLeaveReport(
     masters?: MastersState;
   },
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("student_leave", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const leave = filters.leave ?? loadStudentLeave();
   const masters = filters.masters ?? loadMasters();
   const sis = loadSis();

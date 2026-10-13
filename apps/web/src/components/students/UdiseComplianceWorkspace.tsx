@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { loadMasters, type MastersState } from "@/lib/masters";
-import { displayAadhaar, loadSis, saveSis, type SisState } from "@/lib/sis";
+import { aadhaarForExport, displayAadhaar, loadSis, saveSis, type SisState } from "@/lib/sis";
 import { openWaMe } from "@/lib/waMe";
 import {
   composeUdiseComplianceWhatsApp,
@@ -409,11 +409,7 @@ export function UdiseComplianceWorkspace({
         r.student.admissionNo,
         r.student.fullName,
         r.classLabel,
-        displayAadhaar({
-          number: r.student.aadhaarNumber,
-          last4: r.student.aadhaarLast4,
-          verification: r.student.aadhaarVerification,
-        }),
+        aadhaarForExport({ number: r.student.aadhaarNumber, last4: r.student.aadhaarLast4 }),
         r.reason,
         r.student.penStatus || "",
         r.student.fatherName,

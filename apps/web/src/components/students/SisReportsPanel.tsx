@@ -318,7 +318,7 @@ export function SisReportsPanel({
             <ul className="divide-y divide-[rgba(32,48,80,0.06)]">
               {(byCat[cat.id] ?? []).map((r) => (
                 <li
-                  key={r.id}
+                  key={r.id} data-report-id={r.id}
                   className="flex items-start justify-between gap-2 bg-white px-3 py-2.5"
                 >
                   <div className="min-w-0">
