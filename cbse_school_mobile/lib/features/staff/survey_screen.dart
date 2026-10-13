@@ -87,8 +87,23 @@ class SurveyScreen extends StatelessWidget {
                         top: Radius.circular(24),
                       ),
                     ),
-                    builder: (_) =>
-                        _CaptureSheet(api: api, beat: b, setup: setup),
+                    builder: (_) => SurveyCaptureSheet(
+                      beatName: b.name,
+                      initialLocality: b.area,
+                      classes: setup.classes,
+                      save: (f) => api.captureSurvey(
+                        beatId: b.id,
+                        childName: f.childName,
+                        guardianName: f.guardianName,
+                        mobile: f.mobile,
+                        clientRef: f.clientRef,
+                        classSoughtId: f.classSoughtId,
+                        ageYearsApprox: f.ageYearsApprox,
+                        gender: f.gender,
+                        locality: f.locality,
+                        note: f.note,
+                      ),
+                    ),
                   );
                   if (saved == true) await reload();
                 },
@@ -100,22 +115,56 @@ class SurveyScreen extends StatelessWidget {
   }
 }
 
-class _CaptureSheet extends StatefulWidget {
-  const _CaptureSheet({
-    required this.api,
-    required this.beat,
-    required this.setup,
+/// One family as typed on the capture sheet.
+class SurveyFamily {
+  const SurveyFamily({
+    required this.childName,
+    required this.guardianName,
+    required this.mobile,
+    required this.clientRef,
+    required this.classSoughtId,
+    required this.ageYearsApprox,
+    required this.gender,
+    required this.locality,
+    required this.note,
   });
 
-  final ApiClient api;
-  final SurveyBeat beat;
-  final SurveySetup setup;
+  final String childName;
+  final String guardianName;
+  final String mobile;
 
-  @override
-  State<_CaptureSheet> createState() => _CaptureSheetState();
+  /// Made once per sheet, so a retry after a dropped reply is not a second
+  /// lead (the server returns the first one).
+  final String clientRef;
+  final String classSoughtId;
+  final int ageYearsApprox;
+  final String gender;
+  final String locality;
+  final String note;
 }
 
-class _CaptureSheetState extends State<_CaptureSheet> {
+/// The "new family" form. [save] does the sending and returns the enquiry
+/// number: the plain capture (Field survey) or the signed, located one of a
+/// survey day (SurveyDayScreen).
+class SurveyCaptureSheet extends StatefulWidget {
+  const SurveyCaptureSheet({
+    super.key,
+    required this.beatName,
+    required this.initialLocality,
+    required this.classes,
+    required this.save,
+  });
+
+  final String beatName;
+  final String initialLocality;
+  final List<({String id, String name})> classes;
+  final Future<String> Function(SurveyFamily family) save;
+
+  @override
+  State<SurveyCaptureSheet> createState() => _CaptureSheetState();
+}
+
+class _CaptureSheetState extends State<SurveyCaptureSheet> {
   final _child = TextEditingController();
   final _guardian = TextEditingController();
   final _mobile = TextEditingController();
@@ -133,7 +182,7 @@ class _CaptureSheetState extends State<_CaptureSheet> {
   @override
   void initState() {
     super.initState();
-    _locality.text = widget.beat.area;
+    _locality.text = widget.initialLocality;
   }
 
   @override
@@ -153,17 +202,18 @@ class _CaptureSheetState extends State<_CaptureSheet> {
     }
     setState(() => _busy = true);
     try {
-      final enq = await widget.api.captureSurvey(
-        beatId: widget.beat.id,
-        childName: _child.text.trim(),
-        guardianName: _guardian.text.trim(),
-        mobile: _mobile.text.trim(),
-        clientRef: _clientRef,
-        classSoughtId: _classId,
-        ageYearsApprox: _age,
-        gender: _gender,
-        locality: _locality.text.trim(),
-        note: _note.text.trim(),
+      final enq = await widget.save(
+        SurveyFamily(
+          childName: _child.text.trim(),
+          guardianName: _guardian.text.trim(),
+          mobile: _mobile.text.trim(),
+          clientRef: _clientRef,
+          classSoughtId: _classId,
+          ageYearsApprox: _age,
+          gender: _gender,
+          locality: _locality.text.trim(),
+          note: _note.text.trim(),
+        ),
       );
       Haptics.success();
       if (!mounted) return;
@@ -198,7 +248,7 @@ class _CaptureSheetState extends State<_CaptureSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              "New family · ${widget.beat.name}",
+              "New family · ${widget.beatName}",
               style: AppText.titleMediumInk,
             ),
             const SizedBox(height: 10),
@@ -240,7 +290,7 @@ class _CaptureSheetState extends State<_CaptureSheet> {
                 isDense: true,
               ),
               items: [
-                for (final c in widget.setup.classes)
+                for (final c in widget.classes)
                   DropdownMenuItem(value: c.id, child: Text(c.name)),
               ],
               onChanged: (v) => setState(() => _classId = v ?? ""),

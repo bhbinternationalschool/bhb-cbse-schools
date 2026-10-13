@@ -1098,6 +1098,62 @@ class SurveySetup {
   final List<({String id, String name})> classes;
 }
 
+// ---------------------------------------------------------------- survey day
+
+/// A field surveyor's day (the website's /survey-day, in the app). The
+/// server answers every step with the whole picture.
+class SurveyDayStatus {
+  SurveyDayStatus.fromJson(Map<String, dynamic> j)
+    : memberName = _s(Map<String, dynamic>.from((j["member"] as Map?) ?? const {}), "name"),
+      startsAtSchool =
+          _s(Map<String, dynamic>.from((j["member"] as Map?) ?? const {}), "startMode") == "school",
+      day = j["day"] is Map
+          ? SurveyDayInfo.fromJson(Map<String, dynamic>.from(j["day"] as Map))
+          : null,
+      captures = _list(j, "captures")
+          .map((c) => (enquiryNo: _s(c, "enquiryNo"), childName: _s(c, "childName"), at: _s(c, "at")))
+          .toList(),
+      beats = _list(j, "beats")
+          .map((b) => (id: _s(b, "id"), name: _s(b, "name"), area: _s(b, "area")))
+          .toList(),
+      classes = _list(j, "classes").map((c) => (id: _s(c, "id"), name: _s(c, "name"))).toList(),
+      enquiryNo = _s(j, "enquiryNo"),
+      duplicate = _b(j, "duplicate");
+
+  final String memberName;
+
+  /// Starts at school: START needs the gate code and a fix on campus.
+  final bool startsAtSchool;
+
+  /// Null until today's survey is started.
+  final SurveyDayInfo? day;
+  final List<({String enquiryNo, String childName, String at})> captures;
+  final List<({String id, String name, String area})> beats;
+  final List<({String id, String name})> classes;
+
+  /// Set on a capture's reply.
+  final String enquiryNo;
+  final bool duplicate;
+}
+
+class SurveyDayInfo {
+  SurveyDayInfo.fromJson(Map<String, dynamic> j)
+    : status = _s(j, "status"),
+      beatId = _s(j, "beatId"),
+      startedAt = _s(j, "startedAt"),
+      endedAt = _s(j, "endedAt"),
+      breaks = _i(j, "breaks"),
+      workedMs = _i(j, "workedMs");
+
+  /// "active" | "on_break" | "ended".
+  final String status;
+  final String beatId;
+  final String startedAt;
+  final String endedAt;
+  final int breaks;
+  final int workedMs;
+}
+
 // -------------------------------------------------------------------- gate
 
 class GateVisitor {
@@ -1698,6 +1754,34 @@ extension StaffApi on ApiClient {
       "note": note,
       "nextFollowUpAt": nextFollowUpAt,
     });
+  }
+
+  /// One survey-day step: "status", "pair", "start", "break", "resume",
+  /// "end" or "capture". Signed by this phone's punch key over
+  /// `survey|action|extra|ts` (lib/surveyDay surveyMessage); every step but
+  /// status/pair carries the live [geo]. The surveyor is the key, not the
+  /// login — the same route the website's /survey-day uses.
+  Future<SurveyDayStatus> surveyDayStep({
+    required String action,
+    required Map<String, String> deviceJwk,
+    required String signature,
+    required int ts,
+    String deviceLabel = "BHB staff app",
+    Map<String, dynamic>? geo,
+    Map<String, dynamic> payload = const {},
+  }) async {
+    final data = await _postData("/api/public/survey-day", {
+      ...payload,
+      "action": action,
+      "geo": ?geo,
+      "device": {
+        "jwk": deviceJwk,
+        "signature": signature,
+        "ts": ts,
+        "label": deviceLabel,
+      },
+    });
+    return SurveyDayStatus.fromJson(data);
   }
 
   Future<SurveySetup> fetchSurveySetup() async =>

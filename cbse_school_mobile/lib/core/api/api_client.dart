@@ -30,13 +30,22 @@ const _roleKey = "bhb_role_code";
 const _kindKey = "bhb_home_kind";
 
 class ApiException implements Exception {
-  ApiException(this.message, [this.statusCode, this.code = ""]);
+  ApiException(
+    this.message, [
+    this.statusCode,
+    this.code = "",
+    this.reason = "",
+  ]);
 
   final String message;
   final int? statusCode;
 
   /// The server's reason code, e.g. "unknown_number", "family_inactive".
   final String code;
+
+  /// The finer reason some routes add under error.details.reason, e.g. the
+  /// survey day's "not_registered" / "not_on_team".
+  final String reason;
 
   @override
   String toString() => message;
@@ -3117,6 +3126,7 @@ class ApiClient {
       res.statusCode.toString(),
     );
     String code = "";
+    String reason = "";
     try {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final err = body["error"];
@@ -3125,6 +3135,10 @@ class ApiClient {
         message = err["message"] as String;
       }
       code = "${(err is Map ? err["code"] : null) ?? body["code"] ?? ""}";
+      final details = err is Map ? err["details"] : null;
+      if (details is Map && details["reason"] is String) {
+        reason = details["reason"] as String;
+      }
     } catch (_) {
       /* keep default */
     }
@@ -3137,7 +3151,7 @@ class ApiClient {
     if (res.statusCode != 401 && res.statusCode != 426) {
       ScreenGuides.noteError(message);
     }
-    throw ApiException(message, res.statusCode, code);
+    throw ApiException(message, res.statusCode, code, reason);
   }
 
   /// Link a phone the school doesn't have: name the child (admission number

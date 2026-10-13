@@ -14,7 +14,7 @@ import "fee_counter_screen.dart";
 import "fee_defaulters_screen.dart";
 import "visitor_gate_screen.dart";
 import "my_collections_screen.dart";
-import "survey_screen.dart";
+import "survey_day_screen.dart";
 import "home_groups.dart";
 import "leave_approvals_screen.dart";
 import "my_attendance_calendar_screen.dart";
@@ -160,7 +160,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       Icons.map_outlined,
       ModuleTone.amber,
       "field_survey",
-      (api) => SurveyScreen(api: api),
+      (api) => SurveyDayScreen(api: api),
     ),
     _Tile(
       "Visitor gate",
