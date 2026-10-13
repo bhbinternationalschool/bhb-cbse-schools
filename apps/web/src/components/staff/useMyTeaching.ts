@@ -17,6 +17,19 @@ export type MyTeaching = {
   unrestricted: boolean;
   academicYearCode: string;
   teaching: TeachingSection[];
+  /**
+   * Today's attendance cover: classes this person may take the REGISTER of
+   * today only — as a substitute, or as co-ordinator while the class teacher
+   * is away (lib/attendanceCover). Never offered by any other picker.
+   */
+  attendanceCover?: {
+    classId: string;
+    sectionId: string;
+    className: string;
+    sectionName: string;
+    reason: "substitute" | "coordinator";
+    detail: string;
+  }[];
 };
 
 let cache: { at: number; value: MyTeaching } | null = null;
