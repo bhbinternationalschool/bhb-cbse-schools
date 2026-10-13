@@ -165,6 +165,8 @@ export type SalarySettings = {
   salaryBankBranch: string;
   salaryBankAccountNo: string;
   salaryBankIfsc: string;
+  /** Union Bank corporate net-banking ID — row 1 of the salary upload file. */
+  salaryBankCorporateId: string;
   salaryAccountLabel: string;
 };
 
@@ -200,6 +202,7 @@ export function defaultSalarySettings(): SalarySettings {
     salaryBankBranch: SCHOOL_SALARY_BANK.branch,
     salaryBankAccountNo: "",
     salaryBankIfsc: SCHOOL_SALARY_BANK.ifsc,
+    salaryBankCorporateId: "",
     salaryAccountLabel: "Salary account — Union Bank Murdaha Bazar",
   };
 }
@@ -235,6 +238,7 @@ export function normalizeSalarySettings(
       s?.salaryBankAccountNo ?? d.salaryBankAccountNo,
     ),
     salaryBankIfsc: bankIfsc || d.salaryBankIfsc,
+    salaryBankCorporateId: String(s?.salaryBankCorporateId ?? "").replace(/,/g, "").trim().slice(0, 32),
     salaryAccountLabel:
       String(s?.salaryAccountLabel ?? d.salaryAccountLabel).trim() ||
       d.salaryAccountLabel,
