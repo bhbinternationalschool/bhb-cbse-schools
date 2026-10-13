@@ -71,6 +71,7 @@ SELFTESTS=(
   test:session-year
   test:academic-year-resolve
   test:workspace-policy
+  test:workspace-idle
   test:tone-tokens
   test:masters-read-failure
   test:save-full-cache

@@ -119,6 +119,15 @@ export function headGapForLine(
   return null;
 }
 
+/**
+ * Vouchers the payroll run writes itself. Their salary line belongs on the
+ * parent head: regular pay IS "Salary & Wages", and the sub-heads the office
+ * adds under it (extra work, corrections, inactive staff) are for the odd
+ * payment keyed by hand. Flagging every payroll voucher once a sub-head
+ * exists asked the office to reclassify what was already right (13 Oct 2026).
+ */
+const PAYROLL_SOURCES = new Set(["payroll_run", "payroll_payment"]);
+
 /** Every unclassified line on this voucher, by line index. */
 export function headGaps(
   v: VoucherFacts,
@@ -126,9 +135,12 @@ export function headGaps(
   byParent = childCodesByParent(chart),
 ): { index: number; line: VoucherLineFacts; gap: HeadGap }[] {
   const out: { index: number; line: VoucherLineFacts; gap: HeadGap }[] = [];
+  const fromPayroll = PAYROLL_SOURCES.has(v.sourceType);
   v.lines.forEach((line, index) => {
     const gap = headGapForLine(line, chart, byParent);
-    if (gap) out.push({ index, line, gap });
+    if (!gap) return;
+    if (fromPayroll && gap.kind === "parent_with_subheads") return;
+    out.push({ index, line, gap });
   });
   return out;
 }
