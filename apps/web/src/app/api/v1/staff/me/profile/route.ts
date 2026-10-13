@@ -14,7 +14,7 @@
 
 import { writeAudit } from "@/lib/audit.server";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
-import { requestMeta, resolveApiAuth, type ApiAuthContext } from "@/lib/api/v1/auth";
+import { assertPermission, requestMeta, resolveApiAuth, type ApiAuthContext } from "@/lib/api/v1/auth";
 import {
   ownProfileView,
   requestForStaff,
@@ -35,6 +35,8 @@ function ownStaffId(ctx: ApiAuthContext): string {
   if (ctx.session.persona !== "staff" || !ctx.session.staffId) {
     throw new ApiError("forbidden", "Staff login required", 403);
   }
+  // Self service, like GPS punch, My leave and My payslips (Home · view).
+  assertPermission(ctx, "home", "view");
   return ctx.session.staffId;
 }
 

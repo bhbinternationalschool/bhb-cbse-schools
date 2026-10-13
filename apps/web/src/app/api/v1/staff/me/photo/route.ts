@@ -9,7 +9,7 @@
 
 import { writeAudit } from "@/lib/audit.server";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
-import { requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
+import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { archiveToDrive } from "@/lib/driveArchive.server";
 import { mediaArchiveFileName, mediaArchiveFolder } from "@/lib/driveArchive";
 import { privateMediaUrl } from "@/lib/media";
@@ -26,6 +26,7 @@ export async function POST(request: Request) {
     const ctx = await resolveApiAuth(request);
     const staffId = ctx.session.persona === "staff" ? ctx.session.staffId || "" : "";
     if (!staffId) throw new ApiError("forbidden", "Staff login required", 403);
+    assertPermission(ctx, "home", "view"); // self service, like My payslips
     const form = await request.formData().catch(() => null);
     const file = form?.get("file");
     if (!(file instanceof File)) throw new ApiError("bad_request", "Choose a photo", 400);
