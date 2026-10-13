@@ -2498,4 +2498,101 @@ class LEn extends L {
   String homeNewCount(String count) {
     return '$count new';
   }
+
+  @override
+  String get homeModuleResults => 'Results';
+
+  @override
+  String get homeModuleDateSheet => 'Date sheet';
+
+  @override
+  String get resultsTitle => 'Results';
+
+  @override
+  String get resultsNotPublished =>
+      'Results not published yet. The school will publish them here after each exam.';
+
+  @override
+  String get resultsSubject => 'Subject';
+
+  @override
+  String get resultsMarks => 'Marks';
+
+  @override
+  String get resultsGrade => 'Grade';
+
+  @override
+  String get resultsAssessment => 'Assessment';
+
+  @override
+  String get resultsTotal => 'Total';
+
+  @override
+  String get resultsPercentage => 'Percentage';
+
+  @override
+  String get resultsOverallGrade => 'Overall grade';
+
+  @override
+  String get resultsRank => 'Rank';
+
+  @override
+  String resultsRankOf(String rank, String size) {
+    return '$rank of $size';
+  }
+
+  @override
+  String get resultsClassAverage => 'Class average';
+
+  @override
+  String get resultsResult => 'Result';
+
+  @override
+  String get resultsAttendance => 'Attendance';
+
+  @override
+  String get resultsCoScholastic => 'Co-scholastic areas';
+
+  @override
+  String get resultsTeacherRemarks => 'Class teacher\'s remarks';
+
+  @override
+  String get resultsAbsentAll => 'Absent in this examination';
+
+  @override
+  String resultsAbsentFor(String subjects) {
+    return 'Absent for: $subjects';
+  }
+
+  @override
+  String get resultsAggregateNote =>
+      'Weighted result of the exams that count toward it.';
+
+  @override
+  String get resultsNoMarks =>
+      'Marks for this exam are not ready yet. Please check again later.';
+
+  @override
+  String get resultsHeld =>
+      'This report card is being held by the school office. Please contact the office.';
+
+  @override
+  String get resultsUnavailable =>
+      'Could not check this report card right now. Please try again in a few minutes.';
+
+  @override
+  String get resultsPrintHint =>
+      'To print or save the report card as a PDF, open the parent portal on the school website and go to Results.';
+
+  @override
+  String get dateSheetTitle => 'Date sheet';
+
+  @override
+  String get dateSheetNone =>
+      'No upcoming exams have been published for this child yet.';
+
+  @override
+  String dateSheetMinutes(String minutes) {
+    return '$minutes min';
+  }
 }

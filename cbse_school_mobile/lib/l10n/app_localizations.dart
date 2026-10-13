@@ -4364,6 +4364,174 @@ abstract class L {
   /// In en, this message translates to:
   /// **'{count} new'**
   String homeNewCount(String count);
+
+  /// No description provided for @homeModuleResults.
+  ///
+  /// In en, this message translates to:
+  /// **'Results'**
+  String get homeModuleResults;
+
+  /// No description provided for @homeModuleDateSheet.
+  ///
+  /// In en, this message translates to:
+  /// **'Date sheet'**
+  String get homeModuleDateSheet;
+
+  /// No description provided for @resultsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Results'**
+  String get resultsTitle;
+
+  /// No description provided for @resultsNotPublished.
+  ///
+  /// In en, this message translates to:
+  /// **'Results not published yet. The school will publish them here after each exam.'**
+  String get resultsNotPublished;
+
+  /// No description provided for @resultsSubject.
+  ///
+  /// In en, this message translates to:
+  /// **'Subject'**
+  String get resultsSubject;
+
+  /// No description provided for @resultsMarks.
+  ///
+  /// In en, this message translates to:
+  /// **'Marks'**
+  String get resultsMarks;
+
+  /// No description provided for @resultsGrade.
+  ///
+  /// In en, this message translates to:
+  /// **'Grade'**
+  String get resultsGrade;
+
+  /// No description provided for @resultsAssessment.
+  ///
+  /// In en, this message translates to:
+  /// **'Assessment'**
+  String get resultsAssessment;
+
+  /// No description provided for @resultsTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'Total'**
+  String get resultsTotal;
+
+  /// No description provided for @resultsPercentage.
+  ///
+  /// In en, this message translates to:
+  /// **'Percentage'**
+  String get resultsPercentage;
+
+  /// No description provided for @resultsOverallGrade.
+  ///
+  /// In en, this message translates to:
+  /// **'Overall grade'**
+  String get resultsOverallGrade;
+
+  /// No description provided for @resultsRank.
+  ///
+  /// In en, this message translates to:
+  /// **'Rank'**
+  String get resultsRank;
+
+  /// No description provided for @resultsRankOf.
+  ///
+  /// In en, this message translates to:
+  /// **'{rank} of {size}'**
+  String resultsRankOf(String rank, String size);
+
+  /// No description provided for @resultsClassAverage.
+  ///
+  /// In en, this message translates to:
+  /// **'Class average'**
+  String get resultsClassAverage;
+
+  /// No description provided for @resultsResult.
+  ///
+  /// In en, this message translates to:
+  /// **'Result'**
+  String get resultsResult;
+
+  /// No description provided for @resultsAttendance.
+  ///
+  /// In en, this message translates to:
+  /// **'Attendance'**
+  String get resultsAttendance;
+
+  /// No description provided for @resultsCoScholastic.
+  ///
+  /// In en, this message translates to:
+  /// **'Co-scholastic areas'**
+  String get resultsCoScholastic;
+
+  /// No description provided for @resultsTeacherRemarks.
+  ///
+  /// In en, this message translates to:
+  /// **'Class teacher\'s remarks'**
+  String get resultsTeacherRemarks;
+
+  /// No description provided for @resultsAbsentAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Absent in this examination'**
+  String get resultsAbsentAll;
+
+  /// No description provided for @resultsAbsentFor.
+  ///
+  /// In en, this message translates to:
+  /// **'Absent for: {subjects}'**
+  String resultsAbsentFor(String subjects);
+
+  /// No description provided for @resultsAggregateNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Weighted result of the exams that count toward it.'**
+  String get resultsAggregateNote;
+
+  /// No description provided for @resultsNoMarks.
+  ///
+  /// In en, this message translates to:
+  /// **'Marks for this exam are not ready yet. Please check again later.'**
+  String get resultsNoMarks;
+
+  /// No description provided for @resultsHeld.
+  ///
+  /// In en, this message translates to:
+  /// **'This report card is being held by the school office. Please contact the office.'**
+  String get resultsHeld;
+
+  /// No description provided for @resultsUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not check this report card right now. Please try again in a few minutes.'**
+  String get resultsUnavailable;
+
+  /// No description provided for @resultsPrintHint.
+  ///
+  /// In en, this message translates to:
+  /// **'To print or save the report card as a PDF, open the parent portal on the school website and go to Results.'**
+  String get resultsPrintHint;
+
+  /// No description provided for @dateSheetTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Date sheet'**
+  String get dateSheetTitle;
+
+  /// No description provided for @dateSheetNone.
+  ///
+  /// In en, this message translates to:
+  /// **'No upcoming exams have been published for this child yet.'**
+  String get dateSheetNone;
+
+  /// No description provided for @dateSheetMinutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{minutes} min'**
+  String dateSheetMinutes(String minutes);
 }
 
 class _LDelegate extends LocalizationsDelegate<L> {

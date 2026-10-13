@@ -107,6 +107,7 @@ import {
 } from "@/components/exams/ClassResultSheet";
 import { useHoldDecisions } from "@/lib/useHoldDecisions";
 import { ExamDateSheetGrid } from "@/components/exams/ExamDateSheetGrid";
+import { ParentReleasePanel } from "@/components/exams/ParentReleasePanel";
 import { ExamSeatingPanel } from "@/components/exams/ExamSeatingPanel";
 import { InvigilationPanel } from "@/components/exams/InvigilationPanel";
 import { ExamPapersPanel } from "@/components/exams/ExamPapersPanel";
@@ -1760,12 +1761,19 @@ export function ExamsWorkspace() {
       ) : null}
 
       {tab === "datesheet" && masters ? (
-        <ExamDateSheetGrid
-          academicYearCode={ay}
-          masters={masters}
-          terms={terms}
-          onChanged={refresh}
-        />
+        <>
+          <ParentReleasePanel
+            kind="dateSheet"
+            terms={terms}
+            canEdit={hasPermission(session, masters, "exams", "edit")}
+          />
+          <ExamDateSheetGrid
+            academicYearCode={ay}
+            masters={masters}
+            terms={terms}
+            onChanged={refresh}
+          />
+        </>
       ) : null}
 
       {tab === "seating" && masters ? (
@@ -2978,6 +2986,11 @@ export function ExamsWorkspace() {
 
       {tab === "results" ? (
         <div className="mt-6 space-y-4">
+          <ParentReleasePanel
+            kind="results"
+            terms={terms}
+            canEdit={!!masters && hasPermission(session, masters, "exams", "edit")}
+          />
           {!classId || !sectionId || !examTermId ? (
             <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
               Select exam, class and section. Use Annual / Half-yearly for

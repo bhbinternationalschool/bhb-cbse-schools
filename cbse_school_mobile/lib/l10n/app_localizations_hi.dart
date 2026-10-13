@@ -2499,4 +2499,101 @@ class LHi extends L {
   String homeNewCount(String count) {
     return '$count नए';
   }
+
+  @override
+  String get homeModuleResults => 'परिणाम';
+
+  @override
+  String get homeModuleDateSheet => 'परीक्षा कार्यक्रम';
+
+  @override
+  String get resultsTitle => 'परिणाम';
+
+  @override
+  String get resultsNotPublished =>
+      'परिणाम अभी प्रकाशित नहीं हुए हैं। हर परीक्षा के बाद स्कूल यहाँ प्रकाशित करेगा।';
+
+  @override
+  String get resultsSubject => 'विषय';
+
+  @override
+  String get resultsMarks => 'अंक';
+
+  @override
+  String get resultsGrade => 'ग्रेड';
+
+  @override
+  String get resultsAssessment => 'मूल्यांकन';
+
+  @override
+  String get resultsTotal => 'कुल';
+
+  @override
+  String get resultsPercentage => 'प्रतिशत';
+
+  @override
+  String get resultsOverallGrade => 'कुल ग्रेड';
+
+  @override
+  String get resultsRank => 'स्थान';
+
+  @override
+  String resultsRankOf(String rank, String size) {
+    return '$size में $rank';
+  }
+
+  @override
+  String get resultsClassAverage => 'कक्षा का औसत';
+
+  @override
+  String get resultsResult => 'परिणाम';
+
+  @override
+  String get resultsAttendance => 'हाज़िरी';
+
+  @override
+  String get resultsCoScholastic => 'सह-शैक्षिक क्षेत्र';
+
+  @override
+  String get resultsTeacherRemarks => 'कक्षा अध्यापक की टिप्पणी';
+
+  @override
+  String get resultsAbsentAll => 'इस परीक्षा में अनुपस्थित';
+
+  @override
+  String resultsAbsentFor(String subjects) {
+    return 'इनमें अनुपस्थित: $subjects';
+  }
+
+  @override
+  String get resultsAggregateNote =>
+      'इसमें गिनी जाने वाली परीक्षाओं का भारित परिणाम।';
+
+  @override
+  String get resultsNoMarks =>
+      'इस परीक्षा के अंक अभी तैयार नहीं हैं। कृपया बाद में फिर देखें।';
+
+  @override
+  String get resultsHeld =>
+      'यह रिपोर्ट कार्ड स्कूल कार्यालय ने रोका हुआ है। कृपया कार्यालय से संपर्क करें।';
+
+  @override
+  String get resultsUnavailable =>
+      'अभी यह रिपोर्ट कार्ड जाँचा नहीं जा सका। कृपया कुछ मिनट बाद फिर कोशिश करें।';
+
+  @override
+  String get resultsPrintHint =>
+      'रिपोर्ट कार्ड प्रिंट करने या PDF में सहेजने के लिए स्कूल की वेबसाइट पर अभिभावक पोर्टल खोलें और परिणाम में जाएँ।';
+
+  @override
+  String get dateSheetTitle => 'परीक्षा कार्यक्रम';
+
+  @override
+  String get dateSheetNone =>
+      'इस बच्चे की कोई आने वाली परीक्षा अभी प्रकाशित नहीं हुई है।';
+
+  @override
+  String dateSheetMinutes(String minutes) {
+    return '$minutes मिनट';
+  }
 }

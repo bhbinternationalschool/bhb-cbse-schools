@@ -91,6 +91,58 @@ const List<ScreenGuide> parentScreenGuides = [
     ],
   ),
   ScreenGuide(
+    id: "results-parent",
+    titleEn: "See your child's exam results",
+    titleHi: "बच्चे का परीक्षा परिणाम देखें",
+    stepsEn: [
+      "On the home screen, choose your child at the top, then tap **Results**.",
+      "Tap an exam name at the top (for example **Half-yearly**) to see that exam.",
+      "Each row is a subject with its marks and grade, exactly as the school's report card shows them.",
+      "Below the table you see the total, percentage, rank and attendance — only those the school's report card shows.",
+      "The class teacher's remarks are at the bottom.",
+    ],
+    stepsHi: [
+      "होम स्क्रीन पर ऊपर अपना बच्चा चुनें, फिर **परिणाम** दबाएँ।",
+      "ऊपर परीक्षा का नाम दबाएँ (जैसे **अर्धवार्षिक**) — उस परीक्षा का परिणाम दिखेगा।",
+      "हर पंक्ति में एक विषय के अंक और ग्रेड हैं, ठीक वैसे जैसे स्कूल के रिपोर्ट कार्ड में।",
+      "तालिका के नीचे कुल, प्रतिशत, स्थान और हाज़िरी है — केवल वही जो स्कूल का रिपोर्ट कार्ड दिखाता है।",
+      "सबसे नीचे कक्षा अध्यापक की टिप्पणी है।",
+    ],
+    tipsEn: [
+      "If you see \"Results not published yet\", the school has not released this exam's results to parents yet.",
+      "If an exam says the report card is held by the office, please contact the school office.",
+      "To print or save the report card as a PDF, open the parent portal on the school website and go to **Results**.",
+    ],
+    tipsHi: [
+      "अगर \"परिणाम अभी प्रकाशित नहीं हुए हैं\" दिखे, तो स्कूल ने अभी यह परिणाम अभिभावकों के लिए जारी नहीं किया है।",
+      "अगर लिखा हो कि रिपोर्ट कार्ड कार्यालय ने रोका है, तो स्कूल कार्यालय से संपर्क करें।",
+      "रिपोर्ट कार्ड प्रिंट करने या PDF में सहेजने के लिए स्कूल की वेबसाइट पर अभिभावक पोर्टल खोलें और **परिणाम** में जाएँ।",
+    ],
+  ),
+  ScreenGuide(
+    id: "datesheet-parent",
+    titleEn: "See your child's exam date sheet",
+    titleHi: "बच्चे का परीक्षा कार्यक्रम देखें",
+    stepsEn: [
+      "On the home screen, choose your child at the top, then tap **Date sheet**.",
+      "Each exam lists its coming papers: the date, the subject, the start time and how long it lasts.",
+      "Papers that are over drop off the list by themselves.",
+    ],
+    stepsHi: [
+      "होम स्क्रीन पर ऊपर अपना बच्चा चुनें, फिर **परीक्षा कार्यक्रम** दबाएँ।",
+      "हर परीक्षा में आने वाले पेपर हैं: तारीख़, विषय, शुरू होने का समय और अवधि।",
+      "जो पेपर हो चुके हैं, वे सूची से अपने आप हट जाते हैं।",
+    ],
+    tipsEn: [
+      "If nothing is shown, the school has not published an upcoming date sheet for your child's class yet.",
+      "Pull the list down to load the latest date sheet.",
+    ],
+    tipsHi: [
+      "अगर कुछ नहीं दिखे, तो स्कूल ने अभी आपके बच्चे की कक्षा का आने वाला परीक्षा कार्यक्रम प्रकाशित नहीं किया है।",
+      "ताज़ा कार्यक्रम के लिए सूची को नीचे खींचें।",
+    ],
+  ),
+  ScreenGuide(
     id: "homework-parent",
     titleEn: "See homework and get help with it",
     titleHi: "होमवर्क देखें और उसमें मदद लें",
