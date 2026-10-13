@@ -56,7 +56,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   StaffFeatureSet? _features;
   String? _error;
   bool _deepLinkDone = false;
-  StaffFeatureSet _features = const StaffFeatureSet.empty();
 
   @override
   void initState() {
@@ -411,7 +410,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                   ),
                   // My pay: payslips (with the grant) and my advances
                   // (everyone's own record, always shown).
-                  if (_features.has("my_payslips"))
+                  if (_features?.has("my_payslips") == true)
                     _payCard(
                       icon: Icons.receipt_long_outlined,
                       tone: ModuleTone.gray,
