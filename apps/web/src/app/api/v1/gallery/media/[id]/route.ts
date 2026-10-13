@@ -13,6 +13,7 @@
 import { NextResponse } from "next/server";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
+import { requireParentHousehold } from "@/lib/api/v1/household";
 import { albumVisibleTo } from "@/lib/classGallery";
 import { parentSections, readClassMedia, signedMediaUrl } from "@/lib/classGallery.server";
 import { signClassMediaLink, verifyClassMediaLink } from "@/lib/classMediaLinkToken.server";
@@ -62,9 +63,12 @@ export async function GET(request: Request, rctx: RouteCtx) {
     // Staff see an item while it is checked or held (the principal decides on
     // it); a parent only once it passed.
     let allowed = ctx.session.persona === "staff" && media.reviewStatus !== "removed";
-    if (!allowed && ctx.session.persona === "parent" && ctx.session.householdId && media.reviewStatus === "ok") {
+    if (!allowed && ctx.session.persona === "parent" && media.reviewStatus === "ok") {
+      // The session's household only; a parent session without one is
+      // refused here rather than falling through to "not allowed".
+      const householdId = requireParentHousehold(ctx);
       await ensureSisHydratedServer();
-      const hh = loadSis().students.filter((s) => s.householdId === ctx.session.householdId);
+      const hh = loadSis().students.filter((s) => s.householdId === householdId);
       allowed = albumVisibleTo({ sectionIds: media.sectionIds }, { staff: false, sections: parentSections(hh, ctx.session.academicYearCode || "") });
     }
     if (!allowed) throw new ApiError("forbidden", "This photo is for another class's families.", 403);

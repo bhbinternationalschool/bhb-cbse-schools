@@ -378,6 +378,15 @@ function card(over: Partial<ReportCard["presentation"]> = {}, extra: Partial<Rep
     "a child with no household belongs to nobody's session",
   );
   assert.equal(status(() => assertParentOwnsChild(ctxFor({ persona: "staff", householdId: "hh_1" }), mine)), 403);
+  // Records keyed by something other than a child (a PTM booking) use the
+  // same check with their own household and message.
+  assert.equal(assertParentOwnsChild(ctxFor({ persona: "parent", householdId: "hh_1" }), { householdId: "hh_1" }, "Not your booking"), "hh_1");
+  try {
+    assertParentOwnsChild(ctxFor({ persona: "parent", householdId: "hh_1" }), { householdId: "hh_9" }, "Not your booking");
+    assert.fail("another family's booking must be refused");
+  } catch (e) {
+    assert.equal((e as Error).message, "Not your booking");
+  }
 }
 
 console.log("parentResults.selftest.ts: OK");

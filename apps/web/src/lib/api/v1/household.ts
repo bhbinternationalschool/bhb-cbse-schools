@@ -37,10 +37,12 @@ export function childOfHousehold(
  */
 export function assertParentOwnsChild(
   ctx: ApiAuthContext,
-  student: Pick<SisStudent, "householdId">,
-): void {
+  record: Pick<SisStudent, "householdId">,
+  message = "Not your child",
+): string {
   const householdId = requireParentHousehold(ctx);
-  if (!student.householdId || student.householdId !== householdId) {
-    throw new ApiError("forbidden", "Not your child", 403);
+  if (!record.householdId || record.householdId !== householdId) {
+    throw new ApiError("forbidden", message, 403);
   }
+  return householdId;
 }
