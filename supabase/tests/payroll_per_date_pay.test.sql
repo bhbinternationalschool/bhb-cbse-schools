@@ -82,6 +82,9 @@ begin
      and not exists (select 1 from public.ledger_vouchers x where x.reverses_voucher_id = v.id);
   assert live = 'prb_run:pay:2026-07-30:cash#2=1760000,prb_run:pay:2026-08-09:bnk_probe_a=880000', format('4: %s', live);
 
+  select count(*) into n from public.ledger_vouchers where tenant_id = t and narration like '%set %';
+  assert n = 0, '4: no staff-set hash in a narration';
+
   -- 5. Un-mark the NEFT line: its group is reversed, nothing else moves.
   update public.payroll_desk_run_lines set paid_on = null where run_id = 'prb_run' and line_index = 2;
   select string_agg(v.source_id, ',' order by v.source_id) into live from public.ledger_vouchers v
@@ -90,6 +93,54 @@ begin
   assert live = 'prb_run:pay:2026-07-30:cash#2', format('5: %s', live);
   select paid_account_code into live from public.payroll_desk_run_lines where run_id = 'prb_run' and line_index = 2;
   assert live = '', '5: un-marking clears the fixed account';
+
+  -- 5b. A regroup whose re-post fails leaves the book as it was: the group's
+  --     voucher is not left reversed. (Frozen account forced to a code the
+  --     chart lacks, with the freeze trigger off inside this transaction.)
+  alter table public.payroll_desk_run_lines disable trigger payroll_run_lines_freeze_paid_account;
+  select count(*) into pay_before from public.ledger_vouchers where tenant_id = t;
+  update public.payroll_desk_run_lines set paid_account_code = '9999' where run_id = 'prb_run' and line_index = 3;
+  alter table public.payroll_desk_run_lines enable trigger payroll_run_lines_freeze_paid_account;
+  select count(*) into n from public.ledger_vouchers where tenant_id = t;
+  assert n = pay_before, format('5b: a failed regroup wrote %s voucher(s)', n - pay_before);
+  select string_agg(v.source_id, ',') into live from public.ledger_vouchers v
+   where v.tenant_id = t and v.source_type = 'payroll_payment'
+     and not exists (select 1 from public.ledger_vouchers x where x.reverses_voucher_id = v.id);
+  assert live = 'prb_run:pay:2026-07-30:cash#2', format('5b: live after failed regroup %s', live);
+  begin
+    perform public.payroll_ledger_post(t, 'prb_run', 'probe');
+    assert false, '5b: a direct post must raise';
+  exception when assert_failure then raise;
+  when others then
+    assert sqlerrm like '%no ledger account with code 9999%', format('5b: %s', sqlerrm);
+  end;
+  update public.payroll_desk_run_lines set paid_on = null where run_id = 'prb_run' and line_index = 3;
+  update public.payroll_desk_run_lines set paid_on = '2026-07-30', payment_mode = 'cash' where run_id = 'prb_run' and line_index = 3;
+
+  -- 5c. A locked period: un-marking changes nothing in the book (the desk
+  --     save's book step is refused and swallowed); a direct post raises.
+  insert into public.ledger_periods (tenant_id, period, fy_code, status) values (t, '2026-07', 'FY2026-27', 'locked');
+  select count(*) into pay_before from public.ledger_vouchers where tenant_id = t;
+  update public.payroll_desk_run_lines set paid_on = null where run_id = 'prb_run' and line_index = 3;
+  select count(*) into n from public.ledger_vouchers where tenant_id = t;
+  assert n = pay_before, format('5c: locked period wrote %s voucher(s)', n - pay_before);
+  begin
+    perform public.payroll_ledger_post(t, 'prb_run', 'probe');
+    assert false, '5c: a direct post must raise';
+  exception when assert_failure then raise;
+  when others then
+    assert sqlerrm like '%locked%', format('5c: %s', sqlerrm);
+  end;
+  delete from public.ledger_periods where tenant_id = t and period = '2026-07';
+  update public.payroll_desk_run_lines set paid_on = '2026-07-30' where run_id = 'prb_run' and line_index = 3;
+
+  -- 5d. Run lines post once per statement: no row-level book trigger.
+  select count(*) filter (where (tg.tgtype & 1) = 1), count(*) filter (where (tg.tgtype & 1) = 0)
+    into n, pay_before
+    from pg_trigger tg join pg_proc p on p.oid = tg.tgfoid
+   where tg.tgrelid = 'public.payroll_desk_run_lines'::regclass and not tg.tgisinternal
+     and p.proname in ('payroll_desk_ledger_autopost', 'payroll_desk_lines_ledger_autopost');
+  assert n = 0 and pay_before = 2, format('5d: %s row-level, %s statement-level book triggers on run lines', n, pay_before);
 
   -- 6. Idempotent: posting again writes nothing.
   select count(*) into pay_before from public.ledger_vouchers where tenant_id = t;

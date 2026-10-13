@@ -130,7 +130,7 @@ as $$ select split_part(coalesce(p_source_id, ''), '#', 1) $$;
 -- accountant's back.
 create or replace function public.payroll_ledger_slot(
   p_tenant_id uuid, p_source_type text, p_base text, p_run_id text, p_lock integer
-) returns table (live_id uuid, live_no text, live_paise bigint, live_narration text, versions integer, may_post boolean, why text)
+) returns table (live_id uuid, live_no text, live_paise bigint, live_tag text, versions integer, may_post boolean, why text)
 language plpgsql stable security definer set search_path to 'public'
 as $function$
 declare
@@ -143,8 +143,11 @@ begin
 
   select v.id, v.voucher_no,
          (select coalesce(sum(l.debit_paise), 0) from public.ledger_lines l where l.voucher_id = v.id),
-         v.narration
-    into live_id, live_no, live_paise, live_narration
+         -- Who the group's voucher paid: kept on its 2110 line's instrument
+         -- reference, not in any narration a reader sees.
+         (select l.instrument_ref from public.ledger_lines l
+           where l.voucher_id = v.id and l.debit_paise > 0 order by l.line_no limit 1)
+    into live_id, live_no, live_paise, live_tag
     from public.ledger_vouchers v
    where v.tenant_id = p_tenant_id and v.source_type = p_source_type
      and (v.source_id = p_base or left(v.source_id, length(p_base) + 1) = p_base || '#')
@@ -401,7 +404,8 @@ begin
            string_agg(nullif(g.ref, ''), ', ' order by g.ref) as refs,
            max(nullif(g.paid_by, '')) as paid_by,
            -- Who is in the group: a group whose total is unchanged but whose
-           -- people changed is still regrouped (its narration names them).
+           -- people changed is still regrouped. The set is kept on the 2110
+           -- line's instrument reference (staffset:…), never in a narration.
            left(md5(string_agg(g.staff_id, ',' order by g.staff_id)), 10) as sig
       from (
         select x.d, x.amt, x.mode, x.ref, x.paid_by, x.staff_id,
@@ -455,7 +459,7 @@ begin
 
     select * into v_slot from public.payroll_ledger_slot(p_tenant_id, 'payroll_payment', v_base, p_run_id, coalesce(v_run.lock_version, 0));
     if v_slot.live_id is not null and v_slot.live_paise = v_paise
-       and v_slot.live_narration like '%· set ' || m.sig then
+       and v_slot.live_tag is not distinct from 'staffset:' || m.sig then
       v_payments := v_payments || jsonb_build_object('date', m.d, 'account', v_code, 'staff', m.n,
         'amount_paise', v_paise, 'voucher_no', v_slot.live_no, 'created', false);
       continue;
@@ -477,7 +481,8 @@ begin
     v_lines := jsonb_build_array(
       jsonb_build_object(
         'account_code', '2110', 'debit_paise', v_paise, 'credit_paise', 0,
-        'narration', 'Net payable ' || v_run.month || ' — ' || m.n || ' staff'),
+        'narration', 'Net payable ' || v_run.month || ' — ' || m.n || ' staff',
+        'instrument', jsonb_build_object('mode', '', 'ref', 'staffset:' || m.sig)),
       jsonb_build_object(
         'account_code', v_code, 'debit_paise', 0, 'credit_paise', v_paise,
         'narration', case when v_code = '1110' then 'Salary paid from the Cashfree Payouts wallet'
@@ -487,7 +492,7 @@ begin
         'subledger_id', case when v_code not in ('1000', '1010', '1110') then v_bank else '' end));
     v_res := public.ledger_post(p_tenant_id, jsonb_build_object(
       'voucher_type', 'payment', 'date', m.d,
-      'narration', 'Salary paid ' || v_run.month || ' — ' || m.n || ' staff on ' || to_char(m.d, 'YYYY-MM-DD') || ' · set ' || m.sig,
+      'narration', 'Salary paid ' || v_run.month || ' — ' || m.n || ' staff on ' || to_char(m.d, 'YYYY-MM-DD'),
       'source_type', 'payroll_payment', 'source_id', v_src,
       'created_by', coalesce(nullif(m.paid_by, ''), nullif(v_run.paid_by, ''), v_created_by), 'lines', v_lines));
     if not coalesce((v_res->>'ok')::boolean, false) then

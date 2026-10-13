@@ -194,6 +194,8 @@ export function PayrollWorkspace() {
   // Runs whose server book did not take the last change (run id → what the
   // book said). Cleared when the book agrees again.
   const [bookIssues, setBookIssues] = useState<Record<string, string>>({});
+  // Lines whose hand-typed head amounts the next setup rebuild resets.
+  const [setupReset, setSetupReset] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     setMasters(loadMasters());
@@ -409,6 +411,8 @@ export function PayrollWorkspace() {
     flash(
       `Bulk draft ${month}: ${r.run.lines.length} staff — not in accounts until published${r.skipped.length
         ? ` · skipped ${r.skipped.length} already paid/approved for ${month}: ${r.skipped.slice(0, 4).join(", ")}${r.skipped.length > 4 ? "…" : ""}`
+        : ""}${r.excluded.length
+        ? ` · not included — joined after ${month}: ${r.excluded.join(", ")} (fix the joining date in Masters if wrong)`
         : ""}`,
     );
     refresh();
@@ -447,6 +451,8 @@ export function PayrollWorkspace() {
           : `Draft for ${month}: ${r.run.lines.length} staff — edit freely until publish`
       }${r.skipped.length
         ? ` · skipped ${r.skipped.length} already paid/approved for ${month}: ${r.skipped.slice(0, 4).join(", ")}${r.skipped.length > 4 ? "…" : ""}`
+        : ""}${r.excluded.length
+        ? ` · not included — joined after ${month}: ${r.excluded.join(", ")} (fix the joining date in Masters if wrong)`
         : ""}`,
     );
     setProcessStaffIds([]);
@@ -467,14 +473,17 @@ export function PayrollWorkspace() {
     );
   }
 
-  function onApplySetup(staffIds: string[]) {
+  function onApplySetup(staffIds: string[], resetIds: string[] = []) {
     if (!selected || !masters) return;
-    const r = applyDraftSetupSync(selected.id, staffIds, masters, session.fullName);
+    const r = applyDraftSetupSync(selected.id, staffIds, masters, session.fullName, resetIds);
     if (!r.ok) {
       flash(r.error, true);
       return;
     }
-    flash(`Salary setup applied — ${r.rebuilt} line(s) rebuilt${r.removed ? `, ${r.removed} removed (not in this month)` : ""}`);
+    flash(
+      `Salary setup applied — ${r.rebuilt} line(s) rebuilt${r.removed ? ` · removed: ${r.removedWho.join("; ")}` : ""}`,
+      false,
+    );
     setSelectedId(r.run.id);
     refresh();
   }
@@ -1179,8 +1188,13 @@ export function PayrollWorkspace() {
             onPaid={onPaid}
             onMarkLinesPaid={onMarkLinesPaid}
             bookIssue={bookIssues[selected.id] || ""}
-            setupRows={masters ? previewDraftSetupSync(selected, masters).rows : []}
-            onApplySetup={onApplySetup}
+            setupRows={masters ? previewDraftSetupSync(selected, masters, undefined, setupReset).rows : []}
+            setupReset={setupReset}
+            setSetupReset={setSetupReset}
+            onApplySetup={(ids) => {
+              onApplySetup(ids, [...setupReset].filter((id) => ids.includes(id)));
+              setSetupReset(new Set());
+            }}
             onCheckBook={() => reportBook(selected.id, "Book checked")}
             onUnmarkLinePaid={onUnmarkLinePaid}
             onDelete={onDelete}
@@ -1317,6 +1331,8 @@ function RunDetail({
   bookIssue,
   onCheckBook,
   setupRows,
+  setupReset,
+  setSetupReset,
   onApplySetup,
   onDelete,
   onExport,
@@ -1349,6 +1365,8 @@ function RunDetail({
   onCheckBook: () => void;
   /** Each line against salary setup / attendance / joining date now. */
   setupRows: SetupSyncRow[];
+  setupReset: Set<string>;
+  setSetupReset: (s: Set<string>) => void;
   onApplySetup: (staffIds: string[]) => void;
   onDelete: () => void;
   onExport: () => void;
@@ -1709,6 +1727,8 @@ function RunDetail({
               all={setupRows}
               picked={setupOpen}
               setPicked={setSetupOpen}
+              reset={setupReset}
+              setReset={setSetupReset}
               onApply={(ids) => {
                 const chosen = setupDiffering.filter((r) => ids.includes(r.staffId));
                 const t = setupSyncTotals(chosen, setupRows.map((r) => r.before));
@@ -2316,12 +2336,16 @@ function SetupSyncPanel({
   all,
   picked,
   setPicked,
+  reset,
+  setReset,
   onApply,
 }: {
   rows: SetupSyncRow[];
   all: SetupSyncRow[];
   picked: Set<string>;
   setPicked: (s: Set<string>) => void;
+  reset: Set<string>;
+  setReset: (s: Set<string>) => void;
   onApply: (staffIds: string[]) => void;
 }) {
   const chosen = rows.filter((r) => picked.has(r.staffId));
@@ -2361,7 +2385,33 @@ function SetupSyncPanel({
                   {r.fullName}
                   <div className="font-normal text-[var(--muted)]">{r.empCode}</div>
                 </td>
-                <td className="px-2 py-1">{r.reasons.join("; ")}</td>
+                <td className="px-2 py-1">
+                  {r.reasons.join("; ")}
+                  {r.headChanges.length ? (
+                    <div className="mt-0.5 text-[var(--muted)]">Heads: {r.headChanges.join(", ")}</div>
+                  ) : null}
+                  {r.kept.length ? (
+                    <div className="mt-0.5 font-semibold text-[var(--brand-deep)]">Your edits kept: {r.kept.join(", ")}</div>
+                  ) : null}
+                  {r.reset.length ? (
+                    <div className="mt-0.5 font-semibold text-[var(--danger)]">Reset to setup: {r.reset.join(", ")}</div>
+                  ) : null}
+                  {r.kept.length || r.reset.length ? (
+                    <label className="mt-0.5 flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={reset.has(r.staffId)}
+                        onChange={(e) => {
+                          const next = new Set(reset);
+                          if (e.target.checked) next.add(r.staffId);
+                          else next.delete(r.staffId);
+                          setReset(next);
+                        }}
+                      />
+                      Reset my edits to salary setup
+                    </label>
+                  ) : null}
+                </td>
                 <td className="px-2 py-1">{fig(r.before)}</td>
                 <td className="px-2 py-1 font-semibold text-[var(--brand-deep)]">
                   {r.action === "remove" ? "Remove from this month" : fig(r.after)}

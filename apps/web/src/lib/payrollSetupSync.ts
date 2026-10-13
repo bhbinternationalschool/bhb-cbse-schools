@@ -87,6 +87,12 @@ export type SetupSyncRow = {
   noSetup: boolean;
   before: SetupSyncFigures;
   after: SetupSyncFigures | null;
+  /** Hand-typed head amounts the rebuild keeps ("Basic 15000"). */
+  kept: string[];
+  /** Hand-typed heads this rebuild resets to salary setup. */
+  reset: string[];
+  /** Every head amount the rebuild changes ("PF (employee) 1800 → 0"). */
+  headChanges: string[];
 };
 
 export function figuresOf(l: SetupSyncFigures): SetupSyncFigures {

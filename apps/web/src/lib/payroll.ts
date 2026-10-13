@@ -78,6 +78,11 @@ export type PayrollLineComponent = {
   headName: string;
   kind: "earning" | "deduction" | "employer";
   amount: number;
+  /**
+   * Typed by hand on the draft (updateDraftLineComponent). A rebuild from
+   * salary setup keeps it unless that line is reset (14 Oct 2026).
+   */
+  manual?: boolean;
 };
 
 export type PayrollPaymentMode =
@@ -411,6 +416,8 @@ export type BuildPayrollOpts = {
   dayCountOverride?: number;
   /** If set, only these staff (individual / partial process) */
   staffIds?: string[];
+  /** Filled with who was left out because they joined after the month. */
+  excludedOut?: { staffId: string; fullName: string; joiningDate: string }[];
   kind?: PayrollRunKind;
 };
 
@@ -434,7 +441,13 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
     // Joined after the month: no salary for it (Sanjay Pratap, joined
     // 1 Aug 2026, was in the July draft).
     const link = salary.staffLinks.find((l) => l.staffId === s.id);
-    if (payrollEmploymentStart(opts.month, s.joiningDate, link?.effectiveFrom).excluded) return false;
+    const start = payrollEmploymentStart(opts.month, s.joiningDate, link?.effectiveFrom);
+    if (start.excluded) {
+      // Said in the result, never silent: joining dates were repaired for a
+      // day/month mix-up on 7 Oct 2026, and a wrong one would drop a person.
+      opts.excludedOut?.push({ staffId: s.id, fullName: s.fullName, joiningDate: start.from });
+      return false;
+    }
     return true;
   });
   const kind: PayrollRunKind =
@@ -561,9 +574,14 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
     const halfAsAbsent = daysHalf * 0.5;
     // Days before joining go through loss of pay, so the book reduces the
     // salary expense for them (payroll_ledger_post reads the LWP component).
+    // They are pro-rated on the month's calendar days — joined on 22 Jul is
+    // 10/31 of the month paid — while absences stay on the configured day
+    // count (notJoinedDeduction, one rule for a build and a rebuild).
     const daysLwp = daysAbsent + halfAsAbsent + unpaidLeave + daysNotJoined;
     const dayRate = amounts.gross / dayCount;
-    const lwpDeduction = Math.round(dayRate * daysLwp);
+    const lwpDeduction =
+      Math.round(dayRate * (daysLwp - daysNotJoined)) +
+      notJoinedDeduction(amounts.gross, daysNotJoined, monthDays.length);
     /** Simple late penalty: 1 hour ≈ dayRate/8 per late beyond 3 */
     const latePenalty =
       lateCount > 3
@@ -1165,7 +1183,7 @@ export function updateDraftLineComponent(
     if (l.staffId !== staffId) return l;
     const components = l.components.map((c) =>
       c.headCode === headCode
-        ? { ...c, amount: Math.max(0, Math.round(amount)) }
+        ? { ...c, amount: Math.max(0, Math.round(amount)), manual: true }
         : c,
     );
     return recalculateLineFromComponents({ ...l, components });
@@ -1221,6 +1239,39 @@ export function removeDraftStaffLine(
   return { ok: true, run: next };
 }
 
+/** Put the draft's hand-typed head amounts back on a rebuilt line. */
+function keepManualComponents(line: PayrollStaffLine, manual: PayrollLineComponent[]): PayrollStaffLine {
+  const components = line.components.map((c) => {
+    const m = manual.find((x) => x.headCode === c.headCode && x.kind === c.kind);
+    return m ? { ...c, amount: m.amount, manual: true } : c;
+  });
+  for (const m of manual) {
+    if (!components.some((c) => c.headCode === m.headCode && c.kind === m.kind)) components.push(m);
+  }
+  return recalculateLineFromComponents({ ...line, components });
+}
+
+/** Head-by-head amounts that a rebuild changes ("PF (employee) 1800 → 0"). */
+function headChanges(before: PayrollLineComponent[], after: PayrollLineComponent[]): string[] {
+  const key = (c: PayrollLineComponent) => `${c.kind}:${c.headCode}`;
+  const out: string[] = [];
+  const keys = [...new Set([...before.map(key), ...after.map(key)])];
+  for (const k of keys) {
+    const b = before.find((c) => key(c) === k);
+    const a = after.find((c) => key(c) === k);
+    const was = b?.amount ?? 0;
+    const now = a?.amount ?? 0;
+    if (was !== now) out.push(`${(a ?? b)!.headName} ${was} → ${now}`);
+  }
+  return out;
+}
+
+/** Pay not earned before joining: the month's calendar-day share. */
+export function notJoinedDeduction(gross: number, daysNotJoined: number, monthDayCount: number): number {
+  if (daysNotJoined <= 0 || monthDayCount <= 0) return 0;
+  return Math.round((gross * Math.min(daysNotJoined, monthDayCount)) / monthDayCount);
+}
+
 /** Notes the draft builder writes itself — replaced, not kept, on a rebuild. */
 const SYSTEM_NOTE = /^(No salary setup — |Joined \d{4}-\d{2}-\d{2}: |No attendance marked on |LWP includes \d+(\.\d+)? approved unpaid leave)/;
 
@@ -1239,8 +1290,34 @@ function mergeNotes(fresh: string, previous: string): string {
  * setup rebuild never re-reads attendance for someone employed all month —
  * only for someone who joined during it, whose days must change.
  */
-function keepDraftAttendance(fresh: PayrollStaffLine, draft: PayrollStaffLine, dayCount: number): PayrollStaffLine {
-  const lwpDeduction = Math.round((fresh.gross / (dayCount || 30)) * (draft.daysLwp || 0));
+function keepDraftAttendance(
+  fresh: PayrollStaffLine,
+  draft: PayrollStaffLine,
+  dayCount: number,
+  /** Calendar days of the month before this person joined (0 = all month). */
+  notJoined: number,
+  monthDayCount: number,
+): PayrollStaffLine {
+  // One rule for every unmarked day (re-review of #620, 14 Oct 2026): a
+  // rebuild keeps the basis the draft counted its days on, for everyone. For
+  // someone who joined during the month only the days before joining are
+  // cut: the draft's own day counts are scaled to the days in service, and
+  // the days before joining are pro-rated on calendar days.
+  // A draft built since this fix already counts only days in service (its
+  // day columns add up to them, and its LWP holds the days before joining):
+  // it is not cut again. A draft built before it counted the whole month.
+  const counted =
+    (draft.daysPresent || 0) + (draft.daysAbsent || 0) + (draft.daysHalf || 0) +
+    (draft.daysLeavePaid || 0) + (draft.daysHoliday || 0);
+  const wholeMonthBasis = notJoined > 0 && counted > monthDayCount - notJoined + 0.5;
+  const frac = wholeMonthBasis ? Math.max(0, monthDayCount - notJoined) / monthDayCount : 1;
+  const scale = (n: number) => (wholeMonthBasis ? Math.round((n || 0) * frac * 2) / 2 : n || 0);
+  const otherLwp = wholeMonthBasis
+    ? scale(draft.daysLwp || 0)
+    : Math.max(0, (draft.daysLwp || 0) - notJoined);
+  const lwpDeduction =
+    Math.round((fresh.gross / (dayCount || 30)) * otherLwp) +
+    notJoinedDeduction(fresh.gross, notJoined, monthDayCount);
   const latePenalty = draft.gross > 0 ? Math.round((draft.latePenalty || 0) * (fresh.gross / draft.gross)) : 0;
   const keep = fresh.components.filter((c) => c.headCode !== "LWP" && c.headCode !== "LATE");
   const lwpC = draft.components.find((c) => c.headCode === "LWP");
@@ -1255,12 +1332,12 @@ function keepDraftAttendance(fresh: PayrollStaffLine, draft: PayrollStaffLine, d
   return recalculateLineFromComponents({
     ...fresh,
     components,
-    daysPresent: draft.daysPresent,
-    daysAbsent: draft.daysAbsent,
-    daysHalf: draft.daysHalf,
-    daysLeavePaid: draft.daysLeavePaid,
-    daysLwp: draft.daysLwp,
-    daysHoliday: draft.daysHoliday,
+    daysPresent: scale(draft.daysPresent),
+    daysAbsent: scale(draft.daysAbsent),
+    daysHalf: scale(draft.daysHalf),
+    daysLeavePaid: scale(draft.daysLeavePaid),
+    daysLwp: otherLwp + notJoined,
+    daysHoliday: scale(draft.daysHoliday),
     lwpDeduction,
     latePenalty,
     // The builder's attendance notes belong to the attendance it read.
@@ -1280,6 +1357,8 @@ export function previewDraftSetupSync(
   run: PayrollRun,
   masters: MastersState,
   salary: SalarySetupState = loadSalarySetup(),
+  /** Lines whose hand-typed head amounts go back to salary setup. */
+  resetStaffIds: ReadonlySet<string> = new Set(),
 ): { rows: SetupSyncRow[]; rebuilt: Map<string, PayrollStaffLine> } {
   const fresh = buildPayrollDraft({
     masters,
@@ -1314,14 +1393,23 @@ export function previewDraftSetupSync(
         fullName: line.fullName,
         empCode: line.empCode,
         action: employed?.excluded ? ("remove" as const) : ("none" as const),
-        reasons: [excludedReason],
+        reasons: employed?.excluded ? [`${excludedReason} — fix the joining date in Masters if it is wrong`] : [excludedReason],
         noSetup,
         before: figuresOf(line),
         after: null,
+        kept: [],
+        reset: [],
+        headChanges: [],
       };
     }
     const employed = payrollEmploymentStart(run.month, staff?.joiningDate, link?.effectiveFrom);
-    const base = employed.joinedInMonth ? f : keepDraftAttendance(f, line, run.dayCount);
+    const monthDayCount = daysInMonth(run.month).length;
+    const notJoined = employed.joinedInMonth ? Number(employed.from.slice(8, 10)) - 1 : 0;
+    const attended = keepDraftAttendance(f, line, run.dayCount, notJoined, monthDayCount);
+    // Hand-typed head amounts stay, unless this line is reset to setup.
+    const manual = line.components.filter((c) => c.manual);
+    const reset = resetStaffIds.has(line.staffId);
+    const base = manual.length && !reset ? keepManualComponents(attended, manual) : attended;
     const merged = { ...mergePreservedAdjustments(base, line), note: mergeNotes(base.note, line.note || "") };
     rebuilt.set(line.staffId, merged);
     const reasons = setupDiffReasons(figuresOf(line), figuresOf(merged), { noSetup });
@@ -1334,6 +1422,9 @@ export function previewDraftSetupSync(
       noSetup,
       before: figuresOf(line),
       after: figuresOf(merged),
+      kept: reset ? [] : manual.map((c) => `${c.headName} ${c.amount}`),
+      reset: reset ? manual.map((c) => c.headName) : [],
+      headChanges: headChanges(line.components, merged.components),
     };
   });
   return { rows, rebuilt };
@@ -1345,13 +1436,22 @@ export function applyDraftSetupSync(
   staffIds: string[],
   masters: MastersState,
   by: string,
-): { ok: true; run: PayrollRun; rebuilt: number; removed: number } | { ok: false; error: string } {
+  /** Lines whose hand-typed head amounts are reset to salary setup. */
+  resetStaffIds: string[] = [],
+): {
+  ok: true;
+  run: PayrollRun;
+  rebuilt: number;
+  removed: number;
+  /** Who was removed and why (joining date) — said in the result. */
+  removedWho: string[];
+} | { ok: false; error: string } {
   const state = loadPayroll();
   const run = state.runs.find((r) => r.id === runId);
   if (!run) return { ok: false, error: "Run not found" };
   const locked = guardDraftOnly(run);
   if (locked) return { ok: false, error: locked };
-  const { rows, rebuilt } = previewDraftSetupSync(run, masters);
+  const { rows, rebuilt } = previewDraftSetupSync(run, masters, loadSalarySetup(), new Set(resetStaffIds));
   const chosen = rows.filter((r) => staffIds.includes(r.staffId) && r.action !== "none");
   if (!chosen.length) return { ok: false, error: "Nothing on this run differs from salary setup" };
   const remove = new Set(chosen.filter((r) => r.action === "remove").map((r) => r.staffId));
@@ -1376,10 +1476,16 @@ export function applyDraftSetupSync(
       detail:
         r.action === "remove"
           ? `${r.fullName}: removed — ${r.reasons.join("; ")}`
-          : `${r.fullName}: rebuilt from salary setup — ${r.reasons.join("; ")} · net ${r.before.netPay} → ${r.after!.netPay}, employer ${r.before.employerCost} → ${r.after!.employerCost}`,
+          : `${r.fullName}: rebuilt from salary setup — ${r.reasons.join("; ")} · net ${r.before.netPay} → ${r.after!.netPay}, employer ${r.before.employerCost} → ${r.after!.employerCost}${r.kept.length ? ` · kept your edits: ${r.kept.join(", ")}` : ""}${r.reset.length ? ` · reset to setup: ${r.reset.join(", ")}` : ""}`,
     });
   }
-  return { ok: true, run: next, rebuilt: rebuild.size, removed: remove.size };
+  return {
+    ok: true,
+    run: next,
+    rebuilt: rebuild.size,
+    removed: remove.size,
+    removedWho: chosen.filter((r) => r.action === "remove").map((r) => `${r.fullName}: ${r.reasons[0]}`),
+  };
 }
 
 /**
@@ -1407,7 +1513,14 @@ export function processPayrollDraft(opts: {
   staffIds?: string[];
   replaceExistingDraft?: boolean;
 }):
-  | { ok: true; run: PayrollRun; merged: boolean; skipped: string[] }
+  | {
+      ok: true;
+      run: PayrollRun;
+      merged: boolean;
+      skipped: string[];
+      /** Left out: joined after the month ("Name (joined YYYY-MM-DD)"). */
+      excluded: string[];
+    }
   | { ok: false; error: string } {
   if (opts.mode === "individual" && !opts.staffIds?.length) {
     return { ok: false, error: "Select at least one staff member" };
@@ -1444,6 +1557,9 @@ export function processPayrollDraft(opts: {
     staffIds = due;
   }
 
+  // Joined after the month: said in the result (fix the date in Masters if wrong).
+  const excludedOut: { staffId: string; fullName: string; joiningDate: string }[] = [];
+  const excludedNames = () => [...new Set(excludedOut.map((e) => `${e.fullName} (joined ${e.joiningDate})`))];
   const state = loadPayroll();
   const open = state.runs.find(
     (r) =>
@@ -1475,6 +1591,7 @@ export function processPayrollDraft(opts: {
       createdBy: opts.createdBy,
       staffIds,
       kind: "bulk",
+      excludedOut,
     });
     if (open) {
       const next = {
@@ -1496,7 +1613,7 @@ export function processPayrollDraft(opts: {
         academicYearCode: next.academicYearCode,
         detail: `Bulk replace · ${next.lines.length} staff`,
       });
-      return { ok: true, run: next, merged: false, skipped };
+      return { ok: true, run: next, merged: false, skipped, excluded: excludedNames() };
     }
     upsertPayrollRun(built);
     appendPayrollAudit({
@@ -1507,7 +1624,7 @@ export function processPayrollDraft(opts: {
       academicYearCode: built.academicYearCode,
       detail: `Bulk draft · ${built.lines.length} staff`,
     });
-    return { ok: true, run: built, merged: false, skipped };
+    return { ok: true, run: built, merged: false, skipped, excluded: excludedNames() };
   }
 
   const built = buildPayrollDraft({
@@ -1517,11 +1634,15 @@ export function processPayrollDraft(opts: {
     createdBy: opts.createdBy,
     staffIds,
     kind: "individual",
+    excludedOut,
   });
   if (built.lines.length === 0) {
+    const ex = excludedNames();
     return {
       ok: false,
-      error: "No salary structure for selected staff — assign in Salary setup",
+      error: ex.length
+        ? `Nothing was created — ${ex.join(", ")} joined after ${opts.month}. Fix the joining date in Masters if it is wrong.`
+        : "No salary structure for selected staff — assign in Salary setup",
     };
   }
 
@@ -1546,7 +1667,7 @@ export function processPayrollDraft(opts: {
       academicYearCode: next.academicYearCode,
       detail: `Merged ${staffIds!.length} staff · now ${next.lines.length} lines`,
     });
-    return { ok: true, run: next, merged: true, skipped };
+    return { ok: true, run: next, merged: true, skipped, excluded: excludedNames() };
   }
 
   upsertPayrollRun(built);
@@ -1558,7 +1679,7 @@ export function processPayrollDraft(opts: {
     academicYearCode: built.academicYearCode,
     detail: `Individual draft · ${built.lines.map((l) => l.empCode).join(", ")}`,
   });
-  return { ok: true, run: built, merged: false, skipped };
+  return { ok: true, run: built, merged: false, skipped, excluded: excludedNames() };
 }
 
 /** The payment fields of a line — all a posted run's line may change. */
