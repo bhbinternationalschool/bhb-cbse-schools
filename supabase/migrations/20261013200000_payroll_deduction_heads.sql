@@ -73,12 +73,15 @@ begin
   --
   -- A special deduction labelled as an advance is an advance recovered and
   -- reduces 1070 Staff Advances, not Statutory Dues (Deepak, April 2026:
-  -- "old advance").
+  -- "old advance"). It does not reduce the advance register on the Staff
+  -- advances desk: recoveries meant to be tracked there belong in the
+  -- line's Advance deduction, which is capped by what is outstanding.
   select coalesce(sum(x.lwp), 0), coalesce(sum(x.adv_special), 0)
     into v_lwp, v_adv_special
     from public.payroll_desk_run_lines l
     cross join lateral (
-      select coalesce(sum((c->>'amount')::numeric)
+      select coalesce(sum(case when (c->>'amount') ~ '^\s*-?[0-9]+(\.[0-9]+)?\s*$'
+                               then (c->>'amount')::numeric end)
                filter (where c->>'kind' = 'deduction' and c->>'headCode' = 'LWP'), 0) as comp
         from jsonb_array_elements(coalesce(l.components, '[]'::jsonb)) c
     ) lc
@@ -90,7 +93,12 @@ begin
              end as lwp,
              case
                when coalesce(l.special_deduction, 0) > 0
-                and coalesce(l.special_deduction_label, '') ~* 'advance'
+                -- Only a label that names an advance being recovered:
+                -- "advance", "old advance", "staff/salary advance",
+                -- "advance recovery/recovered/deduction". Not "advance
+                -- tax", "no advance", or a sentence that mentions one.
+                and coalesce(l.special_deduction_label, '')
+                    ~* '^\s*(old\s+)?((staff|salary)\s+)?advance(\s+(recovery|recovered|deduction|deducted))?\s*$'
                then l.special_deduction else 0
              end as adv_special
     ) x
@@ -213,7 +221,5 @@ begin
   return jsonb_build_object('ok', true, 'month', v_run.month, 'accrual', v_accrual, 'payment', v_payment);
 end;
 $function$;
-
-
 
 notify pgrst, 'reload schema';

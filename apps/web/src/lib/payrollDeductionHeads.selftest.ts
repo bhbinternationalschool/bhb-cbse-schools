@@ -24,7 +24,17 @@ const sql = readFileSync(join(dir, latest), "utf8");
 assert.ok(/least\(lc\.comp,\s*l\.lwp_deduction\)/.test(sql), `${latest}: LWP per line, capped by the attendance column`);
 assert.ok(/headCode'\s*=\s*'LWP'/.test(sql), `${latest}: LWP read from the line's components`);
 // A special deduction labelled as an advance is an advance recovered (1070).
-assert.ok(/special_deduction_label[^;]*~\*\s*'advance'/.test(sql), `${latest}: advance-labelled special deductions go to Staff Advances`);
+const m = /special_deduction_label,\s*''\)\s*~\*\s*'([^']+)'/.exec(sql);
+assert.ok(m, `${latest}: advance-labelled special deductions go to Staff Advances`);
+// The label pattern (SQL regex, case-insensitive) — checked here with the
+// same expression in JS so a loosened pattern fails this test.
+const label = new RegExp(m![1]!.replace(/\\\\/g, "\\"), "i");
+for (const ok of ["advance", "Old advance", "old  advance", "staff advance", "Salary Advance", "advance recovery", "old advance recovered", " advance deduction "]) {
+  assert.ok(label.test(ok), `"${ok}" is an advance recovery`);
+}
+for (const no of ["advance tax", "no advance", "advance salary paid in July", "fine", "uniform", "TDS", "advances given"]) {
+  assert.ok(!label.test(no), `"${no}" is not booked to Staff Advances`);
+}
 assert.ok(/v_adv\s*:=\s*v_adv\s*\+\s*v_adv_special/.test(sql), `${latest}: advance specials added to recoveries`);
 assert.ok(/v_special\s*:=\s*v_special\s*-\s*v_adv_special/.test(sql), `${latest}: and taken out of Statutory Dues`);
 // The payment leg from the wallet migration is still there.
