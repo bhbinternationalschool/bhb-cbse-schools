@@ -384,6 +384,7 @@ SELFTESTS=(
   test:closing-balance
   test:accounts-position-rbac
   test:voucher-filter
+  test:staff-otp-mobile
   test:accounts-today-tile
   test:attendance-exception-ids
   test:voucher-amend
