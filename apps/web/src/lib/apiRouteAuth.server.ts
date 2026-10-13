@@ -395,8 +395,12 @@ export async function requireWaStaffApi(
   // school-wide) is refused unless the route scopes to their own classes
   // itself (class channels).
   if (!opts.allowTeachers) {
-    const { staffSectionScope } = await import("@/lib/api/v1/staffScope");
-    const scope = await staffSectionScope(base.ctx).catch(() => null);
+    const { readStaffScopeForDesk } = await import("@/lib/api/v1/staffScope");
+    // Unknown scope (the timetable could not be read) is a 503 to retry, not
+    // a refusal that says the inbox is the office's.
+    const scopeRead = await readStaffScopeForDesk(base.ctx);
+    if (!scopeRead.ok) return { ok: false, response: scopeRead.response };
+    const scope = scopeRead.scope;
     if (!scope?.unrestricted) {
       return authFailure(403, "The school's WhatsApp inbox is handled by the office");
     }

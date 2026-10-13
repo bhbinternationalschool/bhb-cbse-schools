@@ -1,4 +1,4 @@
-import { sectionKey, staffSectionScope } from "@/lib/api/v1/staffScope";
+import { sectionKey, readStaffScopeForDesk } from "@/lib/api/v1/staffScope";
 import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import { ATTENDANCE_REGISTERS_PROBE_TABLES } from "@/lib/deskProbeTables";
@@ -114,13 +114,15 @@ export async function GET(req: Request) {
   // A teacher gets only their own sections' registers (2026-09-29). Every
   // register carries student ids and marks, and the nudges/exceptions carry
   // parents' numbers — "attendance.view" alone handed a teacher's browser
-  // the whole school. Unknown scope (lookup failed) is treated as
-  // restricted with no sections, never as school-wide.
+  // the whole school. Unknown scope (lookup failed) is a 503 — never
+  // school-wide, and (since 13 Oct 2026) never an empty register list.
   // A function holder is cut the same way, then to their functions.
   let sections: Set<string> | null = null;
   const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
   if (scopeCtx) {
-    const scope = await staffSectionScope(scopeCtx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(scopeCtx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope?.unrestricted) sections = scope?.sections ?? new Set<string>();
   }
   try {
@@ -186,7 +188,9 @@ export async function POST(req: Request) {
   // register still marks one register at a time through the mark route.
   const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
   if (scopeCtx) {
-    const scope = await staffSectionScope(scopeCtx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(scopeCtx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope?.unrestricted) {
       return NextResponse.json(
         {

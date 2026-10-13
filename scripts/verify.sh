@@ -384,6 +384,7 @@ SELFTESTS=(
   test:closing-balance
   test:accounts-position-rbac
   test:voucher-filter
+  test:staff-otp-mobile
   test:accounts-today-tile
   test:attendance-exception-ids
   test:voucher-amend
@@ -416,6 +417,7 @@ SELFTESTS=(
   test:nucleus-assessments
   test:staff-home-kind
   test:staff-teaching-scope
+  test:staff-scope-timetable
   test:staff-month-calendar
   test:staff-roster-redact
   test:sis-class-teacher

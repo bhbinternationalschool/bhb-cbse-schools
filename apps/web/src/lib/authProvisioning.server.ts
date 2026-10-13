@@ -47,10 +47,29 @@ export type ResolvedPerson = {
  * phone number must not be able to provision itself a login just by
  * receiving a WhatsApp code.
  */
+/**
+ * The 10-digit Indian mobile in whatever the phone sent: "+91 95980 28391"
+ * (the staff app's phone-number autofill), "919598028391", "095980 28391".
+ * Null when it is not one.
+ */
+export function mobile10Of(raw: string): string | null {
+  const d = String(raw ?? "").replace(/\D/g, "");
+  if (d.length === 10) return d;
+  if (d.length === 12 && d.startsWith("91")) return d.slice(2);
+  if (d.length === 11 && d.startsWith("0")) return d.slice(1);
+  return null;
+}
+
 export async function resolvePersonByMobile(
   persona: "staff" | "parent" | "field",
-  mobile10: string,
+  rawMobile: string,
 ): Promise<ResolvedPerson | null> {
+  // Matched on the stored 10 digits. The raw text was compared before, so a
+  // number picked from autofill ("+91 95980 28391") found no staff row and
+  // the OTP was never sent — Ravindra Yadav, 12–13 Oct 2026, while typing
+  // the same ten digits worked for everyone else.
+  const mobile10 = mobile10Of(rawMobile);
+  if (!mobile10) return null;
   const sb = createServiceSupabase();
   if (!sb) return null;
 

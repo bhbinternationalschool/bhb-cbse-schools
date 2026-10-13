@@ -144,6 +144,9 @@ async function main(): Promise<void> {
   }
 
   // The teacher whose only link to a section is the published timetable.
+  // Found by this stack on 13 Oct 2026 (0 students: the server scope read
+  // loadTimetable(), always empty on the server); fixed by data-layer 1.7,
+  // which reads timetable_desk_slices. A plain check since then.
   {
     const h = as(fx.sessions.timetableTeacher);
     const r = await getJson(`${app}/api/school-data/sis-roster`, h);
@@ -151,31 +154,18 @@ async function main(): Promise<void> {
     const students = arr(rb.students).map(obj);
     const allowed = new Set(TIMETABLE_TEACHER_SECTIONS.map((k) => `${classId(k)}|${sectionId(k)}`));
     const outside = students.filter((s) => !allowed.has(`${String(s.classId)}|${String(s.sectionId)}`)).length;
-    const right = r.status === 200 && students.length === e.timetableTeacherRows && outside === 0;
-    const detail =
+    const named = arr(rb.sections).map(obj).map((x) => `${String(x.classId)}|${String(x.sectionId)}`);
+    const sectionsRight = named.length === allowed.size && named.every((k) => allowed.has(k));
+    record(
+      "timetable-only teacher: sis-roster is her timetable sections",
+      r.status === 200 &&
+        rb.scoped === true &&
+        sectionsRight &&
+        students.length === e.timetableTeacherRows &&
+        outside === 0,
       `HTTP ${r.status}, ${students.length} rows (want ${e.timetableTeacherRows}), ${outside} outside her sections, ` +
-      `scopedToTeacher=${String(rb.scopedToTeacher ?? false)}`;
-    // KNOWN DEFECT, found by this stack on 13 Oct 2026: on the server,
-    // loadTimetable() returns an empty state (lib/timetable.ts: `typeof window
-    // === "undefined"`), and ensureTimetableHydratedServer() writes the DB
-    // copy back through writeTimetableLocalRaw(), a no-op on the server — so
-    // staffSectionScope() never sees a published grid, and a teacher whose
-    // only tie is the timetable gets zero students. Recorded as an expected
-    // failure so the run stays green for the stack itself; the moment the
-    // app is fixed this flips to XPASS and FAILS the run, so the fix must
-    // promote it to a plain check (remove `knownDefect`).
-    const knownDefect = true;
-    if (knownDefect) {
-      const stillBroken = r.status === 200 && students.length === 0;
-      console.log(`${right ? "XPASS" : stillBroken ? "XFAIL" : "FAIL "}  timetable-only teacher (known defect) — ${detail}`);
-      outcomes.push({
-        name: "timetable-only teacher: sis-roster (known defect, expected failure)",
-        ok: stillBroken,
-        detail: right ? `now correct — promote this to a plain check. ${detail}` : detail,
-      });
-    } else {
-      record("timetable-only teacher: sis-roster is her timetable sections", right, detail);
-    }
+        `scoped=${String(rb.scoped ?? false)}, sections=[${named.join(", ")}]`,
+    );
   }
 
   const failed = outcomes.filter((o) => !o.ok);
