@@ -153,6 +153,37 @@ const List<ScreenGuide> staffScreenGuides = [
     ],
   ),
   ScreenGuide(
+    id: "month-register",
+    titleEn: "See a class's whole month of attendance",
+    titleHi: "कक्षा की पूरे महीने की हाज़िरी देखें",
+    stepsEn: [
+      "Your own class opens first; tap the two-arrow button at the top to choose another class.",
+      "Use **<** and **>** beside the month to go to the month before or after.",
+      "Children go down, days go across — slide the days sideways; the names stay put.",
+      "Grey columns marked **H** are holidays and Sundays.",
+      "Under each name, **P/W** shows days present out of working days this month.",
+      "The last row counts how many children were present each day.",
+    ],
+    stepsHi: [
+      "पहले आपकी अपनी कक्षा खुलती है; दूसरी कक्षा के लिए ऊपर दो-तीर वाला बटन दबाएँ।",
+      "पिछला या अगला महीना देखने के लिए महीने के पास **<** और **>** दबाएँ।",
+      "बच्चे ऊपर से नीचे, दिन बाएँ से दाएँ — दिनों को बगल में खिसकाएँ; नाम अपनी जगह रहते हैं।",
+      "**H** लिखे स्लेटी कॉलम छुट्टी और रविवार हैं।",
+      "हर नाम के नीचे **P/W** इस महीने के कार्य-दिवसों में से उपस्थित दिन दिखाता है।",
+      "आख़िरी पंक्ति हर दिन उपस्थित बच्चों की गिनती है।",
+    ],
+    tipsEn: [
+      "**L** means Late (counted present). Leave is **LE**; **HD** is a half day.",
+      "A blank box on a working day means nobody marked it — it is NOT counted as present. Mark the day from **Attendance**.",
+      "If you see **You are not a teacher of …**, ask the office to add the class to your duties.",
+    ],
+    tipsHi: [
+      "**L** का अर्थ देर से आना है (उपस्थित गिना जाता है)। छुट्टी **LE** है; **HD** आधा दिन है।",
+      "कार्य-दिवस पर ख़ाली खाने का मतलब है किसी ने हाज़िरी नहीं लगाई — इसे उपस्थित नहीं गिना जाता। वह दिन **Attendance** से लगाएँ।",
+      "अगर **You are not a teacher of …** दिखे, तो दफ़्तर से कक्षा अपनी ड्यूटी में जुड़वाएँ।",
+    ],
+  ),
+  ScreenGuide(
     id: "self-attendance",
     titleEn: "Punch your own attendance with GPS",
     titleHi: "जीपीएस से अपनी हाज़िरी पंच करें",
@@ -505,6 +536,39 @@ const List<ScreenGuide> staffScreenGuides = [
     tipsHi: [
       "अगर **इस सेक्शन में कोई चालू छात्र नहीं है।** दिखे, तो दफ़्तर को बताएँ।",
       "अनुशासन टिप्पणी छोटी और सही लिखें; दफ़्तर और अभिभावक इसे पढ़ सकते हैं।",
+    ],
+  ),
+  ScreenGuide(
+    id: "my-class",
+    titleEn: "Your class: call a family and fill the class sheet",
+    titleHi: "आपकी कक्षा: परिवार को कॉल करें और कक्षा शीट भरें",
+    stepsEn: [
+      "**Children · बच्चे** lists your class with roll numbers; red text means the school cannot reach that family on WhatsApp.",
+      "Tap the phone button on a child to see the family's numbers, then tap one to call.",
+      "Tap **Class sheet** to fill the UDISE+ details.",
+      "Choose what you are filling today — **Height & weight**, **Blood group**, **Mother tongue, religion, category**, **Parents' education** or **Special needs (CWSN)**.",
+      "For height and weight, set **Measured on** to the day you measured.",
+      "Fill each child, then tap **Save … children · सहेजें** at the bottom.",
+    ],
+    stepsHi: [
+      "**Children · बच्चे** में आपकी कक्षा रोल नंबर के साथ है; लाल लिखावट का अर्थ है विद्यालय उस परिवार तक व्हाट्सऐप पर नहीं पहुँच पाता।",
+      "बच्चे के फ़ोन बटन से परिवार के नंबर देखें, फिर किसी पर दबाकर कॉल करें।",
+      "UDISE+ विवरण भरने के लिए **Class sheet** दबाएँ।",
+      "चुनें कि आज क्या भर रहे हैं — **लंबाई व वज़न**, **रक्त समूह**, **मातृभाषा, धर्म, वर्ग**, **माता-पिता की शिक्षा** या **विशेष आवश्यकता (CWSN)**।",
+      "लंबाई-वज़न के लिए **Measured on** में नापने का दिन चुनें।",
+      "हर बच्चे का भरें, फिर नीचे **Save … children · सहेजें** दबाएँ।",
+    ],
+    tipsEn: [
+      "Measure with a tape and a scale — never guess a height or weight. Leave a box blank if you do not know.",
+      "A red note under a child means something to fix; that child is not saved until it is fixed.",
+      "If someone else saved a child at the same time, that child is not saved — check the values and save again.",
+      "If you see **Only a class teacher can update their class's records**, ask the office to link you to your class.",
+    ],
+    tipsHi: [
+      "फ़ीते और तराज़ू से नापें — लंबाई या वज़न का अंदाज़ा कभी न लगाएँ। पता न हो तो खाना ख़ाली छोड़ें।",
+      "बच्चे के नीचे लाल टिप्पणी का अर्थ है कुछ ठीक करना है; ठीक होने तक वह बच्चा सहेजा नहीं जाता।",
+      "अगर उसी समय किसी और ने बच्चे का रिकॉर्ड सहेजा, तो वह बच्चा सहेजा नहीं जाता — मान जाँचकर फिर सहेजें।",
+      "अगर **Only a class teacher can update their class's records** दिखे, तो दफ़्तर से अपनी कक्षा से जुड़वाएँ।",
     ],
   ),
   ScreenGuide(
