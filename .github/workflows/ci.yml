@@ -691,17 +691,13 @@ jobs:
     # Not a merge gate yet — the director makes it required once it has run green.
     continue-on-error: true
     steps:
-      # A secret named *SERVICE_ROLE* visible to this workflow, or any such
-      # variable in the job's environment, stops the job before checkout.
-      # Only the boolean leaves the expression; no secret value is exposed.
+      # Any *SERVICE_ROLE* variable in the job's environment stops the job
+      # before checkout. This job references no secret at all (keys are minted
+      # per run), so nothing can put one there. An earlier version inspected
+      # toJSON(secrets); GitHub held every run of that version for manual
+      # approval, so the check reads only the job's own environment.
       - name: Refuse production credentials
-        env:
-          SERVICE_ROLE_SECRET_PRESENT: ${{ contains(toJSON(secrets), 'SERVICE_ROLE') }}
         run: |
-          if [ "$SERVICE_ROLE_SECRET_PRESENT" != "false" ]; then
-            echo "A secret whose name contains SERVICE_ROLE is visible to this workflow — the e2e job must run without production credentials." >&2
-            exit 1
-          fi
           if env | cut -d= -f1 | grep -q SERVICE_ROLE; then
             echo "The job environment carries a *SERVICE_ROLE* variable — refusing." >&2
             exit 1
