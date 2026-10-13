@@ -270,38 +270,68 @@ worth automating in the trigger smoke step later.
 
 ### Phase 1 — The kernel (one executor; nothing user-visible yet)
 
-**1.0 The local API stack for tests.** The app only reaches the database through supabase-js
-over PostgREST (`lib/supabase/server.ts:203-206`, `lib/serverTenant.ts:16-19`); the migration
-rehearsal script (`scripts/rehearse-migrations.sh`) starts a bare Postgres and cannot serve the
-app. Build `scripts/e2e-stack.sh` on the Supabase CLI: `supabase start` (config.toml already
-says Postgres 17; the CLI brings PostgREST, auth and a service-role key via `supabase status`),
-`supabase db reset` to apply `supabase/migrations`, then `scripts/e2e-seed.ts` (below). It writes
-`apps/web/.env.e2e` with: `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321`,
-`SUPABASE_SERVICE_ROLE_KEY=<from status>`, `NEXT_PUBLIC_SUPABASE_ANON_KEY=<from status>`,
-`APP_SESSION_SECRET=e2e-secret`, `E2E=1`, every `*_READ_FROM_DB=true` and `*_DUAL_WRITE_DB=true`
-flag listed in `deploy/desk-cutover-runtime.env`, `NEXT_PUBLIC_DEMO_AUTH=false`. The stack
-starts the app with `dotenv -e apps/web/.env.e2e -- next start -p 3700` and **never** reads
-`.env.local`; the Playwright global setup asserts the Supabase URL points at 127.0.0.1 and
-aborts otherwise. CI: a job `e2e` on `ubuntu-latest` (Docker available) running the same script;
-the job must have no production secret (fail if any `*SERVICE_ROLE*` secret is present).
-Seed (`scripts/e2e-seed.ts`, runs with the local service key only; refuses any non-127.0.0.1
-URL): a `tenants` row with slug `bhb-international`; Masters built as a `MastersState` through
-the existing TypeScript types and written through the same function the masters-desk POST uses
-(`pushMastersSlicesToDb` in `lib/mastersNormalized.server.ts`) so all 29 slices and
-`masters_desk_sync_meta` are consistent; `rbac_desk_slices` and `module_registry_desk_slices`
-from the same seed the go-live bootstrap uses (read it, do not run it); staff through the
-staff-roster write path; students and households through `sis_push_guarded`. Fixture shape
-mirrors production: counts taken from `masters_desk_sync_meta` / `sis_sync_meta` the day the
-step runs (today 15 classes, 13 sections, 44 subjects, 35 staff of which 34 active, ~250
-current-year children), with 30 % of children carrying 2–4 per-year rows, some rows with a blank
-`academic_year_code`, two children sharing an admission number with different names, one
-all-inactive household, placeholder `0000000000` mobiles, and one teacher whose only link to a
-section is the timetable. Logins: Playwright mints the session cookie `bhb_demo_session` with
-`signSession()` (`lib/sessionCookie.server.ts:58`, needs `APP_SESSION_SECRET`) for a seeded
-office `DemoSession` (`persona:'staff'`, `roleCode`, `staffId`, `tenantSlug`, `academicYearCode`)
-and a seeded teacher. Acceptance: `bash scripts/e2e-stack.sh` on a clean machine and in CI
-reaches `/login` → `/home` with the office cookie and `curl /api/school-data/masters-desk`
-returns 15 classes.
+**1.0 The local API stack for tests.** *(Built 13 Oct 2026 without Docker or the Supabase CLI.)*
+The app only reaches the database through supabase-js over PostgREST
+(`lib/supabase/server.ts`, `lib/serverTenant.ts`), so the stack is exactly that and nothing
+more: `bash scripts/e2e-stack.sh up` starts a throwaway **Postgres 17** (Homebrew on a Mac,
+the PostgreSQL apt package in CI; `PGBIN` overrides), applies the Supabase shim
+(`scripts/supabase-shim.sql`, shared with `scripts/rehearse-migrations.sh`: roles
+`anon`/`authenticated`/`service_role`(bypassrls)/`authenticator`, `auth.uid/role/jwt`,
+`storage.buckets/objects/foldername`, Supabase's role statement timeouts, and deliberately
+**no** default grants — production has none), then every migration in version order with
+`ON_ERROR_STOP`, one transaction each: `supabase/migrations/*.sql` plus
+`supabase/migrations/adhoc-export/*.sql` (378 files; the export's seven `*_zzz_*` files are
+data-only edits of production rows and are skipped). Without the export the replay stops at
+`20260910090000_wa_number_verdict`: it alters `wa_contact_state`, which only the ad-hoc export
+creates. It then starts **PostgREST 16.4** (pinned; CI downloads the release tarball and checks
+its sha256) with `db-schemas=public`, `db-anon-role=anon`, `db-max-rows=1000` and a JWT secret
+generated per run, mints HS256 anon and service_role keys with `node:crypto`
+(`scripts/e2e/mint-keys.mjs`), and puts `scripts/e2e/proxy.mjs` on `127.0.0.1:54321`: it strips
+`/rest/v1` and passes headers through, refuses a request with no key (401, as Kong does), and
+answers `/auth/v1`, `/storage/v1`, `/functions/v1`, `/realtime/v1`, `/graphql/v1` with **501**
+and a JSON reason, so a test that needs them fails at once. It writes `apps/web/.env.e2e`
+(git-ignored): the 127.0.0.1 URL, the minted keys, `APP_SESSION_SECRET=e2e-secret`, `E2E=1`,
+`E2E_APP_URL`, `NEXT_PUBLIC_DEMO_AUTH=false`, `NEXT_PUBLIC_TENANT_SLUG=bhb-international` and
+every `*_READ_FROM_DB` / `*_DUAL_WRITE_DB` flag in `deploy/desk-cutover-runtime.env`; then seeds.
+Everything that reads that file goes through `scripts/e2e/with-env.mjs` (no dotenv-cli
+dependency): the child process gets the file plus PATH/HOME/locale only, it refuses a URL that is
+not `http://127.0.0.1:<port>` or names a hosted project, and it **refuses to run in a directory
+holding `.env.local`** (Next.js would load it, and it is production) — so the stack runs from a
+git worktree, never the shared checkout. Then `build` (`next build` with the e2e env —
+`NEXT_PUBLIC_*` are baked in, so rebuild after every `up`), `app` (`next start` on
+`127.0.0.1:3700`), `check`, `status`, `down` (stops everything, deletes the cluster and
+`.env.e2e`).
+Seed (`scripts/e2e-seed.ts` → `apps/web/e2e/seed.ts`, fixture in `apps/web/e2e/fixture.ts`, both
+typechecked and linted with the app): refuses unless pointed at 127.0.0.1 and refuses a database
+that already holds a school. The `tenants` row comes from migration
+`20260711000000_phase0_foundation`. Writes go through the app's own server functions:
+`pushMastersDeskToDb` (masters slices, `masters_desk_sync_meta`, row tables),
+`pushStaffRemoteServer`, `pushDeskSliceToDb('rbac' | 'module_registry')` from
+`defaultRbacState()` and the registry catalog defaults, `pushTimetableDeskToDb`, and
+`pushSisToDb` (asserted to have used `sis_push_guarded`, not the legacy fallback); then it reads
+every desk back through the app's readers and checks the counts. Fixture: 15 classes, 13
+sections, 44 subjects, 127 class–subject links, 35 staff (34 active), 250 active children in
+2026-27, 75 of them (30 %) with 2–4 per-year rows, 24 rows with a blank `academic_year_code`,
+two different children under one admission number (different years — the unique index allows
+nothing else), an all-inactive household, `0000000000` mobiles, an office member whose role is
+a Masters → Roles assignment, and a teacher whose only tie to any section is the published
+timetable — 401 student rows, 169 households. Logins: `apps/web/e2e/session.ts` mints
+`bhb_demo_session` with `signSession()` for the fixture's office, class-teacher and
+timetable-only-teacher `DemoSession`s, and refuses unless the process is on the e2e stack.
+Acceptance (`bash scripts/e2e-stack.sh check`, `apps/web/e2e/acceptance.ts`): through the proxy
+the service key reads the tenant and 15 classes, no key gets 401, the anon key reads no student,
+Auth/Storage answer 501; `/api/app-version` 200; `/home` without a session redirects to `/login`
+and with the office cookie renders 200; with the office cookie masters-desk returns 15
+classes, staff-roster 35 staff, sis-roster 401 rows / 169 households; with the class teacher's
+cookie sis-roster returns exactly her section's 51 rows and masters-desk the teaching subset.
+**Found by the stack:** the timetable-only teacher gets **0** students — on the server
+`loadTimetable()` is always empty and `ensureTimetableHydratedServer()` writes through a
+browser-only no-op, so `staffSectionScope()` never sees a published grid. The check records it
+as an expected failure (XFAIL) that turns red the day it is fixed. CI: job `e2e-stack`
+(`continue-on-error` until the director makes it required; later steps call it the `e2e` job)
+runs `up`, `build`, `app`, `check`, `down` on `ubuntu-latest`, uses no secret, and stops before
+checkout if a `*SERVICE_ROLE*` secret is visible to the workflow or such a variable is in its
+environment.
 
 **1.1 The gate that can see the symptoms.** Playwright in `apps/web/e2e/`, run by the `e2e`
 job against the 1.0 stack. Until a spec is green it runs `continue-on-error` with a scoreboard
@@ -749,7 +779,7 @@ stale tabs reload themselves). After 0.3, manual `deploy-online.sh` runs are not
 | `lib/sliceCas.server.ts` | a TypeScript read→compute→`update … eq(updated_at)` retry loop, not a lock, not callable from SQL | replaced by the RPCs | — |
 | per-row stamped writes | `lib/rowStampWrite.server.ts` (`UPDATE … WHERE updated_at = stamp`) | legacy routes only; no sync_meta bump | kept until Phase 6 |
 | session cookie | `bhb_demo_session`, `signSession(session)` in `lib/sessionCookie.server.ts:58`, `DemoSession` in `lib/auth.ts:5-16` | | 1.0 logins |
-| local database rehearsal | `scripts/rehearse-migrations.sh` (bare PG17, macOS-specific, no PostgREST) | migration rehearsals only — the app cannot run against it | — (1.0 uses `supabase start`) |
+| local database rehearsal | `scripts/rehearse-migrations.sh` (bare PG17, no PostgREST; `supabase/migrations` only, so 2 of 362 fail — see 1.0) | migration rehearsals only — the app cannot run against it | — (1.0 builds `scripts/e2e-stack.sh` on the same shim) |
 | deploy trigger config | `cloudbuild.deploy-on-merge.yaml`, `scripts/setup-deploy-on-merge.sh` | never created; smoke test only checks `/login` | 0.3 |
 | ratchets | `scripts/check-ratchets.sh` (one `case` per metric) + `scripts/ratchets.txt` (budgets) | | 1.6 |
 | change-signal sources | 35 `*_sync_meta` tables in production (`sis_sync_meta`, `masters_desk_sync_meta`, …); none for staff, module books or blobs | hence `erp_versions` | 1.3 |
