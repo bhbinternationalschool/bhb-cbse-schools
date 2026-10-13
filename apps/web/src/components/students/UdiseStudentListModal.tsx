@@ -8,6 +8,7 @@ import {
   downloadPdfReport,
   type ReportColumn,
 } from "@/lib/reportExport";
+import { maskAadhaarText } from "@/lib/sis";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import type { SortValue } from "@/lib/tableSort";
@@ -72,10 +73,14 @@ export function UdiseStudentListModal({
   for (const c of columns) sortColumns[c.key] = (r) => cellSortValue(r[c.key]);
   const sort = useTableSort(rows, sortColumns, "__order");
 
+  // The screen shows staff the full Aadhaar; a downloaded file carries the
+  // last four digits only (director, 14 Oct 2026).
   const exportRows = rows.map((r) => {
     const { _studentId, ...rest } = r;
     void _studentId;
-    return rest;
+    const out: Record<string, string | number | null | undefined> = {};
+    for (const [k, v] of Object.entries(rest)) out[k] = /aadhaar/i.test(k) ? maskAadhaarText(v) : v;
+    return out;
   });
 
   const firstKey = columns[0]?.key;
