@@ -44,7 +44,6 @@ function innermostFailedStep(steps: TestStep[]): TestStep | null {
 
 function firstLines(text: string | undefined, n = 6): string | null {
   if (!text) return null;
-  // eslint-disable-next-line no-control-regex
   const plain = text.replace(/\u001b\[[0-9;]*m/g, "");
   return plain.split("\n").filter((l) => l.trim()).slice(0, n).join("\n");
 }

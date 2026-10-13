@@ -68,16 +68,18 @@ export function note(testInfo: TestInfo, type: string, description: string): voi
 
 export const test = base.extend<GateOptions>({
   cpuThrottle: [1, { option: true }],
-  context: async ({ context }, use) => {
+  // The fixture callback is named `provide`, not Playwright's usual `use`:
+  // the React hooks lint rule would take `use(...)` for React's use().
+  context: async ({ context }, provide) => {
     await signIn(context, "office");
-    await use(context);
+    await provide(context);
   },
-  page: async ({ page, cpuThrottle }, use) => {
+  page: async ({ page, cpuThrottle }, provide) => {
     if (cpuThrottle > 1) {
       const cdp = await page.context().newCDPSession(page);
       await cdp.send("Emulation.setCPUThrottlingRate", { rate: cpuThrottle });
     }
-    await use(page);
+    await provide(page);
   },
 });
 
