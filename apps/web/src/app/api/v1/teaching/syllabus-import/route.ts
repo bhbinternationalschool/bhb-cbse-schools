@@ -8,13 +8,11 @@ import {
 import { assertClassSubjectScope } from "@/lib/api/v1/staffScope";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import {
-  ensureTeachingHydratedServer,
-  pushTeachingRemoteServer,
-} from "@/lib/teachingPersistence";
+  readTeachingStateServer,
+  saveTeachingStateServer,
+} from "@/lib/api/v1/teachingServer.server";
 import {
   importSyllabusUnits,
-  loadTeaching,
-  writeTeachingLocalRaw,
   type SyllabusImportChapter,
 } from "@/lib/teaching";
 
@@ -60,9 +58,7 @@ export async function POST(request: Request) {
     }
 
     await ensureSchoolMirrorHydrated();
-    await ensureTeachingHydratedServer();
-
-    const result = importSyllabusUnits(loadTeaching(), {
+    const result = importSyllabusUnits(await readTeachingStateServer(), {
       academicYearCode: ctx.session.academicYearCode,
       classId,
       subjectId,
@@ -70,8 +66,7 @@ export async function POST(request: Request) {
     });
     if (!result.ok) throw new ApiError("bad_request", result.error, 400);
 
-    writeTeachingLocalRaw(result.value.state);
-    const push = await pushTeachingRemoteServer(result.value.state);
+    const push = await saveTeachingStateServer(result.value.state);
     if (!push.ok) {
       console.warn("[teaching-v1] syllabus import push failed", push.error);
       throw new ApiError(
@@ -99,7 +94,7 @@ export async function POST(request: Request) {
     // pushing the whole teaching blob — which it may not — so it needs the
     // server's copy, ids included, rather than re-running the import locally
     // and minting different ids. The app reads only the summary fields.
-    const units = result.value.state.units.filter(
+    const units = push.state.units.filter(
       (u) =>
         u.academicYearCode === ctx.session.academicYearCode &&
         u.classId === classId &&

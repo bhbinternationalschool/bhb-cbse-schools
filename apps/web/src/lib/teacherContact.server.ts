@@ -19,20 +19,47 @@ import {
   teacherHoursOpen,
   type TeacherContact,
 } from "@/lib/teacherContact";
-import { findGrid, loadTimetable } from "@/lib/timetable";
+import { readTimetableStateServer } from "@/lib/api/v1/teachingServer.server";
+import type { TimetableState } from "@/lib/timetable";
 import { buildWaTemplateBodyComponent, sendWhatsAppTemplate, sendWhatsAppText } from "@/lib/waSend";
 import { approvedTemplatesServer } from "@/lib/waTemplatesRead.server";
 import { sendPushToSubjects } from "@/lib/webPush.server";
 
-/** Class teacher(s) first, then every teacher on the section's timetable. */
-export function teacherContactsFor(student: SisStudent, masters: MastersState = loadMasters()): TeacherContact[] {
-  const out: TeacherContact[] = [];
-  const seen = new Set<string>();
-  for (const t of resolveClassTeachers(masters, student.classId, student.sectionId, student.academicYearCode)) {
-    seen.add(t.id);
-    out.push({ staffId: t.id, name: t.fullName, role: "Class teacher", isClassTeacher: true, subjects: [] });
-  }
-  const grid = findGrid(student.academicYearCode, student.classId, student.sectionId, loadTimetable());
+function classTeacherContacts(student: SisStudent, masters: MastersState): TeacherContact[] {
+  return resolveClassTeachers(masters, student.classId, student.sectionId, student.academicYearCode).map((t) => ({
+    staffId: t.id,
+    name: t.fullName,
+    role: "Class teacher",
+    isClassTeacher: true,
+    subjects: [],
+  }));
+}
+
+/**
+ * Class teacher(s) first, then every teacher on the section's PUBLISHED
+ * timetable.
+ *
+ * `timetable` is the stored timetable (readTimetableStateServer). Until
+ * 13 Oct 2026 this read loadTimetable(), which is empty on the server, so a
+ * child's list only ever held class teachers and a parent could not reach a
+ * subject teacher at all.
+ *
+ * Published only, never the draft: only the published timetable gives a
+ * teacher a section's students (timetableScope.server.ts), so a parent is
+ * not handed a teacher who cannot see their child. With nothing published
+ * (production on 13 Oct: 13 drafts) the list is the class teachers — that
+ * is what the school has published, not a failed read; a failed read throws
+ * before this is called.
+ */
+export function teacherContactsFor(student: SisStudent, masters: MastersState, timetable: TimetableState): TeacherContact[] {
+  const out = classTeacherContacts(student, masters);
+  const seen = new Set(out.map((c) => c.staffId));
+  const grid = timetable.publishedGrids.find(
+    (g) =>
+      g.academicYearCode === student.academicYearCode &&
+      g.classId === student.classId &&
+      g.sectionId === student.sectionId,
+  );
   const bySubject = new Map<string, Set<string>>();
   for (const slot of grid?.slots ?? []) {
     if (!slot.teacherId || !slot.subjectId) continue;
@@ -67,12 +94,27 @@ export type RelayInput = {
 
 export type RelayResult =
   | { ok: true; id: string; teacherName: string; delivered: boolean; via: string }
-  | { ok: false; error: string };
+  /** `retry`: nothing was stored and nothing was decided — the parent should send again. */
+  | { ok: false; error: string; retry?: boolean };
 
 /** Store, then deliver now if the window is open; otherwise hold for the morning tick. */
 export async function relayTeacherMessage(input: RelayInput): Promise<RelayResult> {
   const masters = loadMasters();
-  const contact = teacherContactsFor(input.student, masters).find((c) => c.staffId === input.staffId);
+  // A class teacher comes from the masters alone, so a message to one does
+  // not wait on the timetable. Anyone else can only be found on it: when it
+  // cannot be read, whether this teacher teaches the child is unknown — the
+  // parent is asked to send again, never told "does not teach this child".
+  let contact = classTeacherContacts(input.student, masters).find((c) => c.staffId === input.staffId);
+  if (!contact) {
+    let timetable: TimetableState;
+    try {
+      timetable = await readTimetableStateServer();
+    } catch (e) {
+      console.error("[teacher-relay] timetable unreadable — message not stored", e);
+      return { ok: false, retry: true, error: "Could not check this child's teachers just now — please send again in a few minutes" };
+    }
+    contact = teacherContactsFor(input.student, masters, timetable).find((c) => c.staffId === input.staffId);
+  }
   if (!contact) return { ok: false, error: "That teacher does not teach this child" };
   const body = input.body.trim().slice(0, 2000);
   if (!body) return { ok: false, error: "Empty message" };

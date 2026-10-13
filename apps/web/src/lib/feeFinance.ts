@@ -299,6 +299,8 @@ export function exportTallyDayBookCsv(options?: {
     ],
     rows,
     fileBaseName: "tally_fee_daybook",
+    // An import file for Tally: a TOTAL line would be read as a voucher.
+    totals: false,
   });
 }
 

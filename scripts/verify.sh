@@ -397,6 +397,7 @@ SELFTESTS=(
   test:accounts-today-tile
   test:attendance-exception-ids
   test:voucher-amend
+  test:last-entry-cancelled-pairs
   test:lesson-plan-ai
   test:marketing-content-ai
   test:module-filters
@@ -427,6 +428,9 @@ SELFTESTS=(
   test:staff-home-kind
   test:staff-teaching-scope
   test:staff-scope-timetable
+  test:teaching-server-read
+  test:timetable-server-callers
+  test:teacher-contacts
   test:staff-month-calendar
   test:staff-roster-redact
   test:sis-class-teacher
@@ -479,6 +483,7 @@ SELFTESTS=(
   test:referrals
   test:report-export
   test:report-data-guard
+  test:report-export-format
   test:report-remark-ai
   test:salary-additional
   test:salary-gross-up

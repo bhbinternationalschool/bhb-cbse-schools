@@ -1101,7 +1101,11 @@ export async function handleWaSisBotInbound(opts: {
     const r = await relayTeacherMessage({ household: hh, student: child, staffId: relay.staffId, body: relay.message, channel: "whatsapp" });
     const ack = r.ok
       ? teacherRelayAck({ teacherName: r.teacherName, open: r.via !== "held", hindi })
-      : hindi ? `संदेश नहीं भेजा जा सका: ${r.error}` : `Could not send: ${r.error}`;
+      : r.retry
+        ? hindi
+          ? "अभी आपका संदेश नहीं भेजा जा सका। कृपया कुछ मिनट बाद वही संदेश दोबारा भेजें।"
+          : "Your message could not be sent just now. Please send the same message again in a few minutes."
+        : hindi ? `संदेश नहीं भेजा जा सका: ${r.error}` : `Could not send: ${r.error}`;
     return finishLanguageFlow(thread, parentMsg, ack);
   }
 
