@@ -424,6 +424,7 @@ SELFTESTS=(
   test:staff-teaching-scope
   test:staff-scope-timetable
   test:teaching-server-read
+  test:timetable-server-callers
   test:staff-month-calendar
   test:staff-roster-redact
   test:sis-class-teacher
