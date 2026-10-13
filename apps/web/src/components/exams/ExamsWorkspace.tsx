@@ -631,6 +631,11 @@ export function ExamsWorkspace() {
   // written back to the URL.
   useEffect(() => {
     if (urlAsksForTab(window.location.search, "papers")) setTab("papers");
+    // Reports Center links ("Open module") land on the report tabs they name
+    // (14 Oct 2026: /exams?tab=result_reports opened the dashboard).
+    for (const t of ["result_reports", "results", "reports"] as const) {
+      if (urlAsksForTab(window.location.search, t)) setTab(t);
+    }
   }, []);
   const [masters, setMasters] = useState<MastersState | null>(() =>
     typeof window !== "undefined" ? loadMasters() : null,

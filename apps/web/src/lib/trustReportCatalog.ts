@@ -18,6 +18,8 @@ import {
   loadTrust,
   type TrustState,
 } from "@/lib/trust";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type TrustReportFormat = "excel" | "pdf";
 
@@ -98,6 +100,9 @@ export function runTrustReport(
   id: TrustReportId,
   filters: TrustReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("trust", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const trust = filters.trust ?? loadTrust();
   const project = filters.projectId
     ? trust.projects.find((p) => p.id === filters.projectId)

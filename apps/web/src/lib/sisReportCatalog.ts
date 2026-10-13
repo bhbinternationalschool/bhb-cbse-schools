@@ -25,6 +25,7 @@ import {
   type SisState,
   type SisStudent,
   type StudentDocKey,
+  studentsInSession,
 } from "@/lib/sis";
 import {
   STUDENT_REGISTER_EXPORT_COLUMNS,
@@ -39,6 +40,8 @@ import {
   isUdiseFullyCompliant,
   loadUdiseComplianceSettings,
 } from "@/lib/udiseCompliance";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type SisReportFormat = "excel" | "pdf";
 
@@ -55,7 +58,9 @@ export type SisReportId =
   | "category_wise"
   | "students_notes"
   | "student_tags"
-  | "udise_compliance";
+  | "udise_compliance"
+  | "strength_matrix"
+  | "udise_age_matrix";
 
 export type SisReportCategory = "downloads" | "registers" | "analytics";
 
@@ -147,6 +152,18 @@ export const SIS_REPORTS: SisReportDef[] = [
     category: "analytics",
     label: "Student strength report",
   },
+  {
+    id: "strength_matrix",
+    category: "analytics",
+    label: "Strength by gender, category & RTE",
+    hint: "Class × section: boys, girls, GEN/OBC/SC/ST/EWS, RTE, CWSN",
+  },
+  {
+    id: "udise_age_matrix",
+    category: "analytics",
+    label: "UDISE+ age matrix",
+    hint: "Class × age as on the 'To' date (default 30 Sep), by gender",
+  },
 ];
 
 export type SisReportFilters = {
@@ -206,6 +223,13 @@ function classSection(
   };
 }
 
+/** A child's class position in the school's own order (Masters sortOrder). */
+function classOrder(masters: MastersState, s: { classId?: string; sectionId?: string }): number {
+  const classId = s.classId || masters.sections.find((x) => x.id === s.sectionId)?.classId || "";
+  const c = masters.classes.find((x) => x.id === classId);
+  return typeof c?.sortOrder === "number" ? c.sortOrder : 9999;
+}
+
 export function filterSisStudents(
   sis: SisState,
   masters: MastersState,
@@ -223,13 +247,19 @@ export function filterSisStudents(
     filters.academicYearCode === "all"
       ? ""
       : filters.academicYearCode || currentAcademicYearCode();
-  if (reportAy) {
-    rows = rows.filter(
-      (s) => !s.academicYearCode || s.academicYearCode === reportAy,
-    );
-  }
-  if (status !== "all") {
-    rows = rows.filter((s) => s.status === status);
+  if (status === "active" && reportAy) {
+    // The session's children ONCE each (studentsInSession): a child can
+    // carry two rows in one year, and every report row is a child.
+    rows = studentsInSession(sis, reportAy);
+  } else {
+    if (reportAy) {
+      rows = rows.filter(
+        (s) => !s.academicYearCode || s.academicYearCode === reportAy,
+      );
+    }
+    if (status !== "all") {
+      rows = rows.filter((s) => s.status === status);
+    }
   }
   if (filters.classId) {
     rows = rows.filter((s) => {
@@ -257,6 +287,11 @@ export function filterSisStudents(
   }
 
   return rows.sort((a, b) => {
+    // School order (Masters sortOrder), not alphabetical — "IX" sorted
+    // before "LKG" and "X" after "VIII".
+    const oa = classOrder(masters, a);
+    const ob = classOrder(masters, b);
+    if (oa !== ob) return oa - ob;
     const ca = classSection(a, masters).className;
     const cb = classSection(b, masters).className;
     if (ca !== cb) return ca.localeCompare(cb);
@@ -516,6 +551,132 @@ function runPromoted(
   };
 }
 
+/** Class × section strength split the way UDISE+ and the board ask. */
+function runStrengthMatrix(students: SisStudent[], masters: MastersState) {
+  type Row = Record<string, string | number> & { _order: number };
+  const map = new Map<string, Row>();
+  const cats = ["GEN", "OBC", "SC", "ST", "EWS"] as const;
+  for (const s of students) {
+    const { className: cn, section } = classSection(s, masters);
+    const key = `${cn}|${section}`;
+    const row =
+      map.get(key) ??
+      ({
+        className: cn,
+        section,
+        boys: 0,
+        girls: 0,
+        other: 0,
+        ...Object.fromEntries(cats.map((c) => [c.toLowerCase(), 0])),
+        noCategory: 0,
+        rte: 0,
+        cwsn: 0,
+        total: 0,
+        _order: classOrder(masters, s),
+      } as Row);
+    row.total = Number(row.total) + 1;
+    const g = s.gender === "M" ? "boys" : s.gender === "F" ? "girls" : "other";
+    row[g] = Number(row[g]) + 1;
+    const c = (cats as readonly string[]).includes(s.category) ? s.category.toLowerCase() : "noCategory";
+    row[c] = Number(row[c]) + 1;
+    if (s.studentType === "RTE") row.rte = Number(row.rte) + 1;
+    if (s.isCwsn) row.cwsn = Number(row.cwsn) + 1;
+    map.set(key, row);
+  }
+  const rows = [...map.values()]
+    .sort((a, b) => a._order - b._order || String(a.section).localeCompare(String(b.section)))
+    .map((r) => {
+      const out: Record<string, string | number> = { ...r };
+      delete out._order;
+      return out;
+    });
+  return {
+    columns: [
+      { key: "className", header: "Class", width: 0.7 },
+      { key: "section", header: "Sec", width: 0.5 },
+      { key: "boys", header: "Boys", width: 0.5, align: "right" as const },
+      { key: "girls", header: "Girls", width: 0.5, align: "right" as const },
+      { key: "other", header: "Other / not set", width: 0.6, align: "right" as const },
+      ...cats.map((c) => ({ key: c.toLowerCase(), header: c, width: 0.5, align: "right" as const })),
+      { key: "noCategory", header: "Category not set", width: 0.7, align: "right" as const },
+      { key: "rte", header: "RTE", width: 0.5, align: "right" as const },
+      { key: "cwsn", header: "CWSN", width: 0.5, align: "right" as const },
+      { key: "total", header: "Total students", width: 0.6, align: "right" as const },
+    ],
+    rows,
+  };
+}
+
+/**
+ * UDISE+ asks enrolment by class × age × gender. Age is completed years on
+ * the "as on" date (the To date; else 30 September of the session). A child
+ * without a usable date of birth is counted in "DOB missing"; an age outside
+ * 2–25 in "DOB doubtful" — never placed in an age column by guess (birth
+ * dates were corrupted day↔month on import, see the 8 Oct 2026 repair).
+ */
+function runUdiseAgeMatrix(students: SisStudent[], masters: MastersState, ay: string, asOnRaw?: string) {
+  const asOn = /^\d{4}-\d{2}-\d{2}$/.test(asOnRaw || "") ? asOnRaw! : `${(ay || "").slice(0, 4) || new Date().getFullYear()}-09-30`;
+  const at = new Date(`${asOn}T12:00:00`);
+  const AGES = Array.from({ length: 16 }, (_, i) => i + 3); // 3 … 18
+  type Row = Record<string, string | number> & { _order: number };
+  const map = new Map<string, Row>();
+  for (const s of students) {
+    const { className: cn } = classSection(s, masters);
+    const gender = s.gender === "M" ? "Boys" : s.gender === "F" ? "Girls" : "Not set";
+    const key = `${cn}|${gender}`;
+    const row =
+      map.get(key) ??
+      ({
+        className: cn,
+        gender,
+        under3: 0,
+        ...Object.fromEntries(AGES.map((a) => [`a${a}`, 0])),
+        over18: 0,
+        dobMissing: 0,
+        dobDoubtful: 0,
+        total: 0,
+        _order: classOrder(masters, s),
+      } as Row);
+    row.total = Number(row.total) + 1;
+    const age = ageYears(s.dob, at);
+    let col: string;
+    if (age === "") col = "dobMissing";
+    else if (age < 2 || age > 25) col = "dobDoubtful";
+    else if (age < 3) col = "under3";
+    else if (age > 18) col = "over18";
+    else col = `a${age}`;
+    row[col] = Number(row[col]) + 1;
+    map.set(key, row);
+  }
+  const rows = [...map.values()]
+    .sort((a, b) => a._order - b._order || String(a.gender).localeCompare(String(b.gender)))
+    .map((r) => {
+      const out: Record<string, string | number> = { ...r };
+      delete out._order;
+      return out;
+    });
+  return {
+    asOn,
+    columns: [
+      { key: "className", header: "Class", width: 0.6 },
+      { key: "gender", header: "Gender", width: 0.6 },
+      { key: "under3", header: "<3", width: 0.35, align: "right" as const },
+      ...AGES.map((a) => ({ key: `a${a}`, header: String(a), width: 0.35, align: "right" as const })),
+      { key: "over18", header: ">18", width: 0.35, align: "right" as const },
+      { key: "dobMissing", header: "DOB missing", width: 0.6, align: "right" as const },
+      { key: "dobDoubtful", header: "DOB doubtful", width: 0.6, align: "right" as const },
+      { key: "total", header: "Total students", width: 0.6, align: "right" as const },
+    ],
+    rows,
+  };
+}
+
+/** Self-test access (lib/reportsRegistersNew.selftest.ts). */
+export const __sisReportInternalsForTests = {
+  strengthMatrix: (students: SisStudent[], masters: MastersState) => runStrengthMatrix(students, masters),
+  udiseAgeMatrix: (students: SisStudent[], masters: MastersState, ay: string, asOn?: string) => runUdiseAgeMatrix(students, masters, ay, asOn),
+};
+
 function runStrength(
   students: SisStudent[],
   masters: MastersState,
@@ -541,8 +702,9 @@ function runStrength(
     cur.total += 1;
     map.set(key, cur);
   }
-  const rows = [...map.values()].sort((a, b) =>
-    `${a.className}-${a.section}`.localeCompare(`${b.className}-${b.section}`),
+  const order = (name: string) => masters.classes.find((c) => c.name === name)?.sortOrder ?? 9999;
+  const rows = [...map.values()].sort(
+    (a, b) => order(a.className) - order(b.className) || `${a.className}-${a.section}`.localeCompare(`${b.className}-${b.section}`),
   );
   const totals = rows.reduce(
     (acc, r) => ({
@@ -762,6 +924,9 @@ export function runSisReport(
   id: SisReportId,
   filters: SisReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("sis", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   // Every format here is a file download of children's records (names,
   // DOB, category, Aadhaar-bearing registers). "students.view" — which
   // every teacher holds — used to be enough.
@@ -780,6 +945,7 @@ export function runSisReport(
     columns: ReportColumn[];
     rows: Record<string, string | number>[];
   };
+  let ageAsOn = "";
 
   switch (id) {
     case "custom_download":
@@ -806,6 +972,15 @@ export function runSisReport(
     case "student_strength":
       built = runStrength(students, masters);
       break;
+    case "strength_matrix":
+      built = runStrengthMatrix(students, masters);
+      break;
+    case "udise_age_matrix": {
+      const m = runUdiseAgeMatrix(students, masters, ay, filters.toDate);
+      built = { columns: m.columns, rows: m.rows };
+      ageAsOn = m.asOn;
+      break;
+    }
     case "admission_register":
       built = runAdmissionRegister(students, sis, masters);
       break;
@@ -836,7 +1011,7 @@ export function runSisReport(
     {
       title,
       subtitle: `${TENANT.shortName} · ${ay}`,
-      filterNote: note,
+      filterNote: ageAsOn ? `${note} · Age as on ${ageAsOn}` : note,
       columns: built.columns,
       rows: built.rows,
       fileBaseName: `sis_${id}`,

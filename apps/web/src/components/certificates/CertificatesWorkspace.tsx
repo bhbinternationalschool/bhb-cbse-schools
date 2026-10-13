@@ -114,6 +114,11 @@ export function CertificatesWorkspace() {
   const holdDecisions = useHoldDecisions();
   const session = useDemoSession();
   const [tab, setTab] = useState<Tab>("desk");
+  // ?tab=reports (Reports Center "Open module") — read once, on the client.
+  useEffect(() => {
+    const asked = new URLSearchParams(window.location.search).get("tab");
+    if (asked === "reports" || asked === "dashboard" || asked === "desk") setTab(asked);
+  }, []);
   const [certStep, setCertStep] = useState<CertStep>("student");
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);

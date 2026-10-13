@@ -23,6 +23,8 @@ import {
   teachingPeriods,
   type TimetableState,
 } from "@/lib/timetable";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type TimetableReportFormat = "excel" | "pdf";
 
@@ -288,8 +290,11 @@ function runSubstitutionRegister(
   tt: TimetableState,
   fromDate?: string,
   toDate?: string,
+  ay?: string,
 ) {
+  // The selected session only (with no dates it listed every year's).
   const rows = tt.substitutions
+    .filter((s) => !ay || !s.academicYearCode || s.academicYearCode === ay)
     .filter((s) => (!fromDate || s.date >= fromDate) && (!toDate || s.date <= toDate))
     .sort((a, b) => a.date.localeCompare(b.date) || a.periodNo - b.periodNo)
     .map((s) => ({
@@ -329,6 +334,9 @@ export function runTimetableReport(
   id: TimetableReportId,
   filters: TimetableReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("timetable", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const masters = filters.masters ?? loadMasters();
   const tt = filters.timetable ?? loadTimetable();
   const ay = filters.academicYearCode || currentAcademicYearCode(masters);
@@ -358,7 +366,7 @@ export function runTimetableReport(
       built = runFreePeriods(masters, tt, ay, filters.weekday);
       break;
     case "substitution_register":
-      built = runSubstitutionRegister(masters, tt, filters.fromDate, filters.toDate);
+      built = runSubstitutionRegister(masters, tt, filters.fromDate, filters.toDate, ay);
       break;
     default:
       return { ok: false, error: "Unknown report" };

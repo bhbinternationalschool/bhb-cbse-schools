@@ -21,6 +21,8 @@ import {
   type SchoolNewsItem,
   type SchoolNotice,
 } from "@/lib/schoolComms";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type CommsReportFormat = "excel" | "pdf";
 
@@ -146,6 +148,9 @@ export function runCommsReport(
   id: CommsReportId,
   filters: CommsReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("comms", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const state = filters.state ?? loadSchoolComms();
   const def = COMMS_REPORTS.find((r) => r.id === id);
   const title = def?.label ?? id;

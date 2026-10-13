@@ -41,6 +41,8 @@ import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { recordRteDeletion } from "@/lib/rteNormalizedClient";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 const STORAGE_KEY = "bhb_rte_ews_v1";
 
@@ -140,7 +142,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */;
 }
 
 export function emptyRteState(): RteState {
@@ -1480,10 +1482,11 @@ export function listReadyForSis(state?: RteState): QuotaApplication[] {
   );
 }
 
-export function listEnrolledRteStudents(sis?: SisState) {
+export function listEnrolledRteStudents(sis?: SisState, academicYearCode?: string) {
   const state = sis ?? loadSis();
-  // A government-facing register: one row per child, this session.
-  return studentsInSession(state, currentAcademicYearCode())
+  // A government-facing register: one row per child, for the session asked
+  // (the report passed its year and this ignored it).
+  return studentsInSession(state, academicYearCode || currentAcademicYearCode())
     .filter(
       (s) =>
         (s.studentType === "RTE" || s.category === "EWS"),
@@ -1842,6 +1845,9 @@ export function runRteReport(
     rte?: RteState;
   },
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("rte", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const rte = filters.rte ?? loadRte();
   const ay = filters.academicYearCode || DEFAULT_AY;
   const note = describeFilters([TENANT.shortName, ay, todayIso()]);
@@ -1923,7 +1929,7 @@ export function runRteReport(
   }
 
   const masters = loadMasters();
-  const rows = listEnrolledRteStudents().map((s) => ({
+  const rows = listEnrolledRteStudents(undefined, ay).map((s) => ({
     name: s.fullName,
     class: masters.classes.find((c) => c.id === s.classId)?.name || s.classId,
     type: s.studentType,

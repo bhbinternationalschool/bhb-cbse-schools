@@ -212,7 +212,7 @@ export function StaffLeaveReportsPanel({
             {reports.map((r) => {
               const active = reportId === r.id;
               return (
-                <li key={r.id}>
+                <li key={r.id} data-report-id={r.id}>
                   <button
                     type="button"
                     onClick={() => setReportId(r.id)}
