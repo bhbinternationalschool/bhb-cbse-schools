@@ -120,6 +120,9 @@ function buildClassSubjects(): ClassSubjectLink[] {
         subjectId: subjectId(code),
         periodsPerWeek: 5,
         isActive: true,
+        // As every link the app writes has it (masters_desk_class_subjects.is_optional
+        // is NOT NULL); a slice row without it fails the row sync of the next save.
+        isOptional: false,
       });
     }
   }
@@ -155,7 +158,8 @@ const DESIGNATIONS: Designation[] = [
 
 export const staffId = (n: number) => `e2e_stf_${pad(n, 2)}`;
 
-/** The three people the tests sign in as. */
+/** The people the tests sign in as. */
+export const PRINCIPAL_STAFF = 1;
 export const OFFICE_STAFF = 2;
 export const TIMETABLE_TEACHER = 3;
 /** Class teacher of Nursery-A (section 1), nothing else. */
@@ -187,7 +191,7 @@ function staffRecord(n: number): StaffRecord {
     status: "active" as const,
     gender: (n === TIMETABLE_TEACHER || (n >= 4 && n <= 16) ? "F" : "M") as "F" | "M",
   };
-  if (n === 1) {
+  if (n === PRINCIPAL_STAFF) {
     return normalizeStaffRecord({ ...base, stream: "non_teaching", departmentId: "e2e_dep_admin", designationId: "e2e_des_principal" });
   }
   if (n === OFFICE_STAFF) {
@@ -451,7 +455,13 @@ export type E2eFixture = {
   moduleRegistry: ModuleRegistryState;
   timetable: TimetableState;
   sis: { households: Household[]; students: SisStudent[] };
-  sessions: { office: DemoSession; teacher: DemoSession; timetableTeacher: DemoSession };
+  /**
+   * office — Office role by Masters → Roles assignment (Masters: view only);
+   * principal — the Principal (built-in principal role: may edit Masters; the
+   * propagation specs make their Masters changes as her);
+   * teacher — class teacher of Nursery-A; timetableTeacher — timetable-only.
+   */
+  sessions: { office: DemoSession; principal: DemoSession; teacher: DemoSession; timetableTeacher: DemoSession };
   expected: {
     classes: number;
     sections: number;
@@ -520,6 +530,7 @@ export function buildFixture(): E2eFixture {
     sis,
     sessions: {
       office: session(OFFICE_STAFF, "office"),
+      principal: session(PRINCIPAL_STAFF, "principal"),
       teacher: session(CLASS_TEACHER, "teacher"),
       timetableTeacher: session(TIMETABLE_TEACHER, "teacher"),
     },

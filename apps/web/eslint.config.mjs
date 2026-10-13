@@ -18,6 +18,9 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      // Playwright gate outputs (step 1.1): generated, never committed.
+      "e2e/report/**",
+      "e2e/test-results/**",
     ],
   },
   {
