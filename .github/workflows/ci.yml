@@ -197,6 +197,9 @@ jobs:
       - name: Self-test — payroll Mark paid uses the real pay date
         working-directory: apps/web
         run: npm run test:payroll-paid-on
+      - name: Test — payroll loss of pay and advance recoveries are not posted as statutory dues
+        working-directory: apps/web
+        run: npm run test:payroll-deduction-heads
 
       - name: Self-test — Masters function grants, own classes only
         working-directory: apps/web
