@@ -26,7 +26,7 @@ import "documents_screen.dart";
 import "fee_counter_screen.dart";
 import "fee_defaulters_screen.dart";
 import "my_collections_screen.dart";
-import "survey_screen.dart";
+import "survey_day_screen.dart";
 import "marks_screen.dart";
 import "payslips_screen.dart";
 import "ptm_teacher_screen.dart";
@@ -538,7 +538,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       case "Admission leads":
         await _pushScreen(AdmissionLeadsScreen(api: widget.api));
       case "Field survey":
-        await _pushScreen(SurveyScreen(api: widget.api));
+        await _pushScreen(SurveyDayScreen(api: widget.api));
       case "Broadcast":
         await _pushScreen(BroadcastScreen(api: widget.api));
       case "Staff leave":

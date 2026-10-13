@@ -19,7 +19,7 @@ import "documents_screen.dart";
 import "fee_counter_screen.dart";
 import "fee_defaulters_screen.dart";
 import "my_collections_screen.dart";
-import "survey_screen.dart";
+import "survey_day_screen.dart";
 import "visitor_gate_screen.dart";
 import "home_groups.dart";
 import "leave_approvals_screen.dart";
@@ -403,7 +403,7 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
           icon: Icons.map_outlined,
           label: "Field survey",
           tone: ModuleTone.amber,
-          onTap: () => _push(SurveyScreen(api: widget.api)),
+          onTap: () => _push(SurveyDayScreen(api: widget.api)),
         ),
       ),
     if (_features.has("visitor_gate"))

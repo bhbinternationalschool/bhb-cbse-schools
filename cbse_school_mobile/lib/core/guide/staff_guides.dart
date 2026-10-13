@@ -840,6 +840,35 @@ const List<ScreenGuide> staffScreenGuides = [
     ],
   ),
   ScreenGuide(
+    id: "survey-day",
+    titleEn: "Your survey day: start, break, end and record families",
+    titleHi: "सर्वे दिवस: शुरू, ब्रेक, समाप्त और परिवार दर्ज करें",
+    stepsEn: [
+      "Choose your **Beat (area) today**. If you start at school, type the **6-digit code on the gate QR screen**.",
+      "Tap **Start survey** — your live location is saved.",
+      "At each house tap **Record a family**, fill the form, tick the parent's consent and tap **Save family**.",
+      "Tap **Break** when you stop and **Resume** when you start again.",
+      "Tap **End survey** when you finish for the day.",
+    ],
+    stepsHi: [
+      "**Beat (area) today** में अपना क्षेत्र चुनें। स्कूल से शुरू करते हैं तो **गेट QR स्क्रीन का 6 अंकों का कोड** लिखें।",
+      "**Start survey** दबाएँ — आपकी लाइव लोकेशन सेव होती है।",
+      "हर घर पर **Record a family** दबाएँ, फ़ॉर्म भरें, अभिभावक की सहमति पर निशान लगाएँ और **Save family** दबाएँ।",
+      "रुकें तो **Break**, फिर शुरू करें तो **Resume** दबाएँ।",
+      "दिन का काम पूरा होने पर **End survey** दबाएँ।",
+    ],
+    tipsEn: [
+      "If it says the phone is not registered, punch IN once at the gate from this app, or type the office's pairing code.",
+      "If your location is too rough, turn on GPS and step outside for a moment.",
+      "School staff are marked present for the day when the survey starts.",
+    ],
+    tipsHi: [
+      "फ़ोन पंजीकृत नहीं बताए तो इसी ऐप से गेट पर एक बार IN पंच करें, या ऑफ़िस का पेयरिंग कोड लिखें।",
+      "लोकेशन सटीक न हो तो GPS चालू करें और थोड़ी देर बाहर खुले में जाएँ।",
+      "सर्वे शुरू होते ही स्कूल स्टाफ़ उस दिन उपस्थित माने जाते हैं।",
+    ],
+  ),
+  ScreenGuide(
     id: "field-survey",
     titleEn: "Record families during a field survey",
     titleHi: "सर्वे में परिवारों को दर्ज करें",
