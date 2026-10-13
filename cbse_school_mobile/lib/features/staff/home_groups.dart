@@ -33,7 +33,8 @@ const kStaffGroupHindi = <String, String>{
 };
 
 /// Mirror of apps/web/src/lib/mobileFeatures.ts (each feature's `group`)
-/// plus the features the server injects, and the app-only "my_profile".
+/// plus the features the server injects, and the app-only "my_profile" and
+/// "my_attendance".
 const kLocalFeatureGroups = <String, String>{
   "fee_take": "Fees",
   "fee_defaulters": "Fees",
@@ -69,7 +70,12 @@ const kLocalFeatureGroups = <String, String>{
   "notices": "Self service",
   "messages": "Self service",
   "my_profile": "Self service",
+  "my_attendance": "Self service",
 };
+
+/// App-side tiles for a person's own records — not grants, so every staff
+/// home shows them whatever the ERP's feature list says.
+const kAlwaysShownStaffFeatures = <String>{"my_profile", "my_attendance"};
 
 /// The heading a feature's tile sits under: the server's word first, then
 /// the local mirror, then "Self service".

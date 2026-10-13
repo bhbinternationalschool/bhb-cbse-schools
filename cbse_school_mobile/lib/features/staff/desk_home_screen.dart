@@ -17,6 +17,7 @@ import "my_collections_screen.dart";
 import "survey_screen.dart";
 import "home_groups.dart";
 import "leave_approvals_screen.dart";
+import "my_attendance_calendar_screen.dart";
 import "my_profile_screen.dart";
 import "payslips_screen.dart";
 import "self_attendance_screen.dart";
@@ -229,6 +230,16 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
     (api) => MyProfileScreen(api: api),
   );
 
+  /// My month of attendance — the person's own record, always shown.
+  static final _attendanceTile = _Tile(
+    "My attendance",
+    "मेरी हाज़िरी",
+    Icons.calendar_month_outlined,
+    ModuleTone.teal,
+    "my_attendance",
+    (api) => MyAttendanceCalendarScreen(api: api),
+  );
+
   @override
   void initState() {
     super.initState();
@@ -296,6 +307,15 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
         _push(noticesScreenForRoute(widget.api, Uri.tryParse(raw)));
       case "/profile":
         _openProfile();
+      case "/my-attendance":
+        _push(
+          MyAttendanceCalendarScreen(
+            api: widget.api,
+            initialMonth: Uri.tryParse(raw)?.queryParameters["month"],
+          ),
+        );
+      case "/payslips":
+        _push(PayslipsScreen(api: widget.api));
     }
   }
 
@@ -338,7 +358,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
     ].where((t) => _features.has(t.feature)).toList();
     // My profile is everyone's own record, not a grant — always shown.
     final groups = groupStaffTiles(
-      [...tiles, _profileTile],
+      [...tiles, _attendanceTile, _profileTile],
       (t) => staffGroupOf(_features, t.feature),
       order: _features.groupOrder,
     );

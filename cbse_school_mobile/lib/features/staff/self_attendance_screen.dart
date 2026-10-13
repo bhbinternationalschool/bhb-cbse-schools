@@ -12,6 +12,7 @@ import "../../core/ui/haptics.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../../core/punch/punch_device_key.dart";
 import "../../core/punch/phone_id.dart";
+import "my_attendance_calendar_screen.dart";
 
 /// The six digits from the office QR ("…/punch?c=482913") or as typed.
 String punchCodeFrom(String raw) {
@@ -220,7 +221,14 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        actions: [ScreenGuideButton(guideId: "self-attendance", screenLabel: "self-attendance")],
+        actions: [
+          IconButton(
+            tooltip: "My month · मेरा महीना",
+            onPressed: _openMonth,
+            icon: const Icon(Icons.calendar_month_outlined),
+          ),
+          ScreenGuideButton(guideId: "self-attendance", screenLabel: "self-attendance"),
+        ],
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -379,10 +387,26 @@ class _SelfAttendanceScreenState extends State<SelfAttendanceScreen> {
                             ),
                           ),
                   ),
+                const SizedBox(height: 12),
+                // The whole month, coloured the way payroll counts it.
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(46),
+                  ),
+                  onPressed: _openMonth,
+                  icon: const Icon(Icons.calendar_month_outlined),
+                  label: const Text("My month · मेरा महीना"),
+                ),
               ],
             ),
     );
   }
+
+  void _openMonth() => Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => MyAttendanceCalendarScreen(api: widget.api),
+    ),
+  );
 }
 
 class _TimeBox extends StatelessWidget {
