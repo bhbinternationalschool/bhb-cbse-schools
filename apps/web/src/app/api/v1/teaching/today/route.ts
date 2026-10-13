@@ -1,13 +1,13 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
-import { ensureTeachingHydratedServer } from "@/lib/teachingPersistence";
-import { loadTimetable } from "@/lib/timetable";
+import {
+  readTeachingStateServer,
+  readTimetableStateServer,
+} from "@/lib/api/v1/teachingServer.server";
 import {
   computeDelivery,
   istDateOf,
-  loadTeaching,
   resolveExpectedPeriods,
   resourcesForUnits,
 } from "@/lib/teaching";
@@ -48,14 +48,16 @@ export async function GET(request: Request) {
     const date = url.searchParams.get("date")?.trim() || istDateOf();
 
     await ensureSchoolMirrorHydrated();
-    await Promise.all([
-      ensureTimetableHydratedServer(),
-      ensureTeachingHydratedServer(),
+    // Server truth, both read up front: a plan or timetable that cannot be
+    // read is a 503, never "no classes" / "no chapters".
+    const [timetable, teaching] = await Promise.all([
+      readTimetableStateServer(),
+      readTeachingStateServer(),
     ]);
 
     const ay = ctx.session.academicYearCode;
     const expected = resolveExpectedPeriods({
-      timetable: loadTimetable(),
+      timetable,
       masters: ctx.masters,
       academicYearCode: ay,
       date,
@@ -73,7 +75,6 @@ export async function GET(request: Request) {
       });
     }
 
-    const teaching = loadTeaching();
     const rows = computeDelivery({
       expected: expected.periods,
       logs: teaching.logs,
