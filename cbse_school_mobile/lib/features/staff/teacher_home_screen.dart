@@ -15,6 +15,7 @@ import "../modules/syllabus_scan_screen.dart";
 import "../modules/teaching_screen.dart";
 import "attendance_screen.dart";
 import "broadcast_screen.dart";
+import "class_message_screen.dart";
 import "leave_approvals_screen.dart";
 import "principal_lists.dart";
 import "staff_roster_screen.dart";
@@ -138,6 +139,13 @@ const _staffModules = [
     "complaints_handle",
   ),
   _StaffModule("PTM", Icons.groups_outlined, ModuleTone.purple, "ptm_meet"),
+  // My own sections' families (not the principal's school-wide Broadcast).
+  _StaffModule(
+    "Message my classes",
+    Icons.forum_outlined,
+    ModuleTone.coral,
+    "class_broadcast",
+  ),
   _StaffModule(
     "Class gallery",
     Icons.photo_library_outlined,
@@ -548,6 +556,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         await _pushScreen(StaffComplaintsScreen(api: widget.api));
       case "PTM":
         await _pushScreen(PtmTeacherScreen(api: widget.api));
+      case "Message my classes":
+        await _pushScreen(ClassMessageScreen(api: widget.api));
       case "Class gallery":
         await _pushScreen(ClassGalleryScreen(api: widget.api));
       case "My subjects":

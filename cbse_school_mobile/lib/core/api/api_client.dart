@@ -18,6 +18,7 @@ part "staff_api.dart";
 part "online_classes_api.dart";
 part "my_class_api.dart";
 part "self_service_api.dart";
+part "teacher_tools_api.dart";
 
 /// Session cookie minted by the ERP (see web /api/auth/*).
 const _cookieName = "bhb_demo_session";

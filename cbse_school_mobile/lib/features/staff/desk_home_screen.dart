@@ -9,6 +9,8 @@ import "../modules/chat_inbox_screen.dart";
 import "../modules/notice_detail_screen.dart";
 import "../modules/notices_screen.dart";
 import "admission_leads_screen.dart";
+import "class_message_screen.dart";
+import "ptm_teacher_screen.dart";
 import "documents_screen.dart";
 import "fee_counter_screen.dart";
 import "fee_defaulters_screen.dart";
@@ -231,6 +233,24 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       ModuleTone.teal,
       "messages",
       (api) => ChatInboxScreen(api: api),
+    ),
+    // An office-like member of staff may teach a section too; both tiles
+    // show only when the ERP grants them.
+    _Tile(
+      "Message my classes",
+      "कक्षा को संदेश",
+      Icons.forum_outlined,
+      ModuleTone.coral,
+      "class_broadcast",
+      (api) => ClassMessageScreen(api: api),
+    ),
+    _Tile(
+      "PTM",
+      "पीटीएम",
+      Icons.groups_outlined,
+      ModuleTone.purple,
+      "ptm_meet",
+      (api) => PtmTeacherScreen(api: api),
     ),
     _Tile(
       "Staff contacts",
