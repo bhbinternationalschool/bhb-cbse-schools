@@ -159,7 +159,9 @@ export function NotificationBell({
                       href={
                         persona === "parent"
                           ? "/parent"
-                          : n.href || "/comms"
+                          : n.kind === "notice" && n.sourceId
+                            ? `/comms?tab=notices&notice=${encodeURIComponent(n.sourceId)}`
+                            : n.href || "/comms"
                       }
                       onClick={() => onOpenItem(n)}
                       className={`block px-3 py-2.5 hover:bg-[var(--surface-sunken)] ${

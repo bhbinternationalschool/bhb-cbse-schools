@@ -501,7 +501,7 @@ async function pushNoticeNotifications(notice: SchoolNotice) {
     title: notice.title,
     body: notice.body.slice(0, 160),
     kind: "notice",
-    href: "/comms?tab=notices",
+    href: `/comms?tab=notices&notice=${encodeURIComponent(notice.id)}`,
     audience: notice.audience,
     sourceId: notice.id,
   });

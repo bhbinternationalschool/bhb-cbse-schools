@@ -4412,7 +4412,7 @@ async function runConfirmedWrite(
       title: `${session.fullName} · ${TENANT.shortName}`,
       body: r.message && r.message.length > 200 ? `${r.message.slice(0, 197)}…` : r.message || "",
       url: "/notices",
-      data: { kind: "broadcast" },
+      data: { kind: "broadcast", fullText: (r.message || "").slice(0, 3000), sender: session.fullName || "" },
     }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));
 
     let wa = { recipientCount: 0, skippedOptOut: 0, sent: 0, failed: 0 };
