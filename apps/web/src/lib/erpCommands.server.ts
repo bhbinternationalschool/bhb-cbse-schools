@@ -3172,11 +3172,19 @@ async function busManifest(
   const ay =
     live.map((a) => a.academicYearCode).filter(Boolean).sort().pop() || session.academicYearCode;
   const riders = live.filter((a) => a.academicYearCode === ay);
-  const marks = new Map(
-    (state.boardingEvents ?? [])
-      .filter((e) => e.date === date && e.routeId === route.id)
-      .map((e) => [e.studentId, e.status]),
-  );
+  // Marks come from bus register v2 (transport_boarding_marks), the one
+  // record of boarding. A failed read is said in the reply, never shown as
+  // a bus nobody marked.
+  const { readMarks } = await import("@/lib/transportBoardingLog.server");
+  const { registerDayMarks, registerDayLabel } = await import("@/lib/transportBoardingLog");
+  const marksRes = await readMarks({ from: date, to: date, routeIds: [route.id] });
+  const dayMarks = marksRes.ok ? registerDayMarks(marksRes.marks) : [];
+  const amBy = new Map(dayMarks.filter((m) => m.trip === "AM").map((m) => [m.studentId, m.status]));
+  const pmBy = new Map(dayMarks.filter((m) => m.trip === "PM").map((m) => [m.studentId, m.status]));
+  const marks = new Map<string, string>();
+  for (const id of new Set([...amBy.keys(), ...pmBy.keys()])) {
+    marks.set(id, registerDayLabel(amBy.get(id) ?? null, pmBy.get(id) ?? null));
+  }
   const byId = new Map(sis.students.map((st) => [st.id, st]));
   const stops = [...(route.stops ?? [])]
     .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
@@ -3193,7 +3201,7 @@ async function busManifest(
             classLabel: st ? classLabel(masters, st.classId, st.sectionId).replace(" · ", " ") : "",
             rollNo: st?.rollNo || "",
             suspended: !!a.boardingSuspended,
-            mark: mark === "boarded" ? "boarded" : mark === "absent" ? "absent" : mark ? String(mark) : "",
+            mark: mark ?? "",
           };
         })
         .sort((a, b) => a.classLabel.localeCompare(b.classLabel) || a.fullName.localeCompare(b.fullName)),
@@ -3212,7 +3220,8 @@ async function busManifest(
     date,
     todayIso,
     stops,
-    markedCount: riders.filter((a) => marks.has(a.studentId)).length,
+    markedCount: riders.filter((a) => !a.boardingSuspended && marks.has(a.studentId)).length,
+    registerUnavailable: !marksRes.ok,
     formatMobile: maskMobile10,
   }));
 }

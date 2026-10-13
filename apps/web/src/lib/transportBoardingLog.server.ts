@@ -169,10 +169,20 @@ export type MarkRow = {
   tappedAt: string;
   markedByName: string;
   updatedAt: string;
+  /** The attendant's phone at the tap; null when it gave no location. */
+  lat: number | null;
+  lng: number | null;
+  accuracyM: number | null;
 };
 
 const MARK_COLS =
-  "run_date, route_id, trip, shift_id, vehicle_id, student_id, stop_id, status, tapped_at, marked_by_name, updated_at";
+  "run_date, route_id, trip, shift_id, vehicle_id, student_id, stop_id, status, tapped_at, marked_by_name, updated_at, lat, lng, accuracy_m";
+
+function numOrNull(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
 function rowToMark(r: Record<string, unknown>): MarkRow {
   return {
@@ -187,6 +197,9 @@ function rowToMark(r: Record<string, unknown>): MarkRow {
     tappedAt: String(r.tapped_at ?? ""),
     markedByName: String(r.marked_by_name ?? ""),
     updatedAt: String(r.updated_at ?? ""),
+    lat: numOrNull(r.lat),
+    lng: numOrNull(r.lng),
+    accuracyM: numOrNull(r.accuracy_m),
   };
 }
 

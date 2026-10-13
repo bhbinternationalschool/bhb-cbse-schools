@@ -12,6 +12,8 @@ import "../modules/notice_detail_screen.dart";
 import "../modules/notices_screen.dart";
 import "../modules/bus_routes_screen.dart";
 import "transport_requests_screen.dart";
+import "bus_register_screen.dart";
+import "vehicle_logbook_screen.dart";
 import "attendance_screen.dart";
 import "broadcast_screen.dart";
 import "class_message_screen.dart";
@@ -576,6 +578,24 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
         label: "Transport",
         tone: ModuleTone.blue,
         onTap: () => _push(BusRoutesScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "route_manifest",
+      _Action(
+        icon: Icons.fact_check_outlined,
+        label: "Bus register",
+        tone: ModuleTone.blue,
+        onTap: () => _push(BusRegisterScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "route_manifest",
+      _Action(
+        icon: Icons.local_gas_station_outlined,
+        label: "Log book",
+        tone: ModuleTone.amber,
+        onTap: () => _push(VehicleLogbookScreen(api: widget.api)),
       ),
     ),
     (

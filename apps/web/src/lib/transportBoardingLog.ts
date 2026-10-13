@@ -751,3 +751,69 @@ export function boardingMonthReport(input: {
     (a, b) => a.routeName.localeCompare(b.routeName) || a.fullName.localeCompare(b.fullName),
   );
 }
+
+/* ─── the register as other screens read it ────────────────── */
+
+/**
+ * One child's mark on one trip of one day, as a non-register screen (fleet
+ * roster, boarding day sheet, student card, bus manifest command) reads it.
+ * Only real marks travel: an undone tap ("unmarked") is no mark at all.
+ */
+export type RegisterDayMark = {
+  date: string;
+  routeId: string;
+  trip: RegisterTrip;
+  studentId: string;
+  status: RegisterStatus;
+  tappedAt: string;
+  markedByName: string;
+  /** The attendant's phone when they tapped; null when it gave none. */
+  lat: number | null;
+  lng: number | null;
+  accuracyM: number | null;
+};
+
+/** Stored rows → the marks other screens use (undone taps dropped). */
+export function registerDayMarks(
+  rows: {
+    runDate: string;
+    routeId: string;
+    trip: RegisterTrip;
+    studentId: string;
+    status: StoredRegisterStatus;
+    tappedAt: string;
+    markedByName: string;
+    lat?: number | null;
+    lng?: number | null;
+    accuracyM?: number | null;
+  }[],
+): RegisterDayMark[] {
+  const out: RegisterDayMark[] = [];
+  for (const r of rows) {
+    const status = effectiveStatus(r.status);
+    if (!status) continue;
+    out.push({
+      date: r.runDate,
+      routeId: r.routeId,
+      trip: r.trip,
+      studentId: r.studentId,
+      status,
+      tappedAt: r.tappedAt,
+      markedByName: r.markedByName,
+      lat: typeof r.lat === "number" && Number.isFinite(r.lat) ? r.lat : null,
+      lng: typeof r.lng === "number" && Number.isFinite(r.lng) ? r.lng : null,
+      accuracyM: typeof r.accuracyM === "number" && Number.isFinite(r.accuracyM) ? r.accuracyM : null,
+    });
+  }
+  return out;
+}
+
+/**
+ * "AM boarded · PM dropped" — one child's day on one route, for a text reply.
+ * A trip with no mark says "not marked"; a day with no mark at all is "".
+ */
+export function registerDayLabel(am: RegisterStatus | null, pm: RegisterStatus | null): string {
+  if (!am && !pm) return "";
+  const word = (s: RegisterStatus | null) => (s ? STATUS_LABEL[s].toLowerCase() : "not marked");
+  return `AM ${word(am)} · PM ${word(pm)}`;
+}

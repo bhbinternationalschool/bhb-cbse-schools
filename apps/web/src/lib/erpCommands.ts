@@ -4210,6 +4210,8 @@ export type BusManifestInput = {
   todayIso: string;
   stops: ManifestStopRow[];
   markedCount: number;
+  /** True when the bus register could not be read — marks are not known. */
+  registerUnavailable?: boolean;
   formatMobile?: (m: string) => string;
 };
 
@@ -4238,8 +4240,10 @@ export function formatBusManifestReply(input: BusManifestInput): string {
       lines.push(`${r.fullName} (${r.classLabel}${r.rollNo ? `, ${r.rollNo}` : ""})${r.mark ? ` · ${r.mark}` : ""}`);
     }
   }
-  if (input.markedCount) {
-    lines.push("", `${input.markedCount} of ${active.length} marked ${when === "today" ? "today" : "that day"}.`);
+  if (input.registerUnavailable) {
+    lines.push("", "Bus register could not be read — boarding marks are not shown.");
+  } else if (input.markedCount) {
+    lines.push("", `${input.markedCount} of ${active.length} marked on the bus register ${when === "today" ? "today" : "that day"}.`);
   }
   if (suspended.length) {
     lines.push("", `*Boarding suspended:* ${suspended.map((r) => r.fullName).join(", ")}`);

@@ -11,6 +11,7 @@ import "../modules/notices_screen.dart";
 import "admission_leads_screen.dart";
 import "class_message_screen.dart";
 import "ptm_teacher_screen.dart";
+import "bus_register_screen.dart";
 import "documents_screen.dart";
 import "fee_counter_screen.dart";
 import "fee_defaulters_screen.dart";
@@ -31,6 +32,7 @@ import "staff_leave_screen.dart";
 import "staff_roster_screen.dart";
 import "student_leave_queue_screen.dart";
 import "transport_requests_screen.dart";
+import "vehicle_logbook_screen.dart";
 import "waiting_card.dart";
 import "../../core/i18n/locale_controller.dart";
 
@@ -225,6 +227,24 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       ModuleTone.teal,
       "attendance_mark",
       (api) => MonthRegisterScreen(api: api),
+    ),
+    // The transport in-charge works from this home: the bus register and
+    // log book, every bus when the server grants the whole fleet.
+    _Tile(
+      "Bus register",
+      "बस रजिस्टर",
+      Icons.fact_check_outlined,
+      ModuleTone.blue,
+      "route_manifest",
+      (api) => BusRegisterScreen(api: api),
+    ),
+    _Tile(
+      "Log book",
+      "लॉग बुक",
+      Icons.local_gas_station_outlined,
+      ModuleTone.amber,
+      "route_manifest",
+      (api) => VehicleLogbookScreen(api: api),
     ),
     _Tile(
       "Messages",
