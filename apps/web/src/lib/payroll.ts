@@ -1633,6 +1633,24 @@ export function publishPayrollToAccounts(
   return { ok: true, run: next };
 }
 
+/**
+ * Why a run cannot go back to draft because salary on it was already paid
+ * (null = it can). A partly paid run is still "posted", but the money of the
+ * staff marked paid has left: recalling would reverse their payments in the
+ * book and post them again on re-post — perhaps at changed amounts — or lose
+ * them if the draft were deleted (review of PR #620, 14 Oct 2026).
+ */
+export function payrollRecallBlockedReason(run: Pick<PayrollRun, "status" | "lines">): string | null {
+  if (run.status === "paid") {
+    return "Not recalled — this salary is already marked paid, so it cannot go back to draft. Nothing was changed.";
+  }
+  const paid = run.lines.filter((l) => l.paidOn);
+  if (paid.length) {
+    return `Not recalled — ${namesList(paid.map((l) => l.fullName))} ${paid.length === 1 ? "is" : "are"} already marked paid on this run, so it cannot go back to draft. Un-mark a person only if that payment was not made. Nothing was changed.`;
+  }
+  return null;
+}
+
 /** Pull back to draft for corrections. Voids account entries if was posted. */
 export function recallPayrollToDraft(
   runId: string,
@@ -1643,12 +1661,8 @@ export function recallPayrollToDraft(
   const state = loadPayroll();
   const run = state.runs.find((r) => r.id === runId);
   if (!run) return { ok: false, error: "Run not found" };
-  if (run.status === "paid") {
-    return {
-      ok: false,
-      error: "Not recalled — this salary is already marked paid, so it cannot go back to draft. Nothing was changed.",
-    };
-  }
+  const blocked = payrollRecallBlockedReason(run);
+  if (blocked) return { ok: false, error: blocked };
   if (run.status === "draft") {
     return { ok: true, run };
   }

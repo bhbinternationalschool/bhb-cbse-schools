@@ -21,6 +21,14 @@
 --    un-marked. Runs paid the old way (one voucher keyed by the run id) and
 --    the April runs corrected by hand are left exactly as they are.
 --
+-- Review of PR #620 (14 Oct 2026): a run with anyone marked paid is never
+-- recalled (their money has left); posting locks the run row like the recall
+-- does; the money account is fixed on the line when it is marked paid, so a
+-- change to the mode → bank map never moves a past payment; a group with the
+-- same total but different people is regrouped; run lines post once per run
+-- per statement instead of once per line row. Behaviour is tested in CI by
+-- supabase/tests/payroll_per_date_pay.test.sql on the E2E stack.
+--
 -- Based on the live definition of payroll_ledger_post from
 -- 20261013200000_payroll_deduction_heads.sql (md5 bcf580bded451e6b575b64ea4d04931a
 -- on 14 Oct 2026); its accrual arithmetic is unchanged. Signature, SECURITY
@@ -29,10 +37,60 @@
 alter table public.payroll_desk_run_lines
   add column if not exists paid_on date,
   add column if not exists paid_by text not null default '',
-  add column if not exists payment_ref text not null default '';
+  add column if not exists payment_ref text not null default '',
+  add column if not exists paid_account_code text not null default '',
+  add column if not exists paid_bank_id text not null default '';
 
 comment on column public.payroll_desk_run_lines.paid_on is
   'Day this person''s salary was actually paid (null = not paid yet). payment_date is the planned day.';
+comment on column public.payroll_desk_run_lines.paid_account_code is
+  'Ledger money account the payment left from, fixed when the line was marked paid (payroll_line_freeze_paid_account).';
+
+-- The money account is fixed when a line is marked paid. Resolving the bank
+-- through accounts_desk_mode_bank_map on every posting meant a later change
+-- to that map re-booked past salary payments to the new bank. Re-resolved
+-- only when the line's paid day, mode or person changes; cleared when it is
+-- un-marked. Wallet payments are not fixed here: they are a fact about the
+-- payment (payroll_line_wallet_paid), read when the book is written. Desk
+-- saves never send these columns, so an upsert keeps them.
+create or replace function public.payroll_line_freeze_paid_account()
+returns trigger language plpgsql security definer set search_path to 'public'
+as $function$
+declare v_mode text; v_bank text;
+begin
+  if new.paid_on is null then
+    new.paid_account_code := ''; new.paid_bank_id := '';
+    return new;
+  end if;
+  if tg_op = 'UPDATE'
+     and old.paid_on is not distinct from new.paid_on
+     and lower(coalesce(old.payment_mode, '')) = lower(coalesce(new.payment_mode, ''))
+     and old.staff_id is not distinct from new.staff_id
+     and coalesce(old.paid_account_code, '') <> '' then
+    new.paid_account_code := old.paid_account_code; new.paid_bank_id := old.paid_bank_id;
+    return new;
+  end if;
+  v_mode := lower(coalesce(nullif(new.payment_mode, ''), 'bank_transfer'));
+  if v_mode = 'cash' then
+    new.paid_account_code := '1000'; new.paid_bank_id := '';
+    return new;
+  end if;
+  select b.bank_id into v_bank from public.accounts_desk_mode_bank_map b
+   where b.tenant_id = new.tenant_id and b.mode = v_mode;
+  if v_bank is null then
+    select b.bank_id into v_bank from public.accounts_desk_mode_bank_map b
+     where b.tenant_id = new.tenant_id and b.mode in ('neft', 'upi', 'rtgs') order by b.mode limit 1;
+  end if;
+  new.paid_bank_id := coalesce(v_bank, '');
+  new.paid_account_code := case when coalesce(v_bank, '') = '' then '1010'
+                                else public.accounts_ledger_money_account(new.tenant_id, v_bank, '') end;
+  return new;
+end;
+$function$;
+drop trigger if exists payroll_run_lines_freeze_paid_account on public.payroll_desk_run_lines;
+create trigger payroll_run_lines_freeze_paid_account
+  before insert or update on public.payroll_desk_run_lines
+  for each row execute function public.payroll_line_freeze_paid_account();
 
 -- One row per recall that reversed the book. A run posts again only at a
 -- later lock version than the one recorded here.
@@ -72,7 +130,7 @@ as $$ select split_part(coalesce(p_source_id, ''), '#', 1) $$;
 -- accountant's back.
 create or replace function public.payroll_ledger_slot(
   p_tenant_id uuid, p_source_type text, p_base text, p_run_id text, p_lock integer
-) returns table (live_id uuid, live_no text, live_paise bigint, versions integer, may_post boolean, why text)
+) returns table (live_id uuid, live_no text, live_paise bigint, live_narration text, versions integer, may_post boolean, why text)
 language plpgsql stable security definer set search_path to 'public'
 as $function$
 declare
@@ -84,8 +142,9 @@ begin
      and (v.source_id = p_base or left(v.source_id, length(p_base) + 1) = p_base || '#');
 
   select v.id, v.voucher_no,
-         (select coalesce(sum(l.debit_paise), 0) from public.ledger_lines l where l.voucher_id = v.id)
-    into live_id, live_no, live_paise
+         (select coalesce(sum(l.debit_paise), 0) from public.ledger_lines l where l.voucher_id = v.id),
+         v.narration
+    into live_id, live_no, live_paise, live_narration
     from public.ledger_vouchers v
    where v.tenant_id = p_tenant_id and v.source_type = p_source_type
      and (v.source_id = p_base or left(v.source_id, length(p_base) + 1) = p_base || '#')
@@ -139,7 +198,9 @@ begin
   if not public.inv_ledger_active(p_tenant_id) then
     return jsonb_build_object('ok', false, 'refused', 'ledger not active for this tenant');
   end if;
-  select * into v_run from public.payroll_desk_runs where id = p_run_id and tenant_id = p_tenant_id;
+  -- Locked while the book is written: a recall (payroll_ledger_recall, which
+  -- locks the same row) and a desk save's posting never interleave.
+  select * into v_run from public.payroll_desk_runs where id = p_run_id and tenant_id = p_tenant_id for update;
   if not found then return jsonb_build_object('ok', false, 'refused', 'no such payroll run'); end if;
   v_status := lower(coalesce(v_run.status, ''));
   if v_status not in ('posted', 'paid') then
@@ -335,52 +396,66 @@ begin
   end if;
 
   for m in
-    select g.d, g.kind, g.bank_id, sum(g.amt) as amt, count(*) as n,
+    select g.d, g.code, g.bank_id, sum(g.amt) as amt, count(*) as n,
            string_agg(distinct g.mode, ', ' order by g.mode) as modes,
            string_agg(nullif(g.ref, ''), ', ' order by g.ref) as refs,
-           max(nullif(g.paid_by, '')) as paid_by
+           max(nullif(g.paid_by, '')) as paid_by,
+           -- Who is in the group: a group whose total is unchanged but whose
+           -- people changed is still regrouped (its narration names them).
+           left(md5(string_agg(g.staff_id, ',' order by g.staff_id)), 10) as sig
       from (
-        select x.d, x.amt, x.mode, x.ref, x.paid_by, x.kind,
-               case when x.kind = 'bank' then coalesce(
-                 (select b.bank_id from public.accounts_desk_mode_bank_map b
-                   where b.tenant_id = p_tenant_id and b.mode = x.mode),
-                 (select b.bank_id from public.accounts_desk_mode_bank_map b
-                   where b.tenant_id = p_tenant_id and b.mode in ('neft', 'upi', 'rtgs') order by b.mode limit 1))
-               end as bank_id
+        select x.d, x.amt, x.mode, x.ref, x.paid_by, x.staff_id,
+               case when x.wallet then '1110'
+                    when x.frozen_code <> '' then x.frozen_code
+                    when x.mode = 'cash' then '1000'
+                    when r.bank_id is null then '1010'
+                    else public.accounts_ledger_money_account(p_tenant_id, r.bank_id, '') end as code,
+               case when x.wallet then ''
+                    when x.frozen_code <> '' then x.frozen_bank
+                    when x.mode = 'cash' then ''
+                    else coalesce(r.bank_id, '') end as bank_id
           from (
             select coalesce(l.paid_on, v_default_paid) as d,
                    coalesce(l.amount_payable, l.net_pay) as amt,
                    lower(coalesce(nullif(l.payment_mode, ''), 'bank_transfer')) as mode,
                    coalesce(l.payment_ref, '') as ref,
                    coalesce(l.paid_by, '') as paid_by,
+                   l.staff_id,
+                   -- The money account fixed when the line was marked paid
+                   -- (payroll_line_freeze_paid_account): a later change to
+                   -- the mode → bank map never moves a past payment.
+                   coalesce(l.paid_account_code, '') as frozen_code,
+                   coalesce(l.paid_bank_id, '') as frozen_bank,
                    -- Wallet-paid lines left the Payouts wallet, not a bank.
-                   case when public.payroll_line_wallet_paid(p_tenant_id, p_run_id, l.staff_id) then 'wallet'
-                        when lower(coalesce(l.payment_mode, '')) = 'cash' then 'cash'
-                        else 'bank' end as kind
+                   public.payroll_line_wallet_paid(p_tenant_id, p_run_id, l.staff_id) as wallet
               from public.payroll_desk_run_lines l
              where l.run_id = p_run_id and l.tenant_id = p_tenant_id
           ) x
+          left join lateral (
+            select coalesce(
+                     (select b.bank_id from public.accounts_desk_mode_bank_map b
+                       where b.tenant_id = p_tenant_id and b.mode = x.mode),
+                     (select b.bank_id from public.accounts_desk_mode_bank_map b
+                       where b.tenant_id = p_tenant_id and b.mode in ('neft', 'upi', 'rtgs') order by b.mode limit 1)) as bank_id
+          ) r on true
          where x.d is not null and x.amt > 0
       ) g
-     group by g.d, g.kind, g.bank_id
-     order by g.d, g.kind, g.bank_id
+     group by g.d, g.code, g.bank_id
+     order by g.d, g.code, g.bank_id
   loop
-    if m.kind = 'wallet' then
-      v_code := '1110'; v_bank := ''; v_key := 'wallet';
-    elsif m.kind = 'cash' then
-      v_code := '1000'; v_bank := ''; v_key := 'cash';
-    else
-      v_bank := coalesce(m.bank_id, '');
-      v_code := case when v_bank = '' then '1010'
-                     else public.accounts_ledger_money_account(p_tenant_id, v_bank, '') end;
-      v_key := case when v_bank = '' then '1010' else v_bank end;
-    end if;
+    v_code := m.code;
+    v_bank := coalesce(m.bank_id, '');
+    v_key := case when v_code = '1110' then 'wallet'
+                  when v_bank <> '' then v_bank
+                  when v_code = '1000' then 'cash'
+                  else v_code end;
     v_base := p_run_id || ':pay:' || to_char(m.d, 'YYYY-MM-DD') || ':' || v_key;
     v_bases := v_bases || v_base;
     v_paise := round(m.amt * 100);
 
     select * into v_slot from public.payroll_ledger_slot(p_tenant_id, 'payroll_payment', v_base, p_run_id, coalesce(v_run.lock_version, 0));
-    if v_slot.live_id is not null and v_slot.live_paise = v_paise then
+    if v_slot.live_id is not null and v_slot.live_paise = v_paise
+       and v_slot.live_narration like '%· set ' || m.sig then
       v_payments := v_payments || jsonb_build_object('date', m.d, 'account', v_code, 'staff', m.n,
         'amount_paise', v_paise, 'voucher_no', v_slot.live_no, 'created', false);
       continue;
@@ -405,14 +480,14 @@ begin
         'narration', 'Net payable ' || v_run.month || ' — ' || m.n || ' staff'),
       jsonb_build_object(
         'account_code', v_code, 'debit_paise', 0, 'credit_paise', v_paise,
-        'narration', case when m.kind = 'wallet' then 'Salary paid from the Cashfree Payouts wallet'
+        'narration', case when v_code = '1110' then 'Salary paid from the Cashfree Payouts wallet'
                           else 'Salary disbursed by ' || m.modes end
                      || coalesce(' · ref ' || left(m.refs, 200), ''),
         'subledger_kind', case when v_code not in ('1000', '1010', '1110') and v_bank <> '' then 'bank_account' else '' end,
         'subledger_id', case when v_code not in ('1000', '1010', '1110') then v_bank else '' end));
     v_res := public.ledger_post(p_tenant_id, jsonb_build_object(
       'voucher_type', 'payment', 'date', m.d,
-      'narration', 'Salary paid ' || v_run.month || ' — ' || m.n || ' staff on ' || to_char(m.d, 'YYYY-MM-DD'),
+      'narration', 'Salary paid ' || v_run.month || ' — ' || m.n || ' staff on ' || to_char(m.d, 'YYYY-MM-DD') || ' · set ' || m.sig,
       'source_type', 'payroll_payment', 'source_id', v_src,
       'created_by', coalesce(nullif(m.paid_by, ''), nullif(v_run.paid_by, ''), v_created_by), 'lines', v_lines));
     if not coalesce((v_res->>'ok')::boolean, false) then
@@ -466,6 +541,7 @@ language plpgsql security definer set search_path to 'public'
 as $function$
 declare
   v_run record; v_vch record; v_res jsonb; v_out jsonb := '[]'::jsonb; v_reason text; v_fixes text;
+  v_paid_names text; v_paid_n int;
 begin
   select * into v_run from public.payroll_desk_runs
    where id = p_run_id and tenant_id = p_tenant_id
@@ -474,6 +550,20 @@ begin
   if lower(coalesce(v_run.status, '')) = 'paid' then
     return jsonb_build_object('ok', false, 'refused',
       'this salary is already marked paid, so it cannot go back to draft');
+  end if;
+
+  -- Somebody on it was already paid (a partly paid run): their money left,
+  -- and reversing its voucher would book it again on re-post — perhaps at a
+  -- changed amount — or lose it if the draft were deleted. Un-mark first
+  -- only if that payment was not made.
+  select string_agg(l.full_name, ', ' order by l.full_name), count(*)
+    into v_paid_names, v_paid_n
+    from public.payroll_desk_run_lines l
+   where l.run_id = p_run_id and l.tenant_id = p_tenant_id and l.paid_on is not null;
+  if v_paid_n > 0 then
+    return jsonb_build_object('ok', false, 'refused',
+      v_paid_n || ' staff on this run are already marked paid (' || left(v_paid_names, 200)
+      || ') — a run with salary already paid cannot go back to draft');
   end if;
 
   select string_agg(v.voucher_no, ', ' order by v.voucher_no) into v_fixes
@@ -521,6 +611,38 @@ end;
 $function$;
 revoke all on function public.payroll_ledger_recall(uuid, text, text, text) from public, anon, authenticated;
 grant execute on function public.payroll_ledger_recall(uuid, text, text, text) to service_role;
+
+-- Run lines post once per run per statement, not once per line row: a desk
+-- save upserts every line of a run in one statement, and the row trigger ran
+-- the whole posting (and its regrouping) once for each of them. Errors are
+-- swallowed per run as before — a book refusal must not cost the office its
+-- payroll record; Payroll asks the book afterwards and shows the refusal.
+create or replace function public.payroll_desk_lines_ledger_autopost()
+returns trigger language plpgsql security definer set search_path to 'public'
+as $function$
+declare r record;
+begin
+  for r in select distinct n.tenant_id, n.run_id from new_rows n loop
+    begin
+      perform public.payroll_ledger_post(r.tenant_id, r.run_id, 'desk');
+    exception when others then
+      null;
+    end;
+  end loop;
+  return null;
+end;
+$function$;
+drop trigger if exists payroll_run_lines_ledger_autopost on public.payroll_desk_run_lines;
+drop trigger if exists payroll_run_lines_ledger_autopost_ins on public.payroll_desk_run_lines;
+drop trigger if exists payroll_run_lines_ledger_autopost_upd on public.payroll_desk_run_lines;
+create trigger payroll_run_lines_ledger_autopost_ins
+  after insert on public.payroll_desk_run_lines
+  referencing new table as new_rows
+  for each statement execute function public.payroll_desk_lines_ledger_autopost();
+create trigger payroll_run_lines_ledger_autopost_upd
+  after update on public.payroll_desk_run_lines
+  referencing new table as new_rows
+  for each statement execute function public.payroll_desk_lines_ledger_autopost();
 
 -- Runs already back in draft whose accrual was reversed by hand (July 2026:
 -- PR/FY2026-27/00002 reversed as RV/FY2026-27/00983 on 14 Oct) count as

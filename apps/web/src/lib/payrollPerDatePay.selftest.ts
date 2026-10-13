@@ -47,6 +47,7 @@ import {
   markPayrollLinesPaid,
   markPayrollPaid,
   normalizePayrollLine,
+  payrollRecallBlockedReason,
   onlyPaymentFieldsDiffer,
   recallPayrollToDraft,
   recordPayrollLinePayment,
@@ -209,15 +210,20 @@ assert.ok(!markPayrollLinesPaid("pr_test1", ["a"], { date: "2026-08-01" }, "t", 
 const oldUn = unmarkPayrollLinePaid("pr_test1", "a", "t");
 assert.ok(!oldUn.ok && /as a whole/.test(oldUn.error));
 
-// Recall of a posted, partly paid run keeps who was paid and records the
-// book's reversals in the audit trail.
+// A partly paid run is not recalled: their money has left (review of #620).
 writePayrollLocalRaw({ version: 2, runs: [posted], audit: [] });
 assert.ok(markPayrollLinesPaid("pr_test1", ["a"], { date: "2026-07-30" }, "t", now).ok);
+const partly = recallPayrollToDraft("pr_test1", "t");
+assert.ok(!partly.ok && /Staff a is already marked paid/.test(partly.error) && /Nothing was changed/.test(partly.error), partly.ok ? "" : partly.error);
+assert.equal(payrollRecallBlockedReason(loadPayroll().runs[0]!)?.includes("Staff a"), true);
+assert.equal(loadPayroll().runs[0]!.status, "posted");
+
+// A posted run nobody is paid on recalls, and the audit names the book's reversals.
+writePayrollLocalRaw({ version: 2, runs: [posted], audit: [] });
+assert.equal(payrollRecallBlockedReason(posted), null);
 const rc = recallPayrollToDraft("pr_test1", "t", { reversed: [{ voucherNo: "PR/FY2026-27/00002", reversalNo: "RV/FY2026-27/00983" }] });
 assert.ok(rc.ok);
-run = loadPayroll().runs[0]!;
-assert.equal(run.status, "draft");
-assert.equal(run.lines[0]!.paidOn, "2026-07-30");
+assert.equal(loadPayroll().runs[0]!.status, "draft");
 assert.match(loadPayroll().audit[0]!.detail, /PR\/FY2026-27\/00002 → RV\/FY2026-27\/00983/);
 
 console.log("  ok");

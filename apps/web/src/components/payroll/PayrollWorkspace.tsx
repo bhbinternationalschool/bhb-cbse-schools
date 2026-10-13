@@ -50,6 +50,7 @@ import {
   processPayrollDraft,
   publishPayrollToAccounts,
   recallPayrollToDraft,
+  payrollRecallBlockedReason,
   rejectPayrollRun,
   removeDraftStaffLine,
   submitPayrollForApproval,
@@ -186,6 +187,9 @@ export function PayrollWorkspace() {
     readRecentPicks(INDIVIDUAL_RUN_RECENT),
   );
   const [expandedStaffId, setExpandedStaffId] = useState<string | null>(null);
+  // Runs whose server book did not take the last change (run id → what the
+  // book said). Cleared when the book agrees again.
+  const [bookIssues, setBookIssues] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setMasters(loadMasters());
@@ -525,17 +529,32 @@ export function PayrollWorkspace() {
    */
   function reportBook(runId: string, lead: string) {
     void postRunInBook(runId).then((b) => {
-      flash(`${lead} · ${describeBookState(b)}`, !b.ok);
+      const said = describeBookState(b);
+      flash(`${lead} · ${said}`, !b.ok);
+      // The desk save's own book step swallows a refusal (a locked period,
+      // say): the desk and the book then disagree until someone acts. That
+      // stays on the run, not in a toast that is gone in seconds.
+      const outOfStep = !b.ok || (b.payments ?? []).some((p) => p.skipped) || Boolean(b.accrual?.skipped);
+      setBookIssues((m) => {
+        const next = { ...m };
+        if (outOfStep) next[runId] = said;
+        else delete next[runId];
+        return next;
+      });
     });
   }
 
   async function onRecall() {
     if (!selected) return;
-    const progress = payrollPaidProgress(selected.lines);
+    const blocked = payrollRecallBlockedReason(selected);
+    if (blocked) {
+      flash(blocked, true);
+      return;
+    }
     if (
       !window.confirm(
         selected.status === "posted"
-          ? `Recall posted run to draft? Its salary entries are reversed in the books${progress.paid ? ` — including the payments of the ${progress.paid} staff already marked paid (they stay marked paid and are booked again when the run is posted again)` : ""}.`
+          ? "Recall posted run to draft? Its salary entries are reversed in the books."
           : "Recall to draft for further edits?",
       )
     ) {
@@ -1126,6 +1145,8 @@ export function PayrollWorkspace() {
             onRecall={onRecall}
             onPaid={onPaid}
             onMarkLinesPaid={onMarkLinesPaid}
+            bookIssue={bookIssues[selected.id] || ""}
+            onCheckBook={() => reportBook(selected.id, "Book checked")}
             onUnmarkLinePaid={onUnmarkLinePaid}
             onDelete={onDelete}
             onExport={onExport}
@@ -1258,6 +1279,8 @@ function RunDetail({
   onPaid,
   onMarkLinesPaid,
   onUnmarkLinePaid,
+  bookIssue,
+  onCheckBook,
   onDelete,
   onExport,
   onExportRegister,
@@ -1284,6 +1307,9 @@ function RunDetail({
   onPaid: (paidOn: string, mode?: PayrollPaymentMode) => void;
   onMarkLinesPaid: (staffIds: string[], paid: { date: string; mode?: PayrollPaymentMode; ref?: string }) => boolean;
   onUnmarkLinePaid: (staffId: string) => void;
+  /** The server book disagrees with this run ("" = in step / not checked). */
+  bookIssue: string;
+  onCheckBook: () => void;
   onDelete: () => void;
   onExport: () => void;
   onExportRegister: (format: "xlsx" | "pdf") => void;
@@ -1608,6 +1634,28 @@ function RunDetail({
           ) : null}
         </div>
       </div>
+
+      {inAccounts && bookIssue ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--danger)]/40 bg-[var(--danger-soft)] p-3 text-[11px] font-medium text-[var(--danger)]">
+          <span className="font-bold">Book out of step with this run.</span>
+          <span className="min-w-0 flex-1">{bookIssue}</span>
+          <button
+            type="button"
+            className="rounded-lg border border-[var(--danger)]/40 px-2.5 py-1 font-semibold"
+            onClick={onCheckBook}
+          >
+            Check the book again
+          </button>
+        </div>
+      ) : inAccounts && !readOnly ? (
+        <button
+          type="button"
+          className="self-start text-[11px] font-semibold text-[var(--brand-deep)] underline"
+          onClick={onCheckBook}
+        >
+          Check this run in the book
+        </button>
+      ) : null}
 
       {inAccounts && !readOnly ? (
         <PayLinesBar

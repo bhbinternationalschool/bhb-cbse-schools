@@ -9,6 +9,10 @@
 #   bash scripts/e2e-stack.sh app      next start on 127.0.0.1:3700 (background)
 #   bash scripts/e2e-stack.sh check    the acceptance checks (apps/web/e2e/acceptance.ts,
 #                                      then e2e/versions.acceptance.ts — step 1.3)
+#   bash scripts/e2e-stack.sh sql-test <file.sql>
+#                                      run a behavioural SQL test (supabase/tests)
+#                                      against the stack's database; it must roll
+#                                      itself back and raise on any failed check
 #   bash scripts/e2e-stack.sh status   what is running
 #   bash scripts/e2e-stack.sh down     stop everything, delete the cluster and .env.e2e
 #   bash scripts/e2e-stack.sh install-postgrest <dir>
@@ -298,6 +302,15 @@ cmd_status() {
   [ -f "$ENV_FILE" ] && say "  env: ${ENV_FILE#"$ROOT"/}" || say "  env: none"
 }
 
+cmd_sql_test() {
+  local file="${1:-}"
+  [ -n "$file" ] && [ -f "$file" ] || die "usage: sql-test <file.sql>"
+  [ -f "$STATE/pg_port" ] && [ -f "$STATE/pgbin" ] || die "no stack is up (bash scripts/e2e-stack.sh up)"
+  say "sql-test: ${file#"$ROOT"/}"
+  "$(cat "$STATE/pgbin")/psql" -X -q -h 127.0.0.1 -p "$(cat "$STATE/pg_port")" -U postgres -d postgres \
+    -v ON_ERROR_STOP=1 -f "$file"
+}
+
 cmd_down() {
   stop_pid "$STATE/app.pid" app
   stop_pid "$STATE/proxy.pid" proxy
@@ -329,6 +342,7 @@ case "${1:-}" in
   app) cmd_app ;;
   check) cmd_check ;;
   status) cmd_status ;;
+  sql-test) cmd_sql_test "${2:-}" ;;
   down) cmd_down ;;
   install-postgrest) cmd_install_postgrest "${2:-}" ;;
   *) sed -n '2,15p' "$0"; exit 2 ;;

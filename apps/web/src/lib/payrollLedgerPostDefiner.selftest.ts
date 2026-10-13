@@ -73,5 +73,15 @@ assert.match(recall, /revoke all on function public\.payroll_ledger_recall\(uuid
 assert.match(recall, /grant execute on function public\.payroll_ledger_recall\(uuid, text, text, text\) to service_role/);
 assert.match(recall, /grant select, insert on public\.payroll_ledger_recalls to service_role/);
 assert.match(recall, /add column if not exists paid_on date/);
+// Review of #620: a partly paid run is not recalled; posting locks the run;
+// the money account is fixed on the line when it is marked paid; lines post
+// once per run per statement; a group with new people is regrouped.
+assert.match(recall, /already marked paid \(/, "recall refused while anyone on the run is marked paid");
+assert.match(fn, /where id = p_run_id and tenant_id = p_tenant_id for update/, "posting locks the run row");
+assert.match(fn, /x\.frozen_code <> '' then x\.frozen_code/, "groups use the account fixed on the line");
+assert.match(fn, /live_narration like '%· set ' \|\| m\.sig/, "a group with different people is regrouped");
+assert.match(recall, /before insert or update on public\.payroll_desk_run_lines\s+for each row execute function public\.payroll_line_freeze_paid_account/);
+assert.match(recall, /referencing new table as new_rows\s+for each statement execute function public\.payroll_desk_lines_ledger_autopost/);
+assert.match(recall, /drop trigger if exists payroll_run_lines_ledger_autopost on public\.payroll_desk_run_lines/, "the per-row line trigger is gone");
 
 console.log(`  ok (${latest})`);
