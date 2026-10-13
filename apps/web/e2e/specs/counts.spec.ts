@@ -64,12 +64,10 @@ const subjectHeads = fx.masters.subjects.filter((s) => !s.parentId && s.isActive
  */
 const KNOWN: Record<string, Partial<Record<string, string>>> = {
   desktop: {
-    "/staff":
-      "shows 0 active staff (seeded 34) although GET /api/school-data/staff-roster returns all 35 to the page: " +
-      "the Staff screen's copy of the roster never receives them (S1). Until steps 1.4/2.1.",
     "/students":
-      "the page crashes — React #185 'Maximum update depth exceeded' (a dev build points at ErpSidebar's route " +
-      "effect) whenever the roster holds students; no count is drawn (S2). Until step 3.x.",
+      "shows 274 active students (seeded 250): rows with a BLANK academic year are counted as this year's " +
+      "(studentsDash, lib/moduleDashboards.ts). Production has no blank-year rows today. Until step 3.1. " +
+      "(Until 13 Oct 2026 the page crashed with React #185 — fixed by fix/teacher-masters-fee-reset.)",
     "/attendance":
       "V-A's 2026-27 register is wrong either way (S2): in most desktop opens it stays at Strength 0 for 30 s although " +
       "the page's GET sis-roster (all 401 rows) completed ~1.3 s after navigation (metric desksLoadedAtMs) — the data " +
@@ -77,8 +75,7 @@ const KNOWN: Record<string, Partial<Record<string, string>>> = {
       "year counted as this year's (admission numbers in the metric). Until step 3.1.",
   },
   "phone-375-cpu4x": {
-    "/staff": "as desktop: 0 active staff (seeded 34). Until steps 1.4/2.1.",
-    "/students": "no Active students card within 5 s; the same page crashes with React #185 on desktop. Until step 3.x.",
+    "/students": "as desktop: 274 active students (seeded 250), blank-year rows counted as this year's. Until step 3.1.",
     "/attendance": "as desktop: V-A's register shows blank-year rows as this year's (21, seeded 19), or stays at 0. Until step 3.1.",
   },
 };

@@ -1921,7 +1921,23 @@ function ensureFeeSetupInner(state: MastersState): MastersState {
   if (mastersLooksUnhydrated(state) && isSupabaseConfigured()) return state;
 
   let next = { ...state, version: 2 as const };
-  if (!next.feeGroups?.length || !next.feeStructureLines?.length) {
+  // A missing fee structure is filled from the demo school ONLY in demo mode.
+  //
+  // On a real tenant this replaced the whole copy — staff, students,
+  // departments, designations, school timing, profile, holidays, academic
+  // years — with defaultMasters(), keeping only campuses/classes/sections/fee
+  // heads. A teacher's phone gets a reduced Masters with no fees at all
+  // (masters-desk teachingOnly, PR #336), so EVERY loadMasters() for a
+  // teacher returned staff: [] and students: [] (13 Oct 2026, found by the
+  // data-layer gate): pickers showed no staff, holidays/timing showed demo
+  // values, and syncSisIntoMasters kept re-writing the student projection and
+  // re-firing 'bhb-masters-updated' until /students died with React #185
+  // ("Maximum update depth exceeded"). On a tenant, absent fees stay absent
+  // — the same rule NEVER_SEEDED_ON_TENANT applies to the other lists.
+  if (
+    (!next.feeGroups?.length || !next.feeStructureLines?.length) &&
+    !isSupabaseConfigured()
+  ) {
     const full = defaultMasters();
     next = {
       ...full,
