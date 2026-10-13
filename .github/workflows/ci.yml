@@ -213,6 +213,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:payroll-ledger-post-definer
 
+      - name: Self-test — payroll follows salary setup (no setup = no PF/ESI) and joining dates
+        working-directory: apps/web
+        run: npm run test:payroll-setup-sync
+
       - name: Self-test — Masters function grants, own classes only
         working-directory: apps/web
         run: npm run test:masters-change-auth

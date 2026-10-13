@@ -54,6 +54,14 @@ import {
 import { trackServerWork } from "@/lib/serverWork";
 import { recordPayrollRunDeletion } from "@/lib/payrollNormalizedClient";
 import { payrollPaidProgress } from "@/lib/payrollPayGroups";
+import {
+  NO_SETUP_NOTE,
+  figuresOf,
+  payrollEmploymentStart,
+  setupDiffReasons,
+  statutoryCoverFor,
+  type SetupSyncRow,
+} from "@/lib/payrollSetupSync";
 
 export type PayrollRunStatus =
   | "draft"
@@ -422,7 +430,11 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
     // Visiting staff are paid from their month work sheet (Staff → Visiting
     // pay), never from payroll — no salary, PF, ESIC, payslip or bank file.
     if (isVisitingStaff(s)) return false;
-    if (opts.staffIds?.length) return opts.staffIds.includes(s.id);
+    if (opts.staffIds?.length && !opts.staffIds.includes(s.id)) return false;
+    // Joined after the month: no salary for it (Sanjay Pratap, joined
+    // 1 Aug 2026, was in the July draft).
+    const link = salary.staffLinks.find((l) => l.staffId === s.id);
+    if (payrollEmploymentStart(opts.month, s.joiningDate, link?.effectiveFrom).excluded) return false;
     return true;
   });
   const kind: PayrollRunKind =
@@ -452,11 +464,14 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
     const structure = resolveStructureForStaff(salary, staff);
     if (!structure) continue;
     const link = salary.staffLinks.find((l) => l.staffId === staff.id);
+    // No salary setup = no PF/ESI decision made: never PF + ESIC by default.
+    const coverFor = statutoryCoverFor(link);
+    const employed = payrollEmploymentStart(opts.month, staff.joiningDate, link?.effectiveFrom);
     const amounts = computeStructureAmounts(
       salary,
       structure,
       link?.basicOverride || 0,
-      link?.statutoryCover || "both",
+      coverFor.cover,
       opts.masters.statutoryConfig,
       additionalFromLink(link),
       grossUpFromLink(link),
@@ -468,8 +483,17 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
     let daysLeavePaid = 0;
     let daysHoliday = 0;
     let lateCount = 0;
+    // Days before joining are not paid — not a holiday, not present, not
+    // absent (14 Oct 2026; the July draft paid new joiners a full month).
+    let daysNotJoined = 0;
+    // Working days with no register mark, counted absent — said on the line.
+    let daysUnmarked = 0;
 
     for (const d of monthDays) {
+      if (d < employed.from) {
+        daysNotJoined += 1;
+        continue;
+      }
       const hol = classifyStaffHolidayDay(
         opts.masters,
         d,
@@ -515,6 +539,7 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
         // full. The director: a day with no register is absent unless it is
         // a holiday; anything the office marks before the run counts.
         daysAbsent += 1;
+        daysUnmarked += 1;
         continue;
       }
       if (mark.status === "A" && hasEndedSurveyWorkForStaff(staff.id, d)) {
@@ -534,7 +559,9 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
 
     const unpaidLeave = unpaidLeaveDaysForStaff(staff.id, opts.month, ay);
     const halfAsAbsent = daysHalf * 0.5;
-    const daysLwp = daysAbsent + halfAsAbsent + unpaidLeave;
+    // Days before joining go through loss of pay, so the book reduces the
+    // salary expense for them (payroll_ledger_post reads the LWP component).
+    const daysLwp = daysAbsent + halfAsAbsent + unpaidLeave + daysNotJoined;
     const dayRate = amounts.gross / dayCount;
     const lwpDeduction = Math.round(dayRate * daysLwp);
     /** Simple late penalty: 1 hour ≈ dayRate/8 per late beyond 3 */
@@ -625,7 +652,7 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
         : "Teaching June held — <1 year service: not drawable later"
       : "";
 
-    const cover = link?.statutoryCover || "both";
+    const cover = coverFor.cover;
     const govt = govtDepositFromComponents(components);
 
     void headsById;
@@ -666,9 +693,16 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
       paymentDate: "",
       paymentMode: "bank_transfer",
       note: [
+        coverFor.noSetup ? NO_SETUP_NOTE : "",
         link?.salaryAccountNote || "",
         unpaidLeave > 0
           ? `LWP includes ${unpaidLeave} approved unpaid leave day(s)`
+          : "",
+        daysNotJoined > 0
+          ? `Joined ${employed.from}: LWP includes ${daysNotJoined} day(s) before joining`
+          : "",
+        daysUnmarked > 0
+          ? `No attendance marked on ${daysUnmarked} working day(s) — counted absent`
           : "",
       ]
         .filter(Boolean)
@@ -1185,6 +1219,179 @@ export function removeDraftStaffLine(
     detail: `Removed staff ${staffId}`,
   });
   return { ok: true, run: next };
+}
+
+/** Notes the draft builder writes itself — replaced, not kept, on a rebuild. */
+const SYSTEM_NOTE = /^(No salary setup — |Joined \d{4}-\d{2}-\d{2}: |No attendance marked on |LWP includes \d+(\.\d+)? approved unpaid leave)/;
+
+function mergeNotes(fresh: string, previous: string): string {
+  const parts = [
+    ...fresh.split(" · "),
+    ...previous.split(" · ").filter((p) => !SYSTEM_NOTE.test(p.trim())),
+  ].map((p) => p.trim()).filter(Boolean);
+  return [...new Set(parts)].join(" · ");
+}
+
+/**
+ * A rebuilt line with the draft's own attendance: days, loss of pay (re-rated
+ * on the rebuilt gross) and late penalty. The registers for a month can be
+ * incomplete (July 2026: registers on 26 days, most staff on 7 of them), so a
+ * setup rebuild never re-reads attendance for someone employed all month —
+ * only for someone who joined during it, whose days must change.
+ */
+function keepDraftAttendance(fresh: PayrollStaffLine, draft: PayrollStaffLine, dayCount: number): PayrollStaffLine {
+  const lwpDeduction = Math.round((fresh.gross / (dayCount || 30)) * (draft.daysLwp || 0));
+  const latePenalty = draft.gross > 0 ? Math.round((draft.latePenalty || 0) * (fresh.gross / draft.gross)) : 0;
+  const keep = fresh.components.filter((c) => c.headCode !== "LWP" && c.headCode !== "LATE");
+  const lwpC = draft.components.find((c) => c.headCode === "LWP");
+  const lateC = draft.components.find((c) => c.headCode === "LATE");
+  const components = [...keep];
+  if (lwpDeduction > 0) {
+    components.push({ headId: lwpC?.headId || "lwp", headCode: "LWP", headName: lwpC?.headName || "Loss of pay", kind: "deduction", amount: lwpDeduction });
+  }
+  if (latePenalty > 0) {
+    components.push({ headId: lateC?.headId || "late", headCode: "LATE", headName: lateC?.headName || "Late penalty", kind: "deduction", amount: latePenalty });
+  }
+  return recalculateLineFromComponents({
+    ...fresh,
+    components,
+    daysPresent: draft.daysPresent,
+    daysAbsent: draft.daysAbsent,
+    daysHalf: draft.daysHalf,
+    daysLeavePaid: draft.daysLeavePaid,
+    daysLwp: draft.daysLwp,
+    daysHoliday: draft.daysHoliday,
+    lwpDeduction,
+    latePenalty,
+    // The builder's attendance notes belong to the attendance it read.
+    note: fresh.note.split(" · ").filter((p) => !/^No attendance marked on /.test(p)).join(" · "),
+  });
+}
+
+/**
+ * Each line of a run against salary setup, attendance and the joining date
+ * as they are now (director, 14 Oct 2026). A line is rebuilt exactly as
+ * processing would build it today, with its own adjustments kept (bonus,
+ * special deduction, advance, payment day / mode / note —
+ * mergePreservedAdjustments); a person who joined after the month is offered
+ * for removal. Nothing is changed here — see applyDraftSetupSync.
+ */
+export function previewDraftSetupSync(
+  run: PayrollRun,
+  masters: MastersState,
+  salary: SalarySetupState = loadSalarySetup(),
+): { rows: SetupSyncRow[]; rebuilt: Map<string, PayrollStaffLine> } {
+  const fresh = buildPayrollDraft({
+    masters,
+    salary,
+    month: run.month,
+    academicYearCode: run.academicYearCode,
+    createdBy: "preview",
+    dayCountOverride: run.dayCount,
+    staffIds: run.lines.map((l) => l.staffId),
+    kind: run.kind,
+  });
+  const byId = new Map(fresh.lines.map((l) => [l.staffId, l]));
+  const rebuilt = new Map<string, PayrollStaffLine>();
+  const rows: SetupSyncRow[] = run.lines.map((line) => {
+    const staff = (masters.staff ?? []).find((s) => s.id === line.staffId);
+    const link = salary.staffLinks.find((l) => l.staffId === line.staffId);
+    const noSetup = statutoryCoverFor(link).noSetup;
+    const f = byId.get(line.staffId);
+    if (!f) {
+      const employed = staff ? payrollEmploymentStart(run.month, staff.joiningDate, link?.effectiveFrom) : null;
+      const excludedReason = !staff
+        ? "Not on the staff list any more"
+        : employed?.excluded
+          ? `Joined ${employed.from} — after ${run.month}`
+          : staff.status !== "active"
+            ? "Not an active staff member"
+            : isVisitingStaff(staff)
+              ? "Visiting staff — paid from the work sheet"
+              : "No salary structure";
+      return {
+        staffId: line.staffId,
+        fullName: line.fullName,
+        empCode: line.empCode,
+        action: employed?.excluded ? ("remove" as const) : ("none" as const),
+        reasons: [excludedReason],
+        noSetup,
+        before: figuresOf(line),
+        after: null,
+      };
+    }
+    const employed = payrollEmploymentStart(run.month, staff?.joiningDate, link?.effectiveFrom);
+    const base = employed.joinedInMonth ? f : keepDraftAttendance(f, line, run.dayCount);
+    const merged = { ...mergePreservedAdjustments(base, line), note: mergeNotes(base.note, line.note || "") };
+    rebuilt.set(line.staffId, merged);
+    const reasons = setupDiffReasons(figuresOf(line), figuresOf(merged), { noSetup });
+    return {
+      staffId: line.staffId,
+      fullName: line.fullName,
+      empCode: line.empCode,
+      action: reasons.length ? ("rebuild" as const) : ("none" as const),
+      reasons,
+      noSetup,
+      before: figuresOf(line),
+      after: figuresOf(merged),
+    };
+  });
+  return { rows, rebuilt };
+}
+
+/** Rebuild (or remove) the chosen lines of a draft from salary setup. Audited per person. */
+export function applyDraftSetupSync(
+  runId: string,
+  staffIds: string[],
+  masters: MastersState,
+  by: string,
+): { ok: true; run: PayrollRun; rebuilt: number; removed: number } | { ok: false; error: string } {
+  const state = loadPayroll();
+  const run = state.runs.find((r) => r.id === runId);
+  if (!run) return { ok: false, error: "Run not found" };
+  const locked = guardDraftOnly(run);
+  if (locked) return { ok: false, error: locked };
+  const { rows, rebuilt } = previewDraftSetupSync(run, masters);
+  const chosen = rows.filter((r) => staffIds.includes(r.staffId) && r.action !== "none");
+  if (!chosen.length) return { ok: false, error: "Nothing on this run differs from salary setup" };
+  const remove = new Set(chosen.filter((r) => r.action === "remove").map((r) => r.staffId));
+  const rebuild = new Set(chosen.filter((r) => r.action === "rebuild").map((r) => r.staffId));
+  const lines = run.lines
+    .filter((l) => !remove.has(l.staffId))
+    .map((l) => (rebuild.has(l.staffId) ? rebuilt.get(l.staffId)! : l));
+  const next: PayrollRun = {
+    ...run,
+    lines,
+    kind: lines.length <= 1 ? "individual" : run.kind,
+    lockVersion: (run.lockVersion || 0) + 1,
+  };
+  upsertPayrollRun(next);
+  for (const r of chosen) {
+    appendPayrollAudit({
+      by,
+      action: "line_edited",
+      runId: run.id,
+      month: run.month,
+      academicYearCode: run.academicYearCode,
+      detail:
+        r.action === "remove"
+          ? `${r.fullName}: removed — ${r.reasons.join("; ")}`
+          : `${r.fullName}: rebuilt from salary setup — ${r.reasons.join("; ")} · net ${r.before.netPay} → ${r.after!.netPay}, employer ${r.before.employerCost} → ${r.after!.employerCost}`,
+    });
+  }
+  return { ok: true, run: next, rebuilt: rebuild.size, removed: remove.size };
+}
+
+/**
+ * Lines a run should not move on with silently: no salary setup, or not as
+ * salary setup, attendance and joining dates give them now. Asked before
+ * submit / approve / publish (director, 14 Oct 2026).
+ */
+export function runSetupWarnings(run: PayrollRun, masters: MastersState): string[] {
+  const { rows } = previewDraftSetupSync(run, masters);
+  return rows
+    .filter((r) => r.noSetup || r.action !== "none")
+    .map((r) => `${r.fullName} (${r.empCode}): ${r.noSetup && r.action === "none" ? "No salary setup" : r.reasons.join("; ")}`);
 }
 
 /**

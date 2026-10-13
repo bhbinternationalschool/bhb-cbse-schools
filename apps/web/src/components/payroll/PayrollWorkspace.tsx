@@ -51,6 +51,9 @@ import {
   publishPayrollToAccounts,
   recallPayrollToDraft,
   payrollRecallBlockedReason,
+  previewDraftSetupSync,
+  applyDraftSetupSync,
+  runSetupWarnings,
   rejectPayrollRun,
   removeDraftStaffLine,
   submitPayrollForApproval,
@@ -105,6 +108,7 @@ import {
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { describeBookState, postRunInBook, recallRunInBook } from "@/lib/payrollBookClient";
 import { payrollPaidProgress, payrollPaidStatusLabel } from "@/lib/payrollPayGroups";
+import { setupSyncTotals, type SetupSyncRow } from "@/lib/payrollSetupSync";
 
 /**
  * One month's salary, in order: make the run, check it, get it approved,
@@ -449,8 +453,35 @@ export function PayrollWorkspace() {
     refresh();
   }
 
+  /**
+   * Lines with no salary setup, or not as salary setup / attendance / joining
+   * dates give them now, are confirmed by name before the run moves on — never
+   * a silent pass (director, 14 Oct 2026).
+   */
+  function confirmSetupWarnings(step: string): boolean {
+    if (!selected || !masters) return true;
+    const warn = runSetupWarnings(selected, masters);
+    if (!warn.length) return true;
+    return window.confirm(
+      `${step} with ${warn.length} line(s) that differ from salary setup?\n\n${warn.slice(0, 15).join("\n")}${warn.length > 15 ? `\n… and ${warn.length - 15} more` : ""}\n\nCancel to fix them first (Run detail → Review salary setup).`,
+    );
+  }
+
+  function onApplySetup(staffIds: string[]) {
+    if (!selected || !masters) return;
+    const r = applyDraftSetupSync(selected.id, staffIds, masters, session.fullName);
+    if (!r.ok) {
+      flash(r.error, true);
+      return;
+    }
+    flash(`Salary setup applied — ${r.rebuilt} line(s) rebuilt${r.removed ? `, ${r.removed} removed (not in this month)` : ""}`);
+    setSelectedId(r.run.id);
+    refresh();
+  }
+
   function onSubmit(note?: string) {
     if (!selected) return;
+    if (!confirmSetupWarnings("Submit for approval")) return;
     const r = submitPayrollForApproval(
       selected.id,
       session.fullName,
@@ -472,6 +503,7 @@ export function PayrollWorkspace() {
       flash("Only Principal / Admin can approve", true);
       return;
     }
+    if (!confirmSetupWarnings("Approve")) return;
     const r = approvePayrollRun(selected.id, session.fullName, note || "");
     if (!r.ok) {
       flash(r.error, true);
@@ -500,6 +532,7 @@ export function PayrollWorkspace() {
 
   function onPublish() {
     if (!selected) return;
+    if (!confirmSetupWarnings("Publish to the salary account")) return;
     if (
       !window.confirm(
         "Publish to salary account? This posts payables, PF/ESIC remittance, and June holds. Draft edits will lock.",
@@ -1146,6 +1179,8 @@ export function PayrollWorkspace() {
             onPaid={onPaid}
             onMarkLinesPaid={onMarkLinesPaid}
             bookIssue={bookIssues[selected.id] || ""}
+            setupRows={masters ? previewDraftSetupSync(selected, masters).rows : []}
+            onApplySetup={onApplySetup}
             onCheckBook={() => reportBook(selected.id, "Book checked")}
             onUnmarkLinePaid={onUnmarkLinePaid}
             onDelete={onDelete}
@@ -1281,6 +1316,8 @@ function RunDetail({
   onUnmarkLinePaid,
   bookIssue,
   onCheckBook,
+  setupRows,
+  onApplySetup,
   onDelete,
   onExport,
   onExportRegister,
@@ -1310,6 +1347,9 @@ function RunDetail({
   /** The server book disagrees with this run ("" = in step / not checked). */
   bookIssue: string;
   onCheckBook: () => void;
+  /** Each line against salary setup / attendance / joining date now. */
+  setupRows: SetupSyncRow[];
+  onApplySetup: (staffIds: string[]) => void;
   onDelete: () => void;
   onExport: () => void;
   onExportRegister: (format: "xlsx" | "pdf") => void;
@@ -1355,6 +1395,11 @@ function RunDetail({
   // Find a person in a long run by name, emp code, structure or designation.
   const [lineQuery, setLineQuery] = useState("");
   const paidProgress = payrollPaidProgress(run.lines);
+  const setupById = new Map(setupRows.map((r) => [r.staffId, r]));
+  const setupDiffering = setupRows.filter((r) => r.action !== "none");
+  const noSetupCount = setupRows.filter((r) => r.noSetup).length;
+  // The "Review salary setup" panel: which differing lines are ticked.
+  const [setupOpen, setSetupOpen] = useState<Set<string> | null>(null);
   const partlyPaid = payrollPaidStatusLabel(run.status, run.lines);
   const net = run.lines.reduce((s, l) => s + l.netPay, 0);
   const payable = run.lines.reduce(
@@ -1405,6 +1450,7 @@ function RunDetail({
               ? ` · Submitted by ${run.submittedBy}`
               : ""}
             {run.approvedBy ? ` · Approved by ${run.approvedBy}` : ""}
+            {noSetupCount ? ` · ${noSetupCount} without salary setup (no PF/ESI)` : ""}
             {run.postedBy
               ? ` · Posted by ${run.postedBy} (${run.postedAt.slice(0, 10)})`
               : ""}
@@ -1635,6 +1681,52 @@ function RunDetail({
         </div>
       </div>
 
+      {setupDiffering.length || noSetupCount ? (
+        <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 text-[11px]">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-bold text-[var(--brand-deep)]">
+              {setupDiffering.length
+                ? `${setupDiffering.length} line(s) differ from salary setup`
+                : "Salary setup"}
+              {noSetupCount ? ` · ${noSetupCount} without salary setup (PF/ESI not applied — set it up in Masters → Salary setup)` : ""}
+            </span>
+            {editable && setupDiffering.length ? (
+              <button
+                type="button"
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1 font-semibold"
+                onClick={() => setSetupOpen(setupOpen ? null : new Set(setupDiffering.map((r) => r.staffId)))}
+              >
+                {setupOpen ? "Close" : "Review salary setup"}
+              </button>
+            ) : null}
+            {!editable && setupDiffering.length ? (
+              <span className="text-[var(--muted)]">Recall to draft to rebuild these lines.</span>
+            ) : null}
+          </div>
+          {setupOpen && editable ? (
+            <SetupSyncPanel
+              rows={setupDiffering}
+              all={setupRows}
+              picked={setupOpen}
+              setPicked={setSetupOpen}
+              onApply={(ids) => {
+                const chosen = setupDiffering.filter((r) => ids.includes(r.staffId));
+                const t = setupSyncTotals(chosen, setupRows.map((r) => r.before));
+                if (
+                  !window.confirm(
+                    `Rebuild ${chosen.filter((r) => r.action === "rebuild").length} line(s) from salary setup${chosen.some((r) => r.action === "remove") ? ` and remove ${chosen.filter((r) => r.action === "remove").length} not in ${run.month}` : ""}?\n\nRun net ${formatInr(t.before.net)} → ${formatInr(t.after.net)} · employer cost ${formatInr(t.before.employer)} → ${formatInr(t.after.employer)}.\nBonus, special deductions, advances and payment details on these lines are kept.`,
+                  )
+                ) {
+                  return;
+                }
+                onApplySetup(ids);
+                setSetupOpen(null);
+              }}
+            />
+          ) : null}
+        </div>
+      ) : null}
+
       {inAccounts && bookIssue ? (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--danger)]/40 bg-[var(--danger-soft)] p-3 text-[11px] font-medium text-[var(--danger)]">
           <span className="font-bold">Book out of step with this run.</span>
@@ -1758,6 +1850,34 @@ function RunDetail({
                           ? ` · adv due ${formatInr(lockedDue)}`
                           : ""}
                       </div>
+                      {(() => {
+                        const sr = setupById.get(l.staffId);
+                        if (!sr || (!sr.noSetup && sr.action === "none")) return null;
+                        const label = sr.action === "remove"
+                          ? "Not in this month"
+                          : sr.noSetup
+                            ? "No salary setup"
+                            : "Differs from salary setup";
+                        return (
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                            <span
+                              className="rounded bg-[var(--danger-soft)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--danger)]"
+                              title={sr.reasons.join("; ") || "PF/ESI not applied; set it up in Masters → Salary setup"}
+                            >
+                              {label}
+                            </span>
+                            {editable && sr.action !== "none" ? (
+                              <button
+                                type="button"
+                                className="text-[10px] font-semibold text-[var(--brand-deep)] underline"
+                                onClick={() => setSetupOpen(new Set([l.staffId]))}
+                              >
+                                {sr.action === "remove" ? "Remove from this month" : "Rebuild from setup"}
+                              </button>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-3 py-2 text-[11px] text-[var(--muted)]">
                       {l.daysPresent}/{l.daysAbsent}/{l.daysHalf}/{l.daysLwp}
@@ -2183,6 +2303,87 @@ function RunDetail({
         </ErpTable>
         </div>
       </ErpTableShell>
+    </div>
+  );
+}
+
+/**
+ * Before → after for each line that differs from salary setup, with run
+ * totals; the office ticks what to apply (director, 14 Oct 2026).
+ */
+function SetupSyncPanel({
+  rows,
+  all,
+  picked,
+  setPicked,
+  onApply,
+}: {
+  rows: SetupSyncRow[];
+  all: SetupSyncRow[];
+  picked: Set<string>;
+  setPicked: (s: Set<string>) => void;
+  onApply: (staffIds: string[]) => void;
+}) {
+  const chosen = rows.filter((r) => picked.has(r.staffId));
+  const t = setupSyncTotals(chosen, all.map((r) => r.before));
+  const fig = (f: SetupSyncRow["before"] | null) =>
+    f ? `${formatInr(f.gross)} / ${formatInr(f.totalDeductions)} / ${formatInr(f.netPay)} / ${formatInr(f.employerCost)} · ${f.daysPresent}P ${f.daysAbsent}A ${f.daysLwp}LWP · ${f.statutoryCover}` : "removed";
+  return (
+    <div className="space-y-2">
+      <div className="overflow-x-auto">
+        <ErpTable minWidth="min-w-[640px]" className="text-[11px]">
+          <ErpTableHead>
+            <tr className="text-left text-[var(--muted)]">
+              <th className="px-2 py-1" />
+              <th className="px-2 py-1">Staff</th>
+              <th className="px-2 py-1">Why</th>
+              <th className="px-2 py-1">Before — gross / deductions / net / employer · days · cover</th>
+              <th className="px-2 py-1">After</th>
+            </tr>
+          </ErpTableHead>
+          <ErpTableBody>
+            {rows.map((r) => (
+              <tr key={r.staffId} className="border-t border-[var(--border)] align-top">
+                <td className="px-2 py-1">
+                  <input
+                    type="checkbox"
+                    aria-label={`Apply salary setup to ${r.fullName}`}
+                    checked={picked.has(r.staffId)}
+                    onChange={(e) => {
+                      const next = new Set(picked);
+                      if (e.target.checked) next.add(r.staffId);
+                      else next.delete(r.staffId);
+                      setPicked(next);
+                    }}
+                  />
+                </td>
+                <td className="px-2 py-1 font-semibold">
+                  {r.fullName}
+                  <div className="font-normal text-[var(--muted)]">{r.empCode}</div>
+                </td>
+                <td className="px-2 py-1">{r.reasons.join("; ")}</td>
+                <td className="px-2 py-1">{fig(r.before)}</td>
+                <td className="px-2 py-1 font-semibold text-[var(--brand-deep)]">
+                  {r.action === "remove" ? "Remove from this month" : fig(r.after)}
+                </td>
+              </tr>
+            ))}
+          </ErpTableBody>
+        </ErpTable>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[var(--muted)]">
+          Run net {formatInr(t.before.net)} → {formatInr(t.after.net)} · employer cost {formatInr(t.before.employer)} → {formatInr(t.after.employer)}
+        </span>
+        <button
+          type="button"
+          className="rounded-lg bg-[var(--primary)] px-2.5 py-1 font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
+          disabled={!chosen.length}
+          onClick={() => onApply(chosen.map((r) => r.staffId))}
+        >
+          {chosen.length === rows.length ? "Apply to all differing lines" : `Apply to ${chosen.length} line(s)`}
+        </button>
+      </div>
     </div>
   );
 }

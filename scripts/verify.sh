@@ -207,6 +207,7 @@ SELFTESTS=(
   test:picker-search
   test:payroll-per-date-pay
   test:payroll-ledger-post-definer
+  test:payroll-setup-sync
   test:masters-change-auth
   test:timetable-free-grid
   test:udise-teacher-apaar
