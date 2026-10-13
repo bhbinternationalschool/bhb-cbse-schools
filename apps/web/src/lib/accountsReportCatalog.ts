@@ -32,6 +32,8 @@ import {
   exportFilterReport,
 } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 function formatExpensePaymentSplitLine(
   split: ExpensePaymentSplit,
@@ -210,6 +212,9 @@ export function runAccountsReport(
   id: AccountsReportId,
   filters: AccountsReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("accounts", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const accounts = filters.accounts ?? loadAccounts();
   const date = filters.date || todayYmd();
   const from = filters.fromDate || date;

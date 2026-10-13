@@ -22,6 +22,8 @@ import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import { recordHomeworkDiaryDeletion } from "@/lib/homeworkNormalizedClient";
 import { classCalendar } from "@/lib/studentWorkingDays";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 const STORAGE_KEY = "bhb_homework_v1";
 
@@ -1069,6 +1071,9 @@ export function runHomeworkReport(
     sectionKeys?: Set<string>;
   },
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("homework", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const keys = filters.sectionKeys;
   const inScope = (classId: string, sectionId: string) =>
     !keys || keys.has(`${classId}|${sectionId}`);

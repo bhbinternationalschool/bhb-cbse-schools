@@ -41,6 +41,8 @@ import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { recordRteDeletion } from "@/lib/rteNormalizedClient";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 const STORAGE_KEY = "bhb_rte_ews_v1";
 
@@ -1843,6 +1845,9 @@ export function runRteReport(
     rte?: RteState;
   },
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("rte", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const rte = filters.rte ?? loadRte();
   const ay = filters.academicYearCode || DEFAULT_AY;
   const note = describeFilters([TENANT.shortName, ay, todayIso()]);

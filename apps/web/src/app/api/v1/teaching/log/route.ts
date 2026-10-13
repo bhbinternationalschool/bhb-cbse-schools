@@ -6,12 +6,11 @@ import {
   resolveApiAuth,
 } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
 import {
-  ensureTeachingHydratedServer,
-  pushTeachingRemoteServer,
-} from "@/lib/teachingPersistence";
-import { loadTimetable } from "@/lib/timetable";
+  readTeachingStateServer,
+  readTimetableStateServer,
+  saveTeachingStateServer,
+} from "@/lib/api/v1/teachingServer.server";
 import { loadStaffAttendanceServer } from "@/lib/staffAttendance.server";
 import { normalizeAttendanceSettings } from "@/lib/staffAttendance";
 import {
@@ -20,11 +19,9 @@ import {
 } from "@/lib/staffGeofence.server";
 import {
   istDateOf,
-  loadTeaching,
   resolveExpectedPeriods,
   unknownTeachingLogLocation,
   upsertTeachingLog,
-  writeTeachingLocalRaw,
   type TeachingLogLocation,
   type TeachingLogStatus,
 } from "@/lib/teaching";
@@ -137,9 +134,9 @@ export async function POST(request: Request) {
     }
 
     await ensureSchoolMirrorHydrated();
-    await Promise.all([
-      ensureTimetableHydratedServer(),
-      ensureTeachingHydratedServer(),
+    const [timetable, state] = await Promise.all([
+      readTimetableStateServer(),
+      readTeachingStateServer(),
     ]);
 
     const ay = ctx.session.academicYearCode;
@@ -150,7 +147,7 @@ export async function POST(request: Request) {
     }
 
     const expected = resolveExpectedPeriods({
-      timetable: loadTimetable(),
+      timetable,
       masters: ctx.masters,
       academicYearCode: ay,
       date,
@@ -179,7 +176,6 @@ export async function POST(request: Request) {
     }
 
     const status = parseStatus(body.status);
-    const state = loadTeaching();
 
     // Units and plans are re-checked against this class+subject too — a
     // period must not be able to mark a chapter of some other subject as
@@ -264,10 +260,9 @@ export async function POST(request: Request) {
     });
     if (!result.ok) throw new ApiError("bad_request", result.error, 400);
 
-    // saveTeaching() is a browser-only path (localStorage-first), so the
-    // server writes its own cache and pushes the merged blob explicitly.
-    writeTeachingLocalRaw(result.value.state);
-    const push = await pushTeachingRemoteServer(result.value.state);
+    // saveTeaching() is a browser-only path (localStorage-first); the
+    // server merges into the stored plan and saves it.
+    const push = await saveTeachingStateServer(result.value.state);
     if (!push.ok) {
       console.warn("[teaching-v1] blob push failed", push.error);
       throw new ApiError(

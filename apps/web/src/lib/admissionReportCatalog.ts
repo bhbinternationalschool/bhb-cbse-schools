@@ -41,6 +41,8 @@ import {
   type ReportColumn,
 } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type AdmissionReportFormat = "excel" | "pdf";
 
@@ -573,6 +575,9 @@ export function runAdmissionReport(
   id: AdmissionReportId,
   filters: AdmissionReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("admissions", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const state = filters.admissions ?? loadAdmissions();
   const masters = filters.masters ?? loadMasters();
   const base = {

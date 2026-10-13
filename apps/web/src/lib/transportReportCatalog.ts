@@ -32,6 +32,8 @@ import {
   type RegisterDayMark,
   type RegisterTrip,
 } from "@/lib/transportBoardingLog";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type TransportReportFormat = "excel" | "pdf";
 
@@ -314,6 +316,9 @@ export function runTransportReport(
   id: TransportReportId,
   filters: TransportReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("transport", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const transport = filters.transport ?? loadTransport();
   const masters = filters.masters ?? loadMasters();
   const sis = filters.sis ?? loadSis();

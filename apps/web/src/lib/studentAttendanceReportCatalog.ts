@@ -26,6 +26,8 @@ import {
   studentDaysSummary,
 } from "@/lib/studentWorkingDays";
 import { TENANT } from "@/lib/types";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type StudentAttReportFormat = "excel" | "pdf" | "preview";
 
@@ -610,6 +612,9 @@ export function runStudentAttReport(
 ):
   | { ok: true; message: string; preview?: Built }
   | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("student_attendance", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const def = STUDENT_ATT_REPORTS.find((r) => r.id === id);
   if (!def) return { ok: false, error: "Unknown report" };
 
