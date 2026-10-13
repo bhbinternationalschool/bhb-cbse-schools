@@ -7,7 +7,8 @@
 #   bash scripts/e2e-stack.sh build    next build with .env.e2e (NEXT_PUBLIC_*
 #                                      values are baked in at build time)
 #   bash scripts/e2e-stack.sh app      next start on 127.0.0.1:3700 (background)
-#   bash scripts/e2e-stack.sh check    the acceptance check (apps/web/e2e/acceptance.ts)
+#   bash scripts/e2e-stack.sh check    the acceptance checks (apps/web/e2e/acceptance.ts,
+#                                      then e2e/versions.acceptance.ts — step 1.3)
 #   bash scripts/e2e-stack.sh status   what is running
 #   bash scripts/e2e-stack.sh down     stop everything, delete the cluster and .env.e2e
 #   bash scripts/e2e-stack.sh install-postgrest <dir>
@@ -278,6 +279,9 @@ cmd_app() {
 cmd_check() {
   [ -f "$ENV_FILE" ] || die "no .env.e2e — run up first"
   in_web npx --yes tsx e2e/acceptance.ts
+  # data-layer 1.3: erp_versions, GET /api/data/views/versions, the server
+  # reference cache. It reads the app's log to count reference-cache rebuilds.
+  in_web npx --yes tsx e2e/versions.acceptance.ts "$STATE/app.log"
 }
 
 cmd_status() {
