@@ -32,6 +32,8 @@ import {
 import { VoucherBrowserPanel } from "@/components/accounts/VoucherBrowserPanel";
 import { formatInr } from "@/lib/fees";
 import { hideCancelledLines, type StatementLineLike } from "@/lib/ledger/cancelledPairs";
+import { statementDrillTarget, type StatementTarget } from "@/lib/ledger/drillDown";
+import { VoucherDetailDialog, rowOpenProps } from "@/components/accounts/VoucherDetailDialog";
 import {
   ErpTable,
   ErpTableBody,
@@ -831,7 +833,18 @@ type ReportSection = {
 
 type ReportKind = "tb" | "ie" | "bs" | "rp" | "statement" | "capack";
 
-function SectionTable({ sections, totalLabel, totalPaise }: { sections: ReportSection[]; totalLabel: string; totalPaise: number }) {
+function SectionTable({
+  sections,
+  totalLabel,
+  totalPaise,
+  drill,
+}: {
+  sections: ReportSection[];
+  totalLabel: string;
+  totalPaise: number;
+  /** The statement a line opens, or null when the line is not one account. */
+  drill?: (code: string) => (() => void) | null;
+}) {
   return (
     <div className="space-y-3">
       {sections.map((s) => (
@@ -839,13 +852,16 @@ function SectionTable({ sections, totalLabel, totalPaise }: { sections: ReportSe
           <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">{s.title}</p>
           <ErpTable minWidth="min-w-0" className="text-sm">
             <ErpTableBody>
-              {s.lines.map((l) => (
-                <tr key={l.code}>
+              {s.lines.map((l) => {
+                const open = drill?.(l.code) ?? null;
+                return (
+                <tr key={l.code} {...(open ? rowOpenProps(open, `Open the statement of ${l.code} ${l.name}`) : {})}>
                   <td className="py-1 font-mono text-xs text-[var(--muted)]">{l.code}</td>
                   <td className="py-1">{l.name}</td>
                   <td className="py-1 text-right tabular-nums">{formatInr(l.amountPaise)}</td>
                 </tr>
-              ))}
+                );
+              })}
               <tr>
                 <td colSpan={2} className="py-1 text-right text-xs font-bold">{s.title}</td>
                 <td className="py-1 text-right font-bold tabular-nums">{formatInr(s.totalPaise)}</td>
@@ -878,6 +894,10 @@ export function LedgerReportsPanel() {
   // Salary & Wages 2026-27 under 422 lines of the 13 Oct clean-up. Hidden by
   // default, one click away, and never touching the opening or closing.
   const [hideCancelled, setHideCancelled] = useState(true);
+  // Drill-down: a report line opens its account's statement for the same
+  // dates; a statement line opens its voucher.
+  const [drillNonce, setDrillNonce] = useState(0);
+  const [openVoucher, setOpenVoucher] = useState<string | null>(null);
 
   useEffect(() => {
     void fetch("/api/ledger", { cache: "no-store" })
@@ -921,9 +941,26 @@ export function LedgerReportsPanel() {
 
   useEffect(() => {
     void run();
-    // Deliberate: re-run only on demand or when the report kind changes.
+    // Deliberate: re-run only on demand, when the report kind changes, or on
+    // a drill-down (which sets kind, code and dates in one render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind]);
+  }, [kind, drillNonce]);
+
+  const knownCodes = useMemo(() => new Set(accounts.map((a) => a.code)), [accounts]);
+  const drill = useCallback(
+    (code: string): (() => void) | null => {
+      const t: StatementTarget | null = statementDrillTarget({ code, knownCodes, from, to });
+      if (!t) return null;
+      return () => {
+        setCode(t.code);
+        setFrom(t.from);
+        setTo(t.to);
+        setKind("statement");
+        setDrillNonce((n) => n + 1);
+      };
+    },
+    [knownCodes, from, to],
+  );
 
   const report = (data?.report ?? null) as Record<string, unknown> | null;
 
@@ -1027,8 +1064,13 @@ export function LedgerReportsPanel() {
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {(report.rows as Record<string, number | string>[]).map((r) => (
-                  <tr key={String(r.code)}>
+                {(report.rows as Record<string, number | string>[]).map((r) => {
+                  const open = drill(String(r.code));
+                  return (
+                  <tr
+                    key={String(r.code)}
+                    {...(open ? rowOpenProps(open, `Open the statement of ${r.code} ${r.name}`) : {})}
+                  >
                     <td className="py-1 font-mono text-xs">{r.code}</td>
                     <td className="py-1">{r.name}</td>
                     <td className="py-1 text-right tabular-nums">{formatInr(Number(r.openingPaise))}</td>
@@ -1037,7 +1079,8 @@ export function LedgerReportsPanel() {
                     <td className="py-1 text-right tabular-nums">{formatInr(Number(r.closingDebitPaise))}</td>
                     <td className="py-1 text-right tabular-nums">{formatInr(Number(r.closingCreditPaise))}</td>
                   </tr>
-                ))}
+                  );
+                })}
                 {(() => {
                   const t = report.totals as Record<string, number>;
                   return (
@@ -1072,11 +1115,13 @@ export function LedgerReportsPanel() {
             <SectionTable
               sections={report.income as ReportSection[]}
               totalLabel="Total income"
+              drill={drill}
               totalPaise={Number(report.totalIncomePaise)}
             />
             <SectionTable
               sections={report.expenditure as ReportSection[]}
               totalLabel="Total expenditure"
+              drill={drill}
               totalPaise={Number(report.totalExpenditurePaise)}
             />
           </div>
@@ -1112,11 +1157,13 @@ export function LedgerReportsPanel() {
             <SectionTable
               sections={report.liabilities as ReportSection[]}
               totalLabel="Corpus & liabilities"
+              drill={drill}
               totalPaise={Number(report.totalLiabilitiesPaise)}
             />
             <SectionTable
               sections={report.assets as ReportSection[]}
               totalLabel="Assets"
+              drill={drill}
               totalPaise={Number(report.totalAssetsPaise)}
             />
           </div>
@@ -1149,11 +1196,13 @@ export function LedgerReportsPanel() {
             <SectionTable
               sections={report.receipts as ReportSection[]}
               totalLabel="Total receipts"
+              drill={drill}
               totalPaise={Number(report.totalReceiptsPaise)}
             />
             <SectionTable
               sections={report.payments as ReportSection[]}
               totalLabel="Total payments"
+              drill={drill}
               totalPaise={Number(report.totalPaymentsPaise)}
             />
           </div>
@@ -1205,7 +1254,13 @@ export function LedgerReportsPanel() {
               </ErpTableHead>
               <ErpTableBody>
                 {(statement.rows as unknown as Record<string, unknown>[]).map((r, i) => (
-                  <tr key={i}>
+                  <tr
+                    key={i}
+                    {...rowOpenProps(
+                      () => setOpenVoucher(String(r.voucherNo)),
+                      `Open voucher ${String(r.voucherNo)}`,
+                    )}
+                  >
                     <td className="py-1">{String(r.date)}</td>
                     <td className="py-1 font-mono text-xs">
                       {String(r.voucherNo)}
@@ -1304,6 +1359,10 @@ export function LedgerReportsPanel() {
             </div>
           ) : null}
         </section>
+      ) : null}
+
+      {openVoucher ? (
+        <VoucherDetailDialog target={{ voucherNo: openVoucher }} onClose={() => setOpenVoucher(null)} />
       ) : null}
     </div>
   );

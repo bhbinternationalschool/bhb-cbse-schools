@@ -43,6 +43,7 @@ import {
 } from "@/lib/ledger/cancelledPairs";
 import { lastEntriesByKind, type HandVoucher, type LastEntriesByKind } from "@/lib/ledger/lastEntries";
 import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
+import type { VoucherDetail } from "@/lib/ledger/drillDown";
 import {
   buildVendorStatement,
   type VendorLine,
@@ -379,6 +380,105 @@ export async function accountStatement(input: {
     closingPaise,
     debitNormal,
     cancelledLines: rows.filter((r) => r.cancelledPair).length,
+  };
+}
+
+/* ─── One voucher, whole ───────────────────────────────────── */
+
+/**
+ * Everything one voucher says — header, every line, and whether it stands —
+ * for the drill-down from the day sheet, the statements and the voucher list.
+ *
+ * Its own lines only: no account balance is read, so it is safe behind view
+ * rights alone, like `find-voucher` (the day sheet's counter has no
+ * accounts_position).
+ */
+export async function ledgerVoucherDetail(by: {
+  voucherId?: string;
+  voucherNo?: string;
+}): Promise<{ ok: boolean; error?: string; voucher?: VoucherDetail }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const cols =
+    "id, voucher_no, voucher_type, voucher_date, narration, created_by, created_at, source_type, reverses_voucher_id";
+  let q = ctx.sb.from("ledger_vouchers").select(cols).eq("tenant_id", ctx.tenantId);
+  if (by.voucherId) q = q.eq("id", by.voucherId);
+  else if (by.voucherNo?.trim()) q = q.eq("voucher_no", by.voucherNo.trim());
+  else return { ok: false, error: "Say which voucher" };
+  const { data: v, error } = await q.maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!v) return { ok: false, error: "No voucher with that number" };
+  const row = v as Record<string, unknown>;
+  const id = String(row.id);
+
+  const [linesRes, revByRes, revOfRes] = await Promise.all([
+    ctx.sb
+      .from("ledger_lines")
+      .select(
+        "line_no, debit_paise, credit_paise, narration, instrument_mode, instrument_ref, ledger_accounts!inner(code, name), ledger_parties(name)",
+      )
+      .eq("tenant_id", ctx.tenantId)
+      .eq("voucher_id", id)
+      .order("line_no", { ascending: true }),
+    ctx.sb
+      .from("ledger_vouchers")
+      .select("id, voucher_no, voucher_date, narration")
+      .eq("tenant_id", ctx.tenantId)
+      .eq("reverses_voucher_id", id)
+      .limit(1)
+      .maybeSingle(),
+    row.reverses_voucher_id
+      ? ctx.sb
+          .from("ledger_vouchers")
+          .select("id, voucher_no, voucher_date")
+          .eq("tenant_id", ctx.tenantId)
+          .eq("id", String(row.reverses_voucher_id))
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+  const err = linesRes.error ?? revByRes.error ?? revOfRes.error;
+  if (err) return { ok: false, error: err.message };
+
+  const revBy = revByRes.data as Record<string, unknown> | null;
+  const revOf = revOfRes.data as Record<string, unknown> | null;
+  return {
+    ok: true,
+    voucher: {
+      id,
+      voucherNo: String(row.voucher_no ?? ""),
+      voucherType: String(row.voucher_type ?? ""),
+      date: String(row.voucher_date ?? ""),
+      narration: String(row.narration ?? ""),
+      createdBy: String(row.created_by ?? ""),
+      createdAt: String(row.created_at ?? ""),
+      sourceType: String(row.source_type ?? ""),
+      lines: ((linesRes.data ?? []) as Record<string, unknown>[]).map((l) => {
+        const acct = l.ledger_accounts as { code?: string; name?: string } | null;
+        const party = l.ledger_parties as { name?: string } | null;
+        return {
+          lineNo: Number(l.line_no ?? 0),
+          accountCode: String(acct?.code ?? ""),
+          accountName: String(acct?.name ?? ""),
+          partyName: String(party?.name ?? ""),
+          debitPaise: Number(l.debit_paise ?? 0),
+          creditPaise: Number(l.credit_paise ?? 0),
+          narration: String(l.narration ?? ""),
+          instrumentMode: String(l.instrument_mode ?? ""),
+          instrumentRef: String(l.instrument_ref ?? ""),
+        };
+      }),
+      reversedBy: revBy
+        ? {
+            id: String(revBy.id),
+            voucherNo: String(revBy.voucher_no ?? ""),
+            date: String(revBy.voucher_date ?? ""),
+            narration: String(revBy.narration ?? ""),
+          }
+        : null,
+      reverses: revOf
+        ? { id: String(revOf.id), voucherNo: String(revOf.voucher_no ?? ""), date: String(revOf.voucher_date ?? "") }
+        : null,
+    },
   };
 }
 

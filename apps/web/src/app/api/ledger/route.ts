@@ -71,6 +71,7 @@ import {
   ledgerVendorStatement,
   accountStatement,
   ledgerLastEntries,
+  ledgerVoucherDetail,
   ledgerSearchVouchers,
   ledgerReclassifyHead,
   ledgerVoidVoucher,
@@ -137,7 +138,7 @@ type PostBody =
     }
   | { action: "close-year"; fyCode: string; surplusAccountCode?: string }
   | { action: "closing-position"; asOn: string }
-  | { action: "day-sheet"; date: string }
+  | { action: "day-sheet"; date?: string; from?: string; to?: string }
   | {
       action: "closing-balances";
       asOn: string;
@@ -217,6 +218,7 @@ type PostBody =
   | { action: "release-fee-advances"; academicYearCode: string; date?: string }
   | { action: "find-voucher"; voucherNo: string }
   | { action: "last-entries" }
+  | { action: "voucher-detail"; voucherId?: string; voucherNo?: string }
   | { action: "vendor-bills"; vendorId?: string }
   | {
       action: "pay-vendor-bill";
@@ -289,12 +291,16 @@ export async function POST(req: Request) {
     "recent-tags",
     "spend-by-centre",
     "closing-position",
-    // One day only, so the counter may run it without seeing any balance.
+    // Movements over at most a quarter, never a balance, so the counter may
+    // run it without accounts_position.
     "day-sheet",
     // Dates and voucher numbers, no amounts — the "Entered up to" strip on
     // the voucher forms. Deliberately not a position action: the office
     // keying the vouchers is exactly who needs it.
     "last-entries",
+    // One voucher's own header and lines — the drill-down target from the
+    // day sheet, statements and voucher list. No balance, so not position.
+    "voucher-detail",
   ]);
 
   /**
@@ -398,7 +404,8 @@ export async function POST(req: Request) {
       return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }
     case "day-sheet": {
-      const res = await readDaySheet(body.date);
+      // {from, to}; {date} still works for a tab opened before the deploy.
+      const res = await readDaySheet({ date: body.date, from: body.from, to: body.to });
       return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }
     case "closing-position": {
@@ -646,6 +653,10 @@ export async function POST(req: Request) {
         toDate: body.toDate,
       });
       return NextResponse.json({ ok: true, rows });
+    }
+    case "voucher-detail": {
+      const res = await ledgerVoucherDetail({ voucherId: body.voucherId, voucherNo: body.voucherNo });
+      return NextResponse.json(res, { status: res.ok ? 200 : 404 });
     }
     case "last-entries": {
       const res = await ledgerLastEntries();
