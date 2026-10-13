@@ -233,6 +233,7 @@ export const FEE_REPORTS: FeeReportDef[] = [
     id: "student_ledger_report",
     category: "student",
     label: "Student Ledger Report",
+    hint: "Statement: dues, concessions and receipts by date, running balance",
     requiresStudent: true,
   },
   {
@@ -501,6 +502,68 @@ function dueNowKeys(
 
 /** Self-test access to the scoping helpers (lib/feeReportsYearScope.selftest.ts). */
 export const __feeReportInternalsForTests = { yearStudents, allOpenDues, activeVouchers, dueNowKeys };
+
+/**
+ * One child's fee statement for the session to `asOf`: each due on its due
+ * date (debit), its concession (credit), each receipt line on its
+ * collection date (credit, cancelled receipts left out), the running
+ * balance after every line, and — last, outside the balance — what is still
+ * to fall due this session. A receipt paid ahead of its due date shows as a
+ * credit balance until the due arrives.
+ */
+export function studentLedgerLines(
+  student: SisStudent,
+  masters: MastersState,
+  fees: FeesState,
+  asOf: string,
+): { date: string; particulars: string; ref: string; debit: number; credit: number; balance: number | null }[] {
+  const dues = computeStudentDues(student, masters, fees, {
+    asOf,
+    includeFuture: true,
+    includePaid: true,
+    includeInactive: student.status !== "active",
+  });
+  type Ev = { date: string; order: number; particulars: string; ref: string; debit: number; credit: number };
+  const events: Ev[] = [];
+  let notYetDue = 0;
+  for (const d of dues) {
+    if (d.dueOn > asOf) {
+      notYetDue += d.billedPaise - d.concessionPaise;
+      continue;
+    }
+    events.push({ date: d.dueOn, order: 0, particulars: d.label, ref: "", debit: d.billedPaise, credit: 0 });
+    if (d.concessionPaise > 0) {
+      events.push({ date: d.dueOn, order: 1, particulars: `Concession — ${d.label}`, ref: "", debit: 0, credit: d.concessionPaise });
+    }
+  }
+  const myKeys = new Set(dues.map((d) => d.dueKey));
+  for (const v of fees.vouchers) {
+    if (v.voidedAt || v.collectionDate > asOf) continue;
+    const mode = v.tenders.map((t) => tenderModeLabel(t.mode)).join("+");
+    for (const line of v.lines) {
+      if (line.studentId !== student.id && !myKeys.has(line.dueKey)) continue;
+      events.push({
+        date: v.collectionDate,
+        order: 2,
+        particulars: `Paid — ${line.label}${mode ? ` (${mode})` : ""}`,
+        ref: v.receiptNo,
+        debit: 0,
+        credit: line.amountPaise,
+      });
+    }
+  }
+  events.sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order);
+  let bal = 0;
+  const out: { date: string; particulars: string; ref: string; debit: number; credit: number; balance: number | null }[] = events.map((e) => {
+    bal += e.debit - e.credit;
+    return { date: e.date, particulars: e.particulars, ref: e.ref, debit: e.debit, credit: e.credit, balance: bal };
+  });
+  out.push({ date: asOf, particulars: bal < 0 ? "Closing balance (advance paid)" : "Closing balance due", ref: "", debit: 0, credit: 0, balance: bal });
+  if (notYetDue > 0) {
+    out.push({ date: "", particulars: "Still to fall due this session (not in the balance)", ref: "", debit: 0, credit: 0, balance: notYetDue });
+  }
+  return out;
+}
 
 export function runFeeReport(
   id: FeeReportId,
@@ -1336,8 +1399,47 @@ export function runFeeReport(
         return { ok: true, rows: n, message: `${def.label} · ${fmt} · ${n} type(s)` };
       }
 
-      case "student_wise_fee_details":
       case "student_ledger_report": {
+        // A statement, not a dues list: what fell due, what was conceded
+        // and what was paid, by date, with the balance after each line.
+        const rows: Record<string, string>[] = [];
+        for (const student of scopedStudents(false)) {
+          for (const l of studentLedgerLines(student, masters, fees, asOf)) {
+            rows.push({
+              admissionNo: student.admissionNo,
+              studentName: student.fullName,
+              classLabel: classLabel(student, masters),
+              date: l.date,
+              particulars: l.particulars,
+              ref: l.ref,
+              debit: l.debit ? paise(l.debit) : "",
+              credit: l.credit ? paise(l.credit) : "",
+              balance: l.balance === null ? "" : paise(l.balance),
+            });
+          }
+        }
+        const n = emit(
+          def.label,
+          id,
+          [
+            { key: "admissionNo", header: "Adm no" },
+            { key: "studentName", header: "Student" },
+            { key: "classLabel", header: "Class" },
+            { key: "date", header: "Date" },
+            { key: "particulars", header: "Particulars", width: 2 },
+            { key: "ref", header: "Receipt / ref" },
+            { key: "debit", header: "Due ₹", total: true },
+            { key: "credit", header: "Paid / conceded ₹", total: true },
+            { key: "balance", header: "Balance ₹", total: false },
+          ] as ReportColumn[],
+          rows,
+          filterNote,
+          format,
+        );
+        return { ok: true, rows: n, message: `${def.label} · ${fmt} · ${n} line(s)` };
+      }
+
+      case "student_wise_fee_details": {
         const rows: Record<string, string>[] = [];
         for (const student of scopedStudents()) {
           const dues = computeStudentDues(student, masters, fees, {

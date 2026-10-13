@@ -30,7 +30,8 @@ export type ReportCatalog =
   | "library"
   | "certificates"
   | "comms"
-  | "teaching";
+  | "teaching"
+  | "complaints";
 
 const BASE: Record<ReportCatalog, ReportDesk[]> = {
   fees: ["masters", "sis", "fees", "payments"],
@@ -62,6 +63,7 @@ const BASE: Record<ReportCatalog, ReportDesk[]> = {
   certificates: ["certificates"],
   comms: ["school_comms"],
   teaching: ["masters", "teaching"],
+  complaints: ["masters", "sis", "module_state:complaints"],
 };
 
 const EXTRA: Partial<Record<ReportCatalog, Record<string, ReportDesk[]>>> = {

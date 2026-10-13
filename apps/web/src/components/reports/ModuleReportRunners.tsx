@@ -8,6 +8,7 @@ import { STUDENT_LEAVE_REPORTS, runStudentLeaveReport, type StudentLeaveReportId
 import { VAULT_REPORTS, runVaultReport, type VaultReportId } from "@/lib/vault";
 import { RTE_REPORTS, runRteReport, type RteReportId } from "@/lib/rteEws";
 import { TEACHING_REPORTS, runTeachingReport, type TeachingReportId } from "@/lib/teachingReportCatalog";
+import { COMPLAINTS_REPORTS, runComplaintsReport, type ComplaintsReportId } from "@/lib/complaintsReportCatalog";
 import Link from "next/link";
 import {
   ACCOUNTS_REPORTS,
@@ -1312,6 +1313,36 @@ export function TeachingReportsRunner({ ay }: { ay: string }) {
             }),
           )
         }
+      />
+    </div>
+  );
+}
+
+export function ComplaintsReportsRunner() {
+  const [format, setFormat] = useState<"excel" | "pdf">("excel");
+  const [fromDate, setFromDate] = useState(`${todayIso().slice(0, 4)}-04-01`);
+  const [toDate, setToDate] = useState(todayIso);
+  const { show, view } = useRunResult();
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-xs text-[var(--muted)]">
+          From
+          <input type="date" className={`${field} mt-1 block`} value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+        </label>
+        <label className="text-xs text-[var(--muted)]">
+          To
+          <input type="date" className={`${field} mt-1 block`} value={toDate} onChange={(e) => setToDate(e.target.value)} />
+        </label>
+        <FormatPicker value={format} onChange={setFormat} />
+        <Link href="/complaints" className={btnOutline}>
+          Open Complaints
+        </Link>
+      </div>
+      {view}
+      <ExportList
+        reports={COMPLAINTS_REPORTS}
+        onRun={(id) => show(runComplaintsReport(id as ComplaintsReportId, { fromDate, toDate, format }))}
       />
     </div>
   );

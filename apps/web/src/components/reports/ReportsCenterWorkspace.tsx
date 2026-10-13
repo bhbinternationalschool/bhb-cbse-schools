@@ -12,6 +12,7 @@ import {
   CertificatesReportsRunner,
   CommsReportsRunner,
   PtmReportsRunner,
+  ComplaintsReportsRunner,
   TeachingReportsRunner,
   RteReportsRunner,
   StudentLeaveReportsRunner,
@@ -466,6 +467,7 @@ function moduleReportDesks(id: ReportsCenterModuleId, hideStaffRecords: boolean)
     trust: ["trust"],
     timetable: ["timetable"],
     teaching: ["teaching"],
+    complaints: ["complaints"],
     exams: ["exams"],
     library: ["library"],
     certificates: ["certificates"],
@@ -603,6 +605,8 @@ function ModuleRunner({
       return <AccountsReportsRunner />;
     case "trust":
       return <TrustReportsRunner />;
+    case "complaints":
+      return <ComplaintsReportsRunner />;
     case "teaching":
       return <TeachingReportsRunner ay={ay} />;
     case "timetable":
