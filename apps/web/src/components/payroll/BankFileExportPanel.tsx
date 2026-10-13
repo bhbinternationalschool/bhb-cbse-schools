@@ -13,7 +13,7 @@ import {
   BANK_FILE_FORMATS,
   buildBankExportPreview,
   downloadBankExceptionReport,
-  downloadBankFile,
+  downloadBankFileChecked,
   type BankFileFormat,
 } from "@/lib/bankFileExport";
 import { monthLabel } from "@/components/payroll/PrintPayslipsPanel";
@@ -102,9 +102,11 @@ export function BankFileExportPanel({
     }, 4000);
   }
 
-  function onDownload() {
+  async function onDownload() {
     if (!preview) return;
-    const r = downloadBankFile(preview, format);
+    // Checked against the server's payroll first: a run marked paid on
+    // another device must not be paid again from this screen's copy.
+    const r = await downloadBankFileChecked(preview, format);
     if (!r.ok) flash(r.error, true);
     else flash(r.message);
   }

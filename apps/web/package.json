@@ -81,6 +81,7 @@
     "test:visiting-pay": "npx tsx src/lib/visitingPay.selftest.ts",
     "test:visiting-exclusions": "npx tsx src/lib/visitingExclusions.selftest.ts",
     "test:payroll-staggered-runs": "npx tsx src/lib/payrollStaggeredRuns.selftest.ts",
+    "test:bank-file-safety": "npx tsx src/lib/bankFileSafety.selftest.ts",
     "test:staff-payslips": "npx tsx src/lib/staffPayslips.selftest.ts",
     "test:diksha-index": "npx tsx src/lib/dikshaIndex.selftest.ts",
     "test:teacher-contact": "npx tsx src/lib/teacherContact.selftest.ts",
