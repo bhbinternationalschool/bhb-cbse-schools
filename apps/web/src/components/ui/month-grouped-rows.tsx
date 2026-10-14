@@ -136,7 +136,10 @@ export function useMonthGroups<T>({
     key: string;
     map: Record<string, boolean>;
   }>({ key: "", map: {} });
-  const filterOverrides = filterFolds.key === filterKey ? filterFolds.map : {};
+  const filterOverrides = useMemo(
+    () => (filterFolds.key === filterKey ? filterFolds.map : {}),
+    [filterFolds, filterKey],
+  );
 
   const attention = useMemo(
     () => (needsAttention ? attentionMonthKeys(groups, needsAttention) : new Set<string>()),
