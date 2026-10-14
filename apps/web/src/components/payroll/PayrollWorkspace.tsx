@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, Fragment } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAccessData } from "@/components/shell/useAccessData";
 import Link from "next/link";
 import { Wallet } from "lucide-react";
@@ -12,7 +12,7 @@ import { UpiPayButton, type UpiPaid } from "@/components/payments/UpiPayButton";
 import { recordUpiProof, useRecordedUpiProofs } from "@/lib/upiProofsClient";
 import { PayoutButton } from "@/components/payments/PayoutButton";
 import { StaffCashgramButton } from "@/components/payments/StaffCashgramButton";
-import { useStaffCashgrams } from "@/lib/cashgramClient";
+import { useStaffCashgrams, type CashgramRefundView } from "@/lib/cashgramClient";
 import { cashgramIsDead } from "@/lib/cashgram";
 import { PayoutSwitchPanel } from "@/components/payments/PayoutSwitchPanel";
 import {
@@ -79,7 +79,14 @@ import {
   liveEntriesForRun,
   salaryAccountCsv,
 } from "@/lib/salaryAccount";
-import { outstandingForStaff } from "@/lib/staffAdvance";
+import { advancePickRowsForStaff, outstandingByStaff } from "@/lib/staffAdvance";
+import {
+  clampAdvanceDeduct,
+  lineAdvancePicks,
+  pickedAdvanceTotal,
+} from "@/lib/payrollAdvancePick";
+import { AdvancePickNote } from "@/components/payroll/AdvancePickNote";
+import { DraftDateInput, DraftNumberInput, DraftTextInput } from "@/components/ui/draft-inputs";
 import {
   canApprovePayroll,
   canManagePayroll,
@@ -297,6 +304,24 @@ export function PayrollWorkspace() {
   }, [masters, session]);
 
   const selected = runs.find((r) => r.id === selectedId) ?? null;
+
+  // Each line against salary setup / attendance / joining date now. This
+  // rebuilds every line of the run, so it runs only on the run-detail tab and
+  // only when the run, masters or the reset ticks change — it used to run on
+  // EVERY render of this screen, i.e. on every keystroke in the adjust table.
+  const setupRows = useMemo(
+    () =>
+      tab === "detail" && masters && selected
+        ? previewDraftSetupSync(selected, masters, undefined, setupReset).rows
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tick tracks salary setup / attendance hydration
+    [tab, masters, selected, setupReset, tick],
+  );
+
+  /** Put a run a draft edit returned on screen without re-reading every store. */
+  function showEditedRun(run: PayrollRun) {
+    setRuns((cur) => cur.map((r) => (r.id === run.id ? run : r)));
+  }
 
   /** The last process's "Left out" list (not on payroll / joined after the month). */
   const [leftOut, setLeftOut] = useState<PayrollLeftOutEntry[]>([]);
@@ -843,14 +868,18 @@ export function PayrollWorkspace() {
     refresh();
   }
 
+  // `runId`: the run the edited box belongs to. A box saves after a pause or
+  // when it goes away, which may be after another run was opened — so the
+  // edit names its run rather than trusting whichever is selected now.
   function onEditComponent(
     staffId: string,
     headCode: string,
     amount: number,
+    runId = selected?.id,
   ) {
-    if (!selected) return;
+    if (!runId) return;
     const r = updateDraftLineComponent(
-      selected.id,
+      runId,
       staffId,
       headCode,
       amount,
@@ -860,16 +889,17 @@ export function PayrollWorkspace() {
       flash(r.error, true);
       return;
     }
-    refresh();
+    showEditedRun(r.run);
   }
 
   function onEditAdjustments(
     staffId: string,
     patch: Parameters<typeof updateDraftLineAdjustments>[2],
+    runId = selected?.id,
   ) {
-    if (!selected) return;
+    if (!runId) return;
     const r = updateDraftLineAdjustments(
-      selected.id,
+      runId,
       staffId,
       patch,
       session.fullName,
@@ -878,7 +908,7 @@ export function PayrollWorkspace() {
       flash(r.error, true);
       return;
     }
-    refresh();
+    showEditedRun(r.run);
   }
 
   const pendingCount = useMemo(() => {
@@ -1255,7 +1285,7 @@ export function PayrollWorkspace() {
             onPaid={onPaid}
             onMarkLinesPaid={onMarkLinesPaid}
             bookIssue={bookIssues[selected.id] || ""}
-            setupRows={masters ? previewDraftSetupSync(selected, masters, undefined, setupReset).rows : []}
+            setupRows={setupRows}
             setupReset={setupReset}
             setSetupReset={setSetupReset}
             onApplySetup={(ids) => {
@@ -1382,6 +1412,19 @@ export function PayrollWorkspace() {
   );
 }
 
+/**
+ * A callback whose identity never changes but which always runs the latest
+ * function — so a memoised row is not re-rendered just because its parent
+ * made a new closure.
+ */
+function useLatestCallback<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+  const ref = useRef(fn);
+  useEffect(() => {
+    ref.current = fn;
+  });
+  return useCallback((...args: A) => ref.current(...args), []);
+}
+
 function RunDetail({
   run,
   editable,
@@ -1444,10 +1487,11 @@ function RunDetail({
   onRebuild: () => void;
   onRemoveLine: (staffId: string) => void;
   onRemoveLines: (staffIds: string[]) => void;
-  onEditComponent: (staffId: string, headCode: string, amount: number) => void;
+  onEditComponent: (staffId: string, headCode: string, amount: number, runId: string) => void;
   onEditAdjustments: (
     staffId: string,
     patch: Parameters<typeof updateDraftLineAdjustments>[2],
+    runId: string,
   ) => void;
   onLinePaid: (staffId: string, paid: UpiPaid) => void;
   staffById: (id: string) => StaffRecord | undefined;
@@ -1519,10 +1563,53 @@ function RunDetail({
   );
   const notOnPayrollById = new Map(notOnPayroll.map((x) => [x.staffId, x]));
 
+  // Every line's locked "advance outstanding" from one read of the register
+  // (it was read once per row on every render).
+  const outstandingNow = useMemo(
+    () => outstandingByStaff(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-read whenever the run changes (each commit)
+    [run],
+  );
+  // A save re-reads the whole store, so every line arrives as a new object
+  // even when only one changed. Keep the previous object for an unchanged
+  // line, so its memoised row does not re-render.
+  const lineCache = useRef(new Map<string, { json: string; line: PayrollStaffLine }>());
+  const stableLines = useMemo(() => {
+    const next = new Map<string, { json: string; line: PayrollStaffLine }>();
+    const out = run.lines.map((l) => {
+      const json = JSON.stringify(l);
+      const prev = lineCache.current.get(l.staffId);
+      const keep = prev && prev.json === json ? prev.line : l;
+      next.set(l.staffId, { json, line: keep });
+      return keep;
+    });
+    lineCache.current = next;
+    return out;
+  }, [run.lines]);
+  // Stable callbacks for the memoised rows.
+  const stableEditAdjustments = useLatestCallback(onEditAdjustments);
+  const stableEditComponent = useLatestCallback(onEditComponent);
+  const stableRemoveLine = useLatestCallback(onRemoveLine);
+  const stableUnmarkLinePaid = useLatestCallback(onUnmarkLinePaid);
+  const stableLinePaid = useLatestCallback(onLinePaid);
+  const onToggleOpen = useLatestCallback((staffId: string) =>
+    setExpandedStaffId(expandedStaffId === staffId ? null : staffId),
+  );
+  const onTogglePick = useCallback((staffId: string, on: boolean) => {
+    setPayPick((cur) => {
+      const next = new Set(cur);
+      if (on) next.add(staffId);
+      else next.delete(staffId);
+      return next;
+    });
+  }, []);
+  const onOpenSetup = useCallback((staffId: string) => setSetupOpen(new Set([staffId])), []);
+  const onLinkChanged = useCallback(() => setLinkTick((t) => t + 1), []);
+
   // Attendance renders as "22/1/0/0"; sorting that string is meaningless, so
   // the column yields days present. Gross and net sort on paise.
   const lineSort = useTableSort(
-    run.lines,
+    stableLines,
     {
       staff: (l) => l.fullName,
       present: (l) => l.daysPresent,
@@ -1706,13 +1793,12 @@ function RunDetail({
                   payment on it (not the day this button is pressed). */}
               <label className="flex items-center gap-1 text-[11px] font-semibold">
                 Paid on
-                <input
-                  type="date"
+                <DraftDateInput
                   className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-1.5 py-1 text-[11px]"
                   value={paidOnDraft || payrollRunPaymentDate(run) || todayIstDate()}
                   min={`${run.month}-01`}
                   max={todayIstDate()}
-                  onChange={(e) => setPaidOnDraft(e.target.value)}
+                  onCommit={setPaidOnDraft}
                 />
               </label>
               <label className="flex items-center gap-1 text-[11px] font-semibold">
@@ -1929,25 +2015,153 @@ function RunDetail({
           </ErpTableHead>
           <ErpTableBody>
             {lineSort.rows.filter((l) => lineMatches(l, lineQuery, roleOf)).map((l) => {
-              const open = expandedStaffId === l.staffId;
               const lockedDue = editable
-                ? outstandingForStaff(l.staffId)
+                ? outstandingNow.get(l.staffId) || 0
                 : l.advanceTaken || 0;
               return (
-                <Fragment key={l.staffId}>
+                <RunLineRow
+                  key={l.staffId}
+                  line={l}
+                  runId={run.id}
+                  runMonth={run.month}
+                  runStatus={run.status}
+                  runPaidAt={run.paidAt || ""}
+                  editable={editable}
+                  inAccounts={inAccounts}
+                  readOnly={readOnly}
+                  open={expandedStaffId === l.staffId}
+                  picked={payPick.has(l.staffId)}
+                  lockedDue={lockedDue}
+                  setupAction={setupById.get(l.staffId)?.action}
+                  setupNoSetup={Boolean(setupById.get(l.staffId)?.noSetup)}
+                  setupReasons={(setupById.get(l.staffId)?.reasons || []).join("; ")}
+                  notOnPayroll={notOnPayrollById.has(l.staffId)}
+                  notOnPayrollReason={notOnPayrollById.get(l.staffId)?.reason || ""}
+                  staff={staffById(l.staffId)}
+                  upiProof={upiPaid.get(`${run.id}|${l.staffId}`)}
+                  link={staffLinks.get(`${run.id}|${l.staffId}`)}
+                  colSpan={inAccounts && !readOnly ? 10 : 9}
+                  onTogglePick={onTogglePick}
+                  onToggleOpen={onToggleOpen}
+                  onOpenSetup={onOpenSetup}
+                  onRemoveLine={stableRemoveLine}
+                  onUnmarkLinePaid={stableUnmarkLinePaid}
+                  onLinePaid={stableLinePaid}
+                  onLinkChanged={onLinkChanged}
+                  onEditAdjustments={stableEditAdjustments}
+                  onEditComponent={stableEditComponent}
+                />
+              );
+            })}
+          </ErpTableBody>
+        </ErpTable>
+        </div>
+      </ErpTableShell>
+    </div>
+  );
+}
+
+/**
+ * One line of a run, and its Adjust / pay panel. Memoised: an edit to one
+ * line re-renders that line, not every row of the run (director, 14 Oct
+ * 2026: typing in the adjust table lagged). Every callback it gets is
+ * stable (RunDetail wraps them), and every input keeps its own draft until
+ * blur / Enter (components/ui/draft-inputs).
+ */
+const RunLineRow = memo(function RunLineRow({
+  line: l,
+  runId,
+  runMonth,
+  runStatus,
+  runPaidAt,
+  editable,
+  inAccounts,
+  readOnly,
+  open,
+  picked,
+  lockedDue,
+  setupAction,
+  setupNoSetup,
+  setupReasons,
+  notOnPayroll,
+  notOnPayrollReason,
+  staff,
+  upiProof,
+  link,
+  colSpan,
+  onTogglePick,
+  onToggleOpen,
+  onOpenSetup,
+  onRemoveLine,
+  onUnmarkLinePaid,
+  onLinePaid,
+  onLinkChanged,
+  onEditAdjustments: editAdjustmentsIn,
+  onEditComponent: editComponentIn,
+}: {
+  line: PayrollStaffLine;
+  runId: string;
+  runMonth: string;
+  runStatus: PayrollRun["status"];
+  runPaidAt: string;
+  editable: boolean;
+  inAccounts: boolean;
+  readOnly: boolean;
+  open: boolean;
+  picked: boolean;
+  lockedDue: number;
+  /** Against salary setup now (undefined = not checked). */
+  setupAction: SetupSyncRow["action"] | undefined;
+  setupNoSetup: boolean;
+  setupReasons: string;
+  notOnPayroll: boolean;
+  notOnPayrollReason: string;
+  staff: StaffRecord | undefined;
+  upiProof: { utr: string; paidOn: string } | undefined;
+  link: CashgramRefundView | undefined;
+  colSpan: number;
+  onTogglePick: (staffId: string, on: boolean) => void;
+  onToggleOpen: (staffId: string) => void;
+  onOpenSetup: (staffId: string) => void;
+  onRemoveLine: (staffId: string) => void;
+  onUnmarkLinePaid: (staffId: string) => void;
+  onLinePaid: (staffId: string, paid: UpiPaid) => void;
+  onLinkChanged: () => void;
+  onEditAdjustments: (
+    staffId: string,
+    patch: Parameters<typeof updateDraftLineAdjustments>[2],
+    runId: string,
+  ) => void;
+  onEditComponent: (staffId: string, headCode: string, amount: number, runId: string) => void;
+}) {
+  // Every edit names this row's run (see onEditAdjustments in the workspace).
+  const onEditAdjustments = (
+    staffId: string,
+    patch: Parameters<typeof updateDraftLineAdjustments>[2],
+  ) => editAdjustmentsIn(staffId, patch, runId);
+  const onEditComponent = (staffId: string, headCode: string, amount: number) =>
+    editComponentIn(staffId, headCode, amount, runId);
+  // Advances ticked for this month's recovery (on the Advance recovery head).
+  const picks = useMemo(() => lineAdvancePicks(l.components), [l.components]);
+  // The most the deduction may be: the ticked advances' balance, else the
+  // whole outstanding. Read from the register only when something is ticked
+  // on a draft (a posted run's own recovery is already in the register).
+  const deductMax = useMemo(
+    () => (editable && picks.length ? Math.min(pickedTotalNow(l.staffId, picks), lockedDue) : lockedDue),
+    [editable, picks, l.staffId, lockedDue],
+  );
+  // Why a typed deduction was changed (clamped), until the next edit.
+  const [deductMsg, setDeductMsg] = useState("");
+  return (
+    <>
                   <tr className="border-b border-[var(--border)]">
                     {inAccounts && !readOnly ? (
                       <td className="px-2 py-2">
                         <input
                           type="checkbox"
                           aria-label={`Tick ${l.fullName}`}
-                          checked={payPick.has(l.staffId)}
-                          onChange={(e) => {
-                            const next = new Set(payPick);
-                            if (e.target.checked) next.add(l.staffId);
-                            else next.delete(l.staffId);
-                            setPayPick(next);
-                          }}
+                          checked={picked}
+                          onChange={(e) => onTogglePick(l.staffId, e.target.checked)}
                         />
                       </td>
                     ) : null}
@@ -1962,37 +2176,36 @@ function RunDetail({
                           ? ` · adv due ${formatInr(lockedDue)}`
                           : ""}
                       </div>
-                      {notOnPayrollById.has(l.staffId) ? (
+                      {notOnPayroll ? (
                         <NotOnPayrollBadge
-                          reason={notOnPayrollById.get(l.staffId)!.reason}
+                          reason={notOnPayrollReason}
                           onRemove={editable ? () => onRemoveLine(l.staffId) : undefined}
                         />
                       ) : null}
                       {(() => {
                         // Not on payroll: its own badge and one-click remove.
-                        if (notOnPayrollById.has(l.staffId)) return null;
-                        const sr = setupById.get(l.staffId);
-                        if (!sr || (!sr.noSetup && sr.action === "none")) return null;
-                        const label = sr.action === "remove"
+                        if (notOnPayroll) return null;
+                        if (!setupAction || (!setupNoSetup && setupAction === "none")) return null;
+                        const label = setupAction === "remove"
                           ? "Not in this month"
-                          : sr.noSetup
+                          : setupNoSetup
                             ? "No salary setup"
                             : "Differs from salary setup";
                         return (
                           <div className="mt-0.5 flex flex-wrap items-center gap-1">
                             <span
                               className="rounded bg-[var(--danger-soft)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--danger)]"
-                              title={sr.reasons.join("; ") || "PF/ESI not applied; set it up in Masters → Salary setup"}
+                              title={setupReasons || "PF/ESI not applied; set it up in Masters → Salary setup"}
                             >
                               {label}
                             </span>
-                            {editable && sr.action !== "none" ? (
+                            {editable && setupAction !== "none" ? (
                               <button
                                 type="button"
                                 className="text-[10px] font-semibold text-[var(--brand-deep)] underline"
-                                onClick={() => setSetupOpen(new Set([l.staffId]))}
+                                onClick={() => onOpenSetup(l.staffId)}
                               >
-                                {sr.action === "remove" ? "Remove from this month" : "Rebuild from setup"}
+                                {setupAction === "remove" ? "Remove from this month" : "Rebuild from setup"}
                               </button>
                             ) : null}
                           </div>
@@ -2006,15 +2219,15 @@ function RunDetail({
                     <td className="px-3 py-2">{formatInr(l.netPay)}</td>
                     <td className="px-3 py-2 font-semibold">
                       {editable ? (
-                        <input
-                          type="number"
+                        <DraftNumberInput
                           className="field w-24 !py-1 !text-xs"
+                          aria-label={`Payable for ${l.fullName}`}
                           value={
                             l.amountPayable ?? (l.juneHold ? 0 : l.netPay)
                           }
-                          onChange={(e) =>
+                          onCommit={(n) =>
                             onEditAdjustments(l.staffId, {
-                              amountPayable: Number(e.target.value) || 0,
+                              amountPayable: n,
                             })
                           }
                         />
@@ -2076,9 +2289,9 @@ function RunDetail({
                             </button>
                           ) : null}
                         </span>
-                      ) : run.status === "paid" ? (
+                      ) : runStatus === "paid" ? (
                         <span className="text-[var(--muted)]">
-                          with the run · {(run.paidAt || "").slice(0, 10)}
+                          with the run · {(runPaidAt || "").slice(0, 10)}
                         </span>
                       ) : (
                         <span className="text-[var(--muted)]">
@@ -2091,22 +2304,21 @@ function RunDetail({
                       <span className="inline-flex items-center gap-1">
                         {/* Pay this salary by UPI and record its UTR from the
                             app's screenshot (director, 7 Oct 2026). */}
-                        {(run.status === "posted" || run.status === "paid") && !readOnly ? (
+                        {(runStatus === "posted" || runStatus === "paid") && !readOnly ? (
                           (() => {
-                            const st = staffById(l.staffId);
+                            const st = staff;
                             const amt = l.amountPayable ?? (l.juneHold ? 0 : l.netPay);
-                            const lineKey = `${run.id}|${l.staffId}`;
-                            const link = staffLinks.get(lineKey);
+                            const lineKey = `${runId}|${l.staffId}`;
                             const linkLive = Boolean(link && !cashgramIsDead(link.status));
-                            const linePaid = Boolean(upiPaid.get(lineKey)) || /UTR \d{12}/.test(l.note || "") || linkLive;
+                            const linePaid = Boolean(upiProof) || /UTR \d{12}/.test(l.note || "") || linkLive;
                             return amt > 0 ? (
                               <>
                               {/* A salary paid by link shows only the link. */}
                               {linkLive ? null : (
                               <UpiPayButton
                                 label={
-                                  upiPaid.get(`${run.id}|${l.staffId}`)
-                                    ? `Paid ✓ ${upiPaid.get(`${run.id}|${l.staffId}`)!.utr.slice(-4)}`
+                                  upiProof
+                                    ? `Paid ✓ ${upiProof.utr.slice(-4)}`
                                     : /UTR \d{12}/.test(l.note || "")
                                       ? "Paid ✓ UPI"
                                       : "Pay UPI"
@@ -2115,8 +2327,8 @@ function RunDetail({
                                 payeeVpa={st?.upiId || ""}
                                 payeeMobile={st?.mobile || ""}
                                 amountPaise={Math.round(amt * 100)}
-                                note={`Salary ${run.month} · ${l.empCode || l.fullName}`}
-                                earliest={`${run.month}-01`}
+                                note={`Salary ${runMonth} · ${l.empCode || l.fullName}`}
+                                earliest={`${runMonth}-01`}
                                 onPaid={(p) => onLinePaid(l.staffId, p)}
                               />
                               )}
@@ -2132,23 +2344,23 @@ function RunDetail({
                                   phone: st?.mobile || "",
                                 }}
                                 amountPaise={Math.round(amt * 100)}
-                                note={`Salary ${run.month}`}
-                                target={{ kind: "payroll_line", id: lineKey, label: `Salary ${run.month} — ${l.fullName}` }}
+                                note={`Salary ${runMonth}`}
+                                target={{ kind: "payroll_line", id: lineKey, label: `Salary ${runMonth} — ${l.fullName}` }}
                                 subjectId={l.staffId}
-                                period={run.id}
+                                period={runId}
                                 onPaid={(p) => onLinePaid(l.staffId, p)}
                               />
                               {/* Or a Cashgram link to their phone — for staff
                                   with no UPI ID or bank on file. */}
                               <StaffCashgramButton
                                 link={link}
-                                runId={run.id}
+                                runId={runId}
                                 staffId={l.staffId}
                                 name={l.fullName}
                                 phone={st?.mobile || ""}
                                 amountPaise={Math.round(amt * 100)}
-                                paid={Boolean(upiPaid.get(lineKey)) || /UTR \d{12}/.test(l.note || "")}
-                                onChanged={() => setLinkTick((t) => t + 1)}
+                                paid={Boolean(upiProof) || /UTR \d{12}/.test(l.note || "")}
+                                onChanged={onLinkChanged}
                               />
                               </>
                             ) : null;
@@ -2157,9 +2369,8 @@ function RunDetail({
                         <button
                           type="button"
                           className="text-[11px] font-semibold text-[var(--brand-deep)]"
-                          onClick={() =>
-                            setExpandedStaffId(open ? null : l.staffId)
-                          }
+                          aria-expanded={open}
+                          onClick={() => onToggleOpen(l.staffId)}
                         >
                           {editable ? "Adjust / pay" : "Details"}
                         </button>
@@ -2170,7 +2381,7 @@ function RunDetail({
                             {
                               id: "details",
                               label: editable ? "Adjust / pay" : "Details",
-                              onSelect: (x) => setExpandedStaffId(open ? null : x.staffId),
+                              onSelect: (x) => onToggleOpen(x.staffId),
                             },
                             {
                               id: "staff",
@@ -2194,19 +2405,18 @@ function RunDetail({
                   </tr>
                   {open ? (
                     <tr className="border-b border-[var(--border)] bg-[var(--surface-sunken)]">
-                      <td colSpan={inAccounts && !readOnly ? 10 : 9} className="px-3 py-3">
+                      <td colSpan={colSpan} className="px-3 py-3">
                         <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                           <label className="text-[10px] font-semibold text-[var(--muted)]">
                             Bonus (this month)
                             {editable ? (
-                              <input
-                                type="number"
+                              <DraftNumberInput
                                 min={0}
                                 className="field mt-0.5 !py-1 !text-xs"
                                 value={l.bonus || 0}
-                                onChange={(e) =>
+                                onCommit={(n) =>
                                   onEditAdjustments(l.staffId, {
-                                    bonus: Number(e.target.value) || 0,
+                                    bonus: n,
                                   })
                                 }
                               />
@@ -2219,15 +2429,13 @@ function RunDetail({
                           <label className="text-[10px] font-semibold text-[var(--muted)]">
                             Special deduction
                             {editable ? (
-                              <input
-                                type="number"
+                              <DraftNumberInput
                                 min={0}
                                 className="field mt-0.5 !py-1 !text-xs"
                                 value={l.specialDeduction || 0}
-                                onChange={(e) =>
+                                onCommit={(n) =>
                                   onEditAdjustments(l.staffId, {
-                                    specialDeduction:
-                                      Number(e.target.value) || 0,
+                                    specialDeduction: n,
                                   })
                                 }
                               />
@@ -2240,13 +2448,13 @@ function RunDetail({
                           <label className="text-[10px] font-semibold text-[var(--muted)] sm:col-span-2">
                             Deduction reason / label
                             {editable ? (
-                              <input
+                              <DraftTextInput
                                 className="field mt-0.5 !py-1 !text-xs"
                                 value={l.specialDeductionLabel || ""}
                                 placeholder="e.g. Uniform, fine, lost property"
-                                onChange={(e) =>
+                                onCommit={(text) =>
                                   onEditAdjustments(l.staffId, {
-                                    specialDeductionLabel: e.target.value,
+                                    specialDeductionLabel: text,
                                   })
                                 }
                               />
@@ -2256,51 +2464,81 @@ function RunDetail({
                               </span>
                             )}
                           </label>
-                          <label className="text-[10px] font-semibold text-[var(--muted)]">
+                          <div className="text-[10px] font-semibold text-[var(--muted)]">
                             Advance outstanding (locked)
-                            <span className="mt-0.5 block rounded border border-[var(--border)] bg-[var(--surface-sunken)] px-2 py-1.5 text-xs font-semibold text-[var(--brand-deep)]">
-                              {formatInr(lockedDue)}
-                            </span>
+                            {/* Tap for the advances behind the total; tick
+                                the ones this month recovers (14 Oct 2026). */}
+                            <AdvancePickNote
+                              staffId={l.staffId}
+                              staffName={l.fullName}
+                              runId={runId}
+                              lockedDue={lockedDue}
+                              editable={editable}
+                              picks={picks}
+                              onPick={(next) => {
+                                setDeductMsg("");
+                                onEditAdjustments(l.staffId, { advancePicks: next });
+                              }}
+                            />
                             <span className="mt-0.5 block text-[10px] font-normal">
-                              Total due from Advances ledger
+                              {picks.length
+                                ? `${picks.length} advance${picks.length === 1 ? "" : "s"} ticked · tap to change`
+                                : "Total due from Advances ledger · tap to choose advances"}
                             </span>
-                          </label>
+                          </div>
                           <label className="text-[10px] font-semibold text-[var(--muted)]">
                             Advance deduct this month
                             {editable ? (
-                              <input
-                                type="number"
+                              <DraftNumberInput
                                 min={0}
-                                max={lockedDue}
+                                max={deductMax}
                                 className="field mt-0.5 !py-1 !text-xs"
+                                aria-describedby={`adv-max-${l.staffId}`}
                                 value={l.advanceDeduct || 0}
-                                onChange={(e) =>
-                                  onEditAdjustments(l.staffId, {
-                                    advanceDeduct: Number(e.target.value) || 0,
-                                  })
-                                }
+                                onCommit={(n) => {
+                                  // 0 … the ticked advances' balance (or the
+                                  // whole outstanding when none are ticked).
+                                  const max = picks.length
+                                    ? Math.min(pickedTotalNow(l.staffId, picks), lockedDue)
+                                    : lockedDue;
+                                  const c = clampAdvanceDeduct(n, max);
+                                  setDeductMsg(
+                                    c.clamped
+                                      ? n < 0
+                                        ? "Cannot be below ₹0 — set to ₹0."
+                                        : `Cannot be more than ${formatInr(max)}${picks.length ? " (the ticked advances' balance)" : " (outstanding)"} — set to ${formatInr(c.value)}.`
+                                      : "",
+                                  );
+                                  if (c.value !== (l.advanceDeduct || 0)) {
+                                    onEditAdjustments(l.staffId, { advanceDeduct: c.value });
+                                  }
+                                }}
                               />
                             ) : (
                               <span className="mt-0.5 block text-xs text-[var(--brand-deep)]">
                                 {formatInr(l.advanceDeduct || 0)}
                               </span>
                             )}
-                            <span className="mt-0.5 block text-[10px] font-normal">
-                              Max {formatInr(lockedDue)}
+                            <span id={`adv-max-${l.staffId}`} className="mt-0.5 block text-[10px] font-normal">
+                              Max {formatInr(deductMax)}
+                              {picks.length ? " · ticked advances" : ""}
                             </span>
+                            {deductMsg ? (
+                              <span role="status" className="mt-0.5 block text-[10px] font-semibold text-[var(--danger)]">
+                                {deductMsg}
+                              </span>
+                            ) : null}
                           </label>
                           <label className="text-[10px] font-semibold text-[var(--muted)]">
                             New advance with salary
                             {editable ? (
-                              <input
-                                type="number"
+                              <DraftNumberInput
                                 min={0}
                                 className="field mt-0.5 !py-1 !text-xs"
                                 value={l.advanceNewWithSalary || 0}
-                                onChange={(e) =>
+                                onCommit={(n) =>
                                   onEditAdjustments(l.staffId, {
-                                    advanceNewWithSalary:
-                                      Number(e.target.value) || 0,
+                                    advanceNewWithSalary: n,
                                   })
                                 }
                               />
@@ -2316,13 +2554,12 @@ function RunDetail({
                           <label className="text-[10px] font-semibold text-[var(--muted)]">
                             Payment date
                             {editable ? (
-                              <input
-                                type="date"
+                              <DraftDateInput
                                 className="field mt-0.5 !py-1 !text-xs"
                                 value={l.paymentDate || ""}
-                                onChange={(e) =>
+                                onCommit={(iso) =>
                                   onEditAdjustments(l.staffId, {
-                                    paymentDate: e.target.value,
+                                    paymentDate: iso,
                                   })
                                 }
                               />
@@ -2362,13 +2599,13 @@ function RunDetail({
                           <label className="text-[10px] font-semibold text-[var(--muted)] sm:col-span-2 lg:col-span-4">
                             Notes
                             {editable ? (
-                              <input
+                              <DraftTextInput
                                 className="field mt-0.5 !py-1 !text-xs"
                                 value={l.note || ""}
                                 placeholder="Any note for this staff / month"
-                                onChange={(e) =>
+                                onCommit={(text) =>
                                   onEditAdjustments(l.staffId, {
-                                    note: e.target.value,
+                                    note: text,
                                   })
                                 }
                               />
@@ -2393,16 +2630,11 @@ function RunDetail({
                               c.headCode !== "BONUS" &&
                               c.headCode !== "SPECIAL_DED" &&
                               c.headCode !== "ADVANCE" ? (
-                                <input
-                                  type="number"
+                                <DraftNumberInput
                                   className="field mt-0.5 !py-1 !text-xs"
                                   value={c.amount}
-                                  onChange={(e) =>
-                                    onEditComponent(
-                                      l.staffId,
-                                      c.headCode,
-                                      Number(e.target.value) || 0,
-                                    )
+                                  onCommit={(n) =>
+                                    onEditComponent(l.staffId, c.headCode, n)
                                   }
                                 />
                               ) : (
@@ -2416,15 +2648,13 @@ function RunDetail({
                       </td>
                     </tr>
                   ) : null}
-                </Fragment>
-              );
-            })}
-          </ErpTableBody>
-        </ErpTable>
-        </div>
-      </ErpTableShell>
-    </div>
+    </>
   );
+});
+
+/** Balance of the ticked advances as the register stands now. */
+function pickedTotalNow(staffId: string, picks: string[]): number {
+  return pickedAdvanceTotal(advancePickRowsForStaff(staffId), picks);
 }
 
 /**
@@ -2602,13 +2832,15 @@ function PayLinesBar({
       </div>
       <label className="flex flex-col font-semibold">
         Paid on
-        <input
-          type="date"
+        {/* Own draft while typing: the box used to fall back to the
+            planned day / today the moment it was half-typed (value ""),
+            wiping the day and month before the year went in. */}
+        <DraftDateInput
           className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-1.5 py-1"
           value={day}
           min={`${run.month}-01`}
           max={todayIstDate()}
-          onChange={(e) => setDate(e.target.value)}
+          onCommit={setDate}
         />
       </label>
       <label className="flex flex-col font-semibold">

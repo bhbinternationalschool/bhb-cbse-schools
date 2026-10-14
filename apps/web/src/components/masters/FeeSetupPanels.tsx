@@ -38,6 +38,7 @@ import {
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DraftDateInput } from "@/components/ui/draft-inputs";
 import { useDemoSessionOptional } from "@/components/shell/SessionContext";
 
 type Commit = (s: MastersState, msg?: string) => void;
@@ -701,12 +702,13 @@ export function InstallmentsPanel({
                       {!i.isActive ? " · off" : ""}
                     </span>
                   </div>
-                  <input
-                    type="date"
+                  {/* Saves Masters (and says "Due date updated") — so only
+                      a whole date is saved, never 0002-… per digit. */}
+                  <DraftDateInput
                     className="field max-w-[160px]"
                     value={i.dueOn}
                     disabled={!i.isActive}
-                    onChange={(e) => updateDue(i.id, e.target.value)}
+                    onCommit={(v) => updateDue(i.id, v)}
                   />
                 </li>
               ))}

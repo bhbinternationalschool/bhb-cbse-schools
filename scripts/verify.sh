@@ -208,6 +208,7 @@ SELFTESTS=(
   test:payroll-per-date-pay
   test:payroll-ledger-post-definer
   test:payroll-setup-sync
+  test:payroll-adjust-table
   test:masters-change-auth
   test:timetable-free-grid
   test:teacher-load-published
