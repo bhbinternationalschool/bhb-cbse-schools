@@ -27,11 +27,17 @@
  *   section  V-A renamed (to a fresh tag each test).
  *   staff    a staff member's full name changed.
  *
- * Every test here is EXPECTED TO FAIL until steps 1.3/1.4/2.1 (one change
- * signal + useErpQuery invalidation): today a Masters copy lives per tab and
- * nothing re-reads it (evidence/propagation.md). The scoreboard records the
- * step each one failed at; the subject and section tests must fail at
- * "propagation", never at "control", "edit" or "database".
+ * Every test on a real screen is EXPECTED TO FAIL until step 2.1 converts it
+ * to useMasters(): today a Masters copy lives per tab and nothing re-reads it
+ * (evidence/propagation.md). The scoreboard records the step each one failed
+ * at; the subject and section tests must fail at "propagation", never at
+ * "control", "edit" or "database".
+ *
+ * /__kernel (step 1.4) is the exception and must PASS: a test page that lists
+ * the classes through useMasters() alone (GET /api/data/views/masters), kept
+ * fresh by the versions poll (GET /api/data/views/versions every 20 s; a moved
+ * `masters` value refetches the view). It is the proof that the kernel moves
+ * a change to an open tab before any real screen is converted to it.
  *
  * This project runs after every read-only spec (playwright.config.ts) because
  * it writes to the stack.
@@ -46,11 +52,13 @@ import { expect, metric, openAs, test } from "../support";
 const PROPAGATION_MS = 30_000;
 const CLASS_V = classId(8);
 const STAFF_EDITED = staffId(20);
-const UNTIL = "expected to fail until steps 1.3/1.4/2.1: a Masters/staff copy lives per tab and nothing re-reads it";
+const UNTIL = "expected to fail until step 2.1 converts this screen to useMasters(): a Masters/staff copy lives per tab and nothing re-reads it";
 
 type EditVia = "editor" | "api";
 type Observer = {
   path: string;
+  /** Set when this observer reads through the query kernel: the test must pass (no test.fail). */
+  kernel?: true;
   /** Navigate to the view and prove it shows the current value. */
   open: (page: Page, current: string) => Promise<void>;
   /** The element that appears once the new value has reached this screen. */
@@ -103,7 +111,19 @@ const pickV = async (page: Page) => {
   await cls.selectOption({ label: "V" });
 };
 
+/** /__kernel (1.4): every class's sections and subjects, from useMasters() only. */
+const kernelItem = (page: Page, list: "Sections" | "Subjects", name: string) =>
+  page.getByRole("list", { name: `${list} of V`, exact: true }).getByRole("listitem").filter({ hasText: new RegExp(`^${name}$`) });
+
 const SUBJECT_OBSERVERS: Observer[] = [
+  {
+    path: "/__kernel",
+    kernel: true,
+    open: async (page) => {
+      await expect(kernelItem(page, "Subjects", "Mathematics")).toHaveCount(1, { timeout: 20_000 });
+    },
+    sees: (page, name) => kernelItem(page, "Subjects", name),
+  },
   {
     path: "/masters?tab=subjects",
     open: async (page) => {
@@ -137,6 +157,14 @@ const sectionOption = (page: Page, name: string) =>
   page.getByRole("combobox", { name: "Section", exact: true }).first().locator("option", { hasText: new RegExp(`^${name}$`) });
 
 const SECTION_OBSERVERS: Observer[] = [
+  {
+    path: "/__kernel",
+    kernel: true,
+    open: async (page, current) => {
+      await expect(kernelItem(page, "Sections", current)).toHaveCount(1, { timeout: 20_000 });
+    },
+    sees: (page, name) => kernelItem(page, "Sections", name),
+  },
   {
     path: "/attendance",
     open: async (page, current) => {
@@ -314,7 +342,7 @@ async function scenario(
 for (const via of ["editor", "api"] as const) {
   for (const obs of SUBJECT_OBSERVERS) {
     test(`subject added to Class V via ${via} → visible on ${obs.path}`, async ({ browser }, testInfo) => {
-      test.fail(true, UNTIL);
+      test.fail(!obs.kernel, UNTIL);
       const t = tag();
       const code = `CMP${t}`;
       const name = `Computer ${t}`;
@@ -343,7 +371,7 @@ for (const via of ["editor", "api"] as const) {
 
   for (const obs of SECTION_OBSERVERS) {
     test(`section V-A renamed via ${via} → visible on ${obs.path}`, async ({ browser }, testInfo) => {
-      test.fail(true, UNTIL);
+      test.fail(!obs.kernel, UNTIL);
       const next = `S${tag()}`;
       const r: { propagatedAfterMs: number | null; visibleAfterReload?: boolean | string; controlShown?: boolean } = { propagatedAfterMs: null };
       await scenario(

@@ -38,6 +38,7 @@ import { consumeFreshLoginSession, flushAllDeskSyncPending, resetAllWorkspacePer
 import { useWorkspaceInactivityLogout } from "./useWorkspaceInactivityLogout";
 import { ToastHost } from "./Toast";
 import { useClientMetrics } from "./useClientMetrics";
+import { ErpQueryProvider } from "@/lib/data/client/hooks";
 
 export function AppShell({
   session,
@@ -388,7 +389,11 @@ export function AppShell({
     );
   }
 
+  // The query kernel (data-layer 1.4): one React Query client per tab for the
+  // screens that read through useErpQuery / useMasters / …; its versions poll
+  // runs only while such a query is mounted (lib/data/client/hooks).
   return (
+    <ErpQueryProvider>
     <SessionProvider session={session} readOnly={readOnly}>
       <SchoolFavicon />
       <div className="flex h-screen overflow-hidden bg-[var(--surface)]">
@@ -486,5 +491,6 @@ export function AppShell({
         </div>
       </div>
     </SessionProvider>
+    </ErpQueryProvider>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { ErpQueryError, useErpQuery } from "@/lib/data/client/hooks";
 import type { TeachingSection } from "@/lib/staffTeachingScope";
 
 /**
@@ -12,6 +12,12 @@ import type { TeachingSection } from "@/lib/staffTeachingScope";
  * `unrestricted` = principal / office: list the whole school as before.
  * `null` while loading or when the answer could not be fetched; callers
  * must not treat that as "no classes" (unknown is not a fact).
+ *
+ * Read through the query kernel (data-layer 1.4) instead of a module-level
+ * copy and a mount-only effect: one cached answer per tab (fresh for 60 s,
+ * as the old copy was), refetched when the tab regains focus after that,
+ * and when the versions poll sees the staff roster, the timetable or
+ * Masters move — the inputs of the server's scope.
  */
 export type MyTeaching = {
   unrestricted: boolean;
@@ -32,41 +38,29 @@ export type MyTeaching = {
   }[];
 };
 
-let cache: { at: number; value: MyTeaching } | null = null;
-const TTL_MS = 60_000;
-
-export async function fetchMyTeaching(force = false): Promise<MyTeaching | null> {
-  if (!force && cache && Date.now() - cache.at < TTL_MS) return cache.value;
-  try {
-    const res = await fetch("/api/v1/staff/my-classes", { cache: "no-store" });
-    if (!res.ok) return null;
-    const body = (await res.json()) as { data?: MyTeaching } & Partial<MyTeaching>;
-    const data = (body.data ?? body) as MyTeaching;
-    if (typeof data.unrestricted !== "boolean" || !Array.isArray(data.teaching)) {
-      return null;
-    }
-    cache = { at: Date.now(), value: data };
-    return data;
-  } catch {
-    return null;
+/** The answer, or a failed read: a shape without `unrestricted` / `teaching` is not "no classes". */
+export function parseMyTeaching(data: unknown): MyTeaching {
+  const d = data as Partial<MyTeaching> | null;
+  if (!d || typeof d.unrestricted !== "boolean" || !Array.isArray(d.teaching)) {
+    throw new ErpQueryError(502, "my-classes answered without unrestricted/teaching");
   }
+  return d as MyTeaching;
 }
 
+/** The erp_versions keys the server builds the scope from (lib/api/v1/staffScope). */
+export const MY_TEACHING_DESKS = ["sis_staff", "timetable", "masters"] as const;
+
 export function useMyTeaching(): { my: MyTeaching | null; loading: boolean } {
-  const [my, setMy] = useState<MyTeaching | null>(cache?.value ?? null);
-  const [loading, setLoading] = useState(!cache);
-  useEffect(() => {
-    let alive = true;
-    void fetchMyTeaching().then((v) => {
-      if (!alive) return;
-      setMy(v);
-      setLoading(false);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
-  return { my, loading };
+  const q = useErpQuery<MyTeaching>("my-teaching", "/api/v1/staff/my-classes", {
+    desk: MY_TEACHING_DESKS,
+    parse: parseMyTeaching,
+  });
+  // The old contract: `loading` until the first answer or failure (a
+  // background refetch does not flip it back); `my` null while loading and
+  // when it could not be read. A failed background refetch keeps the last
+  // good answer on screen (the old copy was replaced by null only on a remount
+  // after 60 s).
+  return { my: q.data ?? null, loading: q.isPending };
 }
 
 /** Restricted = a teacher whose pickers must be narrowed to `teaching`. */

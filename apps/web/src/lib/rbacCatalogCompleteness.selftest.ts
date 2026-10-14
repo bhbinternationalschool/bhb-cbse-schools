@@ -289,6 +289,14 @@ const PUBLIC_API_ROUTES: Record<string, string> = {
     "telemetry: any signed-in session, checked in lib/clientMetrics.server (sessionFromRequest, 401 otherwise); reads no school data, writes one log line",
   "data/views/versions":
     "the change signal (data-layer 1.3): any signed-in STAFF session (or API key) by design, checked in the route (resolveApiAuth 401, parents 403); answers a timestamp and a count per desk, no rows",
+  "data/views/masters":
+    "reference view (data-layer 1.4): gated in lib/data/server/views.ts by the masters-desk rule (lib/mastersReadScope.server: requireStaffPermission(masters, view) = full, other staff = teaching subset; 401/403 parents/mirror secret refused)",
+  "data/views/staff-list":
+    "reference view (data-layer 1.4): any staff session, gated in lib/data/server/views.ts (requireStaffApi; parents 403, mirror secret 403); a redacted directory, no personal fields",
+  "data/views/rbac":
+    "reference view (data-layer 1.4): gated in lib/data/server/views.ts — requireStaffPermission(settings, view) = whole desk, other staff = own rows only (the rbac desk's rule)",
+  "data/views/module-registry":
+    "reference view (data-layer 1.4): any staff session, gated in lib/data/server/views.ts (requireStaffApi); which modules are switched on, no rows",
   "auth/first-login/request-otp": "sign-in: sends an OTP to a registered number",
   "auth/link/office": "parent number linking before login; the office approves",
   "auth/link/start": "parent number linking before login; a code goes to the registered phone",

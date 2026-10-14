@@ -20,8 +20,14 @@
  *
  * And with masters-desk failing (503), the teacher sees "could not load" +
  * "Try again", never an empty school.
+ *
+ * useMasters() (data-layer 1.4): the class teacher's /__kernel lists the
+ * school's classes from GET /api/data/views/masters — the TEACHING SUBSET
+ * (the masters-desk rule: no Masters grant = classes, sections, subjects and
+ * timings, no money), never a 403 and never an empty school.
  */
 import type { Page } from "@playwright/test";
+import type { MastersView } from "@/lib/data/viewTypes";
 import { AY_CURRENT, CLASS_TEACHER, sectionId, TIMETABLE_TEACHER_SECTIONS } from "../fixture";
 import { collectPageErrors, expect, fx, leadingNumber, metric, note, openAs, test } from "../support";
 
@@ -110,6 +116,41 @@ test.describe("class teacher (Nursery-A)", () => {
         await metric(testInfo, "students", { expected: ctChildren.length, pageErrors: errors.slice(0, 2) });
         if (errors.length) note(testInfo, "page error", errors[0]!);
       }
+    } finally {
+      await context.close();
+    }
+  });
+});
+
+test.describe("class teacher: useMasters()", () => {
+  test("/__kernel: her useMasters() is the teaching subset — every class, no money, no roster", async ({ browser }, testInfo) => {
+    const { context, page } = await openAs(browser, "teacher");
+    const views: MastersView[] = [];
+    page.on("response", (r) => {
+      if (new URL(r.url()).pathname === "/api/data/views/masters" && r.status() === 200) {
+        void r.json().then((b: { data: MastersView }) => views.push(b.data)).catch(() => undefined);
+      }
+    });
+    try {
+      await page.goto("/__kernel");
+      await test.step("the page shows the teaching scope and every class", async () => {
+        await expect(page.getByTestId("kernel-summary")).toHaveText(new RegExp(`^Scope: teaching · ${fx.expected.classes} classes`), { timeout: 20_000 });
+        await expect(page.getByRole("list", { name: "Subjects of Nursery", exact: true }).getByRole("listitem").first()).toBeVisible();
+      });
+      await test.step("the answer it read is the teaching subset", async () => {
+        await expect.poll(() => views.length, { timeout: 5_000 }).toBeGreaterThan(0);
+        const v = views[0]!;
+        expect(v.scope).toBe("teaching");
+        expect(v.masters.classes).toHaveLength(fx.expected.classes);
+        expect(v.masters.sections).toHaveLength(fx.expected.sections);
+        expect(v.masters.subjects).toHaveLength(fx.expected.subjects);
+        expect(v.masters.classSubjects).toHaveLength(fx.expected.classSubjects);
+        expect(v.masters.feeHeads, "no fee heads for a teacher").toEqual([]);
+        expect(v.masters.feeStructureLines, "no fee structure for a teacher").toEqual([]);
+        expect(v.masters.concessionGrants, "no concession grants for a teacher").toEqual([]);
+        expect(Object.keys(v.masters), "no staff roster in Masters").not.toContain("staff");
+      });
+      await metric(testInfo, "kernel-teacher", { scope: views[0]?.scope ?? null, classes: views[0]?.masters.classes.length ?? null });
     } finally {
       await context.close();
     }
