@@ -21,7 +21,8 @@ export type TransportGapKind =
   | "rider_bus"
   | "fleet_record"
   | "driving"
-  | "decision";
+  | "decision"
+  | "new_gps_stop";
 
 export type TransportGapStatus = "open" | "settled" | "dismissed";
 
@@ -58,10 +59,12 @@ export const TRANSPORT_GAP_KIND_LABEL: Record<TransportGapKind, string> = {
   fleet_record: "Vehicle record",
   driving: "Driving",
   decision: "Decision",
+  new_gps_stop: "New GPS stop",
 };
 
 /** Order the office should work through them: money and children first. */
 const KIND_ORDER: TransportGapKind[] = [
+  "new_gps_stop",
   "fee_distance",
   "stop_not_reached",
   "rider_bus",

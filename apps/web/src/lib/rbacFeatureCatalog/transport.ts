@@ -19,6 +19,7 @@ export const TRANSPORT_FEATURES: RbacFeatureDef[] = [
       "/api/transport/boarding-point",
       "/api/transport/boarding-audit",
       "/api/transport/gaps",
+      "/api/transport/gps-stops/tick",
       "/api/transport/route-change-notice",
     ],
   },

@@ -299,6 +299,7 @@ SELFTESTS=(
   test:transport-seats
   test:boarding-suggest
   test:transport-gaps
+  test:gps-stop-discovery
   test:defaulter-hold-policy
   test:hold-resolve
   test:live-bus-marker
