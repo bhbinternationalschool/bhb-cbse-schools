@@ -68,6 +68,44 @@ export function dateDraftCommit(
 }
 
 /**
+ * A typed month as YYYY-MM, or null when it is not a whole, real month.
+ * Accepts what a month input reports (YYYY-MM) and MM/YYYY. As with dates,
+ * the year must have four digits in range: while the year is typed Chrome
+ * reports 0002-10, 0020-10, 0202-10 — not months anyone means.
+ */
+export function parseTypedMonth(text: string): string | null {
+  const s = String(text || "").trim();
+  let m = /^(\d{4})-(\d{1,2})$/.exec(s);
+  let y: number;
+  let mo: number;
+  if (m) {
+    y = Number(m[1]);
+    mo = Number(m[2]);
+  } else {
+    m = /^(\d{1,2})[/.-](\d{4})$/.exec(s);
+    if (!m) return null;
+    y = Number(m[2]);
+    mo = Number(m[1]);
+  }
+  if (y < DATE_YEAR_MIN || y > DATE_YEAR_MAX || mo < 1 || mo > 12) return null;
+  return `${y}-${pad2(mo)}`;
+}
+
+/**
+ * Whether a month field's draft should be stored. A month box always holds
+ * a month (a report or pay sheet is for one month), so emptying it or a
+ * half-typed year stores nothing; only a whole month is handed up.
+ */
+export function monthDraftCommit(
+  draft: string,
+  opts: { badInput?: boolean } = {},
+): { commit: true; value: string } | { commit: false } {
+  if (opts.badInput) return { commit: false };
+  const ym = parseTypedMonth(draft);
+  return ym ? { commit: true, value: ym } : { commit: false };
+}
+
+/**
  * A number box's draft as a number: "" is 0 (an emptied box means nothing),
  * an unreadable entry is null (the box goes back to the stored value).
  */

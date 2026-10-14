@@ -31,6 +31,7 @@ import {
 
 import {
   dateDraftCommit,
+  monthDraftCommit,
   draftNumberValue,
   numberDraftText,
 } from "@/lib/draftInput";
@@ -285,6 +286,72 @@ export const DraftDateInput = memo(function DraftDateInput({
       }}
       onBlur={(e) => {
         // Half-typed: nothing is stored, and the stored date shows again.
+        d.schedule(e.target.value);
+        d.flush();
+        d.setFocused(false);
+      }}
+    />
+  );
+});
+
+/**
+ * A month box (the browser's own month input) that lets you type the year.
+ * It hands up a month only when it is whole and real (YYYY-MM, four-digit
+ * year); a half-typed year never reloads anything and never replaces the
+ * stored month — on blur the stored month shows again. A month box always
+ * holds a month: emptying it stores nothing.
+ */
+export const DraftMonthInput = memo(function DraftMonthInput({
+  value,
+  onCommit,
+  onFocus,
+  onKeyDown,
+  ...rest
+}: BaseProps & {
+  /** YYYY-MM. */
+  value: string;
+  onCommit: (ym: string) => void;
+}) {
+  const stored = value || "";
+  const sent = useRef(stored);
+  useEffect(() => {
+    sent.current = stored;
+  }, [stored]);
+  const d = useDraftCommit(
+    stored,
+    (draft, node) => {
+      const r = monthDraftCommit(draft, { badInput: node?.validity.badInput ?? false });
+      if (!r.commit || r.value === sent.current) return;
+      sent.current = r.value;
+      onCommit(r.value);
+    },
+    null,
+  );
+  return (
+    <input
+      {...rest}
+      ref={d.el}
+      type="month"
+      value={d.draft}
+      onFocus={(e) => {
+        sent.current = stored;
+        d.setFocused(true);
+        onFocus?.(e);
+      }}
+      onChange={(e) => {
+        const v = e.target.value;
+        d.setDraft(v);
+        const r = monthDraftCommit(v, { badInput: e.target.validity.badInput });
+        if (r.commit) {
+          d.schedule(v);
+          d.flush();
+        }
+      }}
+      onKeyDown={(e) => {
+        d.onKeyDown(e);
+        onKeyDown?.(e);
+      }}
+      onBlur={(e) => {
         d.schedule(e.target.value);
         d.flush();
         d.setFocused(false);
