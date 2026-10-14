@@ -107,6 +107,7 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
+import { MonthGroupedTbody, useMonthGroups } from "@/components/ui/month-grouped-rows";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { JuneHoldPanel } from "@/components/payroll/JuneHoldPanel";
@@ -221,6 +222,16 @@ export function PayrollWorkspace() {
     // created or fetched (director, 8 Oct 2026: dated lists in date order).
     setRuns([...loadPayroll().runs].sort((a, b) => b.month.localeCompare(a.month) || (b.createdAt || "").localeCompare(a.createdAt || "")));
   }, [tick]);
+
+  // Runs of this session, folded by payroll month (a month can hold several
+  // runs since staff are paid in parts). The run's own month decides the
+  // group, never the day it was created.
+  const yearRuns = useMemo(() => runs.filter((r) => r.academicYearCode === ay), [runs, ay]);
+  const runMonths = useMonthGroups({
+    rows: yearRuns,
+    dateOf: (r) => r.month,
+    storageKey: "payroll.runs",
+  });
 
   // The staff roster can land after this screen mounts (the shell waits for
   // it at most 5 s); re-read Masters when it does, or the staff picker and
@@ -1203,51 +1214,56 @@ export function PayrollWorkspace() {
                   <th className="px-4 py-2.5 font-medium" />
                 </tr>
               </ErpTableHead>
-              <ErpTableBody>
-                {runs
-                  .filter((r) => r.academicYearCode === ay)
-                  .map((r) => {
-                    const net = r.lines.reduce((s, l) => s + l.netPay, 0);
-                    return (
-                      <tr key={r.id}>
-                        <td className="px-4 py-2.5 font-semibold text-[var(--brand-deep)]">
-                          {r.month}
-                        </td>
-                        <td className="px-4 py-2.5 capitalize text-[var(--muted)]">
-                          {r.kind || "bulk"}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          {payrollStatusLabel(r.status)}
-                        </td>
-                        <td className="px-4 py-2.5">{r.lines.length}</td>
-                        <td className="px-4 py-2.5">{formatInr(net)}</td>
-                        <td className="px-4 py-2.5 text-right">
-                          <RowActionMenu
-                            row={r}
-                            label={`Actions for run ${r.month}`}
-                            actions={[
-                              {
-                                id: "open",
-                                label: "Open run",
-                                onSelect: (x) => {
-                                  setSelectedId(x.id);
-                                  setTab("detail");
-                                },
+              <MonthGroupedTbody
+                month={runMonths}
+                colSpan={6}
+                rowKey={(r) => r.id}
+                countLabel={(n) => `${n} ${n === 1 ? "run" : "runs"}`}
+                summary={(rs) =>
+                  `Net ${formatInr(rs.reduce((s, r) => s + r.lines.reduce((t, l) => t + l.netPay, 0), 0))}`
+                }
+                renderRow={(r) => {
+                  const net = r.lines.reduce((s, l) => s + l.netPay, 0);
+                  return (
+                    <tr key={r.id}>
+                      <td className="px-4 py-2.5 font-semibold text-[var(--brand-deep)]">
+                        {r.month}
+                      </td>
+                      <td className="px-4 py-2.5 capitalize text-[var(--muted)]">
+                        {r.kind || "bulk"}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {payrollStatusLabel(r.status)}
+                      </td>
+                      <td className="px-4 py-2.5">{r.lines.length}</td>
+                      <td className="px-4 py-2.5">{formatInr(net)}</td>
+                      <td className="px-4 py-2.5 text-right">
+                        <RowActionMenu
+                          row={r}
+                          label={`Actions for run ${r.month}`}
+                          actions={[
+                            {
+                              id: "open",
+                              label: "Open run",
+                              onSelect: (x) => {
+                                setSelectedId(x.id);
+                                setTab("detail");
                               },
-                              {
-                                id: "book",
-                                label: "See it in the server book",
-                                onSelect: () => {
-                                  window.location.href = "/accounts?tab=book";
-                                },
+                            },
+                            {
+                              id: "book",
+                              label: "See it in the server book",
+                              onSelect: () => {
+                                window.location.href = "/accounts?tab=book";
                               },
-                            ]}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                {runs.filter((r) => r.academicYearCode === ay).length === 0 ? (
+                            },
+                          ]}
+                        />
+                      </td>
+                    </tr>
+                  );
+                }}
+                empty={
                   <tr>
                     <td
                       colSpan={6}
@@ -1257,8 +1273,8 @@ export function PayrollWorkspace() {
                       month.
                     </td>
                   </tr>
-                ) : null}
-              </ErpTableBody>
+                }
+              />
             </ErpTable>
             </div>
           </ErpTableShell>
