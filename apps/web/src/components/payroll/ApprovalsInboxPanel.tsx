@@ -176,7 +176,13 @@ export function ApprovalsInboxPanel({
       refresh();
       return;
     }
-    flash(`Increment approved & applied · ${applied.applied} staff`);
+    flash(
+      `Increment approved & applied · ${applied.applied} staff${
+        applied.skippedNotOnPayroll.length
+          ? ` · not applied — not on payroll: ${applied.skippedNotOnPayroll.join(", ")}`
+          : ""
+      }`,
+    );
     refresh();
   }
 

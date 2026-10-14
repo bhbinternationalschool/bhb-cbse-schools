@@ -503,6 +503,7 @@ SELFTESTS=(
   test:report-remark-ai
   test:salary-additional
   test:salary-gross-up
+  test:payroll-not-on-payroll
   test:school-receipt-no
   test:fee-tender-ref
   test:session-cookie-edge
