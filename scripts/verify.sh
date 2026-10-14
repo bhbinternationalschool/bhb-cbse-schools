@@ -201,6 +201,7 @@ SELFTESTS=(
   test:subject-masters
   test:upi-pay
   test:upi-proof-match
+  test:upi-proof-wa-senders
   test:expense-range
   test:payroll-paid-on
   test:payroll-deduction-heads

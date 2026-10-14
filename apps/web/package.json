@@ -498,6 +498,7 @@
     "test:subject-masters": "npx tsx src/lib/subjectMasters.selftest.ts",
     "test:upi-pay": "npx tsx src/lib/upiPay.selftest.ts",
     "test:upi-proof-match": "npx tsx src/lib/upiProofMatch.selftest.ts",
+    "test:upi-proof-wa-senders": "npx tsx src/lib/upiProofWaSenders.selftest.ts",
     "test:expense-range": "npx tsx src/lib/expenseRange.selftest.ts",
     "test:payroll-paid-on": "npx tsx src/lib/payrollPaidOn.selftest.ts",
     "test:payroll-deduction-heads": "npx tsx src/lib/payrollDeductionHeads.selftest.ts",

@@ -1,4 +1,5 @@
 import "server-only";
+import { isUpiProofWaSender } from "@/lib/upiProofWaSenders";
 
 /**
  * A UPI success screenshot sent to the school WhatsApp number by a member of
@@ -50,6 +51,8 @@ function inr(paise: number): string {
 
 /** The staff member behind this number, if they may record payments. */
 async function payingStaff(fromWaId: string): Promise<StaffRecord | null> {
+  // Owner numbers only — checked before anything is fetched or read.
+  if (!isUpiProofWaSender(fromWaId)) return null;
   const identity = await resolveWaIdentityServer(fromWaId);
   const staff = identity.roles.find((r) => r.staff)?.staff;
   if (!staff) return null;
@@ -62,7 +65,7 @@ async function payingStaff(fromWaId: string): Promise<StaffRecord | null> {
   return may ? staff : null;
 }
 
-/** Is this number a member of staff who may record payments? Never throws. */
+/** Is this an owner number (upiProofWaMobiles) held by staff who may record payments? Never throws. */
 export async function isPayingStaffNumber(fromWaId: string): Promise<boolean> {
   try {
     return !!(await payingStaff(fromWaId));
