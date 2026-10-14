@@ -62,7 +62,7 @@ export async function readPage<T = Record<string, unknown>>(
 
   let res: Response;
   try {
-    res = await erpFetch(
+    res = await fetch(
       `/api/data/${encodeURIComponent(collection)}${qs.size ? `?${qs}` : ""}`,
       { cache: "no-store", signal: params.signal },
     );

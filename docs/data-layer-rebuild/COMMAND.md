@@ -542,6 +542,78 @@ over `[collection]`): `masters` (full-rights or the teaching subset by permissio
 editVia('editor')` passes (the old Masters editor's `masters_write_slices` already bumps
 `masters_desk_sync_meta`); the teacher login's `useMasters()` returns the teaching subset.
 
+*(Built 14 Oct 2026, PR #PRNUM.)* **What exists.** `@tanstack/react-query` 5.104.0 (exact pin, published
+26 Sep). `lib/data/client/hooks.tsx`: `ErpQueryProvider` (one client per tab, mounted in `AppShell`
+around the signed-in shell), `useErpQuery(key, path, {desk, parse})` (reads through `readView`,
+added to `lib/data/client/query.ts` beside `readPage`/`readAll`, through `erpFetch`; `readPage` is
+left on plain `fetch` because the website editor already uses `readAll` and this step does not touch it), `useErpMutation(collection, {desk})` (`useSaveMutation` + invalidation of the desk's queries
+after a confirmed write and after a conflict; no consumer yet), `useVersionsPoll` / the provider's
+poller, and `useMasters()`, `useStaffList()`, `useRbac()`, `useModuleRegistry()`. The rules are pure
+functions in `lib/data/client/queryKernel.ts`: staleTime 60 s, refetch on focus, retry 2 (1 s, 2 s)
+only for no answer / 5xx / 408 / 429 — a 4xx is not retried; the poll's outcome (200 apply,
+401/403 stop for the life of the page, quietly; 503 / no answer / malformed = keep, nothing
+invalidated); which queries go stale. Each view answers `{ok, data, versions, stale}` where
+`versions` is what the copy was **built from** (new `builtFrom` on `referenceCache` reads — null for a
+previous/fallback copy), so a query is stale when any of its desks now differs from what it was built
+from; that also closes the race between a view's read and the poll's first answer. Queries without
+it (`/api/v1/...`) go stale when a desk moves between two answers. **When the poll runs:** only while a
+mounted query reads a desk and the tab is visible (immediately, then every 20 s, and on
+`visibilitychange→visible`, never twice within 5 s). Today that is `/__kernel` and the ~15 screens
+that use `useMyTeaching`; every other page makes no new request. Parents and field sessions never
+render `AppShell` (the `(erp)` layout redirects them), and the Flutter apps' web views open only
+checkout/e-books/videos. Views: `app/api/data/views/{masters,staff-list,rbac,module-registry}/route.ts`,
+handlers in `lib/data/server/views.ts` (deps injectable), real deps in `viewDeps.ts`, types in
+`lib/data/viewTypes.ts`. `masters` uses the masters-desk rule, now **shared** as
+`lib/mastersReadScope.server.ts` (`resolveMastersReadScope`; the masters-desk GET calls it too) and
+`lib/mastersTeachingSubset.ts` (the key list moved out of the route): the Masters grant = the book
+without staff/departments/designations, any other staff session = the teaching subset (`scope:
+"teaching"`), never a 403. `staff-list` is built field by field from an allow list (id, empCode,
+fullName, stream, status, department/designation id + name, the four link lists with their known
+fields only — duty-link `notes` dropped) plus departments/designations; nothing from
+`sis_staff.profile` other than those fields can reach it (tested with a profile `loginPassword`); a
+Masters copy without the roster (`fallback`) = 503. `rbac` = the rbac desk's rule (Settings view: the
+whole state; other staff: every role, own assignments/grants, no audit; a failed Settings check is
+503, never own-only); `known:false` means no saved role set. `module-registry` = a new
+`referenceCache("module_registry", ["module_registry"])` over the desk (booleans only). All four: 401
+no session, 403 parent / inactive family / the mirror sync secret (no mirror read on this path), 503
+`{ok:false}` with no copy, `Cache-Control: private, no-store`. Sources: `readServerMastersCopy` /
+`readServerRbacCopy` (new exports of the 1.3 caches in `lib/api/v1/auth.ts`). `<QueryError>`
+(`components/data/QueryError.tsx`) uses CoreDataGate's words and button. `useMyTeaching` is now
+`useErpQuery('my-teaching', '/api/v1/staff/my-classes', {desk: sis_staff, timetable, masters})`
+with the same return type; the module-level copy and `fetchMyTeaching` are gone. `/__kernel` =
+`app/(erp)/%5F%5Fkernel/page.tsx` (a `_` folder is private in the App Router), `notFound()` unless
+`process.env.E2E === "1"` at request time.
+
+**Proof.** `test:query-kernel` (pure rules + the wiring on a real `QueryClient` + `readView` +
+`parseMyTeaching`), `test:reference-views` (`resolveMastersReadScope`, the auth matrix of every view,
+subsets, redaction, 503s, and the real route files through the real guards by API key on a fake
+PostgREST), `test:reference-cache` (+`builtFrom`) — each new assertion shown to fail with its predicate
+reverted (21 mutations: 20 red at once; the one that stayed green — a Settings-check 503 treated as
+"no Settings" — got its own case, which is red under that mutation). Playwright (local stack, fresh seed): the four `/__kernel` propagation cases **pass** (editor and
+api × subject and section; seen after 17.6–20.3 s); rebuilt with the poll's invalidation removed, all
+four fail at "propagation" with `visibleAfterReload: true`. `kernel.spec.ts`: 401/403 matrix, office full
+vs teacher own-only rbac, staff-list keys = the allow list, no versions request on `/masters` in 25 s,
+one at mount and one 20 s later on `/__kernel`, a 403 stops it (1 request in 23 s), a 503 keeps the
+list, a failed view = "Could not load … Try again" after 3 reads (~4 s) and Try again recovers.
+`teacher.spec.ts`: the class teacher's `/__kernel` reads `scope: teaching`, 15 classes, 13 sections,
+44 subjects, 127 links, no fee heads/structure/grants, no roster. Scoreboard: origin/main ea9f5ba2
+fresh run 16 pass / 27 expected-fail / 2 fixme; this branch 27 / 27 / 2, 0 FAIL, 0 UNEXPECTED-PASS — the
+11 new passes are the new tests; every existing test kept its status. Budget: the three useMyTeaching
+pages (`/students`, `/attendance`, `/homework`) now make one extra small `/api` request in the first 5 s
+(the versions poll); others unchanged. Bundle: every `(erp)` page loads two more chunks (react-query
+≈ 34 KB raw / 10.3 KB gzip; the kernel + erpFetch ≈ 9.4 KB / 3.9 KB); public and parent pages unchanged.
+
+**Not done / not proven here.** No real screen reads `useMasters()` etc. yet (2.1) — the 12
+real-screen propagation cases stay expected-fail; the 2.1 bridge (`writeMastersLocalRaw` from
+`useMasters()`) is not built; `useErpMutation` has no consumer (2.2/1.5); `useErpCollection` over
+`readAll` is not built (first consumer 3.x). R6's "200 with zero rows while erp_versions says
+non-zero = failure" is not implemented on the client. `useMyTeaching` differences: a 5xx/network
+failure now retries twice (~3 s more "loading" before `my: null`); a failed *background* refetch keeps
+the last good answer (before, a remount after 60 s with a failed read gave `null`); it refetches on
+focus after 60 s and when the poll sees sis_staff/timetable/masters move (attendance cover changes —
+coordinators/leave — do not trigger it; they reach it on focus/remount as before). Not measured in
+production (needs deploy); timings are from a shared Mac.
+
 **1.5 Write kernel (migration PR — director applies before merge).**
 - `desk_write_guarded` v3: refuse `base = null` whenever the row exists (409 `unversioned`;
   `null` stays legal only for an insert of an absent id); add `sync_meta_table` to
