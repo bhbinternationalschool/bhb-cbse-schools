@@ -32,7 +32,7 @@ export type FleetEdgeVehicleStatus = {
 
 export type FleetEdgeLinkReport<T> = {
   /** Desk vehicle -> its Fleet Edge status, for those that matched. */
-  matched: { vehicle: T; status: FleetEdgeVehicleStatus; matchedOn: "registration" | "vin" }[];
+  matched: { vehicle: T; status: FleetEdgeVehicleStatus; matchedOn: "registration" | "vin" | "chassis" }[];
   /** On the desk, unknown to Fleet Edge — a van, or a vehicle never subscribed. */
   deskOnly: T[];
   /** Reporting to Fleet Edge, absent from the desk. Someone should add it. */
@@ -70,9 +70,74 @@ export function isPlaceholderVehicle(
   return looksDummy(status.vin) || looksDummy(status.registrationNumber);
 }
 
+/**
+ * What a desk vehicle can be recognised by in Fleet Edge data.
+ *
+ * Fleet Edge keys a vehicle by VIN and carries its plate alongside — and for
+ * an unregistered vehicle it sends the plate as "NA". The desk used to hold a
+ * single `registrationNo`, so the office typed Magic-3's VIN there to make
+ * tracking link, which put a chassis number on every receipt and register
+ * that names the bus. The chassis number now has its own field; a Fleet Edge
+ * record belongs to a desk vehicle when its plate OR its VIN equals any of
+ * these keys.
+ */
+export type FleetKeyedVehicle = {
+  registrationNo?: string | null;
+  chassisNo?: string | null;
+};
+
+/** A run of four X's cannot occur in a real VIN or plate: Tata's dummy. */
+function isPlaceholderKey(key: string): boolean {
+  return /XXXX/.test(key);
+}
+
+/**
+ * The normalised keys a desk vehicle matches Fleet Edge on, registration
+ * first: [registrationNo, chassisNo], blanks and "NA" dropped, deduplicated.
+ * Placeholder keys (XXXX…) are never keys — they would match Tata's test
+ * vehicle.
+ */
+export function vehicleFleetKeys(v: FleetKeyedVehicle | null | undefined): string[] {
+  if (!v) return [];
+  const out: string[] = [];
+  for (const raw of [v.registrationNo, v.chassisNo]) {
+    const k = normalizeVehicleKey(raw);
+    if (k && !isPlaceholderKey(k) && !out.includes(k)) out.push(k);
+  }
+  return out;
+}
+
+/** Does a Fleet Edge record (plate, VIN) belong to a vehicle with these keys? */
+export function fleetRecordMatchesKeys(
+  keys: readonly string[],
+  plate: string | null | undefined,
+  vin: string | null | undefined,
+): boolean {
+  if (keys.length === 0) return false;
+  const p = normalizeVehicleKey(plate);
+  const n = normalizeVehicleKey(vin);
+  return (!!p && keys.includes(p)) || (!!n && keys.includes(n));
+}
+
+/**
+ * Link Fleet Edge vehicles to desk vehicles.
+ *
+ * `identityOf` returns the desk vehicle's registration (a string, the old
+ * call shape) or its registration and chassis number. Each desk vehicle
+ * claims at most one Fleet Edge unit: a plate match on any of its keys wins
+ * over a VIN match ("registration first"). Two desk rows may still resolve to
+ * the same unit (a duplicated row) — the unit is then not reported as
+ * unaccounted for.
+ *
+ * matchedOn:
+ *  - "registration": Fleet Edge's plate equals the desk vehicle's key;
+ *  - "chassis": Fleet Edge's VIN equals the desk vehicle's chassis number;
+ *  - "vin": Fleet Edge's VIN sits in the desk's registration field (a
+ *    mis-keyed row the office should fix by moving it to Chassis no.).
+ */
 export function linkFleetEdgeToDesk<T>(
   deskVehicles: T[],
-  registrationOf: (v: T) => string,
+  identityOf: (v: T) => string | FleetKeyedVehicle,
   statuses: FleetEdgeVehicleStatus[],
 ): FleetEdgeLinkReport<T> {
   const byRegistration = new Map<string, FleetEdgeVehicleStatus>();
@@ -89,23 +154,36 @@ export function linkFleetEdgeToDesk<T>(
   const usedVins = new Set<string>();
 
   for (const v of deskVehicles) {
-    const key = normalizeVehicleKey(registrationOf(v));
-    if (!key) {
+    const raw = identityOf(v);
+    const identity: FleetKeyedVehicle =
+      typeof raw === "string" ? { registrationNo: raw } : raw;
+    const keys = vehicleFleetKeys(identity);
+    if (keys.length === 0) {
       deskOnly.push(v);
       continue;
     }
     // Registration first: it is what the office typed on purpose. The VIN
-    // match is the fallback that rescues a mis-keyed row.
-    const byReg = byRegistration.get(key);
-    if (byReg) {
-      matched.push({ vehicle: v, status: byReg, matchedOn: "registration" });
-      usedVins.add(normalizeVehicleKey(byReg.vin));
-      continue;
+    // match is the fallback — through the chassis number, or a VIN typed
+    // into the registration field.
+    let hit: { status: FleetEdgeVehicleStatus; matchedOn: "registration" | "vin" | "chassis" } | null = null;
+    for (const k of keys) {
+      const s = byRegistration.get(k);
+      if (s) {
+        hit = { status: s, matchedOn: "registration" };
+        break;
+      }
     }
-    const hit = byVin.get(key);
+    if (!hit) {
+      const chassis = normalizeVehicleKey(identity.chassisNo);
+      const reg = normalizeVehicleKey(identity.registrationNo);
+      const byChassis = chassis && !isPlaceholderKey(chassis) ? byVin.get(chassis) : undefined;
+      const byRegAsVin = reg && !isPlaceholderKey(reg) ? byVin.get(reg) : undefined;
+      if (byChassis) hit = { status: byChassis, matchedOn: "chassis" };
+      else if (byRegAsVin) hit = { status: byRegAsVin, matchedOn: "vin" };
+    }
     if (hit) {
-      matched.push({ vehicle: v, status: hit, matchedOn: "vin" });
-      usedVins.add(normalizeVehicleKey(hit.vin));
+      matched.push({ vehicle: v, status: hit.status, matchedOn: hit.matchedOn });
+      usedVins.add(normalizeVehicleKey(hit.status.vin));
       continue;
     }
     deskOnly.push(v);

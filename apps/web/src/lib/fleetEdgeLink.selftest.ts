@@ -17,8 +17,11 @@ import {
   linkFleetEdgeToDesk,
   normalizeVehicleKey,
   telemetryFreshness,
+  fleetRecordMatchesKeys,
+  vehicleFleetKeys,
   type FleetEdgeVehicleStatus,
 } from "./fleetEdgeLink";
+import { chassisNoWarning, normalizeVehicle } from "./transport";
 
 console.log("fleetEdgeLink.selftest.ts");
 
@@ -123,6 +126,85 @@ assert.equal(
   0,
   "and it is not then reported as unaccounted for",
 );
+
+/* ── chassis no.: the plate field can hold the plate ────────── */
+
+// Magic-3: Fleet Edge sends plate "NA" and the VIN; the RC says UP65ST1373.
+assert.deepEqual(
+  vehicleFleetKeys({ registrationNo: "UP65ST1373", chassisNo: "MAT558053TVG40149" }),
+  ["UP65ST1373", "MAT558053TVG40149"],
+  "registration first, then chassis",
+);
+assert.deepEqual(vehicleFleetKeys({ registrationNo: "MAT558053TVG40149", chassisNo: "" }), ["MAT558053TVG40149"]);
+assert.deepEqual(
+  vehicleFleetKeys({ registrationNo: "mat558053 tvg40149", chassisNo: "MAT558053TVG40149" }),
+  ["MAT558053TVG40149"],
+  "the same key twice is one key",
+);
+assert.deepEqual(vehicleFleetKeys({ registrationNo: "NA", chassisNo: "" }), [], "NA is no key");
+assert.deepEqual(vehicleFleetKeys({ registrationNo: "UP65QT4657", chassisNo: "MATXXXXXXXX" }), ["UP65QT4657"], "a placeholder VIN is never a key");
+assert.deepEqual(vehicleFleetKeys(null), []);
+
+assert.equal(fleetRecordMatchesKeys(["UP65ST1373", "MAT558053TVG40149"], "NA", "MAT558053TVG40149"), true);
+assert.equal(fleetRecordMatchesKeys(["MAT558053TVG40149"], "NA", "MAT558053TVG40149"), true, "old shape still matches");
+assert.equal(fleetRecordMatchesKeys(["UP65QT4657"], "UP65QT4657", "MAT805022SFB02913"), true, "plate-only unchanged");
+assert.equal(fleetRecordMatchesKeys(["UP65QT4657"], "NA", "MAT558053TVG40149"), false);
+assert.equal(fleetRecordMatchesKeys([], "NA", ""), false, "no keys match nothing");
+
+// The full fleet after the lead's data update: every Tata vehicle carries its
+// plate in Registration and its VIN in Chassis no.
+const deskAfter = [
+  { registrationNo: "UP65QT4657", chassisNo: "MAT805022SFB02913" },
+  { registrationNo: "UP65MT0849", chassisNo: "MAT557029PUA00368" },
+  { registrationNo: "UP65PT3540", chassisNo: "MAT558017RVE22810" },
+  { registrationNo: "UP65RT9825", chassisNo: "MAT558053TVE29204" },
+  { registrationNo: "UP65ST1373", chassisNo: "MAT558053TVG40149" },
+  { registrationNo: "RAJESH VAN", chassisNo: "" },
+];
+const after = linkFleetEdgeToDesk(deskAfter, (v) => v, edge);
+assert.equal(after.matched.length, 5, "all five Tata vehicles still match");
+assert.equal(after.edgeOnly.length, 0);
+assert.deepEqual(after.deskOnly.map((v) => v.registrationNo), ["RAJESH VAN"]);
+const afterOn = new Map(after.matched.map((m) => [m.vehicle.registrationNo, m]));
+assert.equal(afterOn.get("UP65ST1373")?.matchedOn, "chassis", "Magic-3 links through its chassis no.");
+assert.equal(afterOn.get("UP65ST1373")?.status.vin, "MAT558053TVG40149");
+assert.equal(afterOn.get("UP65RT9825")?.matchedOn, "registration", "registration first, even with a chassis no.");
+assert.equal(afterOn.get("UP65QT4657")?.status.vin, "MAT805022SFB02913");
+
+// Old shape (VIN in registration, no chassis) is unchanged.
+const oldShape = linkFleetEdgeToDesk([{ registrationNo: "MAT558053TVG40149", chassisNo: "" }], (v) => v, edge);
+assert.equal(oldShape.matched.length, 1);
+assert.equal(oldShape.matched[0]!.matchedOn, "vin");
+
+// No vehicle claims two Fleet Edge units: a plate pointing at one unit and a
+// chassis no. pointing at another resolves to the plate's unit, once.
+const split = linkFleetEdgeToDesk(
+  [{ registrationNo: "UP65MT0849", chassisNo: "MAT558053TVG40149" }],
+  (v) => v,
+  edge,
+);
+assert.equal(split.matched.length, 1, "one vehicle, one unit");
+assert.equal(split.matched[0]!.status.vin, "MAT557029PUA00368", "registration wins");
+assert.ok(split.edgeOnly.some((s) => s.vin === "MAT558053TVG40149"), "the other unit stays unaccounted for, visibly");
+
+// A placeholder chassis never claims Tata's test vehicle.
+const dummy = linkFleetEdgeToDesk(
+  [{ registrationNo: "TEMP1", chassisNo: "MATXXXXXXXX" }],
+  (v) => v,
+  [status("MATXXXXXXXX", "HRXXXXXX")],
+);
+assert.equal(dummy.matched.length, 0);
+
+// The desk keeps the field: normalised uppercase, "" by default.
+assert.equal(normalizeVehicle({ id: "v", registrationNo: "x" }).chassisNo, "");
+assert.equal(normalizeVehicle({ id: "v", registrationNo: "x", chassisNo: " mat558053-tvg40149 " }).chassisNo, "MAT558053TVG40149");
+const roundTrip = JSON.parse(JSON.stringify(normalizeVehicle({ id: "v", registrationNo: "UP65ST1373", chassisNo: "MAT558053TVG40149" })));
+assert.equal(normalizeVehicle(roundTrip).chassisNo, "MAT558053TVG40149", "survives a save and reload");
+
+assert.equal(chassisNoWarning(""), "");
+assert.equal(chassisNoWarning("MAT558053TVG40149"), "");
+assert.ok(/17 characters/.test(chassisNoWarning("MAT55805")), "short number warned");
+assert.ok(/I, O or Q/.test(chassisNoWarning("MAT558053TVG4014O")), "letter O warned");
 
 /* ── telemetry freshness is stated, never assumed ───────────── */
 

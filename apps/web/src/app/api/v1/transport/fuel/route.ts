@@ -130,7 +130,7 @@ export async function GET(request: Request) {
       readDayLogs({ from, to }),
       readFleetEdgeMonth(
         month,
-        vehicles.map((v) => ({ id: v.id, registrationNo: v.registrationNo })),
+        vehicles.map((v) => ({ id: v.id, registrationNo: v.registrationNo, chassisNo: v.chassisNo ?? "" })),
       ),
       access.fleetWide ? readUnpostedFills() : Promise.resolve({ ok: true as const, fills: [] as RegisterFill[] }),
       access.fleetWide ? fuelBankChoices() : Promise.resolve([]),
@@ -434,7 +434,7 @@ export async function POST(request: Request) {
             filledBy: l.filledBy,
             paymentStatus: l.paymentStatus,
           })),
-          vehicles: transport.vehicles.map((v) => ({ id: v.id, name: v.name, registrationNo: v.registrationNo, fuelType: v.fuelType })),
+          vehicles: transport.vehicles.map((v) => ({ id: v.id, name: v.name, registrationNo: v.registrationNo, chassisNo: v.chassisNo ?? "", fuelType: v.fuelType })),
           dealers: transport.dealers.map((d) => ({ id: d.id, name: d.name })),
         });
         const auditWarn = await audit(

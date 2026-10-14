@@ -262,6 +262,16 @@ export type ServiceScheduleItem = {
 export type FleetVehicle = {
   id: string;
   registrationNo: string;
+  /**
+   * Chassis number (VIN), normalised uppercase; "" when not recorded.
+   *
+   * Tata Fleet Edge identifies a vehicle by VIN and sends "NA" as the plate
+   * of an unregistered one, so before this field existed the office typed
+   * Magic-3's VIN into registrationNo to make tracking link. Every Fleet Edge
+   * join now matches on registration OR chassis (vehicleFleetKeys), so the
+   * plate field can hold the plate.
+   */
+  chassisNo?: string;
   name: string;
   type: VehicleType;
   fuelType: FuelType;
@@ -884,6 +894,27 @@ function normalizeAssignment(
   };
 }
 
+/** Chassis numbers get typed with spaces and hyphens; stored bare, uppercase. */
+export function normalizeChassisNo(raw: string | null | undefined): string {
+  return String(raw ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+/**
+ * A warning for a chassis number that does not look like a 17-character VIN
+ * (letters I, O and Q never appear in one), or "" when it does or is blank.
+ * A warning, not a refusal: an old or imported vehicle may carry a shorter
+ * frame number, and refusing it would push it back into the plate field.
+ */
+export function chassisNoWarning(raw: string | null | undefined): string {
+  const c = normalizeChassisNo(raw);
+  if (!c) return "";
+  if (/^[A-HJ-NPR-Z0-9]{17}$/.test(c)) return "";
+  if (c.length !== 17) {
+    return `A VIN has 17 characters; this has ${c.length}. Check it against the RC or the Fleet Edge vehicle list.`;
+  }
+  return "A VIN never contains the letters I, O or Q. Check for a 1 or 0 typed as a letter.";
+}
+
 export function normalizeVehicle(v: Partial<FleetVehicle>): FleetVehicle {
   const fuelType = (v.fuelType as FuelType) || "diesel";
   // A secondary fuel that repeats the primary says nothing, so it is dropped.
@@ -891,6 +922,7 @@ export function normalizeVehicle(v: Partial<FleetVehicle>): FleetVehicle {
   return {
     id: v.id ?? id("veh"),
     registrationNo: (v.registrationNo ?? "").trim().toUpperCase() || "TBD",
+    chassisNo: normalizeChassisNo(v.chassisNo),
     name: v.name ?? v.registrationNo ?? "Bus",
     type: (v.type as VehicleType) || "bus",
     fuelType,
@@ -3290,6 +3322,7 @@ function buildRealFleetVehicles(): FleetVehicle[] {
   return REAL_FLEET.map((v) =>
     normalizeVehicle({
       registrationNo: v.registrationNo || v.vin,
+      chassisNo: v.vin,
       name: v.registrationNo || `Bus — registration pending (VIN ${v.vin})`,
     }),
   );
