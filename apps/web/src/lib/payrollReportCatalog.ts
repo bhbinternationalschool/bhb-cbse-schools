@@ -42,6 +42,7 @@ import {
 } from "@/lib/salarySetup";
 import { loadSalaryAccount, entryTypeLabel } from "@/lib/salaryAccount";
 import type { StaffStream } from "@/lib/foundationMasters";
+import { statutoryCoverFor } from "@/lib/payrollSetupSync";
 import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
 import { reportDesksFor } from "@/lib/reportDesks";
 
@@ -726,7 +727,8 @@ export function runPayrollReport(
             basic: money(link?.basicOverride || 0),
             additional: money(link?.additionalAmount || 0),
             grossUp: link?.statutoryGrossUp ? "yes" : "no",
-            cover: link?.statutoryCover || "both",
+            // No salary setup: no PF/ESI liability (14 Oct 2026).
+            cover: link ? statutoryCoverFor(link).cover : "none (no salary setup)",
             from: link?.effectiveFrom || "",
             due: money(outstandingForStaff(s.id)),
           };

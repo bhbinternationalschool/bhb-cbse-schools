@@ -204,6 +204,10 @@ SELFTESTS=(
   test:expense-range
   test:payroll-paid-on
   test:payroll-deduction-heads
+  test:picker-search
+  test:payroll-per-date-pay
+  test:payroll-ledger-post-definer
+  test:payroll-setup-sync
   test:masters-change-auth
   test:timetable-free-grid
   test:teacher-load-published

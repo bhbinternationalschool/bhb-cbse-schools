@@ -20,6 +20,7 @@ import {
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { statutoryCoverFor } from "@/lib/payrollSetupSync";
 export type IncrementCycle = "april" | "anniversary" | "hold_month";
 export type IncrementMode = "percent" | "fixed";
 
@@ -343,7 +344,8 @@ export function buildIncrementDraft(input: {
       salary,
       structure,
       link?.basicOverride || 0,
-      link?.statutoryCover || "both",
+      // No salary setup: no PF/ESI (14 Oct 2026) — never PF + ESIC by default.
+      statutoryCoverFor(link).cover,
       input.masters.statutoryConfig,
       additionalFromLink(link),
     );
@@ -508,7 +510,7 @@ export function previewStaffIncrement(input: {
     salary,
     structure,
     link?.basicOverride || 0,
-    link?.statutoryCover || "both",
+    statutoryCoverFor(link).cover,
     input.masters.statutoryConfig,
     additionalFromLink(link),
   );
@@ -785,7 +787,8 @@ export function applyIncrementBatch(
       staffId: line.staffId,
       structureId: existing?.structureId || line.structureId,
       basicOverride: line.newBasic,
-      statutoryCover: existing?.statutoryCover || "both",
+      // A first link made by an increment does not decide PF/ESI for them.
+      statutoryCover: statutoryCoverFor(existing).cover,
       // Increments move basic only; the additional amount is left as set.
       // This is exactly how a hand-typed PF/ESIC top-up went stale before
       // 2026-09-20 — a raise moved the basic, the typed top-up stayed put and

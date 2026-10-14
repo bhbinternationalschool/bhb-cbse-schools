@@ -20,6 +20,8 @@
 
 import { VoucherPayLink } from "@/components/payments/VoucherPayLink";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { SearchPick } from "@/components/ui/SearchPick";
+import { groupAccountsForPicker } from "@/lib/pickerSearch";
 import { UpiPayButton } from "@/components/payments/UpiPayButton";
 import { Check, FileText, Plus, Trash2, Undo2 } from "lucide-react";
 import { formatInr } from "@/lib/fees";
@@ -62,6 +64,9 @@ const BTN_OUTLINE =
   "rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-bold text-[var(--brand-deep)] disabled:opacity-50";
 const FIELD =
   "w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm";
+// FIELD plus room for the picker's clear / chevron icons.
+const PICK_FIELD =
+  "w-full min-w-0 rounded-xl border border-[var(--border)] bg-transparent py-2 pl-3 pr-8 text-sm disabled:opacity-60";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -130,51 +135,86 @@ function AccountSelect({
   onChange: (code: string) => void;
   disabled?: boolean;
 }) {
-  // A category that has sub-heads is a heading: it is never offered — its
-  // sub-heads are, grouped under the category's name so the clerk picks
-  // "Utilities → Electricity", not a flat code from a long list.
-  const { grouped, expenseGroups } = useMemo(() => {
-    const byCode = new Map(accounts.map((a) => [a.code, a]));
-    const g = new Map<string, CoaAccount[]>();
-    const eg: { label: string; children: CoaAccount[] }[] = [];
-    for (const a of accounts) {
-      if (a.hasChildren) continue;
-      const parent = a.parentCode ? byCode.get(a.parentCode) : undefined;
-      if (a.kind === "expense" && parent && parent.hasChildren) {
-        const label = `${parent.name}`;
-        const bucket = eg.find((x) => x.label === label);
-        if (bucket) bucket.children.push(a);
-        else eg.push({ label, children: [a] });
-        continue;
-      }
-      const k = g.get(a.kind) ?? [];
-      k.push(a);
-      g.set(a.kind, k);
-    }
-    return { grouped: g, expenseGroups: eg };
-  }, [accounts]);
+  // A category that has sub-heads is a heading: it is shown, so its sub-heads
+  // read "Utilities → Electricity", but never offered. Type a name or code to
+  // narrow; each level reads A→Z and this browser's recent accounts lead
+  // (director, 14 Oct 2026: "build in search heads").
+  const rowsFor = useCallback(
+    (q: string, recent: string[]) =>
+      groupAccountsForPicker(accounts, q, recent, {
+        groupOf: (a) => KIND_LABEL[a.kind] ?? a.kind,
+        groupOrder: KIND_ORDER.map((k) => KIND_LABEL[k] ?? k),
+        isSelectable: (a) => !a.hasChildren,
+      }),
+    [accounts],
+  );
+  const items = useMemo(
+    () => accounts.map((a) => ({ id: a.code, label: a.name, sub: a.code })),
+    [accounts],
+  );
   return (
-    <select className={FIELD} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
-      <option value="">Account…</option>
-      {KIND_ORDER.filter((k) => grouped.has(k)).map((k) => (
-        <optgroup key={k} label={KIND_LABEL[k] ?? k}>
-          {grouped.get(k)!.map((a) => (
-            <option key={a.code} value={a.code}>
-              {a.code} · {a.name}
-            </option>
-          ))}
-        </optgroup>
-      ))}
-      {expenseGroups.map((x) => (
-        <optgroup key={x.label} label={`Expenses — ${x.label}`}>
-          {x.children.map((a) => (
-            <option key={a.code} value={a.code}>
-              {a.code} · {a.name}
-            </option>
-          ))}
-        </optgroup>
-      ))}
-    </select>
+    <SearchPick
+      items={items}
+      rowsFor={rowsFor}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      placeholder="Account — type a name or code…"
+      recentKey="accounts.voucher.account"
+      display={(it) => `${it.sub} · ${it.label}`}
+      inputClassName={PICK_FIELD}
+      aria-label="Account"
+    />
+  );
+}
+
+/**
+ * The expense head picker for Quick expense and the multi-line voucher: heads
+ * with their sub-heads indented beneath, searchable by name or code, A→Z,
+ * recent heads first. Picking a sub-head answers both questions at once
+ * (head + sub-head); picking a head that has sub-heads leaves the sub-head
+ * select beside it to answer, exactly as before.
+ */
+function ExpenseHeadPick({
+  accounts,
+  heads,
+  head,
+  subHead,
+  onPick,
+}: {
+  accounts: CoaAccount[];
+  heads: CoaAccount[];
+  head: string;
+  subHead: string;
+  onPick: (head: string, subHead: string) => void;
+}) {
+  const { pool, headCodes } = useMemo(() => {
+    const codes = new Set(heads.map((h) => h.code));
+    return {
+      headCodes: codes,
+      pool: [...heads, ...accounts.filter((a) => a.parentCode && codes.has(a.parentCode))],
+    };
+  }, [accounts, heads]);
+  const rowsFor = useCallback(
+    (q: string, recent: string[]) => groupAccountsForPicker(pool, q, recent),
+    [pool],
+  );
+  const items = useMemo(() => pool.map((a) => ({ id: a.code, label: a.name, sub: a.code })), [pool]);
+  return (
+    <SearchPick
+      items={items}
+      rowsFor={rowsFor}
+      value={subHead || head}
+      onChange={(code) => {
+        const a = pool.find((x) => x.code === code);
+        if (a?.parentCode && headCodes.has(a.parentCode)) onPick(a.parentCode, code);
+        else onPick(code, "");
+      }}
+      placeholder="Type a head or sub-head…"
+      recentKey="accounts.expense.head"
+      inputClassName={PICK_FIELD}
+      aria-label="Expense head"
+    />
   );
 }
 
@@ -1458,23 +1498,18 @@ export function QuickExpensePanel({
       ) : null}
 
       <div className="mt-3 flex flex-wrap items-end gap-2">
-        <label className="text-[11px] font-bold text-[var(--muted)]">
+        <label className="w-full min-w-0 text-[11px] font-bold text-[var(--muted)] sm:w-64">
           Head
-          <select
-            className={FIELD}
-            value={category}
-            onChange={(e) => {
-              setCategory(e.target.value);
-              setSubHead("");
+          <ExpenseHeadPick
+            accounts={accounts}
+            heads={heads}
+            head={category}
+            subHead={subHead}
+            onPick={(h, sh) => {
+              setCategory(h);
+              setSubHead(sh);
             }}
-          >
-            <option value="">Choose…</option>
-            {heads.map((h) => (
-              <option key={h.code} value={h.code}>
-                {h.name}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         {subHeads.length > 0 ? (
           <label className="text-[11px] font-bold text-[var(--muted)]">
@@ -2511,24 +2546,19 @@ export function MultiLineExpensePanel({
               <div className="flex flex-wrap items-end gap-2">
                 <label className="min-w-[10rem] flex-1 text-[10px] font-bold text-[var(--muted)]">
                   Head
-                  <select
-                    className={FIELD}
-                    value={r.head}
-                    onChange={(e) =>
+                  <ExpenseHeadPick
+                    accounts={accounts}
+                    heads={heads}
+                    head={r.head}
+                    subHead={r.subHead}
+                    onPick={(h, sh) =>
                       setRow(r.id, {
-                        head: e.target.value,
-                        subHead: "",
-                        ...suggestTag(r, e.target.value),
+                        head: h,
+                        subHead: sh,
+                        ...(sh ? suggestTag(r, h, sh) : suggestTag(r, h)),
                       })
                     }
-                  >
-                    <option value="">Choose…</option>
-                    {heads.map((h) => (
-                      <option key={h.code} value={h.code}>
-                        {h.name}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </label>
                 {subs.length > 0 ? (
                   <label className="min-w-[10rem] flex-1 text-[10px] font-bold text-[var(--muted)]">
