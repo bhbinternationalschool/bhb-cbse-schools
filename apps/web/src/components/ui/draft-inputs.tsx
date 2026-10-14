@@ -209,17 +209,27 @@ export const DraftTextInput = memo(function DraftTextInput({
  * half-typed nothing is stored and nothing re-renders, and a partial entry
  * never clears the stored date — on blur the box shows the stored date
  * again. Choosing a day in the picker stores it at once.
+ *
+ * `allowEmpty={false}`: the box always holds a day — emptying it stores
+ * nothing. `commitOn="blur"`: hand the date up only when the box is left
+ * (or Enter is pressed), never while it is being edited — for a date whose
+ * change is an action with a confirm (moving a whole exam day), where a
+ * day typed digit by digit (01, then 15) must not ask twice.
  */
 export const DraftDateInput = memo(function DraftDateInput({
   value,
   onCommit,
   onFocus,
   onKeyDown,
+  allowEmpty = true,
+  commitOn = "change",
   ...rest
 }: BaseProps & {
   /** YYYY-MM-DD or "". */
   value: string;
   onCommit: (iso: string) => void;
+  allowEmpty?: boolean;
+  commitOn?: "change" | "blur";
 }) {
   const stored = value || "";
   // What was handed up last, so one date is not sent twice (on change, then
@@ -231,7 +241,11 @@ export const DraftDateInput = memo(function DraftDateInput({
   const d = useDraftCommit(
     stored,
     (draft, node) => {
-      const r = dateDraftCommit(draft, { badInput: node?.validity.badInput ?? false, onBlur: true });
+      const r = dateDraftCommit(draft, {
+        badInput: node?.validity.badInput ?? false,
+        onBlur: true,
+        allowEmpty,
+      });
       if (!r.commit || r.value === sent.current) return;
       sent.current = r.value;
       onCommit(r.value);
@@ -245,13 +259,21 @@ export const DraftDateInput = memo(function DraftDateInput({
       type="date"
       value={d.draft}
       onFocus={(e) => {
+        // A date the parent refused last time (a cancelled confirm, a
+        // clamp) may be offered again in this new visit to the box.
+        sent.current = stored;
         d.setFocused(true);
         onFocus?.(e);
       }}
       onChange={(e) => {
         const v = e.target.value;
         d.setDraft(v);
-        const r = dateDraftCommit(v, { badInput: e.target.validity.badInput, clearNow: true });
+        if (commitOn === "blur") return;
+        const r = dateDraftCommit(v, {
+          badInput: e.target.validity.badInput,
+          clearNow: true,
+          allowEmpty,
+        });
         if (r.commit) {
           d.schedule(v);
           d.flush();

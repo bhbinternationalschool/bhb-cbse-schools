@@ -49,14 +49,20 @@ export function parseTypedDate(text: string): string | null {
  *    `clearNow` (the picker's own clear button);
  *  - anything else (day and month typed, year not yet; 31/02) → keep
  *    typing; store nothing.
+ * `allowEmpty: false` is for a box that must always hold a day (the day a
+ * register or log book shows): emptying it stores nothing, and on blur the
+ * stored day shows again.
  */
 export function dateDraftCommit(
   draft: string,
-  opts: { badInput?: boolean; onBlur?: boolean; clearNow?: boolean } = {},
+  opts: { badInput?: boolean; onBlur?: boolean; clearNow?: boolean; allowEmpty?: boolean } = {},
 ): { commit: true; value: string } | { commit: false } {
   if (opts.badInput) return { commit: false };
   const s = String(draft || "").trim();
-  if (!s) return opts.onBlur || opts.clearNow ? { commit: true, value: "" } : { commit: false };
+  if (!s) {
+    if (opts.allowEmpty === false) return { commit: false };
+    return opts.onBlur || opts.clearNow ? { commit: true, value: "" } : { commit: false };
+  }
   const iso = parseTypedDate(s);
   return iso ? { commit: true, value: iso } : { commit: false };
 }

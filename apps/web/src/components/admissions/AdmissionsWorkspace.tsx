@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { DraftDateInput } from "@/components/ui/draft-inputs";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import Link from "next/link";
 import { UserPlus } from "lucide-react";
@@ -2271,13 +2272,12 @@ export function AdmissionsWorkspace() {
                     Source: Walk-in
                   </span>
                   <Field label="Lead / enquiry date *">
-                    <input
-                      type="date"
+                    {/* Empty means today; a draft box so a half-typed date
+                        does not snap back to today mid-year. */}
+                    <DraftDateInput
                       className={inp}
                       value={draft.leadDate || todayYmd()}
-                      onChange={(e) =>
-                        setDraft((d) => ({ ...d, leadDate: e.target.value }))
-                      }
+                      onCommit={(v) => setDraft((d) => ({ ...d, leadDate: v }))}
                     />
                   </Field>
                 </div>
@@ -3114,11 +3114,11 @@ function LeadDetail({
         {canEdit && !locked ? (
           <div className="mt-3 grid gap-2 border-t border-[var(--border)] pt-3 sm:grid-cols-2">
             <Field label="Lead / enquiry date">
-              <input
-                type="date"
+              {/* Saves the lead — only a whole date (never 0002-…). */}
+              <DraftDateInput
                 className={inp}
                 value={(lead.leadDate || "").slice(0, 10)}
-                onChange={(e) => onPatch({ leadDate: e.target.value })}
+                onCommit={(v) => onPatch({ leadDate: v })}
               />
             </Field>
             <Field label="Academic session (AY)">
@@ -3719,12 +3719,11 @@ function LeadDetail({
             />
           </Field>
           <Field label="DOB">
-            <input
-              type="date"
+            <DraftDateInput
               className={inp}
               disabled={locked || !canEdit}
               value={lead.dob}
-              onChange={(e) => onPatch({ dob: e.target.value })}
+              onCommit={(v) => onPatch({ dob: v })}
             />
           </Field>
           <Field label="Class sought">
@@ -3794,12 +3793,11 @@ function LeadDetail({
             </select>
           </Field>
           <Field label="Admission date">
-            <input
-              type="date"
+            <DraftDateInput
               className={inp}
               disabled={locked || !canEdit}
               value={lead.admissionDate}
-              onChange={(e) => onPatch({ admissionDate: e.target.value })}
+              onCommit={(v) => onPatch({ admissionDate: v })}
             />
           </Field>
           <Field label="Medium">
