@@ -350,4 +350,29 @@ const line = (lineId: string, narration: string, extra: Partial<FuelVoucherLine>
   assert.equal(m.has("idle"), false); // nothing sent → no figure, not 0
 }
 
+// Chassis no.: Magic-3 keyed by plate + chassis still collects its "NA" windows.
+{
+  const rows = [
+    { vehicleRef: "MAT558053TVG40149", registrationNumber: "NA", windowFrom: "2026-09-10T03:00:00Z", receivedAt: "2026-09-10T03:00:00Z", km: 12, fuelUsed: 1 },
+    { vehicleRef: "MAT805022SFB02913", registrationNumber: "UP65QT4657", windowFrom: "2026-09-10T03:00:00Z", receivedAt: "2026-09-10T03:00:00Z", km: 4, fuelUsed: 0 },
+  ];
+  const m = fleetEdgeMonthByVehicle({
+    month: "2026-09",
+    vehicles: [
+      { id: "magic3", registrationNo: "UP65ST1373", chassisNo: "MAT558053TVG40149" },
+      { id: "city", registrationNo: "UP65QT4657" },
+    ],
+    rows,
+  });
+  assert.deepEqual(m.get("magic3"), { km: 12, fuelUsed: 1, windows: 1 });
+  assert.deepEqual(m.get("city"), { km: 4, fuelUsed: 0, windows: 1 }, "plate-only unchanged");
+  const fill = { fillDate: "2026-07-30", amountPaise: 69_966 };
+  const lines = [line("L8", "Diesel — MAT558053TVG40149")];
+  assert.equal(
+    matchExistingFuelLine(fill, { registrationNo: "UP65ST1373", chassisNo: "MAT558053TVG40149" }, lines, new Set())?.lineId,
+    "L8",
+    "an old voucher naming the VIN still links once the plate is set",
+  );
+}
+
 console.log("transportFuelRegister selftest: ok");

@@ -14,7 +14,7 @@
  * untracked vehicle is shown as untracked instead of being invented.
  */
 
-import { normalizeVehicleKey } from "@/lib/fleetEdgeLink";
+import { fleetRecordMatchesKeys, normalizeVehicleKey, vehicleFleetKeys } from "@/lib/fleetEdgeLink";
 
 export type LivePosition = {
   vehicleRef: string;
@@ -88,18 +88,20 @@ export function istClock(nowMs: number): { hhmm: string; weekday: number; dateIs
 
 /* ── linking positions to the desk's vehicles ─────────────────── */
 
-export type DeskVehicleLike = { id: string; registrationNo: string; name: string };
+export type DeskVehicleLike = { id: string; registrationNo: string; name: string; chassisNo?: string };
 
 /**
- * Plate first, VIN second — two desk rows hold a VIN in registrationNo
- * because the plate was pending. A vehicle with no match is untracked.
+ * Plate first, VIN second, against every key the vehicle has (registration,
+ * chassis no. — vehicleFleetKeys). Fleet Edge sends "NA" as the plate of an
+ * unregistered bus, and older desk rows hold the VIN in registrationNo; both
+ * still match. A vehicle with no match is untracked.
  */
 export function positionForVehicle<T extends DeskVehicleLike>(vehicle: T, positions: LivePosition[]): LivePosition | null {
-  const key = normalizeVehicleKey(vehicle.registrationNo);
-  if (!key) return null;
+  const keys = vehicleFleetKeys(vehicle);
+  if (keys.length === 0) return null;
   return (
-    positions.find((p) => normalizeVehicleKey(p.registrationNumber) === key) ??
-    positions.find((p) => normalizeVehicleKey(p.vehicleRef) === key) ??
+    positions.find((p) => keys.includes(normalizeVehicleKey(p.registrationNumber))) ??
+    positions.find((p) => keys.includes(normalizeVehicleKey(p.vehicleRef))) ??
     null
   );
 }
@@ -261,9 +263,7 @@ export function evaluateFleetAlerts(input: {
     }
 
     for (const fd of input.fuelDrains ?? []) {
-      const key = normalizeVehicleKey(v.registrationNo);
-      const hit = key && (normalizeVehicleKey(fd.registrationNumber) === key || normalizeVehicleKey(fd.vehicleRef) === key);
-      if (!hit) continue;
+      if (!fleetRecordMatchesKeys(vehicleFleetKeys(v), fd.registrationNumber, fd.vehicleRef)) continue;
       push({
         key: `fuel_drain:${v.id}`,
         kind: "fuel_drain",

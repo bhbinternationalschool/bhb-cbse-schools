@@ -569,7 +569,7 @@ export type GpsOdometerResult =
  * never 0 km.
  */
 export async function readGpsOdometers(
-  vehicles: { id: string; registrationNo: string; name: string }[],
+  vehicles: { id: string; registrationNo: string; name: string; chassisNo?: string }[],
   date: string,
 ): Promise<Map<string, GpsOdometerResult>> {
   const out = new Map<string, GpsOdometerResult>();

@@ -58,6 +58,27 @@ assert.equal(positionForVehicle(vehicles[0]!, positions)?.vehicleRef, "MAT558053
 assert.equal(positionForVehicle(vehicles[1]!, positions)?.vehicleRef, "MAT557029PUA00368", "by VIN when the desk holds a VIN as the plate");
 assert.equal(positionForVehicle(vehicles[2]!, positions), null, "Rajesh's van has no tracker");
 
+// Chassis no.: Magic-3 with its plate in Registration and VIN in Chassis no.
+// matches a Fleet Edge ping whose plate is "NA".
+{
+  const magic3Ping: LivePosition = { vehicleRef: "MAT558053TVG40149", registrationNumber: "NA", recordedAt: at(1), lat: 25.4, lng: 82.9, speedKmh: 0, courseDeg: null, ignitionOn: false, fuelPercent: null, odometerKm: null };
+  const all = [...positions, magic3Ping];
+  const v3 = { id: "veh_m3", registrationNo: "UP65ST1373", chassisNo: "MAT558053TVG40149", name: "Magic-3" };
+  assert.equal(positionForVehicle(v3, all)?.vehicleRef, "MAT558053TVG40149", "by chassis no.");
+  assert.equal(positionForVehicle({ ...v3, registrationNo: "MAT558053TVG40149", chassisNo: "" }, all)?.vehicleRef, "MAT558053TVG40149", "old shape unchanged");
+  assert.equal(positionForVehicle({ ...v3, chassisNo: "" }, all), null, "plate alone cannot find an NA tracker");
+  // Plate first: a plate hit beats a chassis hit.
+  assert.equal(positionForVehicle({ id: "x", name: "x", registrationNo: "UP65RT9825", chassisNo: "MAT558053TVG40149" }, all)?.vehicleRef, "MAT558053TVE29204");
+  const drains = evaluateFleetAlerts({
+    vehicles: [{ ...v3, isActive: true, status: "active", serviceSchedule: [], compliance: [] }],
+    positions: [],
+    nowMs: T0,
+    lastSent: {},
+    fuelDrains: [{ vehicleRef: "MAT558053TVG40149", registrationNumber: "NA", at: at(5), detail: "drop 3 L" }],
+  });
+  assert.deepEqual(drains.filter((a) => a.kind === "fuel_drain").map((a) => a.key), ["fuel_drain:veh_m3"], "fuel drain reaches Magic-3 by chassis");
+}
+
 // 17:30 IST is inside the window: no out-of-hours alert, but low fuel + service + paper.
 {
   const alerts = evaluateFleetAlerts({ vehicles, positions, nowMs: T0, lastSent: {} });

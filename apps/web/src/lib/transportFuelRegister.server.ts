@@ -521,7 +521,7 @@ export type ImportResult = {
  */
 export async function importDeskFuelLogs(input: {
   logs: DeskFuelLog[];
-  vehicles: { id: string; name: string; registrationNo: string; fuelType?: string }[];
+  vehicles: { id: string; name: string; registrationNo: string; chassisNo?: string; fuelType?: string }[];
   dealers: { id: string; name: string }[];
 }): Promise<ImportResult> {
   const { sb, tenantId } = await tenant();
@@ -623,7 +623,7 @@ export async function importDeskFuelLogs(input: {
  */
 export async function readFleetEdgeMonth(
   month: string,
-  vehicles: { id: string; registrationNo: string }[],
+  vehicles: { id: string; registrationNo: string; chassisNo?: string }[],
 ): Promise<{ ok: true; byVehicle: Map<string, { km: number; fuelUsed: number; windows: number }> } | { ok: false; error: string }> {
   const { sb, tenantId } = await tenant();
   const [y, m] = month.split("-").map(Number) as [number, number];

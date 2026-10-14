@@ -13,9 +13,10 @@ import type { FleetVehicle } from "@/lib/transport";
  *
  * Fleet Edge data used to live only in its own report tab, so the Fleet and
  * Live screens showed nothing while thousands of events arrived — and two of
- * the six vehicles could not be matched at all, because the desk holds their
- * VIN where a registration should be. Matching happens on either key here,
- * and anything that fails to match is named rather than dropped.
+ * the six vehicles could not be matched at all, because the desk held their
+ * VIN where a registration should be. Matching happens on the plate or the
+ * chassis number (vehicleFleetKeys), and anything that fails to match is
+ * named rather than dropped.
  */
 export function FleetEdgeStatusStrip({
   vehicles,
@@ -82,7 +83,7 @@ export function FleetEdgeStatusStrip({
 
   const link = linkFleetEdgeToDesk(
     vehicles,
-    (v) => v.registrationNo,
+    (v) => ({ registrationNo: v.registrationNo, chassisNo: v.chassisNo }),
     data.vehicles,
   );
   const fmt = (iso: string | null) =>
@@ -115,9 +116,14 @@ export function FleetEdgeStatusStrip({
             {m.matchedOn === "vin" ? (
               <span
                 className="text-[var(--warning)]"
-                title="This desk row holds a VIN where the registration should be"
+                title="This desk row holds a VIN where the registration should be. Move it to Chassis no. and enter the plate."
               >
                 (matched by VIN — plate is {m.status.registrationNumber || "not set"})
+              </span>
+            ) : m.matchedOn === "chassis" ? (
+              <span className="text-[var(--muted)]">
+                (matched by chassis no.
+                {m.status.registrationNumber ? "" : " — Fleet Edge has no plate for it"})
               </span>
             ) : null}
             <span className="text-[var(--muted)]">
