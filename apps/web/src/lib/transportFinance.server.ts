@@ -39,12 +39,13 @@ import {
   type VehicleDoc,
   type VehicleDocsState,
 } from "@/lib/transportFinance";
+import { LOAN_TERMS_KEY, effectiveTerms, normalizeLoanTermsState, startMonthFor } from "@/lib/loans";
 
 type Fail = { ok: false; error: string; status?: number; conflict?: boolean };
 
 /* ─── module_local_state, one row, compare-and-set ─────────── */
 
-async function readRow(key: string): Promise<{ state: unknown; updatedAt: string } | null> {
+export async function readRow(key: string): Promise<{ state: unknown; updatedAt: string } | null> {
   const ctx = await getServerTenantContext();
   if (!ctx) return null;
   const { data, error } = await ctx.sb
@@ -65,7 +66,7 @@ async function readRow(key: string): Promise<{ state: unknown; updatedAt: string
  * between; on a lost race, re-read and re-apply (the change is per item, so
  * re-applying it is the right merge). `change` returns an error to refuse.
  */
-async function casUpdate<S extends object>(
+export async function casUpdate<S extends object>(
   key: string,
   normalize: (raw: unknown) => S,
   change: (current: S) => { ok: true; next: S } | Fail,
@@ -146,7 +147,7 @@ export type VehicleLoanView = {
 
 type AccountRow = { id: string; code: string; name: string; kind: string; parent_code: string | null; is_active: boolean | null };
 
-async function pageAll<T>(
+export async function pageAll<T>(
   run: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>,
 ): Promise<T[] | null> {
   const out: T[] = [];
@@ -173,8 +174,9 @@ export async function buildVehicleLoans(today = istToday()): Promise<
 > {
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "Tenant unavailable", status: 503 };
-  const [links, vehicles, accountsRes] = await Promise.all([
+  const [links, termsRow, vehicles, accountsRes] = await Promise.all([
     readLoanLinks(),
+    readRow(LOAN_TERMS_KEY),
     readFleetVehicles(),
     ctx.sb
       .from("ledger_accounts")
@@ -182,9 +184,13 @@ export async function buildVehicleLoans(today = istToday()): Promise<
       .eq("tenant_id", ctx.tenantId),
   ]);
   if (!links) return { ok: false, error: "Could not read the loan links", status: 502 };
+  if (!termsRow) return { ok: false, error: "Could not read the loan terms", status: 502 };
+  // Accounts → Loans terms (lib/loans.ts) decide the vehicle, the due day and
+  // where EMIs start; the older Transport link fills in only what they lack.
+  const termsState = normalizeLoanTermsState(termsRow.state);
   if (accountsRes.error) return { ok: false, error: `Could not read the chart of accounts: ${accountsRes.error.message}`, status: 502 };
   const accounts = (accountsRes.data ?? []) as AccountRow[];
-  const linked = new Set(Object.keys(links.state.links));
+  const linked = new Set([...Object.keys(links.state.links), ...Object.keys(termsState.loans)]);
   const loanAccounts = accounts.filter((a) =>
     isVehicleLoanAccount(
       { code: a.code, name: a.name, kind: a.kind, parentCode: a.parent_code ?? "", isActive: a.is_active !== false },
@@ -264,14 +270,27 @@ export async function buildVehicleLoans(today = istToday()): Promise<
         row.creditPaise += Number(l.credit_paise || 0);
         byVoucher.set(v.id, row);
       }
-      const link = links.state.links[a.code] ?? null;
+      const stored = links.state.links[a.code] ?? null;
+      const terms = effectiveTerms(a.code, termsState)?.terms ?? null;
+      const link: LoanLink | null = terms
+        ? {
+            vehicleId: terms.vehicleId || stored?.vehicleId || "",
+            emiDueDay: terms.dueDay,
+            paidBy: stored?.paidBy ?? "",
+            updatedAt: terms.updatedAt || stored?.updatedAt || "",
+            updatedBy: terms.updatedBy || stored?.updatedBy || "",
+          }
+        : stored;
+      const rows = [...byVoucher.values()];
+      const firstCredit = rows.filter((r) => !r.cancelled && r.creditPaise > 0).map((r) => r.date).sort()[0] ?? "";
+      const firstDueMonth = terms?.firstInstalmentDate ? startMonthFor(terms, firstCredit) : undefined;
       const veh = link?.vehicleId ? fleet.find((v) => v.id === link.vehicleId) : undefined;
       return {
         code: a.code,
         name: a.name,
         link,
         vehicleLabel: veh ? veh.label : link?.vehicleId ? "(vehicle no longer in the fleet)" : "",
-        summary: summarizeLoan({ rows: [...byVoucher.values()], today, dueDay: link?.emiDueDay ?? DEFAULT_EMI_DUE_DAY }),
+        summary: summarizeLoan({ rows, today, dueDay: link?.emiDueDay ?? DEFAULT_EMI_DUE_DAY, firstDueMonth }),
       };
     })
     .sort((x, y) => x.code.localeCompare(y.code));

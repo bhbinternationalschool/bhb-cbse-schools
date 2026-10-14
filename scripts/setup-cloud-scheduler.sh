@@ -248,6 +248,15 @@ create_job "bhb-fleet-alerts-tick" "*/15 * * * *" \
   "${LITE_URL}/api/transport/fleet-alerts/tick" \
   "Asia/Kolkata" "120s"
 
+# Loan EMIs awaiting approval (Accounts -> Loans): once a day at 09:00 IST,
+# every loan EMI whose due date has come and is not in the books, and every
+# open prepayment / top-up request, is pushed to the people who can approve
+# it — once per loan-month. It posts NOTHING; an EMI enters the books only
+# when someone with Accounts approve approves it.
+create_job "bhb-loan-emi-tick" "0 9 * * *" \
+  "${APP_URL}/api/accounts/loans/tick" \
+  "Asia/Kolkata" "120s"
+
 # New stops from the buses' own GPS (director, 14 Oct 2026). Nightly, after
 # the day's runs: a place a bus halts at on 8+ of the last 28 days (and 40% of
 # its run days) that is not yet a stop is added to its route, unpriced, and

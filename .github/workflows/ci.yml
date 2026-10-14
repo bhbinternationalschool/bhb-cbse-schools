@@ -508,6 +508,7 @@ jobs:
           npm run test:voucher-filter
           npm run test:voucher-amend
           npm run test:transport-finance
+          npm run test:loans
           npm run test:last-entry-cancelled-pairs
           npm run test:lesson-plan-ai
           npm run test:marketing-content-ai
