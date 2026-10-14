@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { DraftDateInput } from "@/components/ui/draft-inputs";
 import { Bus } from "lucide-react";
 import { BusRegisterReports } from "@/components/transport/BusRegisterReports";
 import { BusRunMarker } from "@/components/transport/BusRunMarker";
@@ -164,13 +165,15 @@ function RunsToday({
         <label className="text-sm font-semibold text-[var(--brand-deep)]" htmlFor="register-date">
           Day
         </label>
-        <input
+        {/* Each day loads from the server: only a whole date does, and an
+            emptied box keeps the day shown (never a snap mid-typing). */}
+        <DraftDateInput
           id="register-date"
-          type="date"
           className={regField}
           value={date}
           max={view?.today}
-          onChange={(e) => e.target.value && onDate(e.target.value)}
+          allowEmpty={false}
+          onCommit={onDate}
         />
         <button type="button" className={regBtnOutline} onClick={() => void load()}>
           Reload

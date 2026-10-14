@@ -208,6 +208,7 @@ SELFTESTS=(
   test:payroll-per-date-pay
   test:payroll-ledger-post-definer
   test:payroll-setup-sync
+  test:payroll-adjust-table
   test:masters-change-auth
   test:timetable-free-grid
   test:teacher-load-published
@@ -552,6 +553,8 @@ SELFTESTS=(
   test:erp-fetch
   test:reference-cache
   test:versions-route
+  test:query-kernel
+  test:reference-views
   # Added 2026-09-12, in CI's order, after the drift check below reported that
   # ci.yml had been running these for weeks while this script did not:
   # WhatsApp failure reasons, household numbers, audience specs, the tutor and
