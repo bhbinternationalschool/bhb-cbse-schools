@@ -214,6 +214,7 @@ function MonthGroupToggle({
   attention,
   onToggle,
   stickyLabel,
+  flush,
 }: {
   label: string;
   open: boolean;
@@ -224,6 +225,8 @@ function MonthGroupToggle({
   attention?: number;
   onToggle: () => void;
   stickyLabel?: boolean;
+  /** No side padding: for lists whose items sit flush with the card edge. */
+  flush?: boolean;
 }) {
   return (
     <button
@@ -235,7 +238,8 @@ function MonthGroupToggle({
     >
       <span
         className={cn(
-          "flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-x-2 gap-y-0.5 px-4 py-2",
+          "flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-x-2 gap-y-0.5 py-2",
+          flush ? "px-0" : "px-4",
           stickyLabel && "sticky left-0",
         )}
       >
@@ -364,6 +368,7 @@ export function MonthGroupedList<T>({
   isRowSelected,
   listClassName = "divide-y divide-[var(--border)]",
   empty,
+  flush = false,
 }: {
   month: MonthGroupsState<T>;
   rowKey: (row: T) => string;
@@ -373,6 +378,8 @@ export function MonthGroupedList<T>({
   isRowSelected?: (row: T) => boolean;
   listClassName?: string;
   empty?: ReactNode;
+  /** The list's items have no side padding; drop the header's too. */
+  flush?: boolean;
 }) {
   const baseId = useId();
   if (month.groups.length === 0) return empty ? <>{empty}</> : null;
@@ -393,6 +400,7 @@ export function MonthGroupedList<T>({
               selected={selected}
               attention={month.attentionCount(g.rows)}
               onToggle={() => month.toggle(g.key)}
+              flush={flush}
             />
             <ul
               id={listId}
