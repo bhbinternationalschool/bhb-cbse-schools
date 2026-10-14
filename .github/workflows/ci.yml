@@ -616,6 +616,7 @@ jobs:
           npm run test:transport-vehicle-costs
           npm run test:transport-seats
           npm run test:boarding-suggest
+          npm run test:wa-number-verify
           npm run test:transport-gaps
           npm run test:gps-stop-discovery
           npm run test:run-stop-order

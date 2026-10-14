@@ -273,6 +273,7 @@
     "test:transport-phone-empty-desk": "npx tsx src/lib/transportPhoneEmptyDesk.selftest.ts",
     "test:transport-seats": "npx tsx src/lib/transportSeats.selftest.ts",
     "test:boarding-suggest": "npx tsx src/lib/boardingSuggestAi.selftest.ts",
+    "test:wa-number-verify": "npx tsx src/lib/waNumberVerify.selftest.ts",
     "test:transport-gaps": "npx tsx src/lib/transportGaps.selftest.ts",
     "test:gps-stop-discovery": "npx tsx src/lib/gpsStopDiscovery.selftest.ts",
     "test:run-stop-order": "npx tsx src/lib/runStopOrder.selftest.ts",

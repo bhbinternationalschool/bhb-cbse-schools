@@ -188,6 +188,7 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "classLabel", label: "Class & section", group: "Student", sample: "Class 5 A" },
   { key: "className", label: "Class name", group: "Student", sample: "Class 5" },
   { key: "schoolName", label: "School name", group: "School", sample: "BHB International School" },
+  { key: "newNumber", label: "Newly added mobile (masked)", group: "Parent", sample: "******3926" },
   { key: "feeDue", label: "Fee amount due", group: "Fees", sample: "₹12,500" },
   { key: "amount", label: "Amount", group: "Fees", sample: "₹5,000" },
   { key: "dueDate", label: "Due date", group: "Fees", sample: "15 Aug 2026" },
@@ -628,6 +629,70 @@ const SEED_DEFS: SeedDef[] = [
       "🚨 *{{alertTitle}}*\n\n🚌 वाहन: *{{busNo}}*\n🕒 {{time}}\n\n{{detail}}\n\nनक़्शे के लिए ERP में Transport → Live खोलें। — {{schoolName}} 🙏",
     footerEn: "Transport desk · automatic alert",
     footerHi: "परिवहन कार्यालय · स्वचालित चेतावनी",
+  },
+
+  // ── Parent app: a number the school does not have ─────────────
+  //
+  // Somebody asks the parent app for an OTP with a number that is not on
+  // record (lib/waNumberVerify). The school writes to that number once; a
+  // reply starts five questions about the child on WhatsApp, and a full match
+  // links the number. The second template tells the family's REGISTERED
+  // number that a new one was added; the third tells the new number it was
+  // linked when the office approved it more than a day later.
+  {
+    familyKey: "parent_number_check",
+    nameEn: "App login from an unknown number",
+    nameHi: "अनजान नंबर से ऐप लॉग-इन",
+    module: "general",
+    category: "UTILITY",
+    metaName: "bhb_parent_number_check",
+    headerFormat: "TEXT",
+    headerTextEn: "Parent app login",
+    headerTextHi: "पैरेंट ऐप लॉग-इन",
+    bodyEn:
+      "Namaste 🙏\n\nSomeone tried to log in to the {{schoolName}} parent app with this number, but this number is not in the school's records.\n\nIf you are a parent at the school, reply *Yes*. We will ask five short questions about your child and add your number if they match.\n\nIf this was not you, please ignore this message.",
+    bodyHi:
+      "नमस्ते 🙏\n\n{{schoolName}} के पैरेंट ऐप में इस नंबर से लॉग-इन की कोशिश हुई, लेकिन यह नंबर स्कूल के रिकॉर्ड में नहीं है।\n\nअगर आप स्कूल के अभिभावक हैं, तो इस संदेश का जवाब *हाँ* लिखकर दें। हम बच्चे के बारे में पाँच छोटे सवाल पूछेंगे और सही होने पर आपका नंबर जोड़ देंगे।\n\nअगर यह आपने नहीं किया, तो इस संदेश को अनदेखा करें।",
+    footerEn: "School office · reply to this message",
+    footerHi: "स्कूल कार्यालय · इसी संदेश का उत्तर दें",
+    buttons: [{ type: "QUICK_REPLY", text: "Yes, add my number" }],
+    buttonsHi: [{ type: "QUICK_REPLY", text: "हाँ, नंबर जोड़ें" }],
+  },
+  {
+    familyKey: "parent_number_added",
+    nameEn: "New number added to the family",
+    nameHi: "परिवार में नया नंबर जोड़ा गया",
+    module: "general",
+    category: "UTILITY",
+    metaName: "bhb_parent_number_added",
+    headerFormat: "TEXT",
+    headerTextEn: "New number added",
+    headerTextHi: "नया नंबर जोड़ा गया",
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\nA new number *{{newNumber}}* has been added to your family's {{schoolName}} parent app account ({{childName}}).\n\nIf you do not know about this, please contact the school office straight away.",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{schoolName}} के पैरेंट ऐप में आपके परिवार ({{childName}}) के खाते से एक नया नंबर *{{newNumber}}* जोड़ा गया है।\n\nअगर यह आपकी जानकारी में नहीं है, तो तुरंत स्कूल कार्यालय से संपर्क करें।",
+    footerEn: "School office · security notice",
+    footerHi: "स्कूल कार्यालय · सुरक्षा सूचना",
+  },
+  {
+    familyKey: "parent_number_linked",
+    nameEn: "Your number is linked — log in",
+    nameHi: "नंबर जुड़ गया — लॉग-इन करें",
+    module: "general",
+    category: "UTILITY",
+    metaName: "bhb_parent_number_linked",
+    headerFormat: "TEXT",
+    headerTextEn: "Your number is linked",
+    headerTextHi: "आपका नंबर जुड़ गया",
+    bodyEn:
+      "Namaste 🙏\n\nYour number has been added to {{childName}}'s record. You can now log in to the {{schoolName}} parent app with this number.",
+    bodyHi:
+      "नमस्ते 🙏\n\nआपका नंबर {{childName}} के रिकॉर्ड से जोड़ दिया गया है। अब आप इसी नंबर से {{schoolName}} के पैरेंट ऐप में लॉग-इन कर सकते हैं।",
+    footerEn: "School office · parent app",
+    footerHi: "स्कूल कार्यालय · पैरेंट ऐप",
+    buttons: [OPEN_APP_EN],
+    buttonsHi: [OPEN_APP_HI],
   },
 
   // ── UDISE+ documents ──────────────────────────────────────────

@@ -26,7 +26,7 @@ export type LinkedMobile = {
   mobile10: string;
   householdId: string;
   childName: string;
-  via: "registered_code" | "office";
+  via: "registered_code" | "office" | "wa_questions";
   linkedAt: string;
   by: string;
 };
@@ -85,7 +85,7 @@ export function normalizeParentLinkState(raw: unknown): ParentLinkState {
         mobile10: m10(x.mobile10),
         householdId: str(x.householdId, 80),
         childName: str(x.childName),
-        via: x.via === "office" ? "office" : "registered_code",
+        via: x.via === "office" ? "office" : x.via === "wa_questions" ? "wa_questions" : "registered_code",
         linkedAt: str(x.linkedAt, 40),
         by: str(x.by),
       })),

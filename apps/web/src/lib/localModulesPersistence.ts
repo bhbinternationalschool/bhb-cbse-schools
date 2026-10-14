@@ -11,6 +11,7 @@
  */
 
 import { emptyModuleRequestsState } from "@/lib/moduleRequests";
+import { emptyWaVerifyState } from "@/lib/waNumberVerify";
 import { emptyAppPopupsState } from "@/lib/appPopups";
 import { emptyParentLinkState } from "@/lib/parentNumberLink";
 import { emptyStaffBroadcastLog } from "@/lib/staffBroadcastLog";
@@ -139,6 +140,14 @@ const registry: Record<ModuleStateKey, ModuleStatePersistence<any>> = {
     key: "parent_linked_mobiles",
     isEmpty: () => true,
     loadLocal: emptyParentLinkState,
+    writeLocalRaw: () => undefined,
+  }),
+  // Written only by the server (unknown numbers asked about their child on
+  // WhatsApp — lib/waNumberVerify).
+  parent_wa_verify: createModuleStatePersistence({
+    key: "parent_wa_verify",
+    isEmpty: () => true,
+    loadLocal: emptyWaVerifyState,
     writeLocalRaw: () => undefined,
   }),
   // Written only by the server (each live send of /api/v1/staff/broadcast).
