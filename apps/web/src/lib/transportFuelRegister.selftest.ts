@@ -375,4 +375,19 @@ const line = (lineId: string, narration: string, extra: Partial<FuelVoucherLine>
   );
 }
 
+// A re-sent window is Fleet Edge revising it: the LATEST copy counts, once —
+// the same rule as the Fleet Edge report (fleetEdgeWindows.ts). Real case,
+// 14 Oct 2026: a window first sent with 3 km, later with 4 km.
+{
+  const w = "2026-10-13T03:00:00Z";
+  const rows = [
+    { vehicleRef: "MAT558053TVE29204", registrationNumber: "UP65RT9825", windowFrom: w, receivedAt: "2026-10-13T03:31:00Z", km: 3, fuelUsed: 0.2 },
+    { vehicleRef: "MAT558053TVE29204", registrationNumber: "UP65RT9825", windowFrom: w, receivedAt: "2026-10-13T05:02:00Z", km: 4, fuelUsed: 0.3 },
+    // An older copy arriving out of order must not win.
+    { vehicleRef: "MAT558053TVE29204", registrationNumber: "UP65RT9825", windowFrom: w, receivedAt: "2026-10-13T04:00:00Z", km: 9, fuelUsed: 9 },
+  ];
+  const m = fleetEdgeMonthByVehicle({ month: "2026-10", vehicles: [{ id: "magic2", registrationNo: "UP65RT9825" }], rows });
+  assert.deepEqual(m.get("magic2"), { km: 4, fuelUsed: 0.3, windows: 1 }, "latest copy of a revised window, counted once");
+}
+
 console.log("transportFuelRegister selftest: ok");

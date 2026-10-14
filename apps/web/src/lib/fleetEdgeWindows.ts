@@ -18,11 +18,8 @@
  * revising its own window, so the rule is: each (vehicle, window start)
  * counts ONCE, and the copy kept is the LATEST received.
  *
- * The fuel register (PR #628, lib/transportFuelRegister.ts
- * fleetEdgeMonthByVehicle) applies the same "once per (vehicle, window
- * start)" key but keeps the FIRST copy. On today's data the two agree on
- * every window but the handful above; they should converge on this helper
- * once #628 is in main.
+ * The fuel register (lib/transportFuelRegister.ts fleetEdgeMonthByVehicle)
+ * applies the same rule: once per (vehicle, window start), latest copy kept.
  *
  * A details event with no window start (`from`) cannot be matched to a
  * window, so it is kept as its own entry — never merged on a guess.
