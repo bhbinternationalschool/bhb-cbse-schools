@@ -248,6 +248,15 @@ create_job "bhb-fleet-alerts-tick" "*/15 * * * *" \
   "${LITE_URL}/api/transport/fleet-alerts/tick" \
   "Asia/Kolkata" "120s"
 
+# Loan EMIs awaiting approval (Accounts -> Loans): once a day at 09:00 IST,
+# every loan EMI whose due date has come and is not in the books, and every
+# open prepayment / top-up request, is pushed to the people who can approve
+# it — once per loan-month. It posts NOTHING; an EMI enters the books only
+# when someone with Accounts approve approves it.
+create_job "bhb-loan-emi-tick" "0 9 * * *" \
+  "${APP_URL}/api/accounts/loans/tick" \
+  "Asia/Kolkata" "120s"
+
 # ERP command desk: the director's end-of-day digest of what staff asked the
 # ERP over WhatsApp / app / assistant. Sends once after ERP_COMMANDS_DIGEST_HOUR
 # (default 19:00 IST), only on days with commands; idempotent per date, so the
