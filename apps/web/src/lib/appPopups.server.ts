@@ -15,7 +15,9 @@ import {
   type RuleFacts,
 } from "@/lib/appPopups";
 import { aadhaarSlot, popupOutcome, sortResponses, type ResponseRow } from "@/lib/appPopupResponses";
+import { ApiError } from "@/lib/api/v1/errors";
 import { writeAudit } from "@/lib/audit.server";
+import { readHouseholdStudents } from "@/lib/data/server/householdRead";
 import { loadMasters } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
@@ -45,13 +47,21 @@ export async function writeAppPopups(state: AppPopupsState): Promise<{ ok: boole
   return w.ok ? { ok: true } : { ok: false, error: w.error };
 }
 
-/** The family's children who are on roll, one row each (see childrenOnRoll). */
+/**
+ * The family's children who are on roll, one row each (see childrenOnRoll).
+ *
+ * Read from SQL scoped to the household (data-layer 4.1a) — it hydrated the
+ * whole roster into the process to filter one family out of it. A failed
+ * read throws a 503: an unreadable family is not a family with no children
+ * (that would hide every pop-up, and refuse an Aadhaar save as "no children").
+ */
 export async function householdChildren(householdId: string, sessionAy: string): Promise<SisStudent[]> {
-  await ensureSisHydratedServer();
-  return childrenOnRoll(
-    loadSis().students.filter((s) => s.householdId === householdId),
-    sessionAy,
-  );
+  const read = await readHouseholdStudents(householdId);
+  if (!read.ok) {
+    console.warn("[app-popups] household read failed", read.reason);
+    throw new ApiError("server_error", "Could not read this family's record just now — please try again.", 503);
+  }
+  return childrenOnRoll(read.students, sessionAy);
 }
 
 export function missingDocKeys(s: SisStudent): string[] {
