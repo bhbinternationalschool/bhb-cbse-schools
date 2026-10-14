@@ -573,6 +573,105 @@ editVia('editor')` passes (the old Masters editor's `masters_write_slices` alrea
   contexts edit the same subject — the second gets the conflict toast and sees the first's value;
   `stale-writer.spec.ts` passes.
 
+*(Built 14 Oct 2026 — migration `20261014220000_data_layer_write_kernel.sql`: **the director
+applies it to production before this deploys**. Without it the new code fails closed: a kernel
+write answers 503 "the server's write kernel is not installed", never an old path.)*
+**What exists.**
+- `desk_write_guarded` v3: a null base on a row that exists → `conflict`, `reason:'unversioned'`
+  (with the stored row; 409 at the route); a base on an absent row → `reason:'deleted'` (an edit
+  never re-creates a removed row); a soft-deleted row *exists* (reviving it needs its revision).
+  **All or none** (v2 applied the rest of a batch and reported the refused). An op without an id,
+  an unknown op or an id twice in a batch raises 22023 (v2 skipped it silently). Every batch that
+  changes anything bumps the table's `sync_meta` (`updated_at` strictly later + its count column;
+  `sis_students` also `active_student_count`) in the same transaction — `desk_writable_tables`
+  gained `sync_meta_table` / `sync_count_column`; new `website_desk_sync_meta` and
+  `udise_sheet_desk_sync_meta` (both appear in `erp_versions`, count `null` — not in its mapping).
+  The 22 `masters_desk_*` row tables **left the allowlist**: they are derived
+  (`masters_sync_rows_from_slices` rewrites them and deletes what the slice lacks on every save),
+  so a direct write was silently undone; no code wrote them.
+- `desk_slice_row_write(p_tenant, p_table, p_slice_key, p_op, p_id, p_row, p_base, p_key='id')`
+  (SECURITY DEFINER, service_role only): the 16 tables (production list, 14 Oct); advisory lock +
+  `for update`; base = slice `updated_at` for masters **and timetable** (neither carries `_rev`),
+  element `_rev` for the other 14 (absent `_rev` = 0; new → 1, changed → +1, identical →
+  unchanged, a client `_rev` ignored — as `mergeWithRevs` with a base); **patch** of one element by
+  key (`p_key` = `code` for `staff_hr.leaveTypes`); an element without a key, a row whose key
+  disagrees, an object slice, a staff-owned Masters list (`staff/departments/designations`) or the
+  `students` projection is refused; new slice `updated_at` (strictly later); `<desk>_desk_sync_meta`
+  bumped with the counts the TypeScript writers compute; for masters `masters_sync_rows_from_slices`
+  in the same transaction (a row the tables refuse rolls the slice back). A `classSubjects`
+  element without `isOptional` is written with `false` (non-boolean refused) — and the old path's
+  `pushMastersSlicesToDb` / `pushMastersDeskToDb` apply the same default
+  (`withClassLinkDefaults`), so the 1.1 finding cannot recur from the old editor either.
+- `desk_slice_object_write(p_tenant, p_table, p_slice_key, p_value, p_base)`: a fixed list of 12
+  object slices (Masters' four + `rbac.mobile`, `exam_papers.importMappings`,
+  `wa_templates.lastMetaSyncAt`, `staff_hr.leaveSettings`, `module_registry.enabled`,
+  `automation.lastTickAt`, `transport.feePolicy`, `timetable.config`); base = slice `updated_at`.
+- Registry: `kind: 'rows' | 'slice' | 'object'` + `slice: {table, key, keyField, base}`; the 21
+  `masters.*` list collections are now **slice** collections (read from `masters_desk_slices`,
+  camelCase, with the slice stamp as `revision`), `masters.settings` is replaced by four object
+  collections (`masters.school-profile` …). A slice collection takes **one op per request**.
+  `POST /api/data/<collection>` routes rows → `desk_write_guarded`, slice/object → the RPCs (the
+  client is unchanged: `writeRecords` / `useSaveMutation` send `{ops}`; `WriteOk.revision` /
+  `ReadOk.revision` carry the slice stamp; conflicts carry `reason`). After a write that changed
+  something the route drops that desk's probe cache (`clearDeskProbeCache`: `sis-roster`,
+  `masters-desk-rows`) and the masters reference cache.
+- Deletes of `sis.students` / `sis.households` need `students` **approve** on top of edit
+  (`approval.onDelete`; office: 403; principal: allowed). No soft delete: `sis_students` has no
+  `deleted_at`, and adding one would need every roster reader to filter it.
+- Teacher reach: `teacherScope` on the registry; `GET /api/data/sis.students` for a session that
+  is not school-wide and lacks `students.edit` returns only rows whose (class, section) is in
+  `staffSectionScope` (in the `WHERE` as `section_id in (…)` + the pair check), `sis.households`
+  only those students' households, `udise.*` and `?ids=` 403; unknown scope 503.
+- `GET /api/data/<collection>?ids=a,b` (≤ 200, not for scoped sessions): current revisions,
+  soft-deleted rows included — what a client needs to revive a row it put away.
+- **Callers.** Every `desk_write_guarded` caller is `repo.write()` behind `POST /api/data/<c>`;
+  its callers: the website desk (`WebsiteWorkspace`, `PageEditor`, `MediaLibrary`,
+  `Publications`: new records with a null base and fresh ids, edits/deletes with the row's
+  `updated_at` — unchanged under v3) and the UDISE+ working sheet (`lib/udiseUploadServer.ts`),
+  which sent **no base at all** — the sheet row on every save, every re-uploaded child, every row
+  "start a fresh sheet" put away: under v3 every save after the first would have been refused.
+  Fixed here: it sends the revision it loaded or last wrote, reads back soft-deleted rows'
+  revisions (`?ids=`) to revive them, and for a live row it never loaded (the robot wrote it) is
+  refused rather than overwriting it. The UDISE robot (`udiseRobotSync.server.ts`) writes the two
+  tables directly, not through the kernel (unchanged; it bumps no signal). No mobile or script
+  caller.
+
+**Proof.** `supabase/tests/desk_write_guarded.test.sql` (35 checks, rewritten for v3; it fails
+on origin/main's v2 at "masters_desk_* not writable", and with the allowlist checks removed at
+"an op without an id is refused", then "the insert bumped sis_sync_meta", then "null base on an
+existing row → unversioned") and `desk_slice_row_write.test.sql` (45 checks; the functions do not
+exist on origin/main), both in CI. `e2e/write-kernel.acceptance.ts` (24 checks, run by
+`e2e-stack.sh check`; on origin/main's app a null-base write **overwrote** the student's notes
+and the run stopped at check 3). Before/after on the class teacher's
+`GET /api/data/sis.students`: origin/main 400 of the 401 rows (the whole school) and `udise.rows` 200; now 51
+(her section) and 403. `test:udise-upload-server` (fails on the old caller: the first re-upload is
+refused `unversioned`). `test:approval-gate` (+ onDelete). Playwright: `write-conflict.spec.ts`
+(two contexts, the second gets "someone else changed this" and shows the first's value; fails on
+origin/main — the screen does not exist) and `stale-writer.spec.ts` (fixme → pass; on origin/main
+the same script's "kernel" write lands in the derived row table and the old tab's section save
+is then **accepted**, 200 — the revert the spec exists to catch). Scoreboard on a fresh stack:
+**18 pass · 27 expected-fail · 1 fixme · 0 fail** (origin/main ea9f5ba2: 16 · 27 · 2 · 0); the
+only differences are those two specs. Migration rehearsal on a fresh PG17: 371 applied, the same 2
+known failures as origin/main (adhoc-only tables), this one applied. `scripts/verify.sh`: 515
+passed (typecheck, lint, every self-test); its `next build` died of Node's default 4 GB heap
+twice with a `.next` cache left by the e2e-env build — the same tree built clean from a cold cache
+at the default heap (89 s; origin/main 92 s), warm, and at CI's 6144 MB.
+
+**Not done / not proven.** No product screen writes through the kernel yet (the test screen
+`/e2e/write-kernel`, 404 unless `E2E=1`, is the only client); Phase 2 converts screens. No
+`kind:'slice'` registry entries for transport, trust, timetable or the desk-slice modules — the
+RPCs accept their tables (SQL-tested for `staff_hr` and `module_registry`), the entries come with
+each desk's conversion. Old whole-desk paths for `_rev` desks still accept an unversioned save
+(server writers, old builds): a kernel element write moves `_rev`, but an old no-`revs` POST
+still wins for its rows (`mergeWithRevs` without a base) — closing that is the per-desk 410 stub of
+1.2. A kernel delete of a Masters class/section bypasses the old editor's whole-book guards
+(`guardMastersOverwrite`, `guardSubjectsOverwrite`); it is one named element with the slice stamp,
+but nothing checks references (students in that class). `masters_desk_settings` (and every
+`masters_desk_*` row table) is keyed on `id` alone, so with two tenants the row sync would write
+across them (one school in production; seen in the SQL test, not changed here). The UDISE robot
+bumps no signal. Unknown-scope 503 on `/api/data/sis.*` is the 1.7 reader's (`readStaffScopeForDesk`)
+and is not re-tested here. `useErpMutation` (1.4) is not built here.
+
 **1.6 Ratchets.** `scripts/check-ratchets.sh` defines each metric in a `case` block and
 `scripts/ratchets.txt` carries the budget — add both for: `loadMasters(` files in
 `components/` + `app/(erp)/` (today 109), `loadSis(` (77), `ensure[A-Za-z]+Hydrated(` in
@@ -906,7 +1005,7 @@ stale tabs reload themselves). After 0.3, manual `deploy-online.sh` runs are not
 |---|---|---|---|
 | typed data kernel | `lib/data/types.ts` (`WriteOp`, `Revision`, `ReadFail` with no `rows`), `lib/data/registry.ts` (10 collections: `sis.students`, `sis.households`, `udise.*`, `site.*`, `admissions.leads`), `lib/data/server/repo.ts` (keyset `list()`, `write()` → `desk_write_guarded`), `lib/data/approvalGate.ts`, `lib/data/client/{query,mutate,useSaveMutation}.ts` | live code with a `{ops}` contract; no screen consumes it yet | 1.4, 1.5, 3.1, 3.4 |
 | generic data route | `app/api/data/[collection]/route.ts` | GET keyset list, POST `{ops}`; header forbids whole-state bodies | R4 |
-| row CAS RPC | `supabase/migrations/20260810010000_desk_write_guarded.sql`, `20260810050000_…` | applies ops with base checks; **accepts null base; bumps no sync_meta; hard-deletes** — fixed in 1.5 | 1.5 |
+| row CAS RPC | `supabase/migrations/20260810010000_desk_write_guarded.sql`, `20260810050000_…`, v3 `20261014220000_…` | v3 (1.5): refuses a null base on an existing row, all-or-none, bumps the table's sync_meta; slice elements via `desk_slice_row_write` / `desk_slice_object_write` | 1.5 |
 | paged reads | `lib/supabase/pageAll.ts` (`fetchAllPages`, `fetchByIds`) | | 1.3, 3.x |
 | probe-gated response cache | `lib/deskProbeCache.server.ts` (`cachedDeskJson`, `deskProbe`) | `desk_probe` RPC has a fixed allowlist of data tables (`20261009090000_desk_probe_transport.sql:19-36`) with **no sync_meta, rbac or module-registry tables** and fails open on an unlisted name (9 Oct incident) | 0.5f; **not** for versions |
 | slice lock + all-or-none | `supabase/migrations/20261010220000_masters_write_slices.sql` (`for update`, base = slice `updated_at`, bumps sync_meta, then `masters_sync_rows_from_slices`) | the pattern `desk_slice_row_write` copies | 1.5 |
