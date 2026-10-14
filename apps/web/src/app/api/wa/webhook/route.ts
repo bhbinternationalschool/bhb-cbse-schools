@@ -453,6 +453,29 @@ export async function POST(req: Request) {
         continue;
       }
     }
+    // A number that tried to log in to the parent app, answering the school's
+    // questions about the child (lib/waNumberVerify). Only numbers with a live
+    // conversation are handled; everything else falls through untouched.
+    if ((msg.text || "").trim()) {
+      try {
+        const { tryWaNumberVerify } = await import("@/lib/waNumberVerify.server");
+        const v = await tryWaNumberVerify({ fromWaId: msg.fromWaId, text: msg.text });
+        if (v.handled) {
+          results.push({
+            audience: `number_verify_${v.outcome ?? "handled"}`,
+            from: msg.fromWaId,
+            escalate: false,
+            replied: true,
+            stub: false,
+            error: v.error,
+          });
+          continue;
+        }
+      } catch (e) {
+        console.error("[wa/webhook] number verify failed", msg.waMessageId, e);
+      }
+    }
+
     // A family we asked "where does your child wait?" answering that question.
     //
     // Before the ordinary bot, and gated on an OPEN request for this

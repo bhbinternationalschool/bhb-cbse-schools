@@ -298,6 +298,7 @@ SELFTESTS=(
   test:transport-phone-empty-desk
   test:transport-seats
   test:boarding-suggest
+  test:wa-number-verify
   test:transport-gaps
   test:gps-stop-discovery
   test:run-stop-order
