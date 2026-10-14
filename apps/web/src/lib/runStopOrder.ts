@@ -62,6 +62,8 @@ export type RunOrder = {
   returnMinutes: number | null;
   /** Share of this run's journeys that ended back at school. */
   returnsToSchoolShare: number;
+  /** Share that started from school (City Bus starts its morning at the far end). */
+  startsAtSchoolShare: number;
 };
 
 const EARTH_M = 6_371_000;
@@ -269,6 +271,7 @@ export function buildRunOrders(input: {
       legs: g.legs.length,
       returnMinutes: lastDropReturn.length ? Math.round(median(lastDropReturn)) : null,
       returnsToSchoolShare: g.legs.filter((l) => l.endedAtSchool).length / g.legs.length,
+      startsAtSchoolShare: g.legs.filter((l) => l.startedAtSchool).length / g.legs.length,
     });
   }
   return out;
@@ -377,11 +380,16 @@ export function suggestFairDrop(input: {
  */
 export function orderForRun(input: {
   routeStops: { id: string; sequence: number }[];
-  run?: Pick<RunOrder, "stops"> & { chosen?: "gps" | "fair" };
+  run?: Pick<RunOrder, "stops"> & { chosen?: "gps" | "fair" | "custom"; customOrder?: string[] | null };
   pickup?: Pick<RunOrder, "stops">;
-}): { ids: string[]; expectedMinute: Map<string, number>; basis: "gps" | "fair" | "route" } {
+}): { ids: string[]; expectedMinute: Map<string, number>; basis: "gps" | "fair" | "custom" | "route" } {
   const byRoute = [...input.routeStops].sort((a, b) => a.sequence - b.sequence).map((s) => s.id);
   const valid = new Set(byRoute);
+  if (input.run?.chosen === "custom" && input.run.customOrder?.length) {
+    const first = input.run.customOrder.filter((id) => valid.has(id));
+    const seen = new Set(first);
+    return { ids: [...first, ...byRoute.filter((id) => !seen.has(id))], expectedMinute: new Map(), basis: "custom" };
+  }
   const useFair = input.run?.chosen === "fair" && (input.pickup?.stops.length ?? 0) > 0;
   const source = useFair ? input.pickup!.stops : input.run?.stops ?? [];
   if (source.length === 0) return { ids: byRoute, expectedMinute: new Map(), basis: "route" };

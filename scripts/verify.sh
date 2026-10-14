@@ -301,6 +301,7 @@ SELFTESTS=(
   test:transport-gaps
   test:gps-stop-discovery
   test:run-stop-order
+  test:transport-audit
   test:defaulter-hold-policy
   test:hold-resolve
   test:live-bus-marker

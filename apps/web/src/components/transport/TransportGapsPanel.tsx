@@ -65,6 +65,28 @@ export function TransportGapsPanel({ canEdit }: { canEdit: boolean }) {
     void load();
   }, [load]);
 
+  const act = useCallback(
+    async (id: string) => {
+      setBusy(id);
+      setError("");
+      try {
+        const res = await fetch("/api/transport/gaps/act", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id }),
+        });
+        const body = await res.json();
+        if (!res.ok) setError(body?.error || "Could not do that");
+        else await load();
+      } catch {
+        setError("Could not do that");
+      } finally {
+        setBusy("");
+      }
+    },
+    [load],
+  );
+
   const decide = useCallback(
     async (id: string, status: "settled" | "dismissed" | "open") => {
       setBusy(id);
@@ -209,6 +231,19 @@ export function TransportGapsPanel({ canEdit }: { canEdit: boolean }) {
                         {g.settledBy ? `${g.settledBy}: ` : ""}
                         {g.settleNote}
                       </p>
+                    ) : null}
+                    {g.actionResult ? (
+                      <p className="mt-1 font-semibold text-[var(--success)]">{g.actionResult}</p>
+                    ) : null}
+                    {canEdit && !g.live && g.status === "open" && g.action && !g.actionDoneAt ? (
+                      <button
+                        type="button"
+                        disabled={busy === g.id}
+                        onClick={() => void act(g.id)}
+                        className="mt-1.5 rounded-lg bg-[var(--brand-deep)] px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+                      >
+                        {busy === g.id ? "Working…" : g.action.label}
+                      </button>
                     ) : null}
                     {canEdit && !g.live ? (
                       g.status === "open" ? (

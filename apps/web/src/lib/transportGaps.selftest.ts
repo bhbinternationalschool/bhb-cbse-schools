@@ -75,6 +75,16 @@ const live = liveTransportGaps({
 });
 const ids = live.map((g) => g.id).sort();
 assert.deepEqual(ids, ["live:driver:v1", "live:seats:v1", "live:stopgeo:s1"], "inactive vehicles and ended riders raise nothing");
+// Fuel bills: last fill 20 days ago → gap; 3 days ago → none.
+const now14 = Date.parse("2026-10-14T00:00:00Z");
+const fuelOld = liveTransportGaps({ vehicles: [], routes: [], assignments: [], fuelRefillLogs: [{ vehicleId: "v", filledAt: "2026-09-24T12:00:00Z" }] }, now14);
+assert.equal(fuelOld[0]?.id, "live:fuel-bills");
+assert.match(fuelOld[0]!.title, /19 days/);
+assert.equal(liveTransportGaps({ vehicles: [], routes: [], assignments: [], fuelRefillLogs: [{ vehicleId: "v", filledAt: "2026-10-11T12:00:00Z" }] }, now14).length, 0);
+// An action on a stored row comes through with a label.
+const withAction = gapFromRow({ id: "s1", kind: "suggestion", status: "open", title: "x", action: { type: "move_rider", assignmentId: "a" } });
+assert.equal(withAction?.action?.type, "move_rider");
+assert.equal(withAction?.action?.label, "Do it");
 assert.ok(live.every((g) => g.live && g.status === "open"));
 
 // Sorting: open before settled, fee gaps first.

@@ -22,7 +22,12 @@ export type TransportGapKind =
   | "fleet_record"
   | "driving"
   | "decision"
-  | "new_gps_stop";
+  | "new_gps_stop"
+  | "suggestion"
+  | "road_alert";
+
+/** A one-tap action the audit attached to a suggestion (carried out by /api/transport/gaps/act). */
+export type TransportGapAction = { type: string; label: string } & Record<string, unknown>;
 
 export type TransportGapStatus = "open" | "settled" | "dismissed";
 
@@ -49,6 +54,9 @@ export type TransportGap = {
   settleNote: string;
   /** true for gaps derived from the desk on this request (not stored, cannot be settled). */
   live?: boolean;
+  action: TransportGapAction | null;
+  actionDoneAt: string | null;
+  actionResult: string;
 };
 
 export const TRANSPORT_GAP_KIND_LABEL: Record<TransportGapKind, string> = {
@@ -60,10 +68,14 @@ export const TRANSPORT_GAP_KIND_LABEL: Record<TransportGapKind, string> = {
   driving: "Driving",
   decision: "Decision",
   new_gps_stop: "New GPS stop",
+  suggestion: "Suggestion",
+  road_alert: "Road / route change",
 };
 
 /** Order the office should work through them: money and children first. */
 const KIND_ORDER: TransportGapKind[] = [
+  "road_alert",
+  "suggestion",
   "new_gps_stop",
   "fee_distance",
   "stop_not_reached",
@@ -116,6 +128,12 @@ export function gapFromRow(r: Record<string, unknown>): TransportGap | null {
     settledAt: str(r.settled_at) || null,
     settledBy: str(r.settled_by),
     settleNote: str(r.settle_note),
+    action:
+      r.action && typeof r.action === "object" && typeof (r.action as { type?: unknown }).type === "string"
+        ? ({ label: "Do it", ...(r.action as Record<string, unknown>) } as TransportGapAction)
+        : null,
+    actionDoneAt: str(r.action_done_at) || null,
+    actionResult: str(r.action_result),
   };
 }
 
@@ -142,6 +160,9 @@ function liveGap(id: string, kind: TransportGapKind, vehicle: string, title: str
     settledBy: "",
     settleNote: "",
     live: true,
+    action: null,
+    actionDoneAt: null,
+    actionResult: "",
     ...extra,
   };
 }
@@ -150,8 +171,22 @@ function liveGap(id: string, kind: TransportGapKind, vehicle: string, title: str
  * Gaps the desk itself shows, recomputed on every read. Only active vehicles
  * and routes count, and only open assignments make a stop "used".
  */
-export function liveTransportGaps(state: Pick<TransportState, "vehicles" | "routes" | "assignments">): TransportGap[] {
+export function liveTransportGaps(
+  state: Pick<TransportState, "vehicles" | "routes" | "assignments"> & { fuelRefillLogs?: { vehicleId: string; filledAt: string }[] },
+  nowMs: number = Date.now(),
+): TransportGap[] {
   const out: TransportGap[] = [];
+  // Fuel bills: without them nobody can check km per kg against the trackers.
+  if (state.fuelRefillLogs) {
+    const last = state.fuelRefillLogs.map((f) => f.filledAt).filter(Boolean).sort().pop();
+    const days = last ? Math.floor((nowMs - Date.parse(last)) / 86_400_000) : null;
+    if (days == null || days >= 14) {
+      out.push(
+        liveGap("fuel-bills", "fleet_record", "", days == null ? "No fuel bills entered" : `No fuel bill entered for ${days} days`,
+          "Enter every fill with its odometer reading under Transport → Fuel, so fuel used can be checked against the km the trackers record."),
+      );
+    }
+  }
   for (const v of state.vehicles) {
     if (v.isActive === false) continue;
     if (!(Number(v.seatCapacity) > 0)) {

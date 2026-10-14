@@ -29,7 +29,8 @@ const WINDOW_DAYS = 28;
 
 export type StoredRunOrder = RunOrder & {
   id: string;
-  chosen: "gps" | "fair";
+  chosen: "gps" | "fair" | "custom";
+  customOrder: string[] | null;
   chosenBy: string;
   chosenAt: string | null;
   computedAt: string;
@@ -55,7 +56,9 @@ export async function readRunOrders(sb: SupabaseClient, tenantId: string): Promi
         legs: Number(x.legs ?? 0),
         returnMinutes: x.return_minutes == null ? null : Number(x.return_minutes),
         returnsToSchoolShare: Number(x.returns_share ?? 0),
-        chosen: x.chosen === "fair" ? "fair" : "gps",
+        startsAtSchoolShare: Number(x.starts_share ?? 0),
+        chosen: x.chosen === "fair" ? "fair" : x.chosen === "custom" ? "custom" : "gps",
+        customOrder: Array.isArray(x.custom_order) ? (x.custom_order as string[]) : null,
         chosenBy: String(x.chosen_by ?? ""),
         chosenAt: x.chosen_at ? String(x.chosen_at) : null,
         computedAt: String(x.computed_at ?? ""),
@@ -122,6 +125,7 @@ export async function runRunOrderTick(opts: { dryRun?: boolean; nowMs?: number }
         legs: o.legs,
         return_minutes: o.returnMinutes,
         returns_share: Math.round(o.returnsToSchoolShare * 100) / 100,
+        starts_share: Math.round(o.startsAtSchoolShare * 100) / 100,
         computed_at: now,
         updated_at: now,
       })),

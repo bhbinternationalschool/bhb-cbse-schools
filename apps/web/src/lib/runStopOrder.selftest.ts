@@ -66,9 +66,9 @@ const resequenced = sequenceByPickup([A, B, C, { id: "Z", sequence: 0 }], { stop
 assert.deepEqual(resequenced.map((s) => [s.id, s.sequence]), [["C", 1], ["A", 2], ["Z", 3], ["B", 4]]);
 
 // Fair drop: reversed drop (A picked first, dropped last) is suggested on a loop.
-const pickup: RunOrder = { routeId: "r", shiftId: "am", direction: "pickup", legs: 6, unseenStopIds: [], returnMinutes: null, returnsToSchoolShare: 1,
+const pickup: RunOrder = { routeId: "r", shiftId: "am", direction: "pickup", legs: 6, unseenStopIds: [], returnMinutes: null, returnsToSchoolShare: 1, startsAtSchoolShare: 1,
   stops: [{ stopId: "A", minute: 400, rideMinutes: 40, days: 6 }, { stopId: "B", minute: 410, rideMinutes: 30, days: 6 }, { stopId: "C", minute: 420, rideMinutes: 20, days: 6 }] };
-const drop: RunOrder = { routeId: "r", shiftId: "pm", direction: "drop", legs: 6, unseenStopIds: [], returnMinutes: 15, returnsToSchoolShare: 1,
+const drop: RunOrder = { routeId: "r", shiftId: "pm", direction: "drop", legs: 6, unseenStopIds: [], returnMinutes: 15, returnsToSchoolShare: 1, startsAtSchoolShare: 1,
   stops: [{ stopId: "C", minute: 820, rideMinutes: 10, days: 6 }, { stopId: "B", minute: 830, rideMinutes: 20, days: 6 }, { stopId: "A", minute: 845, rideMinutes: 35, days: 6 }] };
 const points = new Map([A, B, C].map((s) => [s.id, { lat: s.geoLat, lng: s.geoLng }]));
 const riders = new Map([["A", 3], ["B", 2], ["C", 4]]);
@@ -93,5 +93,9 @@ assert.deepEqual(fair.ids, ["A", "B", "C", "Z"]);
 assert.equal(fair.basis, "fair");
 assert.equal(fair.expectedMinute.size, 0, "no invented times for the fair order");
 assert.deepEqual(orderForRun({ routeStops }).ids, ["A", "B", "C", "Z"]);
+// Custom order from an audit suggestion; unknown ids ignored, missing stops appended.
+const custom = orderForRun({ routeStops, run: { stops: drop.stops, chosen: "custom", customOrder: ["B", "GONE", "A"] }, pickup });
+assert.deepEqual(custom.ids, ["B", "A", "C", "Z"]);
+assert.equal(custom.basis, "custom");
 
 console.log("ok");

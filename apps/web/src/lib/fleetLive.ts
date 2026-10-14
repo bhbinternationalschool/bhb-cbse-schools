@@ -120,6 +120,10 @@ export type FleetAlertSettings = {
   complianceDueDays: number;
   /** Minutes before the same alert for the same vehicle is sent again. */
   cooldownMinutes: Record<FleetAlertKind, number>;
+  /** Engine on and standing still this long → idling alert. */
+  idleMinutes: number;
+  /** No position for this long inside the school-run hours → tracker silent. */
+  silentMinutes: number;
 };
 
 export const DEFAULT_FLEET_ALERT_SETTINGS: FleetAlertSettings = {
@@ -131,10 +135,54 @@ export const DEFAULT_FLEET_ALERT_SETTINGS: FleetAlertSettings = {
   serviceDueDays: 7,
   serviceDueKm: 500,
   complianceDueDays: 15,
-  cooldownMinutes: { out_of_hours: 60, low_fuel: 12 * 60, fuel_drain: 60, service_due: 24 * 60, compliance_due: 24 * 60 },
+  cooldownMinutes: { out_of_hours: 60, low_fuel: 12 * 60, fuel_drain: 60, service_due: 24 * 60, compliance_due: 24 * 60, idling: 30, tracker_silent: 3 * 60 },
+  idleMinutes: 10,
+  silentMinutes: 30,
 };
 
-export type FleetAlertKind = "out_of_hours" | "low_fuel" | "fuel_drain" | "service_due" | "compliance_due";
+export type FleetAlertKind =
+  | "out_of_hours"
+  | "low_fuel"
+  | "fuel_drain"
+  | "service_due"
+  | "compliance_due"
+  | "idling"
+  | "tracker_silent";
+
+/**
+ * Alerts that go to phones only (driver + management app push), never
+ * WhatsApp: they can repeat several times a day, and a WhatsApp message per
+ * idle bus would be both noise and a Meta bill.
+ */
+export const PUSH_ONLY_ALERTS: ReadonlySet<FleetAlertKind> = new Set(["idling", "tracker_silent"]);
+
+export type IdleSpell = { vehicleId: string; minutes: number; lat: number; lng: number; atSchool: boolean };
+
+/**
+ * Engine on, not moving, for at least `minMinutes` up to now.
+ *
+ * Read backwards from the newest ping: every ping in the run must have the
+ * ignition on, speed ≤ 1 km/h and be within 60 m of the newest; the newest
+ * must be fresh (≤ 5 min old), or the "idling" is a tracker that went quiet.
+ * Ignition unknown (null) never counts as on.
+ */
+export function detectIdling(track: { recordedAt: string; lat: number; lng: number; speedKmh: number | null; ignitionOn: boolean | null }[], nowMs: number, minMinutes = 10): { minutes: number; lat: number; lng: number } | null {
+  const pts = [...track].sort((a, b) => Date.parse(a.recordedAt) - Date.parse(b.recordedAt));
+  const last = pts[pts.length - 1];
+  if (!last || nowMs - Date.parse(last.recordedAt) > 5 * 60_000) return null;
+  const idle = (p: (typeof pts)[number]) =>
+    p.ignitionOn === true &&
+    (p.speedKmh ?? 0) <= 1 &&
+    Math.hypot((p.lat - last.lat) * 110_540, (p.lng - last.lng) * 100_500) <= 60;
+  if (!idle(last)) return null;
+  let first = last;
+  for (let i = pts.length - 2; i >= 0; i--) {
+    if (!idle(pts[i]!)) break;
+    first = pts[i]!;
+  }
+  const minutes = (Date.parse(last.recordedAt) - Date.parse(first.recordedAt)) / 60_000;
+  return minutes >= minMinutes ? { minutes: Math.round(minutes), lat: last.lat, lng: last.lng } : null;
+}
 
 export type FleetAlert = {
   /** kind:vehicleId — the cooldown key. */
@@ -162,6 +210,8 @@ const ALERT_TITLES: Record<FleetAlertKind, string> = {
   fuel_drain: "Sudden fuel drop",
   service_due: "Service due",
   compliance_due: "Vehicle paper expiring",
+  idling: "Engine running, bus not moving",
+  tracker_silent: "Tracker not reporting",
 };
 
 function addDays(iso: string, days: number): string {
@@ -188,6 +238,8 @@ export function evaluateFleetAlerts(input: {
    * fuel signal there is; it is relayed rather than re-derived.
    */
   fuelDrains?: { vehicleRef: string; registrationNumber: string | null; at: string; detail: string; lat?: number | null; lng?: number | null }[];
+  /** Engine-on standing spells found in the last minutes of track (server: detectIdling). */
+  idleSpells?: IdleSpell[];
 }): FleetAlert[] {
   const s: FleetAlertSettings = { ...DEFAULT_FLEET_ALERT_SETTINGS, ...input.settings, cooldownMinutes: { ...DEFAULT_FLEET_ALERT_SETTINGS.cooldownMinutes, ...(input.settings?.cooldownMinutes ?? {}) } };
   const { hhmm, weekday, dateIso } = istClock(input.nowMs);
@@ -269,6 +321,37 @@ export function evaluateFleetAlerts(input: {
         at: fd.lat != null && fd.lng != null ? { lat: fd.lat, lng: fd.lng } : null,
       });
       break;
+    }
+
+    const idle = (input.idleSpells ?? []).find((x) => x.vehicleId === v.id);
+    if (idle && idle.minutes >= s.idleMinutes) {
+      push({
+        key: `idling:${v.id}`,
+        kind: "idling",
+        vehicleId: v.id,
+        vehicleLabel: label,
+        title: ALERT_TITLES.idling,
+        detail: `Engine on and standing still for at least ${idle.minutes} minutes${idle.atSchool ? " at school" : ""}. Switch it off — idling burns fuel for nothing.`,
+        at: { lat: idle.lat, lng: idle.lng },
+      });
+    }
+
+    // A tracker that reported recently but has gone quiet inside the school-run
+    // hours (06:30–15:30, when every ping is kept) is switched off or broken —
+    // the bus is on the road with children and nobody can see it.
+    if (pos && s.workingDays.includes(weekday) && hhmm >= "06:30" && hhmm <= "15:30") {
+      const ageMin = (input.nowMs - new Date(pos.recordedAt).getTime()) / 60_000;
+      if (ageMin >= s.silentMinutes && ageMin <= 3 * 24 * 60) {
+        push({
+          key: `tracker_silent:${v.id}`,
+          kind: "tracker_silent",
+          vehicleId: v.id,
+          vehicleLabel: label,
+          title: ALERT_TITLES.tracker_silent,
+          detail: `No position for ${Math.round(ageMin)} minutes during school-run hours. Check the tracker's power and wiring.`,
+          at: { lat: pos.lat, lng: pos.lng },
+        });
+      }
     }
 
     const expBy = addDays(dateIso, s.complianceDueDays);

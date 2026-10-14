@@ -613,6 +613,7 @@ jobs:
           npm run test:transport-gaps
           npm run test:gps-stop-discovery
           npm run test:run-stop-order
+          npm run test:transport-audit
           npm run test:defaulter-hold-policy
           npm run test:hold-resolve
           npm run test:live-bus-marker
