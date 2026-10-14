@@ -1,5 +1,6 @@
 "use client";
 
+import { STOP_ORIGIN_LABEL, stopOrigin } from "@/lib/transportStopOrigin";
 import { useEffect, useRef, useState } from "react";
 import type { PlacePrediction, ResolvedPlaceAddress } from "@/lib/mapsPlaces";
 import { fetchStopRoadDistanceKm } from "@/lib/transportPlanner";
@@ -541,6 +542,20 @@ function StopRow({
       </div>
 
       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-7 text-[10px]">
+        <span
+          title={
+            stopOrigin(row) === "gps"
+              ? "The bus really halts here — taken from its GPS"
+              : "Typed or picked by hand — the bus's GPS has not confirmed it"
+          }
+          className={`rounded-full px-2 py-0.5 font-semibold ${
+            stopOrigin(row) === "gps"
+              ? "bg-[color-mix(in_srgb,var(--success)_14%,transparent)] text-[var(--success)]"
+              : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
+          }`}
+        >
+          {STOP_ORIGIN_LABEL[stopOrigin(row)]}
+        </span>
         <span
           className={
             row.distanceSource === "google" || row.distanceSource === "free"

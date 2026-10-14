@@ -32,6 +32,7 @@ import { ClassTransportPanel } from "@/components/transport/ClassTransportPanel"
 import { LivePositionsPanel } from "@/components/transport/LivePositionsPanel";
 import { FleetEdgeStatusStrip } from "@/components/transport/FleetEdgeStatusStrip";
 import { StaffRiderPanel } from "@/components/transport/StaffRiderPanel";
+import { groupStopsByOrigin } from "@/lib/transportStopOrigin";
 import { StopLinkRepairPanel } from "@/components/transport/StopLinkRepairPanel";
 import { strictClassGroup } from "@/lib/transportShifts";
 import { TransportAmendDialog } from "@/components/transport/TransportAmendDialog";
@@ -1351,12 +1352,23 @@ function RidersPanel(props: RidersPanelProps) {
                 <option value="">
                   {selectedRoute ? "Select stop…" : "Pick route first"}
                 </option>
-                {selectedRoute?.stops.map((stop) => (
-                  <option key={stop.id} value={stop.id}>
-                    {stop.sequence}. {stop.name}
-                    {stop.distanceKm ? ` · ${stop.distanceKm} km` : ""}
-                  </option>
-                ))}
+                {selectedRoute
+                  ? groupStopsByOrigin(selectedRoute.stops).map((group) => {
+                      const options = group.stops.map((stop) => (
+                        <option key={stop.id} value={stop.id}>
+                          {stop.sequence}. {stop.name}
+                          {stop.distanceKm ? ` · ${stop.distanceKm} km` : ""}
+                        </option>
+                      ));
+                      return group.label ? (
+                        <optgroup key={group.origin} label={group.label}>
+                          {options}
+                        </optgroup>
+                      ) : (
+                        options
+                      );
+                    })
+                  : null}
               </select>
             </label>
             <label className="text-sm">

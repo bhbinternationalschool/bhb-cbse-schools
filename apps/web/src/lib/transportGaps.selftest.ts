@@ -11,6 +11,7 @@ import {
   sortGaps,
   type TransportGap,
 } from "./transportGaps";
+import { groupStopsByOrigin, stopOrigin } from "./transportStopOrigin";
 
 console.log("transportGaps.selftest.ts");
 
@@ -81,5 +82,24 @@ const mk = (id: string, kind: TransportGap["kind"], status: TransportGap["status
   ({ ...live[0], id, kind, status, live: false, title: id, vehicle: "X" });
 const sorted = sortGaps([mk("d", "driving", "open"), mk("f2", "fee_distance", "settled"), mk("f1", "fee_distance", "open")]);
 assert.deepEqual(sorted.map((g) => g.id), ["f1", "d", "f2"]);
+
+// Actual (GPS) vs manual stops: the note is the marker.
+assert.equal(stopOrigin({ geoAddress: "From GPS: Magic-1 stops here on 20 of 25 school days" }), "gps");
+assert.equal(stopOrigin({ geoAddress: "  From GPS: x" }), "gps");
+assert.equal(stopOrigin({ geoAddress: "CXH2+RX5, Ayar, Uttar Pradesh" }), "manual");
+assert.equal(stopOrigin({}), "manual");
+assert.equal(stopOrigin(null), "manual");
+const groups = groupStopsByOrigin([
+  { id: "m2", sequence: 3, geoAddress: "Ayar" },
+  { id: "g1", sequence: 2, geoAddress: "From GPS: a" },
+  { id: "m1", sequence: 1 },
+  { id: "g2", sequence: 4, geoAddress: "From GPS: b" },
+]);
+assert.deepEqual(groups.map((g) => [g.origin, g.stops.map((s) => s.id)]), [["gps", ["g1", "g2"]], ["manual", ["m1", "m2"]]]);
+// A route with no GPS stops keeps one unlabelled list — Rajesh Van looks as before.
+const plain = groupStopsByOrigin([{ id: "a", sequence: 2 }, { id: "b", sequence: 1 }]);
+assert.equal(plain.length, 1);
+assert.equal(plain[0].label, "");
+assert.deepEqual(plain[0].stops.map((s) => s.id), ["b", "a"]);
 
 console.log("ok");
