@@ -3,27 +3,46 @@
 import { useMemo, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import {
-  checkSheetRow,
   EDUCATION_LEVELS,
-  GROUP_KEYS,
   MOTHER_TONGUE_SUGGESTIONS,
   RELIGIONS,
   SHEET_GROUPS,
   type SheetGroup,
   type SheetValues,
 } from "@/lib/classDetailsSheet";
-import { BLOOD_GROUPS, normalizeBloodGroup, STUDENT_CATEGORIES } from "@/lib/sis";
+import {
+  draftFromRecord,
+  editEntry,
+  freshEntries,
+  reconcileEntries,
+  rowState,
+  saveRows,
+  type Draft,
+  type DraftEntry,
+  type SheetKey,
+  type SheetRecordRow,
+} from "@/lib/classSheetDraft";
+import { BLOOD_GROUPS, STUDENT_CATEGORIES } from "@/lib/sis";
 import { ageYears } from "@/lib/studentMeasurements";
 
-export type SheetRow = {
-  id: string;
-  revisionAt: string;
-  fields: Record<string, string>;
-  measure: { heightCm: string; weightKg: string; measuredOn: string };
-  sheet: { fatherQualification: string; motherQualification: string; isCwsn: boolean };
+export type SheetRow = SheetRecordRow;
+
+const KEY_LABEL: Record<SheetKey, string> = {
+  heightCm: "height",
+  weightKg: "weight",
+  bloodGroup: "blood group",
+  motherTongue: "mother tongue",
+  religion: "religion",
+  category: "category",
+  fatherQualification: "father's education",
+  motherQualification: "mother's education",
+  isCwsn: "CWSN",
 };
 
-type Draft = Required<SheetValues>;
+function shown(v: string | boolean): string {
+  if (typeof v === "boolean") return v ? "ticked" : "not ticked";
+  return v || "blank";
+}
 
 function istToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
@@ -32,21 +51,6 @@ function istToday(): string {
 function dmy(iso: string): string {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
-}
-
-function initial(r: SheetRow): Draft {
-  return {
-    heightCm: r.measure.heightCm,
-    weightKg: r.measure.weightKg,
-    // "B(+)" from the old import shows — and is kept — as "B+".
-    bloodGroup: normalizeBloodGroup(r.fields.bloodGroup || "") || r.fields.bloodGroup || "",
-    motherTongue: r.fields.motherTongue || "",
-    religion: r.fields.religion || "",
-    category: r.fields.category || "",
-    fatherQualification: r.sheet.fatherQualification,
-    motherQualification: r.sheet.motherQualification,
-    isCwsn: r.sheet.isCwsn,
-  };
 }
 
 /** Is this group filled in for the child? */
@@ -69,12 +73,26 @@ function withCurrent(list: readonly string[], cur: string): string[] {
  * mother tongue, religion, category, parents' education, CWSN. Pick the
  * columns, fill the list, one Save. The UDISE robot fills the portal from
  * these. Height and weight are measured, never estimated (director, 7 Oct 2026).
+ *
+ * The draft rules (lib/classSheetDraft): only changed keys go, each child
+ * with its own revisionAt; after any re-read a value the teacher did not
+ * touch follows the record, so a refused child is never re-sent with
+ * someone else's older values.
  */
 export function ClassSheet({ rows, onSaved }: { rows: SheetRow[]; onSaved: () => void }) {
   const today = istToday();
   const [groups, setGroups] = useState<SheetGroup[]>(["measure", "blood"]);
   const [date, setDate] = useState(today);
-  const [draft, setDraft] = useState<Record<string, Draft>>(() => Object.fromEntries(rows.map((r) => [r.id, initial(r)])));
+  const [entries, setEntries] = useState<Record<string, DraftEntry>>(() => freshEntries(rows));
+  // The list is re-read after a save or a refusal: fold the newer records
+  // into the draft during render (React's "adjust state on prop change").
+  const [seenRows, setSeenRows] = useState(rows);
+  const [justSent, setJustSent] = useState<Record<string, SheetValues>>({});
+  if (rows !== seenRows) {
+    setSeenRows(rows);
+    setEntries((x) => reconcileEntries(x, rows, justSent));
+    setJustSent({});
+  }
   const [result, setResult] = useState<Record<string, { ok: boolean; text: string }>>({});
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -82,30 +100,20 @@ export function ClassSheet({ rows, onSaved }: { rows: SheetRow[]; onSaved: () =>
   const toggle = (g: SheetGroup) =>
     setGroups((x) => (x.includes(g) ? (x.length > 1 ? x.filter((y) => y !== g) : x) : [...x, g]));
 
-  const state = useMemo(
-    () =>
-      rows.map((r) => {
-        const base = initial(r);
-        const d = draft[r.id] ?? base;
-        const send: Record<string, unknown> = {};
-        for (const g of groups) {
-          const keys = GROUP_KEYS[g];
-          if (!keys.some((k) => d[k] !== base[k])) continue;
-          // Height and weight travel together; other keys only when changed.
-          for (const k of keys) if (g === "measure" || d[k] !== base[k]) send[k] = d[k];
-        }
-        const dirty = Object.keys(send).length > 0;
-        const check = dirty ? checkSheetRow(send, base) : ({ ok: true, values: {} } as const);
-        return { r, d, send, dirty, check };
-      }),
-    [rows, draft, groups],
-  );
-  const toSave = state.filter((x) => x.dirty && x.check.ok);
+  const state = useMemo(() => rows.map((r) => rowState(r, entries[r.id], groups)), [rows, entries, groups]);
+  const toSave = useMemo(() => saveRows(state), [state]);
   const withErrors = state.filter((x) => x.dirty && !x.check.ok).length;
-  const complete = rows.filter((r) => groups.every((g) => filled(initial(r), g))).length;
+  const complete = rows.filter((r) => groups.every((g) => filled(draftFromRecord(r), g))).length;
 
-  const set = (id: string, patch: Partial<Draft>) =>
-    setDraft((x) => ({ ...x, [id]: { ...(x[id] as Draft), ...patch } }));
+  const set = (id: string, patch: Partial<Draft>) => {
+    setEntries((x) => (x[id] ? { ...x, [id]: editEntry(x[id], patch) } : x));
+    setResult((x) => {
+      if (!x[id]) return x;
+      const next = { ...x };
+      delete next[id];
+      return next;
+    });
+  };
 
   async function save() {
     setBusy(true);
@@ -116,12 +124,12 @@ export function ClassSheet({ rows, onSaved }: { rows: SheetRow[]; onSaved: () =>
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           measuredOn: date,
-          rows: toSave.map((x) => ({ id: x.r.id, revisionAt: x.r.revisionAt, values: x.send })),
+          rows: toSave,
         }),
       });
       const body = (await res.json().catch(() => null)) as {
         ok?: boolean;
-        data?: { saved: number; results: { id: string; ok: boolean; error?: string }[] };
+        data?: { saved: number; results: { id: string; ok: boolean; error?: string; conflict?: boolean }[] };
         error?: { message?: string } | string;
       } | null;
       if (!res.ok || !body?.ok || !body.data) {
@@ -130,8 +138,21 @@ export function ClassSheet({ rows, onSaved }: { rows: SheetRow[]; onSaved: () =>
         return;
       }
       const next: Record<string, { ok: boolean; text: string }> = {};
-      for (const x of body.data.results) next[x.id] = { ok: x.ok, text: x.ok ? "Saved" : x.error || "Not saved" };
+      const sent: Record<string, SheetValues> = {};
+      for (const x of body.data.results) {
+        next[x.id] = {
+          ok: x.ok,
+          text: x.ok
+            ? "Saved"
+            : x.conflict
+              ? "Someone else saved this child just now — their newer values are shown; check yours and save again"
+              : x.error || "Not saved",
+        };
+        const row = toSave.find((y) => y.id === x.id);
+        if (x.ok && row) sent[x.id] = row.values;
+      }
       setResult(next);
+      setJustSent(sent);
       const failed = body.data.results.length - body.data.saved;
       setMsg({
         ok: failed === 0,
@@ -139,7 +160,9 @@ export function ClassSheet({ rows, onSaved }: { rows: SheetRow[]; onSaved: () =>
           ? `Saved ${body.data.saved}; ${failed} not saved — see the red notes`
           : `Saved ${body.data.saved} child${body.data.saved === 1 ? "" : "ren"}`,
       });
-      if (body.data.saved) onSaved();
+      // Re-read after a save or a refusal, so the next Save carries each
+      // child's newer revisionAt and the newer values of untouched boxes.
+      if (body.data.saved || body.data.results.some((x) => x.conflict)) onSaved();
     } catch {
       setMsg({ ok: false, text: "Could not reach the school server — nothing lost, press Save again" });
     } finally {
@@ -195,7 +218,7 @@ export function ClassSheet({ rows, onSaved }: { rows: SheetRow[]; onSaved: () =>
       </datalist>
 
       <ul className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--card)]">
-        {state.map(({ r, d, dirty, check }) => {
+        {state.map(({ r, d, dirty, check, conflicts }) => {
           const age = ageYears(r.fields.dob || "", today);
           const res = result[r.id];
           const name = r.fields.fullName;
@@ -287,6 +310,15 @@ export function ClassSheet({ rows, onSaved }: { rows: SheetRow[]; onSaved: () =>
                   </label>
                 ) : null}
               </div>
+              {dirty && Object.keys(conflicts).length ? (
+                <p className="mt-1 text-[11px] text-[var(--warning)]">
+                  Changed by someone else meanwhile —{" "}
+                  {(Object.entries(conflicts) as [SheetKey, string | boolean][])
+                    .map(([k, v]) => `${KEY_LABEL[k]} is now ${shown(v)}`)
+                    .join("; ")}
+                  . Your value is kept; Save replaces theirs.
+                </p>
+              ) : null}
               {dirty && !check.ok ? (
                 <p className="mt-1 text-[11px] text-[var(--danger)]">{check.error}</p>
               ) : res && !dirty ? (
