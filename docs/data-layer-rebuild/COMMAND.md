@@ -542,7 +542,7 @@ over `[collection]`): `masters` (full-rights or the teaching subset by permissio
 editVia('editor')` passes (the old Masters editor's `masters_write_slices` already bumps
 `masters_desk_sync_meta`); the teacher login's `useMasters()` returns the teaching subset.
 
-*(Built 14 Oct 2026, PR #PRNUM.)* **What exists.** `@tanstack/react-query` 5.104.0 (exact pin, published
+*(Built 14 Oct 2026, PR #645.)* **What exists.** `@tanstack/react-query` 5.104.0 (exact pin, published
 26 Sep). `lib/data/client/hooks.tsx`: `ErpQueryProvider` (one client per tab, mounted in `AppShell`
 around the signed-in shell), `useErpQuery(key, path, {desk, parse})` (reads through `readView`,
 added to `lib/data/client/query.ts` beside `readPage`/`readAll`, through `erpFetch`; `readPage` is
