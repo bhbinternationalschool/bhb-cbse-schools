@@ -336,8 +336,8 @@ returns boolean language sql immutable set search_path = public as $$
     ('transport_desk_slices','feePolicy'), ('timetable_desk_slices','config'))
 $$;
 
--- Bump <desk>_desk_sync_meta: updated_at (strictly later), last_updated_at and
--- the desk's count columns, computed from the slices as the TypeScript
+-- Bump <desk>_desk_sync_meta: updated_at (strictly later), last_updated_at,
+-- slice_count and the desk's count columns, computed from the slices as the TypeScript
 -- writers compute them (mastersNormalized/timetableNormalized/
 -- transportNormalized/trustNormalized/deskSliceNormalized .server.ts).
 create or replace function public._desk_slice_meta_bump(p_tenant uuid, p_table text, p_now timestamptz)
@@ -349,8 +349,19 @@ declare
   v_vals int[] := array[]::int[];
   v_sql text;
   v_out timestamptz;
+  v_all int;
+  v_nonempty int;
   i int;
 begin
+  -- slice_count as the TypeScript writers keep it (checked against
+  -- production, 14 Oct 2026): Masters and Trust count the slice rows that
+  -- are not an empty list (mastersNormalized: rows that are an object or a
+  -- non-empty list; trustNormalized: keys whose list is non-empty);
+  -- timetable, transport and the desk-slice modules count every slice row.
+  execute format(
+    'select count(*)::int, (count(*) filter (where not (jsonb_typeof(payload) = ''array'' and jsonb_array_length(payload) = 0)))::int '
+    'from public.%I where tenant_id = $1', p_table) into v_all, v_nonempty using p_tenant;
+
   execute format(
     'select coalesce(jsonb_object_agg(slice_key, case when jsonb_typeof(payload) = ''array'' then jsonb_array_length(payload) '
     'when payload is null or payload = ''null''::jsonb or payload = ''""''::jsonb then 0 else 1 end), ''{}''::jsonb) '
@@ -375,6 +386,9 @@ begin
     v_cols := array['row_count'];
     v_vals := array[(select coalesce(sum(value::int),0)::int from jsonb_each_text(v_len))];
   end if;
+
+  v_cols := v_cols || 'slice_count'::text;
+  v_vals := v_vals || case when p_table in ('masters_desk_slices','trust_desk_slices') then v_nonempty else v_all end;
 
   v_sql := format('insert into public.%I as m (tenant_id, updated_at, last_updated_at', v_meta);
   for i in 1 .. array_length(v_cols, 1) loop v_sql := v_sql || format(', %I', v_cols[i]); end loop;

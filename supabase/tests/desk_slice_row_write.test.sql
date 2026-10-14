@@ -91,6 +91,8 @@ begin
   select updated_at into m2 from public.masters_desk_sync_meta where tenant_id = t;
   perform pg_temp.check(m2 > m1 and (select subject_count = 2 and class_count = 1 from public.masters_desk_sync_meta where tenant_id = t),
     'masters_desk_sync_meta bumped with its counts');
+  perform pg_temp.check((select slice_count from public.masters_desk_sync_meta where tenant_id = t) = 4,
+    'masters slice_count after an update = the 4 slice rows that are not an empty list');
   perform pg_temp.check((public.erp_versions(t)->'masters'->>'updated_at')::timestamptz > v1, 'erp_versions(masters) moved');
   perform pg_temp.check((select name_en from public.masters_desk_subjects where tenant_id=t and id='s_eng') = 'English Language',
     'masters row tables synced in the same call');
@@ -152,6 +154,13 @@ begin
   perform pg_temp.check(r->>'status' = 'applied'
     and (select jsonb_array_length(payload) from public.masters_desk_slices where tenant_id=t and slice_key='holidays') = 1,
     'null base on an absent slice creates it with one element');
+  perform pg_temp.check((select slice_count from public.masters_desk_sync_meta where tenant_id = t) = 5,
+    'masters slice_count counts the new slice row (5)');
+  -- An empty list is not counted for Masters (mastersNormalized's rule).
+  insert into public.masters_desk_slices (tenant_id, slice_key, payload) values (t, 'seniorStreams', '[]');
+  r := public.desk_slice_row_write(t, 'masters_desk_slices', 'holidays', 'upsert', 'h2', '{"name":"Holi"}', r->>'revision');
+  perform pg_temp.check((select slice_count from public.masters_desk_sync_meta where tenant_id = t) = 5,
+    'masters slice_count leaves out an empty list');
 
   -- ── _rev desks (staff_hr): base = the element's _rev ────────────────────
   insert into public.staff_hr_desk_slices (tenant_id, slice_key, payload) values
@@ -166,6 +175,8 @@ begin
     'rev desk: current _rev → applied, _rev + 1 (a client _rev is ignored)');
   perform pg_temp.check((select (row_count) from public.staff_hr_desk_sync_meta where tenant_id = t) = 3,
     'staff_hr_desk_sync_meta row_count = every element of every list');
+  perform pg_temp.check((select slice_count from public.staff_hr_desk_sync_meta where tenant_id = t) = 2,
+    'staff_hr slice_count on the first-ever sync_meta row = its 2 slice rows');
   r := public.desk_slice_row_write(t, 'staff_hr_desk_slices', 'leaveRequests', 'upsert', 'lr2', '{"status":"rejected"}', '0');
   perform pg_temp.check(r->>'status' = 'applied' and (r->>'rev')::int = 1, 'an element with no _rev is at 0; changed → 1');
   r := public.desk_slice_row_write(t, 'staff_hr_desk_slices', 'leaveRequests', 'upsert', 'lr3', '{"status":"pending"}', null);
@@ -180,6 +191,12 @@ begin
   r := public.desk_slice_row_write(t, 'staff_hr_desk_slices', 'leaveTypes', 'upsert', 'CL', '{"name":"Casual leave"}', '0', 'code');
   perform pg_temp.check(r->>'status' = 'applied' and r->'element'->>'code' = 'CL' and not (r->'element' ? 'id'),
     'a list keyed by code is written by code');
+  -- A desk whose slice row did not exist yet: the first write creates it and
+  -- slice_count counts it, on an existing sync_meta row (update branch).
+  r := public.desk_slice_row_write(t, 'staff_hr_desk_slices', 'appraisals', 'upsert', 'ap1', '{"staffId":"s1"}', null);
+  perform pg_temp.check(r->>'status' = 'applied'
+    and (select slice_count from public.staff_hr_desk_sync_meta where tenant_id = t) = 3,
+    'staff_hr slice_count after a first-ever slice row = 3');
 
   -- ── Object slices ──────────────────────────────────────────────────────
   select updated_at::text into s1 from public.masters_desk_slices where tenant_id = t and slice_key = 'schoolProfile';
@@ -204,8 +221,14 @@ begin
   perform pg_temp.check(r->>'status' = 'unchanged', 'object: identical value is unchanged');
   r := public.desk_slice_object_write(t, 'module_registry_desk_slices', 'enabled', '{"library":true}', null);
   perform pg_temp.check(r->>'status' = 'applied'
-    and (select row_count from public.module_registry_desk_sync_meta where tenant_id=t) = 1,
-    'object: a desk-slice module''s first object slice is created with a null base');
+    and (select row_count from public.module_registry_desk_sync_meta where tenant_id=t) = 1
+    and (select slice_count from public.module_registry_desk_sync_meta where tenant_id=t) = 1,
+    'object: a desk-slice module''s first object slice is created with a null base (insert branch: slice_count 1)');
+  -- Trust: only non-empty lists count (trustNormalized's rule).
+  insert into public.trust_desk_slices (tenant_id, slice_key, payload) values (t, 'rateCard', '[]');
+  r := public.desk_slice_row_write(t, 'trust_desk_slices', 'projects', 'upsert', 'p1', '{"name":"Hall"}', null);
+  perform pg_temp.check((select slice_count = 1 and project_count = 1 from public.trust_desk_sync_meta where tenant_id=t),
+    'trust slice_count counts non-empty lists only (insert branch, first-ever slice row)');
 end
 $test$;
 

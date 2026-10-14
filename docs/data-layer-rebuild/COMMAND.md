@@ -604,7 +604,9 @@ school is refused (42501) instead of being updated.
   key (`p_key` = `code` for `staff_hr.leaveTypes`); an element without a key, a row whose key
   disagrees, an object slice, a staff-owned Masters list (`staff/departments/designations`) or the
   `students` projection is refused; new slice `updated_at` (strictly later); `<desk>_desk_sync_meta`
-  bumped with the counts the TypeScript writers compute; for masters `masters_sync_rows_from_slices`
+  bumped with the counts the TypeScript writers compute, `slice_count` included (Masters and
+  Trust: slice rows that are not an empty list; the others: every slice row — matched against
+  production's stored values, 14 Oct); for masters `masters_sync_rows_from_slices`
   in the same transaction (a row the tables refuse rolls the slice back). A `classSubjects`
   element without `isOptional` is written with `false` (non-boolean refused) — and the old path's
   `pushMastersSlicesToDb` / `pushMastersDeskToDb` apply the same default
@@ -646,7 +648,7 @@ school is refused (42501) instead of being updated.
 **Proof.** `supabase/tests/desk_write_guarded.test.sql` (37 checks, rewritten for v3; it fails
 on origin/main's v2 at "masters_desk_* not writable", and with the allowlist checks removed at
 "an op without an id is refused", then "the insert bumped sis_sync_meta", then "null base on an
-existing row → unversioned") and `desk_slice_row_write.test.sql` (45 checks; the functions do not
+existing row → unversioned") and `desk_slice_row_write.test.sql` (51 checks — `slice_count` checks fail on the first version of `_desk_slice_meta_bump`, which never set it; the functions do not
 exist on origin/main), both in CI. `e2e/write-kernel.acceptance.ts` (24 checks, run by
 `e2e-stack.sh check`; on origin/main's app a null-base write **overwrote** the student's notes
 and the run stopped at check 3). Before/after on the class teacher's
