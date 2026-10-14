@@ -15,6 +15,13 @@ import type { MastersState } from "@/lib/masters";
 import { DEFAULT_AY, loadMasters } from "@/lib/masters";
 import { isVisitingStaff } from "@/lib/visitingPay";
 import {
+  isOnPayroll,
+  mergeLeftOut,
+  notOnPayrollLabel,
+  partitionDueStaff,
+  type PayrollLeftOutEntry,
+} from "@/lib/payrollNotOnPayroll";
+import {
   findStaffRegister,
   attendanceExemptStaffIds,
   loadStaffAttendance,
@@ -438,9 +445,12 @@ export function buildPayrollDraft(opts: BuildPayrollOpts): PayrollRun {
     // pay), never from payroll — no salary, PF, ESIC, payslip or bank file.
     if (isVisitingStaff(s)) return false;
     if (opts.staffIds?.length && !opts.staffIds.includes(s.id)) return false;
+    const link = salary.staffLinks.find((l) => l.staffId === s.id);
+    // Marked "not on payroll" in Masters → Salary setup: no line at all
+    // (processPayrollDraft lists them as left out, with the reason).
+    if (!isOnPayroll(link)) return false;
     // Joined after the month: no salary for it (Sanjay Pratap, joined
     // 1 Aug 2026, was in the July draft).
-    const link = salary.staffLinks.find((l) => l.staffId === s.id);
     const start = payrollEmploymentStart(opts.month, s.joiningDate, link?.effectiveFrom);
     if (start.excluded) {
       // Said in the result, never silent: joining dates were repaired for a
@@ -1377,6 +1387,24 @@ export function previewDraftSetupSync(
     const link = salary.staffLinks.find((l) => l.staffId === line.staffId);
     const noSetup = statutoryCoverFor(link).noSetup;
     const f = byId.get(line.staffId);
+    if (!f && staff && !isOnPayroll(link)) {
+      // Marked not on payroll since this draft was built: never rebuilt —
+      // offered for removal, with the reason.
+      return {
+        staffId: line.staffId,
+        fullName: line.fullName,
+        empCode: line.empCode,
+        action: "remove" as const,
+        reasons: [`${notOnPayrollLabel(link)} (Masters → Salary setup)`],
+        noSetup: false,
+        notOnPayroll: true,
+        before: figuresOf(line),
+        after: null,
+        kept: [],
+        reset: [],
+        headChanges: [],
+      };
+    }
     if (!f) {
       const employed = staff ? payrollEmploymentStart(run.month, staff.joiningDate, link?.effectiveFrom) : null;
       const excludedReason = !staff
@@ -1443,7 +1471,7 @@ export function applyDraftSetupSync(
   run: PayrollRun;
   rebuilt: number;
   removed: number;
-  /** Who was removed and why (joining date) — said in the result. */
+  /** Who was removed and why (joining date, not on payroll) — said in the result. */
   removedWho: string[];
 } | { ok: false; error: string } {
   const state = loadPayroll();
@@ -1518,12 +1546,35 @@ export function processPayrollDraft(opts: {
       run: PayrollRun;
       merged: boolean;
       skipped: string[];
-      /** Left out: joined after the month ("Name (joined YYYY-MM-DD)"). */
-      excluded: string[];
+      /**
+       * Who was left out, and why — one list: marked not on payroll in
+       * Masters → Salary setup, or joined after the month.
+       */
+      leftOut: PayrollLeftOutEntry[];
     }
   | { ok: false; error: string } {
   if (opts.mode === "individual" && !opts.staffIds?.length) {
     return { ok: false, error: "Select at least one staff member" };
+  }
+
+  // Not on payroll (Masters → Salary setup): never built, in either mode —
+  // and said, so nobody wonders where they went.
+  const salaryLinks = loadSalarySetup().staffLinks;
+  const { leftOut } = partitionDueStaff(
+    (opts.masters.staff ?? []).filter(
+      (s) =>
+        s.status === "active" &&
+        !isVisitingStaff(s) &&
+        (opts.mode === "bulk" || opts.staffIds!.includes(s.id)),
+    ),
+    salaryLinks,
+  );
+  const notOnPayroll = new Set(leftOut.map((x) => x.staffId));
+  if (opts.mode === "individual" && opts.staffIds!.every((id) => notOnPayroll.has(id))) {
+    return {
+      ok: false,
+      error: `Nothing was created — ${namesList(leftOut.map((x) => x.fullName))} ${leftOut.length === 1 ? "is" : "are"} marked not on payroll in Masters → Salary setup.`,
+    };
   }
 
   // Staff already paid (or approved/posted) for this month are left out —
@@ -1536,7 +1587,7 @@ export function processPayrollDraft(opts: {
       const name = committed.get(id);
       if (name) skipped.push(name);
     }
-    staffIds = staffIds.filter((id) => !committed.has(id));
+    staffIds = staffIds.filter((id) => !committed.has(id) && !notOnPayroll.has(id));
     if (staffIds.length === 0) {
       return {
         ok: false,
@@ -1545,7 +1596,7 @@ export function processPayrollDraft(opts: {
     }
   } else if (opts.mode === "bulk" && committed.size > 0) {
     const due = (opts.masters.staff ?? [])
-      .filter((s) => s.status === "active" && !committed.has(s.id))
+      .filter((s) => s.status === "active" && !committed.has(s.id) && !notOnPayroll.has(s.id))
       .map((s) => s.id);
     skipped.push(...committed.values());
     if (due.length === 0) {
@@ -1560,6 +1611,7 @@ export function processPayrollDraft(opts: {
   // Joined after the month: said in the result (fix the date in Masters if wrong).
   const excludedOut: { staffId: string; fullName: string; joiningDate: string }[] = [];
   const excludedNames = () => [...new Set(excludedOut.map((e) => `${e.fullName} (joined ${e.joiningDate})`))];
+  const allLeftOut = () => mergeLeftOut(leftOut, excludedOut, opts.masters.staff ?? []);
   const state = loadPayroll();
   const open = state.runs.find(
     (r) =>
@@ -1613,7 +1665,7 @@ export function processPayrollDraft(opts: {
         academicYearCode: next.academicYearCode,
         detail: `Bulk replace · ${next.lines.length} staff`,
       });
-      return { ok: true, run: next, merged: false, skipped, excluded: excludedNames() };
+      return { ok: true, run: next, merged: false, skipped, leftOut: allLeftOut() };
     }
     upsertPayrollRun(built);
     appendPayrollAudit({
@@ -1624,7 +1676,7 @@ export function processPayrollDraft(opts: {
       academicYearCode: built.academicYearCode,
       detail: `Bulk draft · ${built.lines.length} staff`,
     });
-    return { ok: true, run: built, merged: false, skipped, excluded: excludedNames() };
+    return { ok: true, run: built, merged: false, skipped, leftOut: allLeftOut() };
   }
 
   const built = buildPayrollDraft({
@@ -1667,7 +1719,7 @@ export function processPayrollDraft(opts: {
       academicYearCode: next.academicYearCode,
       detail: `Merged ${staffIds!.length} staff · now ${next.lines.length} lines`,
     });
-    return { ok: true, run: next, merged: true, skipped, excluded: excludedNames() };
+    return { ok: true, run: next, merged: true, skipped, leftOut: allLeftOut() };
   }
 
   upsertPayrollRun(built);
@@ -1679,7 +1731,7 @@ export function processPayrollDraft(opts: {
     academicYearCode: built.academicYearCode,
     detail: `Individual draft · ${built.lines.map((l) => l.empCode).join(", ")}`,
   });
-  return { ok: true, run: built, merged: false, skipped, excluded: excludedNames() };
+  return { ok: true, run: built, merged: false, skipped, leftOut: allLeftOut() };
 }
 
 /** The payment fields of a line — all a posted run's line may change. */

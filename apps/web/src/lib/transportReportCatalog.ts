@@ -11,7 +11,7 @@ import { formatInr, loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import {
-  certTypeLabel,
+  completedJobsPaise,
   computeTransportComplianceAlerts,
   computeTransportPeriodDues,
   getRoute,
@@ -21,7 +21,6 @@ import {
   listActiveRoutes,
   listOpenPayables,
   loadTransport,
-  vehicleTcoPaise,
   vehicleStatusLabel,
   dealerTypeLabel,
   type TransportState,
@@ -33,6 +32,18 @@ import {
   type RegisterTrip,
 } from "@/lib/transportBoardingLog";
 import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { currentDocsFor, VEHICLE_DOC_LABELS } from "@/lib/transportFinance";
+import {
+  complianceCalendarRows,
+  emiRegisterRows,
+  fuelByVehicle,
+  tcoPartText,
+  tcoTotalText,
+  vehicleTco,
+  type FuelVehicleRow,
+  type TcoPart,
+  type VehicleCosts,
+} from "@/lib/transportVehicleCosts";
 import { reportDesksFor } from "@/lib/reportDesks";
 
 export type TransportReportFormat = "excel" | "pdf";
@@ -159,7 +170,23 @@ export type TransportReportFilters = {
    * printing a sheet of blanks that reads as "nobody was marked".
    */
   registerMarks?: RegisterDayMark[] | null;
+  /**
+   * Fuel register, vehicle papers and ledger loans (GET
+   * /api/transport/vehicle-costs). The reports in
+   * TRANSPORT_REPORTS_NEEDING_COSTS refuse without it.
+   */
+  costs?: VehicleCosts | null;
 };
+
+/** Reports read from the fuel register / vehicle papers / ledger loans, not the desk. */
+export const TRANSPORT_REPORTS_NEEDING_COSTS: ReadonlySet<TransportReportId> = new Set<TransportReportId>([
+  "fuel_by_vehicle",
+  "cost_per_km",
+  "compliance_calendar",
+  "emi_register",
+  "insurance_cert_schedule",
+  "tco_by_vehicle",
+]);
 
 /** Today in IST (toISOString() is UTC: before 05:30 it named yesterday). */
 function todayYmd() {
@@ -221,10 +248,6 @@ function routeLabel(routeId: string, transport: TransportState): string {
 function vehicleLabel(vehicleId: string, transport: TransportState): string {
   const v = getVehicle(vehicleId, transport);
   return v ? `${v.registrationNo} · ${v.name}` : vehicleId;
-}
-
-function dealerName(dealerId: string, transport: TransportState): string {
-  return transport.dealers.find((d) => d.id === dealerId)?.name || dealerId;
 }
 
 function filterNoteParts(
@@ -319,6 +342,11 @@ export function runTransportReport(
   // Not from a copy this page has not loaded (lib/reportDataGuard).
   const notLoaded = refuseReportBeforeLoad(reportDesksFor("transport", id));
   if (notLoaded) return { ok: false, error: notLoaded };
+  if (TRANSPORT_REPORTS_NEEDING_COSTS.has(id) && !filters.costs) {
+    return { ok: false, error: "Fuel, vehicle papers and loans could not be read, so this report was not made. Try again." };
+  }
+  // Only the reports above read this; the fallback says "unknown", never ₹0.
+  const costs: VehicleCosts = filters.costs ?? { fills: null, docs: null, loans: { known: false, reason: "not loaded" } };
   const transport = filters.transport ?? loadTransport();
   const masters = filters.masters ?? loadMasters();
   const sis = filters.sis ?? loadSis();
@@ -593,119 +621,84 @@ export function runTransportReport(
         : r;
     }
 
-    case "fuel_by_vehicle": {
-      let logs = transport.fuelRefillLogs;
-      if (filters.vehicleId) {
-        logs = logs.filter((l) => l.vehicleId === filters.vehicleId);
-      }
-      const byVehicle = new Map<
-        string,
-        {
-          refills: number;
-          qty: number;
-          amountPaise: number;
-          km: number;
-          mileageSum: number;
-          mileageN: number;
-          anomalies: number;
-        }
-      >();
-      for (const log of logs) {
-        const cur = byVehicle.get(log.vehicleId) ?? {
-          refills: 0,
-          qty: 0,
-          amountPaise: 0,
-          km: 0,
-          mileageSum: 0,
-          mileageN: 0,
-          anomalies: 0,
-        };
-        cur.refills += 1;
-        cur.qty += log.qty;
-        cur.amountPaise += log.amountPaise;
-        cur.km += log.kmSinceLast;
-        if (log.mileage > 0) {
-          cur.mileageSum += log.mileage;
-          cur.mileageN += 1;
-        }
-        if (log.anomaly) cur.anomalies += 1;
-        byVehicle.set(log.vehicleId, cur);
-      }
-      const rows = [...byVehicle.entries()]
-        .map(([vehicleId, agg]) => {
-          const v = getVehicle(vehicleId, transport);
-          const avgMileage =
-            agg.mileageN > 0 ? (agg.mileageSum / agg.mileageN).toFixed(1) : "";
-          return {
-            vehicle: v?.name || vehicleId,
-            registration: v?.registrationNo || "",
-            fuelType: v?.fuelType || "",
-            fuelUnit: v?.fuelUnit || "",
-            refills: agg.refills,
-            totalQty: agg.qty.toFixed(1),
-            totalAmount: formatInr(agg.amountPaise),
-            kmDriven: agg.km.toFixed(0),
-            avgMileage,
-            anomalies: agg.anomalies,
-          };
-        })
-        .sort((a, b) => String(a.registration).localeCompare(String(b.registration)));
-      const r = exportFilterReport(
-        {
-          title: "Fuel by vehicle",
-          subtitle,
-          filterNote: note,
-          columns: [
-            { key: "registration", header: "Reg no", width: 0.9 },
-            { key: "vehicle", header: "Vehicle", width: 1 },
-            { key: "fuelType", header: "Fuel", width: 0.7 },
-            { key: "fuelUnit", header: "Unit", width: 0.6 },
-            { key: "refills", header: "Refills", width: 0.7, align: "right" },
-            { key: "totalQty", header: "Qty", width: 0.7, align: "right" },
-            { key: "totalAmount", header: "Amount", width: 0.9 },
-            { key: "kmDriven", header: "Km", width: 0.7, align: "right" },
-            { key: "avgMileage", header: "Avg mileage", width: 0.8 },
-            { key: "anomalies", header: "Anomalies", width: 0.7, align: "right" },
-          ],
-          rows,
-          fileBaseName: "transport_fuel_by_vehicle",
-        },
-        filters.format,
-      );
-      return r.ok
-        ? { ok: true, message: `Fuel summary: ${rows.length} vehicle(s)` }
-        : r;
-    }
-
+    case "fuel_by_vehicle":
     case "cost_per_km": {
-      let logs = transport.fuelRefillLogs;
-      if (filters.vehicleId) {
-        logs = logs.filter((l) => l.vehicleId === filters.vehicleId);
+      // The fuel register (transport_fuel_fills), not the desk's retired
+      // fuelRefillLogs. Fills up to the report date; voided ones excluded.
+      if (!costs.fills) {
+        return { ok: false, error: `The fuel register could not be read${costs.fillsError ? ` (${costs.fillsError})` : ""} — no report was made.` };
       }
-      const byVehicle = new Map<
-        string,
-        { amountPaise: number; km: number }
-      >();
-      for (const log of logs) {
-        const km = log.kmSinceLast > 0 ? log.kmSinceLast : 0;
-        const cur = byVehicle.get(log.vehicleId) ?? { amountPaise: 0, km: 0 };
-        cur.amountPaise += log.amountPaise;
-        cur.km += km;
-        byVehicle.set(log.vehicleId, cur);
+      let vehicles = transport.vehicles;
+      if (filters.vehicleId) vehicles = vehicles.filter((v) => v.id === filters.vehicleId);
+      const fills = costs.fills.filter((f) => f.fillDate <= date);
+      const ids = new Set(vehicles.map((v) => v.id));
+      const withFills = new Set(fills.map((f) => f.vehicleId));
+      // A fill whose vehicle is no longer on the desk still counts (and says so).
+      const vehicleIds = [
+        ...vehicles.filter((v) => withFills.has(v.id)).map((v) => v.id),
+        ...(filters.vehicleId ? [] : [...withFills].filter((id) => !ids.has(id))),
+      ];
+      const per = fuelByVehicle(fills, vehicleIds);
+      const unitText = (r: FuelVehicleRow) =>
+        [r.kg > 0 ? `${r.kg} kg` : "", r.litres > 0 ? `${r.litres} L` : ""].filter(Boolean).join(" + ") || "—";
+      const kmText = (r: FuelVehicleRow) => (r.km == null ? "unknown" : `${r.km}`);
+      if (id === "fuel_by_vehicle") {
+        const rows = per
+          .map((r) => {
+            const v = getVehicle(r.vehicleId, transport);
+            return {
+              registration: v?.registrationNo || "",
+              vehicle: v?.name || `${r.vehicleId} (not in the fleet)`,
+              fuelType: v?.fuelType || "",
+              fills: r.fills,
+              quantity: unitText(r),
+              totalAmount: formatInr(r.amountPaise),
+              kmDriven: kmText(r),
+              kmFrom: r.km == null ? "no odometer pairs" : `${r.fillsWithKm} of ${r.fills} fills`,
+              avgMileage: r.kmPerUnit == null ? "unknown" : `${r.kmPerUnit} km/${r.kmPerUnitUnit === "kg" ? "kg" : "L"}`,
+              inAccounts: r.inAccounts,
+              notInAccounts: r.notInAccounts,
+              awaitingOffice: r.awaitingOffice,
+              voided: r.voided,
+            };
+          })
+          .sort((a, b) => String(a.registration).localeCompare(String(b.registration)));
+        const r = exportFilterReport(
+          {
+            title: "Fuel by vehicle",
+            subtitle: `${subtitle} · fuel register`,
+            filterNote: describeFilters([note, `Fills up to ${date}`]),
+            columns: [
+              { key: "registration", header: "Reg no", width: 0.9 },
+              { key: "vehicle", header: "Vehicle", width: 1 },
+              { key: "fuelType", header: "Fuel", width: 0.6 },
+              { key: "fills", header: "Fills", width: 0.5, align: "right" },
+              { key: "quantity", header: "Qty", width: 0.8 },
+              { key: "totalAmount", header: "Amount", width: 0.9 },
+              { key: "kmDriven", header: "Km", width: 0.6, align: "right" },
+              { key: "kmFrom", header: "Km from", width: 0.9 },
+              { key: "avgMileage", header: "Mileage", width: 0.8 },
+              { key: "inAccounts", header: "In accounts", width: 0.6, align: "right" },
+              { key: "notInAccounts", header: "Not in accounts", width: 0.7, align: "right" },
+              { key: "awaitingOffice", header: "Awaiting office", width: 0.7, align: "right" },
+              { key: "voided", header: "Voided", width: 0.5, align: "right" },
+            ],
+            rows,
+            fileBaseName: "transport_fuel_by_vehicle",
+          },
+          filters.format,
+        );
+        return r.ok ? { ok: true, message: `Fuel summary: ${rows.length} vehicle(s)` } : r;
       }
-      const rows = [...byVehicle.entries()]
-        .map(([vehicleId, agg]) => {
-          const v = getVehicle(vehicleId, transport);
-          const costPerKm =
-            agg.km > 0
-              ? formatInr(Math.round(agg.amountPaise / agg.km))
-              : "—";
+      const rows = per
+        .map((r) => {
+          const v = getVehicle(r.vehicleId, transport);
           return {
             registration: v?.registrationNo || "",
-            vehicle: v?.name || vehicleId,
-            totalKm: agg.km.toFixed(0),
-            fuelCost: formatInr(agg.amountPaise),
-            costPerKm,
+            vehicle: v?.name || `${r.vehicleId} (not in the fleet)`,
+            totalKm: kmText(r),
+            fuelCost: formatInr(r.amountPaise),
+            costPerKm: r.rupeesPerKm == null ? "unknown" : `₹${r.rupeesPerKm.toFixed(2)}`,
             odometer: v?.odometerKm ?? "",
           };
         })
@@ -713,12 +706,12 @@ export function runTransportReport(
       const r = exportFilterReport(
         {
           title: "Transport cost per km",
-          subtitle,
-          filterNote: note,
+          subtitle: `${subtitle} · fuel register`,
+          filterNote: describeFilters([note, `Fills up to ${date}`, "Km only from consecutive odometer readings"]),
           columns: [
             { key: "registration", header: "Reg no", width: 0.9 },
             { key: "vehicle", header: "Vehicle", width: 1.1 },
-            { key: "totalKm", header: "Km (refills)", width: 0.8, align: "right" },
+            { key: "totalKm", header: "Km (fills)", width: 0.8, align: "right" },
             { key: "fuelCost", header: "Fuel cost", width: 0.9 },
             { key: "costPerKm", header: "₹ / km", width: 0.8 },
             { key: "odometer", header: "Odometer", width: 0.8, align: "right" },
@@ -728,9 +721,7 @@ export function runTransportReport(
         },
         filters.format,
       );
-      return r.ok
-        ? { ok: true, message: `Cost/km: ${rows.length} vehicle(s)` }
-        : r;
+      return r.ok ? { ok: true, message: `Cost/km: ${rows.length} vehicle(s)` } : r;
     }
 
     case "dealer_aging": {
@@ -855,22 +846,26 @@ export function runTransportReport(
       if (filters.vehicleId) {
         vehicles = vehicles.filter((v) => v.id === filters.vehicleId);
       }
+      // Vehicle papers from the server register (transport_vehicle_docs),
+      // not the desk's vehicle.compliance[] (never saved). A paper type
+      // nobody recorded is listed as such, not left out.
+      if (!costs.docs) {
+        return { ok: false, error: "The vehicle papers could not be read — no calendar was made. Try again." };
+      }
       const rows: Record<string, string | number>[] = [];
-      for (const v of vehicles) {
-        for (const doc of v.compliance) {
-          const daysLeft = daysLeftCell(date, doc.expiryDate);
-          rows.push({
-            registration: v.registrationNo,
-            vehicle: v.name,
-            certType: certTypeLabel(doc.certType),
-            expiryDate: doc.expiryDate,
-            daysLeft,
-            status: expiryStatus(doc.expiryDate, date),
-            renewalCost: formatInr(doc.renewalCostPaise),
-            vendor: dealerName(doc.vendorId, transport),
-            note: doc.docNote,
-          });
-        }
+      for (const c of complianceCalendarRows(costs.docs, vehicles.map((v) => v.id), date)) {
+        const v = getVehicle(c.vehicleId, transport);
+        rows.push({
+          registration: v?.registrationNo || "",
+          vehicle: v?.name || c.vehicleId,
+          certType: c.paper,
+          expiryDate: c.expiresOn,
+          daysLeft: c.daysLeft ?? "—",
+          status: c.status,
+          renewalCost: c.feePaise > 0 ? formatInr(c.feePaise) : "",
+          vendor: c.insurer,
+          note: [c.number, c.note].filter(Boolean).join(" · "),
+        });
       }
       const paidMap = paidByDueKey(fees);
       const alerts = computeTransportComplianceAlerts({
@@ -903,7 +898,8 @@ export function runTransportReport(
         });
       }
       rows.sort((a, b) =>
-        String(a.expiryDate).localeCompare(String(b.expiryDate)),
+        // A paper with no date ("Not recorded") goes last, not first.
+        String(a.expiryDate || "9999").localeCompare(String(b.expiryDate || "9999")),
       );
       const r = exportFilterReport(
         {
@@ -935,104 +931,78 @@ export function runTransportReport(
     }
 
     case "emi_register": {
-      let schedule = transport.emiSchedule;
-      if (filters.vehicleId) {
-        const loanIds = new Set(
-          transport.vehicleLoans
-            .filter((l) => l.vehicleId === filters.vehicleId)
-            .map((l) => l.id),
-        );
-        schedule = schedule.filter((e) => loanIds.has(e.loanId));
+      // From Ledger v2 (the vehicle-loan accounts), not the desk's
+      // emiSchedule — that was never saved and held none of the real loans.
+      if (!costs.loans.known) {
+        return { ok: false, error: `The EMI register needs the loan accounts: ${costs.loans.reason}.` };
       }
-      const rows = schedule
-        .map((e) => {
-          const loan = transport.vehicleLoans.find((l) => l.id === e.loanId);
-          const v = loan
-            ? getVehicle(loan.vehicleId, transport)
-            : undefined;
-          return {
-            registration: v?.registrationNo || "",
-            vehicle: v?.name || loan?.vehicleId || "",
-            accountNo: loan?.accountNo || "",
-            financier: loan ? dealerName(loan.dealerId, transport) : "",
-            installmentNo: e.installmentNo,
-            dueOn: e.dueOn,
-            amount: formatInr(e.amountPaise),
-            status: e.status,
-            paidOn: e.paidOn,
-            paidAmount: formatInr(e.paidAmountPaise),
-          };
-        })
-        .sort((a, b) =>
-          String(a.dueOn).localeCompare(String(b.dueOn)) ||
-          Number(a.installmentNo) - Number(b.installmentNo),
-        );
+      let loans = costs.loans.loans;
+      if (filters.vehicleId) loans = loans.filter((l) => l.vehicleId === filters.vehicleId);
+      const rows = emiRegisterRows(loans).map((e) => {
+        const v = e.vehicleId ? getVehicle(e.vehicleId, transport) : undefined;
+        return {
+          registration: v?.registrationNo || "",
+          vehicle: v?.name || e.vehicleLabel || "Not linked to a bus",
+          loanAccount: `${e.loanCode} · ${e.loanName}`,
+          date: e.date,
+          status: e.status,
+          voucherNo: e.voucherNo,
+          principal: e.principalPaise == null ? "" : formatInr(e.principalPaise),
+          interest: e.interestPaise == null ? "" : formatInr(e.interestPaise),
+        };
+      });
       const r = exportFilterReport(
         {
           title: "Vehicle EMI register",
-          subtitle,
-          filterNote: note,
+          subtitle: `${subtitle} · from the books`,
+          filterNote: describeFilters([note, "EMIs posted in Accounts; months with none posted are listed as Not posted"]),
           columns: [
             { key: "registration", header: "Reg no", width: 0.9 },
             { key: "vehicle", header: "Vehicle", width: 1 },
-            { key: "accountNo", header: "Loan ac", width: 0.9 },
-            { key: "financier", header: "Financier", width: 1.1 },
-            { key: "installmentNo", header: "Inst #", width: 0.6, align: "right" },
-            { key: "dueOn", header: "Due on", width: 0.8 },
-            { key: "amount", header: "EMI", width: 0.8 },
-            { key: "status", header: "Status", width: 0.7 },
-            { key: "paidOn", header: "Paid on", width: 0.8 },
-            { key: "paidAmount", header: "Paid", width: 0.8 },
+            { key: "loanAccount", header: "Loan account", width: 1.4 },
+            { key: "date", header: "Date / due", width: 0.8 },
+            { key: "status", header: "Status", width: 0.8 },
+            { key: "voucherNo", header: "Voucher", width: 0.9 },
+            { key: "principal", header: "Principal", width: 0.8 },
+            { key: "interest", header: "Interest", width: 0.8 },
           ],
           rows,
           fileBaseName: "transport_emi_register",
         },
         filters.format,
       );
-      return r.ok
-        ? { ok: true, message: `EMI register: ${rows.length} installment(s)` }
-        : r;
+      return r.ok ? { ok: true, message: `EMI register: ${rows.length} row(s) across ${loans.length} loan(s)` } : r;
     }
 
     case "insurance_cert_schedule": {
+      // Every vehicle paper on record (renewals keep their history) from
+      // transport_vehicle_docs — not the desk's insurancePolicies /
+      // certificateRenewals, which were never saved.
+      if (!costs.docs) {
+        return { ok: false, error: "The vehicle papers could not be read — no schedule was made. Try again." };
+      }
       let vehicles = transport.vehicles.filter((v) => v.isActive);
       if (filters.vehicleId) {
         vehicles = vehicles.filter((v) => v.id === filters.vehicleId);
       }
       const vehicleIds = new Set(vehicles.map((v) => v.id));
       const rows: Record<string, string | number>[] = [];
-
-      for (const pol of transport.insurancePolicies) {
-        if (!vehicleIds.has(pol.vehicleId)) continue;
-        const v = getVehicle(pol.vehicleId, transport);
+      for (const d of costs.docs) {
+        if (!vehicleIds.has(d.vehicleId) || d.status !== "active") continue;
+        const v = getVehicle(d.vehicleId, transport);
+        const inForce = currentDocsFor(costs.docs, d.vehicleId)[d.type]?.id === d.id;
         rows.push({
           registration: v?.registrationNo || "",
-          vehicle: v?.name || pol.vehicleId,
-          kind: `Insurance · ${pol.type.replace(/_/g, " ")}`,
-          reference: pol.policyNo,
-          periodStart: pol.periodStart,
-          expiryDate: pol.periodEnd,
-          daysLeft: daysLeftCell(date, pol.periodEnd),
-          status: expiryStatus(pol.periodEnd, date),
-          amount: formatInr(pol.premiumPaise),
-          vendor: dealerName(pol.dealerId, transport),
-        });
-      }
-
-      for (const cert of transport.certificateRenewals) {
-        if (!vehicleIds.has(cert.vehicleId)) continue;
-        const v = getVehicle(cert.vehicleId, transport);
-        rows.push({
-          registration: v?.registrationNo || "",
-          vehicle: v?.name || cert.vehicleId,
-          kind: certTypeLabel(cert.certType),
-          reference: cert.billNo,
-          periodStart: cert.issuedDate,
-          expiryDate: cert.expiryDate,
-          daysLeft: daysLeftCell(date, cert.expiryDate),
-          status: expiryStatus(cert.expiryDate, date),
-          amount: formatInr(cert.feePaise),
-          vendor: dealerName(cert.dealerId, transport),
+          vehicle: v?.name || d.vehicleId,
+          kind: VEHICLE_DOC_LABELS[d.type],
+          reference: [d.number, d.policyNo].filter(Boolean).join(" · "),
+          periodStart: d.issuedOn,
+          expiryDate: d.expiresOn,
+          daysLeft: daysLeftCell(date, d.expiresOn),
+          status: inForce ? expiryStatus(d.expiresOn, date) : "Renewed",
+          amount: d.feePaise > 0 ? formatInr(d.feePaise) : "Not entered",
+          booked: d.fee ? (d.fee.reversalVoucherNo ? `${d.fee.voucherNo} (reversed)` : d.fee.voucherNo) : "",
+          vendor: d.insurer,
         });
       }
 
@@ -1047,14 +1017,15 @@ export function runTransportReport(
           columns: [
             { key: "registration", header: "Reg no", width: 0.9 },
             { key: "vehicle", header: "Vehicle", width: 1 },
-            { key: "kind", header: "Kind", width: 1.1 },
-            { key: "reference", header: "Policy / bill", width: 1 },
-            { key: "periodStart", header: "Start", width: 0.8 },
+            { key: "kind", header: "Kind", width: 0.9 },
+            { key: "reference", header: "Number / policy", width: 1 },
+            { key: "periodStart", header: "Issued", width: 0.8 },
             { key: "expiryDate", header: "Expiry", width: 0.8 },
-            { key: "daysLeft", header: "Days left", width: 0.7, align: "right" },
-            { key: "status", header: "Status", width: 0.8 },
-            { key: "amount", header: "Amount", width: 0.8 },
-            { key: "vendor", header: "Vendor", width: 1 },
+            { key: "daysLeft", header: "Days left", width: 0.6, align: "right" },
+            { key: "status", header: "Status", width: 0.7 },
+            { key: "amount", header: "Fee", width: 0.8 },
+            { key: "booked", header: "Voucher", width: 0.8 },
+            { key: "vendor", header: "Insurer", width: 0.9 },
           ],
           rows,
           fileBaseName: "transport_insurance_cert_schedule",
@@ -1075,17 +1046,30 @@ export function runTransportReport(
         vehicles = vehicles.filter((v) => v.id === filters.vehicleId);
       }
       const rows = vehicles.map((v) => {
-        const tco = vehicleTcoPaise(v.id, transport);
+        const tco = vehicleTco({
+          vehicleId: v.id,
+          fills: costs.fills,
+          docs: costs.docs,
+          loans: costs.loans,
+          jobsPaise: completedJobsPaise(v.id, transport),
+        });
+        const t = (p: TcoPart) => tcoPartText(p, formatInr);
         return {
           registration: v.registrationNo,
           vehicle: v.name,
           status: vehicleStatusLabel(v.status),
-          fuel: formatInr(tco.fuel),
-          emi: formatInr(tco.emi),
-          insurance: formatInr(tco.insurance),
-          certs: formatInr(tco.certs),
-          jobs: formatInr(tco.jobs),
-          total: formatInr(tco.total),
+          fuel: t(tco.fuel),
+          emi: t(tco.emiPrincipal),
+          interest: t(tco.interest),
+          insurance: t(tco.insurance),
+          certs: t(tco.papers),
+          jobs: t(tco.jobs),
+          total: tcoTotalText(tco, formatInr),
+          gaps: [tco.fuel, tco.emiPrincipal, tco.insurance, tco.papers]
+            .map((p) => p.note)
+            .filter(Boolean)
+            .filter((x, i, a) => a.indexOf(x) === i)
+            .join("; "),
           odometer: v.odometerKm,
         };
       });
@@ -1093,18 +1077,23 @@ export function runTransportReport(
         {
           title: "Total cost of ownership by vehicle",
           subtitle,
-          filterNote: note,
+          filterNote: describeFilters([
+            note,
+            "Fuel: fuel register · EMI & interest: Accounts (loans linked to the bus) · papers: vehicle documents · “+” = at least",
+          ]),
           columns: [
             { key: "registration", header: "Reg no", width: 0.9 },
-            { key: "vehicle", header: "Vehicle", width: 1 },
-            { key: "status", header: "Status", width: 0.8 },
-            { key: "fuel", header: "Fuel", width: 0.8 },
-            { key: "emi", header: "EMI paid", width: 0.8 },
-            { key: "insurance", header: "Insurance", width: 0.8 },
-            { key: "certs", header: "Certs", width: 0.8 },
-            { key: "jobs", header: "Service/repair", width: 0.9 },
-            { key: "total", header: "Total TCO", width: 0.9 },
-            { key: "odometer", header: "Odometer", width: 0.7, align: "right" },
+            { key: "vehicle", header: "Vehicle", width: 0.9 },
+            { key: "status", header: "Status", width: 0.6 },
+            { key: "fuel", header: "Fuel", width: 0.7 },
+            { key: "emi", header: "EMI principal", width: 0.8 },
+            { key: "interest", header: "Interest", width: 0.7 },
+            { key: "insurance", header: "Insurance", width: 0.7 },
+            { key: "certs", header: "Other papers", width: 0.7 },
+            { key: "jobs", header: "Service/repair", width: 0.7 },
+            { key: "total", header: "Total TCO", width: 1.1 },
+            { key: "gaps", header: "Not known", width: 1.2 },
+            { key: "odometer", header: "Odometer", width: 0.6, align: "right" },
           ],
           rows,
           fileBaseName: "transport_tco_by_vehicle",

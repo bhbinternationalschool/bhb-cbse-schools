@@ -313,12 +313,14 @@ SELFTESTS=(
   test:transport-stop-links
   test:transport-boarding-log
   test:transport-fuel-register
+  test:transport-vehicle-costs
   test:transport-concession
   test:transport-by-class
   test:transport-staff-riders
   test:fleet-edge-link
   test:fleet-edge-push
   test:fleet-edge-fuel
+  test:fleet-edge-windows
   test:boarding-point-audit
   test:halt-clustering
   test:transport-parent-messages
@@ -505,6 +507,7 @@ SELFTESTS=(
   test:report-remark-ai
   test:salary-additional
   test:salary-gross-up
+  test:payroll-not-on-payroll
   test:school-receipt-no
   test:fee-tender-ref
   test:session-cookie-edge

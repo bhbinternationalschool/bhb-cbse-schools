@@ -27,8 +27,11 @@ import type { AccountsState } from "@/lib/accountsTypes";
 import {
   TRANSPORT_REPORTS,
   runTransportReport,
+  TRANSPORT_REPORTS_NEEDING_COSTS,
   type TransportReportFormat,
 } from "@/lib/transportReportCatalog";
+import type { VehicleCosts } from "@/lib/transportVehicleCosts";
+import { fetchVehicleCosts } from "@/lib/transportVehicleCostsClient";
 import { loadTransport } from "@/lib/transport";
 import {
   TRUST_REPORTS,
@@ -271,6 +274,17 @@ export function TransportReportsRunner() {
         return;
       }
     }
+    // Fuel, papers, loans and TCO read the server stores, not the desk.
+    let costs: VehicleCosts | null = null;
+    if (TRANSPORT_REPORTS_NEEDING_COSTS.has(id)) {
+      try {
+        costs = await fetchVehicleCosts();
+      } catch (e) {
+        setError(`Fuel, vehicle papers and loans could not be read — ${e instanceof Error ? e.message : "try again"}`);
+        setNotice(null);
+        return;
+      }
+    }
     const r = runTransportReport(id, {
       date,
       format,
@@ -278,6 +292,7 @@ export function TransportReportsRunner() {
       masters: loadMasters(),
       sis: loadSis(),
       registerMarks,
+      costs,
     });
     if (!r.ok) {
       setError(r.error);

@@ -31,6 +31,7 @@ import {
   recoveryMethodLabel,
 } from "@/lib/staffAdvance";
 import { loadSalaryHold } from "@/lib/salaryHold";
+import { isOnPayroll, notOnPayrollLabel } from "@/lib/payrollNotOnPayroll";
 import { loadStatutoryRemit } from "@/lib/statutoryRemit";
 import {
   incrementBatchStatusLabel,
@@ -700,6 +701,7 @@ export function runPayrollReport(
         { key: "grossUp", header: "School bears PF/ESIC" },
         { key: "cover", header: "PF/ESIC cover" },
         { key: "from", header: "Effective from" },
+        { key: "payroll", header: "Payroll" },
         { key: "due", header: "Adv outstanding", align: "right" },
       ];
       rows = (masters.staff ?? [])
@@ -728,8 +730,9 @@ export function runPayrollReport(
             additional: money(link?.additionalAmount || 0),
             grossUp: link?.statutoryGrossUp ? "yes" : "no",
             // No salary setup: no PF/ESI liability (14 Oct 2026).
-            cover: link ? statutoryCoverFor(link).cover : "none (no salary setup)",
+            cover: statutoryCoverFor(link).noSetup ? "none (no salary setup)" : statutoryCoverFor(link).cover,
             from: link?.effectiveFrom || "",
+            payroll: isOnPayroll(link) ? "On payroll" : notOnPayrollLabel(link),
             due: money(outstandingForStaff(s.id)),
           };
         })

@@ -3030,38 +3030,16 @@ export function lastGpsPingByVehicle(state?: TransportState) {
 
 /* ─── TCO + compliance alerts ──────────────────────────────── */
 
-export function vehicleTcoPaise(
-  vehicleId: string,
-  state?: TransportState,
-): {
-  fuel: number;
-  emi: number;
-  insurance: number;
-  certs: number;
-  jobs: number;
-  total: number;
-} {
+/**
+ * Completed job cards' labour + parts for one vehicle — the service & repair
+ * part of TCO (lib/transportVehicleCosts vehicleTco). Fuel, EMI and papers
+ * are no longer read from this desk: see transportVehicleCosts.
+ */
+export function completedJobsPaise(vehicleId: string, state?: TransportState): number {
   const s = state ?? loadTransport();
-  const fuel = s.fuelRefillLogs
-    .filter((l) => l.vehicleId === vehicleId)
-    .reduce((n, l) => n + l.amountPaise, 0);
-  const loanIds = new Set(
-    s.vehicleLoans.filter((l) => l.vehicleId === vehicleId).map((l) => l.id),
-  );
-  const emi = s.emiSchedule
-    .filter((e) => loanIds.has(e.loanId) && e.status === "paid")
-    .reduce((n, e) => n + e.paidAmountPaise, 0);
-  const insurance = s.insurancePolicies
-    .filter((p) => p.vehicleId === vehicleId)
-    .reduce((n, p) => n + p.premiumPaise, 0);
-  const certs = s.certificateRenewals
-    .filter((c) => c.vehicleId === vehicleId && c.paymentStatus === "paid")
-    .reduce((n, c) => n + c.feePaise, 0);
-  const jobs = s.serviceJobCards
+  return s.serviceJobCards
     .filter((j) => j.vehicleId === vehicleId && j.status === "completed")
     .reduce((n, j) => n + j.laborPaise + j.partsPaise, 0);
-  const total = fuel + emi + insurance + certs + jobs;
-  return { fuel, emi, insurance, certs, jobs, total };
 }
 
 export function computeTransportComplianceAlerts(options?: {

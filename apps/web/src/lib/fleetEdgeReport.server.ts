@@ -12,6 +12,12 @@
  *   - lastSeenAt, lastTelemetry, lastOfflinePosition and offline periods are
  *     CURRENT-status facts and use all history in FLEET_LOOKBACK_MS.
  *
+ * Repeats: Fleet Edge re-sends the same 30-minute `details` window (and
+ * could re-send an alert). Every counter, the daily series and the alert
+ * log count each (vehicle, window) / (vehicle, alert, eventDateTime) once,
+ * from the latest copy received — see lib/fleetEdgeWindows.ts. Last-seen,
+ * offline gaps and the last parked position still read every push.
+ *
  * SOS: Fleet Edge's live system sends "PanicSosEvent" where the spec says
  * "DriverSOSAlert" (159 real ones on 16–18 Aug 2026 were being ignored).
  * Both count as SOS everywhere here.
@@ -30,6 +36,7 @@ import {
 } from "@/lib/fleetEdgeAnalytics";
 import { isSosAlert } from "@/lib/fleetEdge.server";
 import { FUEL_FIELDS, pickNumber } from "@/lib/fleetEdgePush";
+import { dedupeFleetEdgeEvents } from "@/lib/fleetEdgeWindows";
 import {
   isServiceDue,
   type FleetAlertRow,
@@ -296,6 +303,9 @@ export async function buildFleetEdgeReport(
     if (!opts.vehicleRef) return true;
     return ev.vehicle_ref === opts.vehicleRef || ev.registration_number === opts.vehicleRef;
   });
+  // The one copy of each window / alert that counts. Pushes left out still
+  // feed last-seen and offline gaps below — they are real arrivals.
+  const counted = new Set(dedupeFleetEdgeEvents(events).events.map((ev) => ev.id));
   const byVehicle = new Map<string, VehicleFleetMetrics>();
   const timestampsByVehicle = new Map<string, string[]>();
   const fromMs = Date.parse(from);
@@ -367,9 +377,11 @@ export async function buildFleetEdgeReport(
       }
     }
 
-    // Everything below this line is bounded to the requested [from,to].
+    // Everything below this line is bounded to the requested [from,to],
+    // and counts a re-sent window or alert once.
     const evMs = Date.parse(ev.received_at);
     if (!Number.isFinite(evMs) || evMs < fromMs || evMs > toMs) continue;
+    if (!counted.has(ev.id)) continue;
 
     if (ev.event_type === "alert") {
       const eventDetails = isObj(ev.payload.eventDetails) ? ev.payload.eventDetails : {};
@@ -495,6 +507,7 @@ export async function buildFleetEdgeReport(
     if (!Number.isFinite(evMs) || evMs < fromMs || evMs > toMs) continue;
     if (ev.vehicle_ref && NON_FLEET_VEHICLE_REFS.has(ev.vehicle_ref)) continue;
     eventsInRange += 1;
+    if (!counted.has(ev.id)) continue;
     const at = ev.event_at || ev.received_at;
     if (ev.event_type === "details") {
       const p = ev.payload;
@@ -502,7 +515,9 @@ export async function buildFleetEdgeReport(
       const perf = isObj(p.vehiclePerformance) ? p.vehiclePerformance : {};
       const eff = isObj(p.vehicleEfficiency) ? p.vehicleEfficiency : {};
       const d = dayFor(typeof p.from === "string" ? p.from : at);
-      d.windows += 1;
+      // A stub with no window start (TVG40149 sent 5,671 of those in
+      // Aug–Sep: vehicleId + plate only) is not a window.
+      if (typeof p.from === "string" && p.from) d.windows += 1;
       d.distanceKm += num(perf.distanceTravelled);
       d.fuelL += typeof eff.fuelUsed === "number" ? eff.fuelUsed : num(eff.fuelConsumed);
       d.harshEvents += num(safety.harshAccelerationCount) + num(safety.harshBrakeCount) + num(safety.rashTurningCount);
