@@ -28,6 +28,7 @@ import {
   localUrl,
   obj,
   parentSession,
+  logOffset,
   pct,
   reporter,
   seedParentApiData,
@@ -47,6 +48,7 @@ async function main(): Promise<void> {
   const families = fixtureFamilies();
   const nameOf = new Map(fx.sis.students.map((s) => [s.id, s.fullName]));
 
+  const logStart = logOffset(appLog);
   const seeded = await seedParentApiData();
   try {
     // 1. Isolation, every family.
@@ -126,7 +128,7 @@ async function main(): Promise<void> {
 
     // 4. Timing lines.
     await new Promise((res) => setTimeout(res, 300));
-    const lines = timingLines(appLog, "v1/app/popups");
+    const lines = timingLines(appLog, "v1/app/popups", logStart);
     const ok = lines.filter((l) => l.status === 200 && ["authMs", "queryMs", "buildMs", "totalMs"].every((k) => typeof l[k] === "number"));
     const failed = lines.filter((l) => l.status === 503);
     const qp95 = pct(ok.map((l) => Number(l.queryMs)), 95);

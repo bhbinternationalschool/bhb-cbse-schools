@@ -12,7 +12,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { DemoSession } from "@/lib/auth";
 import { AY_CURRENT, buildFixture, classId, sectionId, E2E_TENANT_SLUG } from "./fixture";
@@ -302,9 +302,17 @@ export async function withUnreadableTable<T>(stateDir: string, table: string, fn
   }
 }
 
-/** The app's log lines with `"event":"route-timing"` for `route`, parsed. */
-export function timingLines(appLog: string, route: string): Record<string, unknown>[] {
-  return readFileSync(appLog, "utf8")
+/** The app log's size now — pass it to timingLines to see only what comes after. */
+export function logOffset(appLog: string): number {
+  return existsSync(appLog) ? statSync(appLog).size : 0;
+}
+
+/** The app's log lines with `"event":"route-timing"` for `route` written after byte `from`, parsed. */
+export function timingLines(appLog: string, route: string, from = 0): Record<string, unknown>[] {
+  if (!existsSync(appLog)) return [];
+  return readFileSync(appLog)
+    .subarray(from)
+    .toString("utf8")
     .split("\n")
     .filter((l) => l.includes('"event":"route-timing"'))
     .map((l) => {
