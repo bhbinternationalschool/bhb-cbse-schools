@@ -37,6 +37,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { erpFetch } from "../erpFetch";
 import type { WriteResult } from "../types";
 import type { ModuleRegistryView, MastersView, RbacView, StaffListView } from "../viewTypes";
+import { emptyMastersShell, readMastersPageCopyRaw } from "@/lib/masters";
+import { writeMastersLocalRaw } from "@/lib/mastersPersistence";
+import { bridgeMastersToPageMemory, parseMastersView, type MastersBridgeDeps } from "./mastersBridge";
 import { readView } from "./query";
 import {
   ErpQueryError,
@@ -307,9 +310,34 @@ function VersionsPoller() {
 
 // ── The reference views ────────────────────────────────────────────────────
 
+/**
+ * Each masters answer, checked (parseMastersView — a malformed one is a failed
+ * read) and then bridged into the tab's page-memory copy for the lib/
+ * readers that still call loadMasters() (lib/data/client/mastersBridge; the
+ * bridge goes in 2.3b). Runs once per fetch, inside the query function — not
+ * per mounted screen. Exported for its self-test.
+ */
+export function acceptMastersAnswer(data: unknown, deps: MastersBridgeDeps | null = pageMemoryBridgeDeps()): MastersView {
+  const view = parseMastersView(data);
+  if (deps) bridgeMastersToPageMemory(view, deps);
+  return view;
+}
+
+function pageMemoryBridgeDeps(): MastersBridgeDeps | null {
+  // Only a browser tab has a page copy to keep in step.
+  if (typeof window === "undefined") return null;
+  // The stored copy as it is (not loadMasters()'s normalised read, which
+  // would persist read-time fill-ins); a tab with no copy yet starts from the
+  // empty shell, which the answer's book then fills.
+  return { load: () => readMastersPageCopyRaw() ?? emptyMastersShell(), write: writeMastersLocalRaw };
+}
+
 /** Masters (full, or the teaching subset — `scope` says which). Read-only. */
 export function useMasters(): UseQueryResult<MastersView, Error> {
-  return useErpQuery<MastersView>("masters", "/api/data/views/masters", { desk: ["masters"] });
+  return useErpQuery<MastersView>("masters", "/api/data/views/masters", {
+    desk: ["masters"],
+    parse: (d) => acceptMastersAnswer(d),
+  });
 }
 
 /** The staff directory: no phone, Aadhaar, salary or password, ever. Read-only. */
