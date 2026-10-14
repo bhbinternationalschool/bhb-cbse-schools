@@ -308,6 +308,7 @@ SELFTESTS=(
   test:transport-crew
   test:transport-stop-links
   test:transport-boarding-log
+  test:transport-fuel-register
   test:transport-concession
   test:transport-by-class
   test:transport-staff-riders
@@ -397,6 +398,7 @@ SELFTESTS=(
   test:notice-push
   test:staff-self-profile
   test:attendance-cover
+  test:transport-finance
   test:udise-robot-fetch-all
   test:staff-otp-mobile
   test:accounts-today-tile

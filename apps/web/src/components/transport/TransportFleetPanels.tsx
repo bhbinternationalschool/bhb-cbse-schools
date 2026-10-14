@@ -12,6 +12,7 @@ import {
 import type { MastersState } from "@/lib/masters";
 import type { SisState } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
+import { VehicleLoansPanel } from "@/components/transport/VehicleLoansPanel";
 import {
   DEFAULT_MAP_LAYERS,
   TransportGoogleMap,
@@ -27,7 +28,6 @@ import {
   completeServiceJob,
   convertRepairToJob,
   createRepairRequest,
-  createVehicleLoan,
   dealerTypeLabel,
   listActiveRiders,
   listBoardingForTrip,
@@ -35,20 +35,14 @@ import {
   markPayablePaid,
   openServiceJob,
   recordBoardingGeoEvent,
-  recordCertificateRenewal,
-  recordEmiPayment,
   recordGpsPing,
-  recordInsurancePayment,
   setBoardingSuspended,
   upsertBoardingEvent,
   upsertDealer,
-  upsertInsurance,
   upsertServiceScheduleItem,
   computeTransportComplianceAlerts,
   lastGpsPingByVehicle,
-  certTypeLabel,
   type BoardingTrip,
-  type CertType,
   type DealerType,
   type TransportState,
 } from "@/lib/transport";
@@ -173,263 +167,31 @@ export function DealersPanel({
   );
 }
 
-export function FinancePanel({
-  state,
-  onRefresh,
-  onFlash,
-  onError,
-}: {
-  state: TransportState;
-  onRefresh: () => void;
-  onFlash: (m: string) => void;
-  onError: (m: string) => void;
-}) {
-  const [vehicleId, setVehicleId] = useState("");
-  const [emiPaise, setEmiPaise] = useState("42500");
-  const [tenure, setTenure] = useState("48");
-  const [principal, setPrincipal] = useState("1500000");
-  const [dealerId, setDealerId] = useState("");
-  const [certType, setCertType] = useState<CertType>("puc");
-  const [expiry, setExpiry] = useState("");
-  const [fee, setFee] = useState("400");
-
-  // Soonest due first, sorted BEFORE the 20-row cap: each new loan's schedule
-  // is prepended, so a new loan's future EMIs used to hide older loans'
-  // overdue ones (8 Oct 2026).
-  const dueEmis = state.emiSchedule
-    .filter((e) => e.status === "due" || e.status === "overdue")
-    .sort((a, b) => (a.dueOn || "").localeCompare(b.dueOn || ""))
-    .slice(0, 20);
-
+/**
+ * Transport → Finance. Vehicle loans come from the books (Ledger v2), not
+ * the transport desk: the desk's loans / EMI schedule / certificates /
+ * insurance were never saved to the server, so what was typed here lived in
+ * one browser and never reached Accounts (found 14 Oct 2026). The desk-only
+ * "New vehicle loan / EMI" form and the demo insurance button (sample policy +
+ * premium) are gone; papers (insurance, PUC, fitness…) are on the
+ * Compliance tab, saved on the server.
+ */
+export function FinancePanel({ onOpenCompliance }: { onOpenCompliance?: () => void }) {
   return (
-    <div className="mt-4 grid gap-4 lg:grid-cols-2">
-      <div className="space-y-4">
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-            New vehicle loan / EMI
-          </h2>
-          <div className="mt-2 grid gap-2">
-            <select
-              className="field !py-1.5"
-              value={vehicleId}
-              onChange={(e) => setVehicleId(e.target.value)}
-            >
-              <option value="">Vehicle…</option>
-              {state.vehicles.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.registrationNo}
-                </option>
-              ))}
-            </select>
-            <select
-              className="field !py-1.5"
-              value={dealerId}
-              onChange={(e) => setDealerId(e.target.value)}
-            >
-              <option value="">Financier…</option>
-              {state.dealers
-                .filter((d) => d.type === "financier")
-                .map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-            </select>
-            <input
-              className="field !py-1.5"
-              placeholder="Principal ₹"
-              value={principal}
-              onChange={(e) => setPrincipal(e.target.value)}
-            />
-            <input
-              className="field !py-1.5"
-              placeholder="EMI ₹"
-              value={emiPaise}
-              onChange={(e) => setEmiPaise(e.target.value)}
-            />
-            <input
-              className="field !py-1.5"
-              placeholder="Tenure months"
-              value={tenure}
-              onChange={(e) => setTenure(e.target.value)}
-            />
-            <button
-              type="button"
-              className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
-              onClick={() => {
-                const r = createVehicleLoan({
-                  vehicleId,
-                  dealerId,
-                  accountNo: `VL-${Date.now().toString(36)}`,
-                  principalPaise: Math.round(Number(principal) * 100),
-                  ratePct: 10,
-                  tenureMonths: Number(tenure) || 12,
-                  emiPaise: Math.round(Number(emiPaise) * 100),
-                  emiDueDay: 5,
-                  startDate: new Date().toISOString().slice(0, 10),
-                });
-                if (!r.ok) {
-                  onError(r.error);
-                  return;
-                }
-                onRefresh();
-                onFlash("Loan + EMI schedule created");
-              }}
-            >
-              Create schedule
-            </button>
-          </div>
-        </div>
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-            Certificate renewal
-          </h2>
-          <div className="mt-2 grid gap-2">
-            <select
-              className="field !py-1.5"
-              value={vehicleId}
-              onChange={(e) => setVehicleId(e.target.value)}
-            >
-              <option value="">Vehicle…</option>
-              {state.vehicles.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.registrationNo}
-                </option>
-              ))}
-            </select>
-            <select
-              className="field !py-1.5"
-              value={certType}
-              onChange={(e) => setCertType(e.target.value as CertType)}
-            >
-              {(
-                [
-                  "puc",
-                  "fitness",
-                  "permit",
-                  "road_tax",
-                  "cng_hydro",
-                  "ais140",
-                  "fire_extinguisher",
-                  "insurance",
-                ] as CertType[]
-              ).map((t) => (
-                <option key={t} value={t}>
-                  {certTypeLabel(t)}
-                </option>
-              ))}
-            </select>
-            <input
-              className="field !py-1.5"
-              type="date"
-              value={expiry}
-              onChange={(e) => setExpiry(e.target.value)}
-            />
-            <input
-              className="field !py-1.5"
-              placeholder="Fee ₹"
-              value={fee}
-              onChange={(e) => setFee(e.target.value)}
-            />
-            <button
-              type="button"
-              className="rounded-lg border px-3 py-2 text-sm font-semibold"
-              onClick={() => {
-                const r = recordCertificateRenewal({
-                  vehicleId,
-                  certType,
-                  expiryDate: expiry,
-                  issuedDate: new Date().toISOString().slice(0, 10),
-                  feePaise: Math.round(Number(fee || "0") * 100),
-                  markPaid: true,
-                });
-                if (!r.ok) {
-                  onError(r.error);
-                  return;
-                }
-                onRefresh();
-                onFlash("Certificate renewed");
-              }}
-            >
-              Record renewal
-            </button>
-          </div>
-        </div>
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-            Insurance policy
-          </h2>
-          <button
-            type="button"
-            className="mt-2 rounded-lg border px-3 py-2 text-sm font-semibold"
-            onClick={() => {
-              const end = new Date();
-              end.setFullYear(end.getFullYear() + 1);
-              const r = upsertInsurance({
-                vehicleId,
-                policyNo: `POL-${Date.now().toString(36).toUpperCase()}`,
-                periodStart: new Date().toISOString().slice(0, 10),
-                periodEnd: end.toISOString().slice(0, 10),
-                premiumPaise: 1850000,
-                type: "comprehensive",
-                dealerId,
-              });
-              if (!r.ok) {
-                onError(r.error);
-                return;
-              }
-              recordInsurancePayment(r.policy.id);
-              onRefresh();
-              onFlash("Insurance saved + premium marked");
-            }}
-          >
-            Add sample policy + pay premium
-          </button>
-        </div>
-      </div>
+    <div className="mt-4 space-y-4">
       <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <h2 className="text-sm font-bold text-[var(--brand-deep)]">EMI due</h2>
-        <ul className="mt-2 max-h-[28rem] divide-y overflow-y-auto text-sm">
-          {dueEmis.length === 0 ? (
-            <li className="py-2 text-[var(--muted)]">No open EMIs.</li>
-          ) : (
-            dueEmis.map((e) => {
-              const loan = state.vehicleLoans.find((l) => l.id === e.loanId);
-              const veh = state.vehicles.find((v) => v.id === loan?.vehicleId);
-              return (
-                <li
-                  key={e.id}
-                  className="flex items-center justify-between gap-2 py-2"
-                >
-                  <div>
-                    <div className="font-semibold">
-                      #{e.installmentNo} · {veh?.registrationNo} ·{" "}
-                      {formatInr(e.amountPaise)}
-                    </div>
-                    <div className="text-[10px] text-[var(--muted)]">
-                      due {e.dueOn}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="text-[11px] font-semibold text-[var(--brand-deep)]"
-                    onClick={() => {
-                      const r = recordEmiPayment(e.id);
-                      if (!r.ok) {
-                        onError(r.error);
-                        return;
-                      }
-                      onRefresh();
-                      onFlash("EMI recorded");
-                    }}
-                  >
-                    Pay
-                  </button>
-                </li>
-              );
-            })
-          )}
-        </ul>
+        <VehicleLoansPanel />
+      </div>
+      <div className="rounded-xl border border-dashed border-[var(--border)] px-4 py-3 text-xs text-[var(--muted)]">
+        Insurance, PUC, fitness, permit, road tax and the other vehicle papers — with their renewal fees — are recorded on the{" "}
+        {onOpenCompliance ? (
+          <button type="button" className="font-semibold text-[var(--brand-mid)]" onClick={onOpenCompliance}>
+            Compliance tab
+          </button>
+        ) : (
+          "Compliance tab"
+        )}
+        .
       </div>
     </div>
   );
