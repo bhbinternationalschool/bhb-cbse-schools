@@ -32,11 +32,14 @@ import { substituteCandidates } from "./timetableSubstitution";
 console.log("visitingExclusions.selftest.ts");
 
 const ay = "2026-27";
+// Each person their own account: the bank file blocks two people on one
+// account (bankFileExport, 14 Oct 2026).
+let accountSeq = 100000000000;
 const staff = (id: string, category: string, extra: Partial<StaffRecord> = {}) =>
   ({
     id, empCode: id.toUpperCase(), fullName: id, status: "active", stream: "teaching", category,
     designationId: "", classTeacherLinks: [], subjectTeachingLinks: [], joiningDate: "2025-04-01",
-    bankAccountNo: "123456789012", bankIfsc: "SBIN0001234", bankAccountName: id, ...extra,
+    bankAccountNo: String(++accountSeq), bankIfsc: "SBIN0001234", bankAccountName: id, ...extra,
   }) as unknown as StaffRecord;
 
 const musicLink = (classId: string, sectionId = "") => ({ academicYearCode: ay, classId, sectionId, subjectId: "mus" });

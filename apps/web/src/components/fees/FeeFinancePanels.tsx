@@ -461,7 +461,7 @@ export function FeeReportsPanel({
                 const busyPdf = running === `${report.id}:pdf`;
                 return (
                   <li
-                    key={report.id}
+                    key={report.id} data-report-id={report.id}
                     className="flex items-center gap-1 rounded-sm bg-[#eceff1] px-2 py-1.5"
                   >
                     <span className="min-w-0 flex-1 px-1 text-[13px] font-medium leading-snug text-[#37474f]">

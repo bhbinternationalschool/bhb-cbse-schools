@@ -631,6 +631,28 @@ export function displayAadhaar(input: {
   return "—";
 }
 
+/**
+ * Aadhaar in a DOWNLOADED file (Excel / CSV / PDF): last four digits only,
+ * "XXXX XXXX 1234" (director, 14 Oct 2026). A file leaves the ERP — it is
+ * mailed, printed, left on a desktop — so it never carries the whole number,
+ * whoever exported it. Screens keep displayAadhaar (staff see the full
+ * number where their work needs it). "—" when nothing is on record.
+ */
+export function aadhaarForExport(input: { number?: string; last4?: string }): string {
+  const last4 =
+    (input.last4 || "").replace(/\D/g, "").slice(-4) ||
+    (input.number || "").replace(/\D/g, "").slice(-4);
+  return last4.length === 4 ? `XXXX XXXX ${last4}` : "—";
+}
+
+/** Mask any Aadhaar-looking value (12 digits, spaced or not, or ****1234) for a file. */
+export function maskAadhaarText(value: string | number | null | undefined): string | number | null | undefined {
+  if (typeof value !== "string") return value;
+  const digits = value.replace(/\D/g, "");
+  if (digits.length === 12 || (digits.length === 4 && /[*X•]/.test(value))) return aadhaarForExport({ number: digits });
+  return value;
+}
+
 export function hasStoredAadhaar(input: {
   number?: string;
   last4?: string;
@@ -1945,7 +1967,7 @@ export function countActiveHouseholds(
 }
 
 /** `2023-2024` / `2023–24` → `2023-24` for cross-record comparison. */
-function normalizeAyCode(code: string): string {
+export function normalizeAyCode(code: string): string {
   const t = (code || "").trim().replace(/\s+/g, "").replace(/–/g, "-");
   const full = t.match(/^(20\d{2})-(20\d{2})$/);
   if (full) return `${full[1]}-${full[2]!.slice(2)}`;

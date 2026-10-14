@@ -43,6 +43,8 @@ import {
 import { loadSalaryAccount, entryTypeLabel } from "@/lib/salaryAccount";
 import type { StaffStream } from "@/lib/foundationMasters";
 import { statutoryCoverFor } from "@/lib/payrollSetupSync";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type PayrollReportCategory =
   | "payroll"
@@ -385,6 +387,9 @@ export function runPayrollReport(
   id: PayrollReportId,
   filters: PayrollReportFilters = {},
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("payroll", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const format: PayrollReportFormat = filters.format ?? "excel";
   const def = PAYROLL_REPORTS.find((r) => r.id === id);
   if (!def) return { ok: false, error: "Unknown report" };

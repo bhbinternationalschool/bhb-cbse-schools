@@ -14,6 +14,8 @@ import { trackServerWork } from "@/lib/serverWork";
 import { recordLibraryDeletion } from "@/lib/libraryNormalizedClient";
 import { fineToDate, libraryToday } from "@/lib/libraryCounter";
 import type { LibraryFineStatus } from "@/lib/libraryFine";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type LibraryCopyStatus =
   | "available"
@@ -944,9 +946,12 @@ export function runLibraryReport(input: {
   students?: { id: string; fullName: string; admissionNo: string }[];
   staff?: { id: string; fullName: string; empCode?: string }[];
 }): { ok: true } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("library", input.reportId));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const state = input.state ?? loadLibrary();
   const from = input.fromDate || "2000-01-01";
-  const to = input.toDate || new Date().toISOString().slice(0, 10);
+  const to = input.toDate || new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */;
   const today = libraryToday();
   const titles = listActiveTitles(state);
   const titleById = new Map(titles.map((t) => [t.id, t]));

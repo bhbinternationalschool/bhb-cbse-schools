@@ -210,6 +210,7 @@ SELFTESTS=(
   test:payroll-setup-sync
   test:masters-change-auth
   test:timetable-free-grid
+  test:teacher-load-published
   test:udise-teacher-apaar
   test:udise-teacher-sync
   test:login-unknown-numbers
@@ -464,6 +465,7 @@ SELFTESTS=(
   test:visiting-pay
   test:visiting-exclusions
   test:payroll-staggered-runs
+  test:bank-file-safety
   test:staff-payslips
   test:diksha-index
   test:teacher-contact
@@ -486,6 +488,14 @@ SELFTESTS=(
   test:receipt-lookup
   test:referrals
   test:report-export
+  test:aadhaar-export-mask
+  test:report-data-guard
+  test:reports-center-hub
+  test:reports-academic-new
+  test:reports-registers-new
+  test:reports-wrong-figures
+  test:fee-reports-year-scope
+  test:report-export-format
   test:report-remark-ai
   test:salary-additional
   test:salary-gross-up

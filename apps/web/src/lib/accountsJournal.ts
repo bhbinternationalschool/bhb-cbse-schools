@@ -118,7 +118,32 @@ export function listJournals(state?: AccountsState): JournalEntry[] {
   });
 }
 
-/** Active (non-void) journal lines for one COA in a period, with running balance. */
+/**
+ * Balance of one account carried into `from`: every active journal line
+ * dated before it (opening balances are posted as journal entries), signed
+ * by the account's normal side.
+ */
+export function coaOpeningBalance(coaId: string, from: string, state?: AccountsState): number {
+  const s = state ?? loadAccounts();
+  const coa = s.coaAccounts.find((c) => c.id === coaId);
+  if (!coa) return 0;
+  const debitNormal = coa.group === "assets" || coa.group === "expense";
+  let bal = 0;
+  for (const entry of s.journalEntries) {
+    if (entry.voidedAt || entry.date >= from) continue;
+    for (const line of entry.lines) {
+      if (line.coaId !== coaId) continue;
+      bal += debitNormal ? line.debitPaise - line.creditPaise : line.creditPaise - line.debitPaise;
+    }
+  }
+  return bal;
+}
+
+/**
+ * Active (non-void) journal lines for one COA in a period, with running
+ * balance — carried on from the balance before `from` (it started at 0, so
+ * every closing balance was wrong unless the period began with the books).
+ */
 export function coaLedgerRows(
   coaId: string,
   from: string,
@@ -164,7 +189,7 @@ export function coaLedgerRows(
     }
   }
   lines.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-  let bal = 0;
+  let bal = coaOpeningBalance(coaId, from, s);
   return lines.map((l) => {
     bal += debitNormal
       ? l.debitPaise - l.creditPaise
