@@ -20,6 +20,16 @@ import {
   normalizeSalarySettings,
 } from "@/lib/salarySetup";
 import { buildSalaryRegister, salaryRegisterTitle } from "@/lib/payrollRegister";
+import {
+  isOnPayroll,
+  notOnPayrollLines,
+  type PayrollLeftOutEntry,
+} from "@/lib/payrollNotOnPayroll";
+import {
+  NotOnPayrollBadge,
+  NotOnPayrollLeftOut,
+  NotOnPayrollRunBanner,
+} from "@/components/payroll/NotOnPayrollNotices";
 import { downloadPdfReport, downloadXlsxReport } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
 import {
@@ -288,6 +298,18 @@ export function PayrollWorkspace() {
 
   const selected = runs.find((r) => r.id === selectedId) ?? null;
 
+  /** The last process's "Left out" list (not on payroll / joined after the month). */
+  const [leftOut, setLeftOut] = useState<PayrollLeftOutEntry[]>([]);
+  // Marked not on payroll in Masters → Salary setup: shown greyed with the
+  // reason, never selectable — payroll leaves them out.
+  const notOnPayrollById = useMemo(() => {
+    const links = loadSalarySetup().staffLinks;
+    return new Map(
+      links.filter((l) => !isOnPayroll(l)).map((l) => [l.staffId, l.notOnPayrollReason || ""]),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tick tracks salary setup hydration
+  }, [tick]);
+
   const processStaffOptions = useMemo(
     () =>
       (masters?.staff ?? [])
@@ -406,13 +428,14 @@ export function PayrollWorkspace() {
       flash(r.error, true);
       return;
     }
+    setLeftOut(r.leftOut);
     setSelectedId(r.run.id);
     setTab("detail");
     flash(
       `Bulk draft ${month}: ${r.run.lines.length} staff — not in accounts until published${r.skipped.length
         ? ` · skipped ${r.skipped.length} already paid/approved for ${month}: ${r.skipped.slice(0, 4).join(", ")}${r.skipped.length > 4 ? "…" : ""}`
-        : ""}${r.excluded.length
-        ? ` · not included — joined after ${month}: ${r.excluded.join(", ")} (fix the joining date in Masters if wrong)`
+        : ""}${r.leftOut.length
+        ? ` · left out ${r.leftOut.length}: ${r.leftOut.slice(0, 4).map((e) => e.fullName).join(", ")}${r.leftOut.length > 4 ? "…" : ""} (list below)`
         : ""}`,
     );
     refresh();
@@ -442,6 +465,7 @@ export function PayrollWorkspace() {
       flash(r.error, true);
       return;
     }
+    setLeftOut(r.leftOut);
     setSelectedId(r.run.id);
     setTab("detail");
     flash(
@@ -451,8 +475,8 @@ export function PayrollWorkspace() {
           : `Draft for ${month}: ${r.run.lines.length} staff — edit freely until publish`
       }${r.skipped.length
         ? ` · skipped ${r.skipped.length} already paid/approved for ${month}: ${r.skipped.slice(0, 4).join(", ")}${r.skipped.length > 4 ? "…" : ""}`
-        : ""}${r.excluded.length
-        ? ` · not included — joined after ${month}: ${r.excluded.join(", ")} (fix the joining date in Masters if wrong)`
+        : ""}${r.leftOut.length
+        ? ` · left out ${r.leftOut.length}: ${r.leftOut.slice(0, 4).map((e) => e.fullName).join(", ")}${r.leftOut.length > 4 ? "…" : ""} (list below)`
         : ""}`,
     );
     setProcessStaffIds([]);
@@ -794,6 +818,31 @@ export function PayrollWorkspace() {
     refresh();
   }
 
+  /** Remove every line of the draft whose staff are not on payroll. */
+  function onRemoveLines(staffIds: string[]) {
+    if (!selected) return;
+    // Each line on its own: one refusal does not stop the rest.
+    const failed: string[] = [];
+    let removed = 0;
+    for (const id of staffIds) {
+      const r = removeDraftStaffLine(selected.id, id, session.fullName);
+      if (r.ok) removed += 1;
+      else {
+        const name = selected.lines.find((l) => l.staffId === id)?.fullName || id;
+        failed.push(`${name}: ${r.error}`);
+      }
+    }
+    if (failed.length) {
+      flash(
+        `${removed} not-on-payroll ${removed === 1 ? "line" : "lines"} removed · NOT removed: ${failed.join("; ")}`,
+        true,
+      );
+    } else {
+      flash(`${removed} not-on-payroll ${removed === 1 ? "line" : "lines"} removed from draft`);
+    }
+    refresh();
+  }
+
   function onEditComponent(
     staffId: string,
     headCode: string,
@@ -994,7 +1043,7 @@ export function PayrollWorkspace() {
             <p className="mt-2 rounded-lg bg-[rgba(32,48,80,0.05)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--brand-deep)]">
               {committedInMonth.size} staff already have {month} salary
               approved, posted or paid — they are skipped.{" "}
-              {processStaffOptions.filter((st) => !committedInMonth.has(st.id)).length}{" "}
+              {processStaffOptions.filter((st) => !committedInMonth.has(st.id) && !notOnPayrollById.has(st.id)).length}{" "}
               still to process.
             </p>
           ) : null}
@@ -1033,7 +1082,9 @@ export function PayrollWorkspace() {
                   className="text-[11px] font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline"
                   onClick={() =>
                     setProcessStaffIds(
-                      pickableStaff.filter((st) => !committedInMonth.has(st.id)).map((st) => st.id),
+                      pickableStaff
+                        .filter((st) => !committedInMonth.has(st.id) && !notOnPayrollById.has(st.id))
+                        .map((st) => st.id),
                     )
                   }
                 >
@@ -1050,16 +1101,24 @@ export function PayrollWorkspace() {
               <div className="grid max-h-48 gap-1 overflow-y-auto rounded-lg border border-[var(--border)] p-2 sm:grid-cols-2 lg:grid-cols-3">
                 {pickableStaff.map((st) => {
                   const done = committedInMonth.get(st.id);
+                  const notOn = notOnPayrollById.get(st.id);
+                  const off = !!done || notOn !== undefined;
                   return (
                     <label
                       key={st.id}
-                      className={`flex items-center gap-2 text-xs ${done ? "text-[var(--muted)]" : "text-[var(--brand-deep)]"}`}
-                      title={done ? `${month} salary already approved / posted / paid` : undefined}
+                      className={`flex items-center gap-2 text-xs ${off ? "text-[var(--muted)]" : "text-[var(--brand-deep)]"}`}
+                      title={
+                        done
+                          ? `${month} salary already approved / posted / paid`
+                          : notOn !== undefined
+                            ? `Not on payroll${notOn ? ` — ${notOn}` : ""} (Masters → Salary setup)`
+                            : undefined
+                      }
                     >
                       <input
                         type="checkbox"
-                        disabled={!!done}
-                        checked={!done && processStaffIds.includes(st.id)}
+                        disabled={off}
+                        checked={!off && processStaffIds.includes(st.id)}
                         onChange={() =>
                           setProcessStaffIds((prev) =>
                             prev.includes(st.id)
@@ -1075,6 +1134,9 @@ export function PayrollWorkspace() {
                         <span className="text-[10px] text-[var(--muted)]">· recent</span>
                       ) : null}
                       {done ? <span className="text-[10px]">· paid</span> : null}
+                      {!done && notOn !== undefined ? (
+                        <span className="text-[10px]">· not on payroll{notOn ? ` (${notOn})` : ""}</span>
+                      ) : null}
                     </label>
                   );
                 })}
@@ -1097,6 +1159,7 @@ export function PayrollWorkspace() {
               </button>
             </div>
           </div>
+          <NotOnPayrollLeftOut month={month} rows={leftOut} onClose={() => setLeftOut([])} />
           <ErpTableShell exportAs="payroll_runs" exportTitle="Payroll runs">
             <div className="overflow-x-auto">
             <ErpTable>
@@ -1172,6 +1235,10 @@ export function PayrollWorkspace() {
         </div>
       ) : null}
 
+      {tab === "detail" && allowed && selected?.month === month ? (
+        <NotOnPayrollLeftOut month={month} rows={leftOut} onClose={() => setLeftOut([])} />
+      ) : null}
+
       {tab === "detail" && allowed ? (
         selected ? (
           <RunDetail
@@ -1203,6 +1270,7 @@ export function PayrollWorkspace() {
             onExportAccount={onExportAccountLedger}
             onRebuild={rebuildDraft}
             onRemoveLine={onRemoveLine}
+            onRemoveLines={onRemoveLines}
             onEditComponent={onEditComponent}
             onEditAdjustments={onEditAdjustments}
             onLinePaid={(staffId, p) => {
@@ -1340,6 +1408,7 @@ function RunDetail({
   onExportAccount,
   onRebuild,
   onRemoveLine,
+  onRemoveLines,
   onEditComponent,
   onEditAdjustments,
   onLinePaid,
@@ -1374,6 +1443,7 @@ function RunDetail({
   onExportAccount: () => void;
   onRebuild: () => void;
   onRemoveLine: (staffId: string) => void;
+  onRemoveLines: (staffIds: string[]) => void;
   onEditComponent: (staffId: string, headCode: string, amount: number) => void;
   onEditAdjustments: (
     staffId: string,
@@ -1432,6 +1502,22 @@ function RunDetail({
   const govtEsic = run.lines.reduce((s, l) => s + (l.esicGovtDeposit || 0), 0);
   const gross = run.lines.reduce((s, l) => s + l.gross, 0);
   const inAccounts = run.status === "posted" || run.status === "paid";
+  // Lines for staff since marked not on payroll — drafts only; a posted or
+  // paid run is never touched.
+  // Re-read when salary setup lands or changes (hydration finishes after
+  // the run may already be on screen).
+  const [setupVersion, setSetupVersion] = useState(0);
+  useEffect(() => {
+    const onSetup = () => setSetupVersion((v) => v + 1);
+    window.addEventListener("bhb-salary-setup-updated", onSetup);
+    return () => window.removeEventListener("bhb-salary-setup-updated", onSetup);
+  }, []);
+  const notOnPayroll = useMemo(
+    () => (run.status === "draft" ? notOnPayrollLines(run.lines, loadSalarySetup().staffLinks) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setupVersion tracks salary setup writes
+    [run, setupVersion],
+  );
+  const notOnPayrollById = new Map(notOnPayroll.map((x) => [x.staffId, x]));
 
   // Attendance renders as "22/1/0/0"; sorting that string is meaningless, so
   // the column yields days present. Gross and net sort on paise.
@@ -1493,6 +1579,12 @@ function RunDetail({
               Locked — line amounts cannot change. Recall to draft to edit
               (posted runs void account entries).
             </p>
+          ) : null}
+          {editable ? (
+            <NotOnPayrollRunBanner
+              rows={notOnPayroll}
+              onRemoveAll={() => onRemoveLines(notOnPayroll.map((x) => x.staffId))}
+            />
           ) : null}
           {!inAccounts ? (
             <p className="mt-2 rounded-lg bg-[rgba(197,160,40,0.14)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--brand-deep)]">
@@ -1870,7 +1962,15 @@ function RunDetail({
                           ? ` · adv due ${formatInr(lockedDue)}`
                           : ""}
                       </div>
+                      {notOnPayrollById.has(l.staffId) ? (
+                        <NotOnPayrollBadge
+                          reason={notOnPayrollById.get(l.staffId)!.reason}
+                          onRemove={editable ? () => onRemoveLine(l.staffId) : undefined}
+                        />
+                      ) : null}
                       {(() => {
+                        // Not on payroll: its own badge and one-click remove.
+                        if (notOnPayrollById.has(l.staffId)) return null;
                         const sr = setupById.get(l.staffId);
                         if (!sr || (!sr.noSetup && sr.action === "none")) return null;
                         const label = sr.action === "remove"

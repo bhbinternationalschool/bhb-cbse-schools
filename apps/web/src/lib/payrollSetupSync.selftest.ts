@@ -42,6 +42,7 @@ import {
   statutoryCoverFor,
 } from "./payrollSetupSync";
 import { defaultSalarySetupState, writeSalarySetupLocalRaw, type StaffSalaryLink } from "./salarySetup";
+import { setNotOnPayroll } from "./payrollNotOnPayroll";
 import { emptyStaffAttendanceState, writeStaffAttendanceLocalRaw } from "./staffAttendance";
 import { emptyStaffHrState, writeStaffHrLocalRaw } from "./staffHr";
 
@@ -218,9 +219,61 @@ assert.ok(resetRow.headChanges.some((h) => h.startsWith(basicHead.headName)), "a
 /* ── 4e. processing says who it left out ─────────────────────────── */
 writePayrollLocalRaw({ version: 2, runs: [], audit: [] });
 const processed = processPayrollDraft({ masters, month: "2026-07", academicYearCode: "2026-27", createdBy: "t", mode: "bulk" });
-assert.ok(processed.ok && processed.excluded.includes("Staff sanjay (joined 2026-08-01)"), processed.ok ? processed.excluded.join() : processed.error);
+assert.ok(
+  processed.ok && processed.leftOut.some((e) => e.staffId === "sanjay" && e.why === "joined_after" && e.reason === "2026-08-01"),
+  processed.ok ? JSON.stringify(processed.leftOut) : processed.error,
+);
 const only = processPayrollDraft({ masters, month: "2026-07", academicYearCode: "2026-27", createdBy: "t", mode: "individual", staffIds: ["sanjay"] });
 assert.ok(!only.ok && /joined after 2026-07\. Fix the joining date in Masters/.test(only.error));
+
+/* ── 4f. not on payroll × setup sync: removed, never rebuilt; one left-out list ── */
+{
+  // "old" is marked not on payroll after a draft that carries them was built.
+  const withSwitch = {
+    ...salary,
+    staffLinks: setNotOnPayroll(salary.staffLinks, "old", { on: true, reason: "Owner / trustee", by: "D", at: "2026-10-14T00:00:00Z" }).links,
+  };
+  writeSalarySetupLocalRaw(withSwitch);
+  const oldLine = byId.get("old")!;
+  const nrun: PayrollRun = { ...draft, id: "pr_nop", status: "draft", lines: [oldLine, byId.get("nolink")!] };
+  writePayrollLocalRaw({ version: 2, runs: [nrun], audit: [] });
+  const prev = previewDraftSetupSync(nrun, masters, withSwitch);
+  const r = prev.rows.find((x) => x.staffId === "old")!;
+  assert.equal(r.action, "remove", "not on payroll: offered for removal");
+  assert.equal(r.notOnPayroll, true);
+  assert.equal(r.after, null);
+  assert.match(r.reasons[0]!, /^Not on payroll — Owner \/ trustee/);
+  assert.ok(!prev.rebuilt.has("old"), "never rebuilt");
+  assert.ok(
+    runSetupWarnings(nrun, masters).some((w) => w.startsWith("Staff old (OLD): Not on payroll — Owner / trustee")),
+    "flagged before submit / approve / publish",
+  );
+  // Rebuilding everything removes the line instead of re-pricing it.
+  const applied = applyDraftSetupSync("pr_nop", nrun.lines.map((l) => l.staffId), masters, "t");
+  assert.ok(applied.ok, applied.ok ? "" : applied.error);
+  if (applied.ok) {
+    assert.ok(!applied.run.lines.some((l) => l.staffId === "old"));
+    assert.ok(applied.removedWho.some((w) => w.startsWith("Staff old: Not on payroll")));
+  }
+  // Processing: one left-out list with both reasons, nobody twice.
+  writePayrollLocalRaw({ version: 2, runs: [], audit: [] });
+  const both = {
+    ...withSwitch,
+    staffLinks: setNotOnPayroll(withSwitch.staffLinks, "sanjay", { on: true, reason: "", by: "D", at: "2026-10-14T00:00:00Z" }).links,
+  };
+  writeSalarySetupLocalRaw(both);
+  const p = processPayrollDraft({ masters, month: "2026-07", academicYearCode: "2026-27", createdBy: "t", mode: "bulk" });
+  assert.ok(p.ok, p.ok ? "" : p.error);
+  if (p.ok) {
+    assert.ok(!p.run.lines.some((l) => l.staffId === "old"));
+    const ids = p.leftOut.map((e) => `${e.staffId}:${e.why}`).sort();
+    assert.deepEqual(ids, ["old:not_on_payroll", "sanjay:not_on_payroll"], "sanjay is both — listed once, as not on payroll");
+    assert.equal(p.leftOut.find((e) => e.staffId === "old")!.reason, "Owner / trustee");
+  }
+  const picked = processPayrollDraft({ masters, month: "2026-07", academicYearCode: "2026-27", createdBy: "t", mode: "individual", staffIds: ["old"] });
+  assert.ok(!picked.ok && /marked not on payroll/.test(picked.error));
+  writeSalarySetupLocalRaw(salary);
+}
 
 /* ── 5. reasons ─────────────────────────────────────────────────────── */
 const f = { gross: 1, totalDeductions: 0, netPay: 1, employerCost: 0, daysPresent: 1, daysAbsent: 0, daysHoliday: 0, daysLwp: 0, statutoryCover: "none", structureId: "s" };
