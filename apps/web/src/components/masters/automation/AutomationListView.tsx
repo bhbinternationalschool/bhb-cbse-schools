@@ -11,6 +11,7 @@ import {
 } from "@/lib/automation";
 import { describeCronExpr, describeIntervalMinutes } from "@/lib/automationSchedule";
 import { audienceSummaryLabel } from "./AutomationAudiencePicker";
+import { MonthGroupedList, useMonthGroups } from "@/components/ui/month-grouped-rows";
 import {
   MastersEmptyRow,
   MastersTableCard,
@@ -47,6 +48,24 @@ function runStateLabel(r: AutomationRun): string {
     default:
       return "failed";
   }
+}
+
+/** When a run happened: it started, or (still waiting) was scheduled. */
+function runDate(r: AutomationRun): string {
+  return r.startedAt || r.scheduledFor || "";
+}
+
+function runWhenLabel(r: AutomationRun): string {
+  const at = runDate(r);
+  const t = at ? Date.parse(at) : Number.NaN;
+  if (!Number.isFinite(t)) return "";
+  return new Date(t).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function scheduleLabel(r: AutomationRule): string {
@@ -93,6 +112,14 @@ export function AutomationListView({
     "all",
   );
   const [q, setQ] = useState("");
+
+  // Every run the store keeps (it holds the latest 200), folded by IST
+  // month with the newest open — the list used to stop at 40 instead.
+  const runMonths = useMonthGroups({
+    rows: state.runs,
+    dateOf: runDate,
+    storageKey: "automation.runs",
+  });
 
   const pending = pendingApprovals(state);
   const activeCount = state.rules.filter((r) => r.enabled).length;
@@ -357,30 +384,39 @@ export function AutomationListView({
 
       {tab === "runs" ? (
         <MastersTableCard title="Recent runs">
-          {state.runs.length === 0 ? (
-            <MastersEmptyRow label="No runs yet." />
-          ) : (
-            <ul className="divide-y divide-[var(--border)]">
-              {state.runs.slice(0, 40).map((r) => {
-                const rule = state.rules.find((x) => x.id === r.ruleId);
-                return (
-                  <li key={r.id} className="px-3 py-2 text-[12px]">
-                    <span className="font-semibold text-[var(--brand-deep)]">
-                      {rule?.name || r.ruleId}
-                    </span>{" "}
-                    · {runStateLabel(r)} · {r.stats.proposed} proposed
-                    {r.status === "proposed" || r.status === "cancelled"
-                      ? ""
-                      : ` · ${r.stats.dispatched} sent`}
-                    {r.stats.failed ? ` · ${r.stats.failed} failed` : ""}
-                    {r.error ? (
-                      <span className="text-rose-700"> — {r.error}</span>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <MonthGroupedList
+            month={runMonths}
+            rowKey={(r) => r.id}
+            countLabel={(n) => `${n} ${n === 1 ? "run" : "runs"}`}
+            summary={(rs) => {
+              const sent = rs.reduce((n, r) => n + (r.stats.dispatched || 0), 0);
+              const failed = rs.reduce((n, r) => n + (r.stats.failed || 0), 0);
+              return `${sent} sent${failed ? ` · ${failed} failed` : ""}`;
+            }}
+            empty={<MastersEmptyRow label="No runs yet." />}
+            renderItem={(r) => {
+              const rule = state.rules.find((x) => x.id === r.ruleId);
+              const when = runWhenLabel(r);
+              return (
+                <li className="px-3 py-2 text-[12px]">
+                  <span className="font-semibold text-[var(--brand-deep)]">
+                    {rule?.name || r.ruleId}
+                  </span>{" "}
+                  · {runStateLabel(r)} · {r.stats.proposed} proposed
+                  {r.status === "proposed" || r.status === "cancelled"
+                    ? ""
+                    : ` · ${r.stats.dispatched} sent`}
+                  {r.stats.failed ? ` · ${r.stats.failed} failed` : ""}
+                  {when ? (
+                    <span className="text-[var(--muted)]"> · {when}</span>
+                  ) : null}
+                  {r.error ? (
+                    <span className="text-rose-700"> — {r.error}</span>
+                  ) : null}
+                </li>
+              );
+            }}
+          />
         </MastersTableCard>
       ) : null}
     </div>

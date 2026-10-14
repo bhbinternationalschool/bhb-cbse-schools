@@ -27,6 +27,7 @@ import { fetchStaffRemoteServer, pushStaffRemoteServer } from "@/lib/staffPersis
 import { fetchDeskSliceFromDb, pushDeskSliceToDb } from "@/lib/deskSliceNormalized.server";
 import { fetchTimetableDeskFromDb, pushTimetableDeskToDb } from "@/lib/timetableNormalized.server";
 import { fetchSisFromDb, pushSisToDb } from "@/lib/sisNormalized.server";
+import { fetchPayrollDeskFromDb, pushPayrollDeskToDb } from "@/lib/payrollNormalized.server";
 import { TENANT } from "@/lib/types";
 
 function check(what: string, actual: number, expected: number): void {
@@ -90,6 +91,11 @@ export async function runSeed(): Promise<void> {
   if (sisPush.conflicts?.length) throw new Error(`seed: sis_push_guarded reported ${sisPush.conflicts.length} conflicts`);
   console.log(`students written through sis_push_guarded (${sisPush.studentCount} students, ${sisPush.householdCount} households applied)`);
 
+  // Growing lists for the month-grouped screens.
+  must("payroll runs", await pushPayrollDeskToDb(fx.payroll));
+  must("automation runs", await pushDeskSliceToDb("automation", { ...fx.automation }));
+  console.log(`payroll runs (${fx.payroll.runs.length}) and automation runs (${fx.automation.runs.length}) written`);
+
   // Read back through the app's own readers.
   const e = fx.expected;
   console.log("read-back:");
@@ -124,6 +130,12 @@ export async function runSeed(): Promise<void> {
   const tt = await fetchTimetableDeskFromDb();
   if (!tt.ok) throw new Error("seed read-back: timetable read failed");
   check("timetable published grids", tt.bundle.publishedGrids.length, fx.timetable.publishedGrids.length);
+
+  const pr = await fetchPayrollDeskFromDb();
+  check("payroll runs", pr.ok ? pr.bundle.runs.length : -1, fx.payroll.runs.length);
+  const au = await fetchDeskSliceFromDb("automation");
+  if (!au.ok) throw new Error(`seed read-back: automation read failed: ${au.error}`);
+  check("automation runs", Array.isArray(au.bundle.runs) ? au.bundle.runs.length : -1, fx.automation.runs.length);
 
   const sis = await fetchSisFromDb();
   if (!sis.ok) throw new Error("seed read-back: SIS read failed");

@@ -41,6 +41,9 @@ import type { TimetableGrid, TimetableState } from "@/lib/timetable";
 import { emptyTimetableState } from "@/lib/timetable";
 import type { Household, SisStudent } from "@/lib/sis";
 import { normalizeHousehold, normalizeStudent } from "@/lib/sis";
+import type { PayrollRun, PayrollState } from "@/lib/payroll";
+import { normalizePayrollLine } from "@/lib/payroll";
+import type { AutomationRun, AutomationState } from "@/lib/automation";
 
 export const E2E_TENANT_SLUG = "bhb-international";
 export const AY_CURRENT = "2026-27";
@@ -446,6 +449,81 @@ function buildSis(): { households: Household[]; students: SisStudent[] } {
   return { households, students };
 }
 
+
+// ── Growing lists (month-grouped screens) ────────────────────────────────
+
+/**
+ * Payroll runs over three payroll months, two of them paid in parts, so
+ * Payroll → Payroll runs shows month groups: October open, September and
+ * August folded. Every run's net total is different, so a test (or an
+ * export) can tell the rows apart by it.
+ */
+function buildPayrollRuns(staff: StaffRecord[]): PayrollState {
+  const runs: PayrollRun[] = [
+    { id: "e2e_pr_1", month: "2026-10", kind: "bulk", net: [21000, 18500] },
+    { id: "e2e_pr_2", month: "2026-10", kind: "individual", net: [9100] },
+    { id: "e2e_pr_3", month: "2026-09", kind: "bulk", net: [20500, 18000] },
+    { id: "e2e_pr_4", month: "2026-09", kind: "individual", net: [9050] },
+    { id: "e2e_pr_5", month: "2026-08", kind: "bulk", net: [20400, 17900, 9000] },
+  ].map((r, i) => ({
+    id: r.id,
+    academicYearCode: AY_CURRENT,
+    month: r.month,
+    dayCount: 30,
+    kind: r.kind as PayrollRun["kind"],
+    status: "draft",
+    lines: r.net.map((net, j) => {
+      const s = staff[j]!;
+      return normalizePayrollLine({ staffId: s.id, empCode: s.empCode, fullName: s.fullName, gross: net, netPay: net });
+    }),
+    createdBy: "E2E seed",
+    createdAt: `${r.month}-2${i}T05:00:00.000Z`,
+    submittedBy: "",
+    submittedAt: "",
+    approvedBy: "",
+    approvedAt: "",
+    postedBy: "",
+    postedAt: "",
+    paidBy: "",
+    paidAt: "",
+    remark: "",
+    submissionNote: "",
+    rejectionNote: "",
+    rejectedBy: "",
+    rejectedAt: "",
+    lockVersion: 0,
+  }));
+  return { version: 2, runs, audit: [] };
+}
+
+/**
+ * Automation runs (Masters → Automation → Recent runs), newest first like
+ * the store keeps them. One sits on the IST month boundary: 20:00Z on 30 Sep
+ * is 01:30 on 1 Oct in India, so it is an OCTOBER run.
+ */
+function buildAutomationRuns(): AutomationState {
+  const at = [
+    "2026-10-12T04:30:00.000Z",
+    "2026-10-05T04:30:00.000Z",
+    "2026-09-30T20:00:00.000Z",
+    "2026-09-20T04:30:00.000Z",
+    "2026-09-10T04:30:00.000Z",
+    "2026-08-15T04:30:00.000Z",
+  ];
+  const runs: AutomationRun[] = at.map((t, i) => ({
+    id: `e2e_ar_${i + 1}`,
+    ruleId: "e2e_rule_fee_reminder",
+    status: "completed",
+    scheduledFor: t,
+    startedAt: t,
+    finishedAt: t,
+    approvalId: "",
+    stats: { proposed: 10 + i, approved: 10 + i, dispatched: 10 + i, failed: 0 },
+    error: "",
+  }));
+  return { version: 1, rules: [], approvals: [], runs, lastTickAt: "" };
+}
+
 // ── The whole school, and what a test should see ─────────────────────────
 
 export type E2eFixture = {
@@ -455,6 +533,10 @@ export type E2eFixture = {
   moduleRegistry: ModuleRegistryState;
   timetable: TimetableState;
   sis: { households: Household[]; students: SisStudent[] };
+  /** Payroll runs over three months (Payroll → Payroll runs). */
+  payroll: PayrollState;
+  /** Automation runs over three IST months (Masters → Automation). */
+  automation: AutomationState;
   /**
    * office — Office role by Masters → Roles assignment (Masters: view only);
    * principal — the Principal (built-in principal role: may edit Masters; the
@@ -528,6 +610,8 @@ export function buildFixture(): E2eFixture {
     moduleRegistry: buildModuleRegistry(),
     timetable: buildTimetable(),
     sis,
+    payroll: buildPayrollRuns(staff),
+    automation: buildAutomationRuns(),
     sessions: {
       office: session(OFFICE_STAFF, "office"),
       principal: session(PRINCIPAL_STAFF, "principal"),
