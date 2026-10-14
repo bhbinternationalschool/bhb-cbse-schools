@@ -324,6 +324,7 @@ SELFTESTS=(
   test:village-market
   test:lead-score
   test:fuel-expense-line
+  test:fuel-two-way
   test:vendor-history
   test:site-seo
   test:approval-gate

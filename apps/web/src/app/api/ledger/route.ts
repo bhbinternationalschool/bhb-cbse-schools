@@ -96,6 +96,14 @@ import {
 import type { VoucherFilter } from "@/lib/ledger/voucherFilter";
 import type { AmendLine } from "@/lib/ledger/voucherAmend";
 import type { LedgerVoucherInput } from "@/lib/ledger/types";
+import {
+  fuelFillsOnVoucher,
+  postAccountsFuel,
+  type AccountsFuelFill,
+} from "@/lib/transportFuelRegister.server";
+import { loadTransportDesk } from "@/lib/transportBoardingLog.server";
+import { vehicleFuelOptions } from "@/lib/transport";
+import { isFuelAccount } from "@/lib/fuelExpenseLine";
 
 export const runtime = "nodejs";
 
@@ -127,7 +135,16 @@ export async function GET(req: Request) {
 }
 
 type PostBody =
-  | { action: "post"; voucher: LedgerVoucherInput }
+  | {
+      action: "post";
+      voucher: LedgerVoucherInput;
+      /**
+       * Fuel lines of a multi-line expense voucher, each naming the voucher
+       * line it sits on. Present → the voucher and the fuel register fills
+       * are written together (transport_fuel_fill_post, one transaction).
+       */
+      fuelFills?: AccountsFuelFill[];
+    }
   | { action: "mirror"; voucher: LedgerVoucherInput }
   | { action: "reverse"; voucherId: string; reason?: string; date?: string }
   | { action: "lock"; period: string; status: "open" | "locked" | "closed"; note?: string }
@@ -229,6 +246,24 @@ type PostBody =
       note?: string;
       paidOn?: string;
     };
+
+/**
+ * A voucher that carries fuel register fills is voided and entered again,
+ * never amended or re-headed: either would leave Transport → Fuel tied to
+ * money the book no longer says went on fuel. Voiding is fine — the reversal
+ * voids its fills in the same transaction (migration 20261014150000).
+ */
+async function refuseFuelVoucherChange(voucherId: string): Promise<NextResponse | null> {
+  const fills = await fuelFillsOnVoucher(voucherId);
+  if (!fills.length) return null;
+  return NextResponse.json(
+    {
+      ok: false,
+      error: `This voucher carries ${fills.length} fuel fill(s) in Transport → Fuel. Void it and enter the fuel again — the fills follow the void.`,
+    },
+    { status: 409 },
+  );
+}
 
 export async function POST(req: Request) {
   let body: PostBody;
@@ -372,7 +407,37 @@ export async function POST(req: Request) {
       const res = await ensureLedgerMasters();
       return NextResponse.json(res, { status: res.ok ? 200 : 502 });
     }
-    case "post":
+    case "post": {
+      if (Array.isArray(body.fuelFills) && body.fuelFills.length) {
+        const transport = await loadTransportDesk();
+        const res = await postAccountsFuel({
+          voucher: { ...body.voucher, createdBy: body.voucher.createdBy || actor },
+          fills: body.fuelFills.map((f) => ({ ...f, fillDate: body.voucher.date })),
+          vehicles: transport.vehicles.map((v) => ({ id: v.id, fuels: vehicleFuelOptions(v) })),
+          actor,
+          staffId: (auth.ctx.session.staffId || "").trim(),
+        });
+        return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+      }
+      // Fuel without its fill is the drift this closes: money on a fuel head
+      // with no vehicle, quantity or rate behind it, that Transport → Fuel
+      // never sees. Every entry form sends the fill; a hand-built voucher on
+      // a fuel head is refused with the way in.
+      const chart = await ledgerListAccounts();
+      const fuelCodes = new Set(chart.filter((a) => isFuelAccount(a)).map((a) => a.code));
+      const fuelLine = (body.voucher?.lines ?? []).find((l) => fuelCodes.has(l.accountCode) && (l.debitPaise ?? 0) > 0);
+      if (fuelLine) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `${fuelLine.accountCode} is a fuel head — enter fuel with its vehicle, quantity and rate (Accounts → Quick or Multi-line expense, or Transport → Fuel) so the fuel register and the book carry the same fill.`,
+          },
+          { status: 422 },
+        );
+      }
+      const res = await ledgerPost({ ...body.voucher, createdBy: body.voucher.createdBy || actor });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
     case "mirror": {
       const res = await ledgerPost({ ...body.voucher, createdBy: body.voucher.createdBy || actor });
       return NextResponse.json(res, { status: res.ok ? 200 : 422 });
@@ -546,6 +611,8 @@ export async function POST(req: Request) {
     case "amend-voucher": {
       // Void, then post the corrected voucher. The only way to change a head,
       // a party, an amount or a date on something already in the book.
+      const fuelRefusal = await refuseFuelVoucherChange(String(body.voucherId ?? ""));
+      if (fuelRefusal) return fuelRefusal;
       const res = await ledgerAmendVoucher({
         voucherId: String(body.voucherId ?? ""),
         lines: Array.isArray(body.lines) ? body.lines : [],
@@ -560,6 +627,8 @@ export async function POST(req: Request) {
       // Posts a journal moving one line to another head. Never edits the
       // original: the book is append-only, so the mistake and the correction
       // both stay on the record.
+      const fuelRefusal = await refuseFuelVoucherChange(String(body.voucherId ?? ""));
+      if (fuelRefusal) return fuelRefusal;
       const res = await ledgerReclassifyHead({
         voucherId: String(body.voucherId ?? ""),
         lineIndex: Number(body.lineIndex ?? -1),

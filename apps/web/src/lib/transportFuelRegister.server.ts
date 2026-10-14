@@ -13,7 +13,7 @@ import "server-only";
 
 import { ApiError } from "@/lib/api/v1/errors";
 import { NON_FLEET_VEHICLE_REFS } from "@/lib/fleetEdgeAnalytics";
-import { ledgerListAccounts, ledgerPost, ledgerReverse } from "@/lib/ledger/ledger.server";
+import { ledgerListAccounts } from "@/lib/ledger/ledger.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
 import {
@@ -28,7 +28,17 @@ import {
   type FuelPaymentMode,
   type FuelUnit,
   type FuelVoucherLine,
+  istDayOf,
+  unitForFuel,
 } from "@/lib/transportFuelRegister";
+import {
+  parseFuelNarration,
+  planFuelReconcile,
+  type FuelReconcilePlan,
+  type ReconcileLine,
+} from "@/lib/fuelLog";
+import { normalizeVehicleKey } from "@/lib/fleetEdgeLink";
+import { fuelAmountPaise } from "@/lib/fuelExpenseLine";
 
 async function tenant() {
   const ctx = await getServerTenantContext();
@@ -45,6 +55,8 @@ export type RegisterFill = {
   quantity: number;
   unit: FuelUnit;
   fuelType: FuelKind;
+  /** Rate per kg / litre in paise when the rate was entered; amount = round(rate × qty). */
+  ratePaise: number | null;
   amountPaise: number;
   odometerKm: number | null;
   receiptPath: string;
@@ -54,7 +66,7 @@ export type RegisterFill = {
   paymentMode: "" | FuelPaymentMode;
   bankAccountId: string;
   paymentRef: string;
-  entrySource: "app" | "web" | "desk_import";
+  entrySource: "app" | "web" | "desk_import" | "accounts";
   deskEntryId: string;
   voucherId: string | null;
   voucherNo: string;
@@ -71,7 +83,7 @@ export type RegisterFill = {
 };
 
 const REGISTER_COLS =
-  "id, vehicle_id, fill_date, quantity, unit, fuel_type, amount_paise, odometer_km, receipt_path, note, dealer_name, bill_no, payment_mode, bank_account_id, payment_ref, entry_source, desk_entry_id, voucher_id, voucher_no, voucher_origin, posted_at, posted_by_name, reversal_voucher_no, created_by_staff_id, created_by_name, created_at, voided_at, voided_by_name, void_reason";
+  "id, vehicle_id, fill_date, quantity, unit, fuel_type, rate_paise, amount_paise, odometer_km, receipt_path, note, dealer_name, bill_no, payment_mode, bank_account_id, payment_ref, entry_source, desk_entry_id, voucher_id, voucher_no, voucher_origin, posted_at, posted_by_name, reversal_voucher_no, created_by_staff_id, created_by_name, created_at, voided_at, voided_by_name, void_reason";
 
 function numOrNull(v: unknown): number | null {
   if (v == null || v === "") return null;
@@ -91,6 +103,7 @@ function rowToFill(r: Record<string, unknown>): RegisterFill {
     quantity: Number(r.quantity),
     unit: r.unit === "kg" ? "kg" : "litre",
     fuelType: fuel === "cng" || fuel === "petrol" || fuel === "diesel" ? fuel : "",
+    ratePaise: numOrNull(r.rate_paise),
     amountPaise: Number(r.amount_paise),
     odometerKm: numOrNull(r.odometer_km),
     receiptPath: String(r.receipt_path ?? ""),
@@ -100,7 +113,7 @@ function rowToFill(r: Record<string, unknown>): RegisterFill {
     paymentMode: mode === "cash" || mode === "bank" || mode === "upi" || mode === "on_account" ? mode : "",
     bankAccountId: String(r.bank_account_id ?? ""),
     paymentRef: String(r.payment_ref ?? ""),
-    entrySource: src === "web" || src === "desk_import" ? src : "app",
+    entrySource: src === "web" || src === "desk_import" || src === "accounts" ? src : "app",
     deskEntryId: String(r.desk_entry_id ?? ""),
     voucherId: r.voucher_id ? String(r.voucher_id) : null,
     voucherNo: String(r.voucher_no ?? ""),
@@ -176,6 +189,7 @@ export async function addOfficeFill(input: {
   quantity: number;
   unit: FuelUnit;
   fuelType: FuelKind;
+  ratePaise?: number | null;
   amountPaise: number;
   odometerKm: number | null;
   receiptPath: string;
@@ -198,6 +212,7 @@ export async function addOfficeFill(input: {
       quantity: input.quantity,
       unit: input.unit,
       fuel_type: input.fuelType,
+      rate_paise: input.ratePaise ?? null,
       amount_paise: input.amountPaise,
       odometer_km: input.odometerKm,
       receipt_path: input.receiptPath,
@@ -261,6 +276,17 @@ export async function amendFillDetails(input: {
   note: string;
   name: string;
 }): Promise<RegisterFill> {
+  const before = await readRegisterFill(input.id);
+  // In the book, quantity is part of the money (the voucher line says "7.55 kg
+  // @ ₹92.67") — the table refuses the change (migration 20261014150000), so
+  // say why in words: void and enter again.
+  if (before?.voucherId && Math.abs(before.quantity - input.quantity) > 0.0001) {
+    throw new ApiError(
+      "conflict",
+      `This fill is in the book as ${before.voucherNo}; its quantity changes only by voiding it and entering it again.`,
+      409,
+    );
+  }
   const { sb, tenantId } = await tenant();
   const { data, error } = await sb
     .from("transport_fuel_fills")
@@ -345,34 +371,16 @@ export async function postFillToAccounts(input: {
   });
   if (!built.ok) throw new ApiError("bad_request", built.error, 400);
 
-  const res = await ledgerPost({ ...built.voucher, createdBy: input.actor });
+  // Voucher and stamp in ONE transaction (transport_fuel_fill_post, migration
+  // 20261014150000): either the book and the fill both say "posted", or
+  // neither does. Still keyed (transport_fuel_fill, fill id), so a retry or a
+  // second press lands on the same voucher.
+  const res = await rpcFuelPost({
+    voucher: { ...built.voucher, createdBy: input.actor },
+    fills: [{ id: fill.id, line_no: 1, existing: true }],
+    actor: input.actor,
+  });
   if (!res.ok) throw new ApiError("server_error", `The book refused the fuel voucher: ${res.error}`, 422);
-
-  const { sb, tenantId } = await tenant();
-  const { data, error } = await sb
-    .from("transport_fuel_fills")
-    .update({
-      voucher_id: res.voucherId,
-      voucher_no: res.voucherNo,
-      voucher_origin: "posted",
-      posted_at: new Date().toISOString(),
-      posted_by_name: input.actor.slice(0, 120),
-    })
-    .eq("tenant_id", tenantId)
-    .eq("id", fill.id)
-    .is("voucher_id", null)
-    .select(REGISTER_COLS);
-  if (error) {
-    // The voucher stands (it is real money and idempotent); the next Post
-    // press lands on the same voucher and stamps the row.
-    throw new ApiError(
-      "server_error",
-      `Posted ${res.voucherNo}, but the fill could not be marked: ${error.message}. Press Post again — it will not post twice.`,
-      502,
-    );
-  }
-  const row = (data ?? [])[0] as Record<string, unknown> | undefined;
-  if (row) return rowToFill(row);
   const now = await readRegisterFill(fill.id);
   if (!now) throw new ApiError("not_found", "Fuel entry not found", 404);
   return now;
@@ -391,44 +399,23 @@ export async function voidFillWithVoucher(input: {
 }): Promise<{ fill: RegisterFill; warning: string }> {
   const { fill } = input;
   if (fill.voided) throw new ApiError("conflict", "This entry was already voided.", 409);
-  let reversalNo = "";
-  let warning = "";
-  if (fill.voucherId && fill.voucherOrigin === "posted") {
-    const rev = await ledgerReverse({
-      voucherId: fill.voucherId,
-      reason: `Fuel entry voided in Transport — ${input.reason}`.slice(0, 300),
-      createdBy: input.actor,
-    });
-    if (!rev.ok) throw new ApiError("server_error", `Could not reverse ${fill.voucherNo}: ${rev.error}. Nothing was voided.`, 422);
-    reversalNo = rev.voucherNo;
-  } else if (fill.voucherId && fill.voucherOrigin === "adopted") {
-    warning = `${fill.voucherNo} was keyed in Accounts and is NOT reversed by this — correct it in Accounts.`;
-  }
+  // One transaction (transport_fuel_fill_void): the voucher is reversed and
+  // the fill voided together. A voucher that is this fill and nothing else is
+  // reversed whoever keyed it; one that also carries other lines is refused
+  // with its number — it is voided in Accounts, which voids this fill too.
   const { sb, tenantId } = await tenant();
-  const { data, error } = await sb
-    .from("transport_fuel_fills")
-    .update({
-      voided_at: new Date().toISOString(),
-      voided_by_name: input.actor.slice(0, 120),
-      void_reason: input.reason.slice(0, 300),
-      ...(reversalNo ? { reversal_voucher_no: reversalNo } : {}),
-    })
-    .eq("tenant_id", tenantId)
-    .eq("id", fill.id)
-    .is("voided_at", null)
-    .select(REGISTER_COLS);
-  if (error) {
-    throw new ApiError(
-      "server_error",
-      reversalNo
-        ? `Reversed ${fill.voucherNo} as ${reversalNo}, but the fill could not be marked void: ${error.message}. Void again — it will not reverse twice.`
-        : `Could not void the fill: ${error.message}`,
-      502,
-    );
-  }
-  const row = (data ?? [])[0] as Record<string, unknown> | undefined;
-  if (!row) throw new ApiError("conflict", "This entry was already voided.", 409);
-  return { fill: rowToFill(row), warning };
+  const { data, error } = await sb.rpc("transport_fuel_fill_void", {
+    p_tenant_id: tenantId,
+    p_id: fill.id,
+    p_reason: input.reason.slice(0, 300),
+    p_actor: input.actor.slice(0, 120),
+  });
+  if (error) throw new ApiError("server_error", `Could not void the fill: ${error.message}`, 502);
+  const r = (data ?? {}) as { ok?: boolean; error?: string };
+  if (!r.ok) throw new ApiError("conflict", r.error || "The fill could not be voided", 409);
+  const now = await readRegisterFill(fill.id);
+  if (!now) throw new ApiError("not_found", "Fuel entry not found", 404);
+  return { fill: now, warning: "" };
 }
 
 /* ─── the Vehicle Fuel lines already in the book ───────────── */
@@ -592,6 +579,15 @@ export async function importDeskFuelLogs(input: {
       entry_source: "desk_import",
       desk_entry_id: f.deskEntryId,
       created_by_name: f.createdByName.slice(0, 120),
+      // Every row carries every column: a batch upsert sends the union of the
+      // rows' keys and fills a missing one with NULL, so a "not in accounts"
+      // row next to a linked one would send voucher_no = NULL and the whole
+      // import was refused (found rehearsing 14 Oct 2026).
+      voucher_id: null,
+      voucher_no: "",
+      voucher_line_id: null,
+      voucher_origin: "",
+      posted_by_name: "",
       ...(line
         ? {
             voucher_id: line.voucherId,
@@ -657,4 +653,315 @@ export async function readFleetEdgeMonth(
     fuelUsed: r.fuel,
   }));
   return { ok: true, byVehicle: fleetEdgeMonthByVehicle({ month, vehicles, rows, ignoreRefs: NON_FLEET_VEHICLE_REFS }) };
+}
+
+/* ─── one-transaction posting (migration 20261014150000) ───── */
+
+type RpcLine = {
+  accountCode: string;
+  debitPaise: number;
+  creditPaise: number;
+  narration?: string;
+  subledgerKind?: string;
+  subledgerId?: string;
+  costCentreCode?: string;
+  party?: { kind: string; externalId: string; name?: string };
+  instrument?: { mode?: string; ref?: string; date?: string };
+};
+
+/** The ledger_post row shape — same mapping as ledger.server's lineToRpc. */
+function lineToRpc(line: RpcLine) {
+  return {
+    account_code: line.accountCode,
+    debit_paise: Math.round(line.debitPaise || 0),
+    credit_paise: Math.round(line.creditPaise || 0),
+    narration: line.narration ?? "",
+    subledger_kind: line.subledgerKind ?? "",
+    subledger_id: line.subledgerId ?? "",
+    cost_centre_code: line.costCentreCode ?? "",
+    ...(line.party
+      ? { party: { kind: line.party.kind, external_id: line.party.externalId, name: line.party.name ?? "" } }
+      : {}),
+    ...(line.instrument
+      ? { instrument: { mode: line.instrument.mode ?? "", ref: line.instrument.ref ?? "", date: line.instrument.date ?? null } }
+      : {}),
+  };
+}
+
+export type FuelPostResult =
+  | { ok: true; created: boolean; voucherId: string; voucherNo: string; fillIds: string[] }
+  | { ok: false; error: string };
+
+/**
+ * transport_fuel_fill_post: ledger_post and the fills in one transaction.
+ * `fills[].line_no` is the 1-based voucher line each fill sits on.
+ */
+async function rpcFuelPost(input: {
+  voucher: {
+    voucherType: string;
+    date: string;
+    narration?: string;
+    sourceType?: string;
+    sourceId?: string;
+    createdBy?: string;
+    lines: RpcLine[];
+  };
+  fills: Record<string, unknown>[];
+  actor: string;
+}): Promise<FuelPostResult> {
+  const { sb, tenantId } = await tenant();
+  const { data, error } = await sb.rpc("transport_fuel_fill_post", {
+    p_tenant_id: tenantId,
+    p_voucher: {
+      voucher_type: input.voucher.voucherType,
+      date: input.voucher.date,
+      narration: input.voucher.narration ?? "",
+      source_type: input.voucher.sourceType ?? "",
+      source_id: input.voucher.sourceId ?? "",
+      created_by: input.voucher.createdBy || input.actor,
+      lines: input.voucher.lines.map(lineToRpc),
+    },
+    p_fills: input.fills,
+    p_actor: input.actor.slice(0, 120),
+  });
+  if (error) return { ok: false, error: error.message };
+  const r = (data ?? {}) as { ok?: boolean; error?: string; created?: boolean; voucher_id?: string; voucher_no?: string; fill_ids?: string };
+  if (!r.ok) {
+    const msg = r.error || "the book refused the fuel voucher";
+    return {
+      ok: false,
+      error: /no ledger account with code/i.test(msg)
+        ? `${msg} — if it was recently added to the chart, run the ensure-masters action to install it`
+        : msg,
+    };
+  }
+  return {
+    ok: true,
+    created: r.created !== false,
+    voucherId: String(r.voucher_id ?? ""),
+    voucherNo: String(r.voucher_no ?? ""),
+    fillIds: String(r.fill_ids ?? "").split(",").filter(Boolean),
+  };
+}
+
+/** One fuel fill keyed in Accounts, as the register stores it. */
+export type AccountsFuelFill = {
+  id: string;
+  /** 1-based voucher line the fill's debit sits on. */
+  lineNo: number;
+  vehicleId: string;
+  fillDate: string;
+  fuelType: FuelKind;
+  quantity: number;
+  ratePaise: number;
+  odometerKm: number | null;
+  dealerName: string;
+  billNo: string;
+  paymentMode: FuelPaymentMode;
+  bankAccountId: string;
+  paymentRef: string;
+  note: string;
+};
+
+/**
+ * Accounts → Quick / Multi-line expense with fuel: the voucher is the form's
+ * (it may carry other heads), and each fuel line becomes a register fill in
+ * the SAME transaction — so the book and Transport → Fuel never disagree about
+ * what was bought. The amount is rate × qty (fuelAmountPaise), and the SQL
+ * checks the voucher line carries exactly that.
+ */
+export async function postAccountsFuel(input: {
+  voucher: { voucherType: string; date: string; narration?: string; createdBy?: string; lines: RpcLine[] };
+  fills: AccountsFuelFill[];
+  vehicles: { id: string; fuels: { fuelType: string }[] }[];
+  actor: string;
+  staffId: string;
+}): Promise<FuelPostResult> {
+  if (!input.fills.length) return { ok: false, error: "No fuel lines to post" };
+  for (const f of input.fills) {
+    const v = input.vehicles.find((x) => x.id === f.vehicleId);
+    if (!v) return { ok: false, error: `Vehicle ${f.vehicleId || "(none chosen)"} is not on the fleet` };
+    if (!v.fuels.some((o) => o.fuelType === f.fuelType)) {
+      return { ok: false, error: `That vehicle runs on ${v.fuels.map((o) => o.fuelType).join(" or ")}, not ${f.fuelType || "this fuel"}` };
+    }
+    if (!(f.quantity > 0) || f.quantity > 2000) return { ok: false, error: "Enter the quantity filled" };
+    if (!(f.ratePaise > 0)) return { ok: false, error: "Enter the rate per kg / litre" };
+    if (f.paymentMode === "on_account" && !f.dealerName.trim()) {
+      return { ok: false, error: "Fuel on credit is owed to someone — name the dealer." };
+    }
+  }
+  return rpcFuelPost({
+    voucher: input.voucher,
+    actor: input.actor,
+    fills: input.fills.map((f) => {
+      const qty = Math.round(f.quantity * 100) / 100;
+      return {
+        id: f.id,
+        line_no: f.lineNo,
+        vehicle_id: f.vehicleId,
+        fill_date: f.fillDate,
+        quantity: qty,
+        unit: unitForFuel(f.fuelType),
+        fuel_type: f.fuelType,
+        rate_paise: Math.round(f.ratePaise),
+        amount_paise: fuelAmountPaise(f.ratePaise, qty),
+        odometer_km: f.odometerKm,
+        dealer_name: f.dealerName.trim(),
+        bill_no: f.billNo.trim(),
+        payment_mode: f.paymentMode,
+        bank_account_id: f.paymentMode === "bank" || f.paymentMode === "upi" ? f.bankAccountId : "",
+        payment_ref: f.paymentMode === "bank" || f.paymentMode === "upi" ? f.paymentRef.trim() : "",
+        note: f.note.trim(),
+        entry_source: "accounts",
+        created_by_staff_id: input.staffId,
+        created_by_name: input.actor,
+      };
+    }),
+  });
+}
+
+/** The fills a voucher carries — amending or re-heading it would cut them loose. */
+export async function fuelFillsOnVoucher(voucherId: string): Promise<{ id: string; vehicleId: string }[]> {
+  const c = await getServerTenantContext();
+  if (!c || !voucherId) return [];
+  const { data } = await c.sb
+    .from("transport_fuel_fills")
+    .select("id, vehicle_id")
+    .eq("tenant_id", c.tenantId)
+    .eq("voucher_id", voucherId);
+  return ((data ?? []) as { id: string; vehicle_id: string }[]).map((r) => ({ id: r.id, vehicleId: r.vehicle_id }));
+}
+
+/** The last odometer each vehicle showed at a live fill — the entry forms' sanity check. */
+export async function lastOdometerByVehicle(): Promise<Record<string, number>> {
+  const res = await readRegisterFills({});
+  const out: Record<string, number> = {};
+  if (!res.ok) return out;
+  for (const f of res.fills) {
+    if (f.voided || f.odometerKm == null) continue;
+    out[f.vehicleId] = Math.max(out[f.vehicleId] ?? 0, f.odometerKm);
+  }
+  return out;
+}
+
+/* ─── reconcile: old desk refills ↔ the book ───────────────── */
+
+export type FuelReconcileReport = FuelReconcilePlan & {
+  deskEntries: number;
+  liveLines: number;
+  liveLinePaise: number;
+  /** Imported from the old tab but in no voucher — candidates to void. */
+  importedNotInAccounts: RegisterFill[];
+};
+
+/**
+ * Read-only: the old desk fuel log, the register and every live Vehicle Fuel
+ * line, paired by the import's own rule. Writes nothing.
+ */
+export async function fuelReconcileReport(input: {
+  deskLogs: { id: string; vehicleId: string; filledAt: string; qty: number; amountPaise: number }[];
+  vehicles: { id: string; registrationNo: string }[];
+}): Promise<FuelReconcileReport> {
+  const [fills, book] = await Promise.all([readRegisterFills({}), readFuelVoucherLines()]);
+  if (!fills.ok) throw new ApiError("server_error", `Could not read the register: ${fills.error}`, 503);
+  if (!book.ok) throw new ApiError("server_error", `Could not read the Vehicle Fuel vouchers: ${book.error}`, 503);
+  const { sb, tenantId } = await tenant();
+  const linkedRes = await fetchAllPages<Record<string, unknown>>((from, to) =>
+    sb
+      .from("transport_fuel_fills")
+      .select("id, voucher_line_id")
+      .eq("tenant_id", tenantId)
+      .not("voucher_line_id", "is", null)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  if (linkedRes.error) throw new ApiError("server_error", `Could not read linked vouchers: ${linkedRes.error}`, 503);
+  const linked = new Set(linkedRes.rows.map((r) => String(r.voucher_line_id)));
+  // A fill tied to a voucher by voucher_id alone (posted before line ids were
+  // kept) still holds that voucher's fuel line.
+  const linkedVouchers = new Set(fills.fills.filter((f) => f.voucherId && !f.voided).map((f) => f.voucherId!));
+  const imported = new Set(fills.fills.map((f) => f.deskEntryId).filter(Boolean));
+  const lines: ReconcileLine[] = book.lines.map((l) => ({
+    ...l,
+    linked: linked.has(l.lineId) || linkedVouchers.has(l.voucherId),
+  }));
+  const plan = planFuelReconcile({
+    refills: input.deskLogs.map((d) => ({
+      id: String(d.id),
+      vehicleId: String(d.vehicleId),
+      fillDate: istDayOf(String(d.filledAt ?? "")),
+      qty: Number(d.qty) || 0,
+      amountPaise: Math.round(Number(d.amountPaise) || 0),
+      imported: imported.has(String(d.id)),
+    })),
+    lines,
+    vehicles: input.vehicles,
+  });
+  const live = book.lines.filter((l) => !l.reversed);
+  return {
+    ...plan,
+    deskEntries: input.deskLogs.length,
+    liveLines: live.length,
+    liveLinePaise: live.reduce((n, l) => n + l.debitPaise, 0),
+    importedNotInAccounts: fills.fills.filter((f) => f.entrySource === "desk_import" && !f.voucherId && !f.voided),
+  };
+}
+
+/**
+ * For live Vehicle Fuel lines that have no fill: write the fill from the
+ * line itself — vehicle by the plate in the narration, fuel, quantity and
+ * rate as the narration states them, the line's own amount — tied to that
+ * line ('adopted': the money was keyed in Accounts and is not re-posted).
+ * Refuses a line whose narration names no fleet vehicle, or whose rate ×
+ * quantity does not give its amount.
+ */
+export async function createFillsFromVoucherLines(input: {
+  lineIds: string[];
+  vehicles: { id: string; registrationNo: string; name: string }[];
+  actor: string;
+}): Promise<{ done: number; failed: { key: string; error: string }[] }> {
+  const book = await readFuelVoucherLines();
+  if (!book.ok) throw new ApiError("server_error", `Could not read the Vehicle Fuel vouchers: ${book.error}`, 503);
+  const { sb, tenantId } = await tenant();
+  const failed: { key: string; error: string }[] = [];
+  let done = 0;
+  for (const lineId of input.lineIds) {
+    const l = book.lines.find((x) => x.lineId === lineId);
+    if (!l || l.reversed) {
+      failed.push({ key: lineId, error: "not a live Vehicle Fuel line" });
+      continue;
+    }
+    const p = parseFuelNarration(l.narration);
+    const key = p ? normalizeVehicleKey(p.plate) : "";
+    const v = key ? input.vehicles.find((x) => normalizeVehicleKey(x.registrationNo) === key) : undefined;
+    if (!p || !v) {
+      failed.push({ key: lineId, error: `${l.voucherNo}: the narration does not name a fleet vehicle, fuel, quantity and rate` });
+      continue;
+    }
+    const fuelType = p.fuelType === "cng" || p.fuelType === "petrol" || p.fuelType === "diesel" ? p.fuelType : "";
+    const rateOk = fuelAmountPaise(p.ratePaise, p.qty) === l.debitPaise;
+    const { error } = await sb.from("transport_fuel_fills").insert({
+      id: `vl_${lineId.replace(/-/g, "").slice(0, 24)}`,
+      tenant_id: tenantId,
+      vehicle_id: v.id,
+      fill_date: l.voucherDate,
+      quantity: p.qty,
+      unit: unitForFuel(fuelType),
+      fuel_type: fuelType,
+      rate_paise: rateOk ? p.ratePaise : null,
+      amount_paise: l.debitPaise,
+      payment_mode: "",
+      entry_source: "accounts",
+      note: `Created from ${l.voucherNo} in the fuel reconcile`,
+      created_by_name: input.actor.slice(0, 120),
+      voucher_id: l.voucherId,
+      voucher_no: l.voucherNo,
+      voucher_line_id: l.lineId,
+      voucher_origin: "adopted",
+      posted_by_name: "Keyed in Accounts",
+    });
+    if (error) failed.push({ key: lineId, error: error.message });
+    else done += 1;
+  }
+  return { done, failed };
 }

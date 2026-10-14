@@ -407,6 +407,7 @@ jobs:
           npm run test:village-market
           npm run test:lead-score
           npm run test:fuel-expense-line
+          npm run test:fuel-two-way
           npm run test:vendor-history
           npm run test:site-seo
           npm run test:approval-gate
@@ -781,6 +782,12 @@ jobs:
       # data is read.
       - name: SQL test — payroll per-date pay, recall and re-post
         run: bash scripts/e2e-stack.sh sql-test supabase/tests/payroll_per_date_pay.test.sql
+
+      # A fuel fill and its voucher land together; voiding in Transport
+      # reverses the voucher, reversing in Accounts voids the fill; rate × qty
+      # is the table's rule (14 Oct 2026).
+      - name: SQL test — fuel register tied to the book both ways
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/transport_fuel_two_way.test.sql
 
       # NEXT_PUBLIC_* are baked in at build time, so the build reads
       # apps/web/.env.e2e (127.0.0.1 URL, this run's anon key) and nothing else.
