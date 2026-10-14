@@ -575,7 +575,14 @@ editVia('editor')` passes (the old Masters editor's `masters_write_slices` alrea
 
 *(Built 14 Oct 2026 — migration `20261014220000_data_layer_write_kernel.sql`: **the director
 applies it to production before this deploys**. Without it the new code fails closed: a kernel
-write answers 503 "the server's write kernel is not installed", never an old path.)*
+write answers 503 "the server's write kernel is not installed", never an old path. **Apply it
+immediately before the deploy, not hours ahead:** the live code's UDISE+ sheet caller sends no
+base, so between the migration and the deploy every UDISE+ upload after the first is refused
+("Saved in this browser only"). The reverse order is safe — this code against the old database:
+the fixed caller's bases are accepted by v2, teacher reach and delete approval live in the route,
+and only `masters.*` writes (no caller yet) answer 503.)*
+Also in v3: a new id is locked against a concurrent insert, and an id that belongs to another
+school is refused (42501) instead of being updated.
 **What exists.**
 - `desk_write_guarded` v3: a null base on a row that exists → `conflict`, `reason:'unversioned'`
   (with the stored row; 409 at the route); a base on an absent row → `reason:'deleted'` (an edit
@@ -636,7 +643,7 @@ write answers 503 "the server's write kernel is not installed", never an old pat
   tables directly, not through the kernel (unchanged; it bumps no signal). No mobile or script
   caller.
 
-**Proof.** `supabase/tests/desk_write_guarded.test.sql` (35 checks, rewritten for v3; it fails
+**Proof.** `supabase/tests/desk_write_guarded.test.sql` (37 checks, rewritten for v3; it fails
 on origin/main's v2 at "masters_desk_* not writable", and with the allowlist checks removed at
 "an op without an id is refused", then "the insert bumped sis_sync_meta", then "null base on an
 existing row → unversioned") and `desk_slice_row_write.test.sql` (45 checks; the functions do not
