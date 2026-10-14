@@ -65,7 +65,8 @@ test("a whole-desk POST from a pre-write copy is refused and does not revert or 
       expect(r.status()).toBe(409);
     });
     await test.step("old shape 3: a whole-book save against the old desk revision → 409", async () => {
-      const { sliceStamps: _s, updatedAt: _u, ok: _o, ...book } = desk;
+      const book: Record<string, unknown> = { ...desk };
+      for (const k of ["sliceStamps", "updatedAt", "ok"]) delete book[k];
       const r = await old.page.request.post("/api/school-data/masters-desk", {
         data: { ...book, subjects: oldSubjects, baseUpdatedAt: oldRevision },
       });

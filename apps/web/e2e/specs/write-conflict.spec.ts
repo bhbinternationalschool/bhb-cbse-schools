@@ -20,8 +20,10 @@ async function openEditor(page: Page): Promise<void> {
 }
 
 async function rename(page: Page, to: string): Promise<void> {
-  await page.getByLabel(`New name for ${SUBJECT}`).fill(to);
-  await page.getByRole("button", { name: `Save ${SUBJECT}` }).click();
+  // Within the subject's own row: another subject's id may start with this one's.
+  const item = page.getByTestId(`subject-${SUBJECT}`);
+  await item.getByRole("textbox").fill(to);
+  await item.getByRole("button").click();
 }
 
 const nameOn = (page: Page) => page.getByTestId(`subject-${SUBJECT}`).getByTestId("subject-name");
