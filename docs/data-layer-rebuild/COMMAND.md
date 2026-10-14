@@ -861,7 +861,7 @@ gated. Acceptance: the 01:30 IST BigQuery sync and the watch email run green the
 deploy (named in the PR as a post-deploy check), and every enumerated caller is listed with its
 new endpoint.
 
-*(Built 15 Oct 2026, PR #PRNUM — enumeration only: **no non-browser caller of a bulk desk GET
+*(Built 15 Oct 2026, PR #648 — enumeration only: **no non-browser caller of a bulk desk GET
 exists**, so no `/api/export/*` route was added.)* **What was found.** The premise above (from
 `evidence/review-v1.md` §3.3) was checked caller by caller and is wrong for every one:
 
