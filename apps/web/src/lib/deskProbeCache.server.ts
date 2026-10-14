@@ -104,6 +104,17 @@ export function deskJsonResponse(r: CachedDeskResult): Response {
   return new Response(r.body, { status: 200, headers });
 }
 
+/**
+ * Drop one route's cached body and its probe (data-layer 1.5): a write
+ * through the kernel calls this for the desk it changed, so the next GET on
+ * this instance rebuilds instead of serving the pre-write body for up to the
+ * 5 s probe window. Other instances still rely on their probe.
+ */
+export function clearDeskProbeCache(cacheKey: string): void {
+  probeCache.delete(`probe:${cacheKey}`);
+  responseCache.delete(cacheKey);
+}
+
 /** Test/ops hook. */
 export function clearDeskProbeCaches(): void {
   probeCache.clear();
