@@ -160,6 +160,7 @@
     "test:notice-push": "npx tsx src/lib/noticePush.selftest.ts",
     "test:staff-self-profile": "npx tsx src/lib/staffSelfProfile.selftest.ts",
     "test:attendance-cover": "npx tsx src/lib/attendanceCover.selftest.ts",
+    "test:transport-finance": "npx tsx src/lib/transportFinance.selftest.ts",
     "test:udise-robot-fetch-all": "npx tsx src/lib/udiseRobotFetchAll.selftest.ts",
     "test:staff-otp-mobile": "npx tsx src/lib/staffOtpMobile.selftest.ts",
     "test:accounts-today-tile": "npx tsx src/lib/accountsTodayTile.selftest.ts",

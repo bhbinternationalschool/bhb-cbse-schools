@@ -49,6 +49,7 @@ import { TransportRequestsPanel } from "@/components/transport/TransportRequests
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import { VehicleDocsSummary, VehicleDocumentsPanel } from "@/components/transport/VehicleDocumentsPanel";
 import {
   computeStudentDues,
   formatInr,
@@ -650,6 +651,9 @@ export function TransportWorkspace() {
       ) : (
         <>
           {tab === "dashboard" ? (
+            <VehicleDocsSummary onOpen={() => setTab("compliance")} />
+          ) : null}
+          {tab === "dashboard" ? (
             <ModuleDashboardHost
               moduleId="transport"
               onNavigateTab={(t) => setTab(t as TransportTab)}
@@ -805,7 +809,7 @@ export function TransportWorkspace() {
             <DealersPanel state={state} {...commonPanelProps} />
           ) : null}
           {tab === "finance" ? (
-            <FinancePanel state={state} {...commonPanelProps} />
+            <FinancePanel onOpenCompliance={() => setTab("compliance")} />
           ) : null}
           {tab === "service" ? (
             <ServicePanel
@@ -824,6 +828,14 @@ export function TransportWorkspace() {
               masters={masters}
               {...commonPanelProps}
             />
+          ) : null}
+          {tab === "compliance" ? (
+            <div className="mt-4">
+              <VehicleDocumentsPanel
+                canEdit={canWriteModuleTab(session, masters, "transport", tab)}
+                onFlash={flash}
+              />
+            </div>
           ) : null}
           {tab === "compliance" ? (
             <CompliancePanel

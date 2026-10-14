@@ -34,11 +34,11 @@ export const TRANSPORT_FEATURES: RbacFeatureDef[] = [
     id: "transport.fleet",
     module: "transport",
     label: "Vehicles & compliance",
-    blurb: "Vehicles, insurance and certificate renewals.",
+    blurb: "Vehicles and their papers — insurance, PUC, fitness, permit, road tax and the rest (Compliance tab). Booking a paper's fee also needs Accounts · edit.",
     actions: CRUD,
     slices: ["vehicles", "insurancePolicies", "certificateRenewals"],
     tabs: ["fleet", "compliance"],
-    routes: ["/api/transport/fleet-edge/vehicle-identity"],
+    routes: ["/api/transport/fleet-edge/vehicle-identity", "/api/transport/vehicle-docs"],
   },
   {
     id: "transport.fuel",
@@ -105,6 +105,9 @@ export const TRANSPORT_FEATURES: RbacFeatureDef[] = [
     // serves this function every list the dashboard and the report
     // catalogue (lib/transportReportCatalog) read — TRANSPORT_REPORT_KEYS.
     tabs: ["dashboard", "reports"],
+    // The dashboard's vehicle-papers strip reads this; saving needs edit,
+    // which this function never holds.
+    routes: ["/api/transport/vehicle-docs"],
   },
 ];
 

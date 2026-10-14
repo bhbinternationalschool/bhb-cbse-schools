@@ -393,6 +393,7 @@ SELFTESTS=(
   test:notice-push
   test:staff-self-profile
   test:attendance-cover
+  test:transport-finance
   test:udise-robot-fetch-all
   test:staff-otp-mobile
   test:accounts-today-tile
