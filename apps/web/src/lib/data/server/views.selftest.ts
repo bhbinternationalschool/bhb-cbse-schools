@@ -291,6 +291,9 @@ void (async () => {
     assert.equal(rsData.ownOnly, false, "Settings view: the whole desk");
     assert.equal(rsData.rbac.assignments.length, 2);
     assert.equal(rsData.rbac.audit.length, 1);
+    who = "office";
+    const settings503 = await views.rbacViewGet(req, { ...deps, requireSettingsView: async () => fail(503, "setup unreadable") });
+    assert.equal(settings503.status, 503, "rbac: the Settings check failing (503) is not 'no Settings' — never answered own-only");
     rbacRead = { ok: false, error: "rbac desk read failed" };
     const r503 = await call(views.rbacViewGet);
     assert.equal(r503.status, 503, "rbac: no copy = 503, never the built-in defaults");

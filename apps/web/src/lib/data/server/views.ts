@@ -96,8 +96,11 @@ async function staffOnly(req: Request, deps: ViewDeps): Promise<{ ok: true; ctx:
 // ── masters ───────────────────────────────────────────────────────────────
 
 function mastersBook(state: MastersState): MastersBook {
-  const { staff: _s, departments: _d, designations: _g, ...book } = state;
-  return book;
+  const book: Partial<MastersState> = { ...state };
+  delete book.staff;
+  delete book.departments;
+  delete book.designations;
+  return book as MastersBook;
 }
 
 export async function mastersViewGet(req: Request, deps: ViewDeps): Promise<Response> {

@@ -32,7 +32,8 @@ export const TEACHING_MASTERS_KEYS = [
  * The staff roster, departments and designations are left out entirely.
  */
 export function teachingMastersSubset(book: Record<string, unknown>): Record<string, unknown> {
-  const { version: _v, ...subset } = emptyMastersShell() as unknown as Record<string, unknown>;
+  const subset = { ...emptyMastersShell() } as unknown as Record<string, unknown>;
+  delete subset.version;
   for (const k of TEACHING_MASTERS_KEYS) subset[k] = book[k];
   delete subset.staff;
   delete subset.departments;
