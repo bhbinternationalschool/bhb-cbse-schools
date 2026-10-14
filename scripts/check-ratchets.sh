@@ -160,6 +160,32 @@ count_metric() {
       # filenames, which have no spaces.
       ls "$ROOT/supabase/migrations" 2>/dev/null \
         | grep '\.sql$' | sed 's/_.*//' | sort | uniq -d | wc -l ;;
+    nonbrowser_desk_get)
+      # Data-layer step 3.0 (docs/data-layer-rebuild/COMMAND.md). Phase 3
+      # gates the bulk desk GETs (/api/school-data/*, /api/data/*) to
+      # per-screen browser use and Phase 6 deletes them, so nothing that is
+      # NOT a signed-in browser tab may come to depend on them. On
+      # 15 Oct 2026 the count was 0 everywhere a non-browser caller lives:
+      # the Flutter app (calls /api/v1/* only), the office robot extension
+      # (/api/v1/udise|propel/robot/* only), every script, CI workflow and
+      # deploy file (Cloud Scheduler jobs are created by
+      # scripts/setup-cloud-scheduler.sh and hit POST */tick routes), the
+      # nightly BigQuery sync (reads Postgres directly through
+      # postgresPool, never HTTP), and server code fetching its own
+      # routes. Production logs agreed: no non-browser request of those
+      # paths in the 30 days to 15 Oct. A new caller that needs a bulk read
+      # gets an explicit service-only export route, not a browser desk route.
+      # scripts/e2e* and apps/web/e2e are the local test stack, not callers.
+      {
+        grep -rnE 'api/(school-data|data)/' \
+          "$ROOT/cbse_school_mobile/lib" "$ROOT/extensions" "$ROOT/scripts" \
+          "$ROOT/apps/web/scripts" "$ROOT/.github/workflows" "$ROOT/deploy" \
+          "$ROOT"/cloudbuild*.yaml "$SRC"/lib/bigQuery*.ts \
+          "$SRC/app/api/analytics" 2>/dev/null \
+          | grep -vE '/scripts/(e2e|check-ratchets\.sh|ratchets\.txt)'
+        grep -rnE 'fetch\([^)]*api/(school-data|data)/' "$SRC/app/api" 2>/dev/null
+        grep -rnE 'fetch\([^)]*api/(school-data|data)/' --include='*.server.ts' "$SRC" 2>/dev/null
+      } | wc -l ;;
     *)
       echo "-1" ;;
   esac
