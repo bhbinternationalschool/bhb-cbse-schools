@@ -797,6 +797,16 @@ jobs:
       - name: SQL test — fuel register tied to the book both ways
         run: bash scripts/e2e-stack.sh sql-test supabase/tests/transport_fuel_two_way.test.sql
 
+      # data-layer 1.5: desk_write_guarded v3 — a null base on an existing row
+      # is refused, all-or-none, every applied op bumps its sync_meta.
+      - name: SQL test — desk_write_guarded v3
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/desk_write_guarded.test.sql
+
+      # data-layer 1.5: one slice element / one object slice per call, under a
+      # lock, with a base; masters rows synced in the same transaction.
+      - name: SQL test — desk_slice_row_write / desk_slice_object_write
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/desk_slice_row_write.test.sql
+
       # NEXT_PUBLIC_* are baked in at build time, so the build reads
       # apps/web/.env.e2e (127.0.0.1 URL, this run's anon key) and nothing else.
       - name: Build the app against the stack
