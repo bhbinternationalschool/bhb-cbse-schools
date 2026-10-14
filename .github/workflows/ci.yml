@@ -217,6 +217,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:payroll-setup-sync
 
+      - name: Self-test — payroll adjust table — typed dates, advance ticks, recovery on the ticked advances
+        working-directory: apps/web
+        run: npm run test:payroll-adjust-table
+
       - name: Self-test — Masters function grants, own classes only
         working-directory: apps/web
         run: npm run test:masters-change-auth
