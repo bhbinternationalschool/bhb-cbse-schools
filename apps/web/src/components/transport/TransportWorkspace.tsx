@@ -21,9 +21,9 @@ import { FleetEdgeReport } from "@/components/transport/FleetEdgeReport";
 import { canWriteModuleTab, visibleModuleTabs } from "@/lib/rbac";
 import {
   FleetPanel,
-  FuelPanel,
   RoutesPanel,
 } from "@/components/transport/TransportOpsPanels";
+import { FuelRegisterPanel } from "@/components/transport/FuelRegisterPanel";
 import {
   FleetRosterPanel,
   type RiderAction,
@@ -799,7 +799,7 @@ export function TransportWorkspace() {
             />
           ) : null}
           {tab === "fuel" ? (
-            <FuelPanel state={state} {...commonPanelProps} />
+            <FuelRegisterPanel />
           ) : null}
           {tab === "dealers" ? (
             <DealersPanel state={state} {...commonPanelProps} />

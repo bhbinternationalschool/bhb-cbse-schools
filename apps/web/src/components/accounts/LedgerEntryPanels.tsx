@@ -28,7 +28,6 @@ import {
   expenseTotalPaise,
 } from "@/lib/expenseSpread";
 import {
-  buildFuelRefill,
   checkFuelLine,
   fuelAmountPaise,
   fuelNarration,
@@ -36,7 +35,6 @@ import {
 } from "@/lib/fuelExpenseLine";
 import {
   loadTransport,
-  recordFuelRefill,
   vehicleFuelOptions,
   type FleetVehicle,
 } from "@/lib/transport";
@@ -1058,7 +1056,9 @@ export function QuickExpensePanel({
   // concessions. Money never goes to them by hand, so the quick form does
   // not offer them; the full voucher screen still can when a correction
   // genuinely needs it.
-  const SYSTEM_HEADS = useMemo(() => new Set(["5060", "5065", "5066", "5100"]), []);
+  // 5031 Vehicle Fuel is posted by Transport → Fuel (director, 14 Oct 2026:
+  // "enter once in Transport"); keying it here too would book the fill twice.
+  const SYSTEM_HEADS = useMemo(() => new Set(["5031", "5060", "5065", "5066", "5100"]), []);
   const heads = useMemo(
     () =>
       accounts.filter(
@@ -1281,6 +1281,8 @@ export function QuickExpensePanel({
       <p className="text-[11px] text-[var(--muted)]">
         Head, amount, paid by — the balanced voucher is written for you. For
         anything unusual, the full voucher screen below still does everything.
+        Vehicle fuel is not entered here: record each fill in Transport → Fuel
+        and it posts to 5031 Vehicle Fuel by itself.
       </p>
       <div className="mt-2">
         <LastEntryStrip kind="payment" refreshKey={refreshKey} />
@@ -2198,7 +2200,9 @@ export function MultiLineExpensePanel({
 
   // Same rule as Quick expense: the store's automation owns these codes, so
   // money never goes to them by hand.
-  const SYSTEM_HEADS = useMemo(() => new Set(["5060", "5065", "5066", "5100"]), []);
+  // 5031 Vehicle Fuel is posted by Transport → Fuel (director, 14 Oct 2026:
+  // "enter once in Transport"); keying it here too would book the fill twice.
+  const SYSTEM_HEADS = useMemo(() => new Set(["5031", "5060", "5065", "5066", "5100"]), []);
   const heads = useMemo(
     () =>
       accounts.filter(
@@ -2383,58 +2387,20 @@ export function MultiLineExpensePanel({
         },
       });
       if (res.ok) {
-        // The book has the money; Transport gets the litres. Written only
-        // AFTER the voucher posts, so a refused voucher cannot leave a fuel
-        // log behind claiming a fill that was never paid for. If a refill is
-        // rejected here the voucher still stands — it is real money — and the
-        // failure is said out loud rather than swallowed, because a silent
-        // miss is a mileage figure that is quietly wrong from then on.
+        // Fuel is no longer written to the Transport desk from here: the fuel
+        // register (Transport → Fuel) is the one fuel record and posts its own
+        // vouchers. A fuel-named head other than 5031 still books the money
+        // with the vehicle in the narration.
         const fuelRows = rows.filter((r) => isFuelRow(r));
-        const refillErrors: string[] = [];
-        for (const r of fuelRows) {
-          try {
-            const out = recordFuelRefill(
-              buildFuelRefill({
-                pick: {
-                  vehicleId: r.vehicleId,
-                  fuelType: r.fuelType,
-                  unit: r.fuelUnit,
-                  ratePaisePerUnit: paiseFromRupees(r.fuelRate),
-                  qty: Number(r.fuelQty) || 0,
-                  odometerKm: Number(r.odometer) || 0,
-                },
-                vendorName: r.vendorName,
-                billNo: ref.trim(),
-                filledAt: `${date}T12:00:00.000Z`,
-                paidInFull: totals.duePaise === 0,
-              }),
-            );
-            if (!out.ok) {
-              refillErrors.push(
-                `${vehicleOf(r)?.registrationNo ?? "vehicle"}: ${out.error}`,
-              );
-            }
-          } catch (e) {
-            refillErrors.push(
-              `${vehicleOf(r)?.registrationNo ?? "vehicle"}: ${
-                e instanceof Error ? e.message : "could not record the fill"
-              }`,
-            );
-          }
-        }
-
         setNotice({
-          tone: refillErrors.length ? "bad" : "ok",
+          tone: "ok",
           text:
             `${res.voucherNo ?? "Posted"} — ${formatInr(totals.grandTotalPaise)}` +
             (totals.duePaise > 0
               ? ` · ${formatInr(totals.duePaise)} left owing`
               : " · paid in full") +
-            (fuelRows.length && !refillErrors.length
-              ? ` · ${fuelRows.length} fill(s) logged in Transport`
-              : "") +
-            (refillErrors.length
-              ? ` · POSTED, but the fuel log was NOT written (${refillErrors.join("; ")}) — record it in Transport by hand`
+            (fuelRows.length
+              ? " · vehicle fuel belongs in Transport → Fuel; enter fills there so they count once"
               : ""),
         });
         setRows([blankRow()]);
@@ -2458,7 +2424,8 @@ export function MultiLineExpensePanel({
       <p className="text-[11px] text-[var(--muted)]">
         One trip, one voucher: a head and sub-head per line, with its own
         vendor and tag. Pay all of it or part — whatever is left stays owing to
-        the vendor it belongs to.
+        the vendor it belongs to. Vehicle fuel is entered in Transport → Fuel,
+        which posts it here.
       </p>
       <div className="mt-2">
         <LastEntryStrip kind="payment" refreshKey={refreshKey} />

@@ -80,7 +80,6 @@ export const SESSION_ONLY_ROUTE_BASELINE: readonly string[] = [
   "v1/staff/my-advances",
   "v1/staff/my-attendance",
   "v1/staff/payslips",
-  "v1/transport/logbook/fuel",
   "v1/transport/logbook/month",
   "v1/transport/logbook",
   "v1/transport/register/exceptions",
