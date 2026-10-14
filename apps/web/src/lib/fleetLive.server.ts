@@ -16,6 +16,9 @@ import {
   renderFleetAlertText,
   tripPhase,
   DEFAULT_FLEET_ALERT_SETTINGS,
+  PUSH_ONLY_ALERTS,
+  detectIdling,
+  type IdleSpell,
   type FleetAlert,
   type LivePosition,
   type PositionFreshness,
@@ -31,6 +34,7 @@ import { inferStaffIsOwner } from "@/lib/waRoleResolver";
 import { buildWaTemplateBodyComponent, sendWaWithFailover } from "@/lib/waSend";
 import { normalizeWaTemplatesState, resolveTemplateForSend, templateVariablePositions, type WaTemplatesState } from "@/lib/waTemplates";
 import { fetchServerBlob } from "@/lib/serverBlob";
+import { normalizeVehicleKey } from "@/lib/fleetEdgeLink";
 import { sendPushToSubject } from "@/lib/webPush.server";
 
 type PositionRow = {
@@ -194,7 +198,7 @@ export async function buildParentBusViews(input: {
 
 /* ── owner alerts ─────────────────────────────────────────────── */
 
-const ALERT_KINDS = ["out_of_hours", "low_fuel", "fuel_drain", "service_due", "compliance_due"] as const;
+const ALERT_KINDS = ["out_of_hours", "low_fuel", "fuel_drain", "service_due", "compliance_due", "idling", "tracker_silent"] as const;
 
 export type FleetAlertsTickResult = {
   evaluated: number;
@@ -272,7 +276,32 @@ export async function runFleetAlertsTick(opts: { dryRun?: boolean; nowMs?: numbe
     }
   }
 
-  const alerts = evaluateFleetAlerts({ vehicles, positions, nowMs, lastSent, fuelDrains });
+  // Engine-on standing spells: the last 25 minutes of every tracker.
+  const idleSpells: IdleSpell[] = [];
+  if (ctx) {
+    const since = new Date(nowMs - 25 * 60_000).toISOString();
+    const { data } = await ctx.sb
+      .from("fleet_vehicle_positions")
+      .select("vehicle_ref, registration_number, recorded_at, lat, lng, speed_kmh, course_deg, ignition_on, fuel_percent, odometer_km")
+      .eq("tenant_id", ctx.tenantId)
+      .gte("recorded_at", since)
+      .order("recorded_at", { ascending: true })
+      .limit(2000);
+    const track = ((data ?? []) as PositionRow[]).map(rowToPosition);
+    for (const v of vehicles) {
+      if (!v.isActive) continue;
+      const key = normalizeVehicleKey(v.registrationNo);
+      if (!key) continue;
+      const mine = track.filter((p) => normalizeVehicleKey(p.registrationNumber) === key || normalizeVehicleKey(p.vehicleRef) === key);
+      const spell = detectIdling(mine, nowMs);
+      if (spell) {
+        const atSchool = Math.hypot((spell.lat - TENANT.schoolLat) * 110_540, (spell.lng - TENANT.schoolLng) * 100_500) <= 300;
+        idleSpells.push({ vehicleId: v.id, ...spell, atSchool });
+      }
+    }
+  }
+
+  const alerts = evaluateFleetAlerts({ vehicles, positions, nowMs, lastSent, fuelDrains, idleSpells });
   const result: FleetAlertsTickResult = {
     evaluated: vehicles.length,
     alerts: [],
@@ -294,6 +323,48 @@ export async function runFleetAlertsTick(opts: { dryRun?: boolean; nowMs?: numbe
   const timeLabel = `${dateIso} ${hhmm} IST`;
 
   for (const a of alerts) {
+    if (PUSH_ONLY_ALERTS.has(a.kind)) {
+      // Phones only: management (the owners on the roster) and, for idling,
+      // the vehicle's own driver — the one person who can turn the key.
+      const vehicle = vehicles.find((x) => x.id === a.vehicleId);
+      const people = [...owners];
+      if (a.kind === "idling" && vehicle?.driverStaffId) {
+        const driver = (masters.staff ?? []).find((s) => s.id === vehicle.driverStaffId && s.status === "active");
+        if (driver && !people.some((p) => p.id === driver.id)) people.push(driver);
+      }
+      const recipients: FleetAlertsTickResult["alerts"][number]["recipients"] = [];
+      for (const s of people) {
+        let push = 0;
+        if (!opts.dryRun) {
+          const p = await sendPushToSubject("staff", s.id, {
+            title: `${a.title} · ${a.vehicleLabel}`,
+            body: a.detail.slice(0, 160),
+            url: "/transport?tab=live",
+            data: { kind: "fleet_alert", alert: a.kind },
+          }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));
+          push = p.sent;
+        }
+        recipients.push({ name: s.fullName, wa: "push only", push });
+      }
+      if (ctx && !opts.dryRun) {
+        // Logged once per alert so the cooldown holds even when nobody has
+        // the app installed — otherwise the same alert would retry every tick.
+        await ctx.sb.from("fleet_edge_notifications").insert({
+          tenant_id: ctx.tenantId,
+          event_id: null,
+          alert_name: a.kind,
+          vehicle_ref: a.vehicleId,
+          registration_number: vehicle?.registrationNo ?? null,
+          channel: "push",
+          recipient: recipients.map((r) => r.name).join(", ").slice(0, 500),
+          status: "sent",
+          detail: `push to ${recipients.length} (${recipients.reduce((n, r) => n + r.push, 0)} devices)`,
+          body: `${a.title} · ${a.vehicleLabel}: ${a.detail}`,
+        });
+      }
+      result.alerts.push({ key: a.key, title: a.title, vehicle: a.vehicleLabel, recipients });
+      continue;
+    }
     const text = renderFleetAlertText(a, TENANT.nameDisplay, timeLabel);
     const recipients: FleetAlertsTickResult["alerts"][number]["recipients"] = [];
     for (const s of owners) {

@@ -19,7 +19,7 @@ import {
   type LivePosition,
 } from "@/lib/fleetLivePosition";
 import { readLiveVehiclePositions } from "@/lib/fleetLivePosition.server";
-import { normalizeVehicleKey } from "@/lib/fleetEdgeLink";
+import { normalizeVehicleKey, vehicleFleetKeys } from "@/lib/fleetEdgeLink";
 import {
   composeBusFoundReply,
   composeBusUnavailableReply,
@@ -60,6 +60,22 @@ export type BusLocationChild = { id: string; name: string };
  * every stray "hi", and the desk changes a few times a term.
  */
 const DESK_TTL_MS = 60_000;
+/**
+ * Every key the child's bus can be recognised by in Fleet Edge data: the
+ * route's recorded plate, then the vehicle's own registration and chassis
+ * number (vehicleFleetKeys). Fleet Edge sends "NA" as the plate of an
+ * unregistered bus, so a plate-only lookup drops it.
+ */
+function busKeysFor(state: TransportState, routeId: string, vehicleReg: string): string[] {
+  const route = state.routes.find((r) => r.id === routeId);
+  const vehicle = route?.vehicleId ? state.vehicles.find((v) => v.id === route.vehicleId) : undefined;
+  const out: string[] = [];
+  for (const k of [...vehicleFleetKeys({ registrationNo: vehicleReg }), ...vehicleFleetKeys(vehicle)]) {
+    if (!out.includes(k)) out.push(k);
+  }
+  return out;
+}
+
 let deskCache: { at: number; state: TransportState | null } | null = null;
 
 async function readDeskState(): Promise<TransportState | null> {
@@ -129,8 +145,8 @@ export async function busLocationReplyForHousehold(opts: {
   const byKey = new Map<string, LivePosition>();
   if (live.ok) {
     for (const p of live.positions) {
-      // Either key: the desk holds a chassis where a registration belongs on
-      // two of the six vehicles, and a plate-only match drops them.
+      // Either key of the ping (VIN, plate), matched below against every key
+      // of the bus (route plate, registration, chassis no.).
       for (const k of [normalizeVehicleKey(p.vehicleRef), normalizeVehicleKey(p.registrationNumber)]) {
         if (k && !byKey.has(k)) byKey.set(k, p.position);
       }
@@ -164,7 +180,10 @@ export async function busLocationReplyForHousehold(opts: {
 
     const busLabel = summary.busNo || summary.routeName || summary.routeCode || summary.vehicleReg;
     const childName = showChildName ? child.name : "";
-    const position = byKey.get(normalizeVehicleKey(summary.vehicleReg)) ?? null;
+    const position =
+      busKeysFor(state, summary.routeId, summary.vehicleReg)
+        .map((k) => byKey.get(k))
+        .find((p) => p != null) ?? null;
     const verdict = parentPositionVerdict({ position, hasVehicle: true, nowMs });
 
     if (!verdict.share) {
@@ -244,15 +263,14 @@ export async function busTrackFixForStudent(
   const live = await readLiveVehiclePositions();
   let position: LivePosition | null = null;
   if (live.ok) {
-    const want = normalizeVehicleKey(summary.vehicleReg);
-    for (const p of live.positions) {
-      // Either key, same reason as the reply path: two of the six vehicles
-      // carry a chassis number where a plate belongs.
-      const keys = [
-        normalizeVehicleKey(p.vehicleRef),
-        normalizeVehicleKey(p.registrationNumber),
-      ];
-      if (want && keys.includes(want)) {
+    const want = busKeysFor(state, summary.routeId, summary.vehicleReg);
+    // Plate/registration keys first, in the bus's key order, as the reply
+    // path does: the first key that any ping carries wins.
+    for (const k of want) {
+      const p = live.positions.find(
+        (x) => normalizeVehicleKey(x.vehicleRef) === k || normalizeVehicleKey(x.registrationNumber) === k,
+      );
+      if (p) {
         position = p.position;
         break;
       }
