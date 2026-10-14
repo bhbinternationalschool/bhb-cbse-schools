@@ -580,7 +580,7 @@ components (70), `readCache(` files in `src` (69), `readFileSync` inside `*.self
 `ensureSchoolMirrorHydrated` files under `app/api/v1` (100), and two **all-of-src** counts used as
 the Phase 2.3b / 3.4 gates: `loadMasters(` occurrences (476) and `loadSis(` occurrences (426),
 selftests and definitions excluded. Acceptance: CI fails when any count rises.
-*(Built 14 Oct 2026, PR #PRNUM.)* Measured on origin/main `ea9f5ba2`, budgets set to the true
+*(Built 14 Oct 2026, PR #642.)* Measured on origin/main `ea9f5ba2`, budgets set to the true
 count: `load_masters_screen_files` 106 (12 Oct: 109), `load_sis_screen_files` 77 (77),
 `ensure_hydrated_component_files` 69 (70), `read_cache_files` 68 (69), `selftest_readfilesync_files`
 89 (66), `v1_school_mirror_files` 107 (100), `load_masters_calls_src` 471 (476),
