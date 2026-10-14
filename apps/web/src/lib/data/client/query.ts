@@ -19,7 +19,7 @@
  *      page budget and REFUSES to silently truncate — it tells you it stopped.
  */
 
-import type { Cursor } from "../types";
+import { asRevision, type Cursor, type Revision } from "../types";
 import { erpFetch } from "../erpFetch";
 
 export type PageResult<T> =
@@ -29,6 +29,11 @@ export type PageResult<T> =
       /** Null when this is the last page. */
       nextCursor: Cursor | null;
       serverTime: string;
+      /**
+       * Slice collections based on the slice's stamp, and object slices: the
+       * base every write of this collection sends (types.ts ReadOk.revision).
+       */
+      revision?: Revision | null;
     }
   | {
       ok: false;
@@ -91,6 +96,7 @@ export async function readPage<T = Record<string, unknown>>(
     rows?: T[];
     nextCursor?: string | null;
     serverTime?: string;
+    revision?: string | null;
     code?: PageResult<T> extends { ok: false; code: infer C } ? C : never;
     error?: string;
   };
@@ -125,7 +131,53 @@ export async function readPage<T = Record<string, unknown>>(
     rows: parsed.rows,
     nextCursor: (parsed.nextCursor ?? null) as Cursor | null,
     serverTime: parsed.serverTime ?? new Date().toISOString(),
+    ...(parsed.revision !== undefined
+      ? { revision: parsed.revision ? asRevision(String(parsed.revision)) : null }
+      : {}),
   };
+}
+
+/**
+ * The current revision of named records (≤ 200), soft-deleted ones included:
+ * `GET /api/data/<collection>?ids=…`. For a client that must write a record
+ * it did not load — reviving a soft-deleted row, putting away a sheet held
+ * from another source — since a null base on an existing record is refused
+ * (data-layer 1.5). Absent ids are simply not in the answer.
+ */
+export async function readRevisions(
+  collection: string,
+  ids: readonly string[],
+): Promise<
+  | { ok: true; revisions: Map<string, { revision: Revision; deleted: boolean }> }
+  | { ok: false; error: string }
+> {
+  const out = new Map<string, { revision: Revision; deleted: boolean }>();
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  for (let i = 0; i < unique.length; i += 200) {
+    const chunk = unique.slice(i, i + 200);
+    let res: Response;
+    try {
+      res = await fetch(
+        `/api/data/${encodeURIComponent(collection)}?ids=${encodeURIComponent(chunk.join(","))}`,
+        { cache: "no-store" },
+      );
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Network request failed" };
+    }
+    const body = (await res.json().catch(() => null)) as {
+      ok?: boolean;
+      rows?: { id?: unknown; updated_at?: unknown; deleted_at?: unknown }[];
+      error?: string;
+    } | null;
+    if (!res.ok || !body?.ok || !Array.isArray(body.rows)) {
+      return { ok: false, error: body?.error ?? `Request failed (${res.status})` };
+    }
+    for (const r of body.rows) {
+      if (typeof r.id !== "string" || !r.updated_at) continue;
+      out.set(r.id, { revision: asRevision(String(r.updated_at)), deleted: r.deleted_at != null });
+    }
+  }
+  return { ok: true, revisions: out };
 }
 
 export type ReadAllResult<T> =

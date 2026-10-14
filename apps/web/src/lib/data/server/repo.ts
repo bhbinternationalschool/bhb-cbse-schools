@@ -22,9 +22,11 @@
 import "server-only";
 
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { collectionDef, type CollectionDef } from "../registry";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
+import { collectionDef, collectionKind, type CollectionDef } from "../registry";
 import {
   asRevision,
+  type ConflictReason,
   type Cursor,
   type ReadResult,
   type RecordOutcome,
@@ -35,11 +37,25 @@ import {
 
 export type Row = Record<string, unknown>;
 
+/**
+ * A teacher's reach, applied in the query (data-layer 1.5, registry
+ * `teacherScope`). Built by the route from staffSectionScope; the repo never
+ * computes scope itself and never widens it.
+ *  - `sections`: rows whose (class_id, section_id) pair is one of these;
+ *  - `households`: rows whose id is one of these.
+ * An empty list is a real "nothing in reach" and returns no rows.
+ */
+export type RowScope =
+  | { readonly kind: "sections"; readonly sections: readonly { classId: string; sectionId: string }[] }
+  | { readonly kind: "households"; readonly ids: readonly string[] };
+
 export type ListParams = {
   /** Required for collections scoped to a session. */
   academicYearCode?: string;
   limit?: number;
   cursor?: Cursor | null;
+  /** Restrict to a teacher's reach. See RowScope. */
+  scope?: RowScope;
 };
 
 /** Keyset cursor: the sort value and id of the last row on the page. */
@@ -128,6 +144,25 @@ export async function list(
     };
   }
 
+  if (collectionKind(def) !== "rows") {
+    if (params.scope) {
+      return { ok: false, code: "invalid", error: `${def.id} cannot be scoped to a teacher` };
+    }
+    return listSlice(def, ctx, params);
+  }
+
+  // A teacher's reach that holds nothing: no query, no rows.
+  const pairKeys =
+    params.scope?.kind === "sections"
+      ? new Set(params.scope.sections.map((x) => `${x.classId}|${x.sectionId}`))
+      : null;
+  if (params.scope?.kind === "sections" && params.scope.sections.length === 0) {
+    return { ok: true, rows: [], nextCursor: null, serverTime: new Date().toISOString() };
+  }
+  if (params.scope?.kind === "households" && params.scope.ids.length === 0) {
+    return { ok: true, rows: [], nextCursor: null, serverTime: new Date().toISOString() };
+  }
+
   const scope = resolveScope(def, ctx.tenantId, params);
   if (!scope.ok) {
     return { ok: false, code: "invalid", error: scope.error };
@@ -141,7 +176,14 @@ export async function list(
   // the cursor cannot be built and paging stops after one page, which is the
   // kind of bug that only shows up on the second screenful.
   const projection = def.list.columns?.length
-    ? Array.from(new Set(["id", sortCol, ...def.list.columns])).join(",")
+    ? Array.from(
+        new Set([
+          "id",
+          sortCol,
+          ...(pairKeys ? ["class_id", "section_id"] : []),
+          ...def.list.columns,
+        ]),
+      ).join(",")
     : "*";
 
   let q = ctx.sb.from(def.table).select(projection);
@@ -150,6 +192,14 @@ export async function list(
   }
   if (def.softDelete) {
     q = q.is("deleted_at", null);
+  }
+  // Scope in the WHERE clause (R5). Sections: section_id in (…) here, and the
+  // (class, section) pair checked below — a child whose class moved but whose
+  // section id did not is not in reach, exactly as sis-roster decides it.
+  if (params.scope?.kind === "sections") {
+    q = q.in("section_id", Array.from(new Set(params.scope.sections.map((x) => x.sectionId))));
+  } else if (params.scope?.kind === "households") {
+    q = q.in("id", Array.from(new Set(params.scope.ids)));
   }
 
   if (params.cursor) {
@@ -178,16 +228,286 @@ export async function list(
   const rows = (data ?? []) as unknown as Row[];
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
+  // The cursor follows the page as read; the pair check only drops rows.
   const last = page[page.length - 1];
+  const shown = pairKeys
+    ? page.filter((r) => pairKeys.has(`${String(r.class_id ?? "")}|${String(r.section_id ?? "")}`))
+    : page;
 
   return {
     ok: true,
-    rows: page,
+    rows: shown,
     nextCursor:
       hasMore && last
         ? encodeCursor({ sort: String(last[sortCol] ?? ""), id: String(last.id) })
         : null,
     serverTime: new Date().toISOString(),
+  };
+}
+
+type TenantCtx = NonNullable<Awaited<ReturnType<typeof getServerTenantContext>>>;
+
+/**
+ * Read a slice collection: the elements of one jsonb list (or one object
+ * slice), from `*_desk_slices` — the truth — not from any derived table.
+ * Keyset-paged by the element key. `revision` is the slice's stamp when the
+ * collection's writes are based on it (and for object slices).
+ */
+async function listSlice(
+  def: CollectionDef,
+  ctx: TenantCtx,
+  params: ListParams,
+): Promise<ReadResult<Row>> {
+  const src = def.slice;
+  if (!src) return { ok: false, code: "unavailable", error: `${def.id} has no slice` };
+  const { data, error } = await ctx.sb
+    .from(src.table)
+    .select("payload, updated_at")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("slice_key", src.key)
+    .maybeSingle();
+  if (error) return { ok: false, code: "unavailable", error: error.message };
+  const row = data as { payload?: unknown; updated_at?: string } | null;
+  const stamp = row?.updated_at ? asRevision(String(row.updated_at)) : null;
+  const serverTime = new Date().toISOString();
+
+  if (collectionKind(def) === "object") {
+    const value = row?.payload;
+    return {
+      ok: true,
+      rows: value == null ? [] : [{ value } as Row],
+      nextCursor: null,
+      serverTime,
+      revision: stamp,
+    };
+  }
+
+  if (row && row.payload != null && !Array.isArray(row.payload)) {
+    return { ok: false, code: "unavailable", error: `${def.id}: the stored slice is not a list` };
+  }
+  const keyField = src.keyField ?? "id";
+  const keyOf = (r: Row) => String(r[keyField] ?? "");
+  const all = (Array.isArray(row?.payload) ? (row!.payload as unknown[]) : [])
+    .filter((e): e is Row => !!e && typeof e === "object" && !Array.isArray(e) && keyOf(e as Row) !== "")
+    .sort((a, b) => (keyOf(a) < keyOf(b) ? -1 : keyOf(a) > keyOf(b) ? 1 : 0));
+
+  let from = 0;
+  if (params.cursor) {
+    const after = decodeCursor(params.cursor);
+    if (!after) return { ok: false, code: "invalid", error: "Malformed cursor" };
+    from = all.findIndex((r) => keyOf(r) > after.id);
+    if (from < 0) from = all.length;
+  }
+  const limit = clampLimit(def, params.limit);
+  const page = all.slice(from, from + limit);
+  const hasMore = from + limit < all.length;
+  const last = page[page.length - 1];
+  return {
+    ok: true,
+    rows: page,
+    nextCursor: hasMore && last ? encodeCursor({ sort: keyOf(last), id: keyOf(last) }) : null,
+    serverTime,
+    revision: src.base === "slice" ? stamp : undefined,
+  };
+}
+
+/**
+ * The household ids of the children in these (class, section) pairs — a
+ * teacher's household reach (registry teacherScope "household"). Paged: a
+ * section list can exceed one PostgREST page. Throws on a failed read: an
+ * unknown reach is never an empty one.
+ */
+export async function householdIdsForSections(
+  sections: readonly { classId: string; sectionId: string }[],
+): Promise<string[]> {
+  if (sections.length === 0) return [];
+  const ctx = await getServerTenantContext();
+  if (!ctx) throw new Error("Supabase tenant not configured");
+  const pairs = new Set(sections.map((x) => `${x.classId}|${x.sectionId}`));
+  const sectionIds = Array.from(new Set(sections.map((x) => x.sectionId)));
+  const res = await fetchAllPages<{ id: string; class_id: string | null; section_id: string | null; household_id: string | null }>(
+    (from, to) =>
+      ctx.sb
+        .from("sis_students")
+        .select("id, class_id, section_id, household_id")
+        .eq("tenant_id", ctx.tenantId)
+        .in("section_id", sectionIds)
+        .order("id", { ascending: true })
+        .range(from, to),
+  );
+  if (res.error || res.truncated) throw new Error(res.error ?? "household scope truncated");
+  const ids = new Set<string>();
+  for (const r of res.rows) {
+    if (r.household_id && pairs.has(`${r.class_id ?? ""}|${r.section_id ?? ""}`)) ids.add(r.household_id);
+  }
+  return Array.from(ids);
+}
+
+/**
+ * The current revision of named records, soft-deleted ones included — what a
+ * client needs to revive a soft-deleted row or to put away a sheet it is
+ * holding from another source (data-layer 1.5: a null base on an existing
+ * row is refused). At most 200 ids.
+ */
+export async function revisionsOf(
+  collectionId: string,
+  ids: readonly string[],
+): Promise<ReadResult<Row>> {
+  const def = collectionDef(collectionId);
+  if (!def) return { ok: false, code: "not_found", error: "Unknown collection" };
+  if (collectionKind(def) !== "rows") {
+    return { ok: false, code: "invalid", error: `${def.id} is a slice; its revision comes with the list` };
+  }
+  const wanted = Array.from(new Set(ids.map((x) => String(x)).filter(Boolean)));
+  if (wanted.length === 0 || wanted.length > 200) {
+    return { ok: false, code: "invalid", error: "Ask for 1–200 ids" };
+  }
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, code: "unavailable", error: "Supabase tenant not configured" };
+  const cols = def.softDelete ? "id, updated_at, deleted_at" : "id, updated_at";
+  const { data, error } = await ctx.sb
+    .from(def.table)
+    .select(cols)
+    .eq("tenant_id", ctx.tenantId)
+    .in("id", wanted);
+  if (error) return { ok: false, code: "unavailable", error: error.message };
+  return {
+    ok: true,
+    rows: (data ?? []) as unknown as Row[],
+    nextCursor: null,
+    serverTime: new Date().toISOString(),
+  };
+}
+
+/** A missing kernel function is unavailable — the code fails closed (§0). */
+function rpcFailure(
+  error: { code?: string; message: string },
+): { kind: "auth" | "invalid" | "unavailable"; message: string } {
+  if (error.code === "42501" || /not writable|is not a slice table|is not written here|is not an object slice/i.test(error.message)) {
+    return { kind: "auth", message: error.message };
+  }
+  if (error.code === "22023" || error.code === "22004" || error.code === "22P02" || error.code === "22007") {
+    return { kind: "invalid", message: error.message };
+  }
+  if (error.code === "PGRST202" || error.code === "42883") {
+    return {
+      kind: "unavailable",
+      message:
+        "Not saved — the server's write kernel is not installed yet (migration 20261014220000). Nothing was written.",
+    };
+  }
+  return { kind: "unavailable", message: error.message };
+}
+
+function asReason(v: unknown): ConflictReason | undefined {
+  return v === "stale" || v === "unversioned" || v === "deleted" ? v : undefined;
+}
+
+/**
+ * One element of a slice collection, through desk_slice_row_write (or the
+ * whole value of an object collection, through desk_slice_object_write).
+ * Exactly one op: the RPC locks and writes one element per call, and a batch
+ * of calls would not be one transaction.
+ */
+export async function writeSlice(
+  collectionId: string,
+  ops: readonly WriteOp<Row>[],
+): Promise<WriteResult<Row>> {
+  const def = collectionDef(collectionId);
+  if (!def || !def.slice || collectionKind(def) === "rows") {
+    return { ok: false, kind: "not_found", message: "Unknown slice collection", conflicts: [] };
+  }
+  if (ops.length !== 1) {
+    return {
+      ok: false,
+      kind: "invalid",
+      message: `${def.id} takes one change per request (got ${ops.length})`,
+      conflicts: [],
+    };
+  }
+  const op = ops[0]!;
+  const id = typeof op?.id === "string" ? op.id : "";
+  const ctx = await getServerTenantContext();
+  if (!ctx) {
+    return { ok: false, kind: "unavailable", message: "Supabase tenant not configured", conflicts: [] };
+  }
+  const src = def.slice;
+  const isObject = collectionKind(def) === "object";
+  if (isObject && (op.op !== "upsert" || id !== src.key)) {
+    return {
+      ok: false,
+      kind: "invalid",
+      message: `${def.id} is one object: send a single upsert with id "${src.key}" and the whole value as row`,
+      conflicts: [],
+    };
+  }
+  const base = op.base == null ? null : String(op.base);
+
+  const { data, error } = isObject
+    ? await ctx.sb.rpc("desk_slice_object_write", {
+        p_tenant: ctx.tenantId,
+        p_table: src.table,
+        p_slice_key: src.key,
+        p_value: (op as { row?: unknown }).row ?? null,
+        p_base: base,
+      })
+    : await ctx.sb.rpc("desk_slice_row_write", {
+        p_tenant: ctx.tenantId,
+        p_table: src.table,
+        p_slice_key: src.key,
+        p_op: op.op,
+        p_id: id,
+        p_row: op.op === "upsert" ? ((op as { row?: unknown }).row ?? null) : null,
+        p_base: base,
+        p_key: src.keyField ?? "id",
+      });
+  if (error) {
+    const f = rpcFailure(error);
+    return { ok: false, kind: f.kind, message: f.message, conflicts: [] };
+  }
+
+  const res = (data ?? {}) as {
+    ok?: boolean;
+    status?: string;
+    reason?: string;
+    revision?: string | null;
+    rev?: number | null;
+    stored?: Row | null;
+    changed?: boolean;
+  };
+  const sliceStamp = res.revision ? asRevision(String(res.revision)) : null;
+  // The base the client sends next for THIS element.
+  const elementBase = asRevision(
+    src.base === "rev" && !isObject ? String(res.rev ?? (res.status === "deleted" ? "" : "0")) : String(res.revision ?? ""),
+  );
+
+  if (res.ok !== true) {
+    if (res.status === "conflict") {
+      const reason = asReason(res.reason);
+      return {
+        ok: false,
+        kind: "conflict",
+        message:
+          reason === "unversioned"
+            ? "This record exists on the server and the save did not say which version it changed"
+            : reason === "deleted"
+              ? "This record was removed on another device"
+              : "Changed on another device since you loaded it",
+        conflicts: [
+          { id, status: "conflict", revision: elementBase, stored: (res.stored ?? {}) as Row, reason },
+        ],
+      };
+    }
+    return { ok: false, kind: "unavailable", message: "The slice write returned no outcome", conflicts: [] };
+  }
+
+  const status: "applied" | "unchanged" | "deleted" =
+    res.status === "unchanged" ? "unchanged" : res.status === "deleted" ? "deleted" : "applied";
+  return {
+    ok: true,
+    results: [{ id, status, revision: elementBase }],
+    versions: { [id]: elementBase },
+    revision: sliceStamp,
   };
 }
 
@@ -233,14 +553,10 @@ export async function write(
 
   if (error) {
     // 42501 is the allowlist refusing the table — a bug or an attack, never
-    // something to retry. Anything else is treated as unavailable.
-    const denied = error.code === "42501" || /not writable/i.test(error.message);
-    return {
-      ok: false,
-      kind: denied ? "auth" : "unavailable",
-      message: error.message,
-      conflicts: [],
-    };
+    // something to retry. 22023 is a malformed batch (an op without an id, an
+    // id twice). A missing function fails closed.
+    const f = rpcFailure(error);
+    return { ok: false, kind: f.kind, message: f.message, conflicts: [] };
   }
 
   const payload = (data ?? {}) as {
@@ -250,6 +566,7 @@ export async function write(
       status: RecordOutcome<Row>["status"];
       revision?: string;
       stored?: Row;
+      reason?: string;
     }[];
     versions?: Record<string, string>;
   };
@@ -261,6 +578,7 @@ export async function write(
           status: "conflict",
           revision: asRevision(String(r.revision ?? "")),
           stored: (r.stored ?? {}) as Row,
+          reason: asReason(r.reason),
         }
       : {
           id: r.id,
@@ -274,12 +592,17 @@ export async function write(
     versions[id] = asRevision(rev);
   }
 
+  // v3 is all-or-none: one refusal means nothing in the batch was written.
   const conflicts = results.filter((r) => r.status === "conflict");
-  if (conflicts.length > 0) {
+  if (conflicts.length > 0 || payload.ok === false) {
+    const unversioned = conflicts.filter((c) => c.status === "conflict" && c.reason === "unversioned").length;
     return {
       ok: false,
       kind: "conflict",
-      message: `${conflicts.length} record(s) changed since you loaded them`,
+      message:
+        unversioned > 0
+          ? `${unversioned} record(s) exist on the server but the save did not say which version it changed — nothing was written`
+          : `${conflicts.length} record(s) changed since you loaded them — nothing was written`,
       conflicts,
     };
   }

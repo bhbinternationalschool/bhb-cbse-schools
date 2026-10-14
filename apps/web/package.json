@@ -387,6 +387,7 @@
     "test:vendor-history": "npx tsx src/lib/ledger/vendorHistory.selftest.ts",
     "test:site-seo": "npx tsx src/lib/siteSeo.selftest.ts",
     "test:approval-gate": "npx tsx src/lib/data/approvalGate.selftest.ts",
+    "test:udise-upload-server": "npx tsx src/lib/udiseUploadServer.selftest.ts",
     "test:photo-consent": "npx tsx src/lib/photoConsent.selftest.ts",
     "test:registration-blockers": "npx tsx src/lib/registrationBlockers.selftest.ts",
     "test:sibling-carry-over": "npx tsx src/lib/siblingCarryOver.selftest.ts",

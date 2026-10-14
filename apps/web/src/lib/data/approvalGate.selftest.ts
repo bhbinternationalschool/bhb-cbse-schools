@@ -67,6 +67,23 @@ function run() {
     "a scheduled publish is still a publish",
   );
 
+  // data-layer 1.5: deleting a student or a family is a decision. The delete
+  // needs `approve` on top of `edit`; an edit of the same row does not.
+  const DEL = { module: "students" as const, onDelete: true, message: "m" };
+  assert.equal(batchNeedsApproval(DEL, [{ op: "delete" }]), true, "a delete needs approval");
+  assert.equal(batchNeedsApproval(DEL, [{ op: "upsert", row: { full_name: "x" } }]), false, "an edit does not");
+  assert.equal(
+    batchNeedsApproval(DEL, [{ op: "upsert", row: {} }, { op: "delete" }]),
+    true,
+    "one delete in a batch of edits still needs approval",
+  );
+  assert.equal(batchNeedsApproval(RULE, [{ op: "delete" }]), false, "a rule without onDelete leaves deletes alone");
+  for (const id of ["sis.students", "sis.households"]) {
+    const def = COLLECTIONS.find((c) => c.id === id);
+    assert.ok(def?.approval?.onDelete === true, `${id}: a delete must need approval`);
+    assert.equal(def?.approval?.module, "students", `${id}: approved under students`);
+  }
+
   console.log("approvalGate selftest: ok");
 }
 

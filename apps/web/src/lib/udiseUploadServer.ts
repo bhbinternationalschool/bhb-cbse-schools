@@ -13,8 +13,9 @@
  * three of them is both slow and impossible to reason about afterwards.
  */
 
-import { readAll } from "@/lib/data/client/query";
+import { readAll, readRevisions } from "@/lib/data/client/query";
 import { writeRecords } from "@/lib/data/client/mutate";
+import { asRevision, type Revision, type WriteResult } from "@/lib/data/types";
 import {
   UDISE_CANONICAL_MARKER,
   udiseEmptyRow,
@@ -53,6 +54,93 @@ function rowId(sheetId: string, key: string): string {
 const CHUNK = 200;
 
 /**
+ * The revision this page last read or wrote for each sheet / row id — the
+ * base its next write of that record sends (data-layer 1.5: the server
+ * refuses a null base on a record that exists). Filled by loadServerSheet
+ * and by every write's answer; nothing else. Not a copy of the data.
+ */
+const knownRevisions = new Map<string, Revision>();
+
+/**
+ * Bases for writing `ids`. A record this page loaded or wrote: the revision
+ * it holds. Any other: asked of the server (soft-deleted rows included) —
+ *  - a delete ("start a fresh sheet") takes the current revision: putting
+ *    the sheet away is meant for whatever is on it;
+ *  - an upsert takes it only for a soft-deleted row (reviving a sheet or a
+ *    child put away with "start a fresh sheet" — 212 such rows in
+ *    production, 14 Oct 2026); for a live row this page never loaded it
+ *    sends no base, and the server refuses rather than overwrite a row
+ *    someone else wrote (the UDISE robot, another machine).
+ */
+async function basesFor(
+  collection: "udise.sheets" | "udise.rows",
+  ids: readonly string[],
+  op: "upsert" | "delete",
+): Promise<{ ok: true; bases: Map<string, Revision | null> } | { ok: false; error: string }> {
+  const unknown = ids.filter((id) => !knownRevisions.has(id));
+  let fetched = new Map<string, { revision: Revision; deleted: boolean }>();
+  if (unknown.length) {
+    const r = await readRevisions(collection, unknown);
+    if (!r.ok) return { ok: false, error: r.error };
+    fetched = r.revisions;
+  }
+  const bases = new Map<string, Revision | null>();
+  for (const id of ids) {
+    const known = knownRevisions.get(id);
+    if (known) {
+      bases.set(id, known);
+      continue;
+    }
+    const f = fetched.get(id);
+    bases.set(id, f && (op === "delete" || f.deleted) ? f.revision : null);
+  }
+  return { ok: true, bases };
+}
+
+/**
+ * Why a save or a clear was not done on the server. `conflict` = the server
+ * refused it because the sheet changed since this page read it (the UDISE
+ * robot's pull rewrites the sheet row): the fix is a reload, not a retry.
+ */
+export type SheetWriteFailure = { ok: false; error: string; conflict: boolean };
+
+function failure(res: { message: string; kind?: string }): SheetWriteFailure {
+  return { ok: false, error: res.message, conflict: res.kind === "conflict" };
+}
+
+/** What the office is told when an upload did not reach the server. */
+export function sheetSaveFailureMessage(f: SheetWriteFailure): string {
+  return f.conflict
+    ? "Not saved to the server — the sheet changed since you opened this page (the UDISE robot may have pulled). Reload the page and upload the file again."
+    : `Saved in this browser only — it will not appear on another machine. ${f.error}`;
+}
+
+/**
+ * "Start a fresh sheet": what the panel does with the server's answer. A
+ * refused clear leaves the screen as it is — clearing it would show an empty
+ * sheet the server still holds, and it would come back on the next load.
+ */
+export function clearOutcome(
+  res: { ok: true } | SheetWriteFailure,
+): { clearScreen: true; error: null } | { clearScreen: false; error: string } {
+  if (res.ok) return { clearScreen: true, error: null };
+  return {
+    clearScreen: false,
+    error: res.conflict
+      ? "Not cleared — the sheet changed on the server since you opened it (the UDISE robot may have pulled). Reload the page and try again."
+      : `Not cleared — ${res.error}`,
+  };
+}
+
+/** Keep the revisions a write returned as the next bases. */
+function remember<T>(res: WriteResult<T>): void {
+  if (!res.ok) return;
+  for (const [id, rev] of Object.entries(res.versions)) {
+    if (rev) knownRevisions.set(id, rev);
+  }
+}
+
+/**
  * Read the working sheet for this session.
  *
  * Rows are paged. PostgREST caps a request at 1000 rows and reports the
@@ -72,11 +160,17 @@ export async function loadServerSheet(
 
   const row = sheets.rows.find((r) => str(r.id) === id);
   if (!row) return { ok: true, sheet: null };
+  if (str(row.updated_at)) knownRevisions.set(id, asRevision(str(row.updated_at)));
 
   const rows = await readAll<Record<string, unknown>>("udise.rows", {
     maxPages: 10,
   });
   if (!rows.ok) return { ok: false, error: rows.error };
+  for (const r of rows.rows) {
+    if (str(r.sheet_id) === id && str(r.id) && str(r.updated_at)) {
+      knownRevisions.set(str(r.id), asRevision(str(r.updated_at)));
+    }
+  }
 
   const records: UdiseSheetRecord[] = rows.rows
     .filter((r) => str(r.sheet_id) === id)
@@ -131,14 +225,17 @@ export async function saveServerSheet(input: {
   changed: UdiseSheetRecord[];
   removed: string[];
   actor: string;
-}): Promise<{ ok: true; written: number } | { ok: false; error: string }> {
+}): Promise<{ ok: true; written: number } | SheetWriteFailure> {
   const id = sheetIdFor(input.academicYearCode);
   const now = new Date().toISOString();
 
+  const sheetBase = await basesFor("udise.sheets", [id], "upsert");
+  if (!sheetBase.ok) return { ok: false, error: sheetBase.error, conflict: false };
   const sheetWrite = await writeRecords("udise.sheets", [
     {
       op: "upsert",
       id,
+      base: sheetBase.bases.get(id) ?? null,
       row: {
         id,
         academic_year_code: input.academicYearCode,
@@ -151,13 +248,18 @@ export async function saveServerSheet(input: {
       },
     },
   ] as never);
-  if (!sheetWrite.ok) return { ok: false, error: sheetWrite.message };
+  remember(sheetWrite);
+  if (!sheetWrite.ok) return failure(sheetWrite);
 
   let written = 0;
   for (let i = 0; i < input.changed.length; i += CHUNK) {
-    const ops = input.changed.slice(i, i + CHUNK).map((rec) => ({
+    const chunk = input.changed.slice(i, i + CHUNK);
+    const b = await basesFor("udise.rows", chunk.map((rec) => rowId(id, rec.key)), "upsert");
+    if (!b.ok) return { ok: false, error: b.error, conflict: false };
+    const ops = chunk.map((rec) => ({
       op: "upsert" as const,
       id: rowId(id, rec.key),
+      base: b.bases.get(rowId(id, rec.key)) ?? null,
       row: {
         id: rowId(id, rec.key),
         sheet_id: id,
@@ -169,16 +271,19 @@ export async function saveServerSheet(input: {
       },
     }));
     const res = await writeRecords("udise.rows", ops as never);
-    if (!res.ok) return { ok: false, error: res.message };
+    remember(res);
+    if (!res.ok) return failure(res);
     written += ops.length;
   }
 
   for (let i = 0; i < input.removed.length; i += CHUNK) {
-    const ops = input.removed
-      .slice(i, i + CHUNK)
-      .map((key) => ({ op: "delete" as const, id: rowId(id, key) }));
+    const ids = input.removed.slice(i, i + CHUNK).map((key) => rowId(id, key));
+    const b = await basesFor("udise.rows", ids, "delete");
+    if (!b.ok) return { ok: false, error: b.error, conflict: false };
+    const ops = ids.map((rid) => ({ op: "delete" as const, id: rid, base: b.bases.get(rid) ?? null }));
     const res = await writeRecords("udise.rows", ops as never);
-    if (!res.ok) return { ok: false, error: res.message };
+    remember(res);
+    if (!res.ok) return failure(res);
   }
 
   return { ok: true, written };
@@ -192,17 +297,22 @@ export async function saveServerSheet(input: {
 export async function clearServerSheet(
   academicYearCode: string,
   rowKeys: string[],
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: true } | SheetWriteFailure> {
   const id = sheetIdFor(academicYearCode);
   for (let i = 0; i < rowKeys.length; i += CHUNK) {
-    const ops = rowKeys
-      .slice(i, i + CHUNK)
-      .map((key) => ({ op: "delete" as const, id: rowId(id, key) }));
+    const ids = rowKeys.slice(i, i + CHUNK).map((key) => rowId(id, key));
+    const b = await basesFor("udise.rows", ids, "delete");
+    if (!b.ok) return { ok: false, error: b.error, conflict: false };
+    const ops = ids.map((rid) => ({ op: "delete" as const, id: rid, base: b.bases.get(rid) ?? null }));
     const res = await writeRecords("udise.rows", ops as never);
-    if (!res.ok) return { ok: false, error: res.message };
+    remember(res);
+    if (!res.ok) return failure(res);
   }
+  const b = await basesFor("udise.sheets", [id], "delete");
+  if (!b.ok) return { ok: false, error: b.error, conflict: false };
   const res = await writeRecords("udise.sheets", [
-    { op: "delete", id },
+    { op: "delete", id, base: b.bases.get(id) ?? null },
   ] as never);
-  return res.ok ? { ok: true } : { ok: false, error: res.message };
+  remember(res);
+  return res.ok ? { ok: true } : failure(res);
 }

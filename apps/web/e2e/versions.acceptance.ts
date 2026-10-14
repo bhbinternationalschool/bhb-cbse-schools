@@ -9,7 +9,7 @@
  * which is how this sees loadServerMasters rebuild from outside the process.
  *
  * What it proves, against Postgres 17 + PostgREST with every migration applied:
- *  1. erp_versions through PostgREST (service key): the 35 *_sync_meta desks,
+ *  1. erp_versions through PostgREST (service key): the 37 *_sync_meta desks,
  *     the staff row tables, the blobs; counts equal the seeded data; the
  *     dropped purchase/store desks are absent; anon is refused.
  *  2. erp_versions answers in < 50 ms (median of 30 warm calls over HTTP).
@@ -91,7 +91,13 @@ async function main(): Promise<void> {
   const keys = Object.keys(v);
   const syncMetaKeys = keys.filter((k) => !k.startsWith("module_state:") && !k.endsWith("_state") && !k.startsWith("sis_") && k !== "masters_desk_settings");
   record("rpc: erp_versions answers (service key)", first.status === 200 && keys.length > 0, `HTTP ${first.status}, ${keys.length} keys`);
-  record("rpc: one key per *_sync_meta table present (35)", syncMetaKeys.length === 35, `${syncMetaKeys.length} desk keys: ${syncMetaKeys.join(" ")}`);
+  // 35 in production before 1.5; data-layer 1.5 adds website_desk_sync_meta
+  // and udise_sheet_desk_sync_meta (the generic write route's two desks).
+  record(
+    "rpc: one key per *_sync_meta table present (37)",
+    syncMetaKeys.length === 37 && syncMetaKeys.includes("website") && syncMetaKeys.includes("udise_sheet"),
+    `${syncMetaKeys.length} desk keys: ${syncMetaKeys.join(" ")}`,
+  );
   record("rpc: dropped purchase/store desks are absent, not an error", !("purchase" in v) && !("store" in v) && !("store_state" in v), "purchase, store, store_state absent");
   record("rpc: masters count = seeded classes", v.masters?.count === e.classes && !!v.masters?.updated_at, `masters ${JSON.stringify(v.masters)} (want count ${e.classes})`);
   record("rpc: sis count = seeded student rows", v.sis?.count === e.studentRows, `sis ${JSON.stringify(v.sis)} (want ${e.studentRows})`);

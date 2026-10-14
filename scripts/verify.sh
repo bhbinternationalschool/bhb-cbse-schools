@@ -339,6 +339,7 @@ SELFTESTS=(
   test:sibling-carry-over
   test:sibling-separate
   test:udise-upload-store
+  test:udise-upload-server
   test:udise-student-details
   test:udise-compliance
   test:udise-robot
