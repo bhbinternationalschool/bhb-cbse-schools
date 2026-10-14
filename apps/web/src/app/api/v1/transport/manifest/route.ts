@@ -4,6 +4,9 @@ import { fetchTransportDeskFromDb } from "@/lib/transportNormalized.server";
 import { fetchSisFromDb } from "@/lib/sisNormalized.server";
 import type { SisStudent } from "@/lib/sis";
 import { fetchMastersDeskFromDb } from "@/lib/mastersNormalized.server";
+import { getServerTenantContext } from "@/lib/serverTenant";
+import { readRunOrders } from "@/lib/runStopOrder.server";
+import { minuteToHhmm, orderForRun } from "@/lib/runStopOrder";
 import {
   listRouteShifts,
   resolveRiderShift,
@@ -151,12 +154,39 @@ export async function GET(request: Request) {
         .map((e) => [e.studentId, e]),
     );
 
+    // Each run in its own order (from GPS, refreshed nightly; a drop run the
+    // office switched to "first picked, first dropped" follows the morning).
+    // An unreadable order is not an error: the route's own sequence is used
+    // and the response says so. No stop is ever left out.
+    const runRows = await (async () => {
+      const c = await getServerTenantContext();
+      if (!c) return null;
+      const r = await readRunOrders(c.sb, c.tenantId);
+      return r.ok ? r.orders.filter((o) => o.routeId === route.id) : null;
+    })();
+    const dirRows = (runRows ?? []).filter((o) => o.direction === direction);
+    const runRow = askedShiftId
+      ? dirRows.find((o) => o.shiftId === askedShiftId)
+      : dirRows.length === 1
+        ? dirRows[0]
+        : undefined;
+    const runOrder = orderForRun({
+      routeStops: route.stops,
+      run: runRow,
+      pickup: (runRows ?? []).find((o) => o.direction === "pickup"),
+    });
+    const runRank = new Map(runOrder.ids.map((id, i) => [id, i]));
+
     const stops = [...route.stops]
-      .sort((a, b) => a.sequence - b.sequence)
+      .sort((a, b) => (runRank.get(a.id) ?? 999) - (runRank.get(b.id) ?? 999))
       .map((stop) => ({
         id: stop.id,
         name: stop.name,
         sequence: stop.sequence,
+        /** Usual time the bus reaches this stop on this run (GPS), "" when not observed. */
+        expectedTime: runOrder.expectedMinute.has(stop.id)
+          ? minuteToHhmm(runOrder.expectedMinute.get(stop.id)!)
+          : "",
         distanceKm: stop.distanceKm,
         lat: stop.geoLat ?? null,
         lng: stop.geoLng ?? null,
@@ -209,6 +239,8 @@ export async function GET(request: Request) {
         weekdays: sh.weekdays,
       })),
       shiftId: askedShiftId || null,
+      /** How the stops are ordered: "gps" observed run, "fair" first-picked-first-dropped, "route" the route list. */
+      stopOrder: runOrder.basis,
       /**
        * True when the class list could not be read, so runs could not be
        * worked out. The manifest below is then the WHOLE route — correct but

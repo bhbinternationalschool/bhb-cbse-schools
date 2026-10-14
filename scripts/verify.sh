@@ -298,6 +298,10 @@ SELFTESTS=(
   test:transport-phone-empty-desk
   test:transport-seats
   test:boarding-suggest
+  test:transport-gaps
+  test:gps-stop-discovery
+  test:run-stop-order
+  test:transport-audit
   test:defaulter-hold-policy
   test:hold-resolve
   test:live-bus-marker
@@ -324,6 +328,7 @@ SELFTESTS=(
   test:village-market
   test:lead-score
   test:fuel-expense-line
+  test:fuel-two-way
   test:vendor-history
   test:site-seo
   test:approval-gate
@@ -401,6 +406,7 @@ SELFTESTS=(
   test:staff-self-profile
   test:attendance-cover
   test:transport-finance
+  test:loans
   test:udise-robot-fetch-all
   test:staff-otp-mobile
   test:accounts-today-tile

@@ -25,7 +25,7 @@ import {
   buildExpenseVoucherLines,
   type BuiltVoucherLine,
 } from "@/lib/expenseVoucherDraft";
-import { normalizeVehicleKey } from "@/lib/fleetEdgeLink";
+import { normalizeVehicleKey, vehicleFleetKeys } from "@/lib/fleetEdgeLink";
 
 /* ─── constants ────────────────────────────────────────────── */
 
@@ -169,7 +169,7 @@ export type FillAccountsFacts = {
   voucherNo: string;
   voucherOrigin: "" | "posted" | "adopted";
   paymentMode: "" | FuelPaymentMode;
-  entrySource: "app" | "web" | "desk_import";
+  entrySource: "app" | "web" | "desk_import" | "accounts";
   reversalVoucherNo?: string;
 };
 
@@ -460,14 +460,18 @@ function n(v: unknown): number {
  */
 export function fleetEdgeMonthByVehicle(input: {
   month: string;
-  vehicles: { id: string; registrationNo: string }[];
+  vehicles: { id: string; registrationNo: string; chassisNo?: string }[];
   rows: FleetEdgeDetailsRow[];
   ignoreRefs?: Set<string>;
 }): Map<string, { km: number; fuelUsed: number; windows: number }> {
+  // Every key a vehicle has (vehicleFleetKeys: registration, chassis no.).
+  // Registrations claim first; a key already claimed is not re-pointed, so
+  // one tracker is never split between two vehicles.
   const deskByKey = new Map<string, string>();
-  for (const v of input.vehicles) {
-    const k = normalizeVehicleKey(v.registrationNo);
-    if (k) deskByKey.set(k, v.id);
+  for (const pick of [(v: (typeof input.vehicles)[number]) => ({ registrationNo: v.registrationNo }), (v: (typeof input.vehicles)[number]) => ({ chassisNo: v.chassisNo })]) {
+    for (const v of input.vehicles) {
+      for (const k of vehicleFleetKeys(pick(v))) if (!deskByKey.has(k)) deskByKey.set(k, v.id);
+    }
   }
   const vehicleOfRef = new Map<string, string>();
   for (const r of input.rows) {
@@ -608,19 +612,17 @@ export type FuelVoucherLine = {
  */
 export function matchExistingFuelLine(
   fill: { fillDate: string; amountPaise: number },
-  vehicle: { registrationNo: string },
+  vehicle: { registrationNo: string; chassisNo?: string },
   lines: FuelVoucherLine[],
   taken: Set<string>,
 ): FuelVoucherLine | null {
-  const key = normalizeVehicleKey(vehicle.registrationNo);
-  if (!key) return null;
-  const hits = lines.filter(
-    (l) =>
-      !l.reversed &&
-      !taken.has(l.lineId) &&
-      l.voucherDate === fill.fillDate &&
-      l.debitPaise === fill.amountPaise &&
-      l.narration.toUpperCase().replace(/[^A-Z0-9]/g, "").includes(key),
-  );
+  const keys = vehicleFleetKeys(vehicle);
+  if (keys.length === 0) return null;
+  const hits = lines.filter((l) => {
+    if (l.reversed || taken.has(l.lineId)) return false;
+    if (l.voucherDate !== fill.fillDate || l.debitPaise !== fill.amountPaise) return false;
+    const text = l.narration.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    return keys.some((k) => text.includes(k));
+  });
   return hits.length === 1 ? hits[0]! : null;
 }

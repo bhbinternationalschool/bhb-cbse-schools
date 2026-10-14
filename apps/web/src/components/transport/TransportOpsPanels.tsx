@@ -30,6 +30,8 @@ import {
   setRouteStops,
   upsertTransportRoute,
   completedJobsPaise,
+  chassisNoWarning,
+  normalizeChassisNo,
   type FleetVehicle,
   type TransportFeePolicy,
   type TransportFeeSlab,
@@ -928,6 +930,7 @@ export function FleetPanel({
   upsertVehicle: typeof import("@/lib/transport").upsertFleetVehicle;
 }) {
   const [reg, setReg] = useState("");
+  const [chassis, setChassis] = useState("");
   const [vname, setVname] = useState("");
   const [fuelType, setFuelType] = useState<"diesel" | "cng" | "petrol">(
     "diesel",
@@ -944,11 +947,26 @@ export function FleetPanel({
 
   const crew = useMemo(() => listTransportCrew(masters), [masters]);
   const selected = state.vehicles.find((v) => v.id === selectedId) ?? null;
+  // Warn, never block: see chassisNoWarning. A chassis number already on
+  // another vehicle would make both of them claim the same tracker.
+  const chassisKey = normalizeChassisNo(chassis);
+  const chassisClash = chassisKey
+    ? state.vehicles.find(
+        (v) =>
+          v.id !== editId &&
+          (normalizeChassisNo(v.chassisNo) === chassisKey ||
+            normalizeChassisNo(v.registrationNo) === chassisKey),
+      )
+    : undefined;
+  const chassisWarn = chassisClash
+    ? `${chassisClash.name || chassisClash.registrationNo} already carries this number.`
+    : chassisNoWarning(chassis);
 
   function save() {
     const r = upsertVehicle({
       id: editId || undefined,
       registrationNo: reg,
+      chassisNo: normalizeChassisNo(chassis),
       name: vname || reg,
       fuelType,
       odometerKm: Number(odo) || 0,
@@ -965,6 +983,7 @@ export function FleetPanel({
     }
     setEditId(null);
     setReg("");
+    setChassis("");
     setVname("");
     setOdo("0");
     setSeats("");
@@ -978,6 +997,7 @@ export function FleetPanel({
   function beginEditVehicle(v: FleetVehicle) {
     setEditId(v.id);
     setReg(v.registrationNo);
+    setChassis(v.chassisNo || "");
     setVname(v.name);
     setFuelType(v.fuelType === "cng" || v.fuelType === "petrol" ? v.fuelType : "diesel");
     setOdo(String(v.odometerKm));
@@ -1003,6 +1023,7 @@ export function FleetPanel({
       render: (v) => <span className="font-semibold text-[var(--brand-deep)]">{v.registrationNo}</span>,
     },
     { key: "name", header: "Name", value: (v) => v.name || "—", sortable: true },
+    { key: "chassis", header: "Chassis no.", value: (v) => v.chassisNo || "—", sortable: true },
     { key: "fuel", header: "Fuel", value: (v) => v.fuelType, sortable: true },
     { key: "status", header: "Status", value: (v) => v.status, sortable: true },
     {
@@ -1034,6 +1055,30 @@ export function FleetPanel({
               value={reg}
               onChange={(e) => setReg(e.target.value)}
             />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-[11px] text-[var(--muted)]">
+              Chassis no. (VIN)
+            </span>
+            <input
+              className="field !py-1.5 uppercase"
+              value={chassis}
+              maxLength={24}
+              placeholder="17 characters, from the RC"
+              autoCapitalize="characters"
+              spellCheck={false}
+              onChange={(e) => setChassis(e.target.value.toUpperCase())}
+            />
+            {chassisWarn ? (
+              <span className="mt-1 block text-[10px] text-[var(--warning)]">
+                {chassisWarn}
+              </span>
+            ) : (
+              <span className="mt-1 block text-[10px] text-[var(--muted)]">
+                Fleet Edge tracks vehicles by this number. Keep the number
+                plate in Registration.
+              </span>
+            )}
           </label>
           <label className="text-sm">
             <span className="mb-1 block text-[11px] text-[var(--muted)]">

@@ -186,6 +186,17 @@ export const MONEY_FEATURES: RbacFeatureDef[] = [
     routes: ["/api/ledger"],
   },
   {
+    id: "accounts.loans",
+    module: "accounts",
+    group: "Transaction",
+    label: "Loans & EMI approvals",
+    blurb:
+      "Every loan (vehicle loans) with its history, EMIs due, projection and export. Edit = loan terms and asking for a prepayment / top-up; Approve = post an EMI, prepayment or top-up to the books, skip a month, open a new loan. Balances still need the balances grant.",
+    actions: ["view", "edit", "approve", "export"],
+    tabs: ["loans"],
+    routes: ["/api/accounts/loans"],
+  },
+  {
     id: "accounts.book_reports",
     module: "accounts",
     group: "Reports",

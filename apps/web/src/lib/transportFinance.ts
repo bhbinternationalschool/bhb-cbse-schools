@@ -204,12 +204,15 @@ export function missingEmiMonths(input: {
   postedMonths: readonly string[];
   today: string;
   dueDay: number;
+  /** The first month an EMI is owed (loan terms); default the month after the anchor. */
+  firstDueMonth?: string;
 }): string[] {
   if (!/^\d{4}-\d{2}$/.test(input.anchorMonth) || !isIsoDate(input.today)) return [];
   const posted = new Set(input.postedMonths);
   const out: string[] = [];
   const current = monthOf(input.today);
-  for (let m = addMonths(input.anchorMonth, 1); m <= current; m = addMonths(m, 1)) {
+  const start = input.firstDueMonth && /^\d{4}-\d{2}$/.test(input.firstDueMonth) ? input.firstDueMonth : addMonths(input.anchorMonth, 1);
+  for (let m = start; m <= current; m = addMonths(m, 1)) {
     if (dueDateIn(m, input.dueDay) >= input.today) break; // not due yet (due today = not yet missed)
     if (!posted.has(m)) out.push(m);
     if (out.length > 240) break; // a bad anchor must not spin
@@ -233,6 +236,12 @@ export function summarizeLoan(input: {
   rows: readonly LoanVoucherRow[];
   today: string;
   dueDay: number;
+  /**
+   * The first month an EMI is owed, from the loan's terms (lib/loans.ts). A
+   * loan sanctioned 20 Jul with its first EMI on 10 Sep owes nothing in
+   * August; without terms, the month after the anchor is assumed.
+   */
+  firstDueMonth?: string;
 }): LoanSummary {
   const fy = fyBounds(input.today);
   let outstanding = 0;
@@ -276,7 +285,7 @@ export function summarizeLoan(input: {
     missingMonths:
       repaid || !anchorMonth
         ? []
-        : missingEmiMonths({ anchorMonth, postedMonths, today: input.today, dueDay: input.dueDay }),
+        : missingEmiMonths({ anchorMonth, postedMonths, today: input.today, dueDay: input.dueDay, firstDueMonth: input.firstDueMonth }),
     nextDueOn: repaid ? "" : nextEmiDue({ postedMonths, today: input.today, dueDay: input.dueDay }),
     lastEmiTotalPaise: last ? last.debitPaise - last.creditPaise + last.interestPaise : 0,
     anchorMonth,

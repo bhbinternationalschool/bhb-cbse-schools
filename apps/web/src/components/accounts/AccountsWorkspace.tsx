@@ -39,6 +39,7 @@ import { useAccessData } from "@/components/shell/useAccessData";
 import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
 import { ClosingBalancePanel } from "@/components/accounts/ClosingBalancePanel";
 import { DaySheetPanel } from "@/components/accounts/DaySheetPanel";
+import { LoansPanel } from "@/components/accounts/LoansPanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
@@ -60,6 +61,7 @@ type AccountsTab =
   | "masters"
   | "bills"
   | "owner"
+  | "loans"
   | "dayclose"
   | "daysheet"
   | "closing";
@@ -87,6 +89,7 @@ const TABS: ModuleTabItem[] = [
   { id: "masters", label: "Masters", tone: "violet" },
   { id: "bills", label: "Bills & AP", tone: "violet" },
   { id: "owner", label: "Owner loans", tone: "coral" },
+  { id: "loans", label: "Loans & EMIs", tone: "coral" },
   { id: "daysheet", label: "Day sheet", tone: "green" },
   { id: "dayclose", label: "Day close", tone: "rose" },
   { id: "closing", label: "Closing balances", tone: "rose" },
@@ -153,7 +156,7 @@ export function AccountsWorkspace() {
     // whose tab bar may not include the dashboard, is moved to one they hold.
     if (hasPermission(session, am, "accounts", "view", ar)) return;
     const open = shownTabs.filter(
-      (t) => canSeePosition || !["dashboard", "book", "bookreports", "recon", "closing"].includes(t.id),
+      (t) => canSeePosition || !["dashboard", "book", "bookreports", "recon", "closing", "loans"].includes(t.id),
     );
     if (open.length > 0 && !open.some((t) => t.id === tab)) {
       setTab(open[0]!.id as AccountsTab);
@@ -174,6 +177,7 @@ export function AccountsWorkspace() {
       "masters",
       "bills",
       "owner",
+      "loans",
       "dayclose",
       "daysheet",
       "closing",
@@ -248,7 +252,7 @@ export function AccountsWorkspace() {
   const dayCloseBadge = dayCloseNeedsAttention() ? "!" : undefined;
 
   // Tabs that show a balance or a session total at all.
-  const POSITION_TABS = new Set(["dashboard", "book", "bookreports", "recon", "closing"]);
+  const POSITION_TABS = new Set(["dashboard", "book", "bookreports", "recon", "closing", "loans"]);
   const tabsWithBadge = shownTabs.filter((t) => canSeePosition || !POSITION_TABS.has(t.id)).map((t) =>
     t.id === "dayclose" ? { ...t, badge: dayCloseBadge } : t,
   );
@@ -411,6 +415,10 @@ export function AccountsWorkspace() {
           <LegacyBookNotice tab="Owner loans — use the owner-loan presets in Vouchers" />
           <OwnerLoansPanel {...panelProps} />
         </>
+      ) : tab === "loans" ? (
+        <div className="mt-4">
+          <LoansPanel />
+        </div>
       ) : tab === "daysheet" ? (
         <DaySheetPanel {...panelProps} />
       ) : tab === "dayclose" ? (
