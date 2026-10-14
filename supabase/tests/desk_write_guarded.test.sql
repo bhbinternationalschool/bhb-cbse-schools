@@ -166,6 +166,17 @@ begin
     and (select student_count = 1 and active_student_count = 1 from public.sis_sync_meta where tenant_id=t),
     'a student insert sets student_count and active_student_count');
 
+  -- ── An id held by another school is never updated from this one ────────
+  declare t2 uuid := gen_random_uuid();
+  begin
+    insert into public.tenants (id, slug, name) values (t2, 'guard-probe2-' || left(t2::text, 8), 'Guard probe 2');
+    perform pg_temp.check(pg_temp.state_of(t2, 'sis_students',
+      '[{"op":"upsert","id":"stu_p1","row":{"full_name":"Other school"}}]') = '42501',
+      'an id that belongs to another school is refused, not overwritten');
+    perform pg_temp.check((select full_name from public.sis_students where id = 'stu_p1') = 'Probe Child',
+      '…and the first school''s row is untouched');
+  end;
+
   -- ── erp_versions sees the bump ──────────────────────────────────────────
   perform pg_temp.check((public.erp_versions(t)->'sis'->>'updated_at')::timestamptz
                         = (select updated_at from public.sis_sync_meta where tenant_id=t),

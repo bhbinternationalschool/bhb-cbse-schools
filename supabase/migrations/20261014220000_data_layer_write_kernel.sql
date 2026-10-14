@@ -123,7 +123,7 @@ create or replace function public.desk_write_guarded(
 returns jsonb language plpgsql security invoker set search_path = public as $$
 declare
   v_soft boolean; v_meta text; v_count_col text; v_has_deleted boolean;
-  v_cols text; v_set text;
+  v_cols text; v_set text; v_n int;
   item jsonb; v_op text; rec_id text; base_txt text; payload jsonb; incoming jsonb; existing jsonb;
   base_ts timestamptz; stored_ts timestamptz; now_ts timestamptz := clock_timestamp();
   plan jsonb := '[]'::jsonb; step jsonb;
@@ -165,6 +165,10 @@ begin
     base_txt := nullif(item->>'base','');
     base_ts := base_txt::timestamptz;
 
+    -- FOR UPDATE cannot lock a row that does not exist yet: two writers
+    -- inserting the same new id would both see it absent and the second would
+    -- overwrite the first. The id lock makes the second wait, then see it.
+    perform pg_advisory_xact_lock(hashtext(p_table), hashtext(p_tenant_id::text || '/' || rec_id));
     execute format('select to_jsonb(t) from public.%I t where t.id = $1 and t.tenant_id = $2 for update', p_table)
       into existing using rec_id, p_tenant_id;
 
@@ -260,10 +264,17 @@ begin
        where exists (select 1 from information_schema.columns c
           where c.table_schema='public' and c.table_name=p_table and c.column_name=k)
          and k not in ('id','tenant_id','created_at');
+      -- The tables are keyed on id alone: never let an id that belongs to
+      -- another school be updated from this one.
       execute format(
-        'insert into public.%I (id, tenant_id, %s) select $2, $3, %s from jsonb_populate_record(null::public.%I, $1) on conflict (id) do update set %s',
+        'insert into public.%I as t (id, tenant_id, %s) select $2, $3, %s from jsonb_populate_record(null::public.%I, $1) '
+        'on conflict (id) do update set %s where t.tenant_id = $3',
         p_table, v_cols, v_cols, p_table, v_set)
         using incoming, rec_id, p_tenant_id;
+      get diagnostics v_n = row_count;
+      if v_n = 0 then
+        raise exception 'desk_write_guarded: id % belongs to another school', rec_id using errcode = '42501';
+      end if;
       n_applied := n_applied + 1;
       versions := versions || jsonb_build_object(rec_id, now_ts);
       results := results || jsonb_build_array(jsonb_build_object(
