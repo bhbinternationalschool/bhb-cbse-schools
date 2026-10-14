@@ -515,6 +515,7 @@ SELFTESTS=(
   test:session-cookie-edge
   test:staff-geo
   test:punch-screen-geofence
+  test:punch-screen-keep
   test:app-min-build
   test:canva-birthday
   test:standing-discount-change

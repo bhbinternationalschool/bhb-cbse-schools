@@ -11,12 +11,15 @@ import { loadPunchOptions, savePunchOptions } from "@/lib/punchOptions.server";
 import { printedQrTokenFor } from "@/lib/punchCode.server";
 import { normalizePunchOptions, printedQrLink, punchWindowState, type PunchOptions } from "@/lib/punchSchedule";
 import { publicAppOrigin } from "@/lib/waSisBotServer";
+import { canManageStaffLeave } from "@/lib/staffResolve";
 import {
   createPunchDisplay,
   decidePunchDevice,
   listPunchDevices,
   listPunchDisplays,
   revokePunchDisplay,
+  revokePunchDisplays,
+  revokeUnusedPunchDisplays,
   startScreenPairing,
 } from "@/lib/punchDevices.server";
 
@@ -28,7 +31,13 @@ export const runtime = "nodejs";
  *      and the QR screens that are switched on.
  * POST {action: approve|reject|reset, id} — decide a phone.
  * POST {action: screen_create, label} → {token} — switch THIS device on as
- *      a QR screen; POST {action: screen_revoke, id} switches one off.
+ *      a QR screen; other screens with the same name are returned
+ *      (→ sameName), never switched off here. POST {action: screen_revoke,
+ *      id} switches one off.
+ * POST {action: screens_revoke, ids} — admin: switch off the chosen screens
+ *      (the "older screens with this name — remove?" offer).
+ * POST {action: screens_remove_unused} — admin: switch off every old screen
+ *      (lib/punchScreens: unused 7 days, or replaced and unseen for a day).
  * POST {action: punch_options, windowStart, windowEnd, days, printedQrEnabled}
  *      — the gate window and the printed backup QR on/off.
  * POST {action: printed_qr_new} — a new printed QR; every earlier print
@@ -71,6 +80,7 @@ export async function GET(request: Request) {
 type Body = {
   action?: string;
   id?: string;
+  ids?: unknown[];
   label?: string;
   lat?: number;
   lng?: number;
@@ -93,6 +103,16 @@ function printedQrView(o: PunchOptions) {
   };
 }
 
+/**
+ * Switching screens on or off: the same people who see the Punch phones
+ * panel (StaffAttendancePanel canSeePhones), not every school-wide login.
+ */
+function assertScreenManager(ctx: Awaited<ReturnType<typeof resolveApiAuth>>) {
+  if (!canManageStaffLeave(ctx.session, ctx.masters)) {
+    throw new ApiError("forbidden", "Only the office can switch punch QR screens on or off", 403);
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const ctx = await resolveApiAuth(request);
@@ -102,6 +122,7 @@ export async function POST(request: Request) {
     const meta = requestMeta(request);
 
     if (body.action === "screen_create") {
+      assertScreenManager(ctx);
       // Only a device inside the school may become a QR screen.
       const fence = campusGeofenceFromSettings(await fetchStaffAttendanceSettingsFromDb());
       const where = validateScreenLocation({ lat: body.lat, lng: body.lng, accuracyM: body.accuracyM }, fence);
@@ -118,7 +139,7 @@ export async function POST(request: Request) {
         ip: meta.ip,
         userAgent: meta.userAgent,
       });
-      return apiOk({ token: r.token });
+      return apiOk({ token: r.token, sameName: r.sameName });
     }
     if (body.action === "punch_options" || body.action === "printed_qr_new") {
       const current = await loadPunchOptions();
@@ -168,6 +189,7 @@ export async function POST(request: Request) {
       });
     }
     if (body.action === "screen_pair_start") {
+      assertScreenManager(ctx);
       // The office's own device may be anywhere; the GATE phone's location
       // is checked when it types the code (/api/public/punch-screen/pair).
       const r = await startScreenPairing(String(body.label || "Gate phone"), by);
@@ -185,10 +207,61 @@ export async function POST(request: Request) {
       return apiOk({ code: r.code, expiresAt: r.expiresAt });
     }
     if (body.action === "screen_revoke") {
+      assertScreenManager(ctx);
       if (!body.id || !(await revokePunchDisplay(body.id))) {
         throw new ApiError("server_error", "Could not switch that screen off", 503);
       }
+      await writeAudit({
+        session: ctx.session,
+        module: "staff_attendance",
+        action: "edit",
+        entityType: "punch_screen",
+        entityId: body.id,
+        summary: "Switched off a punch QR screen",
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      });
       return apiOk({ revoked: body.id });
+    }
+    if (body.action === "screens_revoke") {
+      assertPermission(ctx, "attendance", "edit");
+      const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
+      if (ids.length === 0) throw new ApiError("bad_request", "Which screens?", 400);
+      const removed = await revokePunchDisplays(ids);
+      if (!removed) throw new ApiError("server_error", "Could not switch those screens off right now", 503);
+      if (removed.length) {
+        await writeAudit({
+          session: ctx.session,
+          module: "staff_attendance",
+          action: "edit",
+          entityType: "punch_screen",
+          entityId: "",
+          summary: `Switched off ${removed.length} older punch QR screen(s) with the same name`,
+          before: { screens: removed },
+          ip: meta.ip,
+          userAgent: meta.userAgent,
+        });
+      }
+      return apiOk({ removed: removed.length });
+    }
+    if (body.action === "screens_remove_unused") {
+      assertPermission(ctx, "attendance", "edit");
+      const removed = await revokeUnusedPunchDisplays();
+      if (!removed) throw new ApiError("server_error", "Could not remove the unused screens right now", 503);
+      if (removed.length) {
+        await writeAudit({
+          session: ctx.session,
+          module: "staff_attendance",
+          action: "edit",
+          entityType: "punch_screen",
+          entityId: "",
+          summary: `Removed ${removed.length} unused punch QR screen(s)`,
+          before: { screens: removed },
+          ip: meta.ip,
+          userAgent: meta.userAgent,
+        });
+      }
+      return apiOk({ removed: removed.length });
     }
     if (body.action === "approve" || body.action === "reject" || body.action === "reset") {
       assertPermission(ctx, "attendance", "edit");

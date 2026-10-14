@@ -32,6 +32,7 @@ import {
   ensureSurveyMasters,
   flushOfflineSurveyQueue,
   loadOfflineQueue,
+  offlineItemIsMine,
   removeOfflineItem,
   setSurveyBeatActive,
   surveyAgentProductivity,
@@ -1415,27 +1416,36 @@ export function AdmissionFieldSurveyPanel({
           hint="Stored on this device · flush when connection returns"
         >
           <ul className="mb-3 space-y-1 text-[12px]">
-            {offlineQueue.map((q) => (
-              <li
-                key={q.id}
-                className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.06)] py-1.5"
-              >
-                <span>
-                  <span className="font-medium">{q.childName}</span>
-                  {" · "}
-                  {q.beatName || "—"} · {q.mobile}
-                </span>
-                {canEdit ? (
-                  <button
-                    type="button"
-                    className="text-[10px] text-[#9a3412] underline"
-                    onClick={() => setOfflineQueue(removeOfflineItem(q.id))}
-                  >
-                    Discard
-                  </button>
-                ) : null}
-              </li>
-            ))}
+            {offlineQueue.map((q) =>
+              !offlineItemIsMine(q, by) ? (
+                <li
+                  key={q.id}
+                  className="border-b border-[rgba(32,48,80,0.06)] py-1.5 text-[var(--muted)]"
+                >
+                  Waiting to upload by {q.by}
+                </li>
+              ) : (
+                <li
+                  key={q.id}
+                  className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.06)] py-1.5"
+                >
+                  <span>
+                    <span className="font-medium">{q.childName}</span>
+                    {" · "}
+                    {q.beatName || "—"} · {q.mobile}
+                  </span>
+                  {canEdit ? (
+                    <button
+                      type="button"
+                      className="text-[10px] text-[#9a3412] underline"
+                      onClick={() => setOfflineQueue(removeOfflineItem(q.id))}
+                    >
+                      Discard
+                    </button>
+                  ) : null}
+                </li>
+              ),
+            )}
           </ul>
           {canEdit ? (
             <button

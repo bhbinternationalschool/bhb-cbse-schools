@@ -6,15 +6,7 @@ import { clearWorkspaceSessionAlignFlag } from "@/lib/workspaceSession";
 import { FRESH_LOGIN_SESSION_KEY } from "@/lib/workspaceSyncPolicy";
 import { resetDeskHydrated } from "@/lib/deskHydrateGuard";
 import { clearMemoryCopies } from "@/lib/browserStorage";
-
-const DESK_PREFIX = "bhb_";
-
-const LOCAL_STORAGE_KEEP = new Set<string>([
-  "bhb_tenant_data_wipe_seen_v1",
-  // Deletions the server has not confirmed yet must survive a re-login,
-  // or the removed student comes back on the next hydrate.
-  "bhb_sis_pending_deletes_v1",
-]);
+import { clearedOnLogin } from "@/lib/deviceLocalStorage";
 
 export function markFreshLoginSession(): void {
   if (typeof window === "undefined") return;
@@ -35,7 +27,9 @@ export function clearWorkspaceLocalStorage(): void {
     const keysToRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key && key.startsWith(DESK_PREFIX) && !LOCAL_STORAGE_KEEP.has(key)) {
+      // Desk copies only — this device's own keys (QR screen, surveyor,
+      // kiosk language…) survive: see lib/deviceLocalStorage.ts.
+      if (key && clearedOnLogin(key)) {
         keysToRemove.push(key);
       }
     }
