@@ -16,6 +16,7 @@ import {
 import { dayKm, isMonth, istDate, monthDates, parseKm, rupeesToPaise } from "@/lib/transportBoardingLog";
 import {
   accountsStatus,
+  buildFuelVoucher,
   busMonthTotals,
   isPaymentMode,
   kmBetweenFills,
@@ -28,7 +29,12 @@ import {
   addOfficeFill,
   amendFillDetails,
   fuelBankChoices,
+  createFillsFromVoucherLines,
+  tieFillToVoucherLine,
+  fuelReconcileReport,
   importDeskFuelLogs,
+  lastOdometerByVehicle,
+  postAccountsFuel,
   postFillToAccounts,
   readFleetEdgeMonth,
   readRegisterFill,
@@ -39,6 +45,7 @@ import {
   type RegisterFill,
 } from "@/lib/transportFuelRegister.server";
 import type { TransportDeskBundle } from "@/lib/transportNormalized.server";
+import { fuelAmountPaise } from "@/lib/fuelExpenseLine";
 
 export const runtime = "nodejs";
 
@@ -60,6 +67,11 @@ function canPostAccounts(ctx: ApiAuthContext): boolean {
 /** Reversing a posted voucher is a decision about the book — accounts.approve, as on /api/ledger. */
 function canReverseAccounts(ctx: ApiAuthContext): boolean {
   return hasPermission(ctx.session, ctx.masters, "accounts", "approve", ctx.rbac);
+}
+
+/** Reading the book's vouchers — Accounts view, or the expense-entry right. */
+function canViewAccounts(ctx: ApiAuthContext): boolean {
+  return hasPermission(ctx.session, ctx.masters, "accounts", "view", ctx.rbac) || canPostAccounts(ctx);
 }
 
 function assertTransportEdit(ctx: ApiAuthContext) {
@@ -110,12 +122,50 @@ export async function GET(request: Request) {
     const ctx = await resolveApiAuth(request);
     const url = new URL(request.url);
     const today = istDate();
+
+    // ?form=1 — what an entry form needs (Accounts → Quick / Multi-line keys
+    // fuel too): the fleet with its fuels, the banks, each bus's last
+    // odometer. Open to the Accounts expense-entry right as well as Transport.
+    if (url.searchParams.get("form") === "1") {
+      if (!canPostAccounts(ctx) && !hasPermission(ctx.session, ctx.masters, "transport", "view", ctx.rbac)) {
+        throw new ApiError("forbidden", "Fuel entry needs Transport or the Accounts expense-entry permission", 403);
+      }
+      const desk = await loadTransportDesk();
+      const [banks, lastOdometer] = await Promise.all([fuelBankChoices(), lastOdometerByVehicle()]);
+      return apiOk({
+        today,
+        canPost: canPostAccounts(ctx),
+        canEdit: canEditTransport(ctx),
+        vehicles: desk.vehicles.map((v) => ({
+          id: v.id,
+          registrationNo: v.registrationNo,
+          name: v.name,
+          ...vehicleLabel({ name: v.name, registrationNo: v.registrationNo }),
+          fuels: vehicleFuelOptions(v).map((o) => ({ fuelType: o.fuelType, unit: unitForFuel(o.fuelType) })),
+          isActive: v.isActive !== false && v.status !== "sold",
+        })),
+        banks,
+        lastOdometer,
+      });
+    }
+
     const month = (url.searchParams.get("month") || today.slice(0, 7)).trim();
     if (!isMonth(month)) throw new ApiError("bad_request", "month must be YYYY-MM", 400);
     const vehicleFilter = (url.searchParams.get("vehicleId") || "").trim();
     const dates = monthDates(month);
+    // ?from&to — the fill list for any date range (Transport → Fuel table);
+    // the per-bus totals and Fleet Edge stay the month's.
+    const rangeFrom = (url.searchParams.get("from") || "").trim();
+    const rangeTo = (url.searchParams.get("to") || "").trim();
+    const isDay = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d);
+    if ((rangeFrom && !isDay(rangeFrom)) || (rangeTo && !isDay(rangeTo))) {
+      throw new ApiError("bad_request", "from / to must be YYYY-MM-DD", 400);
+    }
+    const listFrom = rangeFrom || dates[0]!;
+    const listTo = rangeTo || dates[dates.length - 1]!;
     const from = dates[0]!;
     const to = dates[dates.length - 1]!;
+    const readTo = listTo > to ? listTo : to;
 
     const transport = await loadTransportDesk();
     const access = registerAccess(ctx, transport, to < today ? to : today);
@@ -125,8 +175,8 @@ export async function GET(request: Request) {
     const ids = new Set(vehicles.map((v) => v.id));
 
     const [allRes, logsRes, fleetEdge, queueRes, banks] = await Promise.all([
-      // Everything up to the month's end: the previous fill is needed for km.
-      readRegisterFills({ to }),
+      // Everything up to the later end: the previous fill is needed for km.
+      readRegisterFills({ to: readTo }),
       readDayLogs({ from, to }),
       readFleetEdgeMonth(
         month,
@@ -142,7 +192,7 @@ export async function GET(request: Request) {
     const allFills = allRes.fills.filter((f) => ids.has(f.vehicleId));
     const kmSince = kmBetweenFills(allFills);
     const monthFills = allFills
-      .filter((f) => f.fillDate >= from && f.fillDate <= to)
+      .filter((f) => f.fillDate >= listFrom && f.fillDate <= listTo)
       .sort((a, b) => b.fillDate.localeCompare(a.fillDate) || b.createdAt.localeCompare(a.createdAt));
 
     const dayLogKm = new Map<string, { km: number; days: number }>();
@@ -159,7 +209,7 @@ export async function GET(request: Request) {
     const totals = busMonthTotals({
       month,
       vehicleIds: vehicles.map((v) => v.id),
-      fills: allFills,
+      fills: allFills.filter((f) => f.fillDate <= to),
       dayLogKm,
       fleetEdge: fleetEdge.ok ? new Map([...fleetEdge.byVehicle].map(([k, x]) => [k, { km: x.km, fuelUsed: x.fuelUsed }])) : new Map(),
     }).map((t) => {
@@ -178,8 +228,11 @@ export async function GET(request: Request) {
 
     return apiOk({
       month,
+      from: listFrom,
+      to: listTo,
       today,
       fleetWide: access.fleetWide,
+      canViewVouchers: canViewAccounts(ctx),
       canEdit: canEditTransport(ctx),
       canPost: canPostAccounts(ctx),
       canReverse: canReverseAccounts(ctx),
@@ -271,7 +324,9 @@ export async function POST(request: Request) {
     } catch {
       throw new ApiError("bad_request", "Invalid JSON", 400);
     }
-    assertTransportEdit(ctx);
+    // Accounts keys fuel through "add-accounts" with its own right; every
+    // other action is the register's and needs transport.edit.
+    if (body.action !== "add-accounts") assertTransportEdit(ctx);
     const actor = actorOf(ctx);
     const today = istDate();
     const transport = await loadTransportDesk();
@@ -299,7 +354,15 @@ export async function POST(request: Request) {
         if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 2000) {
           throw new ApiError("bad_request", "Enter the quantity filled", 400);
         }
-        const amountPaise = rupeesToPaise(body.amountRupees);
+        // Rate × quantity when the rate is given (the amount is then derived,
+        // to the paisa, the same way Accounts and the SQL check derive it);
+        // a typed amount only when no rate was entered.
+        const ratePaise = body.ratePaise == null || body.ratePaise === "" ? null : Math.round(Number(body.ratePaise));
+        if (ratePaise != null && (!Number.isFinite(ratePaise) || ratePaise <= 0)) {
+          throw new ApiError("bad_request", "Enter the rate per kg / litre", 400);
+        }
+        const amountPaise =
+          ratePaise != null ? fuelAmountPaise(ratePaise, Math.round(quantity * 100) / 100) : rupeesToPaise(body.amountRupees);
         if (amountPaise == null || amountPaise <= 0) throw new ApiError("bad_request", "Enter the amount paid in ₹", 400);
         const odo = parseKm(body.odometerKm);
         if (odo === "invalid") throw new ApiError("bad_request", "Odometer must be a number of km (or blank)", 400);
@@ -318,6 +381,7 @@ export async function POST(request: Request) {
           quantity: Math.round(quantity * 100) / 100,
           unit: unitForFuel(fuelType),
           fuelType,
+          ratePaise,
           amountPaise,
           odometerKm: odo,
           receiptPath: receiptUrl,
@@ -411,7 +475,7 @@ export async function POST(request: Request) {
         if (!reason) throw new ApiError("bad_request", "Say why this entry is wrong", 400);
         const fill = await readRegisterFill(id);
         if (!fill) throw new ApiError("not_found", "Fuel entry not found", 404);
-        if (fill.voucherId && fill.voucherOrigin === "posted" && !canReverseAccounts(ctx)) {
+        if (fill.voucherId && !fill.reversalVoucherNo && !canReverseAccounts(ctx)) {
           throw new ApiError("forbidden", `This fill is in accounts as ${fill.voucherNo}; voiding reverses it, which needs accounts.approve.`, 403);
         }
         const out = await voidFillWithVoucher({ fill, reason, actor });
@@ -448,8 +512,149 @@ export async function POST(request: Request) {
         return apiOk({ result, notice: auditWarn });
       }
 
+      case "reconcile-report": {
+        // Read-only: what the import would tie, what has no live voucher,
+        // and which live fuel lines have no fill. Writes nothing — but it
+        // shows voucher numbers and the book's fuel money, so it needs the
+        // Accounts read right as well as Transport.
+        if (!canViewAccounts(ctx)) throw new ApiError("forbidden", "The fuel reconcile shows the book — it needs Accounts (view)", 403);
+        const report = await fuelReconcileReport({
+          deskLogs: (transport.fuelRefillLogs ?? []).map((l) => ({
+            id: l.id,
+            vehicleId: l.vehicleId,
+            filledAt: l.filledAt,
+            qty: l.qty,
+            amountPaise: l.amountPaise,
+          })),
+          vehicles: transport.vehicles.map((v) => ({ id: v.id, registrationNo: v.registrationNo })),
+        });
+        return apiOk({
+          report: {
+            ...report,
+            importedNotInAccounts: report.importedNotInAccounts.map((f) => shapeFill(f, transport, kmNone)),
+          },
+        });
+      }
+
+      case "reconcile-create": {
+        // Writing fills against money already in the book is a decision about
+        // the book — the director confirms it (accounts.approve).
+        if (!canReverseAccounts(ctx)) throw new ApiError("forbidden", "Creating fills from vouchers needs accounts.approve", 403);
+        const lineIds = Array.isArray(body.lineIds) ? body.lineIds.map((x) => String(x)).filter(Boolean).slice(0, 500) : [];
+        if (!lineIds.length) throw new ApiError("bad_request", "Choose the voucher lines", 400);
+        const out = await createFillsFromVoucherLines({
+          lineIds,
+          vehicles: transport.vehicles.map((v) => ({ id: v.id, registrationNo: v.registrationNo, name: v.name })),
+          actor,
+        });
+        const auditWarn = await audit(request, ctx, "fuel_reconcile_create", "fuel_reconcile", `Fuel reconcile: ${out.done} fill(s) created from vouchers already in the book (${out.failed.length} refused)`, out);
+        return apiOk({ ...out, notice: auditWarn });
+      }
+
+      case "reconcile-tie": {
+        // A fill already in the register belongs to a live fuel line: tie it.
+        if (!canReverseAccounts(ctx)) throw new ApiError("forbidden", "Tying fills to vouchers needs accounts.approve", 403);
+        const out = await tieFillToVoucherLine({
+          fillId: idOf(body.fillId),
+          lineId: String(body.lineId ?? ""),
+          vehicles: transport.vehicles.map((v) => ({ id: v.id, registrationNo: v.registrationNo })),
+        });
+        if (!out.ok) throw new ApiError("conflict", out.error, 409);
+        const auditWarn = await audit(request, ctx, "fuel_reconcile_tie", String(body.fillId), `Fuel reconcile: fill tied to ${out.voucherNo}`, out);
+        return apiOk({ done: 1, failed: [], notice: auditWarn });
+      }
+
+      case "reconcile-void": {
+        // Old-tab entries no voucher holds: kept, struck through — never deleted.
+        const ids = Array.isArray(body.ids) ? body.ids.map(idOf) : [];
+        if (!ids.length) throw new ApiError("bad_request", "Choose the fills", 400);
+        const reason = String(body.reason ?? "").trim() || "No live voucher in the book (cleared in the 13 Oct 2026 clean-up) — confirmed in the fuel reconcile";
+        let done = 0;
+        const failed: { key: string; error: string }[] = [];
+        for (const id of ids) {
+          try {
+            const fill = await readRegisterFill(id);
+            if (!fill) throw new ApiError("not_found", "not found", 404);
+            if (fill.voucherId) throw new ApiError("conflict", `in the book as ${fill.voucherNo}`, 409);
+            await voidFillWithVoucher({ fill, reason, actor });
+            done += 1;
+          } catch (e) {
+            failed.push({ key: id, error: e instanceof Error ? e.message : "could not void" });
+          }
+        }
+        const auditWarn = await audit(request, ctx, "fuel_reconcile_void", "fuel_reconcile", `Fuel reconcile: ${done} old entr(ies) with no voucher voided`, { done, failed });
+        return apiOk({ done, failed, notice: auditWarn });
+      }
+
+      case "add-accounts": {
+        // Accounts → Quick expense with a fuel head: one fill, one voucher,
+        // one transaction. Needs only what the Accounts expense forms need.
+        assertAccountsPost(ctx);
+        const id = idOf(body.id);
+        const date = dayParam(body.date, today);
+        const vehicleId = String(body.vehicleId ?? "").trim();
+        const v = vehicleFor(transport, vehicleId);
+        if (!v) throw new ApiError("not_found", "Vehicle not found", 404);
+        const fuelRaw = String(body.fuelType ?? "").toLowerCase();
+        const fuelType = (fuelRaw === "cng" || fuelRaw === "petrol" || fuelRaw === "diesel" ? fuelRaw : "") as FuelKind;
+        const quantity = Math.round(Number(String(body.quantity ?? "").trim()) * 100) / 100;
+        const ratePaise = Math.round(Number(body.ratePaise));
+        const odo = parseKm(body.odometerKm);
+        if (odo === "invalid") throw new ApiError("bad_request", "Odometer must be a number of km (or blank)", 400);
+        const banks = await fuelBankChoices();
+        const pay = paymentOf(body, banks);
+        const dealerName = String(body.dealerName ?? "").trim();
+        const billNo = String(body.billNo ?? "").trim();
+        const amountPaise = fuelAmountPaise(ratePaise, quantity);
+        const bank = banks.find((b) => b.bankAccountId === pay.bankAccountId);
+        const built = buildFuelVoucher({
+          fillId: id,
+          fillDate: date,
+          vehicle: { name: v.name, registrationNo: v.registrationNo },
+          fuelType,
+          quantity,
+          unit: unitForFuel(fuelType),
+          amountPaise,
+          odometerKm: odo,
+          dealerName,
+          billNo,
+          payment:
+            pay.paymentMode === "bank" || pay.paymentMode === "upi"
+              ? { mode: pay.paymentMode, bankAccountCode: bank?.code ?? "", bankAccountId: pay.bankAccountId, ref: pay.paymentRef }
+              : { mode: pay.paymentMode },
+        });
+        if (!built.ok) throw new ApiError("bad_request", built.error, 400);
+        const res = await postAccountsFuel({
+          voucher: { ...built.voucher, narration: built.voucher.narration.replace("(Transport fuel register)", "(keyed in Accounts)"), createdBy: actor },
+          fills: [
+            {
+              id,
+              lineNo: 1,
+              vehicleId,
+              fillDate: date,
+              fuelType,
+              quantity,
+              ratePaise,
+              odometerKm: odo,
+              dealerName,
+              billNo,
+              ...pay,
+              note: String(body.note ?? ""),
+            },
+          ],
+          vehicles: transport.vehicles.map((x) => ({ id: x.id, fuels: vehicleFuelOptions(x) })),
+          actor,
+          staffId: (ctx.session.staffId || "").trim(),
+        });
+        if (!res.ok) throw new ApiError("bad_request", res.error, 422);
+        const fill = await readRegisterFill(id);
+        if (!fill) throw new ApiError("not_found", "Fuel entry not found", 404);
+        const auditWarn = await audit(request, ctx, "fuel_add_accounts", id, `Fuel ${fill.quantity} ${fill.unit} ₹${fill.amountPaise / 100} for ${v.name} keyed in Accounts → ${fill.voucherNo}`, fill);
+        return apiOk({ fill: shapeFill(fill, transport, kmNone), notice: auditWarn });
+      }
+
       default:
-        throw new ApiError("bad_request", "action must be add, post, post-many, amend, void or import-desk", 400);
+        throw new ApiError("bad_request", "action must be add, add-accounts, post, post-many, amend, void, import-desk or reconcile-report / -create / -void", 400);
     }
   } catch (e) {
     return apiErr(e);

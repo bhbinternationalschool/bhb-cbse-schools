@@ -169,7 +169,7 @@ export type FillAccountsFacts = {
   voucherNo: string;
   voucherOrigin: "" | "posted" | "adopted";
   paymentMode: "" | FuelPaymentMode;
-  entrySource: "app" | "web" | "desk_import";
+  entrySource: "app" | "web" | "desk_import" | "accounts";
   reversalVoucherNo?: string;
 };
 

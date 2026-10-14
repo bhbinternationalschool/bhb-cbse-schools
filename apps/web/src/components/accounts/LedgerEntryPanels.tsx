@@ -16,10 +16,16 @@
  * House rules: amounts entered in rupees, stored in paise; a bank line must
  * say WHICH bank (the reconciliation depends on it); reversals carry a
  * reason.
+ *
+ * Fuel (14 Oct 2026): a debit to a fuel head (5031 Vehicle Fuel) is refused
+ * by /api/ledger from the Voucher entry grid and from Cheques — fuel goes in
+ * through Quick or Multi-line expense (or Transport → Fuel), which carry the
+ * vehicle, quantity and rate and write the Transport fill in the same
+ * transaction. A fuel voucher is voided, never amended or re-headed.
  */
 
 import { VoucherPayLink } from "@/components/payments/VoucherPayLink";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SearchPick } from "@/components/ui/SearchPick";
 import { groupAccountsForPicker } from "@/lib/pickerSearch";
 import { UpiPayButton } from "@/components/payments/UpiPayButton";
@@ -36,11 +42,6 @@ import {
   isFuelAccount,
 } from "@/lib/fuelExpenseLine";
 import {
-  loadTransport,
-  vehicleFuelOptions,
-  type FleetVehicle,
-} from "@/lib/transport";
-import {
   allocateExpensePayment,
   buildExpenseVoucherLines,
 } from "@/lib/expenseVoucherDraft";
@@ -54,6 +55,12 @@ import {
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { LastEntryStrip } from "@/components/accounts/LastEntryStrip";
+import { stableFillIds } from "@/lib/fuelLog";
+import {
+  FuelEntryForm,
+  useFuelFormContext,
+  type FuelFormVehicle,
+} from "@/components/transport/FuelEntryForm";
 
 const CARD = "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
 const BTN =
@@ -1096,9 +1103,11 @@ export function QuickExpensePanel({
   // concessions. Money never goes to them by hand, so the quick form does
   // not offer them; the full voucher screen still can when a correction
   // genuinely needs it.
-  // 5031 Vehicle Fuel is posted by Transport → Fuel (director, 14 Oct 2026:
-  // "enter once in Transport"); keying it here too would book the fill twice.
-  const SYSTEM_HEADS = useMemo(() => new Set(["5031", "5060", "5065", "5066", "5100"]), []);
+  // Vehicle Fuel IS offered (director, 14 Oct 2026: "allow fuel entry in
+  // Accounts and sync both ways"): a fuel head takes the fill — vehicle,
+  // quantity, rate — and writes it to Transport → Fuel's register in the
+  // voucher's own transaction, so it is booked once and seen on both sides.
+  const SYSTEM_HEADS = useMemo(() => new Set(["5060", "5065", "5066", "5100"]), []);
   const heads = useMemo(
     () =>
       accounts.filter(
@@ -1122,6 +1131,13 @@ export function QuickExpensePanel({
 
   const amountPaise = paiseFromRupees(amount);
   const needsBank = payMode !== "cash";
+  /**
+   * A fuel head takes the fill instead of an amount: vehicle, quantity and
+   * rate, written to Transport → Fuel's register with its voucher in one
+   * transaction. A bare amount on 5031 is what left the book and Transport's
+   * log disagreeing.
+   */
+  const fuelHead = !!chosenHead && isFuelAccount({ code: chosenHead.code, name: chosenHead.name });
 
   /**
    * The days this amount actually lands on.
@@ -1321,8 +1337,8 @@ export function QuickExpensePanel({
       <p className="text-[11px] text-[var(--muted)]">
         Head, amount, paid by — the balanced voucher is written for you. For
         anything unusual, the full voucher screen below still does everything.
-        Vehicle fuel is not entered here: record each fill in Transport → Fuel
-        and it posts to 5031 Vehicle Fuel by itself.
+        Vehicle fuel takes its vehicle, quantity and rate, and lands in
+        Transport → Fuel as well.
       </p>
       <div className="mt-2">
         <LastEntryStrip kind="payment" refreshKey={refreshKey} />
@@ -1330,6 +1346,7 @@ export function QuickExpensePanel({
 
       {/* The repeating daily expense — milk, newspapers — is the one the
           office most often shortcuts into a single lump on one date. */}
+      {fuelHead ? null : (
       <label className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-[var(--brand-deep)]">
         <input
           type="checkbox"
@@ -1351,8 +1368,9 @@ export function QuickExpensePanel({
           </span>
         ) : null}
       </label>
+      )}
 
-      {spread ? (
+      {spread && !fuelHead ? (
         <div className="mt-2 space-y-2">
           <div className="flex flex-wrap items-end gap-2">
             <label className="text-[11px] font-bold text-[var(--muted)]">
@@ -1530,6 +1548,8 @@ export function QuickExpensePanel({
             </select>
           </label>
         ) : null}
+        {fuelHead ? null : (
+        <>
         <label className="text-[11px] font-bold text-[var(--muted)]">
           Spent on
           <select className={FIELD} value={tag} onChange={(e) => setTag(e.target.value)}>
@@ -1556,8 +1576,19 @@ export function QuickExpensePanel({
           Date
           <input type="date" className={FIELD} value={date} onChange={(e) => setDate(e.target.value)} />
         </label>
+        </>
+        )}
       </div>
 
+      {fuelHead ? (
+        <div className="mt-3 rounded-xl bg-[var(--surface-sunken)] p-3">
+          <p className="mb-2 text-[11px] text-[var(--muted)]">
+            {chosenHead?.name} is fuel: the fill goes to the book and to Transport → Fuel together, tagged to Transport.
+          </p>
+          <FuelEntryForm initialDate={date} onSaved={() => onPosted?.()} />
+        </div>
+      ) : (
+      <>
       <div className="mt-2 flex flex-wrap items-end gap-2">
         <div className="text-[11px] font-bold text-[var(--muted)]">
           Paid by
@@ -1622,6 +1653,8 @@ export function QuickExpensePanel({
           it can post — that is what ties it to the bank statement later.
         </p>
       ) : null}
+      </>
+      )}
     </section>
   );
 }
@@ -2235,9 +2268,11 @@ export function MultiLineExpensePanel({
 
   // Same rule as Quick expense: the store's automation owns these codes, so
   // money never goes to them by hand.
-  // 5031 Vehicle Fuel is posted by Transport → Fuel (director, 14 Oct 2026:
-  // "enter once in Transport"); keying it here too would book the fill twice.
-  const SYSTEM_HEADS = useMemo(() => new Set(["5031", "5060", "5065", "5066", "5100"]), []);
+  // Vehicle Fuel IS offered (director, 14 Oct 2026: "allow fuel entry in
+  // Accounts and sync both ways"): a fuel head takes the fill — vehicle,
+  // quantity, rate — and writes it to Transport → Fuel's register in the
+  // voucher's own transaction, so it is booked once and seen on both sides.
+  const SYSTEM_HEADS = useMemo(() => new Set(["5060", "5065", "5066", "5100"]), []);
   const heads = useMemo(
     () =>
       accounts.filter(
@@ -2256,34 +2291,24 @@ export function MultiLineExpensePanel({
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
 
   /**
-   * The fleet, read from the Transport desk rather than the chart.
+   * The fleet, read from the server (the Transport desk's vehicles, with the
+   * fuels each takes) — never from this browser's copy of Transport, which is
+   * empty on any machine that has not opened Transport.
    *
    * Vehicles are not sub-heads: the fleet changes when one is sold, and a
    * chart of accounts that grows an account per number plate is a chart
-   * nobody can read. The vehicle is recorded on the line and in Transport's
-   * own fuel log, which is where per-vehicle mileage already lives.
+   * nobody can read. The vehicle is recorded on the fill in Transport → Fuel,
+   * tied to its voucher line.
    */
-  const [fleet, setFleet] = useState<FleetVehicle[]>([]);
-  useEffect(() => {
-    try {
-      const t = loadTransport();
-      setFleet(t.vehicles ?? []);
-    } catch {
-      // Transport not opened in this browser yet — the fuel strip simply does
-      // not appear, and the expense can still be booked as a plain amount.
-      setFleet([]);
-    }
-  }, []);
+  const { ctx: fuelCtx } = useFuelFormContext(refreshKey ?? 0);
+  const fleet: FuelFormVehicle[] = fuelCtx?.vehicles ?? [];
 
   const isFuelRow = (r: Row) => {
     const a = accountOf(r);
     return !!a && isFuelAccount({ code: a.code, name: a.name });
   };
   const vehicleOf = (r: Row) => fleet.find((v) => v.id === r.vehicleId);
-  const fuelsOf = (r: Row) => {
-    const v = vehicleOf(r);
-    return v ? vehicleFuelOptions(v) : [];
-  };
+  const fuelsOf = (r: Row) => vehicleOf(r)?.fuels ?? [];
   /** On a fuel row the amount is rate × quantity, never a typed figure. */
   const rowAmountPaise = (r: Row) =>
     isFuelRow(r)
@@ -2365,7 +2390,7 @@ export function MultiLineExpensePanel({
           odometerKm: Number(r.odometer) || 0,
         },
         allowedFuels: fuelsOf(r),
-        lastOdometerKm: v?.odometerKm,
+        lastOdometerKm: v ? fuelCtx?.lastOdometer[v.id] : undefined,
       });
       problems.push(...res.problems);
       warnings.push(...res.warnings);
@@ -2385,8 +2410,17 @@ export function MultiLineExpensePanel({
     (totals.paidPaise === 0 || !needsBank || (!!bankId && ref.trim() !== "")) &&
     fuelIssues.problems.length === 0;
 
+  /**
+   * Fill ids, one per fuel row, kept until the post is confirmed — a retry or
+   * a double click re-sends the same ids and lands on the same voucher.
+   */
+  const fuelIdsRef = useRef(new Map<string, string>());
+  /** Set synchronously: a second click in the same tick sees it before React re-renders. */
+  const postingRef = useRef(false);
+
   async function post() {
-    if (!canPost || busy) return;
+    if (!canPost || busy || postingRef.current) return;
+    postingRef.current = true;
     setBusy(true);
     setNotice(null);
     try {
@@ -2411,6 +2445,46 @@ export function MultiLineExpensePanel({
                 date,
               },
       });
+      // Each fuel row names the voucher line it lands on, so the server can
+      // write the voucher and Transport → Fuel's fills in one transaction.
+      // buildExpenseVoucherLines emits, per line in order, the amount then its
+      // tax — the line numbers follow from that.
+      const lineOfRow = new Map<string, number>();
+      let lineNo = 0;
+      for (const l of totals.lines) {
+        if (l.amountPaise > 0) lineOfRow.set(l.id, ++lineNo);
+        if (l.taxPaise > 0) lineNo += 1;
+      }
+      const fuelRowIds = rows.filter((r) => isFuelRow(r) && lineOfRow.has(r.id)).map((r) => r.id);
+      const heldIds = stableFillIds(
+        fuelIdsRef.current,
+        fuelRowIds,
+        () => `fuela_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
+      );
+      const fuelFills = rows
+        .filter((r) => isFuelRow(r) && lineOfRow.has(r.id))
+        .map((r) => {
+          const allocated = totals.lines.find((l) => l.id === r.id);
+          const odo = Number(r.odometer);
+          return {
+            id: heldIds.get(r.id)!,
+            lineNo: lineOfRow.get(r.id)!,
+            vehicleId: r.vehicleId,
+            fillDate: date,
+            fuelType: r.fuelType,
+            quantity: Math.round((Number(r.fuelQty) || 0) * 100) / 100,
+            ratePaise: paiseFromRupees(r.fuelRate),
+            odometerKm: r.odometer.trim() && Number.isFinite(odo) && odo > 0 ? odo : null,
+            dealerName: r.vendorName,
+            billNo: "",
+            // Left owing → fuel on credit from its dealer; paid today → the
+            // way the voucher paid (a cheque is a bank payment).
+            paymentMode: allocated && allocated.duePaise > 0 ? "on_account" : payMode === "cheque" ? "bank" : payMode,
+            bankAccountId: bankId,
+            paymentRef: ref.trim(),
+            note: r.description.trim(),
+          };
+        });
       const res = await ledgerApi<{ voucherNo?: string }>({
         action: "post",
         voucher: {
@@ -2420,13 +2494,9 @@ export function MultiLineExpensePanel({
           createdBy: actor,
           lines,
         },
+        ...(fuelFills.length ? { fuelFills } : {}),
       });
       if (res.ok) {
-        // Fuel is no longer written to the Transport desk from here: the fuel
-        // register (Transport → Fuel) is the one fuel record and posts its own
-        // vouchers. A fuel-named head other than 5031 still books the money
-        // with the vehicle in the narration.
-        const fuelRows = rows.filter((r) => isFuelRow(r));
         setNotice({
           tone: "ok",
           text:
@@ -2434,10 +2504,10 @@ export function MultiLineExpensePanel({
             (totals.duePaise > 0
               ? ` · ${formatInr(totals.duePaise)} left owing`
               : " · paid in full") +
-            (fuelRows.length
-              ? " · vehicle fuel belongs in Transport → Fuel; enter fills there so they count once"
-              : ""),
+            (fuelFills.length ? ` · ${fuelFills.length} fill(s) in Transport → Fuel, tied to this voucher` : ""),
         });
+        // Confirmed: only now do the next rows get fresh fill ids.
+        fuelIdsRef.current = new Map();
         setRows([blankRow()]);
         setNote("");
         setRef("");
@@ -2447,6 +2517,7 @@ export function MultiLineExpensePanel({
         setNotice({ tone: "bad", text: res.error || "The book refused this voucher" });
       }
     } finally {
+      postingRef.current = false;
       setBusy(false);
     }
   }
@@ -2459,8 +2530,8 @@ export function MultiLineExpensePanel({
       <p className="text-[11px] text-[var(--muted)]">
         One trip, one voucher: a head and sub-head per line, with its own
         vendor and tag. Pay all of it or part — whatever is left stays owing to
-        the vendor it belongs to. Vehicle fuel is entered in Transport → Fuel,
-        which posts it here.
+        the vendor it belongs to. A fuel line names its vehicle, quantity and
+        rate, and lands in Transport → Fuel in the same save.
       </p>
       <div className="mt-2">
         <LastEntryStrip kind="payment" refreshKey={refreshKey} />
@@ -2637,9 +2708,9 @@ export function MultiLineExpensePanel({
               {fuelRow ? (
                 fleet.length === 0 ? (
                   <p className="mt-2 rounded-lg bg-amber-500/10 px-2 py-1 text-[10px] text-amber-700">
-                    This is a fuel head, but no vehicles have loaded in this
-                    browser. Open Transport once, then come back — otherwise
-                    the fill cannot be logged against a vehicle.
+                    This is a fuel head, but the fleet has not loaded (or
+                    Transport has no vehicles), so the fill cannot be tied to a
+                    vehicle yet.
                   </p>
                 ) : (
                   <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg bg-[var(--surface-2)] p-2">
@@ -2650,7 +2721,7 @@ export function MultiLineExpensePanel({
                         value={r.vehicleId}
                         onChange={(e) => {
                           const v = fleet.find((x) => x.id === e.target.value);
-                          const opts = v ? vehicleFuelOptions(v) : [];
+                          const opts = v?.fuels ?? [];
                           // The fuel and its unit follow the vehicle: a
                           // CNG+Petrol bus offers both, everything else is
                           // settled the moment the vehicle is chosen.
@@ -2658,14 +2729,15 @@ export function MultiLineExpensePanel({
                             vehicleId: e.target.value,
                             fuelType: opts[0]?.fuelType ?? "",
                             fuelUnit: opts[0]?.unit ?? "",
-                            odometer: v?.odometerKm ? String(v.odometerKm) : "",
+                            odometer: "",
                           });
                         }}
                       >
                         <option value="">Choose…</option>
                         {fleet.map((v) => (
                           <option key={v.id} value={v.id}>
-                            {v.registrationNo} — {v.name}
+                            {v.primary}
+                            {v.secondary ? ` — ${v.secondary}` : ""}
                           </option>
                         ))}
                       </select>
