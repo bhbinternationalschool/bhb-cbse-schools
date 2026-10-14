@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ExportMenu } from "@/components/ui/erp-grid";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { DraftMonthInput } from "@/components/ui/draft-inputs";
 import { monthCell, type BoardingMonthRow, type VehicleMonthRow } from "@/lib/transportBoardingLog";
 import { registerGet, regBtnOutline, regField, rupees } from "@/lib/transportRegisterClient";
 
@@ -40,13 +41,7 @@ export function BusRegisterReports({ initialMonth }: { initialMonth: string }) {
           aria-label="Report"
           size="md"
         />
-        <input
-          type="month"
-          aria-label="Month"
-          className={regField}
-          value={month}
-          onChange={(e) => e.target.value && setMonth(e.target.value)}
-        />
+        <DraftMonthInput aria-label="Month" className={regField} value={month} onCommit={setMonth} />
       </div>
       {kind === "boarding" ? <BoardingMonthReport month={month} /> : <VehicleMonthReport month={month} />}
     </section>

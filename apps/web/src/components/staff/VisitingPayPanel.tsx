@@ -23,6 +23,7 @@ import { ErpControlBar, ExportMenu, RowActionMenu, RowCheckbox, BulkActionBar, u
 import { ErpMetricCard, ErpMetricGrid, ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { pushToast } from "@/components/shell/Toast";
+import { DraftMonthInput } from "@/components/ui/draft-inputs";
 import { requestStatusSentence, type PayoutRequestChannel, type PayoutRequestStatus } from "@/lib/payoutRequests";
 import { fyMonths, fyOfMonth, istToday, sheetStatusSentence, type SheetStatus, type TdsComputation, type VisitingPayBasis, type WorkLineStatus } from "@/lib/visitingPay";
 
@@ -252,7 +253,7 @@ export function VisitingPayPanel() {
             <button type="button" className={btnOutline} onClick={() => setMonth(shiftMonth(month, -1))} aria-label="Previous month">
               ‹
             </button>
-            <input type="month" className={`${field} !w-auto`} value={month} max={thisMonth()} onChange={(e) => e.target.value && setMonth(e.target.value)} />
+            <DraftMonthInput aria-label="Month" className={`${field} !w-auto`} value={month} max={thisMonth()} onCommit={(ym) => setMonth(ym > thisMonth() ? thisMonth() : ym)} />
             <button type="button" className={btnOutline} onClick={() => setMonth(shiftMonth(month, 1))} disabled={month >= thisMonth()} aria-label="Next month">
               ›
             </button>

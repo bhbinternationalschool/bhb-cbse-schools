@@ -34,7 +34,7 @@ const store = new Map<string, string>();
   clear: () => void store.clear(),
 };
 
-import { dateDraftCommit, draftNumberValue, numberDraftText, parseTypedDate } from "./draftInput";
+import { dateDraftCommit, draftNumberValue, monthDraftCommit, numberDraftText, parseTypedDate, parseTypedMonth } from "./draftInput";
 import {
   advancePickRows,
   allocateAdvanceRecovery,
@@ -88,6 +88,16 @@ assert.deepEqual(
 assert.deepEqual(dateDraftCommit("", { badInput: true, onBlur: true }), { commit: false }, "half-typed on blur: keep the stored date");
 assert.deepEqual(dateDraftCommit("", { badInput: false, onBlur: true }), { commit: true, value: "" }, "emptied on blur: clear");
 assert.deepEqual(dateDraftCommit("", { badInput: false }), { commit: false }, "empty while typing is not a clear");
+// Month boxes: Chrome reports 0002-10, 0020-10, 0202-10 while the year is
+// typed — none is handed up; only the whole month is.
+{
+  const typing = ["0002-10", "0020-10", "0202-10", "2026-10"].map((v) => monthDraftCommit(v));
+  assert.deepEqual(typing, [{ commit: false }, { commit: false }, { commit: false }, { commit: true, value: "2026-10" }], "month: only the whole year commits");
+  assert.equal(parseTypedMonth("10/2026"), "2026-10", "MM/YYYY accepted");
+  assert.equal(parseTypedMonth("2026-13"), null, "no 13th month");
+  assert.deepEqual(monthDraftCommit(""), { commit: false }, "an emptied month box stores nothing");
+  assert.deepEqual(monthDraftCommit("2026-10", { badInput: true }), { commit: false }, "half-typed per the browser: nothing");
+}
 assert.deepEqual(dateDraftCommit("", { badInput: false, clearNow: true }), { commit: true, value: "" }, "the picker's clear button");
 // A box that must always hold a day (a register's day, the class sheet's
 // "measured on"): emptying it stores nothing, on blur or by the clear button.
