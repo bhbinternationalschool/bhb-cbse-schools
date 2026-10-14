@@ -189,7 +189,10 @@ jobs:
       - name: Self-test — WhatsApp UPI screenshot finds the payment it pays
         working-directory: apps/web
         run: npm run test:upi-proof-match
- npm run test:upi-proof-wa-senders
+
+      - name: Self-test — only the owner number records payments by WhatsApp
+        working-directory: apps/web
+        run: npm run test:upi-proof-wa-senders
 
       - name: Self-test — dashboard expense periods (India days, Monday weeks)
         working-directory: apps/web
