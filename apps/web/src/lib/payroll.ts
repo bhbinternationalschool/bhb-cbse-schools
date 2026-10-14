@@ -44,10 +44,18 @@ import {
   voidSalaryAccountForRun,
 } from "@/lib/salaryAccount";
 import {
+  advanceAllocationProblems,
+  advancePickRowsForStaff,
+  outstandingByStaff,
   outstandingForStaff,
   syncAdvanceRecoveriesFromPayroll,
   voidAdvanceRecoveriesForRun,
 } from "@/lib/staffAdvance";
+import {
+  cleanAdvancePicks,
+  lineAdvancePicks,
+  pickedAdvanceTotal,
+} from "@/lib/payrollAdvancePick";
 import {
   additionalFromLink,
   computeStructureAmounts,
@@ -90,6 +98,13 @@ export type PayrollLineComponent = {
    * salary setup keeps it unless that line is reset (14 Oct 2026).
    */
   manual?: boolean;
+  /**
+   * On the Advance recovery head only: the staff advances ticked on the
+   * line's "Advance outstanding" note (14 Oct 2026). Publish books the
+   * recovery on exactly these, oldest first (lib/payrollAdvancePick). Kept
+   * on the component because the component is stored whole (jsonb).
+   */
+  advanceIds?: string[];
 };
 
 export type PayrollPaymentMode =
@@ -918,7 +933,11 @@ function guardDraftOnly(run: PayrollRun): string | null {
   return `Run is locked (${run.status}) — recall to draft before editing`;
 }
 
-function recalculateLineFromComponents(line: PayrollStaffLine): PayrollStaffLine {
+function recalculateLineFromComponents(
+  line: PayrollStaffLine,
+  /** Outstanding advance, when the caller has read it already. */
+  outstanding?: number,
+): PayrollStaffLine {
   const gross = line.components
     .filter((c) => c.kind === "earning")
     .reduce((s, c) => s + c.amount, 0);
@@ -933,7 +952,7 @@ function recalculateLineFromComponents(line: PayrollStaffLine): PayrollStaffLine
   /** Cash out: salary net + optional new advance with salary (held June → 0 salary part) */
   const amountPayable = line.juneHold ? newAdv : netPay + newAdv;
   const govt = govtDepositFromComponents(line.components);
-  const lockedOutstanding = outstandingForStaff(line.staffId);
+  const lockedOutstanding = outstanding ?? outstandingForStaff(line.staffId);
   return {
     ...line,
     advanceTaken: lockedOutstanding,
@@ -977,7 +996,11 @@ function upsertAdjustmentComponent(
 }
 
 /** Sync bonus / special deduction / advance into salary heads and recalc. */
-export function applyMonthAdjustments(line: PayrollStaffLine): PayrollStaffLine {
+export function applyMonthAdjustments(
+  line: PayrollStaffLine,
+  /** Advances ticked for the recovery; default = those already on the line. */
+  advancePicks: string[] = lineAdvancePicks(line.components),
+): PayrollStaffLine {
   const bonus = Math.max(0, Math.round(line.bonus || 0));
   const special = Math.max(0, Math.round(line.specialDeduction || 0));
   const advance = Math.max(0, Math.round(line.advanceDeduct || 0));
@@ -1006,6 +1029,11 @@ export function applyMonthAdjustments(line: PayrollStaffLine): PayrollStaffLine 
     "deduction",
     advance,
   );
+  if (advance > 0 && advancePicks.length > 0) {
+    components = components.map((c) =>
+      c.headCode === ADJ_CODES.advance ? { ...c, advanceIds: [...advancePicks] } : c,
+    );
+  }
 
   return recalculateLineFromComponents({
     ...line,
@@ -1035,7 +1063,13 @@ export type DraftLineAdjustmentPatch = Partial<
     | "amountPayable"
     | "lwpDeduction"
   >
->;
+> & {
+  /**
+   * Advances ticked on the "Advance outstanding" note. Without
+   * `advanceDeduct` in the same patch, the deduction becomes their total.
+   */
+  advancePicks?: string[];
+};
 
 /** Edit month adjustments / payment fields on a draft line.
  * advanceTaken is always locked from the advance ledger.
@@ -1058,20 +1092,34 @@ export function updateDraftLineAdjustments(
     "advanceDeduct",
     "advanceNewWithSalary",
   ] as const;
-  const touchesMoney = moneyKeys.some((k) => patch[k] !== undefined);
+  const touchesMoney =
+    moneyKeys.some((k) => patch[k] !== undefined) || patch.advancePicks !== undefined;
 
-  const due = outstandingForStaff(staffId);
+  // One read of the advance register for the whole run (it used to be read
+  // once per line, on every keystroke).
+  const outstanding = outstandingByStaff();
+  const due = outstanding.get(staffId) || 0;
+  const { advancePicks: patchPicks, ...fieldPatch } = patch;
 
   const lines = run.lines.map((l) => {
     if (l.staffId !== staffId) {
-      return recalculateLineFromComponents({
-        ...l,
-        advanceTaken: outstandingForStaff(l.staffId),
-      });
+      // Other lines only refresh the locked "advance outstanding" figure.
+      // Their components did not change, so gross / net cannot — and a
+      // payable typed by hand on them stays as typed (it used to be reset
+      // to net whenever ANY other line was edited).
+      return { ...l, advanceTaken: outstanding.get(l.staffId) || 0 };
     }
+    // The ticked advances: still open and this person's, oldest first.
+    const pickRows =
+      patchPicks !== undefined || lineAdvancePicks(l.components).length
+        ? advancePickRowsForStaff(staffId)
+        : [];
+    const rawPicks = patchPicks !== undefined ? patchPicks : lineAdvancePicks(l.components);
+    const picks = cleanAdvancePicks(pickRows, rawPicks);
+    const pickedTotal = pickedAdvanceTotal(pickRows, picks);
     let next: PayrollStaffLine = {
       ...l,
-      ...patch,
+      ...fieldPatch,
       advanceTaken: due,
       paymentMode: patch.paymentMode
         ? normalizePaymentMode(patch.paymentMode)
@@ -1082,8 +1130,15 @@ export function updateDraftLineAdjustments(
           : l.paymentDate,
     };
 
-    if (patch.advanceDeduct !== undefined && patch.advanceDeduct > due) {
-      next = { ...next, advanceDeduct: due };
+    if (patchPicks !== undefined && patch.advanceDeduct === undefined) {
+      // Ticking fills the deduction with the ticked balances.
+      next = { ...next, advanceDeduct: pickedTotal };
+    }
+    // Never more than is outstanding — and with advances ticked, never more
+    // than the ticked balances.
+    const cap = rawPicks.length ? Math.min(pickedTotal, due) : due;
+    if (touchesMoney && (next.advanceDeduct || 0) > cap) {
+      next = { ...next, advanceDeduct: cap };
     }
 
     if (patch.lwpDeduction !== undefined) {
@@ -1110,9 +1165,9 @@ export function updateDraftLineAdjustments(
     }
 
     if (touchesMoney || patch.specialDeductionLabel !== undefined) {
-      next = applyMonthAdjustments(next);
+      next = applyMonthAdjustments(next, picks);
     } else {
-      next = recalculateLineFromComponents(next);
+      next = recalculateLineFromComponents(next, due);
     }
 
     if (patch.amountPayable !== undefined && !touchesMoney) {
@@ -1120,6 +1175,10 @@ export function updateDraftLineAdjustments(
         ...next,
         amountPayable: Math.max(0, Math.round(patch.amountPayable)),
       };
+    } else if (!touchesMoney && patch.lwpDeduction === undefined) {
+      // A date, mode, note or label changes no money: a payable typed by
+      // hand stays as typed (it used to snap back to net on any edit).
+      next = { ...next, amountPayable: l.amountPayable };
     }
 
     return next;
@@ -1152,13 +1211,22 @@ export function mergePreservedAdjustments(
       advanceNewWithSalary: 0,
     });
   }
+  // Advances ticked on the line stay ticked while still open, and the
+  // deduction stays within their balance.
+  const prevPicks = lineAdvancePicks(previous.components);
+  const pickRows = prevPicks.length ? advancePickRowsForStaff(fresh.staffId) : [];
+  const picks = cleanAdvancePicks(pickRows, prevPicks);
+  // A line that had advances ticked stays on them: if they were recovered
+  // elsewhere meanwhile the deduction shrinks to what they still owe — it is
+  // never moved onto an advance nobody ticked.
+  const cap = prevPicks.length ? Math.min(pickedAdvanceTotal(pickRows, picks), due) : due;
   return applyMonthAdjustments({
     ...fresh,
     bonus: previous.bonus || 0,
     specialDeduction: previous.specialDeduction || 0,
     specialDeductionLabel: previous.specialDeductionLabel || "",
     advanceTaken: due,
-    advanceDeduct: Math.min(previous.advanceDeduct || 0, due),
+    advanceDeduct: Math.min(previous.advanceDeduct || 0, cap),
     advanceNewWithSalary: previous.advanceNewWithSalary || 0,
     paymentDate: previous.paymentDate || "",
     paymentMode: previous.paymentMode || "bank_transfer",
@@ -1167,7 +1235,7 @@ export function mergePreservedAdjustments(
     paidOn: previous.paidOn || "",
     paidBy: previous.paidBy || "",
     paymentRef: previous.paymentRef || "",
-  });
+  }, picks);
 }
 
 export function paymentModeLabel(mode: PayrollPaymentMode): string {
@@ -1960,6 +2028,15 @@ export function publishPayrollToAccounts(
     return {
       ok: false,
       error: `Not published — ${namesList(staffClash)} already ${staffClash.length === 1 ? "has" : "have"} ${run.month} salary in another approved, posted or paid run. Nothing was posted.`,
+    };
+  }
+  // Advances ticked on a line must still owe what the line deducts — else
+  // the recovery would land twice, or on an advance nobody ticked.
+  const advanceShort = advanceAllocationProblems(run);
+  if (advanceShort.length) {
+    return {
+      ok: false,
+      error: `Not published — ${advanceShort.join("; ")}. Recall to draft, open Adjust / pay and tick the advances again. Nothing was posted.`,
     };
   }
 
