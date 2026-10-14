@@ -36,6 +36,12 @@ import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { EnteredUpToLine } from "@/components/accounts/LastEntryStrip";
 import { pickLastEntries } from "@/lib/ledger/lastEntries";
+import { SearchPick } from "@/components/ui/SearchPick";
+import type { PickItem } from "@/lib/pickerSearch";
+
+// One recent list for all three staff pickers on this tab: the person whose
+// advance was just issued is usually the one checked or repaid next.
+const ADVANCE_STAFF_RECENT = "payroll.advances.staff";
 
 export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
   const session = useDemoSession();
@@ -98,6 +104,34 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
   );
 
   const summary = useMemo(() => advanceSummary(masters), [masters, tick]);
+
+  // Staff pickers search by name, emp code or designation, read A→Z by name
+  // and keep this browser's recent picks on top (director, 14 Oct 2026:
+  // "staff in advance by alphabet or make easier to pick name"). `withDue`
+  // adds the outstanding amount for the check / return pickers.
+  const staffPick = useMemo(() => {
+    const desig = new Map((masters?.designations ?? []).map((d) => [d.id, d.name]));
+    const build = (withDue: boolean): PickItem[] =>
+      roster.map((s) => {
+        const designation = (s.designationId && desig.get(s.designationId)) || "";
+        const due = withDue
+          ? summary.byStaff.find((x) => x.staffId === s.id)?.outstanding || 0
+          : 0;
+        return {
+          id: s.id,
+          label: s.fullName || s.empCode,
+          sub: [s.empCode, designation, due > 0 ? `due ${formatInr(due)}` : ""]
+            .filter(Boolean)
+            .join(" · "),
+          keywords: [s.empCode, designation],
+        };
+      });
+    return { plain: build(false), withDue: build(true) };
+  }, [roster, masters, summary]);
+  const staffDisplay = (it: PickItem) => {
+    const code = roster.find((s) => s.id === it.id)?.empCode;
+    return code && code !== it.label ? `${it.label} (${code})` : it.label;
+  };
 
   const visible = useMemo(() => {
     let list = advances;
@@ -257,26 +291,19 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
           Check staff advances
         </h3>
         <div className="flex flex-wrap items-end gap-3">
-          <label className="text-xs font-semibold text-[var(--muted)]">
+          <label className="w-full text-xs font-semibold text-[var(--muted)] sm:w-auto">
             Staff
-            <select
-              className="field mt-1 min-w-[240px] !py-2"
+            <SearchPick
+              className="mt-1 w-full min-w-0 sm:w-[280px]"
+              items={staffPick.withDue}
               value={viewStaffId}
-              onChange={(e) => setViewStaffId(e.target.value)}
-            >
-              <option value="">All staff</option>
-              {roster.map((s) => {
-                const due =
-                  summary.byStaff.find((x) => x.staffId === s.id)
-                    ?.outstanding || 0;
-                return (
-                  <option key={s.id} value={s.id}>
-                    {s.empCode} — {s.fullName}
-                    {due > 0 ? ` · due ${formatInr(due)}` : ""}
-                  </option>
-                );
-              })}
-            </select>
+              onChange={setViewStaffId}
+              placeholder="All staff — type a name or code"
+              recentKey={ADVANCE_STAFF_RECENT}
+              display={staffDisplay}
+              clearable
+              aria-label="Staff to check"
+            />
           </label>
           {viewStaffId ? (
             <p className="pb-2 text-sm font-semibold text-[var(--brand-deep)]">
@@ -311,18 +338,17 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
         </div>
         <label className="text-xs font-semibold text-[var(--muted)] sm:col-span-2 lg:col-span-1">
           Staff
-          <select
-            className="field mt-1 !py-2"
+          <SearchPick
+            className="mt-1"
+            items={staffPick.plain}
             value={staffId}
-            onChange={(e) => setStaffId(e.target.value)}
-          >
-            <option value="">Select…</option>
-            {roster.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.empCode} — {s.fullName}
-              </option>
-            ))}
-          </select>
+            onChange={setStaffId}
+            placeholder="Type a name, code or designation…"
+            recentKey={ADVANCE_STAFF_RECENT}
+            display={staffDisplay}
+            disabled={readOnly}
+            aria-label="Staff to issue the advance to"
+          />
         </label>
         <label className="text-xs font-semibold text-[var(--muted)]">
           Amount ₹
@@ -434,30 +460,21 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
         </p>
         <label className="text-xs font-semibold text-[var(--muted)]">
           Staff
-          <select
-            className="field mt-1 !py-2"
+          {/* Every active staff is listed, due or not, as before. */}
+          <SearchPick
+            className="mt-1"
+            items={staffPick.withDue}
             value={returnStaffId}
-            onChange={(e) => {
-              setReturnStaffId(e.target.value);
+            onChange={(id) => {
+              setReturnStaffId(id);
               setReturnAmount(0);
             }}
-          >
-            <option value="">Select…</option>
-            {roster.map((s) => {
-              const due =
-                summary.byStaff.find((x) => x.staffId === s.id)?.outstanding ||
-                0;
-              if (due <= 0 && !summary.byStaff.some((x) => x.staffId === s.id)) {
-                /* still list all for clarity */
-              }
-              return (
-                <option key={s.id} value={s.id}>
-                  {s.empCode} — {s.fullName}
-                  {due > 0 ? ` · due ${formatInr(due)}` : ""}
-                </option>
-              );
-            })}
-          </select>
+            placeholder="Type a name, code or designation…"
+            recentKey={ADVANCE_STAFF_RECENT}
+            display={staffDisplay}
+            disabled={readOnly}
+            aria-label="Staff returning the advance"
+          />
         </label>
         <label className="text-xs font-semibold text-[var(--muted)]">
           Return amount ₹

@@ -151,7 +151,10 @@ export function buildBankExportPreview(input: {
   let entries =
     input.requirePosted === false
       ? monthPayslipLines(runs, input.month, input.academicYearCode)
-      : monthPayslipLines(runs, input.month, input.academicYearCode, ["posted"]);
+      : monthPayslipLines(runs, input.month, input.academicYearCode, ["posted"])
+          // Staff on a posted run already marked paid on their own day
+          // (14 Oct 2026) are not in the file either.
+          .filter((e) => !e.line.paidOn);
   if (entries.length === 0 && input.requirePosted !== false) {
     entries = monthPayslipLines(runs, input.month, input.academicYearCode, ["paid"]);
   }
@@ -172,7 +175,8 @@ export function buildBankExportPreview(input: {
   const rows: BankExportRow[] = [];
   {
     for (const { line } of entries) {
-      const mode = line.paymentMode || "bank_transfer";
+      // NEFT / RTGS is a bank transfer for the file.
+      const mode = line.paymentMode === "neft" ? "bank_transfer" : line.paymentMode || "bank_transfer";
       if (modeFilter && !modeFilter.has(mode as "bank_transfer" | "upi")) {
         continue;
       }

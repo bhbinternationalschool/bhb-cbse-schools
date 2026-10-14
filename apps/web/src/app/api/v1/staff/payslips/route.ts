@@ -56,10 +56,12 @@ export async function GET(request: Request) {
         amountPayable: line.amountPayable,
         onHold: line.juneHold && !line.eligibleForJuneDraw,
         holdNote: line.holdNote,
-        paymentDate: line.paymentDate,
+        // The day this person was actually paid, when marked on its own
+        // (14 Oct 2026); else the planned day / the run's paid day.
+        paymentDate: line.paidOn || line.paymentDate,
         paymentMode: line.paymentMode,
         paymentModeLabel: modeLabel(line.paymentMode),
-        paidAt: run.paidAt,
+        paidAt: line.paidOn ? `${line.paidOn}T12:00:00+05:30` : run.paidAt,
         earnings: line.components
           .filter((c) => c.kind === "earning")
           .map((c) => ({ name: c.headName, amount: c.amount })),

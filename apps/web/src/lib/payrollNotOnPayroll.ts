@@ -170,6 +170,46 @@ export type NotOnPayrollEntry = {
   reason: string;
 };
 
+/**
+ * processPayrollDraft's one "left out" list: marked not on payroll, or
+ * joined after the month (lib/payrollSetupSync payrollEmploymentStart).
+ */
+export type PayrollLeftOutEntry = NotOnPayrollEntry & {
+  why: "not_on_payroll" | "joined_after";
+};
+
+/** What a left-out entry says on screen. */
+export function leftOutText(e: PayrollLeftOutEntry): string {
+  if (e.why === "joined_after") return `Joined ${e.reason} — after the month (fix the joining date in Masters if wrong)`;
+  return e.reason ? `Not on payroll — ${e.reason}` : "Not on payroll";
+}
+
+/**
+ * One list from the two ways a person is left out. Not on payroll wins: the
+ * draft builder checks it first, so nobody appears twice.
+ */
+export function mergeLeftOut(
+  notOnPayroll: NotOnPayrollEntry[],
+  joinedAfter: { staffId: string; fullName: string; joiningDate: string }[],
+  staff: { id: string; empCode: string }[],
+): PayrollLeftOutEntry[] {
+  const out: PayrollLeftOutEntry[] = notOnPayroll.map((e) => ({ ...e, why: "not_on_payroll" as const }));
+  const seen = new Set(out.map((e) => e.staffId));
+  const codes = new Map(staff.map((s) => [s.id, s.empCode]));
+  for (const j of joinedAfter) {
+    if (seen.has(j.staffId)) continue;
+    seen.add(j.staffId);
+    out.push({
+      staffId: j.staffId,
+      fullName: j.fullName,
+      empCode: codes.get(j.staffId) || "",
+      reason: j.joiningDate,
+      why: "joined_after",
+    });
+  }
+  return out;
+}
+
 type StaffLike = { id: string; fullName: string; empCode: string };
 
 /** Split due staff into those payroll builds and those left out by the switch. */

@@ -1,18 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import type { NotOnPayrollEntry } from "@/lib/payrollNotOnPayroll";
+import {
+  leftOutText,
+  type NotOnPayrollEntry,
+  type PayrollLeftOutEntry,
+} from "@/lib/payrollNotOnPayroll";
 
 const SETUP_HREF = "/masters?tab=salary";
 
-/** After processing: who payroll left out because they are not on payroll. */
+/** After processing: who payroll left out — not on payroll, or joined after the month. */
 export function NotOnPayrollLeftOut({
   month,
   rows,
   onClose,
 }: {
   month: string;
-  rows: NotOnPayrollEntry[];
+  rows: PayrollLeftOutEntry[];
   onClose: () => void;
 }) {
   if (!rows.length) return null;
@@ -20,7 +24,7 @@ export function NotOnPayrollLeftOut({
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-xs">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-semibold text-[var(--brand-deep)]">
-          Left out — not on payroll ({rows.length}) · {month}
+          Left out ({rows.length}) · {month}
         </p>
         <button
           type="button"
@@ -34,16 +38,16 @@ export function NotOnPayrollLeftOut({
         {rows.map((r) => (
           <li key={r.staffId} className="text-[var(--brand-deep)]">
             {r.empCode} — {r.fullName}
-            <span className="text-[var(--muted)]">{r.reason ? ` · ${r.reason}` : ""}</span>
+            <span className="text-[var(--muted)]"> · {leftOutText(r)}</span>
           </li>
         ))}
       </ul>
       <p className="mt-1.5 text-[10px] text-[var(--muted)]">
-        Marked in{" "}
+        &ldquo;Not on payroll&rdquo; is set in{" "}
         <Link href={SETUP_HREF} className="font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline">
           Masters → Salary setup
         </Link>
-        . They stay active staff for attendance, the staff app and roles.
+        ; they stay active staff for attendance, the staff app and roles.
       </p>
     </div>
   );

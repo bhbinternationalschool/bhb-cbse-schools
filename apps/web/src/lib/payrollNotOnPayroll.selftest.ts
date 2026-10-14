@@ -16,6 +16,8 @@ import {
   clearSalaryAssignment,
   hasSalaryAssignment,
   isOnPayroll,
+  leftOutText,
+  mergeLeftOut,
   normalizeNotOnPayroll,
   notOnPayrollLabel,
   notOnPayrollLines,
@@ -175,6 +177,24 @@ const AT = "2026-10-14T10:00:00.000Z";
   });
   assert.deepEqual(ids(picked), ["paid"]);
   console.log("  ok  draft builder skips not-on-payroll staff");
+}
+
+// 7. One left-out list: not on payroll first, joined-after added once.
+{
+  const merged = mergeLeftOut(
+    [{ staffId: "s1", fullName: "Ashish Singh", empCode: "EMP-0001", reason: "Owner / trustee" }],
+    [
+      { staffId: "s1", fullName: "Ashish Singh", joiningDate: "2026-08-01" },
+      { staffId: "s9", fullName: "New Joiner", joiningDate: "2026-08-01" },
+      { staffId: "s9", fullName: "New Joiner", joiningDate: "2026-08-01" },
+    ],
+    [{ id: "s9", empCode: "STF-099" }],
+  );
+  assert.deepEqual(merged.map((e) => `${e.staffId}:${e.why}`), ["s1:not_on_payroll", "s9:joined_after"]);
+  assert.equal(merged[1]!.empCode, "STF-099");
+  assert.equal(leftOutText(merged[0]!), "Not on payroll — Owner / trustee");
+  assert.match(leftOutText(merged[1]!), /^Joined 2026-08-01 — after the month/);
+  console.log("  ok  one left-out list, nobody twice");
 }
 
 console.log("payrollNotOnPayroll.selftest.ts — all passed");
