@@ -19,13 +19,17 @@ const KEEP_ON_LOGIN = new Set<string>([
   "bhb_sis_pending_deletes_v1",
   // ── this device ──
   PUNCH_SCREEN_TOKEN_KEY,
-  "bhb_survey_agent_member_v1", // which surveyor this phone belongs to
-  "bhb_survey_offline_v1", // survey pings not yet sent
+  // Survey entries captured offline and not yet uploaded. Each carries who
+  // captured it (item.by); another user on this phone sees only "waiting to
+  // upload by <name>" (AdmissionFieldSurveyPanel).
+  "bhb_survey_offline_v1",
   "bhb_visitor_lang", // gate kiosk language
   "bhb_visitor_desk_lang",
   "bhb_gate_wa_number", // gate QR's WhatsApp number on this device
   "bhb_login_app_card_dismissed_v2",
-  "bhb_chat_alert_prefs_v1", // sound / alert choice on this device
+  // NOT kept, on purpose: "bhb_survey_agent_member_v1" (the next person to
+  // sign in would work as the last surveyor) and "bhb_chat_alert_prefs_v1"
+  // (one user's mute would silence the next) belong to a person, not a device.
 ]);
 
 const KEEP_PREFIXES_ON_LOGIN = ["bhb_pwa_dismiss_"];

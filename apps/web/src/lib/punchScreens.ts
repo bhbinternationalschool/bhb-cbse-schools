@@ -45,21 +45,13 @@ export function splitScreens<T extends PunchScreenRow>(rows: T[], nowMs: number)
 }
 
 /**
- * Switching on a screen named `label`: earlier screens with that name that
- * have not been seen for a day are replaced (switched off) at once; ones seen
- * in the last day are only reported, for the office to decide.
+ * Switching on a screen named `label`: the other screens with that name.
+ * Nothing is switched off for this — a second real tablet with the same name,
+ * idle over a holiday, looks exactly like a leftover. The panel only offers
+ * them to an admin, who confirms (review of #637).
  */
-export function sameLabelOnSwitchOn<T extends PunchScreenRow>(
-  rows: T[],
-  label: string,
-  newId: string,
-  nowMs: number,
-): { replace: T[]; seenToday: T[] } {
-  const replace: T[] = [];
-  const seenToday: T[] = [];
-  for (const r of rows) {
-    if (r.id === newId || !sameLabel(r.label, label)) continue;
-    (nowMs - lastActivityMs(r) < DAY_MS ? seenToday : replace).push(r);
-  }
-  return { replace, seenToday };
+export function sameNameScreens<T extends PunchScreenRow>(rows: T[], label: string, newId: string): T[] {
+  return rows
+    .filter((r) => r.id !== newId && sameLabel(r.label, label))
+    .sort((a, b) => lastActivityMs(b) - lastActivityMs(a));
 }

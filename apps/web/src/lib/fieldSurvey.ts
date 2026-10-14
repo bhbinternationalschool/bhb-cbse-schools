@@ -379,6 +379,16 @@ export function enqueueOfflineSurvey(
   return next;
 }
 
+/**
+ * The offline queue outlives a login (lib/deviceLocalStorage.ts), so a
+ * shared phone can hold another person's unsent entries. Only the person who
+ * captured an entry sees its details; others see who it is waiting for.
+ */
+export function offlineItemIsMine(item: Pick<SurveyOfflineDraft, "by">, by: string): boolean {
+  const a = (item.by || "").trim().toLowerCase();
+  return !a || a === by.trim().toLowerCase();
+}
+
 export function removeOfflineItem(id: string): SurveyOfflineDraft[] {
   const next = loadOfflineQueue().filter((x) => x.id !== id);
   saveOfflineQueue(next);

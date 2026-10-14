@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomInt, webcrypto } from "crypto";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { mergePunchAttempt, type PunchAttempt } from "@/lib/punchAttempts";
-import { isOldScreen, sameLabelOnSwitchOn, type PunchScreenRow } from "@/lib/punchScreens";
+import { isOldScreen, sameNameScreens, type PunchScreenRow } from "@/lib/punchScreens";
 
 /**
  * Staff punch phones and office QR screens (director, 30 Sep 2026).
@@ -312,7 +312,7 @@ export async function createPunchDisplay(
   label: string,
   by: string,
 ): Promise<
-  | { ok: true; token: string; replaced: PunchScreenRow[]; seenToday: PunchScreenRow[] }
+  | { ok: true; token: string; sameName: PunchScreenRow[] }
   | { ok: false; error: string; duplicate?: true }
 > {
   const ctx = await getServerTenantContext();
@@ -346,33 +346,36 @@ export async function createPunchDisplay(
     .single();
   if (error || !made) return { ok: false, error: error?.message || "Not saved" };
 
-  // The same name switched on again is the same device, switched on again
-  // (14 Oct 2026: ~20 "Office tablet" rows in a week). Earlier ones not seen
-  // for a day are switched off now; ones seen in the last day are only
-  // reported — the office decides those. Best effort: the new screen works
-  // whatever happens here.
-  let replaced: PunchScreenRow[] = [];
-  let seenToday: PunchScreenRow[] = [];
+  // Other screens with this name are only reported — never switched off
+  // here: a second real tablet with the same name may just be idle.
   const rows = await listPunchDisplays();
-  if (rows) {
-    const split = sameLabelOnSwitchOn(rows, label.slice(0, 80), String(made.id), Date.now());
-    seenToday = split.seenToday;
-    if (split.replace.length) {
-      const { data: off } = await ctx.sb
-        .from("staff_punch_displays")
-        .update({ revoked_at: new Date().toISOString() })
-        .eq("tenant_id", ctx.tenantId)
-        .in(
-          "id",
-          split.replace.map((r) => r.id),
-        )
-        .is("revoked_at", null)
-        .select("id");
-      const offIds = new Set((off ?? []).map((r: { id: string }) => String(r.id)));
-      replaced = split.replace.filter((r) => offIds.has(r.id));
-    }
-  }
-  return { ok: true, token, replaced, seenToday };
+  const sameName = rows ? sameNameScreens(rows, label.slice(0, 80), String(made.id)) : [];
+  return { ok: true, token, sameName };
+}
+
+/** Admin: switch off the chosen screens (the "older screens with this name" offer). */
+export async function revokePunchDisplays(ids: string[]): Promise<PunchScreenRow[] | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const want = [...new Set(ids.map(String).filter(Boolean))].slice(0, 200);
+  if (want.length === 0) return [];
+  const rows = await listPunchDisplays();
+  if (!rows) return null;
+  const hit = rows.filter((r) => want.includes(r.id));
+  if (hit.length === 0) return [];
+  const { data, error } = await ctx.sb
+    .from("staff_punch_displays")
+    .update({ revoked_at: new Date().toISOString() })
+    .eq("tenant_id", ctx.tenantId)
+    .in(
+      "id",
+      hit.map((r) => r.id),
+    )
+    .is("revoked_at", null)
+    .select("id");
+  if (error) return null;
+  const offIds = new Set((data ?? []).map((r: { id: string }) => String(r.id)));
+  return hit.filter((r) => offIds.has(r.id));
 }
 
 /**

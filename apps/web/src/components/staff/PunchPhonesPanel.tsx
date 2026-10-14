@@ -125,8 +125,7 @@ export function PunchPhonesPanel({ canDecidePhones }: { canDecidePhones: boolean
           token?: string;
           code?: string;
           expiresAt?: string;
-          replaced?: number;
-          seenToday?: Screen[];
+          sameName?: Screen[];
           removed?: number;
           recorded?: { kind: string; time: string; ok: boolean; note?: string }[];
         };
@@ -193,24 +192,23 @@ export function PunchPhonesPanel({ canDecidePhones }: { canDecidePhones: boolean
       }
       const r = await act({ action: "screen_create", label, lat: here.lat, lng: here.lng, accuracyM: here.accuracyM });
       if (!r?.token) return;
-      // Same name, seen in the last day: maybe this very device, maybe a
-      // second real one — never switched off without asking (14 Oct 2026).
-      const today = r.seenToday ?? [];
+      // Other screens with this name are only offered — to an admin, who
+      // confirms — never switched off by themselves (review of #637).
+      const same = r.sameName ?? [];
       if (
-        today.length &&
+        canDecidePhones &&
+        same.length &&
         window.confirm(
-          `${today.length} other “${label}” screen${today.length === 1 ? " was" : "s were"} used in the last day ` +
-            `(last seen ${today.map((t) => day(t.last_seen_at || t.created_at)).join(", ")}).\n\n` +
-            "If that was this device, switch the old one off? Cancel keeps it — choose Cancel if it is another screen.",
+          `${same.length} older “${label}” screen${same.length === 1 ? "" : "s"} still switched on ` +
+            `(last seen ${same.map((t) => day(t.last_seen_at)).join(", ")}).\n\n` +
+            "Remove them? Choose Cancel if any of them is another real screen.",
         )
       ) {
-        for (const t of today) {
-          await fetch("/api/v1/staff/attendance/punch-devices", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "screen_revoke", id: t.id }),
-          }).catch(() => null);
-        }
+        await fetch("/api/v1/staff/attendance/punch-devices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "screens_revoke", ids: same.map((t) => t.id) }),
+        }).catch(() => null);
       }
       window.location.href = `/punch-screen#k=${r.token}`;
     } finally {
@@ -312,7 +310,8 @@ export function PunchPhonesPanel({ canDecidePhones }: { canDecidePhones: boolean
                       onClick={() =>
                         void act(
                           { action: "screens_remove_unused" },
-                          `Switch off ${screens.old.length} old screen${screens.old.length === 1 ? "" : "s"}? None of them has been used in the last day.`,
+                          `Switch off ${screens.old.length} old screen${screens.old.length === 1 ? "" : "s"}? None of them has been used in the last day:\n\n` +
+                            screens.old.map((o) => `• ${o.label} — last seen ${day(o.last_seen_at)}`).join("\n"),
                         )
                       }
                     >
