@@ -339,7 +339,7 @@ export function ErpTableShell({
             compact
             title={exportTitle || exportAs.replace(/[_-]+/g, " ")}
             fileBaseName={exportAs}
-            columns={domTableColumns(shellRef)}
+            columns={() => domTableColumns(shellRef)}
             rows={() => domTableRows(shellRef)}
           />
         </div>
@@ -364,7 +364,10 @@ function domHeaders(ref: { current: HTMLDivElement | null }) {
     .map((c) => ({ key: `c${c.index}`, header: c.header, index: c.index }));
 }
 function domTableColumns(ref: { current: HTMLDivElement | null }) {
-  // Resolved when the menu opens, so an empty first paint costs nothing.
+  // Read when an export is chosen. It used to be read while the shell
+  // rendered, when the ref is still empty on a first render — a table whose
+  // screen did not re-render after mounting exported rows with no columns
+  // (blank CSV / Excel). Found 15 Oct 2026 by the month-groups export test.
   return domHeaders(ref).map(({ key, header }) => ({ key, header }));
 }
 function domTableRows(ref: { current: HTMLDivElement | null }) {
