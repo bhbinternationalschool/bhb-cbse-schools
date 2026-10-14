@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { DraftDateInput } from "@/components/ui/draft-inputs";
 import { uploadMedia } from "@/lib/mediaUpload";
 import {
   odometerField,
@@ -133,13 +134,15 @@ export function VehicleLogBook({ initialDate }: { initialDate: string }) {
         <label className="text-sm font-semibold text-[var(--brand-deep)]" htmlFor="logbook-date">
           Day
         </label>
-        <input
+        {/* Each day loads from the server: only a whole date does, and an
+            emptied box keeps the day shown (never a snap mid-typing). */}
+        <DraftDateInput
           id="logbook-date"
-          type="date"
           className={regField}
           value={date}
           max={view?.today}
-          onChange={(e) => e.target.value && setDate(e.target.value)}
+          allowEmpty={false}
+          onCommit={setDate}
         />
         <button type="button" className={regBtnOutline} onClick={() => void load()}>
           Reload

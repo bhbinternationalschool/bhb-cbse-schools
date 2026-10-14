@@ -6,6 +6,7 @@ import { useBillRequests } from "@/lib/payoutRequestsClient";
 import { PRINT_LETTERHEAD_CSS, printLetterheadHtml, printWhenImagesReady } from "@/lib/printLetterheadHtml";
 import Link from "next/link";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { DraftDateInput } from "@/components/ui/draft-inputs";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { DayClosePanel } from "@/components/fees/DayClosePanel";
 import {
@@ -2937,13 +2938,12 @@ export function BillsPanel({
               {billLines.map((l) => (
                 <tr key={l.id}>
                   <td className="py-1 pr-2">
-                    <input
-                      type="date"
+                    {/* An empty line date shows the bill date; a draft box so
+                        a half-typed day/year does not snap back to it. */}
+                    <DraftDateInput
                       className={FIELD}
                       value={l.lineDate || billDate}
-                      onChange={(e) =>
-                        updateBillLine(l.id, { lineDate: e.target.value })
-                      }
+                      onCommit={(v) => updateBillLine(l.id, { lineDate: v })}
                     />
                   </td>
                   <td className="py-1 pr-2">

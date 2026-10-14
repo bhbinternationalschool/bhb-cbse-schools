@@ -89,6 +89,16 @@ assert.deepEqual(dateDraftCommit("", { badInput: true, onBlur: true }), { commit
 assert.deepEqual(dateDraftCommit("", { badInput: false, onBlur: true }), { commit: true, value: "" }, "emptied on blur: clear");
 assert.deepEqual(dateDraftCommit("", { badInput: false }), { commit: false }, "empty while typing is not a clear");
 assert.deepEqual(dateDraftCommit("", { badInput: false, clearNow: true }), { commit: true, value: "" }, "the picker's clear button");
+// A box that must always hold a day (a register's day, the class sheet's
+// "measured on"): emptying it stores nothing, on blur or by the clear button.
+assert.deepEqual(dateDraftCommit("", { badInput: false, onBlur: true, allowEmpty: false }), { commit: false }, "required day: emptied on blur keeps the stored day");
+assert.deepEqual(dateDraftCommit("", { badInput: false, clearNow: true, allowEmpty: false }), { commit: false }, "required day: the clear button stores nothing");
+assert.deepEqual(dateDraftCommit("2026-10-14", { allowEmpty: false }), { commit: true, value: "2026-10-14" }, "required day: a whole date still stores");
+assert.deepEqual(
+  typing.map((t) => dateDraftCommit(t.value, { badInput: t.badInput, clearNow: true, allowEmpty: false })).map((r) => (r.commit ? r.value : null)),
+  [null, null, null, null, null, null, null, "2026-10-14"],
+  "required day: typed year — only the whole date",
+);
 assert.equal(parseTypedDate("14/10/2026"), "2026-10-14", "day-first");
 assert.equal(parseTypedDate("4-7-2026"), "2026-07-04");
 assert.equal(parseTypedDate("04.07.2026"), "2026-07-04");

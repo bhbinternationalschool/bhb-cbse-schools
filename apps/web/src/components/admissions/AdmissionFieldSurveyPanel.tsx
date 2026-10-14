@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
+import { DraftDateInput } from "@/components/ui/draft-inputs";
 import {
   GUARDIAN_RELATIONS,
   addGuardian,
@@ -982,13 +983,12 @@ export function AdmissionFieldSurveyPanel({
                 Source: Field survey
               </span>
               <Field label="Lead / enquiry date *">
-                <input
-                  type="date"
+                {/* Empty means today; a draft box so a half-typed date does
+                    not snap back to today between the digits of the year. */}
+                <DraftDateInput
                   className={inp}
                   value={draft.leadDate || todayYmd()}
-                  onChange={(e) =>
-                    setDraft((d) => ({ ...d, leadDate: e.target.value }))
-                  }
+                  onCommit={(v) => setDraft((d) => ({ ...d, leadDate: v }))}
                 />
               </Field>
               <Field label="Beat *">

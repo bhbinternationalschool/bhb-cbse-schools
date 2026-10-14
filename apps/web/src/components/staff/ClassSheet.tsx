@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { DraftDateInput } from "@/components/ui/draft-inputs";
 import { CheckCircle2 } from "lucide-react";
 import {
   EDUCATION_LEVELS,
@@ -206,7 +207,7 @@ export function ClassSheet({ rows, onSaved }: { rows: SheetRow[]; onSaved: () =>
         {groups.includes("measure") ? (
           <label className="mt-2 flex items-center gap-2 text-[11px] font-semibold text-[var(--muted)]">
             Measured on
-            <input type="date" className="field !w-auto !py-1.5" value={date} max={today} onChange={(e) => setDate(e.target.value || today)} />
+            <DraftDateInput className="field !w-auto !py-1.5" value={date} max={today} allowEmpty={false} onCommit={setDate} />
           </label>
         ) : null}
       </div>
