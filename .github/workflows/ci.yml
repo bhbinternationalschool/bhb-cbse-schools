@@ -600,6 +600,7 @@ jobs:
           npm run test:session-cookie-edge
           npm run test:staff-geo
           npm run test:punch-screen-geofence
+          npm run test:punch-screen-keep
           npm run test:app-min-build
           npm run test:canva-birthday
           npm run test:standing-discount-change

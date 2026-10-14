@@ -17,6 +17,7 @@ import {
   listPunchDevices,
   listPunchDisplays,
   revokePunchDisplay,
+  revokeUnusedPunchDisplays,
   startScreenPairing,
 } from "@/lib/punchDevices.server";
 
@@ -28,7 +29,12 @@ export const runtime = "nodejs";
  *      and the QR screens that are switched on.
  * POST {action: approve|reject|reset, id} — decide a phone.
  * POST {action: screen_create, label} → {token} — switch THIS device on as
- *      a QR screen; POST {action: screen_revoke, id} switches one off.
+ *      a QR screen; earlier same-named screens not seen for a day are
+ *      switched off with it (→ replaced), ones seen today are returned
+ *      (→ seenToday) for the office to decide. POST {action: screen_revoke,
+ *      id} switches one off.
+ * POST {action: screens_remove_unused} — admin: switch off every old screen
+ *      (lib/punchScreens: unused 7 days, or replaced and unseen for a day).
  * POST {action: punch_options, windowStart, windowEnd, days, printedQrEnabled}
  *      — the gate window and the printed backup QR on/off.
  * POST {action: printed_qr_new} — a new printed QR; every earlier print
@@ -114,11 +120,16 @@ export async function POST(request: Request) {
         action: "create",
         entityType: "punch_screen",
         entityId: "",
-        summary: `Switched on a punch QR screen: ${body.label || "Office screen"}`,
+        summary:
+          `Switched on a punch QR screen: ${body.label || "Office screen"}` +
+          (r.replaced.length
+            ? ` · replaced ${r.replaced.length} earlier same-named screen(s) not seen for a day`
+            : ""),
+        after: r.replaced.length ? { replaced: r.replaced } : undefined,
         ip: meta.ip,
         userAgent: meta.userAgent,
       });
-      return apiOk({ token: r.token });
+      return apiOk({ token: r.token, replaced: r.replaced.length, seenToday: r.seenToday });
     }
     if (body.action === "punch_options" || body.action === "printed_qr_new") {
       const current = await loadPunchOptions();
@@ -188,7 +199,36 @@ export async function POST(request: Request) {
       if (!body.id || !(await revokePunchDisplay(body.id))) {
         throw new ApiError("server_error", "Could not switch that screen off", 503);
       }
+      await writeAudit({
+        session: ctx.session,
+        module: "staff_attendance",
+        action: "edit",
+        entityType: "punch_screen",
+        entityId: body.id,
+        summary: "Switched off a punch QR screen",
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      });
       return apiOk({ revoked: body.id });
+    }
+    if (body.action === "screens_remove_unused") {
+      assertPermission(ctx, "attendance", "edit");
+      const removed = await revokeUnusedPunchDisplays();
+      if (!removed) throw new ApiError("server_error", "Could not remove the unused screens right now", 503);
+      if (removed.length) {
+        await writeAudit({
+          session: ctx.session,
+          module: "staff_attendance",
+          action: "edit",
+          entityType: "punch_screen",
+          entityId: "",
+          summary: `Removed ${removed.length} unused punch QR screen(s)`,
+          before: { screens: removed },
+          ip: meta.ip,
+          userAgent: meta.userAgent,
+        });
+      }
+      return apiOk({ removed: removed.length });
     }
     if (body.action === "approve" || body.action === "reject" || body.action === "reset") {
       assertPermission(ctx, "attendance", "edit");

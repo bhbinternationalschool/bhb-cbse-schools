@@ -2,7 +2,8 @@
 
 import { PRINT_LETTERHEAD_CSS, printLetterheadHtml } from "@/lib/printLetterheadHtml";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PUNCH_SCREEN_TOKEN_KEY } from "@/components/staff/PunchScreen";
+import { PUNCH_SCREEN_TOKEN_KEY } from "@/lib/deviceLocalStorage";
+import { splitScreens } from "@/lib/punchScreens";
 import QRCode from "qrcode";
 
 type Device = {
@@ -68,6 +69,9 @@ ${printLetterheadHtml()}
   return true;
 }
 
+/** Longer lists than this start folded (director, 14 Oct 2026). */
+const LONG_LIST = 8;
+
 const hhmm = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false });
 const triedText = (d: Device) =>
@@ -121,6 +125,9 @@ export function PunchPhonesPanel({ canDecidePhones }: { canDecidePhones: boolean
           token?: string;
           code?: string;
           expiresAt?: string;
+          replaced?: number;
+          seenToday?: Screen[];
+          removed?: number;
           recorded?: { kind: string; time: string; ok: boolean; note?: string }[];
         };
         error?: { message?: string };
@@ -185,7 +192,27 @@ export function PunchPhonesPanel({ canDecidePhones }: { canDecidePhones: boolean
         return;
       }
       const r = await act({ action: "screen_create", label, lat: here.lat, lng: here.lng, accuracyM: here.accuracyM });
-      if (r?.token) window.location.href = `/punch-screen#k=${r.token}`;
+      if (!r?.token) return;
+      // Same name, seen in the last day: maybe this very device, maybe a
+      // second real one — never switched off without asking (14 Oct 2026).
+      const today = r.seenToday ?? [];
+      if (
+        today.length &&
+        window.confirm(
+          `${today.length} other “${label}” screen${today.length === 1 ? " was" : "s were"} used in the last day ` +
+            `(last seen ${today.map((t) => day(t.last_seen_at || t.created_at)).join(", ")}).\n\n` +
+            "If that was this device, switch the old one off? Cancel keeps it — choose Cancel if it is another screen.",
+        )
+      ) {
+        for (const t of today) {
+          await fetch("/api/v1/staff/attendance/punch-devices", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "screen_revoke", id: t.id }),
+          }).catch(() => null);
+        }
+      }
+      window.location.href = `/punch-screen#k=${r.token}`;
     } finally {
       opening.current = false;
       setBusy(false);
@@ -196,8 +223,22 @@ export function PunchPhonesPanel({ canDecidePhones }: { canDecidePhones: boolean
     return <p className="text-sm text-[var(--muted)]">{error || "Loading punch phones…"}</p>;
   }
   const pending = data.devices.filter((d) => d.status === "pending");
+  const screens = splitScreens(data.screens, Date.now());
   const active = data.devices.filter((d) => d.status === "active");
   const btn = "rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-semibold text-[var(--brand-deep)] disabled:opacity-40";
+  const screenRow = (s: Screen) => (
+    <div key={s.id} className="flex items-center justify-between gap-2 text-sm">
+      <span>
+        {s.label}{" "}
+        <span className="text-xs text-[var(--muted)]">
+          · by {s.created_by} · {s.last_seen_at ? `last seen ${day(s.last_seen_at)}` : "never used — switch it off"}
+        </span>
+      </span>
+      <button type="button" className={btn} disabled={busy} onClick={() => void act({ action: "screen_revoke", id: s.id }, `Switch off “${s.label}”?`)}>
+        Switch off
+      </button>
+    </div>
+  );
 
   return (
     <div className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
@@ -250,19 +291,42 @@ export function PunchPhonesPanel({ canDecidePhones }: { canDecidePhones: boolean
             </p>
           </div>
         ) : null}
-        {data.screens.map((s) => (
-          <div key={s.id} className="flex items-center justify-between gap-2 text-sm">
-            <span>
-              {s.label}{" "}
-              <span className="text-xs text-[var(--muted)]">
-                · by {s.created_by} · {s.last_seen_at ? `last seen ${day(s.last_seen_at)}` : "never used — switch it off"}
-              </span>
-            </span>
-            <button type="button" className={btn} disabled={busy} onClick={() => void act({ action: "screen_revoke", id: s.id }, `Switch off “${s.label}”?`)}>
-              Switch off
-            </button>
+        <details open={screens.inUse.length + screens.old.length <= LONG_LIST}>
+          <summary className="cursor-pointer text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
+            Office screens ({screens.inUse.length} in use{screens.old.length ? ` · ${screens.old.length} old` : ""})
+          </summary>
+          <div className="mt-1 space-y-1">
+            {screens.inUse.length === 0 ? <p className="text-xs text-[var(--muted)]">None in use.</p> : null}
+            {screens.inUse.map((s) => screenRow(s))}
+            {screens.old.length ? (
+              <details className="rounded-lg border border-[var(--border)] px-3 py-2">
+                <summary className="cursor-pointer text-xs font-semibold text-[var(--muted)]">
+                  Old screens ({screens.old.length}) — not used for a week, or the same device switched on again
+                </summary>
+                <div className="mt-2 space-y-1">
+                  {canDecidePhones ? (
+                    <button
+                      type="button"
+                      className={btn}
+                      disabled={busy}
+                      onClick={() =>
+                        void act(
+                          { action: "screens_remove_unused" },
+                          `Switch off ${screens.old.length} old screen${screens.old.length === 1 ? "" : "s"}? None of them has been used in the last day.`,
+                        )
+                      }
+                    >
+                      Remove unused screens
+                    </button>
+                  ) : (
+                    <p className="text-xs text-[var(--muted)]">Admin removes old screens.</p>
+                  )}
+                  {screens.old.map((s) => screenRow(s))}
+                </div>
+              </details>
+            ) : null}
           </div>
-        ))}
+        </details>
       </section>
 
       {data.punchOptions ? (
@@ -315,8 +379,10 @@ export function PunchPhonesPanel({ canDecidePhones }: { canDecidePhones: boolean
         ))}
       </section>
 
-      <section className="space-y-1">
-        <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">Registered phones ({active.length})</p>
+      <details open={active.length <= LONG_LIST} className="space-y-1">
+        <summary className="cursor-pointer text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
+          Registered phones ({active.length})
+        </summary>
         {active.map((d) => (
           <div key={d.id} className="flex items-center justify-between gap-2 border-b border-[var(--border)] py-1.5 text-sm last:border-0">
             <span>
@@ -334,7 +400,7 @@ export function PunchPhonesPanel({ canDecidePhones }: { canDecidePhones: boolean
             No phone yet ({data.staffWithoutPhone.length}): {data.staffWithoutPhone.map((s) => s.name).join(", ")}
           </p>
         ) : null}
-      </section>
+      </details>
     </div>
   );
 }

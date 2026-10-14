@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomInt, webcrypto } from "crypto";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { mergePunchAttempt, type PunchAttempt } from "@/lib/punchAttempts";
+import { isOldScreen, sameLabelOnSwitchOn, type PunchScreenRow } from "@/lib/punchScreens";
 
 /**
  * Staff punch phones and office QR screens (director, 30 Sep 2026).
@@ -310,7 +311,10 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 export async function createPunchDisplay(
   label: string,
   by: string,
-): Promise<{ ok: true; token: string } | { ok: false; error: string; duplicate?: true }> {
+): Promise<
+  | { ok: true; token: string; replaced: PunchScreenRow[]; seenToday: PunchScreenRow[] }
+  | { ok: false; error: string; duplicate?: true }
+> {
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "School database unavailable" };
   // The same person switching on a same-named screen twice inside half a
@@ -330,13 +334,73 @@ export async function createPunchDisplay(
     return { ok: false, duplicate: true, error: "This screen was switched on a moment ago — open /punch-screen on it." };
   }
   const token = randomBytes(24).toString("base64url");
-  const { error } = await ctx.sb.from("staff_punch_displays").insert({
-    tenant_id: ctx.tenantId,
-    token_hash: sha(token),
-    label: label.slice(0, 80),
-    created_by: by,
-  });
-  return error ? { ok: false, error: error.message } : { ok: true, token };
+  const { data: made, error } = await ctx.sb
+    .from("staff_punch_displays")
+    .insert({
+      tenant_id: ctx.tenantId,
+      token_hash: sha(token),
+      label: label.slice(0, 80),
+      created_by: by,
+    })
+    .select("id")
+    .single();
+  if (error || !made) return { ok: false, error: error?.message || "Not saved" };
+
+  // The same name switched on again is the same device, switched on again
+  // (14 Oct 2026: ~20 "Office tablet" rows in a week). Earlier ones not seen
+  // for a day are switched off now; ones seen in the last day are only
+  // reported — the office decides those. Best effort: the new screen works
+  // whatever happens here.
+  let replaced: PunchScreenRow[] = [];
+  let seenToday: PunchScreenRow[] = [];
+  const rows = await listPunchDisplays();
+  if (rows) {
+    const split = sameLabelOnSwitchOn(rows, label.slice(0, 80), String(made.id), Date.now());
+    seenToday = split.seenToday;
+    if (split.replace.length) {
+      const { data: off } = await ctx.sb
+        .from("staff_punch_displays")
+        .update({ revoked_at: new Date().toISOString() })
+        .eq("tenant_id", ctx.tenantId)
+        .in(
+          "id",
+          split.replace.map((r) => r.id),
+        )
+        .is("revoked_at", null)
+        .select("id");
+      const offIds = new Set((off ?? []).map((r: { id: string }) => String(r.id)));
+      replaced = split.replace.filter((r) => offIds.has(r.id));
+    }
+  }
+  return { ok: true, token, replaced, seenToday };
+}
+
+/**
+ * "Remove unused screens" (admin): switches off every screen that is old by
+ * lib/punchScreens — not seen for 7 days, or replaced by a same-named screen
+ * and not seen for a day. A screen seen in the last day is never touched.
+ */
+export async function revokeUnusedPunchDisplays(): Promise<PunchScreenRow[] | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return null;
+  const rows = await listPunchDisplays();
+  if (!rows) return null;
+  const now = Date.now();
+  const old = rows.filter((r) => isOldScreen(r, rows, now));
+  if (old.length === 0) return [];
+  const { data, error } = await ctx.sb
+    .from("staff_punch_displays")
+    .update({ revoked_at: new Date(now).toISOString() })
+    .eq("tenant_id", ctx.tenantId)
+    .in(
+      "id",
+      old.map((r) => r.id),
+    )
+    .is("revoked_at", null)
+    .select("id");
+  if (error) return null;
+  const offIds = new Set((data ?? []).map((r: { id: string }) => String(r.id)));
+  return old.filter((r) => offIds.has(r.id));
 }
 
 /** null = the screen is unknown or switched off; "unavailable" = cannot tell. */
@@ -369,7 +433,7 @@ export async function punchDisplayFor(
   return { id: String(data.id), label: String(data.label || "") };
 }
 
-export async function listPunchDisplays() {
+export async function listPunchDisplays(): Promise<(PunchScreenRow & { created_by: string })[] | null> {
   const ctx = await getServerTenantContext();
   if (!ctx) return null;
   const { data, error } = await ctx.sb
@@ -380,7 +444,7 @@ export async function listPunchDisplays() {
     // A screen still waiting for its pairing code is not a screen yet.
     .is("pairing_code_hash", null)
     .order("created_at", { ascending: false });
-  return error ? null : data ?? [];
+  return error ? null : ((data ?? []) as (PunchScreenRow & { created_by: string })[]);
 }
 
 // ------------------------------------------------------------ pairing code
