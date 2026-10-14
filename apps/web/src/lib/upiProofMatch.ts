@@ -9,11 +9,11 @@
  * recording anything.
  *
  * A match needs the exact amount and agreement on who was paid (their UPI
- * ID, or a word of their name). A payment that already has a UTR recorded is
- * never offered again. Pure: tested in upiProofMatch.selftest.
+ * ID, or their name — OCR slips forgiven, lib/upiPay payeeNamesAgree). A
+ * payment that already has a UTR recorded is never offered again. Pure: tested in upiProofMatch.selftest.
  */
 
-import type { UpiProof } from "@/lib/upiPay";
+import { payeeNamesAgree, type UpiProof } from "@/lib/upiPay";
 
 export type UpiTargetKind = "payroll_line" | "staff_advance" | "ledger_voucher";
 
@@ -71,8 +71,7 @@ export function matchUpiProof(
     }
     const vpaMatch = !!proofVpa && !!c.payeeVpa && c.payeeVpa.toLowerCase() === proofVpa;
     const vpaClash = !!proofVpa && !!c.payeeVpa && !vpaMatch;
-    const want = tokens(c.payeeName);
-    const nameMatch = proofName.length > 0 && want.some((w) => proofName.includes(w));
+    const nameMatch = proofName.length > 0 && payeeNamesAgree(proof.payeeName, c.payeeName);
     if (vpaMatch) out.push({ ...c, strength: "upi_id" });
     else if (vpaClash) continue;
     else if (nameMatch) out.push({ ...c, strength: "name" });

@@ -59,6 +59,24 @@ assert.equal(matchUpiProof({ amountPaise: 1425000, payeeName: "RAJESH PATEL", pa
   assert.ok(m.every((x) => x.strength === "amount_only"));
 }
 
+/* 15 Oct 2026: OCR read "Randhir Sungh" — still the salary of RANDHIR SINGH, never Rajesh's */
+{
+  const randhir: UpiCandidate = {
+    kind: "payroll_line", targetId: "pr_710|stf_rs", label: "Salary 2026-09 — RANDHIR SINGH",
+    amountPaise: 1150000, payeeName: "RANDHIR SINGH", payeeVpa: "", date: "2026-09-01", dateWindowDays: -1,
+  };
+  const rakesh: UpiCandidate = { ...randhir, targetId: "pr_710|stf_rk", payeeName: "RAKESH PATEL", label: "Salary 2026-09 — RAKESH PATEL" };
+  const m = matchUpiProof({ amountPaise: 1150000, payeeName: "Randhir Sungh", payeeVpa: "", paidOn: "2026-10-15" }, [randhir, rakesh], none);
+  assert.deepEqual(m.map((x) => [x.targetId, x.strength]), [["pr_710|stf_rs", "name"]]);
+  const slips = matchUpiProof({ amountPaise: 1150000, payeeName: "Randhlr Sungh", payeeVpa: "", paidOn: "2026-10-15" }, [randhir, rakesh], none);
+  assert.deepEqual(slips.map((x) => x.targetId), ["pr_710|stf_rs"]);
+  assert.equal(
+    matchUpiProof({ amountPaise: 1150000, payeeName: "Rajesh", payeeVpa: "", paidOn: "2026-10-15" }, [rakesh], none).length,
+    0,
+    "one near word is not the same person",
+  );
+}
+
 /* Buttons */
 assert.equal(upiProofButtonId("upd_abc123", 0), "upiproof|upd_abc123|0");
 assert.deepEqual(parseUpiProofButton("upiproof|upd_abc123|2"), { draftId: "upd_abc123", choice: 2 });
