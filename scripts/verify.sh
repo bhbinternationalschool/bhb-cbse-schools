@@ -314,6 +314,7 @@ SELFTESTS=(
   test:fleet-edge-link
   test:fleet-edge-push
   test:fleet-edge-fuel
+  test:fleet-edge-windows
   test:boarding-point-audit
   test:halt-clustering
   test:transport-parent-messages
