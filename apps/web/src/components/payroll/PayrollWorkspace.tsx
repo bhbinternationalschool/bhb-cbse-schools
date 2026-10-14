@@ -3065,6 +3065,12 @@ function PayrollAuditPanel() {
   useEffect(() => {
     setRows(listPayrollAudit(100));
   }, [tick]);
+  // Folded by the IST month the event happened in, newest open.
+  const auditMonths = useMonthGroups({
+    rows,
+    dateOf: (e) => e.at,
+    storageKey: "payroll.audit",
+  });
 
   return (
     <div className="space-y-4">
@@ -3097,9 +3103,13 @@ function PayrollAuditPanel() {
               <th className="px-3 py-2 font-semibold">Detail</th>
             </tr>
           </ErpTableHead>
-          <ErpTableBody>
-            {rows.map((e) => (
-              <tr key={e.id}>
+          <MonthGroupedTbody
+            month={auditMonths}
+            colSpan={5}
+            rowKey={(e) => e.id}
+            countLabel={(n) => `${n} ${n === 1 ? "event" : "events"}`}
+            renderRow={(e) => (
+              <tr>
                 <td className="px-3 py-2 whitespace-nowrap">
                   {e.at.replace("T", " ").slice(0, 19)}
                 </td>
@@ -3110,8 +3120,8 @@ function PayrollAuditPanel() {
                 <td className="px-3 py-2">{e.month}</td>
                 <td className="px-3 py-2 text-[var(--muted)]">{e.detail}</td>
               </tr>
-            ))}
-            {rows.length === 0 ? (
+            )}
+            empty={
               <tr>
                 <td
                   colSpan={5}
@@ -3120,8 +3130,8 @@ function PayrollAuditPanel() {
                   No audit events yet — process or publish a payroll run.
                 </td>
               </tr>
-            ) : null}
-          </ErpTableBody>
+            }
+          />
         </ErpTable>
       </ErpTableShell>
     </div>

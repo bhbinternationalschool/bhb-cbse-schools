@@ -20,6 +20,7 @@ import {
 import { canManageStaffLeave, resolveSessionStaff } from "@/lib/staffResolve";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { MonthGroupedTbody, useMonthGroups } from "@/components/ui/month-grouped-rows";
 
 const STATUS_LABEL: Record<StaffRequestStatus, string> = {
   open: "Open",
@@ -106,6 +107,18 @@ export function StaffRequestsPanel() {
     "desc",
   );
 
+  // Folded by the IST month the request was raised, newest open. Filters
+  // open every month with a match, and a month still holding an open or
+  // in-progress request is never folded by default.
+  const reqMonths = useMonthGroups({
+    rows: reqSort.rows,
+    dateOf: (t) => t.createdAt,
+    filterActive: statusFilter !== "all" || typeFilter !== "all",
+    filterKey: `${statusFilter}|${typeFilter}`,
+    storageKey: "staff.requests",
+    needsAttention: (t) => t.status === "open" || t.status === "in_progress",
+  });
+
   function onSave(ticket: StaffRequestTicket, patch: Partial<StaffRequestTicket>) {
     const result = updateStaffRequestTicket(ticket.id, {
       assignedToStaffId: patch.assignedToStaffId,
@@ -188,9 +201,13 @@ export function StaffRequestsPanel() {
                 {isManager ? <th className="px-3 py-2">Action</th> : null}
               </tr>
             </ErpTableHead>
-            <ErpTableBody>
-              {reqSort.rows.map((t) => (
-                <tr key={t.id}>
+            <MonthGroupedTbody
+              month={reqMonths}
+              colSpan={isManager ? 7 : 5}
+              rowKey={(t) => t.id}
+              countLabel={(n) => `${n} ${n === 1 ? "request" : "requests"}`}
+              renderRow={(t) => (
+                <tr>
                   <td className="px-4 py-2 font-medium text-[var(--brand-deep)]">
                     {staffLabel(t.staffId)}
                   </td>
@@ -289,8 +306,8 @@ export function StaffRequestsPanel() {
                     </td>
                   ) : null}
                 </tr>
-              ))}
-              {rows.length === 0 ? (
+              )}
+              empty={
                 <tr>
                   <td
                     colSpan={isManager ? 7 : 5}
@@ -299,8 +316,8 @@ export function StaffRequestsPanel() {
                     No requests {statusFilter !== "all" || typeFilter !== "all" ? "match this filter" : "yet"}.
                   </td>
                 </tr>
-              ) : null}
-            </ErpTableBody>
+              }
+            />
           </ErpTable>
         </div>
       </div>

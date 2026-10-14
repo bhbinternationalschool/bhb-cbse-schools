@@ -37,6 +37,7 @@ import {
 import { hasFeaturePermission } from "@/lib/rbac";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { MonthGroupedTbody, useMonthGroups } from "@/components/ui/month-grouped-rows";
 import { LeaveAllotmentPanel } from "@/components/staff/LeaveAllotmentPanel";
 
 type LeaveTab =
@@ -243,6 +244,18 @@ export function StaffLeavePanel({
     "dates",
     "desc",
   );
+  // Folded by the IST month the leave starts in, newest open; the status
+  // filter opens every month with a match, and a month holding a pending
+  // request is never folded by default. The column sort orders the rows
+  // inside each month.
+  const leaveMonths = useMonthGroups({
+    rows: leaveSort.rows,
+    dateOf: (r) => r.fromDate,
+    filterActive: statusFilter !== "all",
+    filterKey: statusFilter,
+    storageKey: "staff.leave",
+    needsAttention: (r) => r.status === "pending" || r.status === "pending_l2",
+  });
 
   const balances = useMemo(() => {
     if (!hr || !masters) return [];
@@ -1015,9 +1028,14 @@ export function StaffLeavePanel({
                 <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
-            <ErpTableBody>
-              {leaveSort.rows.map((r) => (
-                <tr key={r.id}>
+            <MonthGroupedTbody
+              month={leaveMonths}
+              colSpan={8}
+              rowKey={(r) => r.id}
+              countLabel={(n) => `${n} ${n === 1 ? "request" : "requests"}`}
+              summary={(rs) => `${rs.reduce((n, r) => n + (Number(r.days) || 0), 0)} days`}
+              renderRow={(r) => (
+                <tr>
                   <td className="px-4 py-2">{staffLabel(r.staffId)}</td>
                   <td className="px-3 py-2">{r.typeCode}</td>
                   <td className="px-3 py-2 text-xs text-[var(--muted)]">
@@ -1042,18 +1060,18 @@ export function StaffLeavePanel({
                     <RowActionMenu row={r} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
                   </td>
                 </tr>
-              ))}
-              {history.length === 0 ? (
+              )}
+              empty={
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-4 py-8 text-center text-sm text-[var(--muted)]"
                   >
                     No leave requests for this year
                   </td>
                 </tr>
-              ) : null}
-            </ErpTableBody>
+              }
+            />
           </ErpTable>
         </div>
       </div>

@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 
 import {
   NO_DATE_KEY,
+  attentionMonthKeys,
   groupRowsByMonth,
   istMonthKey,
   monthKeyLabel,
@@ -127,6 +128,15 @@ assert.deepEqual(
   ["2026-10", "2026-08", "2025-10", NO_DATE_KEY],
   "the viewer may fold a month while searching",
 );
+// A month holding work still to do starts open; the viewer can still fold it.
+const pendingIn = attentionMonthKeys(groups, (r) => r.id === "e");
+assert.deepEqual([...pendingIn], ["2026-08"]);
+assert.deepEqual(
+  [...openMonthKeys(groups, { attention: pendingIn })],
+  ["2026-10", "2026-08"],
+  "a month with a pending row is not folded away",
+);
+assert.deepEqual([...openMonthKeys(groups, { attention: pendingIn, overrides: { "2026-08": false } })], ["2026-10"]);
 // Only undated rows: that group is the newest and opens.
 const undatedOnly = groupRowsByMonth([{ id: "z", at: null }], (r) => r.at);
 assert.deepEqual([...openMonthKeys(undatedOnly)], [NO_DATE_KEY]);

@@ -164,7 +164,9 @@ export function groupRowsByMonth<T>(
  * Which groups are open.
  *
  *   - No filter: the newest group is open, the rest are closed, unless the
- *     viewer toggled one (`overrides`, which a screen may remember).
+ *     viewer toggled one (`overrides`, which a screen may remember). A month
+ *     in `attention` (it holds a row someone still has to act on — a pending
+ *     leave, an open request) also starts open: folding must not bury work.
  *   - A search or filter is active: EVERY group is open, because the rows
  *     passed in are already the matches and a match must never sit hidden
  *     in a folded month. The viewer can still fold one while searching
@@ -176,6 +178,7 @@ export function openMonthKeys<T>(
     filterActive?: boolean;
     overrides?: Readonly<Record<string, boolean>>;
     filterOverrides?: Readonly<Record<string, boolean>>;
+    attention?: ReadonlySet<string>;
   } = {},
 ): Set<string> {
   const open = new Set<string>();
@@ -183,7 +186,7 @@ export function openMonthKeys<T>(
   for (const g of groups) {
     const isOpen = opts.filterActive
       ? (opts.filterOverrides?.[g.key] ?? true)
-      : (opts.overrides?.[g.key] ?? g.key === newest);
+      : (opts.overrides?.[g.key] ?? (g.key === newest || !!opts.attention?.has(g.key)));
     if (isOpen) open.add(g.key);
   }
   return open;
@@ -205,4 +208,14 @@ export function selectedInClosedGroups<T>(
     for (const r of g.rows) if (isSelected(r)) n += 1;
   }
   return n;
+}
+
+/** The months holding at least one row that still needs someone to act. */
+export function attentionMonthKeys<T>(
+  groups: readonly MonthGroup<T>[],
+  needsAttention: (row: T) => boolean,
+): Set<string> {
+  const out = new Set<string>();
+  for (const g of groups) if (g.rows.some(needsAttention)) out.add(g.key);
+  return out;
 }

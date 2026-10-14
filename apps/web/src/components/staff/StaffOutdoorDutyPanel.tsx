@@ -19,6 +19,7 @@ import {
 import { canManageStaffLeave, resolveSessionStaff } from "@/lib/staffResolve";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { MonthGroupedTbody, useMonthGroups } from "@/components/ui/month-grouped-rows";
 
 function fmt(iso: string | null): string {
   if (!iso) return "—";
@@ -112,6 +113,15 @@ export function StaffOutdoorDutyPanel() {
     "desc",
   );
 
+  // Folded by the IST month the trip started, newest open. A trip still
+  // out keeps its month open.
+  const dutyMonths = useMonthGroups({
+    rows: dutySort.rows,
+    dateOf: (s) => s.startedAt,
+    storageKey: "staff.outdoorDuty",
+    needsAttention: (s) => s.status === "active",
+  });
+
   if (!masters || !attendance) {
     return <p className="text-sm text-[var(--muted)]">Loading outdoor duty…</p>;
   }
@@ -187,9 +197,13 @@ export function StaffOutdoorDutyPanel() {
                 <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
-            <ErpTableBody>
-              {dutySort.rows.map((s) => (
-                <tr key={s.id}>
+            <MonthGroupedTbody
+              month={dutyMonths}
+              colSpan={isManager ? 8 : 7}
+              rowKey={(s) => s.id}
+              countLabel={(n) => `${n} ${n === 1 ? "trip" : "trips"}`}
+              renderRow={(s) => (
+                <tr>
                   {isManager ? (
                     <td className="px-4 py-2 font-medium text-[var(--brand-deep)]">
                       {staffLabel(s.staffId)}
@@ -217,18 +231,18 @@ export function StaffOutdoorDutyPanel() {
                     <RowActionMenu row={s} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
                   </td>
                 </tr>
-              ))}
-              {history.length === 0 ? (
+              )}
+              empty={
                 <tr>
                   <td
-                    colSpan={isManager ? 7 : 6}
+                    colSpan={isManager ? 8 : 7}
                     className="px-4 py-8 text-center text-sm text-[var(--muted)]"
                   >
                     No outdoor duty records yet.
                   </td>
                 </tr>
-              ) : null}
-            </ErpTableBody>
+              }
+            />
           </ErpTable>
         </div>
       </div>

@@ -47,6 +47,7 @@ import {
 } from "react";
 
 import {
+  attentionMonthKeys,
   groupRowsByMonth,
   openMonthKeys,
   selectedInClosedGroups,
@@ -93,6 +94,8 @@ export type MonthGroupsState<T> = {
   selectedHidden: (isSelected: (row: T) => boolean) => number;
   /** Total rows across all groups (equals the rows passed in). */
   total: number;
+  /** Rows of a group that still need action (0 without `needsAttention`). */
+  attentionCount: (rows: T[]) => number;
 };
 
 export function useMonthGroups<T>({
@@ -101,6 +104,7 @@ export function useMonthGroups<T>({
   filterActive = false,
   filterKey = "",
   storageKey,
+  needsAttention,
 }: {
   rows: readonly T[];
   /** The row's date: Date, epoch ms, "YYYY-MM", "YYYY-MM-DD" or ISO stamp. */
@@ -111,10 +115,15 @@ export function useMonthGroups<T>({
   filterKey?: string;
   /** Remember this viewer's folds per screen (localStorage, optional). */
   storageKey?: string;
+  /**
+   * A row someone still has to act on (pending leave, open request). Its
+   * month starts open and its header says how many need action.
+   */
+  needsAttention?: (row: T) => boolean;
 }): MonthGroupsState<T> {
-  // dateOf is usually an inline arrow; the rows are what matter.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const groups = useMemo(() => groupRowsByMonth(rows, dateOf), [rows]);
+  // dateOf is often an inline arrow, so this regroups on each render: one
+  // pass over rows a screen already holds in memory, which is cheap.
+  const groups = useMemo(() => groupRowsByMonth(rows, dateOf), [rows, dateOf]);
 
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   useEffect(() => {
@@ -129,9 +138,13 @@ export function useMonthGroups<T>({
   }>({ key: "", map: {} });
   const filterOverrides = filterFolds.key === filterKey ? filterFolds.map : {};
 
+  const attention = useMemo(
+    () => (needsAttention ? attentionMonthKeys(groups, needsAttention) : new Set<string>()),
+    [groups, needsAttention],
+  );
   const open = useMemo(
-    () => openMonthKeys(groups, { filterActive, overrides, filterOverrides }),
-    [groups, filterActive, overrides, filterOverrides],
+    () => openMonthKeys(groups, { filterActive, overrides, filterOverrides, attention }),
+    [groups, filterActive, overrides, filterOverrides, attention],
   );
 
   const toggle = useCallback(
@@ -180,8 +193,9 @@ export function useMonthGroups<T>({
       selectedHidden: (isSelected: (row: T) => boolean) =>
         selectedInClosedGroups(groups, open, isSelected),
       total: rows.length,
+      attentionCount: (rs: T[]) => (needsAttention ? rs.filter(needsAttention).length : 0),
     }),
-    [groups, open, toggle, setAll, rows.length],
+    [groups, open, toggle, setAll, rows.length, needsAttention],
   );
 }
 
@@ -197,6 +211,7 @@ function MonthGroupToggle({
   countText,
   summary,
   selected,
+  attention,
   onToggle,
   stickyLabel,
 }: {
@@ -206,6 +221,7 @@ function MonthGroupToggle({
   countText: string;
   summary?: ReactNode;
   selected?: number;
+  attention?: number;
   onToggle: () => void;
   stickyLabel?: boolean;
 }) {
@@ -237,6 +253,11 @@ function MonthGroupToggle({
         {summary != null && summary !== "" ? (
           <span className="text-[12px] font-medium text-[var(--foreground)]">{summary}</span>
         ) : null}
+        {attention ? (
+          <span className="rounded-full bg-[var(--warning-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--warning)]">
+            {attention} need action
+          </span>
+        ) : null}
         {selected ? (
           <span className="text-[11px] font-semibold text-[var(--chart-1)]">
             {selected} ticked
@@ -261,6 +282,7 @@ export function MonthGroupedTbody<T>({
   isRowSelected,
   empty,
   zebra = false,
+  hoverable = false,
 }: {
   month: MonthGroupsState<T>;
   /** Number of columns in the table, so the month header spans them all. */
@@ -275,6 +297,8 @@ export function MonthGroupedTbody<T>({
   /** Rendered (inside a <tbody>) when there are no rows at all. */
   empty?: ReactNode;
   zebra?: boolean;
+  /** Tints the row under the pointer, like ErpTableBody's `hoverable`. */
+  hoverable?: boolean;
 }) {
   const baseId = useId();
   if (month.groups.length === 0) {
@@ -298,6 +322,7 @@ export function MonthGroupedTbody<T>({
                     countText={countLabel(g.rows.length)}
                     summary={summary ? summary(g.rows) : undefined}
                     selected={selected}
+                    attention={month.attentionCount(g.rows)}
                     onToggle={() => month.toggle(g.key)}
                     stickyLabel
                   />
@@ -311,6 +336,8 @@ export function MonthGroupedTbody<T>({
               className={cn(
                 "divide-y divide-[var(--border)] border-t border-[var(--border)]",
                 zebra && "[&>tr:nth-child(even)]:bg-[var(--surface-sunken)]",
+                hoverable &&
+                  "[&>tr]:transition-colors [&>tr]:duration-[var(--motion-fast)] [&>tr:hover]:bg-[var(--surface-sunken)]",
               )}
             >
               {g.rows.map((row, i) => (
@@ -364,6 +391,7 @@ export function MonthGroupedList<T>({
               countText={countLabel(g.rows.length)}
               summary={summary ? summary(g.rows) : undefined}
               selected={selected}
+              attention={month.attentionCount(g.rows)}
               onToggle={() => month.toggle(g.key)}
             />
             <ul
