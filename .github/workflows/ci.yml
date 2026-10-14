@@ -610,6 +610,7 @@ jobs:
           npm run test:transport-fuel-register
           npm run test:transport-seats
           npm run test:boarding-suggest
+          npm run test:transport-gaps
           npm run test:defaulter-hold-policy
           npm run test:hold-resolve
           npm run test:live-bus-marker
