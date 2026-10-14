@@ -861,6 +861,41 @@ gated. Acceptance: the 01:30 IST BigQuery sync and the watch email run green the
 deploy (named in the PR as a post-deploy check), and every enumerated caller is listed with its
 new endpoint.
 
+*(Built 15 Oct 2026, PR #648 — enumeration only: **no non-browser caller of a bulk desk GET
+exists**, so no `/api/export/*` route was added.)* **What was found.** The premise above (from
+`evidence/review-v1.md` §3.3) was checked caller by caller and is wrong for every one:
+
+| Caller | What it actually calls | Auth | Bulk desk GET? |
+|---|---|---|---|
+| Nightly BigQuery sync (`bhb-bigquery-nightly-sync`, **02:00 IST**, on `school-erp-lite`) | `POST /api/analytics/bigquery-sync/tick` → `lib/bigQuerySync.server.ts` `select * from <table> where tenant_id = $1` through `postgresPool` (9 tables) | `x-cron-secret` | no — reads Postgres directly |
+| `school-erp-lite` (`scripts/sync-lite-service.sh`) | a copy of the web image serving ticks + the Fleet Edge push; calls nothing | — | no |
+| 19 Cloud Scheduler jobs, asia-southeast1 | `POST` to `*/tick`-style routes (all exist) | `x-cron-secret` | no |
+| 6 Cloud Scheduler jobs, us-central1 (5) + asia-south1 (1) | `GET /api/cron/{control-jobs,audit,ai-run,scheduled}`, `GET /api/holidays/official-suggestions/sync`, `POST …-uc.a.run.app/api/cron/scheduled` | `x-cron-secret` | no — and every one **404s** (last status NOT_FOUND; the routes do not exist) |
+| ERP watch (3-hourly) and nightly review (01:30 IST) — Claude cloud routines | Supabase `SELECT`s, repo reads, Gmail; no gcloud, no app secret | Supabase MCP | no (prompts not re-read in this step; logs below cover them) |
+| UDISE / Propel office robot (`extensions/office-robot`) | `/api/v1/udise/robot/*`, `/api/v1/propel/robot/*` only | the staff's own ERP cookie (`credentials: "include"`) | no |
+| Flutter apps (`cbse_school_mobile/lib`) | 141 distinct `/api/v1/*` path strings + auth/upload/file/checkout/client-metrics | bearer session | no (their whole-desk cost is server-side, Phase 4) |
+| `scripts/`, `apps/web/scripts/` | PostgREST directly (`/rest/v1`), `/api/wa/*`, `/api/analytics/bigquery-sync/tick?dryRun=1` | service key / secrets | no |
+| Senders of `x-mirror-secret` (`MIRROR_SYNC_SECRET`: named in 44 route files, accepted by every `requireStaffApi` route) | none in the repo outside three self-tests | — | no |
+
+Production agreed: Cloud Run request logs, 8–15 Oct, 27,519 GETs of `/api/school-data/*` +
+`/api/data/*`, every one on `school-erp-web` from a `Mozilla` user agent (no headless, webview or
+Electron agent); 15 Sep–15 Oct, the only non-browser request to those paths was one `curl` POST
+answered 401. **What exists.** Ratchet `nonbrowser_desk_get` (budget 0, `scripts/check-ratchets.sh`):
+a reference to `api/school-data/` or `api/data/` in the Flutter app, the extension, `scripts/`
+(e2e harness excluded), `apps/web/scripts/`, CI workflows, `deploy/`, `cloudbuild*.yaml`, the
+BigQuery sync files, or a `fetch(` of those paths in a route or `*.server.ts` fails CI; shown
+red for a planted line in each of six of those places. **Consequences for later steps.** 3.3 and
+Phase 6 can gate or delete the browser desk routes without an export path; `?export=1` on
+`sis-roster` is not needed for any caller; the mirror-secret bypass on the bulk GETs has no user
+and can go with them (`apiRouteAuth.server.ts` `hasMirrorSyncSecret`). The e2e acceptance
+scripts and specs GET `masters-desk`/`sis-roster`/`staff-roster` with session cookies and move
+with 3.3. 6.0 re-runs this enumeration (the ratchet plus the log query above). **Not done / not
+proven.** The cloud routines' current prompts were not read (no tool for it here); a caller
+outside the repo using a browser user agent with the mirror secret cannot be told apart in the
+logs. The six 404 scheduler jobs are the director's to delete or repoint (not changed here). A
+post-deploy check is still named — the 02:00 IST BigQuery job and the next watch email green —
+though nothing in this PR touches either.
+
 **3.1 Per-screen student endpoints.** `GET /api/data/sis.students?ay=&class=&section=&status=&q=&cursor=`
 (the registered collection, keyset-paged ≤ 200) returns the list projection (id, admission no,
 name, class, section, roll, household id, guardian name, phone, status, photo key).
