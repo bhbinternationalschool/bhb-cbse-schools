@@ -29,7 +29,9 @@
  *
  * Every test on a real screen is EXPECTED TO FAIL until step 2.1 converts it
  * to useMasters(): today a Masters copy lives per tab and nothing re-reads it
- * (evidence/propagation.md). The scoreboard records the step each one failed
+ * (evidence/propagation.md). Converted (must pass): /attendance, /timetable,
+ * /homework (2.1a). Still expected to fail: /masters (2.1h) and the staff
+ * cases (the roster is not on useStaffList() yet, 2.1c / 2.3a). The scoreboard records the step each one failed
  * at; the subject and section tests must fail at "propagation", never at
  * "control", "edit" or "database".
  *
@@ -57,7 +59,7 @@ const UNTIL = "expected to fail until step 2.1 converts this screen to useMaster
 type EditVia = "editor" | "api";
 type Observer = {
   path: string;
-  /** Set when this observer reads through the query kernel: the test must pass (no test.fail). */
+  /** Set when this observer reads Masters through the query kernel (useMasters): the test must pass (no test.fail). */
   kernel?: true;
   /** Navigate to the view and prove it shows the current value. */
   open: (page: Page, current: string) => Promise<void>;
@@ -135,6 +137,7 @@ const SUBJECT_OBSERVERS: Observer[] = [
   },
   {
     path: "/timetable",
+    kernel: true, // 2.1a
     open: async (page) => {
       await page.getByRole("tab", { name: "Subject rules", exact: true }).click({ timeout: 20_000 });
       await pickV(page);
@@ -144,6 +147,7 @@ const SUBJECT_OBSERVERS: Observer[] = [
   },
   {
     path: "/homework",
+    kernel: true, // 2.1a
     open: async (page) => {
       await page.getByRole("tab", { name: "Compose HW", exact: true }).click({ timeout: 20_000 });
       await pickV(page);
@@ -167,6 +171,7 @@ const SECTION_OBSERVERS: Observer[] = [
   },
   {
     path: "/attendance",
+    kernel: true, // 2.1a
     open: async (page, current) => {
       await page.getByRole("tab", { name: "Students", exact: true }).click({ timeout: 20_000 });
       await pickV(page);
@@ -176,6 +181,7 @@ const SECTION_OBSERVERS: Observer[] = [
   },
   {
     path: "/homework",
+    kernel: true, // 2.1a
     open: async (page, current) => {
       await pickV(page);
       await expect(sectionOption(page, current)).toHaveCount(1);
@@ -184,6 +190,7 @@ const SECTION_OBSERVERS: Observer[] = [
   },
   {
     path: "/timetable",
+    kernel: true, // 2.1a
     open: async (page, current) => {
       await pickV(page);
       await expect(sectionOption(page, current)).toHaveCount(1);

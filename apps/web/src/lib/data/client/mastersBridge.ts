@@ -3,7 +3,7 @@
  *
  * Screens converted to useMasters() read the server's answer directly. But
  * ~107 lib/ readers (fees maths, exams, payroll, counter concessions, the
- * SIS alignment…) still call loadMasters(), which reads this tab's page-
+ * SIS alignment…) still call loadMasters, which reads this tab's page-
  * memory copy. Without a bridge those readers would keep the copy the tab
  * booted with while the screen around them shows the new answer.
  *

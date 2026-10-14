@@ -313,7 +313,7 @@ function VersionsPoller() {
 /**
  * Each masters answer, checked (parseMastersView — a malformed one is a failed
  * read) and then bridged into the tab's page-memory copy for the lib/
- * readers that still call loadMasters() (lib/data/client/mastersBridge; the
+ * readers that still call loadMasters (lib/data/client/mastersBridge; the
  * bridge goes in 2.3b). Runs once per fetch, inside the query function — not
  * per mounted screen. Exported for its self-test.
  */
@@ -326,7 +326,7 @@ export function acceptMastersAnswer(data: unknown, deps: MastersBridgeDeps | nul
 function pageMemoryBridgeDeps(): MastersBridgeDeps | null {
   // Only a browser tab has a page copy to keep in step.
   if (typeof window === "undefined") return null;
-  // The stored copy as it is (not loadMasters()'s normalised read, which
+  // The stored copy as it is (not the normalised loadMasters read, which
   // would persist read-time fill-ins); a tab with no copy yet starts from the
   // empty shell, which the answer's book then fills.
   return { load: () => readMastersPageCopyRaw() ?? emptyMastersShell(), write: writeMastersLocalRaw };

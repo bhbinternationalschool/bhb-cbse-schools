@@ -2077,7 +2077,7 @@ export function loadMasters(): MastersState {
 
 /**
  * This tab's page-memory Masters copy exactly as stored — without the
- * read-time normalisation loadMasters() applies (which can mint ids for
+ * read-time normalisation loadMasters applies (which can mint ids for
  * missing fee heads on every read). Null when the tab holds none yet, when
  * it is unreadable, or outside a browser. For the data-layer 2.1 bridge
  * (lib/data/client/mastersBridge), which must replace the stored copy's
