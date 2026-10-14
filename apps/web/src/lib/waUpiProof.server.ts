@@ -1,4 +1,5 @@
 import "server-only";
+import { isUpiProofWaSender } from "@/lib/upiProofWaSenders";
 
 /**
  * A UPI success screenshot sent to the school WhatsApp number by a member of
@@ -22,7 +23,7 @@ import { staffSessionFor } from "@/lib/erpCommands.server";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { visionConfigured, visionExtractText } from "@/lib/googleVision.server";
 import { hasPermission } from "@/lib/rbac";
-import { parseUpiProofText } from "@/lib/upiPay";
+import { parseUpiProofText, UPI_NO_UTR_HELP, type UpiProof } from "@/lib/upiPay";
 import { matchUpiProof, parseUpiProofButton, upiProofButtonId } from "@/lib/upiProofMatch";
 import {
   answerPendingUpiProof,
@@ -50,6 +51,8 @@ function inr(paise: number): string {
 
 /** The staff member behind this number, if they may record payments. */
 async function payingStaff(fromWaId: string): Promise<StaffRecord | null> {
+  // Owner numbers only — checked before anything is fetched or read.
+  if (!isUpiProofWaSender(fromWaId)) return null;
   const identity = await resolveWaIdentityServer(fromWaId);
   const staff = identity.roles.find((r) => r.staff)?.staff;
   if (!staff) return null;
@@ -62,9 +65,53 @@ async function payingStaff(fromWaId: string): Promise<StaffRecord | null> {
   return may ? staff : null;
 }
 
-/** Words a payment screen always carries; a bill or a class photo does not. */
-function looksLikeUpiPayment(text: string): boolean {
-  return /(UPI|UTR|transaction ID|Ref(?:erence)? No|Paid to|Payment successful|Completed)/i.test(text) && /(₹|Rs\.?|INR)\s*\d/.test(text);
+/** Is this an owner number (upiProofWaMobiles) held by staff who may record payments? Never throws. */
+export async function isPayingStaffNumber(fromWaId: string): Promise<boolean> {
+  try {
+    return !!(await payingStaff(fromWaId));
+  } catch (e) {
+    console.warn("[waUpiProof] paying-staff check failed", e);
+    return false;
+  }
+}
+
+/**
+ * Words a payment screen always carries, and an amount or a UTR read off it;
+ * a bill or a class photo has neither. The amount is the parser's, so a "₹"
+ * that OCR read as "*" (15 Oct 2026: "*11,500 / Paid to / Randhir Sungh")
+ * still counts — it used to demand a literal ₹/Rs/INR and drop the photo.
+ */
+function looksLikeUpiPayment(text: string, proof: UpiProof): boolean {
+  return (
+    /(UPI|UTR|transaction ID|Ref(?:erence)? No|Paid to|Payment successful|Completed)/i.test(text) &&
+    (proof.amountPaise > 0 || !!proof.utr)
+  );
+}
+
+/**
+ * A screenshot from paying staff that did not end in a "Record it on …?"
+ * question, per number — so a follow-up line like "Randhir singh salary" is
+ * answered with what to send, not "didn't understand". Per instance, like
+ * the staff bot's own photo note; ten minutes.
+ */
+const FOLLOW_UP_MS = 10 * 60_000;
+const awaitingDetails = new Map<string, number>();
+
+function noteAwaitingDetails(fromWaId: string): void {
+  awaitingDetails.set(waNormalizeLocal10(fromWaId), Date.now());
+}
+
+/**
+ * The instruction for a payment-ish line sent soon after such a screenshot,
+ * or null. Words only — "salary", "advance", "paid", "UTR" — nothing more is
+ * read into it.
+ */
+export function upiFollowUpHelp(mobile10: string, text: string): string | null {
+  const at = awaitingDetails.get(mobile10);
+  if (!at || Date.now() - at > FOLLOW_UP_MS) return null;
+  if (!/\b(salary|salaries|advance|paid|payment|pay|upi|utr|gpay|phonepe|paytm|voucher|vetan)\b/i.test(text || "")) return null;
+  awaitingDetails.delete(mobile10);
+  return `${UPI_NO_UTR_HELP}\n\nOr record it in the ERP: Payroll → the person's line → Pay UPI, and upload that screenshot there.`;
 }
 
 export async function handleStaffUpiScreenshot(opts: {
@@ -84,27 +131,40 @@ export async function handleStaffUpiScreenshot(opts: {
     imageBase64: media.dataUrl.replace(/^data:[^,]+,/, ""),
     mimeType: media.mimeType,
   });
-  if (!vision.ok || !looksLikeUpiPayment(vision.text)) return { handled: false };
-
+  if (!vision.ok) {
+    noteAwaitingDetails(opts.fromWaId);
+    return { handled: false };
+  }
   const proof = parseUpiProofText(vision.text);
+  if (!looksLikeUpiPayment(vision.text, proof)) {
+    noteAwaitingDetails(opts.fromWaId);
+    return { handled: false };
+  }
   const reply = (text: string, buttons?: UpiProofReply["buttons"]): UpiProofOutcome => ({
     handled: true,
     audience: "upi_proof",
     reply: { text, buttons },
   });
 
+  // Anything short of the "Record it on …?" question leaves the number
+  // waiting for a details screenshot (cleared again below when it is asked).
+  noteAwaitingDetails(opts.fromWaId);
+
   if (proof.status === "failed") return reply("❌ This screenshot shows a FAILED UPI payment — nothing recorded.");
   if (proof.status === "pending") {
     return reply("⏳ This payment is still pending. Send the screenshot again once your UPI app shows it completed.");
   }
   if (!proof.utr) {
-    return reply(
-      "I could not read the UPI reference (UTR) on this screenshot. Open the payment in your UPI app, tap it for details, and send a screenshot that shows the 12-digit UPI transaction ID.",
-    );
+    // A "Paid ✓" success screen: the amount and the person, but no UTR.
+    const read = proof.amountPaise
+      ? `🧾 Read: ${inr(proof.amountPaise)}${proof.payeeName || proof.payeeVpa ? ` to ${proof.payeeName || proof.payeeVpa}` : ""}${proof.paidOn ? ` on ${proof.paidOn}` : ""}.\n\n`
+      : "";
+    return reply(`${read}${UPI_NO_UTR_HELP}`);
   }
   if (!proof.amountPaise) return reply(`I read UTR ${proof.utr} but no amount. Send a screenshot that shows the amount too.`);
 
   const already = await findRecordedUtr(proof.utr);
+  if (already) awaitingDetails.delete(waNormalizeLocal10(opts.fromWaId));
   if (already) return reply(`✅ UTR ${proof.utr} is already recorded on ${already.target_label}. Nothing to do.`);
 
   const [cands, recorded] = await Promise.all([loadUpiCandidates(), recordedUpiTargets()]);
@@ -131,6 +191,7 @@ export async function handleStaffUpiScreenshot(opts: {
   });
   if (!pending.ok) return reply(`I read ${summary}, but could not save it (${pending.error}). Nothing recorded — try again.`);
 
+  awaitingDetails.delete(waNormalizeLocal10(opts.fromWaId));
   const weak = offered.some((m) => m.strength === "amount_only")
     ? "\n⚠️ The screenshot does not show who was paid — check it is the right one."
     : "";

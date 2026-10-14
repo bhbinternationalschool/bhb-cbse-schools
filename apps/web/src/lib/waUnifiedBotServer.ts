@@ -1139,6 +1139,22 @@ async function replyStaffFallback(opts: {
     });
     return { replied: false, escalate: false, audience: "staff_quiet", stub: false };
   }
+  // "Randhir singh salary" just after a UPI screenshot that could not be
+  // recorded (15 Oct 2026): say what to send instead of "didn't understand".
+  const { upiFollowUpHelp } = await import("@/lib/waUpiProof.server");
+  const upiHelp = upiFollowUpHelp(mobile10, said);
+  if (upiHelp) {
+    const ok = await sendBotReply({
+      mobile10,
+      displayName,
+      category,
+      audience: "upi_proof_followup",
+      flow,
+      text: upiHelp,
+      inbound: { text: said, waMessageId: opts.waMessageId },
+    });
+    return { replied: ok, escalate: false, audience: "upi_proof_followup", stub: !ok };
+  }
   const staffRole =
     identity.roles.find((r) => r.kind === flow && r.staff) ?? identity.roles.find((r) => r.staff);
   const ok = await sendBotReply({
