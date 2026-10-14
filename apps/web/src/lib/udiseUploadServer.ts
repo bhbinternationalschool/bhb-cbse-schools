@@ -97,6 +97,41 @@ async function basesFor(
   return { ok: true, bases };
 }
 
+/**
+ * Why a save or a clear was not done on the server. `conflict` = the server
+ * refused it because the sheet changed since this page read it (the UDISE
+ * robot's pull rewrites the sheet row): the fix is a reload, not a retry.
+ */
+export type SheetWriteFailure = { ok: false; error: string; conflict: boolean };
+
+function failure(res: { message: string; kind?: string }): SheetWriteFailure {
+  return { ok: false, error: res.message, conflict: res.kind === "conflict" };
+}
+
+/** What the office is told when an upload did not reach the server. */
+export function sheetSaveFailureMessage(f: SheetWriteFailure): string {
+  return f.conflict
+    ? "Not saved to the server — the sheet changed since you opened this page (the UDISE robot may have pulled). Reload the page and upload the file again."
+    : `Saved in this browser only — it will not appear on another machine. ${f.error}`;
+}
+
+/**
+ * "Start a fresh sheet": what the panel does with the server's answer. A
+ * refused clear leaves the screen as it is — clearing it would show an empty
+ * sheet the server still holds, and it would come back on the next load.
+ */
+export function clearOutcome(
+  res: { ok: true } | SheetWriteFailure,
+): { clearScreen: true; error: null } | { clearScreen: false; error: string } {
+  if (res.ok) return { clearScreen: true, error: null };
+  return {
+    clearScreen: false,
+    error: res.conflict
+      ? "Not cleared — the sheet changed on the server since you opened it (the UDISE robot may have pulled). Reload the page and try again."
+      : `Not cleared — ${res.error}`,
+  };
+}
+
 /** Keep the revisions a write returned as the next bases. */
 function remember<T>(res: WriteResult<T>): void {
   if (!res.ok) return;
@@ -190,12 +225,12 @@ export async function saveServerSheet(input: {
   changed: UdiseSheetRecord[];
   removed: string[];
   actor: string;
-}): Promise<{ ok: true; written: number } | { ok: false; error: string }> {
+}): Promise<{ ok: true; written: number } | SheetWriteFailure> {
   const id = sheetIdFor(input.academicYearCode);
   const now = new Date().toISOString();
 
   const sheetBase = await basesFor("udise.sheets", [id], "upsert");
-  if (!sheetBase.ok) return { ok: false, error: sheetBase.error };
+  if (!sheetBase.ok) return { ok: false, error: sheetBase.error, conflict: false };
   const sheetWrite = await writeRecords("udise.sheets", [
     {
       op: "upsert",
@@ -214,13 +249,13 @@ export async function saveServerSheet(input: {
     },
   ] as never);
   remember(sheetWrite);
-  if (!sheetWrite.ok) return { ok: false, error: sheetWrite.message };
+  if (!sheetWrite.ok) return failure(sheetWrite);
 
   let written = 0;
   for (let i = 0; i < input.changed.length; i += CHUNK) {
     const chunk = input.changed.slice(i, i + CHUNK);
     const b = await basesFor("udise.rows", chunk.map((rec) => rowId(id, rec.key)), "upsert");
-    if (!b.ok) return { ok: false, error: b.error };
+    if (!b.ok) return { ok: false, error: b.error, conflict: false };
     const ops = chunk.map((rec) => ({
       op: "upsert" as const,
       id: rowId(id, rec.key),
@@ -237,18 +272,18 @@ export async function saveServerSheet(input: {
     }));
     const res = await writeRecords("udise.rows", ops as never);
     remember(res);
-    if (!res.ok) return { ok: false, error: res.message };
+    if (!res.ok) return failure(res);
     written += ops.length;
   }
 
   for (let i = 0; i < input.removed.length; i += CHUNK) {
     const ids = input.removed.slice(i, i + CHUNK).map((key) => rowId(id, key));
     const b = await basesFor("udise.rows", ids, "delete");
-    if (!b.ok) return { ok: false, error: b.error };
+    if (!b.ok) return { ok: false, error: b.error, conflict: false };
     const ops = ids.map((rid) => ({ op: "delete" as const, id: rid, base: b.bases.get(rid) ?? null }));
     const res = await writeRecords("udise.rows", ops as never);
     remember(res);
-    if (!res.ok) return { ok: false, error: res.message };
+    if (!res.ok) return failure(res);
   }
 
   return { ok: true, written };
@@ -262,22 +297,22 @@ export async function saveServerSheet(input: {
 export async function clearServerSheet(
   academicYearCode: string,
   rowKeys: string[],
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: true } | SheetWriteFailure> {
   const id = sheetIdFor(academicYearCode);
   for (let i = 0; i < rowKeys.length; i += CHUNK) {
     const ids = rowKeys.slice(i, i + CHUNK).map((key) => rowId(id, key));
     const b = await basesFor("udise.rows", ids, "delete");
-    if (!b.ok) return { ok: false, error: b.error };
+    if (!b.ok) return { ok: false, error: b.error, conflict: false };
     const ops = ids.map((rid) => ({ op: "delete" as const, id: rid, base: b.bases.get(rid) ?? null }));
     const res = await writeRecords("udise.rows", ops as never);
     remember(res);
-    if (!res.ok) return { ok: false, error: res.message };
+    if (!res.ok) return failure(res);
   }
   const b = await basesFor("udise.sheets", [id], "delete");
-  if (!b.ok) return { ok: false, error: b.error };
+  if (!b.ok) return { ok: false, error: b.error, conflict: false };
   const res = await writeRecords("udise.sheets", [
     { op: "delete", id, base: b.bases.get(id) ?? null },
   ] as never);
   remember(res);
-  return res.ok ? { ok: true } : { ok: false, error: res.message };
+  return res.ok ? { ok: true } : failure(res);
 }

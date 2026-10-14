@@ -20,7 +20,14 @@
 import assert from "node:assert/strict";
 import { udiseEmptyRow } from "@/lib/udiseStudentDetails";
 import type { UdiseSheetRecord } from "@/lib/udiseUploadStore";
-import { clearServerSheet, loadServerSheet, saveServerSheet, sheetIdFor } from "./udiseUploadServer";
+import {
+  clearOutcome,
+  clearServerSheet,
+  loadServerSheet,
+  saveServerSheet,
+  sheetIdFor,
+  sheetSaveFailureMessage,
+} from "./udiseUploadServer";
 
 type Stored = { row: Record<string, unknown>; updated_at: string; deleted_at: string | null };
 const tables: Record<string, Map<string, Stored>> = { "udise.sheets": new Map(), "udise.rows": new Map() };
@@ -148,6 +155,7 @@ async function run(): Promise<void> {
     actor: "office",
   });
   assert.equal(third.ok, false, "a live row this page never loaded is not overwritten");
+  assert.equal(!third.ok && third.conflict, true, "…and the failure says it is a conflict");
   assert.deepEqual(refusals.at(-1), { id: rid("robot"), reason: "unversioned" });
   assert.equal(
     (tables["udise.rows"]!.get(rid("robot"))!.row.cells as { fullName: string }).fullName,
@@ -160,8 +168,49 @@ async function run(): Promise<void> {
   tables["udise.rows"]!.get(rid("a"))!.updated_at = tick();
   const fourth = await saveServerSheet({ academicYearCode: AY, files: [], changed: [rec("a", "Mine")], removed: [], actor: "office" });
   assert.equal(fourth.ok, false, "a stale copy is refused");
+  assert.ok(!fourth.ok && fourth.conflict, "a stale copy is reported as a conflict");
+  assert.equal(
+    !fourth.ok && sheetSaveFailureMessage(fourth),
+    "Not saved to the server — the sheet changed since you opened this page (the UDISE robot may have pulled). Reload the page and upload the file again.",
+    "a conflict tells the office what to do",
+  );
+
   assert.equal(refusals.at(-1)?.reason, "stale");
   assert.equal(refusals.length, before + 1);
+
+  // 4b. The robot pulled after the page loaded: it rewrites the SHEET row,
+  //     so the save is refused at its first write — and so is "Start a fresh
+  //     sheet"; the panel keeps its screen and says why.
+  assert.ok((await loadServerSheet(AY)).ok, "reload before the robot pull");
+  tables["udise.sheets"]!.get(SHEET)!.updated_at = tick();
+  const afterPull = await saveServerSheet({ academicYearCode: AY, files: [], changed: [rec("a", "Mine")], removed: [], actor: "office" });
+  assert.ok(!afterPull.ok && afterPull.conflict, "a save after a robot pull is a conflict on the sheet row");
+  const refusedClear = await clearServerSheet(AY, []);
+  assert.ok(!refusedClear.ok && refusedClear.conflict, "a clear after a robot pull is a conflict");
+  assert.deepEqual(clearOutcome(refusedClear), {
+    clearScreen: false,
+    error:
+      "Not cleared — the sheet changed on the server since you opened it (the UDISE robot may have pulled). Reload the page and try again.",
+  }, "a refused clear leaves the screen and says why");
+  assert.deepEqual(clearOutcome({ ok: true }), { clearScreen: true, error: null }, "a clear that worked clears the screen");
+
+  // 4c. Not a conflict (the network): the generic wording, never "reload".
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error("network down");
+  }) as typeof fetch;
+  const offline = await saveServerSheet({ academicYearCode: AY, files: [], changed: [rec("a", "x")], removed: [], actor: "office" });
+  const offlineClear = await clearServerSheet(AY, ["a"]);
+  globalThis.fetch = realFetch;
+  assert.ok(!offline.ok && !offline.conflict, "a network failure is not a conflict");
+  assert.equal(
+    !offline.ok && sheetSaveFailureMessage(offline),
+    "Saved in this browser only — it will not appear on another machine. network down",
+    "other failures keep the generic message",
+  );
+  assert.ok(!offlineClear.ok && !offlineClear.conflict, "an offline clear is not a conflict");
+  const oc = clearOutcome(offlineClear);
+  assert.ok(!oc.clearScreen && oc.error === "Not cleared — network down", "an offline clear keeps the screen too");
 
   // 5. The office reopens the panel (a fresh read), then "Start a fresh
   //    sheet": every row on screen put away — including the robot's, which
