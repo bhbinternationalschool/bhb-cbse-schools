@@ -20,6 +20,7 @@
  */
 
 import type { Cursor } from "../types";
+import { erpFetch } from "../erpFetch";
 
 export type PageResult<T> =
   | {
@@ -61,7 +62,7 @@ export async function readPage<T = Record<string, unknown>>(
 
   let res: Response;
   try {
-    res = await fetch(
+    res = await erpFetch(
       `/api/data/${encodeURIComponent(collection)}${qs.size ? `?${qs}` : ""}`,
       { cache: "no-store", signal: params.signal },
     );
@@ -175,4 +176,72 @@ export async function readAll<T = Record<string, unknown>>(
 
   // Budget exhausted with more to read. Say so.
   return { ok: true, rows, complete: false, nextCursor: cursor as Cursor };
+}
+
+// ── One answer from a view (data-layer 1.4) ─────────────────────────────────
+
+export type ViewResult<T> =
+  | {
+      ok: true;
+      data: T;
+      /**
+       * The erp_versions values the answer was built from (a reference
+       * view's `versions`), or null when the server did not say — the
+       * versions poll then goes by what moved between its own answers.
+       */
+      builtFrom: Record<string, { updated_at: string | null; count: number | null } | null> | null;
+    }
+  | {
+      ok: false;
+      /** HTTP status; null when the request never got an answer. */
+      status: number | null;
+      error: string;
+    };
+
+/**
+ * GET one view or /api/v1 answer: `{ ok: true, data, versions? }`.
+ *
+ * The same discipline as readPage: a failure has no `data` (offline, a
+ * non-2xx, an unreadable body, or `ok:true` with no `data` — a malformed
+ * answer is not an empty one). Sent through erpFetch, so it carries the
+ * build header and is timed.
+ */
+export async function readView<T>(
+  path: string,
+  opts: { signal?: AbortSignal; fetchImpl?: (input: string | URL, init?: RequestInit) => Promise<Response> } = {},
+): Promise<ViewResult<T>> {
+  let res: Response;
+  try {
+    res = await erpFetch(path, { cache: "no-store", signal: opts.signal }, opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {});
+  } catch (e) {
+    return { ok: false, status: null, error: e instanceof Error ? e.message : "Network request failed" };
+  }
+
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return { ok: false, status: res.status, error: `Server returned ${res.status} with an unreadable body` };
+  }
+  const parsed = (body ?? {}) as { ok?: unknown; data?: unknown; versions?: unknown; error?: unknown };
+
+  if (!res.ok || parsed.ok !== true) {
+    const e = parsed.error;
+    const message =
+      typeof e === "string"
+        ? e
+        : e && typeof e === "object" && typeof (e as { message?: unknown }).message === "string"
+          ? (e as { message: string }).message
+          : `Request failed (${res.status})`;
+    return { ok: false, status: res.ok ? 502 : res.status, error: message };
+  }
+  if (!("data" in parsed) || parsed.data === undefined || parsed.data === null) {
+    return { ok: false, status: 502, error: "Server reported success but returned no data" };
+  }
+  const v = parsed.versions;
+  return {
+    ok: true,
+    data: parsed.data as T,
+    builtFrom: v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, { updated_at: string | null; count: number | null } | null>) : null,
+  };
 }

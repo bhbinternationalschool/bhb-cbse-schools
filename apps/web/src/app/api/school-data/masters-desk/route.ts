@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
-import {
-  authorizeSchoolDataDesk,
-  requireStaffApi,
-  SCHOOL_DATA_DESK_RBAC,
-} from "@/lib/apiRouteAuth.server";
-import { emptyMastersShell, type MastersState } from "@/lib/masters";
+import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
+import { type MastersState } from "@/lib/masters";
+import { teachingMastersSubset } from "@/lib/mastersTeachingSubset";
+import { resolveMastersReadScope } from "@/lib/mastersReadScope.server";
 import { mastersDualWriteDbEnabled } from "@/lib/mastersDbConfig";
 import {
   fetchMastersDeskFromDb,
@@ -48,26 +46,6 @@ function readFromRowTables(): boolean {
 }
 
 /**
- * The parts of Masters every member of staff needs to do their job: the
- * school's years, terms, classes, sections, subjects, holidays and timings.
- * Nothing about money (fee heads, structures, concessions and the families
- * they were granted to), numbering, statutory setup or students.
- */
-const TEACHING_MASTERS_KEYS = [
-  "academicYears",
-  "academicTerms",
-  "campuses",
-  "classes",
-  "sections",
-  "subjects",
-  "classSubjects",
-  "seniorStreams",
-  "holidays",
-  "schoolTiming",
-  "schoolProfile",
-] as const;
-
-/**
  * Staff without the Masters grant used to get 403 here — and with it an
  * EMPTY class list on every screen, because this is the only place a
  * browser learns the school's classes. Every teacher who signed in on
@@ -83,15 +61,12 @@ async function teachingMastersResponse() {
       { status: 503 },
     );
   }
-  // Start from the empty shell so every other key is present but empty —
-  // the client reads e.g. `bundle.feeHeads.length` and must not crash.
-  const { version: _v, ...subset } = emptyMastersShell() as unknown as Record<string, unknown>;
-  for (const k of TEACHING_MASTERS_KEYS) subset[k] = (bundle as Record<string, unknown>)[k];
-  // The Staff module owns these three; an empty list here would be merged
-  // over the roster the browser already holds.
-  delete subset.staff;
-  delete subset.departments;
-  delete subset.designations;
+  // Every other key is present but empty — the client reads e.g.
+  // `bundle.feeHeads.length` and must not crash. The Staff module owns
+  // staff/departments/designations; an empty list here would be merged over
+  // the roster the browser already holds, so they are left out
+  // (lib/mastersTeachingSubset, shared with GET /api/data/views/masters).
+  const subset = teachingMastersSubset(bundle as Record<string, unknown>);
   return NextResponse.json({
     ok: true,
     ...subset,
@@ -106,16 +81,11 @@ async function teachingMastersResponse() {
 }
 
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["masters-desk"], "GET");
-  if (!auth.ok) {
-    if (auth.response.status === 403) {
-      const staff = await requireStaffApi(req);
-      if (staff.ok && !staff.viaMirrorSecret && staff.ctx.session.persona === "staff") {
-        return teachingMastersResponse();
-      }
-    }
-    return auth.response;
-  }
+  // Full Masters, the teaching subset, or the guard's refusal — one rule,
+  // shared with GET /api/data/views/masters (lib/mastersReadScope.server).
+  const access = await resolveMastersReadScope(req);
+  if (!access.ok) return access.response;
+  if (access.scope === "teaching") return teachingMastersResponse();
 
   if (readFromRowTables()) {
     const cachedRows = await cachedDeskJson({

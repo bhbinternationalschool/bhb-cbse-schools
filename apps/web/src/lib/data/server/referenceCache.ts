@@ -29,7 +29,16 @@
  */
 // Server code, but no `import "server-only"`: lib/api/v1/auth.ts imports this,
 // and many self-tests import auth.ts under plain tsx.
-import { forgetErpVersions, readErpVersions, type VersionsSnapshot } from "./versions";
+import { forgetErpVersions, readErpVersions, type DeskVersion, type VersionsSnapshot } from "./versions";
+
+/**
+ * The erp_versions values of a cache's `deskKeys` that a value was built
+ * under (data-layer 1.4): read before the build started, so the value is at
+ * least this new. A reference view sends it to the browser, whose versions
+ * poll can then tell whether the copy it holds is behind. null = not proven
+ * (built while the versions were unknown, a previous copy, a fallback).
+ */
+export type BuiltFrom = Record<string, DeskVersion | null>;
 
 export type BuildResult<T> =
   | { ok: true; value: T }
@@ -42,6 +51,8 @@ export type CacheRead<T> =
       /** true = not proven current: a failed rebuild's previous value, or a build's fallback. */
       stale: boolean;
       from: "cache" | "rebuild" | "previous" | "fallback";
+      /** The deskKeys' versions this value was built under; null when `stale` or unknown. */
+      builtFrom: BuiltFrom | null;
     }
   | { ok: false; error: string };
 
@@ -74,6 +85,12 @@ type Entry<T> = {
 function keyOf(snap: VersionsSnapshot, deskKeys: readonly string[]): string | null {
   if (!snap.ok) return null;
   return JSON.stringify(deskKeys.map((k) => snap.versions[k] ?? null));
+}
+
+function builtFromOf(key: string | null, deskKeys: readonly string[]): BuiltFrom | null {
+  if (key === null) return null;
+  const vals = JSON.parse(key) as (DeskVersion | null)[];
+  return Object.fromEntries(deskKeys.map((k, i) => [k, vals[i] ?? null]));
 }
 
 function movedKeys(prev: string | null, next: string | null, deskKeys: readonly string[]): string[] {
@@ -128,16 +145,16 @@ export function referenceCache<T>(
           entry = { value: res.value, key, unknownSeq: snap.ok ? -1 : snap.seq, order: myOrder };
         }
         console.log(`[reference-cache] ${name} rebuilt (${reason})`);
-        return { ok: true, value: res.value, stale: false, from: "rebuild" };
+        return { ok: true, value: res.value, stale: false, from: "rebuild", builtFrom: builtFromOf(key, deskKeys) };
       }
       const prev = gen === generation ? entry : null;
       if (prev) {
         console.error(`[reference-cache] ${name} rebuild failed (${res.error}) — serving the previous copy, stale`);
-        return { ok: true, value: prev.value, stale: true, from: "previous" };
+        return { ok: true, value: prev.value, stale: true, from: "previous", builtFrom: null };
       }
       if (res.fallback !== undefined) {
         console.error(`[reference-cache] ${name} rebuild failed (${res.error}) and there is no copy — fallback served, not stored`);
-        return { ok: true, value: res.fallback, stale: true, from: "fallback" };
+        return { ok: true, value: res.fallback, stale: true, from: "fallback", builtFrom: null };
       }
       console.error(`[reference-cache] ${name} rebuild failed (${res.error}) and there is no copy`);
       return { ok: false, error: res.error };
@@ -159,7 +176,7 @@ export function referenceCache<T>(
       const snap = await versions();
       const key = keyOf(snap, deskKeys);
       if (entry && current(snap, key)) {
-        return { ok: true, value: entry.value, stale: false, from: "cache" };
+        return { ok: true, value: entry.value, stale: false, from: "cache", builtFrom: builtFromOf(entry.key, deskKeys) };
       }
       if (
         running &&

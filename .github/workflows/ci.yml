@@ -670,6 +670,8 @@ jobs:
           npm run test:erp-fetch
           npm run test:reference-cache
           npm run test:versions-route
+          npm run test:query-kernel
+          npm run test:reference-views
 
   build:
     name: Production build
