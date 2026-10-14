@@ -24,6 +24,8 @@ import {
 import { getServerTenantContext } from "@/lib/serverTenant";
 import type { TransportRoute, FleetVehicle } from "@/lib/transport";
 import { fetchTransportDeskFromDb } from "@/lib/transportNormalized.server";
+import { readVehicleDocs } from "@/lib/transportFinance.server";
+import { papersAsCompliance } from "@/lib/transportVehicleCosts";
 import { TENANT } from "@/lib/types";
 import { inferStaffIsOwner } from "@/lib/waRoleResolver";
 import { buildWaTemplateBodyComponent, sendWaWithFailover } from "@/lib/waSend";
@@ -199,6 +201,8 @@ export type FleetAlertsTickResult = {
   alerts: { key: string; title: string; vehicle: string; recipients: { name: string; wa: string; push: number }[] }[];
   pruned: number;
   dryRun: boolean;
+  /** The vehicle papers could not be read: no "paper expiring" alert was evaluated this tick. */
+  papersUnread?: boolean;
 };
 
 /**
@@ -210,8 +214,19 @@ export type FleetAlertsTickResult = {
 export async function runFleetAlertsTick(opts: { dryRun?: boolean; nowMs?: number } = {}): Promise<FleetAlertsTickResult> {
   const nowMs = opts.nowMs ?? Date.now();
   const ctx = await getServerTenantContext();
-  const [{ bundle }, positions] = await Promise.all([fetchTransportDeskFromDb(), readLatestPositions()]);
-  const vehicles = bundle.vehicles as FleetVehicle[];
+  const [{ bundle }, positions, papers] = await Promise.all([
+    fetchTransportDeskFromDb(),
+    readLatestPositions(),
+    readVehicleDocs().catch(() => null),
+  ]);
+  // Papers come from the server register (transport_vehicle_docs), never the
+  // desk's vehicle.compliance[] — that list was never saved (14 Oct 2026).
+  // Unread papers evaluate no paper alert; they are not "nothing expiring".
+  if (!papers) console.warn("[fleet-alerts] vehicle papers could not be read — no compliance_due alert this tick");
+  const vehicles = (bundle.vehicles as FleetVehicle[]).map((v) => ({
+    ...v,
+    compliance: papers ? papersAsCompliance(papers.state.docs, v.id) : [],
+  }));
 
   // Cooldown: the last time each alert key went out.
   const lastSent: Record<string, string> = {};
@@ -258,7 +273,13 @@ export async function runFleetAlertsTick(opts: { dryRun?: boolean; nowMs?: numbe
   }
 
   const alerts = evaluateFleetAlerts({ vehicles, positions, nowMs, lastSent, fuelDrains });
-  const result: FleetAlertsTickResult = { evaluated: vehicles.length, alerts: [], pruned: 0, dryRun: !!opts.dryRun };
+  const result: FleetAlertsTickResult = {
+    evaluated: vehicles.length,
+    alerts: [],
+    pruned: 0,
+    dryRun: !!opts.dryRun,
+    ...(papers ? {} : { papersUnread: true }),
+  };
   if (!alerts.length) {
     result.pruned = await prunePositions(nowMs);
     return result;

@@ -38,7 +38,7 @@ export const TRANSPORT_FEATURES: RbacFeatureDef[] = [
     actions: CRUD,
     slices: ["vehicles", "insurancePolicies", "certificateRenewals"],
     tabs: ["fleet", "compliance"],
-    routes: ["/api/transport/fleet-edge/vehicle-identity", "/api/transport/vehicle-docs"],
+    routes: ["/api/transport/fleet-edge/vehicle-identity", "/api/transport/vehicle-docs", "/api/transport/vehicle-costs"],
   },
   {
     id: "transport.fuel",
@@ -106,8 +106,9 @@ export const TRANSPORT_FEATURES: RbacFeatureDef[] = [
     // catalogue (lib/transportReportCatalog) read — TRANSPORT_REPORT_KEYS.
     tabs: ["dashboard", "reports"],
     // The dashboard's vehicle-papers strip reads this; saving needs edit,
-    // which this function never holds.
-    routes: ["/api/transport/vehicle-docs"],
+    // which this function never holds. vehicle-costs: the fleet reports'
+    // fuel / papers / TCO / EMI figures (read only).
+    routes: ["/api/transport/vehicle-docs", "/api/transport/vehicle-costs"],
   },
 ];
 

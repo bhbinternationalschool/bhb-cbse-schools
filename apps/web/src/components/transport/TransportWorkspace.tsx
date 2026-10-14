@@ -97,8 +97,11 @@ import {
   TRANSPORT_REPORT_CATEGORIES,
   TRANSPORT_REPORTS,
   runTransportReport,
+  TRANSPORT_REPORTS_NEEDING_COSTS,
   type TransportReportFormat,
 } from "@/lib/transportReportCatalog";
+import type { VehicleCosts } from "@/lib/transportVehicleCosts";
+import { fetchVehicleCosts } from "@/lib/transportVehicleCostsClient";
 import type { RegisterDayMark } from "@/lib/transportBoardingLog";
 import { fetchRegisterDayMarks } from "@/lib/transportRegisterClient";
 import { useHoldDecisions } from "@/lib/useHoldDecisions";
@@ -1825,6 +1828,16 @@ function ReportsPanel({
         return;
       }
     }
+    // Fuel, papers, loans and TCO read the server stores, not the desk.
+    let costs: VehicleCosts | null = null;
+    if (TRANSPORT_REPORTS_NEEDING_COSTS.has(id)) {
+      try {
+        costs = await fetchVehicleCosts();
+      } catch (e) {
+        onError(`Fuel, vehicle papers and loans could not be read — ${e instanceof Error ? e.message : "try again"}`);
+        return;
+      }
+    }
     const result = runTransportReport(id, {
       date,
       routeId: routeId || undefined,
@@ -1834,6 +1847,7 @@ function ReportsPanel({
       masters: masters ?? undefined,
       sis: sis ?? undefined,
       registerMarks,
+      costs,
     });
     if (!result.ok) {
       onError(result.error);

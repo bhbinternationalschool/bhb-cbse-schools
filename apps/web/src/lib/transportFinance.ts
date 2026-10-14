@@ -178,6 +178,11 @@ export type LoanSummary = {
   /** Opening/first-credit month: where "missing" starts counting. */
   anchorMonth: string;
   emiCount: number;
+  /** Every live EMI ever posted, oldest first (the EMI register and TCO read these). */
+  emis: { voucherNo: string; date: string; principalPaise: number; interestPaise: number }[];
+  /** All-time principal and interest paid by those EMIs. */
+  principalPaidPaise: number;
+  interestPaidPaise: number;
 };
 
 /** An EMI: a live voucher that pays the loan down (Dr the loan), not the opening. */
@@ -276,6 +281,14 @@ export function summarizeLoan(input: {
     lastEmiTotalPaise: last ? last.debitPaise - last.creditPaise + last.interestPaise : 0,
     anchorMonth,
     emiCount: emis.length,
+    emis: emis.map((e) => ({
+      voucherNo: e.voucherNo,
+      date: e.date,
+      principalPaise: e.debitPaise - e.creditPaise,
+      interestPaise: e.interestPaise,
+    })),
+    principalPaidPaise: emis.reduce((n, e) => n + e.debitPaise - e.creditPaise, 0),
+    interestPaidPaise: emis.reduce((n, e) => n + e.interestPaise, 0),
   };
 }
 

@@ -305,6 +305,7 @@ SELFTESTS=(
   test:transport-stop-links
   test:transport-boarding-log
   test:transport-fuel-register
+  test:transport-vehicle-costs
   test:transport-concession
   test:transport-by-class
   test:transport-staff-riders
