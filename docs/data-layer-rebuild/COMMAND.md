@@ -590,7 +590,7 @@ subsets, redaction, 503s, and the real route files through the real guards by AP
 PostgREST), `test:reference-cache` (+`builtFrom`) — each new assertion shown to fail with its predicate
 reverted (21 mutations: 20 red at once; the one that stayed green — a Settings-check 503 treated as
 "no Settings" — got its own case, which is red under that mutation). Playwright (local stack, fresh seed): the four `/__kernel` propagation cases **pass** (editor and
-api × subject and section; seen after 17.6–20.3 s); rebuilt with the poll's invalidation removed, all
+api × subject and section; seen after 17.6–20.3 s over two full runs); rebuilt with the poll's invalidation removed, all
 four fail at "propagation" with `visibleAfterReload: true`. `kernel.spec.ts`: 401/403 matrix, office full
 vs teacher own-only rbac, staff-list keys = the allow list, no versions request on `/masters` in 25 s,
 one at mount and one 20 s later on `/__kernel`, a 403 stops it (1 request in 23 s), a 503 keeps the
