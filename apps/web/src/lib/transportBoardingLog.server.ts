@@ -543,21 +543,10 @@ export async function readFuelFill(id: string): Promise<FuelFillRow | null> {
   return data ? rowToFill(data as Record<string, unknown>) : null;
 }
 
-/** A wrong entry is voided — kept, with who and why — never deleted. */
-export async function voidFuelFill(id: string, reason: string, name: string): Promise<FuelFillRow> {
-  const { sb, tenantId } = await tenant();
-  const { data, error } = await sb
-    .from("transport_fuel_fills")
-    .update({ voided_at: new Date().toISOString(), voided_by_name: name.slice(0, 120), void_reason: reason.slice(0, 300) })
-    .eq("tenant_id", tenantId)
-    .eq("id", id)
-    .is("voided_at", null)
-    .select(FILL_COLS);
-  if (error) throw new ApiError("server_error", `Could not void the fill: ${error.message}`, 502);
-  const row = (data ?? [])[0] as Record<string, unknown> | undefined;
-  if (!row) throw new ApiError("conflict", "This entry was already voided.", 409);
-  return rowToFill(row);
-}
+/*
+ * Voiding lives in transportFuelRegister.server.ts (voidFillWithVoucher): a
+ * fill may carry a posted Vehicle Fuel voucher, which must be reversed with it.
+ */
 
 /* ─── GPS odometer for one vehicle-day ─────────────────────── */
 

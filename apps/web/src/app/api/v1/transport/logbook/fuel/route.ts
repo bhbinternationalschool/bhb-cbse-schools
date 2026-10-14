@@ -1,6 +1,7 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { sanitizeStoredMediaUrl } from "@/lib/media";
+import { hasPermission } from "@/lib/rbac";
 import {
   addFuelFill,
   assertEditableDate,
@@ -9,8 +10,8 @@ import {
   loadTransportDesk,
   readFuelFill,
   registerAccess,
-  voidFuelFill,
 } from "@/lib/transportBoardingLog.server";
+import { readRegisterFill, voidFillWithVoucher } from "@/lib/transportFuelRegister.server";
 import { fuelUnitFor, istDate, parseKm, rupeesToPaise } from "@/lib/transportBoardingLog";
 
 export const runtime = "nodejs";
@@ -29,6 +30,11 @@ export const runtime = "nodejs";
  *
  * A wrong entry is voided with a reason, never deleted. The person who made
  * it may void it on the days they may still edit; the office any time.
+ *
+ * A fill added here carries no payment mode: it reaches the office's
+ * "awaiting office" queue in Transport → Fuel, which sets how it was paid and
+ * posts its Vehicle Fuel voucher (transportFuelRegister.server.ts). Voiding a
+ * fill that is already posted reverses that voucher.
  */
 export async function POST(request: Request) {
   try {
@@ -57,7 +63,16 @@ export async function POST(request: Request) {
       }
       const reason = String(body.reason ?? "").trim();
       if (!reason) throw new ApiError("bad_request", "Say why this entry is wrong", 400);
-      return apiOk({ fill: await voidFuelFill(id, reason, access.name) });
+      // Once the office has posted a fill to accounts, voiding it reverses
+      // the voucher — a decision about the book, so accounts.approve, the
+      // same right /api/ledger asks for a reversal.
+      const reg = await readRegisterFill(id);
+      if (!reg) throw new ApiError("not_found", "Fuel entry not found", 404);
+      if (reg.voucherId && reg.voucherOrigin === "posted" && !hasPermission(ctx.session, ctx.masters, "accounts", "approve", ctx.rbac)) {
+        throw new ApiError("forbidden", `This fill is already in accounts (${reg.voucherNo}). Ask the office to void it.`, 403);
+      }
+      const out = await voidFillWithVoucher({ fill: reg, reason, actor: access.name });
+      return apiOk({ fill: await readFuelFill(id), warning: out.warning });
     }
 
     if (body.action !== "add") throw new ApiError("bad_request", "action must be add or void", 400);
