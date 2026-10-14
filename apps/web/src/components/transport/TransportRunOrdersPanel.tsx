@@ -1,5 +1,7 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — detail tables — a run's stops in driving order and a suggestion's per-stop ride times; the actions belong to the run, not to a row
 
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { useCallback, useEffect, useState } from "react";
 import { minuteToHhmm, type FairDropSuggestion } from "@/lib/runStopOrder";
 
@@ -142,29 +144,29 @@ export function TransportRunOrdersPanel({ canEdit }: { canEdit: boolean }) {
                         </span>
                       ) : null}
                     </div>
-                    <div className="mt-1 overflow-x-auto">
-                      <table className="text-[11px] tabular-nums">
-                        <thead>
-                          <tr className="text-left text-[10px] uppercase tracking-wide text-[var(--muted)]">
-                            <th className="pr-3 font-semibold">#</th>
-                            <th className="pr-3 font-semibold">Usual time</th>
-                            <th className="pr-3 font-semibold">Stop</th>
-                            <th className="pr-3 font-semibold">Children</th>
-                            <th className="font-semibold">{run.direction === "pickup" ? "Ride to school" : "Ride home"}</th>
+                    <div className="mt-1">
+                      <ErpTableShell density="compact"><div className="overflow-x-auto"><ErpTable minWidth="min-w-[480px]" className="text-[11px] tabular-nums">
+                        <ErpTableHead>
+                          <tr>
+                            <th className="px-3 py-1.5 font-semibold">#</th>
+                            <th className="px-3 py-1.5 font-semibold">Usual time</th>
+                            <th className="px-3 py-1.5 font-semibold">Stop</th>
+                            <th className="px-3 py-1.5 font-semibold">Children</th>
+                            <th className="px-3 py-1.5 font-semibold">{run.direction === "pickup" ? "Ride to school" : "Ride home"}</th>
                           </tr>
-                        </thead>
-                        <tbody>
+                        </ErpTableHead>
+                        <ErpTableBody zebra>
                           {run.stops.map((s, i) => (
                             <tr key={s.stopId} className={s.riders === 0 ? "text-[var(--muted)]" : "text-[var(--ink)]"}>
-                              <td className="pr-3">{i + 1}</td>
-                              <td className="pr-3">{minuteToHhmm(s.minute)}</td>
-                              <td className="pr-3">{s.name}</td>
-                              <td className="pr-3">{s.riders ?? "—"}</td>
-                              <td>{fmtRide(s.rideMinutes)}</td>
+                              <td className="px-3 py-1.5">{i + 1}</td>
+                              <td className="px-3 py-1.5">{minuteToHhmm(s.minute)}</td>
+                              <td className="px-3 py-1.5">{s.name}</td>
+                              <td className="px-3 py-1.5">{s.riders ?? "—"}</td>
+                              <td className="px-3 py-1.5">{fmtRide(s.rideMinutes)}</td>
                             </tr>
                           ))}
-                        </tbody>
-                      </table>
+                        </ErpTableBody>
+                      </ErpTable></div></ErpTableShell>
                     </div>
                     {run.unseen.length ? (
                       <p className="mt-1 text-[10px] text-[var(--muted)]">
@@ -212,29 +214,29 @@ function Suggestion({
         straight out to them first and dropping back towards school uses the same roads, the other way round.{" "}
         {s.childrenBetter} children would ride less and {s.childrenWorse} more. New times are estimates.
       </p>
-      <div className="mt-1.5 overflow-x-auto">
-        <table className="tabular-nums">
-          <thead>
-            <tr className="text-left text-[10px] uppercase tracking-wide text-[var(--muted)]">
-              <th className="pr-3 font-semibold">Stop (pick-up order)</th>
-              <th className="pr-3 font-semibold">Children</th>
-              <th className="pr-3 font-semibold">Morning ride</th>
-              <th className="pr-3 font-semibold">Ride home now</th>
-              <th className="font-semibold">Ride home, suggested</th>
+      <div className="mt-1.5">
+        <ErpTableShell density="compact"><div className="overflow-x-auto"><ErpTable minWidth="min-w-[480px]" className="text-[11px] tabular-nums">
+          <ErpTableHead>
+            <tr>
+              <th className="px-3 py-1.5 font-semibold">Stop (pick-up order)</th>
+              <th className="px-3 py-1.5 font-semibold">Children</th>
+              <th className="px-3 py-1.5 font-semibold">Morning ride</th>
+              <th className="px-3 py-1.5 font-semibold">Ride home now</th>
+              <th className="px-3 py-1.5 font-semibold">Ride home, suggested</th>
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody zebra>
             {s.rows.map((r) => (
               <tr key={r.stopId} className="text-[var(--ink)]">
-                <td className="pr-3">{nameOf.get(r.stopId) ?? r.stopId}</td>
-                <td className="pr-3">{r.riders}</td>
-                <td className="pr-3">{fmtRide(r.pickupRide)}</td>
-                <td className="pr-3">{fmtRide(r.dropRideNow)}</td>
-                <td>~{r.dropRideSuggested} min</td>
+                <td className="px-3 py-1.5">{nameOf.get(r.stopId) ?? r.stopId}</td>
+                <td className="px-3 py-1.5">{r.riders}</td>
+                <td className="px-3 py-1.5">{fmtRide(r.pickupRide)}</td>
+                <td className="px-3 py-1.5">{fmtRide(r.dropRideNow)}</td>
+                <td className="px-3 py-1.5">~{r.dropRideSuggested} min</td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable></div></ErpTableShell>
       </div>
       {canEdit ? (
         <div className="mt-2 flex flex-wrap gap-2">

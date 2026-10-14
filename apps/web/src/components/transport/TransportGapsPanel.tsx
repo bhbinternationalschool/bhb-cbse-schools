@@ -1,5 +1,7 @@
 "use client";
+// ratchet-allow: grids_without_row_menu — detail table — each gap shows one row of billed vs measured figures; the actions (do it / settle / dismiss) belong to the gap, not to a row
 
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   TRANSPORT_GAP_KIND_LABEL,
@@ -199,31 +201,31 @@ export function TransportGapsPanel({ canEdit }: { canEdit: boolean }) {
                     </div>
                     {g.detail ? <p className="mt-1 max-w-4xl text-[var(--muted)]">{g.detail}</p> : null}
                     {isFee ? (
-                      <div className="mt-1.5 overflow-x-auto">
-                        <table className="text-[11px] tabular-nums">
-                          <thead>
-                            <tr className="text-left text-[10px] uppercase tracking-wide text-[var(--muted)]">
-                              <th className="pr-4 font-semibold">Billed distance</th>
-                              <th className="pr-4 font-semibold">Road distance</th>
-                              <th className="pr-4 font-semibold">Straight line</th>
-                              <th className="pr-4 font-semibold">Billed / month</th>
-                              <th className="pr-4 font-semibold">Policy at road distance</th>
-                              <th className="font-semibold">Difference</th>
+                      <div className="mt-1.5">
+                        <ErpTableShell density="compact"><div className="overflow-x-auto"><ErpTable minWidth="min-w-[480px]" className="text-[11px] tabular-nums">
+                          <ErpTableHead>
+                            <tr>
+                              <th className="px-3 py-1.5 font-semibold">Billed distance</th>
+                              <th className="px-3 py-1.5 font-semibold">Road distance</th>
+                              <th className="px-3 py-1.5 font-semibold">Straight line</th>
+                              <th className="px-3 py-1.5 font-semibold">Billed / month</th>
+                              <th className="px-3 py-1.5 font-semibold">Policy at road distance</th>
+                              <th className="px-3 py-1.5 font-semibold">Difference</th>
                             </tr>
-                          </thead>
-                          <tbody>
+                          </ErpTableHead>
+                          <ErpTableBody zebra>
                             <tr className="text-[var(--ink)]">
-                              <td className="pr-4">{km(g.billedKm)}</td>
-                              <td className="pr-4">{km(g.roadKm)}</td>
-                              <td className="pr-4">{km(g.straightKm)}</td>
-                              <td className="pr-4">{rupees(g.billedFeePaise)}</td>
-                              <td className="pr-4">
+                              <td className="px-3 py-1.5">{km(g.billedKm)}</td>
+                              <td className="px-3 py-1.5">{km(g.roadKm)}</td>
+                              <td className="px-3 py-1.5">{km(g.straightKm)}</td>
+                              <td className="px-3 py-1.5">{rupees(g.billedFeePaise)}</td>
+                              <td className="px-3 py-1.5">
                                 {g.policyFeePaise != null ? rupees(g.policyFeePaise) : g.policyFeeNote || "—"}
                               </td>
-                              <td>{diff == null ? "—" : diff === 0 ? "none" : `${rupees(diff)} / month`}</td>
+                              <td className="px-3 py-1.5">{diff == null ? "—" : diff === 0 ? "none" : `${rupees(diff)} / month`}</td>
                             </tr>
-                          </tbody>
-                        </table>
+                          </ErpTableBody>
+                        </ErpTable></div></ErpTableShell>
                       </div>
                     ) : null}
                     {g.status !== "open" ? (
