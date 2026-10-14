@@ -153,6 +153,11 @@ export type AlertVehicleLike = DeskVehicleLike & {
   status: string;
   odometerKm?: number;
   serviceSchedule?: { task: string; nextDueOn?: string | null; nextDueOdo?: number | null }[];
+  /**
+   * Papers in force (one per type) — the server fills this from
+   * transport_vehicle_docs (lib/transportVehicleCosts papersAsCompliance),
+   * never from the desk's vehicle.compliance[].
+   */
   compliance?: { certType: string; expiryDate?: string | null }[];
 };
 
