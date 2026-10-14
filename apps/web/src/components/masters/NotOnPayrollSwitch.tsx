@@ -18,10 +18,13 @@ export function NotOnPayrollSwitch({
   link,
   staffName,
   onChange,
+  disabled = false,
 }: {
   link: (NotOnPayrollFields & { staffId: string }) | undefined;
   staffName: string;
   onChange: (on: boolean, reason: string) => void;
+  /** A save is in flight. */
+  disabled?: boolean;
 }) {
   const on = !isOnPayroll(link);
   const [editing, setEditing] = useState(false);
@@ -44,6 +47,7 @@ export function NotOnPayrollSwitch({
           </div>
         ) : null}
         <button
+          disabled={disabled}
           type="button"
           className="font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline"
           onClick={() => {
@@ -61,6 +65,7 @@ export function NotOnPayrollSwitch({
   if (!editing) {
     return (
       <button
+        disabled={disabled}
         type="button"
         className="rounded-lg border border-[var(--border)] px-2 py-1 text-[10px] font-semibold text-[var(--muted)] hover:text-[var(--brand-deep)]"
         onClick={() => setEditing(true)}
@@ -98,8 +103,9 @@ export function NotOnPayrollSwitch({
       ) : null}
       <div className="flex gap-1.5">
         <button
+          disabled={disabled}
           type="button"
-          className="rounded-lg bg-[var(--primary)] px-2 py-1 text-[10px] font-semibold text-[var(--primary-foreground)]"
+          className="rounded-lg bg-[var(--primary)] px-2 py-1 text-[10px] font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
           onClick={() => {
             onChange(true, reason);
             setEditing(false);

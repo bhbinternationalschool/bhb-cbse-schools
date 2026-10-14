@@ -730,7 +730,7 @@ export function runPayrollReport(
             additional: money(link?.additionalAmount || 0),
             grossUp: link?.statutoryGrossUp ? "yes" : "no",
             // No salary setup: no PF/ESI liability (14 Oct 2026).
-            cover: link ? statutoryCoverFor(link).cover : "none (no salary setup)",
+            cover: statutoryCoverFor(link).noSetup ? "none (no salary setup)" : statutoryCoverFor(link).cover,
             from: link?.effectiveFrom || "",
             payroll: isOnPayroll(link) ? "On payroll" : notOnPayrollLabel(link),
             due: money(outstandingForStaff(s.id)),

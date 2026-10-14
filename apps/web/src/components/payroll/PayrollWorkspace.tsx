@@ -821,15 +821,25 @@ export function PayrollWorkspace() {
   /** Remove every line of the draft whose staff are not on payroll. */
   function onRemoveLines(staffIds: string[]) {
     if (!selected) return;
+    // Each line on its own: one refusal does not stop the rest.
+    const failed: string[] = [];
+    let removed = 0;
     for (const id of staffIds) {
       const r = removeDraftStaffLine(selected.id, id, session.fullName);
-      if (!r.ok) {
-        flash(r.error, true);
-        refresh();
-        return;
+      if (r.ok) removed += 1;
+      else {
+        const name = selected.lines.find((l) => l.staffId === id)?.fullName || id;
+        failed.push(`${name}: ${r.error}`);
       }
     }
-    flash(`${staffIds.length} not-on-payroll ${staffIds.length === 1 ? "line" : "lines"} removed from draft`);
+    if (failed.length) {
+      flash(
+        `${removed} not-on-payroll ${removed === 1 ? "line" : "lines"} removed · NOT removed: ${failed.join("; ")}`,
+        true,
+      );
+    } else {
+      flash(`${removed} not-on-payroll ${removed === 1 ? "line" : "lines"} removed from draft`);
+    }
     refresh();
   }
 
@@ -1494,9 +1504,18 @@ function RunDetail({
   const inAccounts = run.status === "posted" || run.status === "paid";
   // Lines for staff since marked not on payroll — drafts only; a posted or
   // paid run is never touched.
+  // Re-read when salary setup lands or changes (hydration finishes after
+  // the run may already be on screen).
+  const [setupVersion, setSetupVersion] = useState(0);
+  useEffect(() => {
+    const onSetup = () => setSetupVersion((v) => v + 1);
+    window.addEventListener("bhb-salary-setup-updated", onSetup);
+    return () => window.removeEventListener("bhb-salary-setup-updated", onSetup);
+  }, []);
   const notOnPayroll = useMemo(
     () => (run.status === "draft" ? notOnPayrollLines(run.lines, loadSalarySetup().staffLinks) : []),
-    [run],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setupVersion tracks salary setup writes
+    [run, setupVersion],
   );
   const notOnPayrollById = new Map(notOnPayroll.map((x) => [x.staffId, x]));
 

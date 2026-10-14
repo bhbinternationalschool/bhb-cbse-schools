@@ -7,7 +7,7 @@
 import type { StaffStream } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
 import { isVisitingStaff } from "@/lib/visitingPay";
-import { carryNotOnPayroll } from "@/lib/payrollNotOnPayroll";
+import { carryNotOnPayroll, isOnPayroll, notOnPayrollLabel } from "@/lib/payrollNotOnPayroll";
 import {
   additionalFromLink,
   computeStructureAmounts,
@@ -320,6 +320,29 @@ export function buildIncrementDraft(input: {
   const lines: IncrementLine[] = [];
 
   for (const staff of roster) {
+    // Not on payroll (Masters → Salary setup): no salary, so nothing to
+    // raise — listed as skipped with the reason. Without this, the structure
+    // fallback gave a switch-only person a line, and applying it wrote a
+    // real structure + basic nobody had decided.
+    const nopLink = salary.staffLinks.find((l) => l.staffId === staff.id);
+    if (!isOnPayroll(nopLink)) {
+      lines.push({
+        staffId: staff.id,
+        empCode: staff.empCode,
+        fullName: staff.fullName,
+        stream: staff.stream,
+        joiningDate: staff.joiningDate,
+        structureId: "",
+        structureName: "",
+        oldBasic: 0,
+        mode: "percent",
+        value: 0,
+        newBasic: 0,
+        status: "skipped",
+        skipReason: notOnPayrollLabel(nopLink),
+      });
+      continue;
+    }
     const structure = resolveStructureForStaff(salary, staff);
     if (!structure) {
       lines.push({
@@ -489,6 +512,23 @@ export function previewStaffIncrement(input: {
   const defaults = streamDefaults(policy, staff.stream);
   const mode = input.mode ?? defaults.mode;
   const value = input.value !== undefined ? input.value : defaults.value;
+  const nopLink = salary.staffLinks.find((l) => l.staffId === staff.id);
+  if (!isOnPayroll(nopLink)) {
+    return {
+      staffId: staff.id,
+      empCode: staff.empCode,
+      fullName: staff.fullName,
+      stream: staff.stream,
+      joiningDate: staff.joiningDate,
+      structureId: "",
+      structureName: "",
+      oldBasic: 0,
+      mode,
+      value,
+      newBasic: 0,
+      error: `${notOnPayrollLabel(nopLink)} — put them back on payroll in Masters → Salary setup first`,
+    };
+  }
   const structure = resolveStructureForStaff(salary, staff);
   if (!structure) {
     return {
@@ -770,7 +810,12 @@ export function rejectIncrementBatch(
 export function applyIncrementBatch(
   batchId: string,
   by: string,
-): { ok: true; applied: number } | { ok: false; error: string } {
+): {
+  ok: true;
+  applied: number;
+  /** Marked not on payroll since the batch was made — left untouched. */
+  skippedNotOnPayroll: string[];
+} | { ok: false; error: string } {
   const state = loadIncrementState();
   const batch = state.batches.find((b) => b.id === batchId);
   if (!batch) return { ok: false, error: "Batch not found" };
@@ -781,9 +826,18 @@ export function applyIncrementBatch(
   const salary = loadSalarySetup();
   const included = batch.lines.filter((l) => l.status === "included");
   let links = [...salary.staffLinks];
+  const skippedNotOnPayroll: string[] = [];
+  let applied = 0;
 
   for (const line of included) {
     const existing = links.find((l) => l.staffId === line.staffId);
+    // Switched off payroll after the batch was made: no raise, and never a
+    // structure or basic written onto a switch-only link.
+    if (!isOnPayroll(existing)) {
+      skippedNotOnPayroll.push(line.fullName);
+      continue;
+    }
+    applied += 1;
     const row: StaffSalaryLink = {
       staffId: line.staffId,
       structureId: existing?.structureId || line.structureId,
@@ -813,7 +867,7 @@ export function applyIncrementBatch(
     appliedBy: by,
     appliedAt: new Date().toISOString(),
   });
-  return { ok: true, applied: included.length };
+  return { ok: true, applied, skippedNotOnPayroll };
 }
 
 export function deleteIncrementBatch(batchId: string): boolean {

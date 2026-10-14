@@ -236,7 +236,13 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
     }
     const r = applyIncrementBatch(selected.id, String(who));
     if (!r.ok) return flash(r.error, true);
-    flash(`Applied to ${r.applied} staff · basic override updated`);
+    flash(
+      `Applied to ${r.applied} staff · basic override updated${
+        r.skippedNotOnPayroll.length
+          ? ` · not applied — not on payroll: ${r.skippedNotOnPayroll.join(", ")}`
+          : ""
+      }`,
+    );
     refresh();
   }
 

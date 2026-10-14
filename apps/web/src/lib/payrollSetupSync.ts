@@ -22,9 +22,10 @@ export const NO_SETUP_NOTE = "No salary setup — PF/ESI not applied; set it up 
  * been made: never PF + ESIC by default — "none", and flagged.
  */
 export function statutoryCoverFor(
-  link: { statutoryCover?: StatutoryCover | string | null } | null | undefined,
+  link: { statutoryCover?: StatutoryCover | string | null; notOnPayrollOnly?: boolean } | null | undefined,
 ): { cover: StatutoryCover; noSetup: boolean } {
-  if (!link) return { cover: "none", noSetup: true };
+  // A link that only carries the "not on payroll" switch is no salary setup.
+  if (!link || link.notOnPayrollOnly === true) return { cover: "none", noSetup: true };
   const c = link.statutoryCover;
   if (c === "both" || c === "pf_only" || c === "esic_only" || c === "none") return { cover: c, noSetup: false };
   return { cover: "none", noSetup: false };

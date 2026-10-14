@@ -55,6 +55,7 @@ import { IncrementPanel } from "@/components/payroll/IncrementPanel";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { NotOnPayrollSwitch } from "@/components/masters/NotOnPayrollSwitch";
 import { recordAudit } from "@/lib/auditClient";
+import { pushToast } from "@/components/shell/Toast";
 import {
   carryNotOnPayroll,
   clearSalaryAssignment,
@@ -109,6 +110,13 @@ export function SalarySetupPanel() {
       setNotice(msg);
       window.setTimeout(() => setNotice(null), 2400);
     }
+  }
+
+  /** A change already saved and confirmed by the server: show it, no second save. */
+  function showSaved(next: SalarySetupState, msg: string) {
+    setState(next);
+    setNotice(msg);
+    window.setTimeout(() => setNotice(null), 2400);
   }
 
   if (!state || !masters) {
@@ -170,7 +178,7 @@ export function SalarySetupPanel() {
         <StructuresPanel state={state} commit={commit} masters={masters} />
       ) : null}
       {tab === "assign" ? (
-        <AssignPanel state={state} commit={commit} masters={masters} />
+        <AssignPanel state={state} commit={commit} showSaved={showSaved} masters={masters} />
       ) : null}
       {tab === "increment" ? <IncrementPanel mode="full" /> : null}
     </div>
@@ -1013,10 +1021,12 @@ function StructuresPanel({
 function AssignPanel({
   state,
   commit,
+  showSaved,
   masters,
 }: {
   state: SalarySetupState;
   commit: (s: SalarySetupState, msg?: string) => void;
+  showSaved: (s: SalarySetupState, msg: string) => void;
   masters: MastersState;
 }) {
   const session = useDemoSession();
@@ -1148,7 +1158,15 @@ function AssignPanel({
   }
 
   /** The "Not on payroll" switch — saved at once, and audited. */
-  function setPayrollSwitch(staffId: string, on: boolean, reason: string) {
+  const [switchBusy, setSwitchBusy] = useState(false);
+
+  /**
+   * The "Not on payroll" switch — saved at once and confirmed by the server.
+   * Audited only after a confirmed save: a refused save (no payroll edit,
+   * changed on another device) says so and records nothing.
+   */
+  async function setPayrollSwitch(staffId: string, on: boolean, reason: string) {
+    if (switchBusy) return;
     const staff = roster.find((s) => s.id === staffId);
     const r = setNotOnPayroll(state.staffLinks, staffId, {
       on,
@@ -1156,23 +1174,35 @@ function AssignPanel({
       by: session.fullName,
       at: new Date().toISOString(),
     });
-    commit(
-      { ...state, staffLinks: r.links },
-      on
-        ? `${staff?.fullName ?? "Staff"} marked not on payroll — left out of new salary runs`
-        : `${staff?.fullName ?? "Staff"} is back on payroll`,
-    );
-    recordAudit({
-      module: "masters",
-      action: "update",
-      entityType: "salary_payroll_switch",
-      entityId: staffId,
-      summary: `${staff?.fullName ?? staffId} (${staff?.empCode ?? ""}): ${
-        on ? `not on payroll${reason ? ` — ${reason}` : ""}` : "back on payroll"
-      }`,
-      before: r.before,
-      after: r.after,
-    });
+    const next = { ...state, staffLinks: r.links };
+    setSwitchBusy(true);
+    try {
+      const { saveSalarySetupConfirmed } = await import("@/lib/salarySetupPersistence");
+      const saved = await saveSalarySetupConfirmed(next, state);
+      if (!saved.ok) {
+        pushToast({ kind: "error", message: saved.error, durationMs: 0 });
+        return;
+      }
+      showSaved(
+        next,
+        on
+          ? `${staff?.fullName ?? "Staff"} marked not on payroll — left out of new salary runs`
+          : `${staff?.fullName ?? "Staff"} is back on payroll`,
+      );
+      recordAudit({
+        module: "masters",
+        action: "update",
+        entityType: "salary_payroll_switch",
+        entityId: staffId,
+        summary: `${staff?.fullName ?? staffId} (${staff?.empCode ?? ""}): ${
+          on ? `not on payroll${reason ? ` — ${reason}` : ""}` : "back on payroll"
+        }`,
+        before: r.before,
+        after: r.after,
+      });
+    } finally {
+      setSwitchBusy(false);
+    }
   }
 
   const dirtyCount = roster.filter((s) => isDirty(s.id)).length;
@@ -1432,7 +1462,8 @@ function AssignPanel({
                     <NotOnPayrollSwitch
                       link={link}
                       staffName={s.fullName}
-                      onChange={(on, reason) => setPayrollSwitch(s.id, on, reason)}
+                      disabled={switchBusy}
+                      onChange={(on, reason) => void setPayrollSwitch(s.id, on, reason)}
                     />
                   </td>
                   <td className="px-3 py-2">

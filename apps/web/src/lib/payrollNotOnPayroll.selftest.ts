@@ -28,6 +28,7 @@ import { defaultSalarySetupState, type StaffSalaryLink } from "./salarySetup";
 import { buildPayrollDraft } from "./payroll";
 import { defaultMasters, type MastersState } from "./masters";
 import type { StaffRecord } from "./foundationMasters";
+import { statutoryCoverFor } from "./payrollSetupSync";
 
 console.log("payrollNotOnPayroll.selftest.ts");
 
@@ -197,4 +198,134 @@ const AT = "2026-10-14T10:00:00.000Z";
   console.log("  ok  one left-out list, nobody twice");
 }
 
-console.log("payrollNotOnPayroll.selftest.ts — all passed");
+// 8. A switch-only link is no salary setup: no PF/ESI decision (review of #625).
+{
+  const only = setNotOnPayroll([], "x", { on: true, by: "D", at: AT }).links[0]!;
+  assert.deepEqual(statutoryCoverFor(only), { cover: "none", noSetup: true });
+  const assigned = setNotOnPayroll([link("a")], "a", { on: true, by: "D", at: AT }).links[0]!;
+  assert.deepEqual(statutoryCoverFor(assigned), { cover: "pf_only", noSetup: false }, "a real assignment keeps its cover");
+  console.log("  ok  switch-only link reads as no salary setup");
+}
+
+void (async () => {
+  // Browser-like storage for the stateful parts below.
+  const store = new Map<string, string>();
+  const g = globalThis as Record<string, unknown>;
+  g.window = globalThis;
+  g.dispatchEvent ??= () => true;
+  g.addEventListener ??= () => {};
+  g.removeEventListener ??= () => {};
+  g.CustomEvent ??= class { constructor(public type: string) {} };
+  g.localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => void store.clear(),
+  };
+
+  // 9. Increments skip not-on-payroll staff, and never write a structure or
+  //    basic onto a switch-only link (review of #625).
+  {
+    const { buildIncrementDraft, previewStaffIncrement, applyIncrementBatch, writeIncrementStateLocalRaw, defaultIncrementPolicy } =
+      await import("./salaryIncrement");
+    const { writeSalarySetupLocalRaw, loadSalarySetup } = await import("./salarySetup");
+    const st = (id: string) =>
+      ({
+        id, empCode: id.toUpperCase(), fullName: `Staff ${id}`, status: "active", stream: "teaching",
+        category: "permanent", designationId: "", classTeacherLinks: [], subjectTeachingLinks: [], joiningDate: "2019-04-01",
+      }) as unknown as StaffRecord;
+    const masters: MastersState = { ...defaultMasters(), staff: [st("paid"), st("owner")] };
+    const salary = {
+      ...defaultSalarySetupState(),
+      staffLinks: [
+        link("paid", { structureId: "" }),
+        ...setNotOnPayroll([], "owner", { on: true, reason: "Owner / trustee", by: "D", at: AT }).links,
+      ],
+    };
+    writeSalarySetupLocalRaw(salary);
+    const batch = buildIncrementDraft({
+      masters, salary, academicYearCode: "2026-27", effectiveFrom: "2027-04-01", createdBy: "t", anniversaryOnly: false,
+    });
+    const ownerLine = batch.lines.find((l) => l.staffId === "owner")!;
+    assert.equal(ownerLine.status, "skipped");
+    assert.equal(ownerLine.skipReason, "Not on payroll — Owner / trustee");
+    assert.equal(ownerLine.newBasic, 0);
+    assert.notEqual(batch.lines.find((l) => l.staffId === "paid")!.skipReason, "Not on payroll — Owner / trustee");
+    const pv = previewStaffIncrement({ masters, staffId: "owner", salary });
+    assert.ok(pv && /^Not on payroll — Owner \/ trustee/.test(pv.error));
+
+    // A batch approved before the switch: applying it leaves them untouched.
+    writeIncrementStateLocalRaw({
+      version: 1,
+      policy: defaultIncrementPolicy(),
+      batches: [{
+        id: "ib1", kind: "individual", label: "", academicYearCode: "2026-27", effectiveFrom: "2027-04-01",
+        status: "approved", createdBy: "t", createdAt: AT, submittedBy: "", submittedAt: "", approvedBy: "t",
+        approvedAt: AT, appliedBy: "", appliedAt: "", note: "",
+        lines: [{ ...ownerLine, status: "included", structureId: "ss_x", oldBasic: 10000, newBasic: 11000, skipReason: "" }],
+      }],
+    } as never);
+    const applied = applyIncrementBatch("ib1", "t");
+    assert.ok(applied.ok, applied.ok ? "" : applied.error);
+    if (applied.ok) {
+      assert.equal(applied.applied, 0);
+      assert.deepEqual(applied.skippedNotOnPayroll, ["Staff owner"]);
+    }
+    const ownerAfter = loadSalarySetup().staffLinks.find((l) => l.staffId === "owner")!;
+    assert.equal(ownerAfter.structureId, "", "no structure written");
+    assert.equal(ownerAfter.basicOverride, 0, "no basic written");
+    assert.equal(ownerAfter.notOnPayrollOnly, true);
+    console.log("  ok  increments skip not-on-payroll staff");
+  }
+
+  // 10. The switch's save is confirmed by the server before anything is
+  //     audited: refused / conflicting / failed saves say so (review of #625).
+  {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "http://127.0.0.1:9";
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test";
+    let postStatus = 200;
+    const remote = { state: defaultSalarySetupState() as unknown, updatedAt: "2026-10-14T00:00:00.000Z" };
+    g.fetch = async (_url: string, init?: { method?: string }) => {
+      const body = init?.method === "POST"
+        ? postStatus === 200
+          ? { ok: true, updatedAt: "2026-10-14T01:00:00.000Z" }
+          : { ok: false, error: postStatus === 403 ? "Forbidden" : "boom" }
+        : { ok: true, state: remote.state, updatedAt: remote.updatedAt };
+      return {
+        ok: init?.method !== "POST" || postStatus === 200,
+        status: init?.method === "POST" ? postStatus : 200,
+        json: async () => body,
+      };
+    };
+    const { saveSalarySetupConfirmed, ensureSalarySetupHydrated } = await import("./salarySetupPersistence");
+    const { loadSalarySetup } = await import("./salarySetup");
+    await ensureSalarySetupHydrated();
+    const prev = loadSalarySetup();
+    const next = { ...prev, staffLinks: setNotOnPayroll(prev.staffLinks, "z", { on: true, by: "D", at: AT }).links };
+
+    postStatus = 200;
+    assert.deepEqual(await saveSalarySetupConfirmed(next, prev), { ok: true });
+    assert.equal(isOnPayroll(loadSalarySetup().staffLinks.find((l) => l.staffId === "z")), false);
+
+    postStatus = 403;
+    const refused = await saveSalarySetupConfirmed(prev, next);
+    assert.equal(refused.ok, false, "a refused save is not reported as saved");
+    assert.equal(
+      isOnPayroll(loadSalarySetup().staffLinks.find((l) => l.staffId === "z")),
+      false,
+      "and the local copy goes back to what the server has",
+    );
+
+    postStatus = 409;
+    const conflict = await saveSalarySetupConfirmed(prev, next);
+    assert.equal(conflict.ok, false, "changed on another device: not saved");
+    if (!conflict.ok) assert.match(conflict.error, /NOT saved/);
+    console.log("  ok  the switch is audited only after a confirmed save");
+  }
+
+  console.log("payrollNotOnPayroll.selftest.ts — all passed");
+  process.exit(0);
+})().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
