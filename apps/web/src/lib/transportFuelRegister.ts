@@ -452,7 +452,8 @@ function n(v: unknown): number {
  *
  * Fleet Edge re-sends the same 30-minute `details` window — one VIN had 7,563
  * events for 1,871 windows — so each (vehicle, window start) counts ONCE, or
- * the km would be four times the truth. A vehicle is matched by plate or VIN,
+ * the km would be over-counted. The copy kept is the latest received (Fleet
+ * Edge revising its own window). A vehicle is matched by plate or VIN,
  * and a tracker that has ever reported a desk vehicle's plate carries that
  * vehicle for its "NA" windows too (Magic-2 reported "NA" for its first days).
  * A vehicle with no window in the month is absent from the map: no figure,
@@ -480,8 +481,11 @@ export function fleetEdgeMonthByVehicle(input: {
     const hit = deskByKey.get(normalizeVehicleKey(r.registrationNumber)) ?? deskByKey.get(ref);
     if (hit) vehicleOfRef.set(ref, hit);
   }
-  const seen = new Set<string>();
-  const out = new Map<string, { km: number; fuelUsed: number; windows: number }>();
+  // One copy per (tracker, window start): the LATEST received, because a
+  // later push is Fleet Edge revising its own window — the same rule as the
+  // Fleet Edge report (lib/fleetEdgeWindows.ts dedupeFleetEdgeEvents). A row
+  // with no window start stands alone (keyed on its own receipt time).
+  const latest = new Map<string, { row: FleetEdgeDetailsRow; vehicleId: string }>();
   for (const r of input.rows) {
     const ref = normalizeVehicleKey(r.vehicleRef);
     if (!ref || input.ignoreRefs?.has(String(r.vehicleRef ?? ""))) continue;
@@ -490,11 +494,14 @@ export function fleetEdgeMonthByVehicle(input: {
     const at = r.windowFrom || r.receivedAt;
     if (istDayOf(at).slice(0, 7) !== input.month) continue;
     const key = `${ref}|${r.windowFrom || r.receivedAt}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const cur = latest.get(key);
+    if (!cur || r.receivedAt > cur.row.receivedAt) latest.set(key, { row: r, vehicleId });
+  }
+  const out = new Map<string, { km: number; fuelUsed: number; windows: number }>();
+  for (const { row, vehicleId } of latest.values()) {
     const cur = out.get(vehicleId) ?? { km: 0, fuelUsed: 0, windows: 0 };
-    cur.km += n(r.km);
-    cur.fuelUsed += n(r.fuelUsed);
+    cur.km += n(row.km);
+    cur.fuelUsed += n(row.fuelUsed);
     cur.windows += 1;
     out.set(vehicleId, cur);
   }
