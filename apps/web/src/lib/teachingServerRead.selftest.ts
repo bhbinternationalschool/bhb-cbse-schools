@@ -29,6 +29,7 @@ import { AY_CURRENT, buildFixture } from "../../e2e/fixture";
 import {
   emptyTeachingState,
   importSyllabusUnits,
+  istDateOf,
   loadTeaching,
   resolveExpectedPeriods,
   upsertLessonPlan,
@@ -181,7 +182,9 @@ void (async () => {
   await check("save merges into the stored plan (another teacher's log survives)", async () => {
     const other = upsertTeachingLog(seed.state, {
       academicYearCode: AY_CURRENT,
-      date: "2026-10-13",
+      // Today in IST: the log rules refuse a period older than the backdate
+      // window, so a fixed date turned this check red the day it aged out.
+      date: istDateOf(),
       periodNo: 1,
       classId: CLASS,
       sectionId: fx.masters.sections.find((s) => s.classId === CLASS)?.id || "",
