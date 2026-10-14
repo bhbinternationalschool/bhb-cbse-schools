@@ -61,14 +61,16 @@ create index if not exists transport_fuel_fills_voucher_idx
 
 /* ─── Is this ledger account a fuel head? ───────────────────────── */
 
--- Same rule as isFuelAccount (apps/web/src/lib/fuelExpenseLine.ts): by name,
--- because the office renames heads.
+-- Same rule as isFuelAccount (apps/web/src/lib/fuelExpenseLine.ts): 5031,
+-- or a head NAMED for vehicle fuel (the office renames heads). A bare "gas"
+-- does not count — a kitchen gas cylinder is not a vehicle fill.
 create or replace function public.ledger_is_fuel_account(p_code text, p_name text)
 returns boolean
 language sql
 immutable
 as $$
-  select lower(coalesce(p_code, '') || ' ' || coalesce(p_name, '')) ~ '\m(fuel|diesel|petrol|cng|gas)\M';
+  select coalesce(p_code, '') = '5031'
+      or lower(coalesce(p_name, '')) ~ '\m(fuel|diesel|petrol|cng)\M';
 $$;
 
 /* ─── Guard: in the book means fixed ────────────────────────────── */
@@ -225,6 +227,22 @@ begin
       v_amount := v_row.amount_paise;
     else
       v_amount := coalesce((v_fill->>'amount_paise')::bigint, 0);
+      -- The id is the caller's (a browser mints it so a retry lands once).
+      -- If a row already holds it, it must be THIS fill — same vehicle, day,
+      -- quantity, rate and amount — or the voucher would be tied to a row
+      -- whose facts the amount check above never saw.
+      select * into v_row from public.transport_fuel_fills
+       where tenant_id = p_tenant_id and id = v_fill->>'id';
+      if found and (
+           v_row.vehicle_id is distinct from v_fill->>'vehicle_id'
+        or v_row.fill_date is distinct from (v_fill->>'fill_date')::date
+        or v_row.quantity is distinct from (v_fill->>'quantity')::numeric
+        or v_row.rate_paise is distinct from nullif(v_fill->>'rate_paise', '')::bigint
+        or v_row.amount_paise is distinct from v_amount
+        or v_row.voided_at is not null) then
+        return jsonb_build_object('ok', false, 'error',
+          format('entry id %s is already used by a different fill — reload and enter it again', v_fill->>'id'));
+      end if;
     end if;
     if coalesce((v_line->>'debit_paise')::bigint, 0) <> v_amount then
       return jsonb_build_object('ok', false, 'error',
@@ -364,6 +382,19 @@ begin
 end;
 $$;
 
+-- Server-only, like ledger_post (20260823141000): EXECUTE on a new function
+-- goes to PUBLIC by default, and Supabase also grants anon / authenticated
+-- directly — both must be taken away, or the anon key could post money.
+revoke all on function public.ledger_is_fuel_account(text, text) from public;
+revoke all on function public.transport_fuel_fill_post(uuid, jsonb, jsonb, text) from public;
+revoke all on function public.transport_fuel_fill_void(uuid, text, text, text) from public;
+revoke all on function public.transport_fuel_fills_guard() from public;
+revoke all on function public.transport_fuel_fills_on_reversal() from public;
+revoke all on function public.ledger_is_fuel_account(text, text) from anon, authenticated;
+revoke all on function public.transport_fuel_fill_post(uuid, jsonb, jsonb, text) from anon, authenticated;
+revoke all on function public.transport_fuel_fill_void(uuid, text, text, text) from anon, authenticated;
+revoke all on function public.transport_fuel_fills_guard() from anon, authenticated;
+revoke all on function public.transport_fuel_fills_on_reversal() from anon, authenticated;
 grant execute on function public.ledger_is_fuel_account(text, text) to service_role;
 grant execute on function public.transport_fuel_fill_post(uuid, jsonb, jsonb, text) to service_role;
 grant execute on function public.transport_fuel_fill_void(uuid, text, text, text) to service_role;

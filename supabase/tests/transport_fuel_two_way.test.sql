@@ -147,6 +147,54 @@ begin
   assert (select count(*) from public.ledger_vouchers where tenant_id = t) = n, '10: the book moved';
   delete from public.transport_fuel_fills where id = 'fill_z1'; -- not in the book: the driver-app rules apply
 
+  -- 11. Server-only: the anon key cannot post or void money.
+  assert not has_function_privilege('anon', 'public.transport_fuel_fill_post(uuid, jsonb, jsonb, text)', 'execute'), '11: anon can post';
+  assert not has_function_privilege('authenticated', 'public.transport_fuel_fill_post(uuid, jsonb, jsonb, text)', 'execute'), '11: authenticated can post';
+  assert not has_function_privilege('anon', 'public.transport_fuel_fill_void(uuid, text, text, text)', 'execute'), '11: anon can void';
+  assert not has_function_privilege('authenticated', 'public.transport_fuel_fill_void(uuid, text, text, text)', 'execute'), '11: authenticated can void';
+  assert has_function_privilege('service_role', 'public.transport_fuel_fill_post(uuid, jsonb, jsonb, text)', 'execute'), '11: service_role cannot post';
+
+  -- 12. A client-chosen id that already belongs to a different (unposted)
+  --     fill is refused before anything is written — it cannot drag that row
+  --     onto a voucher whose amount was checked against other facts.
+  insert into public.transport_fuel_fills (id, tenant_id, vehicle_id, fill_date, quantity, unit, amount_paise, rate_paise)
+  values ('fill_x1', t, 'veh_b', '2026-09-20', 5, 'kg', 46500, 9300);
+  select count(*) into n from public.ledger_vouchers where tenant_id = t;
+  r := public.transport_fuel_fill_post(t,
+         jsonb_set(jsonb_set(cash_voucher, '{date}', '"2026-09-21"'), '{lines,0,narration}', '"x"'),
+         jsonb_build_array(fill || '{"id":"fill_x1","fill_date":"2026-09-21"}'), 'probe');
+  assert not (r->>'ok')::boolean and r->>'error' like '%already used by a different fill%', format('12: %s', r);
+  assert (select count(*) from public.ledger_vouchers where tenant_id = t) = n, '12: a voucher was written';
+  assert (select voucher_id is null from public.transport_fuel_fills where id = 'fill_x1'), '12: the other row was tied';
+
+  -- 13. Double submit of a multi-fill voucher: the same ids land once.
+  r := public.transport_fuel_fill_post(t,
+         jsonb_build_object('voucher_type', 'payment', 'date', '2026-09-25', 'lines', jsonb_build_array(
+           jsonb_build_object('account_code', '5031', 'debit_paise', 70029, 'credit_paise', 0),
+           jsonb_build_object('account_code', '5031', 'debit_paise', 46500, 'credit_paise', 0),
+           jsonb_build_object('account_code', '1000', 'debit_paise', 0, 'credit_paise', 116529))),
+         jsonb_build_array(
+           fill || '{"id":"fill_d1","fill_date":"2026-09-25"}',
+           jsonb_build_object('id', 'fill_d2', 'line_no', 2, 'vehicle_id', 'veh_b', 'fill_date', '2026-09-25',
+             'quantity', 5, 'unit', 'kg', 'fuel_type', 'cng', 'rate_paise', 9300, 'amount_paise', 46500)), 'office');
+  assert (r->>'ok')::boolean, format('13: %s', r);
+  v_id := (r->>'voucher_id')::uuid;
+  r := public.transport_fuel_fill_post(t,
+         jsonb_build_object('voucher_type', 'payment', 'date', '2026-09-25', 'lines', jsonb_build_array(
+           jsonb_build_object('account_code', '5031', 'debit_paise', 70029, 'credit_paise', 0),
+           jsonb_build_object('account_code', '5031', 'debit_paise', 46500, 'credit_paise', 0),
+           jsonb_build_object('account_code', '1000', 'debit_paise', 0, 'credit_paise', 116529))),
+         jsonb_build_array(
+           fill || '{"id":"fill_d1","fill_date":"2026-09-25"}',
+           jsonb_build_object('id', 'fill_d2', 'line_no', 2, 'vehicle_id', 'veh_b', 'fill_date', '2026-09-25',
+             'quantity', 5, 'unit', 'kg', 'fuel_type', 'cng', 'rate_paise', 9300, 'amount_paise', 46500)), 'office');
+  assert (r->>'ok')::boolean and (r->>'created')::boolean = false and (r->>'voucher_id')::uuid = v_id, format('13: replay %s', r);
+  assert (select count(*) from public.ledger_vouchers where tenant_id = t and source_type = 'transport_fuel_fills') = 1, '13: posted twice';
+
+  -- 14. A bare "gas" head is not fuel; 5031 is, whatever it is called.
+  assert not public.ledger_is_fuel_account('5040', 'Gas cylinder (kitchen)'), '14: kitchen gas counted as fuel';
+  assert public.ledger_is_fuel_account('5031', 'Transport running'), '14: 5031 not fuel';
+
   raise notice 'transport_fuel_two_way: all checks passed';
 end;
 $test$;

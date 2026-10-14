@@ -11,7 +11,7 @@
  * and the register carry the same figure.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check } from "lucide-react";
 import { SearchPick } from "@/components/ui/SearchPick";
 import { fuelAmountPaise } from "@/lib/fuelExpenseLine";
@@ -127,8 +127,12 @@ export function FuelEntryForm({
     [ctx, vehicleId],
   );
 
+  /** Set synchronously, so a double click cannot send twice before React re-renders. */
+  const savingRef = useRef(false);
+
   async function save() {
-    if (problems.length || busy) return;
+    if (problems.length || busy || savingRef.current) return;
+    savingRef.current = true;
     setBusy(true);
     setNotice(null);
     try {
@@ -165,6 +169,7 @@ export function FuelEntryForm({
     } catch (e) {
       setNotice({ tone: "bad", text: e instanceof Error ? e.message : "The fill was not saved" });
     } finally {
+      savingRef.current = false;
       setBusy(false);
     }
   }

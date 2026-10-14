@@ -900,7 +900,7 @@ export function FuelRegisterPanel() {
         </div>
       ) : null}
 
-      {view && writable && view.fleetWide ? <FuelReconcileCard canApprove={view.canReverse} onDone={done} /> : null}
+      {view && writable && view.fleetWide && view.canViewVouchers ? <FuelReconcileCard canApprove={view.canReverse} onDone={done} /> : null}
 
       {posting && view ? (
         <PostForm
@@ -1104,7 +1104,7 @@ export function FuelRegisterPanel() {
 type ReconcileView = {
   matched: { refill: { id: string; vehicleId: string; fillDate: string; qty: number; amountPaise: number }; line: { voucherNo: string; debitPaise: number } }[];
   refillOnly: { id: string; vehicleId: string; fillDate: string; qty: number; amountPaise: number; imported: boolean }[];
-  lineOnly: { lineId: string; voucherNo: string; voucherDate: string; debitPaise: number; narration: string }[];
+  lineOnly: { lineId: string; voucherNo: string; voucherDate: string; debitPaise: number; narration: string; tieTo: string[]; refusal: string }[];
   importedNotInAccounts: Fill[];
   deskEntries: number;
   liveLines: number;
@@ -1188,28 +1188,51 @@ function FuelReconcileCard({ canApprove, onDone }: { canApprove: boolean; onDone
             <b>Fuel in the book with no fill — {report.lineOnly.length}</b>
           </p>
           {report.lineOnly.length ? (
-            <ul className="max-h-40 overflow-y-auto">
+            <ul className="max-h-56 space-y-1 overflow-y-auto">
               {report.lineOnly.map((l) => (
                 <li key={l.lineId} className="tabular-nums">
-                  {dateLabel(l.voucherDate)} · {l.voucherNo} · {inrPaise(l.debitPaise)} · {l.narration}
+                  <div>
+                    {dateLabel(l.voucherDate)} · {l.voucherNo} · {inrPaise(l.debitPaise)} · {l.narration}
+                  </div>
+                  {l.tieTo.length ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[var(--muted)]">Already in the register as {l.tieTo.join(", ")} — tie it, never a second fill.</span>
+                      {canApprove && l.tieTo.length === 1 ? (
+                        <button
+                          type="button"
+                          className={regBtnOutline}
+                          disabled={!!busy}
+                          onClick={() => void run(`Tie ${l.tieTo[0]} to ${l.voucherNo}`, { action: "reconcile-tie", fillId: l.tieTo[0], lineId: l.lineId }, 1)}
+                        >
+                          Tie
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : l.refusal ? (
+                    <div className="text-[var(--warning)]">{l.refusal}</div>
+                  ) : null}
                 </li>
               ))}
             </ul>
           ) : null}
-          {report.lineOnly.length && canApprove ? (
-            <button
-              type="button"
-              className={regBtnOutline}
-              disabled={!!busy}
-              onClick={() =>
-                void run("Create fills from vouchers", { action: "reconcile-create", lineIds: report.lineOnly.map((l) => l.lineId) }, report.lineOnly.length)
-              }
-            >
-              Create these {report.lineOnly.length} fill(s) from their vouchers
-            </button>
-          ) : report.lineOnly.length ? (
-            <p className="text-[var(--muted)]">Creating fills from vouchers needs Accounts approval.</p>
-          ) : null}
+          {(() => {
+            const creatable = report.lineOnly.filter((l) => !l.tieTo.length && !l.refusal);
+            if (!creatable.length) return null;
+            return canApprove ? (
+              <button
+                type="button"
+                className={regBtnOutline}
+                disabled={!!busy}
+                onClick={() =>
+                  void run("Create fills from vouchers", { action: "reconcile-create", lineIds: creatable.map((l) => l.lineId) }, creatable.length)
+                }
+              >
+                Create {creatable.length} fill(s) from their vouchers
+              </button>
+            ) : (
+              <p className="text-[var(--muted)]">Creating fills from vouchers needs Accounts approval.</p>
+            );
+          })()}
         </div>
       )}
     </div>

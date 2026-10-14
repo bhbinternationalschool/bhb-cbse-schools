@@ -9,10 +9,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fuelAmountPaise } from "@/lib/fuelExpenseLine";
+import { fuelAmountPaise, isFuelAccount } from "@/lib/fuelExpenseLine";
 import { buildFuelVoucher, fuelLineNarration } from "@/lib/transportFuelRegister";
 import {
   amountMatchesRate,
+  createFromLineRefusal,
   filterFuelRows,
   fuelDatePresets,
   fuelTotals,
@@ -24,7 +25,10 @@ import {
   qtyText,
   ratePaiseOf,
   singleMonthOf,
+  stableFillIds,
+  tieCandidatesFor,
   type FuelTableRow,
+  type UnlinkedFill,
   type ReconcileLine,
 } from "@/lib/fuelLog";
 
@@ -219,7 +223,51 @@ const row = (o: Partial<FuelTableRow>): FuelTableRow => ({
   assert.equal(twin.refillOnly.length, 1);
 }
 
-/* ── 4. The wiring ── */
+/* ── 4. Double submit: the same rows send the same fill ids ── */
+{
+  let n = 0;
+  const mint = () => `fuela_${++n}`;
+  const held = new Map<string, string>();
+  const first = new Map(stableFillIds(held, ["r1", "r2"], mint));
+  const retry = stableFillIds(held, ["r1", "r2"], mint);
+  assert.deepEqual([...retry], [...first], "a retry / second click re-sends the same ids (same voucher source)");
+  assert.equal(stableFillIds(held, ["r1", "r2", "r3"], mint).get("r3"), "fuela_3", "a new row gets its own id");
+  assert.equal(retry.get("r1"), "fuela_1", "an existing row keeps its id");
+  const afterConfirm = stableFillIds(new Map(), ["r1"], mint);
+  assert.notEqual(afterConfirm.get("r1"), "fuela_1", "only a confirmed post clears them");
+}
+
+/* ── 5. A live line with no fill: tie the fill that exists; never a copy; never a wrong one ── */
+{
+  const vehicles = [
+    { id: "veh_a", registrationNo: "UP65RT9825" },
+    { id: "veh_b", registrationNo: "UP65PT3540" },
+  ];
+  const fill = (o: Partial<UnlinkedFill>): UnlinkedFill => ({
+    id: "dk_1", vehicleId: "veh_a", fillDate: "2026-08-31", quantity: 7.53, amountPaise: 70029, voided: false, linked: false, ...o,
+  });
+  const line = { voucherNo: "PY/715", voucherDate: "2026-08-31", debitPaise: 70029, narration: "cng 7.53 kg @ ₹93.00/kg — UP65RT9825" };
+  // An imported-but-unlinked fill (or one saved "not in the book") IS this line.
+  assert.deepEqual(tieCandidatesFor(line, [fill({})], vehicles).map((f) => f.id), ["dk_1"]);
+  assert.match(createFromLineRefusal(line, [fill({})], vehicles), /tie it instead/, "no second fill beside the first");
+  assert.deepEqual(tieCandidatesFor(line, [fill({ linked: true }), fill({ voided: true }), fill({ vehicleId: "veh_b" }), fill({ fillDate: "2026-09-01" })], vehicles), []);
+  assert.equal(createFromLineRefusal(line, [], vehicles), "", "nothing like it in the register: it may be created");
+  // Production's swapped entry is refused, with the arithmetic shown.
+  const swapped = { voucherNo: "PY/FY2026-27/00619", voucherDate: "2026-05-13", debitPaise: 70048, narration: "cng 87.67 kg @ ₹7.99/kg — UP65PT3540" };
+  assert.match(createFromLineRefusal(swapped, [], vehicles), /cannot be a fuel rate.*void it in Accounts and enter it again/);
+  // rate × qty that is not the line's amount is refused too.
+  const off = { ...line, debitPaise: 70000 };
+  assert.match(createFromLineRefusal(off, [], vehicles), /is ₹700\.29, but the line is ₹700\.00/);
+  assert.match(createFromLineRefusal({ ...line, narration: "CNG-Magic 2026" }, [], vehicles), /does not state/);
+  assert.match(createFromLineRefusal({ ...line, narration: "cng 7.53 kg @ ₹93.00/kg — RAJESH VAN" }, [], vehicles), /not a fleet vehicle/);
+
+  // A fuel head is 5031 or a head named for vehicle fuel — not a bare "gas".
+  assert.equal(isFuelAccount({ code: "5031", name: "Transport running" }), true);
+  assert.equal(isFuelAccount({ code: "5040", name: "Gas cylinder (kitchen)" }), false);
+  assert.equal(isFuelAccount({ code: "5099", name: "CNG for vans" }), true);
+}
+
+/* ── 6. The wiring ── */
 {
   const root = join(__dirname, "..");
   const sql = readFileSync(join(root, "../../../supabase/migrations/20261014150000_transport_fuel_two_way.sql"), "utf8");
@@ -243,6 +291,15 @@ const row = (o: Partial<FuelTableRow>): FuelTableRow => ({
   const ledger = readFileSync(join(root, "app/api/ledger/route.ts"), "utf8");
   assert.match(ledger, /refuseFuelVoucherChange/, "amend / re-head of a fuel voucher is refused");
   assert.match(ledger, /is a fuel head — enter fuel with its vehicle/, "a bare fuel-head post is refused");
+  assert.match(ledger, /case "mirror": \{[\s\S]{0,300}refuseBareFuel/, "the desk mirror cannot book bare fuel either");
+  assert.match(ledger, /refuseBareFuel\(\[\{ accountCode: String\(body\.toCode/, "no re-head onto a fuel head");
+  assert.match(panels, /postingRef\.current/, "multi-line refuses a second click while posting");
+  assert.match(panels, /stableFillIds\(/, "multi-line fill ids are held until a confirmed post");
+
+  const route = readFileSync(join(root, "app/api/v1/transport/fuel/route.ts"), "utf8");
+  assert.match(route, /case "reconcile-report": \{[\s\S]{0,500}canViewAccounts\(ctx\)/, "the reconcile shows the book only to Accounts readers");
+  assert.match(sql, /revoke all on function public\.transport_fuel_fill_post\(uuid, jsonb, jsonb, text\) from anon, authenticated/, "server-only");
+  assert.match(sql, /entry id %s is already used by a different fill/, "a client id cannot tie a different row");
 }
 
 console.log("fuelLog.selftest.ts: all passed");

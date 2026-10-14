@@ -16,10 +16,16 @@
  * House rules: amounts entered in rupees, stored in paise; a bank line must
  * say WHICH bank (the reconciliation depends on it); reversals carry a
  * reason.
+ *
+ * Fuel (14 Oct 2026): a debit to a fuel head (5031 Vehicle Fuel) is refused
+ * by /api/ledger from the Voucher entry grid and from Cheques — fuel goes in
+ * through Quick or Multi-line expense (or Transport → Fuel), which carry the
+ * vehicle, quantity and rate and write the Transport fill in the same
+ * transaction. A fuel voucher is voided, never amended or re-headed.
  */
 
 import { VoucherPayLink } from "@/components/payments/VoucherPayLink";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SearchPick } from "@/components/ui/SearchPick";
 import { groupAccountsForPicker } from "@/lib/pickerSearch";
 import { UpiPayButton } from "@/components/payments/UpiPayButton";
@@ -49,6 +55,7 @@ import {
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { LastEntryStrip } from "@/components/accounts/LastEntryStrip";
+import { stableFillIds } from "@/lib/fuelLog";
 import {
   FuelEntryForm,
   useFuelFormContext,
@@ -2403,8 +2410,17 @@ export function MultiLineExpensePanel({
     (totals.paidPaise === 0 || !needsBank || (!!bankId && ref.trim() !== "")) &&
     fuelIssues.problems.length === 0;
 
+  /**
+   * Fill ids, one per fuel row, kept until the post is confirmed — a retry or
+   * a double click re-sends the same ids and lands on the same voucher.
+   */
+  const fuelIdsRef = useRef(new Map<string, string>());
+  /** Set synchronously: a second click in the same tick sees it before React re-renders. */
+  const postingRef = useRef(false);
+
   async function post() {
-    if (!canPost || busy) return;
+    if (!canPost || busy || postingRef.current) return;
+    postingRef.current = true;
     setBusy(true);
     setNotice(null);
     try {
@@ -2439,13 +2455,19 @@ export function MultiLineExpensePanel({
         if (l.amountPaise > 0) lineOfRow.set(l.id, ++lineNo);
         if (l.taxPaise > 0) lineNo += 1;
       }
+      const fuelRowIds = rows.filter((r) => isFuelRow(r) && lineOfRow.has(r.id)).map((r) => r.id);
+      const heldIds = stableFillIds(
+        fuelIdsRef.current,
+        fuelRowIds,
+        () => `fuela_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
+      );
       const fuelFills = rows
         .filter((r) => isFuelRow(r) && lineOfRow.has(r.id))
         .map((r) => {
           const allocated = totals.lines.find((l) => l.id === r.id);
           const odo = Number(r.odometer);
           return {
-            id: `fuela_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
+            id: heldIds.get(r.id)!,
             lineNo: lineOfRow.get(r.id)!,
             vehicleId: r.vehicleId,
             fillDate: date,
@@ -2484,6 +2506,8 @@ export function MultiLineExpensePanel({
               : " · paid in full") +
             (fuelFills.length ? ` · ${fuelFills.length} fill(s) in Transport → Fuel, tied to this voucher` : ""),
         });
+        // Confirmed: only now do the next rows get fresh fill ids.
+        fuelIdsRef.current = new Map();
         setRows([blankRow()]);
         setNote("");
         setRef("");
@@ -2493,6 +2517,7 @@ export function MultiLineExpensePanel({
         setNotice({ tone: "bad", text: res.error || "The book refused this voucher" });
       }
     } finally {
+      postingRef.current = false;
       setBusy(false);
     }
   }

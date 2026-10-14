@@ -32,8 +32,11 @@ import {
   unitForFuel,
 } from "@/lib/transportFuelRegister";
 import {
+  createFromLineRefusal,
   parseFuelNarration,
   planFuelReconcile,
+  tieCandidatesFor,
+  type UnlinkedFill,
   type FuelReconcilePlan,
   type ReconcileLine,
 } from "@/lib/fuelLog";
@@ -846,7 +849,9 @@ export async function lastOdometerByVehicle(): Promise<Record<string, number>> {
 
 /* ─── reconcile: old desk refills ↔ the book ───────────────── */
 
-export type FuelReconcileReport = FuelReconcilePlan & {
+export type FuelReconcileReport = Omit<FuelReconcilePlan, "lineOnly"> & {
+  /** Live fuel lines with no fill — each with the fill it should be tied to, or why it cannot be created. */
+  lineOnly: (ReconcileLine & { tieTo: string[]; refusal: string })[];
   deskEntries: number;
   liveLines: number;
   liveLinePaise: number;
@@ -898,8 +903,17 @@ export async function fuelReconcileReport(input: {
     vehicles: input.vehicles,
   });
   const live = book.lines.filter((l) => !l.reversed);
+  const unlinked = unlinkedFills(fills.fills);
   return {
     ...plan,
+    lineOnly: plan.lineOnly.map((l) => {
+      const near = tieCandidatesFor(l, unlinked, input.vehicles);
+      return {
+        ...l,
+        tieTo: near.map((f) => f.id),
+        refusal: near.length ? "" : createFromLineRefusal(l, unlinked, input.vehicles),
+      };
+    }),
     deskEntries: input.deskLogs.length,
     liveLines: live.length,
     liveLinePaise: live.reduce((n, l) => n + l.debitPaise, 0),
@@ -920,15 +934,29 @@ export async function createFillsFromVoucherLines(input: {
   vehicles: { id: string; registrationNo: string; name: string }[];
   actor: string;
 }): Promise<{ done: number; failed: { key: string; error: string }[] }> {
-  const book = await readFuelVoucherLines();
+  const [book, reg] = await Promise.all([readFuelVoucherLines(), readRegisterFills({})]);
   if (!book.ok) throw new ApiError("server_error", `Could not read the Vehicle Fuel vouchers: ${book.error}`, 503);
+  if (!reg.ok) throw new ApiError("server_error", `Could not read the register: ${reg.error}`, 503);
   const { sb, tenantId } = await tenant();
   const failed: { key: string; error: string }[] = [];
   let done = 0;
+  const unlinked = unlinkedFills(reg.fills);
+  const tiedLines = new Set(reg.fills.filter((f) => f.voucherId && !f.voided).map((f) => f.voucherId!));
   for (const lineId of input.lineIds) {
     const l = book.lines.find((x) => x.lineId === lineId);
     if (!l || l.reversed) {
       failed.push({ key: lineId, error: "not a live Vehicle Fuel line" });
+      continue;
+    }
+    if (tiedLines.has(l.voucherId)) {
+      failed.push({ key: lineId, error: `${l.voucherNo} already carries a fill` });
+      continue;
+    }
+    // Never a second fill for fuel the register already holds, never a fill
+    // copied from a line whose rate × quantity is not its amount.
+    const refusal = createFromLineRefusal(l, unlinked, input.vehicles);
+    if (refusal) {
+      failed.push({ key: lineId, error: refusal });
       continue;
     }
     const p = parseFuelNarration(l.narration);
@@ -939,7 +967,6 @@ export async function createFillsFromVoucherLines(input: {
       continue;
     }
     const fuelType = p.fuelType === "cng" || p.fuelType === "petrol" || p.fuelType === "diesel" ? p.fuelType : "";
-    const rateOk = fuelAmountPaise(p.ratePaise, p.qty) === l.debitPaise;
     const { error } = await sb.from("transport_fuel_fills").insert({
       id: `vl_${lineId.replace(/-/g, "").slice(0, 24)}`,
       tenant_id: tenantId,
@@ -948,7 +975,7 @@ export async function createFillsFromVoucherLines(input: {
       quantity: p.qty,
       unit: unitForFuel(fuelType),
       fuel_type: fuelType,
-      rate_paise: rateOk ? p.ratePaise : null,
+      rate_paise: p.ratePaise,
       amount_paise: l.debitPaise,
       payment_mode: "",
       entry_source: "accounts",
@@ -964,4 +991,58 @@ export async function createFillsFromVoucherLines(input: {
     else done += 1;
   }
   return { done, failed };
+}
+
+function unlinkedFills(fills: RegisterFill[]): UnlinkedFill[] {
+  return fills.map((f) => ({
+    id: f.id,
+    vehicleId: f.vehicleId,
+    fillDate: f.fillDate,
+    quantity: f.quantity,
+    amountPaise: f.amountPaise,
+    voided: f.voided,
+    linked: !!f.voucherId,
+  }));
+}
+
+/**
+ * Tie a fill already in the register (imported from the old tab, or saved
+ * "not in the book yet") to the live Vehicle Fuel line that holds its money.
+ * Only a plausible pair (same vehicle, day, and amount) and only to the
+ * paisa: a fill whose amount differs from the line is refused — one of them
+ * is wrong, and the office voids it and enters it again.
+ */
+export async function tieFillToVoucherLine(input: {
+  fillId: string;
+  lineId: string;
+  vehicles: { id: string; registrationNo: string }[];
+}): Promise<{ ok: true; voucherNo: string } | { ok: false; error: string }> {
+  const [book, fill] = await Promise.all([readFuelVoucherLines(), readRegisterFill(input.fillId)]);
+  if (!book.ok) return { ok: false, error: book.error };
+  if (!fill) return { ok: false, error: "Fuel entry not found" };
+  const l = book.lines.find((x) => x.lineId === input.lineId);
+  if (!l || l.reversed) return { ok: false, error: "Not a live Vehicle Fuel line" };
+  const [cand] = tieCandidatesFor(l, unlinkedFills([fill]), input.vehicles);
+  if (!cand) return { ok: false, error: `${fill.id} is not this line's fill (vehicle, day and amount or quantity must match)` };
+  if (fill.amountPaise !== l.debitPaise) {
+    return { ok: false, error: `${fill.id} is ${fill.amountPaise / 100} but ${l.voucherNo} is ${l.debitPaise / 100} — void the wrong one and enter it again` };
+  }
+  const { sb, tenantId } = await tenant();
+  const { data, error } = await sb
+    .from("transport_fuel_fills")
+    .update({
+      voucher_id: l.voucherId,
+      voucher_no: l.voucherNo,
+      voucher_line_id: l.lineId,
+      voucher_origin: "adopted",
+      posted_by_name: "Keyed in Accounts",
+    })
+    .eq("tenant_id", tenantId)
+    .eq("id", fill.id)
+    .is("voucher_id", null)
+    .is("voided_at", null)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!(data ?? []).length) return { ok: false, error: "That fill is already in the book or voided — reload" };
+  return { ok: true, voucherNo: l.voucherNo };
 }

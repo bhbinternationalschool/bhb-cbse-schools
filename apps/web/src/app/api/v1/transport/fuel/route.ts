@@ -30,6 +30,7 @@ import {
   amendFillDetails,
   fuelBankChoices,
   createFillsFromVoucherLines,
+  tieFillToVoucherLine,
   fuelReconcileReport,
   importDeskFuelLogs,
   lastOdometerByVehicle,
@@ -66,6 +67,11 @@ function canPostAccounts(ctx: ApiAuthContext): boolean {
 /** Reversing a posted voucher is a decision about the book — accounts.approve, as on /api/ledger. */
 function canReverseAccounts(ctx: ApiAuthContext): boolean {
   return hasPermission(ctx.session, ctx.masters, "accounts", "approve", ctx.rbac);
+}
+
+/** Reading the book's vouchers — Accounts view, or the expense-entry right. */
+function canViewAccounts(ctx: ApiAuthContext): boolean {
+  return hasPermission(ctx.session, ctx.masters, "accounts", "view", ctx.rbac) || canPostAccounts(ctx);
 }
 
 function assertTransportEdit(ctx: ApiAuthContext) {
@@ -226,7 +232,7 @@ export async function GET(request: Request) {
       to: listTo,
       today,
       fleetWide: access.fleetWide,
-      canViewVouchers: hasPermission(ctx.session, ctx.masters, "accounts", "view", ctx.rbac) || canPostAccounts(ctx),
+      canViewVouchers: canViewAccounts(ctx),
       canEdit: canEditTransport(ctx),
       canPost: canPostAccounts(ctx),
       canReverse: canReverseAccounts(ctx),
@@ -508,7 +514,10 @@ export async function POST(request: Request) {
 
       case "reconcile-report": {
         // Read-only: what the import would tie, what has no live voucher,
-        // and which live fuel lines have no fill. Writes nothing.
+        // and which live fuel lines have no fill. Writes nothing — but it
+        // shows voucher numbers and the book's fuel money, so it needs the
+        // Accounts read right as well as Transport.
+        if (!canViewAccounts(ctx)) throw new ApiError("forbidden", "The fuel reconcile shows the book — it needs Accounts (view)", 403);
         const report = await fuelReconcileReport({
           deskLogs: (transport.fuelRefillLogs ?? []).map((l) => ({
             id: l.id,
@@ -540,6 +549,19 @@ export async function POST(request: Request) {
         });
         const auditWarn = await audit(request, ctx, "fuel_reconcile_create", "fuel_reconcile", `Fuel reconcile: ${out.done} fill(s) created from vouchers already in the book (${out.failed.length} refused)`, out);
         return apiOk({ ...out, notice: auditWarn });
+      }
+
+      case "reconcile-tie": {
+        // A fill already in the register belongs to a live fuel line: tie it.
+        if (!canReverseAccounts(ctx)) throw new ApiError("forbidden", "Tying fills to vouchers needs accounts.approve", 403);
+        const out = await tieFillToVoucherLine({
+          fillId: idOf(body.fillId),
+          lineId: String(body.lineId ?? ""),
+          vehicles: transport.vehicles.map((v) => ({ id: v.id, registrationNo: v.registrationNo })),
+        });
+        if (!out.ok) throw new ApiError("conflict", out.error, 409);
+        const auditWarn = await audit(request, ctx, "fuel_reconcile_tie", String(body.fillId), `Fuel reconcile: fill tied to ${out.voucherNo}`, out);
+        return apiOk({ done: 1, failed: [], notice: auditWarn });
       }
 
       case "reconcile-void": {

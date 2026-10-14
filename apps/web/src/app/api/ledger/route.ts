@@ -265,6 +265,28 @@ async function refuseFuelVoucherChange(voucherId: string): Promise<NextResponse 
   );
 }
 
+/**
+ * Fuel without its fill is the drift this closes: money debited to a fuel
+ * head with no vehicle, quantity or rate behind it, which Transport → Fuel
+ * never sees. Every fuel entry form sends the fill (post + fuelFills, or
+ * /api/v1/transport/fuel); everything else that debits a fuel head — the
+ * full Voucher entry screen, Cheques, the desk mirror, a re-head onto fuel —
+ * is refused here with the way in.
+ */
+async function refuseBareFuel(lines: { accountCode: string; debitPaise?: number }[]): Promise<NextResponse | null> {
+  const chart = await ledgerListAccounts();
+  const fuelCodes = new Set(chart.filter((a) => isFuelAccount(a)).map((a) => a.code));
+  const fuelLine = lines.find((l) => fuelCodes.has(l.accountCode) && (l.debitPaise ?? 0) > 0);
+  if (!fuelLine) return null;
+  return NextResponse.json(
+    {
+      ok: false,
+      error: `${fuelLine.accountCode} is a fuel head — enter fuel with its vehicle, quantity and rate (Accounts → Quick or Multi-line expense, or Transport → Fuel) so the fuel register and the book carry the same fill.`,
+    },
+    { status: 422 },
+  );
+}
+
 export async function POST(req: Request) {
   let body: PostBody;
   try {
@@ -419,26 +441,16 @@ export async function POST(req: Request) {
         });
         return NextResponse.json(res, { status: res.ok ? 200 : 422 });
       }
-      // Fuel without its fill is the drift this closes: money on a fuel head
-      // with no vehicle, quantity or rate behind it, that Transport → Fuel
-      // never sees. Every entry form sends the fill; a hand-built voucher on
-      // a fuel head is refused with the way in.
-      const chart = await ledgerListAccounts();
-      const fuelCodes = new Set(chart.filter((a) => isFuelAccount(a)).map((a) => a.code));
-      const fuelLine = (body.voucher?.lines ?? []).find((l) => fuelCodes.has(l.accountCode) && (l.debitPaise ?? 0) > 0);
-      if (fuelLine) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error: `${fuelLine.accountCode} is a fuel head — enter fuel with its vehicle, quantity and rate (Accounts → Quick or Multi-line expense, or Transport → Fuel) so the fuel register and the book carry the same fill.`,
-          },
-          { status: 422 },
-        );
-      }
+      const bare = await refuseBareFuel(body.voucher?.lines ?? []);
+      if (bare) return bare;
       const res = await ledgerPost({ ...body.voucher, createdBy: body.voucher.createdBy || actor });
       return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }
     case "mirror": {
+      // The desk mirror is a way into the book too: fuel through it would
+      // be money on 5031 that Transport → Fuel never sees.
+      const bare = await refuseBareFuel(body.voucher?.lines ?? []);
+      if (bare) return bare;
       const res = await ledgerPost({ ...body.voucher, createdBy: body.voucher.createdBy || actor });
       return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }
@@ -629,6 +641,9 @@ export async function POST(req: Request) {
       // both stay on the record.
       const fuelRefusal = await refuseFuelVoucherChange(String(body.voucherId ?? ""));
       if (fuelRefusal) return fuelRefusal;
+      // Moving money ONTO a fuel head would put fuel in the book with no fill.
+      const ontoFuel = await refuseBareFuel([{ accountCode: String(body.toCode ?? ""), debitPaise: 1 }]);
+      if (ontoFuel) return ontoFuel;
       const res = await ledgerReclassifyHead({
         voucherId: String(body.voucherId ?? ""),
         lineIndex: Number(body.lineIndex ?? -1),

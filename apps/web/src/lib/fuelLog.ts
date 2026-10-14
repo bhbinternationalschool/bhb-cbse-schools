@@ -333,3 +333,88 @@ export function planFuelReconcile(input: {
   const lineOnly = input.lines.filter((l) => !l.reversed && !taken.has(l.lineId));
   return { matched, refillOnly, lineOnly };
 }
+
+/* ─── stable entry ids (retry / double-click safety) ───────── */
+
+/**
+ * The fill id for each form row, minted ONCE and kept until the post is
+ * confirmed. A retry after a timeout, or a second click, sends the same ids,
+ * so the voucher's source (the fill ids) is the same and ledger_post lands
+ * on the voucher it already wrote instead of booking the fuel twice. The
+ * caller clears the map only after a confirmed post.
+ */
+export function stableFillIds(
+  held: Map<string, string>,
+  rowIds: string[],
+  mint: () => string,
+): Map<string, string> {
+  for (const id of rowIds) if (!held.has(id)) held.set(id, mint());
+  return held;
+}
+
+/* ─── a live fuel line with no fill: tie, or create, or refuse ─ */
+
+/** A register fill not yet in the book — what a line might belong to. */
+export type UnlinkedFill = {
+  id: string;
+  vehicleId: string;
+  fillDate: string;
+  quantity: number;
+  amountPaise: number;
+  voided: boolean;
+  linked: boolean;
+};
+
+/**
+ * The fills already in the register that a live fuel line most likely IS:
+ * same vehicle (the plate in the narration), same day, and the same amount
+ * or the same quantity. A fill imported from the old tab, or saved "not in
+ * the book yet", must be tied to the line — never shadowed by a second fill.
+ */
+export function tieCandidatesFor(
+  line: Pick<ReconcileLine, "voucherDate" | "debitPaise" | "narration">,
+  fills: UnlinkedFill[],
+  vehicles: { id: string; registrationNo: string }[],
+): UnlinkedFill[] {
+  const p = parseFuelNarration(line.narration);
+  const plates = new Map(vehicles.map((v) => [v.id, normalizeVehicleKey(v.registrationNo)]));
+  const nar = line.narration.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return fills.filter((f) => {
+    if (f.voided || f.linked || f.fillDate !== line.voucherDate) return false;
+    const key = plates.get(f.vehicleId) ?? "";
+    if (!key || !nar.includes(key)) return false;
+    return f.amountPaise === line.debitPaise || (p != null && Math.abs(p.qty - f.quantity) <= 0.005);
+  });
+}
+
+/**
+ * Why a fill must NOT be created from this line ("" = it may be).
+ *
+ * Refused when the narration names no fleet vehicle or no rate and quantity;
+ * when rate × quantity does not give the line's amount (on prod PY/FY2026-27/
+ * 00619 reads 87.67 kg @ ₹7.99 — rate and quantity swapped: that one is voided
+ * and entered again, never copied into the register as if it were true); and
+ * when a fill that is plausibly this one already exists (tie that instead).
+ */
+export function createFromLineRefusal(
+  line: Pick<ReconcileLine, "voucherNo" | "voucherDate" | "debitPaise" | "narration">,
+  fills: UnlinkedFill[],
+  vehicles: { id: string; registrationNo: string }[],
+): string {
+  const p = parseFuelNarration(line.narration);
+  if (!p) return `${line.voucherNo}: the narration does not state fuel, quantity and rate`;
+  const key = normalizeVehicleKey(p.plate);
+  if (!key || !vehicles.some((v) => normalizeVehicleKey(v.registrationNo) === key)) {
+    return `${line.voucherNo}: "${p.plate}" is not a fleet vehicle`;
+  }
+  const want = fuelAmountPaise(p.ratePaise, p.qty);
+  if (want !== line.debitPaise) {
+    return `${line.voucherNo}: ${p.qty} ${p.unit} @ ${inrPaise(p.ratePaise)} is ${inrPaise(want)}, but the line is ${inrPaise(line.debitPaise)} — void it in Accounts and enter it again`;
+  }
+  if (p.ratePaise < 3000 || p.ratePaise > 25000) {
+    return `${line.voucherNo}: ${inrPaise(p.ratePaise)}/${p.unit} cannot be a fuel rate (quantity and rate swapped?) — void it in Accounts and enter it again`;
+  }
+  const near = tieCandidatesFor(line, fills, vehicles);
+  if (near.length) return `${line.voucherNo}: fill ${near[0]!.id} is already in the register for this — tie it instead`;
+  return "";
+}
