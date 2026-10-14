@@ -4,11 +4,12 @@ import { useState, type ComponentProps } from "react";
 import { BoardingPointAuditPanel } from "@/components/transport/BoardingPointAuditPanel";
 import { PinRequestPanel } from "@/components/transport/PinRequestPanel";
 import { TransportGapsPanel } from "@/components/transport/TransportGapsPanel";
+import { TransportRunOrdersPanel } from "@/components/transport/TransportRunOrdersPanel";
 import { PinsReceivedPanel } from "@/components/transport/PinsReceivedPanel";
 import { TransportPlannerPanel } from "@/components/transport/TransportPlannerPanel";
 import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 
-type PlannerStep = "gaps" | "ask" | "review" | "audit" | "plan";
+type PlannerStep = "gaps" | "runs" | "ask" | "review" | "audit" | "plan";
 
 /**
  * Asking comes first because every later step can only be as good as where a
@@ -22,6 +23,11 @@ const PLANNER_STEPS: StepDef<PlannerStep>[] = [
     id: "gaps",
     title: "Gaps to settle",
     what: "Where the records and the buses' GPS disagree — fee gaps shown side by side, nothing changed until the office decides.",
+  },
+  {
+    id: "runs",
+    title: "Stop order & ride times",
+    what: "Each run's stops in the order the bus really reaches them, and first-picked-first-dropped suggestions for drop runs.",
   },
   {
     id: "ask",
@@ -69,6 +75,9 @@ export function TransportPlannerSteps({
     >
       <div className={step === "gaps" ? "" : "hidden"}>
         <TransportGapsPanel canEdit={canEdit} />
+      </div>
+      <div className={step === "runs" ? "" : "hidden"}>
+        <TransportRunOrdersPanel canEdit={canEdit} />
       </div>
       <div className={step === "ask" ? "" : "hidden"}>
         <PinRequestPanel canEdit={canEdit} />

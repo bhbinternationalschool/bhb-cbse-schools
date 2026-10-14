@@ -274,6 +274,7 @@
     "test:boarding-suggest": "npx tsx src/lib/boardingSuggestAi.selftest.ts",
     "test:transport-gaps": "npx tsx src/lib/transportGaps.selftest.ts",
     "test:gps-stop-discovery": "npx tsx src/lib/gpsStopDiscovery.selftest.ts",
+    "test:run-stop-order": "npx tsx src/lib/runStopOrder.selftest.ts",
     "test:defaulter-hold-policy": "npx tsx src/lib/defaulterHoldPolicy.selftest.ts",
     "test:hold-resolve": "npx tsx src/lib/holdResolve.selftest.ts",
     "test:live-bus-marker": "npx tsx src/lib/liveBusMarker.selftest.ts",

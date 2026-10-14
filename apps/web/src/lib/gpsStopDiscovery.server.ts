@@ -13,7 +13,7 @@ import "server-only";
  */
 
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { fetchAllPages } from "@/lib/supabase/pageAll";
+import { readDeskVehicleTrail } from "@/lib/fleetTrail.server";
 import { casWriteSlice } from "@/lib/sliceCas.server";
 import { normalizeVehicleKey } from "@/lib/fleetEdgeLink";
 import { fetchTransportDeskFromDb, deskBundleToTransportState } from "@/lib/transportNormalized.server";
@@ -137,41 +137,15 @@ export async function runGpsStopDiscovery(opts: { dryRun?: boolean; nowMs?: numb
   const state = deskBundleToTransportState(desk.bundle);
 
   const since = new Date(nowMs - WINDOW_DAYS * 86_400_000).toISOString();
-  const trail = await fetchAllPages<{
-    vehicle_ref: string | null;
-    registration_number: string | null;
-    recorded_at: string;
-    lat: number;
-    lng: number;
-    speed_kmh: number | null;
-  }>((from, to) =>
-    sb
-      .from("fleet_vehicle_positions")
-      .select("vehicle_ref, registration_number, recorded_at, lat, lng, speed_kmh")
-      .eq("tenant_id", tenantId)
-      .gte("recorded_at", since)
-      .order("recorded_at", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, to),
-  );
-  if (trail.error) return fail(`Could not read bus positions: ${trail.error}`);
-  // A cut-off trail would make every stop look rarer than it is — refuse it.
-  if (trail.truncated) return fail("Bus position history hit the read cap — nothing was added");
-
-  // Telemetry → desk vehicle, by VIN or plate (the desk holds a VIN as the plate for some).
+  const trail = await readDeskVehicleTrail(sb, tenantId, state.vehicles, since);
+  // A cut-off or failed read would make every stop look rarer than it is — refuse it.
+  if (!trail.ok) return fail(`${trail.error} — nothing was added`);
+  const points: GpsPosition[] = trail.points;
   const vehicleByKey = new Map<string, (typeof state.vehicles)[number]>();
   for (const v of state.vehicles) {
     if (v.isActive === false) continue;
     const k = normalizeVehicleKey(v.registrationNo);
     if (k) vehicleByKey.set(k, v);
-  }
-  const points: GpsPosition[] = [];
-  for (const r of trail.rows) {
-    if (/XXXX/i.test(`${r.vehicle_ref ?? ""}${r.registration_number ?? ""}`)) continue;
-    const v =
-      vehicleByKey.get(normalizeVehicleKey(r.vehicle_ref)) ?? vehicleByKey.get(normalizeVehicleKey(r.registration_number));
-    if (!v) continue;
-    points.push({ vehicleKey: v.id, at: r.recorded_at, lat: Number(r.lat), lng: Number(r.lng), speedKmh: r.speed_kmh });
   }
   result.positions = points.length;
 

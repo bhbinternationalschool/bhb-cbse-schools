@@ -300,6 +300,7 @@ SELFTESTS=(
   test:boarding-suggest
   test:transport-gaps
   test:gps-stop-discovery
+  test:run-stop-order
   test:defaulter-hold-policy
   test:hold-resolve
   test:live-bus-marker
