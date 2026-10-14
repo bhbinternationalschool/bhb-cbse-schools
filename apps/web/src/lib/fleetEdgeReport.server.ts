@@ -77,6 +77,44 @@ function sumDurations(list: unknown): number {
 }
 
 
+/** The lastTelemetry block from one telemetry payload. */
+function telemetrySnapshot(p: Record<string, unknown>, receivedAt: string): VehicleFleetMetrics["lastTelemetry"] {
+  return {
+    lat: typeof p.gpsLatitude === "number" ? p.gpsLatitude : null,
+    lng: typeof p.gpsLongitude === "number" ? p.gpsLongitude : null,
+    speed: typeof p.speed === "number" ? p.speed : null,
+    ignitionOn: typeof p.ignitionOn === "boolean" ? p.ignitionOn : null,
+    // Real telemetry sends primaryFuelLevel; the spec PDF says
+    // fuelLevelPercent, and capitalises it. Accept any of them —
+    // see pickNumber's header for why the casing is not academic.
+    fuelLevelPercent: pickNumber(p, FUEL_FIELDS.primaryLevel),
+    odometer: typeof p.odometer === "number" ? p.odometer : null,
+    at: receivedAt,
+    accelX: typeof p.accelX === "number" ? p.accelX : null,
+    accelY: typeof p.accelY === "number" ? p.accelY : null,
+    accelZ: typeof p.accelZ === "number" ? p.accelZ : null,
+    gyroX: typeof p.gyroX === "number" ? p.gyroX : null,
+    gyroY: typeof p.gyroY === "number" ? p.gyroY : null,
+    gyroZ: typeof p.gyroZ === "number" ? p.gyroZ : null,
+    crankOn: typeof p.crankOn === "boolean" ? p.crankOn : null,
+    currentGear: typeof p.currentGear === "string" ? p.currentGear : null,
+    engineRunHour: typeof p.engineRunHour === "number" ? p.engineRunHour : null,
+    gpsAltitude: typeof p.gpsAltitude === "number" ? p.gpsAltitude : null,
+    gpsCourseInDegrees: typeof p.gpsCourseInDegrees === "number" ? p.gpsCourseInDegrees : null,
+    gpsFix: typeof p.gpsFix === "boolean" ? p.gpsFix : null,
+    gpsSignalQuality: typeof p.gpsSignalQuality === "string" ? p.gpsSignalQuality : null,
+    imei: typeof p.imei === "string" ? p.imei : null,
+    noOfFuelTanks: typeof p.noOfFuelTanks === "number" ? p.noOfFuelTanks : null,
+    noOfSatForFix: typeof p.noOfSatForFix === "number" ? p.noOfSatForFix : null,
+    primaryFuelTankCapacity: pickNumber(p, FUEL_FIELDS.primaryCapacity),
+    // The CNG readout on the Fleet Dashboard reads tank 2. This is the
+    // field the spec capitalises as SecondaryFuelLevel1.
+    secondaryFuelLevel1: pickNumber(p, FUEL_FIELDS.secondaryLevel),
+    secondaryFuelTankCapacity1: pickNumber(p, FUEL_FIELDS.secondaryCapacity),
+    vehicleStatus: typeof p.vehicleStatus === "string" ? p.vehicleStatus : null,
+  };
+}
+
 export function alertSeverity(alertName: string): FleetAlertRow["severity"] {
   if (isSosAlert(alertName)) return "critical";
   if (alertName === "OverSpeedEvent" || alertName === "FuelDrainAlert") return "warning";
@@ -108,18 +146,35 @@ export async function buildFleetEdgeReport(
   const lookbackFrom = new Date(Date.now() - FLEET_LOOKBACK_MS).toISOString();
 
   // PostgREST caps every response at max-rows (1 000 on Supabase) no matter
-  // what .limit() asks for. The original dashboard asked for 20 000 and got
-  // the oldest 1 000 — everything after 17 Aug 12:30 UTC was silently
-  // missing (SOS 57 of 159, "last seen" a day stale). Page explicitly.
+  // what .limit() asks for, so every read here pages explicitly.
+  //
+  // Until 14 Oct 2026 this read the whole 30-day log — payloads included —
+  // oldest first, capped at 50 000 rows. TimeBound's half-hourly details
+  // (since 4 Oct) took the log past the cap on 9 Oct, and the cap cut the
+  // NEWEST rows: the report stopped at 9 Oct 02:30 IST and Offline history
+  // showed every bus "offline" from then on. Now:
+  //   - details + alerts (what the counters, charts and alert log need) are
+  //     read in full, with payloads — a few thousand rows a month;
+  //   - telemetry (~95% of the log) is read as timestamps only, for last-seen
+  //     and offline gaps, in parallel pages;
+  //   - each vehicle's latest telemetry payload is read on its own.
+  // A cap that is hit is an error, never a silently shorter history.
   const PAGE = 1000;
-  const MAX_EVENTS = 50_000;
-  async function fetchAllEvents(): Promise<{ data: RawEvent[]; error: string | null }> {
+  const MAX_HEAVY = 100_000;
+  const MAX_TELEMETRY = 400_000;
+  const PARALLEL = 6;
+
+  async function fetchHeavyEvents(): Promise<{ data: RawEvent[]; error: string | null }> {
     const out: RawEvent[] = [];
-    for (let offset = 0; offset < MAX_EVENTS; offset += PAGE) {
+    for (let offset = 0; ; offset += PAGE) {
+      if (offset >= MAX_HEAVY) {
+        return { data: out, error: `More than ${MAX_HEAVY} Fleet Edge alert/detail events in 30 days — report not built` };
+      }
       const { data, error } = await sb
         .from("fleet_edge_events")
         .select("id, event_type, alert_name, vehicle_ref, registration_number, event_at, received_at, payload")
         .eq("tenant_id", tenantId)
+        .in("event_type", ["alert", "details"])
         .gte("received_at", lookbackFrom)
         .order("received_at", { ascending: true })
         .order("id", { ascending: true })
@@ -127,9 +182,101 @@ export async function buildFleetEdgeReport(
       if (error) return { data: out, error: error.message };
       const rows = (data || []) as RawEvent[];
       out.push(...rows);
+      if (rows.length < PAGE) return { data: out, error: null };
+    }
+  }
+
+  type TelemetryStamp = { id: string; vehicle_ref: string | null; registration_number: string | null; received_at: string };
+  async function fetchTelemetryStamps(): Promise<{ data: TelemetryStamp[]; error: string | null }> {
+    const head = await sb
+      .from("fleet_edge_events")
+      .select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenantId)
+      .eq("event_type", "telemetry")
+      .gte("received_at", lookbackFrom);
+    if (head.error) return { data: [], error: head.error.message };
+    const count = head.count ?? 0;
+    if (count > MAX_TELEMETRY) {
+      return { data: [], error: `More than ${MAX_TELEMETRY} telemetry pings in 30 days — report not built` };
+    }
+    const page = (offset: number) =>
+      sb
+        .from("fleet_edge_events")
+        .select("id, vehicle_ref, registration_number, received_at")
+        .eq("tenant_id", tenantId)
+        .eq("event_type", "telemetry")
+        .gte("received_at", lookbackFrom)
+        .order("received_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(offset, offset + PAGE - 1);
+    const out: TelemetryStamp[] = [];
+    const known = Math.ceil(count / PAGE);
+    for (let i = 0; i < known; i += PARALLEL) {
+      const batch = await Promise.all(
+        Array.from({ length: Math.min(PARALLEL, known - i) }, (_, k) => page((i + k) * PAGE)),
+      );
+      for (const r of batch) {
+        if (r.error) return { data: out, error: r.error.message };
+        out.push(...((r.data || []) as TelemetryStamp[]));
+      }
+    }
+    // Pings that arrived after the count: keep reading until a short page.
+    for (let offset = known * PAGE; ; offset += PAGE) {
+      if (offset >= MAX_TELEMETRY) {
+        return { data: out, error: `More than ${MAX_TELEMETRY} telemetry pings in 30 days — report not built` };
+      }
+      const r = await page(offset);
+      if (r.error) return { data: out, error: r.error.message };
+      const rows = (r.data || []) as TelemetryStamp[];
+      out.push(...rows);
       if (rows.length < PAGE) break;
     }
-    return { data: out, error: null };
+    // Parallel pages can overlap by a row or two if pings landed mid-read.
+    const seen = new Set<string>();
+    return { data: out.filter((t) => (seen.has(t.id) ? false : (seen.add(t.id), true))), error: null };
+  }
+
+  async function fetchAllEvents(): Promise<{ data: RawEvent[]; error: string | null }> {
+    const [heavy, stamps] = await Promise.all([fetchHeavyEvents(), fetchTelemetryStamps()]);
+    if (heavy.error) return { data: [], error: heavy.error };
+    if (stamps.error) return { data: [], error: stamps.error };
+    const telemetry: RawEvent[] = stamps.data.map((t) => ({
+      id: t.id,
+      event_type: "telemetry",
+      alert_name: null,
+      vehicle_ref: t.vehicle_ref,
+      registration_number: t.registration_number,
+      event_at: null,
+      received_at: t.received_at,
+      payload: {},
+    }));
+    const all = [...heavy.data, ...telemetry];
+    all.sort((a, b) =>
+      a.received_at < b.received_at ? -1 : a.received_at > b.received_at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+    );
+    return { data: all, error: null };
+  }
+
+  /** Each vehicle's newest telemetry, payload and all — one small read each. */
+  async function fetchLatestTelemetry(
+    keys: { vehicleRef: string | null; registrationNumber: string | null; key: string }[],
+  ): Promise<Map<string, { received_at: string; payload: Record<string, unknown> }>> {
+    const out = new Map<string, { received_at: string; payload: Record<string, unknown> }>();
+    await Promise.all(
+      keys.map(async (k) => {
+        let q = sb
+          .from("fleet_edge_events")
+          .select("received_at, payload")
+          .eq("tenant_id", tenantId)
+          .eq("event_type", "telemetry")
+          .gte("received_at", lookbackFrom);
+        q = k.vehicleRef ? q.eq("vehicle_ref", k.vehicleRef) : q.eq("registration_number", k.registrationNumber ?? "");
+        const { data } = await q.order("received_at", { ascending: false }).limit(1);
+        const row = (data || [])[0] as { received_at: string; payload: Record<string, unknown> } | undefined;
+        if (row) out.set(k.key, row);
+      }),
+    );
+    return out;
   }
 
   const [eventsRes, identityRes, notifRes, totalRes] = await Promise.all([
@@ -156,6 +303,7 @@ export async function buildFleetEdgeReport(
   const dailyMap = new Map<string, FleetDailyPoint>();
   const alerts: FleetAlertRow[] = [];
   let eventsInRange = 0;
+  const telemetryKeys = new Map<string, { vehicleRef: string | null; registrationNumber: string | null; key: string }>();
 
   // Fleet Edge window stamps ("2026-08-18T05:30:00") carry no zone and are
   // UTC (they arrive seconds after the window ends). Pin them so a server
@@ -197,44 +345,9 @@ export async function buildFleetEdgeReport(
     timestampsByVehicle.get(key)!.push(ev.received_at);
 
     if (ev.event_type === "telemetry") {
-      const p = ev.payload;
-      const at = Date.parse(ev.received_at);
-      if (!m.lastTelemetry || (m.lastTelemetry.at && Date.parse(m.lastTelemetry.at) < at) || !m.lastTelemetry.at) {
-        m.lastTelemetry = {
-          lat: typeof p.gpsLatitude === "number" ? p.gpsLatitude : null,
-          lng: typeof p.gpsLongitude === "number" ? p.gpsLongitude : null,
-          speed: typeof p.speed === "number" ? p.speed : null,
-          ignitionOn: typeof p.ignitionOn === "boolean" ? p.ignitionOn : null,
-          // Real telemetry sends primaryFuelLevel; the spec PDF says
-          // fuelLevelPercent, and capitalises it. Accept any of them —
-          // see pickNumber's header for why the casing is not academic.
-          fuelLevelPercent: pickNumber(p, FUEL_FIELDS.primaryLevel),
-          odometer: typeof p.odometer === "number" ? p.odometer : null,
-          at: ev.received_at,
-          accelX: typeof p.accelX === "number" ? p.accelX : null,
-          accelY: typeof p.accelY === "number" ? p.accelY : null,
-          accelZ: typeof p.accelZ === "number" ? p.accelZ : null,
-          gyroX: typeof p.gyroX === "number" ? p.gyroX : null,
-          gyroY: typeof p.gyroY === "number" ? p.gyroY : null,
-          gyroZ: typeof p.gyroZ === "number" ? p.gyroZ : null,
-          crankOn: typeof p.crankOn === "boolean" ? p.crankOn : null,
-          currentGear: typeof p.currentGear === "string" ? p.currentGear : null,
-          engineRunHour: typeof p.engineRunHour === "number" ? p.engineRunHour : null,
-          gpsAltitude: typeof p.gpsAltitude === "number" ? p.gpsAltitude : null,
-          gpsCourseInDegrees: typeof p.gpsCourseInDegrees === "number" ? p.gpsCourseInDegrees : null,
-          gpsFix: typeof p.gpsFix === "boolean" ? p.gpsFix : null,
-          gpsSignalQuality: typeof p.gpsSignalQuality === "string" ? p.gpsSignalQuality : null,
-          imei: typeof p.imei === "string" ? p.imei : null,
-          noOfFuelTanks: typeof p.noOfFuelTanks === "number" ? p.noOfFuelTanks : null,
-          noOfSatForFix: typeof p.noOfSatForFix === "number" ? p.noOfSatForFix : null,
-          primaryFuelTankCapacity: pickNumber(p, FUEL_FIELDS.primaryCapacity),
-          // The CNG readout on the Fleet Dashboard reads tank 2. This is the
-          // field the spec capitalises as SecondaryFuelLevel1.
-          secondaryFuelLevel1: pickNumber(p, FUEL_FIELDS.secondaryLevel),
-          secondaryFuelTankCapacity1: pickNumber(p, FUEL_FIELDS.secondaryCapacity),
-          vehicleStatus: typeof p.vehicleStatus === "string" ? p.vehicleStatus : null,
-        };
-      }
+      // Telemetry arrives here as timestamps only; the latest payload per
+      // vehicle is read separately and applied after this loop.
+      telemetryKeys.set(key, { vehicleRef: ev.vehicle_ref, registrationNumber: ev.registration_number, key });
     } else if (ev.event_type === "details") {
       // Last-known parked position — a current-status fact like
       // lastTelemetry, so unbounded by [from,to] too.
@@ -369,6 +482,12 @@ export async function buildFleetEdgeReport(
     }
   }
 
+
+  const latest = await fetchLatestTelemetry([...telemetryKeys.values()]);
+  for (const [key, row] of latest) {
+    const m = byVehicle.get(key);
+    if (m) m.lastTelemetry = telemetrySnapshot(row.payload ?? {}, row.received_at);
+  }
 
   // Second pass over in-range events for the daily series + alert log.
   for (const ev of events) {
