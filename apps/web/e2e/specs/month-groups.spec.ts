@@ -261,7 +261,10 @@ test.describe("month-grouped lists — every converted screen", () => {
           await expect(page.getByRole("menuitem").first()).toBeVisible();
           await page.keyboard.press("Escape");
         }
-        await monthHeader(page, "October 2026").scrollIntoViewIfNeeded();
+        // The app scrolls an inner pane; centre the list in it, then let any
+        // smooth scroll settle before the picture.
+        await monthHeader(page, "October 2026").evaluate((el) => el.scrollIntoView({ block: "center" }));
+        await page.waitForTimeout(600);
         await page.screenshot({ path: path.join(SHOTS, `${sc.name}-${v.tag}.png`) });
         await page.context().close();
       }
