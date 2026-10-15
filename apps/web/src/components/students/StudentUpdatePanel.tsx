@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import {
-  loadMasters,
   type MastersState,
 } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   BLOOD_GROUPS,
   STUDENT_CATEGORIES,
@@ -224,7 +225,7 @@ export function StudentUpdatePanel({
   onChanged?: (sis: SisState) => void;
 }) {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [tool, setTool] = useState<UpdateTool>("details");
   const [selectedId, setSelectedId] = useState("");
@@ -264,7 +265,6 @@ export function StudentUpdatePanel({
   const [photoQuery, setPhotoQuery] = useState("");
 
   function refresh() {
-    setMasters(loadMasters());
     setSis(loadSis());
   }
 
@@ -502,6 +502,9 @@ export function StudentUpdatePanel({
     onChanged?.(res.state);
   }
 
+  if (mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
   if (!sis || !masters) {
     return (
       <p className="mt-4 text-sm text-[var(--muted)]">Loading update tools…</p>

@@ -23,6 +23,10 @@
  *   /students    the module dashboard's "Active students" card, same hook.
  *                Seeded: 250 active children in 2026-27 (the dashboard says
  *                "this year only").
+ *   /students?tab=register
+ *                the register's "Filter by class" picker: one option per
+ *                class (15) besides "All classes" — Masters (2.1b), not the
+ *                student count, so it passes while the count above waits on 3.1.
  *   /masters     the overview cards — buttons named "<n> Classes" and
  *                "<n> Subjects" (active classes, active subjects incl.
  *                components). Seeded: 15 and 44.
@@ -125,6 +129,19 @@ const PAGES: { path: string; prepare?: (page: Page) => Promise<void>; checks: Ch
   {
     path: "/students",
     checks: [{ what: "active students 2026-27", expected: e.currentYearActiveChildren, read: (p) => metricValue(p, /^Active students/) }],
+  },
+  {
+    path: "/students?tab=register",
+    checks: [
+      {
+        what: "classes in the register's class filter",
+        expected: e.classes,
+        read: async (p) => {
+          const labels = await p.getByRole("combobox", { name: "Filter by class", exact: true }).first().locator("option").allTextContents();
+          return labels.filter((l) => l.trim() && !/^all classes/i.test(l.trim())).length;
+        },
+      },
+    ],
   },
   {
     path: "/masters",

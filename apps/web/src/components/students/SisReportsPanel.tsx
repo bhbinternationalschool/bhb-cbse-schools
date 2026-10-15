@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
   CUSTOM_DOWNLOAD_COLUMNS,
@@ -24,7 +25,7 @@ export function SisReportsPanel({
 }) {
   const session = useDemoSession();
   const ay = session.academicYearCode;
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
@@ -51,7 +52,6 @@ export function SisReportsPanel({
   const [running, setRunning] = useState<string | null>(null);
 
   useEffect(() => {
-    setMasters(loadMasters());
     setSis(loadSis());
   }, [tick, ay]);
 
@@ -140,6 +140,9 @@ export function SisReportsPanel({
     );
   }
 
+  if (mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters || !sis) {
     return (
       <p className="mt-4 text-sm text-[var(--muted)]">Loading reports…</p>
