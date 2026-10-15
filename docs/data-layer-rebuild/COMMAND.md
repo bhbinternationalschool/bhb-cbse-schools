@@ -1011,7 +1011,10 @@ the dashboard shows the October run's ₹39,500, and E2E-001's rebuilt line read
 ESIC on ₹22,750). **Same numbers before/after:** the same spec on origin/main (probe PR #666, closed) vs this
 branch, every tab's text diffed: identical on run detail ×5 (all setup-review rupees), bank file, increment
 (individual preview for E2E-003), advances, approvals, statutory, print, payslips, reports, runs, My payslip/advances —
-the only differences are the propagation spec's random rename suffix on E2E-020 and the dashboard defect above.
+the only difference is the propagation spec's random rename suffix on E2E-020 (the dashboard, before its fix,
+read 0 runs — fixed and then identical too). CI scoreboard, same spec: origin/main + spec 100 pass · 17 expected-fail ·
+1 fixme · 0 fail; this branch the same, test for test. Bank-file rows and advance amounts were not exercised with
+data (the fixture has no posted run and no advance) — those screens are identical but trivially so.
 Ratchets: `load_masters_screen_files` 72 → **62**, `load_masters_calls_src` 436 → **424** (12 calls);
 `ensure_hydrated_component_files` unchanged (the workspace still hydrates the payroll desks).
 **Not done / not proven.** A payroll holder WITHOUT the Masters view gets the teaching answer, whose `statutoryConfig`
