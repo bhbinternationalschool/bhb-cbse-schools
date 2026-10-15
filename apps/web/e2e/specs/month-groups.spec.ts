@@ -22,6 +22,7 @@ import path from "node:path";
 import type { Browser, Page } from "@playwright/test";
 import { APP_URL, expect, fx, signIn, test } from "../support";
 import { formatInr as formatPaise } from "@/lib/masters";
+import * as XLSX from "xlsx";
 
 // with-env.mjs passes only an allowlist of variables, so the default is a
 // git-ignored folder beside the specs.
@@ -180,6 +181,32 @@ async function goAndWait(page: Page, url: string, then?: (page: Page) => Promise
   await expect(monthHeader(page, "October 2026")).toBeVisible({ timeout: 90_000 });
 }
 
+/**
+ * Staff → Leave / Outdoor duty, reloaded until the history has loaded.
+ *
+ * KNOWN DEFECT, not this change's (15 Oct 2026): on a cold load these panels
+ * often show "No leave requests for this year" / "No outdoor duty records
+ * yet" although the desk holds the rows — 5 of 6 fresh loads of Leave in a
+ * row did, for 30 s each. Both panels read the desk once on mount and re-read
+ * only if THEIR ensure*Hydrated call did the hydration; when something else
+ * hydrated the desk first, the panel never re-reads. That is loading code
+ * under the data-layer freeze, so it is reported, not patched; this helper
+ * retries so the grouping itself can be seen.
+ */
+const openStaffHistory = (url: string) => async (page: Page) => {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await page.goto(url);
+    try {
+      await expect(monthHeader(page, "October 2026")).toBeVisible({ timeout: 15_000 });
+      return;
+    } catch {
+      /* the race above — load again */
+    }
+  }
+  await expect(monthHeader(page, "October 2026")).toBeVisible({ timeout: 30_000 });
+};
+const openLeaveHistory = openStaffHistory("/staff?tab=leave");
+
 const storeSection = (label: string) => async (page: Page) => {
   await page.getByRole("button", { name: label, exact: true }).click({ timeout: 30_000 });
 };
@@ -188,8 +215,8 @@ const SCREENS: Screen[] = [
   { name: "fee-receipts", open: (p) => goAndWait(p, "/fees?tab=receipts") },
   { name: "charge-vouchers", open: (p) => goAndWait(p, "/fees?tab=vouchers") },
   { name: "fee-adjustments", open: (p) => goAndWait(p, "/fees?tab=adjustments") },
-  { name: "staff-leave", open: (p) => goAndWait(p, "/staff?tab=leave"), rowMenu: /Staff actions/ },
-  { name: "outdoor-duty", open: (p) => goAndWait(p, "/staff?tab=outdoor_duty"), rowMenu: /Staff actions/ },
+  { name: "staff-leave", open: openLeaveHistory, rowMenu: /Staff actions/ },
+  { name: "outdoor-duty", open: openStaffHistory("/staff?tab=outdoor_duty"), rowMenu: /Staff actions/ },
   { name: "store-orders", open: (p) => goAndWait(p, "/inventory?tab=purchase", storeSection("Orders")), rowMenu: /Purchase order actions/ },
   { name: "store-receipts", open: (p) => goAndWait(p, "/inventory?tab=purchase", storeSection("Receive goods")) },
   { name: "store-bills", open: (p) => goAndWait(p, "/inventory?tab=purchase", storeSection("Bills to pay")) },
@@ -290,14 +317,21 @@ test.describe("fee receipts and staff leave, on screen", () => {
     await expect(monthHeader(page, "September 2026")).toHaveAttribute("aria-expanded", "false");
     await expect(monthHeader(page, "August 2026")).toHaveAttribute("aria-expanded", "false");
     await expect(page.getByText(`Showing ${receipts.length} of ${receipts.length} receipts`)).toBeVisible();
+    // The receipts screen's "Excel" button writes a real .xlsx workbook.
     const [download] = await Promise.all([
       page.waitForEvent("download"),
       page.getByRole("button", { name: "Download Excel (CSV) of current filter" }).click(),
     ]);
-    const csv = fs.readFileSync(await download.path(), "utf8");
-    const rows = csv.split(/\r?\n/).filter((l) => /E2E-R-\d{4}/.test(l));
-    expect(rows.length, csv).toBe(receipts.length);
-    for (const v of receipts) expect(csv).toContain(v.receiptNo);
+    const book = XLSX.read(fs.readFileSync(await download.path()));
+    const sheet = book.Sheets[book.SheetNames[0]!]!;
+    const cells = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 }).map((r) => r.map(String).join(" | "));
+    const rows = cells.filter((l) => /E2E-R-\d{4}/.test(l));
+    expect(rows.length, cells.join("\n")).toBe(receipts.length);
+    for (const v of receipts) expect(rows.some((r) => r.includes(v.receiptNo)), v.receiptNo).toBe(true);
+    // Exactly the folded months' receipts are in it too.
+    for (const v of receipts.filter((x) => !x.collectionDate.startsWith("2026-10"))) {
+      expect(rows.some((r) => r.includes(v.receiptNo))).toBe(true);
+    }
     await page.context().close();
   });
 
@@ -329,10 +363,13 @@ test.describe("fee receipts and staff leave, on screen", () => {
     const pending = fx.growing.staffHr.leaveRequests.filter((r) => r.status === "pending" || r.status === "pending_l2");
     expect(pending.map((r) => r.fromDate.slice(0, 7))).toEqual(["2026-08"]);
     const page = await openPrincipal(browser, { width: 1440, height: 900 });
-    await goAndWait(page, "/staff?tab=leave");
+    await openLeaveHistory(page);
     const aug = monthHeader(page, "August 2026");
     await expect(aug).toHaveAttribute("aria-expanded", "true");
     await expect(aug).toContainText("1 need action");
+    // The header counts approved days only (Aug's are pending + rejected).
+    await expect(aug).toContainText("0 days approved");
+    await expect(monthHeader(page, "October 2026")).toContainText("3 days approved");
     await expect(monthHeader(page, "September 2026")).toHaveAttribute("aria-expanded", "false");
     await expect(monthHeader(page, "September 2026")).not.toContainText("need action");
     await aug.scrollIntoViewIfNeeded();

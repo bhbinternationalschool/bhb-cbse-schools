@@ -1033,7 +1033,7 @@ export function StaffLeavePanel({
               colSpan={8}
               rowKey={(r) => r.id}
               countLabel={(n) => `${n} ${n === 1 ? "request" : "requests"}`}
-              summary={(rs) => `${rs.reduce((n, r) => n + (Number(r.days) || 0), 0)} days`}
+              summary={(rs) => `${rs.reduce((n, r) => n + (r.status === "approved" ? Number(r.days) || 0 : 0), 0)} days approved`}
               renderRow={(r) => (
                 <tr>
                   <td className="px-4 py-2">{staffLabel(r.staffId)}</td>

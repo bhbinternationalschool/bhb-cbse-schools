@@ -178,7 +178,7 @@ export async function runSeed(): Promise<void> {
         vendorId: vendor.id,
         returnDate: ret.date,
         reason: "Damaged in transit (E2E)",
-        lines: [{ itemId: item.id, qty: ret.qty }],
+        lines: [{ itemId: item.id, qty: ret.qty, ratePaise: ret.ratePaise }],
       },
       actor,
       AY_CURRENT,

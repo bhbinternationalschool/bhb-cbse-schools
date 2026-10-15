@@ -293,7 +293,7 @@ export const STORE_PLAN = {
     { date: "2026-08-12", qty: 60, ratePaise: 4200 },
   ],
   returns: [
-    { date: "2026-10-12", qty: 2 },
-    { date: "2026-08-14", qty: 5 },
+    { date: "2026-10-12", qty: 2, ratePaise: 4500 },
+    { date: "2026-08-14", qty: 5, ratePaise: 4200 },
   ],
 } as const;
