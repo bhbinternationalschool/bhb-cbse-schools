@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, LogOut, Pencil, Shield, UserRound } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { SessionSelector } from "@/components/shell/SessionSelector";
@@ -42,6 +42,10 @@ export function UserAccountMenu({
   // a guess from the built-in defaults; they follow a roster or roles change
   // without a reload (this used to be read once, when the menu mounted).
   const access = useAccessData();
+  // MUTATION (proof only): a shell copy change re-announces Masters — the 13 Oct loop shape.
+  useLayoutEffect(() => {
+    window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
+  }, [access.masters]);
   const { staff, roleLabels, canManageRoles, known } = useMemo(() => {
     const masters = access.masters;
     const rbac = access.rbac;
