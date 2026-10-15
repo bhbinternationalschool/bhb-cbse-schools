@@ -19,9 +19,15 @@ class TimeoutClient extends http.BaseClient {
   /// How long to wait for the headers, and for each chunk of the body.
   final Duration timeout;
 
-  /// The everyday deadline: a phone that has not heard back in 15 s gets an
+  /// The everyday deadline: a phone that has not heard back in 30 s gets an
   /// error it can show and retry, not a spinner forever.
-  static const standard = Duration(seconds: 15);
+  ///
+  /// 30 s, not 15 s: a cold Cloud Run instance rebuilds the whole-school
+  /// mirror before answering any /api/v1 route (14 Oct: homework/feed took
+  /// 15.7 s once in 76 calls; principal/snapshot p95 6.2 s). Lower to 15 s
+  /// once the Phase 4 `ensureSchoolMirrorHydrated` ratchet under
+  /// app/api/v1 reaches 0.
+  static const standard = Duration(seconds: 30);
 
   /// Calls where the server itself runs a model or sends to many families
   /// (command desk, lesson plan, syllabus scan, broadcasts).

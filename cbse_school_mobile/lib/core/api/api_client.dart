@@ -2964,7 +2964,8 @@ class ApiClient {
   final http.Client? _injectedClient;
   late final http.Client _shared = _injectedClient ?? http.Client();
 
-  /// Every ERP call: 15 s for the headers and for each gap in the body.
+  /// Every ERP call: 30 s for the headers and for each gap in the body
+  /// (see [TimeoutClient.standard] for why 30 and when it drops to 15).
   late final http.Client _http = TimeoutClient(_shared, TimeoutClient.standard);
 
   /// The server runs a model or sends to many families (see [_slowPaths]).
@@ -2985,7 +2986,7 @@ class ApiClient {
     const Duration(minutes: 30),
   );
 
-  /// POSTs whose server side legitimately takes longer than 15 s.
+  /// POSTs whose server side legitimately takes longer than 30 s.
   static const _slowPaths = {
     "/api/v1/commands",
     "/api/v1/teaching/lesson-plan",

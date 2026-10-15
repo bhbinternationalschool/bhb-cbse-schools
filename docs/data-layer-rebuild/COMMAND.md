@@ -1054,8 +1054,12 @@ calls per session ≤ 2; the app shows a Masters change within 2 min of resume.
 
 *(Built 15 Oct 2026, PR #656 — app code only; no APK built, no versionCode change.)* **What
 exists.** `lib/core/api/http_transport.dart` `TimeoutClient`: a view over ONE `http.Client` that
-`ApiClient` creates lazily and keeps for its life (keep-alive); 15 s for the headers and for each
-gap in the body (a Timer per gap, not `Stream.timeout`, which FakeAsync does not drive); 120 s for
+`ApiClient` creates lazily and keeps for its life (keep-alive); 30 s for the headers and for each
+gap in the body — 30 s, not the 15 s planned above, because a cold Cloud Run instance rebuilds the
+whole-school mirror before answering any `/api/v1` route (14 Oct 18:55–21:15 IST:
+`homework/feed` 15.7 s once in 76 calls, `principal/snapshot` p95 6.2 s, `owner/anomalies` 6.2 s);
+lower `TimeoutClient.standard` to 15 s once the `ensureSchoolMirrorHydrated` ratchet under
+`app/api/v1` reaches 0 in Phase 4 (a Timer per gap, not `Stream.timeout`, which FakeAsync does not drive); 120 s for
 `ApiClient._slowPaths` (command desk, lesson plan, syllabus scan/import, homework post,
 class-gallery complete, staff/owner broadcast); 5 min for multipart uploads; 30 min for the class
 video PUT straight to storage. Every `http.get/post/patch/delete` and `req.send()` in
@@ -1082,7 +1086,7 @@ first use (it was created inside `dispose()` when the strip never showed — a d
 Gallery carousel, class-gallery 48 px thumb and review card decode via `cacheWidth`
 (`core/ui/thumb_size.dart`; width only — aspect kept; the full-screen viewer stays full size).
 **Proof.** `flutter analyze` clean; `flutter test` 123/123. New: `test/http_client_hygiene_test.dart`
-(one client for 5 calls; 15 s header deadline; stalled body; command desk 120 s),
+(one client for 5 calls; 30 s header deadline — still waiting at 29 s; stalled body; command desk 120 s),
 `test/home_cache_test.dart` (identity keying memory+file, owner check, wipe on sign-out and
 sign-in, late reply after identity change not saved, failure keeps last good, SWR ordering,
 stale label, RefreshClock, ResumeWatcher, strip under a pushed route, PopWithChanged, thumb size),
@@ -1091,7 +1095,8 @@ re-read after a screen that decided nothing, resume < 2 min nothing / ≥ 2 min 
 again and approvals not, cold open paints the saved home within 200 ms of fake time while the
 server is pending, server away keeps it with the banner, no copy → error, another cookie's copy
 never painted). Fail-on-old: the old-API tests run against origin/main's `lib` fail (6 clients
-for 5 calls; no timeout at 16 s or 121 s; approvals 2 after My leave — that run needed the
+for 5 calls; no timeout at 16 s or 121 s — the deadline test now checks 29 s / 31 s and fails
+with the deadline removed or set back to 15 s; approvals 2 after My leave — that run needed the
 RunningStrip dispose fix patched in, since old code first fails on that assertion); every other
 new test fails under a named mutation (scope re-check, sign-out/sign-in wipe, identity in scope,
 owner check, `!freshOk`, staleSince, 2 min, resume attach, cold paint, push bump, `shouldPoll`,

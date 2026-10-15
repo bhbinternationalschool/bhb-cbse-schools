@@ -242,7 +242,7 @@ void main() {
       var errored = false;
       await loadCachedThenFresh<String>(
         peek: () async => null,
-        fetch: () async => throw TimeoutException("15 s"),
+        fetch: () async => throw TimeoutException("30 s"),
         onCached: (_) => painted = true,
         onFresh: (_) => painted = true,
         onError: (e, s) {

@@ -1,6 +1,7 @@
 // data-layer 4.4: the app's calls share ONE long-lived http.Client (one
 // kept-alive connection, not a TLS handshake per call) and every call has a
-// deadline — 15 s, longer only where the server runs a model.
+// deadline — 30 s (cold-start mirror rebuild), longer only where the server
+// runs a model.
 //
 // These tests use only API that existed before 4.4 (ApiClient(config) and its
 // fetch methods), so they run unchanged against the old code — where they
@@ -77,14 +78,18 @@ void main() {
     expect(created, 1, reason: "one long-lived client for the app's life");
   });
 
-  testWidgets("a home call with no reply gives up after 15 s", (tester) async {
+  testWidgets("a home call with no reply gives up after 30 s", (tester) async {
     late _Outcome o;
     await http.runWithClient(
       () async => o = _watch(ApiClient(_config).fetchStaffSummary()),
       () => MockClient((req) => Completer<http.Response>().future),
     );
-    await tester.pump(const Duration(seconds: 14));
-    expect(o.done, isFalse, reason: "still waiting at 14 s");
+    await tester.pump(const Duration(seconds: 29));
+    expect(
+      o.done,
+      isFalse,
+      reason: "a cold start may take 16 s — still waiting at 29 s",
+    );
     await tester.pump(const Duration(seconds: 2));
     expect(o.done, isTrue, reason: "not waiting forever");
     expect(o.error, isA<TimeoutException>());
@@ -110,10 +115,10 @@ void main() {
       throwsA(isA<TimeoutException>()),
     );
     expect(watch.elapsedMilliseconds, lessThan(2000));
-    expect(TimeoutClient.standard, const Duration(seconds: 15));
+    expect(TimeoutClient.standard, const Duration(seconds: 30));
   });
 
-  testWidgets("the command desk (server runs a model) gets 120 s, not 15 s", (
+  testWidgets("the command desk (server runs a model) gets 120 s, not 30 s", (
     tester,
   ) async {
     late _Outcome o;
