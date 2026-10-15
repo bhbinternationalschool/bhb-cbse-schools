@@ -1052,7 +1052,7 @@ polls only while the home route is current; `cacheWidth`/`cacheHeight` on galler
 Acceptance (1.2f beacon): cold open of the staff home paints cached data < 200 ms; approvals
 calls per session ≤ 2; the app shows a Masters change within 2 min of resume.
 
-*(Built 15 Oct 2026, PR #PRNUM — app code only; no APK built, no versionCode change.)* **What
+*(Built 15 Oct 2026, PR #656 — app code only; no APK built, no versionCode change.)* **What
 exists.** `lib/core/api/http_transport.dart` `TimeoutClient`: a view over ONE `http.Client` that
 `ApiClient` creates lazily and keeps for its life (keep-alive); 15 s for the headers and for each
 gap in the body (a Timer per gap, not `Stream.timeout`, which FakeAsync does not drive); 120 s for
