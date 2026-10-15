@@ -487,7 +487,7 @@ export function StaffBroadcastButton() {
         // positioned, so the popover hangs from the sticky header instead and
         // spans it with the page's gutter (and scrolls if taller than the
         // screen).
-        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[min(100vw-1.5rem,24rem)] max-sm:inset-x-3 max-sm:max-h-[calc(100dvh-6rem)] max-sm:w-auto max-sm:overflow-y-auto space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_16px_40px_rgba(32,48,80,0.28)]">
+        <div data-testid="staff-broadcast-panel" className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[min(100vw-1.5rem,24rem)] max-sm:inset-x-3 max-sm:max-h-[calc(100dvh-6rem)] max-sm:w-auto max-sm:overflow-y-auto space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_16px_40px_rgba(32,48,80,0.28)]">
           <div className="flex items-center justify-between">
             <p className="text-sm font-bold text-[var(--brand-deep)]">
               WhatsApp
