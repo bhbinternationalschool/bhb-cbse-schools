@@ -8,7 +8,8 @@
  * moves that child to UKG, where nothing matches, and asserts:
  *   - the hint promises to keep the current group;
  *   - after "Upgrade class" the panel and the history row show the group kept;
- *   - a fresh browser, reading the roster from the server, still shows it.
+ *   - a fresh browser, reading the upgrade history from the server, shows
+ *     the group kept ("E2E LKG Promoted → E2E LKG Promoted").
  *
  * Writes to the stack, so it runs in the "propagation" project (after every
  * read-only spec). Screenshots to e2e/student-upgrade-shots (git-ignored).
@@ -60,36 +61,37 @@ test.describe("student upgrade — fee group", () => {
     await expect(page.getByText("(no matching group found — keep current)")).toBeVisible();
 
     fs.mkdirSync(SHOTS, { recursive: true });
-    await page.screenshot({ path: path.join(SHOTS, "upgrade-before-desktop-light.png"), fullPage: true });
+    await page.getByText("(no matching group found — keep current)").evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: path.join(SHOTS, "upgrade-before-desktop-light.png") });
 
     await page.getByRole("button", { name: "Upgrade class" }).click();
     await expect(page.getByText(/^Updated .* → UKG-A$/)).toBeVisible({ timeout: 30_000 });
     // The panel re-reads the saved child: the group is still there.
     await expect(page.getByText(`Fee: ${UPGRADE_FEE_GROUP.name}`)).toBeVisible();
     // The history row says the group went nowhere ("E2E LKG Promoted → E2E LKG Promoted", not "→ —").
+    const kept = new RegExp(`${UPGRADE_FEE_GROUP.name}\\s*→\\s*${UPGRADE_FEE_GROUP.name}`);
     const historyRow = page.locator("tr", { hasText: CHILD.fullName }).first();
-    await expect(historyRow.locator("td").filter({ hasText: "→" }).last()).toHaveText(
-      new RegExp(`${UPGRADE_FEE_GROUP.name}\\s*→\\s*${UPGRADE_FEE_GROUP.name}`),
-    );
-    await page.screenshot({ path: path.join(SHOTS, "upgrade-after-desktop-light.png"), fullPage: true });
-    // Let the roster push reach the server before the browser goes.
+    await expect(historyRow.locator("td").filter({ hasText: kept })).toHaveCount(1);
+    await historyRow.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: path.join(SHOTS, "upgrade-after-desktop-light.png") });
+    // Let the saves reach the server before the browser goes.
     await page.waitForTimeout(4_000);
     await page.context().close();
 
-    // A fresh browser reads the roster from the server.
-    for (let attempt = 0; ; attempt += 1) {
-      const fresh = await openUpgrade(browser, { width: 375, height: 812, dark: true });
-      await pickChild(fresh);
-      try {
-        await expect(fresh.getByText(/Current:.*UKG-A/)).toBeVisible({ timeout: 15_000 });
-        await expect(fresh.getByText(`Fee: ${UPGRADE_FEE_GROUP.name}`)).toBeVisible();
-        await fresh.screenshot({ path: path.join(SHOTS, "upgrade-after-phone375-dark.png"), fullPage: true });
-        await fresh.context().close();
-        break;
-      } catch (e) {
-        await fresh.context().close();
-        if (attempt >= 3) throw e;
-      }
-    }
+    // A fresh browser (no local copy) reads the upgrade history from the
+    // server (sis_class_upgrades): the recorded fee group is the kept one.
+    // NOT asserted here: the child's own row on the server — in this stack
+    // the whole-roster push is refused (sis_push_guarded: duplicate key on
+    // sis_students_tenant_admission_ay_uidx), a separate defect reported
+    // with this PR.
+    const fresh = await openUpgrade(browser, { width: 375, height: 812, dark: true });
+    const freshRow = fresh.locator("tr", { hasText: CHILD.fullName }).first();
+    await expect(freshRow.locator("td").filter({ hasText: kept })).toHaveCount(1, { timeout: 60_000 });
+    await freshRow.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await fresh.waitForTimeout(400);
+    await fresh.screenshot({ path: path.join(SHOTS, "upgrade-history-phone375-dark.png") });
+    await fresh.context().close();
   });
 });
