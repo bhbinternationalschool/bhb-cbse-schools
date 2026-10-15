@@ -1,5 +1,6 @@
 "use client";
 
+import { useDuesInputs } from "@/components/fees/useDuesInputs";
 import { useEffect, useMemo, useState } from "react";
 import { listExamDateSheet, loadExams, type ExamTerm } from "@/lib/exams";
 import { rosterForSection } from "@/lib/attendance";
@@ -95,6 +96,9 @@ export function AdmitCardsPanel({ academicYearCode, masters, terms }: Props) {
     [academicYearCode, examTermId, exams],
   );
 
+  // A fee hold is decided from dues, and dues include the bus: re-decided
+  // when the fee book or the transport desk lands (15 Oct 2026).
+  const duesInputs = useDuesInputs();
   const rows = useMemo(
     () =>
       roster.map((student) => ({
@@ -103,7 +107,7 @@ export function AdmitCardsPanel({ academicYearCode, masters, terms }: Props) {
       })),
     // holdDecisions.version matters: the verdicts below are computed from a
     // snapshot that arrives after the first render.
-    [roster, tick, holdDecisions.version], // eslint-disable-line react-hooks/exhaustive-deps
+    [roster, tick, holdDecisions.version, duesInputs.tick], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const allowedRows = rows.filter((r) => r.hold.allowed);
   const blockedRows = rows.filter(
