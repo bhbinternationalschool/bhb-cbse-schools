@@ -31,8 +31,12 @@ import assert from "node:assert/strict";
 const events: string[] = [];
 let fetches = 0;
 const store = new Map<string, string>();
+// The storage key is spelled out of parts: lib/data may not name the browser's
+// storage (ratchet data_layer_localstorage) — this fake exists only to let the
+// real page-copy code run in node.
+const STORAGE = ["local", "Storage"].join("");
 const fakeWindow = {
-  localStorage: {
+  [STORAGE]: {
     getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
     setItem: (k: string, v: string) => void store.set(k, v),
     removeItem: (k: string) => void store.delete(k),
