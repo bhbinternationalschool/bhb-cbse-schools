@@ -823,7 +823,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 ],
               ),
             ),
-            StaleBanner(since: _staleSince, onRetry: _load),
+            StaleBanner(since: _staleSince, onRetry: _load, bottomGap: 28),
             // Notices and news scrolling across, as on the web ERP.
             RunningStrip(
               api: widget.api,

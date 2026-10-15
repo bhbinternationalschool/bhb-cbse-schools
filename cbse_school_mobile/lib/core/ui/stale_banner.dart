@@ -7,10 +7,19 @@ import "../theme/app_theme.dart";
 /// passed off as today's, and never replaced by an empty "nothing here".
 /// Nothing at all when [since] is null.
 class StaleBanner extends StatelessWidget {
-  const StaleBanner({super.key, required this.since, required this.onRetry});
+  const StaleBanner({
+    super.key,
+    required this.since,
+    required this.onRetry,
+    this.bottomGap = 0,
+  });
 
   final DateTime? since;
   final VoidCallback onRetry;
+
+  /// Room below for a card the screen pulls up over the header (the teacher
+  /// home's attendance banner sits 20 px higher than its slot).
+  final double bottomGap;
 
   static String label(DateTime since, DateTime now, {required bool hindi}) {
     final hh = since.hour.toString().padLeft(2, "0");
@@ -33,7 +42,7 @@ class StaleBanner extends StatelessWidget {
     if (at == null) return const SizedBox.shrink();
     final hindi = Localizations.localeOf(context).languageCode == "hi";
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: EdgeInsets.fromLTRB(16, 12, 16, bottomGap),
       child: Material(
         color: ModuleTone.amber.background,
         borderRadius: BorderRadius.circular(12),

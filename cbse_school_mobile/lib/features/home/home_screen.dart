@@ -540,7 +540,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-            StaleBanner(since: _staleSince, onRetry: _load),
+            StaleBanner(since: _staleSince, onRetry: _load, bottomGap: 8),
             // Notices and news scrolling across, as on the web ERP.
             RunningStrip(
               api: widget.api,
