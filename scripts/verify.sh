@@ -558,6 +558,7 @@ SELFTESTS=(
   test:query-kernel
   test:reference-views
   test:masters-bridge
+  test:staff-requests
   # Added 2026-09-12, in CI's order, after the drift check below reported that
   # ci.yml had been running these for weeks while this script did not:
   # WhatsApp failure reasons, household numbers, audience specs, the tutor and

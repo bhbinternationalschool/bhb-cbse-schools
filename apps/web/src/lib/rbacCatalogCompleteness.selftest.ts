@@ -295,6 +295,10 @@ const PUBLIC_API_ROUTES: Record<string, string> = {
     "reference view (data-layer 1.4): any staff session, gated in lib/data/server/views.ts (requireStaffApi; parents 403, mirror secret 403); a redacted directory, no personal fields",
   "data/views/rbac":
     "reference view (data-layer 1.4): gated in lib/data/server/views.ts — requireStaffPermission(settings, view) = whole desk, other staff = own rows only (the rbac desk's rule)",
+  "data/views/staff-requests":
+    "Staff → Requests view (15 Oct 2026): any staff session, gated in lib/staffRequests.server.ts (requireStaffApi; parents 403, mirror secret 403); a manager (canManageStaffLeave with the saved roles) gets every request, anyone else only their own",
+  "staff/requests":
+    "Staff → Requests writes (15 Oct 2026): gated in lib/staffRequests.server.ts (requireStaffApi) — any member of staff raises their own; only a manager (canManageStaffLeave) assigns/resolves; mirror secret 403",
   "data/views/module-registry":
     "reference view (data-layer 1.4): any staff session, gated in lib/data/server/views.ts (requireStaffApi); which modules are switched on, no rows",
   "auth/first-login/request-otp": "sign-in: sends an OTP to a registered number",

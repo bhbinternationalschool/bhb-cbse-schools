@@ -3,6 +3,7 @@
 import { hasDeskLoaded } from "@/lib/deskHydrateGuard";
 import { ensureStaffHrHydrated } from "@/lib/staffHrPersistence";
 import { useEffect, useMemo, useState } from "react";
+import { raiseStaffRequest } from "@/lib/staffRequestsClient";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import { chatSelfFromSession } from "@/lib/erpChat";
@@ -14,7 +15,6 @@ import { loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis } from "@/lib/sis";
 import {
   computeLeaveDays,
-  createStaffRequestTicket,
   loadStaffHr,
   STAFF_REQUEST_TYPE_LABELS,
   type LeaveTypeCode,
@@ -348,9 +348,9 @@ export function StaffBroadcastButton() {
     setBusy(true);
     setError(null);
     try {
-      const r = createStaffRequestTicket({
-        staffId: selfStaff.id,
-        raisedByName: session.fullName,
+      // Saved on the server (one element through the write kernel): the
+      // office sees it on any device. Before 15 Oct it stayed in this browser.
+      const r = await raiseStaffRequest({
         type: requestType,
         subject: requestSubject.trim(),
         description: requestDescription.trim(),
@@ -822,7 +822,7 @@ export function StaffBroadcastButton() {
                     ) : null}
                     <button
                       type="button"
-                      disabled={busy || !hrReady || !requestSubject.trim()}
+                      disabled={busy || !requestSubject.trim()}
                       className="w-full rounded-lg bg-[var(--primary)] py-2 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
                       onClick={() => void submitRequest()}
                     >
