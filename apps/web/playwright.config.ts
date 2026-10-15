@@ -65,7 +65,7 @@ export default defineConfig<GateOptions>({
   projects: [
     {
       name: "desktop",
-      testIgnore: /propagation\.spec\.ts/,
+      testIgnore: /(propagation|transport-paid-month)\.spec\.ts/,
       use: { ...desktop },
     },
     {
@@ -74,6 +74,14 @@ export default defineConfig<GateOptions>({
       name: "phone-375-cpu4x",
       testMatch: /counts\.spec\.ts/,
       use: { ...devices["Pixel 7"], viewport: { width: 375, height: 812 }, cpuThrottle: 4 },
+    },
+    {
+      // Writes a transport desk and receipts (the 15 Oct paid-month case), so
+      // it runs after everything that reads the stack.
+      name: "money-writes",
+      testMatch: /transport-paid-month\.spec\.ts/,
+      dependencies: ["desktop", "phone-375-cpu4x"],
+      use: { ...desktop },
     },
     {
       // Writes to the stack, so it runs after everything that reads it.
