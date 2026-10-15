@@ -25,6 +25,15 @@ import {
   type SurveyDayAction,
 } from "@/lib/surveyDay";
 import {
+  applySurveyTeamPlan,
+  newSurveyId,
+  parseSurveyTeamOp,
+  planSurveyTeamOp,
+  readSurveyRoster,
+  surveyTeamOrNull,
+  writeFailStatus,
+} from "@/lib/surveyTeam.server";
+import {
   completeSurveyPairing,
   insertSurveyDay,
   istDateAndTime,
@@ -41,7 +50,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type Body = {
-  action?: "pair" | "status" | SurveyDayAction;
+  action?: "pair" | "status" | "team" | "manage" | SurveyDayAction;
+  /** manage: one change to the team or the beats (team leader only). */
+  change?: Record<string, unknown>;
   /** pair: the office's 6-digit code; start (school mode): the gate QR code. */
   code?: string;
   beatId?: string;
@@ -78,7 +89,7 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as Body;
     const action = body.action;
-    const allowed = ["pair", "status", "start", "break", "resume", "end", "capture"];
+    const allowed = ["pair", "status", "team", "manage", "start", "break", "resume", "end", "capture"];
     if (!action || !allowed.includes(action)) throw new ApiError("bad_request", "Unknown action", 400);
 
     const jwk = cleanJwk(body.device?.jwk);
@@ -96,7 +107,9 @@ export async function POST(request: Request) {
           ? cleanPunchCode(body.code)
           : action === "capture"
             ? String(body.family?.clientRef ?? "").slice(0, 60)
-            : "";
+            : action === "manage"
+              ? manageExtra(body.change)
+              : "";
     if (!(await verifyPunchSignature(jwk, surveyMessage({ action, extra, ts }), body.device.signature))) {
       throw new ApiError("forbidden", "This request was not signed by this phone. Reload the page and try again.", 403);
     }
@@ -146,6 +159,68 @@ export async function POST(request: Request) {
       return apiOk(await statusPayload(member, day));
     }
 
+    // ── team leader: the team and the beats, from the phone ──
+    if (action === "team" || action === "manage") {
+      if (member.role !== "leader") {
+        throw new ApiError("forbidden", "Only the survey team leader can change the team or the beats.", 403, { reason: "not_leader" });
+      }
+      const team = await surveyTeamOrNull();
+      const roster = await readSurveyRoster();
+      if (!team || !roster) throw new ApiError("server_error", "Could not read the survey team — try again.", 503);
+      if (action === "manage") {
+        const op = parseSurveyTeamOp(body.change);
+        if (!op) throw new ApiError("bad_request", "Unknown change.", 400);
+        const plan = planSurveyTeamOp(op, { kind: "leader", memberId: member.id, name: `${member.name} (team leader)` }, team, roster, new Date(), newSurveyId);
+        if (!plan.ok) throw new ApiError(plan.status === 409 ? "conflict" : plan.status === 404 ? "not_found" : plan.status === 403 ? "forbidden" : "bad_request", plan.error, plan.status);
+        const w = await applySurveyTeamPlan(plan);
+        if (!w.ok) {
+          const st = writeFailStatus(w);
+          throw new ApiError(
+            st === 409 ? "conflict" : st === 400 ? "bad_request" : "server_error",
+            st === 409 ? "Someone changed this just now — pull down to refresh and try again." : "Not saved — try again.",
+            st,
+          );
+        }
+        await writeAudit({
+          module: "admissions",
+          action: op.op === "member_remove" ? "delete" : "edit",
+          entityType: plan.collection === "admissions.survey-beats" ? "survey_beat" : "survey_member",
+          entityId: plan.id,
+          summary: plan.summary,
+          ip: meta.ip,
+          userAgent: meta.userAgent,
+        });
+      }
+      const fresh = action === "manage" ? await surveyTeamOrNull() : team;
+      if (!fresh) throw new ApiError("server_error", "Saved — but could not re-read the team. Pull down to refresh.", 503);
+      const onTeam = new Set(fresh.members.filter((m) => m.kind === "staff").map((m) => m.staffId));
+      return apiOk({
+        members: fresh.members.map((m) => ({
+          id: m.id,
+          name: m.fullName,
+          kind: m.kind,
+          role: m.role,
+          assigned: m.assigned,
+          empCode: m.empCode,
+          revision: m.revision,
+          isMe: m.id === member.id,
+        })),
+        beats: fresh.beats.map((b) => ({
+          id: b.id,
+          code: b.code,
+          name: b.name,
+          area: b.area,
+          targetHouseholds: b.targetHouseholds,
+          isActive: b.isActive,
+          revision: b.revision,
+        })),
+        staff: roster
+          .filter((r) => r.active && !onTeam.has(r.id))
+          .sort((a, b) => a.fullName.localeCompare(b.fullName))
+          .map((r) => ({ id: r.id, name: r.fullName, empCode: r.empCode })),
+      });
+    }
+
     const fixCheck = checkSurveyFix(body.geo, Date.now());
     if (!fixCheck.ok) throw new ApiError("forbidden", fixCheck.error, 403);
     const fix = fixCheck.fix;
@@ -155,7 +230,7 @@ export async function POST(request: Request) {
       const options = await loadPunchOptions();
       const gate = punchWindowState(options, Date.now());
       if (!gate.open) throw new ApiError("forbidden", punchWindowMessage(options, gate), 403, { reason: "closed" });
-      const beats = await loadSurveyBeats();
+      const beats = myBeats(member, await loadSurveyBeats());
       const beat = beats.find((b) => b.id === body.beatId);
       if (!beat) throw new ApiError("bad_request", "Choose the beat (area) you are surveying today.", 400);
       if (member.startMode === "school") {
@@ -319,8 +394,22 @@ export async function POST(request: Request) {
   }
 }
 
+/** The signed text of a team change: the op and its target, so a signature cannot be lifted onto another change. */
+function manageExtra(change: unknown): string {
+  const c = (change ?? {}) as Record<string, unknown>;
+  const target = String(c.id ?? c.staffId ?? c.name ?? "");
+  return `${String(c.op ?? "")}:${target}`.slice(0, 120);
+}
+
+/** The beats a member may start in: their own when the office set some, else every active beat. */
+function myBeats<T extends { id: string }>(member: SurveyMember, beats: T[]): T[] {
+  if (!member.beatIds.length) return beats;
+  const mine = beats.filter((b) => member.beatIds.includes(b.id));
+  return mine.length ? mine : beats;
+}
+
 async function statusPayload(member: SurveyMember, day: SurveyDay | null) {
-  const beats = await loadSurveyBeats().catch(() => []);
+  const beats = myBeats(member, await loadSurveyBeats().catch(() => []));
   const today = day ? await listSurveyDays(day.day).catch(() => null) : null;
   const mine = (today?.captures ?? []).filter((c) => c.surveyDayId === day?.id);
   let classes: { id: string; name: string }[] = [];
@@ -334,7 +423,9 @@ async function statusPayload(member: SurveyMember, day: SurveyDay | null) {
     classes = [];
   }
   return {
-    member: { name: member.name, startMode: member.startMode, kind: member.kind },
+    member: { name: member.name, startMode: member.startMode, kind: member.kind, role: member.role },
+    /** The team leader manages the team and the beats from the app. */
+    canManage: member.role === "leader",
     day: day
       ? {
           status: day.status,

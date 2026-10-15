@@ -49,7 +49,7 @@ import {
   type FeeDueLine,
   type FeesState,
 } from "@/lib/fees";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { classLabelForStudent } from "@/lib/parentPortal";
 import {
   loadSis,
@@ -67,7 +67,6 @@ type Load =
       /** Same household, same session — see siblingsOf. */
       siblings: SisStudent[];
       fees: FeesState;
-      masters: MastersState;
     }
   | { kind: "missing" }
   | { kind: "error"; message: string };
@@ -77,6 +76,10 @@ const PAYMENT_PREVIEW = 6;
 
 export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
+  // The fee structure the dues are computed from (Masters, server truth).
+  // For a teacher it is withheld — the dues are then "not shown", never ₹0.
+  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
+  const feesWithheld = mastersScope === "teaching";
   const [showAllPayments, setShowAllPayments] = useState(false);
 
   useEffect(() => {
@@ -87,9 +90,15 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
         const { ensureFeesHydrated } = await import("@/lib/feesPersistence");
         const { hydrateFeesStore } = await import("@/lib/fees");
         const { withHydrationSlot } = await import("@/lib/deskHydrateGuard");
+        // The transport desk too: transport dues are derived from it, and
+        // without it this card left out every bus month — owing or paid —
+        // whenever the profile was opened in a browser that had not visited
+        // Transport or Fee Take (found 15 Oct 2026 by the paid-month e2e).
+        const { ensureTransportHydrated } = await import("@/lib/transportPersistence");
         await Promise.all([
           withHydrationSlot(() => ensureSisHydrated()),
           withHydrationSlot(() => ensureFeesHydrated()),
+          withHydrationSlot(() => ensureTransportHydrated()),
         ]);
         await hydrateFeesStore();
         if (!alive) return;
@@ -105,7 +114,6 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
           student,
           siblings: siblingsOf(sis, student).map(normalizeStudent),
           fees: loadFees(),
-          masters: loadMasters(),
         });
       } catch (e) {
         if (!alive) return;
@@ -123,14 +131,14 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
   }, [studentId]);
 
   const summary = useMemo(() => {
-    if (load.kind !== "ready") return null;
+    if (load.kind !== "ready" || !masters || feesWithheld) return null;
     const today = istDateString();
     // Built once and shared: paidByDueKey scans the whole voucher history,
     // and a family of four would otherwise scan it four times.
     const paidMap = paidByDueKey(load.fees);
     const openDuesFor = (s: SisStudent) =>
       openFeeDues(
-        computeStudentDues(s, load.masters, load.fees, {
+        computeStudentDues(s, masters, load.fees, {
           paidMap,
           includePaid: false,
           /*
@@ -171,7 +179,7 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
         return {
           id: s.id,
           name: (s.fullName || "").trim() || "(unnamed)",
-          classLabel: classLabelForStudent(s, load.masters),
+          classLabel: classLabelForStudent(s, masters),
           admissionNo: (s.admissionNo || "").trim(),
           totalPaise: sum(rows),
           overduePaise: sum(late),
@@ -198,7 +206,7 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
       familyOverduePaise:
         sum(overdue) + siblings.reduce((t, s) => t + s.overduePaise, 0),
     };
-  }, [load]);
+  }, [load, masters, feesWithheld]);
 
   /**
    * Receipts that carry a line for THIS child.
@@ -292,7 +300,23 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
         </Link>
       </div>
 
-      {load.kind === "loading" ? (
+      {feesWithheld ? (
+        <p className="px-3 py-3 text-xs text-[var(--muted)]">
+          Fee dues are not shown to your role — ask the office.
+        </p>
+      ) : null}
+
+      {mastersError ? (
+        <p className="px-3 py-3 text-xs font-semibold text-[var(--danger)]">
+          Dues could not be read — the school&apos;s fee setup did not load ({mastersError.message}). This
+          is not a zero balance.{" "}
+          <button type="button" className="underline" onClick={() => void retryMasters()}>
+            Try again
+          </button>
+        </p>
+      ) : null}
+
+      {!feesWithheld && !mastersError && (load.kind === "loading" || (load.kind === "ready" && !masters)) ? (
         <p className="px-3 py-3 text-xs text-[var(--muted)]">Reading dues…</p>
       ) : null}
 

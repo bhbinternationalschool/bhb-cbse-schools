@@ -4,6 +4,7 @@ import "../../core/popups/app_popups.dart";
 import "../../core/ui/running_strip.dart";
 import "../../core/guide/screen_guides.dart";
 import "../../core/api/api_client.dart";
+import "../../core/ui/stale_banner.dart";
 import "../../core/theme/app_theme.dart";
 import "command_bar.dart";
 import "../modules/homework_screen.dart";
@@ -16,6 +17,7 @@ import "bus_register_screen.dart";
 import "vehicle_logbook_screen.dart";
 import "attendance_screen.dart";
 import "broadcast_screen.dart";
+import "class_gallery_screen.dart";
 import "class_message_screen.dart";
 import "ptm_teacher_screen.dart";
 import "admission_leads_screen.dart";
@@ -85,9 +87,38 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
   bool _deepLinkDone = false;
   StaffFeatureSet _features = const StaffFeatureSet.empty();
 
+  /// data-layer 4.4: set when the server could not be reached and the home
+  /// shows the copy saved at this time; the banner says so.
+  DateTime? _staleSince;
+  final _clock = RefreshClock();
+  late final _resume = ResumeWatcher(_onResume);
+  bool _featuresFresh = false;
+  bool _staffFresh = false;
+
   Future<void> _push(Widget screen) async {
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
-    if (mounted) setState(() => _refresh += 1);
+    final changed = await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => screen));
+    // The waiting counts are re-read only when that screen decided something.
+    if (mounted && changed == true) setState(() => _refresh += 1);
+  }
+
+  /// Back in front after 2 minutes or more: re-read the snapshot, tiles and
+  /// class list, so a Masters change shows without a restart.
+  void _onResume() {
+    if (mounted && _clock.isStale) _load();
+  }
+
+  /// Pull-to-refresh also re-reads the waiting counts.
+  Future<void> _pullRefresh() async {
+    setState(() => _refresh += 1);
+    await _load();
+  }
+
+  @override
+  void dispose() {
+    _resume.detach();
+    super.dispose();
   }
 
   void _openWaiting(String kind) {
@@ -225,42 +256,78 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) AppPopups.maybeShow(context, widget.api);
     });
-    _load();
+    _resume.attach();
+    _load(first: true);
   }
 
-  Future<void> _load() async {
+  /// [first]: the app just opened this home — paint the saved copy at once.
+  Future<void> _load({bool first = false}) async {
     setState(() => _error = null);
+    final name = await widget.api.guardianName();
+    if (mounted && _name == null) setState(() => _name = name);
+    if (first) {
+      // Last session's tiles and header with last session's snapshot —
+      // never over a fresh answer.
+      widget.api.cachedStaffFeatures().then((c) {
+        if (c != null && mounted && !_featuresFresh) {
+          setState(() => _features = c.value);
+        }
+      });
+      widget.api.cachedStaffSummary().then((c) {
+        if (c != null && mounted && !_staffFresh) {
+          setState(() => _staff = c.value);
+        }
+      });
+    }
+    var ok = false;
+    await loadCachedThenFresh<PrincipalSnapshot>(
+      peek: first ? widget.api.cachedPrincipalSnapshot : () async => null,
+      fetch: widget.api.fetchPrincipalSnapshot,
+      onCached: (c) {
+        if (mounted) setState(() => _snap = c.value);
+      },
+      onFresh: (snap) {
+        ok = true;
+        _clock.markFresh();
+        if (mounted) {
+          setState(() {
+            _snap = snap;
+            _staleSince = null;
+          });
+        }
+      },
+      onError: (e, since) {
+        if (!mounted) return;
+        setState(() {
+          if (_snap != null) {
+            _staleSince = since ?? _clock.lastFresh ?? DateTime.now();
+          } else {
+            _error = e is ApiException
+                ? e.message
+                : "Could not reach the school server.";
+          }
+        });
+      },
+    );
+    if (!mounted || _snap == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _consumeDeepLink();
+    });
+    if (!ok) return;
     try {
-      final name = await widget.api.guardianName();
-      final snap = await widget.api.fetchPrincipalSnapshot();
-      if (!mounted) return;
-      setState(() {
-        _snap = snap;
-        _name = name;
-        _refresh += 1;
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _consumeDeepLink();
-      });
-      try {
-        final f = await widget.api.fetchStaffFeatures();
-        if (mounted) setState(() => _features = f);
-      } catch (_) {
-        /* keep whatever we had */
-      }
-      // The header photo (and the class list the pickers need).
-      try {
-        final staff = await widget.api.fetchStaffSummary();
-        if (mounted) setState(() => _staff = staff);
-      } catch (_) {
-        /* initials, and the pickers fetch it themselves */
-      }
-    } on ApiException catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      final f = await widget.api.fetchStaffFeatures();
+      _featuresFresh = true;
+      if (mounted) setState(() => _features = f);
     } catch (_) {
-      if (mounted) {
-        setState(() => _error = "Could not reach the school server.");
-      }
+      /* keep whatever we had */
+    }
+    // The header photo (and the class list the pickers need).
+    try {
+      final staff = await widget.api.fetchStaffSummary();
+      _staffFresh = true;
+      if (mounted) setState(() => _staff = staff);
+    } catch (_) {
+      /* initials, and the pickers fetch it themselves */
     }
   }
 
@@ -315,6 +382,19 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
           label: "Message my classes",
           tone: ModuleTone.coral,
           onTap: () => _push(ClassMessageScreen(api: widget.api)),
+        ),
+      ),
+    // The school's photos: post to the whole school or any class, and
+    // decide on what the AI check held (15 Oct 2026 — the principal had no
+    // way in on the phone).
+    if (_features.has("class_gallery"))
+      (
+        "class_gallery",
+        _Action(
+          icon: Icons.photo_library_outlined,
+          label: "Gallery",
+          tone: ModuleTone.pink,
+          onTap: () => _push(ClassGalleryScreen(api: widget.api)),
         ),
       ),
     if (_features.has("ptm_meet"))
@@ -680,7 +760,7 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
 
     return Scaffold(
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: _pullRefresh,
         color: AppColors.primary,
         child: ListView(
           padding: EdgeInsets.zero,
@@ -748,6 +828,7 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
               ),
             ),
             // Notices and news scrolling across, as on the web ERP.
+            StaleBanner(since: _staleSince, onRetry: _load),
             RunningStrip(
               api: widget.api,
               onOpen: () => _push(NoticesScreen(api: widget.api)),

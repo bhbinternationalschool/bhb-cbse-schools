@@ -3,7 +3,9 @@
  * Monthly dues derived from assignments for Fee Take.
  */
 
+import { transportMonthAmount } from "@/lib/transportPaidMonths";
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { hydrateOnFirstRead } from "@/lib/deskLazyHydrate";
 import {
   DEFAULT_AY,
   SESSION_MONTHS,
@@ -1011,6 +1013,14 @@ export function loadTransport(): TransportState {
   // tables; an instance that has not hydrated yet still reads empty, which
   // is why the dues paths hydrate before they compute.
   if (typeof window === "undefined") return memoryTransportState ?? emptyTransport();
+  // In the browser, the first read on a page loads the desk (as loadFees
+  // does), and `bhb-desk-hydrated` tells listening screens to re-read. Every
+  // dues figure reads this desk through computeStudentDues; a screen that got
+  // here before anything had loaded it computed dues with no bus months in
+  // them, owing or paid (15 Oct 2026).
+  hydrateOnFirstRead("transport", () =>
+    import("@/lib/transportPersistence").then((m) => m.ensureTransportHydrated()),
+  );
   try {
     const raw2 = readCache(STORAGE_KEY);
     // A cache that could not be written (or was evicted to make room for
@@ -1144,6 +1154,11 @@ export function sessionPeriodKeys(ayCode: string): string[] {
     const year = m.month >= 4 ? start : start + 1;
     return `${year}-${String(m.month).padStart(2, "0")}`;
   });
+}
+
+/** "2026-09" → "September 2026". */
+export function transportPeriodLabel(periodKey: string): string {
+  return periodLabel(periodKey);
 }
 
 function periodLabel(periodKey: string): string {
@@ -3126,7 +3141,8 @@ export function computeTransportComplianceAlerts(options?: {
     }
 
     for (const d of dues) {
-      const paid = paidMap.get(d.dueKey) ?? 0;
+      // By child + month, not by assignment id — see transportPaidMonths.ts.
+      const paid = transportMonthAmount(paidMap, d.studentId, d.periodKey);
       const bal = Math.max(0, d.amountPaise - paid);
       if (bal > 0 && d.dueOn < asOf) {
         alerts.push({
@@ -3189,6 +3205,54 @@ export function computeTransportComplianceAlerts(options?: {
 
 /* ─── CSV ──────────────────────────────────────────────────── */
 
+/**
+ * A re-imported route's stops, keeping every stop id that can be kept.
+ *
+ * The CSV import used to assign its freshly-minted stops straight onto an
+ * existing route, giving every row a new id and orphaning every rider on it —
+ * the stop-id churn PR #214 removed from the route editor, still live on the
+ * export → edit → import round trip until 15 Oct 2026. Rows now go through
+ * `planRouteStops` (same name → same id). A CSV carries no pin, place or stop
+ * price, so a matched stop keeps its own, and its km unless the file gives one.
+ *
+ * Pure — exported for the self-test.
+ */
+export function mergeImportedStops(
+  existingStops: TransportStop[],
+  imported: TransportStop[],
+): TransportStop[] {
+  const priorById = new Map(existingStops.map((st) => [st.id, st]));
+  const rows = imported.filter((st) => st.name.trim());
+  return planRouteStops(
+    existingStops,
+    rows.map((st) => ({
+      name: st.name,
+      ...(st.distanceKm > 0
+        ? { distanceKm: st.distanceKm, distanceSource: st.distanceSource }
+        : {}),
+    })),
+  ).map((st, idx) => {
+    const prior = priorById.get(st.id);
+    if (!prior) return st;
+    const fileKm = (rows[idx]?.distanceKm ?? 0) > 0;
+    return {
+      ...prior,
+      ...st,
+      ...(fileKm
+        ? {}
+        : { distanceKm: prior.distanceKm, distanceSource: prior.distanceSource }),
+      ...(prior.geoLat != null && st.geoLat == null
+        ? { geoLat: prior.geoLat, geoLng: prior.geoLng }
+        : {}),
+      ...(prior.placeId && !st.placeId ? { placeId: prior.placeId } : {}),
+      ...(prior.geoAddress && !st.geoAddress ? { geoAddress: prior.geoAddress } : {}),
+      ...(prior.monthlyFeePaise && !st.monthlyFeePaise
+        ? { monthlyFeePaise: prior.monthlyFeePaise }
+        : {}),
+    };
+  });
+}
+
 export function importTransportRoutesCsv(text: string): {
   added: number;
   state: TransportState;
@@ -3238,7 +3302,8 @@ export function importTransportRoutesCsv(text: string): {
       existing.busNo = busNo;
       existing.vehicleReg = vehicleReg;
       existing.monthlyFeePaise = Math.max(0, monthlyFeePaise);
-      if (stops.length) existing.stops = stops;
+      // Stop ids kept — see mergeImportedStops.
+      if (stops.length) existing.stops = mergeImportedStops(existing.stops, stops);
       existing.isActive = true;
     } else {
       const route = normalizeRoute({

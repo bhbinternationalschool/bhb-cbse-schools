@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
+import { currentAcademicYearCode } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { formatInr } from "@/lib/payroll";
 import {
   applyIncrementBatch,
@@ -25,7 +27,6 @@ import {
   type IncrementPolicy,
 } from "@/lib/salaryIncrement";
 import { useDemoSession } from "@/components/shell/SessionContext";
-import type { MastersState } from "@/lib/masters";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { RowActionMenu } from "@/components/ui/erp-grid";
@@ -40,7 +41,7 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
     normalizeIncrementPolicy(null),
   );
   const [batches, setBatches] = useState<IncrementBatch[]>([]);
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [selectedId, setSelectedId] = useState<string>("");
   const [effectiveFrom, setEffectiveFrom] = useState("");
   const [tick, setTick] = useState(0);
@@ -64,7 +65,6 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
     const s = loadIncrementState();
     setPolicy(normalizeIncrementPolicy(s.policy));
     setBatches(s.batches);
-    setMasters(loadMasters());
     if (!effectiveFrom) {
       setEffectiveFrom(defaultEffectiveFrom(s.policy));
     }
@@ -109,7 +109,10 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
   }
 
   function createBatch() {
-    const m = masters || loadMasters();
+    // The screen renders only once Masters has arrived; never build a draft
+    // from the tab's page copy behind the screen's back.
+    if (!masters) return;
+    const m = masters;
     const state = loadIncrementState();
     const batch = buildIncrementDraft({
       masters: m,
@@ -156,7 +159,8 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
 
   function doIndividual(action: "draft" | "submit" | "apply") {
     if (!indStaffId) return flash("Select a staff member", true);
-    const m = masters || loadMasters();
+    if (!masters) return;
+    const m = masters;
     const r = createIndividualIncrement({
       masters: m,
       staffId: indStaffId,
@@ -290,6 +294,14 @@ export function IncrementPanel({ mode = "full" }: { mode?: Mode }) {
     const delta = inc.reduce((s, l) => s + (l.newBasic - l.oldBasic), 0);
     return { count: inc.length, delta };
   }, [selected]);
+
+  // A failed Masters read is a failure on screen (R6) — never an empty staff list.
+  if (mastersError) {
+    return <QueryError what="the staff roster and statutory setup" error={mastersError} retry={retryMasters} />;
+  }
+  if (!masters) {
+    return <p className="text-sm text-[var(--muted)]">Loading increments…</p>;
+  }
 
   return (
     <div className="space-y-4">

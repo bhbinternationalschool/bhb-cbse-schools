@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   currentMonthIso,
   formatInr,
@@ -30,7 +31,7 @@ export function BankFileExportPanel({
 }: {
   academicYearCode: string;
 }) {
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [month, setMonth] = useState(currentMonthIso);
   const [format, setFormat] = useState<BankFileFormat>("ubi_salary_upload");
   const [fileSequence, setFileSequence] = useState("");
@@ -38,10 +39,6 @@ export function BankFileExportPanel({
   const [tick, setTick] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setMasters(loadMasters());
-  }, [tick]);
 
   const monthsAvailable = useMemo(() => {
     const set = new Set<string>();
@@ -118,6 +115,12 @@ export function BankFileExportPanel({
     const r = downloadBankExceptionReport(preview);
     if (!r.ok) flash(r.error, true);
     else flash(r.message);
+  }
+
+  // A failed Masters read is a failure on screen (R6) — the bank details are
+  // the roster's; never a file built without them.
+  if (mastersError) {
+    return <QueryError what="the staff roster and bank details" error={mastersError} retry={retryMasters} />;
   }
 
   return (

@@ -18,12 +18,13 @@ export async function GET(request: Request) {
     const mine = await postableSections(ctx);
     const asked = new URL(request.url).searchParams.get("section") || "";
     const section = asked || mine.sections[0] || "";
-    // The principal and leadership decide on held items.
+    // The gallery leader (principal, office) decides on held items. A failed
+    // read is not "nothing held": heldCount is then null and the app says so.
     const canReview = mine.unrestricted;
-    const review = canReview ? await listItemsForReview().catch(() => []) : [];
-    const heldCount = review.filter((r) => r.status === "held").length;
+    const review = canReview ? await listItemsForReview().then((r) => r, () => null) : [];
+    const heldCount = review === null ? null : review.filter((r) => r.status === "held").length;
     if (!section) {
-      return apiOk({ classes: [], section: "", classLabel: "", events: [], canReview, heldCount, note: "The class gallery is for class teachers." });
+      return apiOk({ classes: [], section: "", classLabel: "", events: [], canReview, heldCount, note: "The class gallery is for class teachers, the principal and the office." });
     }
     await assertMaySection(ctx, section);
     return apiOk({

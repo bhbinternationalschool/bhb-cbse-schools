@@ -35,7 +35,7 @@ import {
   type BirthdayState,
 } from "@/lib/birthdayCards";
 import { loadSis } from "@/lib/sis";
-import { loadMasters } from "@/lib/masters";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { listApprovedTemplates, loadWaTemplates } from "@/lib/waTemplates";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { openWaMe } from "@/lib/waMe";
@@ -82,9 +82,11 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
   }, [notice]);
 
   const sis = useMemo(() => loadSis(), []);
-  const masters = useMemo(() => loadMasters(), []);
+  // Staff birthdays and the class count come from Masters (server truth; the
+  // roster is the access copy's). Until it arrives the staff list is empty.
+  const { masters, error: mastersError } = useScreenMasters();
   const upcoming = useMemo(() => upcomingBirthdays(sis.students, todayIst(), 14).filter((u) => u.date !== todayIst()).slice(0, 30), [sis.students]);
-  const upcomingStaff = useMemo(() => upcomingStaffBirthdays(masters.staff ?? [], todayIst(), 30).filter((u) => u.date !== todayIst()).slice(0, 20), [masters.staff]);
+  const upcomingStaff = useMemo(() => upcomingStaffBirthdays(masters?.staff ?? [], todayIst(), 30).filter((u) => u.date !== todayIst()).slice(0, 20), [masters?.staff]);
   const imageTemplates = useMemo(() => listApprovedTemplates(loadWaTemplates()).filter((t) => t.headerFormat === "IMAGE"), []);
 
   async function loadToday(d: string) {
@@ -164,7 +166,7 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
 
   const logToday = state.log.filter((e) => e.date === date);
   const logName = (subject: "student" | "staff", id: string) =>
-    (subject === "staff" ? masters.staff?.find((x) => x.id === id)?.fullName : sis.students.find((x) => x.id === id)?.fullName) || id;
+    (subject === "staff" ? masters?.staff?.find((x) => x.id === id)?.fullName : sis.students.find((x) => x.id === id)?.fullName) || id;
 
   // Default order is whatever the API returned; the office usually wants
   // "who has not been sent yet" first, which is one click on Status.
@@ -626,7 +628,7 @@ export function BirthdaysPanel({ canEdit }: { canEdit: boolean }) {
           </ul>
         </details>
       ) : null}
-      <p className="text-[10px] text-[var(--muted)]">Families&apos; quiet hours are respected (deferred sends are retried by the next tick). STOP opt-outs are enforced at send. Masters: {masters.classes?.length || 0} classes loaded.</p>
+      <p className="text-[10px] text-[var(--muted)]">Families&apos; quiet hours are respected (deferred sends are retried by the next tick). STOP opt-outs are enforced at send. {mastersError ? "Masters could not be loaded." : masters ? `Masters: ${masters.classes.length} classes loaded.` : "Loading Masters…"}</p>
     </div>
   );
 }
