@@ -220,6 +220,17 @@ export async function completeSurveyPairing(input: {
     return { ok: false, error: "This code was just used. Ask the office for a new one.", status: 409 };
   }
   if (ownerKey === row.member_key) return { ok: true, memberKey: row.member_key };
+  // The team view shows each member's phone: move its change signal so an
+  // open office screen shows "registered" on its next versions poll.
+  const touchTeamSignal = () =>
+    ctx.sb
+      .from("admission_survey_sync_meta")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("tenant_id", ctx.tenantId)
+      .then(
+        () => undefined,
+        () => undefined,
+      );
   await ctx.sb
     .from("staff_punch_devices")
     .update({ status: "revoked", decided_by: "replaced by pairing code", decided_at: nowIso, updated_at: nowIso })
@@ -238,6 +249,7 @@ export async function completeSurveyPairing(input: {
     last_used_at: nowIso,
   });
   if (insErr) return { ok: false, error: "Could not register this phone — try again.", status: 503 };
+  await touchTeamSignal();
   return { ok: true, memberKey: row.member_key };
 }
 
