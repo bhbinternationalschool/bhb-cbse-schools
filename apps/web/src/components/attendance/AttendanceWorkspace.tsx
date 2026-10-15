@@ -21,7 +21,9 @@ import {
   type AttendanceMark,
   type AttendanceStatus,
 } from "@/lib/attendance";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { useSyncStatus } from "@/lib/useSyncStatus";
 import { retryNow } from "@/lib/syncRetryStatus";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
@@ -99,7 +101,7 @@ export function AttendanceWorkspace() {
       setMyClassAutoDone(true);
     }
   }, []);
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
@@ -138,7 +140,6 @@ export function AttendanceWorkspace() {
     DEFAULT_AY;
 
   function refresh() {
-    setMasters(loadMasters());
     setSis(loadSis());
     setTick((x) => x + 1);
   }
@@ -534,6 +535,15 @@ export function AttendanceWorkspace() {
     } finally {
       setSaving(false);
     }
+  }
+
+  // A failed Masters read is a failure on screen — never empty pickers (R6).
+  if (mastersError) {
+    return (
+      <ErpWorkspaceShell title="Attendance" icon={<ClipboardCheck className="size-6" aria-hidden />}>
+        <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />
+      </ErpWorkspaceShell>
+    );
   }
 
   return (

@@ -233,4 +233,27 @@ test.describe("teacher, Masters read failing", () => {
       }
     });
   }
+
+  // 2.1a: /attendance reads Masters through useMasters() (the teaching subset for her).
+  test(`/attendance: views/masters 503 → "could not load" + Try again, never an empty school`, async ({ browser }) => {
+    const { context, page } = await openAs(browser, "teacher");
+    try {
+      let hits = 0;
+      await page.route("**/api/data/views/masters", (r) => {
+        hits += 1;
+        return r.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: false, error: "Could not read the school setup — please try again." }),
+        });
+      });
+      await page.goto("/attendance");
+      await expect(page.getByText(/could not load/i).first()).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+      await expect(page.getByRole("combobox", { name: "Class", exact: true })).toHaveCount(0);
+      expect(hits, "the page asked the masters view").toBeGreaterThan(0);
+    } finally {
+      await context.close();
+    }
+  });
 });

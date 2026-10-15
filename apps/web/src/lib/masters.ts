@@ -2076,6 +2076,26 @@ export function loadMasters(): MastersState {
 }
 
 /**
+ * This tab's page-memory Masters copy exactly as stored — without the
+ * read-time normalisation loadMasters applies (which can mint ids for
+ * missing fee heads on every read). Null when the tab holds none yet, when
+ * it is unreadable, or outside a browser. For the data-layer 2.1 bridge
+ * (lib/data/client/mastersBridge), which must replace the stored copy's
+ * book and nothing else.
+ */
+export function readMastersPageCopyRaw(): MastersState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = readCache(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as MastersState | null;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A real tenant gets an empty shell, never generated demo masters: the ids in
  * defaultMasters() are freshly random, so anything saved against them dangles.
  * Applies on both sides — the server has the same NEXT_PUBLIC_SUPABASE_* env

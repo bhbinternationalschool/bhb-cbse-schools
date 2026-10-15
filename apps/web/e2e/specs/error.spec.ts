@@ -88,3 +88,46 @@ for (const p of PAGES) {
     await metric(testInfo, "error", { page: p.path, failureShownAfterMs: shownAfterMs });
   });
 }
+
+/**
+ * The same rule for the screens that read Masters through useMasters()
+ * (data-layer 2.1a): GET /api/data/views/masters failing must show
+ * "could not load" + Try again and no class picker — while masters-desk (the
+ * old hydrate CoreDataGate waits for) answers normally, so only the new read
+ * is failing. On origin/main before 2.1a these screens never asked the view:
+ * the intercept saw no request and the page drew its pickers.
+ */
+async function failMastersView(page: Page): Promise<() => Promise<void>> {
+  const pattern = "**/api/data/views/masters";
+  let hits = 0;
+  await page.route(pattern, (route) => {
+    hits += 1;
+    return route.fulfill({ status: 503, contentType: "application/json", body: FAILED_READ });
+  });
+  return async () => {
+    expect(hits, "the page asked the masters view at least once").toBeGreaterThan(0);
+    await page.unroute(pattern);
+  };
+}
+
+for (const p of PAGES.filter((x) => x.path !== "/masters")) {
+  test(`office ${p.path}: views/masters 503 shows "could not load" + Try again, not empty pickers; Try again recovers`, async ({ page }, testInfo) => {
+    const lift = await failMastersView(page);
+    const t0 = Date.now();
+    await page.goto(p.path);
+    await test.step("the failure is shown", async () => {
+      await expect(page.getByText(/could not load/i).first()).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+    });
+    const shownAfterMs = Date.now() - t0;
+    await test.step("no class picker is drawn from a failed read", async () => {
+      await expect(page.getByRole("combobox", { name: "Class", exact: true })).toHaveCount(0);
+    });
+    await test.step("Try again (read restored) brings the school back without a reload", async () => {
+      await lift();
+      await page.getByRole("button", { name: "Try again" }).click();
+      await p.afterRecovery(page);
+    });
+    await metric(testInfo, "error", { page: p.path, read: "views/masters", failureShownAfterMs: shownAfterMs });
+  });
+}
