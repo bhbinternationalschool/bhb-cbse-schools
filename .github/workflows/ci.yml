@@ -622,6 +622,7 @@ jobs:
           npm run test:transport-shifts
           npm run test:transport-phone-empty-desk
           npm run test:transport-stop-links
+          npm run test:transport-paid-months
           npm run test:transport-boarding-log
           npm run test:transport-fuel-register
           npm run test:transport-vehicle-costs
@@ -685,6 +686,7 @@ jobs:
           npm run test:reference-views
           npm run test:masters-bridge
           npm run test:staff-requests
+          npm run test:survey-team-plan
 
   build:
     name: Production build

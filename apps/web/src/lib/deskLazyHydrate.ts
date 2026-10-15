@@ -28,6 +28,15 @@ export function hydrateOnFirstRead(id: string, run: () => Promise<unknown>): voi
   }, 0);
 }
 
+/**
+ * Let the next read start the load again. A load that RESOLVED without
+ * loading (the ensure* calls return false on a failed read rather than
+ * throw) stays "started", so a screen offering "Try again" calls this first.
+ */
+export function forgetFirstRead(id: string): void {
+  started.delete(id);
+}
+
 /** Tests only. */
 export function resetLazyHydrateForTests(): void {
   started.clear();

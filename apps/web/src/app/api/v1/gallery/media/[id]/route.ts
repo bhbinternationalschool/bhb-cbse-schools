@@ -54,7 +54,7 @@ export async function GET(request: Request, rctx: RouteCtx) {
       if (!media || media.reviewStatus === "removed") throw new ApiError("not_found", "Not found", 404);
       if (media.evicted && media.driveFileId) return fromDrive(media.driveFileId, request);
       if (!media.path) throw new ApiError("not_found", "Not found", 404);
-      return NextResponse.redirect(await signedMediaUrl(media.path), { status: 302, headers: { "Cache-Control": "private, no-store" } });
+      return NextResponse.redirect(await signedMediaUrl(media.path, media.bucket), { status: 302, headers: { "Cache-Control": "private, no-store" } });
     }
 
     const ctx = await resolveApiAuth(request);
@@ -63,7 +63,8 @@ export async function GET(request: Request, rctx: RouteCtx) {
     // Staff see an item while it is checked or held (the principal decides on
     // it); a parent only once it passed.
     let allowed = ctx.session.persona === "staff" && media.reviewStatus !== "removed";
-    if (!allowed && ctx.session.persona === "parent" && media.reviewStatus === "ok") {
+    // …and only in an album the school has published (a draft is the office's).
+    if (!allowed && ctx.session.persona === "parent" && media.reviewStatus === "ok" && media.albumPublished) {
       // The session's household only; a parent session without one is
       // refused here rather than falling through to "not allowed".
       const householdId = requireParentHousehold(ctx);
@@ -87,7 +88,7 @@ export async function GET(request: Request, rctx: RouteCtx) {
         expiresInSec: 600,
       });
     }
-    const link = await signedMediaUrl(media.path);
+    const link = await signedMediaUrl(media.path, media.bucket);
     if (wantLink) return apiOk({ url: link, expiresInSec: 600 });
     return NextResponse.redirect(link, { status: 302, headers: { "Cache-Control": "private, no-store" } });
   } catch (e) {

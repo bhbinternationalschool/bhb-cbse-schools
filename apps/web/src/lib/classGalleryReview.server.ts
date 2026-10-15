@@ -50,12 +50,36 @@ async function openStored(path: string): Promise<{ stream: ReadableStream<Uint8A
   return { stream: res.body, bytes };
 }
 
+/**
+ * CLASS_GALLERY_AI_STUB=ok|hold answers the check on the local e2e stack
+ * (E2E=1 and a 127.0.0.1 Supabase URL) — never anywhere else, so a stray env
+ * var on Cloud Run cannot pass an item unchecked.
+ */
+function e2eModerationStub(): "ok" | "hold" | "" {
+  const v = process.env.CLASS_GALLERY_AI_STUB;
+  if (v !== "ok" && v !== "hold") return "";
+  if (process.env.E2E !== "1") return "";
+  if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.NEXT_PUBLIC_SUPABASE_URL || "")) return "";
+  return v;
+}
+
 /** Ask Gemini about one stored file. ok:false = no answer (try again later), never a pass. */
 export async function checkClassMedia(
   path: string,
   mimeType: string,
   deadline: number,
 ): Promise<{ ok: true; verdict: Verdict } | { ok: false; error: string }> {
+  const stub = e2eModerationStub();
+  if (stub) {
+    // The local test stack only: the file must still be readable, then the
+    // stub's verdict stands in for Gemini's.
+    const file = await openStored(path);
+    if (!file) return { ok: false, error: "The file could not be read from storage" };
+    // Read it through (a test file is small): what the stack served must be the whole file.
+    const got = (await new Response(file.stream).arrayBuffer()).byteLength;
+    if (got !== file.bytes) return { ok: false, error: "The file could not be read from storage" };
+    return { ok: true, verdict: stub === "ok" ? { verdict: "ok", reason: "" } : { verdict: "hold", reason: "Held by the test stack's AI stub" } };
+  }
   const key = geminiApiKey();
   if (!key) return { ok: false, error: "GEMINI_API_KEY not configured" };
   const file = await openStored(path);
