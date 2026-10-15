@@ -48,8 +48,19 @@ export const pct = (xs: number[], p: number): number =>
 export type HttpResult = { status: number; body: unknown; text: string; ms: number };
 
 export async function get(url: string, headers: Record<string, string> = {}): Promise<HttpResult> {
-  const t0 = performance.now();
-  const res = await fetch(url, { headers, redirect: "manual" });
+  let t0 = performance.now();
+  let res: Response;
+  try {
+    res = await fetch(url, { headers, redirect: "manual" });
+  } catch (e) {
+    // A kept-alive socket the server had just closed (ECONNRESET before any
+    // answer): the request never reached a handler, so it is sent once more.
+    // Anything else — or a second failure — is a real failure.
+    const code = (e as { cause?: { code?: string } }).cause?.code;
+    if (code !== "ECONNRESET" && code !== "UND_ERR_SOCKET") throw e;
+    t0 = performance.now();
+    res = await fetch(url, { headers, redirect: "manual" });
+  }
   const text = await res.text();
   const ms = performance.now() - t0;
   let body: unknown = null;
