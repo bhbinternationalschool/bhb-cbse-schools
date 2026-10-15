@@ -6,7 +6,9 @@ import Link from "next/link";
 import { Wallet } from "lucide-react";
 import { pushToast } from "@/components/shell/Toast";
 import { isVisitingStaff } from "@/lib/visitingPay";
-import { loadMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
+import { currentAcademicYearCode, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { UpiPayButton, type UpiPaid } from "@/components/payments/UpiPayButton";
 import { recordUpiProof, useRecordedUpiProofs } from "@/lib/upiProofsClient";
@@ -168,7 +170,11 @@ export function PayrollWorkspace() {
   const session = useDemoSession();
   const readOnly = useSessionReadOnly();
   const ay = session.academicYearCode || currentAcademicYearCode();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // The server's Masters (statutory setup) + the access copy's full staff
+  // records (salary links, bank, PF/ESI) — useScreenMasters. A Masters or
+  // roster change reaches the open screen without a 'bhb-masters-updated'
+  // listener.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [runs, setRuns] = useState<PayrollRun[]>([]);
   const [tab, setTab] = useState<PayTab>("dashboard");
 
@@ -216,7 +222,6 @@ export function PayrollWorkspace() {
   const [setupReset, setSetupReset] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
-    setMasters(loadMasters());
     // Newest month first. The store is insertion-ordered (and a server
     // reload has no ORDER BY), so the list read in whatever order runs were
     // created or fetched (director, 8 Oct 2026: dated lists in date order).
@@ -232,15 +237,6 @@ export function PayrollWorkspace() {
     dateOf: (r) => r.month,
     storageKey: "payroll.runs",
   });
-
-  // The staff roster can land after this screen mounts (the shell waits for
-  // it at most 5 s); re-read Masters when it does, or the staff picker and
-  // "due" counts stay empty.
-  useEffect(() => {
-    const onMasters = () => setTick((t) => t + 1);
-    window.addEventListener("bhb-masters-updated", onMasters);
-    return () => window.removeEventListener("bhb-masters-updated", onMasters);
-  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -987,6 +983,9 @@ export function PayrollWorkspace() {
         ];
 
   useEffect(() => {
+    // Who may see which tab is decided from Masters (the roster): while it
+    // is unknown, decide nothing — "not allowed yet" is not "not allowed".
+    if (!masters) return;
     if (allowed) return;
     if (fnTabs.includes(tab)) return;
     if (fnTabs.length > 0 && tab === "dashboard") {
@@ -998,7 +997,21 @@ export function PayrollWorkspace() {
       return;
     }
     if (!advancesDesk && tab !== "mine" && tab !== "myAdvances") setTab("mine");
-  }, [allowed, advancesDesk, fnTabs, tab]);
+  }, [masters, allowed, advancesDesk, fnTabs, tab]);
+
+  // A failed Masters read is a failure on screen (R6) — never "My salary" for
+  // an office user because the roster could not be read.
+  if (mastersError || !masters) {
+    return (
+      <ErpWorkspaceShell title="Payroll" icon={<Wallet className="size-6" aria-hidden />}>
+        {mastersError ? (
+          <QueryError what="the staff roster and statutory setup" error={mastersError} retry={retryMasters} />
+        ) : (
+          <p className="text-sm text-[var(--muted)]">Loading payroll…</p>
+        )}
+      </ErpWorkspaceShell>
+    );
+  }
 
   return (
     <ErpWorkspaceShell
