@@ -41,9 +41,9 @@ test("a request raised in one browser reaches the approver in another, and the d
       await a.page.getByRole("button", { name: "Raise a request" }).click();
       await a.page.getByPlaceholder("Subject (short)").fill(subject);
       await a.page.getByPlaceholder("Details…").fill("The bulb went this morning.");
-      const saved = a.page.waitForResponse((r) => r.url().endsWith("/api/staff/requests") && r.request().method() === "POST");
+      // The old code said "Request filed" too — it had only written this
+      // browser's copy. What counts is the next step, in the other browser.
       await a.page.getByRole("button", { name: "Submit request" }).click();
-      expect((await saved).status()).toBe(200);
       await expect(a.page.getByText("Request filed")).toBeVisible();
     });
 
