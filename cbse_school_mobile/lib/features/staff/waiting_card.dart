@@ -36,7 +36,9 @@ class _WaitingCardState extends State<WaitingCard> {
     // After that the card re-reads only when the home bumps [refreshKey]:
     // a decision screen closed with `true`, or a pull-to-refresh.
     widget.api.cachedApprovals().then((c) {
-      if (c != null && mounted && _data == null) setState(() => _data = c.value);
+      if (c != null && mounted && _data == null) {
+        setState(() => _data = c.value);
+      }
     });
     _load();
   }

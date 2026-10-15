@@ -4,6 +4,7 @@ import "package:url_launcher/url_launcher.dart";
 import "package:video_compress/video_compress.dart";
 
 import "../../core/api/api_client.dart";
+import "../../core/ui/thumb_size.dart";
 import "../../core/theme/app_theme.dart";
 
 /// Class gallery (director, 10 Oct 2026): the class teacher takes photos and
@@ -307,6 +308,7 @@ class _Cover extends StatelessWidget {
                 width: 48,
                 height: 48,
                 fit: BoxFit.cover,
+                cacheWidth: thumbCacheWidth(context, 48, slack: 2),
                 errorBuilder: (_, _, _) => box,
               ),
             ),
@@ -831,6 +833,10 @@ class _ClassReviewScreenState extends State<ClassReviewScreen> {
                                     height: 220,
                                     width: double.infinity,
                                     fit: BoxFit.cover,
+                                    cacheWidth: thumbCacheWidth(
+                                      context,
+                                      MediaQuery.sizeOf(context).width,
+                                    ),
                                     errorBuilder: (_, _, _) => const SizedBox(
                                       height: 80,
                                       child: Center(

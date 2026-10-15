@@ -33,13 +33,15 @@ class TimeoutClient extends http.BaseClient {
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
-    final res = await inner.send(request).timeout(
-      timeout,
-      onTimeout: () => throw TimeoutException(
-        "No reply from ${request.url.path} in ${timeout.inSeconds}s",
-        timeout,
-      ),
-    );
+    final res = await inner
+        .send(request)
+        .timeout(
+          timeout,
+          onTimeout: () => throw TimeoutException(
+            "No reply from ${request.url.path} in ${timeout.inSeconds}s",
+            timeout,
+          ),
+        );
     return http.StreamedResponse(
       res.stream.timeout(
         timeout,
