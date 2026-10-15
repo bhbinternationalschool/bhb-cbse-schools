@@ -33,7 +33,8 @@ import {
   loadAttendanceRules,
   ruleForStaff,
 } from "@/lib/staffAttendanceRules";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   approvedLeaveOn,
   cancelRegisterLeave,
@@ -90,7 +91,9 @@ type AttTab =
 
 export function StaffAttendancePanel({ ay }: { ay: string }) {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // The roster on this panel is the access copy's (useScreenMasters): it
+  // follows the staff hydrate below through the access data's change signal.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [date, setDate] = useState(todayIso);
   const [marks, setMarks] = useState<StaffAttendanceMark[]>([]);
   const [remark, setRemark] = useState("");
@@ -122,10 +125,6 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     () => normalizeAttendanceSettings(attState.settings),
     [attState],
   );
-
-  useEffect(() => {
-    setMasters(loadMasters());
-  }, [tick]);
 
   useEffect(() => {
     void (async () => {
@@ -770,6 +769,9 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
         : []),
   ];
 
+  if (mastersError) {
+    return <QueryError what="the school's staff and holidays" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters) {
     return <p className="text-sm text-[var(--muted)]">Loading attendance…</p>;
   }

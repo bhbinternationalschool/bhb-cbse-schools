@@ -16,11 +16,12 @@ import {
   type AttendanceExceptionKind,
   type AttendancePolicy,
 } from "@/lib/attendance";
-import { loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import { hasPermission } from "@/lib/rbac";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 
 const KIND_FILTERS: { value: "" | AttendanceExceptionKind; label: string }[] = [
   { value: "", label: "All kinds" },
@@ -33,7 +34,7 @@ const KIND_FILTERS: { value: "" | AttendanceExceptionKind; label: string }[] = [
 
 export function AttendanceExceptionsPanel({ ay }: { ay: string }) {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [tick, setTick] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
@@ -52,7 +53,6 @@ export function AttendanceExceptionsPanel({ ay }: { ay: string }) {
   const [disputeDetail, setDisputeDetail] = useState("");
 
   function refresh() {
-    setMasters(loadMasters());
     setSis(loadSis());
     setPolicyDraft(getAttendancePolicy());
     setTick((x) => x + 1);
@@ -176,6 +176,10 @@ export function AttendanceExceptionsPanel({ ay }: { ay: string }) {
       .sort((a, b) => a.fullName.localeCompare(b.fullName))
       .slice(0, 400);
   }, [sis, ay]);
+
+  if (mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
 
   return (
     <div className="space-y-4">

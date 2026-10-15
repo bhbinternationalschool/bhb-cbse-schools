@@ -44,7 +44,9 @@ import {
   weekdayHolidayBadge,
 } from "@/lib/timetableCalendar";
 import { WEEKDAY_LABELS } from "@/lib/schoolTiming";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   examBlockAt,
   examBlocksForClassDate,
@@ -100,7 +102,7 @@ const TIMETABLE_TABS: ModuleTabItem[] = [
 export function TimetableWorkspace() {
   const session = useDemoSession();
   const [tab, setTab] = useState<TtTab>("class");
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: refetchMasters } = useScreenMasters();
   const [state, setState] = useState<TimetableState | null>(null);
   const [tick, setTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -134,10 +136,7 @@ export function TimetableWorkspace() {
   }, [masters, ay]);
 
   function refresh() {
-    const m = loadMasters();
-    ensureTimetableWeekdaysFromMasters(m);
     const t = loadTimetable();
-    setMasters(m);
     setState(t);
     setBellDraft(t.bellTemplate);
     setWeekdaysDraft(t.workingWeekdays);
@@ -156,6 +155,24 @@ export function TimetableWorkspace() {
       if (changed) refresh();
     })();
   }, []);
+
+  // A timetable never edited takes its working weekdays from Masters' school
+  // timing (a local-only write, lib/timetableCalendar). It used to run inside
+  // every refresh() with a fresh page-copy read; Masters now arrives through
+  // useScreenMasters, so it runs when Masters (or the timetable) arrives.
+  useEffect(() => {
+    if (!masters) return;
+    const before = loadTimetable().workingWeekdays.join(",");
+    ensureTimetableWeekdaysFromMasters(masters);
+    if (loadTimetable().workingWeekdays.join(",") !== before) refresh();
+    // A second pass after that refresh is a no-op: the weekdays are no longer the default.
+  }, [masters, state]);
+
+  /** After a panel saved Masters (Subject rules' periods/week): show the saved value now, not at the next poll. */
+  function refreshAfterMastersSave() {
+    refresh();
+    void refetchMasters();
+  }
 
   useEffect(() => {
     if (!ayBounds.startsOn && !ayBounds.endsOn) return;
@@ -603,6 +620,15 @@ export function TimetableWorkspace() {
     [state, ay],
   );
 
+  // A failed Masters read is a failure on screen — never empty pickers (R6).
+  if (mastersError) {
+    return (
+      <ErpWorkspaceShell title="Timetable" icon={<CalendarClock className="size-6" aria-hidden />}>
+        <QueryError what="the school's classes, subjects and staff" error={mastersError} retry={refetchMasters} />
+      </ErpWorkspaceShell>
+    );
+  }
+
   return (
     <ErpWorkspaceShell
       title="Timetable"
@@ -860,7 +886,7 @@ export function TimetableWorkspace() {
 
       {tab === "rules" && masters && state ? (
         <div className="mt-5" key={`rules-${tick}`}>
-          <SubjectRulesPanel masters={masters} state={state} ay={ay} canEdit={canEdit} onSaved={refresh} flash={flash} />
+          <SubjectRulesPanel masters={masters} state={state} ay={ay} canEdit={canEdit} onSaved={refreshAfterMastersSave} flash={flash} />
         </div>
       ) : null}
 
