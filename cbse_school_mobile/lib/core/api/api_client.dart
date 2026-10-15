@@ -2996,6 +2996,9 @@ class ApiClient {
     "/api/v1/staff/class-gallery/complete",
     "/api/v1/staff/broadcast",
     "/api/v1/owner/broadcast",
+    // 35 s once in production (7 days to 15 Oct). No screen calls it today;
+    // listed so a future caller does not inherit the 30 s deadline.
+    "/api/v1/comms/unknown-logins",
   };
 
   http.Client _clientFor(String path) =>

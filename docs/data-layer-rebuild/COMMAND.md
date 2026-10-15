@@ -1059,9 +1059,25 @@ gap in the body — 30 s, not the 15 s planned above, because a cold Cloud Run i
 whole-school mirror before answering any `/api/v1` route (14 Oct 18:55–21:15 IST:
 `homework/feed` 15.7 s once in 76 calls, `principal/snapshot` p95 6.2 s, `owner/anomalies` 6.2 s);
 lower `TimeoutClient.standard` to 15 s once the `ensureSchoolMirrorHydrated` ratchet under
-`app/api/v1` reaches 0 in Phase 4 (a Timer per gap, not `Stream.timeout`, which FakeAsync does not drive); 120 s for
+`app/api/v1` reaches 0 in Phase 4. Evidence for 30 s — Cloud Run, 7 days to 15 Oct, requests > 10 s on
+`/api/v1/*`, slowest seen:
+
+| Route | Method | Max |
+|---|---|---|
+| `principal/snapshot` | GET | 26 s |
+| `owner/anomalies` | GET | 26 s |
+| `homework/feed` | GET | 25 s |
+| `comms/feed` | GET | 25 s |
+| `parent/attendance` | GET | 24 s |
+| `app/popups` | GET | 23 s |
+| `homework/post` | POST | 46 s (slow list, 120 s) |
+| `comms/unknown-logins` | POST | 35 s (added to the slow list; no app screen calls it today) |
+| `profile/document` | POST multipart | 80 s (upload client, 5 min) |
+
+Every GET stays ≤ 26 s, so 30 s covers today's cold starts. The body deadline is a Timer per
+gap (not `Stream.timeout`, which FakeAsync does not drive). 120 s for
 `ApiClient._slowPaths` (command desk, lesson plan, syllabus scan/import, homework post,
-class-gallery complete, staff/owner broadcast); 5 min for multipart uploads; 30 min for the class
+class-gallery complete, staff/owner broadcast, comms/unknown-logins); 5 min for multipart uploads; 30 min for the class
 video PUT straight to storage. Every `http.get/post/patch/delete` and `req.send()` in
 `lib/core/api/*` now goes through it. Not moved: `_aiPost` and the tutor SSE stream keep their own
 per-call client (cancellable; `_aiPost` already had 150 s), and `app_update_gate.dart` (10 s, own
