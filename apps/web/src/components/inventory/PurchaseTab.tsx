@@ -46,6 +46,7 @@ import {
   type InvPurchaseOrder,
 } from "@/lib/inventory/types";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { MonthGroupedTbody, useMonthGroups } from "@/components/ui/month-grouped-rows";
 
 type Section = "orders" | "receive" | "bills" | "returns";
 
@@ -234,6 +235,16 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
   }
 
   const list = orders.data ?? [];
+  // Folded by the IST month of the order date, newest open. The status
+  // picker chooses which register to read (it is the default view, not a
+  // search), so it does not force every month open; a month holding an
+  // order still awaiting approval does start open.
+  const orderMonths = useMonthGroups({
+    rows: list,
+    dateOf: (o) => o.orderDate,
+    storageKey: "store.purchaseOrders",
+    needsAttention: (o) => o.status === "pending_approval",
+  });
 
   return (
     <div className="space-y-3">
@@ -289,12 +300,18 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
                 <th className="px-3 py-2 text-right font-medium" />
               </tr>
             </ErpTableHead>
-            <ErpTableBody hoverable>
-              {list.map((o) => {
+            <MonthGroupedTbody
+              month={orderMonths}
+              colSpan={6}
+              rowKey={(o) => o.id}
+              countLabel={(n) => `${n} ${n === 1 ? "order" : "orders"}`}
+              hoverable
+              summary={(os) => formatPaise(os.reduce((s, o) => s + o.totalPaise, 0))}
+              renderRow={(o) => {
                 const ordered = o.lines.reduce((s, l) => s + l.qty, 0);
                 const received = o.lines.reduce((s, l) => s + l.qtyReceived, 0);
                 return (
-                  <tr key={o.id}>
+                  <tr>
                     <td className="px-3 py-2">
                       <div className="font-mono text-xs">{o.poNo}</div>
                       <div className="text-[11px] text-muted-foreground">
@@ -366,8 +383,8 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
                     </td>
                   </tr>
                 );
-              })}
-            </ErpTableBody>
+              }}
+            />
           </ErpTable>
         </ErpTableShell>
       )}
@@ -766,6 +783,12 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
   // below so the live table reads as "what we actually hold".
   const list = all.filter((g: InvGrn) => g.status !== "void");
   const cancelledList = all.filter((g: InvGrn) => g.status === "void");
+  // Folded by the IST month goods arrived, newest open.
+  const grnMonths = useMonthGroups({
+    rows: list,
+    dateOf: (g) => g.receiptDate,
+    storageKey: "store.goodsReceived",
+  });
 
   return (
     <div className="space-y-3">
@@ -822,11 +845,16 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
                 <th className="px-3 py-2" />
               </tr>
             </ErpTableHead>
-            <ErpTableBody hoverable>
-              {list.map((g: InvGrn) => {
+            <MonthGroupedTbody
+              month={grnMonths}
+              colSpan={7}
+              rowKey={(g) => g.id}
+              countLabel={(n) => `${n} ${n === 1 ? "receipt" : "receipts"}`}
+              hoverable
+              renderRow={(g) => {
                 const voided = g.status === "void";
                 return (
-                  <tr key={g.id} className={voided ? "opacity-60" : undefined}>
+                  <tr className={voided ? "opacity-60" : undefined}>
                     <td className="px-3 py-2">
                       <div className="font-mono text-xs">
                         {g.grnNo}
@@ -915,8 +943,8 @@ function ReceiveSection({ boot }: { boot: InvBootstrap }) {
                     </td>
                   </tr>
                 );
-              })}
-            </ErpTableBody>
+              }}
+            />
           </ErpTable>
         </ErpTableShell>
       )}
@@ -1459,6 +1487,15 @@ function BillsSection() {
     () => allBills.filter((b) => b.status === "cancelled"),
     [allBills],
   );
+  // Folded by the IST month of the bill date, newest open. The Unpaid /
+  // Paid / All picker is the register being read, not a search; a month
+  // holding an overdue bill starts open so money owed is never folded away.
+  const billMonths = useMonthGroups({
+    rows: list,
+    dateOf: (b) => b.billDate,
+    storageKey: "store.vendorBills",
+    needsAttention: (b) => b.overdueDays > 0 && b.balancePaise > 0,
+  });
   const totals = useMemo(
     () => ({
       outstanding: list.reduce((s, b) => s + b.balancePaise, 0),
@@ -1551,9 +1588,15 @@ function BillsSection() {
                 <th className="px-3 py-2 text-right font-medium" />
               </tr>
             </ErpTableHead>
-            <ErpTableBody hoverable>
-              {list.map((b) => (
-                <tr key={b.id}>
+            <MonthGroupedTbody
+              month={billMonths}
+              colSpan={7}
+              rowKey={(b) => b.id}
+              countLabel={(n) => `${n} ${n === 1 ? "bill" : "bills"}`}
+              hoverable
+              summary={(bs) => `${formatPaise(bs.reduce((s, b) => s + b.balancePaise, 0))} due`}
+              renderRow={(b) => (
+                <tr>
                   <td className="px-3 py-2">
                     <div className="font-mono text-xs">{b.billNo}</div>
                     <div className="text-[11px] text-muted-foreground">
@@ -1612,8 +1655,8 @@ function BillsSection() {
                     ) : null}
                   </td>
                 </tr>
-              ))}
-            </ErpTableBody>
+              )}
+            />
           </ErpTable>
         </ErpTableShell>
       )}
@@ -1778,6 +1821,12 @@ function ReturnsSection({ boot }: { boot: InvBootstrap }) {
   }
 
   const list = returns.data ?? [];
+  // Folded by the IST month of the return date, newest open.
+  const returnMonths = useMonthGroups({
+    rows: list,
+    dateOf: (r) => r.returnDate,
+    storageKey: "store.purchaseReturns",
+  });
 
   return (
     <div className="space-y-3">
@@ -1825,9 +1874,15 @@ function ReturnsSection({ boot }: { boot: InvBootstrap }) {
                 <th className="px-3 py-2 text-right font-medium">Value</th>
               </tr>
             </ErpTableHead>
-            <ErpTableBody hoverable>
-              {list.map((r) => (
-                <tr key={r.id}>
+            <MonthGroupedTbody
+              month={returnMonths}
+              colSpan={5}
+              rowKey={(r) => r.id}
+              countLabel={(n) => `${n} ${n === 1 ? "return" : "returns"}`}
+              hoverable
+              summary={(rs) => formatPaise(rs.reduce((s, r) => s + r.totalPaise, 0))}
+              renderRow={(r) => (
+                <tr>
                   <td className="px-3 py-2">
                     <div className="font-mono text-xs">{r.returnNo}</div>
                     <div className="text-[11px] text-muted-foreground">
@@ -1841,8 +1896,8 @@ function ReturnsSection({ boot }: { boot: InvBootstrap }) {
                     {formatPaise(r.totalPaise)}
                   </td>
                 </tr>
-              ))}
-            </ErpTableBody>
+              )}
+            />
           </ErpTable>
         </ErpTableShell>
       )}

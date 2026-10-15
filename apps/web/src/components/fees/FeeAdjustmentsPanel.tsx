@@ -34,6 +34,7 @@ import { ManualPreviousDuePanel } from "@/components/fees/ManualPreviousDuePanel
 import { BulkPreviousDueByClassPanel } from "@/components/fees/BulkPreviousDueByClassPanel";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { bulkWaiverPlan } from "@/lib/feeAdjustmentsMerge";
+import { MonthGroupedList, useMonthGroups } from "@/components/ui/month-grouped-rows";
 
 export function FeeAdjustmentsPanel({
   onChanged,
@@ -47,6 +48,19 @@ export function FeeAdjustmentsPanel({
   const [query, setQuery] = useState("");
   const [studentId, setStudentId] = useState("");
   const [rows, setRows] = useState<FeeAdjustment[]>([]);
+  // Every adjustment, newest first, folded by the IST month it was made.
+  // The list used to show the first 30 in storage order, undated. A month
+  // holding one still awaiting approval starts open.
+  const sortedRows = useMemo(
+    () => [...rows].sort((x, y) => (y.createdAt || "").localeCompare(x.createdAt || "")),
+    [rows],
+  );
+  const adjustmentMonths = useMonthGroups({
+    rows: sortedRows,
+    dateOf: (a) => a.createdAt,
+    storageKey: "fees.adjustments",
+    needsAttention: (a) => a.status === "pending_approval",
+  });
   const [notice, setNotice] = useState<string | null>(null);
 
   /** "bulk_waiver" is a form mode, not a stored type: it writes many waivers. */
@@ -675,41 +689,50 @@ export function FeeAdjustmentsPanel({
         <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
           Recent adjustments
         </h3>
-        <ul className="mt-2 divide-y divide-[rgba(32,48,80,0.08)] text-sm">
-          {rows.slice(0, 30).map((a) => (
-            <li
-              key={a.id}
-              className="flex flex-wrap items-center justify-between gap-2 py-2"
-            >
-              <div>
-                <div className="font-medium text-[var(--brand-deep)]">
-                  {feeAdjustmentTypeLabel(a.type)} · {a.label}
+        <div className="mt-2 text-sm">
+          <MonthGroupedList
+            month={adjustmentMonths}
+            rowKey={(a) => a.id}
+            countLabel={(n) => `${n} ${n === 1 ? "adjustment" : "adjustments"}`}
+            listClassName="divide-y divide-[rgba(32,48,80,0.08)]"
+            flush
+            empty={
+              <p className="py-6 text-center text-[var(--muted)]">
+                No adjustments yet
+              </p>
+            }
+            renderItem={(a) => (
+              <li
+                className="flex flex-wrap items-center justify-between gap-2 py-2"
+              >
+                <div>
+                  <div className="font-medium text-[var(--brand-deep)]">
+                    {feeAdjustmentTypeLabel(a.type)} · {a.label}
+                  </div>
+                  <div className="text-xs text-[var(--muted)]">
+                    {sis?.students.find((s) => s.id === a.studentId)?.fullName} ·{" "}
+                    {a.status} · {formatInr(a.amountPaise)} · {a.createdBy}
+                    {a.createdAt && Number.isFinite(Date.parse(a.createdAt))
+                      ? ` · ${new Date(a.createdAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}`
+                      : ""}
+                  </div>
                 </div>
-                <div className="text-xs text-[var(--muted)]">
-                  {sis?.students.find((s) => s.id === a.studentId)?.fullName} ·{" "}
-                  {a.status} · {formatInr(a.amountPaise)} · {a.createdBy}
-                </div>
-              </div>
-              {a.status === "posted" || a.status === "pending_approval" ? (
-                <button
-                  type="button"
-                  className="text-xs font-medium text-[var(--danger)]"
-                  onClick={() => {
-                    voidFeeAdjustment(a.id, session.fullName);
-                    refresh();
-                  }}
-                >
-                  Void
-                </button>
-              ) : null}
-            </li>
-          ))}
-          {rows.length === 0 ? (
-            <li className="py-6 text-center text-[var(--muted)]">
-              No adjustments yet
-            </li>
-          ) : null}
-        </ul>
+                {a.status === "posted" || a.status === "pending_approval" ? (
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-[var(--danger)]"
+                    onClick={() => {
+                      voidFeeAdjustment(a.id, session.fullName);
+                      refresh();
+                    }}
+                  >
+                    Void
+                  </button>
+                ) : null}
+              </li>
+            )}
+          />
+        </div>
       </div>
     </div>
   );
