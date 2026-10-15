@@ -67,7 +67,7 @@ const ROUTE_IDS: Record<string, DeskHydrateId[]> = {
   // Staff field apps (lead capture, calling, registration collect).
   field: ["admissions"],
   events: ["fees", "payments", "transport"],
-  parent: ["fees", "payments", "transport"],
+  parent: ["fees", "payments"],
   // A TC is held on dues, and dues include the bus.
   certificates: ["certificates", "transport"],
   staff: ["staff", "staffHr", "staffAdvances", "staffAgreements", "staffAttendance", "salarySetup"],

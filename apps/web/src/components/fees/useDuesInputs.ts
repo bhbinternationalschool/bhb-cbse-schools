@@ -12,7 +12,7 @@ import { FEES_UPDATED_EVENT } from "@/lib/fees";
  * bus month owing and no bus month paid — and nothing told it to recompute
  * when they landed. Found 15 Oct 2026 (PR #665) on the student fee card; the
  * same was true of the student profile modal, the counter's adjustments
- * panel and the parent web portal.
+ * panel, the defaulters list and admit-card holds.
  *
  * `ready` is false until the fee book and the transport desk have been asked
  * for (a failed load still ends the wait — the screen then shows what it has,
