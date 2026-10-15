@@ -187,7 +187,7 @@ function voucher(
     id: `v_${vno}`,
     receiptNo: `RCV-${vno}`,
     householdId: "hh_1",
-    createdAt: opts.at ?? `2026-0${Math.min(9, 3 + vno)}-10T05:00:00.000Z`,
+    collectedAt: opts.at ?? `2026-0${Math.min(9, 3 + vno)}-10T05:00:00.000Z`,
     collectionDate: "2026-09-10",
     voidedAt: opts.voided ? "2026-09-11T00:00:00.000Z" : null,
     lines: lines.map((l) => ({

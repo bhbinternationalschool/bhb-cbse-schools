@@ -2481,7 +2481,7 @@ export function computeStudentDues(
         if (v.voidedAt) continue;
         for (const l of v.lines) {
           if (!keys.has(l.dueKey)) continue;
-          const at = v.createdAt || "";
+          const at = v.collectedAt || v.collectionDate || "";
           if (!snap || at >= snapAt) {
             snap = l;
             snapAt = at;
