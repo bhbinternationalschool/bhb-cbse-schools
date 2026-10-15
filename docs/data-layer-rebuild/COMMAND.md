@@ -1052,6 +1052,58 @@ polls only while the home route is current; `cacheWidth`/`cacheHeight` on galler
 Acceptance (1.2f beacon): cold open of the staff home paints cached data < 200 ms; approvals
 calls per session ≤ 2; the app shows a Masters change within 2 min of resume.
 
+*(Built 15 Oct 2026, PR #PRNUM — app code only; no APK built, no versionCode change.)* **What
+exists.** `lib/core/api/http_transport.dart` `TimeoutClient`: a view over ONE `http.Client` that
+`ApiClient` creates lazily and keeps for its life (keep-alive); 15 s for the headers and for each
+gap in the body (a Timer per gap, not `Stream.timeout`, which FakeAsync does not drive); 120 s for
+`ApiClient._slowPaths` (command desk, lesson plan, syllabus scan/import, homework post,
+class-gallery complete, staff/owner broadcast); 5 min for multipart uploads; 30 min for the class
+video PUT straight to storage. Every `http.get/post/patch/delete` and `req.send()` in
+`lib/core/api/*` now goes through it. Not moved: `_aiPost` and the tutor SSE stream keep their own
+per-call client (cancellable; `_aiPost` already had 150 s), and `app_update_gate.dart` (10 s, own
+call). `lib/core/api/json_cache.dart` `JsonCache`: last `data` of `_cachedPaths` (parent/summary,
+staff/summary, staff/features, principal/snapshot, staff/approvals, comms/feed,
+transport/routes), memory + one JSON file per (scope, path) under the app support dir; scope =
+flavor + SHA-256 of the session cookie (the cookie itself is never written); each file names its
+owner and is ignored under any other; a reply is saved only when the scope after the call equals
+the scope before it; `wipe()` on sign-out AND on every sign-in. `lib/core/api/home_refresh.dart`:
+`loadCachedThenFresh` (saved copy painted unless a SUCCESSFUL answer already arrived; on failure
+the screen keeps it and gets its saved-at time), `RefreshClock` (2 min), `ResumeWatcher`. All five
+homes (parent, teacher, principal, desk, driver) paint the saved copy on open, re-read summary +
+features (principal: snapshot + features + summary; driver: routes + features) on resume when
+≥ 2 min old, and on failure with a copy show `StaleBanner` ("Couldn't reach the school — showing
+what was saved at HH:MM", Hindi when the app is Hindi) instead of the error screen; with no copy
+the old error screen is unchanged. `WaitingCard` paints saved counts, reads once on mount, and
+re-reads only on `refreshKey` — which homes bump only when a pushed screen returns `true`
+(`PopWithChanged` on staff leave, student leave, complaints, documents: true after a decision)
+or on pull-to-refresh. `RunningStrip` paints the saved feed and its 10-min poll runs only while
+its route is current and the app resumed (`shouldPoll`); its AnimationController is now created on
+first use (it was created inside `dispose()` when the strip never showed — a debug assertion).
+Gallery carousel, class-gallery 48 px thumb and review card decode via `cacheWidth`
+(`core/ui/thumb_size.dart`; width only — aspect kept; the full-screen viewer stays full size).
+**Proof.** `flutter analyze` clean; `flutter test` 123/123. New: `test/http_client_hygiene_test.dart`
+(one client for 5 calls; 15 s header deadline; stalled body; command desk 120 s),
+`test/home_cache_test.dart` (identity keying memory+file, owner check, wipe on sign-out and
+sign-in, late reply after identity change not saved, failure keeps last good, SWR ordering,
+stale label, RefreshClock, ResumeWatcher, strip under a pushed route, PopWithChanged, thumb size),
+`test/staff_home_refresh_test.dart` (real `TeacherHomeScreen`: approvals once at open, not
+re-read after a screen that decided nothing, resume < 2 min nothing / ≥ 2 min summary+features
+again and approvals not, cold open paints the saved home within 200 ms of fake time while the
+server is pending, server away keeps it with the banner, no copy → error, another cookie's copy
+never painted). Fail-on-old: the old-API tests run against origin/main's `lib` fail (6 clients
+for 5 calls; no timeout at 16 s or 121 s; approvals 2 after My leave — that run needed the
+RunningStrip dispose fix patched in, since old code first fails on that assertion); every other
+new test fails under a named mutation (scope re-check, sign-out/sign-in wipe, identity in scope,
+owner check, `!freshOk`, staleSince, 2 min, resume attach, cold paint, push bump, `shouldPoll`,
+pop result, shared client, deadlines, slow path, body deadline, slack). Seen: widget-test renders
+at 375 px of the five homes offline with a saved copy (banner placement fixed on teacher/parent).
+**NOT done / not proven.** No device or emulator run (no APK by instruction); the 1.2f beacon
+acceptance (cold paint < 200 ms on a phone, approvals ≤ 2 per session, Masters ≤ 2 min) is
+post-release only. A resume never re-reads approvals or the strip (by spec), so new approvals
+from others appear on pull-to-refresh, after a decision here, or on next open. Screens other
+than the five homes (notices list, fees, etc.) are not cached. Gallery thumbnails were not seen
+on a screen. `cacheHeight` not set (width only, to keep aspect).
+
 ### Phase 5 — Transactional desks, one desk at a time
 
 Order (browser bytes × wipe history): **fees → homework → attendance → exams → admissions →
