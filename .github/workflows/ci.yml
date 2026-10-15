@@ -517,6 +517,7 @@ jobs:
           npm run test:closing-balance
           npm run test:accounts-position-rbac
           npm run test:voucher-filter
+          npm run test:pg-settlement-failed
           npm run test:voucher-amend
           npm run test:transport-finance
           npm run test:loans

@@ -158,6 +158,7 @@
     "test:closing-balance": "npx tsx src/lib/ledger/closingBalance.selftest.ts",
     "test:accounts-position-rbac": "npx tsx src/lib/accountsPositionRbac.selftest.ts",
     "test:voucher-filter": "npx tsx src/lib/ledger/voucherFilter.selftest.ts",
+    "test:pg-settlement-failed": "npx tsx src/lib/ledger/pgSettlementStatus.selftest.ts",
     "test:notice-push": "npx tsx src/lib/noticePush.selftest.ts",
     "test:staff-self-profile": "npx tsx src/lib/staffSelfProfile.selftest.ts",
     "test:attendance-cover": "npx tsx src/lib/attendanceCover.selftest.ts",

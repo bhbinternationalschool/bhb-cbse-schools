@@ -408,6 +408,7 @@ SELFTESTS=(
   test:closing-balance
   test:accounts-position-rbac
   test:voucher-filter
+  test:pg-settlement-failed
   test:notice-push
   test:staff-self-profile
   test:attendance-cover
