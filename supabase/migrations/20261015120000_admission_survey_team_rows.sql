@@ -142,4 +142,17 @@ select t.id,
 on conflict (tenant_id) do update
   set member_count = excluded.member_count, beat_count = excluded.beat_count, updated_at = excluded.updated_at;
 
+-- ── Families recorded WITHOUT a survey day (staff app, 15 Oct 2026) ────────
+-- A member of staff may record a family on any day, with the location taken
+-- from the phone or picked on a map. The point is kept beside the day's
+-- captures with no day: survey_day_id null, located_by says how.
+alter table public.survey_captures alter column survey_day_id drop not null;
+alter table public.survey_captures
+  add column if not exists located_by text not null default 'gps'
+    check (located_by in ('gps', 'map'));
+create index if not exists survey_captures_no_day_idx
+  on public.survey_captures (tenant_id, captured_at) where survey_day_id is null;
+comment on column public.survey_captures.located_by is
+  'gps = the phone''s live fix; map = the surveyor placed the pin on a map (no survey day).';
+
 notify pgrst, 'reload schema';

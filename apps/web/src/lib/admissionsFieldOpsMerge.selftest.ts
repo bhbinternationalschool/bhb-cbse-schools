@@ -44,7 +44,9 @@ const office: FieldOpsLists = {
   assert.equal(out.surveyAttendance.find((a) => a.id === "a1")!.checkOutAt, "13:05", "a check-out is never blanked");
   assert.deepEqual(ids(out.surveySessions), ["s1", "s2", "s3"]);
   assert.equal(out.surveySessions.find((s) => s.id === "s1")!.status, "ended", "an ended session stays ended");
-  assert.deepEqual(ids(out.surveyTeam), ["m1", "m2", "m3"], "nothing leaves for being absent");
+  // Since 15 Oct 2026 the team and beats are rows (admission_survey_*): a
+  // whole-desk save never writes them — the stored list stands, whatever the copy says.
+  assert.deepEqual(ids(out.surveyTeam), ["m1", "m2"], "the copy's team is ignored: no add, no drop");
   assert.deepEqual(out.leadCallerStaffIds.sort(), ["st1", "st2"]);
 }
 // Named removals do remove; one undone by the same copy does not.
@@ -53,14 +55,16 @@ const office: FieldOpsLists = {
     admission_survey_team: ["m2"],
     admission_lead_callers: ["st2", "st1"], // st1 removed then re-added here
   });
-  assert.deepEqual(ids(out.surveyTeam), ["m1", "m3"]);
+  assert.deepEqual(ids(out.surveyTeam), ["m1", "m2"], "a named team removal on the old path removes nothing");
   assert.deepEqual(out.leadCallerStaffIds, ["st1"]);
 }
 // A newer edit of a row still lands; nothing stored → the copy as is.
 {
   const out = mergeFieldOps(stored, { ...empty, surveySessions: [ses("s2", "ended", 1)] });
   assert.equal(out.surveySessions.find((s) => s.id === "s2")!.status, "ended");
-  assert.deepEqual(mergeFieldOps(null, office).surveyTeam.length, 2);
+  assert.deepEqual(mergeFieldOps(null, office).surveyTeam.length, 0, "nothing stored: the copy still writes no team");
+  const beat = { id: "b9", code: "B9", name: "New", area: "", targetHouseholds: 0, isActive: true, note: "", createdAt: "" };
+  assert.deepEqual(mergeFieldOps({ ...empty, surveyBeats: [] }, { ...empty, surveyBeats: [beat] }).surveyBeats, [], "nor beats");
 }
 
 // ── Wiring ─────────────────────────────────────────────────────────────────
@@ -74,7 +78,6 @@ const office: FieldOpsLists = {
   assert.ok(/featureAuthorizedDeletes\(/.test(route), "a function holder's removal must be one their functions made");
   const client = read("admissionsNormalizedClient.ts");
   assert.ok(/deletes: sentDeletes/.test(client) && /confirmDeskDeletes\(ADMISSIONS_DESK, sentDeletes\)/.test(client));
-  assert.ok(/recordDeskDeletion\("admissions", "admission_survey_team", \[memberId\]\)/.test(read("fieldSurvey.ts")));
   assert.ok(/recordDeskDeletion\("admissions", "admission_lead_callers", \[id\]\)/.test(read("admissions.ts")));
 }
 

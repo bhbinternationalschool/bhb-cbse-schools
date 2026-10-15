@@ -436,6 +436,32 @@ export const COLLECTIONS: readonly CollectionDef[] = [
       ],
     },
   },
+  {
+    // Field survey team (15 Oct 2026, migration 20261015120000). Written by
+    // lib/surveyTeam.server.ts (office screen + team leader's phone), which
+    // checks who may change what; through this generic route only an
+    // Admissions editor can write, as for any other collection.
+    id: "admissions.survey-members",
+    module: "admissions",
+    table: "admission_survey_members",
+    rbac: { view: "admissions", edit: "admissions" },
+    scope: ["tenant_id"],
+    // A member removed from the team carries no record of their own (their
+    // survey days and captures live in survey_days / survey_captures).
+    softDelete: false,
+    list: { sortColumn: "id", defaultLimit: 200, maxLimit: 500 },
+  },
+  {
+    // Field survey beats. Retired with is_active, never deleted in the UI:
+    // leads point at their beat by id.
+    id: "admissions.survey-beats",
+    module: "admissions",
+    table: "admission_survey_beats",
+    rbac: { view: "admissions", edit: "admissions" },
+    scope: ["tenant_id"],
+    softDelete: false,
+    list: { sortColumn: "id", defaultLimit: 200, maxLimit: 500 },
+  },
 ] as const;
 
 const BY_ID = new Map(COLLECTIONS.map((c) => [c.id, c]));
