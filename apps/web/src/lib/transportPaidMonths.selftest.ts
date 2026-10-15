@@ -40,6 +40,7 @@ import {
 } from "./fees";
 import { emptyMastersShell } from "./masters";
 import type { SisStudent } from "./sis";
+import { planTransportAmendment } from "./transportAmend";
 import {
   paidMonthsCoveredByNewStart,
   parseTransportDueKey,
@@ -447,6 +448,26 @@ check('12. CSV re-import keeps stop ids (stop-id churn)', () => {
   assert.equal(out[0]!.distanceKm, 3, "km kept when the file gives none");
   assert.equal(out[0]!.distanceSource, "google", "provenance kept");
   assert.equal(out[1]!.distanceKm, 6, "the file's km wins when given");
+});
+
+/* ── 13. How Anvi's change got through: the amend dialog's floor ───── */
+check("13. Change-stop dialog on 14 Sep cannot split over a paid September", () => {
+  // 14 Sep: the old assignment still open, its stop orphaned, no own fee.
+  const asOn14Sep = { ...OLD_ASG, stopId: "st_gone", effectiveTo: null };
+  writeTransportLocalRaw(state([asOn14Sep]));
+  const dues = computeStudentDues(
+    student,
+    emptyMastersShell(),
+    fees([paidAprAug, paidSeptOld]),
+    { asOf: "2026-09-14", includeFuture: true, includePaid: true },
+  );
+  const plan = planTransportAmendment({
+    dues,
+    currentEffectiveFrom: asOn14Sep.effectiveFrom,
+    currentMonth: "2026-09",
+  });
+  assert.equal(plan.ok, true);
+  assert.equal(plan.ok && plan.plan.fromMonth, "2026-10", "the split starts after the paid September");
 });
 
 if (failures.length) {
