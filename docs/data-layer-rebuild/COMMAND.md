@@ -760,6 +760,16 @@ components (70), `readCache(` files in `src` (69), `readFileSync` inside `*.self
 `ensureSchoolMirrorHydrated` files under `app/api/v1` (100), and two **all-of-src** counts used as
 the Phase 2.3b / 3.4 gates: `loadMasters(` occurrences (476) and `loadSis(` occurrences (426),
 selftests and definitions excluded. Acceptance: CI fails when any count rises.
+*(Built 14 Oct 2026, PR #642.)* Measured on origin/main `ea9f5ba2`, budgets set to the true
+count: `load_masters_screen_files` 106 (12 Oct: 109), `load_sis_screen_files` 77 (77),
+`ensure_hydrated_component_files` 69 (70), `read_cache_files` 68 (69), `selftest_readfilesync_files`
+89 (66), `v1_school_mirror_files` 107 (100), `load_masters_calls_src` 471 (476),
+`load_sis_calls_src` 426 (426). All but the last two are FILE counts; those two are OCCURRENCES.
+Common rules (`dl_code_lines` in the script): `.ts`/`.tsx` only, comment lines ignored,
+`*.selftest.ts` and the function's own definition line excluded, the name bounded so
+`loadMastersSafe(`/`loadSisForStaff(`/`reloadMasters(` do not count while `mod.loadMasters(` does.
+Wired through the existing CI step "Ratchets — retired patterns may not regrow" (`ci.yml`) and
+`scripts/verify.sh`; adding one call of each pattern turned all eight red and exited 1.
 
 **1.7 Teacher scope from SQL (own step; 3.1 and 4.2 depend on it).** *(Built 13 Oct 2026.)*
 `staffSectionScope` (`lib/api/v1/staffScope.ts`) computes sections from `sis_staff.profile` links
