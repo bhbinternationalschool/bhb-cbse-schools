@@ -234,6 +234,30 @@ test.describe("teacher, Masters read failing", () => {
     });
   }
 
+  // 2.1b: /students reads Masters through useScreenMasters() (the teaching subset for her).
+  test(`/students: views/masters 503 → "could not load" + Try again, never an empty school`, async ({ browser }) => {
+    const { context, page } = await openAs(browser, "teacher");
+    try {
+      let hits = 0;
+      await page.route("**/api/data/views/masters", (r) => {
+        hits += 1;
+        return r.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: false, error: "Could not read the school setup — please try again." }),
+        });
+      });
+      await page.goto("/students?tab=register");
+      await expect(page.getByText(/could not load/i).first()).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+      await expect(page.getByRole("combobox", { name: "Filter by class", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /^Active students/ })).toHaveCount(0);
+      expect(hits, "the page asked the masters view").toBeGreaterThan(0);
+    } finally {
+      await context.close();
+    }
+  });
+
   // 2.1a: /attendance reads Masters through useMasters() (the teaching subset for her).
   test(`/attendance: views/masters 503 → "could not load" + Try again, never an empty school`, async ({ browser }) => {
     const { context, page } = await openAs(browser, "teacher");
@@ -252,6 +276,29 @@ test.describe("teacher, Masters read failing", () => {
       await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
       await expect(page.getByRole("combobox", { name: "Class", exact: true })).toHaveCount(0);
       expect(hits, "the page asked the masters view").toBeGreaterThan(0);
+    } finally {
+      await context.close();
+    }
+  });
+});
+
+/**
+ * 2.1b: a teacher's Masters carry no fee lists — WITHHELD, not "none"
+ * (lib/mastersTeachingSubset). Her child's profile must say fees are not
+ * shown, never compute dues from an empty fee structure ("No pending dues",
+ * ₹0), and must not re-resolve the child's fee group to "Assign later" from
+ * the empty list (the value a Save would then write).
+ */
+test.describe("class teacher: fees are withheld, not none", () => {
+  test("her child's profile: fee dues 'not shown to your role', fee group kept", async ({ browser }) => {
+    const child = ctChildren[0]!;
+    const { context, page } = await openAs(browser, "teacher");
+    try {
+      await page.goto(`/students/${child.id}/edit`);
+      await expect(page.getByText("Fee dues are not shown to your role", { exact: false })).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText(/No pending dues/)).toHaveCount(0);
+      await expect(page.getByRole("textbox", { name: "Fee group", exact: true })).toHaveValue("Not shown to your role");
+      await expect(page.getByRole("option", { name: "— Assign later —" })).toHaveCount(0);
     } finally {
       await context.close();
     }

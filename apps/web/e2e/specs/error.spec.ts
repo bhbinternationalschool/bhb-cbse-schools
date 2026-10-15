@@ -64,6 +64,13 @@ const PAGES: { path: string; afterRecovery: (page: Page) => Promise<void> }[] = 
       await expect(p.getByRole("combobox", { name: "Class", exact: true }).first().locator("option")).toHaveCount(fx.expected.classes, { timeout: 15_000 });
     },
   },
+  {
+    // 2.1b: the Students register's class filter ("All classes" + one per class).
+    path: "/students?tab=register",
+    afterRecovery: async (p) => {
+      await expect(p.getByRole("combobox", { name: "Filter by class", exact: true }).first().locator("option")).toHaveCount(fx.expected.classes + 1, { timeout: 15_000 });
+    },
+  },
 ];
 
 for (const p of PAGES) {
@@ -79,6 +86,7 @@ for (const p of PAGES) {
     const shownAfterMs = Date.now() - t0;
     await test.step("no class picker is drawn from a failed read", async () => {
       await expect(page.getByRole("combobox", { name: "Class", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("combobox", { name: "Filter by class", exact: true })).toHaveCount(0);
     });
     await test.step("Try again (read restored) brings the school back without a reload", async () => {
       await lift();
@@ -122,6 +130,7 @@ for (const p of PAGES.filter((x) => x.path !== "/masters")) {
     const shownAfterMs = Date.now() - t0;
     await test.step("no class picker is drawn from a failed read", async () => {
       await expect(page.getByRole("combobox", { name: "Class", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("combobox", { name: "Filter by class", exact: true })).toHaveCount(0);
     });
     await test.step("Try again (read restored) brings the school back without a reload", async () => {
       await lift();
