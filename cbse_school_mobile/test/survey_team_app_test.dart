@@ -2,7 +2,6 @@
 // WITHOUT a survey day with the home placed on the map, the team leader's
 // team & beats screen, and starting a survey day — each against a stand-in
 // school server that checks what the app sends.
-import "dart:async";
 import "dart:convert";
 import "dart:io";
 
@@ -158,7 +157,7 @@ void main() {
       expect(sent!["childName"], "Asha Kumari");
       expect(sent!["parentConsent"], true);
       expect(sent!["location"], {"lat": 25.30123, "lng": 82.98765, "accuracyM": 0.0, "source": "map"});
-      expect(find.text("Recorded — enquiry ENQ-77"), findsOneWidget);
+      expect(find.text("Save family"), findsNothing, reason: "the sheet closes once the server saved it");
     });
 
     testWidgets("the map picker: tap places the pin, 'use my location' moves it", (tester) async {
@@ -193,6 +192,8 @@ void main() {
       expect(tester.widget<FilledButton>(use).onPressed, isNull, reason: "nothing placed yet");
 
       await tester.tapAt(tester.getCenter(find.byKey(const Key("survey-location-map"))));
+      // flutter_map waits out the double-tap window before a tap counts.
+      await tester.pump(const Duration(milliseconds: 400));
       await tester.pumpAndSettle();
       expect(find.textContaining("Pin:"), findsOneWidget);
       expect(find.byIcon(Icons.location_pin), findsOneWidget);
