@@ -928,7 +928,7 @@ grant) returning the aggregates the screen shows, cached per process for 30 s ke
 `erp_versions` < 800 ms · 4.1i the remaining `app/api/v1` callers. Phase exit: the
 `ensureSchoolMirrorHydrated` ratchet under `app/api/v1` reaches 0 (100 files today).
 
-*(4.1a built 15 Oct 2026, PR #PRNUM.)* **What exists.** `GET /api/v1/app/popups` for a parent reads
+*(4.1a built 15 Oct 2026, PR #652.)* **What exists.** `GET /api/v1/app/popups` for a parent reads
 the family's student rows from `sis_students` by `household_id` (id order, filtered by household again in
 Node) through `lib/data/server/householdRead.ts` — `householdChildren()` in `lib/appPopups.server.ts` no
 longer hydrates the whole roster (`ensureSisHydratedServer` + `loadSis()`). Staff read no SIS at all, as
