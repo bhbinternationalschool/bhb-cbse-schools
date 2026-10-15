@@ -1174,6 +1174,28 @@ grant) returning the aggregates the screen shows, cached per process for 30 s ke
 `erp_versions` < 800 ms · 4.1i the remaining `app/api/v1` callers. Phase exit: the
 `ensureSchoolMirrorHydrated` ratchet under `app/api/v1` reaches 0 (100 files today).
 
+*(4.1a built 15 Oct 2026, PR #652.)* **What exists.** `GET /api/v1/app/popups` for a parent reads
+the family's student rows from `sis_students` by `household_id` (id order, filtered by household again in
+Node) through `lib/data/server/householdRead.ts` — `householdChildren()` in `lib/appPopups.server.ts` no
+longer hydrates the whole roster (`ensureSisHydratedServer` + `loadSis()`). Staff read no SIS at all, as
+before. R6: a failed family read is 503 (it was the pop-ups of a family with no children), and an unreadable
+pop-up list or event history is 503 (it was `{popups: []}`); the Flutter app already skips a failed pop-up
+read silently (`core/popups/app_popups.dart`), so a parent sees the same thing. `householdChildren` is also
+used by `POST /api/v1/profile/aadhaar`: there a failed read is now 503 instead of 404 "No children on roll".
+One `{"event":"route-timing","route":"v1/app/popups",authMs,queryMs,buildMs,totalMs,persona,children}` line
+per request (`lib/data/server/routeTiming.ts`, shared by 4.1a–c). **Proof.** Golden: the origin/main build
+and this build on the same seeded stack (`e2e/parentApi.golden.ts`: eleven pop-ups of every rule, form and
+audience plus events, for all 169 fixture families as their parent — the all-inactive family, the
+`0000000000` families, 2–4 per-year rows, blank-year rows, the duplicate admission number — and as the
+office): 171/171 popups answers byte-identical. `e2e/v1-popups.acceptance.ts` (in `e2e-stack.sh check`):
+every family's targets are its own children (1,089 checked), no other child named, inactive family 403,
+`sis_students` / `module_local_state` SELECT revoked → 503, timing lines, p95. On origin/main the two 503
+checks, the timing check and the p95 check fail. `test:parent-api-scope` (reader filter, failure =
+`{ok:false}`, timing line) — its household-filter checks fail with the filter removed. p95 (local stack,
+200 warm sequential requests across families, shared Mac): **46–58 ms** (p50 27–31); origin/main 101–124 ms
+(p50 66–73). **Not done:** `schoolAadhaarGaps`, `popupResponses`, `markAadhaarVerified` (office screens)
+still hydrate the roster; production timing needs the deploy.
+
 **4.2 Teacher scope in the app.** Depends on 1.7; verify every `app/api/v1/staff/*` route uses
 it. Acceptance: a teacher whose only link is the timetable sees her sections in the app.
 

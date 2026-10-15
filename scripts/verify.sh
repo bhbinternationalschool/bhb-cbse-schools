@@ -278,6 +278,7 @@ SELFTESTS=(
   test:admissions-row-stamps
   test:payment-link-status-guard
   test:attendance-today
+  test:staff-signature
   test:sis-wire-payload
   test:print-palette
   test:receipt-head-grouping
@@ -370,6 +371,7 @@ SELFTESTS=(
   test:concession-ground
   test:fee-backdate
   test:month-groups
+  test:month-range
   test:class-upgrade-fee-group
   test:receipt-auto-wa
   test:review-login
@@ -409,6 +411,7 @@ SELFTESTS=(
   test:closing-balance
   test:accounts-position-rbac
   test:voucher-filter
+  test:pg-settlement-failed
   test:notice-push
   test:staff-self-profile
   test:attendance-cover
@@ -562,6 +565,7 @@ SELFTESTS=(
   test:masters-bridge
   test:staff-requests
   test:survey-team-plan
+  test:parent-api-scope
   # Added 2026-09-12, in CI's order, after the drift check below reported that
   # ci.yml had been running these for weeks while this script did not:
   # WhatsApp failure reasons, household numbers, audience specs, the tutor and

@@ -1720,6 +1720,40 @@ extension StaffApi on ApiClient {
     return erpUrl("${data["photoUrl"] ?? ""}");
   }
 
+  /// Put [png] on the signed-in member of staff's record as their signature
+  /// (POST /api/v1/staff/me/signature — own record only; PNG / JPG / WebP,
+  /// at most 1 MB). Replaces any earlier one. Returns its full URL.
+  Future<String> uploadMySignature(Uint8List png) async {
+    final req = http.MultipartRequest("POST", _uri("/api/v1/staff/me/signature"));
+    final headers = await _authHeaders();
+    headers.remove("Content-Type");
+    req.headers.addAll(headers);
+    req.files.add(
+      http.MultipartFile.fromBytes(
+        "file",
+        png,
+        filename: "signature.png",
+        contentType: MediaType.parse("image/png"),
+      ),
+    );
+    final res = await http.Response.fromStream(await _uploadHttp.send(req));
+    if (res.statusCode != 200) _throwFrom(res);
+    final data =
+        ((jsonDecode(res.body) as Map<String, dynamic>)["data"]
+            as Map<String, dynamic>?) ??
+        const {};
+    return erpUrl("${data["signatureUrl"] ?? ""}");
+  }
+
+  /// Take the signature off the signed-in member of staff's record.
+  Future<void> removeMySignature() async {
+    final res = await _http.delete(
+      _uri("/api/v1/staff/me/signature"),
+      headers: await _authHeaders(),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+  }
+
   Future<List<FeeStudentHit>> searchFeeStudents(String q) async {
     final data = await _getData(
       "/api/v1/staff/fees/search?q=${Uri.encodeQueryComponent(q)}",
@@ -2070,6 +2104,7 @@ class StaffProfile {
       photoUrl = url(_s(_m(j, "staff"), "photoUrl")),
       photoStatus = _s(_m(j, "staff"), "photoStatus"),
       photoNote = _s(_m(j, "staff"), "photoNote"),
+      signatureUrl = url(_s(_m(j, "staff"), "signatureUrl")),
       designation = _s(_m(j, "staff"), "designation"),
       department = _s(_m(j, "staff"), "department"),
       joiningDate = _s(_m(j, "staff"), "joiningDate"),
@@ -2102,6 +2137,9 @@ class StaffProfile {
   /// pending | verified | rejected | ""
   final String photoStatus;
   final String photoNote;
+
+  /// Full URL of their signature (a trimmed, transparent PNG), or "".
+  final String signatureUrl;
   final String designation;
   final String department;
   final String joiningDate;
