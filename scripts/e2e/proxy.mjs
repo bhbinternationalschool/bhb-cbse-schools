@@ -8,7 +8,10 @@
  * header through (apikey, Authorization, Prefer, Range, Accept-Profile,
  * Content-Profile) and the response back untouched.
  *
- * Everything else Supabase serves — Auth, Storage, Edge Functions, Realtime,
+ * Storage (/storage/v1) is served in memory by ./storage.mjs (15 Oct 2026 —
+ * the gallery's upload, signed-link and AI-check paths go through it).
+ *
+ * Everything else Supabase serves — Auth, Edge Functions, Realtime,
  * GraphQL — answers 501 with a JSON reason, so a test that reaches one fails
  * at once and says why, instead of hanging on a connection nobody answers.
  *
@@ -16,9 +19,13 @@
  * (401) — except a CORS preflight, which carries neither by design.
  *
  * Env: E2E_PROXY_PORT (listen, 127.0.0.1 only), E2E_POSTGREST_URL (upstream,
- * must be http://127.0.0.1:<port>). One line per request on stdout.
+ * must be http://127.0.0.1:<port>), E2E_SERVICE_KEY (the stack's service-role
+ * key: Storage's keyed calls need it). One line per request on stdout.
  */
 import http from "node:http";
+import { handleStorage } from "./storage.mjs";
+
+const serviceKey = process.env.E2E_SERVICE_KEY || "";
 
 const port = Number(process.env.E2E_PROXY_PORT || "");
 const upstream = new URL(process.env.E2E_POSTGREST_URL || "http://invalid");
@@ -29,7 +36,6 @@ if (!port || upstream.hostname !== "127.0.0.1" || upstream.protocol !== "http:")
 
 const NOT_SERVED = {
   "/auth/v1": "Supabase Auth",
-  "/storage/v1": "Supabase Storage",
   "/functions/v1": "Supabase Edge Functions",
   "/realtime/v1": "Supabase Realtime",
   "/graphql/v1": "Supabase GraphQL",
@@ -55,6 +61,23 @@ const server = http.createServer((req, res) => {
   const started = Date.now();
   const url = req.url || "/";
   const path = url.split("?")[0];
+
+  if (path === "/storage/v1" || path.startsWith("/storage/v1/")) {
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "*" });
+      res.end();
+      log(req, 204, started);
+      return;
+    }
+    handleStorage(req, res, path.slice("/storage/v1".length), new URL(url, "http://x").searchParams, serviceKey)
+      .then(() => log(req, res.statusCode, started))
+      .catch((e) => {
+        if (!res.headersSent) json(res, 500, { code: "E2E_STORAGE", message: String(e?.message || e) });
+        else res.destroy(e);
+        log(req, 500, started);
+      });
+    return;
+  }
 
   const prefix = Object.keys(NOT_SERVED).find((p) => path === p || path.startsWith(`${p}/`));
   if (prefix) {
