@@ -6,7 +6,8 @@ import {
   ErpTable,
   ErpTableHead,
 } from "@/components/ui/erp-roster";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   OUTDOOR_DUTY_PURPOSE_LABELS,
   loadStaffAttendance,
@@ -35,11 +36,12 @@ function durationLabel(startedAt: string, endedAt: string | null): string {
 
 export function StaffOutdoorDutyPanel() {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // Masters + the roster (data-layer 2.1c): the roster follows the staff
+  // hydrate through the access data's change signal.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [attendance, setAttendance] = useState<StaffAttendanceState | null>(null);
 
   function reload() {
-    setMasters(loadMasters());
     setAttendance(loadStaffAttendance());
   }
 
@@ -121,6 +123,9 @@ export function StaffOutdoorDutyPanel() {
     needsAttention: (s) => s.status === "active",
   });
 
+  if (mastersError) {
+    return <QueryError what="the school's setup" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters || !attendance) {
     return <p className="text-sm text-[var(--muted)]">Loading outdoor duty…</p>;
   }

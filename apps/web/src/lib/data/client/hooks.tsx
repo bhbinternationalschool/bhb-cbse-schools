@@ -200,7 +200,9 @@ function hasDeskObservers(client: QueryClient): boolean {
   return client
     .getQueryCache()
     .getAll()
-    .some((q) => q.getObserversCount() > 0 && desksOf(q.meta).length > 0);
+    // isActive: at least one observer is ENABLED — a control that has not
+    // asked yet (useMasters({enabled:false})) does not start the poll.
+    .some((q) => q.isActive() && desksOf(q.meta).length > 0);
 }
 
 /** What the poll remembers between answers: the last versions, and whether it was told to stop. */
@@ -294,7 +296,13 @@ function VersionsPoller() {
     };
     update();
     const unsubscribe = client.getQueryCache().subscribe((e) => {
-      if (e.type === "observerAdded" || e.type === "observerRemoved" || e.type === "added" || e.type === "removed") {
+      if (
+        e.type === "observerAdded" ||
+        e.type === "observerRemoved" ||
+        e.type === "observerOptionsUpdated" ||
+        e.type === "added" ||
+        e.type === "removed"
+      ) {
         // Not inside React Query's own notification: after it.
         queueMicrotask(update);
       }
@@ -332,11 +340,17 @@ function pageMemoryBridgeDeps(): MastersBridgeDeps | null {
   return { load: () => readMastersPageCopyRaw() ?? emptyMastersShell(), write: writeMastersLocalRaw };
 }
 
-/** Masters (full, or the teaching subset — `scope` says which). Read-only. */
-export function useMasters(): UseQueryResult<MastersView, Error> {
+/**
+ * Masters (full, or the teaching subset — `scope` says which). Read-only.
+ * `enabled: false` asks nothing (an always-mounted control that reads Masters
+ * only once opened — the header WhatsApp button); an answer another screen
+ * already cached is still returned.
+ */
+export function useMasters(opts: { enabled?: boolean } = {}): UseQueryResult<MastersView, Error> {
   return useErpQuery<MastersView>("masters", "/api/data/views/masters", {
     desk: ["masters"],
     parse: (d) => acceptMastersAnswer(d),
+    enabled: opts.enabled,
   });
 }
 

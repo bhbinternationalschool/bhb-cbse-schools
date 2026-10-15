@@ -140,3 +140,57 @@ for (const p of PAGES.filter((x) => x.path !== "/masters")) {
     await metric(testInfo, "error", { page: p.path, read: "views/masters", failureShownAfterMs: shownAfterMs });
   });
 }
+
+/**
+ * Staff panels (data-layer 2.1c). Two reads, each failed on its own:
+ *   - views/masters  → the Leave tab (useScreenMasters) says "could not load"
+ *     and draws no leave form; Try again brings the form back;
+ *   - views/staff-list → the Appraisal tab (useStaffList) says "could not load
+ *     the staff list" and draws no Staff picker — never a picker with nobody
+ *     in it; Try again brings every active member of staff back.
+ * On origin/main before 2.1c neither panel asked either view (hits = 0).
+ */
+async function failView(page: Page, name: "masters" | "staff-list"): Promise<() => Promise<void>> {
+  const pattern = `**/api/data/views/${name}`;
+  let hits = 0;
+  await page.route(pattern, (route) => {
+    hits += 1;
+    return route.fulfill({ status: 503, contentType: "application/json", body: FAILED_READ });
+  });
+  return async () => {
+    expect(hits, `the page asked views/${name} at least once`).toBeGreaterThan(0);
+    await page.unroute(pattern);
+  };
+}
+
+test(`office /staff Leave: views/masters 503 shows "could not load" + Try again, no leave form; Try again recovers`, async ({ page }, testInfo) => {
+  const lift = await failView(page, "masters");
+  const t0 = Date.now();
+  await page.goto("/staff?tab=leave");
+  await expect(page.getByText(/could not load/i).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+  const shownAfterMs = Date.now() - t0;
+  await expect(page.getByRole("tab", { name: "Request leave", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Staff", exact: true })).toHaveCount(0);
+  await lift();
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByRole("tab", { name: "Request leave", exact: true })).toBeVisible({ timeout: 15_000 });
+  // The request form's Staff picker: every active member of staff + "Select…".
+  await expect(page.getByRole("combobox", { name: "Staff", exact: true }).locator("option")).toHaveCount(fx.expected.activeStaff + 1);
+  await metric(testInfo, "error", { page: "/staff?tab=leave", read: "views/masters", failureShownAfterMs: shownAfterMs });
+});
+
+test(`office /staff Appraisal: views/staff-list 503 shows "could not load the staff list", no empty Staff picker; Try again recovers`, async ({ page }, testInfo) => {
+  const lift = await failView(page, "staff-list");
+  const t0 = Date.now();
+  await page.goto("/staff?tab=appraisal");
+  await expect(page.getByText(/could not load the staff list/i).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+  const shownAfterMs = Date.now() - t0;
+  await expect(page.getByRole("combobox", { name: "Staff", exact: true })).toHaveCount(0);
+  await lift();
+  await page.getByRole("button", { name: "Try again" }).click();
+  // Every active member of staff + "Select…".
+  await expect(page.getByRole("combobox", { name: "Staff", exact: true }).locator("option")).toHaveCount(fx.expected.activeStaff + 1, { timeout: 15_000 });
+  await metric(testInfo, "error", { page: "/staff?tab=appraisal", read: "views/staff-list", failureShownAfterMs: shownAfterMs });
+});
