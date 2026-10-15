@@ -1365,11 +1365,12 @@ beats". Deleted: the browser-copy team/beat mutators in `fieldSurvey.ts`, the we
 beat editor (points to the app).
 **Proof.** `test:survey-team-plan` (planner rules; mutations: leader check off, leader-made-leader — red).
 `test:admissions-field-ops-merge` updated (copy's team/beats ignored). `e2e/specs/survey-team.spec.ts`:
-ERP add → phone code from the row → phone pairs → app status sees the member; made leader in the ERP → phone
-adds a beat → principal's open screen shows it without reload; auth matrix (teacher 403, principal 200, stale
+ERP add → phone code from the row → phone pairs → app status sees the member and the ERP row turns "registered" (pairing moves `admission_survey`); made leader in the ERP → phone
+adds a beat → principal's open screen shows it without reload (18.8 s, local stack); auth matrix (teacher 403, principal 200, stale
 base 409, member/outsider/unregistered phone 403, leader limits, removed member → not_on_team); old-build push
 leaves rows; no-day pin on the board. Flutter `test/survey_team_app_test.dart` (5; capture without location
 sent → red).
+Phones are signed exactly as the app (`e2e/surveyPhone.ts`: ECDSA P-256, `survey|action|extra|ts`, r‖s). Acceptance: erp_versions now has 38 sync_meta desks. Not proven: each e2e test failing on the merge base (the routes and screen do not exist there, so they fail at the first step by construction — not run).
 **Not done.** Lead callers, survey attendance/sessions and saved outsiders remain in ops_json (replica).
 The web `/survey-day` page has no leader screen. Not measured in production; app release needed for the
 app parts.
