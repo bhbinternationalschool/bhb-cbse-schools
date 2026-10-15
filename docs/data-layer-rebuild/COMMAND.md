@@ -814,7 +814,7 @@ call `loadMasters()`** (fees maths, exams, payroll, counter concessions): in 1.4
 deleted in 2.3b. Acceptance per batch: `propagation.spec.ts` and `counts.spec.ts` pass for every
 screen in the batch; the `loadMasters(` file ratchet falls by the batch size.
 
-*(2.1a built 15 Oct 2026, PR #PRNUM.)* **What exists.** The 8 files of the batch
+*(2.1a built 15 Oct 2026, PR #651.)* **What exists.** The 8 files of the batch
 (`components/attendance/{AttendanceWorkspace,AttendanceExceptionsPanel,StaffAttendancePanel,StudentAttendanceReportsPanel}`,
 `components/timetable/TimetableWorkspace`, `components/homework/HomeworkWorkspace`,
 `components/teaching/{TeachingWorkspace,SyllabusPlanPanel}`) no longer call `loadMasters()`: no mount-time
