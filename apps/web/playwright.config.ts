@@ -84,19 +84,19 @@ export default defineConfig<GateOptions>({
       use: { ...desktop },
     },
     {
-      // Writes salary setup and the statutory setup (put back afterwards), so
-      // it runs last: after money-writes (whose open-dues check
-      // failed when this ran first in the same project — PR #663) and propagation.
-      name: "payroll-writes",
-      testMatch: /payroll\.spec\.ts/,
-      dependencies: ["money-writes", "propagation"],
-      use: { ...desktop },
-    },
-    {
       // Writes to the stack, so it runs after everything that reads it.
       name: "propagation",
       testMatch: /propagation\.spec\.ts/,
       dependencies: ["desktop", "phone-375-cpu4x"],
+      use: { ...desktop },
+    },
+    {
+      // Writes salary setup and the statutory setup (put back afterwards), so
+      // it runs last (listed last, after propagation). Not a dependent of
+      // money-writes: a failure there would skip it.
+      name: "payroll-writes",
+      testMatch: /payroll\.spec\.ts/,
+      dependencies: ["propagation"],
       use: { ...desktop },
     },
   ],

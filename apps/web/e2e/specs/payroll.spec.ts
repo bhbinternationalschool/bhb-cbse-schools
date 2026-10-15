@@ -118,7 +118,12 @@ async function settle(page: Page) {
 async function openTab(page: Page, tab: string, label: RegExp) {
   await page.goto("/payroll");
   await expect(page.getByText(/Loading payroll…/)).toHaveCount(0, { timeout: 30_000 });
-  await page.getByRole("tab", { name: label }).first().click({ timeout: 30_000 });
+  // The office strip is a tablist; the self-service strip (two tabs) may draw buttons.
+  await page
+    .getByRole("tab", { name: label })
+    .or(page.getByRole("button", { name: label }))
+    .first()
+    .click({ timeout: 30_000 });
   await settle(page);
   // Pick the same thing on every run so the numbers are comparable.
   const pick = async (value: string) => {
