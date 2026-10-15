@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FEES_UPDATED_EVENT } from "@/lib/fees";
+import { FEES_UPDATED_EVENT, loadFees } from "@/lib/fees";
+import { loadTransport } from "@/lib/transport";
+import { hasDeskLoaded } from "@/lib/deskHydrateGuard";
+
+/** Longest a screen waits before showing what it has (a desk that cannot load). */
+const READY_FALLBACK_MS = 20_000;
 
 /**
  * Everything a browser dues figure is computed from, loaded before it is shown.
@@ -11,48 +16,49 @@ import { FEES_UPDATED_EVENT } from "@/lib/fees";
  * before those desks had arrived got a figure with NO transport in it — no
  * bus month owing and no bus month paid — and nothing told it to recompute
  * when they landed. Found 15 Oct 2026 (PR #665) on the student fee card; the
- * same was true of the student profile modal, the counter's adjustments
- * panel, the defaulters list and admit-card holds.
+ * same was true of the student profile modal (outstanding read ₹0 for a
+ * child owing ₹3,000 of bus fees).
  *
- * `ready` is false until the fee book and the transport desk have been asked
- * for (a failed load still ends the wait — the screen then shows what it has,
- * as before, rather than spin for ever). `tick` changes whenever either desk
- * changes afterwards, so a `useMemo` that lists it recomputes.
+ * No hydration call of its own: reading the two desks starts their load
+ * (`hydrateOnFirstRead` in loadFees / loadTransport), and each load announces
+ * itself with `bhb-desk-hydrated`. `ready` turns true once both desks have
+ * loaded or announced (a desk that failed still announces, and a 20 s
+ * fallback ends the wait, so a screen never spins for ever); `tick` changes
+ * whenever either desk lands or changes, so a `useMemo` that lists it
+ * recomputes.
  */
 export function useDuesInputs(): { ready: boolean; tick: number } {
   const [ready, setReady] = useState(false);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    let alive = true;
-    void (async () => {
-      const [{ ensureFeesHydrated }, { hydrateFeesStore }, { ensureTransportHydrated }, { withHydrationSlot }] =
-        await Promise.all([
-          import("@/lib/feesPersistence"),
-          import("@/lib/fees"),
-          import("@/lib/transportPersistence"),
-          import("@/lib/deskHydrateGuard"),
-        ]);
-      await Promise.allSettled([
-        withHydrationSlot(() => ensureFeesHydrated()),
-        withHydrationSlot(() => ensureTransportHydrated()),
-      ]);
-      try {
-        await hydrateFeesStore();
-      } catch {
-        // The cached book stands.
-      }
-      if (!alive) return;
-      setReady(true);
+    const announced = new Set<string>();
+    const settle = () => {
+      const fees = hasDeskLoaded("fees") || announced.has("fees");
+      const transport = hasDeskLoaded("transport") || announced.has("transport");
+      if (fees && transport) setReady(true);
+    };
+    const onHydrated = (e: Event) => {
+      const id = (e as CustomEvent<{ id?: string }>).detail?.id;
+      if (id) announced.add(id);
+      settle();
       setTick((t) => t + 1);
-    })();
-    const bump = () => setTick((t) => t + 1);
-    window.addEventListener(FEES_UPDATED_EVENT, bump);
-    window.addEventListener("bhb-desk-hydrated", bump);
+    };
+    const onFees = () => {
+      settle();
+      setTick((t) => t + 1);
+    };
+    window.addEventListener("bhb-desk-hydrated", onHydrated);
+    window.addEventListener(FEES_UPDATED_EVENT, onFees);
+    // Reading is what starts the loads.
+    loadFees();
+    loadTransport();
+    settle();
+    const fallback = window.setTimeout(() => setReady(true), READY_FALLBACK_MS);
     return () => {
-      alive = false;
-      window.removeEventListener(FEES_UPDATED_EVENT, bump);
-      window.removeEventListener("bhb-desk-hydrated", bump);
+      window.removeEventListener("bhb-desk-hydrated", onHydrated);
+      window.removeEventListener(FEES_UPDATED_EVENT, onFees);
+      window.clearTimeout(fallback);
     };
   }, []);
 
