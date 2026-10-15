@@ -6,13 +6,15 @@
  * (expires in 10 minutes; opening another cancels it).
  *
  * Who: Admissions (edit), or the "Field survey" function (edit) — checked
- * here, on the server. A team leader makes the same changes from the app
- * through POST /api/public/survey-day (signed by their phone).
+ * here, on the server: every change. A signed-in member of staff whose team
+ * row says leader: the leader's changes only (lib/surveyTeam.server.ts);
+ * from the staff app the leader goes through POST /api/public/survey-day
+ * (signed by their registered phone).
  * Answers: 200 {ok:true, id} only when the database wrote it; 409 with the
  * server's message when the row changed since the screen loaded it.
  */
 import { NextResponse } from "next/server";
-import { requireStaffPermissionOrFeature } from "@/lib/apiRouteAuth.server";
+import { requireStaffApi, requireStaffPermissionOrFeature } from "@/lib/apiRouteAuth.server";
 import { writeAudit } from "@/lib/audit.server";
 import { requestMeta } from "@/lib/api/v1/auth";
 import { startSurveyPairing } from "@/lib/surveyDay.server";
@@ -25,6 +27,7 @@ import {
   rosterOfStaff,
   surveyTeamOrNull,
   writeFailStatus,
+  type SurveyActor,
 } from "@/lib/surveyTeam.server";
 import { surveyMemberKey } from "@/lib/surveyTeamShared";
 
@@ -35,8 +38,12 @@ const NO_STORE = { "Cache-Control": "private, no-store" };
 const fail = (status: number, error: string) => NextResponse.json({ ok: false, error }, { status, headers: NO_STORE });
 
 export async function POST(req: Request) {
-  const auth = await requireStaffPermissionOrFeature(req, "admissions", "edit", "admissions.field_survey", "edit");
-  if (!auth.ok) return auth.response;
+  const office = await requireStaffPermissionOrFeature(req, "admissions", "edit", "admissions.field_survey", "edit");
+  // Not the office: a member of staff who is the survey team's leader may
+  // make the leader's changes (the web /field/survey page).
+  const staff = office.ok ? office : await requireStaffApi(req);
+  if (!staff.ok) return office.ok ? staff.response : office.response;
+  const auth = staff;
   if (auth.viaMirrorSecret) return fail(403, "The survey team is changed by signed-in staff.");
   const ctx = auth.ctx;
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
@@ -45,6 +52,13 @@ export async function POST(req: Request) {
 
   const team = await surveyTeamOrNull();
   if (!team) return fail(503, "Could not read the survey team — nothing was changed. Try again.");
+  let actor: SurveyActor = { kind: "office", name: by };
+  if (!office.ok) {
+    const me = team.members.find((m) => m.kind === "staff" && !!ctx.session.staffId && m.staffId === ctx.session.staffId);
+    if (!me || me.role !== "leader") return office.response;
+    actor = { kind: "leader", memberId: me.id, name: `${by} (team leader)` };
+    if (body?.op === "pair_start") return fail(403, "Only the office gives out phone codes.");
+  }
 
   if (body?.op === "pair_start") {
     const m = team.members.find((x) => x.id === body.memberId);
@@ -71,7 +85,7 @@ export async function POST(req: Request) {
   const roster = ctx.masters?.staff?.length ? rosterOfStaff(ctx.masters.staff) : await readSurveyRoster();
   if (!roster) return fail(503, "Could not read the staff roster — nothing was changed. Try again.");
 
-  const plan = planSurveyTeamOp(op, { kind: "office", name: by }, team, roster, new Date(), newSurveyId);
+  const plan = planSurveyTeamOp(op, actor, team, roster, new Date(), newSurveyId);
   if (!plan.ok) return fail(plan.status, plan.error);
   const w = await applySurveyTeamPlan(plan);
   if (!w.ok) {
