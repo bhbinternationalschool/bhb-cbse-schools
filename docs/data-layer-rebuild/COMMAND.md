@@ -1288,6 +1288,47 @@ left both stored requests and wrote `row_count` 3 = 1 leave type + 2 requests (l
 **Not done.** The rest of staff HR (leave, balances, appraisals) is still the replica (5.8). No
 notification to the raiser when a request is resolved (as before). Not measured in production.
 
+**Admissions · Field survey team & beats (director's report, 15 Oct).** *(Built 15 Oct 2026, PR #664 —
+**migration `20261015120000_admission_survey_team_rows.sql`, the director applies it before the deploy**.)*
+**Found.** "Assigned in the ERP, the app says not assigned; the app asks for a 6-digit code the ERP cannot
+make." Production, read-only: Cloud Run request log of 14 Oct 21:10–21:19 UTC — 15 `admissions-desk` pushes
+(all 200) whose sizes rise and fall by one team member (~190 bytes) as members were added and removed, and
+**every** app call `/api/public/survey-day` answered 403 with a 456-byte response = 217 header bytes + the
+239-byte `not_registered` body (the `not_on_team` body is 192): the phone was never registered, so the app
+showed the pairing-code screen. The only "Pair phone" button lived in the SurveyDaysBoard, which read the team
+from the server once on mount (21:10:00, empty) and never again, so it said "No survey team yet" while the
+Team table above it (the browser copy) showed the member — two copies on one screen. The last pushes carried
+no member (named removals), hence 0 in `ops_json`. On the local stack an add in the ERP reached the server
+(1 member) — the replica did not lose this write; the defect is the second copy and the unreachable code.
+**What exists.** Members and beats are rows (`admission_survey_members`, `admission_survey_beats`, ids kept
+from ops_json; `admission_survey_sync_meta` → erp_versions `admission_survey`), on `desk_writable_tables`,
+registry `admissions.survey-members` / `admissions.survey-beats`, written one change at a time by
+`lib/surveyTeam.server.ts` (rules: pure `lib/surveyTeamPlan.ts`) through `desk_write_guarded`. Doors:
+`POST /api/admissions/survey-team` (office = Admissions edit or the Field survey function: every op +
+`pair_start`; a signed-in team leader: add staff, remove a staff surveyor — not self, not a leader, not an
+outsider — add/edit/retire/reactivate beats), `POST /api/public/survey-day` `team`/`manage` (the leader's
+phone, signed `survey|manage|<op>:<target>|ts`), `GET /api/data/views/survey-team` (referenceCache on
+`admission_survey`; phones; old saved outsiders). The whole-desk push keeps ops_json's stored lists for
+these two keys whatever the copy says (old builds included); the desk read takes them from the rows and
+fails closed when they cannot be read. ERP: `SurveyTeamCard` / `SurveyBeatsCard` (useErpQuery, versions
+poll), "Get phone code" per member with expiry countdown, copy, WhatsApp share. The survey-day board and
+`/api/v1/staff/survey/*` read the rows. No-day capture: `/api/v1/staff/survey/capture` takes `location`
+(map pin / GPS) → lead note with a Google Maps link + a `survey_captures` point with `survey_day_id` null
+(`located_by`), listed on the board for its IST date. Staff app: no-day recording always offered, home on
+the map (flutter_map + OSM: no Google Maps SDK in the app), "Other area (no beat)", leader "Manage team &
+beats". Deleted: the browser-copy team/beat mutators in `fieldSurvey.ts`, the web `/field/survey` leader
+beat editor (points to the app).
+**Proof.** `test:survey-team-plan` (planner rules; mutations: leader check off, leader-made-leader — red).
+`test:admissions-field-ops-merge` updated (copy's team/beats ignored). `e2e/specs/survey-team.spec.ts`:
+ERP add → phone code from the row → phone pairs → app status sees the member; made leader in the ERP → phone
+adds a beat → principal's open screen shows it without reload; auth matrix (teacher 403, principal 200, stale
+base 409, member/outsider/unregistered phone 403, leader limits, removed member → not_on_team); old-build push
+leaves rows; no-day pin on the board. Flutter `test/survey_team_app_test.dart` (5; capture without location
+sent → red).
+**Not done.** Lead callers, survey attendance/sessions and saved outsiders remain in ops_json (replica).
+The web `/survey-day` page has no leader screen. Not measured in production; app release needed for the
+app parts.
+
 ### Phase 6 — Delete the replica
 
 **6.0** Re-run the 3.0 enumeration; every non-browser caller must be on `/api/export/*`.
