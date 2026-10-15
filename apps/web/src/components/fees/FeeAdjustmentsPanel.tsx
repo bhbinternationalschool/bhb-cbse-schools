@@ -1,6 +1,6 @@
 "use client";
 
-import { useDuesInputs } from "@/components/fees/useDuesInputs";
+import { duesDesksLabel, useDuesInputs } from "@/components/fees/useDuesInputs";
 import { useEffect, useMemo, useState } from "react";
 import {
   computeStudentDues,
@@ -116,8 +116,16 @@ export function FeeAdjustmentsPanel({
   // either lands, or a bus month the family owes is missing from the list of
   // dues that can be waived (15 Oct 2026).
   const duesInputs = useDuesInputs();
+  // Nothing is waived or written off on dues that are not loaded: "Leave
+  // mid-year" wrote off only the lines it was shown, leaving the bus months
+  // open on a child marked inactive (15 Oct 2026).
+  const duesReady = duesInputs.status === "ready";
+  const duesNotReady =
+    duesInputs.status === "loading"
+      ? "Loading this student's dues — wait a moment."
+      : `Dues not loaded — ${duesDesksLabel(duesInputs.missing)} could not be read. Nothing can be waived or written off until it is.`;
   const dues = useMemo(() => {
-    if (!student || !masters) return [] as FeeDueLine[];
+    if (!student || !masters || !duesReady) return [] as FeeDueLine[];
     return openFeeDues(
       computeStudentDues(student, masters, loadFees(), {
         includeFuture: true,
@@ -126,7 +134,7 @@ export function FeeAdjustmentsPanel({
       }),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [student, masters, rows, duesInputs.tick]);
+  }, [student, masters, rows, duesReady, duesInputs.tick]);
 
   const todayIso = new Date().toISOString().slice(0, 10);
   const waivable = useMemo(
@@ -183,6 +191,10 @@ export function FeeAdjustmentsPanel({
     e.preventDefault();
     if (!studentId) {
       flash("Select a student");
+      return;
+    }
+    if (!duesReady) {
+      flash(duesNotReady);
       return;
     }
     if (type === "bulk_waiver") {
@@ -276,6 +288,10 @@ export function FeeAdjustmentsPanel({
 
   function onLeaveSettle() {
     if (!student) return;
+    if (!duesReady) {
+      flash(duesNotReady);
+      return;
+    }
     const ok = window.confirm(
       `Stop future dues from ${stopAfter}, write off remaining open dues, and mark ${student.fullName} inactive?`,
     );
@@ -451,6 +467,26 @@ export function FeeAdjustmentsPanel({
               New adjustment
               {student ? ` · ${student.fullName}` : ""}
             </h3>
+            {student && !duesReady ? (
+              <p
+                role={duesInputs.status === "failed" ? "alert" : "status"}
+                className={`mt-2 rounded-lg px-3 py-2 text-xs ${
+                  duesInputs.status === "failed"
+                    ? "bg-[rgba(192,57,43,0.08)] text-[var(--danger)]"
+                    : "bg-[rgba(32,48,80,0.05)] text-[var(--muted)]"
+                }`}
+              >
+                {duesNotReady}
+                {duesInputs.status === "failed" ? (
+                  <>
+                    {" "}
+                    <button type="button" className="font-semibold underline" onClick={duesInputs.retry}>
+                      Try again
+                    </button>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <label className="text-sm">
                 <span className="mb-1 block text-[var(--muted)]">Type</span>
@@ -510,7 +546,7 @@ export function FeeAdjustmentsPanel({
               <div className="mt-3 space-y-3 text-sm">
                 {!student ? (
                   <p className="text-[var(--muted)]">Select a student first.</p>
-                ) : waivable.length === 0 ? (
+                ) : !duesReady ? null : waivable.length === 0 ? (
                   <p className="text-[var(--muted)]">Nothing open to waive for this student.</p>
                 ) : (
                   <>
