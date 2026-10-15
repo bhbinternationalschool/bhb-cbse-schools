@@ -44,14 +44,19 @@ async function open(browser: Browser, opts: { width: number; height: number; dar
 
 test.describe.configure({ mode: "serial" });
 
-test.beforeAll(async () => {
-  expect(CHILD, "fixture has a spare current-year child").toBeTruthy();
-  // Through tsx, like the stack's own seed (see e2e/transportPaidCase.ts).
+/** The case is written under tsx, like the stack's own seed (see e2e/transportPaidCase.ts). */
+function seed(step = ""): void {
   execFileSync("npx", ["--yes", "tsx", path.join(__dirname, "..", "..", "..", "..", "scripts", "e2e-seed-transport-paid.ts")], {
     cwd: path.join(__dirname, "..", ".."),
     stdio: "inherit",
-    env: process.env,
+    env: { ...process.env, TPM_STEP: step },
   });
+}
+
+test.beforeAll(async () => {
+  expect(CHILD, "fixture has a spare current-year child").toBeTruthy();
+  // Through tsx, like the stack's own seed (see e2e/transportPaidCase.ts).
+  seed();
   fs.mkdirSync(SHOTS, { recursive: true });
 });
 
@@ -121,6 +126,30 @@ test("student fee card: October transport owing, September not", async ({ browse
     await expect(card.getByText(/Transport · September 2026/)).toHaveCount(0);
     await card.scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(SHOTS, `student-card-${shot.name}.png`), fullPage: true });
+    await page.context().close();
+  }
+});
+
+test("riders form: a backdated start over paid months says the payment carries over", async ({ browser }) => {
+  seed("end-new");
+  for (const shot of [
+    { name: "desktop-light", width: 1440, height: 900, dark: false },
+    { name: "phone375-dark", width: 375, height: 812, dark: true },
+  ]) {
+    const page = await open(browser, shot);
+    await page.goto("/transport?tab=riders");
+    await page.getByPlaceholder("Name, admission no, or mobile…").fill(CHILD.fullName);
+    await page.getByRole("button", { name: new RegExp(CHILD.fullName) }).first().click({ timeout: 30_000 });
+    await page.getByLabel("Effective from").fill("2026-09-01");
+    const note = page.getByTestId("transport-paid-carry-over");
+    await expect(note).toBeVisible({ timeout: 15_000 });
+    await expect(note).toContainText("September 2026 is already paid");
+    await expect(note).toContainText("carry over to the new stop");
+    await note.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(SHOTS, `riders-warning-${shot.name}.png`), fullPage: false });
+    // A start after the paid months says nothing.
+    await page.getByLabel("Effective from").fill("2026-10-01");
+    await expect(note).toHaveCount(0);
     await page.context().close();
   }
 });

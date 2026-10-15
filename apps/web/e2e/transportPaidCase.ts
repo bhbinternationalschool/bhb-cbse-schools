@@ -161,6 +161,20 @@ export async function seedTransportPaidCase(): Promise<void> {
     vehicles: [],
     feePolicy: defaultFeePolicy(AY_CURRENT),
   } as unknown as TransportState;
+  if (process.env.TPM_STEP === "end-new") {
+    // The rider leaves the bus at the end of September — so the office can
+    // re-assign her, and the Riders form can be seen warning about the paid
+    // months a backdated start would cover.
+    const ended = {
+      ...transport,
+      assignments: transport.assignments.map((a) =>
+        a.id === NEW ? { ...a, effectiveTo: "2026-09-30" } : a,
+      ),
+    } as TransportState;
+    const e = await pushTransportDeskToDb(ended);
+    if (!e.ok) throw new Error(`transport desk: ${e.error}`);
+    return;
+  }
   const t = await pushTransportDeskToDb(transport);
   if (!t.ok) throw new Error(`transport desk: ${t.error}`);
 
