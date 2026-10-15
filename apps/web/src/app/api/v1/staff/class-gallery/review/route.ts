@@ -4,7 +4,8 @@
  * GET  /api/v1/staff/class-gallery/review — held items (and those still being checked), newest first.
  * POST /api/v1/staff/class-gallery/review { id, action: "approve" | "remove" }
  *
- * Leadership only (lib/classGallery.server postableSections().unrestricted).
+ * The gallery leader only — principal or office with the Gallery grant
+ * (lib/classGallery.server postableSections().unrestricted).
  * Approve shows it to the class's parents and copies it to Drive; remove
  * deletes the file and keeps the row as "removed", so a stale copy cannot
  * bring it back.
