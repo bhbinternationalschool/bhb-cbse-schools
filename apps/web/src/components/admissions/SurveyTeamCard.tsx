@@ -142,7 +142,7 @@ export function SurveyTeamCard() {
 
   const view = query.data;
   const canEdit = view?.canEdit ?? false;
-  const members = view?.members ?? [];
+  const members = useMemo(() => view?.members ?? [], [view]);
   const beats = view?.beats ?? [];
   const onTeam = useMemo(() => new Set(members.filter((m) => m.kind === "staff").map((m) => m.staffId)), [members]);
   const available = (staffList.data?.staff ?? [])

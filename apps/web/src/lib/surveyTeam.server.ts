@@ -23,16 +23,15 @@ import { randomUUID } from "node:crypto";
 import { referenceCache } from "@/lib/data/server/referenceCache";
 import { write as repoWrite } from "@/lib/data/server/repo";
 import type { WriteResult } from "@/lib/data/types";
-import { getServerTenantContext } from "@/lib/serverTenant";
 import {
   SURVEY_TEAM_DESK,
-  beatFromRow,
-  memberFromRow,
   type SurveyBeatRow,
   type SurveyMemberRow,
   type SurveyTeamData,
 } from "@/lib/surveyTeamShared";
 
+export { readSurveyTeamFromDb } from "@/lib/surveyTeamRead";
+import { readSurveyTeamFromDb } from "@/lib/surveyTeamRead";
 export {
   BEATS_COLLECTION,
   MEMBERS_COLLECTION,
@@ -47,22 +46,6 @@ import type { RosterStaff, SurveyTeamPlan } from "@/lib/surveyTeamPlan";
 type Row = Record<string, unknown>;
 
 // ── reads ────────────────────────────────────────────────────────────────
-
-/** Both tables, whole (a school has tens of rows). Throws on a failed read — never "empty". */
-export async function readSurveyTeamFromDb(): Promise<SurveyTeamData> {
-  const ctx = await getServerTenantContext();
-  if (!ctx) throw new Error("School database unavailable");
-  const [m, b] = await Promise.all([
-    ctx.sb.from("admission_survey_members").select("*").eq("tenant_id", ctx.tenantId).order("created_at", { ascending: true }).limit(2000),
-    ctx.sb.from("admission_survey_beats").select("*").eq("tenant_id", ctx.tenantId).order("created_at", { ascending: true }).limit(2000),
-  ]);
-  if (m.error) throw new Error(`survey team: ${m.error.message}`);
-  if (b.error) throw new Error(`survey beats: ${b.error.message}`);
-  return {
-    members: (m.data ?? []).map((r) => memberFromRow(r as Row)),
-    beats: (b.data ?? []).map((r) => beatFromRow(r as Row)).sort((x, y) => x.code.localeCompare(y.code, undefined, { numeric: true })),
-  };
-}
 
 /**
  * Per-process copy keyed on erp_versions "admission_survey" (data-layer

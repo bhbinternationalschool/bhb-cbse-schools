@@ -20,7 +20,7 @@ import { fetchAllPages } from "@/lib/supabase/pageAll";
 import { stampsOf, storedNewerIds, writeStampedRows } from "@/lib/rowStampWrite.server";
 import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
 import { mergeFieldOps, type FieldOpsLists } from "@/lib/admissionsFieldOpsMerge";
-import { readSurveyTeamFromDb } from "@/lib/surveyTeam.server";
+import { readSurveyTeamFromDb } from "@/lib/surveyTeamRead";
 import type { SurveyBeatRow, SurveyMemberRow } from "@/lib/surveyTeamShared";
 
 /** A stored beat row as the admissions desk's SurveyBeat. */
