@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Search, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useAccountsDesk } from "@/lib/useAccountsDesk";
 import {
   buildPaymentChannelGroups,
@@ -1668,6 +1668,9 @@ function Row({
 
 /* ─── Sales list ───────────────────────────────────────────── */
 
+/** One server page of the Sales / Unpaid lists. */
+const SALES_PAGE_SIZE = 50;
+
 function SalesSection({
   classes,
   sections,
@@ -1681,14 +1684,31 @@ function SalesSection({
 }) {
   const [search, setSearch] = useState("");
   const debounced = useDebounced(search, 300);
+  /**
+   * Pages come from the server, 50 at a time (newest first). Until 15 Oct
+   * 2026 this list asked for page 1 only and had no way to the next one, so
+   * every sale older than the newest 50 was reachable only by search.
+   *
+   * Paged, not month-grouped: a month header has to count and total its
+   * month, which needs every sale of that month on the client — the very
+   * unbounded read paging avoids. The Catalogue tab pages the same way.
+   */
+  // A new search or list starts again at page 1 — in the same render, so no
+  // request goes out for page N of the new search first.
+  const filterKey = `${onlyUnpaid ? "unpaid" : "all"}|${debounced}`;
+  const [pageAt, setPageAt] = useState({ key: filterKey, page: 1 });
+  const page = pageAt.key === filterKey ? pageAt.page : 1;
+  const setPage = (next: number | ((p: number) => number)) =>
+    setPageAt({ key: filterKey, page: typeof next === "function" ? next(page) : next });
   const sales = useAsync(
     () =>
       invApi.listSales({
         search: debounced,
         status: onlyUnpaid ? "unpaid" : "all",
-        pageSize: 50,
+        page,
+        pageSize: SALES_PAGE_SIZE,
       }),
-    [debounced, onlyUnpaid],
+    [debounced, onlyUnpaid, page],
   );
   const saver = useSaver();
 
@@ -1831,6 +1851,13 @@ function SalesSection({
   }
 
   const rows = sales.data?.rows ?? [];
+  const total = sales.data?.total ?? 0;
+  const pageSize = sales.data?.pageSize ?? SALES_PAGE_SIZE;
+  const lastPage = Math.max(1, Math.ceil(total / pageSize));
+  // A sale cancelled or paid off from the last page can leave it empty.
+  useEffect(() => {
+    if (!sales.loading && page > lastPage) setPage(lastPage);
+  }, [sales.loading, page, lastPage]);
 
   // Sorting by Owing brings the unpaid counter sales together; totals sort
   // by their paise, not by the rendered rupee string.
@@ -2008,6 +2035,45 @@ function SalesSection({
           </ErpTable>
         </ErpTableShell>
       )}
+
+      {sales.error ? null : total > pageSize ? (
+        <nav
+          aria-label={onlyUnpaid ? "Unpaid sales pages" : "Sales pages"}
+          className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"
+        >
+          <span data-testid="sales-range">
+            {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}{" "}
+            {onlyUnpaid ? "unpaid " : ""}sale{total === 1 ? "" : "s"}, newest first
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="xs"
+              aria-label="Newer sales"
+              disabled={page <= 1 || sales.loading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="size-3.5" />
+            </Button>
+            <span className="px-2 tabular-nums">
+              Page {page} of {lastPage}
+            </span>
+            <Button
+              variant="outline"
+              size="xs"
+              aria-label="Older sales"
+              disabled={page >= lastPage || sales.loading}
+              onClick={() => setPage((p) => Math.min(lastPage, p + 1))}
+            >
+              <ChevronRight className="size-3.5" />
+            </Button>
+          </div>
+        </nav>
+      ) : total > 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="sales-range">
+          {total} {onlyUnpaid ? "unpaid " : ""}sale{total === 1 ? "" : "s"}.
+        </p>
+      ) : null}
 
       {/* Receipt — reprint any sale, current balance and all payments on it. */}
       <InvDrawer
