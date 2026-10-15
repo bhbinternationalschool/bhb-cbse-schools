@@ -928,7 +928,7 @@ grant) returning the aggregates the screen shows, cached per process for 30 s ke
 `erp_versions` < 800 ms · 4.1i the remaining `app/api/v1` callers. Phase exit: the
 `ensureSchoolMirrorHydrated` ratchet under `app/api/v1` reaches 0 (100 files today).
 
-*(4.1c built 15 Oct 2026, PR #PRNUM.)* **What exists.** `GET /api/v1/parent/summary` reads the
+*(4.1c built 15 Oct 2026, PR #654.)* **What exists.** `GET /api/v1/parent/summary` reads the
 household (`sis_households` by id) and its student rows (`sis_students` by `household_id`, id order)
 through `lib/data/server/householdRead.ts` (shared with 4.1a/b; the rows are filtered by household again
 in Node), class/section names from `ctx.masters` (the 1.3 reference copy the session was already checked
