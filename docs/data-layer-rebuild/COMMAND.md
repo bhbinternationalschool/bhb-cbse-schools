@@ -892,7 +892,7 @@ main these pages never request the view, so `hits > 0` and "could not load" cann
 Timings are from a Mac running several other sessions' builds (load average ~10); one full run in that state
 failed 7 tests on time-outs and was discarded and re-run clean.
 
-*(2.1b built 15 Oct 2026, PR #PRNUM.)* **What exists.** The 15 `components/students` files
+*(2.1b built 15 Oct 2026, PR #659.)* **What exists.** The 15 `components/students` files
 (`StudentsWorkspace`, `StudentForm`, `StudentUpdatePanel`, `StudentUpgradePanel`, `StudentPromotionPanel`,
 `StudentSiblingsPanel`, `StudentDuplicatesPanel`, `StudentTagsPanel`, `SisReportsPanel`, `BirthdaysPanel`,
 `LegacyAdmissionVerifyPanel`, `UdiseComplianceWorkspace`, `StudentFeeDuesCard`, `StudentExamMarksCard`,
