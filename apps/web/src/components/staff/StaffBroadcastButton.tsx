@@ -11,7 +11,7 @@ import {
   staffAllowedSections,
   type ChatSectionRef,
 } from "@/lib/erpChatAccess";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis } from "@/lib/sis";
 import {
   computeLeaveDays,
@@ -110,7 +110,11 @@ async function postOutdoorDuty(
 export function StaffBroadcastButton() {
   const session = useDemoSession();
   const [open, setOpen] = useState(false);
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // Masters from the server (useScreenMasters — the versions poll keeps it
+  // fresh), not a copy read once when the panel opens: opened before the
+  // roster had landed, that copy had no staff, so the self-service tabs
+  // stayed hidden until the panel was closed and reopened.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [audience, setAudience] = useState<Audience>("class_parents");
   const [mode, setMode] = useState<Mode>("message");
   const [sectionId, setSectionId] = useState("");
@@ -155,7 +159,6 @@ export function StaffBroadcastButton() {
 
   useEffect(() => {
     if (!open) return;
-    setMasters(loadMasters());
     setTemplates(listApprovedTemplates(loadWaTemplates()));
     void withHydrationSlot(() => ensureWaTemplatesHydrated()).then(() => {
       setTemplates(listApprovedTemplates(loadWaTemplates()));
@@ -466,7 +469,7 @@ export function StaffBroadcastButton() {
         : !!message.trim();
 
   return (
-    <div className="relative">
+    <div className="sm:relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -478,7 +481,13 @@ export function StaffBroadcastButton() {
       </button>
 
       {open ? (
-        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[min(100vw-1.5rem,24rem)] space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_16px_40px_rgba(32,48,80,0.28)]">
+        // On a phone the button is not the header's last icon (the bell and
+        // the account menu sit to its right), so a popover hung off its right
+        // edge ran past the screen's left edge. Below sm the wrapper is not
+        // positioned, so the popover hangs from the sticky header instead and
+        // spans it with the page's gutter (and scrolls if taller than the
+        // screen).
+        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[min(100vw-1.5rem,24rem)] max-sm:inset-x-3 max-sm:max-h-[calc(100dvh-6rem)] max-sm:w-auto max-sm:overflow-y-auto space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_16px_40px_rgba(32,48,80,0.28)]">
           <div className="flex items-center justify-between">
             <p className="text-sm font-bold text-[var(--brand-deep)]">
               WhatsApp
@@ -659,11 +668,24 @@ export function StaffBroadcastButton() {
                 </div>
               )}
 
+              {/* Not yet known is not "no record": only a loaded roster
+                  without this login in it earns the "ask admin" line. */}
               {audience === "leadership" && !selfStaff ? (
-                <p className="text-[10px] text-[var(--muted)]">
-                  Leave, requests and outdoor duty need a staff record linked
-                  to your login — ask admin to link it in Staff → Profiles.
-                </p>
+                mastersError ? (
+                  <p className="text-[10px] text-[var(--danger)]" role="alert">
+                    Could not load your staff record from the server.{" "}
+                    <button type="button" className="font-semibold underline" onClick={() => void retryMasters()}>
+                      Try again
+                    </button>
+                  </p>
+                ) : !masters ? (
+                  <p className="text-[10px] text-[var(--muted)]">Loading your staff record…</p>
+                ) : (
+                  <p className="text-[10px] text-[var(--muted)]">
+                    Leave, requests and outdoor duty need a staff record linked
+                    to your login — ask admin to link it in Staff → Profiles.
+                  </p>
+                )
               ) : null}
 
               {audience === "leadership" && mode === "leave" ? (
