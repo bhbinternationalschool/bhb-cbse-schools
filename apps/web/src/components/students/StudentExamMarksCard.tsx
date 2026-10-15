@@ -29,7 +29,7 @@ import {
   loadExams,
   type ReportCard,
 } from "@/lib/exams";
-import { loadMasters } from "@/lib/masters";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { classLabelForStudent } from "@/lib/parentPortal";
 import { loadSis, normalizeStudent, type SisStudent } from "@/lib/sis";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
@@ -43,8 +43,11 @@ type Load =
 export function StudentExamMarksCard({ studentId }: { studentId: string }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [openTerms, setOpenTerms] = useState<string[]>([]);
+  // Class names for the report cards (Masters, server truth).
+  const { masters, error: mastersError } = useScreenMasters();
 
   useEffect(() => {
+    if (!masters) return;
     let alive = true;
     void (async () => {
       try {
@@ -62,7 +65,6 @@ export function StudentExamMarksCard({ studentId }: { studentId: string }) {
           return;
         }
         const student = normalizeStudent(raw);
-        const masters = loadMasters();
         const ay = student.academicYearCode || "";
         const classLabel = classLabelForStudent(student, masters);
         const cards: ReportCard[] = [];
@@ -95,7 +97,7 @@ export function StudentExamMarksCard({ studentId }: { studentId: string }) {
     return () => {
       alive = false;
     };
-  }, [studentId]);
+  }, [studentId, masters]);
 
   const session =
     load.kind === "ready" ? load.student.academicYearCode || "" : "";
@@ -133,9 +135,16 @@ export function StudentExamMarksCard({ studentId }: { studentId: string }) {
         </Link>
       </div>
 
-      {load.kind === "loading" ? (
+      {load.kind === "loading" && !mastersError ? (
         <p className="px-3 py-3 text-xs text-[var(--muted)]">
           Reading marksheets…
+        </p>
+      ) : null}
+
+      {load.kind === "loading" && mastersError ? (
+        <p className="px-3 py-3 text-xs font-semibold text-[var(--danger)]">
+          Marks could not be read — the school&apos;s classes did not load ({mastersError.message}). This is
+          not an empty marksheet.
         </p>
       ) : null}
 

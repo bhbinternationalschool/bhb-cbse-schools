@@ -892,6 +892,49 @@ main these pages never request the view, so `hits > 0` and "could not load" cann
 Timings are from a Mac running several other sessions' builds (load average ~10); one full run in that state
 failed 7 tests on time-outs and was discarded and re-run clean.
 
+*(2.1b built 15 Oct 2026, PR #659.)* **What exists.** The 15 `components/students` files
+(`StudentsWorkspace`, `StudentForm`, `StudentUpdatePanel`, `StudentUpgradePanel`, `StudentPromotionPanel`,
+`StudentSiblingsPanel`, `StudentDuplicatesPanel`, `StudentTagsPanel`, `SisReportsPanel`, `BirthdaysPanel`,
+`LegacyAdmissionVerifyPanel`, `UdiseComplianceWorkspace`, `StudentFeeDuesCard`, `StudentExamMarksCard`,
+`StudentHomeworkCard`) no longer call `loadMasters()`; all read `useScreenMasters()` (none had a
+`bhb-masters-updated` listener or `ensureMastersHydrated`). A masters read that never answered = `<QueryError>`
+(the workspace inside its shell; panels in place; the three profile cards say "could not be read … not a zero /
+not empty" in-card). `StudentForm` fills its fields once per (mode, student, year) from the first Masters answer
+(a ref key) — a background refetch must not wipe typing; the "Auto-assign admission no." button uses the
+hook's book instead of a fresh `loadMasters()`. The students roster is still `loadSis()` (Phase 3, untouched).
+**Teacher (scope "teaching") — fee lists withheld, not none.** Audited every key the 15 files (and
+`StudentProfileModal`, which takes the workspace's masters) read outside the teaching keys: `feeGroups`
+(form, upgrade, register filter/labels), the fee structure behind `computeStudentDues` (dues card, profile
+modal Fees tab), `numberSeries` (admission-number suggestions — empty list = `null`/"could not generate",
+a refusal, safe). Now: the dues card and the modal's Fees tab say "Fee dues are not shown to your role" instead
+of computing ₹0 / "No pending dues" from an empty structure (on origin/main the teacher was told "No pending
+dues" — screenshot in the fail-on-old run); the form's fee group is a read-only "Not shown to your role" and
+the auto-resolve effect does not run, so the child's stored `feeGroupId` is what a Save sends (on main it was
+re-resolved to "" from the empty list); Upgrade does not offer or send "remap fee group"; the register hides
+the fee-group filter and ignores a saved one. Receipts on the dues card come from the fees desk, not Masters —
+left as they were. **Masters write-backs from these screens.** No path passes the hook's book to
+`saveMasters`. Reachable whole-book writes all build from the page copy (`loadMasters()` inside lib), as on
+main: `bumpStudentSeriesUses`→`persistSeriesUse` (StudentForm save, legacy-admission verify) and
+`ensureStudentClassLinks` inside every `loadSis()`; both are on 2.2's list (`lib/numberSeries.ts`, `lib/sis.ts`).
+**Proof.** New specs: `error.spec` office `/students?tab=register` for masters-desk 503 and views/masters 503
+(no "Filter by class" drawn, Try again recovers 15 classes); `teacher.spec` her `/students` views/masters 503,
+and "fees are withheld, not none" (her child's profile: the not-shown line, no "No pending dues", fee group
+field "Not shown to your role"); `counts.spec` `/students?tab=register` class filter = 15 (desktop + phone).
+Fail-on-old (specs on this branch, components reverted to origin/main, fresh build): the two views/masters
+specs and the withheld spec FAIL; the counts and masters-desk specs pass on main too (coverage, not a fix).
+On this branch locally (desktop + phone): counts 14/14 as expected (`/students` stays expected-fail at
+274 vs 250 — blank-year rows, 3.1), error 9/9, teacher 11/11. No propagation case observes `/students`.
+Seen: all 12 tabs + a child's profile page, desktop-light and 375-dark, office and teacher (UDISE+ as
+principal — the seeded office and teacher get "Access restricted" there, by RBAC). Ratchets
+`load_masters_screen_files` 98 → **83**, `load_masters_calls_src` 463 → **447**,
+`ensure_hydrated_component_files` 69 (unchanged: the cards still hydrate sis/fees/exams/homework).
+**Not done / not proven.** Saves still go through the old whole-desk paths (SIS saves; the series bump and
+class-link write above) — 2.2/Phase 3. Screens now render the server's raw book, not `loadMasters()`'s
+read-time normalisation — not audited field by field beyond the fee keys above. The teacher's "Couldn't load
+fee records" toast on /students (fees desk 403) is pre-existing and untouched. Upgrade's "(no matching group
+— keep current)" hint is wrong on main too (a null resolve sets the fee group to null) — not changed here.
+CI scoreboard: see the PR.
+
 **2.2 Masters and staff editing write rows.** `MastersWorkspace` and its panels write through
 `useErpMutation` → `desk_slice_row_write` / `desk_slice_object_write` (one subject, one
 class-subject link, one section, one fee head at a time). The 14 non-Masters `saveMasters`
