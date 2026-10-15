@@ -1,3 +1,13 @@
+## Disk cleanup when your work is done (owner's rule, 15 Oct 2026)
+
+The Mac this repo lives on runs nearly full; worktrees, `node_modules`, `.next`, e2e
+stacks and Flutter builds left by finished sessions filled it to 1.2 GB free. When your
+task is done: stop what you started (e2e stack `down`, dev servers), delete rebuildable
+folders in your worktree, and remove the worktree once its branch is merged.
+`bash scripts/cleanup-worktrees.sh` (dry run; `DRY=0` to act) does this safely for every
+worktree — it only removes clean, merged ones and skips anything active in the last
+90 minutes. Full rule: `~/.claude/CLAUDE.md`.
+
 ## Data layer — read before touching loading, saving or sync (13 Oct 2026)
 
 The ERP's "not showing / stale / slow" problems come from one cause: a

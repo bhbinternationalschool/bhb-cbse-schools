@@ -3,6 +3,7 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { staffWorkingYear } from "@/lib/api/v1/staffScope";
 import { assertMaySection, classLabelFor, ensureClassEvent } from "@/lib/classGallery.server";
+import { SCHOOL_SECTION } from "@/lib/classGallery";
 
 export const runtime = "nodejs";
 
@@ -12,7 +13,7 @@ export async function POST(request: Request) {
     if (ctx.session.persona !== "staff") throw new ApiError("forbidden", "Staff session required", 403);
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
     const section = String(body.section ?? "");
-    if (!/^[^|]+\|[^|]+$/.test(section)) throw new ApiError("bad_request", "section required", 400);
+    if (section !== SCHOOL_SECTION && !/^[^|]+\|[^|]+$/.test(section)) throw new ApiError("bad_request", "section required", 400);
     await assertMaySection(ctx, section);
     const album = await ensureClassEvent({
       section,

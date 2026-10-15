@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { UpiPayButton, type UpiPaid } from "@/components/payments/UpiPayButton";
 import { recordUpiProof, useRecordedUpiProofs } from "@/lib/upiProofsClient";
 import { PayoutButton } from "@/components/payments/PayoutButton";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   formatInr,
   PAYROLL_PAYMENT_MODES,
@@ -45,7 +46,7 @@ const ADVANCE_STAFF_RECENT = "payroll.advances.staff";
 
 export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [advances, setAdvances] = useState<StaffAdvance[]>([]);
   const [tick, setTick] = useState(0);
   // Until the register has been read from the server, an empty list means
@@ -77,7 +78,6 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
   const [returnNote, setReturnNote] = useState("");
 
   useEffect(() => {
-    setMasters(loadMasters());
     setAdvances(loadAdvances().advances);
   }, [tick]);
 
@@ -260,6 +260,14 @@ export function AdvancesPanel({ readOnly = false }: { readOnly?: boolean }) {
     setReturnNote("");
     setViewStaffId(returnStaffId);
     refresh();
+  }
+
+  // A failed Masters read is a failure on screen (R6) — never an empty staff picker.
+  if (mastersError) {
+    return <QueryError what="the staff roster" error={mastersError} retry={retryMasters} />;
+  }
+  if (!masters) {
+    return <p className="text-sm text-[var(--muted)]">Loading advances…</p>;
   }
 
   return (

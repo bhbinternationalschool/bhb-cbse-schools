@@ -104,8 +104,42 @@ export function classGalleryPath(section: string, albumId: string, photoId: stri
 
 /** Drive: Class gallery / 2026-27 / Class III-A / Sports day. */
 export function classGalleryDriveFolder(academicYear: string, classLabel: string, eventName: string): string[] {
-  return ["Class gallery", academicYear || "No year", classLabel || "Class", cleanEventName(eventName) || "Event"];
+  // A whole-school album has no class label.
+  return ["Class gallery", academicYear || "No year", classLabel || "Whole school", cleanEventName(eventName) || "Event"];
 }
+
+/**
+ * The whole school, as a "section" of the gallery (15 Oct 2026): the
+ * principal and the office post school albums from the app too. Such an
+ * album has no sections, so every family sees it — once its items pass the
+ * same check as a class's.
+ */
+export const SCHOOL_SECTION = "school";
+export const SCHOOL_LABEL = "Whole school";
+
+/** The gallery "section" an album belongs to: its class, or the whole school. */
+export const albumSectionKey = (album: Pick<GalleryAlbum, "sectionIds">): string =>
+  album.sectionIds?.[0] || SCHOOL_SECTION;
+
+/**
+ * A school album's photo the office uploaded on the web ERP is stored in the
+ * private school-files bucket and named by the staff-only /api/file route —
+ * which refuses a parent. The path inside that bucket, or "" for any other url.
+ */
+export function officeGalleryFilePath(url: string): string {
+  const m = /^\/api\/file\/(gallery\/[^?#]+)$/.exec(String(url || ""));
+  if (!m) return "";
+  const path = decodeURIComponent(m[1]!);
+  return path.includes("..") ? "" : path;
+}
+
+/**
+ * The url a viewer is handed for a gallery item: an office upload goes
+ * through the gallery media route (which checks the viewer and serves
+ * parents) instead of the staff-only file route. Anything else is unchanged.
+ */
+export const galleryViewUrl = (p: { id: string; url: string }): string =>
+  officeGalleryFilePath(p.url) ? classMediaUrl(p.id) : p.url;
 
 /** The ERP route a class-gallery item is served from (it checks the viewer). */
 export const classMediaUrl = (photoId: string) => `/api/v1/gallery/media/${encodeURIComponent(photoId)}`;
