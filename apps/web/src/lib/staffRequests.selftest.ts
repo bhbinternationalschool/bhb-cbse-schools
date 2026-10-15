@@ -187,7 +187,7 @@ async function main() {
     assert.equal(op.op, "upsert");
     assert.equal(op.id, "req_new");
     assert.equal(op.base, null, "a new element is written with a null base");
-    const row = op.row as Record<string, unknown>;
+    const row = (op as { row?: unknown }).row as Record<string, unknown>;
     assert.equal(row.staffId, "st_teacher", "the staff id comes from the session, never the body");
     assert.equal(row.raisedByName, "Asha Teacher");
     assert.equal(row.subject, "Fan broken in 5A");
@@ -229,7 +229,7 @@ async function main() {
     assert.equal(u.status, 200);
     const op = p.writes[0]!;
     assert.equal(String(op.base), "3", "the base the screen loaded is the RPC's base");
-    const row = op.row as Record<string, unknown>;
+    const row = (op as { row?: unknown }).row as Record<string, unknown>;
     assert.equal(row.status, "resolved");
     assert.equal(row.resolutionNote, "done");
     assert.equal(row.resolvedAt, "2026-10-15T11:00:00.000Z");
