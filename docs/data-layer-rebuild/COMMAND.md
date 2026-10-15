@@ -542,6 +542,78 @@ over `[collection]`): `masters` (full-rights or the teaching subset by permissio
 editVia('editor')` passes (the old Masters editor's `masters_write_slices` already bumps
 `masters_desk_sync_meta`); the teacher login's `useMasters()` returns the teaching subset.
 
+*(Built 14 Oct 2026, PR #645.)* **What exists.** `@tanstack/react-query` 5.104.0 (exact pin, published
+26 Sep). `lib/data/client/hooks.tsx`: `ErpQueryProvider` (one client per tab, mounted in `AppShell`
+around the signed-in shell), `useErpQuery(key, path, {desk, parse})` (reads through `readView`,
+added to `lib/data/client/query.ts` beside `readPage`/`readAll`, through `erpFetch`; `readPage` is
+left on plain `fetch` because the website editor already uses `readAll` and this step does not touch it), `useErpMutation(collection, {desk})` (`useSaveMutation` + invalidation of the desk's queries
+after a confirmed write and after a conflict; no consumer yet), `useVersionsPoll` / the provider's
+poller, and `useMasters()`, `useStaffList()`, `useRbac()`, `useModuleRegistry()`. The rules are pure
+functions in `lib/data/client/queryKernel.ts`: staleTime 60 s, refetch on focus, retry 2 (1 s, 2 s)
+only for no answer / 5xx / 408 / 429 — a 4xx is not retried; the poll's outcome (200 apply,
+401/403 stop for the life of the page, quietly; 503 / no answer / malformed = keep, nothing
+invalidated); which queries go stale. Each view answers `{ok, data, versions, stale}` where
+`versions` is what the copy was **built from** (new `builtFrom` on `referenceCache` reads — null for a
+previous/fallback copy), so a query is stale when any of its desks now differs from what it was built
+from; that also closes the race between a view's read and the poll's first answer. Queries without
+it (`/api/v1/...`) go stale when a desk moves between two answers. **When the poll runs:** only while a
+mounted query reads a desk and the tab is visible (immediately, then every 20 s, and on
+`visibilitychange→visible`, never twice within 5 s). Today that is `/__kernel` and the ~15 screens
+that use `useMyTeaching`; every other page makes no new request. Parents and field sessions never
+render `AppShell` (the `(erp)` layout redirects them), and the Flutter apps' web views open only
+checkout/e-books/videos. Views: `app/api/data/views/{masters,staff-list,rbac,module-registry}/route.ts`,
+handlers in `lib/data/server/views.ts` (deps injectable), real deps in `viewDeps.ts`, types in
+`lib/data/viewTypes.ts`. `masters` uses the masters-desk rule, now **shared** as
+`lib/mastersReadScope.server.ts` (`resolveMastersReadScope`; the masters-desk GET calls it too) and
+`lib/mastersTeachingSubset.ts` (the key list moved out of the route): the Masters grant = the book
+without staff/departments/designations, any other staff session = the teaching subset (`scope:
+"teaching"`), never a 403. `staff-list` is built field by field from an allow list (id, empCode,
+fullName, stream, status, department/designation id + name, the four link lists with their known
+fields only — duty-link `notes` dropped) plus departments/designations; nothing from
+`sis_staff.profile` other than those fields can reach it (tested with a profile `loginPassword`); a
+Masters copy without the roster (`fallback`) = 503. `rbac` = the rbac desk's rule (Settings view: the
+whole state; other staff: every role, own assignments/grants, no audit; a failed Settings check is
+503, never own-only); `known:false` means no saved role set. `module-registry` = a new
+`referenceCache("module_registry", ["module_registry"])` over the desk (booleans only). All four: 401
+no session, 403 parent / inactive family / the mirror sync secret (no mirror read on this path), 503
+`{ok:false}` with no copy, `Cache-Control: private, no-store`. Sources: `readServerMastersCopy` /
+`readServerRbacCopy` (new exports of the 1.3 caches in `lib/api/v1/auth.ts`). `<QueryError>`
+(`components/data/QueryError.tsx`) uses CoreDataGate's words and button. `useMyTeaching` is now
+`useErpQuery('my-teaching', '/api/v1/staff/my-classes', {desk: sis_staff, timetable, masters})`
+with the same return type; the module-level copy and `fetchMyTeaching` are gone. `/__kernel` =
+`app/(erp)/%5F%5Fkernel/page.tsx` (a `_` folder is private in the App Router), `notFound()` unless
+`process.env.E2E === "1"` at request time.
+
+**Proof.** `test:query-kernel` (pure rules + the wiring on a real `QueryClient` + `readView` +
+`parseMyTeaching`), `test:reference-views` (`resolveMastersReadScope`, the auth matrix of every view,
+subsets, redaction, 503s, and the real route files through the real guards by API key on a fake
+PostgREST), `test:reference-cache` (+`builtFrom`) — each new assertion shown to fail with its predicate
+reverted (21 mutations: 20 red at once; the one that stayed green — a Settings-check 503 treated as
+"no Settings" — got its own case, which is red under that mutation). Playwright (local stack, fresh seed): the four `/__kernel` propagation cases **pass** (editor and
+api × subject and section; seen after 17.6–20.3 s over two full runs); rebuilt with the poll's invalidation removed, all
+four fail at "propagation" with `visibleAfterReload: true`. `kernel.spec.ts`: 401/403 matrix, office full
+vs teacher own-only rbac, staff-list keys = the allow list, no versions request on `/masters` in 25 s,
+one at mount and one 20 s later on `/__kernel`, a 403 stops it (1 request in 23 s), a 503 keeps the
+list, a failed view = "Could not load … Try again" after 3 reads (~4 s) and Try again recovers.
+`teacher.spec.ts`: the class teacher's `/__kernel` reads `scope: teaching`, 15 classes, 13 sections,
+44 subjects, 127 links, no fee heads/structure/grants, no roster. Scoreboard: origin/main ea9f5ba2
+fresh run 16 pass / 27 expected-fail / 2 fixme; this branch 27 / 27 / 2, 0 FAIL, 0 UNEXPECTED-PASS — the
+11 new passes are the new tests; every existing test kept its status. Budget: the three useMyTeaching
+pages (`/students`, `/attendance`, `/homework`) now make one extra small `/api` request in the first 5 s
+(the versions poll); others unchanged. Bundle: every `(erp)` page loads two more chunks (react-query
+≈ 34 KB raw / 10.3 KB gzip; the kernel + erpFetch ≈ 9.4 KB / 3.9 KB); public and parent pages unchanged.
+
+**Not done / not proven here.** No real screen reads `useMasters()` etc. yet (2.1) — the 12
+real-screen propagation cases stay expected-fail; the 2.1 bridge (`writeMastersLocalRaw` from
+`useMasters()`) is not built; `useErpMutation` has no consumer (2.2/1.5); `useErpCollection` over
+`readAll` is not built (first consumer 3.x). R6's "200 with zero rows while erp_versions says
+non-zero = failure" is not implemented on the client. `useMyTeaching` differences: a 5xx/network
+failure now retries twice (~3 s more "loading" before `my: null`); a failed *background* refetch keeps
+the last good answer (before, a remount after 60 s with a failed read gave `null`); it refetches on
+focus after 60 s and when the poll sees sis_staff/timetable/masters move (attendance cover changes —
+coordinators/leave — do not trigger it; they reach it on focus/remount as before). Not measured in
+production (needs deploy); timings are from a shared Mac.
+
 **1.5 Write kernel (migration PR — director applies before merge).**
 - `desk_write_guarded` v3: refuse `base = null` whenever the row exists (409 `unversioned`;
   `null` stays legal only for an insert of an absent id); add `sync_meta_table` to
@@ -572,6 +644,114 @@ editVia('editor')` passes (the old Masters editor's `masters_write_slices` alrea
   list `sis.students`; every applied op moves `erp_versions`. Acceptance: two Playwright
   contexts edit the same subject — the second gets the conflict toast and sees the first's value;
   `stale-writer.spec.ts` passes.
+
+*(Built 14 Oct 2026 — migration `20261014220000_data_layer_write_kernel.sql`: **the director
+applies it to production before this deploys**. Without it the new code fails closed: a kernel
+write answers 503 "the server's write kernel is not installed", never an old path. **Apply it
+immediately before the deploy, not hours ahead:** the live code's UDISE+ sheet caller sends no
+base, so between the migration and the deploy every UDISE+ upload after the first is refused
+("Saved in this browser only"). The reverse order is safe — this code against the old database:
+the fixed caller's bases are accepted by v2, teacher reach and delete approval live in the route,
+and only `masters.*` writes (no caller yet) answer 503.)*
+Also in v3: a new id is locked against a concurrent insert, and an id that belongs to another
+school is refused (42501) instead of being updated.
+**What exists.**
+- `desk_write_guarded` v3: a null base on a row that exists → `conflict`, `reason:'unversioned'`
+  (with the stored row; 409 at the route); a base on an absent row → `reason:'deleted'` (an edit
+  never re-creates a removed row); a soft-deleted row *exists* (reviving it needs its revision).
+  **All or none** (v2 applied the rest of a batch and reported the refused). An op without an id,
+  an unknown op or an id twice in a batch raises 22023 (v2 skipped it silently). Every batch that
+  changes anything bumps the table's `sync_meta` (`updated_at` strictly later + its count column;
+  `sis_students` also `active_student_count`) in the same transaction — `desk_writable_tables`
+  gained `sync_meta_table` / `sync_count_column`; new `website_desk_sync_meta` and
+  `udise_sheet_desk_sync_meta` (both appear in `erp_versions`, count `null` — not in its mapping).
+  The 22 `masters_desk_*` row tables **left the allowlist**: they are derived
+  (`masters_sync_rows_from_slices` rewrites them and deletes what the slice lacks on every save),
+  so a direct write was silently undone; no code wrote them.
+- `desk_slice_row_write(p_tenant, p_table, p_slice_key, p_op, p_id, p_row, p_base, p_key='id')`
+  (SECURITY DEFINER, service_role only): the 16 tables (production list, 14 Oct); advisory lock +
+  `for update`; base = slice `updated_at` for masters **and timetable** (neither carries `_rev`),
+  element `_rev` for the other 14 (absent `_rev` = 0; new → 1, changed → +1, identical →
+  unchanged, a client `_rev` ignored — as `mergeWithRevs` with a base); **patch** of one element by
+  key (`p_key` = `code` for `staff_hr.leaveTypes`); an element without a key, a row whose key
+  disagrees, an object slice, a staff-owned Masters list (`staff/departments/designations`) or the
+  `students` projection is refused; new slice `updated_at` (strictly later); `<desk>_desk_sync_meta`
+  bumped with the counts the TypeScript writers compute, `slice_count` included (Masters and
+  Trust: slice rows that are not an empty list; the others: every slice row — matched against
+  production's stored values, 14 Oct); for masters `masters_sync_rows_from_slices`
+  in the same transaction (a row the tables refuse rolls the slice back). A `classSubjects`
+  element without `isOptional` is written with `false` (non-boolean refused) — and the old path's
+  `pushMastersSlicesToDb` / `pushMastersDeskToDb` apply the same default
+  (`withClassLinkDefaults`), so the 1.1 finding cannot recur from the old editor either.
+- `desk_slice_object_write(p_tenant, p_table, p_slice_key, p_value, p_base)`: a fixed list of 12
+  object slices (Masters' four + `rbac.mobile`, `exam_papers.importMappings`,
+  `wa_templates.lastMetaSyncAt`, `staff_hr.leaveSettings`, `module_registry.enabled`,
+  `automation.lastTickAt`, `transport.feePolicy`, `timetable.config`); base = slice `updated_at`.
+- Registry: `kind: 'rows' | 'slice' | 'object'` + `slice: {table, key, keyField, base}`; the 21
+  `masters.*` list collections are now **slice** collections (read from `masters_desk_slices`,
+  camelCase, with the slice stamp as `revision`), `masters.settings` is replaced by four object
+  collections (`masters.school-profile` …). A slice collection takes **one op per request**.
+  `POST /api/data/<collection>` routes rows → `desk_write_guarded`, slice/object → the RPCs (the
+  client is unchanged: `writeRecords` / `useSaveMutation` send `{ops}`; `WriteOk.revision` /
+  `ReadOk.revision` carry the slice stamp; conflicts carry `reason`). After a write that changed
+  something the route drops that desk's probe cache (`clearDeskProbeCache`: `sis-roster`,
+  `masters-desk-rows`) and the masters reference cache.
+- Deletes of `sis.students` / `sis.households` need `students` **approve** on top of edit
+  (`approval.onDelete`; office: 403; principal: allowed). No soft delete: `sis_students` has no
+  `deleted_at`, and adding one would need every roster reader to filter it.
+- Teacher reach: `teacherScope` on the registry; `GET /api/data/sis.students` for a session that
+  is not school-wide and lacks `students.edit` returns only rows whose (class, section) is in
+  `staffSectionScope` (in the `WHERE` as `section_id in (…)` + the pair check), `sis.households`
+  only those students' households, `udise.*` and `?ids=` 403; unknown scope 503.
+- `GET /api/data/<collection>?ids=a,b` (≤ 200, not for scoped sessions): current revisions,
+  soft-deleted rows included — what a client needs to revive a row it put away.
+- **Callers.** Every `desk_write_guarded` caller is `repo.write()` behind `POST /api/data/<c>`;
+  its callers: the website desk (`WebsiteWorkspace`, `PageEditor`, `MediaLibrary`,
+  `Publications`: new records with a null base and fresh ids, edits/deletes with the row's
+  `updated_at` — unchanged under v3) and the UDISE+ working sheet (`lib/udiseUploadServer.ts`),
+  which sent **no base at all** — the sheet row on every save, every re-uploaded child, every row
+  "start a fresh sheet" put away: under v3 every save after the first would have been refused.
+  Fixed here: it sends the revision it loaded or last wrote, reads back soft-deleted rows'
+  revisions (`?ids=`) to revive them, and for a live row it never loaded (the robot wrote it) is
+  refused rather than overwriting it. The UDISE robot (`udiseRobotSync.server.ts`) writes the two
+  tables directly, not through the kernel (unchanged; it bumps no signal). No mobile or script
+  caller.
+
+**Proof.** `supabase/tests/desk_write_guarded.test.sql` (37 checks, rewritten for v3; it fails
+on origin/main's v2 at "masters_desk_* not writable", and with the allowlist checks removed at
+"an op without an id is refused", then "the insert bumped sis_sync_meta", then "null base on an
+existing row → unversioned") and `desk_slice_row_write.test.sql` (51 checks — `slice_count` checks fail on the first version of `_desk_slice_meta_bump`, which never set it; the functions do not
+exist on origin/main), both in CI. `e2e/write-kernel.acceptance.ts` (24 checks, run by
+`e2e-stack.sh check`; on origin/main's app a null-base write **overwrote** the student's notes
+and the run stopped at check 3). Before/after on the class teacher's
+`GET /api/data/sis.students`: origin/main 400 of the 401 rows (the whole school) and `udise.rows` 200; now 51
+(her section) and 403. `test:udise-upload-server` (fails on the old caller: the first re-upload is
+refused `unversioned`). `test:approval-gate` (+ onDelete). Playwright: `write-conflict.spec.ts`
+(two contexts, the second gets "someone else changed this" and shows the first's value; fails on
+origin/main — the screen does not exist) and `stale-writer.spec.ts` (fixme → pass; on origin/main
+the same script's "kernel" write lands in the derived row table and the old tab's section save
+is then **accepted**, 200 — the revert the spec exists to catch). Scoreboard on a fresh stack:
+**18 pass · 27 expected-fail · 1 fixme · 0 fail** (origin/main ea9f5ba2: 16 · 27 · 2 · 0); the
+only differences are those two specs. Migration rehearsal on a fresh PG17: 371 applied, the same 2
+known failures as origin/main (adhoc-only tables), this one applied. `scripts/verify.sh`: 515
+passed (typecheck, lint, every self-test); its `next build` died of Node's default 4 GB heap
+twice with a `.next` cache left by the e2e-env build — the same tree built clean from a cold cache
+at the default heap (89 s; origin/main 92 s), warm, and at CI's 6144 MB.
+
+**Not done / not proven.** No product screen writes through the kernel yet (the test screen
+`/e2e/write-kernel`, 404 unless `E2E=1`, is the only client); Phase 2 converts screens. No
+`kind:'slice'` registry entries for transport, trust, timetable or the desk-slice modules — the
+RPCs accept their tables (SQL-tested for `staff_hr` and `module_registry`), the entries come with
+each desk's conversion. Old whole-desk paths for `_rev` desks still accept an unversioned save
+(server writers, old builds): a kernel element write moves `_rev`, but an old no-`revs` POST
+still wins for its rows (`mergeWithRevs` without a base) — closing that is the per-desk 410 stub of
+1.2. A kernel delete of a Masters class/section bypasses the old editor's whole-book guards
+(`guardMastersOverwrite`, `guardSubjectsOverwrite`); it is one named element with the slice stamp,
+but nothing checks references (students in that class). `masters_desk_settings` (and every
+`masters_desk_*` row table) is keyed on `id` alone, so with two tenants the row sync would write
+across them (one school in production; seen in the SQL test, not changed here). The UDISE robot
+bumps no signal. Unknown-scope 503 on `/api/data/sis.*` is the 1.7 reader's (`readStaffScopeForDesk`)
+and is not re-tested here. `useErpMutation` (1.4) is not built here.
 
 **1.6 Ratchets.** `scripts/check-ratchets.sh` defines each metric in a `case` block and
 `scripts/ratchets.txt` carries the budget — add both for: `loadMasters(` files in
@@ -690,6 +870,41 @@ MIRROR_SYNC_SECRET\|viaMirrorSecret apps/web/src`, Cloud Scheduler `bhb-*-tick` 
 gated. Acceptance: the 01:30 IST BigQuery sync and the watch email run green the night after
 deploy (named in the PR as a post-deploy check), and every enumerated caller is listed with its
 new endpoint.
+
+*(Built 15 Oct 2026, PR #648 — enumeration only: **no non-browser caller of a bulk desk GET
+exists**, so no `/api/export/*` route was added.)* **What was found.** The premise above (from
+`evidence/review-v1.md` §3.3) was checked caller by caller and is wrong for every one:
+
+| Caller | What it actually calls | Auth | Bulk desk GET? |
+|---|---|---|---|
+| Nightly BigQuery sync (`bhb-bigquery-nightly-sync`, **02:00 IST**, on `school-erp-lite`) | `POST /api/analytics/bigquery-sync/tick` → `lib/bigQuerySync.server.ts` `select * from <table> where tenant_id = $1` through `postgresPool` (9 tables) | `x-cron-secret` | no — reads Postgres directly |
+| `school-erp-lite` (`scripts/sync-lite-service.sh`) | a copy of the web image serving ticks + the Fleet Edge push; calls nothing | — | no |
+| 19 Cloud Scheduler jobs, asia-southeast1 | `POST` to `*/tick`-style routes (all exist) | `x-cron-secret` | no |
+| 6 Cloud Scheduler jobs, us-central1 (5) + asia-south1 (1) | `GET /api/cron/{control-jobs,audit,ai-run,scheduled}`, `GET /api/holidays/official-suggestions/sync`, `POST …-uc.a.run.app/api/cron/scheduled` | `x-cron-secret` | no — and every one **404s** (last status NOT_FOUND; the routes do not exist) |
+| ERP watch (3-hourly) and nightly review (01:30 IST) — Claude cloud routines | Supabase `SELECT`s, repo reads, Gmail; no gcloud, no app secret | Supabase MCP | no (prompts not re-read in this step; logs below cover them) |
+| UDISE / Propel office robot (`extensions/office-robot`) | `/api/v1/udise/robot/*`, `/api/v1/propel/robot/*` only | the staff's own ERP cookie (`credentials: "include"`) | no |
+| Flutter apps (`cbse_school_mobile/lib`) | 141 distinct `/api/v1/*` path strings + auth/upload/file/checkout/client-metrics | bearer session | no (their whole-desk cost is server-side, Phase 4) |
+| `scripts/`, `apps/web/scripts/` | PostgREST directly (`/rest/v1`), `/api/wa/*`, `/api/analytics/bigquery-sync/tick?dryRun=1` | service key / secrets | no |
+| Senders of `x-mirror-secret` (`MIRROR_SYNC_SECRET`: named in 44 route files, accepted by every `requireStaffApi` route) | none in the repo outside three self-tests | — | no |
+
+Production agreed: Cloud Run request logs, 8–15 Oct, 27,519 GETs of `/api/school-data/*` +
+`/api/data/*`, every one on `school-erp-web` from a `Mozilla` user agent (no headless, webview or
+Electron agent); 15 Sep–15 Oct, the only non-browser request to those paths was one `curl` POST
+answered 401. **What exists.** Ratchet `nonbrowser_desk_get` (budget 0, `scripts/check-ratchets.sh`):
+a reference to `api/school-data/` or `api/data/` in the Flutter app, the extension, `scripts/`
+(e2e harness excluded), `apps/web/scripts/`, CI workflows, `deploy/`, `cloudbuild*.yaml`, the
+BigQuery sync files, or a `fetch(` of those paths in a route or `*.server.ts` fails CI; shown
+red for a planted line in each of six of those places. **Consequences for later steps.** 3.3 and
+Phase 6 can gate or delete the browser desk routes without an export path; `?export=1` on
+`sis-roster` is not needed for any caller; the mirror-secret bypass on the bulk GETs has no user
+and can go with them (`apiRouteAuth.server.ts` `hasMirrorSyncSecret`). The e2e acceptance
+scripts and specs GET `masters-desk`/`sis-roster`/`staff-roster` with session cookies and move
+with 3.3. 6.0 re-runs this enumeration (the ratchet plus the log query above). **Not done / not
+proven.** The cloud routines' current prompts were not read (no tool for it here); a caller
+outside the repo using a browser user agent with the mirror secret cannot be told apart in the
+logs. The six 404 scheduler jobs are the director's to delete or repoint (not changed here). A
+post-deploy check is still named — the 02:00 IST BigQuery job and the next watch email green —
+though nothing in this PR touches either.
 
 **3.1 Per-screen student endpoints.** `GET /api/data/sis.students?ay=&class=&section=&status=&q=&cursor=`
 (the registered collection, keyset-paged ≤ 200) returns the list projection (id, admission no,
@@ -916,7 +1131,7 @@ stale tabs reload themselves). After 0.3, manual `deploy-online.sh` runs are not
 |---|---|---|---|
 | typed data kernel | `lib/data/types.ts` (`WriteOp`, `Revision`, `ReadFail` with no `rows`), `lib/data/registry.ts` (10 collections: `sis.students`, `sis.households`, `udise.*`, `site.*`, `admissions.leads`), `lib/data/server/repo.ts` (keyset `list()`, `write()` → `desk_write_guarded`), `lib/data/approvalGate.ts`, `lib/data/client/{query,mutate,useSaveMutation}.ts` | live code with a `{ops}` contract; no screen consumes it yet | 1.4, 1.5, 3.1, 3.4 |
 | generic data route | `app/api/data/[collection]/route.ts` | GET keyset list, POST `{ops}`; header forbids whole-state bodies | R4 |
-| row CAS RPC | `supabase/migrations/20260810010000_desk_write_guarded.sql`, `20260810050000_…` | applies ops with base checks; **accepts null base; bumps no sync_meta; hard-deletes** — fixed in 1.5 | 1.5 |
+| row CAS RPC | `supabase/migrations/20260810010000_desk_write_guarded.sql`, `20260810050000_…`, v3 `20261014220000_…` | v3 (1.5): refuses a null base on an existing row, all-or-none, bumps the table's sync_meta; slice elements via `desk_slice_row_write` / `desk_slice_object_write` | 1.5 |
 | paged reads | `lib/supabase/pageAll.ts` (`fetchAllPages`, `fetchByIds`) | | 1.3, 3.x |
 | probe-gated response cache | `lib/deskProbeCache.server.ts` (`cachedDeskJson`, `deskProbe`) | `desk_probe` RPC has a fixed allowlist of data tables (`20261009090000_desk_probe_transport.sql:19-36`) with **no sync_meta, rbac or module-registry tables** and fails open on an unlisted name (9 Oct incident) | 0.5f; **not** for versions |
 | slice lock + all-or-none | `supabase/migrations/20261010220000_masters_write_slices.sql` (`for update`, base = slice `updated_at`, bumps sync_meta, then `masters_sync_rows_from_slices`) | the pattern `desk_slice_row_write` copies | 1.5 |

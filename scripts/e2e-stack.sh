@@ -8,7 +8,8 @@
 #                                      values are baked in at build time)
 #   bash scripts/e2e-stack.sh app      next start on 127.0.0.1:3700 (background)
 #   bash scripts/e2e-stack.sh check    the acceptance checks (apps/web/e2e/acceptance.ts,
-#                                      then e2e/versions.acceptance.ts — step 1.3)
+#                                      then e2e/versions.acceptance.ts — step 1.3,
+#                                      then e2e/write-kernel.acceptance.ts — step 1.5)
 #   bash scripts/e2e-stack.sh sql-test <file.sql>
 #                                      run a behavioural SQL test (supabase/tests)
 #                                      against the stack's database; it must roll
@@ -286,6 +287,10 @@ cmd_check() {
   # data-layer 1.3: erp_versions, GET /api/data/views/versions, the server
   # reference cache. It reads the app's log to count reference-cache rebuilds.
   in_web npx --yes tsx e2e/versions.acceptance.ts "$STATE/app.log"
+  # data-layer 1.5: the write kernel through the running app (refusals,
+  # teacher reach, slice and object writes, erp_versions moving). Puts back
+  # everything it changes.
+  in_web npx --yes tsx e2e/write-kernel.acceptance.ts
 }
 
 cmd_status() {

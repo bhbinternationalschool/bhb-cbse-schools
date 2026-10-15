@@ -108,3 +108,10 @@ selftest_readfilesync_files|89|*.selftest.ts FILES calling readFileSync( — tex
 v1_school_mirror_files|107|FILES under src/app/api/v1 calling ensureSchoolMirrorHydrated( — mobile API routes that rebuild the whole school replica per Cloud Run instance. Set 2026-10-14 on origin/main ea9f5ba2 (12 Oct: 100).
 load_masters_calls_src|471|OCCURRENCES (every match, two on one line = 2) of loadMasters( in ALL of src, selftests and the definition excluded. Phase 2.3b gate. Set 2026-10-14 on origin/main ea9f5ba2 (12 Oct: 476).
 load_sis_calls_src|426|OCCURRENCES of loadSis( in ALL of src (loadSisForStaff not counted), selftests and the definition excluded. Phase 3.4 gate. Set 2026-10-14 on origin/main ea9f5ba2 (12 Oct: 426).
+
+# Data-layer step 3.0 (docs/data-layer-rebuild/COMMAND.md): callers that are
+# not a signed-in browser tab and read a bulk desk GET. Enumerated 15 Oct 2026:
+# none (Flutter app, office robot, scripts, Cloud Scheduler, BigQuery sync,
+# lite service, watch routines; 30 days of Cloud Run logs agree). Phase 3
+# gates those routes and Phase 6 deletes them, so this is 0 and stays 0.
+nonbrowser_desk_get|0|Non-browser code (Flutter app, robot extension, scripts, CI/deploy, BigQuery sync, server loopback fetches) reading a bulk desk GET. A new bulk reader gets a service-only export route instead.

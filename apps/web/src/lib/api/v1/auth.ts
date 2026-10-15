@@ -19,7 +19,7 @@ import { ApiError } from "@/lib/api/v1/errors";
 import { staffRoleCodeFor } from "@/lib/staffSessionRole";
 import { trackServerWork } from "@/lib/serverWork";
 import { rbacReadOutcome } from "@/lib/rbacReadOutcome";
-import { referenceCache, type BuildResult } from "@/lib/data/server/referenceCache";
+import { referenceCache, type BuildResult, type CacheRead } from "@/lib/data/server/referenceCache";
 
 export type ApiAuthContext = {
   session: DemoSession;
@@ -133,6 +133,17 @@ async function readServerRbac(): Promise<RbacCopy> {
   return { state: out.state, known: out.known };
 }
 
+/**
+ * The rbac cache's own answer, for the reference view (GET
+ * /api/data/views/rbac, data-layer 1.4): `ok:false` = no copy could be read
+ * (the view answers 503 — never the built-in defaults dressed as the
+ * school's roles); `known:false` on a copy = the database holds no saved
+ * role set, so these ARE the built-in roles.
+ */
+export function readServerRbacCopy(): Promise<CacheRead<{ state: RbacState; known: boolean }>> {
+  return rbacCache.read();
+}
+
 export async function loadServerRbac(): Promise<RbacState> {
   return (await readServerRbac()).state;
 }
@@ -222,6 +233,15 @@ const mastersCache = referenceCache<MastersState>("masters", MASTERS_DESK_KEYS, 
 /** Force the next read to rebuild — call after a server-side write to sis_staff or Masters. */
 export function invalidateServerMastersCache(): void {
   mastersCache.invalidate();
+}
+
+/**
+ * The masters cache's own answer, for the reference views (data-layer 1.4):
+ * `from: "fallback"` = Masters read, the staff roster NOT (unknown — the
+ * staff-list view answers 503 for it); `ok:false` = no copy at all.
+ */
+export function readServerMastersCopy(): Promise<CacheRead<MastersState>> {
+  return mastersCache.read();
 }
 
 /** Masters + staff roster for this request (see buildServerMasters). */

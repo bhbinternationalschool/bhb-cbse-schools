@@ -1,6 +1,13 @@
 /**
  * The client write path. There is exactly one, and it cannot be ignored.
  *
+ * The same call writes every kind of collection: rows, one slice element,
+ * one object slice — the server routes by the registry's `kind` (data-layer
+ * 1.5). The base is what the read returned: a row's `updated_at`, a `_rev`
+ * element's `_rev`, or the page's `revision` for a slice-stamped collection;
+ * after a write, `versions[id]` (and `revision`) are the next base. A null
+ * base is only for a record that does not exist yet.
+ *
  * Today there are 71 `void pushX()` sites whose failures reach a
  * `console.warn` and stop there. That is why a refused save looked identical
  * to a successful one: the UI had no way to find out, and mostly did not
@@ -22,6 +29,7 @@ type ServerOutcome = {
   status: RecordOutcome<unknown>["status"];
   revision?: string;
   stored?: unknown;
+  reason?: string;
 };
 
 /**
@@ -63,6 +71,7 @@ export async function writeRecords<T>(
     results?: ServerOutcome[];
     versions?: Record<string, string>;
     conflicts?: ServerOutcome[];
+    revision?: string | null;
   } | null;
 
   if (res.ok && body?.ok) {
@@ -74,6 +83,10 @@ export async function writeRecords<T>(
       ok: true,
       results: (body.results ?? []).map((r) => toOutcome<T>(r)),
       versions,
+      // Slice collections: the slice's new stamp — the next write's base.
+      ...(body.revision !== undefined
+        ? { revision: body.revision ? asRevision(String(body.revision)) : null }
+        : {}),
     };
   }
 
@@ -107,7 +120,9 @@ export async function writeRecords<T>(
 
 function toOutcome<T>(r: ServerOutcome): RecordOutcome<T> {
   const revision = asRevision(String(r.revision ?? ""));
+  const reason =
+    r.reason === "stale" || r.reason === "unversioned" || r.reason === "deleted" ? r.reason : undefined;
   return r.status === "conflict"
-    ? { id: r.id, status: "conflict", revision, stored: r.stored as T }
+    ? { id: r.id, status: "conflict", revision, stored: r.stored as T, ...(reason ? { reason } : {}) }
     : { id: r.id, status: r.status, revision };
 }

@@ -84,6 +84,29 @@ function emptyBundle(): MastersDeskBundle {
   return rest;
 }
 
+/**
+ * Every class–subject link says whether it is optional before it is written
+ * (data-layer 1.5, the step 1.1 finding). masters_desk_class_subjects.is_optional
+ * is NOT NULL and the row sync names the column whenever any link carries
+ * it, so ONE link without the key was accepted into the slice and then
+ * failed the row sync ("Masters saved, but the row tables did not update"),
+ * and every later save failed the same way until the slice was repaired.
+ * A missing value is false — what every app-written link carries; "true"
+ * as text is true. desk_slice_row_write applies the same rule in SQL.
+ */
+export function withClassLinkDefaults(state: MastersState): MastersState {
+  const links = state.classSubjects;
+  if (!Array.isArray(links) || links.every((l) => typeof l?.isOptional === "boolean")) return state;
+  return {
+    ...state,
+    classSubjects: links.map((l) =>
+      typeof l?.isOptional === "boolean"
+        ? l
+        : { ...l, isOptional: (l as { isOptional?: unknown })?.isOptional === "true" },
+    ),
+  };
+}
+
 function stateToSlices(state: MastersState): {
   key: MastersSliceKey;
   payload: unknown;
@@ -144,7 +167,7 @@ export async function pushMastersSlicesToDb(
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
   const now = nowIso();
-  const stripped = stripStaffFromMastersForBlob(state) as unknown as Record<string, unknown>;
+  const stripped = stripStaffFromMastersForBlob(withClassLinkDefaults(state)) as unknown as Record<string, unknown>;
   const slices = keys
     .filter((key) => MASTERS_SLICE_KEYS.includes(key))
     .filter((key) =>
@@ -234,7 +257,7 @@ export async function pushMastersDeskToDb(
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
   const now = nowIso();
-  const stripped = stripStaffFromMastersForBlob(state);
+  const stripped = stripStaffFromMastersForBlob(withClassLinkDefaults(state));
   const slices = stateToSlices(stripped);
 
   // A slice the push does not carry is left as stored — absence is not a

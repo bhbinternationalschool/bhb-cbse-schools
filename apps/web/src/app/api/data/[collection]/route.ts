@@ -11,7 +11,14 @@
  *
  * Contract:
  *   GET  /api/data/<collection>?ay=2026-27&limit=100&cursor=…
+ *   GET  /api/data/<collection>?ids=a,b      current revisions (rows only)
  *   POST /api/data/<collection>   body: { ops: WriteOp[] }
+ *
+ * Since data-layer 1.5: a null base on a record that exists is refused (409,
+ * reason "unversioned"); a batch is all-or-none; every applied op moves the
+ * desk's sync_meta (erp_versions); a slice collection takes one op per
+ * request; deleting a student or a family needs `students` approve; a
+ * teacher's GET of sis.* returns only the rows in their reach.
  *
  * The body is ALWAYS a list of stated per-record changes. This endpoint
  * never accepts a whole-module state object — inferring intent by diffing
@@ -19,11 +26,23 @@
  */
 
 import { NextResponse } from "next/server";
-import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
+import { invalidateServerMastersCache, invalidateServerRbacCache } from "@/lib/api/v1/auth";
+import { readStaffScopeForDesk } from "@/lib/api/v1/staffScope";
+import { requireStaffPermission, type RouteAuthSuccess } from "@/lib/apiRouteAuth.server";
 import { batchNeedsApproval } from "@/lib/data/approvalGate";
-import { collectionDef } from "@/lib/data/registry";
-import { list, write, type Row } from "@/lib/data/server/repo";
-import type { Cursor, FailCode, WriteOp } from "@/lib/data/types";
+import { collectionDef, collectionKind, type CollectionDef } from "@/lib/data/registry";
+import {
+  householdIdsForSections,
+  list,
+  revisionsOf,
+  write,
+  writeSlice,
+  type Row,
+  type RowScope,
+} from "@/lib/data/server/repo";
+import type { Cursor, FailCode, WriteOp, WriteResult } from "@/lib/data/types";
+import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
+import { hasPermission } from "@/lib/rbac";
 import { withBuildCheck } from "@/lib/staleBuild.server";
 
 export const runtime = "nodejs";
@@ -62,19 +81,105 @@ export async function GET(req: Request, ctx: RouteCtx) {
   const auth = await requireStaffPermission(req, def.rbac.view, "view");
   if (!auth.ok) return auth.response;
 
+  // A teacher reads only what is in reach (data-layer 1.5). Until this, any
+  // students.view holder could page the whole roster here.
+  const reach = await teacherReach(def, auth);
+  if (!reach.ok) return reach.response;
+
   const url = new URL(req.url);
   const rawLimit = url.searchParams.get("limit");
+
+  // `?ids=a,b` — the current revisions of named records, soft-deleted ones
+  // included (to revive one, or put away a sheet held from elsewhere). Not
+  // for a scoped (teacher) read: it would name rows outside the reach.
+  const rawIds = url.searchParams.get("ids");
+  if (rawIds !== null) {
+    if (reach.scope) {
+      return NextResponse.json(
+        { ok: false, code: "auth", error: "Revisions by id are not available to a scoped session" },
+        { status: 403 },
+      );
+    }
+    const result = await revisionsOf(collection, rawIds.split(","));
+    if (!result.ok) return NextResponse.json(result, { status: statusFor(result.code) });
+    return NextResponse.json(result, { headers: { "Cache-Control": "private, no-store" } });
+  }
 
   const result = await list(collection, {
     academicYearCode: url.searchParams.get("ay") ?? undefined,
     limit: rawLimit ? Number(rawLimit) : undefined,
     cursor: (url.searchParams.get("cursor") as Cursor | null) ?? null,
+    scope: reach.scope,
   });
 
   if (!result.ok) {
     return NextResponse.json(result, { status: statusFor(result.code) });
   }
-  return NextResponse.json(result);
+  return NextResponse.json(result, { headers: { "Cache-Control": "private, no-store" } });
+}
+
+/**
+ * The reach of this session over a collection with a `teacherScope`
+ * (registry). No restriction for the mirror secret, a holder of `edit` on
+ * the collection's module (as sis-roster: they get the whole roster anyway),
+ * or a school-wide session. Otherwise the teacher's sections from
+ * staffSectionScope (1.7) — or 403 for a collection that cannot be scoped.
+ * An unknown scope is a 503 (R6), never the whole school.
+ */
+async function teacherReach(
+  def: CollectionDef,
+  auth: RouteAuthSuccess,
+): Promise<{ ok: true; scope?: RowScope } | { ok: false; response: NextResponse }> {
+  if (!def.teacherScope || auth.viaMirrorSecret) return { ok: true };
+  const { session, masters, rbac } = auth.ctx;
+  if (hasPermission(session, masters, def.rbac.edit, "edit", rbac)) return { ok: true };
+  const read = await readStaffScopeForDesk(auth.ctx);
+  if (!read.ok) return read;
+  const scope = read.scope;
+  if (!scope) {
+    return {
+      ok: false,
+      response: NextResponse.json({ ok: false, code: "auth", error: "Staff session required" }, { status: 403 }),
+    };
+  }
+  if (scope.unrestricted) return { ok: true };
+  if (def.teacherScope === "deny") {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { ok: false, code: "auth", error: `${def.id} covers the whole school; it is not available to a class login` },
+        { status: 403 },
+      ),
+    };
+  }
+  const sections = Array.from(scope.sections).map((k) => {
+    const at = k.indexOf("|");
+    return { classId: k.slice(0, at), sectionId: k.slice(at + 1) };
+  });
+  if (def.teacherScope === "section") return { ok: true, scope: { kind: "sections", sections } };
+  try {
+    return { ok: true, scope: { kind: "households", ids: await householdIdsForSections(sections) } };
+  } catch (e) {
+    console.error("[data] household reach could not be read", e instanceof Error ? e.message : e);
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { ok: false, code: "unavailable", error: "Could not work out your families — please try again.", scopeUnknown: true },
+        { status: 503 },
+      ),
+    };
+  }
+}
+
+/** Drop the server caches a changed collection feeds (registry `invalidates`). */
+function invalidateAfterWrite(def: CollectionDef, result: WriteResult<Row>): void {
+  if (!result.ok) return;
+  if (!result.results.some((r) => r.status === "applied" || r.status === "deleted")) return;
+  for (const key of def.invalidates?.probeCaches ?? []) clearDeskProbeCache(key);
+  for (const ref of def.invalidates?.reference ?? []) {
+    if (ref === "masters") invalidateServerMastersCache();
+    if (ref === "rbac") invalidateServerRbacCache();
+  }
 }
 
 /**
@@ -167,7 +272,11 @@ async function postOps(req: Request, ctx: RouteCtx) {
     }
   }
 
-  const result = await write(collection, ops);
+  // Rows go through desk_write_guarded; slice elements and object slices
+  // through their RPCs, one per request (registry `kind`).
+  const result =
+    collectionKind(def) === "rows" ? await write(collection, ops) : await writeSlice(collection, ops);
+  invalidateAfterWrite(def, result);
   if (!result.ok) {
     return NextResponse.json(result, { status: statusFor(result.kind) });
   }

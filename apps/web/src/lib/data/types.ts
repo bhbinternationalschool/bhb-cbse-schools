@@ -79,6 +79,14 @@ export type ReadOk<T> = {
   readonly nextCursor: Cursor | null;
   /** The server's clock, for display only — never use it as a Revision. */
   readonly serverTime: string;
+  /**
+   * Slice collections whose base is the whole slice's stamp (Masters,
+   * timetable — registry `slice.base: "slice"`) and object slices: the stamp
+   * every write of this collection must send as its `base`. Absent for row
+   * collections, whose rows carry their own `updated_at`, and for `_rev`
+   * slices, whose elements carry `_rev`.
+   */
+  readonly revision?: Revision | null;
 };
 
 export type ReadResult<T> = ReadOk<T> | ReadFail;
@@ -94,10 +102,13 @@ export function isReadOk<T>(r: ReadResult<T>): r is ReadOk<T> {
 /**
  * One stated change.
  *
- * `base` is the revision the client believed it was editing. `null` means
- * "I have never seen this record" — allowed, and counted server-side as
- * `unversioned`, so clients deployed before the guard keep working during a
- * rollout. It is NOT a way to opt out of conflict detection.
+ * `base` is the revision the client believed it was editing: a row's
+ * `updated_at`, a `_rev` slice element's `_rev` (as a string), or — for a
+ * Masters / timetable slice element and for an object slice — the slice's
+ * stamp (`ReadOk.revision`). `null` means "this record does not exist yet":
+ * since data-layer 1.5 the server refuses a null base on a record that
+ * exists (409, `reason: "unversioned"`), so a copy that never loaded the
+ * record cannot overwrite or delete it.
  *
  * `row` is a Partial: the server patches rather than replaces, so a payload
  * carrying only the changed field cannot erase the rest of the record.
@@ -127,13 +138,27 @@ export type RecordOutcome<T> =
       readonly status: "conflict";
       readonly revision: Revision;
       readonly stored: T;
+      /**
+       * Why it was refused: `stale` (changed since the base), `unversioned`
+       * (no base, but the record exists), `deleted` (a base, but the record
+       * is gone). Absent from servers before data-layer 1.5.
+       */
+      readonly reason?: ConflictReason;
     };
+
+export type ConflictReason = "stale" | "unversioned" | "deleted";
 
 export type WriteOk<T> = {
   readonly ok: true;
   readonly results: readonly RecordOutcome<T>[];
   /** Fresh revisions to re-stamp local records with. */
   readonly versions: Readonly<Record<string, Revision>>;
+  /**
+   * Slice collections based on the slice's stamp, and object slices: the
+   * slice's new stamp — the base for the NEXT write of any element of it
+   * (every element shares it). See ReadOk.revision.
+   */
+  readonly revision?: Revision | null;
 };
 
 /**

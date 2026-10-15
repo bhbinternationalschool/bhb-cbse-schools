@@ -6,7 +6,7 @@
  * Vision reads off each app's success screen.
  */
 import assert from "node:assert/strict";
-import { asMobile, buildUpiPayLink, checkUpiProof, isVpa, parseUpiProofText } from "./upiPay";
+import { asMobile, buildUpiPayLink, checkUpiProof, isVpa, parseUpiProofText, payeeNamesAgree, UPI_NO_UTR_HELP } from "./upiPay";
 
 console.log("upiPay.selftest.ts");
 
@@ -117,4 +117,126 @@ Debited from XXXXXX5371`;
   assert.ok(!checkUpiProof(parseUpiProofText("₹500 Completed"), { amountPaise: 50000, today: "2026-10-07" }).ok, "no UTR");
 }
 
+/* ── 15 Oct 2026: the director's GPay "Paid" screen, exactly as Vision read it ──
+ * "₹" came back as "*". It used to give amount 0, so the ERP upload said "No
+ * amount could be read" and the WhatsApp reader dropped the photo. */
+const DIRECTOR_PAID = `*11,500
+Paid to
+Randhir Sungh
+15 October 2026, 12:28am
+POWERED BY
+UPI
+UNIFIED PAYMENTS INTERFACE`;
+{
+  const p = parseUpiProofText(DIRECTOR_PAID);
+  assert.equal(p.amountPaise, 1150000, "*11,500 is ₹11,500");
+  assert.equal(p.payeeName, "Randhir Sungh");
+  assert.equal(p.utr, "", "a success screen has no UTR — not guessed");
+  assert.equal(p.paidOn, "2026-10-15");
+  const c = checkUpiProof(p, { amountPaise: 1150000, payeeName: "RANDHIR SINGH", today: "2026-10-15" });
+  assert.ok(!c.ok, "no UTR, so not recordable");
+  assert.ok(c.problems.some((x) => x.startsWith(UPI_NO_UTR_HELP)), "says to send the details screen");
+  assert.ok(!c.problems.some((x) => /amount/i.test(x)), "the amount was read");
+  assert.ok(!c.problems.some((x) => /payment to/i.test(x)), "Sungh is an OCR slip for Singh, not someone else");
+}
+
+/* ── ₹ misread as other symbols, and dropped altogether ── */
+for (const sign of ["₹", "*", "%", "?", "¥", "Z", "z", "₨"]) {
+  const p = parseUpiProofText(`${sign}11,500\nPaid to\nRandhir Sungh`);
+  assert.equal(p.amountPaise, 1150000, `"${sign}11,500"`);
+}
+for (const pre of ["Rs.", "Rs. ", "Rs ", "Rs", "INR ", "INR", "INR."]) {
+  assert.equal(parseUpiProofText(`Paid to Raju\n${pre}2,500.50`).amountPaise, 250050, `"${pre}2,500.50"`);
+}
+assert.equal(parseUpiProofText("Paid *11,500 to Randhir\nUPI").amountPaise, 1150000, "mid-line, grouped");
+assert.equal(parseUpiProofText("211,500\nPaid to\nRandhir").amountPaise, 0, "a ₹ read as 2 cannot be told from a real 2 — not guessed");
+
+/* GPay details screen, headline ₹ dropped by OCR */
+{
+  const p = parseUpiProofText(`11,500
+Completed
+15 Oct 2026, 12:28 am
+To RANDHIR SINGH
+randhir@okicici
+From: ASHISH SINGH (Union Bank of India)
+5371
+UPI transaction ID
+628802353231
+Google transaction ID
+CICAgKDx9oS0Ag`);
+  assert.equal(p.amountPaise, 1150000, "the headline, not the account suffix 5371");
+  assert.equal(p.utr, "628802353231");
+  assert.equal(p.payeeName, "RANDHIR SINGH");
+  assert.equal(p.app, "gpay");
+  assert.ok(checkUpiProof(p, { amountPaise: 1150000, payeeName: "Randhir Singh", today: "2026-10-15" }).ok);
+}
+
+/* PhonePe details, ₹ read as "%" */
+{
+  const p = parseUpiProofText(`Transaction Successful
+12:28 am on 15 Oct 2026
+Paid to
+RANDHIR SINGH
+9876543210@ybl
+%11,500
+Transfer Details
+Transaction ID
+T2610150028123456789012
+Debited from
+XXXXXX5371
+UTR: 628802353231`);
+  assert.equal(p.amountPaise, 1150000);
+  assert.equal(p.utr, "628802353231");
+  assert.equal(p.app, "phonepe");
+}
+
+/* Paytm, ₹ read as "*" with a space */
+{
+  const p = parseUpiProofText(`Paid Successfully to
+Randhir Singh
+* 11,500
+UPI Ref No: 628802353231
+15 Oct 2026, 12:28 AM
+paytm`);
+  assert.equal(p.amountPaise, 1150000);
+  assert.equal(p.utr, "628802353231");
+}
+
+/* BHIM, amount with paise and no sign at all */
+{
+  const p = parseUpiProofText(`BHIM
+Transaction Successful
+Amount
+11,500.00
+Paid to
+RANDHIR SINGH
+UPI Ref ID 628802353231
+15/10/2026 00:28`);
+  assert.equal(p.amountPaise, 1150000);
+  assert.equal(p.utr, "628802353231");
+  assert.equal(p.paidOn, "2026-10-15");
+  assert.equal(p.app, "bhim");
+}
+
+/* Negatives: a UTR, a mobile, a date, a time, a year are never the amount */
+assert.equal(parseUpiProofText("Paid to\nRandhir\n628802353231").amountPaise, 0, "a 12-digit UTR alone");
+assert.equal(parseUpiProofText("UPI transaction ID\n628802353231").amountPaise, 0);
+assert.equal(parseUpiProofText("Paid to\n9919101755\nUPI").amountPaise, 0, "a 10-digit mobile");
+assert.equal(parseUpiProofText("Paid to Raju\n15\nOctober 2026\nUPI").amountPaise, 0, "a day split from its month");
+assert.equal(parseUpiProofText("Paid to Raju\nOctober\n2026\n15 October 2026\nUPI").amountPaise, 0, "a year");
+assert.equal(parseUpiProofText("Paid to Raju\n12:28\n15 Oct 2026").amountPaise, 0, "a time");
+assert.equal(parseUpiProofText("Paid to Raju\nBank account\n5371").amountPaise, 0, "an account suffix");
+assert.equal(parseUpiProofText("Paid\n1,500\nTotal\n2,000").amountPaise, 0, "two equally likely amounts — not guessed");
+
+/* Who was paid: OCR slips forgiven, other people not */
+assert.ok(payeeNamesAgree("Randhir Sungh", "RANDHIR SINGH"));
+assert.ok(payeeNamesAgree("Randhlr Sungh", "RANDHIR SINGH"), "a slip in every word, whole name lines up");
+assert.ok(payeeNamesAgree("RANDHIR SINGH", "Randhir Singh"));
+assert.ok(!payeeNamesAgree("Rakesh", "Rajesh"), "one near word alone never matches");
+assert.ok(!payeeNamesAgree("Rakesh Yadav", "Rajesh Patel"));
+assert.ok(!payeeNamesAgree("Suraj Kumar", "Randhir Singh"));
+assert.ok(!payeeNamesAgree("Ram Lal", "Raj Pal"), "short words get no slack");
+assert.ok(!payeeNamesAgree("", "Randhir Singh"));
+
 console.log("  ✓ UPI pay link + success-screenshot reading — GPay, PhonePe, Paytm; refusals");
+console.log("  ✓ OCR'd rupee signs, sign-less headline amounts, UTR/mobile/date never the amount, tolerant payee names");

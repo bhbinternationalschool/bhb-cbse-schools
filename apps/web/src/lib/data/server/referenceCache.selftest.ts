@@ -10,6 +10,11 @@
  *   stored; a throwing build = a failed one; versions unknown = one build per
  *   snapshot; invalidate = the next read rebuilds and an older build is not
  *   stored; a build started under an older key is not joined by a newer read.
+ *
+ * data-layer 1.4: `builtFrom` — the deskKeys' versions a value was built under
+ * (what a reference view sends the browser) — on a rebuild and a cache hit,
+ * the values read BEFORE the build; null for a previous copy, a fallback, and
+ * a build made while the versions were unknown.
  */
 import assert from "node:assert/strict";
 import { installServerOnlyStub } from "../../fakePostgrest.testkit";
@@ -265,6 +270,54 @@ void (async () => {
       assert.ok(r1.ok && r1.value === "v1" && r2.ok && r2.value === "v2");
       const r = await c.read();
       assert.ok(r.ok && r.from === "cache" && r.value === "v2", "the later-started build is the one kept");
+    }
+
+    // ── builtFrom (1.4): the versions a value was built under, or null when not proven.
+    {
+      const fv = fakeVersions({ masters: v("a", 15), sis_staff: v("s1", 35), fee: v("f1") });
+      let fail = false;
+      let release: () => void = () => {};
+      let gate: Promise<void> = Promise.resolve();
+      const c = referenceCache("t-built", ["masters", "sis_staff"], async () => {
+        await gate;
+        if (fail) return { ok: false, error: "down" };
+        return { ok: true, value: "x" };
+      }, { versions: fv.source, forgetVersions: () => {} });
+      const cold = await c.read();
+      assert.ok(cold.ok && cold.from === "rebuild");
+      assert.deepEqual(cold.ok && cold.builtFrom, { masters: v("a", 15), sis_staff: v("s1", 35) }, "a rebuild: its own desks' versions, nothing else");
+      const hit = await c.read();
+      assert.ok(hit.ok && hit.from === "cache");
+      assert.deepEqual(hit.ok && hit.builtFrom, { masters: v("a", 15), sis_staff: v("s1", 35) }, "a cache hit: the versions it was built under");
+
+      // The versions are read before the build: a write landing during the
+      // build leaves builtFrom at the OLDER value (the copy is at least that new).
+      fv.set({ masters: v("b", 16), sis_staff: v("s1", 35) });
+      gate = new Promise<void>((r) => (release = r));
+      const during = c.read();
+      await new Promise((r) => setTimeout(r, 5));
+      fv.set({ masters: v("c", 17), sis_staff: v("s1", 35) });
+      release();
+      const built = await during;
+      assert.deepEqual(built.ok && built.builtFrom, { masters: v("b", 16), sis_staff: v("s1", 35) }, "builtFrom = the versions read before the build");
+
+      fail = true;
+      const prev = await c.read();
+      assert.ok(prev.ok && prev.from === "previous" && prev.stale && prev.builtFrom === null, "a previous copy: builtFrom null");
+      fv.fail();
+      const unknown = await c.read();
+      assert.ok(unknown.ok && unknown.stale && unknown.builtFrom === null, "versions unknown + failed build: null");
+      fail = false;
+      fv.fail();
+      const builtUnknown = await c.read();
+      assert.ok(builtUnknown.ok && builtUnknown.from === "rebuild" && builtUnknown.builtFrom === null, "built while the versions were unknown: null");
+
+      const fb = referenceCache("t-built-fb", ["masters"], async () => ({ ok: false, error: "roster", fallback: "fb" }), {
+        versions: fakeVersions({ masters: v("a") }).source,
+        forgetVersions: () => {},
+      });
+      const fr = await fb.read();
+      assert.ok(fr.ok && fr.from === "fallback" && fr.builtFrom === null, "a fallback: builtFrom null");
     }
 
     console.log = quiet.log;

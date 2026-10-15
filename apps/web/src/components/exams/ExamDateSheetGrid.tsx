@@ -22,6 +22,7 @@
 
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { useMemo, useState } from "react";
+import { DraftDateInput } from "@/components/ui/draft-inputs";
 import {
   deleteExamDateSheetEntry,
   listExamDateSheet,
@@ -326,11 +327,12 @@ export function ExamDateSheetGrid({
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
               New exam day
             </span>
-            <input
-              type="date"
+            {/* Empty shows the suggested day; a draft box so a half-typed
+                date does not snap back to it between the year's digits. */}
+            <DraftDateInput
               className="field !py-1.5"
               value={newDay || suggestedDay}
-              onChange={(e) => setNewDay(e.target.value)}
+              onCommit={setNewDay}
             />
           </label>
           <button
@@ -385,12 +387,17 @@ export function ExamDateSheetGrid({
                     className="min-w-[170px] border border-[var(--border)] bg-[var(--surface-sunken)] p-2 text-left align-top"
                   >
                     <div className="font-semibold">{dayLabel(d)}</div>
-                    <input
-                      type="date"
+                    {/* Moving a day asks first and saves every paper on it,
+                        so it happens once, when the box is left or Enter is
+                        pressed — never per digit (0002-…, or day 01 on the
+                        way to 15). Emptying it moves nothing. */}
+                    <DraftDateInput
                       aria-label={`Move every paper on ${dayLabel(d)}`}
                       className="field mt-1 !py-1 !text-[11px]"
                       value={d}
-                      onChange={(e) => moveDay(d, e.target.value)}
+                      allowEmpty={false}
+                      commitOn="blur"
+                      onCommit={(v) => moveDay(d, v)}
                     />
                     <div className="mt-0.5 text-[10px] font-normal text-[var(--muted)]">
                       {rows.filter((r) => r.date === d).length} paper(s)

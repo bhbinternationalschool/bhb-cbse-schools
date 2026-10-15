@@ -32,6 +32,13 @@ export type ApprovalRule = {
    * for dates, where every non-null value means the same decision.
    */
   readonly whenSet?: readonly string[];
+  /**
+   * Every delete needs approval (data-layer 1.5): removing a student or a
+   * family hard-deletes the row and cascades to their transport point and
+   * fee-hold records, so it is a decision, not data entry — never behind
+   * `edit` alone.
+   */
+  readonly onDelete?: boolean;
   /** Shown to the author when they are refused, in their words not ours. */
   readonly message: string;
 };
@@ -48,7 +55,9 @@ export function batchNeedsApproval(
   ops: readonly { readonly op?: string; readonly row?: Record<string, unknown> }[],
 ): boolean {
   if (!rule) return false;
-  return ops.some((o) => rowNeedsApproval(rule, o.row));
+  return ops.some(
+    (o) => (rule.onDelete === true && o.op === "delete") || rowNeedsApproval(rule, o.row),
+  );
 }
 
 export function rowNeedsApproval(
