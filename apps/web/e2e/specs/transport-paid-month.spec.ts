@@ -62,25 +62,30 @@ test.beforeAll(async () => {
 
 test("open dues on the server: October owing, September not", async ({ browser }) => {
   // fee_desk_open_dues — the table the parent app, pay links, reminders and
-  // defaulter lists read — rebuilt by the app's own route.
+  // defaulter lists read — rebuilt by the app's own route. The route computes
+  // from the server's school mirror, which re-reads the database on a 45 s
+  // TTL; the seed wrote the receipts from another process, so the rebuild is
+  // retried until the mirror has them (CI, 15 Oct: the first rebuild ran on
+  // a mirror hydrated by earlier specs, before the seed).
   const page = await open(browser, { width: 1440, height: 900 });
-  const res = await page.request.post(`/api/fees/rebuild-open-dues?ay=${CHILD.academicYearCode}`);
-  expect(res.status(), await res.text()).toBe(200);
-  await page.context().close();
   const sb = createServiceSupabase()!;
-  const { data, error } = await sb
-    .from("fee_desk_open_dues")
-    .select("due_key, balance_paise")
-    .eq("student_id", CHILD.id)
-    .like("due_key", "transport:%");
-  expect(error).toBeNull();
-  const rows = (data ?? []).map((r) => ({ key: String(r.due_key), bal: Number(r.balance_paise) }));
-  expect(rows.filter((r) => r.key.endsWith(":2026-09"))).toEqual([]);
-  expect(rows.filter((r) => r.key.endsWith(":2026-10"))).toEqual([
-    { key: `transport:${CHILD.id}:${NEW}:2026-10`, bal: 50000 },
-  ]);
+  await expect(async () => {
+    const res = await page.request.post(`/api/fees/rebuild-open-dues?ay=${CHILD.academicYearCode}`);
+    expect(res.status(), await res.text()).toBe(200);
+    const { data, error } = await sb
+      .from("fee_desk_open_dues")
+      .select("due_key, balance_paise")
+      .eq("student_id", CHILD.id)
+      .like("due_key", "transport:%");
+    expect(error).toBeNull();
+    const rows = (data ?? []).map((r) => ({ key: String(r.due_key), bal: Number(r.balance_paise) }));
+    expect(rows.filter((r) => r.key.endsWith(":2026-09"))).toEqual([]);
+    expect(rows.filter((r) => r.key.endsWith(":2026-10"))).toEqual([
+      { key: `transport:${CHILD.id}:${NEW}:2026-10`, bal: 50000 },
+    ]);
+  }).toPass({ timeout: 90_000, intervals: [5_000, 10_000, 15_000] });
+  await page.context().close();
 });
-
 
 async function openFeeCounter(page: Page): Promise<void> {
   await page.goto(`/fees?tab=collect&q=${encodeURIComponent(CHILD.admissionNo || CHILD.fullName)}`);
