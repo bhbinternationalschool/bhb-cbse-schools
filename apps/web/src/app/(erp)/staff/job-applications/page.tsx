@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getDemoSession } from "@/lib/auth";
-import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { loadMasters } from "@/lib/masters";
 import { hasPermission } from "@/lib/rbac";
-import { loadServerRbac } from "@/lib/api/v1/auth";
+import { loadServerRbac, readServerMastersCopy } from "@/lib/api/v1/auth";
 import { listJobApplications } from "@/lib/jobApplications.server";
 import {
   classLabelsFor,
@@ -20,8 +18,24 @@ export default async function JobApplicationsPage() {
   const session = await getDemoSession();
   if (!session || session.persona !== "staff") redirect("/login");
 
-  await ensureSchoolMirrorHydrated();
-  const masters = loadMasters();
+  // The server's reference copy of Masters + the staff roster — the one every
+  // API permission check resolves against (data-layer 1.3) — not this
+  // process's school mirror (data-layer 2.1f). No copy, or Masters without
+  // the roster (the roster is unknown, not empty — the staff-list view's
+  // rule): said on screen, never decided against an empty roster.
+  const read = await readServerMastersCopy();
+  if (!read.ok || read.from === "fallback") {
+    return (
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4" role="alert">
+        <h1 className="text-xl font-semibold text-slate-900">Job applications</h1>
+        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          Could not load the school&apos;s setup and staff list from the server, so
+          your access could not be checked. Reload the page to try again.
+        </p>
+      </div>
+    );
+  }
+  const masters = read.value;
   const rbac = await loadServerRbac();
   // A CV is a stranger's personal document. Reading the pile is a staff
   // -desk job, not something every logged-in teacher can browse.
