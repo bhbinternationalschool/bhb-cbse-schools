@@ -4,12 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Images, Megaphone, Newspaper } from "lucide-react";
 import {
   audienceLabel,
-  listAlbums,
   listNews,
   listNotices,
   loadSchoolComms,
-  photosForAlbum,
-  type GalleryAlbum,
   type SchoolCommsState,
   type SchoolNewsItem,
   type SchoolNotice,
@@ -25,9 +22,10 @@ export function ParentCommsPortal({
   guardianDisplayName: string;
 }) {
   const [comms, setComms] = useState<SchoolCommsState | null>(null);
-  const [albumId, setAlbumId] = useState<string | null>(null);
 
   useEffect(() => {
+    // The gallery reads its own route (ParentGalleryView), not the desk.
+    if (view === "gallery") return;
     let cancelled = false;
     void (async () => {
       const [{ ensureSchoolCommsHydrated }, { withHydrationSlot }] =
@@ -42,7 +40,7 @@ export function ParentCommsPortal({
     return () => {
       cancelled = true;
     };
-  }, [guardianDisplayName]);
+  }, [guardianDisplayName, view]);
 
   const notices = useMemo(
     () =>
@@ -55,16 +53,7 @@ export function ParentCommsPortal({
     () => (comms ? listNews(comms, { publishedOnly: true }) : []),
     [comms],
   );
-  const albums = useMemo(
-    // School-wide albums only: a class gallery album is shown, to that
-    // class's families, in the parent app (api/v1/gallery/albums).
-    () => (comms ? listAlbums(comms, { publishedOnly: true }).filter((a) => !a.sectionIds?.length) : []),
-    [comms],
-  );
-  const photos = useMemo(
-    () => (albumId && comms ? photosForAlbum(albumId, comms) : []),
-    [albumId, comms],
-  );
+  if (view === "gallery") return <ParentGalleryView />;
 
   if (!comms) {
     return (
@@ -144,17 +133,81 @@ export function ParentCommsPortal({
     );
   }
 
+  // view === "gallery" returned above (ParentGalleryView).
+  return null;
+}
+
+type PortalAlbum = {
+  id: string;
+  title: string;
+  description: string;
+  coverUrl: string;
+  photos: { id: string; url: string; caption: string; kind: "photo" | "video" }[];
+};
+
+/**
+ * The family's gallery, as the parent app sees it (15 Oct 2026): published
+ * school albums and their own children's class albums, only items that
+ * passed their check, each at a url a parent may open — from
+ * /api/v1/gallery/albums. It used to read the browser's desk copy, which a
+ * parent may not load (403): the page then showed the built-in sample album
+ * as if the school had posted it. A failed read says so; it is never "no
+ * albums".
+ */
+function ParentGalleryView() {
+  const [albums, setAlbums] = useState<PortalAlbum[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [albumId, setAlbumId] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFailed(false);
+    void (async () => {
+      try {
+        const r = await fetch("/api/v1/gallery/albums", { cache: "no-store", credentials: "same-origin" });
+        const j = (await r.json().catch(() => null)) as { data?: { albums?: PortalAlbum[] } } | null;
+        if (cancelled) return;
+        if (!r.ok || !Array.isArray(j?.data?.albums)) {
+          setFailed(true);
+          return;
+        }
+        setAlbums(j.data.albums);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt]);
+
+  const open = albums?.find((a) => a.id === albumId) ?? null;
+
   return (
     <div className="space-y-3 px-4 py-4">
       <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
         <Images className="h-3.5 w-3.5" /> Gallery
       </p>
-      {!albumId ? (
+      {failed ? (
+        <div className="rounded-xl border border-dashed border-[rgba(32,48,80,0.15)] px-3 py-6 text-center text-sm text-[var(--muted)]">
+          <p>Could not load the gallery.</p>
+          <button
+            type="button"
+            className="mt-2 text-xs font-semibold text-[var(--brand-deep)] underline"
+            onClick={() => setAttempt((n) => n + 1)}
+          >
+            Try again
+          </button>
+        </div>
+      ) : albums === null ? (
+        <p className="px-4 py-8 text-center text-sm text-[var(--muted)]">Loading…</p>
+      ) : !open ? (
         albums.length === 0 ? (
           <Empty label="No albums published yet." />
         ) : (
           <div className="grid grid-cols-2 gap-2">
-            {albums.map((a: GalleryAlbum) => (
+            {albums.map((a) => (
               <button
                 key={a.id}
                 type="button"
@@ -185,21 +238,18 @@ export function ParentCommsPortal({
           >
             ← All albums
           </button>
-          {photos.length === 0 ? (
-            <Empty label="This album has no photos yet." />
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              {photos.map((p) => (
-                <figure
-                  key={p.id}
-                  className="overflow-hidden rounded-lg bg-[rgba(32,48,80,0.05)]"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
+          <div className="grid grid-cols-2 gap-2">
+            {open.photos.map((p) => (
+              <figure key={p.id} className="overflow-hidden rounded-lg bg-[rgba(32,48,80,0.05)]">
+                {p.kind === "video" ? (
+                  <video src={p.url} controls preload="none" className="aspect-square w-full object-cover" />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img src={p.url} alt={p.caption} className="aspect-square w-full object-cover" />
-                </figure>
-              ))}
-            </div>
-          )}
+                )}
+              </figure>
+            ))}
+          </div>
         </>
       )}
     </div>
