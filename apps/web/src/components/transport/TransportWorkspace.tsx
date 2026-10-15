@@ -1,5 +1,6 @@
 "use client";
 
+import { PaidMonthsCarryOverNote } from "@/components/transport/PaidMonthsCarryOverNote";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Bus } from "lucide-react";
@@ -1457,6 +1458,14 @@ function RidersPanel(props: RidersPanelProps) {
             <p className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--brand-mid)_45%,transparent)] px-3 py-2 text-[11px] font-semibold text-[var(--brand-mid)]">
               {feeDetail.warning}
             </p>
+          ) : null}
+
+          {selected ? (
+            <PaidMonthsCarryOverNote
+              student={selected.student}
+              masters={masters}
+              effectiveFrom={effectiveFrom}
+            />
           ) : null}
 
           {selected && selectedRoute && stopId ? (

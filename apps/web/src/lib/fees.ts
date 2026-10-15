@@ -61,7 +61,14 @@ import {
 import {
   computeTransportPeriodDues,
   loadTransport,
+  sessionPeriodKeys,
+  transportPeriodLabel,
 } from "@/lib/transport";
+import {
+  transportAmountByStudentMonth,
+  transportMonthAmount,
+  transportMonthsForStudent,
+} from "@/lib/transportPaidMonths";
 import {
   DEFAULT_FEE_BACKDATE_POLICY,
   backdatePolicyApplies,
@@ -2356,8 +2363,15 @@ export function computeStudentDues(
   }
 
   const transport = loadTransport();
+  const studentAy = student.academicYearCode || DEFAULT_AY;
+  // Transport money is matched to the child and the month, not to the
+  // assignment id it was collected under — see lib/transportPaidMonths.ts.
+  // Waivers the same way: a counter discount given on September under the old
+  // stop still discounts September after the stop changes.
+  const transportWaivedByMonth = transportAmountByStudentMonth(waiverMap);
+  const transportMonthsShown = new Set<string>();
   for (const td of computeTransportPeriodDues(student.id, {
-    academicYearCode: student.academicYearCode || DEFAULT_AY,
+    academicYearCode: studentAy,
     asOf,
     includeFuture,
     state: transport,
@@ -2374,7 +2388,10 @@ export function computeStudentDues(
     ) {
       continue;
     }
-    const paid = paidMap.get(td.dueKey) ?? 0;
+    const paid = transportMonthAmount(paidMap, student.id, td.periodKey);
+    const waivedThisMonth =
+      transportWaivedByMonth.get(`${student.id}|${td.periodKey}`) ?? 0;
+    if (waivedThisMonth > 0) waiverMap.set(td.dueKey, waivedThisMonth);
     const transportHeadId =
       masters.feeHeads.find((h) => h.code === "TRANSPORT")?.id ?? "";
     const transportConcession = transportHeadId
@@ -2396,6 +2413,7 @@ export function computeStudentDues(
     }
     if (!includeFuture && isAfterRunningSessionMonth(td.dueOn, asOf)) continue;
 
+    transportMonthsShown.add(td.periodKey);
     lines.push({
       dueKey: td.dueKey,
       kind: "transport",
@@ -2433,6 +2451,88 @@ export function computeStudentDues(
       balancePaise: balance,
       label: `Transport · ${td.periodLabel} · ${td.routeCode}`,
     });
+  }
+
+  // Money taken is never hidden. A transport month with money against it but
+  // no current due — its assignment was closed, or its stop no longer
+  // resolves and it has no fee of its own, so the engine bills it nothing —
+  // used to vanish from the fee card and the counter, because a receipt line
+  // only ever rendered against a computed due (Anvi, Kartik and Kriyansh
+  // Yadav, Apr–Aug 2026, 15 Oct). It is shown from the receipt itself:
+  // what was paid, the month, and the route/stop frozen on the line. It owes
+  // nothing — a fee that cannot be priced today is not invented here; the
+  // roster surfaces that rider as unbilled.
+  if (includePaid) {
+    const sessionMonths = new Set(sessionPeriodKeys(studentAy));
+    const transportHeadId =
+      masters.feeHeads.find((h) => h.code === "TRANSPORT")?.id ?? "";
+    for (const [periodKey, held] of transportMonthsForStudent(paidMap, student.id)) {
+      if (transportMonthsShown.has(periodKey)) continue;
+      if (!sessionMonths.has(periodKey)) continue;
+      if (held.amountPaise <= 0) continue;
+      const calMonth = Number(periodKey.slice(5, 7));
+      const dueOn = dueOnForSessionMonth(studentAy, calMonth, 10);
+      if (!includeFuture && isAfterRunningSessionMonth(dueOn, asOf)) continue;
+      // The latest receipt line for the month supplies the snapshot.
+      const keys = new Set(held.dueKeys);
+      let snap: VoucherLine | null = null;
+      let snapAt = "";
+      for (const v of fees.vouchers) {
+        if (v.voidedAt) continue;
+        for (const l of v.lines) {
+          if (!keys.has(l.dueKey)) continue;
+          const at = v.createdAt || "";
+          if (!snap || at >= snapAt) {
+            snap = l;
+            snapAt = at;
+          }
+        }
+      }
+      const dueKey = snap?.dueKey ?? held.dueKeys[held.dueKeys.length - 1]!;
+      const waived =
+        transportWaivedByMonth.get(`${student.id}|${periodKey}`) ?? 0;
+      if (waived > 0) waiverMap.set(dueKey, waived);
+      const t = snap?.transport ?? null;
+      const label = transportPeriodLabel(periodKey);
+      transportMonthsShown.add(periodKey);
+      lines.push({
+        dueKey,
+        kind: "transport",
+        studentId: student.id,
+        feeHeadId: transportHeadId,
+        feeHeadName: "Transport",
+        installmentId: null,
+        installmentLabel: label,
+        specialFeeId: null,
+        structureLineId: null,
+        storeIssueId: null,
+        storeIssueNo: "",
+        storeItems: [],
+        transport: {
+          assignmentId: t?.assignmentId || dueKey.split(":")[2] || "",
+          routeCode: t?.routeCode ?? "",
+          routeName: t?.routeName ?? "",
+          busNo: t?.busNo ?? "",
+          vehicleReg: t?.vehicleReg ?? "",
+          vehicleId: t?.vehicleId ?? "",
+          vehiclePhotoUrl: t?.vehiclePhotoUrl ?? "",
+          stopName: t?.stopName ?? "",
+          periodLabel: label,
+          periodKey,
+          effectiveFrom: t?.effectiveFrom ?? "",
+          monthlyFeePaise: t?.monthlyFeePaise ?? 0,
+        },
+        dueOn,
+        // Billed = what was settled (paid + any waiver), so the line reads
+        // as exactly settled: nothing owed, nothing refundable invented.
+        billedPaise: held.amountPaise + waived,
+        concessionPaise: 0,
+        concessionDetails: [],
+        paidPaise: held.amountPaise,
+        balancePaise: 0,
+        label: `Transport · ${label}${t?.routeCode ? ` · ${t.routeCode}` : ""} · paid`,
+      });
+    }
   }
 
   for (const sf of masters.specialFees.filter((f) => f.isActive)) {
