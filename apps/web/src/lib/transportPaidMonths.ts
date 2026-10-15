@@ -72,23 +72,40 @@ export function transportAmountByStudentMonth(
 }
 
 /**
- * The index is derived from the map it was built from and remembered against
- * that map object, so the fee counter — which reuses one paid map for up to
- * 80 students per keystroke — scans it once, not once per student. The map's
- * size is checked on every read and the index rebuilt if it changed; the paid
- * maps are built whole by `paidByDueKey` and never edited afterwards.
+ * The indexes are derived from the map they were built from and remembered
+ * against that map object, so the fee counter — which reuses one paid map for
+ * up to 80 students per keystroke — scans it once, not once per student. The
+ * map's size is checked on every read and the indexes rebuilt if it changed;
+ * the paid maps are built whole by `paidByDueKey` and never edited afterwards.
  */
-const indexCache = new WeakMap<
-  ReadonlyMap<string, number>,
-  { size: number; index: Map<string, number> }
->();
+type StudentMonths = Map<string, { amountPaise: number; dueKeys: string[] }>;
+type Indexes = { size: number; byMonth: Map<string, number>; byStudent: Map<string, StudentMonths> };
+const indexCache = new WeakMap<ReadonlyMap<string, number>, Indexes>();
 
-function indexFor(byDueKey: ReadonlyMap<string, number>): Map<string, number> {
+function indexFor(byDueKey: ReadonlyMap<string, number>): Indexes {
   const hit = indexCache.get(byDueKey);
-  if (hit && hit.size === byDueKey.size) return hit.index;
-  const index = transportAmountByStudentMonth(byDueKey);
-  indexCache.set(byDueKey, { size: byDueKey.size, index });
-  return index;
+  if (hit && hit.size === byDueKey.size) return hit;
+  const byMonth = new Map<string, number>();
+  const byStudent = new Map<string, StudentMonths>();
+  for (const [key, amount] of byDueKey) {
+    if (!amount) continue;
+    const p = parseTransportDueKey(key);
+    if (!p) continue;
+    const k = monthKey(p.studentId, p.periodKey);
+    byMonth.set(k, (byMonth.get(k) ?? 0) + amount);
+    let months = byStudent.get(p.studentId);
+    if (!months) byStudent.set(p.studentId, (months = new Map()));
+    const cur = months.get(p.periodKey) ?? { amountPaise: 0, dueKeys: [] };
+    cur.amountPaise += amount;
+    cur.dueKeys.push(key);
+    months.set(p.periodKey, cur);
+  }
+  for (const months of byStudent.values()) {
+    for (const v of months.values()) v.dueKeys.sort();
+  }
+  const built = { size: byDueKey.size, byMonth, byStudent };
+  indexCache.set(byDueKey, built);
+  return built;
 }
 
 /**
@@ -100,29 +117,19 @@ export function transportMonthAmount(
   studentId: string,
   periodKey: string,
 ): number {
-  return indexFor(byDueKey).get(monthKey(studentId, periodKey)) ?? 0;
+  return indexFor(byDueKey).byMonth.get(monthKey(studentId, periodKey)) ?? 0;
 }
 
 /**
  * Every month this student has transport money against, with the keys it sits
  * under — used to show a paid month whose assignment no longer bills it.
+ * Read-only: the result is shared with later callers.
  */
 export function transportMonthsForStudent(
   byDueKey: ReadonlyMap<string, number>,
   studentId: string,
-): Map<string, { amountPaise: number; dueKeys: string[] }> {
-  const out = new Map<string, { amountPaise: number; dueKeys: string[] }>();
-  for (const [key, amount] of byDueKey) {
-    if (!amount) continue;
-    const p = parseTransportDueKey(key);
-    if (!p || p.studentId !== studentId) continue;
-    const cur = out.get(p.periodKey) ?? { amountPaise: 0, dueKeys: [] };
-    cur.amountPaise += amount;
-    cur.dueKeys.push(key);
-    out.set(p.periodKey, cur);
-  }
-  for (const v of out.values()) v.dueKeys.sort();
-  return out;
+): ReadonlyMap<string, { amountPaise: number; dueKeys: readonly string[] }> {
+  return indexFor(byDueKey).byStudent.get(studentId) ?? new Map();
 }
 
 /**
