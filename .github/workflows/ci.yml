@@ -821,6 +821,11 @@ jobs:
       - name: SQL test — desk_slice_row_write / desk_slice_object_write
         run: bash scripts/e2e-stack.sh sql-test supabase/tests/desk_slice_row_write.test.sql
 
+      # A voided fee receipt stays voided: a stale whole-desk push can no
+      # longer clear voided_at and re-post the receipt (15 Oct 2026, R1).
+      - name: SQL test — a voided fee receipt stays voided
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/fee_voucher_void_is_final.test.sql
+
       # NEXT_PUBLIC_* are baked in at build time, so the build reads
       # apps/web/.env.e2e (127.0.0.1 URL, this run's anon key) and nothing else.
       - name: Build the app against the stack

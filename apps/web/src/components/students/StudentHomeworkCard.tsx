@@ -17,7 +17,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { BookOpen, TriangleAlert } from "lucide-react";
 import { loadHomework, subjectLabel, type HomeworkState } from "@/lib/homework";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, normalizeStudent, type SisStudent } from "@/lib/sis";
 import {
   homeworkStatusLabel,
@@ -31,7 +31,6 @@ type Load =
       kind: "ready";
       student: SisStudent;
       homework: HomeworkState;
-      masters: MastersState;
     }
   | { kind: "missing" }
   | { kind: "error"; message: string };
@@ -75,7 +74,6 @@ export function StudentHomeworkCard({ studentId }: { studentId: string }) {
           kind: "ready",
           student: normalizeStudent(raw),
           homework: loadHomework(),
-          masters: loadMasters(),
         });
       } catch (e) {
         if (!alive) return;
@@ -95,8 +93,9 @@ export function StudentHomeworkCard({ studentId }: { studentId: string }) {
     return studentHomeworkRecord(load.homework, load.student);
   }, [load]);
 
-  // `record` is only built when the load is ready, so masters is there too.
-  const masters = load.kind === "ready" ? load.masters : null;
+  // Subject names (Masters, server truth). Until they arrive — or if they
+  // cannot be read — a row shows its subject id rather than nothing.
+  const { masters } = useScreenMasters();
 
   if (load.kind === "missing") return null;
 

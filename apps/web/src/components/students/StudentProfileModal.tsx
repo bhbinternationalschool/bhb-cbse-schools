@@ -77,6 +77,7 @@ export function StudentProfileModal({
   student,
   sis,
   masters,
+  feesWithheld = false,
   classLabel,
   feeGroupLabel,
   onClose,
@@ -85,6 +86,8 @@ export function StudentProfileModal({
   student: SisStudent;
   sis: SisState;
   masters: MastersState;
+  /** The Masters are a teacher's (no fee lists sent): say fees are not shown, never "₹0 / none". */
+  feesWithheld?: boolean;
   classLabel: string;
   feeGroupLabel: string;
   onClose: () => void;
@@ -553,7 +556,9 @@ export function StudentProfileModal({
             </div>
           ) : null}
 
-          {tab === "fees" ? (
+          {tab === "fees" && feesWithheld ? (
+            <Empty text="Fee details are not shown to your role — ask the office." />
+          ) : tab === "fees" ? (
             <div className="space-y-4">
               <div className="grid grid-cols-3 gap-3">
                 <Stat label="Billed" value={inr(feeSummary.billed)} />

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
+import { currentAcademicYearCode} from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, type SisState, type SisStudent, studentsInSession} from "@/lib/sis";
 import {
   TAG_COLORS,
@@ -27,7 +29,7 @@ export function StudentTagsPanel({
   tick?: number;
   onChanged?: () => void;
 }) {
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -38,7 +40,6 @@ export function StudentTagsPanel({
   const [error, setError] = useState<string | null>(null);
 
   function refresh() {
-    setMasters(loadMasters());
     const next = loadSis();
     listStudentTags(next);
     setSis(loadSis());
@@ -119,6 +120,9 @@ export function StudentTagsPanel({
     onChanged?.();
   }
 
+  if (mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
   if (!sis || !masters) {
     return <p className="mt-4 text-sm text-[var(--muted)]">Loading tags…</p>;
   }
