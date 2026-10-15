@@ -90,9 +90,15 @@ export function StudentFeeDuesCard({ studentId }: { studentId: string }) {
         const { ensureFeesHydrated } = await import("@/lib/feesPersistence");
         const { hydrateFeesStore } = await import("@/lib/fees");
         const { withHydrationSlot } = await import("@/lib/deskHydrateGuard");
+        // The transport desk too: transport dues are derived from it, and
+        // without it this card left out every bus month — owing or paid —
+        // whenever the profile was opened in a browser that had not visited
+        // Transport or Fee Take (found 15 Oct 2026 by the paid-month e2e).
+        const { ensureTransportHydrated } = await import("@/lib/transportPersistence");
         await Promise.all([
           withHydrationSlot(() => ensureSisHydrated()),
           withHydrationSlot(() => ensureFeesHydrated()),
+          withHydrationSlot(() => ensureTransportHydrated()),
         ]);
         await hydrateFeesStore();
         if (!alive) return;

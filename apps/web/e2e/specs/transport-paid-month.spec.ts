@@ -83,8 +83,11 @@ test("open dues on the server: October owing, September not", async ({ browser }
 
 
 async function openFeeCounter(page: Page): Promise<void> {
-  await page.goto(`/fees?q=${encodeURIComponent(CHILD.admissionNo || CHILD.fullName)}`);
-  await page.getByText(CHILD.fullName, { exact: false }).first().click({ timeout: 30_000 });
+  await page.goto(`/fees?tab=collect&q=${encodeURIComponent(CHILD.admissionNo || CHILD.fullName)}`);
+  await page
+    .getByRole("button", { name: new RegExp(CHILD.admissionNo || CHILD.fullName) })
+    .first()
+    .click({ timeout: 30_000 });
   await expect(page.getByRole("button", { name: /^October 2026/ })).toBeVisible({ timeout: 30_000 });
 }
 
@@ -121,7 +124,7 @@ test("student fee card: October transport owing, September not", async ({ browse
     const page = await open(browser, shot);
     await page.goto(`/students/${CHILD.id}/edit`);
     const card = page.locator("section").filter({ has: page.getByRole("heading", { name: "Fees" }) });
-    await expect(card.getByText("Pending dues")).toBeVisible({ timeout: 30_000 });
+    await expect(card.getByText("Pending dues", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(card.getByText(/Transport · October 2026/)).toBeVisible();
     await expect(card.getByText(/Transport · September 2026/)).toHaveCount(0);
     await card.scrollIntoViewIfNeeded();
