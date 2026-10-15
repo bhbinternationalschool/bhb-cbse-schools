@@ -5,7 +5,7 @@ import {
   type StaffVehicleRole,
 } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, type RbacState } from "@/lib/rbac";
 
 export function resolveClassTeachers(
   masters: MastersState,
@@ -467,10 +467,12 @@ export function listSessionClassTeacherSections(
 export function canManageStaffLeave(
   session: { roleCode: string; staffId?: string; email?: string; fullName: string },
   masters: MastersState,
+  /** The saved roles on the server (ApiAuthContext.rbac); the browser's copy when omitted. */
+  rbac?: RbacState,
 ): boolean {
   if (
-    hasPermission(session, masters, "staff", "edit") ||
-    hasPermission(session, masters, "policies", "edit")
+    hasPermission(session, masters, "staff", "edit", rbac) ||
+    hasPermission(session, masters, "policies", "edit", rbac)
   ) {
     return true;
   }

@@ -420,7 +420,7 @@ const STAFF_REQUEST_STATUSES: StaffRequestStatus[] = [
   "closed",
 ];
 
-function normalizeStaffRequestTicket(
+export function normalizeStaffRequestTicket(
   t: Partial<StaffRequestTicket>,
 ): StaffRequestTicket | null {
   if (!t.staffId || !t.subject) return null;
@@ -1002,104 +1002,16 @@ export function directLeave(
   return applyLeave({ ...input, direct: true });
 }
 
-/**
- * Any staff member files a real, tracked operational request against
- * their own staffId — stationery/supplies, a repair/maintenance need, a
- * vehicle/driver issue, a classroom problem, or something uncategorized.
- * Self-scoped: assertSelfOrModulePermission lets the actor create only
- * for their own staffId without needing the broader "staff:edit" grant,
- * mirroring applyLeave's self-service fix above.
+/*
+ * Staff → Requests are no longer written here (15 Oct 2026): this browser
+ * copy was never sent anywhere once staff HR read from the desk, so a request
+ * reached only the browser that raised it. Raise / triage go to
+ * POST /api/staff/requests (lib/staffRequests.server.ts) through the write
+ * kernel. StaffHrState.staffRequests is kept only as the old blob's shape
+ * (staffHrPersistence reads it); nothing writes it any more. Requests the old
+ * code kept in a browser are not recoverable: since 10 Oct that copy lived
+ * in page memory only and was gone at the next reload.
  */
-export function createStaffRequestTicket(input: {
-  staffId: string;
-  raisedByName: string;
-  type: StaffRequestType;
-  subject: string;
-  description: string;
-}): { ok: true; state: StaffHrState; ticket: StaffRequestTicket } | { ok: false; error: string } {
-  if (!input.staffId) return { ok: false, error: "Could not resolve your staff record" };
-  if (!input.subject.trim()) return { ok: false, error: "Subject is required" };
-
-  if (
-    !assertSelfOrModulePermission(
-      "staff",
-      "edit",
-      input.staffId,
-      "createStaffRequestTicket",
-    )
-  ) {
-    return { ok: false, error: "You don't have permission to do this" };
-  }
-
-  const now = new Date().toISOString();
-  const ticket: StaffRequestTicket = {
-    id: nid("req"),
-    staffId: input.staffId,
-    raisedByName: input.raisedByName.trim(),
-    type: input.type,
-    subject: input.subject.trim(),
-    description: input.description.trim(),
-    date: now.slice(0, 10),
-    assignedToStaffId: "",
-    status: "open",
-    resolutionNote: "",
-    resolvedAt: null,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  const state = loadStaffHr();
-  const next: StaffHrState = {
-    ...state,
-    staffRequests: [ticket, ...state.staffRequests],
-  };
-  persistStaffHr(next);
-  return { ok: true, state: next, ticket };
-}
-
-/** Admin/office triage — assign, change status, or resolve a ticket. */
-export function updateStaffRequestTicket(
-  ticketId: string,
-  patch: {
-    assignedToStaffId?: string;
-    status?: StaffRequestStatus;
-    resolutionNote?: string;
-  },
-): { ok: true; state: StaffHrState } | { ok: false; error: string } {
-  const state = loadStaffHr();
-  const idx = state.staffRequests.findIndex((t) => t.id === ticketId);
-  if (idx < 0) return { ok: false, error: "Request not found" };
-  const now = new Date().toISOString();
-  const before = state.staffRequests[idx]!;
-  const status = patch.status ?? before.status;
-  const ticket: StaffRequestTicket = {
-    ...before,
-    assignedToStaffId: patch.assignedToStaffId ?? before.assignedToStaffId,
-    status,
-    resolutionNote: patch.resolutionNote ?? before.resolutionNote,
-    resolvedAt:
-      status === "resolved" || status === "closed"
-        ? before.resolvedAt || now
-        : status !== before.status
-          ? null
-          : before.resolvedAt,
-    updatedAt: now,
-  };
-  const staffRequests = [...state.staffRequests];
-  staffRequests[idx] = ticket;
-  const next: StaffHrState = { ...state, staffRequests };
-  saveStaffHr(next);
-  return { ok: true, state: next };
-}
-
-export function listStaffRequestsForStaff(
-  state: StaffHrState,
-  staffId: string,
-): StaffRequestTicket[] {
-  return state.staffRequests
-    .filter((t) => t.staffId === staffId)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-}
 
 /**
  * Leave entered from the staff attendance register.

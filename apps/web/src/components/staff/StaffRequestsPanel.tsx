@@ -1,22 +1,36 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useDemoSession } from "@/components/shell/SessionContext";
+/**
+ * Staff → Requests (15 Oct 2026). Read through the query kernel
+ * (GET /api/data/views/staff-requests: a manager's whole queue, anyone else's
+ * own) and refetched when erp_versions says staff_hr moved — so a request
+ * raised on another device appears here within one versions poll (≤ 20 s).
+ * Every change is one POST /api/staff/requests through the write kernel,
+ * with the revision this screen loaded; nothing is kept in the browser.
+ * Before this, requests were saved only in the browser that raised them.
+ */
+import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { QueryError } from "@/components/data/QueryError";
 import {
   ErpTable,
   ErpTableHead,
 } from "@/components/ui/erp-roster";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { invalidateDesks, useErpQuery, useStaffList } from "@/lib/data/client/hooks";
 import {
   STAFF_REQUEST_TYPE_LABELS,
-  loadStaffHr,
-  updateStaffRequestTicket,
-  type StaffHrState,
   type StaffRequestStatus,
-  type StaffRequestTicket,
   type StaffRequestType,
 } from "@/lib/staffHr";
-import { canManageStaffLeave, resolveSessionStaff } from "@/lib/staffResolve";
+import { postStaffRequest } from "@/lib/staffRequestsClient";
+import {
+  STAFF_REQUESTS_DESK,
+  STAFF_REQUESTS_VIEW_PATH,
+  parseStaffRequestsView,
+  type StaffRequestRow,
+  type StaffRequestTriage,
+  type StaffRequestsView,
+} from "@/lib/staffRequestsShared";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { MonthGroupedTbody, useMonthGroups } from "@/components/ui/month-grouped-rows";
@@ -29,72 +43,42 @@ const STATUS_LABEL: Record<StaffRequestStatus, string> = {
 };
 
 export function StaffRequestsPanel() {
-  const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
-  const [hr, setHr] = useState<StaffHrState | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const client = useQueryClient();
+  const query = useErpQuery<StaffRequestsView>("staff-requests", STAFF_REQUESTS_VIEW_PATH, {
+    desk: STAFF_REQUESTS_DESK,
+    parse: parseStaffRequestsView,
+  });
+  // Names for "Raised by" / "Assigned to" — the redacted directory. If it
+  // cannot be read, the request still shows the name it was raised with.
+  const staffList = useStaffList();
+  const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | StaffRequestStatus>("all");
   const [typeFilter, setTypeFilter] = useState<"all" | StaffRequestType>("all");
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
 
-  function reload() {
-    setMasters(loadMasters());
-    setHr(loadStaffHr());
-  }
+  const view = query.data;
+  const isManager = view?.canManage ?? false;
+  const roster = staffList.data?.staff ?? [];
 
-  useEffect(() => {
-    reload();
-    void (async () => {
-      const [{ ensureStaffHydrated }, { ensureStaffHrHydrated }, { withHydrationSlot }] =
-        await Promise.all([
-          import("@/lib/staffPersistence"),
-          import("@/lib/staffHrPersistence"),
-          import("@/lib/deskHydrateGuard"),
-        ]);
-      const [didStaff, didHr] = await Promise.all([
-        withHydrationSlot(() => ensureStaffHydrated()),
-        withHydrationSlot(() => ensureStaffHrHydrated()),
-      ]);
-      if (didStaff || didHr) reload();
-    })();
-  }, []);
-
-  const selfStaff = useMemo(() => {
-    if (!masters) return null;
-    return resolveSessionStaff(session, masters);
-  }, [masters, session]);
-
-  const isManager = useMemo(() => {
-    if (!masters) return false;
-    return canManageStaffLeave(session, masters);
-  }, [masters, session]);
-
-  function flash(msg: string) {
-    setNotice(msg);
-    window.setTimeout(() => setNotice(null), 2800);
-  }
-
-  function staffLabel(id: string) {
-    const s = masters?.staff.find((x) => x.id === id);
-    return s ? `${s.empCode} · ${s.fullName}` : id || "—";
+  function staffLabel(id: string, fallback = "") {
+    const s = roster.find((x) => x.id === id);
+    return s ? `${s.empCode} · ${s.fullName}` : fallback || id || "—";
   }
 
   const rows = useMemo(() => {
-    let list = hr?.staffRequests ?? [];
-    if (!isManager) {
-      list = list.filter((t) => !!selfStaff && t.staffId === selfStaff.id);
-    }
+    let list: StaffRequestRow[] = view?.requests ?? [];
     if (statusFilter !== "all") list = list.filter((t) => t.status === statusFilter);
     if (typeFilter !== "all") list = list.filter((t) => t.type === typeFilter);
     return [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [hr, isManager, selfStaff, statusFilter, typeFilter]);
+  }, [view, statusFilter, typeFilter]);
 
   // Open first when sorting by status, because an open request is the one
   // that needs somebody; the date sorts by its real timestamp.
   const reqSort = useTableSort(
     rows,
     {
-      raisedBy: (t) => staffLabel(t.staffId),
+      raisedBy: (t) => staffLabel(t.staffId, t.raisedByName),
       type: (t) => t.type,
       subject: (t) => t.subject,
       status: (t) => t.status,
@@ -118,29 +102,57 @@ export function StaffRequestsPanel() {
     needsAttention: (t) => t.status === "open" || t.status === "in_progress",
   });
 
-  function onSave(ticket: StaffRequestTicket, patch: Partial<StaffRequestTicket>) {
-    const result = updateStaffRequestTicket(ticket.id, {
-      assignedToStaffId: patch.assignedToStaffId,
-      status: patch.status,
-      resolutionNote: patch.resolutionNote,
-    });
-    if (!result.ok) {
-      flash(result.error);
-      return;
+  async function onSave(ticket: StaffRequestRow, patch: StaffRequestTriage) {
+    if (savingId) return;
+    setSavingId(ticket.id);
+    setNotice(null);
+    try {
+      const r = await postStaffRequest({ op: "update", id: ticket.id, base: ticket.rev, patch });
+      if (!r.ok) {
+        // A conflict: the server holds a newer version — show it.
+        if (r.conflict) invalidateDesks(client, [STAFF_REQUESTS_DESK]);
+        setNotice({ kind: "error", text: r.error });
+        return;
+      }
+      if (patch.resolutionNote !== undefined) {
+        setNoteDraft((cur) => {
+          const next = { ...cur };
+          delete next[ticket.id];
+          return next;
+        });
+      }
+      invalidateDesks(client, [STAFF_REQUESTS_DESK]);
+      setNotice({ kind: "ok", text: "Request updated" });
+      window.setTimeout(() => setNotice((n) => (n?.kind === "ok" ? null : n)), 2800);
+    } finally {
+      setSavingId(null);
     }
-    setHr(result.state);
-    flash("Request updated");
   }
 
-  if (!masters || !hr) {
+  if (query.isError) {
+    return <QueryError what="staff requests" error={query.error} retry={() => query.refetch()} />;
+  }
+  if (!view) {
     return <p className="text-sm text-[var(--muted)]">Loading requests…</p>;
   }
-
   return (
     <div className="space-y-5">
       {notice ? (
-        <p className="rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]">
-          {notice}
+        <p
+          role={notice.kind === "error" ? "alert" : "status"}
+          data-testid="staff-requests-notice"
+          className={
+            notice.kind === "error"
+              ? "flex items-start justify-between gap-3 rounded-lg border border-[var(--danger)] px-3 py-2 text-sm font-medium text-[var(--danger)]"
+              : "rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-2 text-sm font-medium text-[var(--brand-deep)]"
+          }
+        >
+          <span>{notice.text}</span>
+          {notice.kind === "error" ? (
+            <button type="button" className="text-xs underline" onClick={() => setNotice(null)}>
+              Dismiss
+            </button>
+          ) : null}
         </p>
       ) : null}
 
@@ -206,9 +218,9 @@ export function StaffRequestsPanel() {
               rowKey={(t) => t.id}
               countLabel={(n) => `${n} ${n === 1 ? "request" : "requests"}`}
               renderRow={(t) => (
-                <tr>
+                <tr data-testid={`staff-request-${t.id}`}>
                   <td className="px-4 py-2 font-medium text-[var(--brand-deep)]">
-                    {staffLabel(t.staffId)}
+                    {staffLabel(t.staffId, t.raisedByName)}
                   </td>
                   <td className="px-3 py-2 text-xs">
                     {STAFF_REQUEST_TYPE_LABELS[t.type]}
@@ -230,9 +242,11 @@ export function StaffRequestsPanel() {
                     {isManager ? (
                       <select
                         className="field !w-auto !py-1 text-xs"
+                        aria-label="Status"
                         value={t.status}
+                        disabled={savingId === t.id}
                         onChange={(e) =>
-                          onSave(t, { status: e.target.value as StaffRequestStatus })
+                          void onSave(t, { status: e.target.value as StaffRequestStatus })
                         }
                       >
                         {Object.entries(STATUS_LABEL).map(([code, label]) => (
@@ -249,13 +263,18 @@ export function StaffRequestsPanel() {
                     <td className="px-3 py-2">
                       <select
                         className="field !w-auto !py-1 text-xs"
+                        aria-label="Assigned to"
                         value={t.assignedToStaffId}
+                        disabled={savingId === t.id}
                         onChange={(e) =>
-                          onSave(t, { assignedToStaffId: e.target.value })
+                          void onSave(t, { assignedToStaffId: e.target.value })
                         }
                       >
                         <option value="">Unassigned</option>
-                        {(masters.staff ?? [])
+                        {t.assignedToStaffId && !roster.some((s) => s.id === t.assignedToStaffId) ? (
+                          <option value={t.assignedToStaffId}>{staffLabel(t.assignedToStaffId)}</option>
+                        ) : null}
+                        {roster
                           .filter((s) => s.status === "active")
                           .sort((a, b) => a.empCode.localeCompare(b.empCode))
                           .map((s) => (
@@ -281,8 +300,9 @@ export function StaffRequestsPanel() {
                         <button
                           type="button"
                           className="rounded-lg border border-[var(--border)] px-2 py-1 text-[10px] font-semibold text-[var(--brand-deep)]"
+                          disabled={savingId === t.id}
                           onClick={() =>
-                            onSave(t, {
+                            void onSave(t, {
                               resolutionNote: noteDraft[t.id] ?? t.resolutionNote,
                             })
                           }
@@ -297,7 +317,7 @@ export function StaffRequestsPanel() {
                               id: "save",
                               label: "Save resolution note",
                               onSelect: (x) =>
-                                onSave(x, { resolutionNote: noteDraft[x.id] ?? x.resolutionNote }),
+                                void onSave(x, { resolutionNote: noteDraft[x.id] ?? x.resolutionNote }),
                             },
                           ]}
                         />
