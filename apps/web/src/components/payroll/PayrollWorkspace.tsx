@@ -1079,6 +1079,12 @@ export function PayrollWorkspace() {
       {tab === "dashboard" && allowed ? (
         <ModuleDashboardHost
           moduleId="payroll"
+          // The payroll desk loads in this screen (the hydrate effect above
+          // bumps tick); the host itself never loads payroll. Until 2.1e the
+          // dashboard happened to redraw on a later 'bhb-masters-updated';
+          // now that this screen waits for Masters before drawing, the run
+          // counts would stay at 0 without this.
+          refreshKey={tick}
           onNavigateTab={(t) => setTab(t as PayTab)}
         />
       ) : null}

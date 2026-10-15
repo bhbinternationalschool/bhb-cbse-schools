@@ -170,8 +170,15 @@ test.describe("payroll screens (2.1e)", () => {
       await openTab(page, tab, label);
       const text = await grab(page, testInfo, tab);
       expect(text, `${tab}: no failed Masters read`).not.toMatch(/Could not load/);
+      if (tab === "dashboard") {
+        // The dashboard's recent runs: the October bulk run's net. (2.1e's first
+        // cut drew the dashboard only after Masters and never redrew it when
+        // the payroll desk landed — 0 runs, "No records yet".)
+        await expect(page.locator("main").first()).toContainText("₹39,500", { timeout: 15_000 });
+      }
       await page.screenshot({ path: testInfo.outputPath(`payroll-${tab}-desktop-light.png`), fullPage: true });
     }
+    const details: string[] = [];
     // Each run's detail, with the salary-setup review open: these lines are
     // rebuilt from Masters (statutory setup) + the staff records + salary setup.
     for (const [m, n] of [["2026-10", 2], ["2026-09", 2], ["2026-08", 1]] as const) {
@@ -187,10 +194,15 @@ test.describe("payroll screens (2.1e)", () => {
         const review = page.getByRole("button", { name: "Review salary setup" });
         if (await review.count()) await review.first().click();
         await settle(page);
-        await grab(page, testInfo, `detail-${m}-${i}`);
+        details.push(await grab(page, testInfo, `detail-${m}-${i}`));
         await page.screenshot({ path: testInfo.outputPath(`payroll-detail-${m}-${i}-desktop-light.png`), fullPage: true });
       }
     }
+    // E2E-001 (non-teaching standard, PF + ESIC) rebuilt from salary setup:
+    // gross ₹22,750 is over the DEFAULT ESIC ceiling (₹21,000) but under the
+    // school's seeded ₹25,000 — so ESIC ₹113 (and deductions ₹2,113) appear
+    // only when the screen computes from the server's statutory setup.
+    expect(details.join("\n")).toContain("₹22,750 / ₹2,113 / ₹20,637 / ₹2,288");
     expect(errors, "no page errors").toEqual([]);
     await context.close();
   });
