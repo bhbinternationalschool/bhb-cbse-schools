@@ -35,7 +35,13 @@ test("a request raised in one browser reaches the approver in another, and the d
     });
 
     await test.step("A (class teacher) raises a request from the header WhatsApp panel", async () => {
+      // The header panel resolves "who am I" from the page's roster copy once,
+      // when it opens (a pre-existing race, not this fix's): open it after the
+      // roster has loaded, as a person would a moment after the page appears.
+      const roster = a.page.waitForResponse((r) => r.url().includes("/api/school-data/staff-roster") && r.ok());
       await a.page.goto("/home");
+      await roster;
+      await a.page.waitForLoadState("networkidle");
       await a.page.getByRole("button", { name: "WhatsApp" }).click();
       await a.page.getByRole("button", { name: "Owner / Admin / Principal" }).click();
       await a.page.getByRole("button", { name: "Raise a request" }).click();

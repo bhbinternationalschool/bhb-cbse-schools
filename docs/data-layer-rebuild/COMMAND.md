@@ -1154,7 +1154,7 @@ a shrink. No "send to the office" button: no local copy can exist on the new bui
 **Proof.** `test:staff-requests` (15 checks; 5 mutations — view filter off, manager check off,
 base dropped, failed write reported ok, `kernelSlices` not counted — each red).
 `e2e/specs/staff-requests.spec.ts`: class teacher raises from the header panel, the principal's
-already-open Requests tab shows it without reload (18.1 s), resolves it, the teacher sees
+already-open Requests tab shows it without reload (8.5–18.2 s over four runs), resolves it, the teacher sees
 Resolved, the element is at `_rev` 2; a triage from an older copy gets 409 and the newer value.
 On the merge base fa637423 the first fails at "B sees it" (the teacher's screen said "Request
 filed"), the second at the route (404). An old-build whole-desk push carrying `staffRequests: []`
