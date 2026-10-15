@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   STAFF_DOC_LABELS,
   staffDocStatusLabel,
   type StaffDocFile,
   type StaffDocKey,
 } from "@/lib/foundationMasters";
-import { loadMasters } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { submitStaffDocForVerification } from "@/lib/profileDocVerification";
 import { btn } from "@/components/ui/erp-ui";
 import { useDocLocalPreview } from "@/lib/useDocLocalPreview";
@@ -27,19 +28,18 @@ export function StaffMyProfileDocs({
   staffId: string;
   actorName: string;
 }) {
-  const [tick, setTick] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Your own record (with its documents) from the roster the access checks
+  // use (data-layer 2.1c). A submitted document is saved by
+  // submitStaffDocForVerification through the Masters save, whose
+  // 'bhb-masters-updated' re-reads that roster — so it shows here at once.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
 
   const staff = useMemo(() => {
-    void tick;
-    if (!staffId) return null;
-    return loadMasters().staff.find((s) => s.id === staffId) ?? null;
-  }, [staffId, tick]);
-
-  useEffect(() => {
-    setTick((n) => n + 1);
-  }, [staffId]);
+    if (!staffId || !masters) return null;
+    return masters.staff.find((s) => s.id === staffId) ?? null;
+  }, [staffId, masters]);
 
   function onDocUploaded(key: StaffDocKey, next: StaffDocFile) {
     const r = submitStaffDocForVerification({
@@ -54,7 +54,6 @@ export function StaffMyProfileDocs({
     }
     setNotice("Submitted for HR / office verification");
     window.setTimeout(() => setNotice(null), 2500);
-    setTick((n) => n + 1);
   }
 
   if (!staffId) {
@@ -64,6 +63,12 @@ export function StaffMyProfileDocs({
         documents.
       </p>
     );
+  }
+  if (mastersError) {
+    return <QueryError what="the school's setup" error={mastersError} retry={retryMasters} />;
+  }
+  if (!masters) {
+    return <p className="text-sm text-[var(--muted)]">Loading your documents…</p>;
   }
   if (!staff) {
     return (

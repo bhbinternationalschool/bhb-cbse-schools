@@ -3,7 +3,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useDemoSession } from "@/components/shell/SessionContext";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { useStaffList } from "@/lib/data/client/hooks";
+import { QueryError } from "@/components/data/QueryError";
 import {
   ErpTable,
   ErpTableBody,
@@ -31,7 +32,9 @@ import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function StaffAppraisalPanel({ ay }: { ay: string }) {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // Who can be appraised: the roster as a directory (data-layer 2.1c) — code,
+  // name and status are all this panel shows; it never edits a staff record.
+  const staffList = useStaffList();
   const [hr, setHr] = useState<StaffHrState | null>(null);
   const [cycle, setCycle] = useState<AppraisalCycle | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -46,8 +49,6 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
   const [draftError, setDraftError] = useState<string | null>(null);
 
   function reload() {
-    const m = loadMasters();
-    setMasters(m);
     const state = loadStaffHr();
     const ensured = ensureAppraisalCycle(state, ay);
     setHr(ensured.state);
@@ -68,11 +69,11 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
   }, [ay]);
 
   const roster = useMemo(() => {
-    if (!masters) return [];
-    return (masters.staff ?? [])
+    if (!staffList.data) return [];
+    return staffList.data.staff
       .filter((s) => s.status === "active")
       .sort((a, b) => a.empCode.localeCompare(b.empCode));
-  }, [masters]);
+  }, [staffList.data]);
 
   const cycleAppraisals = useMemo(() => {
     if (!hr || !cycle) return [];
@@ -178,7 +179,7 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
   }
 
   function staffLabel(id: string) {
-    const s = masters?.staff.find((x) => x.id === id);
+    const s = staffList.data?.staff.find((x) => x.id === id);
     return s ? `${s.empCode} · ${s.fullName}` : id;
   }
 
@@ -224,7 +225,10 @@ export function StaffAppraisalPanel({ ay }: { ay: string }) {
     flash(`Exported ${rows.length} appraisal(s)`);
   }
 
-  if (!masters || !hr || !cycle) {
+  if (staffList.isError && !staffList.data) {
+    return <QueryError what="the staff list" error={staffList.error} retry={staffList.refetch} />;
+  }
+  if (!staffList.data || !hr || !cycle) {
     return <p className="text-sm text-[var(--muted)]">Loading appraisal…</p>;
   }
 
