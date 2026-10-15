@@ -398,7 +398,7 @@ export function AutomationListView({
               const rule = state.rules.find((x) => x.id === r.ruleId);
               const when = runWhenLabel(r);
               return (
-                <li className="px-3 py-2 text-[12px]">
+                <li className="px-4 py-2 text-[12px]">
                   <span className="font-semibold text-[var(--brand-deep)]">
                     {rule?.name || r.ruleId}
                   </span>{" "}

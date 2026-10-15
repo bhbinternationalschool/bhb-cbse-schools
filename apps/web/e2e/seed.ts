@@ -29,6 +29,24 @@ import { fetchTimetableDeskFromDb, pushTimetableDeskToDb } from "@/lib/timetable
 import { fetchSisFromDb, pushSisToDb } from "@/lib/sisNormalized.server";
 import { fetchPayrollDeskFromDb, pushPayrollDeskToDb } from "@/lib/payrollNormalized.server";
 import { TENANT } from "@/lib/types";
+import { fetchFeeDeskFromDb, pushFeeDeskToDb } from "@/lib/feesNormalized.server";
+import { readModuleLocalState, writeModuleLocalState } from "@/lib/moduleLocalState.server";
+import { pushStaffHrRemoteServer } from "@/lib/staffHrPersistence";
+import { fetchStaffAttendanceOutdoorDutyFromDb, pushStaffAttendanceOutdoorDutyToDb } from "@/lib/staffAttendanceOutdoorDuty.server";
+import { fetchStaffAttendanceDeskFromDb } from "@/lib/staffAttendanceNormalized.server";
+import { pushStaffAttendanceSettingsToDb } from "@/lib/staffAttendanceDeskAncillary.server";
+import { defaultAttendanceSettings } from "@/lib/staffAttendance";
+import { saveItem, saveVendor } from "@/lib/inventory/catalogue.server";
+import {
+  listGoodsReceipts,
+  listPurchaseOrders,
+  listPurchaseReturns,
+  listVendorBills,
+  postGoodsReceipt,
+  postPurchaseReturn,
+  savePurchaseOrder,
+} from "@/lib/inventory/procurement.server";
+import { STORE_PLAN } from "./growingLists";
 
 function check(what: string, actual: number, expected: number): void {
   if (actual !== expected) throw new Error(`seed read-back: ${what} = ${actual}, expected ${expected}`);
@@ -96,6 +114,78 @@ export async function runSeed(): Promise<void> {
   must("automation runs", await pushDeskSliceToDb("automation", { ...fx.automation }));
   console.log(`payroll runs (${fx.payroll.runs.length}) and automation runs (${fx.automation.runs.length}) written`);
 
+  const g = fx.growing;
+  must(
+    "fee desk (receipts + charge vouchers)",
+    await pushFeeDeskToDb(
+      {
+        vouchers: g.receipts,
+        cheques: [],
+        manualBooks: [],
+        dayCloses: [],
+        installmentPlans: [],
+        planAllocations: [],
+        carriedForwardDues: [],
+        chargeVouchers: g.chargeVouchers,
+      },
+      { academicYearCode: AY_CURRENT, rebuildOpenDues: false },
+    ),
+  );
+  const adj = await writeModuleLocalState("fee_adjustments", { rows: g.feeAdjustments });
+  if (!adj.ok) throw new Error(`seed: fee adjustments failed: ${adj.error}`);
+  must("staff HR (leave + requests)", await pushStaffHrRemoteServer(g.staffHr));
+  // The staff attendance desk refuses to load (503) until its settings row
+  // exists — every real school has one; a fresh database does not.
+  must("staff attendance settings", await pushStaffAttendanceSettingsToDb(defaultAttendanceSettings()));
+  must("outdoor duty", await pushStaffAttendanceOutdoorDutyToDb(g.outdoorDuty));
+  must("certificates", await pushDeskSliceToDb("certificates", { ...g.certificates }));
+  {
+    const { pushServerBlob } = await import("@/lib/serverBlob");
+    must("certificates blob", await pushServerBlob("certificates_state", g.certificates));
+  }
+
+  // Store: through the procurement functions, which mint their own numbers.
+  const actor = "E2E seed";
+  const vendor = await saveVendor({ name: STORE_PLAN.vendor.name }, actor);
+  const item = await saveItem({ name: STORE_PLAN.item.name, sku: STORE_PLAN.item.sku }, actor);
+  for (const o of STORE_PLAN.orders) {
+    await savePurchaseOrder(
+      { vendorId: vendor.id, orderDate: o.date, lines: [{ itemId: item.id, qty: o.qty, ratePaise: o.ratePaise }] },
+      actor,
+      AY_CURRENT,
+    );
+  }
+  const grns: Record<string, string> = {};
+  for (const r of STORE_PLAN.receipts) {
+    const posted = await postGoodsReceipt(
+      {
+        vendorId: vendor.id,
+        receiptDate: r.date,
+        supplierInvoiceNo: `E2E-INV-${r.date}`,
+        supplierInvoiceDate: r.date,
+        createBill: true,
+        lines: [{ itemId: item.id, qtyReceived: r.qty, ratePaise: r.ratePaise }],
+      },
+      actor,
+      AY_CURRENT,
+    );
+    grns[r.date.slice(0, 7)] = posted.grnId;
+  }
+  for (const ret of STORE_PLAN.returns) {
+    await postPurchaseReturn(
+      {
+        grnId: grns[ret.date.slice(0, 7)],
+        vendorId: vendor.id,
+        returnDate: ret.date,
+        reason: "Damaged in transit (E2E)",
+        lines: [{ itemId: item.id, qty: ret.qty }],
+      },
+      actor,
+      AY_CURRENT,
+    );
+  }
+  console.log("receipts, charge vouchers, adjustments, staff HR, outdoor duty, certificates and store documents written");
+
   // Read back through the app's own readers.
   const e = fx.expected;
   console.log("read-back:");
@@ -136,6 +226,31 @@ export async function runSeed(): Promise<void> {
   const au = await fetchDeskSliceFromDb("automation");
   if (!au.ok) throw new Error(`seed read-back: automation read failed: ${au.error}`);
   check("automation runs", Array.isArray(au.bundle.runs) ? au.bundle.runs.length : -1, fx.automation.runs.length);
+
+  check("payroll audit entries", pr.ok ? pr.bundle.audit.length : -1, fx.payroll.audit.length);
+  const fees = await fetchFeeDeskFromDb();
+  check("fee receipts", fees.vouchers?.length ?? -1, fx.growing.receipts.length);
+  check("charge vouchers", fees.ancillary?.chargeVouchers?.length ?? -1, fx.growing.chargeVouchers.length);
+  const adjRead = await readModuleLocalState<{ rows?: unknown[] }>("fee_adjustments");
+  check("fee adjustments", adjRead?.state?.rows?.length ?? -1, fx.growing.feeAdjustments.length);
+  const hr = await fetchDeskSliceFromDb("staff_hr");
+  if (!hr.ok) throw new Error(`seed read-back: staff HR read failed: ${hr.error}`);
+  check("leave requests", Array.isArray(hr.bundle.leaveRequests) ? hr.bundle.leaveRequests.length : -1, fx.growing.staffHr.leaveRequests.length);
+  // Staff requests are NOT seeded: with STAFF_HR read-from-db on (production
+  // and this stack) they are neither a desk slice nor pushed to the blob, so
+  // no server write path holds them — they live only in the browser that
+  // raised them (production staff_hr_state: 0 requests, last written 5 Aug).
+  const od = await fetchStaffAttendanceOutdoorDutyFromDb();
+  check("outdoor duty trips", od.ok ? od.outdoorDuty.length : -1, fx.growing.outdoorDuty.length);
+  const sad = await fetchStaffAttendanceDeskFromDb();
+  check("staff attendance desk readable (outdoor duty through it)", sad.ok ? sad.ancillary.outdoorDuty.length : -1, fx.growing.outdoorDuty.length);
+  const certs = await fetchDeskSliceFromDb("certificates");
+  if (!certs.ok) throw new Error(`seed read-back: certificates read failed: ${certs.error}`);
+  check("certificates", Array.isArray(certs.bundle.issues) ? certs.bundle.issues.length : -1, fx.growing.certificates.issues.length);
+  check("purchase orders", (await listPurchaseOrders({ status: "all" })).length, STORE_PLAN.orders.length);
+  check("goods receipts", (await listGoodsReceipts({})).length, STORE_PLAN.receipts.length);
+  check("vendor bills", (await listVendorBills({ status: "all" })).length, STORE_PLAN.receipts.length);
+  check("purchase returns", (await listPurchaseReturns({})).length, STORE_PLAN.returns.length);
 
   const sis = await fetchSisFromDb();
   if (!sis.ok) throw new Error("seed read-back: SIS read failed");

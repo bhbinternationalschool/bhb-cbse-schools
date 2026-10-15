@@ -235,14 +235,15 @@ function OrdersSection({ boot }: { boot: InvBootstrap }) {
   }
 
   const list = orders.data ?? [];
-  // Folded by the IST month of the order date, newest open; a status other
-  // than "All" is a filter, so every month with a match opens.
+  // Folded by the IST month of the order date, newest open. The status
+  // picker chooses which register to read (it is the default view, not a
+  // search), so it does not force every month open; a month holding an
+  // order still awaiting approval does start open.
   const orderMonths = useMonthGroups({
     rows: list,
     dateOf: (o) => o.orderDate,
-    filterActive: status !== "all",
-    filterKey: status,
     storageKey: "store.purchaseOrders",
+    needsAttention: (o) => o.status === "pending_approval",
   });
 
   return (
@@ -1486,14 +1487,14 @@ function BillsSection() {
     () => allBills.filter((b) => b.status === "cancelled"),
     [allBills],
   );
-  // Folded by the IST month of the bill date, newest open. "Unpaid" and
-  // "Paid" are filters, so every month with a match opens.
+  // Folded by the IST month of the bill date, newest open. The Unpaid /
+  // Paid / All picker is the register being read, not a search; a month
+  // holding an overdue bill starts open so money owed is never folded away.
   const billMonths = useMonthGroups({
     rows: list,
     dateOf: (b) => b.billDate,
-    filterActive: status !== "all",
-    filterKey: status,
     storageKey: "store.vendorBills",
+    needsAttention: (b) => b.overdueDays > 0 && b.balancePaise > 0,
   });
   const totals = useMemo(
     () => ({

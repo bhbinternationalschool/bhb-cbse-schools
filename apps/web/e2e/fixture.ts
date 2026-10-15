@@ -44,6 +44,20 @@ import { normalizeHousehold, normalizeStudent } from "@/lib/sis";
 import type { PayrollRun, PayrollState } from "@/lib/payroll";
 import { normalizePayrollLine } from "@/lib/payroll";
 import type { AutomationRun, AutomationState } from "@/lib/automation";
+import {
+  buildCertificates,
+  buildChargeVouchers,
+  buildFeeAdjustments,
+  buildOutdoorDuty,
+  buildPayrollAudit,
+  buildReceipts,
+  buildStaffHr,
+} from "./growingLists";
+import type { CollectionVoucher, ChargeVoucher } from "@/lib/fees";
+import type { FeeAdjustment } from "@/lib/feeAdjustments";
+import type { StaffHrState } from "@/lib/staffHr";
+import type { OutdoorDutySession } from "@/lib/staffAttendance";
+import type { CertificatesState } from "@/lib/certificates";
 
 export const E2E_TENANT_SLUG = "bhb-international";
 export const AY_CURRENT = "2026-27";
@@ -524,6 +538,30 @@ function buildAutomationRuns(): AutomationState {
   return { version: 1, rules: [], approvals: [], runs, lastTickAt: "" };
 }
 
+function withAudit(p: PayrollState): PayrollState {
+  return { ...p, audit: buildPayrollAudit(p.runs) };
+}
+
+function buildGrowing(students: SisStudent[], staff: StaffRecord[]): E2eFixture["growing"] {
+  // Active children of this session, one per household, in roster order.
+  const seen = new Set<string>();
+  const children = students
+    .filter((s) => s.academicYearCode === AY_CURRENT && s.status === "active")
+    .filter((s) => (seen.has(s.householdId) ? false : (seen.add(s.householdId), true)))
+    .slice(0, 6)
+    .map((s) => ({ id: s.id, fullName: s.fullName, householdId: s.householdId, admissionNo: s.admissionNo }));
+  const { vouchers, searchChild } = buildReceipts(children);
+  return {
+    receipts: vouchers,
+    receiptSearchChild: searchChild,
+    chargeVouchers: buildChargeVouchers(children),
+    feeAdjustments: buildFeeAdjustments(children),
+    staffHr: buildStaffHr(staff),
+    outdoorDuty: buildOutdoorDuty(staff),
+    certificates: buildCertificates(children),
+  };
+}
+
 // ── The whole school, and what a test should see ─────────────────────────
 
 export type E2eFixture = {
@@ -537,6 +575,17 @@ export type E2eFixture = {
   payroll: PayrollState;
   /** Automation runs over three IST months (Masters → Automation). */
   automation: AutomationState;
+  /** Rows for the other month-grouped screens (e2e/growingLists.ts). */
+  growing: {
+    receipts: CollectionVoucher[];
+    /** The child whose only receipt is in August — the receipts search test. */
+    receiptSearchChild: { id: string; fullName: string; householdId: string; admissionNo: string };
+    chargeVouchers: ChargeVoucher[];
+    feeAdjustments: FeeAdjustment[];
+    staffHr: StaffHrState;
+    outdoorDuty: OutdoorDutySession[];
+    certificates: CertificatesState;
+  };
   /**
    * office — Office role by Masters → Roles assignment (Masters: view only);
    * principal — the Principal (built-in principal role: may edit Masters; the
@@ -610,8 +659,9 @@ export function buildFixture(): E2eFixture {
     moduleRegistry: buildModuleRegistry(),
     timetable: buildTimetable(),
     sis,
-    payroll: buildPayrollRuns(staff),
+    payroll: withAudit(buildPayrollRuns(staff)),
     automation: buildAutomationRuns(),
+    growing: buildGrowing(sis.students, staff),
     sessions: {
       office: session(OFFICE_STAFF, "office"),
       principal: session(PRINCIPAL_STAFF, "principal"),

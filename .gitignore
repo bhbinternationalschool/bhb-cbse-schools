@@ -74,4 +74,5 @@ concession-grants-closed-2027-03-31.json
 # Playwright gate (step 1.1) outputs — uploaded as CI artifacts, never committed.
 apps/web/e2e/report/
 apps/web/e2e/test-results/
+apps/web/e2e/month-groups-shots/
 apps/web/e2e/scoreboard.json
