@@ -333,6 +333,20 @@ function buildTimetable(): TimetableState {
 
 export const CURRENT_CHILDREN = 250;
 
+/**
+ * The one child with a fee group, and that group (LKG, Promoted, 2026-27):
+ * the Students → Upgrade test moves this child to UKG, for which no group
+ * matches, and the child must keep this group (e2e/specs/student-upgrade).
+ * Child 249 sits in LKG (sectionOfChild) and has no earlier-year rows.
+ */
+export const UPGRADE_CHILD_INDEX = 249;
+export const UPGRADE_FEE_GROUP = {
+  id: "e2e_fg_lkg_promote",
+  code: "E2E-LKG-P",
+  name: "E2E LKG Promoted",
+  classKey: 2,
+} as const;
+
 const CHILD_FIRST = [
   "Aarav", "Bhavya", "Chirag", "Diya", "Eshan", "Fatima", "Gaurav", "Hiral", "Ishaan", "Jiya",
   "Kabir", "Lavanya", "Manan", "Nisha", "Om", "Pari", "Qasim", "Riya", "Shaurya", "Tanvi",
@@ -407,6 +421,7 @@ function buildSis(): { households: Household[]; students: SisStudent[] } {
         sectionId: sectionId(k),
         academicYearCode: AY_CURRENT,
         rollNo: String(Math.ceil(i / SECTIONED_CLASSES)),
+        ...(i === UPGRADE_CHILD_INDEX ? { feeGroupId: UPGRADE_FEE_GROUP.id } : {}),
       }),
     );
     // Earlier years' rows: a class lower per year; the third extra row is an
@@ -629,6 +644,19 @@ export function buildFixture(): E2eFixture {
     sections,
     subjects,
     classSubjects,
+    feeGroups: [
+      {
+        id: UPGRADE_FEE_GROUP.id,
+        code: UPGRADE_FEE_GROUP.code,
+        name: UPGRADE_FEE_GROUP.name,
+        academicYearCode: AY_CURRENT,
+        studentType: "PROMOTE",
+        classIds: [classId(UPGRADE_FEE_GROUP.classKey)],
+        isActive: true,
+        structurePublishedAt: null,
+        structurePublishedBy: "",
+      },
+    ],
     // The Staff module owns these; they are seeded through its own write path.
     staff: [],
     departments: [],
