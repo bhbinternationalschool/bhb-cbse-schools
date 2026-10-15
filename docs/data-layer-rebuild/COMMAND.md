@@ -967,8 +967,9 @@ asks the view and offers "My class parents". All three FAIL on 9433ee26 (built a
 teacher.spec otherwise unchanged. Staff propagation: both cases still expected-fail, now at the PROPAGATION step
 with `controlShown:true` and `visibleAfterReload:true` on /staff?tab=roster and /timetable — staleness alone (the
 roster on both is the page copy: /staff until 2.2, the access copy behind useScreenMasters until 2.3a); reason text
-updated, editor case stays fixme. Ratchets (#642's script, not merged): `load_masters_screen_files` 98 → **88**,
-`load_masters_calls_src` 463 → **453**, `ensure_hydrated_component_files` 69. Screens seen desktop-light and
+updated, editor case stays fixme. Ratchets (on origin/main e8e7163f, after 2.1b and #657): `load_masters_screen_files` 83 → **72**,
+`load_masters_calls_src` 447 → **436** (10 of each from these files; the 11th from #657's StaffRequestsPanel,
+not yet written down), `ensure_hydrated_component_files` 69 → **68** (bookkeeping: already 68 on main). Screens seen desktop-light and
 phone-375-dark, office (principal fixture) and class teacher: roster, Leave, Leave rules, Reports, Outdoor duty,
 Appraisal, Payslips, My docs, Agreements, GPS, profile edit, /attendance, /my-pay + WhatsApp — no page errors.
 **Not done / not proven.** /staff roster propagation (2.2/2.3a). A teacher opening Staff → Leave sees "You do not
