@@ -928,7 +928,7 @@ grant) returning the aggregates the screen shows, cached per process for 30 s ke
 `erp_versions` < 800 ms · 4.1i the remaining `app/api/v1` callers. Phase exit: the
 `ensureSchoolMirrorHydrated` ratchet under `app/api/v1` reaches 0 (100 files today).
 
-*(4.1b built 15 Oct 2026, PR #PRNUM.)* **What exists.** `GET /api/v1/parent/attendance` reads the
+*(4.1b built 15 Oct 2026, PR #653.)* **What exists.** `GET /api/v1/parent/attendance` reads the
 student by id (`lib/data/server/householdRead.ts`, shared with 4.1a/c) and that child's marks in one query:
 `attendance_desk_marks` by `student_id` inner-joined to `attendance_desk_registers` filtered on the child's
 section, the session's year and `attendance_date >= since` (one mark per register and student is a unique
