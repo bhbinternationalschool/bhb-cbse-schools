@@ -304,3 +304,37 @@ test.describe("class teacher: fees are withheld, not none", () => {
     }
   });
 });
+
+/**
+ * The header WhatsApp button (StaffBroadcastButton, in every page's header)
+ * reads Masters through useScreenMasters({enabled: open}) since data-layer
+ * 2.1c: a page that reads no Masters view itself (/my-pay) asks nothing —
+ * neither the masters view nor the versions poll — until the button is
+ * opened; once opened it asks, and her own class's parents are offered.
+ * On origin/main before 2.1c the button never asked the view (opened: 0).
+ */
+test.describe("header WhatsApp (teacher)", () => {
+  test("/my-pay: asks views/masters only once opened, then offers My class parents", async ({ browser }, testInfo) => {
+    const { context, page } = await openAs(browser, "teacher");
+    try {
+      const seen = { masters: 0, versions: 0 };
+      page.on("request", (r) => {
+        const p = new URL(r.url()).pathname;
+        if (p === "/api/data/views/masters") seen.masters += 1;
+        if (p === "/api/data/views/versions") seen.versions += 1;
+      });
+      await page.goto("/my-pay");
+      await expect(page.getByRole("heading", { name: "My pay & attendance" }).first()).toBeVisible({ timeout: 20_000 });
+      await page.waitForLoadState("networkidle");
+      const closed = { ...seen };
+      expect(closed.masters, "closed: no masters view request").toBe(0);
+      expect(closed.versions, "closed: no versions poll").toBe(0);
+      await page.getByRole("button", { name: "WhatsApp", exact: true }).click();
+      await expect(page.getByRole("button", { name: "My class parents", exact: true })).toBeVisible({ timeout: 15_000 });
+      expect(seen.masters, "opened: the masters view was asked").toBeGreaterThan(0);
+      await metric(testInfo, "header-whatsapp", { closed, opened: { ...seen } });
+    } finally {
+      await context.close();
+    }
+  });
+});

@@ -2,7 +2,8 @@
 // ratchet-allow: grids_without_row_menu — report output with dynamic columns
 
 import { useEffect, useMemo, useState } from "react";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   ErpTable,
   ErpTableBody,
@@ -44,7 +45,8 @@ export function StaffLeaveReportsPanel({
   const defaultId = (reports[0]?.id ??
     "staff_on_leave_today") as StaffLeaveReportId;
 
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // Masters + the roster the reports read (data-layer 2.1c).
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [reportId, setReportId] = useState<StaffLeaveReportId>(defaultId);
   const [date, setDate] = useState(todayIso);
   const [fromDate, setFromDate] = useState(() => `${ay.slice(0, 4)}-04-01`);
@@ -81,10 +83,6 @@ export function StaffLeaveReportsPanel({
     };
   }
   const previewSort = useTableSort(previewRows, previewColumns, "__report_order__");
-
-  useEffect(() => {
-    setMasters(loadMasters());
-  }, []);
 
   useEffect(() => {
     if (!reports.some((r) => r.id === reportId)) {
@@ -190,6 +188,9 @@ export function StaffLeaveReportsPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportId, masters, ay, scope]);
 
+  if (mastersError) {
+    return <QueryError what="the school's setup" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters || !def) {
     return <p className="text-sm text-[var(--muted)]">Loading reports…</p>;
   }
