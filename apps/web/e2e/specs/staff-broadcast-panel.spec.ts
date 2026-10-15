@@ -33,10 +33,11 @@ test("opened before the roster loads, the panel offers leave and requests once i
     await a.page.goto("/home");
     await a.page.getByRole("button", { name: "WhatsApp" }).click();
     await a.page.getByRole("button", { name: "Owner / Admin / Principal" }).click();
-    // Unknown is not "no record": while the roster is out, the panel says so.
+    // The roster read is out (and held) while the panel is open…
+    await expect.poll(() => heldCount, { timeout: 30_000 }).toBeGreaterThan(0);
+    // …and unknown is not "no record": the panel says it is loading.
     await expect(a.page.getByText("Loading your staff record…")).toBeVisible();
     await expect(a.page.getByRole("button", { name: "Raise a request" })).toHaveCount(0);
-    expect(heldCount).toBeGreaterThan(0);
 
     release();
     // The same open panel — no close and reopen.
