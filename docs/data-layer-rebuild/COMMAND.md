@@ -1128,7 +1128,7 @@ desks follow the five-step procedure; each PR names its files from the inventori
 `evidence/write-path.md` (per-desk save table) and `evidence/hydration.md` (hydrate table).
 
 **Staff HR · Requests (ahead of 5.8, director's "fix now, separately", 15 Oct).** *(Built 15 Oct 2026,
-PR #PRNUM — no migration.)* **Found** while seeding for PR #650: with `STAFF_HR_READ_FROM_DB` on,
+PR #657 — no migration.)* **Found** while seeding for PR #650: with `STAFF_HR_READ_FROM_DB` on,
 `staffRequests` was neither a staff_hr desk slice nor pushed to the `staff_hr_state` blob, so a
 request lived only in the browser that raised it (production, 15 Oct: blob 0 requests, last written
 5 Aug; no element in `staff_hr_desk_slices`; no other table holds them). Since 10 Oct that browser
