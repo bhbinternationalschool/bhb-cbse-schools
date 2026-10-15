@@ -162,7 +162,7 @@ extension TeacherToolsApi on ApiClient {
     bool dryRun = true,
   }) async {
     // This route answers with a bare object, not the {data} envelope.
-    final res = await http.post(
+    final res = await _slowHttp.post(
       _uri("/api/v1/staff/broadcast"),
       headers: await _authHeaders(),
       body: jsonEncode({
@@ -204,7 +204,7 @@ extension TeacherToolsApi on ApiClient {
     required int capacity,
     required String roomOrLink,
   }) async {
-    final res = await http.patch(
+    final res = await _http.patch(
       _uri("/api/v1/staff/ptm/slots"),
       headers: await _authHeaders(),
       body: jsonEncode({
@@ -220,7 +220,7 @@ extension TeacherToolsApi on ApiClient {
 
   /// Cancel one of my slots that nobody has booked.
   Future<void> deletePtmSlot(String slotId) async {
-    final res = await http.delete(
+    final res = await _http.delete(
       _uri(
         "/api/v1/staff/ptm/slots?slotId=${Uri.encodeQueryComponent(slotId)}",
       ),
