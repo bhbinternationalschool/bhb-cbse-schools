@@ -31,6 +31,7 @@ import {
   cashfreeBaseUrl,
   cashfreeKeysPresent,
 } from "@/lib/cashfree.server";
+import { deriveSettlementStatus } from "@/lib/ledger/pgSettlementStatus";
 
 /* ─── Money ─────────────────────────────────────────────────── */
 
@@ -128,6 +129,7 @@ function last4(v: unknown): string {
 /** The webhook envelope's `data.settlement` object. */
 export function settlementFromWebhook(
   data: Record<string, unknown>,
+  eventType = "",
 ): PgSettlement | null {
   const s = (data?.settlement ?? null) as Record<string, unknown> | null;
   if (!s) return null;
@@ -136,7 +138,17 @@ export function settlementFromWebhook(
   return {
     cfSettlementId: id,
     utr: str(s.utr),
-    status: str(s.status).toUpperCase(),
+    // SETTLEMENT_FAILED is a verdict even if the body's status were missing.
+    status: deriveSettlementStatus({
+      explicit: str(s.status),
+      utr: str(s.utr),
+      // The webhook always states its status; one that does not is not
+      // promoted to paid on the strength of a date it carries even when
+      // INITIATED.
+      hasSettledDate: false,
+      raw: s,
+      eventType,
+    }),
     settlementType: str(s.settlement_type ?? s.type).toUpperCase(),
     paymentAmountPaise: rupeesToPaise(s.payment_amount),
     amountSettledPaise: rupeesToPaise(s.amount_settled ?? s.settlement_amount),
@@ -168,7 +180,11 @@ export function settlementFromWebhook(
  *
  * The nested row carries no status. A row in the settlement list with a UTR
  * and a settlement date IS a completed transfer to the bank, so that is
- * SUCCESS; without both it is PENDING — never assumed paid.
+ * SUCCESS; without both it is PENDING — never assumed paid. But a row whose
+ * settlement_details.reason/remarks or payment_details.status say FAILED is
+ * FAILED: until 15 Oct 2026 the failed first attempt at the 9 Oct ₹2,600
+ * (404691537) was read as "no UTR yet" → PENDING, overwrote the FAILED the
+ * webhook had stored, and the board counted it beside its retry (405119119).
  */
 export function settlementFromList(s: Record<string, unknown>): PgSettlement | null {
   const obj = (v: unknown): Record<string, unknown> =>
@@ -183,7 +199,12 @@ export function settlementFromList(s: Record<string, unknown>): PgSettlement | n
   return {
     cfSettlementId: id,
     utr,
-    status: explicit || (utr && iso(settledAtRaw) ? "SUCCESS" : "PENDING"),
+    status: deriveSettlementStatus({
+      explicit,
+      utr,
+      hasSettledDate: !!iso(settledAtRaw),
+      raw: s,
+    }),
     settlementType: str(sd.settlement_type ?? sd.type).toUpperCase(),
     paymentAmountPaise: rupeesToPaise(pd.payment_amount ?? sd.payment_amount ?? sd.amount),
     amountSettledPaise: rupeesToPaise(sd.amount_settled ?? sd.settlement_amount),
