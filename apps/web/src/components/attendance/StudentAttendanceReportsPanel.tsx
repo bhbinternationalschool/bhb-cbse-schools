@@ -3,11 +3,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ATTENDANCE_STATUSES, loadAttendance, type AttendanceStatus } from "@/lib/attendance";
-import { loadMasters, type MastersState } from "@/lib/masters";
 import { hasFeaturePermission } from "@/lib/rbac";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import { loadSis, type SisState } from "@/lib/sis";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   STUDENT_ATT_REPORTS,
   runStudentAttReport,
@@ -43,7 +44,7 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
         : null,
     [teacherMode, my],
   );
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [reportId, setReportId] = useState<StudentAttReportId>("day_wise");
   const [date, setDate] = useState(todayIso);
@@ -85,7 +86,6 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
   const previewSort = useTableSort(previewRows, previewColumns, "__report_order__");
 
   useEffect(() => {
-    setMasters(loadMasters());
     setSis(loadSis());
   }, []);
 
@@ -273,6 +273,9 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportId, masters, sis, ay, mySections]);
 
+  if (mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters || !sis) {
     return <p className="text-sm text-[var(--muted)]">Loading reports…</p>;
   }

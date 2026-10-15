@@ -489,6 +489,7 @@
     "test:reference-cache": "npx tsx src/lib/data/server/referenceCache.selftest.ts",
     "test:versions-route": "npx tsx src/lib/data/server/versionsRoute.selftest.ts",
     "test:query-kernel": "npx tsx src/lib/data/client/queryKernel.selftest.ts",
+    "test:masters-bridge": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/lib/data/client/mastersBridge.selftest.ts",
     "test:reference-views": "npx tsx src/lib/data/server/views.selftest.ts",
     "test:outdoor-duty-staff-id": "npx tsx src/lib/outdoorDutyStaffId.selftest.ts",
     "test:outdoor-duty-persistence": "npx tsx src/lib/outdoorDutyPersistence.selftest.ts",
