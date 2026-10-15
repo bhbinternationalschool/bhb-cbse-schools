@@ -204,8 +204,18 @@ async function openParentPage(page: Page): Promise<void> {
   await page.goto("/parent");
   await expect(page.getByText("Loading your fees…")).toHaveCount(0, { timeout: 60_000 });
   await expect(page.getByText(/No household linked/)).toHaveCount(0);
-  const chip = page.locator(`button[data-student-id="${CHILD.id}"]`);
-  if (await chip.count()) await chip.click();
+  await showChild(page);
+}
+
+/** The page has loaded; switch to the seeded child when the family has several. */
+async function showChild(page: Page): Promise<void> {
+  await expect(page.getByTestId("parent-due-now")).toBeVisible({ timeout: 30_000 });
+  if (MY_CHILDREN.size > 1) {
+    const chip = page.locator(`button[data-student-id="${CHILD.id}"]`);
+    await chip.click();
+    await expect(chip).toHaveAttribute("aria-pressed", "true");
+  }
+  await expect(page.getByRole("heading", { name: CHILD.fullName })).toBeVisible();
 }
 
 for (const size of SIZES) {
@@ -270,10 +280,8 @@ test("a failed read says so and offers Try again — never 'No household linked'
     fail = false;
     await err.getByRole("button", { name: "Try again" }).click();
     await expect(err).toHaveCount(0, { timeout: 30_000 });
-    const chip = page.locator(`button[data-student-id="${CHILD.id}"]`);
-    if (await chip.count()) await chip.click();
+    await showChild(page);
     await expect(page.locator('li[data-due-kind="transport"][data-due-month="2026-10"]')).toContainText("₹500");
-    await expect(page.getByTestId("parent-due-now")).toBeVisible();
     await context.close();
   }
 });
