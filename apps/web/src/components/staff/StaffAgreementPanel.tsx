@@ -13,7 +13,8 @@ import {
   Stamp,
   X,
 } from "lucide-react";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { canWriteModuleTab } from "@/lib/rbac";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import {
@@ -65,7 +66,9 @@ export function StaffAgreementPanel({
   staffId?: string;
 }) {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // Masters (the school's details on the letter) + the roster (data-layer
+  // 2.1c). Null = not known yet.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [agreements, setAgreements] = useState<StaffAgreement[]>([]);
   const [tick, setTick] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
@@ -99,7 +102,6 @@ export function StaffAgreementPanel({
   const [signatureUrl, setSignatureUrl] = useState("");
 
   useEffect(() => {
-    setMasters(loadMasters());
     setAgreements(loadAgreements().agreements);
   }, [tick]);
 
@@ -454,6 +456,9 @@ export function StaffAgreementPanel({
     }
   }
 
+  if (mastersError) {
+    return <QueryError what="the school's setup" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters) {
     return <p className="text-sm text-[var(--muted)]">Loading agreements…</p>;
   }
