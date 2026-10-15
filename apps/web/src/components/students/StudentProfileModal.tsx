@@ -22,7 +22,7 @@ import {
   StudentNameLabel,
 } from "@/components/students/StudentAvatar";
 import { loadTransport, type TransportState } from "@/lib/transport";
-import { useDuesInputs } from "@/components/fees/useDuesInputs";
+import { duesDesksLabel, useDuesInputs } from "@/components/fees/useDuesInputs";
 import { studentTransportSummary } from "@/lib/transportForStudent";
 import {
   computeStudentDues,
@@ -568,8 +568,21 @@ export function StudentProfileModal({
 
           {tab === "fees" && feesWithheld ? (
             <Empty text="Fee details are not shown to your role — ask the office." />
-          ) : tab === "fees" && !duesInputs.ready ? (
+          ) : tab === "fees" && duesInputs.status === "loading" ? (
             <Empty text="Reading fees…" />
+          ) : tab === "fees" && duesInputs.status === "failed" ? (
+            // A desk that could not be read is NOT LOADED — never the
+            // tuition-only total a missing transport desk would compute.
+            <div
+              role="alert"
+              className="rounded-xl border border-dashed border-[rgba(192,57,43,0.4)] px-4 py-6 text-center text-sm text-[var(--danger)]"
+            >
+              Fee dues not loaded — {duesDesksLabel(duesInputs.missing)} could not be read, so
+              no figure is shown.{" "}
+              <button type="button" className="font-semibold underline" onClick={duesInputs.retry}>
+                Try again
+              </button>
+            </div>
           ) : tab === "fees" ? (
             <div className="space-y-4">
               <div className="grid grid-cols-3 gap-3">
