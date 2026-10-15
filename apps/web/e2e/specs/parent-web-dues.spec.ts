@@ -13,6 +13,13 @@
  * under a backdated new stop, October ₹500 owing — signed in as THAT child's
  * parent, with a session minted the way the app's login mints one.
  *
+ * "Due now" is the pay link's definition (owing up to the running month —
+ * directDues, the same as /pay/due, the reminders and the app's summary); the
+ * months after it are "Rest of the year", shown apart, never in the amount to
+ * pay and never selectable. The expectations are computed from today's date
+ * below, so the spec passes in any month: on 15 Oct 2026 due now is the
+ * October bus month (₹500) for this child, and November–March are the rest.
+ *
  * Proved here: the dues and paid bus months on the page; another family's
  * household refused (403) and never in the answer; staff and signed-out
  * callers refused; a failed read says "Could not load" and offers Try again,
@@ -81,7 +88,35 @@ async function contextAs(
 }
 
 type Line = { dueKey: string; kind: string; dueOn: string; paidPaise: number; balancePaise: number };
-type View = { householdId: string; children: { student: { id: string }; dues: Line[] }[]; receipts: { householdId: string; id: string }[] };
+type View = {
+  householdId: string;
+  children: { student: { id: string }; dues: Line[] }[];
+  receipts: { householdId: string; id: string }[];
+  dueNowKeys: string[];
+  dueNowPaise: number;
+  restOfYearPaise: number;
+};
+
+/** The child's owing bus months, October 2026 – March 2027. */
+const OWING = ["2026-10", "2026-11", "2026-12", "2027-01", "2027-02", "2027-03"];
+/**
+ * Is `ym` due now, today? An independent oracle for the engine's rule: a line
+ * is due once its month is not after the running month in session order
+ * (April first), judged on the school's (IST) calendar.
+ */
+function dueNowToday(ym: string): boolean {
+  const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 7);
+  const idx = (m: number) => (m + 8) % 12; // April = 0 … March = 11
+  return idx(Number(ym.slice(5, 7))) <= idx(Number(today.slice(5, 7)));
+}
+const rupees = (paise: number) =>
+  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(paise / 100);
+
+async function readView(context: BrowserContext): Promise<View> {
+  const res = await context.request.get(PATH);
+  expect(res.status(), await res.text()).toBe(200);
+  return ((await res.json()) as { data: View }).data;
+}
 
 test.describe.configure({ mode: "serial" });
 
@@ -97,7 +132,7 @@ test.beforeAll(() => {
   fs.mkdirSync(SHOTS, { recursive: true });
 });
 
-test("the server answers with this family's dues: Apr–Sep bus months paid, October owing", async ({ browser }) => {
+test("the server answers with this family's dues: Apr–Sep bus months paid, Oct–Mar owing, split into due now and the rest of the year", async ({ browser }) => {
   const context = await contextAs(browser, parentSession(MY_HH));
   // The server's school mirror re-reads the database on a TTL; the seed wrote
   // from another process, so ask until the receipts are in.
@@ -120,7 +155,18 @@ test("the server answers with this family's dues: Apr–Sep bus months paid, Oct
       expect(lines.reduce((s, d) => s + d.balancePaise, 0), `${ym} owes nothing`).toBe(0);
       expect(lines.reduce((s, d) => s + d.paidPaise, 0), `${ym} shows the ₹500 paid`).toBe(50000);
     }
-    expect(month("2026-10").reduce((s, d) => s + d.balancePaise, 0), "October owes ₹500").toBe(50000);
+    for (const ym of OWING) {
+      expect(month(ym).reduce((s, d) => s + d.balancePaise, 0), `${ym} owes ₹500`).toBe(50000);
+      // Due now or the rest of the year, by today's date.
+      const now = month(ym).every((d) => data.dueNowKeys.includes(d.dueKey));
+      expect(now, `${ym} due now?`).toBe(dueNowToday(ym));
+    }
+    // Due now and rest of the year add up exactly, and never overlap.
+    const open = data.children.flatMap((c) => c.dues).filter((d) => d.balancePaise > 0);
+    const keys = new Set(data.dueNowKeys);
+    expect(data.dueNowPaise).toBe(open.filter((d) => keys.has(d.dueKey)).reduce((s, d) => s + d.balancePaise, 0));
+    expect(data.restOfYearPaise).toBe(open.filter((d) => !keys.has(d.dueKey)).reduce((s, d) => s + d.balancePaise, 0));
+    for (const k of keys) expect(open.some((d) => d.dueKey === k), `due-now key ${k} is an owing line`).toBe(true);
   }).toPass({ timeout: 90_000, intervals: [5_000, 10_000, 15_000] });
   await context.close();
 });
@@ -163,7 +209,7 @@ async function openParentPage(page: Page): Promise<void> {
 }
 
 for (const size of SIZES) {
-  test(`/parent (${size.name}): the bus months paid, October owing`, async ({ browser }) => {
+  test(`/parent (${size.name}): bus months paid, due now apart from the rest of the year`, async ({ browser }) => {
     const context = await contextAs(browser, parentSession(MY_HH), size);
     const page = await context.newPage();
     await openParentPage(page);
@@ -174,10 +220,24 @@ for (const size of SIZES) {
       await expect(line, `${MONTH_NAMES[ym]} transport paid`).toHaveAttribute("data-paid", "1");
       await expect(line).toContainText("Paid");
     }
-    const oct = page.locator('li[data-due-kind="transport"][data-due-month="2026-10"]');
-    await expect(oct).toHaveCount(1);
-    await expect(oct).toHaveAttribute("data-paid", "0");
-    await expect(oct).toContainText("₹500");
+    for (const ym of OWING) {
+      const line = page.locator(`li[data-due-kind="transport"][data-due-month="${ym}"]`);
+      await expect(line).toHaveCount(1);
+      await expect(line).toHaveAttribute("data-paid", "0");
+      await expect(line).toContainText("₹500");
+      if (dueNowToday(ym)) {
+        await expect(line, `${ym} due now`).toHaveAttribute("data-due-now", "1");
+        await expect(line.getByRole("checkbox")).toBeEnabled();
+      } else {
+        await expect(line, `${ym} rest of the year`).toHaveAttribute("data-due-now", "0");
+        await expect(page.getByTestId("parent-rest-of-year-list").locator(`li[data-due-month="${ym}"]`)).toHaveCount(1);
+        await expect(line.getByRole("checkbox")).toBeDisabled();
+      }
+    }
+    // The tiles: "Due now" is the server's due-now figure, the rest apart.
+    const view = await readView(context);
+    await expect(page.getByTestId("parent-due-now")).toHaveText(rupees(view.dueNowPaise));
+    await expect(page.getByTestId("parent-rest-of-year")).toHaveText(rupees(view.restOfYearPaise));
     await page.screenshot({ path: path.join(SHOTS, `parent-dues-${size.name}.png`), fullPage: true });
 
     // Receipts: the family's six bus receipts.
@@ -213,28 +273,42 @@ test("a failed read says so and offers Try again — never 'No household linked'
     const chip = page.locator(`button[data-student-id="${CHILD.id}"]`);
     if (await chip.count()) await chip.click();
     await expect(page.locator('li[data-due-kind="transport"][data-due-month="2026-10"]')).toContainText("₹500");
+    await expect(page.getByTestId("parent-due-now")).toBeVisible();
     await context.close();
   }
 });
 
-test("Pay sends only due keys to the server checkout and goes to the pay-link", async ({ browser }) => {
+test("Pay sends only the due-now keys to the server checkout and goes to the pay-link", async ({ browser }) => {
   const context = await contextAs(browser, parentSession(MY_HH));
+  const view = await readView(context);
+  const mine = view.children.find((c) => c.student.id === CHILD.id)!.dues.map((d) => d.dueKey);
+  const dueNowMine = view.dueNowKeys.filter((k) => mine.includes(k));
+  expect(dueNowMine.length, "this child owes something now").toBeGreaterThan(0);
   const page = await context.newPage();
   await openParentPage(page);
-  const oct = page.locator('li[data-due-kind="transport"][data-due-month="2026-10"]');
-  await oct.getByRole("checkbox").check();
-  const [req, res] = await Promise.all([
-    page.waitForRequest((r) => r.url().endsWith("/api/payments/parent-checkout") && r.method() === "POST"),
-    page.waitForResponse((r) => r.url().endsWith("/api/payments/parent-checkout")),
-    page.getByRole("button", { name: /Pay with/ }).click(),
-  ]);
-  const sent = req.postDataJSON() as Record<string, unknown>;
-  expect(Object.keys(sent).sort()).toEqual(["dueKeys", "studentId"]);
-  expect(sent.dueKeys).toEqual([expect.stringMatching(new RegExp(`^transport:${CHILD.id}:[^:]+:2026-10$`))]);
-  expect(res.status(), await res.text()).toBe(200);
-  const body = (await res.json()) as { ok: boolean; amountPaise: number; checkoutUrl: string | null; shareUrl: string };
+  await page.getByRole("button", { name: "Select all due now" }).click();
+  // The page leaves for the pay page as soon as the answer lands, so the
+  // answer is captured on its way through rather than read afterwards.
+  let sent: { dueKeys: string[]; studentId: string } | null = null;
+  let answer: { status: number; body: { ok: boolean; amountPaise: number; checkoutUrl: string | null; shareUrl: string } } | null = null;
+  await page.route("**/api/payments/parent-checkout", async (route) => {
+    sent = route.request().postDataJSON() as { dueKeys: string[]; studentId: string };
+    const r = await route.fetch();
+    answer = { status: r.status(), body: await r.json() };
+    await route.fulfill({ response: r });
+  });
+  await page.getByRole("button", { name: /Pay with/ }).click();
+  await expect.poll(() => answer?.status ?? 0, { timeout: 30_000 }).toBe(200);
+  expect(Object.keys(sent!).sort()).toEqual(["dueKeys", "studentId"]);
+  // Exactly this child's due-now lines — nothing from the rest of the year.
+  expect([...sent!.dueKeys].sort()).toEqual([...dueNowMine].sort());
+  const body = answer!.body;
   expect(body.ok).toBe(true);
-  expect(body.amountPaise).toBe(50000);
+  const owed = view.children
+    .find((c) => c.student.id === CHILD.id)!
+    .dues.filter((d) => dueNowMine.includes(d.dueKey))
+    .reduce((s, d) => s + d.balancePaise, 0);
+  expect(body.amountPaise).toBe(owed);
   expect(body.checkoutUrl || body.shareUrl).toMatch(/\/pay\//);
   await context.close();
 });

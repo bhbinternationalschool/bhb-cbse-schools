@@ -108,6 +108,17 @@ export type ParentFeesView = {
   children: { student: ParentFeesChild; dues: FeeDueLine[] }[];
   /** Non-voided receipts of this household, newest first. */
   receipts: CollectionVoucher[];
+  /**
+   * The open lines due NOW: exactly what a /pay/due link, the WhatsApp
+   * reminders and the parent app's summary ask for — everything owing up to
+   * the running month (lib/duePayCheckout.server.ts `directDues`, scope
+   * "open"). The page's "Due now" and its Pay button use these only; open
+   * lines not listed are the rest of the year, shown apart and never in the
+   * total to pay.
+   */
+  dueNowKeys: string[];
+  dueNowPaise: number;
+  restOfYearPaise: number;
 };
 
 export type ParentFeesRead =
@@ -153,6 +164,13 @@ export async function readParentFees(householdId: string): Promise<ParentFeesRea
     const sec = masters.sections.find((s) => s.id === sectionId)?.name ?? "";
     return sec ? `${cls}-${sec}` : cls || "—";
   };
+  // Not re-derived: the pay link's own definition of "due now".
+  const { directDues } = await import("@/lib/duePayCheckout.server");
+  const dueNow = directDues({ householdId: hh.id, scope: "open" });
+  const dueNowKeys = new Set(dueNow.dues.map((d) => d.dueKey));
+  const restOfYearPaise = openFeeDues(rows.flatMap((r) => r.dues))
+    .filter((d) => d.balancePaise > 0 && !dueNowKeys.has(d.dueKey))
+    .reduce((s, d) => s + d.balancePaise, 0);
   const receipts = fees.vouchers
     .filter((v) => v.householdId === hh.id && !v.voidedAt)
     .sort((a, b) => b.collectedAt.localeCompare(a.collectedAt));
@@ -174,6 +192,9 @@ export async function readParentFees(householdId: string): Promise<ParentFeesRea
         dues,
       })),
       receipts,
+      dueNowKeys: [...dueNowKeys],
+      dueNowPaise: dueNow.totalPaise,
+      restOfYearPaise,
     },
   };
 }

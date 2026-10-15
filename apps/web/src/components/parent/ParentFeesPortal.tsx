@@ -11,7 +11,11 @@ import {
   type FeeDueLine,
 } from "@/lib/fees";
 import { formatParentDueHint, parentOpenDueTotals } from "@/lib/parentPortal";
-import { ErpQueryError, ErpQueryProvider, useErpQuery } from "@/lib/data/client/hooks";
+import {
+  ErpQueryError,
+  ErpQueryProvider,
+  useErpQuery,
+} from "@/lib/data/client/hooks";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
@@ -33,6 +37,10 @@ type ParentFeesView = {
   academicYearCode: string;
   children: { student: ParentFeesChild; dues: FeeDueLine[] }[];
   receipts: CollectionVoucher[];
+  /** Owing up to the running month — the pay link's / app's "due now". */
+  dueNowKeys: string[];
+  dueNowPaise: number;
+  restOfYearPaise: number;
 };
 
 export const PARENT_FEES_PATH = "/api/payments/parent-dues";
@@ -45,6 +53,9 @@ function parseParentFees(data: unknown): ParentFeesView {
     typeof v.householdId !== "string" ||
     !Array.isArray(v.children) ||
     !Array.isArray(v.receipts) ||
+    !Array.isArray(v.dueNowKeys) ||
+    typeof v.dueNowPaise !== "number" ||
+    typeof v.restOfYearPaise !== "number" ||
     v.children.some((c) => !c?.student?.id || !Array.isArray(c.dues))
   ) {
     throw new ErpQueryError(502, "The fee page came back incomplete");
@@ -107,9 +118,19 @@ function ParentFeesPage({
     [bundle, activeStudentId],
   );
 
+  // "Due now" is the server's list (the pay link's definition); an open line
+  // not on it is the rest of the year: shown apart, never selectable, never
+  // in the amount to pay.
+  const dueNowSet = useMemo(() => new Set(view?.dueNowKeys ?? []), [view]);
+  const isRest = (d: FeeDueLine) =>
+    d.balancePaise > 0 && !dueNowSet.has(d.dueKey);
+
   const allOpen = useMemo(
-    () => bundle.flatMap((r) => openFeeDues(r.dues)),
-    [bundle],
+    () =>
+      bundle
+        .flatMap((r) => openFeeDues(r.dues))
+        .filter((d) => d.balancePaise > 0 && dueNowSet.has(d.dueKey)),
+    [bundle, dueNowSet],
   );
 
   const householdTotals = useMemo(
@@ -119,8 +140,21 @@ function ParentFeesPage({
 
   const monthGroups = useMemo(() => {
     if (!activeRow) return [];
-    return groupDuesByMonth(activeRow.dues);
-  }, [activeRow]);
+    return groupDuesByMonth(
+      activeRow.dues.filter(
+        (d) => !(d.balancePaise > 0 && !dueNowSet.has(d.dueKey)),
+      ),
+    );
+  }, [activeRow, dueNowSet]);
+
+  const restGroups = useMemo(() => {
+    if (!activeRow) return [];
+    return groupDuesByMonth(
+      activeRow.dues.filter(
+        (d) => d.balancePaise > 0 && !dueNowSet.has(d.dueKey),
+      ),
+    );
+  }, [activeRow, dueNowSet]);
 
   const selectedTotal = useMemo(() => {
     let t = 0;
@@ -131,7 +165,7 @@ function ParentFeesPage({
   }, [allOpen, selected]);
 
   function toggleDue(d: FeeDueLine) {
-    if (d.balancePaise <= 0) return;
+    if (d.balancePaise <= 0 || !dueNowSet.has(d.dueKey)) return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(d.dueKey)) next.delete(d.dueKey);
@@ -145,7 +179,9 @@ function ParentFeesPage({
     if (!row) return;
     setSelected((prev) => {
       const next = new Set(prev);
-      for (const d of openFeeDues(row.dues)) next.add(d.dueKey);
+      for (const d of openFeeDues(row.dues)) {
+        if (d.balancePaise > 0 && dueNowSet.has(d.dueKey)) next.add(d.dueKey);
+      }
       return next;
     });
   }
@@ -193,6 +229,89 @@ function ParentFeesPage({
     } finally {
       setPaying(false);
     }
+  }
+
+  function renderGroups(groups: ReturnType<typeof groupDuesByMonth>) {
+    return (
+      <>
+        {groups.map((g) => (
+          <section
+            key={g.monthKey}
+            className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.1)] bg-white"
+          >
+            <div className="flex items-center justify-between border-b border-[rgba(32,48,80,0.08)] bg-[rgba(32,48,80,0.04)] px-3 py-2">
+              <span className="text-xs font-bold text-[var(--brand-deep)]">
+                {g.monthLabel}
+              </span>
+              <span className="text-[11px] font-semibold tabular-nums text-[var(--muted)]">
+                {formatInr(g.totalPaise)} open
+              </span>
+            </div>
+            <ul className="divide-y divide-[rgba(32,48,80,0.06)]">
+              {g.dues.map((d) => {
+                const paid = d.balancePaise <= 0 && d.paidPaise > 0;
+                const later = isRest(d);
+                const checked = selected.has(d.dueKey);
+                return (
+                  <li
+                    key={d.dueKey}
+                    data-due-kind={d.kind}
+                    data-due-month={g.monthKey}
+                    data-paid={paid ? "1" : "0"}
+                    data-due-now={!paid && !later ? "1" : "0"}
+                  >
+                    <label
+                      className={`flex cursor-pointer items-start gap-2.5 px-3 py-2.5 ${
+                        paid ? "bg-[rgba(15,122,76,0.05)]" : ""
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        disabled={paid || later}
+                        checked={checked && !paid && !later}
+                        onChange={() => toggleDue(d)}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-[var(--brand-deep)]">
+                          {d.feeHeadName || d.label}
+                          {paid ? (
+                            <span className="ml-1.5 text-[10px] font-semibold uppercase text-[var(--success)]">
+                              Paid
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+                          {formatParentDueHint(d)}
+                        </div>
+                        {d.concessionDetails?.length ? (
+                          <ul className="mt-1 space-y-0.5 text-[10px] text-[var(--success)]">
+                            {d.concessionDetails.map((c) => (
+                              <li key={`${d.dueKey}-${c.grantId}`}>
+                                Discount · {formatConcessionDetailLine(c)}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                      <div
+                        className={`shrink-0 text-sm font-bold tabular-nums ${
+                          paid
+                            ? "text-[var(--success)]"
+                            : "text-[var(--brand-deep)]"
+                        }`}
+                      >
+                        {formatInr(paid ? 0 : d.balancePaise)}
+                      </div>
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
+      </>
+    );
   }
 
   if (query.isPending) {
@@ -276,10 +395,24 @@ function ParentFeesPage({
         <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl border border-[rgba(32,48,80,0.1)] bg-white px-3 py-2.5 text-center">
           <div>
             <div className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
-              Billed
+              Due now
             </div>
-            <div className="text-sm font-bold tabular-nums text-[var(--brand-deep)]">
-              {formatInr(householdTotals.billedPaise)}
+            <div
+              className="text-sm font-extrabold tabular-nums text-[var(--brand-deep)]"
+              data-testid="parent-due-now"
+            >
+              {formatInr(view.dueNowPaise)}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
+              Rest of the year
+            </div>
+            <div
+              className="text-sm font-bold tabular-nums text-[var(--muted)]"
+              data-testid="parent-rest-of-year"
+            >
+              {formatInr(view.restOfYearPaise)}
             </div>
           </div>
           <div>
@@ -290,14 +423,6 @@ function ParentFeesPage({
               {householdTotals.concessionPaise > 0
                 ? `−${formatInr(householdTotals.concessionPaise)}`
                 : "—"}
-            </div>
-          </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
-              To pay
-            </div>
-            <div className="text-sm font-extrabold tabular-nums text-[var(--brand-deep)]">
-              {formatInr(householdTotals.balancePaise)}
             </div>
           </div>
         </div>
@@ -327,7 +452,11 @@ function ParentFeesPage({
               <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
                 {bundle.map((row) => {
                   const on = row.student.id === activeRow?.student.id;
-                  const due = parentOpenDueTotals(row.dues).balancePaise;
+                  const due = parentOpenDueTotals(
+                    row.dues.filter(
+                      (d) => d.balancePaise > 0 && dueNowSet.has(d.dueKey),
+                    ),
+                  ).balancePaise;
                   return (
                     <button
                       key={row.student.id}
@@ -421,7 +550,7 @@ function ParentFeesPage({
                     className="text-[11px] font-semibold text-[var(--brand-mid)]"
                     onClick={() => selectOpenForStudent(activeRow.student.id)}
                   >
-                    Select all open
+                    Select all due now
                   </button>
                 </div>
               </section>
@@ -432,84 +561,22 @@ function ParentFeesPage({
                 No fee lines for this student yet.
               </p>
             ) : (
-              <div className="space-y-3">
-                {monthGroups.map((g) => (
-                  <section
-                    key={g.monthKey}
-                    className="overflow-hidden rounded-xl border border-[rgba(32,48,80,0.1)] bg-white"
-                  >
-                    <div className="flex items-center justify-between border-b border-[rgba(32,48,80,0.08)] bg-[rgba(32,48,80,0.04)] px-3 py-2">
-                      <span className="text-xs font-bold text-[var(--brand-deep)]">
-                        {g.monthLabel}
-                      </span>
-                      <span className="text-[11px] font-semibold tabular-nums text-[var(--muted)]">
-                        {formatInr(g.totalPaise)} open
-                      </span>
-                    </div>
-                    <ul className="divide-y divide-[rgba(32,48,80,0.06)]">
-                      {g.dues.map((d) => {
-                        const paid = d.balancePaise <= 0 && d.paidPaise > 0;
-                        const checked = selected.has(d.dueKey);
-                        return (
-                          <li
-                            key={d.dueKey}
-                            data-due-kind={d.kind}
-                            data-due-month={g.monthKey}
-                            data-paid={paid ? "1" : "0"}
-                          >
-                            <label
-                              className={`flex cursor-pointer items-start gap-2.5 px-3 py-2.5 ${
-                                paid ? "bg-[rgba(15,122,76,0.05)]" : ""
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                className="mt-1"
-                                disabled={paid}
-                                checked={checked && !paid}
-                                onChange={() => toggleDue(d)}
-                              />
-                              <div className="min-w-0 flex-1">
-                                <div className="text-sm font-medium text-[var(--brand-deep)]">
-                                  {d.feeHeadName || d.label}
-                                  {paid ? (
-                                    <span className="ml-1.5 text-[10px] font-semibold uppercase text-[var(--success)]">
-                                      Paid
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div className="mt-0.5 text-[10px] text-[var(--muted)]">
-                                  {formatParentDueHint(d)}
-                                </div>
-                                {d.concessionDetails?.length ? (
-                                  <ul className="mt-1 space-y-0.5 text-[10px] text-[var(--success)]">
-                                    {d.concessionDetails.map((c) => (
-                                      <li key={`${d.dueKey}-${c.grantId}`}>
-                                        Discount ·{" "}
-                                        {formatConcessionDetailLine(c)}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                ) : null}
-                              </div>
-                              <div
-                                className={`shrink-0 text-sm font-bold tabular-nums ${
-                                  paid
-                                    ? "text-[var(--success)]"
-                                    : "text-[var(--brand-deep)]"
-                                }`}
-                              >
-                                {formatInr(paid ? 0 : d.balancePaise)}
-                              </div>
-                            </label>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </section>
-                ))}
-              </div>
+              <div className="space-y-3">{renderGroups(monthGroups)}</div>
             )}
+
+            {restGroups.length > 0 ? (
+              <section className="mt-6" data-testid="parent-rest-of-year-list">
+                <h3 className="text-sm font-bold text-[var(--brand-deep)]">
+                  Rest of the year
+                </h3>
+                <p className="mb-2 text-[11px] text-[var(--muted)]">
+                  Not due yet — not part of the amount to pay now.
+                </p>
+                <div className="space-y-3 opacity-80">
+                  {renderGroups(restGroups)}
+                </div>
+              </section>
+            ) : null}
           </>
         ) : (
           <div className="space-y-2">
