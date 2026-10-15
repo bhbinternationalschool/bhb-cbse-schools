@@ -43,14 +43,16 @@ export const STAFF_REQUESTS_WRITE_PATH = "/api/staff/requests";
 /** The erp_versions key whose move means "requests may have changed". */
 export const STAFF_REQUESTS_DESK = "staff_hr";
 
-/** One stored element as a request with its revision; null for anything that is not one. */
+/** A stored element (or a view row) as a request with its revision; null for anything that is not one. */
 export function staffRequestFromElement(raw: unknown): StaffRequestRow | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
   if (typeof o.id !== "string" || !o.id) return null;
   const t = normalizeStaffRequestTicket(o as Partial<StaffRequestTicket>);
   if (!t) return null;
-  const rev = typeof o._rev === "number" && o._rev > 0 ? Math.floor(o._rev) : 0;
+  // `_rev` on a stored element (the RPC owns it); `rev` once the view sent it.
+  const r = typeof o._rev === "number" ? o._rev : o.rev;
+  const rev = typeof r === "number" && r > 0 ? Math.floor(r) : 0;
   return { ...t, id: o.id, rev };
 }
 

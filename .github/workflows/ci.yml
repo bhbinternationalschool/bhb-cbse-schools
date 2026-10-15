@@ -683,6 +683,7 @@ jobs:
           npm run test:query-kernel
           npm run test:reference-views
           npm run test:masters-bridge
+          npm run test:staff-requests
 
   build:
     name: Production build
