@@ -113,8 +113,10 @@ export function StaffBroadcastButton() {
   // Masters from the server (useScreenMasters — the versions poll keeps it
   // fresh), not a copy read once when the panel opens: opened before the
   // roster had landed, that copy had no staff, so the self-service tabs
-  // stayed hidden until the panel was closed and reopened.
-  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
+  // stayed hidden until the panel was closed and reopened. Read only while
+  // open: this button is in the header of every page, and a closed panel
+  // must not start the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters({ enabled: open });
   const [audience, setAudience] = useState<Audience>("class_parents");
   const [mode, setMode] = useState<Mode>("message");
   const [sectionId, setSectionId] = useState("");

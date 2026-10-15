@@ -195,12 +195,17 @@ export function useErpMutation<T>(collection: string, opts: ErpMutationOptions<T
 
 // ── The versions poll ──────────────────────────────────────────────────────
 
-/** A mounted query that reads a desk: the poll has something to keep fresh. */
+/**
+ * A mounted, enabled query that reads a desk: the poll has something to keep
+ * fresh. A disabled one (`enabled: false` — e.g. the header WhatsApp panel
+ * while it is closed) reads nothing, so it is no reason to poll
+ * (Query.isActive is React Query's own "has an enabled observer").
+ */
 function hasDeskObservers(client: QueryClient): boolean {
   return client
     .getQueryCache()
     .getAll()
-    .some((q) => q.getObserversCount() > 0 && desksOf(q.meta).length > 0);
+    .some((q) => q.isActive() && desksOf(q.meta).length > 0);
 }
 
 /** What the poll remembers between answers: the last versions, and whether it was told to stop. */
@@ -294,7 +299,14 @@ function VersionsPoller() {
     };
     update();
     const unsubscribe = client.getQueryCache().subscribe((e) => {
-      if (e.type === "observerAdded" || e.type === "observerRemoved" || e.type === "added" || e.type === "removed") {
+      if (
+        e.type === "observerAdded" ||
+        e.type === "observerRemoved" ||
+        // `enabled` flipping is an options update, not an observer change.
+        e.type === "observerOptionsUpdated" ||
+        e.type === "added" ||
+        e.type === "removed"
+      ) {
         // Not inside React Query's own notification: after it.
         queueMicrotask(update);
       }
@@ -332,11 +344,16 @@ function pageMemoryBridgeDeps(): MastersBridgeDeps | null {
   return { load: () => readMastersPageCopyRaw() ?? emptyMastersShell(), write: writeMastersLocalRaw };
 }
 
-/** Masters (full, or the teaching subset — `scope` says which). Read-only. */
-export function useMasters(): UseQueryResult<MastersView, Error> {
+/**
+ * Masters (full, or the teaching subset — `scope` says which). Read-only.
+ * `enabled: false` reads nothing and keeps the versions poll off (a header
+ * control that is mounted on every page but only reads while open).
+ */
+export function useMasters(opts: { enabled?: boolean } = {}): UseQueryResult<MastersView, Error> {
   return useErpQuery<MastersView>("masters", "/api/data/views/masters", {
     desk: ["masters"],
     parse: (d) => acceptMastersAnswer(d),
+    enabled: opts.enabled,
   });
 }
 

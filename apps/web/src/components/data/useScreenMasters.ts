@@ -26,8 +26,8 @@ export type ScreenMasters = {
  * a Masters change made anywhere reaches the open screen through the versions
  * poll (≤ 20 s + one read).
  */
-export function useScreenMasters(): ScreenMasters {
-  const q = useMasters();
+export function useScreenMasters(opts: { enabled?: boolean } = {}): ScreenMasters {
+  const q = useMasters(opts);
   const access = useAccessData();
   const accessMasters = access.ready ? access.masters : null;
   // useAccessData re-reads its copy on every desk event, so its identity
