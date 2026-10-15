@@ -88,7 +88,8 @@ function PairingCode({ pairing, onClose }: { pairing: { name: string; code: stri
   const left = Math.max(0, Date.parse(pairing.expiresAt) - now);
   const expired = left <= 0;
   const text = `Your BHB survey phone code is ${pairing.code}. Open the staff app → Field survey → type this code. It works once, until ${hhmm(pairing.expiresAt)}.`;
-  const wa = `https://wa.me/${pairing.mobile ? `91${pairing.mobile}` : ""}?text=${encodeURIComponent(text)}`;
+  // The share sheet (no number): the office picks the chat — never a send from a personal number.
+  const wa = `https://wa.me/?text=${encodeURIComponent(text)}`;
   return (
     <div data-testid="survey-pairing-code" className="mb-3 rounded-xl border border-[rgba(197,160,40,0.5)] bg-[rgba(197,160,40,0.1)] p-3 text-[12px]">
       <p>
@@ -119,7 +120,7 @@ function PairingCode({ pairing, onClose }: { pairing: { name: string; code: stri
           target="_blank"
           rel="noreferrer"
         >
-          Send on WhatsApp
+          Share on WhatsApp
         </a>
         <button type="button" className="px-2 py-1.5 underline" onClick={onClose}>
           Close
