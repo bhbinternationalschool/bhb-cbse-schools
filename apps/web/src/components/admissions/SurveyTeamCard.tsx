@@ -30,7 +30,7 @@ import {
 } from "@/lib/surveyTeamShared";
 
 const inp =
-  "w-full rounded-lg border border-[var(--line,rgba(32,48,80,0.15))] bg-[var(--surface,#fff)] px-3 py-2 text-sm text-[var(--ink,inherit)]";
+  "w-full rounded-lg border border-[rgba(32,48,80,0.15)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--ink)]";
 const btn = "rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-[12px] font-semibold text-white disabled:opacity-50";
 
 /** The team view, shared by every card that reads it (one request, one cache entry). */
@@ -64,7 +64,7 @@ function Notice({ notice }: { notice: { kind: "ok" | "error"; text: string } | n
       data-testid="survey-team-notice"
       role={notice.kind === "error" ? "alert" : "status"}
       className={`mb-3 rounded-lg px-3 py-2 text-[12px] font-semibold ${
-        notice.kind === "ok" ? "bg-[rgba(22,101,52,0.12)] text-[var(--tone-green-ink,#166534)]" : "bg-[rgba(185,28,28,0.12)] text-[var(--danger,#b91c1c)]"
+        notice.kind === "ok" ? "bg-[rgba(22,101,52,0.12)] text-[var(--tone-green)]" : "bg-[rgba(185,28,28,0.12)] text-[var(--danger)]"
       }`}
     >
       {notice.text}
@@ -284,11 +284,11 @@ export function SurveyTeamCard() {
                       </div>
                     </td>
                     <td className="px-2 py-2 text-[11px]">{m.role === "leader" ? <b>Team leader</b> : "Surveyor"}</td>
-                    <td className="px-2 py-2 text-[11px]">{m.assigned ? <span className="font-semibold text-[var(--tone-green-ink,#166534)]">Can start</span> : <span className="text-[var(--muted)]">Paused</span>}</td>
+                    <td className="px-2 py-2 text-[11px]">{m.assigned ? <span className="font-semibold text-[var(--tone-green)]">Can start</span> : <span className="text-[var(--muted)]">Paused</span>}</td>
                     <td className="px-2 py-2 text-[11px]">{m.startMode === "school" ? "At school (gate code)" : "In the field (GPS)"}</td>
                     <td className="px-2 py-2 text-[11px]">{m.beatIds.length ? m.beatIds.map(beatName).join(", ") : "Any beat"}</td>
                     <td className="px-2 py-2 text-[11px]">
-                      {phone ? <span>{phone}</span> : <span className="text-[var(--danger,#b91c1c)]">Not registered</span>}
+                      {phone ? <span>{phone}</span> : <span className="text-[var(--danger)]">Not registered</span>}
                       {canEdit ? (
                         <button type="button" className="ml-2 underline" onClick={() => void pair(m)}>
                           {phone ? "New phone code" : "Get phone code"}
@@ -447,7 +447,7 @@ export function SurveyBeatsCard({ progress }: { progress?: (beatId: string) => {
               <div key={b.id} className="flex items-center gap-1" data-testid={`survey-beat-${b.id}`}>
                 <span
                   className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                    b.isActive ? "bg-[rgba(180,83,9,0.12)] text-[var(--tone-brick-ink,#9a3412)]" : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)] line-through"
+                    b.isActive ? "bg-[rgba(180,83,9,0.12)] text-[var(--tone-coral)]" : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)] line-through"
                   }`}
                   title={b.area || ""}
                 >
