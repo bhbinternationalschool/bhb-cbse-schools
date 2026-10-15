@@ -16,7 +16,8 @@ import {
   type JuneSalaryHold,
   type SalaryHoldSettings,
 } from "@/lib/salaryHold";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { formatInr, loadPayroll } from "@/lib/payroll";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import {
@@ -30,7 +31,7 @@ import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
 export function JuneHoldPanel() {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [holds, setHolds] = useState<JuneSalaryHold[]>([]);
   const [settlements, setSettlements] = useState<ExitSettlement[]>([]);
   const [settings, setSettings] = useState<SalaryHoldSettings>(
@@ -51,7 +52,6 @@ export function JuneHoldPanel() {
   });
 
   useEffect(() => {
-    setMasters(loadMasters());
     const h = loadSalaryHold();
     setHolds(h.holds);
     setSettlements(h.settlements);
@@ -148,6 +148,14 @@ export function JuneHoldPanel() {
     "month",
     "desc",
   );
+
+  // A failed Masters read is a failure on screen (R6) — never an empty staff picker.
+  if (mastersError) {
+    return <QueryError what="the staff roster" error={mastersError} retry={retryMasters} />;
+  }
+  if (!masters) {
+    return <p className="text-sm text-[var(--muted)]">Loading June hold…</p>;
+  }
 
   return (
     <div className="space-y-4">

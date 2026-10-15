@@ -980,6 +980,51 @@ get the server's raw book instead of `loadMasters()`'s normalised read (agreemen
 `AGR-nnnn` fallback numbering, exactly as the page copy gave them before); not audited field by field. The header
 WhatsApp panel's class list now appears after one view read instead of synchronously.
 
+*(2.1e built 15 Oct 2026, PR #663.)* **What exists.** The 10 `components/payroll` files that called
+`loadMasters()` (`PayrollWorkspace`, `ApprovalsInboxPanel`, `JuneHoldPanel`, `IncrementPanel`, `AdvancesPanel`,
+`PrintPayslipsPanel`, `BankFileExportPanel`, `StaffSelfService`, `StatutoryRemitPanel`, `PayrollReportsPanel`) read
+`useScreenMasters()`; the mount-time reads, the `[tick]` re-reads, `IncrementPanel`'s `masters || loadMasters()`
+fallbacks and `PayrollWorkspace`'s `bhb-masters-updated` listener are gone (none called `ensureMastersHydrated`).
+**Payroll's staff side is the full record.** `useScreenMasters`' staff side is `useAccessData()`'s copy, which is
+the page copy `loadMasters()` returned before (normalised roster included) — salary links, bank, PF/ESI fields are
+all there, so no payroll read had to stay on `loadMasters()` for 2.2. The only non-staff keys these screens and
+the lib functions they call read are `statutoryConfig` (run build/rebuild/setup preview, increments, statutory
+penalties), `designations` and `schoolProfile` (letterheads) — now the server's answer. **No payroll save path
+sends a Masters book:** runs, advances, increments, holds, remittances and salary setup write their own desks;
+none of the 10 files or `lib/{payroll,staffAdvance,salaryIncrement,statutoryRemit,payrollReportCatalog}` calls
+`saveMasters`. A failed Masters read that never answered = `<QueryError>` (the workspace inside its shell; panels in
+place); while loading, a "Loading …" line instead of a screen computed from nothing. **Behaviour changes.**
+(1) `PayrollWorkspace`'s tab-access effect no longer decides while Masters is unknown: on main it ran on the first
+render with `allowed = false` and moved an office user off a `?tab=` deep link (the probe run: `/payroll?tab=runs`
+on main never showed Runs) — now a deep link holds. (2) The payroll dashboard is given `refreshKey={tick}`: the host
+never loads payroll itself and used to redraw only on a later `bhb-masters-updated`; once the workspace waits for
+Masters that event can come first and the dashboard said "No records yet" with 5 runs on file (caught by the new
+spec on this branch's first cut, fixed here). (3) Each screen shows "Loading …" until the masters view and the access
+copy have both answered (one extra 37 KB request per payroll page until 2.3b). **Proof.** New
+`e2e/specs/payroll.spec.ts` (project `payroll-writes`, runs last): seeds through the app's write paths a salary setup
+(six links: every statutory cover, a basic override, an additional amount, a gross-up) and a NON-default statutory
+setup (EPF 10 %, no wage ceiling, ESIC ceiling ₹25,000), puts both back afterwards; opens all 13 office tabs by
+clicking, each run's detail with "Review salary setup" open (5 runs, Aug–Oct, month groups intact), desktop-light and
+375-dark screenshots, the teacher's two self-service tabs; attaches every tab's text. Asserts: no "Could not load",
+the dashboard shows the October run's ₹39,500, and E2E-001's rebuilt line reads `₹22,750 / ₹2,113 / ₹20,637 /
+₹2,288` (ESIC ₹113 exists only under the school's ₹25,000 ceiling — a default or withheld statutory setup gives no
+ESIC on ₹22,750). **Same numbers before/after:** the same spec on origin/main (probe PR #666, closed) vs this
+branch, every tab's text diffed: identical on run detail ×5 (all setup-review rupees), bank file, increment
+(individual preview for E2E-003), advances, approvals, statutory, print, payslips, reports, runs, My payslip/advances —
+the only difference is the propagation spec's random rename suffix on E2E-020 (the dashboard, before its fix,
+read 0 runs — fixed and then identical too). CI scoreboard, same spec: origin/main + spec 100 pass · 17 expected-fail ·
+1 fixme · 0 fail; this branch the same, test for test. Bank-file rows and advance amounts were not exercised with
+data (the fixture has no posted run and no advance) — those screens are identical but trivially so.
+Ratchets: `load_masters_screen_files` 72 → **62**, `load_masters_calls_src` 436 → **424** (12 calls);
+`ensure_hydrated_component_files` unchanged (the workspace still hydrates the payroll desks).
+**Not done / not proven.** A payroll holder WITHOUT the Masters view gets the teaching answer, whose `statutoryConfig`
+is the empty shell's (defaults) — runs, increments and penalties would then be computed from default rates, exactly
+as the page copy gave them on main (same subset); production's statutory setup equals the defaults today (read-only
+check 15 Oct), so no rupee differs now, but a school-specific rate would. Should become a refusal ("statutory setup
+not shown to your role") in 2.2/2.3 — not changed here. Lib helpers now get the server's raw book instead of
+`loadMasters()`'s normalised read; only the keys above were audited. Process / Rebuild / Apply setup were not clicked
+in the spec (they write runs); they call the same builders with the same `masters` the setup review uses.
+
 **2.2 Masters and staff editing write rows.** `MastersWorkspace` and its panels write through
 `useErpMutation` → `desk_slice_row_write` / `desk_slice_object_write` (one subject, one
 class-subject link, one section, one fee head at a time). The 14 non-Masters `saveMasters`

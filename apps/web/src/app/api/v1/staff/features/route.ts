@@ -2,6 +2,7 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { resolveMobileAccess } from "@/lib/api/v1/mobileAccess.server";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
+import { isGalleryLeader } from "@/lib/classGallery.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { MOBILE_FEATURES } from "@/lib/mobileFeatures";
 
@@ -57,8 +58,14 @@ export async function GET(request: Request) {
       features.push("subject_requests");
     }
     // Class gallery (10 Oct 2026): a class teacher posts their class's photos
-    // and videos; only that class's families see them.
-    if (scope.classTeacherOf.size > 0 && !features.includes("class_gallery")) {
+    // and videos; only that class's families see them. The principal and the
+    // office (school-wide, with the Gallery grant) post to the whole school
+    // or any class and decide on held items (15 Oct 2026) — they had no way
+    // in on the phone.
+    if (
+      (scope.classTeacherOf.size > 0 || (await isGalleryLeader(ctx))) &&
+      !features.includes("class_gallery")
+    ) {
       features.push("class_gallery");
     }
     if (AI_TOOL_BASES.some((f) => features.includes(f)) && !features.includes("teacher_ai_tools")) {
