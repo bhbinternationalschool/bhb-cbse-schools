@@ -13,6 +13,7 @@
     "test:concession-ground": "npx tsx src/lib/concessionGround.selftest.ts",
     "test:fee-backdate": "npx tsx src/lib/feeBackdate.selftest.ts",
     "test:month-groups": "npx tsx src/lib/monthGroups.selftest.ts",
+    "test:month-range": "npx tsx src/lib/monthRange.selftest.ts",
     "test:receipt-auto-wa": "npx tsx src/lib/feeReceiptAutoWa.selftest.ts",
     "test:review-login": "npx tsx src/lib/reviewLogin.selftest.ts",
     "test:cash-pool-orphans": "npx tsx src/lib/cashPoolOrphans.selftest.ts",
