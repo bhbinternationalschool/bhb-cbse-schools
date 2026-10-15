@@ -1023,7 +1023,7 @@ dues, receipt, day book), fee setup panels, defaulters, cheques/PDC, instalments
 task. Extra acceptance: "a counter receipt row-written, then an online payment webhook replayed
 from a stale copy — the counter receipt, its cheque and the day-close survive."
 
-*(5.1a built 15 Oct 2026, PR #TBD — inventory only, no behaviour change.)* **What exists.**
+*(5.1a built 15 Oct 2026, PR #655 — inventory only, no behaviour change.)* **What exists.**
 [`evidence/fees-inventory.md`](./evidence/fees-inventory.md): the 13 `fee_desk_*` tables with
 production row counts and triggers; 18 server write paths (W1–W18) with file:line, trigger, scope,
 tables and whether each can overwrite a newer row; ~25 server readers; the browser write sites
