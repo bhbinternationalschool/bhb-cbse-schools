@@ -5,6 +5,7 @@ import "../../core/popups/app_popups.dart";
 import "../../core/ui/running_strip.dart";
 import "../../core/guide/screen_guides.dart";
 import "../../core/api/api_client.dart";
+import "../../core/ui/stale_banner.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/chat_inbox_screen.dart";
 import "../modules/homework_screen.dart";
@@ -331,6 +332,13 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   final int _tab = 0;
   StaffSummary? _summary;
   String? _error;
+
+  /// Set when the server could not be reached and the home is showing the
+  /// copy saved at this time (data-layer 4.4) — the banner says so.
+  DateTime? _staleSince;
+  final _clock = RefreshClock();
+  bool _featuresFresh = false;
+  late final _resume = ResumeWatcher(_onResume);
   String? _pendingRoute;
   int _refresh = 0;
   StaffFeatureSet _features = const StaffFeatureSet.empty();
@@ -343,7 +351,26 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       if (mounted) AppPopups.maybeShow(context, widget.api);
     });
     _pendingRoute = widget.openRoute;
-    _load();
+    _resume.attach();
+    _load(first: true);
+  }
+
+  @override
+  void dispose() {
+    _resume.detach();
+    super.dispose();
+  }
+
+  /// Back in front after 2 minutes or more: re-read the summary and tiles,
+  /// so a Masters change (classes, features) shows without a restart.
+  void _onResume() {
+    if (mounted && _clock.isStale) _load();
+  }
+
+  /// Pull-to-refresh also re-reads the waiting counts.
+  Future<void> _pullRefresh() async {
+    setState(() => _refresh += 1);
+    await _load();
   }
 
   @override
@@ -417,39 +444,72 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   }
 
   Future<void> _pushScreen(Widget screen) async {
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
-    if (mounted) setState(() => _refresh += 1);
+    final changed = await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => screen));
+    // The waiting counts are re-read only when that screen decided something.
+    if (mounted && changed == true) setState(() => _refresh += 1);
   }
 
-  Future<void> _load() async {
+  /// [first]: the app just opened this home — paint the saved copy at once.
+  Future<void> _load({bool first = false}) async {
     setState(() => _error = null);
-    try {
-      final summary = await widget.api.fetchStaffSummary();
-      if (mounted) {
+    var ok = false;
+    if (first) {
+      // Last session's tiles with last session's summary — never over a
+      // fresh answer.
+      widget.api.cachedStaffFeatures().then((c) {
+        if (c != null && mounted && !_featuresFresh) {
+          setState(() => _features = c.value);
+        }
+      });
+    }
+    await loadCachedThenFresh<StaffSummary>(
+      peek: first ? widget.api.cachedStaffSummary : () async => null,
+      fetch: widget.api.fetchStaffSummary,
+      onCached: (c) {
+        if (mounted) setState(() => _summary = c.value);
+      },
+      onFresh: (summary) {
+        ok = true;
+        _clock.markFresh();
+        if (mounted) {
+          setState(() {
+            _summary = summary;
+            _staleSince = null;
+          });
+        }
+      },
+      onError: (e, since) {
+        if (!mounted) return;
         setState(() {
-          _summary = summary;
-          _refresh += 1;
+          if (_summary != null) {
+            // Keep what is on screen and say how old it is.
+            _staleSince = since ?? _clock.lastFresh ?? DateTime.now();
+          } else {
+            _error = e is ApiException
+                ? e.message
+                : "Could not reach the school server.";
+          }
         });
-      }
-      // Tiles come from the ERP, so switching a feature off there removes it
-      // from the phone on the next open.
+      },
+    );
+    if (_summary == null) return;
+    // Tiles come from the ERP, so switching a feature off there removes it
+    // from the phone on the next open (or resume after 2 minutes).
+    if (ok) {
       try {
         final f = await widget.api.fetchStaffFeatures();
+        _featuresFresh = true;
         if (mounted) setState(() => _features = f);
       } catch (_) {
         /* keep whatever we had */
       }
-      if (_pendingRoute != null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _consumePendingRoute();
-        });
-      }
-    } on ApiException catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    } catch (_) {
-      if (mounted) {
-        setState(() => _error = "Could not reach the school server.");
-      }
+    }
+    if (_pendingRoute != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _consumePendingRoute();
+      });
     }
   }
 
@@ -694,7 +754,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
     return Scaffold(
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: _pullRefresh,
         color: AppColors.primary,
         child: ListView(
           padding: EdgeInsets.zero,
@@ -763,6 +823,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 ],
               ),
             ),
+            StaleBanner(since: _staleSince, onRetry: _load, bottomGap: 28),
             // Notices and news scrolling across, as on the web ERP.
             RunningStrip(
               api: widget.api,

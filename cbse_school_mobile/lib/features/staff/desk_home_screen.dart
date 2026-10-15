@@ -4,6 +4,7 @@ import "../../core/popups/app_popups.dart";
 import "../../core/ui/running_strip.dart";
 import "../../core/guide/screen_guides.dart";
 import "../../core/api/api_client.dart";
+import "../../core/ui/stale_banner.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/chat_inbox_screen.dart";
 import "../modules/notice_detail_screen.dart";
@@ -92,6 +93,13 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
   String _kind = "support";
   int _refresh = 0;
   StaffFeatureSet _features = const StaffFeatureSet.empty();
+
+  /// data-layer 4.4: set when the server could not be reached and the home
+  /// shows the copy saved at this time; the banner says so.
+  DateTime? _staleSince;
+  final _clock = RefreshClock();
+  late final _resume = ResumeWatcher(_onResume);
+  bool _featuresFresh = false;
 
   static final _common = <_Tile>[
     _Tile(
@@ -319,35 +327,84 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) AppPopups.maybeShow(context, widget.api);
     });
-    _load();
+    _resume.attach();
+    _load(first: true);
   }
 
-  Future<void> _load() async {
+  @override
+  void dispose() {
+    _resume.detach();
+    super.dispose();
+  }
+
+  /// Back in front after 2 minutes or more: re-read the summary and tiles,
+  /// so a Masters change shows without a restart.
+  void _onResume() {
+    if (mounted && _clock.isStale) _load();
+  }
+
+  /// Pull-to-refresh also re-reads the waiting counts.
+  Future<void> _pullRefresh() async {
+    setState(() => _refresh += 1);
+    await _load();
+  }
+
+  void _showSummary(StaffSummary s, String? kind) {
+    setState(() {
+      _name = s.fullName;
+      _photoUrl = s.photoUrl;
+      _kind = s.homeKind.isEmpty ? (kind ?? "support") : s.homeKind;
+    });
+  }
+
+  /// [first]: the app just opened this home — paint the saved copy at once.
+  Future<void> _load({bool first = false}) async {
     final name = await widget.api.guardianName();
     final kind = await widget.api.homeKind();
-    try {
-      final s = await widget.api.fetchStaffSummary();
-      if (mounted) {
-        setState(() {
-          _name = s.fullName;
-          _photoUrl = s.photoUrl;
-          _kind = s.homeKind.isEmpty ? (kind ?? "support") : s.homeKind;
-          _refresh += 1;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _name = name ?? "";
-          _kind = kind ?? "support";
-        });
-      }
+    if (first) {
+      widget.api.cachedStaffFeatures().then((c) {
+        if (c != null && mounted && !_featuresFresh) {
+          setState(() => _features = c.value);
+        }
+      });
     }
-    try {
-      final f = await widget.api.fetchStaffFeatures();
-      if (mounted) setState(() => _features = f);
-    } catch (_) {
-      /* keep whatever we had */
+    var ok = false;
+    var painted = false;
+    await loadCachedThenFresh<StaffSummary>(
+      peek: first ? widget.api.cachedStaffSummary : () async => null,
+      fetch: widget.api.fetchStaffSummary,
+      onCached: (c) {
+        painted = true;
+        if (mounted) _showSummary(c.value, kind);
+      },
+      onFresh: (s) {
+        ok = true;
+        _clock.markFresh();
+        if (mounted) {
+          _showSummary(s, kind);
+          setState(() => _staleSince = null);
+        }
+      },
+      onError: (_, since) {
+        if (!mounted) return;
+        setState(() {
+          if (painted || _clock.lastFresh != null) {
+            _staleSince = since ?? _clock.lastFresh ?? DateTime.now();
+          } else {
+            _name = name ?? "";
+            _kind = kind ?? "support";
+          }
+        });
+      },
+    );
+    if (ok) {
+      try {
+        final f = await widget.api.fetchStaffFeatures();
+        _featuresFresh = true;
+        if (mounted) setState(() => _features = f);
+      } catch (_) {
+        /* keep whatever we had */
+      }
     }
     if (widget.openRoute != null && mounted) {
       WidgetsBinding.instance.addPostFrameCallback(
@@ -356,8 +413,13 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
     }
   }
 
-  void _push(Widget w) =>
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => w));
+  Future<void> _push(Widget w) async {
+    final changed = await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => w));
+    // The waiting counts are re-read only when that screen decided something.
+    if (mounted && changed == true) setState(() => _refresh += 1);
+  }
 
   void _openDeepLink(String raw) {
     final path = Uri.tryParse(raw)?.path ?? raw;
@@ -436,7 +498,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
     );
     return Scaffold(
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: _pullRefresh,
         color: AppColors.primary,
         child: ListView(
           padding: EdgeInsets.zero,
@@ -503,6 +565,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
                 ],
               ),
             ),
+            StaleBanner(since: _staleSince, onRetry: _load),
             // Notices and news scrolling across, as on the web ERP.
             RunningStrip(
               api: widget.api,

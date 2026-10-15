@@ -4,6 +4,7 @@ import "package:flutter/material.dart";
 import "package:pdfx/pdfx.dart";
 
 import "../../core/api/api_client.dart";
+import "../../core/ui/pop_with_changed.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
@@ -25,8 +26,23 @@ class DocumentsScreen extends StatefulWidget {
 class _DocumentsScreenState extends State<DocumentsScreen> {
   String _filter = "pending";
 
+  /// A decision was made here — the home re-reads its waiting counts.
+  bool _changed = false;
+
+  Future<void> _decided(Future<void> Function() reload) {
+    _changed = true;
+    return reload();
+  }
+
   @override
   Widget build(BuildContext context) {
+    return PopWithChanged(
+      changed: () => _changed,
+      child: _shell(context),
+    );
+  }
+
+  Widget _shell(BuildContext context) {
     return ModuleShell<List<DocReviewItem>>(
       guideId: "documents-review",
       key: ValueKey(_filter),
@@ -98,12 +114,16 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   color: AppColors.muted,
                 ),
                 onTap: () async {
-                  await Navigator.of(context).push(
+                  final reviewed = await Navigator.of(context).push<bool>(
                     MaterialPageRoute(
                       builder: (_) => _ReviewScreen(api: widget.api, d: d),
                     ),
                   );
-                  await reload();
+                  if (reviewed == true) {
+                    await _decided(reload);
+                  } else {
+                    await reload();
+                  }
                 },
               ),
             ),
@@ -193,7 +213,7 @@ class _ReviewScreenState extends State<_ReviewScreen> {
         note: note,
       );
       Haptics.success();
-      if (mounted) Navigator.pop(context);
+      if (mounted) Navigator.pop(context, true);
     } on ApiException catch (e) {
       Haptics.warning();
       if (mounted) {

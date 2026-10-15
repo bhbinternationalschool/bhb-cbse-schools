@@ -187,7 +187,7 @@ extension SelfServiceApi on ApiClient {
   /// here is swallowed, exactly as on the web.
   Future<void> pingLeadership(String body) async {
     try {
-      await http.post(
+      await _slowHttp.post(
         _uri("/api/v1/staff/broadcast"),
         headers: await _authHeaders(),
         body: jsonEncode({
@@ -204,7 +204,7 @@ extension SelfServiceApi on ApiClient {
   /// My payslip for a month as PDF bytes (the slip's pdfUrl), fetched with
   /// the session like a receipt PDF.
   Future<List<int>> fetchPayslipPdf(String pdfUrl) async {
-    final res = await http.get(_uri(pdfUrl), headers: await imageHeaders());
+    final res = await _http.get(_uri(pdfUrl), headers: await imageHeaders());
     if (res.statusCode != 200) _throwFrom(res);
     return res.bodyBytes;
   }

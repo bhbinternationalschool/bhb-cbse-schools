@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
+import "../../core/ui/pop_with_changed.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
@@ -23,8 +24,23 @@ class StaffComplaintsScreen extends StatefulWidget {
 class _StaffComplaintsScreenState extends State<StaffComplaintsScreen> {
   String _filter = "open";
 
+  /// A decision was made here — the home re-reads its waiting counts.
+  bool _changed = false;
+
+  Future<void> _decided(Future<void> Function() reload) {
+    _changed = true;
+    return reload();
+  }
+
   @override
   Widget build(BuildContext context) {
+    return PopWithChanged(
+      changed: () => _changed,
+      child: _shell(context),
+    );
+  }
+
+  Widget _shell(BuildContext context) {
     return ModuleShell<StaffComplaintList>(
       guideId: "complaints-staff",
       key: ValueKey(_filter),
@@ -60,7 +76,7 @@ class _StaffComplaintsScreenState extends State<StaffComplaintsScreen> {
               api: widget.api,
               t: t,
               canClose: list.unrestricted,
-              reload: reload,
+              reload: () => _decided(reload),
             ),
         ],
       ),

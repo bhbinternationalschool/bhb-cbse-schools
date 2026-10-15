@@ -1563,6 +1563,9 @@ extension StaffApi on ApiClient {
   Future<StaffApprovals> fetchApprovals() async =>
       StaffApprovals.fromJson(await _getData("/api/v1/staff/approvals"));
 
+  Future<Cached<StaffApprovals>?> cachedApprovals() =>
+      peekCached("/api/v1/staff/approvals", StaffApprovals.fromJson);
+
   Future<StaffRoster> fetchStaffRoster() async =>
       StaffRoster.fromJson(await _getData("/api/v1/staff/roster"));
 
@@ -1581,6 +1584,9 @@ extension StaffApi on ApiClient {
   Future<StaffFeatureSet> fetchStaffFeatures() async =>
       StaffFeatureSet.fromJson(await _getData("/api/v1/staff/features"));
 
+  Future<Cached<StaffFeatureSet>?> cachedStaffFeatures() =>
+      peekCached("/api/v1/staff/features", StaffFeatureSet.fromJson);
+
   // ---- my profile (self service) ----------------------------------------
 
   /// The signed-in staff member's own record: masked where it must be, the
@@ -1594,7 +1600,7 @@ extension StaffApi on ApiClient {
   Future<StaffProfileSaveResult> updateMyProfile(
     Map<String, String> fields,
   ) async {
-    final res = await http.patch(
+    final res = await _http.patch(
       _uri("/api/v1/staff/me/profile"),
       headers: await _authHeaders(),
       body: jsonEncode({"fields": fields}),
@@ -1618,7 +1624,7 @@ extension StaffApi on ApiClient {
 
   /// Withdraw the open request to the office.
   Future<StaffProfile> withdrawMyProfileRequest() async {
-    final res = await http.delete(
+    final res = await _http.delete(
       _uri("/api/v1/staff/me/profile"),
       headers: await _authHeaders(),
     );
@@ -1655,7 +1661,7 @@ extension StaffApi on ApiClient {
         contentType: MediaType.parse(mime),
       ),
     );
-    final res = await http.Response.fromStream(await req.send());
+    final res = await http.Response.fromStream(await _uploadHttp.send(req));
     if (res.statusCode != 200) _throwFrom(res);
     final data =
         ((jsonDecode(res.body) as Map<String, dynamic>)["data"]
@@ -1894,7 +1900,7 @@ extension StaffApi on ApiClient {
   /// A file behind the ERP's authenticated proxy (student documents),
   /// fetched with the session cookie — the phone's browser has none.
   Future<(Uint8List, String)> fetchFileBytes(String path) async {
-    final res = await http.get(
+    final res = await _http.get(
       path.startsWith("http") ? Uri.parse(path) : _uri(path),
       headers: await _authHeaders(),
     );

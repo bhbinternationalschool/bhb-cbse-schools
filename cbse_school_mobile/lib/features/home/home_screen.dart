@@ -7,6 +7,7 @@ import "package:flutter_svg/flutter_svg.dart";
 import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
+import "../../core/ui/stale_banner.dart";
 import "../../core/config/app_config.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
@@ -124,6 +125,12 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
   String? _pendingRoute;
 
+  /// data-layer 4.4: set when the server could not be reached and the home
+  /// shows the copy saved at this time; the banner says so.
+  DateTime? _staleSince;
+  final _clock = RefreshClock();
+  late final _resume = ResumeWatcher(_onResume);
+
   /// Attendance and homework per child, loaded after the summary. A missing
   /// entry (still loading, or the call failed) shows as a dash.
   final _attendance = <String, AttendanceHistory>{};
@@ -133,7 +140,20 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _pendingRoute = widget.openRoute;
-    _load();
+    _resume.attach();
+    _load(first: true);
+  }
+
+  @override
+  void dispose() {
+    _resume.detach();
+    super.dispose();
+  }
+
+  /// Back in front after 2 minutes or more: re-read the summary (dues,
+  /// children), so a change at the school shows without a restart.
+  void _onResume() {
+    if (mounted && _clock.isStale) _load(stats: false);
   }
 
   @override
@@ -219,21 +239,56 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _load() async {
+  /// [first]: the app just opened this home — paint the saved copy at once.
+  Future<void> _load({bool first = false, bool stats = true}) async {
     setState(() => _error = null);
-    try {
-      final summary = await widget.api.fetchParentSummary();
-      if (!mounted) return;
-      setState(() {
-        _summary = summary;
-        if (_childIndex >= summary.children.length) _childIndex = 0;
-      });
-      if (_pendingRoute != null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _consumePendingRoute();
+    ParentSummary? fresh;
+    await loadCachedThenFresh<ParentSummary>(
+      peek: first ? widget.api.cachedParentSummary : () async => null,
+      fetch: widget.api.fetchParentSummary,
+      onCached: (c) {
+        if (!mounted) return;
+        setState(() {
+          _summary = c.value;
+          if (_childIndex >= c.value.children.length) _childIndex = 0;
         });
-      }
-      _loadStats(summary);
+      },
+      onFresh: (summary) {
+        fresh = summary;
+        _clock.markFresh();
+        if (!mounted) return;
+        setState(() {
+          _summary = summary;
+          _staleSince = null;
+          if (_childIndex >= summary.children.length) _childIndex = 0;
+        });
+      },
+      onError: (e, since) {
+        if (!mounted) return;
+        setState(() {
+          if (_summary != null) {
+            // Keep what is on screen and say how old it is.
+            _staleSince = since ?? _clock.lastFresh ?? DateTime.now();
+          } else {
+            _error = e is ApiException
+                ? e.message
+                : context.l10n.couldNotReachTheSchoolServer;
+          }
+        });
+      },
+    );
+    if (!mounted || _summary == null) return;
+    if (_pendingRoute != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _consumePendingRoute();
+      });
+    }
+    final summary = fresh;
+    if (summary == null) return;
+    {
+      // A resume re-reads the summary only; the per-child tiles keep theirs
+      // unless they never loaded.
+      if (stats || _attendance.isEmpty) _loadStats(summary);
       // The school's pop-up, if any — once per app open (core/popups).
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -252,12 +307,6 @@ class _HomeScreenState extends State<HomeScreen> {
           },
         );
       });
-    } on ApiException catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    } catch (_) {
-      if (mounted) {
-        setState(() => _error = context.l10n.couldNotReachTheSchoolServer);
-      }
     }
   }
 
@@ -491,6 +540,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
+            StaleBanner(since: _staleSince, onRetry: _load, bottomGap: 8),
             // Notices and news scrolling across, as on the web ERP.
             RunningStrip(
               api: widget.api,
