@@ -40,7 +40,9 @@ function countPayloadRows(
   for (const key of def.objectSlices) {
     if (state[key] != null && state[key] !== "") rows += 1;
   }
-  for (const key of def.sliceKeys) {
+  // Kernel-only slices are never in a pushed state, but they are in the
+  // stored copy a push is judged against (and that the meta row counts).
+  for (const key of [...def.sliceKeys, ...(def.kernelSlices ?? [])]) {
     const arr = state[key];
     if (Array.isArray(arr) && arr.length > 0) rows += arr.length;
   }

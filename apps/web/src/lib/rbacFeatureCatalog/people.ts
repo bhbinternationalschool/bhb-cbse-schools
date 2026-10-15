@@ -334,7 +334,7 @@ export const PEOPLE_WHOLE_MODULE_TABS: RbacWholeModuleTab[] = [
     module: "staff",
     tab: "requests",
     reason:
-      "Staff requests live in the staff_hr jsonb blob (staffRequests is not a desk slice), so no function slice can save them; the staff app files them for everyone.",
+      "Every member of staff raises their own requests and sees them here; assigning and resolving is for the people who manage staff leave (canManageStaffLeave), checked by POST /api/staff/requests — not a grantable function.",
   },
   {
     module: "staff",

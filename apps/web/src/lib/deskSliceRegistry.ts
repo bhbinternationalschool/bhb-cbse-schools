@@ -38,6 +38,15 @@ export type DeskSliceModuleDef = {
    * else a save lacks is kept.
    */
   clientDeleteSlices?: string[];
+  /**
+   * List slices written ONLY through the write kernel (desk_slice_row_write,
+   * one element per call, data-layer 1.5). The whole-desk push never carries
+   * them and the whole-desk read never returns them (they are not in
+   * `sliceKeys`); they are counted in `row_count` because the RPC's meta
+   * bump counts every slice row — without that, a push after a kernel write
+   * would see the stored count drop by these rows.
+   */
+  kernelSlices?: string[];
 };
 
 export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
@@ -127,6 +136,10 @@ export const DESK_SLICE_MODULE_DEFS: DeskSliceModuleDef[] = [
     // (removing a type drops its balances) — named.
     mergeKeys: { leaveTypes: "code" },
     clientDeleteSlices: ["leaveTypes", "leaveBalances"],
+    // Staff → Requests (15 Oct 2026): each request is one element, written by
+    // POST /api/staff/requests through desk_slice_row_write and read by
+    // GET /api/data/views/staff-requests. Never part of the browser's copy.
+    kernelSlices: ["staffRequests"],
   },
   {
     id: "staff_advances",

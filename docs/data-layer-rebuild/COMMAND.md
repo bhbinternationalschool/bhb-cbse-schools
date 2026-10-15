@@ -1159,6 +1159,41 @@ term/class, marks per sheet; exam subjects linked by Masters subject id, not cod
 desks follow the five-step procedure; each PR names its files from the inventories in
 `evidence/write-path.md` (per-desk save table) and `evidence/hydration.md` (hydrate table).
 
+**Staff HR · Requests (ahead of 5.8, director's "fix now, separately", 15 Oct).** *(Built 15 Oct 2026,
+PR #657 — no migration.)* **Found** while seeding for PR #650: with `STAFF_HR_READ_FROM_DB` on,
+`staffRequests` was neither a staff_hr desk slice nor pushed to the `staff_hr_state` blob, so a
+request lived only in the browser that raised it (production, 15 Oct: blob 0 requests, last written
+5 Aug; no element in `staff_hr_desk_slices`; no other table holds them). Since 10 Oct that browser
+copy is page memory only (`browserStorage` purge, live), so every request raised since 5 Aug is
+**unrecoverable** — there is nothing on any server and nothing a new build can reach in a browser.
+**What exists.** Each request is one element of a new kernel-only list slice
+`staff_hr_desk_slices.staffRequests`, written by `POST /api/staff/requests` (raise — any member of
+staff, for themselves; the server sets id, staff id from the session, dates, `open` — and update —
+managers only, `canManageStaffLeave` with the server's saved roles, base = the element `_rev` the
+screen loaded) through `desk_slice_row_write` via `repo.writeSliceElement` (the 1.5 RPC: lock,
+`_rev`, `staff_hr_desk_sync_meta` bumped in the same transaction). Read by
+`GET /api/data/views/staff-requests` (handlers `lib/staffRequests.server.ts`, deps
+`lib/staffRequestsDeps.server.ts`: a `referenceCache` on erp_versions `staff_hr`; manager = all,
+others = own; 503 on a failed read, never empty; `versions` = built-from). `StaffRequestsPanel` reads
+it with `useErpQuery(…, {desk: "staff_hr"})` + `useStaffList()` for names (no `loadMasters`, no
+hydrate); a failed save shows the server's error and stays; a conflict refetches. The header
+WhatsApp panel's "Raise a request" posts to the route (no longer waits for the staff_hr hydrate).
+`createStaffRequestTicket` / `updateStaffRequestTicket` / `listStaffRequestsForStaff` deleted.
+`deskSliceRegistry` gains `kernelSlices` (counted in `row_count`, never carried by the whole-desk
+push or returned by the whole-desk read), so an old-build push neither drops requests nor is judged
+a shrink. No "send to the office" button: no local copy can exist on the new build. The staff app
+(Flutter) never raised these requests and calls no route for them — unaffected.
+**Proof.** `test:staff-requests` (15 checks; 5 mutations — view filter off, manager check off,
+base dropped, failed write reported ok, `kernelSlices` not counted — each red).
+`e2e/specs/staff-requests.spec.ts`: class teacher raises from the header panel, the principal's
+already-open Requests tab shows it without reload (8.5–18.2 s over four runs), resolves it, the teacher sees
+Resolved, the element is at `_rev` 2; a triage from an older copy gets 409 and the newer value.
+On the merge base fa637423 the first fails at "B sees it" (the teacher's screen said "Request
+filed"), the second at the route (404). An old-build whole-desk push carrying `staffRequests: []`
+left both stored requests and wrote `row_count` 3 = 1 leave type + 2 requests (local stack).
+**Not done.** The rest of staff HR (leave, balances, appraisals) is still the replica (5.8). No
+notification to the raiser when a request is resolved (as before). Not measured in production.
+
 ### Phase 6 — Delete the replica
 
 **6.0** Re-run the 3.0 enumeration; every non-browser caller must be on `/api/export/*`.
