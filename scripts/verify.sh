@@ -370,6 +370,7 @@ SELFTESTS=(
   test:concession-ground
   test:fee-backdate
   test:month-groups
+  test:month-range
   test:receipt-auto-wa
   test:review-login
   test:desk-sync-status

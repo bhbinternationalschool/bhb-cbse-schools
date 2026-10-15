@@ -10,6 +10,8 @@ import {
   ErpTableHead,
 } from "@/components/ui/erp-roster";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { MonthRangeFilter, useMonthRange, useReportPeriod } from "@/components/ui/month-range-filter";
+import { istTodayIso, reportPeriodPayload } from "@/lib/monthRange";
 import { loadStaffAttendance } from "@/lib/staffAttendance";
 import { loadStaffHr, type LeaveStatus } from "@/lib/staffHr";
 import {
@@ -22,10 +24,6 @@ import {
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
-}
-
-function thisMonth() {
-  return todayIso().slice(0, 7);
 }
 
 export type StaffReportsScope = "leave" | "attendance";
@@ -49,9 +47,13 @@ export function StaffLeaveReportsPanel({
   const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [reportId, setReportId] = useState<StaffLeaveReportId>(defaultId);
   const [date, setDate] = useState(todayIso);
-  const [fromDate, setFromDate] = useState(() => `${ay.slice(0, 4)}-04-01`);
-  const [toDate, setToDate] = useState(todayIso);
-  const [month, setMonth] = useState(thisMonth);
+  // One period for every report: Month and From/To can never disagree
+  // (lib/monthRange.ts). Opens on the session to date, as before.
+  const period = useMonthRange({
+    session: ay,
+    initial: { from: `${ay.slice(0, 4)}-04-01`, to: istTodayIso() },
+    storageKey: `staff.reports.${scope}`,
+  });
   const [staffId, setStaffId] = useState("");
   const [leaveType, setLeaveType] = useState("");
   const [status, setStatus] = useState<"all" | LeaveStatus>("all");
@@ -94,6 +96,7 @@ export function StaffLeaveReportsPanel({
     () => reports.find((r) => r.id === reportId) ?? reports[0],
     [reports, reportId],
   );
+  const periodMode = useReportPeriod(period, def?.filters ?? []);
 
   const hrTypes = useMemo(() => loadStaffHr().leaveTypes, [masters]);
 
@@ -121,10 +124,9 @@ export function StaffLeaveReportsPanel({
   function filterPayload() {
     return {
       academicYearCode: ay,
-      date,
-      fromDate,
-      toDate,
-      month,
+      // A Date-only report reads its own day; every other report reads the
+      // one period, in the shape its filters allow.
+      ...(periodMode === "none" ? { date } : reportPeriodPayload(periodMode, period.range, period.session)),
       staffId: staffId || undefined,
       leaveType: leaveType || undefined,
       status,
@@ -253,7 +255,7 @@ export function StaffLeaveReportsPanel({
           ) : null}
 
           <div className="mt-4 flex flex-wrap gap-3">
-            {needs.has("date") ? (
+            {periodMode === "none" && needs.has("date") ? (
               <label className="block text-sm">
                 <span className="mb-1 block text-[11px] text-[var(--muted)]">
                   Date
@@ -266,44 +268,14 @@ export function StaffLeaveReportsPanel({
                 />
               </label>
             ) : null}
-            {needs.has("fromTo") ? (
-              <>
-                <label className="block text-sm">
-                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                    From
-                  </span>
-                  <input
-                    type="date"
-                    className="field !py-1.5"
-                    value={fromDate}
-                    onChange={(e) => setFromDate(e.target.value)}
-                  />
-                </label>
-                <label className="block text-sm">
-                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                    To
-                  </span>
-                  <input
-                    type="date"
-                    className="field !py-1.5"
-                    value={toDate}
-                    onChange={(e) => setToDate(e.target.value)}
-                  />
-                </label>
-              </>
-            ) : null}
-            {needs.has("month") ? (
-              <label className="block text-sm">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                  Month
-                </span>
-                <input
-                  type="month"
-                  className="field !py-1.5"
-                  value={month}
-                  onChange={(e) => setMonth(e.target.value)}
-                />
-              </label>
+            {periodMode !== "none" ? (
+              <MonthRangeFilter
+                period={period}
+                showDay={periodMode === "dayOrMonth"}
+                showMonth={needs.has("month") || periodMode === "range"}
+                showRange={periodMode === "range"}
+                labelClassName="block text-sm"
+              />
             ) : null}
             {needs.has("staff") ? (
               <label className="block text-sm min-w-[200px]">
