@@ -684,6 +684,7 @@ jobs:
           npm run test:reference-views
           npm run test:masters-bridge
           npm run test:staff-requests
+          npm run test:parent-api-scope
 
   build:
     name: Production build
