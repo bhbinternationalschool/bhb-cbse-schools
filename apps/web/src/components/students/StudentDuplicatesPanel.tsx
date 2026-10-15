@@ -5,9 +5,9 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   currentAcademicYearCode,
-  loadMasters,
-  type MastersState,
 } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   countDocsWithFiles,
   householdOf,
@@ -34,7 +34,7 @@ export function StudentDuplicatesPanel({
   onChanged?: (sis: SisState, message?: string) => void;
 }) {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [allSessions, setAllSessions] = useState(false);
   const [keepByGroup, setKeepByGroup] = useState<Record<string, string>>({});
@@ -42,7 +42,6 @@ export function StudentDuplicatesPanel({
   const [error, setError] = useState<string | null>(null);
 
   function refresh() {
-    setMasters(loadMasters());
     setSis(loadSis());
   }
 
@@ -154,6 +153,9 @@ export function StudentDuplicatesPanel({
     flash(`Removed duplicate ${s.fullName}.`, next);
   }
 
+  if (mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
   if (!sis || !masters) {
     return (
       <div className="mt-4 rounded-xl border border-[rgba(32,48,80,0.12)] bg-white px-4 py-8 text-center text-sm text-[var(--muted)]">

@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
 import {
   SIBLING_REASON_LABELS,
@@ -30,7 +32,7 @@ export function StudentSiblingsPanel({
   tick?: number;
   onChanged?: (sis: SisState) => void;
 }) {
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -42,7 +44,6 @@ export function StudentSiblingsPanel({
   const [separateBusy, setSeparateBusy] = useState(false);
 
   function refresh() {
-    setMasters(loadMasters());
     setSis(loadSis());
   }
 
@@ -176,6 +177,9 @@ export function StudentSiblingsPanel({
     }
   }
 
+  if (mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
   if (!sis || !masters) {
     return (
       <p className="mt-4 text-sm text-[var(--muted)]">Loading siblings…</p>
