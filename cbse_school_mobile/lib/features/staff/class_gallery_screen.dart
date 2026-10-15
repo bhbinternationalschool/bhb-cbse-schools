@@ -139,10 +139,15 @@ class _ClassGalleryScreenState extends State<ClassGalleryScreen> {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
           children: [
             Text(
-              _t(
-                "Photos and videos you add here are checked first, then seen only by your class's parents and saved to the school's Drive.",
-                "यहाँ जोड़ी गई फ़ोटो और वीडियो पहले जाँची जाती हैं, फिर केवल आपकी कक्षा के अभिभावक देखते हैं और स्कूल की ड्राइव में सहेजी जाती हैं।",
-              ),
+              _section == "school"
+                  ? _t(
+                      "Photos and videos you add here are checked first, then seen by every family and saved to the school's Drive.",
+                      "यहाँ जोड़ी गई फ़ोटो और वीडियो पहले जाँची जाती हैं, फिर सभी अभिभावक देखते हैं और स्कूल की ड्राइव में सहेजी जाती हैं।",
+                    )
+                  : _t(
+                      "Photos and videos you add here are checked first, then seen only by your class's parents and saved to the school's Drive.",
+                      "यहाँ जोड़ी गई फ़ोटो और वीडियो पहले जाँची जाती हैं, फिर केवल आपकी कक्षा के अभिभावक देखते हैं और स्कूल की ड्राइव में सहेजी जाती हैं।",
+                    ),
               style: AppText.bodySmallMuted,
             ),
             if (g != null && g.classes.length > 1) ...[
@@ -166,17 +171,22 @@ class _ClassGalleryScreenState extends State<ClassGalleryScreen> {
             if (g != null && g.canReview) ...[
               const SizedBox(height: 10),
               Card(
-                color: g.heldCount > 0 ? const Color(0xFFFFF4E5) : null,
+                color: (g.heldCount ?? 0) > 0 ? const Color(0xFFFFF4E5) : null,
                 child: ListTile(
                   leading: Icon(
                     Icons.shield_outlined,
-                    color: g.heldCount > 0
+                    color: (g.heldCount ?? 0) > 0
                         ? AppColors.warning
                         : AppColors.muted,
                   ),
                   title: Text(_t("Held for review", "जाँच के लिए रोकी गई")),
                   subtitle: Text(
-                    g.heldCount > 0
+                    g.heldCount == null
+                        ? _t(
+                            "Could not count — open to see",
+                            "गिनती नहीं हो सकी — देखने के लिए खोलें",
+                          )
+                        : g.heldCount! > 0
                         ? _t(
                             "${g.heldCount} waiting for you",
                             "${g.heldCount} आपके निर्णय की प्रतीक्षा में",
@@ -212,8 +222,8 @@ class _ClassGalleryScreenState extends State<ClassGalleryScreen> {
             if (g != null && _section.isEmpty)
               Text(
                 _t(
-                  "The class gallery is for class teachers.",
-                  "कक्षा गैलरी कक्षा अध्यापकों के लिए है।",
+                  "The class gallery is for class teachers, the principal and the office.",
+                  "कक्षा गैलरी कक्षा अध्यापकों, प्रधानाचार्य और कार्यालय के लिए है।",
                 ),
               ),
             if (g != null && _section.isNotEmpty && g.events.isEmpty)

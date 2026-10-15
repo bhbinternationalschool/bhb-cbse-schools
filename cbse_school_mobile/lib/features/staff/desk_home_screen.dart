@@ -10,6 +10,7 @@ import "../modules/chat_inbox_screen.dart";
 import "../modules/notice_detail_screen.dart";
 import "../modules/notices_screen.dart";
 import "admission_leads_screen.dart";
+import "class_gallery_screen.dart";
 import "class_message_screen.dart";
 import "ptm_teacher_screen.dart";
 import "bus_register_screen.dart";
@@ -137,6 +138,16 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
   ];
 
   static final _work = <_Tile>[
+    // The office posts the school's photos (whole school or any class) and
+    // decides on what the AI check held (15 Oct 2026).
+    _Tile(
+      "Gallery",
+      "गैलरी",
+      Icons.photo_library_outlined,
+      ModuleTone.pink,
+      "class_gallery",
+      (api) => ClassGalleryScreen(api: api),
+    ),
     _Tile(
       "Collect fees",
       "फ़ीस लें",

@@ -764,11 +764,15 @@ class ClassGallery {
     this.heldCount = 0,
   });
 
-  /// The principal and leadership decide on held items.
+  /// The principal and the office (with the Gallery grant) decide on held
+  /// items, and post to the whole school or any class.
   final bool canReview;
-  final int heldCount;
 
-  /// "classId|sectionId" of the class shown.
+  /// Items waiting for that decision; null = the count could not be read
+  /// (never shown as "nothing waiting").
+  final int? heldCount;
+
+  /// "classId|sectionId" of the class shown, or "school" for the whole school.
   final String section;
   final String classLabel;
   final List<({String section, String classLabel})> classes;
@@ -4244,7 +4248,9 @@ class ApiClient {
           )
           .toList(),
       canReview: data["canReview"] == true,
-      heldCount: (data["heldCount"] as num?)?.toInt() ?? 0,
+      heldCount: data["heldCount"] == null && data["canReview"] == true
+          ? null
+          : (data["heldCount"] as num?)?.toInt() ?? 0,
     );
   }
 
