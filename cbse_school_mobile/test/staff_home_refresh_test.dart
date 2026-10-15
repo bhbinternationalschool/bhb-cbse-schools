@@ -7,6 +7,7 @@ import "dart:io";
 import "package:cbse_school_mobile/core/api/api_client.dart";
 import "package:cbse_school_mobile/core/config/app_config.dart";
 import "package:cbse_school_mobile/core/i18n/locale_controller.dart";
+import "package:cbse_school_mobile/features/staff/staff_leave_screen.dart";
 import "package:cbse_school_mobile/features/staff/teacher_home_screen.dart";
 import "package:cbse_school_mobile/l10n/app_localizations.dart";
 import "package:flutter/material.dart";
@@ -55,7 +56,10 @@ class _Server {
           );
     }
     if (p == "/api/v1/staff/features") {
-      return http.Response('{"data":{"features":["homework"]}}', 200);
+      return http.Response(
+        '{"data":{"features":["homework","my_leave"]}}',
+        200,
+      );
     }
     if (p == "/api/v1/staff/approvals") {
       return http.Response('{"data":{"total":0}}', 200);
@@ -121,6 +125,44 @@ void main() {
       reason: "the summary arriving must not re-read the waiting counts",
     );
   });
+
+  testWidgets(
+    "a screen that decided nothing does not re-read the waiting counts",
+    (tester) async {
+      // A tall phone, so the tile is on screen above the bottom bar.
+      tester.view.physicalSize = const Size(400, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final server = _Server();
+      await http.runWithClient(() async {
+        await tester.pumpWidget(
+          _app(
+            TeacherHomeScreen(
+              api: ApiClient(_config, cache: _memoryCache()),
+              onLogout: () {},
+            ),
+          ),
+        );
+        await _settle(tester);
+        expect(server.n("/api/v1/staff/approvals"), 1);
+        final tile = find.text("My leave");
+        await tester.ensureVisible(tile.first);
+        await tester.tap(tile.first);
+        await _settle(tester);
+        expect(find.byType(StaffLeaveScreen), findsOneWidget);
+        // The phone's back button.
+        await tester.binding.handlePopRoute();
+        await _settle(tester);
+        await tester.pump(const Duration(seconds: 1)); // route animates out
+      }, server.client);
+      expect(find.byType(StaffLeaveScreen), findsNothing);
+      expect(
+        server.n("/api/v1/staff/approvals"),
+        1,
+        reason: "My leave decided nothing → the counts are not re-read",
+      );
+    },
+  );
 
   testWidgets(
     "back in front after 2 min re-reads summary and tiles; sooner, nothing",
