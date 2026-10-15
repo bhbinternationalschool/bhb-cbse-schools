@@ -265,6 +265,7 @@
     "test:transport-start-month": "npx tsx src/lib/transportStartMonth.selftest.ts",
     "test:transport-misrouted": "npx tsx src/lib/transportMisrouted.selftest.ts",
     "test:transport-amend": "npx tsx src/lib/transportAmend.selftest.ts",
+    "test:transport-paid-months": "npx tsx src/lib/transportPaidMonths.selftest.ts",
     "test:table-sort": "npx tsx src/lib/tableSort.selftest.ts",
     "test:transport-fee-policy": "npx tsx src/lib/transportFeePolicy.selftest.ts",
     "test:transport-nearest-stops": "npx tsx src/lib/transportNearestStops.selftest.ts",

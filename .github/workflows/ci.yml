@@ -621,6 +621,7 @@ jobs:
           npm run test:transport-shifts
           npm run test:transport-phone-empty-desk
           npm run test:transport-stop-links
+          npm run test:transport-paid-months
           npm run test:transport-boarding-log
           npm run test:transport-fuel-register
           npm run test:transport-vehicle-costs

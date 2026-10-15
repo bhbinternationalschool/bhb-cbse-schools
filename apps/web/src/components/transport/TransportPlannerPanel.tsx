@@ -26,6 +26,7 @@ import {
   bulkGeocodeHouseholds,
   countHouseholdsNeedingGeocode,
 } from "@/lib/householdGeo";
+import { PaidMonthsCarryOverNote } from "@/components/transport/PaidMonthsCarryOverNote";
 import { TransportMapsApiHelp } from "@/components/transport/TransportMapsApiHelp";
 import {
   ErpTable,
@@ -412,6 +413,11 @@ export function TransportPlannerPanel({
                     onChange={(e) => setEffectiveFrom(e.target.value)}
                   />
                 </label>
+                <PaidMonthsCarryOverNote
+                  student={sis?.students.find((st) => st.id === selected.studentId)}
+                  masters={masters}
+                  effectiveFrom={effectiveFrom}
+                />
 
                 <ul className="space-y-2">
                   {suggestions.length === 0 ? (

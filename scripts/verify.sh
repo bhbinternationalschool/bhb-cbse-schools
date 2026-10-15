@@ -291,6 +291,7 @@ SELFTESTS=(
   test:transport-start-month
   test:transport-misrouted
   test:transport-amend
+  test:transport-paid-months
   test:table-sort
   test:transport-fee-policy
   test:transport-nearest-stops
