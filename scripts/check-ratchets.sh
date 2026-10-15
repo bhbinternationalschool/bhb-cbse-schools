@@ -186,6 +186,21 @@ count_metric() {
         grep -rnE 'fetch\([^)]*api/(school-data|data)/' "$SRC/app/api" 2>/dev/null
         grep -rnE 'fetch\([^)]*api/(school-data|data)/' --include='*.server.ts' "$SRC" 2>/dev/null
       } | wc -l ;;
+    fee_whole_desk_push)
+      # Data-layer step 5.1a (docs/data-layer-rebuild/evidence/fees-inventory.md).
+      # Every call that writes the WHOLE fee desk from a copy: the instance's
+      # (pushFeesRemoteServer(loadFees()) after a webhook, the staff app's
+      # collect, refunds, the bulk tools), the browser's (pushFeeDeskToDb from
+      # the fees-vouchers POST) and the whole-year open-dues rebuild. Headers
+      # are last-write-wins there, voided_at included. 12 on 15 Oct 2026;
+      # 5.1b moves them to fee_voucher_write / fee_voucher_void, 5.1e leaves
+      # only the manual rebuild route.
+      # Call sites only: the three definitions and prose are not counted.
+      grep -rnE '\b(pushFeesRemoteServer|pushFeeDeskToDb|rebuildFeeOpenDuesCache)\(' "$SRC" \
+        --include='*.ts' --include='*.tsx' 2>/dev/null \
+        | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//|#)' \
+        | grep -vE 'selftest|\.test\.|export (async )?function' \
+        | wc -l ;;
     *)
       echo "-1" ;;
   esac
