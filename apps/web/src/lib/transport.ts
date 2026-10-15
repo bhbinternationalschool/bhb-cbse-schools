@@ -5,6 +5,7 @@
 
 import { transportMonthAmount } from "@/lib/transportPaidMonths";
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { hydrateOnFirstRead } from "@/lib/deskLazyHydrate";
 import {
   DEFAULT_AY,
   SESSION_MONTHS,
@@ -1012,6 +1013,14 @@ export function loadTransport(): TransportState {
   // tables; an instance that has not hydrated yet still reads empty, which
   // is why the dues paths hydrate before they compute.
   if (typeof window === "undefined") return memoryTransportState ?? emptyTransport();
+  // In the browser, the first read on a page loads the desk (as loadFees
+  // does), and `bhb-desk-hydrated` tells listening screens to re-read. Every
+  // dues figure reads this desk through computeStudentDues; a screen that got
+  // here before anything had loaded it computed dues with no bus months in
+  // them, owing or paid (15 Oct 2026).
+  hydrateOnFirstRead("transport", () =>
+    import("@/lib/transportPersistence").then((m) => m.ensureTransportHydrated()),
+  );
   try {
     const raw2 = readCache(STORAGE_KEY);
     // A cache that could not be written (or was evicted to make room for

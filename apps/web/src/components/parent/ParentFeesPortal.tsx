@@ -1,5 +1,6 @@
 "use client";
 
+import { useDuesInputs } from "@/components/fees/useDuesInputs";
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import {
@@ -94,9 +95,14 @@ export function ParentFeesPortal({
     });
   }
 
+  // Recomputed when the fee book or the transport desk lands or changes:
+  // computed once at open, the family's bus months (owing and paid) were
+  // missing whenever the transport desk had not arrived yet (15 Oct 2026).
+  const duesInputs = useDuesInputs();
   useEffect(() => {
     reload();
-  }, [guardianDisplayName, householdId, tick]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guardianDisplayName, householdId, tick, duesInputs.tick]);
 
   const activeRow = useMemo(
     () => bundle.find((r) => r.student.id === activeStudentId) ?? bundle[0],

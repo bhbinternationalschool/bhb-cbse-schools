@@ -1,5 +1,6 @@
 "use client";
 
+import { useDuesInputs } from "@/components/fees/useDuesInputs";
 import { useEffect, useMemo, useState } from "react";
 import {
   computeStudentDues,
@@ -111,6 +112,10 @@ export function FeeAdjustmentsPanel({
 
   const student = sis?.students.find((s) => s.id === studentId) ?? null;
 
+  // The fee book and transport desk this list is computed from: re-read when
+  // either lands, or a bus month the family owes is missing from the list of
+  // dues that can be waived (15 Oct 2026).
+  const duesInputs = useDuesInputs();
   const dues = useMemo(() => {
     if (!student || !masters) return [] as FeeDueLine[];
     return openFeeDues(
@@ -120,7 +125,8 @@ export function FeeAdjustmentsPanel({
         includeInactive: student.status === "inactive",
       }),
     );
-  }, [student, masters, rows]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [student, masters, rows, duesInputs.tick]);
 
   const todayIso = new Date().toISOString().slice(0, 10);
   const waivable = useMemo(
