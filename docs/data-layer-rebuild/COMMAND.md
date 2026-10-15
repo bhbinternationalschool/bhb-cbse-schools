@@ -934,6 +934,50 @@ read-time normalisation — not audited field by field beyond the fee keys above
 fee records" toast on /students (fees desk 403) is pre-existing and untouched. Upgrade's "(no matching group
 — keep current)" hint is wrong on main too (a null resolve sets the fee group to null) — not changed here.
 CI scoreboard: see the PR.
+*(2.1c built 15 Oct 2026, PR #660.)* **What exists.** `grep -rl 'loadMasters(' components/staff` lists 14
+files; 10 no longer call it. **`useStaffList()`** (the 1.4 directory view — code, name, status, department,
+designation, links; no phone/Aadhaar/salary) where a panel only shows or picks staff: `StaffAppraisalPanel`
+(the Staff picker and labels) and `StaffGeoAdminPanel` (the "n of N consented" count — computed ONCE at mount from
+the page copy before, so it could read "of 0" on a cold page; now "…" while unread and a retry link on failure).
+**`useScreenMasters()`** (2.1a's hook: server book + the access copy's full roster) where the panel hands a whole
+`MastersState` to lib helpers or resolves the signed-in person (by staffId/e-mail, which the directory does not
+carry), or reads fields the directory lacks (`category`): `StaffLeavePanel`, `StaffLeaveRulesPanel`,
+`StaffLeaveReportsPanel` (+ `StaffAttendanceReportsPanel` on /attendance), `StaffOutdoorDutyPanel`,
+`StaffPayslipsPanel`, `StaffMyProfileDocs`, `StaffAgreementPanel` (+ self panel), `StaffBroadcastButton`. Each renders
+`<QueryError>` when the read failed with no answer and "Loading…" while unknown — never an empty roster
+(`StaffLeaveRulesPanel` drew its steps with `masters = null` before, i.e. "(0 staff)" per category while loading;
+it now waits). No file had a `bhb-masters-updated` listener or `ensureMastersHydrated`. The header WhatsApp button
+(`StaffBroadcastButton`, mounted on every page) asks only once opened: `useMasters({enabled})` /
+`useScreenMasters({enabled})` are new, and the versions poll now runs only while an ENABLED observer reads a desk
+(`hasDeskObservers` uses `query.isActive()`, and re-checks on `observerOptionsUpdated`) — otherwise a closed button
+would have started the 20 s poll on every page. `StaffLeavePanel` opens leave balances (`ensureBalancesForAy` +
+save) only for a known roster (before: `loadMasters().staff`, empty on a cold page) and again when the roster
+changes. `StaffAppraisalPanel` waits for the staff-HR desk before `ensureAppraisalCycle` (which SAVES a new cycle):
+with the roster no longer gating its render, the save raced the HR load and showed "Still loading staff HR … NOT
+saved" on 4/4 then 1/3 opens (0/4 on main); after the fix 0/5. **Left on their full-record read, for 2.2** (they
+edit staff records and save the whole book through `saveMasters`): `StaffWorkspace` (roster, Allocate teaching,
+duty roster, its `bhb-masters-updated` listener) and `StaffProfileForm`. `StaffRequestsPanel` untouched (another
+branch owns it). `TeacherAssignmentsPanel` only names `loadMasters()` in a comment (not counted by the ratchet).
+**Proof** (local stack, this branch): `error.spec` — /staff Leave with views/masters 503 → "could not load" + Try
+again, no leave tabs or Staff picker, Try again → the form with 34 staff + Select; /staff Appraisal with
+views/staff-list 503 → "Could not load the staff list", no Staff picker, Try again → 35 options. `teacher.spec` —
+on /my-pay the class teacher's page asks neither views/masters nor views/versions until she opens WhatsApp, then
+asks the view and offers "My class parents". All three FAIL on 9433ee26 (built and run on the same stack: no
+"could not load"; masters view never asked). `counts.spec` /staff passes desktop and phone-375-cpu4x (34 active);
+teacher.spec otherwise unchanged. Staff propagation: both cases still expected-fail, now at the PROPAGATION step
+with `controlShown:true` and `visibleAfterReload:true` on /staff?tab=roster and /timetable — staleness alone (the
+roster on both is the page copy: /staff until 2.2, the access copy behind useScreenMasters until 2.3a); reason text
+updated, editor case stays fixme. Ratchets (#642's script, not merged): `load_masters_screen_files` 98 → **88**,
+`load_masters_calls_src` 463 → **453**, `ensure_hydrated_component_files` 69. Screens seen desktop-light and
+phone-375-dark, office (principal fixture) and class teacher: roster, Leave, Leave rules, Reports, Outdoor duty,
+Appraisal, Payslips, My docs, Agreements, GPS, profile edit, /attendance, /my-pay + WhatsApp — no page errors.
+**Not done / not proven.** /staff roster propagation (2.2/2.3a). A teacher opening Staff → Leave sees "You do not
+have permission" (the leave panel's balance save) — on main too (seen on 9433ee26), not fixed here. If the
+staff-HR desk never loads, Appraisal stays on "Loading appraisal…" (before: drew the placeholder). Lib helpers now
+get the server's raw book instead of `loadMasters()`'s normalised read (agreements read `schoolProfile` /
+`numberSeries` — a holder of Staff→agreements without the Masters view gets the teaching subset, so the old
+`AGR-nnnn` fallback numbering, exactly as the page copy gave them before); not audited field by field. The header
+WhatsApp panel's class list now appears after one view read instead of synchronously.
 
 **2.2 Masters and staff editing write rows.** `MastersWorkspace` and its panels write through
 `useErpMutation` → `desk_slice_row_write` / `desk_slice_object_write` (one subject, one
