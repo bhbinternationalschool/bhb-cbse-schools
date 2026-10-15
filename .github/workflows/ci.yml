@@ -687,6 +687,7 @@ jobs:
           npm run test:masters-bridge
           npm run test:staff-requests
           npm run test:survey-team-plan
+          npm run test:parent-api-scope
 
   build:
     name: Production build

@@ -496,6 +496,7 @@
     "test:reference-views": "npx tsx src/lib/data/server/views.selftest.ts",
     "test:staff-requests": "npx tsx src/lib/staffRequests.selftest.ts",
     "test:survey-team-plan": "npx tsx src/lib/surveyTeamPlan.selftest.ts",
+    "test:parent-api-scope": "npx tsx src/lib/data/server/parentApiScope.selftest.ts",
     "test:outdoor-duty-staff-id": "npx tsx src/lib/outdoorDutyStaffId.selftest.ts",
     "test:outdoor-duty-persistence": "npx tsx src/lib/outdoorDutyPersistence.selftest.ts",
     "test:puter-ai": "npx tsx src/lib/puterAi.selftest.ts",
