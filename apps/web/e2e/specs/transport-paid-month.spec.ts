@@ -125,8 +125,14 @@ test("student fee card: October transport owing, September not", async ({ browse
     await page.goto(`/students/${CHILD.id}/edit`);
     const card = page.locator("section").filter({ has: page.getByRole("heading", { name: "Fees" }) });
     await expect(card.getByText("Pending dues", { exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(card.getByText(/Transport · October 2026/)).toBeVisible();
-    await expect(card.getByText(/Transport · September 2026/)).toHaveCount(0);
+    // The pending-dues table (the first one; the second is payment history,
+    // which rightly lists the September receipt).
+    const pending = card.locator("table").first();
+    await expect(pending.getByText(/Transport · October 2026/)).toBeVisible();
+    await expect(pending.getByText(/Transport · September 2026/)).toHaveCount(0);
+    await expect(card.getByText("Outstanding").locator("..")).toContainText("₹500");
+    // And the payment history still shows every receipt, September included.
+    await expect(card.getByText("Paid ₹3,000")).toBeVisible();
     await card.scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(SHOTS, `student-card-${shot.name}.png`), fullPage: true });
     await page.context().close();
