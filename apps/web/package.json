@@ -458,6 +458,7 @@
     "test:admissions-row-stamps": "npx tsx src/lib/admissionsRowStamps.selftest.ts",
     "test:payment-link-status-guard": "npx tsx src/lib/paymentLinkStatusGuard.selftest.ts",
     "test:attendance-today": "npx tsx src/lib/attendanceToday.selftest.ts",
+    "test:staff-signature": "npx tsx src/lib/staffSignature.selftest.ts",
     "test:sis-wire-payload": "npx tsx src/lib/sisWirePayload.selftest.ts",
     "test:print-palette": "npx tsx src/lib/printPalette.selftest.ts",
     "test:receipt-head-grouping": "npx tsx src/lib/receiptHeadGrouping.selftest.ts",
