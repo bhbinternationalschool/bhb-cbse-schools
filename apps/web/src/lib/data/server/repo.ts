@@ -23,7 +23,7 @@ import "server-only";
 
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
-import { collectionDef, collectionKind, type CollectionDef } from "../registry";
+import { collectionDef, collectionKind, type CollectionDef, type SliceSource } from "../registry";
 import {
   asRevision,
   type ConflictReason,
@@ -427,10 +427,6 @@ export async function writeSlice(
   }
   const op = ops[0]!;
   const id = typeof op?.id === "string" ? op.id : "";
-  const ctx = await getServerTenantContext();
-  if (!ctx) {
-    return { ok: false, kind: "unavailable", message: "Supabase tenant not configured", conflicts: [] };
-  }
   const src = def.slice;
   const isObject = collectionKind(def) === "object";
   if (isObject && (op.op !== "upsert" || id !== src.key)) {
@@ -440,6 +436,24 @@ export async function writeSlice(
       message: `${def.id} is one object: send a single upsert with id "${src.key}" and the whole value as row`,
       conflicts: [],
     };
+  }
+  return writeSliceOp(src, isObject, op);
+}
+
+/**
+ * One element of a list slice that is not a registry collection (its own
+ * route decides who may write it — e.g. Staff → Requests, where any member
+ * of staff files their own): the same RPC, base and outcome as writeSlice.
+ */
+export async function writeSliceElement(src: SliceSource, op: WriteOp<Row>): Promise<WriteResult<Row>> {
+  return writeSliceOp(src, false, op);
+}
+
+async function writeSliceOp(src: SliceSource, isObject: boolean, op: WriteOp<Row>): Promise<WriteResult<Row>> {
+  const id = typeof op?.id === "string" ? op.id : "";
+  const ctx = await getServerTenantContext();
+  if (!ctx) {
+    return { ok: false, kind: "unavailable", message: "Supabase tenant not configured", conflicts: [] };
   }
   const base = op.base == null ? null : String(op.base);
 

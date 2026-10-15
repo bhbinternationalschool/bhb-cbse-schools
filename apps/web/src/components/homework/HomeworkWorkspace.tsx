@@ -10,11 +10,9 @@ import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { hasFeaturePermission, visibleModuleTabs } from "@/lib/rbac";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
-import {
-  DEFAULT_AY,
-  loadMasters,
-  type MastersState,
-} from "@/lib/masters";
+import { DEFAULT_AY } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
   acknowledgeSubmission,
@@ -101,7 +99,7 @@ export function HomeworkWorkspace() {
   const readOnly = useSessionReadOnly();
   const ay = session.academicYearCode || DEFAULT_AY;
   const [tab, setTab] = useState<HwTab>("dashboard");
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [state, setState] = useState<HomeworkState | null>(null);
   const [date, setDate] = useState(todayIso);
@@ -220,7 +218,6 @@ export function HomeworkWorkspace() {
   }
 
   function refresh() {
-    setMasters(loadMasters());
     setSis(loadSis());
     setState(seedHomeworkIfEmpty(ay));
   }
@@ -665,6 +662,9 @@ export function HomeworkWorkspace() {
     flash("Attachment ready");
   }
 
+  if (mastersError) {
+    return <QueryError what="the school's classes and subjects" error={mastersError} retry={retryMasters} />;
+  }
   if (!state || !masters || !sis) {
     return (
       <div className="px-4 py-8 text-sm text-[var(--muted)]">

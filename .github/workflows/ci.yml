@@ -474,6 +474,7 @@ jobs:
           npm run test:concession-per-due
           npm run test:concession-ground
           npm run test:fee-backdate
+          npm run test:month-groups
           npm run test:receipt-auto-wa
           npm run test:review-login
           npm run test:desk-sync-status
@@ -681,6 +682,8 @@ jobs:
           npm run test:versions-route
           npm run test:query-kernel
           npm run test:reference-views
+          npm run test:masters-bridge
+          npm run test:staff-requests
           npm run test:parent-api-scope
 
   build:

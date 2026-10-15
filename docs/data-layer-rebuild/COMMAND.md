@@ -760,6 +760,16 @@ components (70), `readCache(` files in `src` (69), `readFileSync` inside `*.self
 `ensureSchoolMirrorHydrated` files under `app/api/v1` (100), and two **all-of-src** counts used as
 the Phase 2.3b / 3.4 gates: `loadMasters(` occurrences (476) and `loadSis(` occurrences (426),
 selftests and definitions excluded. Acceptance: CI fails when any count rises.
+*(Built 14 Oct 2026, PR #642.)* Measured on origin/main `ea9f5ba2`, budgets set to the true
+count: `load_masters_screen_files` 106 (12 Oct: 109), `load_sis_screen_files` 77 (77),
+`ensure_hydrated_component_files` 69 (70), `read_cache_files` 68 (69), `selftest_readfilesync_files`
+89 (66), `v1_school_mirror_files` 107 (100), `load_masters_calls_src` 471 (476),
+`load_sis_calls_src` 426 (426). All but the last two are FILE counts; those two are OCCURRENCES.
+Common rules (`dl_code_lines` in the script): `.ts`/`.tsx` only, comment lines ignored,
+`*.selftest.ts` and the function's own definition line excluded, the name bounded so
+`loadMastersSafe(`/`loadSisForStaff(`/`reloadMasters(` do not count while `mod.loadMasters(` does.
+Wired through the existing CI step "Ratchets — retired patterns may not regrow" (`ci.yml`) and
+`scripts/verify.sh`; adding one call of each pattern turned all eight red and exited 1.
 
 **1.7 Teacher scope from SQL (own step; 3.1 and 4.2 depend on it).** *(Built 13 Oct 2026.)*
 `staffSectionScope` (`lib/api/v1/staffScope.ts`) computes sections from `sis_staff.profile` links
@@ -814,6 +824,74 @@ call `loadMasters()`** (fees maths, exams, payroll, counter concessions): in 1.4
 deleted in 2.3b. Acceptance per batch: `propagation.spec.ts` and `counts.spec.ts` pass for every
 screen in the batch; the `loadMasters(` file ratchet falls by the batch size.
 
+*(2.1a built 15 Oct 2026, PR #651.)* **What exists.** The 8 files of the batch
+(`components/attendance/{AttendanceWorkspace,AttendanceExceptionsPanel,StaffAttendancePanel,StudentAttendanceReportsPanel}`,
+`components/timetable/TimetableWorkspace`, `components/homework/HomeworkWorkspace`,
+`components/teaching/{TeachingWorkspace,SyllabusPlanPanel}`) no longer call `loadMasters()`: no mount-time
+read, no re-read in `refresh()` (none had a `bhb-masters-updated` listener or an `ensureMastersHydrated`).
+Seven read `useScreenMasters()` (`components/data/useScreenMasters.ts`): the `useMasters()` answer **plus the
+staff side** (staff, departments, designations, the SIS projection `students`) from `useAccessData()`'s copy —
+`screenMastersOf` in `lib/data/client/mastersBridge.ts`. The staff side is required, not decoration: every
+permission helper resolves the signed-in person through `masters.staff` + `designations` (`lib/rbac`
+`resolveStaffForRbac` / `inferRoleCodes`), and a person missing from the roster falls back to designation
+guessing — so a screen given the book alone would change who may do what; no access copy = `null` (loading).
+The staff side is kept by content (a JSON signature) so `useAccessData`'s per-event re-reads do not re-run a
+screen's `masters` effects (the teacher's homework defaults). `SyllabusPlanPanel` reads subject names from
+`useMasters()` directly. A failed masters view with no answer yet = `<QueryError>` instead of the screen
+(Attendance and Timetable inside their workspace shell; no class picker drawn); a failed *background*
+refetch keeps the last answer. Timetable: the never-edited timetable's weekdays-from-school-timing
+(`ensureTimetableWeekdaysFromMasters`, a local write) now runs from an effect on Masters/timetable arrival
+instead of inside every `refresh()`; after Subject rules saves periods/week through the old `saveMasters`
+path, the screen refetches the view at once (otherwise the saved value would show at the next poll, ≤ 20 s).
+**The bridge** (`acceptMastersAnswer` in `hooks.tsx`, rules in `mastersBridge.ts`): every masters answer is
+checked (`parseMastersView` — not `{scope: full|teaching, masters: {classes[], sections[], subjects[]}}` = a
+failed read, nothing written) and written into the tab's page copy in one synchronous load→write (no await:
+the S1 snapshot race cannot occur) with `writeMastersLocalRaw` — no push, no sync scheduled, **no
+`bhb-masters-updated`** (so none of the 10 listeners — SchoolFavicon, AppShell `alignFromMasters`,
+useAccessData, SessionSelector, PrincipalCockpit, ModuleDashboardHost, Exams, RolesPermissions, Staff,
+Payroll — runs because of it). It loads the **stored** copy (`readMastersPageCopyRaw`, new in `lib/masters.ts`),
+not `loadMasters()`, whose read-time normalisation mints fee-head ids on every read and would be persisted.
+Full answer: every key it carries replaces the copy's, except the page-owned `staff`, `departments`,
+`designations` (not in the view — the staff hydrate's) and `students` (the client SIS projection;
+replacing it with the server's slice would re-trigger the projection write behind the 13 Oct #185 loop).
+**Teaching answer (a teacher):** only `TEACHING_MASTERS_KEYS` are written; every other key — fee heads,
+groups, structure, concessions and grants, numbering, statutory — is left exactly as the copy holds it (for a
+teacher that is the old hydrate's same teaching subset), so a withheld-and-sent-empty list never empties
+the copy (the 13 Oct `ensureFeeSetupInner` lesson). The bridge's write still passes `writeMastersLocalRaw`'s
+existing `protectLocalClasses` guard (frozen file): an answer with no classes, or a wholly new class-id
+generation, against a copy holding classes keeps the copy's classes/sections/subjects (logged) — so "server
+wins" holds for everything except that case. **Proof.** `test:masters-bridge` (in `verify.sh` and CI): a fake
+tab (memory-only `bhb_masters_v5`), the real `loadMasters`/`writeMastersLocalRaw` and `acceptMastersAnswer` —
+full answer reaches the copy, roster/designations/projection untouched; teaching answer updates
+classes/sections/subjects and leaves every fee list and grant identical; no fetch, no event, one synchronous
+write; 7 malformed shapes throw and change nothing; `screenMastersOf` needs the access copy. Each predicate
+mutated (page-owned filter, teaching-keys-only, the shape check, the bridge call, the staff side, an event in
+the write, `loadMasters()` as the load): every mutation turns it red. Playwright, fresh stack, scoreboard
+compared test by test with origin/main `1c54aa42` run on the same machine: main 29 pass · 27 expected-fail ·
+1 fixme · 0 fail; this branch **43 · 17 · 1 · 0**. The only differences: the 10 propagation cases on
+`/attendance`, `/timetable`, `/homework` (subject and section × editor and api) went expected-fail →
+UNEXPECTED-PASS on the first run with their `test.fail()` still in place, and pass after it was removed here
+(seen after 17.4–20.0 s); and 4 new tests pass (`error.spec` views/masters 503 on the three pages,
+`teacher.spec` the same on her `/attendance`: "could not load" + Try again, no Class picker, Try again
+recovers). `counts.spec` for the three pages: unchanged from main (`/timetable`, `/homework` pass;
+`/attendance` stays expected-fail at the V-A register — students, S2, 3.1 — while its class picker shows 15).
+Teacher spec unchanged (picker = exactly her sections; the register's blank-year defect still 27).
+Ratchets (1.6's script from PR #642, not merged): `load_masters_screen_files` 106 → **98** (−8, the batch),
+`load_masters_calls_src` 471 → 463, `ensure_hydrated_component_files` 69 (unchanged).
+**Not done / not proven.** The staff side of these screens is still the replica (the `/timetable` staff
+propagation case stays expected-fail; 2.1c/2.3a). Saves on these screens still go through the old whole-book
+paths — Subject rules' `saveMasters` now sends the composed screen state (the server's book + the access
+copy's staff side) instead of `loadMasters()`'s; for a teacher holding only `masters.class_subjects` that state
+is the teaching subset, which the function-only push accepts only for its own slice (`mastersChangeAuth`) —
+not re-tested here; 2.2 replaces it. Screens now render the server's raw book rather than `loadMasters()`'s
+read-time normalisation (fee heads / class roster top-ups, `ensureFoundationOnMasters` defaults); none of the
+8 files reads fee data, but a value present only through normalisation would now be absent — not audited
+field by field. Budget: each of the three pages fetches the masters view (+37 KB, +1 request) on top of the
+old masters-desk hydrate until 2.3b. The new error/teacher specs were not executed against origin/main (on
+main these pages never request the view, so `hits > 0` and "could not load" cannot hold — argued, not run).
+Timings are from a Mac running several other sessions' builds (load average ~10); one full run in that state
+failed 7 tests on time-outs and was discarded and re-run clean.
+
 **2.2 Masters and staff editing write rows.** `MastersWorkspace` and its panels write through
 `useErpMutation` → `desk_slice_row_write` / `desk_slice_object_write` (one subject, one
 class-subject link, one section, one fee head at a time). The 14 non-Masters `saveMasters`
@@ -860,6 +938,41 @@ MIRROR_SYNC_SECRET\|viaMirrorSecret apps/web/src`, Cloud Scheduler `bhb-*-tick` 
 gated. Acceptance: the 01:30 IST BigQuery sync and the watch email run green the night after
 deploy (named in the PR as a post-deploy check), and every enumerated caller is listed with its
 new endpoint.
+
+*(Built 15 Oct 2026, PR #648 — enumeration only: **no non-browser caller of a bulk desk GET
+exists**, so no `/api/export/*` route was added.)* **What was found.** The premise above (from
+`evidence/review-v1.md` §3.3) was checked caller by caller and is wrong for every one:
+
+| Caller | What it actually calls | Auth | Bulk desk GET? |
+|---|---|---|---|
+| Nightly BigQuery sync (`bhb-bigquery-nightly-sync`, **02:00 IST**, on `school-erp-lite`) | `POST /api/analytics/bigquery-sync/tick` → `lib/bigQuerySync.server.ts` `select * from <table> where tenant_id = $1` through `postgresPool` (9 tables) | `x-cron-secret` | no — reads Postgres directly |
+| `school-erp-lite` (`scripts/sync-lite-service.sh`) | a copy of the web image serving ticks + the Fleet Edge push; calls nothing | — | no |
+| 19 Cloud Scheduler jobs, asia-southeast1 | `POST` to `*/tick`-style routes (all exist) | `x-cron-secret` | no |
+| 6 Cloud Scheduler jobs, us-central1 (5) + asia-south1 (1) | `GET /api/cron/{control-jobs,audit,ai-run,scheduled}`, `GET /api/holidays/official-suggestions/sync`, `POST …-uc.a.run.app/api/cron/scheduled` | `x-cron-secret` | no — and every one **404s** (last status NOT_FOUND; the routes do not exist) |
+| ERP watch (3-hourly) and nightly review (01:30 IST) — Claude cloud routines | Supabase `SELECT`s, repo reads, Gmail; no gcloud, no app secret | Supabase MCP | no (prompts not re-read in this step; logs below cover them) |
+| UDISE / Propel office robot (`extensions/office-robot`) | `/api/v1/udise/robot/*`, `/api/v1/propel/robot/*` only | the staff's own ERP cookie (`credentials: "include"`) | no |
+| Flutter apps (`cbse_school_mobile/lib`) | 141 distinct `/api/v1/*` path strings + auth/upload/file/checkout/client-metrics | bearer session | no (their whole-desk cost is server-side, Phase 4) |
+| `scripts/`, `apps/web/scripts/` | PostgREST directly (`/rest/v1`), `/api/wa/*`, `/api/analytics/bigquery-sync/tick?dryRun=1` | service key / secrets | no |
+| Senders of `x-mirror-secret` (`MIRROR_SYNC_SECRET`: named in 44 route files, accepted by every `requireStaffApi` route) | none in the repo outside three self-tests | — | no |
+
+Production agreed: Cloud Run request logs, 8–15 Oct, 27,519 GETs of `/api/school-data/*` +
+`/api/data/*`, every one on `school-erp-web` from a `Mozilla` user agent (no headless, webview or
+Electron agent); 15 Sep–15 Oct, the only non-browser request to those paths was one `curl` POST
+answered 401. **What exists.** Ratchet `nonbrowser_desk_get` (budget 0, `scripts/check-ratchets.sh`):
+a reference to `api/school-data/` or `api/data/` in the Flutter app, the extension, `scripts/`
+(e2e harness excluded), `apps/web/scripts/`, CI workflows, `deploy/`, `cloudbuild*.yaml`, the
+BigQuery sync files, or a `fetch(` of those paths in a route or `*.server.ts` fails CI; shown
+red for a planted line in each of six of those places. **Consequences for later steps.** 3.3 and
+Phase 6 can gate or delete the browser desk routes without an export path; `?export=1` on
+`sis-roster` is not needed for any caller; the mirror-secret bypass on the bulk GETs has no user
+and can go with them (`apiRouteAuth.server.ts` `hasMirrorSyncSecret`). The e2e acceptance
+scripts and specs GET `masters-desk`/`sis-roster`/`staff-roster` with session cookies and move
+with 3.3. 6.0 re-runs this enumeration (the ratchet plus the log query above). **Not done / not
+proven.** The cloud routines' current prompts were not read (no tool for it here); a caller
+outside the repo using a browser user agent with the mirror secret cannot be told apart in the
+logs. The six 404 scheduler jobs are the director's to delete or repoint (not changed here). A
+post-deploy check is still named — the 02:00 IST BigQuery job and the next watch email green —
+though nothing in this PR touches either.
 
 **3.1 Per-screen student endpoints.** `GET /api/data/sis.students?ay=&class=&section=&status=&q=&cursor=`
 (the registered collection, keyset-paged ≤ 200) returns the list projection (id, admission no,
@@ -1006,6 +1119,32 @@ dues, receipt, day book), fee setup panels, defaulters, cheques/PDC, instalments
 task. Extra acceptance: "a counter receipt row-written, then an online payment webhook replayed
 from a stale copy — the counter receipt, its cheque and the day-close survive."
 
+*(5.1a built 15 Oct 2026, PR #655 — inventory only, no behaviour change.)* **What exists.**
+[`evidence/fees-inventory.md`](./evidence/fees-inventory.md): the 13 `fee_desk_*` tables with
+production row counts and triggers; 18 server write paths (W1–W18) with file:line, trigger, scope,
+tables and whether each can overwrite a newer row; ~25 server readers; the browser write sites
+that end in the whole-desk fees-vouchers POST (for 5.1d); the `fee_voucher_write` / `fee_voucher_void`
+/ `fee_voucher_mark` contract on the real columns with the caller order; risks R1–R12. Ratchet
+`fee_whole_desk_push` = 12 (proved to fail at 13). **What it found that changes 5.1b.** (1) The header
+upsert in `replace_fee_desk_voucher_lines` is last-write-wins on **every** column including `voided_at`:
+any older copy (a browser tab, or a webhook/refund instance copy up to 45 s old) un-voids a receipt and
+the ledger trigger re-posts it — 5.1b should ship a "`voided_at` never returns to null" trigger first,
+which protects every old writer still running. (2) `fee_desk_open_dues` is rebuilt for the whole year
+from the **instance** copy, not from what was just written: proven stale for one family today
+(`RCV-00698`, 14 Oct, ₹1,800 still open in the cache; cause traced in code, not proven) — the
+director can refresh it with `POST /api/fees/rebuild-open-dues`; nothing rebuilds it when Masters,
+transport or adjustments change, so per-student maintenance in `fee_voucher_write` (3.2's dependency)
+needs the caller to pass recomputed rows. (3) Cashfree **registration** payments make an R-receipt
+that is never pushed (latent; 0 such payments in production). (4) Receipt numbers are minted from the
+instance copy — allocate them in the RPC. **Production frequency** (Supabase edge logs, 8–15 Oct):
+25 whole-desk pushes and 25 open-dues rebuilds for 28 receipts; ~324 whole-desk server reads a day
+(`ensureFeesHydratedServer` has no TTL/probe/dedupe). **Not done / not proven.** Cloud Run logs were
+not read (`gcloud` needs an interactive re-login), so the per-route split of the 25 pushes is not
+measured (the query is in the evidence file); the ~15 shared `lib` files that call `loadFees()` and
+are reachable from server code are listed, not traced call-by-call; `voidVoucher`'s side effects
+outside the fee tables (legacy desk book, admissions revert) are not traced; R9
+(`sis_merge_students` vs the append-only trigger) is read from the migrations, not tried.
+
 **5.2 Homework** (two wipes; whole-desk unversioned; `homeworkPost.server.ts:129-141` rebuilds
 the whole desk from the mirror): server writers (`homeworkPost.server.ts`, WhatsApp homework
 flows) first, then `HomeworkWorkspace`, then delete `homeworkPersistence.ts` /
@@ -1015,6 +1154,41 @@ write (client-clock comparison today), then `AttendanceWorkspace`. **5.4 Exams**
 term/class, marks per sheet; exam subjects linked by Masters subject id, not code. The remaining
 desks follow the five-step procedure; each PR names its files from the inventories in
 `evidence/write-path.md` (per-desk save table) and `evidence/hydration.md` (hydrate table).
+
+**Staff HR · Requests (ahead of 5.8, director's "fix now, separately", 15 Oct).** *(Built 15 Oct 2026,
+PR #657 — no migration.)* **Found** while seeding for PR #650: with `STAFF_HR_READ_FROM_DB` on,
+`staffRequests` was neither a staff_hr desk slice nor pushed to the `staff_hr_state` blob, so a
+request lived only in the browser that raised it (production, 15 Oct: blob 0 requests, last written
+5 Aug; no element in `staff_hr_desk_slices`; no other table holds them). Since 10 Oct that browser
+copy is page memory only (`browserStorage` purge, live), so every request raised since 5 Aug is
+**unrecoverable** — there is nothing on any server and nothing a new build can reach in a browser.
+**What exists.** Each request is one element of a new kernel-only list slice
+`staff_hr_desk_slices.staffRequests`, written by `POST /api/staff/requests` (raise — any member of
+staff, for themselves; the server sets id, staff id from the session, dates, `open` — and update —
+managers only, `canManageStaffLeave` with the server's saved roles, base = the element `_rev` the
+screen loaded) through `desk_slice_row_write` via `repo.writeSliceElement` (the 1.5 RPC: lock,
+`_rev`, `staff_hr_desk_sync_meta` bumped in the same transaction). Read by
+`GET /api/data/views/staff-requests` (handlers `lib/staffRequests.server.ts`, deps
+`lib/staffRequestsDeps.server.ts`: a `referenceCache` on erp_versions `staff_hr`; manager = all,
+others = own; 503 on a failed read, never empty; `versions` = built-from). `StaffRequestsPanel` reads
+it with `useErpQuery(…, {desk: "staff_hr"})` + `useStaffList()` for names (no `loadMasters`, no
+hydrate); a failed save shows the server's error and stays; a conflict refetches. The header
+WhatsApp panel's "Raise a request" posts to the route (no longer waits for the staff_hr hydrate).
+`createStaffRequestTicket` / `updateStaffRequestTicket` / `listStaffRequestsForStaff` deleted.
+`deskSliceRegistry` gains `kernelSlices` (counted in `row_count`, never carried by the whole-desk
+push or returned by the whole-desk read), so an old-build push neither drops requests nor is judged
+a shrink. No "send to the office" button: no local copy can exist on the new build. The staff app
+(Flutter) never raised these requests and calls no route for them — unaffected.
+**Proof.** `test:staff-requests` (15 checks; 5 mutations — view filter off, manager check off,
+base dropped, failed write reported ok, `kernelSlices` not counted — each red).
+`e2e/specs/staff-requests.spec.ts`: class teacher raises from the header panel, the principal's
+already-open Requests tab shows it without reload (8.5–18.2 s over four runs), resolves it, the teacher sees
+Resolved, the element is at `_rev` 2; a triage from an older copy gets 409 and the newer value.
+On the merge base fa637423 the first fails at "B sees it" (the teacher's screen said "Request
+filed"), the second at the route (404). An old-build whole-desk push carrying `staffRequests: []`
+left both stored requests and wrote `row_count` 3 = 1 leave type + 2 requests (local stack).
+**Not done.** The rest of staff HR (leave, balances, appraisals) is still the replica (5.8). No
+notification to the raiser when a request is resolved (as before). Not measured in production.
 
 ### Phase 6 — Delete the replica
 
@@ -1136,6 +1310,8 @@ stale tabs reload themselves). After 0.3, manual `deploy-online.sh` runs are not
   per-request costs.
 - `mobile-app.md` — every request each home screen fires; timers; the no-data-layer facts.
 - `propagation.md` — the hop-by-hop trace of a Masters edit; the picker-screen table.
+- `fees-inventory.md` — 5.1a: every server reader/writer of the fee desk, table counts, the
+  `fee_voucher_write` contract, the 5.1 risks.
 - `history.md` — the 98 fixes classified; recurrence; what is live.
 - `harness.md` — what the 455 tests can and cannot see; the guard inventory with line counts.
 - `production-measurements.md` — the numbers and the queries to re-measure.
