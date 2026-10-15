@@ -368,6 +368,7 @@ SELFTESTS=(
   test:concession-per-due
   test:concession-ground
   test:fee-backdate
+  test:month-groups
   test:receipt-auto-wa
   test:review-login
   test:desk-sync-status
@@ -556,6 +557,8 @@ SELFTESTS=(
   test:versions-route
   test:query-kernel
   test:reference-views
+  test:masters-bridge
+  test:staff-requests
   test:parent-api-scope
   # Added 2026-09-12, in CI's order, after the drift check below reported that
   # ci.yml had been running these for weeks while this script did not:

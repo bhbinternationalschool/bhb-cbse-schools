@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Check, ChevronDown, ChevronRight, CircleDashed, Clock, Eraser, Trash2 } from "lucide-react";
 import { RowActionMenu } from "@/components/ui/erp-grid";
-import { loadMasters } from "@/lib/masters";
+import { useMasters } from "@/lib/data/client/hooks";
 import { Sparkles } from "lucide-react";
 import type { LessonPlanDraft, LessonPlanLanguage } from "@/lib/lessonPlanAi";
 import {
@@ -111,6 +111,8 @@ export function SyllabusPlanPanel(props: {
     subjectId,
     canEdit,
   } = props;
+  // Subject names only — in the full answer and in a teacher's teaching subset alike.
+  const subjects = useMasters().data?.masters.subjects;
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   /** Show every chapter's topics at once — the default after a fill. */
@@ -147,9 +149,8 @@ export function SyllabusPlanPanel(props: {
    */
   const subjectCoverage = useMemo(() => {
     if (!classId) return [];
-    const masters = loadMasters();
     const name = (id: string) =>
-      (masters.subjects ?? []).find((x) => x.id === id)?.nameEn || "Subject";
+      (subjects ?? []).find((x) => x.id === id)?.nameEn || "Subject";
     const ids = [
       ...new Set(
         (state.units ?? [])
@@ -164,7 +165,7 @@ export function SyllabusPlanPanel(props: {
       })
       .filter((row) => row.cover.total > 0)
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [state, ay, classId]);
+  }, [state, ay, classId, subjects]);
 
   function toggle(id: string) {
     setExpanded((prev) => {

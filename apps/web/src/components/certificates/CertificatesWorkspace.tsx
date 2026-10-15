@@ -65,6 +65,7 @@ import {
 import type { HoldCode } from "@/lib/types";
 import { useHoldDecisions } from "@/lib/useHoldDecisions";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { MonthGroupedList, useMonthGroups } from "@/components/ui/month-grouped-rows";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -123,6 +124,13 @@ export function CertificatesWorkspace() {
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
   const [issues, setIssues] = useState<CertificateIssue[]>([]);
+  // Every issue, folded by the IST month it was issued (newest open) — the
+  // list used to stop at the latest 25.
+  const issueMonths = useMonthGroups({
+    rows: issues,
+    dateOf: (iss) => iss.issuedOn,
+    storageKey: "certificates.issues",
+  });
   const [query, setQuery] = useState("");
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
@@ -1348,70 +1356,74 @@ export function CertificatesWorkspace() {
               </p>
             ) : (
               <ErpTableShell className="mt-2">
-                <ul className="max-h-72 divide-y divide-[var(--border)] overflow-y-auto">
-                {issues.slice(0, 25).map((iss) => {
-                  const voided = !!iss.voidedAt;
-                  return (
-                    <li
-                      key={iss.id}
-                      className={`flex flex-wrap items-start justify-between gap-2 px-4 py-2.5 ${
-                        voided ? "opacity-55" : ""
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        className="min-w-0 flex-1 text-left"
-                        onClick={() => setPreviewId(iss.id)}
+                <div className="max-h-72 overflow-y-auto">
+                <MonthGroupedList
+                  month={issueMonths}
+                  rowKey={(iss) => iss.id}
+                  countLabel={(n) => `${n} ${n === 1 ? "certificate" : "certificates"}`}
+                  renderItem={(iss) => {
+                    const voided = !!iss.voidedAt;
+                    return (
+                      <li
+                        className={`flex flex-wrap items-start justify-between gap-2 px-4 py-2.5 ${
+                          voided ? "opacity-55" : ""
+                        }`}
                       >
-                        <div className="text-sm font-semibold text-[var(--brand-deep)]">
-                          {iss.certNo}
-                          {voided ? " · void" : ""}
-                          {iss.aiGenerated ? (
-                            <span
-                              className="ml-1.5 rounded-full bg-[rgba(197,160,40,0.15)] px-1.5 py-0.5 text-[9px] font-semibold text-[#8a6400]"
-                              title="Initial text drafted by the AI assistant, reviewed before issue — internal note, never printed on the certificate"
-                            >
-                              AI-drafted
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="text-[11px] text-[var(--muted)]">
-                          {certificateKindLabel(iss.kind)} · {iss.studentName} ·{" "}
-                          {formatCertDate(iss.issuedOn)}
-                        </div>
-                      </button>
-                      <div className="flex gap-1.5">
                         <button
                           type="button"
-                          className="text-[11px] font-semibold text-[var(--brand-mid)]"
-                          onClick={() => {
-                            setPreviewId(iss.id);
-                            if (isUidaiFormKind(iss.kind)) {
-                              window.open(uidaiFormUrl(iss.studentId, iss.issuedOn), "_blank", "noopener");
-                              return;
-                            }
-                            window.setTimeout(
-                              () => printCertificate(iss.id),
-                              100,
-                            );
-                          }}
+                          className="min-w-0 flex-1 text-left"
+                          onClick={() => setPreviewId(iss.id)}
                         >
-                          Print
+                          <div className="text-sm font-semibold text-[var(--brand-deep)]">
+                            {iss.certNo}
+                            {voided ? " · void" : ""}
+                            {iss.aiGenerated ? (
+                              <span
+                                className="ml-1.5 rounded-full bg-[rgba(197,160,40,0.15)] px-1.5 py-0.5 text-[9px] font-semibold text-[#8a6400]"
+                                title="Initial text drafted by the AI assistant, reviewed before issue — internal note, never printed on the certificate"
+                              >
+                                AI-drafted
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="text-[11px] text-[var(--muted)]">
+                            {certificateKindLabel(iss.kind)} · {iss.studentName} ·{" "}
+                            {formatCertDate(iss.issuedOn)}
+                          </div>
                         </button>
-                        {!voided ? (
+                        <div className="flex gap-1.5">
                           <button
                             type="button"
-                            className="text-[11px] font-semibold text-[var(--danger)]"
-                            onClick={() => setVoidTargetId(iss.id)}
+                            className="text-[11px] font-semibold text-[var(--brand-mid)]"
+                            onClick={() => {
+                              setPreviewId(iss.id);
+                              if (isUidaiFormKind(iss.kind)) {
+                                window.open(uidaiFormUrl(iss.studentId, iss.issuedOn), "_blank", "noopener");
+                                return;
+                              }
+                              window.setTimeout(
+                                () => printCertificate(iss.id),
+                                100,
+                              );
+                            }}
                           >
-                            Void
+                            Print
                           </button>
-                        ) : null}
-                      </div>
-                    </li>
-                  );
-                })}
-                </ul>
+                          {!voided ? (
+                            <button
+                              type="button"
+                              className="text-[11px] font-semibold text-[var(--danger)]"
+                              onClick={() => setVoidTargetId(iss.id)}
+                            >
+                              Void
+                            </button>
+                          ) : null}
+                        </div>
+                      </li>
+                    );
+                  }}
+                />
+                </div>
               </ErpTableShell>
             )}
           </div>

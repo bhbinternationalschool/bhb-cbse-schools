@@ -339,7 +339,7 @@ export function ErpTableShell({
             compact
             title={exportTitle || exportAs.replace(/[_-]+/g, " ")}
             fileBaseName={exportAs}
-            columns={domTableColumns(shellRef)}
+            columns={() => domTableColumns(shellRef)}
             rows={() => domTableRows(shellRef)}
           />
         </div>
@@ -364,7 +364,10 @@ function domHeaders(ref: { current: HTMLDivElement | null }) {
     .map((c) => ({ key: `c${c.index}`, header: c.header, index: c.index }));
 }
 function domTableColumns(ref: { current: HTMLDivElement | null }) {
-  // Resolved when the menu opens, so an empty first paint costs nothing.
+  // Read when an export is chosen. It used to be read while the shell
+  // rendered, when the ref is still empty on a first render — a table whose
+  // screen did not re-render after mounting exported rows with no columns
+  // (blank CSV / Excel). Found 15 Oct 2026 by the month-groups export test.
   return domHeaders(ref).map(({ key, header }) => ({ key, header }));
 }
 function domTableRows(ref: { current: HTMLDivElement | null }) {
@@ -372,15 +375,26 @@ function domTableRows(ref: { current: HTMLDivElement | null }) {
   if (!table) return [];
   const cols = domHeaders(ref);
   const out: Record<string, string>[] = [];
-  for (const tr of Array.from(table.querySelectorAll("tbody tr"))) {
-    const tds = Array.from(tr.querySelectorAll("td"));
-    if (tds.length === 0 || (tds.length === 1 && tds[0]!.hasAttribute("colspan"))) continue;
-    const row: Record<string, string> = {};
-    for (const c of cols) {
-      const td = tds[c.index] as HTMLElement | undefined;
-      row[c.key] = td ? (td.innerText || td.textContent || "").replace(/\s+/g, " ").trim() : "";
+  // Month-grouped tables (ui/month-grouped-rows.tsx) keep folded months
+  // mounted but `hidden`. Un-hide them for the instant of the read so a
+  // folded month exports exactly as an open one would, then fold them back
+  // in the same task — nothing paints in between.
+  const folded = Array.from(table.querySelectorAll<HTMLElement>("tbody[data-month-rows][hidden]"));
+  for (const tb of folded) tb.hidden = false;
+  try {
+    for (const tr of Array.from(table.querySelectorAll("tbody tr"))) {
+      if (tr.hasAttribute("data-month-group")) continue;
+      const tds = Array.from(tr.querySelectorAll("td"));
+      if (tds.length === 0 || (tds.length === 1 && tds[0]!.hasAttribute("colspan"))) continue;
+      const row: Record<string, string> = {};
+      for (const c of cols) {
+        const td = tds[c.index] as HTMLElement | undefined;
+        row[c.key] = td ? (td.innerText || td.textContent || "").replace(/\s+/g, " ").trim() : "";
+      }
+      out.push(row);
     }
-    out.push(row);
+  } finally {
+    for (const tb of folded) tb.hidden = true;
   }
   return out;
 }

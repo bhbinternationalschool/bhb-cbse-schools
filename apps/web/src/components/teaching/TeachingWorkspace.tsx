@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAccessData } from "@/components/shell/useAccessData";
 import { urlAsksForTab } from "@/lib/nucleusHandoff";
 import { BookMarked } from "lucide-react";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   classSectionLabel,
   loadTimetable,
@@ -89,7 +91,7 @@ export function TeachingWorkspace() {
   useEffect(() => {
     if (urlAsksForTab(window.location.search, "nucleus")) setTab("nucleus");
   }, []);
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [timetable, setTimetable] = useState<TimetableState | null>(null);
   const [state, setState] = useState<TeachingState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -105,7 +107,6 @@ export function TeachingWorkspace() {
   const ay = session.academicYearCode || DEFAULT_AY;
 
   const refresh = useCallback(() => {
-    setMasters(loadMasters());
     setTimetable(loadTimetable());
     setState(loadTeaching());
   }, []);
@@ -503,6 +504,9 @@ export function TeachingWorkspace() {
   /* Render                                                           */
   /* ---------------------------------------------------------------- */
 
+  if (mastersError) {
+    return <QueryError what="the school's classes, subjects and staff" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters || !timetable || !state) {
     return <p className="text-sm text-[var(--muted)]">Loading teaching desk…</p>;
   }

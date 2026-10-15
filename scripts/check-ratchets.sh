@@ -25,6 +25,46 @@ code_grep() {
     | wc -l
 }
 
+# ── Data-layer rebuild ratchets (COMMAND.md step 1.6) ──────────────────────
+#
+# These count CALLS of the replica's loaders, so they need three things
+# code_grep above does not give:
+#
+#   * an identifier boundary — `(^|[^A-Za-z0-9_$])name\(` — so `loadMasters(`
+#     does not also match `loadMastersSafe(`/`reloadMasters(`, and `loadSis(`
+#     does not match `loadSisForStaff(` (both suffixed names exist today; the
+#     `\(` straight after the name already excludes the suffixed ones, the
+#     boundary excludes any prefixed one). A member call such as
+#     `mod.loadMasters(` (dynamic import) IS a call and IS counted;
+#   * only .ts/.tsx, with `*.selftest.ts` excluded — the self-tests mostly
+#     quote these names inside text-grep assertions, which are not calls;
+#   * definition lines (`function loadMasters(`) excluded.
+#
+# Comment lines (`//`, `*`, `/*`, `#` at line start) are dropped as in code_grep.
+# The pattern passed in must not contain a capturing group the caller relies on.
+DL_BOUND='(^|[^A-Za-z0-9_$])'
+
+# grep -n lines of real code matching $1 under $2.., selftests/definitions out.
+dl_code_lines() {
+  local pattern="$1" defname="$2"
+  shift 2
+  grep -rnE --include='*.ts' --include='*.tsx' "$pattern" "$@" 2>/dev/null \
+    | grep -vE '^[^:]+\.selftest\.tsx?:' \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//|/\*|#)' \
+    | grep -vE "^[^:]+:[0-9]+:.*function[[:space:]]+${defname}[[:space:]]*[(<]"
+}
+
+# FILE count: distinct files with at least one code line matching.
+dl_files() {
+  dl_code_lines "$@" | sed -E 's/^([^:]+):[0-9]+:.*$/\1/' | sort -u | wc -l
+}
+
+# OCCURRENCE count: every match on every code line (two calls on one line = 2).
+dl_occurrences() {
+  local pattern="$1"
+  dl_code_lines "$@" | sed -E 's/^[^:]+:[0-9]+://' | grep -oE "$pattern" | wc -l
+}
+
 # Each metric's current count. Kept here rather than in the budget file so
 # the pattern and its rationale live next to each other.
 count_metric() {
@@ -160,6 +200,86 @@ count_metric() {
       # filenames, which have no spaces.
       ls "$ROOT/supabase/migrations" 2>/dev/null \
         | grep '\.sql$' | sed 's/_.*//' | sort | uniq -d | wc -l ;;
+    load_masters_screen_files)
+      # FILES under components/ + app/(erp)/ that call loadMasters(). Each is a
+      # screen reading the browser replica; Phase 2 moves them to useMasters().
+      dl_files "${DL_BOUND}loadMasters\(" loadMasters "$SRC/components" "$SRC/app/(erp)" ;;
+    load_sis_screen_files)
+      # FILES under components/ + app/(erp)/ that call loadSis() (not
+      # loadSisForStaff). Phase 3 moves them to the sis.students collection.
+      dl_files "${DL_BOUND}loadSis\(" loadSis "$SRC/components" "$SRC/app/(erp)" ;;
+    ensure_hydrated_component_files)
+      # FILES under components/ that call any ensure<Desk>Hydrated(). The name
+      # must end in exactly `Hydrated(` (ensure*HydratedServer is server-only
+      # and lives in lib/ and app/api/, not here).
+      dl_files "${DL_BOUND}ensure[A-Za-z]+Hydrated\(" 'ensure[A-Za-z]+Hydrated' "$SRC/components" ;;
+    read_cache_files)
+      # FILES anywhere in src that call readCache() (browserStorage.ts's
+      # whole-desk localStorage read). The definition line itself is excluded;
+      # browserStorage.ts still counts if it calls readCache internally.
+      dl_files "${DL_BOUND}readCache\(" readCache "$SRC" ;;
+    selftest_readfilesync_files)
+      # *.selftest.ts FILES that call readFileSync — i.e. text-grep "tests"
+      # that read source as a string instead of running behaviour (R7: lint,
+      # not proof). Counted per FILE; comment lines ignored.
+      find "$SRC" \( -name '*.selftest.ts' -o -name '*.selftest.tsx' \) -print0 2>/dev/null \
+        | xargs -0 grep -nE "${DL_BOUND}readFileSync\(" /dev/null 2>/dev/null \
+        | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//|/\*|#)' \
+        | sed -E 's/^([^:]+):[0-9]+:.*$/\1/' | sort -u | wc -l ;;
+    v1_school_mirror_files)
+      # FILES under app/api/v1 (the mobile API) that call
+      # ensureSchoolMirrorHydrated() — every one rebuilds the whole school
+      # replica inside a Cloud Run instance before answering. Phase 4 removes.
+      dl_files "${DL_BOUND}ensureSchoolMirrorHydrated\(" ensureSchoolMirrorHydrated "$SRC/app/api/v1" ;;
+    load_masters_calls_src)
+      # OCCURRENCES of loadMasters( in ALL of src (selftests and the definition
+      # excluded). The Phase 2.3b gate.
+      dl_occurrences "${DL_BOUND}loadMasters\(" loadMasters "$SRC" ;;
+    load_sis_calls_src)
+      # OCCURRENCES of loadSis( in ALL of src (selftests and the definition
+      # excluded; loadSisForStaff not counted). The Phase 3.4 gate.
+      dl_occurrences "${DL_BOUND}loadSis\(" loadSis "$SRC" ;;
+    nonbrowser_desk_get)
+      # Data-layer step 3.0 (docs/data-layer-rebuild/COMMAND.md). Phase 3
+      # gates the bulk desk GETs (/api/school-data/*, /api/data/*) to
+      # per-screen browser use and Phase 6 deletes them, so nothing that is
+      # NOT a signed-in browser tab may come to depend on them. On
+      # 15 Oct 2026 the count was 0 everywhere a non-browser caller lives:
+      # the Flutter app (calls /api/v1/* only), the office robot extension
+      # (/api/v1/udise|propel/robot/* only), every script, CI workflow and
+      # deploy file (Cloud Scheduler jobs are created by
+      # scripts/setup-cloud-scheduler.sh and hit POST */tick routes), the
+      # nightly BigQuery sync (reads Postgres directly through
+      # postgresPool, never HTTP), and server code fetching its own
+      # routes. Production logs agreed: no non-browser request of those
+      # paths in the 30 days to 15 Oct. A new caller that needs a bulk read
+      # gets an explicit service-only export route, not a browser desk route.
+      # scripts/e2e* and apps/web/e2e are the local test stack, not callers.
+      {
+        grep -rnE 'api/(school-data|data)/' \
+          "$ROOT/cbse_school_mobile/lib" "$ROOT/extensions" "$ROOT/scripts" \
+          "$ROOT/apps/web/scripts" "$ROOT/.github/workflows" "$ROOT/deploy" \
+          "$ROOT"/cloudbuild*.yaml "$SRC"/lib/bigQuery*.ts \
+          "$SRC/app/api/analytics" 2>/dev/null \
+          | grep -vE '/scripts/(e2e|check-ratchets\.sh|ratchets\.txt)'
+        grep -rnE 'fetch\([^)]*api/(school-data|data)/' "$SRC/app/api" 2>/dev/null
+        grep -rnE 'fetch\([^)]*api/(school-data|data)/' --include='*.server.ts' "$SRC" 2>/dev/null
+      } | wc -l ;;
+    fee_whole_desk_push)
+      # Data-layer step 5.1a (docs/data-layer-rebuild/evidence/fees-inventory.md).
+      # Every call that writes the WHOLE fee desk from a copy: the instance's
+      # (pushFeesRemoteServer(loadFees()) after a webhook, the staff app's
+      # collect, refunds, the bulk tools), the browser's (pushFeeDeskToDb from
+      # the fees-vouchers POST) and the whole-year open-dues rebuild. Headers
+      # are last-write-wins there, voided_at included. 12 on 15 Oct 2026;
+      # 5.1b moves them to fee_voucher_write / fee_voucher_void, 5.1e leaves
+      # only the manual rebuild route.
+      # Call sites only: the three definitions and prose are not counted.
+      grep -rnE '\b(pushFeesRemoteServer|pushFeeDeskToDb|rebuildFeeOpenDuesCache)\(' "$SRC" \
+        --include='*.ts' --include='*.tsx' 2>/dev/null \
+        | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//|#)' \
+        | grep -vE 'selftest|\.test\.|export (async )?function' \
+        | wc -l ;;
     *)
       echo "-1" ;;
   esac
