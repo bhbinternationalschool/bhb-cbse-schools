@@ -1,37 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Image from "next/image";
 import {
-  computeHouseholdDues,
   formatConcessionDetailLine,
   formatInr,
   groupDuesByMonth,
-  loadFees,
   openFeeDues,
   type CollectionVoucher,
   type FeeDueLine,
 } from "@/lib/fees";
-import {
-  DEFAULT_AY,
-  currentAcademicYearCode,
-  loadMasters,
-} from "@/lib/masters";
-import {
-  classLabelForStudent,
-  formatParentDueHint,
-  householdReceipts,
-  parentOpenDueTotals,
-  householdForSession,
-} from "@/lib/parentPortal";
-import {
-  buildEnrichedPaymentSharePayload,
-  buildPaymentShareUrl,
-  createPaymentLink,
-} from "@/lib/payments";
-import { loadSis, type Household, type SisStudent } from "@/lib/sis";
-import { getPaymentGatewayConfig } from "@/lib/paymentGateway";
-import { StudentNameLabel } from "@/components/students/StudentAvatar";
+import { formatParentDueHint, parentOpenDueTotals } from "@/lib/parentPortal";
+import { ErpQueryError, ErpQueryProvider, useErpQuery } from "@/lib/data/client/hooks";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { FilterExportButtons } from "@/components/reports/FilterExportButtons";
 import { describeFilters } from "@/lib/reportExport";
@@ -39,64 +19,88 @@ import { TENANT } from "@/lib/types";
 
 type Tab = "dues" | "receipts";
 
-export function ParentFeesPortal({
+/** The page as GET /api/payments/parent-dues sends it (lib/parentFeeCheckout.server.ts). */
+type ParentFeesChild = {
+  id: string;
+  fullName: string;
+  admissionNo: string;
+  classLabel: string;
+  photoUrl: string | null;
+};
+type ParentFeesView = {
+  householdId: string;
+  guardianName: string;
+  academicYearCode: string;
+  children: { student: ParentFeesChild; dues: FeeDueLine[] }[];
+  receipts: CollectionVoucher[];
+};
+
+export const PARENT_FEES_PATH = "/api/payments/parent-dues";
+
+/** A body that is not the page is a failed read, never an empty family (R6). */
+function parseParentFees(data: unknown): ParentFeesView {
+  const v = data as Partial<ParentFeesView> | null;
+  if (
+    !v ||
+    typeof v.householdId !== "string" ||
+    !Array.isArray(v.children) ||
+    !Array.isArray(v.receipts) ||
+    v.children.some((c) => !c?.student?.id || !Array.isArray(c.dues))
+  ) {
+    throw new ErpQueryError(502, "The fee page came back incomplete");
+  }
+  return v as ParentFeesView;
+}
+
+/**
+ * The parent's fees and receipts. Everything on it is computed on the server
+ * for the signed-in parent's own household (GET /api/payments/parent-dues);
+ * nothing here reads the office's desks, which refuse a parent session —
+ * reading them is what showed every real parent "No household linked" and no
+ * dues at all until 15 Oct 2026.
+ */
+export function ParentFeesPortal(props: {
+  guardianDisplayName: string;
+  /** From the signed-in session; the server scopes to it on its own. */
+  householdId?: string;
+  onSignOut: () => void;
+}) {
+  // The parent layout has no AppShell (staff only), so the query client is
+  // provided here. No query on this page reads a desk, so it starts no poll.
+  return (
+    <ErpQueryProvider>
+      <ParentFeesPage {...props} />
+    </ErpQueryProvider>
+  );
+}
+
+function ParentFeesPage({
   guardianDisplayName,
   householdId,
   onSignOut,
 }: {
   guardianDisplayName: string;
-  /** From the signed-in session — the only household this page may show. */
   householdId?: string;
   onSignOut: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("dues");
-  const [household, setHousehold] = useState<Household | null>(null);
-  const [bundle, setBundle] = useState<
-    { student: SisStudent; dues: FeeDueLine[] }[]
-  >([]);
-  const [receipts, setReceipts] = useState<CollectionVoucher[]>([]);
+  const query = useErpQuery<ParentFeesView>(
+    ["parent-fees", householdId ?? ""],
+    PARENT_FEES_PATH,
+    { parse: parseParentFees },
+  );
+  const view = query.data ?? null;
+  const bundle = useMemo(() => view?.children ?? [], [view]);
+  const receipts = view?.receipts ?? [];
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [activeStudentId, setActiveStudentId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
-  const [tick, setTick] = useState(0);
 
   function flash(msg: string) {
     setNotice(msg);
     window.setTimeout(() => setNotice(null), 2800);
   }
-
-  function reload() {
-    const sis = loadSis();
-    const masters = loadMasters();
-    const fees = loadFees();
-    const hh = householdForSession(sis, householdId);
-    setHousehold(hh);
-    if (!hh) {
-      setBundle([]);
-      setReceipts([]);
-      return;
-    }
-    // Scoped to the running session. A promoted child keeps one student
-    // row per academic year, all of them still "active", so without this
-    // the parent sees each of their children listed once per year they
-    // have attended and a family balance several times the real one.
-    const rows = computeHouseholdDues(hh.id, sis, masters, fees, {
-      includeFuture: true,
-      includePaid: true,
-      academicYearCode: currentAcademicYearCode(masters),
-    });
-    setBundle(rows);
-    setReceipts(householdReceipts(hh.id, fees));
-    setActiveStudentId((prev) => {
-      if (prev && rows.some((r) => r.student.id === prev)) return prev;
-      return rows[0]?.student.id ?? null;
-    });
-  }
-
-  useEffect(() => {
-    reload();
-  }, [guardianDisplayName, householdId, tick]);
 
   const activeRow = useMemo(
     () => bundle.find((r) => r.student.id === activeStudentId) ?? bundle[0],
@@ -150,123 +154,95 @@ export function ParentFeesPortal({
     setSelected(new Set());
   }
 
+  /**
+   * Only due keys travel: the server recomputes the dues, makes the pay-link
+   * and attaches the gateway checkout (POST /api/payments/parent-checkout —
+   * the same flow the parent app uses); the webhook settles it like any
+   * link. With no gateway configured the parent lands on the link's own pay
+   * page. Nothing is ever marked paid from this browser.
+   */
   async function paySelected() {
-    if (!household || paying) return;
-    const dues = allOpen.filter((d) => selected.has(d.dueKey));
-    if (dues.length === 0) {
+    if (!view || paying) return;
+    const dueKeys = allOpen
+      .filter((d) => selected.has(d.dueKey))
+      .map((d) => d.dueKey);
+    if (dueKeys.length === 0) {
       flash("Select at least one open fee");
       return;
     }
     setPaying(true);
     try {
-      // Live gateway: the server recomputes the dues, creates the link, and
-      // attaches the hosted checkout. The demo instant-settle below must
-      // never run when real money is being collected.
-      if (getPaymentGatewayConfig().mode !== "demo") {
-        try {
-          const res = await fetch("/api/payments/parent-checkout", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              dueKeys: [...selected],
-              studentId: activeStudentId,
-            }),
-          });
-          const json = (await res.json().catch(() => ({}))) as {
-            ok?: boolean;
-            checkoutUrl?: string | null;
-            shareUrl?: string;
-            error?: string;
-          };
-          if (res.ok && json.ok && (json.checkoutUrl || json.shareUrl)) {
-            window.location.href = json.checkoutUrl || json.shareUrl!;
-            return;
-          }
-          flash(json.error || "Could not start payment — try again");
-        } catch {
-          flash("Could not start payment — check connection and try again");
-        }
-        return;
-      }
-
-      const masters = loadMasters();
-      const primary =
-        bundle.find((r) => r.student.id === activeStudentId)?.student ??
-        bundle[0]?.student;
-      if (!primary) {
-        flash("No student on this household");
-        return;
-      }
-      const created = createPaymentLink({
-        householdId: household.id,
-        studentId: primary.id,
-        studentName:
-          dues.length === 1
-            ? dues[0]!.studentId === primary.id
-              ? primary.fullName
-              : dues[0]!.label
-            : `${household.guardianName} · family`,
-        classLabel: classLabelForStudent(primary, masters),
-        dues,
-        createdBy: guardianDisplayName || "Parent",
-        note: "Parent portal",
+      const res = await fetch("/api/payments/parent-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dueKeys, studentId: activeRow?.student.id }),
       });
-      if (!created.ok) {
-        flash(created.error);
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        checkoutUrl?: string | null;
+        shareUrl?: string;
+        error?: string;
+      };
+      if (res.ok && json.ok && (json.checkoutUrl || json.shareUrl)) {
+        window.location.href = json.checkoutUrl || json.shareUrl!;
         return;
       }
-      try {
-        const res = await fetch("/api/payments/parent-pay", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            linkId: created.link.id,
-            code: created.link.code,
-            sendWhatsApp: true,
-          }),
-        });
-        const json = (await res.json().catch(() => ({}))) as {
-          error?: string;
-          receiptNo?: string;
-        };
-        if (res.ok && json.receiptNo) {
-          flash(
-            `Paid ${formatInr(created.link.amountPaise)} · ${json.receiptNo}`,
-          );
-          setSelected(new Set());
-          setTick((x) => x + 1);
-          setTab("receipts");
-          return;
-        }
-      } catch {
-        /* fall through */
-      }
-      const url = buildPaymentShareUrl(
-        buildEnrichedPaymentSharePayload(created.link, TENANT.shortName),
-      );
-      window.location.href = url;
+      flash(json.error || "Could not start payment — try again");
+    } catch {
+      flash("Could not start payment — check connection and try again");
     } finally {
       setPaying(false);
     }
   }
 
-  if (!household) {
+  if (query.isPending) {
     return (
-      <div className="mx-auto max-w-lg px-4 py-12 text-center md:max-w-2xl lg:max-w-3xl">
-        <p className="text-sm text-[var(--muted)]">
-          No household linked for this parent demo. Open staff portal and check
-          SIS households.
-        </p>
-        <button
-          type="button"
-          className="mt-4 text-sm underline"
-          onClick={onSignOut}
-        >
-          Sign out
-        </button>
+      <div
+        className="mx-auto max-w-lg px-4 py-12 text-center md:max-w-2xl lg:max-w-3xl"
+        role="status"
+      >
+        <p className="text-sm text-[var(--muted)]">Loading your fees…</p>
       </div>
     );
   }
+
+  if (!view) {
+    // A failed read. Never "no household" and never ₹0: the family's dues are
+    // unknown, so the page says so and offers to ask again.
+    return (
+      <div
+        className="mx-auto max-w-lg px-4 py-12 text-center md:max-w-2xl lg:max-w-3xl"
+        role="alert"
+        data-testid="parent-fees-error"
+      >
+        <p className="text-base font-semibold text-[var(--brand-deep)]">
+          Could not load your fees
+        </p>
+        <p className="mt-1 text-sm text-[var(--muted)]">
+          {query.error?.message || "Please check your connection."}
+        </p>
+        <div className="mt-4 flex items-center justify-center gap-3">
+          <button
+            type="button"
+            className="btn-accent rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-40"
+            disabled={query.isFetching}
+            onClick={() => void query.refetch()}
+          >
+            {query.isFetching ? "Trying…" : "Try again"}
+          </button>
+          <button
+            type="button"
+            className="text-sm underline"
+            onClick={onSignOut}
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const household = { guardianName: view.guardianName || guardianDisplayName };
 
   return (
     <div className="mx-auto flex min-h-screen max-w-lg flex-col pb-28 md:max-w-2xl lg:max-w-3xl">
@@ -356,6 +332,8 @@ export function ParentFeesPortal({
                     <button
                       key={row.student.id}
                       type="button"
+                      data-student-id={row.student.id}
+                      aria-pressed={on}
                       onClick={() => setActiveStudentId(row.student.id)}
                       className={`shrink-0 rounded-xl border px-3 py-2 text-left ${
                         on
@@ -381,7 +359,7 @@ export function ParentFeesPortal({
                 subtitle={`${TENANT.shortName} · ${household.guardianName}`}
                 filterNote={describeFilters([
                   activeRow
-                    ? `${activeRow.student.fullName} · ${classLabelForStudent(activeRow.student)}`
+                    ? `${activeRow.student.fullName} · ${activeRow.student.classLabel}`
                     : "Household",
                   "Open + paid lines on card",
                 ])}
@@ -430,11 +408,11 @@ export function ParentFeesPortal({
                   <div>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <h2 className="text-base font-semibold text-[var(--brand-deep)]">
-                        <StudentNameLabel student={activeRow.student} />
+                        {activeRow.student.fullName}
                       </h2>
                     </div>
                     <p className="mt-0.5 text-[11px] text-[var(--muted)]">
-                      {classLabelForStudent(activeRow.student)} · Adm{" "}
+                      {activeRow.student.classLabel} · Adm{" "}
                       {activeRow.student.admissionNo || "—"}
                     </p>
                   </div>
@@ -473,7 +451,12 @@ export function ParentFeesPortal({
                         const paid = d.balancePaise <= 0 && d.paidPaise > 0;
                         const checked = selected.has(d.dueKey);
                         return (
-                          <li key={d.dueKey}>
+                          <li
+                            key={d.dueKey}
+                            data-due-kind={d.kind}
+                            data-due-month={g.monthKey}
+                            data-paid={paid ? "1" : "0"}
+                          >
                             <label
                               className={`flex cursor-pointer items-start gap-2.5 px-3 py-2.5 ${
                                 paid ? "bg-[rgba(15,122,76,0.05)]" : ""
