@@ -2,7 +2,8 @@
 // ratchet-allow: grids_without_row_menu — a staff member's own advances, read-only by design
 
 import { useEffect, useMemo, useState } from "react";
-import { loadMasters } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   approvedPayslipsForStaff,
   formatInr,
@@ -52,8 +53,9 @@ export function StaffMyPayslips({ staffId }: { staffId: string }) {
     return slips.filter((s) => s.run.month === month);
   }, [slips, month]);
 
-  // Re-read when the slips refresh, so a Masters edit reaches the letterhead.
-  const masters = useMemo(() => loadMasters(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The letterhead's school profile: the server's Masters (a profile edit
+  // reaches an open screen through the versions poll).
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
 
   useEffect(() => {
     setTick((n) => n + 1);
@@ -74,6 +76,13 @@ export function StaffMyPayslips({ staffId }: { staffId: string }) {
         slip will appear here.
       </p>
     );
+  }
+
+  if (mastersError) {
+    return <QueryError what="the school profile for the payslip letterhead" error={mastersError} retry={retryMasters} />;
+  }
+  if (!masters) {
+    return <p className="text-sm text-[var(--muted)]">Loading payslips…</p>;
   }
 
   const latest = slips[0];
