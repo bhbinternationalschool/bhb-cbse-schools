@@ -7,6 +7,7 @@ import type { ApiAuthContext } from "@/lib/api/v1/auth";
 import { ApiError } from "@/lib/api/v1/errors";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import { childrenOnRoll } from "@/lib/appPopups";
+import { hasPermission } from "@/lib/rbac";
 import type { MastersState } from "@/lib/masters";
 import type { GalleryAlbum } from "@/lib/schoolComms";
 import { albumToRow, photoToRow, rowToAlbum, rowToPhoto, touchCommsMeta } from "@/lib/schoolCommsNormalized.server";
@@ -15,6 +16,10 @@ import type { SisStudent } from "@/lib/sis";
 import {
   CLASS_GALLERY_BUCKET,
   CLASS_GALLERY_TYPES,
+  SCHOOL_LABEL,
+  SCHOOL_SECTION,
+  albumSectionKey,
+  officeGalleryFilePath,
   classGalleryFileProblem,
   classGalleryPath,
   classGalleryType,
@@ -28,23 +33,64 @@ import {
 const id = (prefix: string) => `${prefix}_${randomBytes(6).toString("base64url")}`;
 
 export function classLabelFor(masters: MastersState, section: string): string {
+  if (section === SCHOOL_SECTION) return SCHOOL_LABEL;
   const [classId, sectionId] = section.split("|");
   const c = masters.classes.find((x) => x.id === classId);
   const s = masters.sections.find((x) => x.id === sectionId);
   return `Class ${[c?.name || classId, s?.name || ""].filter(Boolean).join("-")}`;
 }
 
-/** The sections this staff member may post to: their class(es) as class teacher; leadership any. */
+/**
+ * Who runs the gallery for the whole school (15 Oct 2026): a school-wide
+ * session (principal, owner, admin, office — lib/api/v1/staffScope) that
+ * also holds the Gallery module's create or edit grant (Masters → Roles; the
+ * web ERP's Gallery desk asks for the same). They post to any class and to
+ * the whole school, and decide on what the AI check held.
+ */
+export async function isGalleryLeader(ctx: ApiAuthContext): Promise<boolean> {
+  const scope = await staffSectionScope(ctx);
+  if (!scope.unrestricted) return false;
+  return (["create", "edit"] as const).some((a) => hasPermission(ctx.session, ctx.masters, "gallery", a, ctx.rbac));
+}
+
+/** Every live section of the school, in class order (for the gallery leader's picker). */
+function allSections(masters: MastersState): string[] {
+  const order = new Map(masters.classes.map((c, i) => [c.id, [c.sortOrder ?? i, i] as const]));
+  const live = new Set(masters.classes.filter((c) => c.isActive !== false).map((c) => c.id));
+  return masters.sections
+    .filter((s) => s.isActive !== false && live.has(s.classId))
+    .sort((a, b) => {
+      const x = order.get(a.classId) ?? [0, 0];
+      const y = order.get(b.classId) ?? [0, 0];
+      return x[0] - y[0] || x[1] - y[1] || a.name.localeCompare(b.name);
+    })
+    .map((s) => `${s.classId}|${s.id}`);
+}
+
+/**
+ * The sections this staff member may post to: their class(es) as class
+ * teacher; the gallery leader the whole school and every class too (their
+ * own classes first). `unrestricted` = the gallery leader.
+ */
 export async function postableSections(ctx: ApiAuthContext): Promise<{ unrestricted: boolean; sections: string[] }> {
   const scope = await staffSectionScope(ctx);
-  return { unrestricted: scope.unrestricted, sections: [...scope.classTeacherOf] };
+  const own = [...scope.classTeacherOf];
+  if (!(await isGalleryLeader(ctx))) return { unrestricted: false, sections: own };
+  const rest = allSections(ctx.masters).filter((s) => !own.includes(s));
+  return { unrestricted: true, sections: [...own, SCHOOL_SECTION, ...rest] };
 }
 
 export async function assertMaySection(ctx: ApiAuthContext, section: string): Promise<void> {
   const p = await postableSections(ctx);
-  if (!p.unrestricted && !p.sections.includes(section)) {
-    throw new ApiError("forbidden", "Only the class teacher of this class can add to its gallery.", 403);
-  }
+  if (p.sections.includes(section)) return;
+  if (p.unrestricted && section !== SCHOOL_SECTION && /^[^|]+\|[^|]+$/.test(section)) return;
+  throw new ApiError(
+    "forbidden",
+    section === SCHOOL_SECTION
+      ? "Only the principal and the office post to the whole school's gallery."
+      : "Only the class teacher of this class can add to its gallery.",
+    403,
+  );
 }
 
 async function db() {
@@ -56,13 +102,11 @@ async function db() {
 /** A class's events (albums), newest first, with how many items each holds. */
 export async function listClassEvents(section: string) {
   const { sb, tenantId } = await db();
-  const { data, error } = await sb
-    .from("school_comms_desk_albums")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .contains("section_ids", [section])
-    .order("created_at", { ascending: false })
-    .limit(200);
+  const base = sb.from("school_comms_desk_albums").select("*").eq("tenant_id", tenantId);
+  // The whole school's albums are the ones with no sections — the office's
+  // web albums among them, so the app adds to those too.
+  const scoped = section === SCHOOL_SECTION ? base.eq("section_ids", "{}") : base.contains("section_ids", [section]);
+  const { data, error } = await scoped.order("created_at", { ascending: false }).limit(200);
   if (error) throw new ApiError("server_error", "Could not read the class gallery — try again", 503);
   const albums = (data ?? []).map((r) => rowToAlbum(r as Record<string, unknown>));
   type Count = { photos: number; videos: number; checking: number; held: number; cover: string };
@@ -131,8 +175,8 @@ export async function ensureClassEvent(opts: {
     createdAt: now,
     createdBy: opts.by,
     updatedAt: now,
-    sectionIds: [opts.section],
-    classLabel: opts.classLabel,
+    sectionIds: opts.section === SCHOOL_SECTION ? [] : [opts.section],
+    classLabel: opts.section === SCHOOL_SECTION ? "" : opts.classLabel,
   };
   const { error } = await sb.from("school_comms_desk_albums").insert(albumToRow(tenantId, album));
   if (error) throw new ApiError("server_error", "Could not create the event — try again", 503);
@@ -145,9 +189,7 @@ async function albumOf(albumId: string): Promise<GalleryAlbum> {
   const { data, error } = await sb.from("school_comms_desk_albums").select("*").eq("tenant_id", tenantId).eq("id", albumId).maybeSingle();
   if (error) throw new ApiError("server_error", "Could not read the event — try again", 503);
   if (!data) throw new ApiError("not_found", "Event not found", 404);
-  const album = rowToAlbum(data as Record<string, unknown>);
-  if (!album.sectionIds?.length) throw new ApiError("bad_request", "This is not a class gallery event", 400);
-  return album;
+  return rowToAlbum(data as Record<string, unknown>);
 }
 
 /**
@@ -157,12 +199,12 @@ async function albumOf(albumId: string): Promise<GalleryAlbum> {
  */
 export async function startClassUpload(ctx: ApiAuthContext, opts: { albumId: string; fileName: string; contentType: string; bytes: number }) {
   const album = await albumOf(opts.albumId);
-  await assertMaySection(ctx, album.sectionIds![0]!);
+  await assertMaySection(ctx, albumSectionKey(album));
   const type = classGalleryType(opts.contentType, opts.fileName);
   const problem = classGalleryFileProblem(type, opts.bytes);
   if (problem) throw new ApiError("bad_request", problem, 400);
   const photoId = id("pho");
-  const path = classGalleryPath(album.sectionIds![0]!, album.id, photoId, CLASS_GALLERY_TYPES[type]!.ext);
+  const path = classGalleryPath(albumSectionKey(album), album.id, photoId, CLASS_GALLERY_TYPES[type]!.ext);
   const { sb } = await db();
   const { data, error } = await sb.storage.from(CLASS_GALLERY_BUCKET).createSignedUploadUrl(path);
   if (error || !data) throw new ApiError("server_error", "Could not start the upload — try again", 503);
@@ -181,10 +223,10 @@ export async function finishClassUpload(
   deadline: number,
 ) {
   const album = await albumOf(opts.albumId);
-  await assertMaySection(ctx, album.sectionIds![0]!);
+  await assertMaySection(ctx, albumSectionKey(album));
   // Only the path this album would have issued — never one the phone made up.
   const ext = opts.path.split(".").pop() || "";
-  if (opts.path !== classGalleryPath(album.sectionIds![0]!, album.id, opts.photoId, ext)) {
+  if (opts.path !== classGalleryPath(albumSectionKey(album), album.id, opts.photoId, ext)) {
     throw new ApiError("bad_request", "That upload does not belong to this event.", 400);
   }
   const type = Object.entries(CLASS_GALLERY_TYPES).find(([, t]) => t.ext === ext)?.[0] ?? "";
@@ -230,8 +272,12 @@ export function parentSections(householdStudents: SisStudent[], sessionAy: strin
  */
 export async function readClassMedia(photoId: string): Promise<{
   path: string;
+  /** The bucket `path` is in: class-gallery, or school-files for an office upload on the web ERP. */
+  bucket: string;
   url: string;
   sectionIds: string[];
+  /** The album is published (parents never see a draft's items). */
+  albumPublished: boolean;
   reviewStatus: ReviewStatus;
   mediaKind: "photo" | "video";
   /** Set once the bucket copy is gone: Drive serves it. */
@@ -245,7 +291,7 @@ export async function readClassMedia(photoId: string): Promise<{
   const photo = rowToPhoto(p as Record<string, unknown>);
   const { data: a, error: ae } = await sb
     .from("school_comms_desk_albums")
-    .select("section_ids")
+    .select("section_ids, status")
     .eq("tenant_id", tenantId)
     .eq("id", photo.albumId)
     .maybeSingle();
@@ -261,20 +307,24 @@ export async function readClassMedia(photoId: string): Promise<{
       .maybeSingle();
     driveFileId = String((d as { drive_file_id?: string } | null)?.drive_file_id || "");
   }
+  // An office upload on the web ERP: a school-files file behind /api/file.
+  const officePath = photo.storagePath ? "" : officeGalleryFilePath(photo.url);
   return {
-    path: photo.storagePath || "",
+    path: photo.storagePath || officePath,
+    bucket: officePath ? "school-files" : CLASS_GALLERY_BUCKET,
     url: photo.url,
     reviewStatus: photo.reviewStatus ?? "ok",
     mediaKind: photo.mediaKind === "video" ? "video" : "photo",
     driveFileId,
     evicted: !!photo.storageEvicted,
+    albumPublished: (a as { status?: string } | null)?.status === "published",
     sectionIds: Array.isArray((a as { section_ids?: unknown } | null)?.section_ids) ? ((a as { section_ids: string[] }).section_ids) : [],
   };
 }
 
-export async function signedMediaUrl(path: string): Promise<string> {
+export async function signedMediaUrl(path: string, bucket: string = CLASS_GALLERY_BUCKET): Promise<string> {
   const { sb } = await db();
-  const { data, error } = await sb.storage.from(CLASS_GALLERY_BUCKET).createSignedUrl(path, 10 * 60);
+  const { data, error } = await sb.storage.from(bucket).createSignedUrl(path, 10 * 60);
   if (error || !data?.signedUrl) throw new ApiError("server_error", "Could not open the file — try again", 503);
   return data.signedUrl;
 }

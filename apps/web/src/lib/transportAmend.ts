@@ -34,6 +34,11 @@ export type TransportAmendCheck =
   | { ok: true; plan: TransportAmendPlan }
   | { ok: false; error: string };
 
+function monthAfter(periodKey: string): string {
+  const [y, m] = periodKey.split("-").map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+}
+
 function lastDayBefore(periodKey: string): string {
   const [y, m] = periodKey.split("-").map(Number);
   // Day 0 of month m is the last day of month m-1.
@@ -87,8 +92,18 @@ export function planTransportAmendment(input: {
   const paid = paidTransportMonths(input.dues);
   const firstUnpaid = firstUnpaidTransportMonth(input.dues);
 
-  // Nothing billed yet → the change is free to start now; nothing to protect.
-  const floor = firstUnpaid ?? input.currentMonth;
+  // Nothing owing → the change starts now — but never on or before a month
+  // already paid. "Nothing owing" used to be read as "nothing to protect":
+  // when a rider's assignment billed ₹0 (its stop id had been orphaned), no
+  // transport due existed at all, the floor fell to the current month, and a
+  // stop change on 14 Sep 2026 split Anvi Yadav's assignment from 1 Sep —
+  // over a September paid four days earlier. Paid months are now listed even
+  // when their assignment bills nothing (computeStudentDues), and the floor
+  // is the month after the last of them.
+  const afterPaid = paid.length ? monthAfter(paid[paid.length - 1]!) : "";
+  const floor =
+    firstUnpaid ??
+    (afterPaid > input.currentMonth ? afterPaid : input.currentMonth);
   const requested = (input.requestedMonth || "").slice(0, 7);
 
   if (requested && requested < floor) {

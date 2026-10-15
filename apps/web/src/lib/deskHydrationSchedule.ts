@@ -61,12 +61,15 @@ const ROUTE_IDS: Record<string, DeskHydrateId[]> = {
   admissions: ["admissions"],
   // The staff register applies approved leave and files leave (staff HR).
   attendance: ["attendance", "staffAttendance", "staffHr", "staff"],
-  exams: ["exams", "examPapers", "certificates", "attendance"],
+  // transport: fee holds on admit cards / results are decided from dues,
+  // and a dues figure without the transport desk leaves out every bus month.
+  exams: ["exams", "examPapers", "certificates", "attendance", "transport"],
   // Staff field apps (lead capture, calling, registration collect).
   field: ["admissions"],
-  events: ["fees", "payments"],
+  events: ["fees", "payments", "transport"],
   parent: ["fees", "payments"],
-  certificates: ["certificates"],
+  // A TC is held on dues, and dues include the bus.
+  certificates: ["certificates", "transport"],
   staff: ["staff", "staffHr", "staffAdvances", "staffAgreements", "staffAttendance", "salarySetup"],
   // Transport bills, links stops to fee lines and shows dues on the fleet.
   transport: ["transport", "fees", "payments"],
@@ -75,10 +78,11 @@ const ROUTE_IDS: Record<string, DeskHydrateId[]> = {
   // before its desk loads is refused (lib/deskLoadGuard). Roles &
   // permissions are a core desk, loaded first on every page.
   masters: ["salarySetup", "staffHr", "staff", "staffAttendance"],
-  students: ["fees", "payments", "attendance"],
+  // The profile's fee card and fee tab bill transport too (15 Oct 2026).
+  students: ["fees", "payments", "attendance", "transport"],
   comms: ["waTemplates", "erpChat", "staffChat", "automation"],
   payroll: ["staff", "staffHr", "staffAdvances", "salarySetup"],
-  reports: ["fees", "payments", "attendance", "exams"],
+  reports: ["fees", "payments", "attendance", "exams", "transport"],
   // Day close and fuel refills write the fee book and transport.
   accounts: ["fees", "payments", "transport"],
 };
