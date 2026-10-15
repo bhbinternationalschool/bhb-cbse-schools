@@ -24,10 +24,11 @@ export type ScreenMasters = {
  * Masters for a screen converted in data-layer 2.1: no mount-time page-copy
  * read, no 'bhb-masters-updated' listener, no ensureMastersHydrated —
  * a Masters change made anywhere reaches the open screen through the versions
- * poll (≤ 20 s + one read).
+ * poll (≤ 20 s + one read). `enabled: false` (a control not yet opened)
+ * makes no request; see useMasters.
  */
-export function useScreenMasters(): ScreenMasters {
-  const q = useMasters();
+export function useScreenMasters(opts: { enabled?: boolean } = {}): ScreenMasters {
+  const q = useMasters(opts);
   const access = useAccessData();
   const accessMasters = access.ready ? access.masters : null;
   // useAccessData re-reads its copy on every desk event, so its identity

@@ -75,4 +75,5 @@ concession-grants-closed-2027-03-31.json
 apps/web/e2e/report/
 apps/web/e2e/test-results/
 apps/web/e2e/month-groups-shots/
+apps/web/e2e/transport-paid-shots/
 apps/web/e2e/scoreboard.json

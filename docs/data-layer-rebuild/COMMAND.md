@@ -934,6 +934,51 @@ read-time normalisation — not audited field by field beyond the fee keys above
 fee records" toast on /students (fees desk 403) is pre-existing and untouched. Upgrade's "(no matching group
 — keep current)" hint is wrong on main too (a null resolve sets the fee group to null) — not changed here.
 CI scoreboard: see the PR.
+*(2.1c built 15 Oct 2026, PR #660.)* **What exists.** `grep -rl 'loadMasters(' components/staff` lists 14
+files; 10 no longer call it. **`useStaffList()`** (the 1.4 directory view — code, name, status, department,
+designation, links; no phone/Aadhaar/salary) where a panel only shows or picks staff: `StaffAppraisalPanel`
+(the Staff picker and labels) and `StaffGeoAdminPanel` (the "n of N consented" count — computed ONCE at mount from
+the page copy before, so it could read "of 0" on a cold page; now "…" while unread and a retry link on failure).
+**`useScreenMasters()`** (2.1a's hook: server book + the access copy's full roster) where the panel hands a whole
+`MastersState` to lib helpers or resolves the signed-in person (by staffId/e-mail, which the directory does not
+carry), or reads fields the directory lacks (`category`): `StaffLeavePanel`, `StaffLeaveRulesPanel`,
+`StaffLeaveReportsPanel` (+ `StaffAttendanceReportsPanel` on /attendance), `StaffOutdoorDutyPanel`,
+`StaffPayslipsPanel`, `StaffMyProfileDocs`, `StaffAgreementPanel` (+ self panel), `StaffBroadcastButton`. Each renders
+`<QueryError>` when the read failed with no answer and "Loading…" while unknown — never an empty roster
+(`StaffLeaveRulesPanel` drew its steps with `masters = null` before, i.e. "(0 staff)" per category while loading;
+it now waits). No file had a `bhb-masters-updated` listener or `ensureMastersHydrated`. The header WhatsApp button
+(`StaffBroadcastButton`, mounted on every page) asks only once opened: `useMasters({enabled})` /
+`useScreenMasters({enabled})` are new, and the versions poll now runs only while an ENABLED observer reads a desk
+(`hasDeskObservers` uses `query.isActive()`, and re-checks on `observerOptionsUpdated`) — otherwise a closed button
+would have started the 20 s poll on every page. `StaffLeavePanel` opens leave balances (`ensureBalancesForAy` +
+save) only for a known roster (before: `loadMasters().staff`, empty on a cold page) and again when the roster
+changes. `StaffAppraisalPanel` waits for the staff-HR desk before `ensureAppraisalCycle` (which SAVES a new cycle):
+with the roster no longer gating its render, the save raced the HR load and showed "Still loading staff HR … NOT
+saved" on 4/4 then 1/3 opens (0/4 on main); after the fix 0/5. **Left on their full-record read, for 2.2** (they
+edit staff records and save the whole book through `saveMasters`): `StaffWorkspace` (roster, Allocate teaching,
+duty roster, its `bhb-masters-updated` listener) and `StaffProfileForm`. `StaffRequestsPanel` untouched (another
+branch owns it). `TeacherAssignmentsPanel` only names `loadMasters()` in a comment (not counted by the ratchet).
+**Proof** (local stack, this branch): `error.spec` — /staff Leave with views/masters 503 → "could not load" + Try
+again, no leave tabs or Staff picker, Try again → the form with 34 staff + Select; /staff Appraisal with
+views/staff-list 503 → "Could not load the staff list", no Staff picker, Try again → 35 options. `teacher.spec` —
+on /my-pay the class teacher's page asks neither views/masters nor views/versions until she opens WhatsApp, then
+asks the view and offers "My class parents". All three FAIL on 9433ee26 (built and run on the same stack: no
+"could not load"; masters view never asked). `counts.spec` /staff passes desktop and phone-375-cpu4x (34 active);
+teacher.spec otherwise unchanged. Staff propagation: both cases still expected-fail, now at the PROPAGATION step
+with `controlShown:true` and `visibleAfterReload:true` on /staff?tab=roster and /timetable — staleness alone (the
+roster on both is the page copy: /staff until 2.2, the access copy behind useScreenMasters until 2.3a); reason text
+updated, editor case stays fixme. Ratchets (on origin/main e8e7163f, after 2.1b and #657): `load_masters_screen_files` 83 → **72**,
+`load_masters_calls_src` 447 → **436** (10 of each from these files; the 11th from #657's StaffRequestsPanel,
+not yet written down), `ensure_hydrated_component_files` 69 → **68** (bookkeeping: already 68 on main). Screens seen desktop-light and
+phone-375-dark, office (principal fixture) and class teacher: roster, Leave, Leave rules, Reports, Outdoor duty,
+Appraisal, Payslips, My docs, Agreements, GPS, profile edit, /attendance, /my-pay + WhatsApp — no page errors.
+**Not done / not proven.** /staff roster propagation (2.2/2.3a). A teacher opening Staff → Leave sees "You do not
+have permission" (the leave panel's balance save) — on main too (seen on 9433ee26), not fixed here. If the
+staff-HR desk never loads, Appraisal stays on "Loading appraisal…" (before: drew the placeholder). Lib helpers now
+get the server's raw book instead of `loadMasters()`'s normalised read (agreements read `schoolProfile` /
+`numberSeries` — a holder of Staff→agreements without the Masters view gets the teaching subset, so the old
+`AGR-nnnn` fallback numbering, exactly as the page copy gave them before); not audited field by field. The header
+WhatsApp panel's class list now appears after one view read instead of synchronously.
 
 **2.2 Masters and staff editing write rows.** `MastersWorkspace` and its panels write through
 `useErpMutation` → `desk_slice_row_write` / `desk_slice_object_write` (one subject, one
@@ -1287,6 +1332,48 @@ filed"), the second at the route (404). An old-build whole-desk push carrying `s
 left both stored requests and wrote `row_count` 3 = 1 leave type + 2 requests (local stack).
 **Not done.** The rest of staff HR (leave, balances, appraisals) is still the replica (5.8). No
 notification to the raiser when a request is resolved (as before). Not measured in production.
+
+**Admissions · Field survey team & beats (director's report, 15 Oct).** *(Built 15 Oct 2026, PR #664 —
+**migration `20261015120000_admission_survey_team_rows.sql`, the director applies it before the deploy**.)*
+**Found.** "Assigned in the ERP, the app says not assigned; the app asks for a 6-digit code the ERP cannot
+make." Production, read-only: Cloud Run request log of 14 Oct 21:10–21:19 UTC — 15 `admissions-desk` pushes
+(all 200) whose sizes rise and fall by one team member (~190 bytes) as members were added and removed, and
+**every** app call `/api/public/survey-day` answered 403 with a 456-byte response = 217 header bytes + the
+239-byte `not_registered` body (the `not_on_team` body is 192): the phone was never registered, so the app
+showed the pairing-code screen. The only "Pair phone" button lived in the SurveyDaysBoard, which read the team
+from the server once on mount (21:10:00, empty) and never again, so it said "No survey team yet" while the
+Team table above it (the browser copy) showed the member — two copies on one screen. The last pushes carried
+no member (named removals), hence 0 in `ops_json`. On the local stack an add in the ERP reached the server
+(1 member) — the replica did not lose this write; the defect is the second copy and the unreachable code.
+**What exists.** Members and beats are rows (`admission_survey_members`, `admission_survey_beats`, ids kept
+from ops_json; `admission_survey_sync_meta` → erp_versions `admission_survey`), on `desk_writable_tables`,
+registry `admissions.survey-members` / `admissions.survey-beats`, written one change at a time by
+`lib/surveyTeam.server.ts` (rules: pure `lib/surveyTeamPlan.ts`) through `desk_write_guarded`. Doors:
+`POST /api/admissions/survey-team` (office = Admissions edit or the Field survey function: every op +
+`pair_start`; a signed-in team leader: add staff, remove a staff surveyor — not self, not a leader, not an
+outsider — add/edit/retire/reactivate beats), `POST /api/public/survey-day` `team`/`manage` (the leader's
+phone, signed `survey|manage|<op>:<target>|ts`), `GET /api/data/views/survey-team` (referenceCache on
+`admission_survey`; phones; old saved outsiders). The whole-desk push keeps ops_json's stored lists for
+these two keys whatever the copy says (old builds included); the desk read takes them from the rows and
+fails closed when they cannot be read. ERP: `SurveyTeamCard` / `SurveyBeatsCard` (useErpQuery, versions
+poll), "Get phone code" per member with expiry countdown, copy, WhatsApp share. The survey-day board and
+`/api/v1/staff/survey/*` read the rows. No-day capture: `/api/v1/staff/survey/capture` takes `location`
+(map pin / GPS) → lead note with a Google Maps link + a `survey_captures` point with `survey_day_id` null
+(`located_by`), listed on the board for its IST date. Staff app: no-day recording always offered, home on
+the map (flutter_map + OSM: no Google Maps SDK in the app), "Other area (no beat)", leader "Manage team &
+beats". Deleted: the browser-copy team/beat mutators in `fieldSurvey.ts`, the web `/field/survey` leader
+beat editor (points to the app).
+**Proof.** `test:survey-team-plan` (planner rules; mutations: leader check off, leader-made-leader — red).
+`test:admissions-field-ops-merge` updated (copy's team/beats ignored). `e2e/specs/survey-team.spec.ts`:
+ERP add → phone code from the row → phone pairs → app status sees the member and the ERP row turns "registered" (pairing moves `admission_survey`); made leader in the ERP → phone
+adds a beat → principal's open screen shows it without reload (18.8 s, local stack); auth matrix (teacher 403, principal 200, stale
+base 409, member/outsider/unregistered phone 403, leader limits, removed member → not_on_team); old-build push
+leaves rows; no-day pin on the board. Flutter `test/survey_team_app_test.dart` (5; capture without location
+sent → red).
+Phones are signed exactly as the app (`e2e/surveyPhone.ts`: ECDSA P-256, `survey|action|extra|ts`, r‖s). Acceptance: erp_versions now has 38 sync_meta desks. Not proven: each e2e test failing on the merge base (the routes and screen do not exist there, so they fail at the first step by construction — not run).
+**Not done.** Lead callers, survey attendance/sessions and saved outsiders remain in ops_json (replica).
+The web `/survey-day` page has no leader screen. Not measured in production; app release needed for the
+app parts.
 
 ### Phase 6 — Delete the replica
 
