@@ -115,15 +115,12 @@ async function settle(page: Page) {
   await page.waitForTimeout(1500);
 }
 
-async function openTab(page: Page, tab: string, label: RegExp) {
-  await page.goto("/payroll");
+async function openTab(page: Page, tab: string, label: RegExp, opts: { deepLink?: boolean } = {}) {
+  // A teacher may open only the self-service tabs, so the route guard needs
+  // the ?tab= link ("Access restricted" on bare /payroll).
+  await page.goto(opts.deepLink ? `/payroll?tab=${tab}` : "/payroll");
   await expect(page.getByText(/Loading payroll…/)).toHaveCount(0, { timeout: 30_000 });
-  // The office strip is a tablist; the self-service strip (two tabs) may draw buttons.
-  await page
-    .getByRole("tab", { name: label })
-    .or(page.getByRole("button", { name: label }))
-    .first()
-    .click({ timeout: 30_000 });
+  await page.getByRole("tab", { name: label }).first().click({ timeout: 30_000 });
   await settle(page);
   // Pick the same thing on every run so the numbers are comparable.
   const pick = async (value: string) => {
@@ -212,7 +209,7 @@ test.describe("payroll screens (2.1e)", () => {
   test("teacher: My salary renders (self-service, letterhead from the teaching answer)", async ({ browser }, testInfo) => {
     const { context, page } = await open(browser, "teacher", { width: 1440, height: 900 });
     for (const [tab, label] of [["mine", /^My payslip$/], ["myAdvances", /^My advances$/]] as const) {
-      await openTab(page, tab, label);
+      await openTab(page, tab, label, { deepLink: true });
       const text = await grab(page, testInfo, `teacher-${tab}`);
       expect(text).not.toMatch(/Could not load/);
       await page.screenshot({ path: testInfo.outputPath(`payroll-teacher-${tab}-desktop-light.png`), fullPage: true });
