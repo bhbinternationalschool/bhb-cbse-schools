@@ -93,7 +93,7 @@ async function openStaffReports(page: Page) {
 
 async function pickReport(page: Page, label: string) {
   await page.getByRole("button", { name: label, exact: true }).click();
-  await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: label, exact: true })).toBeVisible();
 }
 
 async function previewRows(page: Page): Promise<string[][]> {
