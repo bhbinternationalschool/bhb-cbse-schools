@@ -244,12 +244,16 @@ test("the gallery reaches the right families: class teacher → AI hold → prin
       await page.getByPlaceholder("Annual day 2026").fill(title);
       await expect(page.getByPlaceholder("Annual day 2026")).toHaveValue(title);
       await page.getByRole("button", { name: "Publish now" }).click();
-      await expect(page.getByText("Album published")).toBeVisible();
+      // The album exists, published, and is open for photos. (Not the
+      // "Album published" flash: publishing also cross-posts, and that
+      // result's own flash can replace it before it is read — as on CI.)
+      await expect(page.getByRole("button", { name: `${title} published` })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Album photos" })).toBeVisible();
       const upload = page.waitForResponse((r) => r.url().endsWith("/api/upload") && r.request().method() === "POST");
       await page.locator('input[type="file"][accept="image/*"]').setInputFiles({ name: "science fair.jpg", mimeType: "image/jpeg", buffer: jpeg });
       const up = await upload;
       expect(up.status(), await up.text()).toBe(200);
-      await expect(page.getByText("Photo(s) added")).toBeVisible();
+      await expect(page.getByText("No photos yet.")).toHaveCount(0);
       await page.screenshot({ path: testInfo.outputPath("office-web-gallery.png"), fullPage: true });
 
       // Stored as a row (the desk push is debounced): poll the desk as the office.
