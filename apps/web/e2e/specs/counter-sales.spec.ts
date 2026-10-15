@@ -46,8 +46,10 @@ async function openSales(page: Page, which: "Sales" | "Unpaid" = "Sales") {
   await expect(page.getByTestId("sales-range")).toBeVisible({ timeout: 60_000 });
 }
 
-/** Buyer names on the current page, read from the table. */
-async function buyersOnScreen(page: Page): Promise<string[]> {
+/** Buyer names on the current page, read from the table once it holds `n` rows. */
+async function buyersOnScreen(page: Page, n: number): Promise<string[]> {
+  // A page change shows a spinner, then the new rows: wait for the rows.
+  await expect(page.locator("tbody tr")).toHaveCount(n, { timeout: 30_000 });
   const cells = page.locator("tbody tr td:nth-child(2) > div:first-child");
   return (await cells.allInnerTexts()).map((t) => t.trim());
 }
@@ -61,14 +63,14 @@ test.describe("counter sales — server paging", () => {
 
     const range = page.getByTestId("sales-range");
     await expect(range).toContainText(`1–50 of ${SALES.length} sales`);
-    const first = await buyersOnScreen(page);
+    const first = await buyersOnScreen(page, 50);
     expect(first).toHaveLength(50);
     expect(first[0], "newest first").toBe(SALES[SALES.length - 1]!.buyerName);
 
     await page.getByRole("button", { name: "Older sales" }).click();
     await expect(range).toContainText(`51–${SALES.length} of ${SALES.length} sales`);
     await expect(page.getByRole("button", { name: "Older sales" })).toBeDisabled();
-    const second = await buyersOnScreen(page);
+    const second = await buyersOnScreen(page, SALES.length - 50);
     expect(second).toHaveLength(SALES.length - 50);
     expect(second[second.length - 1], "the oldest sale is on the last page").toBe(SALES[0]!.buyerName);
 
@@ -91,7 +93,7 @@ test.describe("counter sales — server paging", () => {
     // The Unpaid list holds every one of them.
     await page.getByRole("button", { name: "Unpaid", exact: true }).click();
     await expect(page.getByTestId("sales-range")).toContainText(`${UNPAID.length} unpaid sales`);
-    expect((await buyersOnScreen(page)).sort()).toEqual(UNPAID.map((s) => s.buyerName).sort());
+    expect((await buyersOnScreen(page, UNPAID.length)).sort()).toEqual(UNPAID.map((s) => s.buyerName).sort());
     await page.context().close();
   });
 
