@@ -91,9 +91,34 @@ grids_without_row_menu|0|Data grids with no per-row action menu. Target 0, reach
 unguarded_replace|0|A parent's child rows deleted and re-inserted as TWO PostgREST statements. When the insert fails the delete has already committed and the parent is left with no children. This emptied the whole fee book on 2026-09-06 (1,913 lines over 435 receipts, ₹20.8 lakh with no student, head or month) and took 134 receipts the same way on 2026-09-01. Reached 0 the same day by moving 12 sites — exam marks/coscholastic/remarks/item scores, attendance marks, staff attendance marks, payment link lines, fee charge-voucher lines, kit items, kit classes, indent lines, PO lines — onto replace_child_rows(), which does both inside one plpgsql function. Seven sites carry a `ratchet-allow: unguarded_replace` note instead, and every one of them is a PRUNE: they delete only the STALE keys, the complement of what is about to be written, so a failed upsert loses nothing.
 personal_whatsapp|0|Code that messages a family from a STAFF MEMBER'S own WhatsApp instead of the school's Business number. Reached 0 on 2026-09-07. Thirteen web screens did it, and the shared openWaMe() helper was the worst of them: it POSTed to /api/wa/dispatch AND opened wa.me, so a fee reminder could reach a family twice, from two senders, with only the school's copy logged — which is why nobody noticed. Fixing openWaMe() itself corrected fourteen files at once; ten more call sites (fee defaulters, pay links, fee counter, installment plans, the fee dashboard row action, vendors, admissions registration x3, lead actions, transport requests, the field collect app x2, admission campaigns x2) were converted, and two dead builders that only opened personal WhatsApp were deleted. NOT counted: `wa.me/?text=` with no number (the OS share sheet) and links pointed AT the school's own number (gate QR, visitor poster, the parent app's 'message a teacher'), which are inbound — a parent starting a conversation that then arrives through the Business API. Genuine exceptions carry a `personal-whatsapp-allow:` comment; there are three, all of them the parent's own device or a recorded field rather than a send. The Flutter staff app still has 5 (fee defaulters, principal lists, staff roster, admission leads, transport requests) — they need a staff send endpoint and an APK release, and are NOT covered by this ratchet, which scans apps/web/src only.
 
+# Data-layer rebuild (docs/data-layer-rebuild/COMMAND.md §3, step 1.6). Each
+# counts a way a screen or route reads the browser / per-process REPLICA that
+# R1-R5 abolish. They fall as Phases 2-6 convert screens; step 6 of the
+# executor rules says the converting PR lowers the budget in the same commit.
+# Exact patterns and what counts are in check-ratchets.sh. Common rules: .ts/.tsx
+# only, comment lines ignored, *.selftest.ts excluded, the function's own
+# definition line excluded, name bounded on both sides — loadMasters( does NOT
+# count loadMastersSafe(, loadSis( does NOT count loadSisForStaff(; a member
+# call (mod.loadMasters() after a dynamic import) DOES count.
+load_masters_screen_files|98|FILES under src/components + src/app/(erp) calling loadMasters(. Set 2026-10-14 at the true count on origin/main ea9f5ba2 (12 Oct figure in COMMAND.md: 109). (106 -> 98 on 2026-10-15 by #651, data-layer 2.1a: attendance x4, timetable, homework, teaching x2 read useMasters())
+load_sis_screen_files|77|FILES under src/components + src/app/(erp) calling loadSis( (not loadSisForStaff). Set 2026-10-14 at the true count on origin/main ea9f5ba2 (12 Oct: 77).
+ensure_hydrated_component_files|69|FILES under src/components calling any ensure<Name>Hydrated( (name must end exactly in Hydrated; ensure*HydratedServer is not in components). Set 2026-10-14 on origin/main ea9f5ba2 (12 Oct: 70).
+read_cache_files|68|FILES anywhere in src calling readCache( (browserStorage.ts whole-desk localStorage read; its definition line is excluded, and browserStorage.ts has no other call). Set 2026-10-14 on origin/main ea9f5ba2 (12 Oct: 69. Counting browserStorage.ts for its definition line alone would give 69 today; two selftest files that call it are excluded).
+selftest_readfilesync_files|89|*.selftest.ts FILES calling readFileSync( — text-grep self-tests that read source as a string (R7: lint, not proof). Set 2026-10-14 on origin/main ea9f5ba2 (12 Oct: 66; the 23 more arrived with self-tests merged since). Comment lines ignored.
+v1_school_mirror_files|107|FILES under src/app/api/v1 calling ensureSchoolMirrorHydrated( — mobile API routes that rebuild the whole school replica per Cloud Run instance. Set 2026-10-14 on origin/main ea9f5ba2 (12 Oct: 100).
+load_masters_calls_src|463|OCCURRENCES (every match, two on one line = 2) of loadMasters( in ALL of src, selftests and the definition excluded. Phase 2.3b gate. Set 2026-10-14 on origin/main ea9f5ba2 (12 Oct: 476). (471 -> 463 on 2026-10-15 by #651, data-layer 2.1a: the same 8 screen files)
+load_sis_calls_src|426|OCCURRENCES of loadSis( in ALL of src (loadSisForStaff not counted), selftests and the definition excluded. Phase 3.4 gate. Set 2026-10-14 on origin/main ea9f5ba2 (12 Oct: 426).
+
 # Data-layer step 3.0 (docs/data-layer-rebuild/COMMAND.md): callers that are
 # not a signed-in browser tab and read a bulk desk GET. Enumerated 15 Oct 2026:
 # none (Flutter app, office robot, scripts, Cloud Scheduler, BigQuery sync,
 # lite service, watch routines; 30 days of Cloud Run logs agree). Phase 3
 # gates those routes and Phase 6 deletes them, so this is 0 and stays 0.
 nonbrowser_desk_get|0|Non-browser code (Flutter app, robot extension, scripts, CI/deploy, BigQuery sync, server loopback fetches) reading a bulk desk GET. A new bulk reader gets a service-only export route instead.
+
+# Data-layer step 5.1a (docs/data-layer-rebuild/evidence/fees-inventory.md):
+# call sites that write the whole fee desk from a copy — headers last-write-wins
+# (voided_at included), ancillary upsert, whole-year open-dues rebuild from the
+# instance copy. 5.1b converts the server writers to fee_voucher_write /
+# fee_voucher_void; 5.1e deletes the browser POST. Target 1 (the manual rebuild).
+fee_whole_desk_push|12|Whole-fee-desk writes from a copy (pushFeesRemoteServer / pushFeeDeskToDb / rebuildFeeOpenDuesCache call sites). 12 on 15 Oct 2026 (origin/main fa637423): staff collect, settlement, refunds x2, bulk tools x2, fees-vouchers POST, ensure-desk cutover, saveOpsFees, pushFeesRemoteServer's own call, pushFeeDeskToDb's rebuild, the rebuild route.

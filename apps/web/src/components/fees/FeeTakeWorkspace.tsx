@@ -125,6 +125,7 @@ import { ModuleTabButton } from "@/components/ui/ModuleTabs";
 import { MODULE_TAB_CONTAINER_CLASS } from "@/components/ui/modern-tab-bar";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpPanel, ErpTableShell } from "@/components/ui/erp-roster";
+import { MonthGroupedList, useMonthGroups } from "@/components/ui/month-grouped-rows";
 
 import { ChequesPanel } from "@/components/fees/ChequesPanel";
 import { ManualBookPanel } from "@/components/fees/ManualBookPanel";
@@ -4728,6 +4729,16 @@ function ReceiptsPanel({
     leafFrom ||
     leafTo;
 
+  // Folded by the IST month of the collection date, newest open. Any filter
+  // opens every month that still has a match.
+  const receiptMonths = useMonthGroups({
+    rows: filtered,
+    dateOf: (v) => v.collectionDate,
+    filterActive: !!hasFilters,
+    filterKey: [dateFrom, dateTo, studentQ, parentQ, classId, sectionId, modeFilter, concessionFilter, collectorQ, refQ, paperOnly, leafFrom, leafTo].join("|"),
+    storageKey: "fees.receipts",
+  });
+
   if (receipts.length === 0) {
     return (
       <p className="mt-8 text-sm text-[var(--muted)]">
@@ -4961,110 +4972,115 @@ function ReceiptsPanel({
       </ErpPanel>
 
       <ErpTableShell>
-        {filtered.length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-[var(--muted)]">
-            No receipts match these filters.
-          </p>
-        ) : (
-          <ul className="divide-y divide-[var(--border)]">
-            {filtered.map((v) => {
-              const voided = !!v.voidedAt;
-              const students = Array.from(
-                new Set(v.lines.map((l) => l.studentName)),
-              );
-              const modes = [
-                ...new Set(v.tenders.map((t) => tenderModeLabel(t.mode))),
-              ];
-              return (
-                <li key={v.id}>
-                  <button
-                    type="button"
-                    onClick={() => onPreview(v.id)}
-                    className={`flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-[rgba(197,160,40,0.08)] ${
-                      voided ? "opacity-60" : ""
-                    }`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-bold text-[var(--brand-deep)]">
-                          {v.receiptNo}
+        <MonthGroupedList
+          month={receiptMonths}
+          rowKey={(v) => v.id}
+          countLabel={(n) => `${n} ${n === 1 ? "receipt" : "receipts"}`}
+          summary={(vs) =>
+            `${formatInr(vs.reduce((n, v) => n + (v.voidedAt ? 0 : v.totalPaise), 0))} collected`
+          }
+          empty={
+            <p className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+              No receipts match these filters.
+            </p>
+          }
+          renderItem={(v) => {
+            const voided = !!v.voidedAt;
+            const students = Array.from(
+              new Set(v.lines.map((l) => l.studentName)),
+            );
+            const modes = [
+              ...new Set(v.tenders.map((t) => tenderModeLabel(t.mode))),
+            ];
+            return (
+              <li key={v.id}>
+                <button
+                  type="button"
+                  onClick={() => onPreview(v.id)}
+                  className={`flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-[rgba(197,160,40,0.08)] ${
+                    voided ? "opacity-60" : ""
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-bold text-[var(--brand-deep)]">
+                        {v.receiptNo}
+                      </span>
+                      {voided ? (
+                        <span className="rounded bg-[rgba(180,60,60,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--danger)]">
+                          Void
                         </span>
-                        {voided ? (
-                          <span className="rounded bg-[rgba(180,60,60,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--danger)]">
-                            Void
-                          </span>
-                        ) : null}
-                        {v.schoolReceiptNo ? (
-                          <span className="text-[11px] text-[var(--muted)]">
-                            Book {v.schoolReceiptNo}
-                          </span>
-                        ) : null}
-                        {modes.length ? (
-                          <span className="text-[11px] text-[var(--muted)]">
-                            {modes.join(" · ")}
-                          </span>
-                        ) : null}
-                        {v.whatsappSentAt && !voided ? (
-                          <span className="rounded bg-[#128C7E]/12 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#128C7E]">
-                            WA
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
-                        {v.collectionDate} · {students.join(", ")}
-                        {guardianOf(v.householdId)
-                          ? ` · ${guardianOf(v.householdId)}`
-                          : ""}{" "}
-                        · by {v.cashierName}
-                      </p>
-                    </div>
-                    <div className="text-sm font-bold tabular-nums text-[var(--brand-deep)]">
-                      {formatInr(v.totalPaise)}
-                    </div>
-                  </button>
-                  {!voided ? (
-                    <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border)] px-4 py-2">
-                      {/* Only where the receipt cannot say what it settled:
-                          no lines at all, or lines that do not add up to the
-                          money collected. Everywhere else this button would
-                          be an invitation to rewrite a correct receipt. */}
-                      {needsRepair(v) ? (
-                        <>
-                          <span className="mr-auto text-[11px] font-semibold text-[var(--warning)]">
-                            {v.lines.length === 0
-                              ? "No months attached — this receipt clears nothing"
-                              : `Lines add to ${formatInr(v.lines.reduce((n, l) => n + l.amountPaise, 0))}, not ${formatInr(v.totalPaise)}`}
-                          </span>
-                          <button
-                            type="button"
-                            className="rounded-lg border border-[var(--warning)] px-3 py-1.5 text-xs font-semibold text-[var(--warning)]"
-                            onClick={() => setRepairing(v.id)}
-                          >
-                            Re-attach
-                          </button>
-                        </>
                       ) : null}
-                      <button
-                        type="button"
-                        className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
-                        onClick={() => onPreview(v.id)}
-                      >
-                        Open
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--danger)]"
-                        onClick={() => onVoid(v.id)}
-                      >
-                        Void
-                      </button>
+                      {v.schoolReceiptNo ? (
+                        <span className="text-[11px] text-[var(--muted)]">
+                          Book {v.schoolReceiptNo}
+                        </span>
+                      ) : null}
+                      {modes.length ? (
+                        <span className="text-[11px] text-[var(--muted)]">
+                          {modes.join(" · ")}
+                        </span>
+                      ) : null}
+                      {v.whatsappSentAt && !voided ? (
+                        <span className="rounded bg-[#128C7E]/12 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#128C7E]">
+                          WA
+                        </span>
+                      ) : null}
                     </div>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        )}
+                    <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
+                      {v.collectionDate} · {students.join(", ")}
+                      {guardianOf(v.householdId)
+                        ? ` · ${guardianOf(v.householdId)}`
+                        : ""}{" "}
+                      · by {v.cashierName}
+                    </p>
+                  </div>
+                  <div className="text-sm font-bold tabular-nums text-[var(--brand-deep)]">
+                    {formatInr(v.totalPaise)}
+                  </div>
+                </button>
+                {!voided ? (
+                  <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border)] px-4 py-2">
+                    {/* Only where the receipt cannot say what it settled:
+                        no lines at all, or lines that do not add up to the
+                        money collected. Everywhere else this button would
+                        be an invitation to rewrite a correct receipt. */}
+                    {needsRepair(v) ? (
+                      <>
+                        <span className="mr-auto text-[11px] font-semibold text-[var(--warning)]">
+                          {v.lines.length === 0
+                            ? "No months attached — this receipt clears nothing"
+                            : `Lines add to ${formatInr(v.lines.reduce((n, l) => n + l.amountPaise, 0))}, not ${formatInr(v.totalPaise)}`}
+                        </span>
+                        <button
+                          type="button"
+                          className="rounded-lg border border-[var(--warning)] px-3 py-1.5 text-xs font-semibold text-[var(--warning)]"
+                          onClick={() => setRepairing(v.id)}
+                        >
+                          Re-attach
+                        </button>
+                      </>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+                      onClick={() => onPreview(v.id)}
+                    >
+                      Open
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--danger)]"
+                      onClick={() => onVoid(v.id)}
+                    >
+                      Void
+                    </button>
+                  </div>
+                ) : null}
+              </li>
+            );
+          }}
+        />
       </ErpTableShell>
 
       {repairing

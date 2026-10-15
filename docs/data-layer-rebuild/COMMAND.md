@@ -760,6 +760,16 @@ components (70), `readCache(` files in `src` (69), `readFileSync` inside `*.self
 `ensureSchoolMirrorHydrated` files under `app/api/v1` (100), and two **all-of-src** counts used as
 the Phase 2.3b / 3.4 gates: `loadMasters(` occurrences (476) and `loadSis(` occurrences (426),
 selftests and definitions excluded. Acceptance: CI fails when any count rises.
+*(Built 14 Oct 2026, PR #642.)* Measured on origin/main `ea9f5ba2`, budgets set to the true
+count: `load_masters_screen_files` 106 (12 Oct: 109), `load_sis_screen_files` 77 (77),
+`ensure_hydrated_component_files` 69 (70), `read_cache_files` 68 (69), `selftest_readfilesync_files`
+89 (66), `v1_school_mirror_files` 107 (100), `load_masters_calls_src` 471 (476),
+`load_sis_calls_src` 426 (426). All but the last two are FILE counts; those two are OCCURRENCES.
+Common rules (`dl_code_lines` in the script): `.ts`/`.tsx` only, comment lines ignored,
+`*.selftest.ts` and the function's own definition line excluded, the name bounded so
+`loadMastersSafe(`/`loadSisForStaff(`/`reloadMasters(` do not count while `mod.loadMasters(` does.
+Wired through the existing CI step "Ratchets — retired patterns may not regrow" (`ci.yml`) and
+`scripts/verify.sh`; adding one call of each pattern turned all eight red and exited 1.
 
 **1.7 Teacher scope from SQL (own step; 3.1 and 4.2 depend on it).** *(Built 13 Oct 2026.)*
 `staffSectionScope` (`lib/api/v1/staffScope.ts`) computes sections from `sis_staff.profile` links
@@ -1113,6 +1123,32 @@ dues, receipt, day book), fee setup panels, defaulters, cheques/PDC, instalments
 task. Extra acceptance: "a counter receipt row-written, then an online payment webhook replayed
 from a stale copy — the counter receipt, its cheque and the day-close survive."
 
+*(5.1a built 15 Oct 2026, PR #655 — inventory only, no behaviour change.)* **What exists.**
+[`evidence/fees-inventory.md`](./evidence/fees-inventory.md): the 13 `fee_desk_*` tables with
+production row counts and triggers; 18 server write paths (W1–W18) with file:line, trigger, scope,
+tables and whether each can overwrite a newer row; ~25 server readers; the browser write sites
+that end in the whole-desk fees-vouchers POST (for 5.1d); the `fee_voucher_write` / `fee_voucher_void`
+/ `fee_voucher_mark` contract on the real columns with the caller order; risks R1–R12. Ratchet
+`fee_whole_desk_push` = 12 (proved to fail at 13). **What it found that changes 5.1b.** (1) The header
+upsert in `replace_fee_desk_voucher_lines` is last-write-wins on **every** column including `voided_at`:
+any older copy (a browser tab, or a webhook/refund instance copy up to 45 s old) un-voids a receipt and
+the ledger trigger re-posts it — 5.1b should ship a "`voided_at` never returns to null" trigger first,
+which protects every old writer still running. (2) `fee_desk_open_dues` is rebuilt for the whole year
+from the **instance** copy, not from what was just written: proven stale for one family today
+(`RCV-00698`, 14 Oct, ₹1,800 still open in the cache; cause traced in code, not proven) — the
+director can refresh it with `POST /api/fees/rebuild-open-dues`; nothing rebuilds it when Masters,
+transport or adjustments change, so per-student maintenance in `fee_voucher_write` (3.2's dependency)
+needs the caller to pass recomputed rows. (3) Cashfree **registration** payments make an R-receipt
+that is never pushed (latent; 0 such payments in production). (4) Receipt numbers are minted from the
+instance copy — allocate them in the RPC. **Production frequency** (Supabase edge logs, 8–15 Oct):
+25 whole-desk pushes and 25 open-dues rebuilds for 28 receipts; ~324 whole-desk server reads a day
+(`ensureFeesHydratedServer` has no TTL/probe/dedupe). **Not done / not proven.** Cloud Run logs were
+not read (`gcloud` needs an interactive re-login), so the per-route split of the 25 pushes is not
+measured (the query is in the evidence file); the ~15 shared `lib` files that call `loadFees()` and
+are reachable from server code are listed, not traced call-by-call; `voidVoucher`'s side effects
+outside the fee tables (legacy desk book, admissions revert) are not traced; R9
+(`sis_merge_students` vs the append-only trigger) is read from the migrations, not tried.
+
 **5.2 Homework** (two wipes; whole-desk unversioned; `homeworkPost.server.ts:129-141` rebuilds
 the whole desk from the mirror): server writers (`homeworkPost.server.ts`, WhatsApp homework
 flows) first, then `HomeworkWorkspace`, then delete `homeworkPersistence.ts` /
@@ -1243,6 +1279,8 @@ stale tabs reload themselves). After 0.3, manual `deploy-online.sh` runs are not
   per-request costs.
 - `mobile-app.md` — every request each home screen fires; timers; the no-data-layer facts.
 - `propagation.md` — the hop-by-hop trace of a Masters edit; the picker-screen table.
+- `fees-inventory.md` — 5.1a: every server reader/writer of the fee desk, table counts, the
+  `fee_voucher_write` contract, the 5.1 risks.
 - `history.md` — the 98 fixes classified; recurrence; what is live.
 - `harness.md` — what the 455 tests can and cannot see; the guard inventory with line counts.
 - `production-measurements.md` — the numbers and the queries to re-measure.

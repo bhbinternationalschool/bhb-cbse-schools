@@ -368,6 +368,7 @@ SELFTESTS=(
   test:concession-per-due
   test:concession-ground
   test:fee-backdate
+  test:month-groups
   test:receipt-auto-wa
   test:review-login
   test:desk-sync-status

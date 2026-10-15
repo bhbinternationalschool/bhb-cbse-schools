@@ -20,6 +20,7 @@ import {
 import { loadSis, type SisState } from "@/lib/sis";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { MonthGroupedList, useMonthGroups } from "@/components/ui/month-grouped-rows";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -50,6 +51,13 @@ export function ChargeVouchersPanel({
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
   const [rows, setRows] = useState<ChargeVoucher[]>([]);
+  // Every voucher, folded by the IST month it was raised (newest open) —
+  // the list used to stop at the latest 40.
+  const voucherMonths = useMonthGroups({
+    rows,
+    dateOf: (v) => v.createdAt,
+    storageKey: "fees.chargeVouchers",
+  });
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<StudentSearchHit[]>([]);
   const [studentId, setStudentId] = useState("");
@@ -449,49 +457,56 @@ export function ChargeVouchersPanel({
         <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
           Recent charge vouchers
         </h3>
-        <ul className="mt-2 divide-y divide-[rgba(32,48,80,0.08)] text-sm">
-          {rows.slice(0, 40).map((v) => (
-            <li
-              key={v.id}
-              className="flex flex-wrap items-center justify-between gap-2 py-2"
-            >
-              <div>
-                <div className="font-medium text-[var(--brand-deep)]">
-                  {v.code} · {v.studentName}
-                  {v.voidedAt ? (
-                    <span className="ml-2 text-[11px] text-[var(--danger)]">
-                      voided
-                    </span>
-                  ) : null}
+        <div className="mt-2 text-sm">
+          <MonthGroupedList
+            month={voucherMonths}
+            rowKey={(v) => v.id}
+            countLabel={(n) => `${n} ${n === 1 ? "voucher" : "vouchers"}`}
+            summary={(vs) => formatInr(vs.reduce((n, v) => n + (v.voidedAt ? 0 : v.totalPaise), 0))}
+            listClassName="divide-y divide-[rgba(32,48,80,0.08)]"
+            flush
+            empty={
+              <p className="py-6 text-center text-[var(--muted)]">
+                No charge vouchers yet
+              </p>
+            }
+            renderItem={(v) => (
+              <li
+                className="flex flex-wrap items-center justify-between gap-2 py-2"
+              >
+                <div>
+                  <div className="font-medium text-[var(--brand-deep)]">
+                    {v.code} · {v.studentName}
+                    {v.voidedAt ? (
+                      <span className="ml-2 text-[11px] text-[var(--danger)]">
+                        voided
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="text-xs text-[var(--muted)]">
+                    {v.installmentLabel} · {formatInr(v.totalPaise)} ·{" "}
+                    {v.lines.map((l) => l.feeHeadName).join(", ")} · {v.reason}
+                  </div>
                 </div>
-                <div className="text-xs text-[var(--muted)]">
-                  {v.installmentLabel} · {formatInr(v.totalPaise)} ·{" "}
-                  {v.lines.map((l) => l.feeHeadName).join(", ")} · {v.reason}
-                </div>
-              </div>
-              {!v.voidedAt ? (
-                <button
-                  type="button"
-                  className="text-xs font-medium text-[var(--danger)]"
-                  onClick={() => {
-                    if (!window.confirm(`Void ${v.code}?`)) return;
-                    voidChargeVoucher(v.id, session.fullName);
-                    refresh();
-                    onChanged();
-                    flash(`${v.code} voided`);
-                  }}
-                >
-                  Void
-                </button>
-              ) : null}
-            </li>
-          ))}
-          {rows.length === 0 ? (
-            <li className="py-6 text-center text-[var(--muted)]">
-              No charge vouchers yet
-            </li>
-          ) : null}
-        </ul>
+                {!v.voidedAt ? (
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-[var(--danger)]"
+                    onClick={() => {
+                      if (!window.confirm(`Void ${v.code}?`)) return;
+                      voidChargeVoucher(v.id, session.fullName);
+                      refresh();
+                      onChanged();
+                      flash(`${v.code} voided`);
+                    }}
+                  >
+                    Void
+                  </button>
+                ) : null}
+              </li>
+            )}
+          />
+        </div>
       </div>
     </div>
   );

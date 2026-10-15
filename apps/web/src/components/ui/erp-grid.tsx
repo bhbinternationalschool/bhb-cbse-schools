@@ -399,7 +399,8 @@ export function ExportMenu({
   title: string;
   subtitle?: string;
   filterNote?: string;
-  columns: ReportColumn[];
+  /** The columns, or a function read at click time (for a table read from the DOM). */
+  columns: ReportColumn[] | (() => ReportColumn[]);
   rows: () => ExportRow[];
   fileBaseName: string;
   formats?: ExportFormat[];
@@ -418,7 +419,8 @@ export function ExportMenu({
     }
     setBusy(format);
     try {
-      const input = { title, subtitle, filterNote, columns, rows: data, fileBaseName };
+      const cols = typeof columns === "function" ? columns() : columns;
+      const input = { title, subtitle, filterNote, columns: cols, rows: data, fileBaseName };
       if (format === "xlsx") await downloadXlsxReport(input);
       else if (format === "csv") downloadExcelCsv(input);
       else await downloadPdfReport(input);

@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Eye, Plus, RefreshCw, Trash2, Users } from "lucide-react";
 import { FeeToolsStudentPicker } from "@/components/fees/FeeToolsStudentPicker";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
+import { MonthGroupedTbody, useMonthGroups } from "@/components/ui/month-grouped-rows";
 import { RowActionMenu, type RowAction } from "@/components/ui/erp-grid";
 import { TENDER_MODES } from "@/lib/fees";
 import type { BulkPlan, BulkStrategy } from "@/lib/feeBulkAllocation";
@@ -65,6 +66,12 @@ export function BulkPaymentPanel({ canCollect }: { canCollect: boolean }) {
   const [msg, setMsg] = useState<{ text: string; bad: boolean } | null>(null);
   const [history, setHistory] = useState<BulkRecord[] | null>(null);
   const [historyError, setHistoryError] = useState("");
+  // Folded by the IST month of the collection date, newest open.
+  const historyMonths = useMonthGroups({
+    rows: history ?? [],
+    dateOf: (b) => b.collectionDate,
+    storageKey: "fees.bulkPayments",
+  });
 
   const ids = useMemo(() => chosen.map((s) => s.id), [chosen]);
   const modeMeta = TENDER_MODES.find((m) => m.value === mode);
@@ -462,28 +469,33 @@ export function BulkPaymentPanel({ canCollect }: { canCollect: boolean }) {
                     <th className="px-3 py-2">Actions</th>
                   </tr>
                 </ErpTableHead>
-                <ErpTableBody hoverable>
-                  {history.length === 0 ? (
+                <MonthGroupedTbody
+                  month={historyMonths}
+                  colSpan={6}
+                  rowKey={(b) => b.id}
+                  countLabel={(n) => `${n} ${n === 1 ? "payment" : "payments"}`}
+                  summary={(bs) => inr(bs.reduce((s, b) => s + b.totalPaise, 0))}
+                  hoverable
+                  empty={
                     <tr>
                       <td colSpan={6} className="px-3 py-8 text-center text-sm text-[var(--muted)]">No bulk payments yet.</td>
                     </tr>
-                  ) : (
-                    history.map((b) => (
-                      <tr key={b.id}>
-                        <td className="px-3 py-2 tabular-nums">{b.collectionDate}</td>
-                        <td className="px-3 py-2 font-semibold text-[var(--brand-deep)]">{b.payerLabel}</td>
-                        <td className="px-3 py-2 text-xs">{TENDER_MODES.find((m) => m.value === b.mode)?.label ?? b.mode}{b.ref ? ` · ${b.ref}` : ""}</td>
-                        <td className="px-3 py-2 text-xs text-[var(--muted)]">
-                          {b.receipts.map((r) => `${r.studentName} ${r.receiptNo}`).join(" · ")}
-                        </td>
-                        <td className="px-3 py-2 text-right font-semibold tabular-nums">{inr(b.totalPaise)}</td>
-                        <td className="px-3 py-2">
-                          <RowActionMenu row={b} actions={historyActions} />
-                        </td>
-                      </tr>
-                    ))
+                  }
+                  renderRow={(b) => (
+                    <tr>
+                      <td className="px-3 py-2 tabular-nums">{b.collectionDate}</td>
+                      <td className="px-3 py-2 font-semibold text-[var(--brand-deep)]">{b.payerLabel}</td>
+                      <td className="px-3 py-2 text-xs">{TENDER_MODES.find((m) => m.value === b.mode)?.label ?? b.mode}{b.ref ? ` · ${b.ref}` : ""}</td>
+                      <td className="px-3 py-2 text-xs text-[var(--muted)]">
+                        {b.receipts.map((r) => `${r.studentName} ${r.receiptNo}`).join(" · ")}
+                      </td>
+                      <td className="px-3 py-2 text-right font-semibold tabular-nums">{inr(b.totalPaise)}</td>
+                      <td className="px-3 py-2">
+                        <RowActionMenu row={b} actions={historyActions} />
+                      </td>
+                    </tr>
                   )}
-                </ErpTableBody>
+                />
               </ErpTable>
             </div>
           </ErpTableShell>
