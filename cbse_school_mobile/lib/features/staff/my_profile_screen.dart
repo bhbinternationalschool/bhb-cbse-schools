@@ -8,6 +8,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../modules/module_shell.dart";
 import "home_groups.dart";
+import "my_signature_card.dart";
 import "staff_profile_rules.dart";
 
 /// A member of staff's own profile (director, 13 Oct 2026: "staff has no
@@ -332,6 +333,12 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                 children: [
                   _header(p),
+                  const SizedBox(height: 8),
+                  MySignatureCard(
+                    api: widget.api,
+                    signatureUrl: p.signatureUrl,
+                    onChanged: (_) => _load(),
+                  ),
                   if (p.pendingRequest != null) _pendingBanner(p),
                   if (p.pendingRequest == null && p.lastDecision != null)
                     _decisionBanner(p),
