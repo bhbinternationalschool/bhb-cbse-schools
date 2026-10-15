@@ -1856,8 +1856,8 @@ function SalesSection({
   const lastPage = Math.max(1, Math.ceil(total / pageSize));
   // A sale cancelled or paid off from the last page can leave it empty.
   useEffect(() => {
-    if (!sales.loading && page > lastPage) setPage(lastPage);
-  }, [sales.loading, page, lastPage]);
+    if (!sales.loading && page > lastPage) setPageAt({ key: filterKey, page: lastPage });
+  }, [sales.loading, page, lastPage, filterKey]);
 
   // Sorting by Owing brings the unpaid counter sales together; totals sort
   // by their paise, not by the rendered rupee string.
