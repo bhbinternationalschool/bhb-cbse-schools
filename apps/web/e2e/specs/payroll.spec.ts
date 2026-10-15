@@ -22,20 +22,24 @@ import type { APIRequestContext, Browser, Page, TestInfo } from "@playwright/tes
 import { APP_URL, expect, signIn, test, type Who } from "../support";
 import { defaultSalarySetupState } from "@/lib/salarySetup";
 
+// Tab id → its label on the tab strip. The spec CLICKS the tab: on origin/main
+// a ?tab= deep link was overridden by the access effect deciding while the
+// roster was still unknown (see PayrollWorkspace), so a link would not
+// compare like with like.
 const TABS = [
-  "dashboard",
-  "runs",
-  "approvals",
-  "holds",
-  "govt",
-  "increment",
-  "advances",
-  "payslips",
-  "print",
-  "reports",
-  "bank",
-  "mine",
-  "myAdvances",
+  ["dashboard", /^Dashboard$/],
+  ["runs", /^Runs$/],
+  ["approvals", /^Approvals/],
+  ["holds", /^June holds$/],
+  ["govt", /^EPF\/ESIC Compliance$/],
+  ["increment", /^Increment$/],
+  ["advances", /^Advances$/],
+  ["payslips", /^Payslips$/],
+  ["print", /^Print payslips$/],
+  ["reports", /^Reports$/],
+  ["bank", /^Bank file$/],
+  ["mine", /^My payslip$/],
+  ["myAdvances", /^My advances$/],
 ] as const;
 
 const STATUTORY_PATCH = { applyEpfWageCeiling: false, esicWageCeiling: 25000, epfContributionRatePct: 10 };
@@ -111,9 +115,10 @@ async function settle(page: Page) {
   await page.waitForTimeout(1500);
 }
 
-async function openTab(page: Page, tab: string) {
-  await page.goto(`/payroll?tab=${tab}`);
+async function openTab(page: Page, tab: string, label: RegExp) {
+  await page.goto("/payroll");
   await expect(page.getByText(/Loading payroll…/)).toHaveCount(0, { timeout: 30_000 });
+  await page.getByRole("tab", { name: label }).first().click({ timeout: 30_000 });
   await settle(page);
   // Pick the same thing on every run so the numbers are comparable.
   const pick = async (value: string) => {
@@ -159,8 +164,8 @@ test.describe("payroll screens (2.1e)", () => {
     const { context, page } = await open(browser, "principal", { width: 1440, height: 900 });
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    for (const tab of TABS) {
-      await openTab(page, tab);
+    for (const [tab, label] of TABS) {
+      await openTab(page, tab, label);
       const text = await grab(page, testInfo, tab);
       expect(text, `${tab}: no failed Masters read`).not.toMatch(/Could not load/);
       await page.screenshot({ path: testInfo.outputPath(`payroll-${tab}-desktop-light.png`), fullPage: true });
@@ -169,8 +174,7 @@ test.describe("payroll screens (2.1e)", () => {
     // rebuilt from Masters (statutory setup) + the staff records + salary setup.
     for (const [m, n] of [["2026-10", 2], ["2026-09", 2], ["2026-08", 1]] as const) {
       for (let i = 0; i < n; i++) {
-        await page.goto("/payroll?tab=runs");
-        await settle(page);
+        await openTab(page, "runs", /^Runs$/);
         for (const hdr of ["September 2026", "August 2026"]) {
           const h = page.getByRole("button", { name: new RegExp(`^${hdr}\\b`) });
           if ((await h.count()) && (await h.getAttribute("aria-expanded")) === "false") await h.click();
@@ -192,8 +196,8 @@ test.describe("payroll screens (2.1e)", () => {
   test("principal on a 375 px phone, dark: every payroll tab renders", async ({ browser }, testInfo) => {
     test.setTimeout(600_000);
     const { context, page } = await open(browser, "principal", { width: 375, height: 812, dark: true });
-    for (const tab of TABS) {
-      await openTab(page, tab);
+    for (const [tab, label] of TABS) {
+      await openTab(page, tab, label);
       await expect(page.locator("main").first()).not.toContainText("Could not load");
       await page.screenshot({ path: testInfo.outputPath(`payroll-${tab}-phone375-dark.png`), fullPage: true });
     }
@@ -202,8 +206,8 @@ test.describe("payroll screens (2.1e)", () => {
 
   test("teacher: My salary renders (self-service, letterhead from the teaching answer)", async ({ browser }, testInfo) => {
     const { context, page } = await open(browser, "teacher", { width: 1440, height: 900 });
-    for (const tab of ["mine", "myAdvances"]) {
-      await openTab(page, tab);
+    for (const [tab, label] of [["mine", /^My payslip$/], ["myAdvances", /^My advances$/]] as const) {
+      await openTab(page, tab, label);
       const text = await grab(page, testInfo, `teacher-${tab}`);
       expect(text).not.toMatch(/Could not load/);
       await page.screenshot({ path: testInfo.outputPath(`payroll-teacher-${tab}-desktop-light.png`), fullPage: true });

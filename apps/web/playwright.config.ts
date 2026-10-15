@@ -79,8 +79,17 @@ export default defineConfig<GateOptions>({
       // Writes a transport desk and receipts (the 15 Oct paid-month case), so
       // it runs after everything that reads the stack.
       name: "money-writes",
-      testMatch: /(transport-paid-month|payroll)\.spec\.ts/,
+      testMatch: /transport-paid-month\.spec\.ts/,
       dependencies: ["desktop", "phone-375-cpu4x"],
+      use: { ...desktop },
+    },
+    {
+      // Writes salary setup and the statutory setup (put back afterwards), so
+      // it runs last: after money-writes (whose open-dues check
+      // failed when this ran first in the same project — PR #663) and propagation.
+      name: "payroll-writes",
+      testMatch: /payroll\.spec\.ts/,
+      dependencies: ["money-writes", "propagation"],
       use: { ...desktop },
     },
     {
