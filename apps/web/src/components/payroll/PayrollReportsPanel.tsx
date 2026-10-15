@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { useMemo, useState } from "react";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSalarySetup } from "@/lib/salarySetup";
 import { currentMonthIso, PAYROLL_PAYMENT_MODES } from "@/lib/payroll";
 import {
@@ -19,7 +20,7 @@ export function PayrollReportsPanel({
 }: {
   academicYearCode: string;
 }) {
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [monthFrom, setMonthFrom] = useState("");
   const [monthTo, setMonthTo] = useState(currentMonthIso);
   const [month, setMonth] = useState("");
@@ -39,10 +40,6 @@ export function PayrollReportsPanel({
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState<string | null>(null);
   const [category, setCategory] = useState<string>("payroll");
-
-  useEffect(() => {
-    setMasters(loadMasters());
-  }, []);
 
   const roster = useMemo(
     () =>
@@ -93,11 +90,21 @@ export function PayrollReportsPanel({
       includeDraft,
       includeVoidedAccount: includeVoided,
       format,
+      // Never undefined here (the screen waits for it): undefined would make
+      // the catalog read the tab's page copy instead.
       masters: masters ?? undefined,
     });
     setRunning(null);
     if (!result.ok) flash(result.error, true);
     else flash(result.message);
+  }
+
+  // A failed Masters read is a failure on screen (R6) — never an empty staff filter.
+  if (mastersError) {
+    return <QueryError what="the staff roster" error={mastersError} retry={retryMasters} />;
+  }
+  if (!masters) {
+    return <p className="text-sm text-[var(--muted)]">Loading payroll reports…</p>;
   }
 
   return (

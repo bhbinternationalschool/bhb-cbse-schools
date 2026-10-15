@@ -16,7 +16,8 @@ import {
   computeEstimatedPenalty,
   statutoryDueDate,
 } from "@/lib/statutoryCompliance";
-import { loadMasters } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { normalizeStatutoryConfig } from "@/lib/foundationMasters";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import {
@@ -57,9 +58,11 @@ export function StatutoryRemitPanel() {
   const [drafts, setDrafts] = useState<Record<string, BatchDraft>>({});
   const [uploading, setUploading] = useState<string | null>(null);
 
+  // The penalty slabs and rates: the server's Masters (statutory setup).
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const config = useMemo(
-    () => normalizeStatutoryConfig(loadMasters().statutoryConfig),
-    [tick],
+    () => normalizeStatutoryConfig(masters?.statutoryConfig),
+    [masters],
   );
 
   useEffect(() => {
@@ -137,6 +140,15 @@ export function StatutoryRemitPanel() {
         : config.penalty.esicInterestRatePctPerAnnum,
     );
     return penalty.daysOverdue > 0 ? penalty : null;
+  }
+
+  // A failed Masters read is a failure on screen (R6) — never a penalty
+  // estimated from default rates while the school's own are unknown.
+  if (mastersError) {
+    return <QueryError what="the statutory setup" error={mastersError} retry={retryMasters} />;
+  }
+  if (!masters) {
+    return <p className="text-sm text-[var(--muted)]">Loading statutory remittances…</p>;
   }
 
   return (
