@@ -31,7 +31,11 @@ bool shouldPoll(ModalRoute<Object?>? route, AppLifecycleState? app) =>
 class _RunningStripState extends State<RunningStrip>
     with SingleTickerProviderStateMixin {
   List<CommsItem> _items = const [];
-  late final AnimationController _anim = AnimationController(vsync: this);
+  // Made on first use; a strip that never showed anything has none to
+  // dispose (creating one in dispose() looked up a deactivated ancestor).
+  AnimationController? _animCtl;
+  AnimationController get _anim =>
+      _animCtl ??= AnimationController(vsync: this);
   final _textKey = GlobalKey();
   double _textWidth = 0;
   Timer? _refresh;
@@ -66,7 +70,7 @@ class _RunningStripState extends State<RunningStrip>
   @override
   void dispose() {
     _refresh?.cancel();
-    _anim.dispose();
+    _animCtl?.dispose();
     super.dispose();
   }
 

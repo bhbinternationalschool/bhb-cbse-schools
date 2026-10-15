@@ -43,18 +43,7 @@ class TimeoutClient extends http.BaseClient {
           ),
         );
     return http.StreamedResponse(
-      res.stream.timeout(
-        timeout,
-        onTimeout: (sink) {
-          sink.addError(
-            TimeoutException(
-              "Reply from ${request.url.path} stalled for ${timeout.inSeconds}s",
-              timeout,
-            ),
-          );
-          sink.close();
-        },
-      ),
+      _idleTimeout(res.stream, request.url.path),
       res.statusCode,
       contentLength: res.contentLength,
       request: res.request,
@@ -63,6 +52,61 @@ class TimeoutClient extends http.BaseClient {
       persistentConnection: res.persistentConnection,
       reasonPhrase: res.reasonPhrase,
     );
+  }
+
+  /// The body, failing with a [TimeoutException] when no chunk arrives for
+  /// [timeout]. A plain Timer per gap (not Stream.timeout), so it behaves
+  /// the same under the test clock as on the phone.
+  Stream<List<int>> _idleTimeout(Stream<List<int>> body, String path) {
+    late StreamController<List<int>> out;
+    StreamSubscription<List<int>>? sub;
+    Timer? timer;
+    var finished = false;
+    void arm() {
+      timer?.cancel();
+      timer = Timer(timeout, () {
+        finished = true;
+        sub?.cancel();
+        out.addError(
+          TimeoutException(
+            "Reply from $path stalled for ${timeout.inSeconds}s",
+            timeout,
+          ),
+        );
+        out.close();
+      });
+    }
+
+    out = StreamController<List<int>>(
+      onListen: () {
+        arm();
+        sub = body.listen(
+          (chunk) {
+            arm();
+            out.add(chunk);
+          },
+          onError: (Object e, StackTrace st) {
+            timer?.cancel();
+            out.addError(e, st);
+          },
+          onDone: () {
+            finished = true;
+            timer?.cancel();
+            out.close();
+          },
+          cancelOnError: false,
+        );
+      },
+      onPause: () => sub?.pause(),
+      onResume: () => sub?.resume(),
+      onCancel: () {
+        timer?.cancel();
+        // A finished body has nothing to cancel; returning its cancel future
+        // would only hold back the done event.
+        return finished ? null : sub?.cancel();
+      },
+    );
+    return out.stream;
   }
 
   /// A view never closes the shared client — the app holds it for its life.

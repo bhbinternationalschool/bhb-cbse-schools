@@ -22,14 +22,19 @@ Future<void> loadCachedThenFresh<T>({
   required void Function(T value) onFresh,
   required void Function(Object error, DateTime? staleSince) onError,
 }) async {
-  var freshDone = false;
-  final fresh = fetch().whenComplete(() => freshDone = true);
+  // Only a SUCCESSFUL answer outranks the saved copy: when the server fails
+  // fast (no network), the copy is still painted and labelled as old.
+  var freshOk = false;
+  final fresh = fetch().then((v) {
+    freshOk = true;
+    return v;
+  });
   // Swallow here; the error is handled below once the copy is painted.
   unawaited(fresh.then((_) {}, onError: (_) {}));
   Cached<T>? shown;
   try {
     final c = await peek();
-    if (c != null && !freshDone) {
+    if (c != null && !freshOk) {
       shown = c;
       onCached(c);
     }
@@ -49,7 +54,12 @@ class RefreshClock {
   RefreshClock({
     this.maxAge = const Duration(minutes: 2),
     DateTime Function()? now,
-  }) : _now = now ?? DateTime.now;
+  }) : _now = now ?? (() => debugNow());
+
+  /// The clock every home's [RefreshClock] reads unless given its own;
+  /// tests move it forward to stand in for minutes in the background.
+  @visibleForTesting
+  static DateTime Function() debugNow = DateTime.now;
 
   final Duration maxAge;
   final DateTime Function() _now;
