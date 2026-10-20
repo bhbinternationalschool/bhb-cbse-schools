@@ -148,6 +148,25 @@ export async function POST(request: Request) {
       userAgent: meta.userAgent,
     });
 
+    // The class teacher(s) and whoever edits student records school-wide:
+    // ERP bell + phones (lib/notify).
+    {
+      const [{ notify }, { documentReceived }, { resolveClassTeachers }] = await Promise.all([
+        import("@/lib/notify/notify.server"),
+        import("@/lib/notify/events"),
+        import("@/lib/staffResolve"),
+      ]);
+      await notify(
+        documentReceived({
+          refId: `${student.id}:${key}:${now}`,
+          staffIds: resolveClassTeachers(ctx.masters, student.classId, student.sectionId, student.academicYearCode).map((t) => t.id),
+          title: `${label} received · ${student.fullName}`,
+          body: ocr?.overall === "likely_match" ? "The details match the record — please confirm." : "Waiting for verification.",
+          webLink: "/documents",
+        }),
+      );
+    }
+
     const fresh = loadSis().students.find((s) => s.id === student.id) ?? { ...student, docs };
     return apiOk({
       doc: studentDocsForParent(fresh).find((d) => d.key === key),

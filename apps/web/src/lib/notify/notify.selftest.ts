@@ -20,6 +20,7 @@ import { resolveAudience, type AudienceContext } from "./audience";
 import { DEFAULT_PREFS, NOTIFY_KINDS, NOTIFY_TOPICS, prefsFrom, recipientKey, type NotifyPrefs, type Recipient } from "./kinds";
 import { deliverRows, notifyWith, type DeliverRow, type NotifyDeps, type NotifyEvent, type PushMessage } from "./notify";
 import { decidePush, inQuietHours, istMinutes } from "./policy";
+import { messageRelayed, payoutHeld } from "./events";
 import { isPushVoiceKind, pushVoiceChannel } from "@/lib/pushVoice";
 
 console.log("notify.selftest.ts");
@@ -151,6 +152,32 @@ const has = (rs: Recipient[], type: Recipient["type"], id: string) => ids(rs).in
   const to = resolveAudience([{ staff: [GONE, "nobody", TEACHER_B] }, { households: ["", "hh_9"] }], ctx);
   assert.deepEqual(ids(to), ["parent:hh_9", `staff:${TEACHER_B}`], "inactive / unknown staff and blank families dropped");
   assert.deepEqual(resolveAudience([], ctx), [], "no rule, nobody — there is no 'everyone'");
+}
+
+// ── Audience: only the owner approves a held payout ────────────────────────
+
+{
+  const onRoster: MastersState = {
+    ...masters,
+    staff: [...masters.staff, staff("s_dir", "d_prin", { email: "Director@BHBInternational.school" })],
+  } as MastersState;
+  const to = resolveAudience(payoutHeld({ requestId: "p1", payeeName: "Vendor", amountLabel: "₹5,000", reason: "", requestedBy: "Accounts" }).audience, {
+    ...ctx,
+    masters: onRoster,
+  });
+  assert.deepEqual(ids(to), ["staff:s_dir"], "the owner's roster row only — not the principal, not accounts");
+  const off = resolveAudience([{ owners: true }], ctx);
+  assert.deepEqual(ids(off), [`staff:${DIRECTOR}`], "an owner login with no roster row, by email");
+}
+
+// ── Audience: a WhatsApp message handed to the office ──────────────────────
+
+{
+  const routed = resolveAudience(messageRelayed({ relayId: "r1", code: "A1", categoryLabel: "Fees", senderName: "X", text: "", routeStaffIds: [ACCOUNTS] }).audience, ctx);
+  assert.deepEqual(ids(routed), [`staff:${ACCOUNTS}`], "the relay route's own people");
+  const fallback = resolveAudience(messageRelayed({ relayId: "r2", code: "A2", categoryLabel: "Fees", senderName: "X", text: "", routeStaffIds: [] }).audience, ctx);
+  assert.ok(has(fallback, "staff", OFFICE) && has(fallback, "staff", PRINCIPAL), "no route on the roster → school-wide WhatsApp desk");
+  assert.ok(!has(fallback, "staff", TEACHER_B), "never a teacher");
 }
 
 // ── Kinds and voices ───────────────────────────────────────────────────────
