@@ -603,6 +603,16 @@ pages (`/students`, `/attendance`, `/homework`) now make one extra small `/api` 
 (the versions poll); others unchanged. Bundle: every `(erp)` page loads two more chunks (react-query
 ≈ 34 KB raw / 10.3 KB gzip; the kernel + erpFetch ≈ 9.4 KB / 3.9 KB); public and parent pages unchanged.
 
+**When the poll runs (updated 20 Oct 2026, #681).** The header bell (`NotificationBell`) is an enabled
+`useErpQuery` on desk `erp_notifications`, mounted on every staff page, so the versions poll now runs on
+**every staff page** — on purpose: a notification must reach the bell within one poll on any page. It is
+still ONE poll per tab (the single `VersionsPoller` in `ErpQueryProvider`; the bell and every other desk query
+share it), at the 20 s cadence (≥ 5 s apart on a focus tick), and never for a family (the versions route is
+staff-only; `/parent`'s bell re-asks its own list every 30 s). `kernel.spec.ts` and `teacher.spec.ts` assert
+exactly this: ≥ 1 and ≤ 2 polls in 25 s on `/masters`, ≤ 3 in 22 s on `/__kernel` with the four views mounted,
+every gap ≥ 15 s, 0 on `/parent`; the closed header WhatsApp panel still asks no Masters view and opening it
+adds no versions request of its own.
+
 **Not done / not proven here.** No real screen reads `useMasters()` etc. yet (2.1) — the 12
 real-screen propagation cases stay expected-fail; the 2.1 bridge (`writeMastersLocalRaw` from
 `useMasters()`) is not built; `useErpMutation` has no consumer (2.2/1.5); `useErpCollection` over
@@ -1024,6 +1034,48 @@ check 15 Oct), so no rupee differs now, but a school-specific rate would. Should
 not shown to your role") in 2.2/2.3 — not changed here. Lib helpers now get the server's raw book instead of
 `loadMasters()`'s normalised read; only the keys above were audited. Process / Rebuild / Apply setup were not clicked
 in the spec (they write runs); they call the same builders with the same `masters` the setup review uses.
+
+*(2.1f built 20 Oct 2026, PR #661.)* **What exists.** Of the 9 files (`components/shell` ×6,
+`components/dashboard` ×2, `app/(erp)/staff/job-applications/page.tsx`), 7 no longer call `loadMasters()`.
+**The shell is on every page, so it adds no request:** the always-mounted header pieces do NOT call `useMasters()`
+(that would add the masters view and start the 20 s versions poll on every page). What they read is a permission or
+"who may reach whom" answer, so they read the copies the sidebar and `ErpModuleGate` already decide with —
+`useAccessData()` (`UserAccountMenu`: profile link, roles, "Open Roles"; `UniversalSearchBar`: which modules may be
+offered, the staff roster) or `useStableAccessCopy()` (new, `components/shell/useStableAccessCopy.ts`: the same
+copies with an identity that moves only when the roster/classes/sections/subjects/class-subject keys or rbac change —
+for `ErpAiChatbot`, whose history effect, and `StaffInternalChatButton`, whose thread/alert effects, would otherwise
+re-run on every desk event). Until those copies have loaded each shows "Loading…" (failed: "did not load" + Try again
+in the menu) — never "No staff profile linked" / "No roles assigned yet" / designation guessing; they now follow a
+roster or roles change without a reload (all four read once at mount before). **Left on `loadMasters()`, by design:**
+`useAccessData.ts` (re-implemented only in 2.3a — its read IS the permission copy) and `SchoolFavicon.tsx` (rendered
+before the workspace boots, outside the query provider; reading through `useAccessData` would start the rbac/staff
+hydrate before boot, through `useMasters` would add a request per page; it reads one value, `schoolProfile`).
+**Home:** `SchoolHomeDashboard` decides teacher home vs school dashboard and the expenses tile from the access copy
+(waits for it: "Loading school dashboard…"; failed = "Couldn't check your access" + Try again, the module gate's
+words; the principal's cockpit, decided from the session alone, is unchanged). The owner branch is a new `OwnerHome`
+component that alone calls `useMasters()` for `statutoryConfig` (full answer only; a failed read says "Statutory dues
+could not be checked" + Try again instead of showing none; tiles added to copies, never to the parent's model).
+`TeacherHome` reads `useScreenMasters()` (classes, holidays, bell; `<QueryError>` on a failed read; "Loading your class
+desk…" until both answers are in — a pending register is not "none pending"); `shouldShowTeacherHome(session,
+masters|null)` takes the access copy. **Job applications** (server page) read `readServerMastersCopy()` (the 1.3
+reference cache every API permission check uses) instead of `ensureSchoolMirrorHydrated()` + `loadMasters()`; no copy,
+or Masters without the roster (`from: "fallback"`), = an on-screen "could not check your access", never a decision
+against an empty roster. **Proof.** New `e2e/specs/shell.spec.ts`: office, principal, class teacher, timetable-only
+teacher × desktop-light and 375-dark, 9 routes each (`/home /students /staff /masters /attendance /fees /payroll
+/timetable /homework`), full page loads: no `pageerror`, no React #185 / "Maximum update depth", no console error from
+the page's code; the browser's "Failed to load resource" 4xx lines are recorded per request in the `shell-sweep` metric
+(any 5xx fails); screenshots of home per login/viewport, the focused search and the open account menu (desktop) are
+attached. Its first CI cut failed on exactly those network lines (403s of teacher desk reads, a 404 on /fees — all
+present on main's pages, none from this step's reads), which is why they are recorded instead. Loop mutation (a
+`useLayoutEffect` in `UserAccountMenu` re-dispatching `bhb-masters-updated` on each access-copy change — the 13 Oct
+shape) pushed through CI: every page spec froze (budget/counts/error/kernel at 2.1 m time-outs) and the job hit its time
+limit before reaching `shell.spec` — so the mutation is proven to break the gate, but **`shell.spec` itself failing on
+it is not proven by a run.** Budget (CI, office, requests / KB): see the PR body — the shell added no request.
+Ratchets: `load_masters_screen_files` 61 → **54**, `load_masters_calls_src` 423 → **410** (13 calls).
+**Not done / not proven.** The header still reads the page copy (the access copy) — 2.3a replaces it with
+`useRbac()` + `useStaffList()`; staff chat also reads sections/classes from that copy (2.3a must keep them or move the
+chat onto `useMasters({enabled: open})`). No owner login in the fixture: `OwnerHome` was not seen on a screen. The
+home's new access wait was not timed on the throttled phone profile.
 
 **2.2 Masters and staff editing write rows.** `MastersWorkspace` and its panels write through
 `useErpMutation` → `desk_slice_row_write` / `desk_slice_object_write` (one subject, one

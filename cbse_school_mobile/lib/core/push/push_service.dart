@@ -38,6 +38,9 @@ class PushService {
     "message": ("Messages", "संदेश"),
     "leave": ("Leave", "छुट्टी"),
     "notice": ("Notices", "सूचनाएँ"),
+    // 20 Oct 2026 — the ERP's notification service (apps/web lib/notify).
+    "approval": ("Approvals", "मंज़ूरी"),
+    "document": ("Documents", "दस्तावेज़"),
   };
 
   static Iterable<String> get _voiceChannelIds => _voiceKinds.keys.expand(

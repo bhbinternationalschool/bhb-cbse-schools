@@ -206,8 +206,8 @@ export async function settlePaymentLinkWithWhatsApp(opts: {
   // language, and records the outcome per receipt so a retry or a replayed
   // webhook cannot message a family twice about the same money.
   let whatsappReceipt: { ok: boolean; error?: string } | null = null;
+  const sis = loadSis();
   if (opts.sendWhatsApp !== false) {
-    const sis = loadSis();
     const hh = sis.households.find((h) => h.id === result.link.householdId);
     const mobile = hh ? householdWhatsApp(hh) || hh.mobile || "" : "";
     if (mobile) {
@@ -232,6 +232,24 @@ export async function settlePaymentLinkWithWhatsApp(opts: {
           : { ok: false, error: sent.reason };
       }
     }
+  }
+
+  // The family and the fee office: ERP bell + phones (lib/notify). Keyed on
+  // the voucher, so a replayed webhook notifies nobody twice.
+  try {
+    const voucher = loadFees().vouchers.find((v) => v.id === result.voucherId);
+    const firstStudent = voucher?.lines[0]?.studentId;
+    const { notifyFeeReceived } = await import("@/lib/notify/feeNotify.server");
+    await notifyFeeReceived({
+      voucherId: result.voucherId,
+      receiptNo: result.receiptNo,
+      householdId: result.link.householdId,
+      totalPaise: voucher?.totalPaise ?? result.link.amountPaise,
+      studentName: sis.students.find((st) => st.id === firstStudent)?.fullName || "",
+      mode: "Online",
+    });
+  } catch (e) {
+    console.warn("[settle] notify failed", (e as Error)?.message);
   }
 
   return { ...result, whatsappReceipt };
