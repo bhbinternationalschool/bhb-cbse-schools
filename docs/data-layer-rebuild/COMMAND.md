@@ -1156,7 +1156,7 @@ elements (registry `base: "rev"` for the 21 `masters.*` list collections). **2.2
 acceptance above. *(The split was given to the 2.2a executor as "2.2a–2.2f"; the per-PR contents above
 are its reading of the step list — the director may re-cut 2.2b–2.2f.)*
 
-*(2.2a built 21 Oct 2026, PR #… — migration `20261021090000_data_layer_masters_row_revs_staff_kernel.sql`:
+*(2.2a built 21 Oct 2026, PR #697 — migration `20261021090000_data_layer_masters_row_revs_staff_kernel.sql`:
 **the director applies it to production before 2.2b deploys**; it is safe to apply ahead of time — no
 live code calls the new functions, and the only change live code sees is that Masters elements gain
 `_rev`, which every client fingerprint already ignores (`rowFingerprint` in `sliceRevClient.ts`).)*
