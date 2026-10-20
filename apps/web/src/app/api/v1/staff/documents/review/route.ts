@@ -6,7 +6,8 @@ import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { loadSisForStaff, type StudentDocKey } from "@/lib/sis";
 import { updateStudentDocsInDb } from "@/lib/sisProfile.server";
 import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
-import { sendPushToSubject } from "@/lib/webPush.server";
+import { documentReviewed } from "@/lib/notify/events";
+import { notify } from "@/lib/notify/notify.server";
 import { DOC_LABELS } from "@/lib/api/v1/studentDocs";
 
 export const runtime = "nodejs";
@@ -82,18 +83,18 @@ export async function POST(request: Request) {
     });
 
     if (student.householdId) {
-      await sendPushToSubject("parent", student.householdId, {
-        title:
-          verdict === "verified"
-            ? `${DOC_LABELS[key]} verified`
-            : `${DOC_LABELS[key]} needs another upload`,
-        body:
-          verdict === "verified"
-            ? `${student.fullName}'s ${DOC_LABELS[key].toLowerCase()} has been checked and accepted.`
-            : `${student.fullName}: ${note}`,
-        url: `/profile?studentId=${encodeURIComponent(student.id)}`,
-        data: { kind: "document_review", studentId: student.id, key, verdict },
-      }).catch(() => undefined);
+      await notify(
+        documentReviewed({
+          studentId: student.id,
+          householdId: student.householdId,
+          docKey: key,
+          docLabel: DOC_LABELS[key],
+          studentName: student.fullName,
+          verdict,
+          note,
+          at: now,
+        }),
+      );
     }
 
     return apiOk({ studentId: student.id, key, status: verdict, reviewedAt: now });

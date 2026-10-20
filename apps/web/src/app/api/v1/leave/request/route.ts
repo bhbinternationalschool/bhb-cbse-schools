@@ -19,8 +19,8 @@ import {
 } from "@/lib/studentLeave";
 import { loadSis } from "@/lib/sis";
 import { resolveClassTeachers } from "@/lib/staffResolve";
-import { leadershipStaffIds } from "@/lib/staffHomeKind.server";
-import { sendPushToSubjects } from "@/lib/webPush.server";
+import { studentLeaveRequested } from "@/lib/notify/events";
+import { notify } from "@/lib/notify/notify.server";
 
 export const runtime = "nodejs";
 
@@ -115,30 +115,22 @@ export async function POST(request: Request) {
     const r = result.request;
 
     // Wake the people who decide it: the class teacher for a short leave,
-    // leadership when it is over 3 days / medical / long. Best-effort.
-    try {
-      const days = leaveDayCount(r);
-      const leadershipOnly = days > 3 || r.leaveType === "ML" || r.leaveType === "LL";
-      const teachers = resolveClassTeachers(
-        ctx.masters,
-        student.classId,
-        student.sectionId,
-        student.academicYearCode,
-      ).map((t) => t.id);
-      const targets = leadershipOnly
-        ? [...new Set([...leadershipStaffIds(ctx.masters), ...teachers])]
-        : teachers.length
-          ? teachers
-          : leadershipStaffIds(ctx.masters);
-      await sendPushToSubjects("staff", targets, {
-        title: `Leave request · ${student.fullName}`,
-        body: `${leaveTypeLabel(r.leaveType)} ${fromDate}${toDate !== fromDate ? ` to ${toDate}` : ""} · ${reason.slice(0, 80)}`,
-        url: "/student-leave",
-        data: { kind: "student_leave", requestId: r.id, studentId },
-      });
-    } catch (e) {
-      console.warn("[leave-v1] staff push failed", (e as Error)?.message);
-    }
+    // the school-wide approvers too when it is over 3 days / medical / long
+    // (lib/notify/events.ts) — the ERP bell and their phones.
+    const days = leaveDayCount(r);
+    await notify(
+      studentLeaveRequested({
+        requestId: r.id,
+        studentId,
+        studentName: student.fullName,
+        classTeacherIds: resolveClassTeachers(ctx.masters, student.classId, student.sectionId, student.academicYearCode).map((t) => t.id),
+        leadershipToo: days > 3 || r.leaveType === "ML" || r.leaveType === "LL",
+        typeLabel: leaveTypeLabel(r.leaveType),
+        fromDate,
+        toDate,
+        reason,
+      }),
+    );
 
     return apiOk({
       id: r.id,

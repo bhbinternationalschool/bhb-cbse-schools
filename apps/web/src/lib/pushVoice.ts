@@ -15,10 +15,33 @@
  * default channel and its normal sound, so nothing breaks. Pure.
  */
 
-export type PushVoiceKind = "homework" | "attendance" | "fees" | "message" | "leave" | "notice";
+export type PushVoiceKind =
+  | "homework"
+  | "attendance"
+  | "fees"
+  | "message"
+  | "leave"
+  | "notice"
+  // 20 Oct 2026 (lib/notify): named only by the notification service, never
+  // inferred from a link, so the ~30 older send sites keep their clips.
+  | "approval"
+  | "document";
 export type PushVoiceLang = "hi" | "en";
 
-export const PUSH_VOICE_KINDS: PushVoiceKind[] = ["homework", "attendance", "fees", "message", "leave", "notice"];
+export const PUSH_VOICE_KINDS: PushVoiceKind[] = [
+  "homework",
+  "attendance",
+  "fees",
+  "message",
+  "leave",
+  "notice",
+  "approval",
+  "document",
+];
+
+export function isPushVoiceKind(v: unknown): v is PushVoiceKind {
+  return typeof v === "string" && (PUSH_VOICE_KINDS as string[]).includes(v);
+}
 
 export function pushVoiceKind(url: string | undefined, dataKind?: string): PushVoiceKind {
   const s = `${url || ""} ${dataKind || ""}`.toLowerCase();

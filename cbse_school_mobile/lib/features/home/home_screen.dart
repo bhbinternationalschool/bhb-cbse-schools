@@ -35,6 +35,7 @@ import "../profile/profile_screen.dart";
 import "home_stats.dart";
 import "student_id_screen.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/push/notification_bell.dart";
 
 class _Module {
   const _Module(this.label, this.icon, this.tone);
@@ -167,6 +168,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Turn a notification deep link into the same navigation a tap on the
   /// module grid would do. Unknown routes just land on Home.
+  /// An item's link from the notifications list.
+  void _openRoute(String route) {
+    _pendingRoute = route;
+    _consumePendingRoute();
+  }
+
   void _consumePendingRoute() {
     final raw = _pendingRoute;
     _pendingRoute = null;
@@ -184,6 +191,8 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
     switch (uri.path) {
+      case "/notifications":
+        openNotifications(context, widget.api, _openRoute);
       case "/homework":
         _openModule("Homework", child);
       case "/attendance":
@@ -508,6 +517,10 @@ class _HomeScreenState extends State<HomeScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
             _Header(
+              bell: NotificationBellButton(
+                api: widget.api,
+                onOpenRoute: _openRoute,
+              ),
               child: child,
               siblings: summary.children,
               selectedIndex: _childIndex,
@@ -681,8 +694,11 @@ class _Header extends StatelessWidget {
     required this.onSelectChild,
     required this.onNotices,
     required this.onLogout,
+    required this.bell,
   });
 
+  /// The notifications bell (core/push/notification_bell.dart).
+  final Widget bell;
   final ParentChild child;
   final List<ParentChild> siblings;
   final int selectedIndex;
@@ -734,12 +750,14 @@ class _Header extends StatelessWidget {
                         ),
                       ),
                     ),
+                    bell,
                     const ScreenGuideButton(
                       guideId: "parent-home",
                       screenLabel: "Home",
                     ),
                     _RoundAction(
-                      icon: Icons.notifications_none_rounded,
+                      // The bell is the notifications list now; notices keep their own button.
+                      icon: Icons.campaign_outlined,
                       tooltip: context.l10n.notices,
                       onTap: onNotices,
                     ),
