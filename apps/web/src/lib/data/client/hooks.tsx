@@ -23,9 +23,10 @@
  * ./queryKernel.ts with their own self-test.
  *
  * When the versions poll runs: only while at least one mounted query reads a
- * desk (`desk` given) and the tab is visible. A page that uses none of these
- * hooks — today every page but the ~15 that read "my classes" — makes no new
- * request at all. The provider lives in AppShell, which only the staff (erp)
+ * desk (`desk` given) and the tab is visible. Since 20 Oct 2026 the header
+ * bell (NotificationBell, desk "erp_notifications") is such a query on every
+ * staff page, so every staff page polls — once per tab, every 20 s, shared by
+ * every desk query on the page (COMMAND.md 1.4, "When the poll runs"). The provider lives in AppShell, which only the staff (erp)
  * layout renders: parent and field sessions are redirected before it, and the
  * Flutter apps' web views (checkout, e-books, videos) never open an (erp)
  * page. A 401/403 from the versions route stops the poll for the life of the

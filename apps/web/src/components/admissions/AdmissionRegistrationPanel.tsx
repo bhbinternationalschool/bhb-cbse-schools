@@ -46,6 +46,7 @@ import {
 } from "@/components/masters/MastersLayout";
 import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { SisParentMatchBanner } from "@/components/admissions/SisParentMatchBanner";
+import { withheldFeeGroupRefusal } from "@/components/admissions/withheldFeeGroup";
 import {
   ErpTable,
   ErpTableBody,
@@ -105,9 +106,12 @@ export function AdmissionRegistrationPanel({
   canEdit,
   onCommit,
   onOpenCrmLead,
+  feesWithheld = false,
 }: {
   state: AdmissionsState;
   masters: MastersState;
+  /** The teaching subset: fee groups withheld, not none (data-layer 2.1g). */
+  feesWithheld?: boolean;
   sis: SisState;
   by: string;
   canEdit: boolean;
@@ -624,6 +628,11 @@ export function AdmissionRegistrationPanel({
         state,
         "Take registration fee first (or waive), then Send to student record",
       );
+      return;
+    }
+    const refusal = withheldFeeGroupRefusal(feesWithheld, selected);
+    if (refusal) {
+      onCommit(state, refusal);
       return;
     }
     const r = enrollLead(state, selected.id, by, masters);

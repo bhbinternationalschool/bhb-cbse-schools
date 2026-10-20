@@ -17,6 +17,7 @@ import "payslips_screen.dart";
 import "self_attendance_screen.dart";
 import "transport_requests_screen.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/push/notification_bell.dart";
 
 /// Driver home (field persona): the bus register and log book for the
 /// driver's own bus, GPS self-attendance, and the school's routes with
@@ -173,7 +174,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     final raw = widget.openRoute;
     if (raw == null || _deepLinkDone || !mounted) return;
     _deepLinkDone = true;
+    _openRoute(raw);
+  }
+
+  /// A deep link: a tapped push, or an item of the notifications list.
+  void _openRoute(String raw) {
+    if (!mounted) return;
     final uri = Uri.tryParse(raw);
+    if ((uri?.path ?? raw) == "/notifications") {
+      openNotifications(context, widget.api, _openRoute);
+      return;
+    }
     final Widget? screen = switch (uri?.path ?? raw) {
       "/notices" => noticesScreenForRoute(widget.api, uri),
       "/my-attendance" => MyAttendanceCalendarScreen(
@@ -340,6 +351,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         ),
                       ],
                     ),
+                  ),
+                  NotificationBellButton(
+                    api: widget.api,
+                    onOpenRoute: _openRoute,
                   ),
                   const ScreenGuideButton(
                     guideId: "driver-home",

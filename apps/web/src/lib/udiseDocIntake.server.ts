@@ -53,7 +53,8 @@ import {
 } from "@/lib/udiseDocIntakeAi";
 import { buildWaTemplateBodyComponent, sendWaWithFailover, sendWhatsAppText } from "@/lib/waSend";
 import { normalizeWaTemplatesState, resolveTemplateForSend, templateVariablePositions, type WaTemplatesState } from "@/lib/waTemplates";
-import { sendPushToSubjects } from "@/lib/webPush.server";
+import { documentReceived } from "@/lib/notify/events";
+import { notify } from "@/lib/notify/notify.server";
 import { trackServerWork } from "@/lib/serverWork";
 
 const MAX_BYTES = 6 * 1024 * 1024;
@@ -158,8 +159,8 @@ export async function udiseOfficeStaff(): Promise<{ id: string; fullName: string
 
 /**
  * Tell the office. Text inside each staff member's own 24h window, the
- * `udise_doc_received` template outside it, a push either way, and one row
- * in the ERP inbox for the people who read neither.
+ * `udise_doc_received` template outside it, and a notification (the ERP
+ * bell + a push) either way.
  */
 export async function alertOfficeOfUdiseDocument(input: {
   text: string;
@@ -211,44 +212,21 @@ export async function alertOfficeOfUdiseDocument(input: {
     console.warn("[udise-intake] office WA failed", e);
   }
 
-  try {
-    if (staff.length) {
-      const res = await sendPushToSubjects(
-        "staff",
-        staff.map((s) => s.id),
-        { title: officeDocNoticeTitle(input.variables.docLabel), body: input.oneLine.slice(0, 160), url: input.href, data: { kind: "udise_doc", id: input.refId } },
-      );
-      pushed = res.sent;
-    }
-  } catch (e) {
-    console.warn("[udise-intake] push failed", e);
-  }
-
-  try {
-    // Read-append-write: pushNotificationsDeskToDb deletes rows absent from
-    // the state it is given, so a one-item state would wipe the inbox.
-    const { fetchNotificationsDeskFromDb, pushNotificationsDeskToDb } = await import("@/lib/notificationsNormalized.server");
-    const read = await fetchNotificationsDeskFromDb();
-    if (read.ok) {
-      const already = read.bundle.items.some((n) => n.sourceId === input.refId);
-      if (!already) {
-        const item = {
-          id: `nf_udise_${input.refId}`,
-          title: officeDocNoticeTitle(input.variables.docLabel),
-          body: input.text.slice(0, 280),
-          kind: "system" as const,
-          href: input.href,
-          audience: "staff" as const,
-          sourceId: input.refId,
-          createdAt: new Date().toISOString(),
-          readBy: [] as string[],
-        };
-        const w = await pushNotificationsDeskToDb({ version: 1 as const, items: [item, ...read.bundle.items].slice(0, 300) });
-        notified = w.ok;
-      } else notified = true;
-    }
-  } catch (e) {
-    console.warn("[udise-intake] notification failed", e);
+  // The ERP bell + phones of the office people above and whoever edits
+  // student records school-wide (lib/notify). Replaces the push and the old
+  // whole-desk notifications row (which the bell no longer reads).
+  const r = await notify(
+    documentReceived({
+      refId: input.refId,
+      staffIds: staff.map((s) => s.id),
+      title: officeDocNoticeTitle(input.variables.docLabel),
+      body: input.oneLine.slice(0, 200),
+      webLink: input.href,
+    }),
+  );
+  if (r.ok) {
+    pushed = r.pushed;
+    notified = r.inserted + r.grouped + r.duplicate > 0;
   }
   return { wa, pushed, notified };
 }

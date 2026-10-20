@@ -13,7 +13,7 @@
 
 import { GoogleAuth } from "google-auth-library";
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { pushVoiceChannel, pushVoiceKind, type PushVoiceLang } from "@/lib/pushVoice";
+import { pushVoiceChannel, pushVoiceKind, type PushVoiceKind, type PushVoiceLang } from "@/lib/pushVoice";
 
 const FCM_PROJECT_ID =
   process.env.FCM_PROJECT_ID ||
@@ -74,6 +74,15 @@ export type FcmPayload = {
   url?: string;
   /** Extra string data forwarded verbatim to the app. */
   data?: Record<string, string>;
+  /**
+   * The Android channel to ring on, chosen by the notification service
+   * (lib/notify/policy.ts): a voice channel `bhb_voice_<topic>_<lang>`, or
+   * `bhb_default` (the phone's normal sound) for a person who turned voice
+   * off. Unset = the clip inferred from the link, as before.
+   */
+  channel?: string;
+  /** The spoken line to use when `channel` is unset (the voice language is still per person). */
+  voiceTopic?: PushVoiceKind;
 };
 
 function tokenRowId(token: string): string {
@@ -131,23 +140,25 @@ async function listTokensForSubject(
 
 type SendOutcome = "sent" | "expired" | "failed";
 
-async function sendOne(
-  accessToken: string,
-  token: string,
-  payload: FcmPayload,
-  voiceLang: PushVoiceLang = "hi",
-): Promise<{ outcome: SendOutcome; error?: string }> {
+/**
+ * The FCM v1 message for one device. Pure, so the self-test can check the
+ * channel and sound a push rings with.
+ */
+export function buildFcmMessage(token: string, payload: FcmPayload, voiceLang: PushVoiceLang = "hi") {
   // The spoken line for this kind of alert (lib/pushVoice). The app shows
   // a foreground notification on the same channel, so it is in data too.
-  const voice = pushVoiceChannel(pushVoiceKind(payload.url, payload.data?.kind), voiceLang);
+  const voice =
+    payload.channel ||
+    pushVoiceChannel(payload.voiceTopic ?? pushVoiceKind(payload.url, payload.data?.kind), voiceLang);
+  const voiced = voice.startsWith("bhb_voice_");
   const data: Record<string, string> = {
     ...(payload.data || {}),
     title: payload.title,
     body: payload.body,
     url: payload.url || "",
-    voice,
+    voice: voiced ? voice : "",
   };
-  const message = {
+  return {
     message: {
       token,
       notification: { title: payload.title, body: payload.body },
@@ -158,16 +169,22 @@ async function sendOne(
         // itself and surfaces the tap via onMessageOpenedApp/getInitialMessage.
         // An app without this channel (older than the voice release) falls
         // back to its default channel and the normal sound.
-        notification: {
-          channel_id: voice,
-          sound: voice,
-        },
+        notification: voiced ? { channel_id: voice, sound: voice } : { channel_id: voice, sound: "default" },
       },
       apns: {
         payload: { aps: { sound: "default", badge: 1 } },
       },
     },
   };
+}
+
+async function sendOne(
+  accessToken: string,
+  token: string,
+  payload: FcmPayload,
+  voiceLang: PushVoiceLang = "hi",
+): Promise<{ outcome: SendOutcome; error?: string }> {
+  const message = buildFcmMessage(token, payload, voiceLang);
   const res = await fetch(
     `https://fcm.googleapis.com/v1/projects/${FCM_PROJECT_ID}/messages:send`,
     {
@@ -197,7 +214,7 @@ async function sendOne(
  * (the chatbot's language menu); a family the roster cannot find gets the
  * school's default, Hindi.
  */
-async function voiceLanguageFor(subjectType: string, subjectId: string): Promise<PushVoiceLang> {
+export async function voiceLanguageFor(subjectType: string, subjectId: string): Promise<PushVoiceLang> {
   if (subjectType !== "parent") return "en";
   try {
     const [{ loadSis }, { waTemplateLanguageFor, SCHOOL_DEFAULT_WA_LANGUAGE }] = await Promise.all([
