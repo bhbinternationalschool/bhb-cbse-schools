@@ -6,7 +6,7 @@
  * assert exact numbers (`expected` below). The names are obviously fake.
  *
  * The shape mirrors production on 13 Oct 2026 (masters_desk_sync_meta /
- * sis_sync_meta): 15 classes, 13 sections, 44 subjects, 35 staff of whom 34
+ * sis_sync_meta): 15 classes, 14 sections, 44 subjects, 35 staff of whom 34
  * are active, ~250 current-year children — and the awkward parts that broke
  * production before, kept on purpose:
  *  - 30 % of children carry 2–4 per-year rows (one active row per year,
@@ -73,8 +73,15 @@ const CLASS_NAMES = [
   "VI", "VII", "VIII", "IX", "X", "XI", "XII",
 ] as const;
 
-/** Classes 1–13 (Nursery … X) have one section, A; XI and XII have none — 13 sections. */
+/**
+ * Classes 1–13 (Nursery … X) have one section, A, and every child sits in
+ * one of them. XII has an EMPTY section A (no children): the one class with
+ * a section that no fee group matches — the built-in 2026-27 groups cover
+ * Nursery–X — which student-upgrade.spec moves a child into. XI has none.
+ * 14 sections.
+ */
 const SECTIONED_CLASSES = 13;
+const EMPTY_SECTION_CLASS = 15; // XII
 
 export const classId = (k: number) => `e2e_cls_${pad(k, 2)}`;
 export const sectionId = (k: number) => `e2e_sec_${pad(k, 2)}a`;
@@ -87,6 +94,7 @@ function buildClasses(): { classes: SchoolClass[]; sections: Section[] } {
   for (let k = 1; k <= SECTIONED_CLASSES; k++) {
     sections.push({ id: sectionId(k), classId: classId(k), name: "A", isActive: true });
   }
+  sections.push({ id: sectionId(EMPTY_SECTION_CLASS), classId: classId(EMPTY_SECTION_CLASS), name: "A", isActive: true });
   return { classes, sections };
 }
 
