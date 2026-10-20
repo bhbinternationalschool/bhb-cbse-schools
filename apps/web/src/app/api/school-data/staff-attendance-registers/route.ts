@@ -24,6 +24,11 @@ import {
 } from "@/lib/staffAttendanceNormalized.server";
 
 import { readStampsParam } from "@/lib/rowStampClient";
+import {
+  isStaffRegisterOwner,
+  STAFF_REGISTER_OWNER_ONLY,
+  staffRegisterMarkChanges,
+} from "@/lib/staffRegisterOwner";
 
 export const runtime = "nodejs";
 
@@ -151,6 +156,31 @@ export async function POST(req: Request) {
 
   // The registers this browser changed and the stamp each was changed from.
   const stamps = readStampsParam(body.stamps, ["registers"])?.registers;
+
+  // Only the owner changes the register (director, 15 Oct 2026). Anyone
+  // else's save may carry the registers as they are stored (a rules save
+  // does), but not one changed mark. Staff punch for themselves through
+  // their own routes, which this does not touch.
+  if (scopeCtx && !isStaffRegisterOwner(scopeCtx.session, scopeCtx.rbac, scopeCtx.masters)) {
+    const incoming = Array.isArray(body.registers) ? body.registers : [];
+    const toWrite = incoming.filter((r) => !stamps || (r && r.id in stamps));
+    if (toWrite.length > 0) {
+      const stored = await fetchStaffAttendanceDeskFromDb();
+      if (!stored.ok) {
+        return NextResponse.json(
+          { ok: false, error: "Could not read the saved staff register — nothing was written. Try again." },
+          { status: 503 },
+        );
+      }
+      const changed = staffRegisterMarkChanges(stored.registers, toWrite, stamps);
+      if (changed.length > 0) {
+        return NextResponse.json(
+          { ok: false, error: STAFF_REGISTER_OWNER_ONLY, ownerOnly: true, changed: changed.length },
+          { status: 403 },
+        );
+      }
+    }
+  }
 
   // Function holders: merged onto the stored desk, only their functions'
   // slices — never the body as sent.

@@ -79,6 +79,8 @@ import { BulkActionBar, RowActionMenu, RowCheckbox, useRowSelection } from "@/co
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 import { QrPunchCard } from "@/components/staff/QrPunchCard";
 import { PunchPhonesPanel } from "@/components/staff/PunchPhonesPanel";
+import { StaffMonthRegisterPanel } from "@/components/attendance/StaffMonthRegisterPanel";
+import { isStaffRegisterOwner } from "@/lib/staffRegisterOwner";
 
 type AttTab =
   | "punch"
@@ -87,7 +89,9 @@ type AttTab =
   | "adjust"
   | "halfday"
   | "sync"
-  | "phones";
+  | "phones"
+  | "month"
+  | "leaves";
 
 export function StaffAttendancePanel({ ay }: { ay: string }) {
   const session = useDemoSession();
@@ -186,18 +190,26 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
     return resolveSessionStaff(session, masters);
   }, [masters, session]);
 
-  // Office staff who manage leave still see punch phones and QR screens,
-  // but marking or changing the register needs RBAC attendance.edit —
-  // admin and owner only since 5 Oct 2026 (director). The server refuses
-  // those saves anyway; hiding the tabs saves a click that can only fail.
+  // Office staff who manage leave still see punch phones, QR screens and
+  // the month register, but marking or changing the register is the
+  // OWNER's alone since 15 Oct 2026 (director: "only the owner can edit the
+  // staff attendance register"; lib/staffRegisterOwner). The server refuses
+  // anyone else's changed mark (403); hiding the tabs saves a click that can
+  // only fail.
   const canSeePhones = useMemo(() => {
     if (!masters) return false;
     return canManageStaffLeave(session, masters);
   }, [masters, session]);
-  const isManager = useMemo(() => {
+  /** Approve / revoke punch phones — unchanged: Attendance (edit). */
+  const canDecidePhones = useMemo(() => {
     if (!masters) return false;
     return canSeePhones && hasPermission(session, masters, "attendance", "edit");
   }, [canSeePhones, masters, session]);
+  const isManager = useMemo(() => {
+    if (!masters) return false;
+    return isStaffRegisterOwner(session, loadRbac(), masters);
+  }, [masters, session]);
+  const canSeeMonth = isManager || canSeePhones;
 
   const holidayTeaching = useMemo(() => {
     if (!masters) return null;
@@ -230,7 +242,7 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
 
   useEffect(() => {
     if (isManager) setTab((t) => (t === "punch" || t === "phones" ? "manage" : t));
-    else setTab("punch");
+    else setTab((t) => (t === "month" || t === "leaves" ? t : "punch"));
   }, [isManager]);
 
   useEffect(() => {
@@ -238,7 +250,8 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
       setTab("punch");
     }
     if (tab === "phones" && (isManager || !canSeePhones)) setTab(isManager ? "manage" : "punch");
-  }, [isManager, canSeePhones, tab]);
+    if ((tab === "month" || tab === "leaves") && !canSeeMonth) setTab("punch");
+  }, [isManager, canSeePhones, canSeeMonth, tab]);
 
   useEffect(() => {
     if (!isManager && selfStaff) setStaffId(selfStaff.id);
@@ -767,7 +780,14 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
       : canSeePhones
         ? ([{ id: "phones", label: "Punch phones & QR screens", tone: "navy" }] as const)
         : []),
+    ...(canSeeMonth
+      ? ([
+          { id: "month", label: "Month register", tone: "violet" },
+          { id: "leaves", label: "Leave this month", tone: "sky" },
+        ] as const)
+      : []),
   ];
+  const dayTab = tab !== "month" && tab !== "leaves";
 
   if (mastersError) {
     return <QueryError what="the school's staff and holidays" error={mastersError} retry={retryMasters} />;
@@ -792,7 +812,8 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
       <p className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)] px-4 py-2.5 text-sm text-[var(--muted)]">
         {isManager ? (
           <>
-            Admin — manage register, direct mark, adjust, sync leave.
+            Owner — manage register, direct mark, adjust, sync leave. Only
+            the owner can change the staff register.
             Settings &amp; rules in{" "}
             <Link
               href="/masters"
@@ -808,16 +829,19 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
             <strong className="text-[var(--brand-deep)]">
               {selfStaff.empCode} · {selfStaff.fullName}
             </strong>
-            . Office marks the full day register.
+            . {canSeePhones
+              ? "The staff register is view only for you — only the owner can change it."
+              : "Only the owner can change the staff register."}
           </>
         ) : (
           <>
-            Sign in with your staff login to punch. Principal / admin manage the
-            register after office login.
+            Sign in with your staff login to punch. Only the owner can change
+            the staff register.
           </>
         )}
       </p>
 
+      {dayTab ? (
       <div className="flex flex-wrap items-end gap-3">
         <label className="text-xs font-semibold text-[var(--muted)]">
           Date
@@ -830,7 +854,9 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
         </label>
       </div>
 
-      {holidayDay ? (
+      ) : null}
+
+      {holidayDay && dayTab ? (
         <div className="rounded-lg border border-[rgba(197,160,40,0.45)] bg-[rgba(197,160,40,0.12)] px-3 py-2 text-sm text-[var(--brand-deep)]">
           {holidayBlocksAllStaff ? (
             <>
@@ -917,8 +943,11 @@ export function StaffAttendancePanel({ ay }: { ay: string }) {
       ) : null}
 
       {tab === "phones" && canSeePhones && !isManager ? (
-        <PunchPhonesPanel canDecidePhones={false} />
+        <PunchPhonesPanel canDecidePhones={canDecidePhones} />
       ) : null}
+
+      {tab === "month" && canSeeMonth ? <StaffMonthRegisterPanel mode="register" /> : null}
+      {tab === "leaves" && canSeeMonth ? <StaffMonthRegisterPanel mode="leave" /> : null}
 
       {tab === "manage" && isManager ? (
         <>
