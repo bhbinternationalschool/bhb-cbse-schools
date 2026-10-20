@@ -618,6 +618,9 @@ const EXAM_TABS: ModuleTabItem[] = [
   { id: "setup", label: "Exams & policy", tone: "navy" },
 ];
 
+/** Tabs drawn only from Masters (classes, rooms, staff) — "Loading…" until it answers. */
+const MASTERS_TABS = new Set<string>(["datesheet", "seating", "invigilation", "admitcards", "papers"]);
+
 export function ExamsWorkspace() {
   // Fee holds are server truth. Without this the gates below read an
   // unloaded snapshot and every child looks allowed.
@@ -1754,6 +1757,12 @@ export function ExamsWorkspace() {
             </select>
           </label>
         </div>
+      ) : null}
+
+      {!masters && MASTERS_TABS.has(tab) ? (
+        // Masters not answered yet (a failed read shows QueryError above):
+        // say so, never an empty tab.
+        <p className="mt-4 text-sm text-[var(--muted)]">Loading…</p>
       ) : null}
 
       {tab === "datesheet" && masters ? (

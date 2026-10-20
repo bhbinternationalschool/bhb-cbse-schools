@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
+import { invalidateServerMastersCache } from "@/lib/api/v1/auth";
 import { type MastersState } from "@/lib/masters";
 import { teachingMastersSubset } from "@/lib/mastersTeachingSubset";
 import { resolveMastersReadScope } from "@/lib/mastersReadScope.server";
@@ -407,6 +408,15 @@ export async function POST(req: Request) {
             : (sliceBases as Record<string, string>),
         )
       : await pushMastersDeskToDb(state, { baseUpdatedAt: baseUpdatedAt ?? null });
+  // This process's masters reference cache (GET /api/data/views/masters, the
+  // v1 API's masters) holds the book from before this write: drop it, so the
+  // saving browser's refetch — which usually lands on this instance — is
+  // built after the write. (Other instances see the moved erp_versions
+  // within their 2 s window; the editor keeps its own copy until an answer
+  // built from this revision arrives.)
+  // A refused write (conflict) wrote nothing; any other outcome may have
+  // written the slices (a failed row-table sync comes after them).
+  if (pushed.ok || !pushed.conflict) invalidateServerMastersCache();
   if (!pushed.ok) {
     if (pushed.conflict) {
       return NextResponse.json(

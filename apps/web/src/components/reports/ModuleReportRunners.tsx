@@ -78,6 +78,7 @@ import {
 import type { CommsAudience } from "@/lib/schoolComms";
 import { useMasters } from "@/lib/data/client/hooks";
 import { useScreenMasters } from "@/components/data/useScreenMasters";
+import { QueryError } from "@/components/data/QueryError";
 import { loadSis } from "@/lib/sis";
 import { hasPermission } from "@/lib/rbac";
 import { useDemoSession } from "@/components/shell/SessionContext";
@@ -625,6 +626,14 @@ export function ExamReportsRunner({ ay }: { ay: string }) {
     setNotice(r.message);
   }
 
+  // Masters unknown: say so — never an empty class list (R6).
+  if (!examMastersQ.data) {
+    return examMastersQ.isError ? (
+      <QueryError what="the school's classes" error={examMastersQ.error} retry={examMastersQ.refetch} />
+    ) : (
+      <p className="text-sm text-[var(--muted)]">Loading…</p>
+    );
+  }
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
@@ -1312,6 +1321,14 @@ export function TeachingReportsRunner({ ay }: { ay: string }) {
   const [fromDate, setFromDate] = useState(`${todayIso().slice(0, 7)}-01`);
   const [toDate, setToDate] = useState(todayIso);
   const { show, view } = useRunResult();
+  // Masters unknown: say so — never an empty class list (R6).
+  if (!teachMastersQ.data) {
+    return teachMastersQ.isError ? (
+      <QueryError what="the school's classes" error={teachMastersQ.error} retry={teachMastersQ.refetch} />
+    ) : (
+      <p className="text-sm text-[var(--muted)]">Loading…</p>
+    );
+  }
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">

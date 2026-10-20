@@ -30,6 +30,7 @@ import {
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { readCache, writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
+import { rowFingerprint } from "@/lib/sliceRevClient";
 import { resolveAcademicYear, fallbackAcademicYear } from "@/lib/academicYearResolve";
 import { trackServerWork } from "@/lib/serverWork";
 import { STAFF_OWNED_MASTERS_SLICES, staffReadFromDbEnabled } from "@/lib/staffDbConfig";
@@ -2081,10 +2082,62 @@ export function loadMasters(): MastersState {
  * useScreenMasters and must hand its panels the same shape loadMasters gave
  * them — so the whole-book save (unchanged until 2.2) sends what it sent
  * before. Pure: nothing is stored, no event.
+ *
+ * Deterministic: the same book always normalises to the same ids. The
+ * normalisation fills gaps (a class of the standard list the school lacks,
+ * a fee group of the 2026-27 structures, a seed department…) and every filler
+ * gets an id from `Math.random` — in this file, foundationMasters and the four
+ * feeStructure*202627 builders. loadMasters ran it once per mount; this runs
+ * on every answer of the masters view, so with fresh random ids a refetch of
+ * an unchanged book would hand the panels new ids each time (an open editor
+ * row loses its row; a commit saves ids no earlier answer had). So the call
+ * runs with Math.random replaced by a generator seeded from the book's own
+ * content: one book, one set of ids; another book, another sequence (no reuse
+ * of an id an earlier answer minted for something else). The function is
+ * synchronous, so nothing else can draw from the seeded generator, and the
+ * real Math.random is restored in `finally`.
  */
 export function normalizeMastersRead(state: MastersState): MastersState {
-  return normalizeMastersStaffRoster(migrateDemoStaffToTeacherRoster(ensureFeeSetup(state)));
+  const real = Math.random;
+  Math.random = seededRandom(rowFingerprint(state));
+  try {
+    return normalizeMastersStaffRoster(migrateDemoStaffToTeacherRoster(ensureFeeSetup(state)));
+  } finally {
+    Math.random = real;
+  }
 }
+
+/** mulberry32: a small, fast, well-spread generator in [0, 1) from a 32-bit seed. */
+function seededRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * The desk revision this tab's last successful Masters save wrote
+ * (masters_desk_sync_meta.updated_at — the value erp_versions serves as
+ * "masters"), read from the key mastersNormalizedClient writes ONLY from a
+ * server answer (the push result or a hydrate). "" = none known.
+ */
+function readMastersDeskRevision(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = localStorage.getItem(MASTERS_DESK_META_KEY);
+    if (!raw) return "";
+    return String((JSON.parse(raw) as { updatedAt?: string }).updatedAt || "");
+  } catch {
+    return "";
+  }
+}
+
+/** mastersNormalizedClient's desk-meta key (that file is frozen, so it is named here, read-only). */
+const MASTERS_DESK_META_KEY = "bhb_masters_desk_db_meta_v1";
 
 /**
  * This tab's page-memory Masters copy exactly as stored — without the
@@ -2138,7 +2191,13 @@ export function saveMasters(
 }
 
 export type MastersSaveOutcome =
-  | { ok: true; reason?: "unchanged" }
+  /**
+   * `revision`: the desk revision the save wrote (masters_desk_sync_meta
+   * updated_at), when the server answered one — an answer of the masters view
+   * built from that revision or later provably holds this save. Absent for
+   * "unchanged", a function-only save, or no database.
+   */
+  | { ok: true; reason?: "unchanged"; revision?: string }
   | { ok: false; reason: string };
 
 /** System imports (fee discounts seed) — bypass RBAC / closed-session guards. */
@@ -2194,6 +2253,9 @@ async function persistMastersClient(
   const serialized = JSON.stringify({ ...state, version: 2 });
   const prev = readCache(STORAGE_KEY);
   if (prev === serialized) return { ok: true, reason: "unchanged" };
+  // A save that does not move the desk revision (a function-only save: the
+  // server answers no revision on purpose) must not claim the old one.
+  const revisionBefore = readMastersDeskRevision();
 
   try {
     writeCacheOrInvalidate(STORAGE_KEY, serialized);
@@ -2231,7 +2293,9 @@ async function persistMastersClient(
   // `null` = nothing was queued (Supabase unconfigured / demo mode). The
   // local write stands; there is no remote write to have failed.
   if (!pushed) return { ok: true };
-  return pushed.ok ? { ok: true } : { ok: false, reason: pushed.reason };
+  if (!pushed.ok) return { ok: false, reason: pushed.reason };
+  const revision = readMastersDeskRevision();
+  return revision && revision !== revisionBefore ? { ok: true, revision } : { ok: true };
 }
 
 const MASTERS_MIRROR_META = "bhb_masters_mirror_meta_v1";

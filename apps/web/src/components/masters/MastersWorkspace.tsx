@@ -39,6 +39,12 @@ import { CustomFieldsPanel } from "@/components/masters/CustomFieldsPanel";
 import { QueryError } from "@/components/data/QueryError";
 import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { TutorPassesPanel } from "@/components/masters/TutorPassesPanel";
+import {
+  answerHoldsOverlay,
+  overlayOnCommit,
+  overlayOnSaved,
+  type MastersOverlay,
+} from "@/components/masters/mastersPending";
 import { EditControl } from "@/components/masters/EditControl";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { SectionTeachersPanel } from "@/components/masters/SectionTeachersPanel";
@@ -213,17 +219,50 @@ export function MastersWorkspace() {
   // (useScreenMasters, kept fresh by the versions poll), normalised exactly as
   // loadMasters() normalised the page copy, so every panel sees the same shape.
   // WRITES are unchanged until 2.2: commit() still saves the whole book through
-  // saveMasters(); what a commit sent is shown until the server's answer
-  // after that save arrives (`pending`), as setState(next) did before.
-  const { masters: screenMasters, error: mastersError, retry: retryMasters } = useScreenMasters();
+  // saveMasters(); what a commit sent is shown (the overlay) until an answer
+  // PROVABLY holds that save — built from the save's desk revision or later,
+  // or reading back every changed key as sent (./mastersPending). The first
+  // answer after a save can be older than it (another instance's cache); taking
+  // it reverted the screen, and the next commit sent the old value back.
+  const {
+    masters: screenMasters,
+    builtFrom,
+    error: mastersError,
+    retry: retryMasters,
+  } = useScreenMasters();
   const read = useMemo(
     () => (screenMasters ? normalizeMastersRead(screenMasters) : null),
     [screenMasters],
   );
-  const [pending, setPending] = useState<MastersState | null>(null);
-  const commitSeq = useRef(0);
-  const state = pending ?? read;
+  const [overlay, setOverlayState] = useState<MastersOverlay | null>(null);
+  const overlayRef = useRef<MastersOverlay | null>(null);
+  const setOverlay = (next: MastersOverlay | null) => {
+    overlayRef.current = next;
+    setOverlayState(next);
+  };
+  /** Re-asks for the masters answer after a save while it does not hold it yet. */
+  const reasks = useRef(0);
+  const state = overlay?.state ?? read;
   const [notice, setNotice] = useState<string | null>(null);
+
+  // An answer that holds every save of the overlay replaces it. One that does
+  // not (older than the save) is not shown: ask again shortly — another
+  // instance's cache sees the new revision within ~2 s — and after a few
+  // tries leave it to the versions poll, which refetches when Masters moves.
+  useEffect(() => {
+    if (!overlay || overlay.saving > 0) return;
+    if (answerHoldsOverlay(overlay, read, builtFrom)) {
+      setOverlay(null);
+      return;
+    }
+    if (reasks.current >= 4) return;
+    const t = window.setTimeout(() => {
+      reasks.current += 1;
+      void retryMasters();
+    }, 2_500);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- retryMasters is React Query's refetch (stable)
+  }, [overlay, read, builtFrom]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -309,8 +348,8 @@ export function MastersWorkspace() {
       window.setTimeout(() => setNotice(null), 2800);
       return;
     }
-    const seq = ++commitSeq.current;
-    setPending(next);
+    setOverlay(overlayOnCommit(overlayRef.current, state, next));
+    reasks.current = 0;
     // The success notice must wait for the database, not for React. Showing
     // it synchronously is what made 16 refused writes look like 16 saves on
     // 2026-08-09 — the screen said "session changed" every time while the
@@ -318,17 +357,20 @@ export function MastersWorkspace() {
     // push path raises a sticky error toast naming the actual reason.
     if (msg) setNotice("Saving…");
     void saveMasters(next).then((outcome) => {
+      const after = overlayOnSaved(
+        overlayRef.current,
+        outcome.ok ? { ok: true, revision: outcome.revision } : { ok: false },
+      );
+      setOverlay(after);
+      // Read the server's book now (not at the next poll): after a save to
+      // see it, after a refusal to show what IS stored (the page copy held
+      // the refused edit; the answer replaces it).
+      void retryMasters();
       if (!outcome.ok) {
-        // As before: the unsaved edit stays on screen beside the push's sticky
-        // error toast (the page copy holds it too).
-        setNotice(null);
+        setNotice(after ? null : "Not saved — showing the school's saved Masters again.");
+        if (!after) window.setTimeout(() => setNotice(null), 4000);
         return;
       }
-      // Saved: read the server's book now (not at the next poll), then drop
-      // the local copy — unless a later commit is already showing.
-      void Promise.resolve(retryMasters()).finally(() => {
-        if (commitSeq.current === seq) setPending(null);
-      });
       if (msg) {
         setNotice(msg);
         window.setTimeout(() => setNotice(null), 2200);
@@ -394,7 +436,8 @@ export function MastersWorkspace() {
               subjects={state.subjects ?? []}
               canEdit={!readOnly}
               onMastersChanged={() => {
-                setPending(null);
+                // The card changed Masters on the server: ask now. An open
+                // overlay stays until an answer holds it (never mid-save).
                 void retryMasters();
               }}
             />

@@ -141,11 +141,22 @@ export function SalarySetupPanel() {
   if (mastersScope === "teaching") {
     // The teaching subset withholds statutoryConfig: every amount below would
     // be computed from default EPF/ESIC rates, not the school's — refuse.
+    // Deliberately a refusal, not main's silent fallback to default rates: a
+    // salary worked out on rates that are not the school's is wrong money.
     return (
-      <p className="rounded-xl border border-[rgba(180,35,24,0.25)] bg-[rgba(180,35,24,0.06)] px-4 py-3 text-sm text-[var(--brand-deep)]">
-        The school&apos;s statutory setup (EPF / ESIC rates) is not shown to your role, so salary amounts cannot be worked
-        out here. Ask Principal / Admin for Masters access.
-      </p>
+      <div
+        role="alert"
+        className="rounded-xl border border-[rgba(180,35,24,0.25)] bg-[rgba(180,35,24,0.06)] px-4 py-3 text-sm text-[var(--brand-deep)]"
+      >
+        <p className="font-semibold">Salary setup needs the Masters · View permission.</p>
+        <p className="mt-1">
+          The school&apos;s EPF and ESIC rates are part of Masters, and your role is not allowed to see Masters, so no
+          salary amount is worked out here — working it out on default rates could give wrong pay.
+        </p>
+        <p className="mt-1">
+          Ask the Principal or Admin to give your role <strong>Masters · View</strong> (Masters → Roles &amp; permissions).
+        </p>
+      </div>
     );
   }
 
