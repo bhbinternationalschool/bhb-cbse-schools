@@ -40,6 +40,7 @@ import "teacher_ai_tools_screen.dart";
 import "staff_complaints_screen.dart";
 import "staff_leave_screen.dart";
 import "staff_roster_screen.dart";
+import "staff_activity_screen.dart";
 import "student_leave_queue_screen.dart";
 import "timetable_screen.dart";
 import "waiting_card.dart";
@@ -630,7 +631,8 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
         icon: Icons.badge_outlined,
         label: "Staff today",
         tone: ModuleTone.teal,
-        onTap: () => _push(StaffAttendanceTodayScreen(api: widget.api)),
+        // What staff did today; attendance is one tap further in.
+        onTap: () => _push(StaffActivityTodayScreen(api: widget.api)),
       ),
     ),
     (
@@ -855,6 +857,17 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         label: "Collected today",
                         value: formatInrPaise(snap.todayCollectionPaise),
                         color: AppColors.success,
+                        // Today's receipts, every cashier, this session —
+                        // the same receipts the figure adds up.
+                        onTap: _features.has("fee_collections")
+                            ? () => _push(
+                                MyCollectionsScreen(
+                                  api: widget.api,
+                                  schoolWide: true,
+                                  academicYearCode: snap.academicYearCode,
+                                ),
+                              )
+                            : null,
                       ),
                       const SizedBox(width: 8),
                       _Stat(
@@ -1023,27 +1036,54 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         label: "Active staff",
                         value: "${snap.staffActive}",
                         color: AppColors.primary,
-                        onTap: () =>
-                            _push(StaffAttendanceTodayScreen(api: widget.api)),
+                        // The Staff list, a name → their profile.
+                        onTap: _features.has("staff_roster")
+                            ? () => _push(
+                                StaffRosterScreen(
+                                  api: widget.api,
+                                  title: context.l10n.hcStaffList,
+                                ),
+                              )
+                            : null,
                       ),
                       const SizedBox(width: 8),
                       _Stat(
                         label: "Present today",
-                        value: "${snap.staffPresent}",
+                        value: snap.staffCountsKnown
+                            ? "${snap.staffPresent}"
+                            : "—",
                         color: AppColors.success,
-                        onTap: () =>
-                            _push(StaffAttendanceTodayScreen(api: widget.api)),
+                        onTap: () => _push(
+                          StaffAttendanceTodayScreen(
+                            api: widget.api,
+                            filter: StaffTodayFilter.present,
+                          ),
+                        ),
                       ),
                       const SizedBox(width: 8),
                       _Stat(
                         label: "Absent",
-                        value: "${snap.staffAbsent}",
+                        value: snap.staffCountsKnown
+                            ? "${snap.staffAbsent}"
+                            : "—",
                         color: AppColors.danger,
-                        onTap: () =>
-                            _push(StaffAttendanceTodayScreen(api: widget.api)),
+                        onTap: () => _push(
+                          StaffAttendanceTodayScreen(
+                            api: widget.api,
+                            filter: StaffTodayFilter.absent,
+                          ),
+                        ),
                       ),
                     ],
                   ),
+                  if (!snap.staffCountsKnown)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        context.l10n.hcStaffCountsNotLoaded,
+                        style: AppText.labelMediumMuted,
+                      ),
+                    ),
                   const SizedBox(height: 18),
                   const _SectionTitle("Admissions"),
                   Row(

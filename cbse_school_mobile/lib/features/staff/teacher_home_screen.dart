@@ -19,7 +19,7 @@ import "broadcast_screen.dart";
 import "class_message_screen.dart";
 import "bus_register_screen.dart";
 import "leave_approvals_screen.dart";
-import "principal_lists.dart";
+import "staff_activity_screen.dart";
 import "staff_roster_screen.dart";
 import "transport_requests_screen.dart";
 import "vehicle_logbook_screen.dart";
@@ -687,7 +687,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       case "Staff leave":
         await _pushScreen(LeaveApprovalsScreen(api: widget.api));
       case "Staff today":
-        await _pushScreen(StaffAttendanceTodayScreen(api: widget.api));
+        // What staff did today (attendance is one tap further in).
+        await _pushScreen(StaffActivityTodayScreen(api: widget.api));
       case "Staff contacts":
         await _pushScreen(StaffRosterScreen(api: widget.api));
       case "Visitor gate":

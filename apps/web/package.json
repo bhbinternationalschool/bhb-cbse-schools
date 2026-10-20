@@ -462,6 +462,7 @@
     "test:attendance-today": "npx tsx src/lib/attendanceToday.selftest.ts",
     "test:staff-signature": "npx tsx src/lib/staffSignature.selftest.ts",
     "test:staff-month-register": "npx tsx src/lib/staffMonthRegister.selftest.ts",
+    "test:staff-home-cards": "npx tsx src/lib/staffHomeCards.selftest.ts",
     "test:sis-wire-payload": "npx tsx src/lib/sisWirePayload.selftest.ts",
     "test:print-palette": "npx tsx src/lib/printPalette.selftest.ts",
     "test:receipt-head-grouping": "npx tsx src/lib/receiptHeadGrouping.selftest.ts",

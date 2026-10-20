@@ -240,3 +240,24 @@ export function requestForStaff(r: StaffProfileRequest): StaffProfileRequest {
   }
   return { ...r, fields };
 }
+
+/**
+ * What leadership sees of a colleague (the app's Staff list → a person,
+ * request mr_mv9yf8qf6y0j): contact, personal and qualification fields only.
+ * Identity numbers, bank and statutory fields stay with the office and the
+ * person themselves — never on a principal's phone.
+ */
+export const COLLEAGUE_VIEW_GROUPS: ProfileField["group"][] = ["Contact", "Personal", "Qualification"];
+
+export function colleagueProfileView(
+  s: StaffRecord,
+): { key: string; label: string; hindi: string; group: ProfileField["group"]; value: string }[] {
+  const out: { key: string; label: string; hindi: string; group: ProfileField["group"]; value: string }[] = [];
+  for (const f of STAFF_PROFILE_FIELDS) {
+    if (!COLLEAGUE_VIEW_GROUPS.includes(f.group) || f.masked) continue;
+    const value = String((s as unknown as Record<string, unknown>)[f.key] ?? "").trim();
+    if (!value) continue;
+    out.push({ key: f.key, label: f.label, hindi: f.hindi, group: f.group, value });
+  }
+  return out;
+}

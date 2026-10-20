@@ -21,8 +21,6 @@ Future<void> _call(BuildContext context, String mobile) async {
   }
 }
 
-
-
 class _ContactButtons extends StatelessWidget {
   const _ContactButtons({
     required this.api,
@@ -178,8 +176,13 @@ class RegistersScreen extends StatelessWidget {
 /* ─── Staff attendance today ─────────────────────────────────────── */
 
 class StaffAttendanceTodayScreen extends StatelessWidget {
-  const StaffAttendanceTodayScreen({super.key, required this.api});
+  const StaffAttendanceTodayScreen({super.key, required this.api, this.filter});
   final ApiClient api;
+
+  /// The principal's "Present today" / "Absent" cards open the list with
+  /// only those rows (request mr_mv9ym54sdge3). The server leaves out staff
+  /// exempt from attendance, so the rows here are the rows the card counted.
+  final StaffTodayFilter? filter;
 
   static (String, ModuleTone) _label(String status) => switch (status) {
     "P" => ("Present", ModuleTone.teal),
@@ -195,17 +198,31 @@ class StaffAttendanceTodayScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final f = filter;
     return ModuleShell<StaffAttendanceToday>(
-      guideId: "staff-today",
-      title: "Staff attendance today",
+      guideId: "staff-attendance-today",
+      title: switch (f) {
+        StaffTodayFilter.present => context.l10n.hcStaffPresentToday,
+        StaffTodayFilter.absent => context.l10n.hcStaffAbsentToday,
+        null => "Staff attendance today",
+      },
       load: api.fetchStaffAttendanceToday,
       emptyIcon: Icons.badge_outlined,
-      emptyText: context.l10n.noActiveStaffOnTheRoster,
-      isEmpty: (d) => d.staff.isEmpty,
+      emptyText: switch (f) {
+        StaffTodayFilter.present => context.l10n.hcNoStaffPresent,
+        StaffTodayFilter.absent => context.l10n.hcNoStaffAbsent,
+        null => context.l10n.noActiveStaffOnTheRoster,
+      },
+      isEmpty: (d) => filterStaffToday(d.staff, f).isEmpty,
       builder: (context, d, _) {
-        final present = d.staff.where((s) => s.status == "P").length;
+        // Present counts late and half day too — the server's rule, and the
+        // home card's.
+        final present = d.staff
+            .where((s) => isStaffPresentStatus(s.status))
+            .length;
         final absent = d.staff.where((s) => s.status == "A").length;
         final unmarked = d.staff.where((s) => s.status.isEmpty).length;
+        final rows = filterStaffToday(d.staff, f);
         return ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(16),
@@ -215,8 +232,12 @@ class StaffAttendanceTodayScreen extends StatelessWidget {
               "${unmarked > 0 ? " · $unmarked not marked" : ""}",
               style: AppText.bodySmallMuted,
             ),
+            Text(
+              context.l10n.hcExemptNotListed,
+              style: AppText.labelMediumMuted,
+            ),
             const SizedBox(height: 10),
-            for (final s in d.staff)
+            for (final s in rows)
               Card(
                 child: ListTile(
                   dense: true,

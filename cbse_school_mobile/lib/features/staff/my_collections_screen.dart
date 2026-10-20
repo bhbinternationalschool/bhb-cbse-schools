@@ -7,19 +7,35 @@ import "../../core/i18n/locale_controller.dart";
 
 /// What this cashier has taken today, receipt by receipt — the sheet they
 /// hand over with the cash box.
+///
+/// With [schoolWide] it is the whole school's day instead — every cashier's
+/// receipts, what the principal's "Collected today" card opens (request
+/// mr_mv9y9nazs38w). [academicYearCode] makes the list count what the card
+/// counted (that session's receipts).
 class MyCollectionsScreen extends StatelessWidget {
-  const MyCollectionsScreen({super.key, required this.api});
+  const MyCollectionsScreen({
+    super.key,
+    required this.api,
+    this.schoolWide = false,
+    this.academicYearCode = "",
+  });
 
   final ApiClient api;
+  final bool schoolWide;
+  final String academicYearCode;
 
   @override
   Widget build(BuildContext context) {
     return ModuleShell<DayCollections>(
-      guideId: "my-collections",
-      title: "My collections",
-      load: () => api.fetchMyCollections(),
+      guideId: schoolWide ? "school-collections" : "my-collections",
+      title: schoolWide ? context.l10n.hcTodaysCollections : "My collections",
+      load: () => schoolWide
+          ? api.fetchSchoolCollections(academicYearCode: academicYearCode)
+          : api.fetchMyCollections(),
       emptyIcon: Icons.account_balance_wallet_outlined,
-      emptyText: context.l10n.youHaveNotCollectedAnythingToday,
+      emptyText: schoolWide
+          ? context.l10n.hcNothingCollectedToday
+          : context.l10n.youHaveNotCollectedAnythingToday,
       isEmpty: (d) => d.receipts.isEmpty,
       builder: (context, d, _) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -85,7 +101,8 @@ class MyCollectionsScreen extends StatelessWidget {
                   ),
                 ),
                 subtitle: Text(
-                  "${r.guardianName}${r.studentNames.isEmpty ? "" : " · ${r.studentNames}"}\n${r.modes.join(", ")}${r.collectedAt.isEmpty ? "" : " · ${formatTimeLabel(r.collectedAt)}"}",
+                  "${r.guardianName}${r.studentNames.isEmpty ? "" : " · ${r.studentNames}"}\n${r.modes.join(", ")}${r.collectedAt.isEmpty ? "" : " · ${formatTimeLabel(r.collectedAt)}"}"
+                  "${schoolWide && r.cashierName.isNotEmpty ? " · ${context.l10n.hcByCashier(r.cashierName)}" : ""}",
                   style: AppText.labelMediumMuted,
                 ),
                 isThreeLine: true,

@@ -2596,4 +2596,206 @@ class LHi extends L {
   String dateSheetMinutes(String minutes) {
     return '$minutes मिनट';
   }
+
+  @override
+  String get hcCreateNotice => 'सूचना / समाचार बनाएँ';
+
+  @override
+  String get hcNoticeTitle => 'शीर्षक';
+
+  @override
+  String get hcNoticeMessage => 'संदेश';
+
+  @override
+  String get hcNewsSummary => 'छोटा सार (वैकल्पिक)';
+
+  @override
+  String get hcAudience => 'किसके लिए';
+
+  @override
+  String get hcAudienceAll => 'सभी';
+
+  @override
+  String get hcAudienceParents => 'अभिभावक';
+
+  @override
+  String get hcAudienceStaff => 'स्टाफ़';
+
+  @override
+  String get hcPinToTop => 'सबसे ऊपर रखें';
+
+  @override
+  String get hcPublish => 'प्रकाशित करें';
+
+  @override
+  String get hcPublished => 'प्रकाशित हो गया।';
+
+  @override
+  String get hcWriteTitle => 'शीर्षक लिखें।';
+
+  @override
+  String get hcWriteMessage => 'संदेश लिखें।';
+
+  @override
+  String get hcTooLong => 'यह बहुत लंबा है — कृपया छोटा करें।';
+
+  @override
+  String get hcNoticePushNote =>
+      'सूचना जिनके लिए है, उनके फ़ोन पर सूचना भी जाती है।';
+
+  @override
+  String get hcConfirmPublish =>
+      'इसे अभी प्रकाशित करें? जिनके लिए है, वे सभी इसे ऐप में देखेंगे।';
+
+  @override
+  String get hcTodaysCollections => 'आज की वसूली';
+
+  @override
+  String get hcNothingCollectedToday => 'आज कोई वसूली नहीं हुई।';
+
+  @override
+  String hcByCashier(String name) {
+    return '$name द्वारा';
+  }
+
+  @override
+  String get hcStaffList => 'स्टाफ़ सूची';
+
+  @override
+  String get hcStaffProfile => 'स्टाफ़ प्रोफ़ाइल';
+
+  @override
+  String get hcEmpCode => 'कर्मचारी कोड';
+
+  @override
+  String get hcDepartment => 'विभाग';
+
+  @override
+  String get hcJoined => 'कार्यभार ग्रहण';
+
+  @override
+  String get hcClassTeacherOf => 'कक्षा अध्यापक';
+
+  @override
+  String get hcMobile => 'मोबाइल';
+
+  @override
+  String get hcNoOtherDetails => 'कोई और विवरण दर्ज नहीं है।';
+
+  @override
+  String get hcChangeMobile => 'मोबाइल जोड़ें / बदलें';
+
+  @override
+  String hcRosterMissingMobile(int missing, int total) {
+    return '$total में से $missing स्टाफ़ का मोबाइल दर्ज नहीं है, इसलिए वे स्टाफ़ ऐप में साइन इन नहीं कर सकते। नंबर जोड़ने के लिए लाल फ़ोन दबाएँ।';
+  }
+
+  @override
+  String get hcStaffPresentToday => 'आज उपस्थित स्टाफ़';
+
+  @override
+  String get hcStaffAbsentToday => 'आज अनुपस्थित स्टाफ़';
+
+  @override
+  String get hcNoStaffPresent => 'अभी किसी को उपस्थित दर्ज नहीं किया गया।';
+
+  @override
+  String get hcNoStaffAbsent => 'आज किसी को अनुपस्थित दर्ज नहीं किया गया।';
+
+  @override
+  String get hcExemptNotListed =>
+      'हाज़िरी से छूट वाले स्टाफ़ न गिने जाते हैं, न दिखते हैं।';
+
+  @override
+  String get hcStaffCountsNotLoaded =>
+      'उपस्थित और अनुपस्थित लोड नहीं हो सके — दोबारा कोशिश के लिए नीचे खींचें।';
+
+  @override
+  String get hcStaffToday => 'आज का स्टाफ़';
+
+  @override
+  String get hcOpenAttendance => 'हाज़िरी';
+
+  @override
+  String get hcNothingRecordedToday => 'आज कुछ दर्ज नहीं';
+
+  @override
+  String get hcAuditNotLoaded =>
+      'अंक प्रविष्टि, छुट्टी के फ़ैसले और ऐसा काम लोड नहीं हो सका — दोबारा कोशिश के लिए नीचे खींचें।';
+
+  @override
+  String hcActivitySummary(int active, int total) {
+    return '$total में से $active स्टाफ़ का आज काम दर्ज है';
+  }
+
+  @override
+  String hcActPunchIn(String time) {
+    return '$time पर पंच इन';
+  }
+
+  @override
+  String hcActPunchOut(String time) {
+    return '$time पर पंच आउट';
+  }
+
+  @override
+  String hcActRegisters(int count) {
+    return 'हाज़िरी लगाई ($count)';
+  }
+
+  @override
+  String hcActHomework(int count) {
+    return 'गृहकार्य दिया ($count)';
+  }
+
+  @override
+  String hcActMarks(int qty) {
+    return '$qty छात्रों के अंक भरे';
+  }
+
+  @override
+  String hcActCoScholastic(int count) {
+    return 'सह-शैक्षिक ग्रेड ($count)';
+  }
+
+  @override
+  String hcActClassSheet(int count) {
+    return 'कक्षा शीट अपडेट की ($count)';
+  }
+
+  @override
+  String hcActStudentRecords(int count) {
+    return 'छात्र रिकॉर्ड अपडेट किए ($count)';
+  }
+
+  @override
+  String hcActFees(String amount, int count) {
+    return '$count रसीदों में $amount वसूले';
+  }
+
+  @override
+  String hcActReceiptEdit(int count) {
+    return 'रसीदें बदलीं ($count)';
+  }
+
+  @override
+  String get hcActLeaveApplied => 'छुट्टी के लिए आवेदन किया';
+
+  @override
+  String hcActStaffLeave(int count) {
+    return 'स्टाफ़ छुट्टी पर फ़ैसला ($count)';
+  }
+
+  @override
+  String hcActStudentLeave(int count) {
+    return 'छात्र छुट्टी पर फ़ैसला ($count)';
+  }
+
+  @override
+  String get hcActProfile => 'अपनी प्रोफ़ाइल अपडेट की';
+
+  @override
+  String hcActLastAt(String time) {
+    return 'आख़िरी $time पर';
+  }
 }
