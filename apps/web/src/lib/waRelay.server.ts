@@ -274,6 +274,29 @@ function leadershipFallbackRoutes(): RelayRoute[] {
   return out;
 }
 
+/**
+ * The ERP bell + apps (lib/notify) of the staff whose phones are this
+ * message's relay route — or, with none on the roster, whoever edits the
+ * school-wide office. The WhatsApp forward itself is unchanged.
+ */
+async function tellOfficeOfRelay(p: { relayId: string; code: string; categoryLabel: string; senderName: string; text: string; mobiles: string[] }): Promise<void> {
+  try {
+    const [{ notify }, { messageRelayed }, { loadServerMasters }] = await Promise.all([
+      import("@/lib/notify/notify.server"),
+      import("@/lib/notify/events"),
+      import("@/lib/api/v1/auth"),
+    ]);
+    const masters = await loadServerMasters();
+    const want = new Set(p.mobiles);
+    const routeStaffIds = (masters.staff ?? [])
+      .filter((s) => s.status === "active" && want.has(waNormalizeLocal10(s.mobile || "")))
+      .map((s) => s.id);
+    await notify(messageRelayed({ relayId: p.relayId, code: p.code, categoryLabel: p.categoryLabel, senderName: p.senderName, text: p.text, routeStaffIds }));
+  } catch (e) {
+    console.warn("[wa-relay] notify failed", (e as Error)?.message);
+  }
+}
+
 export async function relayEscalation(input: RelayEscalationInput): Promise<{
   ok: boolean;
   relayId?: string;
@@ -354,6 +377,14 @@ export async function relayEscalation(input: RelayEscalationInput): Promise<{
     // phone set for it these go to the director and principal on the staff
     // record rather than to nobody.
     if (targets.length === 0 && category === "director") targets = leadershipFallbackRoutes();
+    await tellOfficeOfRelay({
+      relayId,
+      code,
+      categoryLabel: relayCategoryLabel(category),
+      senderName,
+      text: input.text || input.mediaNote || "",
+      mobiles: targets.map((t) => t.mobile10),
+    });
     if (targets.length === 0) {
       await ctx.sb.from("wa_relay_messages").update({ status: "no_route" }).eq("id", relayId);
       return { ok: true, relayId, code, forwarded: 0, status: "no_route" };
