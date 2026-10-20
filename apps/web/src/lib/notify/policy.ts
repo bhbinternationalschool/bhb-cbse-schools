@@ -26,6 +26,11 @@ export function istMinutes(nowMs: number): number {
   return ((m % 1440) + 1440) % 1440;
 }
 
+/** The India date (YYYY-MM-DD) at `nowMs`. */
+export function istDate(nowMs: number): string {
+  return new Date(nowMs + 330 * 60_000).toISOString().slice(0, 10);
+}
+
 function minutesOf(hhmm: string): number {
   const [h, m] = hhmm.split(":").map(Number);
   return (h ?? 0) * 60 + (m ?? 0);
