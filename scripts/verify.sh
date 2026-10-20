@@ -487,6 +487,7 @@ SELFTESTS=(
   test:payroll-staggered-runs
   test:bank-file-safety
   test:staff-payslips
+  test:staff-admissions-app
   test:diksha-index
   test:teacher-contact
   test:question-bank
