@@ -7,7 +7,7 @@ import {
   suggestSisFamiliesByParent,
   type SisParentMatch,
 } from "@/lib/admissions";
-import { loadMasters } from "@/lib/masters";
+import { useMasters } from "@/lib/data/client/hooks";
 
 export function SisParentMatchBanner({
   guardianName,
@@ -57,9 +57,11 @@ export function SisParentMatchBanner({
 }
 
 function SisMatchRow({ match }: { match: SisParentMatch }) {
-  const masters = useMemo(() => loadMasters(), []);
+  // data-layer 2.1g: class names from the server's book. Unknown (loading,
+  // or the read failed) shows "…", never a wrong "—".
+  const classes = useMasters().data?.masters.classes;
   const classNameOf = (id: string) =>
-    masters.classes.find((c) => c.id === id)?.name || "—";
+    classes ? classes.find((c) => c.id === id)?.name || "—" : "…";
 
   return (
     <li className="rounded-lg border border-[rgba(32,48,80,0.1)] bg-white px-2.5 py-2">
