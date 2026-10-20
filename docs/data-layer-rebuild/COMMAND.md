@@ -1025,6 +1025,44 @@ not shown to your role") in 2.2/2.3 — not changed here. Lib helpers now get th
 `loadMasters()`'s normalised read; only the keys above were audited. Process / Rebuild / Apply setup were not clicked
 in the spec (they write runs); they call the same builders with the same `masters` the setup review uses.
 
+*(2.1h built 20 Oct 2026, PR #PRNUM.)* **What exists.** The 13 files of the batch no longer call `loadMasters()`.
+**`useScreenMasters()`** (server book + the access copy's staff side) where a screen resolves the signed-in person or
+needs the full roster: `MastersWorkspace`, `RolesPermissionsPanel`, `SalarySetupPanel`, `ExamsWorkspace` (its
+`RemarksPanel` now takes the workspace's `masters` as a prop), `ReportsCenterWorkspace`, `EventsWorkspace`, and the
+Transport / Homework / Library runners in `ModuleReportRunners`. **`useMasters()`** where only classes/sections/fee
+heads are read: `InterSchoolPanel`, the Exam and Teaching runners, `StaffLeadCaptureApp`, `StaffRegistrationCollectApp`
+(the `/field` layout now mounts `ErpQueryProvider`; #682 makes the same change). **`useStaffList()`**:
+`StaffAttendanceSettingsPanel`, `StaffAttendanceRulesPanel`. Gone: the mount-time reads, `MastersWorkspace`'s and
+`ExamsWorkspace`'s `ensureMastersHydrated`, the `bhb-masters-updated` listeners in `ExamsWorkspace` and
+`RolesPermissionsPanel`. **Masters editor:** reads `normalizeMastersRead(useScreenMasters())` (new in `lib/masters.ts`
+— `loadMasters()`'s read-time normalisation applied to a book in hand, pure, no write) so panels and the unchanged
+whole-book `saveMasters` see the same shape as before; a commit's state is shown (`pending`) until the save answers,
+then the view is refetched at once and the server's answer replaces it (a failed save keeps the edit on screen beside
+the push's error toast, as on main). Every screen: a masters read that never answered = `<QueryError>` + Try again;
+"Loading …" while unknown, never an empty list. `RemarksPanel` reads `masters` through a ref at rebuild time — a
+poll answer does not wipe typed remarks. `StaffRegistrationCollectApp` refuses to record a fee or build a UPI link
+before Masters answers (main used the built-in fallback UPI id and a blank fee head on a cold page); for the teaching
+scope its fee-head picker says "fee heads not shown to your role". `SalarySetupPanel` refuses for the teaching scope
+(statutory rates withheld). `ReportsCenterWorkspace` decides module access only once Masters is known (main could deny
+every module on a cold page). **Proof.** New `e2e/specs/masters-exams-reports.spec.ts` (desktop project, read-only):
+16 screens seen desktop-light + 375-dark (office; principal for Roles and Exams; the class teacher for Exams and
+Reports) with 15 classes / 34 active staff where a list is drawn, no page errors; 5 failure cases (views/masters 503 on
+/exams, /reports, /events, /masters Salary; views/staff-list 503 on Attendance rules) show "could not load" + Try again
+and recover. `error.spec` now includes /masters for views/masters 503; `propagation.spec` `/masters?tab=subjects` is a
+kernel observer (must pass). **Fail-on-old** (specs on this branch, `apps/web/src` reverted to origin/main, fresh
+build, same stack): all 5 failure cases FAIL, `/field/capture` and `/field/register` FAIL (class picker 0 of 15 — the
+cold `/field` page had no Masters), `error.spec` /masters views/masters FAILS, both `/masters` propagation cases FAIL
+at the propagation step. On this branch, fresh stack: masters-exams-reports + error + counts + budget + teacher on
+desktop and phone-375 **65/65 pass**; the two `/masters` propagation cases pass. Ratchets `load_masters_screen_files`
+61 → **48**, `load_masters_calls_src` 423 → **399**, `ensure_hydrated_component_files` 68 (unchanged: Masters and Exams
+still hydrate staff/rbac/sis/exams). **Not done / not proven.** Saves still go through the old paths (2.2). Lib helpers
+receive the server's raw book (normalised only in the Masters editor) — not audited field by field beyond the keys
+above. The teaching-scope refusals (salary setup, field fee heads) were typechecked and read, not run (no fixture
+holder of those screens without the Masters view). Pre-existing and untouched (seen on main too): `/exams` refresh
+writes fee holds on every open (`setReportCardHoldFromStage`) — the teacher gets "You do not have permission", and on a
+fresh stack the office can get "fee holds: changed on another device" (also seen on `/attendance`); the teacher's
+"Couldn't load fee records" toast on `/reports`.
+
 **2.2 Masters and staff editing write rows.** `MastersWorkspace` and its panels write through
 `useErpMutation` → `desk_slice_row_write` / `desk_slice_object_write` (one subject, one
 class-subject link, one section, one fee head at a time). The 14 non-Masters `saveMasters`

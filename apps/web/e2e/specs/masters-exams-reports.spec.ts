@@ -153,7 +153,9 @@ const SCREENS: Screen[] = [
     who: "teacher",
     open: async (p) => {
       await p.goto("/reports");
-      await expect(p.getByText(/Reports Center/).first()).toBeVisible({ timeout: 20_000 });
+      // The page title (or the no-access card) — not the "How the Reports Center works" tour chip.
+      await expect(p.getByRole("heading", { name: "Reports Center", exact: true }).first()).toBeVisible({ timeout: 30_000 });
+      await expect(p.getByText(/Loading school data/)).toHaveCount(0);
       await expect(p.getByText(/could not load/i)).toHaveCount(0);
     },
   },
