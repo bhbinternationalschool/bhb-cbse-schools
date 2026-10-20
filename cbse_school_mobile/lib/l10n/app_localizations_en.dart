@@ -2595,4 +2595,189 @@ class LEn extends L {
   String dateSheetMinutes(String minutes) {
     return '$minutes min';
   }
+
+  @override
+  String get scCallFamily => 'Call family';
+
+  @override
+  String get scMessageFamily => 'Message family';
+
+  @override
+  String get scAppChat => 'App chat with the family';
+
+  @override
+  String get scAppChatHint =>
+      'Messages in the parent app — the family replies there';
+
+  @override
+  String get scWhatsAppMessage => 'Send WhatsApp message';
+
+  @override
+  String get scWhatsAppMessageHint =>
+      'From the school\'s WhatsApp number — you see it before it goes';
+
+  @override
+  String get scAddWhatsApp => 'Add WhatsApp number';
+
+  @override
+  String get scChangeWhatsApp => 'Change WhatsApp number';
+
+  @override
+  String get scNoNumberOnRecord => 'No number on record';
+
+  @override
+  String get scNoWhatsAppOnRecord => 'No WhatsApp number on record';
+
+  @override
+  String get scAskClassTeacherToAdd =>
+      'Ask the class teacher or the office to add it.';
+
+  @override
+  String scCallNumber(String number) {
+    return 'Call $number';
+  }
+
+  @override
+  String get scCallSourceGuardian => 'Guardian\'s mobile';
+
+  @override
+  String get scCallSourceWhatsApp =>
+      'Family\'s WhatsApp number (no guardian mobile on record)';
+
+  @override
+  String get scLoadingFamily => 'Reading the family\'s numbers…';
+
+  @override
+  String get scWhatsAppNumberLabel => 'WhatsApp number (10 digits)';
+
+  @override
+  String scCurrentNumber(String number) {
+    return 'Now: $number';
+  }
+
+  @override
+  String get scSave => 'Save';
+
+  @override
+  String get scCancel => 'Cancel';
+
+  @override
+  String get scNumberSaved => 'WhatsApp number saved for school messages.';
+
+  @override
+  String get scErrEmpty => 'Type the family\'s 10-digit WhatsApp number';
+
+  @override
+  String get scErrNotMobile =>
+      'Enter a 10-digit Indian mobile number (starting 6–9)';
+
+  @override
+  String scErrPlaceholder(String number) {
+    return '$number is a placeholder, not the family\'s number';
+  }
+
+  @override
+  String get scErrSame => 'That is already the family\'s WhatsApp number';
+
+  @override
+  String get scMessageLabel => 'Your message to the family';
+
+  @override
+  String get scMessageHint =>
+      'Short and clear — the family reads it on WhatsApp';
+
+  @override
+  String get scPreview => 'Preview';
+
+  @override
+  String get scPreviewTitle => 'The family will read this';
+
+  @override
+  String scPreviewTo(String number, String language) {
+    return 'To $number · in $language';
+  }
+
+  @override
+  String get scEdit => 'Edit';
+
+  @override
+  String get scSend => 'Send';
+
+  @override
+  String get scSending => 'Sending…';
+
+  @override
+  String get scSent => 'Sent from the school\'s WhatsApp.';
+
+  @override
+  String scNotSent(String reason) {
+    return 'Not sent: $reason';
+  }
+
+  @override
+  String get scLanguageHindi => 'Hindi';
+
+  @override
+  String get scLanguageEnglish => 'English';
+
+  @override
+  String get dtTypeLabel => 'What is this document?';
+
+  @override
+  String get dtPickType => 'Pick the document type';
+
+  @override
+  String get dtCreateCustom => 'Create a custom type…';
+
+  @override
+  String get dtCustomName => 'Name of the new type';
+
+  @override
+  String get dtCustomHint => 'e.g. Ration card';
+
+  @override
+  String get dtCreate => 'Create';
+
+  @override
+  String get dtCustomNotLoaded =>
+      'The school\'s own types could not be read — only the standard types are listed.';
+
+  @override
+  String get dtAadhaarNumber => 'Aadhaar number on the card (optional)';
+
+  @override
+  String get dtAadhaarHint => '12 digits — it is saved to the record';
+
+  @override
+  String get dtAadhaarInvalid => 'An Aadhaar number has 12 digits';
+
+  @override
+  String dtGoesToSlot(String label) {
+    return 'Verified, it goes to: $label';
+  }
+
+  @override
+  String dtGoesOffSlot(String label, String from) {
+    return 'Verified, it is filed as $label — the child\'s \"$from\" stays empty for the right document.';
+  }
+
+  @override
+  String dtVerifiedAs(String label) {
+    return 'Verified as $label.';
+  }
+
+  @override
+  String get dtAadhaarSaved => 'Aadhaar number saved to the record.';
+
+  @override
+  String get dtAadhaarKept =>
+      'The record already has a different Aadhaar verified on UDISE+ — not changed. Tell the office.';
+
+  @override
+  String dtAadhaarNotSaved(String reason) {
+    return 'Document verified, but the Aadhaar number was not saved: $reason';
+  }
+
+  @override
+  String get dtVerify => 'Verify';
 }

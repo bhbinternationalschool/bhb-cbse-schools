@@ -2596,4 +2596,187 @@ class LHi extends L {
   String dateSheetMinutes(String minutes) {
     return '$minutes मिनट';
   }
+
+  @override
+  String get scCallFamily => 'परिवार को कॉल करें';
+
+  @override
+  String get scMessageFamily => 'परिवार को संदेश';
+
+  @override
+  String get scAppChat => 'परिवार से ऐप चैट';
+
+  @override
+  String get scAppChatHint => 'अभिभावक ऐप में संदेश — परिवार वहीं उत्तर देगा';
+
+  @override
+  String get scWhatsAppMessage => 'WhatsApp संदेश भेजें';
+
+  @override
+  String get scWhatsAppMessageHint =>
+      'विद्यालय के WhatsApp नंबर से — भेजने से पहले आप देखेंगे';
+
+  @override
+  String get scAddWhatsApp => 'WhatsApp नंबर जोड़ें';
+
+  @override
+  String get scChangeWhatsApp => 'WhatsApp नंबर बदलें';
+
+  @override
+  String get scNoNumberOnRecord => 'रिकॉर्ड में कोई नंबर नहीं';
+
+  @override
+  String get scNoWhatsAppOnRecord => 'रिकॉर्ड में कोई WhatsApp नंबर नहीं';
+
+  @override
+  String get scAskClassTeacherToAdd => 'कक्षा अध्यापक या कार्यालय से जुड़वाएँ।';
+
+  @override
+  String scCallNumber(String number) {
+    return '$number पर कॉल करें';
+  }
+
+  @override
+  String get scCallSourceGuardian => 'अभिभावक का मोबाइल';
+
+  @override
+  String get scCallSourceWhatsApp =>
+      'परिवार का WhatsApp नंबर (अभिभावक मोबाइल दर्ज नहीं)';
+
+  @override
+  String get scLoadingFamily => 'परिवार के नंबर पढ़े जा रहे हैं…';
+
+  @override
+  String get scWhatsAppNumberLabel => 'WhatsApp नंबर (10 अंक)';
+
+  @override
+  String scCurrentNumber(String number) {
+    return 'अभी: $number';
+  }
+
+  @override
+  String get scSave => 'सहेजें';
+
+  @override
+  String get scCancel => 'रद्द करें';
+
+  @override
+  String get scNumberSaved =>
+      'विद्यालय संदेशों के लिए WhatsApp नंबर सहेजा गया।';
+
+  @override
+  String get scErrEmpty => 'परिवार का 10 अंकों का WhatsApp नंबर लिखें';
+
+  @override
+  String get scErrNotMobile =>
+      '10 अंकों का भारतीय मोबाइल नंबर लिखें (6–9 से शुरू)';
+
+  @override
+  String scErrPlaceholder(String number) {
+    return '$number नकली/खाली नंबर है, परिवार का नंबर नहीं';
+  }
+
+  @override
+  String get scErrSame => 'यही परिवार का WhatsApp नंबर पहले से है';
+
+  @override
+  String get scMessageLabel => 'परिवार के लिए आपका संदेश';
+
+  @override
+  String get scMessageHint => 'छोटा और साफ़ — परिवार इसे WhatsApp पर पढ़ेगा';
+
+  @override
+  String get scPreview => 'पूर्वावलोकन';
+
+  @override
+  String get scPreviewTitle => 'परिवार यह पढ़ेगा';
+
+  @override
+  String scPreviewTo(String number, String language) {
+    return '$number को · $language में';
+  }
+
+  @override
+  String get scEdit => 'बदलें';
+
+  @override
+  String get scSend => 'भेजें';
+
+  @override
+  String get scSending => 'भेजा जा रहा है…';
+
+  @override
+  String get scSent => 'विद्यालय के WhatsApp से भेजा गया।';
+
+  @override
+  String scNotSent(String reason) {
+    return 'नहीं भेजा गया: $reason';
+  }
+
+  @override
+  String get scLanguageHindi => 'हिंदी';
+
+  @override
+  String get scLanguageEnglish => 'अंग्रेज़ी';
+
+  @override
+  String get dtTypeLabel => 'यह कौन-सा दस्तावेज़ है?';
+
+  @override
+  String get dtPickType => 'दस्तावेज़ का प्रकार चुनें';
+
+  @override
+  String get dtCreateCustom => 'नया प्रकार बनाएँ…';
+
+  @override
+  String get dtCustomName => 'नए प्रकार का नाम';
+
+  @override
+  String get dtCustomHint => 'जैसे राशन कार्ड';
+
+  @override
+  String get dtCreate => 'बनाएँ';
+
+  @override
+  String get dtCustomNotLoaded =>
+      'विद्यालय के अपने प्रकार पढ़े नहीं जा सके — केवल सामान्य प्रकार दिख रहे हैं।';
+
+  @override
+  String get dtAadhaarNumber => 'कार्ड पर आधार नंबर (वैकल्पिक)';
+
+  @override
+  String get dtAadhaarHint => '12 अंक — यह रिकॉर्ड में सहेजा जाएगा';
+
+  @override
+  String get dtAadhaarInvalid => 'आधार नंबर 12 अंकों का होता है';
+
+  @override
+  String dtGoesToSlot(String label) {
+    return 'सत्यापन के बाद यह यहाँ जाएगा: $label';
+  }
+
+  @override
+  String dtGoesOffSlot(String label, String from) {
+    return 'सत्यापन के बाद यह $label के रूप में रखा जाएगा — बच्चे का \"$from\" सही दस्तावेज़ के लिए खाली रहेगा।';
+  }
+
+  @override
+  String dtVerifiedAs(String label) {
+    return '$label के रूप में सत्यापित।';
+  }
+
+  @override
+  String get dtAadhaarSaved => 'आधार नंबर रिकॉर्ड में सहेजा गया।';
+
+  @override
+  String get dtAadhaarKept =>
+      'रिकॉर्ड में UDISE+ पर सत्यापित दूसरा आधार है — बदला नहीं गया। कार्यालय को बताएँ।';
+
+  @override
+  String dtAadhaarNotSaved(String reason) {
+    return 'दस्तावेज़ सत्यापित, पर आधार नंबर सहेजा नहीं गया: $reason';
+  }
+
+  @override
+  String get dtVerify => 'सत्यापित करें';
 }

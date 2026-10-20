@@ -4532,6 +4532,324 @@ abstract class L {
   /// In en, this message translates to:
   /// **'{minutes} min'**
   String dateSheetMinutes(String minutes);
+
+  /// No description provided for @scCallFamily.
+  ///
+  /// In en, this message translates to:
+  /// **'Call family'**
+  String get scCallFamily;
+
+  /// No description provided for @scMessageFamily.
+  ///
+  /// In en, this message translates to:
+  /// **'Message family'**
+  String get scMessageFamily;
+
+  /// No description provided for @scAppChat.
+  ///
+  /// In en, this message translates to:
+  /// **'App chat with the family'**
+  String get scAppChat;
+
+  /// No description provided for @scAppChatHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Messages in the parent app — the family replies there'**
+  String get scAppChatHint;
+
+  /// No description provided for @scWhatsAppMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Send WhatsApp message'**
+  String get scWhatsAppMessage;
+
+  /// No description provided for @scWhatsAppMessageHint.
+  ///
+  /// In en, this message translates to:
+  /// **'From the school\'s WhatsApp number — you see it before it goes'**
+  String get scWhatsAppMessageHint;
+
+  /// No description provided for @scAddWhatsApp.
+  ///
+  /// In en, this message translates to:
+  /// **'Add WhatsApp number'**
+  String get scAddWhatsApp;
+
+  /// No description provided for @scChangeWhatsApp.
+  ///
+  /// In en, this message translates to:
+  /// **'Change WhatsApp number'**
+  String get scChangeWhatsApp;
+
+  /// No description provided for @scNoNumberOnRecord.
+  ///
+  /// In en, this message translates to:
+  /// **'No number on record'**
+  String get scNoNumberOnRecord;
+
+  /// No description provided for @scNoWhatsAppOnRecord.
+  ///
+  /// In en, this message translates to:
+  /// **'No WhatsApp number on record'**
+  String get scNoWhatsAppOnRecord;
+
+  /// No description provided for @scAskClassTeacherToAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask the class teacher or the office to add it.'**
+  String get scAskClassTeacherToAdd;
+
+  /// No description provided for @scCallNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Call {number}'**
+  String scCallNumber(String number);
+
+  /// No description provided for @scCallSourceGuardian.
+  ///
+  /// In en, this message translates to:
+  /// **'Guardian\'s mobile'**
+  String get scCallSourceGuardian;
+
+  /// No description provided for @scCallSourceWhatsApp.
+  ///
+  /// In en, this message translates to:
+  /// **'Family\'s WhatsApp number (no guardian mobile on record)'**
+  String get scCallSourceWhatsApp;
+
+  /// No description provided for @scLoadingFamily.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading the family\'s numbers…'**
+  String get scLoadingFamily;
+
+  /// No description provided for @scWhatsAppNumberLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'WhatsApp number (10 digits)'**
+  String get scWhatsAppNumberLabel;
+
+  /// No description provided for @scCurrentNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Now: {number}'**
+  String scCurrentNumber(String number);
+
+  /// No description provided for @scSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get scSave;
+
+  /// No description provided for @scCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get scCancel;
+
+  /// No description provided for @scNumberSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'WhatsApp number saved for school messages.'**
+  String get scNumberSaved;
+
+  /// No description provided for @scErrEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Type the family\'s 10-digit WhatsApp number'**
+  String get scErrEmpty;
+
+  /// No description provided for @scErrNotMobile.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a 10-digit Indian mobile number (starting 6–9)'**
+  String get scErrNotMobile;
+
+  /// No description provided for @scErrPlaceholder.
+  ///
+  /// In en, this message translates to:
+  /// **'{number} is a placeholder, not the family\'s number'**
+  String scErrPlaceholder(String number);
+
+  /// No description provided for @scErrSame.
+  ///
+  /// In en, this message translates to:
+  /// **'That is already the family\'s WhatsApp number'**
+  String get scErrSame;
+
+  /// No description provided for @scMessageLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Your message to the family'**
+  String get scMessageLabel;
+
+  /// No description provided for @scMessageHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Short and clear — the family reads it on WhatsApp'**
+  String get scMessageHint;
+
+  /// No description provided for @scPreview.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview'**
+  String get scPreview;
+
+  /// No description provided for @scPreviewTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'The family will read this'**
+  String get scPreviewTitle;
+
+  /// No description provided for @scPreviewTo.
+  ///
+  /// In en, this message translates to:
+  /// **'To {number} · in {language}'**
+  String scPreviewTo(String number, String language);
+
+  /// No description provided for @scEdit.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get scEdit;
+
+  /// No description provided for @scSend.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get scSend;
+
+  /// No description provided for @scSending.
+  ///
+  /// In en, this message translates to:
+  /// **'Sending…'**
+  String get scSending;
+
+  /// No description provided for @scSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent from the school\'s WhatsApp.'**
+  String get scSent;
+
+  /// No description provided for @scNotSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Not sent: {reason}'**
+  String scNotSent(String reason);
+
+  /// No description provided for @scLanguageHindi.
+  ///
+  /// In en, this message translates to:
+  /// **'Hindi'**
+  String get scLanguageHindi;
+
+  /// No description provided for @scLanguageEnglish.
+  ///
+  /// In en, this message translates to:
+  /// **'English'**
+  String get scLanguageEnglish;
+
+  /// No description provided for @dtTypeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'What is this document?'**
+  String get dtTypeLabel;
+
+  /// No description provided for @dtPickType.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick the document type'**
+  String get dtPickType;
+
+  /// No description provided for @dtCreateCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Create a custom type…'**
+  String get dtCreateCustom;
+
+  /// No description provided for @dtCustomName.
+  ///
+  /// In en, this message translates to:
+  /// **'Name of the new type'**
+  String get dtCustomName;
+
+  /// No description provided for @dtCustomHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. Ration card'**
+  String get dtCustomHint;
+
+  /// No description provided for @dtCreate.
+  ///
+  /// In en, this message translates to:
+  /// **'Create'**
+  String get dtCreate;
+
+  /// No description provided for @dtCustomNotLoaded.
+  ///
+  /// In en, this message translates to:
+  /// **'The school\'s own types could not be read — only the standard types are listed.'**
+  String get dtCustomNotLoaded;
+
+  /// No description provided for @dtAadhaarNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Aadhaar number on the card (optional)'**
+  String get dtAadhaarNumber;
+
+  /// No description provided for @dtAadhaarHint.
+  ///
+  /// In en, this message translates to:
+  /// **'12 digits — it is saved to the record'**
+  String get dtAadhaarHint;
+
+  /// No description provided for @dtAadhaarInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'An Aadhaar number has 12 digits'**
+  String get dtAadhaarInvalid;
+
+  /// No description provided for @dtGoesToSlot.
+  ///
+  /// In en, this message translates to:
+  /// **'Verified, it goes to: {label}'**
+  String dtGoesToSlot(String label);
+
+  /// No description provided for @dtGoesOffSlot.
+  ///
+  /// In en, this message translates to:
+  /// **'Verified, it is filed as {label} — the child\'s \"{from}\" stays empty for the right document.'**
+  String dtGoesOffSlot(String label, String from);
+
+  /// No description provided for @dtVerifiedAs.
+  ///
+  /// In en, this message translates to:
+  /// **'Verified as {label}.'**
+  String dtVerifiedAs(String label);
+
+  /// No description provided for @dtAadhaarSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Aadhaar number saved to the record.'**
+  String get dtAadhaarSaved;
+
+  /// No description provided for @dtAadhaarKept.
+  ///
+  /// In en, this message translates to:
+  /// **'The record already has a different Aadhaar verified on UDISE+ — not changed. Tell the office.'**
+  String get dtAadhaarKept;
+
+  /// No description provided for @dtAadhaarNotSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Document verified, but the Aadhaar number was not saved: {reason}'**
+  String dtAadhaarNotSaved(String reason);
+
+  /// No description provided for @dtVerify.
+  ///
+  /// In en, this message translates to:
+  /// **'Verify'**
+  String get dtVerify;
 }
 
 class _LDelegate extends LocalizationsDelegate<L> {
