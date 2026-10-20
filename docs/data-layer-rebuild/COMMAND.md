@@ -934,6 +934,96 @@ read-time normalisation — not audited field by field beyond the fee keys above
 fee records" toast on /students (fees desk 403) is pre-existing and untouched. Upgrade's "(no matching group
 — keep current)" hint is wrong on main too (a null resolve sets the fee group to null) — not changed here.
 CI scoreboard: see the PR.
+*(2.1c built 15 Oct 2026, PR #660.)* **What exists.** `grep -rl 'loadMasters(' components/staff` lists 14
+files; 10 no longer call it. **`useStaffList()`** (the 1.4 directory view — code, name, status, department,
+designation, links; no phone/Aadhaar/salary) where a panel only shows or picks staff: `StaffAppraisalPanel`
+(the Staff picker and labels) and `StaffGeoAdminPanel` (the "n of N consented" count — computed ONCE at mount from
+the page copy before, so it could read "of 0" on a cold page; now "…" while unread and a retry link on failure).
+**`useScreenMasters()`** (2.1a's hook: server book + the access copy's full roster) where the panel hands a whole
+`MastersState` to lib helpers or resolves the signed-in person (by staffId/e-mail, which the directory does not
+carry), or reads fields the directory lacks (`category`): `StaffLeavePanel`, `StaffLeaveRulesPanel`,
+`StaffLeaveReportsPanel` (+ `StaffAttendanceReportsPanel` on /attendance), `StaffOutdoorDutyPanel`,
+`StaffPayslipsPanel`, `StaffMyProfileDocs`, `StaffAgreementPanel` (+ self panel), `StaffBroadcastButton`. Each renders
+`<QueryError>` when the read failed with no answer and "Loading…" while unknown — never an empty roster
+(`StaffLeaveRulesPanel` drew its steps with `masters = null` before, i.e. "(0 staff)" per category while loading;
+it now waits). No file had a `bhb-masters-updated` listener or `ensureMastersHydrated`. The header WhatsApp button
+(`StaffBroadcastButton`, mounted on every page) asks only once opened: `useMasters({enabled})` /
+`useScreenMasters({enabled})` are new, and the versions poll now runs only while an ENABLED observer reads a desk
+(`hasDeskObservers` uses `query.isActive()`, and re-checks on `observerOptionsUpdated`) — otherwise a closed button
+would have started the 20 s poll on every page. `StaffLeavePanel` opens leave balances (`ensureBalancesForAy` +
+save) only for a known roster (before: `loadMasters().staff`, empty on a cold page) and again when the roster
+changes. `StaffAppraisalPanel` waits for the staff-HR desk before `ensureAppraisalCycle` (which SAVES a new cycle):
+with the roster no longer gating its render, the save raced the HR load and showed "Still loading staff HR … NOT
+saved" on 4/4 then 1/3 opens (0/4 on main); after the fix 0/5. **Left on their full-record read, for 2.2** (they
+edit staff records and save the whole book through `saveMasters`): `StaffWorkspace` (roster, Allocate teaching,
+duty roster, its `bhb-masters-updated` listener) and `StaffProfileForm`. `StaffRequestsPanel` untouched (another
+branch owns it). `TeacherAssignmentsPanel` only names `loadMasters()` in a comment (not counted by the ratchet).
+**Proof** (local stack, this branch): `error.spec` — /staff Leave with views/masters 503 → "could not load" + Try
+again, no leave tabs or Staff picker, Try again → the form with 34 staff + Select; /staff Appraisal with
+views/staff-list 503 → "Could not load the staff list", no Staff picker, Try again → 35 options. `teacher.spec` —
+on /my-pay the class teacher's page asks neither views/masters nor views/versions until she opens WhatsApp, then
+asks the view and offers "My class parents". All three FAIL on 9433ee26 (built and run on the same stack: no
+"could not load"; masters view never asked). `counts.spec` /staff passes desktop and phone-375-cpu4x (34 active);
+teacher.spec otherwise unchanged. Staff propagation: both cases still expected-fail, now at the PROPAGATION step
+with `controlShown:true` and `visibleAfterReload:true` on /staff?tab=roster and /timetable — staleness alone (the
+roster on both is the page copy: /staff until 2.2, the access copy behind useScreenMasters until 2.3a); reason text
+updated, editor case stays fixme. Ratchets (on origin/main e8e7163f, after 2.1b and #657): `load_masters_screen_files` 83 → **72**,
+`load_masters_calls_src` 447 → **436** (10 of each from these files; the 11th from #657's StaffRequestsPanel,
+not yet written down), `ensure_hydrated_component_files` 69 → **68** (bookkeeping: already 68 on main). Screens seen desktop-light and
+phone-375-dark, office (principal fixture) and class teacher: roster, Leave, Leave rules, Reports, Outdoor duty,
+Appraisal, Payslips, My docs, Agreements, GPS, profile edit, /attendance, /my-pay + WhatsApp — no page errors.
+**Not done / not proven.** /staff roster propagation (2.2/2.3a). A teacher opening Staff → Leave sees "You do not
+have permission" (the leave panel's balance save) — on main too (seen on 9433ee26), not fixed here. If the
+staff-HR desk never loads, Appraisal stays on "Loading appraisal…" (before: drew the placeholder). Lib helpers now
+get the server's raw book instead of `loadMasters()`'s normalised read (agreements read `schoolProfile` /
+`numberSeries` — a holder of Staff→agreements without the Masters view gets the teaching subset, so the old
+`AGR-nnnn` fallback numbering, exactly as the page copy gave them before); not audited field by field. The header
+WhatsApp panel's class list now appears after one view read instead of synchronously.
+
+*(2.1e built 15 Oct 2026, PR #663.)* **What exists.** The 10 `components/payroll` files that called
+`loadMasters()` (`PayrollWorkspace`, `ApprovalsInboxPanel`, `JuneHoldPanel`, `IncrementPanel`, `AdvancesPanel`,
+`PrintPayslipsPanel`, `BankFileExportPanel`, `StaffSelfService`, `StatutoryRemitPanel`, `PayrollReportsPanel`) read
+`useScreenMasters()`; the mount-time reads, the `[tick]` re-reads, `IncrementPanel`'s `masters || loadMasters()`
+fallbacks and `PayrollWorkspace`'s `bhb-masters-updated` listener are gone (none called `ensureMastersHydrated`).
+**Payroll's staff side is the full record.** `useScreenMasters`' staff side is `useAccessData()`'s copy, which is
+the page copy `loadMasters()` returned before (normalised roster included) — salary links, bank, PF/ESI fields are
+all there, so no payroll read had to stay on `loadMasters()` for 2.2. The only non-staff keys these screens and
+the lib functions they call read are `statutoryConfig` (run build/rebuild/setup preview, increments, statutory
+penalties), `designations` and `schoolProfile` (letterheads) — now the server's answer. **No payroll save path
+sends a Masters book:** runs, advances, increments, holds, remittances and salary setup write their own desks;
+none of the 10 files or `lib/{payroll,staffAdvance,salaryIncrement,statutoryRemit,payrollReportCatalog}` calls
+`saveMasters`. A failed Masters read that never answered = `<QueryError>` (the workspace inside its shell; panels in
+place); while loading, a "Loading …" line instead of a screen computed from nothing. **Behaviour changes.**
+(1) `PayrollWorkspace`'s tab-access effect no longer decides while Masters is unknown: on main it ran on the first
+render with `allowed = false` and moved an office user off a `?tab=` deep link (the probe run: `/payroll?tab=runs`
+on main never showed Runs) — now a deep link holds. (2) The payroll dashboard is given `refreshKey={tick}`: the host
+never loads payroll itself and used to redraw only on a later `bhb-masters-updated`; once the workspace waits for
+Masters that event can come first and the dashboard said "No records yet" with 5 runs on file (caught by the new
+spec on this branch's first cut, fixed here). (3) Each screen shows "Loading …" until the masters view and the access
+copy have both answered (one extra 37 KB request per payroll page until 2.3b). **Proof.** New
+`e2e/specs/payroll.spec.ts` (project `payroll-writes`, runs last): seeds through the app's write paths a salary setup
+(six links: every statutory cover, a basic override, an additional amount, a gross-up) and a NON-default statutory
+setup (EPF 10 %, no wage ceiling, ESIC ceiling ₹25,000), puts both back afterwards; opens all 13 office tabs by
+clicking, each run's detail with "Review salary setup" open (5 runs, Aug–Oct, month groups intact), desktop-light and
+375-dark screenshots, the teacher's two self-service tabs; attaches every tab's text. Asserts: no "Could not load",
+the dashboard shows the October run's ₹39,500, and E2E-001's rebuilt line reads `₹22,750 / ₹2,113 / ₹20,637 /
+₹2,288` (ESIC ₹113 exists only under the school's ₹25,000 ceiling — a default or withheld statutory setup gives no
+ESIC on ₹22,750). **Same numbers before/after:** the same spec on origin/main (probe PR #666, closed) vs this
+branch, every tab's text diffed: identical on run detail ×5 (all setup-review rupees), bank file, increment
+(individual preview for E2E-003), advances, approvals, statutory, print, payslips, reports, runs, My payslip/advances —
+the only difference is the propagation spec's random rename suffix on E2E-020 (the dashboard, before its fix,
+read 0 runs — fixed and then identical too). CI scoreboard, same spec: origin/main + spec 100 pass · 17 expected-fail ·
+1 fixme · 0 fail; this branch the same, test for test. Bank-file rows and advance amounts were not exercised with
+data (the fixture has no posted run and no advance) — those screens are identical but trivially so.
+Ratchets: `load_masters_screen_files` 72 → **62**, `load_masters_calls_src` 436 → **424** (12 calls);
+`ensure_hydrated_component_files` unchanged (the workspace still hydrates the payroll desks).
+**Not done / not proven.** A payroll holder WITHOUT the Masters view gets the teaching answer, whose `statutoryConfig`
+is the empty shell's (defaults) — runs, increments and penalties would then be computed from default rates, exactly
+as the page copy gave them on main (same subset); production's statutory setup equals the defaults today (read-only
+check 15 Oct), so no rupee differs now, but a school-specific rate would. Should become a refusal ("statutory setup
+not shown to your role") in 2.2/2.3 — not changed here. Lib helpers now get the server's raw book instead of
+`loadMasters()`'s normalised read; only the keys above were audited. Process / Rebuild / Apply setup were not clicked
+in the spec (they write runs); they call the same builders with the same `masters` the setup review uses.
 
 **2.2 Masters and staff editing write rows.** `MastersWorkspace` and its panels write through
 `useErpMutation` → `desk_slice_row_write` / `desk_slice_object_write` (one subject, one
@@ -1083,6 +1173,28 @@ caller and the reference cache (1.3); none calls `ensureSchoolMirrorHydrated` or
 grant) returning the aggregates the screen shows, cached per process for 30 s keyed on
 `erp_versions` < 800 ms · 4.1i the remaining `app/api/v1` callers. Phase exit: the
 `ensureSchoolMirrorHydrated` ratchet under `app/api/v1` reaches 0 (100 files today).
+
+*(4.1a built 15 Oct 2026, PR #652.)* **What exists.** `GET /api/v1/app/popups` for a parent reads
+the family's student rows from `sis_students` by `household_id` (id order, filtered by household again in
+Node) through `lib/data/server/householdRead.ts` — `householdChildren()` in `lib/appPopups.server.ts` no
+longer hydrates the whole roster (`ensureSisHydratedServer` + `loadSis()`). Staff read no SIS at all, as
+before. R6: a failed family read is 503 (it was the pop-ups of a family with no children), and an unreadable
+pop-up list or event history is 503 (it was `{popups: []}`); the Flutter app already skips a failed pop-up
+read silently (`core/popups/app_popups.dart`), so a parent sees the same thing. `householdChildren` is also
+used by `POST /api/v1/profile/aadhaar`: there a failed read is now 503 instead of 404 "No children on roll".
+One `{"event":"route-timing","route":"v1/app/popups",authMs,queryMs,buildMs,totalMs,persona,children}` line
+per request (`lib/data/server/routeTiming.ts`, shared by 4.1a–c). **Proof.** Golden: the origin/main build
+and this build on the same seeded stack (`e2e/parentApi.golden.ts`: eleven pop-ups of every rule, form and
+audience plus events, for all 169 fixture families as their parent — the all-inactive family, the
+`0000000000` families, 2–4 per-year rows, blank-year rows, the duplicate admission number — and as the
+office): 171/171 popups answers byte-identical. `e2e/v1-popups.acceptance.ts` (in `e2e-stack.sh check`):
+every family's targets are its own children (1,089 checked), no other child named, inactive family 403,
+`sis_students` / `module_local_state` SELECT revoked → 503, timing lines, p95. On origin/main the two 503
+checks, the timing check and the p95 check fail. `test:parent-api-scope` (reader filter, failure =
+`{ok:false}`, timing line) — its household-filter checks fail with the filter removed. p95 (local stack,
+200 warm sequential requests across families, shared Mac): **46–58 ms** (p50 27–31); origin/main 101–124 ms
+(p50 66–73). **Not done:** `schoolAadhaarGaps`, `popupResponses`, `markAadhaarVerified` (office screens)
+still hydrate the roster; production timing needs the deploy.
 
 **4.2 Teacher scope in the app.** Depends on 1.7; verify every `app/api/v1/staff/*` route uses
 it. Acceptance: a teacher whose only link is the timetable sees her sections in the app.
@@ -1287,6 +1399,48 @@ filed"), the second at the route (404). An old-build whole-desk push carrying `s
 left both stored requests and wrote `row_count` 3 = 1 leave type + 2 requests (local stack).
 **Not done.** The rest of staff HR (leave, balances, appraisals) is still the replica (5.8). No
 notification to the raiser when a request is resolved (as before). Not measured in production.
+
+**Admissions · Field survey team & beats (director's report, 15 Oct).** *(Built 15 Oct 2026, PR #664 —
+**migration `20261015120000_admission_survey_team_rows.sql`, the director applies it before the deploy**.)*
+**Found.** "Assigned in the ERP, the app says not assigned; the app asks for a 6-digit code the ERP cannot
+make." Production, read-only: Cloud Run request log of 14 Oct 21:10–21:19 UTC — 15 `admissions-desk` pushes
+(all 200) whose sizes rise and fall by one team member (~190 bytes) as members were added and removed, and
+**every** app call `/api/public/survey-day` answered 403 with a 456-byte response = 217 header bytes + the
+239-byte `not_registered` body (the `not_on_team` body is 192): the phone was never registered, so the app
+showed the pairing-code screen. The only "Pair phone" button lived in the SurveyDaysBoard, which read the team
+from the server once on mount (21:10:00, empty) and never again, so it said "No survey team yet" while the
+Team table above it (the browser copy) showed the member — two copies on one screen. The last pushes carried
+no member (named removals), hence 0 in `ops_json`. On the local stack an add in the ERP reached the server
+(1 member) — the replica did not lose this write; the defect is the second copy and the unreachable code.
+**What exists.** Members and beats are rows (`admission_survey_members`, `admission_survey_beats`, ids kept
+from ops_json; `admission_survey_sync_meta` → erp_versions `admission_survey`), on `desk_writable_tables`,
+registry `admissions.survey-members` / `admissions.survey-beats`, written one change at a time by
+`lib/surveyTeam.server.ts` (rules: pure `lib/surveyTeamPlan.ts`) through `desk_write_guarded`. Doors:
+`POST /api/admissions/survey-team` (office = Admissions edit or the Field survey function: every op +
+`pair_start`; a signed-in team leader: add staff, remove a staff surveyor — not self, not a leader, not an
+outsider — add/edit/retire/reactivate beats), `POST /api/public/survey-day` `team`/`manage` (the leader's
+phone, signed `survey|manage|<op>:<target>|ts`), `GET /api/data/views/survey-team` (referenceCache on
+`admission_survey`; phones; old saved outsiders). The whole-desk push keeps ops_json's stored lists for
+these two keys whatever the copy says (old builds included); the desk read takes them from the rows and
+fails closed when they cannot be read. ERP: `SurveyTeamCard` / `SurveyBeatsCard` (useErpQuery, versions
+poll), "Get phone code" per member with expiry countdown, copy, WhatsApp share. The survey-day board and
+`/api/v1/staff/survey/*` read the rows. No-day capture: `/api/v1/staff/survey/capture` takes `location`
+(map pin / GPS) → lead note with a Google Maps link + a `survey_captures` point with `survey_day_id` null
+(`located_by`), listed on the board for its IST date. Staff app: no-day recording always offered, home on
+the map (flutter_map + OSM: no Google Maps SDK in the app), "Other area (no beat)", leader "Manage team &
+beats". Deleted: the browser-copy team/beat mutators in `fieldSurvey.ts`, the web `/field/survey` leader
+beat editor (points to the app).
+**Proof.** `test:survey-team-plan` (planner rules; mutations: leader check off, leader-made-leader — red).
+`test:admissions-field-ops-merge` updated (copy's team/beats ignored). `e2e/specs/survey-team.spec.ts`:
+ERP add → phone code from the row → phone pairs → app status sees the member and the ERP row turns "registered" (pairing moves `admission_survey`); made leader in the ERP → phone
+adds a beat → principal's open screen shows it without reload (18.8 s, local stack); auth matrix (teacher 403, principal 200, stale
+base 409, member/outsider/unregistered phone 403, leader limits, removed member → not_on_team); old-build push
+leaves rows; no-day pin on the board. Flutter `test/survey_team_app_test.dart` (5; capture without location
+sent → red).
+Phones are signed exactly as the app (`e2e/surveyPhone.ts`: ECDSA P-256, `survey|action|extra|ts`, r‖s). Acceptance: erp_versions now has 38 sync_meta desks. Not proven: each e2e test failing on the merge base (the routes and screen do not exist there, so they fail at the first step by construction — not run).
+**Not done.** Lead callers, survey attendance/sessions and saved outsiders remain in ops_json (replica).
+The web `/survey-day` page has no leader screen. Not measured in production; app release needed for the
+app parts.
 
 ### Phase 6 — Delete the replica
 

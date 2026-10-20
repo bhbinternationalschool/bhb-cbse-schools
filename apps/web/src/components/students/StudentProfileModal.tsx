@@ -22,6 +22,7 @@ import {
   StudentNameLabel,
 } from "@/components/students/StudentAvatar";
 import { loadTransport, type TransportState } from "@/lib/transport";
+import { duesDesksLabel, useDuesInputs } from "@/components/fees/useDuesInputs";
 import { studentTransportSummary } from "@/lib/transportForStudent";
 import {
   computeStudentDues,
@@ -99,6 +100,10 @@ export function StudentProfileModal({
   const [exams, setExams] = useState<ExamsState | null>(null);
   const [attendance, setAttendance] = useState<AttendanceState | null>(null);
 
+  // The fee book and the transport desk are loaded before the fee tab is
+  // computed, and re-read whenever either lands or changes: read once at
+  // open, an unloaded transport desk left every bus month out of this tab.
+  const duesInputs = useDuesInputs();
   useEffect(() => {
     try {
       setFees(loadFees());
@@ -110,6 +115,9 @@ export function StudentProfileModal({
     } catch {
       setTransport(null);
     }
+  }, [duesInputs.tick]);
+
+  useEffect(() => {
     try {
       setExams(loadExams());
     } catch {
@@ -151,7 +159,9 @@ export function StudentProfileModal({
       balance += l.balancePaise;
     }
     return { lines, billed, paid, balance };
-  }, [fees, student, masters]);
+    // duesInputs.tick: the transport desk is read inside computeStudentDues.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fees, student, masters, duesInputs.tick]);
 
   // A child's fee lines in due order, with balance sortable to find what is outstanding.
   const feeLineSort = useTableSort(
@@ -558,6 +568,21 @@ export function StudentProfileModal({
 
           {tab === "fees" && feesWithheld ? (
             <Empty text="Fee details are not shown to your role — ask the office." />
+          ) : tab === "fees" && duesInputs.status === "loading" ? (
+            <Empty text="Reading fees…" />
+          ) : tab === "fees" && duesInputs.status === "failed" ? (
+            // A desk that could not be read is NOT LOADED — never the
+            // tuition-only total a missing transport desk would compute.
+            <div
+              role="alert"
+              className="rounded-xl border border-dashed border-[rgba(192,57,43,0.4)] px-4 py-6 text-center text-sm text-[var(--danger)]"
+            >
+              Fee dues not loaded — {duesDesksLabel(duesInputs.missing)} could not be read, so
+              no figure is shown.{" "}
+              <button type="button" className="font-semibold underline" onClick={duesInputs.retry}>
+                Try again
+              </button>
+            </div>
           ) : tab === "fees" ? (
             <div className="space-y-4">
               <div className="grid grid-cols-3 gap-3">

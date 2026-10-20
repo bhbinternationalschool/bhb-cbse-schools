@@ -1,7 +1,7 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { requireParentHousehold } from "@/lib/api/v1/household";
-import { albumVisibleTo, parentMaySee } from "@/lib/classGallery";
+import { albumVisibleTo, galleryViewUrl, officeGalleryFilePath, parentMaySee } from "@/lib/classGallery";
 import { parentSections } from "@/lib/classGallery.server";
 import { fetchGalleryDeskFromDb } from "@/lib/schoolCommsNormalized.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
@@ -66,8 +66,11 @@ export async function GET(request: Request) {
           .sort((x, y) => (x.uploadedAt || "").localeCompare(y.uploadedAt || ""))
           .map((p) => ({
             id: p.id,
-            // A class item's url is the ERP route (relative): the app adds its base and login.
-            url: p.url,
+            // A class item's url is the ERP route (relative): the app adds its
+            // base and login. So is an office upload on the web ERP: its own
+            // /api/file url is staff-only and would show a parent nothing.
+            url: galleryViewUrl(p),
+            stored: p.url,
             caption: p.caption || "",
             kind: p.mediaKind === "video" ? "video" : "photo",
           }));
@@ -77,11 +80,18 @@ export async function GET(request: Request) {
           description: a.description || "",
           // Falls back to the first photo: an album whose cover was never
           // picked still deserves a face on the phone.
-          coverUrl: a.coverUrl || photos.find((p) => p.kind === "photo")?.url || "",
+          // An office-uploaded cover (/api/file) is shown through its photo's
+          // gallery route; one no listed photo carries is not shown at all.
+          coverUrl:
+            (officeGalleryFilePath(a.coverUrl)
+              ? photos.find((p) => p.stored === a.coverUrl)?.url
+              : a.coverUrl) ||
+            photos.find((p) => p.kind === "photo")?.url ||
+            "",
           classLabel: a.classLabel || "",
           publishedAt: a.publishedAt || a.createdAt || "",
           photoCount: photos.length,
-          photos,
+          photos: photos.map((p) => ({ id: p.id, url: p.url, caption: p.caption, kind: p.kind })),
         };
       })
       // An album with no pictures in it is a heading with nothing under it.

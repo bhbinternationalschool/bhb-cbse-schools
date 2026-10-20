@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import type { MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { SchoolLetterhead } from "@/components/shared/SchoolLetterhead";
 import {
   currentMonthIso,
@@ -47,7 +49,7 @@ export function PrintPayslipsPanel({
 }: {
   academicYearCode: string;
 }) {
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [runs, setRuns] = useState<PayrollRun[]>([]);
   const [month, setMonth] = useState(currentMonthIso);
   const [mode, setMode] = useState<"bulk" | "individual">("bulk");
@@ -55,7 +57,6 @@ export function PrintPayslipsPanel({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   useEffect(() => {
-    setMasters(loadMasters());
     setRuns(loadPayroll().runs);
   }, []);
 
@@ -120,6 +121,15 @@ export function PrintPayslipsPanel({
 
   function selectAll(on: boolean) {
     setSelectedIds(on ? lines.map((l) => l.staffId) : []);
+  }
+
+  // A failed Masters read is a failure on screen (R6); the letterhead's school
+  // profile comes from it, so no payslip is drawn without it.
+  if (mastersError) {
+    return <QueryError what="the school profile for the payslip letterhead" error={mastersError} retry={retryMasters} />;
+  }
+  if (!masters) {
+    return <p className="text-sm text-[var(--muted)]">Loading payslips…</p>;
   }
 
   return (

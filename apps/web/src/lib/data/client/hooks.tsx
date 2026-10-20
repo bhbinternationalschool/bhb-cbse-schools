@@ -205,6 +205,8 @@ function hasDeskObservers(client: QueryClient): boolean {
   return client
     .getQueryCache()
     .getAll()
+    // isActive: at least one observer is ENABLED — a control that has not
+    // asked yet (useMasters({enabled:false})) does not start the poll.
     .some((q) => q.isActive() && desksOf(q.meta).length > 0);
 }
 
@@ -302,7 +304,6 @@ function VersionsPoller() {
       if (
         e.type === "observerAdded" ||
         e.type === "observerRemoved" ||
-        // `enabled` flipping is an options update, not an observer change.
         e.type === "observerOptionsUpdated" ||
         e.type === "added" ||
         e.type === "removed"
@@ -346,8 +347,9 @@ function pageMemoryBridgeDeps(): MastersBridgeDeps | null {
 
 /**
  * Masters (full, or the teaching subset — `scope` says which). Read-only.
- * `enabled: false` reads nothing and keeps the versions poll off (a header
- * control that is mounted on every page but only reads while open).
+ * `enabled: false` asks nothing (an always-mounted control that reads Masters
+ * only once opened — the header WhatsApp button); an answer another screen
+ * already cached is still returned.
  */
 export function useMasters(opts: { enabled?: boolean } = {}): UseQueryResult<MastersView, Error> {
   return useErpQuery<MastersView>("masters", "/api/data/views/masters", {

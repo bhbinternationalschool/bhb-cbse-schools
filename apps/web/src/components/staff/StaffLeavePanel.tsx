@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import {
@@ -8,7 +8,9 @@ import {
   ErpTableBody,
   ErpTableHead,
 } from "@/components/ui/erp-roster";
-import { listSessionYearOptions, loadMasters, type MastersState } from "@/lib/masters";
+import { listSessionYearOptions } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   adjustHalfDayLeave,
   adjustLeave,
@@ -57,7 +59,14 @@ export function StaffLeavePanel({
   onOpenLeaveRules?: () => void;
 }) {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // Masters + the roster (data-layer 2.1c). Null = not known yet.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
+  // reload() also runs from async callbacks (after an approval): it reads
+  // the latest Masters, not the one its render closed over.
+  const mastersRef = useRef(masters);
+  useEffect(() => {
+    mastersRef.current = masters;
+  }, [masters]);
   const [hr, setHr] = useState<StaffHrState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -81,11 +90,14 @@ export function StaffLeavePanel({
   const [halfDayId, setHalfDayId] = useState("");
 
   function reload() {
-    const m = loadMasters();
-    setMasters(m);
     let state = loadStaffHr();
-    state = ensureBalancesForAy(state, m.staff ?? [], ay);
-    saveStaffHr(state);
+    // Balances are opened for the roster as it is KNOWN: with no roster yet
+    // nothing is written (it runs again when the roster arrives, below).
+    const m = mastersRef.current;
+    if (m) {
+      state = ensureBalancesForAy(state, m.staff ?? [], ay);
+      saveStaffHr(state);
+    }
     setHr(state);
   }
 
@@ -106,6 +118,13 @@ export function StaffLeavePanel({
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ay drives reload
   }, [ay]);
+
+  // The roster arrived or changed: open this year's balances for it.
+  const rosterStaff = masters?.staff;
+  useEffect(() => {
+    if (rosterStaff) reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the roster drives reload
+  }, [rosterStaff]);
 
   const selfStaff = useMemo(() => {
     if (!masters) return null;
@@ -530,6 +549,9 @@ export function StaffLeavePanel({
     return s ? `${s.empCode} · ${s.fullName}` : id;
   }
 
+  if (mastersError) {
+    return <QueryError what="the school's setup" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters || !hr) {
     return <p className="text-sm text-[var(--muted)]">Loading leave…</p>;
   }

@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { MapPin, RefreshCw } from "lucide-react";
 import { normalizeStaffGeoSettings, type StaffGeoConsent, type StaffGeoSettings, type StaffPresence } from "@/lib/staffGeo";
-import { loadMasters } from "@/lib/masters";
+import { useStaffList } from "@/lib/data/client/hooks";
 import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
@@ -58,7 +58,13 @@ export function StaffGeoAdminPanel({ canEdit }: { canEdit: boolean }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const staff = useMemo(() => (loadMasters().staff ?? []).filter((s) => s.status === "active"), []);
+  // The roster as a directory (data-layer 2.1c): only the active count is
+  // shown, and an unread roster says so — never "of 0".
+  const staffList = useStaffList();
+  const activeStaffCount = useMemo(
+    () => (staffList.data ? staffList.data.staff.filter((s) => s.status === "active").length : null),
+    [staffList.data],
+  );
 
   async function load() {
     setBusy("load");
@@ -187,7 +193,17 @@ export function StaffGeoAdminPanel({ canEdit }: { canEdit: boolean }) {
           </ErpTableShell>
         </div>
         <p className="mt-1 text-[10px] text-[var(--muted)]">
-          Staff share location from Staff → My presence on their phone (consent recorded on first use; {consents.length} of {staff.length} consented). &ldquo;Location dark&rdquo; = app closed / location off / phone off — alerted during school timing. Evaluation and alerts run every 5 minutes on the server; this board is read-only.
+          Staff share location from Staff → My presence on their phone (consent recorded on first use; {consents.length} of{" "}
+          {activeStaffCount !== null ? (
+            activeStaffCount
+          ) : staffList.isError ? (
+            <button type="button" className="font-semibold text-[var(--danger)] underline" onClick={() => void staffList.refetch()}>
+              ? (staff list not loaded — retry)
+            </button>
+          ) : (
+            "…"
+          )}{" "}
+          consented). &ldquo;Location dark&rdquo; = app closed / location off / phone off — alerted during school timing. Evaluation and alerts run every 5 minutes on the server; this board is read-only.
         </p>
       </div>
 

@@ -69,10 +69,11 @@ async function main(): Promise<void> {
       anon.status !== 200 || arr(anon.body).length === 0,
       `HTTP ${anon.status}, ${arr(anon.body).length} row(s)`,
     );
-    for (const p of ["/auth/v1/user", "/storage/v1/object/list/x"]) {
-      const r = await getJson(`${api}${p}`, svc);
-      record(`proxy: ${p} answers 501`, r.status === 501, `HTTP ${r.status}`);
-    }
+    const auth = await getJson(`${api}/auth/v1/user`, svc);
+    record("proxy: /auth/v1/user answers 501", auth.status === 501, `HTTP ${auth.status}`);
+    // Storage is served in memory (scripts/e2e/storage.mjs): an unknown bucket is refused.
+    const nob = await getJson(`${api}/storage/v1/object/x/y.jpg`, svc);
+    record("proxy: storage refuses an unknown bucket", nob.status === 404, `HTTP ${nob.status}`);
   }
 
   // ── The app ──

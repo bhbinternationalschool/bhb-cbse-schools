@@ -11,6 +11,7 @@ import {
   staffAllowedSections,
   type ChatSectionRef,
 } from "@/lib/erpChatAccess";
+import { QueryError } from "@/components/data/QueryError";
 import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis } from "@/lib/sis";
 import {
@@ -110,12 +111,8 @@ async function postOutdoorDuty(
 export function StaffBroadcastButton() {
   const session = useDemoSession();
   const [open, setOpen] = useState(false);
-  // Masters from the server (useScreenMasters — the versions poll keeps it
-  // fresh), not a copy read once when the panel opens: opened before the
-  // roster had landed, that copy had no staff, so the self-service tabs
-  // stayed hidden until the panel was closed and reopened. Read only while
-  // open: this button is in the header of every page, and a closed panel
-  // must not start the versions poll.
+  // Masters + the roster (data-layer 2.1c), asked for only once the panel is
+  // opened: this button sits in every page's header.
   const { masters, error: mastersError, retry: retryMasters } = useScreenMasters({ enabled: open });
   const [audience, setAudience] = useState<Audience>("class_parents");
   const [mode, setMode] = useState<Mode>("message");
@@ -530,7 +527,9 @@ export function StaffBroadcastButton() {
             <span className="ml-1 font-semibold">→</span>
           </a>
 
-          {sentResult ? (
+          {mastersError ? (
+            <QueryError what="the school's classes and staff" error={mastersError} retry={retryMasters} />
+          ) : sentResult ? (
             <div className="space-y-2 text-sm">
               <p>
                 Sent to {sentResult.sent ?? 0} of{" "}

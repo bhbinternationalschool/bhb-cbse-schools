@@ -61,19 +61,22 @@ export function mergeFieldOps(
   deletes: Partial<Record<(typeof FIELD_OPS_DELETABLE)[number], readonly string[]>> = {},
 ): FieldOpsLists {
   // A removal this copy has since undone (re-added) does not apply.
-  const mineTeam = new Set((mine.surveyTeam ?? []).map((m) => m.id));
   const mineCallers = new Set(mine.leadCallerStaffIds ?? []);
-  const goneTeam = new Set((deletes.admission_survey_team ?? []).filter((id) => !mineTeam.has(id)));
   const goneCallers = new Set((deletes.admission_lead_callers ?? []).filter((id) => !mineCallers.has(id)));
   const callers = new Set<string>();
   for (const id of [...(stored?.leadCallerStaffIds ?? []), ...(mine.leadCallerStaffIds ?? [])]) {
     if (id && !goneCallers.has(id)) callers.add(id);
   }
   return {
-    surveyBeats: mergeById(stored?.surveyBeats, mine.surveyBeats),
+    // Since 15 Oct 2026 the beats and the team are rows of their own
+    // (admission_survey_beats / _members, lib/surveyTeam.server.ts), written
+    // one change at a time. A whole-desk save — this build's or an older
+    // one's — never writes them: what ops_json holds stays as it was (the
+    // migration copied it), whatever this copy says.
+    surveyBeats: stored?.surveyBeats ?? [],
     surveyAttendance: mergeById(stored?.surveyAttendance, mine.surveyAttendance, attendanceBehind),
     surveyExternals: mergeById(stored?.surveyExternals, mine.surveyExternals),
-    surveyTeam: mergeById(stored?.surveyTeam, mine.surveyTeam, undefined, goneTeam),
+    surveyTeam: stored?.surveyTeam ?? [],
     surveySessions: mergeById(stored?.surveySessions, mine.surveySessions, sessionBehind),
     leadCallerStaffIds: [...callers],
   };

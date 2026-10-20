@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { useMemo, useState } from "react";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   approvePayrollRun,
   formatInr,
@@ -50,16 +51,12 @@ export function ApprovalsInboxPanel({
   onOpenPayrollRun?: (runId: string) => void;
 }) {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [tick, setTick] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [rejecting, setRejecting] = useState<string | null>(null);
-
-  useEffect(() => {
-    setMasters(loadMasters());
-  }, [tick]);
 
   const isApprover = useMemo(() => {
     if (!masters) return false;
@@ -203,6 +200,14 @@ export function ApprovalsInboxPanel({
       flash("Increment rejected → draft");
       refresh();
     }
+  }
+
+  // A failed Masters read is a failure on screen (R6) — never "not an approver".
+  if (mastersError) {
+    return <QueryError what="the staff roster and designations" error={mastersError} retry={retryMasters} />;
+  }
+  if (!masters) {
+    return <p className="text-sm text-[var(--muted)]">Loading approvals…</p>;
   }
 
   return (

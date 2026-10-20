@@ -9,7 +9,8 @@
 #   bash scripts/e2e-stack.sh app      next start on 127.0.0.1:3700 (background)
 #   bash scripts/e2e-stack.sh check    the acceptance checks (apps/web/e2e/acceptance.ts,
 #                                      then e2e/versions.acceptance.ts — step 1.3,
-#                                      then e2e/write-kernel.acceptance.ts — step 1.5)
+#                                      then e2e/write-kernel.acceptance.ts — step 1.5,
+#                                      then every e2e/v1-*.acceptance.ts — step 4.1)
 #   bash scripts/e2e-stack.sh sql-test <file.sql>
 #                                      run a behavioural SQL test (supabase/tests)
 #                                      against the stack's database; it must roll
@@ -146,6 +147,9 @@ write_env_file() {
     echo "E2E_APP_URL=http://127.0.0.1:$APP_PORT"
     echo "NEXT_PUBLIC_DEMO_AUTH=false"
     echo "NEXT_PUBLIC_TENANT_SLUG=bhb-international"
+    echo "# The class gallery's AI check answers \"hold\" here (lib/classGalleryReview.server.ts"
+    echo "# honours it only with E2E=1 and a 127.0.0.1 Supabase URL) — never Gemini."
+    echo "CLASS_GALLERY_AI_STUB=hold"
     echo "# Every desk-cutover flag production runs with (deploy/desk-cutover-runtime.env)."
     grep -E '^[A-Z0-9_]+_(READ_FROM_DB|DUAL_WRITE_DB)=' "$ROOT/deploy/desk-cutover-runtime.env"
   } >"$ENV_FILE"
@@ -225,7 +229,7 @@ CONF
     -H "Authorization: Bearer $service" || { tail -20 "$STATE/postgrest.log"; die "postgrest did not come up"; }
   say "PostgREST $POSTGREST_VERSION on 127.0.0.1:$pgrst_port"
 
-  E2E_PROXY_PORT="$API_PORT" E2E_POSTGREST_URL="http://127.0.0.1:$pgrst_port" \
+  E2E_PROXY_PORT="$API_PORT" E2E_POSTGREST_URL="http://127.0.0.1:$pgrst_port" E2E_SERVICE_KEY="$service" \
     nohup node "$ROOT/scripts/e2e/proxy.mjs" >"$STATE/proxy.log" 2>&1 </dev/null &
   echo $! >"$STATE/proxy.pid"
   wait_http "http://127.0.0.1:$API_PORT/rest/v1/tenants?select=id&limit=1" 30 \
@@ -291,6 +295,15 @@ cmd_check() {
   # teacher reach, slice and object writes, erp_versions moving). Puts back
   # everything it changes.
   in_web npx --yes tsx e2e/write-kernel.acceptance.ts
+  # data-layer 4.1: the mobile API's per-person routes, one file per converted
+  # route (e2e/v1-*.acceptance.ts). Each seeds what it reads, reads the app's
+  # log in $STATE, briefly revokes a table's SELECT to prove a failed read is
+  # a 503, and removes what it wrote.
+  local f
+  for f in "$WEB"/e2e/v1-*.acceptance.ts; do
+    [ -f "$f" ] || continue
+    in_web npx --yes tsx "e2e/$(basename "$f")" "$STATE"
+  done
 }
 
 cmd_status() {

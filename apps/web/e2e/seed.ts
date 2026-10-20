@@ -46,6 +46,7 @@ import {
   postPurchaseReturn,
   savePurchaseOrder,
 } from "@/lib/inventory/procurement.server";
+import { listSales, postSale } from "@/lib/inventory/sales.server";
 import { STORE_PLAN } from "./growingLists";
 
 function check(what: string, actual: number, expected: number): void {
@@ -184,7 +185,21 @@ export async function runSeed(): Promise<void> {
       AY_CURRENT,
     );
   }
-  console.log("receipts, charge vouchers, adjustments, staff HR, outdoor duty, certificates and store documents written");
+  // Counter sales through the counter's own posting function (inv_post_sale).
+  for (const sale of STORE_PLAN.counterSales) {
+    await postSale(
+      {
+        buyerKind: "walkin",
+        buyerName: sale.buyerName,
+        saleDate: sale.date,
+        lines: [{ itemId: item.id, qty: 1, unitPricePaise: sale.unitPricePaise }],
+        payments: sale.paidPaise > 0 ? [{ amountPaise: sale.paidPaise, mode: "cash" }] : [],
+      },
+      actor,
+      AY_CURRENT,
+    );
+  }
+  console.log("receipts, charge vouchers, adjustments, staff HR, outdoor duty, certificates, store documents and counter sales written");
 
   // Read back through the app's own readers.
   const e = fx.expected;
@@ -251,6 +266,12 @@ export async function runSeed(): Promise<void> {
   check("goods receipts", (await listGoodsReceipts({})).length, STORE_PLAN.receipts.length);
   check("vendor bills", (await listVendorBills({ status: "all" })).length, STORE_PLAN.receipts.length);
   check("purchase returns", (await listPurchaseReturns({})).length, STORE_PLAN.returns.length);
+  check("counter sales", (await listSales({ status: "all", pageSize: 5 })).total, STORE_PLAN.counterSales.length);
+  check(
+    "unpaid counter sales",
+    (await listSales({ status: "unpaid", pageSize: 5 })).total,
+    STORE_PLAN.counterSales.filter((x) => x.paidPaise === 0).length,
+  );
 
   const sis = await fetchSisFromDb();
   if (!sis.ok) throw new Error("seed read-back: SIS read failed");
