@@ -1530,5 +1530,19 @@
   "dateSheetTitle": "Date sheet",
   "dateSheetNone": "No upcoming exams have been published for this child yet.",
   "dateSheetMinutes": "{minutes} min",
-  "@dateSheetMinutes": {"placeholders": {"minutes": {"type": "String"}}}
+  "@dateSheetMinutes": {"placeholders": {"minutes": {"type": "String"}}},
+  "feeTotalPayingNow": "Total paying now (₹)",
+  "feeTotalPayingNowHelp": "Part payment is fine. It fills the oldest dues first — the ticked ones, or the whole bill if none are ticked.",
+  "feeTotalPayingNowTooMuch": "More than the {amount} outstanding",
+  "@feeTotalPayingNowTooMuch": {"placeholders": {"amount": {"type": "String"}}},
+  "feeDiscountLabel": "Discount {amount}",
+  "@feeDiscountLabel": {"placeholders": {"amount": {"type": "String"}}},
+  "feeDiscountNone": "No discount",
+  "feeDiscountNotLoaded": "Discount: not loaded",
+  "feeReferenceRequired": "{label} (required)",
+  "@feeReferenceRequired": {"placeholders": {"label": {"type": "String"}}},
+  "feeReferenceMissing": "Enter the {label} — every payment that is not cash needs a reference",
+  "@feeReferenceMissing": {"placeholders": {"label": {"type": "String"}}},
+  "feeBankName": "Bank name (required)",
+  "feeBankMissing": "Enter the bank name"
 }

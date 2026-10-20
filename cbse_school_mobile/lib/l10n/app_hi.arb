@@ -751,5 +751,15 @@
   "resultsPrintHint": "रिपोर्ट कार्ड प्रिंट करने या PDF में सहेजने के लिए स्कूल की वेबसाइट पर अभिभावक पोर्टल खोलें और परिणाम में जाएँ।",
   "dateSheetTitle": "परीक्षा कार्यक्रम",
   "dateSheetNone": "इस बच्चे की कोई आने वाली परीक्षा अभी प्रकाशित नहीं हुई है।",
-  "dateSheetMinutes": "{minutes} मिनट"
+  "dateSheetMinutes": "{minutes} मिनट",
+  "feeTotalPayingNow": "अभी कुल भुगतान (₹)",
+  "feeTotalPayingNowHelp": "आंशिक भुगतान चलेगा। यह सबसे पुराने बकाया पहले भरता है — टिक किए हुए, या कुछ टिक न हो तो पूरा बिल।",
+  "feeTotalPayingNowTooMuch": "बकाया {amount} से अधिक",
+  "feeDiscountLabel": "छूट {amount}",
+  "feeDiscountNone": "कोई छूट नहीं",
+  "feeDiscountNotLoaded": "छूट: लोड नहीं हुई",
+  "feeReferenceRequired": "{label} (ज़रूरी)",
+  "feeReferenceMissing": "{label} लिखें — नकद के अलावा हर भुगतान में संदर्भ ज़रूरी है",
+  "feeBankName": "बैंक का नाम (ज़रूरी)",
+  "feeBankMissing": "बैंक का नाम लिखें"
 }

@@ -2596,4 +2596,43 @@ class LHi extends L {
   String dateSheetMinutes(String minutes) {
     return '$minutes मिनट';
   }
+
+  @override
+  String get feeTotalPayingNow => 'अभी कुल भुगतान (₹)';
+
+  @override
+  String get feeTotalPayingNowHelp =>
+      'आंशिक भुगतान चलेगा। यह सबसे पुराने बकाया पहले भरता है — टिक किए हुए, या कुछ टिक न हो तो पूरा बिल।';
+
+  @override
+  String feeTotalPayingNowTooMuch(String amount) {
+    return 'बकाया $amount से अधिक';
+  }
+
+  @override
+  String feeDiscountLabel(String amount) {
+    return 'छूट $amount';
+  }
+
+  @override
+  String get feeDiscountNone => 'कोई छूट नहीं';
+
+  @override
+  String get feeDiscountNotLoaded => 'छूट: लोड नहीं हुई';
+
+  @override
+  String feeReferenceRequired(String label) {
+    return '$label (ज़रूरी)';
+  }
+
+  @override
+  String feeReferenceMissing(String label) {
+    return '$label लिखें — नकद के अलावा हर भुगतान में संदर्भ ज़रूरी है';
+  }
+
+  @override
+  String get feeBankName => 'बैंक का नाम (ज़रूरी)';
+
+  @override
+  String get feeBankMissing => 'बैंक का नाम लिखें';
 }

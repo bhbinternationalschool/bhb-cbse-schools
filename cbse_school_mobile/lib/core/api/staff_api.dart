@@ -797,7 +797,13 @@ class CounterDue {
       label = _s(j, "label"),
       dueOn = _s(j, "dueOn"),
       balancePaise = _i(j, "balancePaise"),
-      balanceLabel = _s(j, "balanceLabel");
+      balanceLabel = _s(j, "balanceLabel"),
+      billedPaise = _i(j, "billedPaise"),
+      discountPaise = (j["discountPaise"] as num?)?.toInt(),
+      discountLines = ((j["discountLines"] as List?) ?? const [])
+          .whereType<String>()
+          .toList(),
+      allocationRank = (j["allocationRank"] as num?)?.toInt();
 
   final String dueKey;
   final String kind;
@@ -805,6 +811,22 @@ class CounterDue {
   final String dueOn;
   final int balancePaise;
   final String balanceLabel;
+
+  /// Billed before any discount (0 when the server did not say).
+  final int billedPaise;
+
+  /// Concession + counter discount on this due, as the web counter shows it.
+  ///
+  /// null = the server could not read every discount source (or is too old
+  /// to send one). Shown as "not loaded" — never as ₹0.
+  final int? discountPaise;
+
+  /// One line per concession / counter discount, e.g. "Sibling discount · 10% · −₹150".
+  final List<String> discountLines;
+
+  /// Position in the order a "total paying now" fills dues (0 = first), from
+  /// the server's own comparator. null on an older server.
+  final int? allocationRank;
 }
 
 class FeeStudentHit {
@@ -857,13 +879,17 @@ class TenderModeInfo {
       label = _s(j, "label"),
       refLabel = _s(j, "refLabel"),
       needsRef = _b(j, "needsRef"),
-      needsInstrumentDate = _b(j, "needsInstrumentDate");
+      needsInstrumentDate = _b(j, "needsInstrumentDate"),
+      needsBank = _b(j, "needsBank");
 
   final String value;
   final String label;
   final String refLabel;
   final bool needsRef;
   final bool needsInstrumentDate;
+
+  /// Cheque / RTGS / NEFT / IMPS / bank deposit: the web counter asks for the bank.
+  final bool needsBank;
 }
 
 class FeeCounter {
@@ -1773,8 +1799,22 @@ extension StaffApi on ApiClient {
     required String studentId,
     required String clientRef,
     required List<({String studentId, String dueKey, int paise})> lines,
-    required List<({String mode, int paise, String ref})> tenders,
+    required List<
+      ({
+        String mode,
+        int paise,
+        String ref,
+        String instrumentDate,
+        String bankName,
+      })
+    >
+    tenders,
     String note = "",
+
+    /// "Total paying now" in paise, when the amounts in [lines] are the split
+    /// of one total. The server re-derives the split from its own dues and
+    /// refuses a mismatch or anything above what is open.
+    int? payingNowPaise,
 
     /// The day the money was handed over, YYYY-MM-DD. Empty means today.
     ///
@@ -1787,6 +1827,7 @@ extension StaffApi on ApiClient {
       "clientRef": clientRef,
       "note": note,
       if (collectionDate.isNotEmpty) "collectionDate": collectionDate,
+      "payingNowPaise": ?payingNowPaise,
       "lines": [
         for (final l in lines)
           {
@@ -1797,7 +1838,13 @@ extension StaffApi on ApiClient {
       ],
       "tenders": [
         for (final t in tenders)
-          {"mode": t.mode, "amountPaise": t.paise, "ref": t.ref},
+          {
+            "mode": t.mode,
+            "amountPaise": t.paise,
+            "ref": t.ref,
+            if (t.instrumentDate.isNotEmpty) "instrumentDate": t.instrumentDate,
+            if (t.bankName.isNotEmpty) "bankName": t.bankName,
+          },
       ],
     }),
   );
