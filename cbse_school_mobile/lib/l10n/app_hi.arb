@@ -751,5 +751,16 @@
   "resultsPrintHint": "रिपोर्ट कार्ड प्रिंट करने या PDF में सहेजने के लिए स्कूल की वेबसाइट पर अभिभावक पोर्टल खोलें और परिणाम में जाएँ।",
   "dateSheetTitle": "परीक्षा कार्यक्रम",
   "dateSheetNone": "इस बच्चे की कोई आने वाली परीक्षा अभी प्रकाशित नहीं हुई है।",
-  "dateSheetMinutes": "{minutes} मिनट"
+  "dateSheetMinutes": "{minutes} मिनट",
+  "homeworkScanPage": "पेज स्कैन करें",
+  "homeworkUploadFile": "फ़ाइल अपलोड करें",
+  "homeworkPageLabel": "पेज {n}",
+  "homeworkAttachLimit": "एक होमवर्क में अधिकतम {max} फ़ाइलें",
+  "homeworkFileTooLarge": "{name} 20 MB से बड़ी है — जोड़ी नहीं गई",
+  "homeworkFileWrongType": "फ़ोटो (JPG, PNG, WebP) या PDF जोड़ें",
+  "homeworkWaitForUploads": "फ़ाइलें अपलोड होने तक रुकें, या जो नहीं हुईं उन्हें हटाएँ",
+  "homeworkCameraUnavailable": "कैमरा नहीं खुल सका",
+  "homeworkUploadFailedRetry": "अपलोड नहीं हुई — फिर से कोशिश के लिए टैप करें",
+  "homeworkCouldNotOpenFile": "फ़ाइल नहीं खुल सकी",
+  "homeworkAttachmentsHint": "पेज और फ़ाइलें इस होमवर्क के साथ अभिभावकों को जाएँगी।"
 }

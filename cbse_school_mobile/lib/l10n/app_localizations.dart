@@ -4532,6 +4532,72 @@ abstract class L {
   /// In en, this message translates to:
   /// **'{minutes} min'**
   String dateSheetMinutes(String minutes);
+
+  /// No description provided for @homeworkScanPage.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan page'**
+  String get homeworkScanPage;
+
+  /// No description provided for @homeworkUploadFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload file'**
+  String get homeworkUploadFile;
+
+  /// No description provided for @homeworkPageLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Page {n}'**
+  String homeworkPageLabel(int n);
+
+  /// No description provided for @homeworkAttachLimit.
+  ///
+  /// In en, this message translates to:
+  /// **'At most {max} files on one homework'**
+  String homeworkAttachLimit(int max);
+
+  /// No description provided for @homeworkFileTooLarge.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} is larger than 20 MB — it was not attached'**
+  String homeworkFileTooLarge(String name);
+
+  /// No description provided for @homeworkFileWrongType.
+  ///
+  /// In en, this message translates to:
+  /// **'Attach a photo (JPG, PNG, WebP) or a PDF'**
+  String get homeworkFileWrongType;
+
+  /// No description provided for @homeworkWaitForUploads.
+  ///
+  /// In en, this message translates to:
+  /// **'Wait for the files to finish uploading, or remove the ones that failed'**
+  String get homeworkWaitForUploads;
+
+  /// No description provided for @homeworkCameraUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open the camera'**
+  String get homeworkCameraUnavailable;
+
+  /// No description provided for @homeworkUploadFailedRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Not uploaded — tap to try again'**
+  String get homeworkUploadFailedRetry;
+
+  /// No description provided for @homeworkCouldNotOpenFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open the file'**
+  String get homeworkCouldNotOpenFile;
+
+  /// No description provided for @homeworkAttachmentsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Pages and files go to the parents with this homework.'**
+  String get homeworkAttachmentsHint;
 }
 
 class _LDelegate extends LocalizationsDelegate<L> {

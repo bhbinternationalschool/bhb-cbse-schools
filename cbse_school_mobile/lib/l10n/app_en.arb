@@ -1530,5 +1530,19 @@
   "dateSheetTitle": "Date sheet",
   "dateSheetNone": "No upcoming exams have been published for this child yet.",
   "dateSheetMinutes": "{minutes} min",
-  "@dateSheetMinutes": {"placeholders": {"minutes": {"type": "String"}}}
+  "@dateSheetMinutes": {"placeholders": {"minutes": {"type": "String"}}},
+  "homeworkScanPage": "Scan page",
+  "homeworkUploadFile": "Upload file",
+  "homeworkPageLabel": "Page {n}",
+  "@homeworkPageLabel": {"placeholders": {"n": {"type": "int"}}},
+  "homeworkAttachLimit": "At most {max} files on one homework",
+  "@homeworkAttachLimit": {"placeholders": {"max": {"type": "int"}}},
+  "homeworkFileTooLarge": "{name} is larger than 20 MB — it was not attached",
+  "@homeworkFileTooLarge": {"placeholders": {"name": {"type": "String"}}},
+  "homeworkFileWrongType": "Attach a photo (JPG, PNG, WebP) or a PDF",
+  "homeworkWaitForUploads": "Wait for the files to finish uploading, or remove the ones that failed",
+  "homeworkCameraUnavailable": "Could not open the camera",
+  "homeworkUploadFailedRetry": "Not uploaded — tap to try again",
+  "homeworkCouldNotOpenFile": "Could not open the file",
+  "homeworkAttachmentsHint": "Pages and files go to the parents with this homework."
 }

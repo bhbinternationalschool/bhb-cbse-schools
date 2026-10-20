@@ -1737,6 +1737,42 @@ class LeadRevision {
   final List<({String type, String title})> items;
 }
 
+/// One file on a homework post — a scanned page, a photo or a PDF. [url] is
+/// what the reader opens: `/api/v1/homework/attachment?…` (checked against
+/// the reader's own child / sections), or a pasted https link.
+class HomeworkAttachment {
+  const HomeworkAttachment({
+    required this.id,
+    required this.label,
+    required this.kind,
+    required this.url,
+  });
+
+  static List<HomeworkAttachment> listFromJson(Object? raw) =>
+      ((raw as List?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(
+            (a) => HomeworkAttachment(
+              id: (a["id"] as String?) ?? "",
+              label: (a["label"] as String?) ?? "",
+              kind: (a["kind"] as String?) ?? "",
+              url: (a["url"] as String?) ?? "",
+            ),
+          )
+          .where((a) => a.url.isNotEmpty)
+          .toList();
+
+  final String id;
+  final String label;
+
+  /// "image", "pdf" or "link".
+  final String kind;
+  final String url;
+
+  bool get isLink => kind == "link";
+  bool get isPdf => kind == "pdf";
+}
+
 class HomeworkItem {
   const HomeworkItem({
     required this.date,
@@ -1747,7 +1783,11 @@ class HomeworkItem {
     required this.dueAt,
     required this.isDiary,
     this.leadRevision,
+    this.attachments = const [],
   });
+
+  /// Files the teacher attached (scanned pages, photos, PDFs).
+  final List<HomeworkAttachment> attachments;
 
   /// Publisher assets to revise this chapter with in the LEAD app, or null.
   final LeadRevision? leadRevision;
@@ -1795,6 +1835,7 @@ class HomeworkFeed {
           dueAt: p["dueAt"] as String?,
           isDiary: false,
           leadRevision: LeadRevision.fromJson(p["leadRevision"]),
+          attachments: HomeworkAttachment.listFromJson(p["attachments"]),
         );
       }),
       ...((j["diary"] as List?) ?? const []).map((raw) {
@@ -4414,6 +4455,7 @@ class ApiClient {
     required String subjectId,
     required String title,
     required String bodyEn,
+    List<UploadedHomeworkFile> attachments = const [],
   }) async {
     await _postData("/api/v1/homework/post", {
       "classId": classId,
@@ -4421,6 +4463,11 @@ class ApiClient {
       "subjectId": subjectId,
       "title": title,
       "bodyEn": bodyEn,
+      if (attachments.isNotEmpty)
+        "attachments": [
+          for (final a in attachments)
+            {"id": a.id, "label": a.label, "url": a.ref},
+        ],
     });
   }
 

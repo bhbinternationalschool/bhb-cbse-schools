@@ -1745,6 +1745,50 @@ extension StaffApi on ApiClient {
     return erpUrl("${data["signatureUrl"] ?? ""}");
   }
 
+  /// One homework file (a scanned page, a photo or a PDF) for a section the
+  /// teacher posts to — POST /api/v1/staff/homework/attachment. Stored in the
+  /// school's private files; the returned ref goes on the post.
+  Future<UploadedHomeworkFile> uploadHomeworkAttachment({
+    required String classId,
+    required String sectionId,
+    required Uint8List bytes,
+    required String fileName,
+    required String mime,
+    required String label,
+  }) async {
+    final req = http.MultipartRequest(
+      "POST",
+      _uri("/api/v1/staff/homework/attachment"),
+    );
+    final headers = await _authHeaders();
+    headers.remove("Content-Type");
+    req.headers.addAll(headers);
+    req.fields["classId"] = classId;
+    req.fields["sectionId"] = sectionId;
+    req.fields["label"] = label;
+    req.files.add(
+      http.MultipartFile.fromBytes(
+        "file",
+        bytes,
+        filename: fileName,
+        contentType: MediaType.parse(mime),
+      ),
+    );
+    final res = await http.Response.fromStream(await _uploadHttp.send(req));
+    if (res.statusCode != 200) _throwFrom(res);
+    final data =
+        ((jsonDecode(res.body) as Map<String, dynamic>)["data"]
+            as Map<String, dynamic>?) ??
+        const {};
+    final a = (data["attachment"] as Map<String, dynamic>?) ?? const {};
+    return UploadedHomeworkFile(
+      id: _s(a, "id"),
+      label: _s(a, "label"),
+      kind: _s(a, "kind"),
+      ref: _s(a, "url"),
+    );
+  }
+
   /// Take the signature off the signed-in member of staff's record.
   Future<void> removeMySignature() async {
     final res = await _http.delete(
@@ -2024,6 +2068,23 @@ extension StaffApi on ApiClient {
     if (res.statusCode != 200) _throwFrom(res);
     return (res.bodyBytes, res.headers["content-type"] ?? "");
   }
+}
+
+/// A homework file already in the school's storage, not yet on a post.
+class UploadedHomeworkFile {
+  const UploadedHomeworkFile({
+    required this.id,
+    required this.label,
+    required this.kind,
+    required this.ref,
+  });
+
+  final String id;
+  final String label;
+  final String kind;
+
+  /// The stored reference (`/api/file/homework/…`) the post route checks.
+  final String ref;
 }
 
 // --------------------------------------------------------------- my profile
