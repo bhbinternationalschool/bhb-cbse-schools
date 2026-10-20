@@ -139,7 +139,7 @@ function BellInner({ persona }: { persona: Persona }) {
         <div
           role="dialog"
           aria-label="Notifications"
-          className="absolute right-0 z-40 mt-2 w-[min(23rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-[0_12px_40px_rgba(32,48,80,0.18)]"
+          className="absolute right-0 z-40 mt-2 w-[23rem] overflow-hidden max-sm:fixed max-sm:inset-x-2 max-sm:top-14 max-sm:mt-0 max-sm:w-auto rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-[0_12px_40px_rgba(32,48,80,0.18)]"
         >
           <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-2">
             <p className="text-xs font-bold text-[var(--brand-deep)]">{view === "list" ? "Notifications" : "Notification settings"}</p>
