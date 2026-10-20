@@ -1303,6 +1303,27 @@ p95 (local stack, 200 warm sequential requests, shared Mac): **65 ms** (p50 29; 
 p95 119 / p50 25); origin/main p95 324–423 ms (p50 167–234). **Intended difference (production only):** a
 register that exists only in a process copy (deleted from the table, or carried from the old blob) is no
 longer shown. **Not done:** production timing needs the deploy.
+*(4.1c built 15 Oct 2026, PR #654.)* **What exists.** `GET /api/v1/parent/summary` reads the
+household (`sis_households` by id) and its student rows (`sis_students` by `household_id`, id order)
+through `lib/data/server/householdRead.ts` (shared with 4.1a/b; the rows are filtered by household again
+in Node), class/section names from `ctx.masters` (the 1.3 reference copy the session was already checked
+against) and the per-child open dues from `fee_desk_open_dues` as before. A failed household/students read
+is 503 (origin/main answered 200 from its process copy of the whole school, whatever that copy held). One
+`{"event":"route-timing","route":"v1/parent/summary",authMs,queryMs,buildMs,totalMs,children,computed}`
+line per request (`lib/data/server/routeTiming.ts`). **Not removed:** a child with no open-dues rows (a fully
+paid child, or one admitted since the cache was rebuilt — 30 of 164 families in production, 15 Oct) still
+needs `computeHouseholdDues`, which reads the fee book, transport, fee adjustments, concession aliases
+(`loadSis()`) and Masters through module-level stores; that fallback still calls
+`ensureSchoolMirrorHydrated` (now lazily, only when a child needs it) and can only go with 5.1 — so this file
+stays in the ratchet. **Proof.** Golden: the origin/main build and this build on the same seeded stack (all
+169 families, as each family's parent and as the office, every refusal) — `e2e/parentApi.golden.ts compare`:
+509/509 summary answers byte-identical (and popups 171/171, attendance 1,374/1,374). `e2e/v1-parent-summary.acceptance.ts`
+(in `e2e-stack.sh check`): children/names/cached balances against the fixture and SQL for 168 families (117
+all-cached, 51 computed), cross-family 403 for every family, `sis_households`/`sis_students` SELECT revoked →
+503, timing lines, p95. On the origin/main build the two 503 checks and the timing check fail (it answers 200). p95 (local stack, 200 warm sequential requests from the test process, shared Mac): cached families
+p50 22.8 / p95 43.7 ms, computed families p50 24.4 / p95 37.3 ms; origin/main, same checks: cached p50 20.4 / p95 26.1 ms, computed p50 32.5 / p95 71.3 ms
+— locally the old route was already fast because one long-lived process keeps its mirror warm; the
+production gain (cold Cloud Run instances, ~1.2–2.2 s today) is **not measured** until deploy.
 
 **4.2 Teacher scope in the app.** Depends on 1.7; verify every `app/api/v1/staff/*` route uses
 it. Acceptance: a teacher whose only link is the timetable sees her sections in the app.
