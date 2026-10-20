@@ -3,7 +3,6 @@ import { apiErr, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
 import { getDriveFileContent } from "@/lib/googleDrive.server";
-import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadSisForStaff } from "@/lib/sis";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { readStudentDocTypes } from "@/lib/studentDocTypes.server";
@@ -30,7 +29,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
     if (!state) throw new ApiError("server_error", "Could not read the document list just now", 503);
     const entry = state.filed.find((f) => f.id === id);
     if (!entry || !entry.driveFileId) throw new ApiError("not_found", "Not found", 404);
-    await ensureSchoolMirrorHydrated();
+    // The SIS alone says whose document it is; the masters come with the session.
     await ensureSisHydratedServer();
     const student = loadSisForStaff().students.find((s) => s.id === entry.studentId);
     if (!student) throw new ApiError("not_found", "Not found", 404);
