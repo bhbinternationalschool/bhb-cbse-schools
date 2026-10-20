@@ -129,6 +129,35 @@ export async function sendTemplateToAudience(opts: {
   if (reasons.size) out.error = [...reasons].slice(0, 2).join(" · ");
   if (!messages.length) return out;
 
+  await dispatchInChunks({
+    messages,
+    module: moduleFor(opts.audienceKind),
+    originUrl: opts.originUrl,
+    refIdOf,
+    out,
+    onChunkResults: opts.onChunkResults,
+  });
+
+  return out;
+}
+
+type ChunkMsg = { messageId: string };
+
+/**
+ * The one dispatch loop: chunks of 100 through /api/wa/dispatch (quiet
+ * hours, number failover, delivery log), counting what came back into
+ * `out`. Shared by the template and the free-text sends so they cannot
+ * drift apart in how they count.
+ */
+async function dispatchInChunks(opts: {
+  messages: ChunkMsg[];
+  module: string;
+  originUrl: string;
+  refIdOf: Map<string, string>;
+  out: WaAudienceSendResult;
+  onChunkResults?: (results: { refId: string; status: string }[]) => Promise<void>;
+}): Promise<void> {
+  const { messages, refIdOf, out } = opts;
   const dispatchSecret = process.env.WA_DISPATCH_SECRET?.trim();
   const dispatchUrl = new URL("/api/wa/dispatch", opts.originUrl).toString();
 
@@ -141,7 +170,7 @@ export async function sendTemplateToAudience(opts: {
         ...(dispatchSecret ? { "x-wa-dispatch-secret": dispatchSecret } : {}),
       },
       body: JSON.stringify({
-        module: moduleFor(opts.audienceKind),
+        module: opts.module,
         messages: chunk,
       }),
     });
@@ -191,5 +220,45 @@ export async function sendTemplateToAudience(opts: {
     }
   }
 
+}
+
+/**
+ * Free text to recipients the caller has ALREADY found inside their 24-hour
+ * window (see lib/staffAppBroadcast splitCustomMessage). Meta refuses free
+ * text to anyone else, so this must never be handed a whole audience.
+ */
+export async function sendTextToAudience(opts: {
+  recipients: WaAudienceRecipient[];
+  text: string;
+  originUrl: string;
+  audienceKind: string;
+}): Promise<WaAudienceSendResult> {
+  const out: WaAudienceSendResult = {
+    sent: 0,
+    failed: 0,
+    deferred: 0,
+    skippedNoTemplate: 0,
+    error: "",
+  };
+  const text = opts.text.trim();
+  if (!text || !opts.recipients.length) return out;
+  const refIdOf = new Map<string, string>();
+  const messages = opts.recipients.map((r) => {
+    const messageId = `aud_text_${opts.audienceKind}_${r.refId}_${r.mobile}`;
+    refIdOf.set(messageId, r.refId);
+    return {
+      messageId,
+      mobile: r.mobile,
+      fallbackMobile: r.fallbackMobile,
+      body: text,
+    };
+  });
+  await dispatchInChunks({
+    messages,
+    module: moduleFor(opts.audienceKind),
+    originUrl: opts.originUrl,
+    refIdOf,
+    out,
+  });
   return out;
 }
