@@ -7,8 +7,8 @@ import {
   saveStaffHrServer,
 } from "@/lib/api/v1/staffLeave";
 import { applyLeave, loadStaffHr, normalizeHalfDaySession } from "@/lib/staffHr";
-import { leadershipStaffIds } from "@/lib/staffHomeKind.server";
-import { sendPushToSubjects } from "@/lib/webPush.server";
+import { staffLeaveRequested } from "@/lib/notify/events";
+import { notify } from "@/lib/notify/notify.server";
 
 export const runtime = "nodejs";
 
@@ -97,15 +97,21 @@ export async function POST(request: Request) {
     });
 
     if (result.request.status === "pending") {
+      // Whoever decides staff leave, by role (lib/notify/events.ts) — bell + phone.
       const { approversToNotify } = await import("@/lib/staffLeaveRules.server");
-      const named = await approversToNotify(ctx.masters, staffId);
-      const approvers = [...new Set([...leadershipStaffIds(ctx.masters), ...named])].filter((id) => id !== staffId);
-      await sendPushToSubjects("staff", approvers, {
-        title: `Leave request · ${ctx.session.fullName}`,
-        body: `${typeCode} ${fromDate}${toDate !== fromDate ? ` to ${toDate}` : ""} · ${reason.slice(0, 80)}`,
-        url: "/leave-approvals",
-        data: { kind: "staff_leave", requestId: result.request.id },
-      }).catch(() => undefined);
+      const named = await approversToNotify(ctx.masters, staffId).catch(() => [] as string[]);
+      await notify(
+        staffLeaveRequested({
+          requestId: result.request.id,
+          staffId,
+          staffName: ctx.session.fullName,
+          typeCode,
+          fromDate,
+          toDate,
+          reason,
+          namedApproverIds: named,
+        }),
+      );
     }
 
     return apiOk(leaveRequestJson(ctx, result.request, loadStaffHr()));
