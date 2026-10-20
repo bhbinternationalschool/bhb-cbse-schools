@@ -113,7 +113,10 @@ async function authorize(ctx: ApiAuthContext, spec: WaAudienceSpec) {
   const schoolWide = isSchoolWide(ctx);
   const scope = schoolWide ? null : await staffSectionScope(ctx);
   return authorizeBroadcastAudience(spec, {
-    schoolWide: schoolWide || !!scope?.unrestricted,
+    // A school-wide SCOPE (principal, office) lets every section through
+    // mayMessageSection; only the broadcast permission opens the
+    // school-wide audiences.
+    schoolWide,
     mayMessageSection: (sectionId) => {
       const sec = ctx.masters.sections.find((s) => s.id === sectionId);
       return !!sec && !!scope && scopeAllows(scope, sec.classId, sec.id);
@@ -167,7 +170,9 @@ export async function GET(req: Request) {
     assertBroadcastFeature(ctx);
     const schoolWide = isSchoolWide(ctx);
     const scope = schoolWide ? null : await staffSectionScope(ctx);
-    const unrestricted = schoolWide || !!scope?.unrestricted;
+    // Every section for a school-wide scope; school-wide AUDIENCES only
+    // with the broadcast permission.
+    const allSections = schoolWide || !!scope?.unrestricted;
 
     const classes = ctx.masters.classes
       .map((c) => ({
@@ -175,13 +180,13 @@ export async function GET(req: Request) {
         name: c.name,
         sections: ctx.masters.sections
           .filter((s) => s.classId === c.id)
-          .filter((s) => unrestricted || (!!scope && scopeAllows(scope, c.id, s.id)))
+          .filter((s) => allSections || (!!scope && scopeAllows(scope, c.id, s.id)))
           .map((s) => ({ id: s.id, name: s.name, label: `${c.name}-${s.name}` })),
       }))
       .filter((c) => c.sections.length);
 
     let routes: { id: string; label: string }[] = [];
-    if (unrestricted) {
+    if (schoolWide) {
       await ensureTransportHydratedServer().catch(() => false);
       routes = (loadTransport().routes ?? [])
         .filter((r) => r.isActive !== false)
@@ -200,13 +205,13 @@ export async function GET(req: Request) {
     }
 
     return apiOk({
-      schoolWide: unrestricted,
+      schoolWide,
       classes,
-      designations: unrestricted
+      designations: schoolWide
         ? (ctx.masters.designations ?? []).map((d) => ({ id: d.id, name: d.name }))
         : [],
       routes,
-      feeStages: unrestricted
+      feeStages: schoolWide
         ? (["S1", "S2", "S3", "S4"] as OverdueStage[]).map((s) => ({ id: s, label: stageLabel(s) }))
         : [],
       templates,
