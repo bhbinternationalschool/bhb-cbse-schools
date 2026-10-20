@@ -11,9 +11,14 @@ import "server-only";
  *  - Rows only (school_chat_* tables, migration 20261020090000), read from
  *    SQL scoped to the conversation; a failed read is a 503, never an empty
  *    chat (R6).
- *  - A child's / family's message is checked before it is stored as
- *    visible; any failure of the check holds it (lib/schoolChatModeration.ts).
- *  - Every check and decision is logged with the original text.
+ *  - Every message (staff too) is checked before it is stored as visible;
+ *    a failure of the check holds a child's / family's message and flags a
+ *    staff one (lib/schoolChatModeration.ts).
+ *  - Every check and decision is logged with the original text, in the
+ *    same transaction as the write it describes (the school_chat_* RPCs);
+ *    a write whose log row cannot be written is refused, never half-done.
+ *  - A sender may send CHAT_RATE_LIMIT messages a minute / a day, checked
+ *    before the model is asked.
  */
 
 import type { ApiAuthContext } from "@/lib/api/v1/auth";
@@ -32,11 +37,13 @@ import { staffRoleCodeFor } from "@/lib/staffSessionRole";
 import {
   allGroups,
   blockVerdict,
+  CHAT_RATE_LIMIT,
   groupFor,
   isRepeatOffender,
   parentDmId,
   parentLabel,
   parseConversationId,
+  rateLimitRefusal,
   sectionGroups,
   sectionLabel,
   staffDmId,
@@ -50,7 +57,7 @@ import {
   type GroupRef,
   type ParsedConversation,
 } from "@/lib/schoolChat";
-import { heldNotice, moderateMessage, type Classifier, type ModerationOutcome } from "@/lib/schoolChatModeration";
+import { admitThenModerate, heldNotice, type Classifier, type ModerationOutcome } from "@/lib/schoolChatModeration";
 import { notifySchoolChat } from "@/lib/schoolChatNotify.server";
 
 type Sb = NonNullable<Awaited<ReturnType<typeof getServerTenantContext>>>["sb"];
@@ -65,13 +72,13 @@ export async function chatTenant(): Promise<Tenant> {
 }
 
 /** A database error: a missing table is "not set up"; anything else is a 503. */
-function dbFail(where: string, error: { message?: string; code?: string } | null): never {
+function dbFail(where: string, error: { message?: string; code?: string } | null, write = false): never {
   const msg = error?.message || "unknown";
   console.error(`[school-chat] ${where}: ${msg}`);
   if (error?.code === "42P01" || error?.code === "PGRST205" || /does not exist|schema cache/i.test(msg)) {
     throw new ApiError("server_error", NOT_SET_UP, 503);
   }
-  throw new ApiError("server_error", "Could not read the chat — please try again.", 503);
+  throw new ApiError("server_error", write ? "Could not save that — nothing was changed. Please try again." : "Could not read the chat — please try again.", 503);
 }
 
 // ── Who is asking ────────────────────────────────────────────────────────
@@ -544,7 +551,7 @@ export async function readMessages(
       mine,
       status: m.status,
       ...(seeAll && !mine ? { senderSubject: { kind: m.sender_kind === "parent" ? ("household" as const) : m.sender_kind, id: m.sender_id } } : {}),
-      ...(m.status === "held" ? { notice: mine ? heldNotice(m.moderation?.categories ?? []) : "Held for review — only you (a moderator) and the sender see it." } : {}),
+      ...(m.status === "held" ? { notice: mine ? heldNotice(m.moderation?.categories ?? [], m.sender_kind) : "Held for review — only you (a moderator) and the sender see it." } : {}),
     });
   }
   if (!access.oversight) {
@@ -587,12 +594,52 @@ const AI_TIMEOUT_MS = 15_000;
 function routerClassifier(requester: string): Classifier {
   return async (text, where) => {
     const { generateChatModerationJson } = await import("@/lib/aiLlm.server");
-    const timeout = new Promise<{ ok: false; error: string }>((resolve) =>
-      setTimeout(() => resolve({ ok: false, error: `no answer in ${AI_TIMEOUT_MS / 1000} s` }), AI_TIMEOUT_MS),
-    );
-    const r = await Promise.race([generateChatModerationJson({ text, where, requester }), timeout]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<{ ok: false; error: string }>((resolve) => {
+      timer = setTimeout(() => resolve({ ok: false, error: `no answer in ${AI_TIMEOUT_MS / 1000} s` }), AI_TIMEOUT_MS);
+    });
+    let r: Awaited<ReturnType<typeof generateChatModerationJson>> | { ok: false; error: string };
+    try {
+      r = await Promise.race([generateChatModerationJson({ text, where, requester }), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
     return r.ok ? { ok: true, verdict: r.verdict, engine: r.engine, generationId: r.generationId } : { ok: false, error: r.error };
   };
+}
+
+/**
+ * The per-sender rate limit (CHAT_RATE_LIMIT). One RPC counts the sender's
+ * messages in the last minute / day and, when over, writes the
+ * "send_refused" log row in the same transaction. A family login counts as
+ * one sender (all its children and the parent line). Throws 429 to refuse;
+ * a failed check is a 503, never "allowed".
+ */
+async function admitSend(
+  t: Tenant,
+  a: { actor: ChatActor; access: ConversationAccess; body: string; subject: ChatSubject },
+): Promise<void> {
+  const { data, error } = await t.sb.rpc("school_chat_rate_check", {
+    p_tenant: t.tenantId,
+    p_conversation: a.access.id,
+    p_sender_kind: a.actor.kind === "staff" ? "staff" : "",
+    p_sender_id: a.actor.kind === "staff" ? a.actor.staffId : "",
+    p_household: a.actor.kind === "family" ? a.actor.householdId : "",
+    p_subject_kind: a.subject.kind,
+    p_subject_id: a.subject.id,
+    p_body: a.body,
+    p_per_minute: CHAT_RATE_LIMIT.perMinute,
+    p_per_day: CHAT_RATE_LIMIT.perDay,
+  });
+  if (error) dbFail("rate check", error);
+  const row = (Array.isArray(data) ? data[0] : data) as { allowed: boolean; minute_count: number; day_count: number } | undefined;
+  if (!row) throw new ApiError("server_error", "Could not check your sending limit — please try again.", 503);
+  if (row.allowed) return;
+  throw new ApiError(
+    "rate_limited",
+    rateLimitRefusal({ minute: row.minute_count, day: row.day_count }) || "You are sending messages too fast. Please wait a minute and try again.",
+    429,
+  );
 }
 
 export type SendResult = { message: ChatMessageOut; held: boolean; notice: string | null };
@@ -615,7 +662,9 @@ export async function sendMessage(
   const verdict = blockVerdict(await activeBlocksFor(t, subjects), subjects, access.id);
   if (!verdict.canSend) {
     const subject = subjects[0]!;
-    await t.sb.from("school_chat_moderation_log").insert({
+    // The refusal is logged or the caller hears that it was not (never a
+    // silent refusal without its log row).
+    const { error: logErr } = await t.sb.from("school_chat_moderation_log").insert({
       tenant_id: t.tenantId,
       conversation_id: access.id,
       action: "send_refused",
@@ -624,6 +673,7 @@ export async function sendMessage(
       reason: verdict.by ? `${verdict.by.mode}: ${verdict.by.reason}` : "",
       original_text: body,
     });
+    if (logErr) dbFail("send_refused log", logErr, true);
     throw new ApiError(
       "forbidden",
       verdict.by?.mode === "block"
@@ -642,10 +692,12 @@ export async function sendMessage(
         : studentLabel(actor.student.fullName, actor.section);
   const subject: ChatSubject = actor.kind === "staff" ? { kind: "staff", id: actor.staffId } : asParent ? { kind: "household", id: actor.householdId } : { kind: "student", id: actor.student.id };
   const requester = `chat:${subject.kind}:${subject.id}`;
-  const outcome: ModerationOutcome = await moderateMessage(body, {
+  const outcome: ModerationOutcome = await admitThenModerate(body, {
     sender,
     where: access.title,
     classify: e2eStub() ?? routerClassifier(requester),
+    // The rate limit, BEFORE the model is asked.
+    admit: () => admitSend(t, { actor, access, body, subject }),
   });
 
   const { data, error } = await t.sb.rpc("school_chat_post", {
@@ -693,11 +745,12 @@ export async function sendMessage(
     exceptHousehold: actor.kind === "family" ? actor.householdId : "",
     ctx,
     loadSection: (classId, sectionId) => sectionStudents(t, roster.ay, classId, sectionId),
+    loadBlocks: (s) => activeBlocksFor(t, s),
   });
 
   return {
     held,
-    notice: held ? heldNotice(outcome.categories) : null,
+    notice: held ? heldNotice(outcome.categories, sender) : null,
     message: {
       id: row.id,
       senderLabel: label,
@@ -706,7 +759,7 @@ export async function sendMessage(
       createdAt: row.created_at,
       mine: true,
       status: outcome.status,
-      ...(held ? { notice: heldNotice(outcome.categories) } : {}),
+      ...(held ? { notice: heldNotice(outcome.categories, sender) } : {}),
     },
   };
 }
@@ -867,11 +920,11 @@ async function behaviourCounts(t: Tenant, sinceIso: string): Promise<Map<string,
     const key = `${r.subject_kind}:${r.subject_id}`;
     let c = out.get(key);
     if (!c) out.set(key, (c = { ...zero(), kind: r.subject_kind, id: r.subject_id, categories: {} }));
-    if (r.action === "passed" || r.action.startsWith("held_") || r.action === "flagged_staff") c.sent += 1;
+    if (r.action === "passed" || r.action.startsWith("held_") || r.action === "flagged_ai_unavailable") c.sent += 1;
     if (r.action.startsWith("held_")) c.held += 1;
     if (r.action === "remove") c.removed += 1;
     if (r.action === "warn") c.warned += 1;
-    if (r.action === "flagged_staff") c.flagged += 1;
+    if (r.action === "flagged_ai_unavailable") c.flagged += 1;
     for (const cat of r.categories ?? []) c.categories[cat] = (c.categories[cat] || 0) + 1;
   }
   return out;
@@ -976,10 +1029,17 @@ export async function decideMessage(
   if (error) dbFail("decide", error);
   const row = (Array.isArray(data) ? data[0] : data) as { id: string; status: string; conversation_id: string } | undefined;
   if (!row?.id) throw new ApiError("conflict", "Someone has already decided this message — the queue has been refreshed.", 409);
-  if (decision === "warn") {
-    const { data: m } = await t.sb.from("school_chat_messages").select("household_id, sender_kind, sender_id").eq("id", row.id).maybeSingle();
-    const msg = m as { household_id: string; sender_kind: string; sender_id: string } | null;
-    if (msg)
+  if (decision === "warn" || (decision === "approve" && row.status === "visible")) {
+    // The decision is saved; a push problem never undoes it (best-effort, logged).
+    const { data: m, error: mErr } = await t.sb
+      .from("school_chat_messages")
+      .select("household_id, sender_kind, sender_id, sender_label, body")
+      .eq("tenant_id", t.tenantId)
+      .eq("id", row.id)
+      .maybeSingle();
+    if (mErr) console.warn("[school-chat] decided message not re-read — no push:", mErr.message);
+    const msg = m as { household_id: string; sender_kind: string; sender_id: string; sender_label: string; body: string } | null;
+    if (msg && decision === "warn")
       void notifySchoolChat({
         kind: "warning",
         conversationId: row.conversation_id,
@@ -995,9 +1055,67 @@ export async function decideMessage(
         exceptHousehold: "",
         ctx,
         loadSection: async () => [],
+        loadBlocks: (s) => activeBlocksFor(t, s),
       });
+    if (msg && decision === "approve") {
+      await pushApproved(ctx, t, row.conversation_id, msg).catch((e) => {
+        console.warn("[school-chat] approved message not pushed:", e instanceof Error ? e.message : e);
+      });
+    }
   }
   return { id: row.id, status: row.status };
+}
+
+/**
+ * An approved message reaches the conversation's members exactly like a
+ * normal post: the same push, the same block filter (pushAudience), the
+ * sender left out.
+ */
+async function pushApproved(
+  ctx: ApiAuthContext,
+  t: Tenant,
+  conversationId: string,
+  msg: { household_id: string; sender_kind: string; sender_id: string; sender_label: string; body: string },
+): Promise<void> {
+  const parsed = parseConversationId(conversationId);
+  if (!parsed) return;
+  const fromStaff = msg.sender_kind === "staff";
+  let title = "";
+  let staffIds: string[] = [];
+  let group: GroupRef | null = null;
+  let householdIds: string[] = [];
+  let ay = "";
+  if (parsed.kind === "class" || parsed.kind === "subject") {
+    const roster = await loadChatRoster(ctx, parsed.ay);
+    group = groupFor(roster, parsed);
+    if (!group) return; // the group no longer exists on this roster: nobody to push
+    title = group.title;
+    staffIds = group.staffIds;
+    ay = roster.ay;
+  } else {
+    const conv = await readConvRow(t, conversationId);
+    if (!conv) return;
+    title = conv.title;
+    staffIds = conv.staff_ids;
+    householdIds = conv.kind === "dm_parent" && fromStaff ? [conv.household_id] : [];
+  }
+  await notifySchoolChat({
+    kind: "message",
+    conversationId,
+    title,
+    senderLabel: msg.sender_label,
+    preview: msg.body,
+    urgent: false,
+    flagged: false,
+    staffIds: staffIds.filter((id) => !(fromStaff && id === msg.sender_id)),
+    group,
+    ay,
+    householdIds,
+    exceptHousehold: fromStaff ? "" : msg.household_id,
+    ctx,
+    loadSection: (classId, sectionId) => sectionStudents(t, ay, classId, sectionId),
+    loadBlocks: (s) => activeBlocksFor(t, s),
+  });
 }
 
 export async function listBlocks(ctx: ApiAuthContext, includeLifted: boolean): Promise<{ blocks: (ChatBlock & { liftedAt: string | null; liftReason: string })[] }> {
@@ -1031,59 +1149,39 @@ export async function setBlock(
   const conversationId = String(input.conversationId || "").trim();
   if (conversationId && !parseConversationId(conversationId)) throw new ApiError("bad_request", "Unknown conversation.", 400);
   const t = await chatTenant();
-  const { data, error } = await t.sb
-    .from("school_chat_blocks")
-    .insert({
-      tenant_id: t.tenantId,
-      subject_kind: kind,
-      subject_id: subjectId,
-      mode: input.mode,
-      conversation_id: conversationId,
-      reason: reason.slice(0, 500),
-      created_by: mod.staffId,
-      created_by_name: mod.name,
-    })
-    .select("id")
-    .single();
-  if (error) dbFail("block", error);
-  await t.sb.from("school_chat_moderation_log").insert({
-    tenant_id: t.tenantId,
-    conversation_id: conversationId,
-    action: input.mode,
-    actor: mod.staffId,
-    actor_name: mod.name,
-    subject_kind: kind,
-    subject_id: subjectId,
-    reason: reason.slice(0, 500),
+  // The block and its log row in one transaction (school_chat_set_block): a
+  // block that could not be logged is not made.
+  const { data, error } = await t.sb.rpc("school_chat_set_block", {
+    p_tenant: t.tenantId,
+    p_subject_kind: kind,
+    p_subject_id: subjectId,
+    p_mode: input.mode,
+    p_conversation: conversationId,
+    p_reason: reason.slice(0, 500),
+    p_actor: mod.staffId,
+    p_actor_name: mod.name,
   });
-  return { id: (data as { id: string }).id };
+  if (error) dbFail("block", error, true);
+  const row = (Array.isArray(data) ? data[0] : data) as { id: string } | undefined;
+  if (!row?.id) throw new ApiError("server_error", "The mute / block was not saved — please try again.", 503);
+  return { id: row.id };
 }
 
 export async function liftBlock(ctx: ApiAuthContext, blockId: string, reason: string): Promise<{ id: string }> {
   const mod = requireModerator(ctx);
   if (!/^[0-9a-f-]{36}$/i.test(blockId)) throw new ApiError("bad_request", "blockId required", 400);
   const t = await chatTenant();
-  const { data, error } = await t.sb
-    .from("school_chat_blocks")
-    .update({ lifted_at: new Date().toISOString(), lifted_by: mod.staffId, lift_reason: reason.trim().slice(0, 500) })
-    .eq("tenant_id", t.tenantId)
-    .eq("id", blockId)
-    .is("lifted_at", null)
-    .select("id, subject_kind, subject_id, mode, conversation_id")
-    .maybeSingle();
-  if (error) dbFail("lift", error);
-  const row = data as { id: string; subject_kind: string; subject_id: string; mode: string; conversation_id: string } | null;
-  if (!row) throw new ApiError("conflict", "That mute / block was already lifted.", 409);
-  await t.sb.from("school_chat_moderation_log").insert({
-    tenant_id: t.tenantId,
-    conversation_id: row.conversation_id,
-    action: row.mode === "mute" ? "unmute" : "unblock",
-    actor: mod.staffId,
-    actor_name: mod.name,
-    subject_kind: row.subject_kind,
-    subject_id: row.subject_id,
-    reason: reason.trim().slice(0, 500),
+  // The lift and its log row in one transaction (school_chat_lift_block).
+  const { data, error } = await t.sb.rpc("school_chat_lift_block", {
+    p_tenant: t.tenantId,
+    p_block: blockId,
+    p_actor: mod.staffId,
+    p_actor_name: mod.name,
+    p_reason: reason.trim().slice(0, 500),
   });
+  if (error) dbFail("lift", error, true);
+  const row = (Array.isArray(data) ? data[0] : data) as { id: string } | undefined;
+  if (!row?.id) throw new ApiError("conflict", "That mute / block was already lifted.", 409);
   return { id: row.id };
 }
 

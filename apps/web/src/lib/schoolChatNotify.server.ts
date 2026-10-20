@@ -18,10 +18,16 @@ import "server-only";
  *    review"); its text is never in the push;
  *  - a self-harm hold → the moderators, marked urgent;
  *  - a warning → the sender's family / staff member.
+ *
+ * Blocks: a blocked member gets NO push for a visible message — not the
+ * sender's name, not a preview (pushAudience in lib/schoolChat.ts). A muted
+ * member still does: mute = may read, may not send. If the blocks cannot be
+ * read, members get no push (unknown is not "not blocked"); moderators'
+ * review pushes carry no text and are unaffected.
  */
 
 import type { ApiAuthContext } from "@/lib/api/v1/auth";
-import type { GroupRef } from "@/lib/schoolChat";
+import { pushAudience, pushAudienceSubjects, type ChatBlock, type ChatSubject, type GroupRef } from "@/lib/schoolChat";
 import type { SisStudent } from "@/lib/sis";
 import { sendPushToSubjects } from "@/lib/webPush.server";
 import { trackServerWork } from "@/lib/serverWork";
@@ -41,6 +47,8 @@ export type SchoolChatEvent = {
   exceptHousehold: string;
   ctx: ApiAuthContext;
   loadSection: (classId: string, sectionId: string) => Promise<SisStudent[]>;
+  /** Active mutes / blocks of these subjects; throws when they cannot be read. */
+  loadBlocks: (subjects: ChatSubject[]) => Promise<ChatBlock[]>;
 };
 
 const url = (id: string) => `/school-chat?c=${encodeURIComponent(id)}`;
@@ -65,13 +73,17 @@ async function deliver(e: SchoolChatEvent): Promise<void> {
   }
   const preview = e.preview.length > 120 ? `${e.preview.slice(0, 117)}…` : e.preview;
   const payload = { title: `${e.senderLabel} · ${e.title}`, body: preview, url: url(e.conversationId), data };
-  let households = [...e.householdIds];
-  if (e.group) {
-    const kids = await e.loadSection(e.group.classId, e.group.sectionId);
-    households = [...new Set(kids.map((k) => k.householdId).filter(Boolean))];
+  const sectionChildren = e.group ? (await e.loadSection(e.group.classId, e.group.sectionId)).map((k) => ({ id: k.id, householdId: k.householdId })) : null;
+  const who = { staffIds: e.staffIds, sectionChildren, householdIds: e.householdIds };
+  let blocks: ChatBlock[];
+  try {
+    blocks = await e.loadBlocks(pushAudienceSubjects(who));
+  } catch (err) {
+    console.warn("[school-chat] blocks unreadable — no member push:", err instanceof Error ? err.message : err);
+    return;
   }
-  households = households.filter((h) => h !== e.exceptHousehold);
-  await Promise.all([sendPushToSubjects("staff", e.staffIds, payload), sendPushToSubjects("parent", households, payload)]);
+  const to = pushAudience({ ...who, conversationId: e.conversationId, exceptHousehold: e.exceptHousehold, blocks });
+  await Promise.all([sendPushToSubjects("staff", to.staff, payload), sendPushToSubjects("parent", to.households, payload)]);
 }
 
 export function notifySchoolChat(e: SchoolChatEvent): Promise<void> {

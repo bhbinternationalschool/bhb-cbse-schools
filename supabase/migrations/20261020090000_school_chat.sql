@@ -103,14 +103,20 @@ create index if not exists school_chat_messages_held_idx
   on public.school_chat_messages (tenant_id, created_at) where status = 'held';
 create index if not exists school_chat_messages_sender_idx
   on public.school_chat_messages (tenant_id, sender_kind, sender_id, created_at);
+-- The per-sender rate limit counts a family login's messages by household.
+create index if not exists school_chat_messages_household_idx
+  on public.school_chat_messages (tenant_id, household_id, created_at) where household_id <> '';
 
 create table if not exists public.school_chat_moderation_log (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
   message_id uuid references public.school_chat_messages(id) on delete set null,
   conversation_id text not null default '',
-  -- held_by_rules, held_by_ai, held_ai_unavailable, passed, flagged_staff,
-  -- approve, remove, warn, mute, unmute, block, unblock, send_refused
+  -- held_by_rules, held_by_ai, held_ai_unavailable, passed,
+  -- flagged_ai_unavailable (a staff message posted while the AI check was
+  -- down, queued for review), approve, remove, warn, mute, unmute, block,
+  -- unblock, send_refused (muted / blocked, or over the rate limit: reason
+  -- 'rate_limit: …')
   action text not null,
   -- 'system' for the automatic check; else the moderator's staff id.
   actor text not null default 'system',
@@ -261,6 +267,128 @@ begin
 end;
 $$;
 
+-- Mute / block someone, and its log row, in one transaction: there is never
+-- a block without its log row, nor a log row for a block that was not made.
+create or replace function public.school_chat_set_block(
+  p_tenant uuid,
+  p_subject_kind text,
+  p_subject_id text,
+  p_mode text,
+  p_conversation text,
+  p_reason text,
+  p_actor text,
+  p_actor_name text
+) returns table (id uuid)
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_id uuid;
+begin
+  insert into public.school_chat_blocks
+    (tenant_id, subject_kind, subject_id, mode, conversation_id, reason, created_by, created_by_name)
+  values
+    (p_tenant, p_subject_kind, p_subject_id, p_mode, coalesce(p_conversation, ''), p_reason, p_actor, coalesce(p_actor_name, ''))
+  returning school_chat_blocks.id into v_id;
+
+  insert into public.school_chat_moderation_log
+    (tenant_id, conversation_id, action, actor, actor_name, subject_kind, subject_id, reason)
+  values
+    (p_tenant, coalesce(p_conversation, ''), p_mode, p_actor, coalesce(p_actor_name, ''), p_subject_kind, p_subject_id, p_reason);
+
+  return query select v_id;
+end;
+$$;
+
+-- Lift a mute / block (the row is kept, lifted_*), and its log row, in one
+-- transaction. Already lifted (or not this tenant's) = no row returned.
+create or replace function public.school_chat_lift_block(
+  p_tenant uuid,
+  p_block uuid,
+  p_actor text,
+  p_actor_name text,
+  p_reason text
+) returns table (id uuid, subject_kind text, subject_id text, mode text, conversation_id text)
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  b public.school_chat_blocks%rowtype;
+begin
+  update public.school_chat_blocks
+     set lifted_at = now(), lifted_by = coalesce(p_actor, ''), lift_reason = coalesce(p_reason, '')
+   where school_chat_blocks.id = p_block
+     and school_chat_blocks.tenant_id = p_tenant
+     and school_chat_blocks.lifted_at is null
+  returning * into b;
+  if not found then return; end if;
+
+  insert into public.school_chat_moderation_log
+    (tenant_id, conversation_id, action, actor, actor_name, subject_kind, subject_id, reason)
+  values
+    (p_tenant, b.conversation_id, case b.mode when 'mute' then 'unmute' else 'unblock' end,
+     coalesce(p_actor, ''), coalesce(p_actor_name, ''), b.subject_kind, b.subject_id, coalesce(p_reason, ''));
+
+  return query select b.id, b.subject_kind, b.subject_id, b.mode, b.conversation_id;
+end;
+$$;
+
+-- The per-sender sending limit, checked before the AI check. Counts the
+-- sender's stored messages (any status) in the last minute and 24 hours —
+-- a family login (p_household <> '') by household, staff by staff id — and,
+-- when over either limit, writes the 'send_refused' log row (with the text)
+-- in the same transaction. allowed = false means refuse.
+create or replace function public.school_chat_rate_check(
+  p_tenant uuid,
+  p_conversation text,
+  p_sender_kind text,
+  p_sender_id text,
+  p_household text,
+  p_subject_kind text,
+  p_subject_id text,
+  p_body text,
+  p_per_minute int,
+  p_per_day int
+) returns table (allowed boolean, minute_count int, day_count int)
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_min int;
+  v_day int;
+  v_ok boolean;
+begin
+  if coalesce(p_household, '') = '' and (coalesce(p_sender_kind, '') <> 'staff' or coalesce(p_sender_id, '') = '') then
+    raise exception 'school_chat_rate_check: a household or a staff sender is required';
+  end if;
+
+  select count(*) filter (where m.created_at > now() - interval '1 minute'),
+         count(*)
+    into v_min, v_day
+    from public.school_chat_messages m
+   where m.tenant_id = p_tenant
+     and m.created_at > now() - interval '24 hours'
+     and (case when coalesce(p_household, '') <> ''
+               then m.household_id = p_household
+               else m.sender_kind = 'staff' and m.sender_id = p_sender_id end);
+
+  v_ok := v_min < p_per_minute and v_day < p_per_day;
+  if not v_ok then
+    insert into public.school_chat_moderation_log
+      (tenant_id, conversation_id, action, subject_kind, subject_id, reason, original_text)
+    values
+      (p_tenant, coalesce(p_conversation, ''), 'send_refused', coalesce(p_subject_kind, ''), coalesce(p_subject_id, ''),
+       format('rate_limit: %s in the last minute (max %s), %s in 24 h (max %s)', v_min, p_per_minute, v_day, p_per_day),
+       coalesce(p_body, ''));
+  end if;
+
+  return query select v_ok, v_min, v_day;
+end;
+$$;
+
 comment on table public.school_chat_conversations is
   'School chat: class / subject groups (deterministic ids) and staff↔staff / staff↔parent direct chats. Membership of groups is decided by the server on every request.';
 comment on table public.school_chat_members is
@@ -292,5 +420,11 @@ grant select, insert, update, delete on public.school_chat_blocks to service_rol
 
 revoke all on function public.school_chat_post(uuid, text, text, text, text, text, text, text, jsonb, text, text, text[], text, text) from public, anon, authenticated;
 revoke all on function public.school_chat_decide(uuid, uuid, text, text, text, text) from public, anon, authenticated;
+revoke all on function public.school_chat_set_block(uuid, text, text, text, text, text, text, text) from public, anon, authenticated;
+revoke all on function public.school_chat_lift_block(uuid, uuid, text, text, text) from public, anon, authenticated;
+revoke all on function public.school_chat_rate_check(uuid, text, text, text, text, text, text, text, int, int) from public, anon, authenticated;
 grant execute on function public.school_chat_post(uuid, text, text, text, text, text, text, text, jsonb, text, text, text[], text, text) to service_role;
 grant execute on function public.school_chat_decide(uuid, uuid, text, text, text, text) to service_role;
+grant execute on function public.school_chat_set_block(uuid, text, text, text, text, text, text, text) to service_role;
+grant execute on function public.school_chat_lift_block(uuid, uuid, text, text, text) to service_role;
+grant execute on function public.school_chat_rate_check(uuid, text, text, text, text, text, text, text, int, int) to service_role;

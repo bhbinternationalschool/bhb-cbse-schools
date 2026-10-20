@@ -293,3 +293,79 @@ export function blockVerdict(
 export function isRepeatOffender(c: { held: number; removed: number; warned: number }): boolean {
   return c.removed + c.warned >= 3 || c.held >= 5;
 }
+
+// ── Who a push goes to (blocks applied) ──────────────────────────────────
+
+/**
+ * The members a VISIBLE message is pushed to, after mutes and blocks.
+ *
+ *  - block = may neither read nor send → no push at all (no sender name, no
+ *    preview). A block on the family closes everything; a block on the child
+ *    closes the child's groups (a family is pushed for a group through each
+ *    of its children in the section, so a family with another, unblocked
+ *    child there is still pushed); a block on a staff member closes their
+ *    groups and chats. In a staff↔parent chat only the family's own block
+ *    counts — a block on the child alone does not close it (same rule as
+ *    listConversations / readMessages).
+ *  - mute = may read, may not send (the documented meaning, migration
+ *    20261020090000) → a muted person IS still pushed: they can read the
+ *    message, so they may hear about it.
+ *
+ * Pure; the caller passes the blocks it read for exactly these subjects.
+ */
+export function pushAudience(input: {
+  conversationId: string;
+  /** Staff to push (sender already left out). */
+  staffIds: string[];
+  /** Class / subject group: the section's active children; null = not a group. */
+  sectionChildren: { id: string; householdId: string }[] | null;
+  /** staff↔parent chat: the family (when staff sent it). */
+  householdIds: string[];
+  /** The sender's family — never pushed its own message. */
+  exceptHousehold: string;
+  blocks: ChatBlock[];
+}): { staff: string[]; households: string[] } {
+  const canRead = (subjects: ChatSubject[]) => blockVerdict(input.blocks, subjects, input.conversationId).canRead;
+  const staff = [...new Set(input.staffIds)].filter((id) => id && canRead([{ kind: "staff", id }]));
+  const households = new Set<string>();
+  if (input.sectionChildren) {
+    for (const k of input.sectionChildren) {
+      if (!k.householdId || k.householdId === input.exceptHousehold) continue;
+      if (canRead([{ kind: "student", id: k.id }, { kind: "household", id: k.householdId }])) households.add(k.householdId);
+    }
+  } else {
+    for (const h of input.householdIds) {
+      if (h && h !== input.exceptHousehold && canRead([{ kind: "household", id: h }])) households.add(h);
+    }
+  }
+  return { staff, households: [...households] };
+}
+
+/** Every subject whose blocks pushAudience needs. */
+export function pushAudienceSubjects(input: { staffIds: string[]; sectionChildren: { id: string; householdId: string }[] | null; householdIds: string[] }): ChatSubject[] {
+  return [
+    ...input.staffIds.map((id) => ({ kind: "staff" as const, id })),
+    ...(input.sectionChildren ?? []).flatMap((k) => [{ kind: "student" as const, id: k.id }, ...(k.householdId ? [{ kind: "household" as const, id: k.householdId }] : [])]),
+    ...input.householdIds.map((id) => ({ kind: "household" as const, id })),
+  ];
+}
+
+// ── Sending rate ─────────────────────────────────────────────────────────
+
+/**
+ * Per sender: a staff member, or a family login (every child and the parent
+ * line of one household count together). Checked BEFORE the AI check, so a
+ * flood costs no model calls. Held messages count too.
+ */
+export const CHAT_RATE_LIMIT = { perMinute: 10, perDay: 200 } as const;
+
+/** null = may send; else what the sender is told. `minute` / `day` = messages already sent in the last 60 s / 24 h. */
+export function rateLimitRefusal(counts: { minute: number; day: number }, limit: { perMinute: number; perDay: number } = CHAT_RATE_LIMIT): string | null {
+  if (counts.day >= limit.perDay) {
+    return `You have sent ${limit.perDay} messages in the last 24 hours — that is the most school chat allows. Please try again later.`;
+  }
+  if (counts.minute >= limit.perMinute) {
+    return `You are sending messages too fast (${limit.perMinute} a minute at most). Please wait a minute and try again.`;
+  }
+  return null;
+}

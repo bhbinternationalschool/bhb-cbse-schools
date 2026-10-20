@@ -1,6 +1,7 @@
 /**
- * School chat — the check every child / family message passes BEFORE anyone
- * else sees it (pure; the model call lives in aiLlm.server.ts).
+ * School chat — the check every message (children, families AND staff)
+ * passes BEFORE anyone else sees it (pure; the model call lives in
+ * aiLlm.server.ts).
  *
  * Director's decision (15 Oct 2026): hold, then human review. Two layers:
  *
@@ -14,6 +15,16 @@
  * Fail closed: no model configured, a budget refusal, an error, a timeout or
  * an answer that does not parse — all HOLD ("held_ai_unavailable"). Nothing
  * a child writes reaches another child unchecked.
+ *
+ * Staff (review of PR #679, 20 Oct 2026 — the director's rule has no staff
+ * exception): a staff message gets the same two layers, and a rules hit or
+ * an abusive model verdict HOLDS it for review exactly like a family's.
+ * ONE difference, a DECISION FOR THE DIRECTOR TO CONFIRM: when the model is
+ * unavailable / times out / answers nonsense for a STAFF message, it is
+ * delivered but flagged into the review queue ("flagged_ai_unavailable"),
+ * so an AI outage does not silence teachers. Family messages stay
+ * fail-closed. To make staff fail-closed too, return the family branch's
+ * held_ai_unavailable outcome for staff below.
  */
 
 export const MODERATION_CATEGORIES = ["abuse", "bullying", "sexual", "threat", "self_harm", "personal_info", "other"] as const;
@@ -27,8 +38,8 @@ export type ModerationOutcome = {
   categories: ModerationCategory[];
   reason: string;
   /** Log action for school_chat_moderation_log. */
-  logAction: "passed" | "held_by_rules" | "held_by_ai" | "held_ai_unavailable" | "flagged_staff";
-  /** true = a staff message that tripped the rules: posted, but queued for a look. */
+  logAction: "passed" | "held_by_rules" | "held_by_ai" | "held_ai_unavailable" | "flagged_ai_unavailable";
+  /** true = a staff message the model could not check: posted, but queued for a look. */
   flagged?: boolean;
   engine?: string;
   generationId?: string;
@@ -251,21 +262,15 @@ export type Classifier = (text: string, where: string) => Promise<
 >;
 
 /**
- * The whole decision for one message. `sender` "staff": logged, never held
- * (director's choice, recommended) — but a rules hit puts it in the review
- * queue as "flagged", still visible. Children and families: rules, then the
- * model; any failure holds.
+ * The whole decision for one message: rules, then the model. Any hit holds
+ * — for staff too. A model failure holds a child's / family's message; a
+ * staff message is delivered and flagged for review (see the header).
  */
 export async function moderateMessage(
   text: string,
   opts: { sender: "staff" | "student" | "parent"; where: string; classify: Classifier },
 ): Promise<ModerationOutcome> {
   const rules = checkRules(text);
-  if (opts.sender === "staff") {
-    return rules.hold
-      ? { status: "visible", by: "rules", categories: rules.categories, reason: rules.reason, logAction: "flagged_staff", flagged: true }
-      : { status: "visible", by: "none", categories: [], reason: "", logAction: "passed" };
-  }
   if (rules.hold) {
     return { status: "held", by: "rules", categories: rules.categories, reason: rules.reason, logAction: "held_by_rules" };
   }
@@ -276,6 +281,17 @@ export async function moderateMessage(
     r = { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
   if (!r.ok) {
+    if (opts.sender === "staff") {
+      return {
+        status: "visible",
+        by: "ai_unavailable",
+        categories: [],
+        reason: "The automatic check could not run — posted (staff), and queued for a person to look at.",
+        logAction: "flagged_ai_unavailable",
+        flagged: true,
+        error: r.error.slice(0, 300),
+      };
+    }
     return {
       status: "held",
       by: "ai_unavailable",
@@ -292,8 +308,26 @@ export async function moderateMessage(
   return { status: "visible", by: "ai", categories: [], reason: "", logAction: "passed", ...base };
 }
 
+/**
+ * The send pipeline's order: `admit` (the rate limit — throws to refuse)
+ * runs FIRST, so a refused message never reaches the model.
+ */
+export async function admitThenModerate(
+  text: string,
+  opts: { sender: "staff" | "student" | "parent"; where: string; classify: Classifier; admit: () => Promise<void> },
+): Promise<ModerationOutcome> {
+  await opts.admit();
+  return moderateMessage(text, opts);
+}
+
 /** What the sender is told about a held message. Self-harm gets help, not just a wait. */
-export function heldNotice(categories: readonly string[]): string {
+export function heldNotice(categories: readonly string[], sender: "staff" | "student" | "parent" = "student"): string {
+  if (sender === "staff") {
+    if (categories.includes("self_harm")) {
+      return "Your message is waiting for a moderator to read it. If you are feeling low or unsafe, please call Tele-MANAS on 14416 (free, any time).";
+    }
+    return "Your message is waiting for review — a moderator will check it before others can see it.";
+  }
   if (categories.includes("self_harm")) {
     return "Your message is waiting for a teacher to read it. If you are feeling low or unsafe, please talk to your class teacher or a family member now, or call Tele-MANAS on 14416 (free, any time).";
   }
