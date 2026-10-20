@@ -1222,7 +1222,7 @@ not monotone; remove without `by` accepted; hard delete ("the row is still there
 an empty sensitive-key list; the mark not cleared. `desk_slice_row_write.test.sql` (51) — its "no _rev on
 a masters element" check now asserts `_rev` 1 → 2 (fails on origin/main's schema, as intended);
 `desk_write_guarded.test.sql` (37) — "every writable table names a sync_meta table" now exempts the three
-tables erp_versions reads directly. Migration applied twice on a fresh PG17 (idempotent; 393 applied, 0
+tables erp_versions reads directly. `e2e/versions.acceptance.ts` "the subject is restored exactly as seeded" compared the element byte for byte and failed in CI on this branch (the restore moved `_rev` 1 → 3 — the guard working); it now compares the content without `_rev` and asserts `_rev` moved by exactly 2. Migration applied twice on a fresh PG17 (idempotent; 393 applied, 0
 failed).
 
 **Not done / not proven.** No app code changes (2.2b–2.2f): nothing calls the new functions, the
