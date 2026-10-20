@@ -1076,6 +1076,45 @@ Ratchets: `load_masters_screen_files` 61 → **54**, `load_masters_calls_src` 42
 `useRbac()` + `useStaffList()`; staff chat also reads sections/classes from that copy (2.3a must keep them or move the
 chat onto `useMasters({enabled: open})`). No owner login in the fixture: `OwnerHome` was not seen on a screen. The
 home's new access wait was not timed on the throttled phone profile.
+*(2.1g built 20 Oct 2026, PR #682.)* **What exists.** `grep` lists 6 `components/admissions`, 5 `components/comms`
+and 3 `components/parent` files; 9 no longer call `loadMasters()`. `PublicEnquiryForm` / `PublicFamilyRegisterForm` only
+name it in a comment (public pages; not counted). **The 3 parent files (`ParentSubjectsPortal`, `ParentPtmPortal`,
+`ParentHomeworkPortal`) are left to #674** (open, CI green): a `/parent` page runs as a PARENT session, which the
+masters view refuses (403) and which has no access copy, so `useScreenMasters` cannot serve it — #674 moves each tab to a
+parent-scoped server route (`/api/v1/homework/feed`, `/api/v1/ptm/overview`, new `/api/parent-portal/subjects`), which
+is the conversion; doing it here as well would collide with that PR. **`useScreenMasters()`** (book + access copy's staff
+side — permission helpers resolve the signed-in person through it, or a `MastersState` is handed to lib):
+`AdmissionsWorkspace` (its mount-time `useState(loadMasters())` and the effect's re-read gone), `AdmissionReportsPanel`,
+`ReferralPolicyEditor`, `WaStudentPicker`, `WaChatHubPanel` (family/class labels were computed ONCE at mount with `[]`
+deps — on a cold page "—" for every thread until a reload; now recomputed when Masters answers). **`useMasters()`**
+(book only): `SisParentMatchBanner` (class names; "…" while unknown), `AppPopupsPanel` (class checkboxes),
+`ClassChannelsPanel` (subjects — it called `loadMasters()` on every render). **`useMasters()` + `useStaffList()`**:
+`WaSendToAudiencePanel` (classes from the view, departments from the directory; its `ensureMastersHydrated` is gone).
+`app/field/layout.tsx` now mounts an `ErpQueryProvider` (the banner is also drawn on `/field/capture`, outside AppShell;
+2.1h's field screens need it too). No file had a `bhb-masters-updated` listener. A failed read with no answer =
+`<QueryError>` (workspace, reports, referral policy, student picker, WA class list, pop-up classes) or an in-place
+"could not load / Try again" line (chat hub labels, department and subject pickers say so in their first option).
+**Teaching subset (no Masters view — e.g. an admissions counsellor):** fee groups / heads / concessions are withheld,
+not none. Sending a lead to Students (`doAdmitLead`, `doEnroll`, Registration's Send) is refused with "Fee groups are
+not shown to your role" unless the lead already names its fee group (`withheldFeeGroupRefusal`) — on main it enrolled
+the child with NO fee group (resolved from the empty list), i.e. no dues; the profile modal opened from Admissions gets
+`feesWithheld` and the fee group label "Not shown to your role"; the referral policy shows "Not shown to your role" for
+the fee head and disables "Award reward" (which writes a concession through the page copy). After an award, the
+editor refetches the view at once. **Proof.** New `e2e/specs/admissions-comms.spec.ts` (desktop project): 10 screens
+seen as office, desktop-light and 375-dark, no page error, each class list = 15 (Admissions Report "Class sought",
+WhatsApp Send → Parents buttons, Pick students class filter, pop-up "Some classes" checkboxes), WhatsApp Staff →
+departments listed; views/masters 503 → /admissions?tab=reports and WhatsApp Send say "could not load" + Try again, no
+tabs / class buttons, Try again restores 15. Fail-on-old (same spec, components reverted to origin/main 6e67c786, fresh
+build, same stack): both 503 cases FAIL (no "could not load"; the lists drawn from the page copy); the 10 seen cases pass
+on main too (coverage). This branch: admissions-comms + counts + error + teacher, all projects: 49 passed, 0 failed.
+No propagation case observes these screens. Ratchets: `load_masters_screen_files` 61 → **52**, `load_masters_calls_src`
+423 → **412**, `ensure_hydrated_component_files` 68 (unchanged: WaSendToAudiencePanel still hydrates WA templates;
+the workspace still hydrates admissions/SIS). **Not done / not proven.** The teaching-subset refusals were not run end to
+end (no fixture lead in "verified" stage and no fixture counsellor without the Masters view) — typechecked and read, not
+executed. Saves still go through the old paths (admissions desk; the referral award's concession and `enrollLead`'s
+RTE tag writes through `saveMasters` — 2.2's `lib/referralRewards.ts`, `lib/rteEws.ts`). The SIS roster these screens
+read is still `loadSis()` (Phase 3). Screens now render the server's raw book, not `loadMasters()`'s normalisation —
+audited only for the keys above (classes, sections, subjects, campuses, academic years, fee groups/heads, concessions).
 
 *(2.1i built 20 Oct 2026, PR #688.)* **What exists.** The list, generated on origin/main ab545386 with
 `grep -rl 'loadMasters(' apps/web/src/components 'apps/web/src/app/(erp)'` minus 2.1a–2.1h's directories and the files
@@ -1307,6 +1346,27 @@ p95 (local stack, 200 warm sequential requests, shared Mac): **65 ms** (p50 29; 
 p95 119 / p50 25); origin/main p95 324–423 ms (p50 167–234). **Intended difference (production only):** a
 register that exists only in a process copy (deleted from the table, or carried from the old blob) is no
 longer shown. **Not done:** production timing needs the deploy.
+*(4.1c built 15 Oct 2026, PR #654.)* **What exists.** `GET /api/v1/parent/summary` reads the
+household (`sis_households` by id) and its student rows (`sis_students` by `household_id`, id order)
+through `lib/data/server/householdRead.ts` (shared with 4.1a/b; the rows are filtered by household again
+in Node), class/section names from `ctx.masters` (the 1.3 reference copy the session was already checked
+against) and the per-child open dues from `fee_desk_open_dues` as before. A failed household/students read
+is 503 (origin/main answered 200 from its process copy of the whole school, whatever that copy held). One
+`{"event":"route-timing","route":"v1/parent/summary",authMs,queryMs,buildMs,totalMs,children,computed}`
+line per request (`lib/data/server/routeTiming.ts`). **Not removed:** a child with no open-dues rows (a fully
+paid child, or one admitted since the cache was rebuilt — 30 of 164 families in production, 15 Oct) still
+needs `computeHouseholdDues`, which reads the fee book, transport, fee adjustments, concession aliases
+(`loadSis()`) and Masters through module-level stores; that fallback still calls
+`ensureSchoolMirrorHydrated` (now lazily, only when a child needs it) and can only go with 5.1 — so this file
+stays in the ratchet. **Proof.** Golden: the origin/main build and this build on the same seeded stack (all
+169 families, as each family's parent and as the office, every refusal) — `e2e/parentApi.golden.ts compare`:
+509/509 summary answers byte-identical (and popups 171/171, attendance 1,374/1,374). `e2e/v1-parent-summary.acceptance.ts`
+(in `e2e-stack.sh check`): children/names/cached balances against the fixture and SQL for 168 families (117
+all-cached, 51 computed), cross-family 403 for every family, `sis_households`/`sis_students` SELECT revoked →
+503, timing lines, p95. On the origin/main build the two 503 checks and the timing check fail (it answers 200). p95 (local stack, 200 warm sequential requests from the test process, shared Mac): cached families
+p50 22.8 / p95 43.7 ms, computed families p50 24.4 / p95 37.3 ms; origin/main, same checks: cached p50 20.4 / p95 26.1 ms, computed p50 32.5 / p95 71.3 ms
+— locally the old route was already fast because one long-lived process keeps its mirror warm; the
+production gain (cold Cloud Run instances, ~1.2–2.2 s today) is **not measured** until deploy.
 
 **4.2 Teacher scope in the app.** Depends on 1.7; verify every `app/api/v1/staff/*` route uses
 it. Acceptance: a teacher whose only link is the timetable sees her sections in the app.
