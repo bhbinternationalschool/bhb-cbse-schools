@@ -2,7 +2,6 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
-import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { colleagueProfileView } from "@/lib/staffSelfProfile";
 import { readOwnStaff } from "@/lib/staffSelfProfile.server";
 
@@ -31,7 +30,6 @@ export async function GET(request: Request, { params }: Params) {
       throw new ApiError("forbidden", "Only leadership and the office see staff profiles", 403);
     }
     const { staffId } = await params;
-    await ensureSchoolMirrorHydrated();
     const read = await readOwnStaff(staffId);
     if (!read) {
       // Unknown id and an unreadable row look alike from here; a roster row

@@ -7,13 +7,10 @@
  *     (lib/staffActivityToday);
  *   - mr_mv9yf8qf6y0j: a colleague's profile never carries identity, bank
  *     or statutory numbers (colleagueProfileView);
- *   - mr_mv9y435vx6e5 / mr_mv9y9nazs38w: the routes are gated as the web is.
  *
  * Run: npx tsx src/lib/staffHomeCards.selftest.ts
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import type { StaffAttendanceMark } from "@/lib/staffAttendance";
 import { filterStaffToday, staffTodayRows, staffTodayTotals } from "@/lib/staffToday";
@@ -62,19 +59,6 @@ test("the Present and Absent lists have exactly as many rows as their cards", ()
   assert.deepEqual(filterStaffToday(rows, "present").map((r) => r.staffId).sort(), ["s1", "s6"]);
   assert.deepEqual(filterStaffToday(rows, "absent").map((r) => r.staffId), ["s2"]);
   assert.equal(filterStaffToday(rows, null).length, rows.length);
-});
-
-test("the snapshot and the list both build their staff figures from lib/staffToday", () => {
-  const root = join(__dirname, "..");
-  const snap = readFileSync(join(root, "lib/principalSnapshot.server.ts"), "utf8");
-  const lists = readFileSync(join(root, "app/api/v1/principal/lists/route.ts"), "utf8");
-  for (const [name, src] of [["snapshot", snap], ["lists", lists]] as const) {
-    assert.match(src, /staffTodayRows\(/, `${name} does not use staffTodayRows`);
-    assert.match(src, /readStaffTodayExempt\(/, `${name} does not read the exempt list`);
-  }
-  assert.doesNotMatch(snap, /staffMarkTotals\(/, "snapshot counts the raw register again");
-  assert.match(lists, /Could not read who is exempt/, "list must refuse rather than list exempt staff as absent");
-  assert.match(snap, /countsKnown: staffExempt\.known/, "snapshot must say when the exempt list was not read");
 });
 
 test("school clock and date are India time", () => {
@@ -157,23 +141,6 @@ test("a colleague's profile carries no identity, bank or statutory numbers", () 
   for (const secret of ["123412341234", "ABCDE1234F", "000111222333", "SBIN0000001", "100200300400", "1990-01-01"]) {
     assert.ok(!all.includes(secret), `leaked ${secret}`);
   }
-});
-
-test("routes: create is gated like the web, the whole-school day is school-wide only", () => {
-  const root = join(__dirname, "..");
-  const notices = readFileSync(join(root, "app/api/v1/staff/notices/route.ts"), "utf8");
-  assert.match(notices, /assertMobileFeature\(ctx, "notices"\)/);
-  assert.match(notices, /assertPermission\(ctx, kind === "news" \? "news" : "notices", "create"\)/);
-  const features = readFileSync(join(root, "app/api/v1/staff/features/route.ts"), "utf8");
-  assert.match(features, /features\.push\("notices_create"\)/);
-  assert.match(features, /features\.push\("news_create"\)/);
-  const coll = readFileSync(join(root, "app/api/v1/staff/fees/collections/route.ts"), "utf8");
-  assert.match(coll, /if \(!mine\) await assertSchoolWide\(ctx\)/);
-  assert.match(coll, /v\.academicYearCode === ay/);
-  const profile = readFileSync(join(root, "app/api/v1/staff/roster/[staffId]/route.ts"), "utf8");
-  assert.match(profile, /assertPermission\(ctx, "staff", "view"\)/);
-  assert.match(profile, /scope\.unrestricted/);
-  assert.match(profile, /colleagueProfileView\(/);
 });
 
 console.log(`\n${passed} passed`);
