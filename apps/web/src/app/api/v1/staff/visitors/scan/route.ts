@@ -1,5 +1,6 @@
-import { resolveApiAuth } from "@/lib/api/v1/auth";
-import { authorizeVisitorScan, handleStaffScan, staffScanLimiter } from "@/lib/api/v1/staffScan.server";
+import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
+import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
+import { handleStaffScan, staffScanLimiter } from "@/lib/api/v1/staffScan.server";
 import { readStaffScanImage } from "@/lib/aiLlm.server";
 import { istDate } from "@/lib/transportBoardingLog";
 
@@ -21,8 +22,13 @@ export const maxDuration = 60;
  */
 export async function POST(request: Request) {
   return handleStaffScan(request, ["visitor_id", "vehicle_plate"], {
-    auth: resolveApiAuth,
-    authorize: authorizeVisitorScan,
+    auth: (req) => resolveApiAuth(req),
+    // Written out here (not imported) so the RBAC completeness check can see
+    // the gate; staffScanRoute.selftest drives the same two calls.
+    authorize: (ctx) => {
+      assertMobileFeature(ctx, "visitor_gate");
+      assertPermission(ctx, "visitors", "create");
+    },
     read: readStaffScanImage,
     limiter: staffScanLimiter,
     today: () => istDate(),

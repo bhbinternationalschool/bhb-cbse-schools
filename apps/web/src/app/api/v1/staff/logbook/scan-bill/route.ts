@@ -31,7 +31,7 @@ export const maxDuration = 60;
  */
 export async function POST(request: Request) {
   return handleStaffScan(request, ["fuel_bill"], {
-    auth: resolveApiAuth,
+    auth: (req) => resolveApiAuth(req),
     authorize: async (ctx, input) => {
       assertMobileFeature(ctx, "route_manifest");
       const today = istDate();
