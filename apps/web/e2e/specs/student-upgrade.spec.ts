@@ -71,10 +71,21 @@ test.describe("student upgrade — fee group", () => {
     let target: { cls: string; section: string } | null = null;
     for (const cls of classOptions) {
       await classSelect.selectOption({ label: cls });
+      // The section list and the remap line re-render after each pick: wait
+      // for them rather than reading the previous class's state.
+      await expect
+        .poll(async () => (await sectionSelect.locator("option").count()) > 1, { timeout: 3_000 })
+        .toBe(true)
+        .catch(() => undefined);
       const sections = (await sectionSelect.locator("option").allTextContents()).map((t) => t.trim());
       if (sections.length < 2) continue;
       await sectionSelect.selectOption({ index: 1 });
-      if (await page.getByText(NO_MATCH).isVisible().catch(() => false)) {
+      const noMatch = await page
+        .getByText(NO_MATCH)
+        .waitFor({ state: "visible", timeout: 3_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (noMatch) {
         target = { cls, section: sections[1]! };
         break;
       }

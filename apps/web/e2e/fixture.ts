@@ -342,7 +342,8 @@ export const CURRENT_CHILDREN = 250;
  * Foundation (Nur–UKG)") matches every move inside Nursery–UKG, so an LKG
  * child moving to UKG always finds a group (CI, 15–20 Oct 2026).
  * Child 239 sits in class II (sectionOfChild: (239-1) % 13 + 1 = 5) and has
- * no earlier-year rows (239 % 10 = 9).
+ * no earlier-year rows (239 % 10 = 9). The group is INACTIVE (see feeGroups
+ * below) so no other child is matched to it.
  */
 export const UPGRADE_CHILD_INDEX = 239;
 export const UPGRADE_FEE_GROUP = {
@@ -657,7 +658,12 @@ export function buildFixture(): E2eFixture {
         academicYearCode: AY_CURRENT,
         studentType: "PROMOTE",
         classIds: [classId(UPGRADE_FEE_GROUP.classKey)],
-        isActive: true,
+        // Inactive: held by child 239 only. An active group for class II would
+        // be resolved for every other Promoted class II child too (lib/masters
+        // resolveFeeGroupId) — it has no structure lines, so their checkout
+        // answered 503 (parent-web-dues spec, 20 Oct 2026). A retired group a
+        // child still holds is also the realistic case for "keep current".
+        isActive: false,
         structurePublishedAt: null,
         structurePublishedBy: "",
       },
