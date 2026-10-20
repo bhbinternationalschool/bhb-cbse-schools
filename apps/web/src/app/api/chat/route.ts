@@ -239,6 +239,30 @@ export async function POST(req: Request) {
       ],
       messages: [...state.messages, message],
     });
+    // The thread's other members: ERP bell + phones (lib/notify).
+    {
+      const [{ notify }, { erpChatMessage }, { parseParentActorKey }] = await Promise.all([
+        import("@/lib/notify/notify.server"),
+        import("@/lib/notify/events"),
+        import("@/lib/erpChatAccess"),
+      ]);
+      const households = thread.participantIds.map(parseParentActorKey).filter((x): x is string => !!x);
+      const staffIds = thread.participantIds.filter((k) => !parseParentActorKey(k));
+      const senderName = (masters.staff ?? []).find((s) => s.id === actor.key)?.fullName || session.fullName || "ERP chat";
+      await notify(
+        erpChatMessage({
+          messageId: message.id,
+          threadId: thread.id,
+          threadTitle: thread.title || "Chat",
+          senderName,
+          senderStaffId: actor.kind === "staff" ? actor.key : undefined,
+          senderHouseholdId: parseParentActorKey(actor.key) ?? undefined,
+          staffIds,
+          householdIds: households,
+          text: message.text,
+        }),
+      );
+    }
     return NextResponse.json({
       ok: true,
       message,
