@@ -1025,7 +1025,7 @@ not shown to your role") in 2.2/2.3 — not changed here. Lib helpers now get th
 `loadMasters()`'s normalised read; only the keys above were audited. Process / Rebuild / Apply setup were not clicked
 in the spec (they write runs); they call the same builders with the same `masters` the setup review uses.
 
-*(2.1h built 20 Oct 2026, PR #PRNUM.)* **What exists.** The 13 files of the batch no longer call `loadMasters()`.
+*(2.1h built 20 Oct 2026, PR #686.)* **What exists.** The 13 files of the batch no longer call `loadMasters()`.
 **`useScreenMasters()`** (server book + the access copy's staff side) where a screen resolves the signed-in person or
 needs the full roster: `MastersWorkspace`, `RolesPermissionsPanel`, `SalarySetupPanel`, `ExamsWorkspace` (its
 `RemarksPanel` now takes the workspace's `masters` as a prop), `ReportsCenterWorkspace`, `EventsWorkspace`, and the
