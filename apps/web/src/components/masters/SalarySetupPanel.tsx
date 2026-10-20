@@ -9,9 +9,7 @@ import {
   type StaffCategory,
   type StaffStream,
 } from "@/lib/foundationMasters";
-import type { MastersState } from "@/lib/masters";
-import { QueryError } from "@/components/data/QueryError";
-import { useScreenMasters } from "@/components/data/useScreenMasters";
+import { loadMasters, type MastersState } from "@/lib/masters";
 import {
   buildStructureLinesFromPack,
   cloneSalaryStructure,
@@ -76,14 +74,13 @@ const HEAD_KINDS: { value: SalaryHeadKind; label: string }[] = [
 
 export function SalarySetupPanel() {
   const session = useDemoSession();
-  // data-layer 2.1h: the server's book (statutory setup, designations) + the
-  // access copy's full staff records (salary links) — no mount-time page-copy read.
-  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
+  const [masters, setMasters] = useState<MastersState | null>(null);
   const [state, setState] = useState<SalarySetupState | null>(null);
   const [tab, setTab] = useState<SalTab>("settings");
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
+    setMasters(loadMasters());
     setState(loadSalarySetup());
     // Pull the server copy (salary_setup_state) and re-read; the login-time
     // cache wipe means the local copy is empty on a fresh session.
@@ -122,9 +119,6 @@ export function SalarySetupPanel() {
     window.setTimeout(() => setNotice(null), 2400);
   }
 
-  if (!masters && mastersError) {
-    return <QueryError what="the school's statutory setup and staff" error={mastersError} retry={retryMasters} />;
-  }
   if (!state || !masters) {
     return <p className="text-sm text-[var(--muted)]">Loading salary setup…</p>;
   }
@@ -134,17 +128,6 @@ export function SalarySetupPanel() {
       <p className="rounded-xl border border-[rgba(180,35,24,0.25)] bg-[rgba(180,35,24,0.06)] px-4 py-3 text-sm text-[var(--brand-deep)]">
         Salary setup is Admin / Principal only. Accounts cannot view or edit
         salary structures (§6i.4).
-      </p>
-    );
-  }
-
-  if (mastersScope === "teaching") {
-    // The teaching subset withholds statutoryConfig: every amount below would
-    // be computed from default EPF/ESIC rates, not the school's — refuse.
-    return (
-      <p className="rounded-xl border border-[rgba(180,35,24,0.25)] bg-[rgba(180,35,24,0.06)] px-4 py-3 text-sm text-[var(--brand-deep)]">
-        The school&apos;s statutory setup (EPF / ESIC rates) is not shown to your role, so salary amounts cannot be worked
-        out here. Ask Principal / Admin for Masters access.
       </p>
     );
   }

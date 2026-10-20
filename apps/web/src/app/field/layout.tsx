@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { FieldPwaInstallBanner } from "@/components/pwa/FieldPwaInstallBanner";
 import { getDemoSession } from "@/lib/auth";
-import { ErpQueryProvider } from "@/lib/data/client/hooks";
 import { pwaManifestHref } from "@/lib/pwaApps";
 import { TENANT } from "@/lib/types";
 
@@ -36,9 +35,7 @@ export default async function FieldLayout({
         persona={session?.persona}
         roleCode={session?.roleCode}
       />
-      {/* data-layer 2.1g: field screens read reference data (Masters) through
-          the query kernel like the ERP pages do; there is no AppShell here. */}
-      <ErpQueryProvider>{children}</ErpQueryProvider>
+      {children}
     </div>
   );
 }

@@ -16,8 +16,7 @@ import {
 } from "@/components/ui/erp-roster";
 import QRCode from "qrcode";
 import { EventPublicity } from "@/components/events/EventPublicity";
-import { formatInr } from "@/lib/masters";
-import { useMasters } from "@/lib/data/client/hooks";
+import { formatInr, loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
@@ -149,9 +148,7 @@ export function InterSchoolPanel({
   const [cats, setCats] = useState<CatDraft[]>([]);
 
   // Own-student picker
-  // data-layer 2.1h: classes and sections from the Masters view (versions poll).
-  const mastersQ = useMasters();
-  const masters = mastersQ.data?.masters ?? null;
+  const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
   const [pickClassId, setPickClassId] = useState("");
   const [pickSectionId, setPickSectionId] = useState("");
@@ -205,6 +202,7 @@ export function InterSchoolPanel({
   }, []);
 
   useEffect(() => {
+    setMasters(loadMasters());
     setSis(loadSis());
     void reloadEvents()
       .catch(oops)
@@ -539,7 +537,7 @@ export function InterSchoolPanel({
                 </div>
                 <div className="flex flex-wrap items-end gap-2">
                   <select className={`${field} w-36`} value={pickClassId} onChange={(e) => { setPickClassId(e.target.value); setPickSectionId(""); setPickedIds(new Set()); }}>
-                    <option value="">{masters ? "Class…" : mastersQ.isError ? "Classes could not load" : "Loading classes…"}</option>
+                    <option value="">Class…</option>
                     {(masters?.classes ?? []).filter((c) => c.isActive !== false).map((c) => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}

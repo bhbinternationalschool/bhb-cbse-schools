@@ -22,8 +22,7 @@ import {
   todayYmd,
 } from "@/lib/admissions";
 import { formatInr, TENDER_MODES, type TenderMode } from "@/lib/fees";
-import type { MastersState } from "@/lib/masters";
-import { useMasters } from "@/lib/data/client/hooks";
+import { loadMasters } from "@/lib/masters";
 import type { DemoSession } from "@/lib/auth";
 import { TENANT } from "@/lib/types";
 import { openWaMe } from "@/lib/waMe";
@@ -36,23 +35,14 @@ export function StaffRegistrationCollectApp({
 }: {
   session: DemoSession;
 }) {
-  // data-layer 2.1h: classes, registration fee heads and the school's UPI
-  // from the Masters view (the field layout mounts the query provider), not a
-  // once-at-mount page-copy read (empty on a cold /field page).
-  const mastersQ = useMasters();
-  const masters = (mastersQ.data?.masters ?? null) as MastersState | null;
-  /** Teaching subset: fee heads are WITHHELD, not none. */
-  const feeHeadsWithheld = mastersQ.data?.scope === "teaching";
+  const masters = useMemo(() => loadMasters(), []);
   const classes = useMemo(
-    () => (masters?.classes ?? []).filter((c) => c.isActive),
+    () => (masters.classes ?? []).filter((c) => c.isActive),
     [masters],
   );
-  const feeHeads = useMemo(
-    () => (masters && !feeHeadsWithheld ? registrationFeeHeads(masters) : []),
-    [masters, feeHeadsWithheld],
-  );
+  const feeHeads = useMemo(() => registrationFeeHeads(masters), [masters]);
   const { vpa, payeeName } = useMemo(
-    () => resolveSchoolCollectionsUpi(masters ?? undefined),
+    () => resolveSchoolCollectionsUpi(masters),
     [masters],
   );
   const by = session.fullName;
@@ -354,9 +344,7 @@ export function StaffRegistrationCollectApp({
           value={classSoughtId}
           onChange={(e) => setClassSoughtId(e.target.value)}
         >
-          <option value="">
-            {mastersQ.data ? "Class (optional)" : mastersQ.isError ? "Classes could not load" : "Loading classes…"}
-          </option>
+          <option value="">Class (optional)</option>
           {classes.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
@@ -368,17 +356,6 @@ export function StaffRegistrationCollectApp({
           value={feeHeadId}
           onChange={(e) => setFeeHeadId(e.target.value)}
         >
-          {feeHeads.length === 0 ? (
-            <option value="">
-              {!mastersQ.data
-                ? mastersQ.isError
-                  ? "Fee heads could not load"
-                  : "Loading fee heads…"
-                : feeHeadsWithheld
-                  ? "Registration fee (fee heads not shown to your role)"
-                  : "Registration fee (no registration head in Masters)"}
-            </option>
-          ) : null}
           {feeHeads.map((h) => (
             <option key={h.id} value={h.id}>
               {h.name}

@@ -2076,17 +2076,6 @@ export function loadMasters(): MastersState {
 }
 
 /**
- * loadMasters()'s read-time normalisation applied to a book already in hand
- * (data-layer 2.1h): the Masters editor reads the server's answer through
- * useScreenMasters and must hand its panels the same shape loadMasters gave
- * them — so the whole-book save (unchanged until 2.2) sends what it sent
- * before. Pure: nothing is stored, no event.
- */
-export function normalizeMastersRead(state: MastersState): MastersState {
-  return normalizeMastersStaffRoster(migrateDemoStaffToTeacherRoster(ensureFeeSetup(state)));
-}
-
-/**
  * This tab's page-memory Masters copy exactly as stored — without the
  * read-time normalisation loadMasters applies (which can mint ids for
  * missing fee heads on every read). Null when the tab holds none yet, when

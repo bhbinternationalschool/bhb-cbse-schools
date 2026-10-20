@@ -10,7 +10,7 @@ import {
   todayYmd,
   type TransportInterest,
 } from "@/lib/admissions";
-import { useMasters } from "@/lib/data/client/hooks";
+import { loadMasters } from "@/lib/masters";
 import type { DemoSession } from "@/lib/auth";
 import { TENANT } from "@/lib/types";
 import { SisParentMatchBanner } from "@/components/admissions/SisParentMatchBanner";
@@ -20,16 +20,11 @@ const inp =
   "w-full rounded-xl border border-[rgba(32,48,80,0.18)] bg-white px-3 py-3 text-base";
 
 export function StaffLeadCaptureApp({ session }: { session: DemoSession }) {
-  // data-layer 2.1h: classes from the Masters view (the field layout mounts
-  // the query provider). On main this read the page copy once — on a /field
-  // page, which has no AppShell hydrate, that copy could be empty.
-  const mastersQ = useMasters();
+  const masters = useMemo(() => loadMasters(), []);
   const classes = useMemo(
-    () => (mastersQ.data?.masters.classes ?? []).filter((c) => c.isActive),
-    [mastersQ.data],
+    () => (masters.classes ?? []).filter((c) => c.isActive),
+    [masters],
   );
-  const classPlaceholder = (label: string) =>
-    mastersQ.data ? label : mastersQ.isError ? "Classes could not load — reload to retry" : "Loading classes…";
   const by = session.fullName;
 
   const [childName, setChildName] = useState("");
@@ -138,7 +133,7 @@ export function StaffLeadCaptureApp({ session }: { session: DemoSession }) {
           value={classSoughtId}
           onChange={(e) => setClassSoughtId(e.target.value)}
         >
-          <option value="">{classPlaceholder("Class sought")}</option>
+          <option value="">Class sought</option>
           {classes.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}

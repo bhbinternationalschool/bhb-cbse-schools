@@ -35,14 +35,11 @@ import { SisReportsPanel } from "@/components/students/SisReportsPanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
-import { currentAcademicYearCode } from "@/lib/masters";
-import { QueryError } from "@/components/data/QueryError";
-import { useScreenMasters } from "@/components/data/useScreenMasters";
+import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import {
   canAccessModule,
   hasPermission,
   loadRbac,
-  type RbacModule,
 } from "@/lib/rbac";
 import {
   clearReportsCenterRecent,
@@ -96,12 +93,8 @@ export function ReportsCenterWorkspace() {
   const { my } = useMyTeaching();
   const hideStaffRecords = !my?.unrestricted;
 
-  // data-layer 2.1h: who may see which module is decided on the server's book
-  // + the access copy's staff side — and not at all while that is unknown
-  // (before: the page copy, which on a cold page could deny every module).
-  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const { allowedModules, allowedRbac } = useMemo(() => {
-    if (!masters) return { allowedModules: [] as typeof REPORTS_CENTER_MODULES, allowedRbac: new Set<RbacModule>() };
+    const masters = loadMasters();
     const rbac = loadRbac();
     const mods = REPORTS_CENTER_MODULES.filter((m) => {
       if (!canAccessModule(session, masters, m.rbacModule, rbac)) return false;
@@ -115,15 +108,15 @@ export function ReportsCenterWorkspace() {
       canAccessModule(session, masters, m, rbac),
     );
     return { allowedModules: mods, allowedRbac: set };
-  }, [session, hideStaffRecords, masters]);
+  }, [session, hideStaffRecords]);
 
   const canExport = useMemo(() => {
-    if (!masters) return false;
+    const masters = loadMasters();
     const rbac = loadRbac();
     return [...allowedRbac].some((m) =>
       hasPermission(session, masters, m, "export", rbac),
     );
-  }, [session, allowedRbac, masters]);
+  }, [session, allowedRbac]);
 
   useEffect(() => {
     setRecent(loadReportsCenterRecent());
@@ -177,14 +170,6 @@ export function ReportsCenterWorkspace() {
     recordReportsCenterOpen(entry);
     setRecent(loadReportsCenterRecent());
     if (e?.metaKey || e?.ctrlKey) return;
-  }
-
-  if (!masters) {
-    return mastersError ? (
-      <QueryError what="your access to the school's modules" error={mastersError} retry={retryMasters} />
-    ) : (
-      <p className="px-4 py-10 text-sm text-[var(--muted)]">Loading reports…</p>
-    );
   }
 
   if (allowedModules.length === 0) {

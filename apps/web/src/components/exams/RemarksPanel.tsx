@@ -26,7 +26,7 @@ import {
   type StudentOverallRemark,
 } from "@/lib/exams";
 import { loadSis, type SisStudent } from "@/lib/sis";
-import type { MastersState } from "@/lib/masters";
+import { loadMasters } from "@/lib/masters";
 import { loadAttendance } from "@/lib/attendance";
 import { checkHoldsForStudents } from "@/lib/holds";
 import {
@@ -91,8 +91,6 @@ export function RemarksPanel(props: {
   roster: SisStudent[];
   subjects: ExamSubject[];
   policy: ExamPolicy;
-  /** The workspace's Masters (data-layer 2.1h: useScreenMasters), never a page-copy read. */
-  masters: MastersState;
   canEdit: boolean;
   onSaved: () => void;
   onFlash: (msg: string) => void;
@@ -107,7 +105,6 @@ export function RemarksPanel(props: {
     classLabel,
     roster,
     subjects,
-    masters,
     canEdit,
   } = props;
 
@@ -156,7 +153,7 @@ export function RemarksPanel(props: {
     // Every store once for the section, not once per child.
     const deps: ExamDeps = {
       state: loadExams(),
-      masters,
+      masters: loadMasters(),
       sis: loadSis(),
       attendance: loadAttendance(),
       holdChecks: checkHoldsForStudents(
@@ -205,7 +202,7 @@ export function RemarksPanel(props: {
     setRows(next);
     setDirty(false);
     setExpanded(new Set());
-  }, [ay, term, sectionId, classId, roster, subjects, sheet, classLabel, masters]);
+  }, [ay, term, sectionId, classId, roster, subjects, sheet, classLabel]);
 
   function factsFor(row: RowState): StudentRemarkFacts | null {
     const st = roster.find((s) => s.id === row.studentId);

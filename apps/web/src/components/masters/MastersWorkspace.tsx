@@ -1,7 +1,7 @@
 "use client";
 // ratchet-allow: grids_without_row_menu — rows carry EditControl (which shows which row is open in the form beside it) and RemoveControl (which holds the check explaining why a row cannot be deleted); neither survives being folded into a menu
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { SlidersHorizontal } from "lucide-react";
 import {
@@ -13,8 +13,8 @@ import {
   checkFeeHeadRemoval,
   checkSectionRemoval,
   feeHeadCategoryLabel,
+  loadMasters,
   listConcessionPolicies,
-  normalizeMastersRead,
   newId,
   removeCampus,
   removeClass,
@@ -36,8 +36,6 @@ import {
   classGroupCodeForName,
 } from "@/lib/masters";
 import { CustomFieldsPanel } from "@/components/masters/CustomFieldsPanel";
-import { QueryError } from "@/components/data/QueryError";
-import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { TutorPassesPanel } from "@/components/masters/TutorPassesPanel";
 import { EditControl } from "@/components/masters/EditControl";
 import { RemoveControl } from "@/components/masters/RemoveControl";
@@ -209,20 +207,14 @@ export function MastersWorkspace() {
   const [rbac, setRbac] = useState(() =>
     typeof window === "undefined" ? null : loadRbac(),
   );
-  // data-layer 2.1h — READS: the server's book + the access copy's staff side
-  // (useScreenMasters, kept fresh by the versions poll), normalised exactly as
-  // loadMasters() normalised the page copy, so every panel sees the same shape.
-  // WRITES are unchanged until 2.2: commit() still saves the whole book through
-  // saveMasters(); what a commit sent is shown until the server's answer
-  // after that save arrives (`pending`), as setState(next) did before.
-  const { masters: screenMasters, error: mastersError, retry: retryMasters } = useScreenMasters();
-  const read = useMemo(
-    () => (screenMasters ? normalizeMastersRead(screenMasters) : null),
-    [screenMasters],
-  );
-  const [pending, setPending] = useState<MastersState | null>(null);
-  const commitSeq = useRef(0);
-  const state = pending ?? read;
+  const [state, setState] = useState<MastersState | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      return loadMasters();
+    } catch {
+      return null;
+    }
+  });
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -260,20 +252,25 @@ export function MastersWorkspace() {
   }, []);
 
   useEffect(() => {
+    setState(loadMasters());
     void (async () => {
       const [
+        { ensureMastersHydrated },
         { ensureStaffHydrated },
         { ensureRbacHydrated },
         { withHydrationSlot },
       ] = await Promise.all([
+        import("@/lib/mastersPersistence"),
         import("@/lib/staffPersistence"),
         import("@/lib/rbacPersistence"),
         import("@/lib/deskHydrateGuard"),
       ]);
       await Promise.all([
+        withHydrationSlot(() => ensureMastersHydrated()),
         withHydrationSlot(() => ensureStaffHydrated()),
         withHydrationSlot(() => ensureRbacHydrated()),
       ]);
+      setState(loadMasters());
       setRbac(loadRbac());
     })();
   }, []);
@@ -309,8 +306,7 @@ export function MastersWorkspace() {
       window.setTimeout(() => setNotice(null), 2800);
       return;
     }
-    const seq = ++commitSeq.current;
-    setPending(next);
+    setState(next);
     // The success notice must wait for the database, not for React. Showing
     // it synchronously is what made 16 refused writes look like 16 saves on
     // 2026-08-09 — the screen said "session changed" every time while the
@@ -319,16 +315,9 @@ export function MastersWorkspace() {
     if (msg) setNotice("Saving…");
     void saveMasters(next).then((outcome) => {
       if (!outcome.ok) {
-        // As before: the unsaved edit stays on screen beside the push's sticky
-        // error toast (the page copy holds it too).
         setNotice(null);
         return;
       }
-      // Saved: read the server's book now (not at the next poll), then drop
-      // the local copy — unless a later commit is already showing.
-      void Promise.resolve(retryMasters()).finally(() => {
-        if (commitSeq.current === seq) setPending(null);
-      });
       if (msg) {
         setNotice(msg);
         window.setTimeout(() => setNotice(null), 2200);
@@ -336,9 +325,6 @@ export function MastersWorkspace() {
     });
   }
 
-  if (!state && mastersError) {
-    return <QueryError what="the school's Masters" error={mastersError} retry={retryMasters} />;
-  }
   if (!state) {
     return (
       <p className="text-sm text-[var(--muted)]">Loading masters…</p>
@@ -393,10 +379,7 @@ export function MastersWorkspace() {
             <SubjectRequestsCard
               subjects={state.subjects ?? []}
               canEdit={!readOnly}
-              onMastersChanged={() => {
-                setPending(null);
-                void retryMasters();
-              }}
+              onMastersChanged={() => setState(loadMasters())}
             />
             <SubjectsPanel state={state} commit={commit} />
           </div>
