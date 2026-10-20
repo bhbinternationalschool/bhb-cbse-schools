@@ -374,6 +374,7 @@ SELFTESTS=(
   test:fee-backdate
   test:month-groups
   test:month-range
+  test:class-upgrade-fee-group
   test:receipt-auto-wa
   test:review-login
   test:desk-sync-status

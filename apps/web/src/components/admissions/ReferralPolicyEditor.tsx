@@ -9,9 +9,11 @@
  * like every other concession from that moment on.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { AdmissionLead } from "@/lib/admissions";
-import { formatInr, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
+import { formatInr, currentAcademicYearCode } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import type { SisState } from "@/lib/sis";
 import { childrenOfHousehold } from "@/lib/sis";
 import { referralCodeFor } from "@/lib/referrals";
@@ -40,21 +42,24 @@ export function ReferralPolicyEditor({
   const [policy, setPolicy] = useState<ReferralRewardPolicy>(() =>
     loadReferralPolicy(),
   );
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1g: the server's book (fee heads, concessions), kept fresh
+  // by the versions poll; an award's own write is re-read at once (retry).
+  const { masters, scope, error: mastersError, retry: retryMasters } = useScreenMasters();
+  /** Teaching subset: fee heads and concessions are WITHHELD, not none. */
+  const feesWithheld = scope === "teaching";
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState("");
   const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    setMasters(loadMasters());
-  }, [tick]);
 
   const pending = useMemo(
     () => pendingReferralAwards(leads, sis),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [leads, sis, tick, policy.enabled, policy.trigger],
   );
-  const done = useMemo(() => rewardedLeadIds(masters ?? undefined), [masters]);
+  const done = useMemo(
+    () => (masters && !feesWithheld ? rewardedLeadIds(masters) : new Set<string>()),
+    [masters, feesWithheld],
+  );
 
   function save(next: ReferralRewardPolicy) {
     setPolicy(next);
@@ -83,6 +88,14 @@ export function ReferralPolicyEditor({
 
   const feeHeads = (masters?.feeHeads ?? []).filter((h) => h.isActive !== false);
 
+  if (!masters) {
+    return mastersError ? (
+      <QueryError what="the referral policy's fee heads" error={mastersError} retry={retryMasters} />
+    ) : (
+      <p className="mt-3 text-xs text-[var(--muted)]">Loading referral policy…</p>
+    );
+  }
+
   return (
     <section className="mt-3 rounded-xl border border-[rgba(197,160,40,0.45)] bg-[rgba(197,160,40,0.06)] p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -91,7 +104,7 @@ export function ReferralPolicyEditor({
             Referral reward policy
           </h3>
           <p className="text-[11px] text-[var(--muted)]">
-            {policyLabel(policy, masters ?? undefined)}
+            {feesWithheld ? "Fee heads are not shown to your role." : policyLabel(policy, masters)}
           </p>
         </div>
         <label className="flex items-center gap-2 text-xs font-semibold text-[var(--brand-deep)]">
@@ -169,6 +182,9 @@ export function ReferralPolicyEditor({
           </label>
           <label className="text-[11px] text-[var(--muted)]">
             On fee head
+            {feesWithheld ? (
+              <span className={`${inp} mt-0.5 block`}>Not shown to your role</span>
+            ) : (
             <select
               className={`${inp} mt-0.5`}
               value={policy.feeHeadId}
@@ -181,6 +197,7 @@ export function ReferralPolicyEditor({
                 </option>
               ))}
             </select>
+            )}
           </label>
           <label className="text-[11px] text-[var(--muted)]">
             Max per parent / session
@@ -240,7 +257,8 @@ export function ReferralPolicyEditor({
                   <button
                     type="button"
                     className="rounded-lg bg-[var(--brand-deep)] px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-60"
-                    disabled={busy === l.id}
+                    disabled={busy === l.id || feesWithheld}
+                    title={feesWithheld ? "Concessions are not shown to your role" : undefined}
                     onClick={() => {
                       setBusy(l.id);
                       void awardReferralForLead({ lead: l, by })
@@ -251,6 +269,8 @@ export function ReferralPolicyEditor({
                               : r.error,
                           );
                           setTick((t) => t + 1);
+                          // The award wrote a concession: show it now, not at the next poll.
+                          if (r.ok) void retryMasters();
                         })
                         .finally(() => setBusy(""));
                     }}

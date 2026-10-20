@@ -65,7 +65,7 @@ export default defineConfig<GateOptions>({
   projects: [
     {
       name: "desktop",
-      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications)\.spec\.ts/,
+      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade)\.spec\.ts/,
       use: { ...desktop },
     },
     {
@@ -102,7 +102,7 @@ export default defineConfig<GateOptions>({
     {
       // Writes to the stack, so it runs after everything that reads it.
       name: "propagation",
-      testMatch: /propagation\.spec\.ts/,
+      testMatch: /(propagation|student-upgrade)\.spec\.ts/,
       dependencies: ["desktop", "phone-375-cpu4x"],
       use: { ...desktop },
     },

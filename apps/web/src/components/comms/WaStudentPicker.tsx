@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { loadSis, type SisStudent } from "@/lib/sis";
 import { ensureSisHydrated } from "@/lib/sisPersistence";
-import { loadMasters, currentAcademicYearCode } from "@/lib/masters";
+import { currentAcademicYearCode } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { field } from "@/components/ui/erp-ui";
 
 /**
@@ -40,7 +42,9 @@ export function WaStudentPicker({
     })();
   }, []);
 
-  const masters = useMemo(() => (ready ? loadMasters() : null), [ready]);
+  // data-layer 2.1g: classes, sections and the session year from the
+  // server's book (versions poll keeps it fresh), not the page copy.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const sis = useMemo(() => (ready ? loadSis() : null), [ready]);
   const ay = useMemo(
     () => (masters ? currentAcademicYearCode(masters) : ""),
@@ -105,7 +109,10 @@ export function WaStudentPicker({
   const allShownPicked =
     shownIds.length > 0 && shownIds.every((id) => selected.includes(id));
 
-  if (!ready) {
+  if (!masters && mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
+  if (!ready || !masters) {
     return (
       <p className="text-[11px] text-[var(--muted)]">Loading the roster…</p>
     );
