@@ -468,7 +468,7 @@ export function StaffBroadcastButton() {
         : !!message.trim();
 
   return (
-    <div className="relative">
+    <div className="sm:relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -480,7 +480,13 @@ export function StaffBroadcastButton() {
       </button>
 
       {open ? (
-        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[min(100vw-1.5rem,24rem)] space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_16px_40px_rgba(32,48,80,0.28)]">
+        // On a phone the button is not the header's last icon (the bell and
+        // the account menu sit to its right), so a popover hung off its right
+        // edge ran past the screen's left edge. Below sm the wrapper is not
+        // positioned, so the popover hangs from the sticky header instead and
+        // spans it with the page's gutter (and scrolls if taller than the
+        // screen).
+        <div data-testid="staff-broadcast-panel" className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[min(100vw-1.5rem,24rem)] max-sm:inset-x-3 max-sm:max-h-[calc(100dvh-6rem)] max-sm:w-auto max-sm:overflow-y-auto space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_16px_40px_rgba(32,48,80,0.28)]">
           <div className="flex items-center justify-between">
             <p className="text-sm font-bold text-[var(--brand-deep)]">
               WhatsApp
@@ -663,11 +669,24 @@ export function StaffBroadcastButton() {
                 </div>
               )}
 
+              {/* Not yet known is not "no record": only a loaded roster
+                  without this login in it earns the "ask admin" line. */}
               {audience === "leadership" && !selfStaff ? (
-                <p className="text-[10px] text-[var(--muted)]">
-                  Leave, requests and outdoor duty need a staff record linked
-                  to your login — ask admin to link it in Staff → Profiles.
-                </p>
+                mastersError ? (
+                  <p className="text-[10px] text-[var(--danger)]" role="alert">
+                    Could not load your staff record from the server.{" "}
+                    <button type="button" className="font-semibold underline" onClick={() => void retryMasters()}>
+                      Try again
+                    </button>
+                  </p>
+                ) : !masters ? (
+                  <p className="text-[10px] text-[var(--muted)]">Loading your staff record…</p>
+                ) : (
+                  <p className="text-[10px] text-[var(--muted)]">
+                    Leave, requests and outdoor duty need a staff record linked
+                    to your login — ask admin to link it in Staff → Profiles.
+                  </p>
+                )
               ) : null}
 
               {audience === "leadership" && mode === "leave" ? (
