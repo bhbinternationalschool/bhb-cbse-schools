@@ -65,7 +65,7 @@ export default defineConfig<GateOptions>({
   projects: [
     {
       name: "desktop",
-      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register)\.spec\.ts/,
+      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|school-chat)\.spec\.ts/,
       use: { ...desktop },
     },
     {
@@ -88,6 +88,14 @@ export default defineConfig<GateOptions>({
       // month register), so it runs after everything that reads the stack.
       name: "staff-register",
       testMatch: /staff-month-register\.spec\.ts/,
+      dependencies: ["desktop", "phone-375-cpu4x"],
+      use: { ...desktop },
+    },
+    {
+      // Writes chat messages, a mute and a block (lifted again), so it runs
+      // after everything that reads the stack (16 Oct 2026, school chat).
+      name: "chat-writes",
+      testMatch: /school-chat\.spec\.ts/,
       dependencies: ["desktop", "phone-375-cpu4x"],
       use: { ...desktop },
     },

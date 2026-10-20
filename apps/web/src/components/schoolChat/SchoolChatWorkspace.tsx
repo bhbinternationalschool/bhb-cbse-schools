@@ -385,7 +385,7 @@ function ReviewQueue() {
           <p className="whitespace-pre-wrap break-words rounded-lg bg-[var(--muted-surface)] p-3 text-sm text-[var(--ink)]">{it.body}</p>
           <p className="text-xs text-[var(--muted)]">
             Checked by {it.checkedBy === "rules" ? "the word rules" : it.checkedBy === "ai" ? "AI" : it.checkedBy === "ai_unavailable" ? "nobody — the AI check failed, so it was held" : it.checkedBy}
-            {it.reason ? ` — ${it.reason}` : ""}. Last 30 days: {it.history.held} held, {it.history.removed} removed, {it.history.warned} warned.
+            {it.reason && it.checkedBy !== "ai_unavailable" ? ` — ${it.reason}` : ""}. Last 30 days: {it.history.held} held, {it.history.removed} removed, {it.history.warned} warned.
           </p>
           <input
             className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--ink)]"
