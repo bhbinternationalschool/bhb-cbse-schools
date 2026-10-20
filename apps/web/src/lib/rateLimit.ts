@@ -48,3 +48,30 @@ export function createRateLimiter(opts: {
     return false;
   };
 }
+
+/**
+ * The same sliding window keyed by something the caller chooses — a staff id,
+ * say — rather than the client IP. A school gate and the transport office
+ * share one Wi-Fi address, so a per-IP window would make one busy guard spend
+ * everybody's allowance.
+ */
+export type KeyedRateLimiter = (key: string, now?: number) => boolean;
+
+export function createKeyedRateLimiter(opts: { windowMs: number; max: number }): KeyedRateLimiter {
+  const hits = new Map<string, number[]>();
+  return function limited(key: string, now: number = Date.now()): boolean {
+    const recent = (hits.get(key) ?? []).filter((t) => now - t < opts.windowMs);
+    if (recent.length >= opts.max) {
+      hits.set(key, recent);
+      return true;
+    }
+    recent.push(now);
+    hits.set(key, recent);
+    if (hits.size > 5000) {
+      for (const [k, v] of hits) {
+        if (v.every((t) => now - t > opts.windowMs)) hits.delete(k);
+      }
+    }
+    return false;
+  };
+}

@@ -208,6 +208,13 @@ import {
   type MinutesLanguage,
 } from "@/lib/meetingMinutesAi";
 import { trackServerWork } from "@/lib/serverWork";
+import {
+  STAFF_SCAN_PROMPT_VERSION,
+  buildStaffScanPrompt,
+  buildStaffScanSystem,
+  staffScanAuditDescriptor,
+  type StaffScanKind,
+} from "@/lib/staffScanReading";
 
 export type LlmEngine = "openai" | "gemini" | "none";
 export type PreferredEngine = "auto" | "openai" | "gemini";
@@ -2760,4 +2767,75 @@ export async function generateModuleRequestJson(opts: {
   );
   if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
   return { ok: false, error: r.error || "AI is not configured", engine: r.engine };
+}
+
+/**
+ * Read a photo the staff app took for a form — a visitor's ID card or number
+ * plate at the gate, a fuel bill in the vehicle log book (2026-10-20).
+ *
+ * Built like readParentDocument: Gemini flash only (one provider for photos
+ * of somebody's ID card, not two), every attempt writes an ai_generations
+ * row with a descriptor in place of the photo, and a failed call is a
+ * failure — never an empty reading, which would be a claim about the photo.
+ *
+ * `parse` turns the model's text into the reading (lib/staffScanReading);
+ * `audit` decides what of it the audit row may keep — for an ID card only
+ * the document type, never the name, number or address.
+ */
+export async function readStaffScanImage<T>(opts: {
+  kind: StaffScanKind;
+  base64: string;
+  mimeType: string;
+  parse: (text: string) => T | null;
+  audit: (reading: T) => string;
+  requester?: string;
+}): Promise<
+  | { ok: true; result: T; generationId: string }
+  | { ok: false; failure: "not-configured" | "budget" | "read-failed"; error: string }
+> {
+  if (!geminiConfigured()) {
+    return { ok: false, failure: "not-configured", error: "GEMINI_API_KEY not configured" };
+  }
+  const { requester, budget } = await startLlmPrecheck({ requester: opts.requester });
+  if (!budget.ok) return { ok: false, failure: "budget", error: budget.reason };
+
+  const system = buildStaffScanSystem(opts.kind);
+  const prompt = buildStaffScanPrompt(opts.kind);
+  const t0 = Date.now();
+  const r = await generateGeminiVisionJson({
+    system,
+    prompt,
+    base64: opts.base64,
+    mimeType: opts.mimeType,
+    model: geminiModel("flash"),
+    // A dozen short fields, plus a thinking model's reasoning out of the same
+    // allowance (see readParentDocument). Headroom, not measured on a real
+    // photo yet.
+    maxTokens: 2500,
+  });
+  const latencyMs = Date.now() - t0;
+
+  const parsed = r.ok ? opts.parse(r.text) : null;
+  const parseError = r.ok && !parsed ? "The reading was not valid JSON (truncated or fenced)" : "";
+
+  const generationId = await recordAiGeneration({
+    route: `staff-scan/${opts.kind}`,
+    promptVersion: STAFF_SCAN_PROMPT_VERSION,
+    tier: "flash",
+    engine: "gemini",
+    model: r.model,
+    status: parsed ? "ok" : "error",
+    error: r.ok ? parseError : r.error,
+    inputText: `${system}\n---\n${prompt}\n---\n${staffScanAuditDescriptor({ kind: opts.kind, mimeType: opts.mimeType, base64: opts.base64 })}`,
+    outputText: parsed ? opts.audit(parsed) : "",
+    promptTokens: r.ok ? r.usage.promptTokens : null,
+    completionTokens: r.ok ? r.usage.completionTokens : null,
+    latencyMs,
+    requester,
+  });
+
+  if (!r.ok) return { ok: false, failure: "read-failed", error: r.error };
+  noteAiBudgetUse(requester, (r.usage.promptTokens ?? 0) + (r.usage.completionTokens ?? 0));
+  if (!parsed) return { ok: false, failure: "read-failed", error: parseError };
+  return { ok: true, result: parsed, generationId };
 }

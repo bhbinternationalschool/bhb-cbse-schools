@@ -25,6 +25,7 @@ import {
   markGatePassPickedUp,
   notifyGatePassParent,
   onGateDutyNow,
+  peopleCountOf,
   saveVisitors,
   upsertGatePass,
   visitorPurposeLabel,
@@ -34,6 +35,7 @@ import {
   type VisitorPurpose,
   type VisitorState,
 } from "@/lib/visitors";
+import { cleanIndianMobile, cleanPeopleCount } from "@/lib/staffScanReading";
 import { VisitorPassSheet, printVisitorPass } from "@/components/visitors/VisitorPassSheet";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { GateQrPanel } from "@/components/visitors/GateQrPanel";
@@ -57,8 +59,8 @@ const TABS_HI: ModuleTabItem[] = [
 const LANG_KEY = "bhb_visitor_desk_lang";
 /** Register/gate labels in Hindi for a gateman who does not read English. */
 const T = {
-  en: { checkIn: "Check in visitor", name: "Visitor name", mobile: "Mobile", purpose: "Purpose", meet: "Person to meet", idProof: "ID proof note", checkInBtn: "Check in", onCampus: "on campus", out: "out", inWord: "in", checkOut: "Check out", checkedOut: "Checked out", printPass: "Print pass", del: "Delete", noVisitors: "No visitors logged yet.", gateQr: "Gate QR", langToggle: "हिन्दी", live: "Live — refreshes every 20 s", meeting: "meeting" },
-  hi: { checkIn: "विज़िटर चेक-इन", name: "विज़िटर का नाम", mobile: "मोबाइल", purpose: "उद्देश्य", meet: "किससे मिलना है", idProof: "पहचान पत्र नोट", checkInBtn: "चेक-इन", onCampus: "परिसर में", out: "बाहर", inWord: "अंदर", checkOut: "चेक-आउट", checkedOut: "चेक-आउट हो गया", printPass: "पास प्रिंट", del: "हटाएँ", noVisitors: "अभी कोई विज़िटर दर्ज नहीं।", gateQr: "गेट QR", langToggle: "English", live: "लाइव — हर 20 सेकंड रिफ्रेश", meeting: "मिलना" },
+  en: { checkIn: "Check in visitor", name: "Visitor name", mobile: "Mobile", purpose: "Purpose", meet: "Person to meet", idProof: "ID proof note", people: "People", vehicle: "Vehicle no.", checkInBtn: "Check in", onCampus: "on campus", out: "out", inWord: "in", checkOut: "Check out", checkedOut: "Checked out", printPass: "Print pass", del: "Delete", noVisitors: "No visitors logged yet.", gateQr: "Gate QR", langToggle: "हिन्दी", live: "Live — refreshes every 20 s", meeting: "meeting" },
+  hi: { checkIn: "विज़िटर चेक-इन", name: "विज़िटर का नाम", mobile: "मोबाइल", purpose: "उद्देश्य", meet: "किससे मिलना है", idProof: "पहचान पत्र नोट", people: "लोग", vehicle: "वाहन नंबर", checkInBtn: "चेक-इन", onCampus: "परिसर में", out: "बाहर", inWord: "अंदर", checkOut: "चेक-आउट", checkedOut: "चेक-आउट हो गया", printPass: "पास प्रिंट", del: "हटाएँ", noVisitors: "अभी कोई विज़िटर दर्ज नहीं।", gateQr: "गेट QR", langToggle: "English", live: "लाइव — हर 20 सेकंड रिफ्रेश", meeting: "मिलना" },
 } as const;
 
 function todayIso() {
@@ -249,6 +251,8 @@ export function VisitorsWorkspace() {
   const [regPurpose, setRegPurpose] = useState<VisitorPurpose>("meeting");
   const [regPersonToMeet, setRegPersonToMeet] = useState("");
   const [regIdProof, setRegIdProof] = useState("");
+  const [regPeople, setRegPeople] = useState("1");
+  const [regVehicle, setRegVehicle] = useState("");
 
   function resetRegForm() {
     setRegName("");
@@ -256,6 +260,8 @@ export function VisitorsWorkspace() {
     setRegPurpose("meeting");
     setRegPersonToMeet("");
     setRegIdProof("");
+    setRegPeople("1");
+    setRegVehicle("");
   }
 
   function onCheckIn() {
@@ -263,10 +269,22 @@ export function VisitorsWorkspace() {
       setError("Visitor name is required.");
       return;
     }
+    const mobile = cleanIndianMobile(regMobile);
+    if (!mobile.ok) {
+      setError(mobile.error);
+      return;
+    }
+    const people = cleanPeopleCount(regPeople);
+    if (!people.ok) {
+      setError(people.error);
+      return;
+    }
     const { state: withEntry, entry } = checkInVisitor(state, {
       visitorName: regName,
-      mobile: regMobile,
+      mobile: mobile.mobile,
       purpose: regPurpose,
+      peopleCount: people.count,
+      vehicleNo: regVehicle,
       personToMeet: regPersonToMeet,
       idProofNote: regIdProof,
       createdBy: session.staffId || session.fullName || "",
@@ -425,6 +443,8 @@ export function VisitorsWorkspace() {
     },
     { key: "meet", header: L.meet, value: (v) => v.personToMeet || "—" },
     { key: "mobile", header: L.mobile, value: (v) => v.mobile || "—" },
+    { key: "people", header: L.people, sortable: true, value: (v) => peopleCountOf(v.peopleCount) },
+    { key: "vehicle", header: L.vehicle, value: (v) => v.vehicleNo || "—" },
     {
       key: "in", header: L.inWord, sortable: true,
       value: (v) => v.inTime,
@@ -576,6 +596,16 @@ export function VisitorsWorkspace() {
               <span className="mb-1 block text-[11px] text-[var(--muted)]">{L.meet}</span>
               <input className={field} value={regPersonToMeet} onChange={(e) => setRegPersonToMeet(e.target.value)} />
             </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block text-sm">
+                <span className="mb-1 block text-[11px] text-[var(--muted)]">{L.people}</span>
+                <input className={field} type="number" min={1} max={99} step={1} inputMode="numeric" value={regPeople} onChange={(e) => setRegPeople(e.target.value)} />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-[11px] text-[var(--muted)]">{L.vehicle}</span>
+                <input className={field} placeholder="UP 32 AB 1234" value={regVehicle} onChange={(e) => setRegVehicle(e.target.value)} />
+              </label>
+            </div>
             <label className="block text-sm">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">{L.idProof}</span>
               <input className={field} placeholder="e.g. Aadhaar last 4 digits" value={regIdProof} onChange={(e) => setRegIdProof(e.target.value)} />
@@ -602,6 +632,8 @@ export function VisitorsWorkspace() {
                   { key: "mobile", header: "Mobile" },
                   { key: "purpose", header: "Purpose" },
                   { key: "meet", header: "To meet", width: 1.4 },
+                  { key: "people", header: "People" },
+                  { key: "vehicle", header: "Vehicle" },
                   { key: "in", header: "In" },
                   { key: "out", header: "Out" },
                   { key: "source", header: "Source" },
@@ -613,6 +645,8 @@ export function VisitorsWorkspace() {
                     mobile: v.mobile || "",
                     purpose: visitorPurposeLabel(v.purpose),
                     meet: v.personToMeet || "",
+                    people: String(peopleCountOf(v.peopleCount)),
+                    vehicle: v.vehicleNo || "",
                     in: new Date(v.inTime).toLocaleString("en-IN"),
                     out: v.outTime ? new Date(v.outTime).toLocaleString("en-IN") : "",
                     source: v.source || "desk",

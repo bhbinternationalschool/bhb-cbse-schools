@@ -404,6 +404,8 @@ jobs:
           npm run test:udise-doc-intake
           npm run test:homework-expand
           npm run test:homework-page-scan
+          npm run test:staff-scan
+          npm run test:staff-scan-route
           npm run test:homework-submission
           npm run test:exam-drill
           npm run test:drill-skills
