@@ -11,10 +11,8 @@ import { NextResponse } from "next/server";
 import { apiErr, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { requireParentHousehold } from "@/lib/api/v1/household";
-import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { ensureHomeworkHydratedServer } from "@/lib/homeworkPersistence";
-import { loadHomework } from "@/lib/homework";
-import { loadSis } from "@/lib/sis";
+import { readHomeworkPostById } from "@/lib/homeworkNormalized.server";
+import { readHouseholdStudents } from "@/lib/data/server/householdRead";
 import { homeworkAttachmentSource } from "@/lib/homeworkAttachments";
 import { assertHomeworkAttachmentReader } from "@/lib/homeworkAttachmentUpload.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
@@ -33,13 +31,20 @@ export async function GET(request: Request) {
     if (ctx.session.persona === "parent") requireParentHousehold(ctx);
     else assertPermission(ctx, "homework", "view");
 
-    await ensureSchoolMirrorHydrated();
-    await ensureHomeworkHydratedServer();
-    const post = loadHomework().posts.find((p) => p.id === postId && p.status === "published");
+    // One post and (for a parent) one family's rows, from SQL — not the
+    // whole school mirror. A failed read is 503, never "not found".
+    const read = await readHomeworkPostById(postId);
+    if (!read.ok) throw new ApiError("server_error", "Could not read the homework — try again", 503);
+    const post = read.post?.status === "published" ? read.post : null;
     const att = post?.attachments.find((a) => a.id === attId);
     if (!post || !att) throw new ApiError("not_found", "File not found", 404);
 
-    await assertHomeworkAttachmentReader(ctx, post, loadSis().students);
+    let students: Awaited<ReturnType<typeof readHouseholdStudents>> = { ok: true, students: [] };
+    if (ctx.session.persona === "parent") {
+      students = await readHouseholdStudents(requireParentHousehold(ctx));
+      if (!students.ok) throw new ApiError("server_error", "Could not read your family — try again", 503);
+    }
+    await assertHomeworkAttachmentReader(ctx, post, students.ok ? students.students : []);
 
     const src = homeworkAttachmentSource(att.url);
     const headers = {

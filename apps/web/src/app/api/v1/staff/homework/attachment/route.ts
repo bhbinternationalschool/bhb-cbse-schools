@@ -9,7 +9,6 @@
 import { apiErr, apiOk } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
-import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { schoolFilesStore, uploadHomeworkAttachment } from "@/lib/homeworkAttachmentUpload.server";
 
 export const runtime = "nodejs";
@@ -20,7 +19,6 @@ export async function POST(request: Request) {
     // Refuse before reading a body of up to 20 MB; the helper checks this
     // again with homework.edit and the section scope.
     assertMobileFeature(ctx, "homework_post");
-    await ensureSchoolMirrorHydrated();
     const form = await request.formData().catch(() => null);
     const attachment = await uploadHomeworkAttachment(ctx, form, schoolFilesStore);
     return apiOk({ attachment });
