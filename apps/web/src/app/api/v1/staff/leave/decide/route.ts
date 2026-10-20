@@ -8,7 +8,8 @@ import {
   saveStaffHrServer,
 } from "@/lib/api/v1/staffLeave";
 import { decideLeaveWithRules } from "@/lib/staffLeaveRules.server";
-import { sendPushToSubject } from "@/lib/webPush.server";
+import { staffLeaveDecided } from "@/lib/notify/events";
+import { notify } from "@/lib/notify/notify.server";
 
 export const runtime = "nodejs";
 
@@ -95,18 +96,18 @@ export async function POST(request: Request) {
       userAgent: meta.userAgent,
     });
 
-    const label = req.fromDate === req.toDate ? req.fromDate : `${req.fromDate} to ${req.toDate}`;
-    await sendPushToSubject("staff", req.staffId, {
-      title:
-        after.status === "approved"
-          ? "Leave approved"
-          : after.status === "pending_l2"
-            ? "Leave cleared at level 1"
-            : "Leave not approved",
-      body: `${req.typeCode} ${label}${note ? ` · ${note}` : ""}`,
-      url: "/leave",
-      data: { kind: "staff_leave_decision", requestId: id, status: after.status },
-    }).catch(() => undefined);
+    await notify(
+      staffLeaveDecided({
+        requestId: id,
+        staffId: req.staffId,
+        status: after.status,
+        typeCode: req.typeCode,
+        fromDate: req.fromDate,
+        toDate: req.toDate,
+        note,
+        decidedBy: ctx.session.fullName || "Principal",
+      }),
+    );
 
     return apiOk(leaveRequestJson(ctx, after, result.state));
   } catch (e) {

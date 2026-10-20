@@ -12,6 +12,7 @@ import { hasMirrorSyncSecret, requireStaffApi } from "@/lib/apiRouteAuth.server"
 import { referenceCache, type BuildResult } from "@/lib/data/server/referenceCache";
 import { writeSliceElement } from "@/lib/data/server/repo";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { notify } from "@/lib/notify/notify.server";
 import type { StaffRequestRow } from "@/lib/staffRequestsShared";
 import { staffRequestsOfSlice, type StaffRequestsDeps } from "./staffRequests.server";
 
@@ -45,4 +46,5 @@ export const staffRequestsDeps: StaffRequestsDeps = {
   invalidate: () => requestsCache.invalidate(),
   now: () => new Date(),
   newId: () => `req_${randomUUID()}`,
+  notify: (ev) => notify(ev),
 };
