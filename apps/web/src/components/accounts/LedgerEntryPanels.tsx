@@ -46,7 +46,7 @@ import {
   buildExpenseVoucherLines,
 } from "@/lib/expenseVoucherDraft";
 import { currentAcademicYearCode } from "@/lib/masters";
-import { useMasters } from "@/lib/data/client/hooks";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { isPublishedHoliday } from "@/lib/foundationMasters";
 import {
   ErpTable,
@@ -1152,8 +1152,7 @@ export function QuickExpensePanel({
   // data-layer 2.1i: the holiday calendar from the Masters view (versions
   // poll), not the page copy — an unread calendar is "loading", never "no
   // holidays" (which would bill the shut days).
-  const mastersQ = useMasters();
-  const holidayBook = mastersQ.data?.masters ?? null;
+  const { masters: holidayBook, error: holidayError, retry: retryHolidays } = useScreenMasters();
   const plan = useMemo(() => {
     if (!spread || !holidayBook) return null;
     const masters = holidayBook;
@@ -1408,10 +1407,10 @@ export function QuickExpensePanel({
             </label>
             <p className="flex-1 rounded-lg bg-[var(--surface-sunken)] px-3 py-1.5 text-[11px]">
               {!plan ? (
-                mastersQ.isError && !holidayBook ? (
+                holidayError ? (
                   <span className="font-semibold text-[var(--danger)]">
                     Could not load the school&apos;s holiday calendar.{" "}
-                    <button type="button" className="underline" onClick={() => void mastersQ.refetch()}>
+                    <button type="button" className="underline" onClick={() => void retryHolidays()}>
                       Try again
                     </button>
                   </span>
