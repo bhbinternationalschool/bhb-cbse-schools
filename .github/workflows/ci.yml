@@ -145,6 +145,9 @@ jobs:
       - name: Self-test — a member of staff sets only their own signature, and only a real small image
         working-directory: apps/web
         run: npm run test:staff-signature
+      - name: Self-test — the staff month register counts what the register holds, and only the owner changes a mark
+        working-directory: apps/web
+        run: npm run test:staff-month-register
 
       - name: Self-test — an in-class answer is a child's work, and the note only says what the teacher said
         working-directory: apps/web
