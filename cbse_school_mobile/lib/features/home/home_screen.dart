@@ -17,6 +17,7 @@ import "../modules/attendance_history_screen.dart";
 import "../modules/exam_date_sheet_screen.dart";
 import "../modules/results_screen.dart";
 import "../modules/chat_thread_screen.dart";
+import "../modules/school_chat_screen.dart";
 import "../modules/complaints_screen.dart";
 import "../modules/ebook_shelf_screen.dart";
 import "../modules/online_classes_screen.dart";
@@ -236,6 +237,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         );
+      case "/school-chat":
+        _openSchoolChat(child);
     }
   }
 
@@ -406,6 +409,26 @@ class _HomeScreenState extends State<HomeScreen> {
     if (screen != null) {
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen!));
     }
+  }
+
+  /// School chat for the picked child: its class group, its subject groups
+  /// and direct chats with its teachers; the older class-teacher thread is
+  /// the first row.
+  void _openSchoolChat(ParentChild child) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SchoolChatScreen(
+          api: widget.api,
+          studentId: child.id,
+          childName: child.fullName,
+          classTeacherThread: (_) => ChatThreadScreen(
+            api: widget.api,
+            studentId: child.id,
+            studentName: child.fullName,
+          ),
+        ),
+      ),
+    );
   }
 
   void _openProfile() {
@@ -637,15 +660,7 @@ class _HomeScreenState extends State<HomeScreen> {
             case 1:
               _openModule("Fees", child);
             case 2:
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => ChatThreadScreen(
-                    api: widget.api,
-                    studentId: child.id,
-                    studentName: child.fullName,
-                  ),
-                ),
-              );
+              _openSchoolChat(child);
             case 3:
               _openProfile();
           }
