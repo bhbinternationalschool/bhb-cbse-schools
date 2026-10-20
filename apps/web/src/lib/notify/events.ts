@@ -341,3 +341,30 @@ export function feeReceivedForOffice(p: {
     group: { key: `fees.received:${p.istDate}`, windowMinutes: 720, title: { en: "{n} fees received today" } },
   };
 }
+
+// ── Notices ────────────────────────────────────────────────────────────────
+
+/**
+ * A notice was published → the audience its publisher chose (staff, families
+ * or both — lib/noticePush.server.ts resolves the ids; the publisher holds
+ * the comms grant to address them).
+ */
+export function noticePublished(p: {
+  noticeId: string;
+  title: string;
+  body: string;
+  link: string;
+  staffIds: readonly string[];
+  householdIds: readonly string[];
+}): NotifyEvent {
+  return {
+    kind: "notice.published",
+    key: `notice:${p.noticeId}:published`,
+    audience: [{ staff: p.staffIds }, { households: p.householdIds }],
+    title: { en: p.title },
+    body: { en: p.body },
+    link: p.link,
+    webLink: `/comms?tab=notices&notice=${encodeURIComponent(p.noticeId)}`,
+    data: { noticeId: p.noticeId },
+  };
+}

@@ -212,7 +212,7 @@ function Item({ n, persona, onOpen }: { n: InboxItem; persona: Persona; onOpen: 
               <span className="rounded-full bg-[var(--surface-sunken)] px-1.5 text-[10px] font-bold text-[var(--muted)]">×{n.groupCount}</span>
             ) : null}
           </p>
-          <span className="shrink-0 text-[10px] text-[var(--muted)]">{ago(n.createdAt, now)}</span>
+          <span className="shrink-0 text-[10px] text-[var(--muted)]">{ago(n.groupCount > 1 ? n.rev : n.createdAt, now)}</span>
         </div>
         {body ? <p className="mt-0.5 line-clamp-2 text-[11px] text-[var(--muted)]">{body}</p> : null}
         <p className="mt-1 text-[10px] uppercase tracking-wide text-[var(--muted)]">{NOTIFY_TOPIC_LABELS[n.topic]?.en ?? n.topic}</p>

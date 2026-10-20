@@ -118,6 +118,7 @@ export type NotifyResult =
   | { ok: false; error: string };
 
 const MAX_TITLE = 160;
+const PUSH_BATCH = 8;
 const MAX_BODY = 400;
 
 function clip(s: string | undefined, n: number): string {
@@ -195,25 +196,33 @@ export async function notifyWith(deps: NotifyDeps, ev: NotifyEvent): Promise<Not
       body: { en: clip(ev.body?.en, 200), hi: ev.body?.hi ? clip(ev.body.hi, 200) : undefined },
       url: ev.link,
     };
+    // Phones in small parallel batches: a notice to every family is ~1,000.
+    const plans: { to: Recipient; voice: boolean; id: string }[] = [];
     for (const r of fresh) {
       const to: Recipient = { type: r.recipient_type, id: r.recipient_id };
       const p = prefs?.get(recipientKey(to)) ?? DEFAULT_PREFS;
       const d = decidePush({ outcome: r.outcome, topic: def.topic, urgent, prefs: p, nowMs });
-      if (!d.push) {
-        if (d.reason === "muted") out.held.muted += 1;
-        if (d.reason === "quiet") out.held.quiet += 1;
-        continue;
-      }
-      try {
-        const res = await deps.push(to, {
-          ...msgBase,
-          voice: d.voice,
-          data: { ...(ev.data ?? {}), kind: ev.kind, topic: def.topic, notificationId: r.id },
-        });
-        out.pushed += res.sent;
-      } catch (e) {
-        deps.log(`${tag}: push to ${recipientKey(to)} failed — ${(e as Error)?.message ?? e}`);
-      }
+      if (d.push) plans.push({ to, voice: d.voice, id: r.id });
+      else if (d.reason === "muted") out.held.muted += 1;
+      else if (d.reason === "quiet") out.held.quiet += 1;
+    }
+    for (let i = 0; i < plans.length; i += PUSH_BATCH) {
+      const sent = await Promise.all(
+        plans.slice(i, i + PUSH_BATCH).map(async (pl) => {
+          try {
+            const res = await deps.push(pl.to, {
+              ...msgBase,
+              voice: pl.voice,
+              data: { ...(ev.data ?? {}), kind: ev.kind, topic: def.topic, notificationId: pl.id },
+            });
+            return res.sent;
+          } catch (e) {
+            deps.log(`${tag}: push to ${recipientKey(pl.to)} failed — ${(e as Error)?.message ?? e}`);
+            return 0;
+          }
+        }),
+      );
+      out.pushed += sent.reduce((a, b) => a + b, 0);
     }
     return out;
   } catch (e) {

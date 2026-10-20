@@ -56,6 +56,7 @@ export const NOTIFY_KINDS = {
   "complaint.created": { topic: "message", urgent: false, what: "A family raised a complaint" },
   "fees.received": { topic: "fees", urgent: false, what: "A fee was received" },
   "fees.receipt": { topic: "fees", urgent: false, what: "Your fee receipt" },
+  "notice.published": { topic: "notice", urgent: false, what: "A notice was published" },
 } as const satisfies Record<string, NotifyKindDef>;
 
 export type NotifyKind = keyof typeof NOTIFY_KINDS;
