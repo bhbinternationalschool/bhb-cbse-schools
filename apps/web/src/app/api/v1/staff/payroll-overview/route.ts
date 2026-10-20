@@ -1,7 +1,6 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { assertStaffPayrollOverviewAccess } from "@/lib/api/v1/staffPayrollMgmtGate";
-import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensurePayrollHydratedServer, payrollServerDbReadOk } from "@/lib/payrollPersistence";
 import { loadPayroll, PAYROLL_PAYMENT_MODES } from "@/lib/payroll";
 import { currentAcademicYearCode } from "@/lib/masters";
@@ -27,7 +26,7 @@ export async function GET(request: Request) {
     const ctx = await resolveApiAuth(request);
     assertStaffPayrollOverviewAccess(ctx);
 
-    await ensureSchoolMirrorHydrated();
+    // ctx.masters already carries the roster; no whole-school replica needed.
     await ensurePayrollHydratedServer();
     if (!payrollServerDbReadOk()) {
       // Unknown must not read as "not run" for everyone.
