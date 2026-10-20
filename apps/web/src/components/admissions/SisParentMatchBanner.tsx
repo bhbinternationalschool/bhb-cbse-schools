@@ -31,6 +31,12 @@ export function SisParentMatchBanner({
     [guardianName, motherName, mobile],
   );
 
+  // data-layer 2.1g: class names from the server's book, read once here for
+  // every row. Unknown (loading, or the read failed) shows "…", never a wrong
+  // "—"; a failed read says so and offers Try again.
+  const mastersQuery = useMasters();
+  const classes = mastersQuery.data?.masters.classes;
+
   if (matches.length === 0) return null;
 
   return (
@@ -49,17 +55,32 @@ export function SisParentMatchBanner({
       </p>
       <ul className="mt-2 space-y-2">
         {matches.map((m) => (
-          <SisMatchRow key={m.householdId} match={m} />
+          <SisMatchRow key={m.householdId} match={m} classes={classes} />
         ))}
       </ul>
+      {mastersQuery.isError && !classes ? (
+        <p className="mt-2 text-[11px] text-[var(--muted)]">
+          Class names did not load.{" "}
+          <button
+            type="button"
+            className="font-semibold text-[var(--brand-deep)] underline underline-offset-2"
+            onClick={() => void mastersQuery.refetch()}
+          >
+            Try again
+          </button>
+        </p>
+      ) : null}
     </div>
   );
 }
 
-function SisMatchRow({ match }: { match: SisParentMatch }) {
-  // data-layer 2.1g: class names from the server's book. Unknown (loading,
-  // or the read failed) shows "…", never a wrong "—".
-  const classes = useMasters().data?.masters.classes;
+function SisMatchRow({
+  match,
+  classes,
+}: {
+  match: SisParentMatch;
+  classes: { id: string; name?: string }[] | undefined;
+}) {
   const classNameOf = (id: string) =>
     classes ? classes.find((c) => c.id === id)?.name || "—" : "…";
 
