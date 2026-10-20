@@ -278,6 +278,8 @@ SELFTESTS=(
   test:admissions-row-stamps
   test:payment-link-status-guard
   test:attendance-today
+  test:staff-signature
+  test:staff-month-register
   test:sis-wire-payload
   test:print-palette
   test:receipt-head-grouping
@@ -291,6 +293,7 @@ SELFTESTS=(
   test:transport-start-month
   test:transport-misrouted
   test:transport-amend
+  test:transport-paid-months
   test:table-sort
   test:transport-fee-policy
   test:transport-nearest-stops
@@ -369,6 +372,7 @@ SELFTESTS=(
   test:concession-ground
   test:fee-backdate
   test:month-groups
+  test:month-range
   test:receipt-auto-wa
   test:review-login
   test:desk-sync-status
@@ -407,6 +411,7 @@ SELFTESTS=(
   test:closing-balance
   test:accounts-position-rbac
   test:voucher-filter
+  test:pg-settlement-failed
   test:notice-push
   test:staff-self-profile
   test:attendance-cover
@@ -559,6 +564,7 @@ SELFTESTS=(
   test:reference-views
   test:masters-bridge
   test:staff-requests
+  test:survey-team-plan
   test:parent-api-scope
   # Added 2026-09-12, in CI's order, after the drift check below reported that
   # ci.yml had been running these for weeks while this script did not:

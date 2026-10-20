@@ -67,8 +67,13 @@ export async function GET(req: Request) {
   const res = await listSettlementRecon(range);
   if (!res.ok) return NextResponse.json({ error: res.error }, { status: 500 });
 
+  // A failed settlement with no voucher is correctly out of the book and is
+  // not a break; one WITH a voucher (failed_posted) is.
   const breaks = res.rows.filter(
-    (r) => r.reconState !== "explained" && r.reconState !== "pending",
+    (r) =>
+      r.reconState !== "explained" &&
+      r.reconState !== "pending" &&
+      r.reconState !== "failed",
   );
   return NextResponse.json({
     service: "cashfree-settlements",

@@ -2,7 +2,8 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { authorizeChatThread } from "@/lib/chatAuth.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
-import { sendPushToSubject, sendPushToSubjects } from "@/lib/webPush.server";
+import { chatMessage } from "@/lib/notify/events";
+import { notify } from "@/lib/notify/notify.server";
 
 export const runtime = "nodejs";
 
@@ -42,24 +43,22 @@ export async function POST(request: Request) {
       .single();
     if (error) throw new ApiError("server_error", error.message, 500);
 
-    // Best-effort push to the other side of the thread (never blocks the send).
+    // The other side of the thread — ERP bell + phone (lib/notify). An
+    // unread run from one thread folds into one row and rings once.
     const preview = body.length > 120 ? `${body.slice(0, 117)}…` : body;
-    const url = `/chat?studentId=${encodeURIComponent(auth.student.id)}`;
-    if (ctx.session.persona === "parent") {
-      await sendPushToSubjects("staff", auth.teacherStaffIds, {
-        title: `${auth.senderName} · ${auth.student.fullName}`,
-        body: preview,
-        url,
-        data: { kind: "chat", studentId: auth.student.id },
-      });
-    } else {
-      await sendPushToSubject("parent", auth.student.householdId, {
-        title: `${auth.senderName} (class teacher)`,
-        body: preview,
-        url,
-        data: { kind: "chat", studentId: auth.student.id },
-      });
-    }
+    await notify(
+      chatMessage({
+        messageId: data.id as string,
+        studentId: auth.student.id,
+        studentName: auth.student.fullName,
+        fromParent: ctx.session.persona === "parent",
+        senderName: auth.senderName,
+        teacherStaffIds: auth.teacherStaffIds,
+        householdId: auth.student.householdId,
+        senderStaffId: ctx.session.persona === "parent" ? undefined : ctx.session.staffId,
+        preview,
+      }),
+    );
 
     return apiOk({ id: data.id as string, createdAt: data.created_at as string });
   } catch (e) {

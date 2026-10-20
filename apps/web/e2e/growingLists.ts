@@ -296,4 +296,21 @@ export const STORE_PLAN = {
     { date: "2026-10-12", qty: 2, ratePaise: 4500 },
     { date: "2026-08-14", qty: 5, ratePaise: 4200 },
   ],
+  /**
+   * 62 walk-in counter sales — more than the Counter → Sales page of 50, so
+   * the oldest are reachable only through the pager. Written oldest first
+   * (the list is newest first by created_at), one a day from 1 Aug 2026.
+   * Every tenth (#1, #11, … #61) is left unpaid, so the "Outstanding" tile
+   * has to count sales that are NOT on the first page.
+   */
+  counterSales: Array.from({ length: 62 }, (_, i) => {
+    const d = new Date(Date.UTC(2026, 7, 1 + i));
+    const unitPricePaise = 6000 + i * 100;
+    return {
+      date: d.toISOString().slice(0, 10),
+      buyerName: `E2E Walk-in ${String(i + 1).padStart(2, "0")}`,
+      unitPricePaise,
+      paidPaise: i % 10 === 0 ? 0 : unitPricePaise,
+    };
+  }),
 } as const;

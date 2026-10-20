@@ -39,6 +39,8 @@ import {
   type StaffRequestType,
 } from "@/lib/staffHr";
 import { canManageStaffLeave, resolveSessionStaff } from "@/lib/staffResolve";
+import { staffRequestRaised, staffRequestUpdated } from "@/lib/notify/events";
+import type { NotifyEvent } from "@/lib/notify/notify";
 import {
   staffRequestFromElement,
   type StaffRequestRow,
@@ -58,6 +60,8 @@ export type StaffRequestsDeps = {
   invalidate: () => void;
   now: () => Date;
   newId: () => string;
+  /** Tell the people it concerns (lib/notify) — managers on a raise, the raiser on a change. Optional in tests. */
+  notify?: (ev: NotifyEvent) => Promise<unknown>;
 };
 
 const NO_STORE = { "Cache-Control": "private, no-store" };
@@ -242,6 +246,15 @@ export async function staffRequestsPost(req: Request, deps: StaffRequestsDeps): 
     const r = await deps.write({ op: "upsert", id: built.ticket.id, base: null, row: built.ticket as unknown as Record<string, unknown> });
     if (!r.ok) return writeFailure(r);
     deps.invalidate();
+    await deps.notify?.(
+      staffRequestRaised({
+        requestId: built.ticket.id,
+        staffId: selfStaffId,
+        staffName: selfName,
+        typeLabel: STAFF_REQUEST_TYPE_LABELS[built.ticket.type] ?? built.ticket.type,
+        subject: built.ticket.subject,
+      }),
+    );
     return NextResponse.json({ ok: true, request: { ...built.ticket, rev: savedRev(r) } }, { headers: NO_STORE });
   }
 
@@ -268,7 +281,23 @@ export async function staffRequestsPost(req: Request, deps: StaffRequestsDeps): 
       return writeFailure(r);
     }
     deps.invalidate();
-    return NextResponse.json({ ok: true, request: { ...stored, ...p.row, rev: savedRev(r) } }, { headers: NO_STORE });
+    const rev = savedRev(r);
+    if (rev > 0) {
+      const assignee = p.row.assignedToStaffId && p.row.assignedToStaffId !== stored.assignedToStaffId ? p.row.assignedToStaffId : undefined;
+      await deps.notify?.(
+        staffRequestUpdated({
+          requestId: id,
+          rev,
+          raisedByStaffId: stored.staffId,
+          assigneeStaffId: assignee,
+          byStaffId: selfStaffId ?? undefined,
+          byName: selfName,
+          subject: stored.subject,
+          status: p.row.status ?? stored.status,
+        }),
+      );
+    }
+    return NextResponse.json({ ok: true, request: { ...stored, ...p.row, rev } }, { headers: NO_STORE });
   }
 
   return fail(400, "Unknown op — raise or update");

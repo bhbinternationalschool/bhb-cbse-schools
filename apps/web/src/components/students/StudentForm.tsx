@@ -8,13 +8,13 @@ import Link from "next/link";
 import {
   STUDENT_TYPES,
   STUDENT_TYPE_HINTS,
-  loadMasters,
   resolveFeeGroupId,
   suggestFeeStudentType,
   type FeeStudentType,
-  type MastersState,
 } from "@/lib/masters";
 import { bumpStudentSeriesUses } from "@/lib/numberSeries";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { StudentAttendanceCard } from "@/components/students/StudentAttendanceCard";
 import { StudentExamMarksCard } from "@/components/students/StudentExamMarksCard";
 import { StudentFeeDuesCard } from "@/components/students/StudentFeeDuesCard";
@@ -224,7 +224,18 @@ export function StudentForm({
   const [academicYearCode, setAcademicYearCode] = useState(
     session.academicYearCode,
   );
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
+  /**
+   * A teacher's Masters carry no fee groups: withheld, not "none". The fee
+   * group is then shown as not available and the student's own value is
+   * kept as loaded — never re-resolved to "" from an empty list.
+   */
+  const feesWithheld = mastersScope === "teaching";
+  /**
+   * Which (mode, student, year) the form was filled for. Filled from the
+   * first Masters answer; a later Masters refetch must not reset edits.
+   */
+  const filledFor = useRef("");
   const [notice, setNotice] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
   const [tab, setTab] = useState<Tab>("basic");
@@ -332,9 +343,11 @@ export function StudentForm({
   const [reviewNote, setReviewNote] = useState("");
 
   useEffect(() => {
-    const m = loadMasters();
+    const fillKey = `${mode}|${studentId ?? ""}|${session.academicYearCode}`;
+    if (!masters || filledFor.current === fillKey) return;
+    filledFor.current = fillKey;
+    const m = masters;
     const sis = loadSis();
-    setMasters(m);
 
     if (mode === "edit" && studentId) {
       const raw = sis.students.find((x) => x.id === studentId);
@@ -466,7 +479,9 @@ export function StudentForm({
       ),
     );
     setPendingRequest(null);
-  }, [mode, studentId, session.academicYearCode]);
+    // Filled once per (mode, student, year) from the first Masters answer:
+    // re-running on a background refetch would wipe what the office has typed.
+  }, [masters, mode, studentId, session.academicYearCode]);
 
   const sectionsForClass = useMemo(() => {
     if (!masters || !classId) return [];
@@ -499,7 +514,7 @@ export function StudentForm({
   }, [masters, studentType, classId, academicYearCode]);
 
   useEffect(() => {
-    if (!masters || !classId) return;
+    if (!masters || !classId || feesWithheld) return;
     setFeeGroupId((prev) => {
       if (prev && feeGroupsForType.some((g) => g.id === prev)) return prev;
       return (
@@ -511,7 +526,7 @@ export function StudentForm({
         }) ?? ""
       );
     });
-  }, [masters, studentType, classId, feeGroupsForType, academicYearCode]);
+  }, [masters, feesWithheld, studentType, classId, feeGroupsForType, academicYearCode]);
 
   useEffect(() => {
     if (!masters || !classId) return;
@@ -1142,6 +1157,10 @@ export function StudentForm({
     );
   }
 
+  // A failed Masters read is a failure on screen — never a form with no classes (R6).
+  if (mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters) {
     return <p className="text-sm text-[var(--muted)]">Loading…</p>;
   }
@@ -1274,10 +1293,10 @@ export function StudentForm({
                     type="button"
                     className="rounded-lg bg-amber-800 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-amber-900"
                     onClick={() => {
-                      const m = loadMasters();
+                      if (!masters) return;
                       const sis = loadSis();
                       const sug = suggestSystemAdmissionForImport(
-                        m,
+                        masters,
                         sis.students,
                         academicYearCode || "2025-26",
                       );
@@ -1402,6 +1421,16 @@ export function StudentForm({
                 </select>
               </Field>
               <Field label="Fee group">
+                {feesWithheld ? (
+                  // Not sent to a teacher. The student's fee group is kept
+                  // exactly as loaded; nothing here can change it.
+                  <input
+                    className="field bg-[rgba(32,48,80,0.04)]"
+                    value="Not shown to your role"
+                    readOnly
+                    aria-label="Fee group"
+                  />
+                ) : (
                 <select
                   className="field"
                   value={feeGroupId}
@@ -1417,13 +1446,16 @@ export function StudentForm({
                     </option>
                   ))}
                 </select>
+                )}
               </Field>
             </div>
             <p className="mt-2 text-[11px] leading-snug text-[var(--muted)]">
               {STUDENT_TYPE_HINTS[studentType]}
-              {feeGroupId
-                ? " Fee group auto-fills from type + class; you can override."
-                : " No matching published group — create one under Masters → Fee groups."}
+              {feesWithheld
+                ? ""
+                : feeGroupId
+                  ? " Fee group auto-fills from type + class; you can override."
+                  : " No matching published group — create one under Masters → Fee groups."}
             </p>
             {mode === "edit" ? (
               <Field label="Status">

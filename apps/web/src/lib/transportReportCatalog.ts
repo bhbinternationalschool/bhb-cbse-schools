@@ -2,6 +2,7 @@
  * Transport reports — riders, fleet, finance exports.
  */
 
+import { transportMonthAmount } from "@/lib/transportPaidMonths";
 import {
   describeFilters,
   exportFilterReport,
@@ -570,7 +571,8 @@ export function runTransportReport(
           academicYearCode: asg.academicYearCode,
         }).filter((d) => d.assignmentId === asg.id);
         for (const d of dues) {
-          const paid = paidMap.get(d.dueKey) ?? 0;
+          // By child + month, not by assignment id — see transportPaidMonths.ts.
+          const paid = transportMonthAmount(paidMap, d.studentId, d.periodKey);
           const bal = Math.max(0, d.amountPaise - paid);
           if (bal <= 0) continue;
           const info = studentRow(asg.studentId, sis, masters);

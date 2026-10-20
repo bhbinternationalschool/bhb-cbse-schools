@@ -6,6 +6,7 @@ import "../../core/guide/screen_guides.dart";
 import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
+import "../../core/ui/stale_banner.dart";
 import "../../core/theme/app_theme.dart";
 import "bus_register_screen.dart";
 import "vehicle_logbook_screen.dart";
@@ -16,6 +17,7 @@ import "payslips_screen.dart";
 import "self_attendance_screen.dart";
 import "transport_requests_screen.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/push/notification_bell.dart";
 
 /// Driver home (field persona): the bus register and log book for the
 /// driver's own bus, GPS self-attendance, and the school's routes with
@@ -57,6 +59,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   String? _error;
   bool _deepLinkDone = false;
 
+  /// data-layer 4.4: set when the server could not be reached and the home
+  /// shows the copy saved at this time; the banner says so.
+  DateTime? _staleSince;
+  final _clock = RefreshClock();
+  late final _resume = ResumeWatcher(_onResume);
+  bool _featuresFresh = false;
+
   @override
   void initState() {
     super.initState();
@@ -64,34 +73,74 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) AppPopups.maybeShow(context, widget.api);
     });
-    _load();
+    _resume.attach();
+    _load(first: true);
   }
 
-  Future<void> _load() async {
+  @override
+  void dispose() {
+    _resume.detach();
+    super.dispose();
+  }
+
+  /// Back in front after 2 minutes or more: re-read routes and tiles.
+  void _onResume() {
+    if (mounted && _clock.isStale) _load();
+  }
+
+  /// [first]: the app just opened this home — paint the saved copy at once.
+  Future<void> _load({bool first = false}) async {
     setState(() => _error = null);
-    try {
-      final name = await widget.api.guardianName();
-      final routes = await widget.api.fetchTransportRoutes();
-      if (!mounted) return;
-      setState(() {
-        _routes = routes;
-        _name = name;
+    final name = await widget.api.guardianName();
+    if (mounted && _name == null) setState(() => _name = name);
+    if (first) {
+      widget.api.cachedStaffFeatures().then((c) {
+        if (c != null && mounted && !_featuresFresh) {
+          setState(() => _features = c.value);
+        }
       });
-      WidgetsBinding.instance.addPostFrameCallback((_) => _consumeDeepLink());
-      // Grants for the tiles (bus register, log book, payslips). Unknown:
-      // the tiles stay and the server answers for itself.
-      try {
-        final f = await widget.api.fetchStaffFeatures();
-        if (mounted) setState(() => _features = f);
-      } catch (_) {
-        /* unknown: the tiles stay and the server answers for itself */
-      }
-    } on ApiException catch (e) {
-      if (mounted) setState(() => _error = e.message);
+    }
+    var ok = false;
+    await loadCachedThenFresh<List<TransportRouteInfo>>(
+      peek: first ? widget.api.cachedTransportRoutes : () async => null,
+      fetch: widget.api.fetchTransportRoutes,
+      onCached: (c) {
+        if (mounted) setState(() => _routes = c.value);
+      },
+      onFresh: (routes) {
+        ok = true;
+        _clock.markFresh();
+        if (mounted) {
+          setState(() {
+            _routes = routes;
+            _staleSince = null;
+          });
+        }
+      },
+      onError: (e, since) {
+        if (!mounted) return;
+        setState(() {
+          if (_routes != null) {
+            _staleSince = since ?? _clock.lastFresh ?? DateTime.now();
+          } else {
+            _error = e is ApiException
+                ? e.message
+                : "स्कूल सर्वर से संपर्क नहीं हुआ।";
+          }
+        });
+      },
+    );
+    if (!mounted || _routes == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _consumeDeepLink());
+    if (!ok) return;
+    // Grants for the tiles (bus register, log book, payslips). Unknown:
+    // the tiles stay and the server answers for itself.
+    try {
+      final f = await widget.api.fetchStaffFeatures();
+      _featuresFresh = true;
+      if (mounted) setState(() => _features = f);
     } catch (_) {
-      if (mounted) {
-        setState(() => _error = "स्कूल सर्वर से संपर्क नहीं हुआ।");
-      }
+      /* unknown: the tiles stay and the server answers for itself */
     }
   }
 
@@ -125,7 +174,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     final raw = widget.openRoute;
     if (raw == null || _deepLinkDone || !mounted) return;
     _deepLinkDone = true;
+    _openRoute(raw);
+  }
+
+  /// A deep link: a tapped push, or an item of the notifications list.
+  void _openRoute(String raw) {
+    if (!mounted) return;
     final uri = Uri.tryParse(raw);
+    if ((uri?.path ?? raw) == "/notifications") {
+      openNotifications(context, widget.api, _openRoute);
+      return;
+    }
     final Widget? screen = switch (uri?.path ?? raw) {
       "/notices" => noticesScreenForRoute(widget.api, uri),
       "/my-attendance" => MyAttendanceCalendarScreen(
@@ -293,6 +352,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                       ],
                     ),
                   ),
+                  NotificationBellButton(
+                    api: widget.api,
+                    onOpenRoute: _openRoute,
+                  ),
                   const ScreenGuideButton(
                     guideId: "driver-home",
                     screenLabel: "Home",
@@ -305,6 +368,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                 ],
               ),
             ),
+            StaleBanner(since: _staleSince, onRetry: _load),
             // Notices and news scrolling across, as on the web ERP.
             RunningStrip(
               api: widget.api,

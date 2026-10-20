@@ -5,8 +5,12 @@
  *  - The four views and the versions route answer by who is asking: no
  *    session 401, a parent 403, staff 200 — the masters view as the teaching
  *    subset or in full by permission, the staff list as a directory only.
- *  - The versions poll runs only on a page that holds a desk query, every
- *    20 s; a 403 stops it for good, a 503 keeps the screen as it was.
+ *  - The versions poll runs while a page holds a desk query — since 20 Oct
+ *    2026 that is every staff page, because the header bell reads desk
+ *    "erp_notifications" — ONE poll per tab whatever else is mounted, at the
+ *    20 s cadence and never in a burst; none for a family (/parent polls its
+ *    own bell, not versions). A 403 stops it for good, a 503 keeps the
+ *    screen as it was.
  *  - A failed view read is "Could not load … / Try again" (one <QueryError>),
  *    never an empty list, and Try again recovers without a reload.
  *
@@ -14,9 +18,10 @@
  */
 import type { APIRequestContext, Page } from "@playwright/test";
 import type { DemoSession } from "@/lib/auth";
+import { demoSessionCookieName } from "@/lib/auth";
 import type { MastersView, RbacView, StaffListView } from "@/lib/data/viewTypes";
 import { AY_CURRENT, E2E_TENANT_SLUG } from "../fixture";
-import { sessionCookieHeader } from "../session";
+import { mintSessionCookie, sessionCookieHeader } from "../session";
 import { APP_URL, expect, fx, metric, openAs, test } from "../support";
 
 const VIEWS = [
@@ -57,6 +62,22 @@ function countVersionPolls(page: Page): () => number {
     if (r.method() === "GET" && new URL(r.url()).pathname === VERSIONS) n += 1;
   });
   return () => n;
+}
+
+/** When each versions GET left the page (ms since the epoch). */
+function versionPollTimes(page: Page): number[] {
+  const at: number[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "GET" && new URL(r.url()).pathname === VERSIONS) at.push(Date.now());
+  });
+  return at;
+}
+
+/** The smallest gap between two consecutive polls; Infinity with fewer than two. */
+function minGap(at: readonly number[]): number {
+  let g = Infinity;
+  for (let i = 1; i < at.length; i += 1) g = Math.min(g, at[i]! - at[i - 1]!);
+  return g;
 }
 
 test("views + versions: no session 401, a parent 403", async ({ playwright }) => {
@@ -132,16 +153,25 @@ test("views: a teacher's rbac is her own rows only", async ({ playwright }) => {
   }
 });
 
-test("versions poll: none on a page without a desk query; every 20 s on /__kernel", async ({ browser }, testInfo) => {
+test("versions poll: one per tab at the 20 s cadence on every staff page (the bell), never a burst; none for a family", async ({ browser }, testInfo) => {
+  test.setTimeout(150_000);
   const { context, page } = await openAs(browser, "office");
   try {
-    const polls = countVersionPolls(page);
+    // /masters mounts no kernel query of its own: the header bell
+    // (desk erp_notifications) is what runs the poll here.
+    const onMastersAt = versionPollTimes(page);
     await page.goto("/masters");
     await expect(page.getByRole("button", { name: `${fx.expected.classes} Classes`, exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("notification-bell")).toBeVisible();
     await page.waitForTimeout(25_000);
-    const onMasters = polls();
-    expect(onMasters, "/masters reads no kernel query: no versions poll").toBe(0);
+    const onMasters = onMastersAt.length;
+    expect(onMasters, "the bell's poll runs on a staff page").toBeGreaterThanOrEqual(1);
+    expect(onMasters, "at the 20 s cadence: the first + at most one in 25 s").toBeLessThanOrEqual(2);
+    expect(minGap(onMastersAt), "never a burst").toBeGreaterThanOrEqual(15_000);
 
+    // /__kernel adds the four reference views to the bell: still ONE poll.
+    const polls = countVersionPolls(page);
+    const kernelAt = versionPollTimes(page);
     await page.goto("/__kernel");
     await expect(page.getByRole("list", { name: "Classes", exact: true }).getByRole("listitem").filter({ has: page.locator("strong") })).toHaveCount(fx.expected.classes, { timeout: 20_000 });
     const atOpen = polls();
@@ -149,10 +179,24 @@ test("versions poll: none on a page without a desk query; every 20 s on /__kerne
     const after22s = polls();
     expect(atOpen, "the poll runs as soon as a desk query is mounted").toBeGreaterThanOrEqual(1);
     expect(after22s - atOpen, "and again 20 s later").toBeGreaterThanOrEqual(1);
-    expect(after22s, "not more than once per 20 s (+ the first)").toBeLessThanOrEqual(3);
-    await metric(testInfo, "poll", { onMasters25s: onMasters, kernelAtOpen: atOpen, kernelAfter22s: after22s });
+    expect(after22s, "the bell and the views share one poll: not more than once per 20 s (+ the first)").toBeLessThanOrEqual(3);
+    expect(minGap(kernelAt), "one poll per tab, never a burst").toBeGreaterThanOrEqual(15_000);
+    await metric(testInfo, "poll", { onMasters25s: onMasters, kernelAtOpen: atOpen, kernelAfter22s: after22s, kernelMinGapMs: minGap(kernelAt) });
   } finally {
     await context.close();
+  }
+
+  // A family's portal: no versions poll at all (its bell re-asks its own list).
+  const family = await browser.newContext({ baseURL: APP_URL });
+  try {
+    await family.addCookies([{ name: demoSessionCookieName(), value: mintSessionCookie(PARENT), url: APP_URL, httpOnly: true, sameSite: "Lax" }]);
+    const page = await family.newPage();
+    const polls = countVersionPolls(page);
+    await page.goto("/parent");
+    await page.waitForTimeout(22_000);
+    expect(polls(), "a family never polls versions").toBe(0);
+  } finally {
+    await family.close();
   }
 });
 

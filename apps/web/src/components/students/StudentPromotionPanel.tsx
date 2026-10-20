@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, saveSis, type SisState, type SisStudent } from "@/lib/sis";
 import { fetchSisDeskFromApi } from "@/lib/sisNormalizedClient";
 import { useDemoSession } from "@/components/shell/SessionContext";
@@ -35,7 +37,7 @@ export function StudentPromotionPanel({
   onChanged?: (sis: SisState) => void;
 }) {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
 
   const [fromClassId, setFromClassId] = useState("");
@@ -53,7 +55,6 @@ export function StudentPromotionPanel({
   >([]);
 
   function refresh() {
-    setMasters(loadMasters());
     setSis(loadSis());
   }
 
@@ -206,6 +207,9 @@ export function StudentPromotionPanel({
     }
   }
 
+  if (mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters || !sis) return null;
 
   return (

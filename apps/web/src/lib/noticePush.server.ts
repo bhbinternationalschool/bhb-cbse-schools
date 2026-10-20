@@ -97,13 +97,19 @@ export async function pushPublishedNotice(n: SchoolNotice): Promise<NoticePushRe
     if (!Number.isFinite(at) || Date.now() - at > 24 * 3600 * 1000) return { pushed: false, reason: "published earlier", sent: 0, failed: 0 };
     if (!(await claimNotice(n.id))) return { pushed: false, reason: "already pushed", sent: 0, failed: 0 };
     const who = await recipients(n.audience);
-    const { sendPushToSubjects } = await import("@/lib/webPush.server");
-    const payload = noticePushPayload(n);
-    const [s, p] = await Promise.all([
-      who.staff.length ? sendPushToSubjects("staff", who.staff, payload) : Promise.resolve({ sent: 0, expired: 0, failed: 0 }),
-      who.parents.length ? sendPushToSubjects("parent", who.parents, payload) : Promise.resolve({ sent: 0, expired: 0, failed: 0 }),
+    // The ERP bell + the apps (lib/notify): one row per person in the notice's
+    // audience, chosen by the publisher; the push rings with the notice voice.
+    const [{ notify }, { noticePublished }] = await Promise.all([
+      import("@/lib/notify/notify.server"),
+      import("@/lib/notify/events"),
     ]);
-    return { pushed: true, sent: s.sent + p.sent, failed: s.failed + p.failed };
+    const payload = noticePushPayload(n);
+    const r = await notify(
+      noticePublished({ noticeId: n.id, title: payload.title, body: payload.body, link: payload.url, staffIds: who.staff, householdIds: who.parents }),
+    );
+    return r.ok
+      ? { pushed: true, sent: r.pushed, failed: 0 }
+      : { pushed: false, reason: r.error, sent: 0, failed: who.staff.length + who.parents.length };
   } catch (e) {
     console.warn("[notice-push] failed:", e instanceof Error ? e.message : e);
     return { pushed: false, reason: "error", sent: 0, failed: 0 };

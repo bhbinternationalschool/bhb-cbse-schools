@@ -13,6 +13,11 @@ import "../guide/screen_guides.dart";
 import "../popups/app_popups.dart";
 import "../i18n/locale_controller.dart";
 import "../update/app_build.dart";
+import "http_transport.dart";
+import "json_cache.dart";
+
+export "home_refresh.dart";
+export "json_cache.dart" show Cached, CachedJson, JsonCache;
 
 part "staff_api.dart";
 part "online_classes_api.dart";
@@ -22,6 +27,7 @@ part "teacher_tools_api.dart";
 part "teacher_ai_api.dart";
 part "transport_register_api.dart";
 part "results_api.dart";
+part "notifications_api.dart";
 
 /// Session cookie minted by the ERP (see web /api/auth/*).
 const _cookieName = "bhb_demo_session";
@@ -759,11 +765,15 @@ class ClassGallery {
     this.heldCount = 0,
   });
 
-  /// The principal and leadership decide on held items.
+  /// The principal and the office (with the Gallery grant) decide on held
+  /// items, and post to the whole school or any class.
   final bool canReview;
-  final int heldCount;
 
-  /// "classId|sectionId" of the class shown.
+  /// Items waiting for that decision; null = the count could not be read
+  /// (never shown as "nothing waiting").
+  final int? heldCount;
+
+  /// "classId|sectionId" of the class shown, or "school" for the whole school.
   final String section;
   final String classLabel;
   final List<({String section, String classLabel})> classes;
@@ -2946,10 +2956,96 @@ class BroadcastResult {
 }
 
 class ApiClient {
-  ApiClient(this.config);
+  ApiClient(this.config, {http.Client? client, JsonCache? cache})
+    : _injectedClient = client,
+      cache = cache ?? JsonCache();
 
   final AppConfig config;
   final _storage = const FlutterSecureStorage();
+
+  /// data-layer 4.4: ONE long-lived client for the app's life, so calls
+  /// reuse the open connection (keep-alive) instead of a new TLS handshake
+  /// per call. Created on first use (inside http.runWithClient in tests).
+  final http.Client? _injectedClient;
+  late final http.Client _shared = _injectedClient ?? http.Client();
+
+  /// Every ERP call: 30 s for the headers and for each gap in the body
+  /// (see [TimeoutClient.standard] for why 30 and when it drops to 15).
+  late final http.Client _http = TimeoutClient(_shared, TimeoutClient.standard);
+
+  /// The server runs a model or sends to many families (see [_slowPaths]).
+  late final http.Client _slowHttp = TimeoutClient(
+    _shared,
+    TimeoutClient.slow,
+  );
+
+  /// Multipart uploads through the ERP (photo, document, receipt).
+  late final http.Client _uploadHttp = TimeoutClient(
+    _shared,
+    TimeoutClient.upload,
+  );
+
+  /// A class video straight to storage — minutes long on a school phone.
+  late final http.Client _mediaHttp = TimeoutClient(
+    _shared,
+    const Duration(minutes: 30),
+  );
+
+  /// POSTs whose server side legitimately takes longer than 30 s.
+  static const _slowPaths = {
+    "/api/v1/commands",
+    "/api/v1/teaching/lesson-plan",
+    "/api/v1/teaching/syllabus-scan",
+    "/api/v1/teaching/syllabus-import",
+    "/api/v1/homework/post",
+    "/api/v1/staff/class-gallery/complete",
+    "/api/v1/staff/broadcast",
+    "/api/v1/owner/broadcast",
+    // 35 s once in production (7 days to 15 Oct). No screen calls it today;
+    // listed so a future caller does not inherit the 30 s deadline.
+    "/api/v1/comms/unknown-logins",
+  };
+
+  http.Client _clientFor(String path) =>
+      _slowPaths.contains(path.split("?").first) ? _slowHttp : _http;
+
+  /// The last good reply of each home call (data-layer 4.4) — see
+  /// [JsonCache]. Wiped on sign-in and sign-out.
+  final JsonCache cache;
+
+  /// The home calls whose last reply is kept so the home paints at once.
+  static const _cachedPaths = {
+    "/api/v1/parent/summary",
+    "/api/v1/staff/summary",
+    "/api/v1/staff/features",
+    "/api/v1/principal/snapshot",
+    "/api/v1/staff/approvals",
+    "/api/v1/comms/feed",
+    "/api/v1/transport/routes",
+  };
+
+  /// Whose saved copies these are: the app flavour and a hash of the session
+  /// (never the session itself). Empty when nobody is signed in.
+  Future<String> _cacheScope() async {
+    final cookie = await sessionCookie();
+    if (cookie == null || cookie.isEmpty) return "";
+    return "${AppBuild.flavor}|${JsonCache.hash(cookie)}";
+  }
+
+  /// The saved copy of [path] for the signed-in identity, parsed; null when
+  /// there is none or it no longer parses.
+  Future<Cached<T>?> peekCached<T>(
+    String path,
+    T Function(Map<String, dynamic> data) parse,
+  ) async {
+    try {
+      final hit = await cache.read(await _cacheScope(), path);
+      if (hit == null) return null;
+      return Cached(parse(hit.data), hit.savedAt);
+    } catch (_) {
+      return null;
+    }
+  }
 
   Uri _uri(String path) => Uri.parse("${config.apiBaseUrl}$path");
 
@@ -2964,7 +3060,7 @@ class ApiClient {
     String path,
     Map<String, dynamic> body,
   ) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri(path),
       headers: await _authHeaders(),
       body: jsonEncode(body),
@@ -3026,9 +3122,14 @@ class ApiClient {
     await _storage.delete(key: _personaKey);
     await _storage.delete(key: _roleKey);
     await _storage.delete(key: _kindKey);
+    // Nobody's saved home stays on the phone after sign-out.
+    await cache.wipe();
   }
 
   Future<void> _storeSession(Map<String, dynamic>? session) async {
+    // A new sign-in starts with no saved homes — whoever used the phone
+    // before (a sibling's parent, another teacher) leaves nothing behind.
+    await cache.wipe();
     final name = session?["fullName"] as String?;
     if (name != null) await _storage.write(key: _guardianKey, value: name);
     final persona = session?["persona"] as String?;
@@ -3067,7 +3168,7 @@ class ApiClient {
     final headers = await _authHeaders();
     final watch = Stopwatch()..start();
     try {
-      final res = await http.get(_uri(path), headers: headers);
+      final res = await _http.get(_uri(path), headers: headers);
       _noteTiming(
         path,
         watch.elapsedMilliseconds,
@@ -3094,7 +3195,7 @@ class ApiClient {
           : "unknown";
       unawaited(() async {
         try {
-          await http
+          await _http
               .post(
                 _uri("/api/client-metrics"),
                 headers: await _authHeaders(),
@@ -3170,7 +3271,7 @@ class ApiClient {
     required String dob,
     String className = "",
   }) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/link/start"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({
@@ -3196,7 +3297,7 @@ class ApiClient {
 
   /// The code from the registered phone: links this number and signs in.
   Future<void> linkNumberVerify(String linkId, String code) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/link/verify"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"linkId": linkId, "code": code}),
@@ -3216,7 +3317,7 @@ class ApiClient {
     String className = "",
     String note = "",
   }) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/link/office"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({
@@ -3235,7 +3336,7 @@ class ApiClient {
 
   /// Step 1 — send the WhatsApp OTP to a registered parent mobile.
   Future<String> requestOtp(String mobile) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/otp/request"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"mobile": mobile}),
@@ -3248,7 +3349,7 @@ class ApiClient {
 
   /// Step 2 — verify the OTP; the ERP mints the session cookie.
   Future<void> verifyOtp(String mobile, String code) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/otp/verify"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"mobile": mobile, "code": code}),
@@ -3261,7 +3362,7 @@ class ApiClient {
 
   /// Step 1 — send the WhatsApp OTP to a registered staff mobile.
   Future<String> requestStaffOtp(String mobile) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/staff-otp/request"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"mobile": mobile}),
@@ -3274,7 +3375,7 @@ class ApiClient {
 
   /// Step 2 — verify the staff OTP; the ERP mints the session cookie.
   Future<void> verifyStaffOtp(String mobile, String code) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/staff-otp/verify"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"mobile": mobile, "code": code}),
@@ -3290,7 +3391,7 @@ class ApiClient {
     if (!config.supabaseConfigured) {
       throw ApiException(LocaleController.strings.apiStaffLoginNotConfigured);
     }
-    final tokenRes = await http.post(
+    final tokenRes = await _http.post(
       Uri.parse("${config.supabaseUrl}/auth/v1/token?grant_type=password"),
       headers: {
         "Content-Type": "application/json",
@@ -3316,7 +3417,7 @@ class ApiClient {
       throw ApiException(LocaleController.strings.apiSignInFailedTryAgain);
     }
 
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/session"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"accessToken": token}),
@@ -3336,7 +3437,7 @@ class ApiClient {
     String? staffId,
     String? roleCode,
   }) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/demo"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({
@@ -3354,12 +3455,11 @@ class ApiClient {
   }
 
   /// The parent home screen payload — real children + fee dues.
-  Future<ParentSummary> fetchParentSummary() async {
-    final res = await _timedGet("/api/v1/parent/summary");
-    if (res.statusCode != 200) _throwFrom(res);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    return ParentSummary.fromJson(body["data"] as Map<String, dynamic>);
-  }
+  Future<ParentSummary> fetchParentSummary() async =>
+      ParentSummary.fromJson(await _getData("/api/v1/parent/summary"));
+
+  Future<Cached<ParentSummary>?> cachedParentSummary() =>
+      peekCached("/api/v1/parent/summary", ParentSummary.fromJson);
 
   /// The teacher home screen payload — identity, class-teacher section,
   /// today's periods, and the class/section list for attendance marking.
@@ -3370,11 +3470,13 @@ class ApiClient {
     return StaffCommandResult.fromJson(data);
   }
 
+  Future<Cached<StaffSummary>?> cachedStaffSummary() =>
+      peekCached("/api/v1/staff/summary", StaffSummary.fromJson);
+
   Future<StaffSummary> fetchStaffSummary() async {
-    final res = await _timedGet("/api/v1/staff/summary");
-    if (res.statusCode != 200) _throwFrom(res);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    final summary = StaffSummary.fromJson(body["data"] as Map<String, dynamic>);
+    final summary = StaffSummary.fromJson(
+      await _getData("/api/v1/staff/summary"),
+    );
     if (summary.homeKind.isNotEmpty) {
       await _storage.write(key: _kindKey, value: summary.homeKind);
     }
@@ -3386,7 +3488,7 @@ class ApiClient {
     required String sectionId,
     required String date,
   }) async {
-    final res = await http.get(
+    final res = await _http.get(
       _uri(
         "/api/v1/attendance/roster?classId=$classId&sectionId=$sectionId&date=$date",
       ),
@@ -3398,17 +3500,25 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> _getData(String path) async {
+    final cached = _cachedPaths.contains(path);
+    // Whose answer this will be — taken BEFORE the call, so a reply that
+    // lands after a sign-out or another sign-in is never saved as theirs.
+    final scope = cached ? await _cacheScope() : "";
     final res = await _timedGet(path);
     if (res.statusCode != 200) _throwFrom(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
-    return body["data"] as Map<String, dynamic>;
+    final data = body["data"] as Map<String, dynamic>;
+    if (cached && scope.isNotEmpty && await _cacheScope() == scope) {
+      unawaited(cache.write(scope, path, data));
+    }
+    return data;
   }
 
   Future<Map<String, dynamic>> _postData(
     String path,
     Map<String, dynamic> body,
   ) async {
-    final res = await http.post(
+    final res = await _clientFor(path).post(
       _uri(path),
       headers: await _authHeaders(),
       body: jsonEncode(body),
@@ -3442,7 +3552,7 @@ class ApiClient {
   }
 
   Future<void> unregisterPushToken(String token) async {
-    final res = await http.delete(
+    final res = await _http.delete(
       _uri("/api/v1/push/register"),
       headers: await _authHeaders(),
       body: jsonEncode({"token": token}),
@@ -3530,7 +3640,7 @@ class ApiClient {
     required String message,
   }) async {
     try {
-      await http.post(
+      await _http.post(
         _uri("/api/v1/app-guide"),
         headers: await _authHeaders(),
         body: jsonEncode({
@@ -3578,7 +3688,7 @@ class ApiClient {
   /// Records "shown" / "dismissed" / "done". Best effort.
   Future<void> appPopupEvent(String popupId, String event) async {
     try {
-      await http.post(
+      await _http.post(
         _uri("/api/v1/app/popups"),
         headers: await _authHeaders(),
         body: jsonEncode({"popupId": popupId, "action": event}),
@@ -3790,7 +3900,7 @@ class ApiClient {
     Map<String, String> variables = const {},
     bool dryRun = true,
   }) async {
-    final res = await http.post(
+    final res = await _slowHttp.post(
       _uri("/api/v1/owner/broadcast"),
       headers: await _authHeaders(),
       body: jsonEncode({
@@ -3990,7 +4100,7 @@ class ApiClient {
         contentType: MediaType.parse(mimeType),
       ),
     );
-    final streamed = await req.send();
+    final streamed = await _uploadHttp.send(req);
     final res = await http.Response.fromStream(streamed);
     if (res.statusCode != 200) _throwFrom(res);
     final decoded = jsonDecode(res.body) as Map<String, dynamic>;
@@ -4018,7 +4128,7 @@ class ApiClient {
   /// The receipt PDF's bytes, fetched with the session — the browser could
   /// not open the link on its own, it has no cookie.
   Future<List<int>> fetchReceiptPdf(String pdfUrl) async {
-    final res = await http.get(_uri(pdfUrl), headers: await imageHeaders());
+    final res = await _http.get(_uri(pdfUrl), headers: await imageHeaders());
     if (res.statusCode != 200) _throwFrom(res);
     return res.bodyBytes;
   }
@@ -4139,7 +4249,9 @@ class ApiClient {
           )
           .toList(),
       canReview: data["canReview"] == true,
-      heldCount: (data["heldCount"] as num?)?.toInt() ?? 0,
+      heldCount: data["heldCount"] == null && data["canReview"] == true
+          ? null
+          : (data["heldCount"] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -4204,7 +4316,7 @@ class ApiClient {
       onError: (Object e) => req.sink.addError(e),
       cancelOnError: true,
     );
-    final res = await http.Response.fromStream(await req.send());
+    final res = await http.Response.fromStream(await _mediaHttp.send(req));
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw ApiException(
         "The file did not upload (${res.statusCode}) — check the connection and try again.",
@@ -4312,8 +4424,13 @@ class ApiClient {
     });
   }
 
-  Future<List<CommsItem>> fetchCommsFeed() async {
-    final data = await _getData("/api/v1/comms/feed");
+  Future<List<CommsItem>> fetchCommsFeed() async =>
+      _commsFrom(await _getData("/api/v1/comms/feed"));
+
+  Future<Cached<List<CommsItem>>?> cachedCommsFeed() =>
+      peekCached("/api/v1/comms/feed", _commsFrom);
+
+  List<CommsItem> _commsFrom(Map<String, dynamic> data) {
     return [
       ...((data["notices"] as List?) ?? const []).map((raw) {
         final n = raw as Map<String, dynamic>;
@@ -4369,8 +4486,16 @@ class ApiClient {
   Future<PrincipalSnapshot> fetchPrincipalSnapshot() async =>
       PrincipalSnapshot.fromJson(await _getData("/api/v1/principal/snapshot"));
 
-  Future<List<TransportRouteInfo>> fetchTransportRoutes() async {
-    final data = await _getData("/api/v1/transport/routes");
+  Future<Cached<PrincipalSnapshot>?> cachedPrincipalSnapshot() =>
+      peekCached("/api/v1/principal/snapshot", PrincipalSnapshot.fromJson);
+
+  Future<Cached<List<TransportRouteInfo>>?> cachedTransportRoutes() =>
+      peekCached("/api/v1/transport/routes", _routesFrom);
+
+  Future<List<TransportRouteInfo>> fetchTransportRoutes() async =>
+      _routesFrom(await _getData("/api/v1/transport/routes"));
+
+  List<TransportRouteInfo> _routesFrom(Map<String, dynamic> data) {
     return ((data["routes"] as List?) ?? const [])
         .map((r) => TransportRouteInfo.fromJson(r as Map<String, dynamic>))
         .toList();
@@ -4569,7 +4694,7 @@ class ApiClient {
     required String date,
     required Map<String, String> statusByStudent,
   }) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/v1/attendance/mark"),
       headers: await _authHeaders(),
       body: jsonEncode({

@@ -241,7 +241,7 @@ extension OnlineClassesApi on ApiClient {
     required String sessionId,
     required String studentId,
   }) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/v1/parent/online-classes/join"),
       headers: {...await _authHeaders(), "x-app-platform": "android"},
       body: jsonEncode({"sessionId": sessionId, "studentId": studentId}),
@@ -292,7 +292,7 @@ extension OnlineClassesApi on ApiClient {
 
   /// start | end | cancel | reopen
   Future<StaffOnlineClass> onlineClassAction(String id, String action) async {
-    final res = await http.patch(
+    final res = await _http.patch(
       _uri("/api/v1/staff/online-classes"),
       headers: await _authHeaders(),
       body: jsonEncode({"id": id, "action": action}),
@@ -479,7 +479,7 @@ extension OnlineClassQaApi on ApiClient {
         contentType: MediaType.parse(mimeType),
       ),
     );
-    final res = await http.Response.fromStream(await req.send());
+    final res = await http.Response.fromStream(await _uploadHttp.send(req));
     if (res.statusCode != 200) _throwFrom(res);
   }
 
@@ -492,7 +492,7 @@ extension OnlineClassQaApi on ApiClient {
   }
 
   Future<void> _patchQa(String sessionId, Map<String, dynamic> body) async {
-    final res = await http.patch(
+    final res = await _http.patch(
       _uri("/api/v1/staff/online-classes/$sessionId/questions"),
       headers: await _authHeaders(),
       body: jsonEncode(body),
@@ -522,7 +522,7 @@ extension OnlineClassQaApi on ApiClient {
   }
 
   Future<ClassSummaryInfo> _patchSummary(String sessionId, Map<String, dynamic> body) async {
-    final res = await http.patch(
+    final res = await _http.patch(
       _uri("/api/v1/staff/online-classes/$sessionId/summary"),
       headers: await _authHeaders(),
       body: jsonEncode(body),

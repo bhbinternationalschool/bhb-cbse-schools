@@ -1131,9 +1131,13 @@ class SurveyDayStatus {
           .toList(),
       classes = _list(j, "classes").map((c) => (id: _s(c, "id"), name: _s(c, "name"))).toList(),
       enquiryNo = _s(j, "enquiryNo"),
-      duplicate = _b(j, "duplicate");
+      duplicate = _b(j, "duplicate"),
+      canManage = _b(j, "canManage");
 
   final String memberName;
+
+  /// The survey team leader: may add / remove staff and beats from the app.
+  final bool canManage;
 
   /// Starts at school: START needs the gate code and a fix on campus.
   final bool startsAtSchool;
@@ -1147,6 +1151,52 @@ class SurveyDayStatus {
   /// Set on a capture's reply.
   final String enquiryNo;
   final bool duplicate;
+}
+
+/// The survey team as its leader sees it (POST /api/public/survey-day
+/// "team" / "manage"): members, every beat (retired ones too), and the
+/// active staff who are not on the team yet.
+class SurveyTeamInfo {
+  SurveyTeamInfo.fromJson(Map<String, dynamic> j)
+    : members = _list(j, "members")
+          .map(
+            (m) => (
+              id: _s(m, "id"),
+              name: _s(m, "name"),
+              kind: _s(m, "kind"),
+              role: _s(m, "role"),
+              empCode: _s(m, "empCode"),
+              revision: _s(m, "revision"),
+              isMe: _b(m, "isMe"),
+            ),
+          )
+          .toList(),
+      beats = _list(j, "beats")
+          .map(
+            (b) => (
+              id: _s(b, "id"),
+              code: _s(b, "code"),
+              name: _s(b, "name"),
+              area: _s(b, "area"),
+              targetHouseholds: _i(b, "targetHouseholds"),
+              isActive: _b(b, "isActive"),
+              revision: _s(b, "revision"),
+            ),
+          )
+          .toList(),
+      staff = _list(j, "staff")
+          .map((s) => (id: _s(s, "id"), name: _s(s, "name"), empCode: _s(s, "empCode")))
+          .toList();
+
+  final List<
+    ({String id, String name, String kind, String role, String empCode, String revision, bool isMe})
+  >
+  members;
+  final List<
+    ({String id, String code, String name, String area, int targetHouseholds, bool isActive, String revision})
+  >
+  beats;
+  final List<({String id, String name, String empCode})> staff;
 }
 
 class SurveyDayInfo {
@@ -1563,6 +1613,9 @@ extension StaffApi on ApiClient {
   Future<StaffApprovals> fetchApprovals() async =>
       StaffApprovals.fromJson(await _getData("/api/v1/staff/approvals"));
 
+  Future<Cached<StaffApprovals>?> cachedApprovals() =>
+      peekCached("/api/v1/staff/approvals", StaffApprovals.fromJson);
+
   Future<StaffRoster> fetchStaffRoster() async =>
       StaffRoster.fromJson(await _getData("/api/v1/staff/roster"));
 
@@ -1581,6 +1634,9 @@ extension StaffApi on ApiClient {
   Future<StaffFeatureSet> fetchStaffFeatures() async =>
       StaffFeatureSet.fromJson(await _getData("/api/v1/staff/features"));
 
+  Future<Cached<StaffFeatureSet>?> cachedStaffFeatures() =>
+      peekCached("/api/v1/staff/features", StaffFeatureSet.fromJson);
+
   // ---- my profile (self service) ----------------------------------------
 
   /// The signed-in staff member's own record: masked where it must be, the
@@ -1594,7 +1650,7 @@ extension StaffApi on ApiClient {
   Future<StaffProfileSaveResult> updateMyProfile(
     Map<String, String> fields,
   ) async {
-    final res = await http.patch(
+    final res = await _http.patch(
       _uri("/api/v1/staff/me/profile"),
       headers: await _authHeaders(),
       body: jsonEncode({"fields": fields}),
@@ -1618,7 +1674,7 @@ extension StaffApi on ApiClient {
 
   /// Withdraw the open request to the office.
   Future<StaffProfile> withdrawMyProfileRequest() async {
-    final res = await http.delete(
+    final res = await _http.delete(
       _uri("/api/v1/staff/me/profile"),
       headers: await _authHeaders(),
     );
@@ -1655,13 +1711,47 @@ extension StaffApi on ApiClient {
         contentType: MediaType.parse(mime),
       ),
     );
-    final res = await http.Response.fromStream(await req.send());
+    final res = await http.Response.fromStream(await _uploadHttp.send(req));
     if (res.statusCode != 200) _throwFrom(res);
     final data =
         ((jsonDecode(res.body) as Map<String, dynamic>)["data"]
             as Map<String, dynamic>?) ??
         const {};
     return erpUrl("${data["photoUrl"] ?? ""}");
+  }
+
+  /// Put [png] on the signed-in member of staff's record as their signature
+  /// (POST /api/v1/staff/me/signature — own record only; PNG / JPG / WebP,
+  /// at most 1 MB). Replaces any earlier one. Returns its full URL.
+  Future<String> uploadMySignature(Uint8List png) async {
+    final req = http.MultipartRequest("POST", _uri("/api/v1/staff/me/signature"));
+    final headers = await _authHeaders();
+    headers.remove("Content-Type");
+    req.headers.addAll(headers);
+    req.files.add(
+      http.MultipartFile.fromBytes(
+        "file",
+        png,
+        filename: "signature.png",
+        contentType: MediaType.parse("image/png"),
+      ),
+    );
+    final res = await http.Response.fromStream(await _uploadHttp.send(req));
+    if (res.statusCode != 200) _throwFrom(res);
+    final data =
+        ((jsonDecode(res.body) as Map<String, dynamic>)["data"]
+            as Map<String, dynamic>?) ??
+        const {};
+    return erpUrl("${data["signatureUrl"] ?? ""}");
+  }
+
+  /// Take the signature off the signed-in member of staff's record.
+  Future<void> removeMySignature() async {
+    final res = await _http.delete(
+      _uri("/api/v1/staff/me/signature"),
+      headers: await _authHeaders(),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
   }
 
   Future<List<FeeStudentHit>> searchFeeStudents(String q) async {
@@ -1797,6 +1887,30 @@ extension StaffApi on ApiClient {
     return SurveyDayStatus.fromJson(data);
   }
 
+  /// The team leader's "team" (read) or "manage" (one change, [change]) call
+  /// — same signed route as [surveyDayStep]; the server checks that this
+  /// phone belongs to the team's leader.
+  Future<SurveyTeamInfo> surveyTeamStep({
+    required String action,
+    required Map<String, String> deviceJwk,
+    required String signature,
+    required int ts,
+    Map<String, dynamic>? change,
+    String deviceLabel = "BHB staff app",
+  }) async {
+    final data = await _postData("/api/public/survey-day", {
+      "action": action,
+      "change": ?change,
+      "device": {
+        "jwk": deviceJwk,
+        "signature": signature,
+        "ts": ts,
+        "label": deviceLabel,
+      },
+    });
+    return SurveyTeamInfo.fromJson(data);
+  }
+
   Future<SurveySetup> fetchSurveySetup() async =>
       SurveySetup.fromJson(await _getData("/api/v1/staff/survey/beats"));
 
@@ -1814,8 +1928,17 @@ extension StaffApi on ApiClient {
     String address = "",
     String previousSchool = "",
     String note = "",
+    /// The family's home: the phone's location ("gps") or a map pin ("map").
+    ({double lat, double lng, double accuracyM, String source})? location,
   }) async {
     final data = await _postData("/api/v1/staff/survey/capture", {
+      if (location != null)
+        "location": {
+          "lat": location.lat,
+          "lng": location.lng,
+          "accuracyM": location.accuracyM,
+          "source": location.source,
+        },
       "beatId": beatId,
       "childName": childName,
       "guardianName": guardianName,
@@ -1894,7 +2017,7 @@ extension StaffApi on ApiClient {
   /// A file behind the ERP's authenticated proxy (student documents),
   /// fetched with the session cookie — the phone's browser has none.
   Future<(Uint8List, String)> fetchFileBytes(String path) async {
-    final res = await http.get(
+    final res = await _http.get(
       path.startsWith("http") ? Uri.parse(path) : _uri(path),
       headers: await _authHeaders(),
     );
@@ -1981,6 +2104,7 @@ class StaffProfile {
       photoUrl = url(_s(_m(j, "staff"), "photoUrl")),
       photoStatus = _s(_m(j, "staff"), "photoStatus"),
       photoNote = _s(_m(j, "staff"), "photoNote"),
+      signatureUrl = url(_s(_m(j, "staff"), "signatureUrl")),
       designation = _s(_m(j, "staff"), "designation"),
       department = _s(_m(j, "staff"), "department"),
       joiningDate = _s(_m(j, "staff"), "joiningDate"),
@@ -2013,6 +2137,9 @@ class StaffProfile {
   /// pending | verified | rejected | ""
   final String photoStatus;
   final String photoNote;
+
+  /// Full URL of their signature (a trimmed, transparent PNG), or "".
+  final String signatureUrl;
   final String designation;
   final String department;
   final String joiningDate;
