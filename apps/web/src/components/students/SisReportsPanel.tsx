@@ -15,6 +15,8 @@ import {
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import { hasPermission } from "@/lib/rbac";
+import { MonthRangeFilter, useMonthRange } from "@/components/ui/month-range-filter";
+import { reportPeriodPayload } from "@/lib/monthRange";
 
 export function SisReportsPanel({
   tick = 0,
@@ -30,9 +32,10 @@ export function SisReportsPanel({
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [status, setStatus] = useState<"all" | "active" | "inactive">("active");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
-  const [month, setMonth] = useState("");
+  // One admission period: Month and From/To can never disagree
+  // (lib/monthRange.ts). Blank = every admission date, as before. Not bound
+  // to the session — the roster holds children admitted in earlier years.
+  const period = useMonthRange({ initial: "all", allowOpen: true, storageKey: "students.sisReports" });
   const [customCols, setCustomCols] = useState<string[]>([
     "admissionNo",
     "fullName",
@@ -118,9 +121,7 @@ export function SisReportsPanel({
       classId: classId || undefined,
       sectionId: sectionId || undefined,
       status,
-      fromDate: fromDate || undefined,
-      toDate: toDate || undefined,
-      month: month || undefined,
+      ...reportPeriodPayload("range", period.range, period.session),
       customColumns: id === "custom_download" ? customCols : undefined,
       masters: masters ?? undefined,
       sis: sis ?? undefined,
@@ -226,40 +227,7 @@ export function SisReportsPanel({
               <option value="all">All</option>
             </select>
           </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-[11px] text-[var(--muted)]">
-              From
-            </span>
-            <input
-              type="date"
-              className="field !py-1.5"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-            />
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-[11px] text-[var(--muted)]">
-              To
-            </span>
-            <input
-              type="date"
-              className="field !py-1.5"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-            />
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-[11px] text-[var(--muted)]">
-              Month
-            </span>
-            <input
-              type="month"
-              className="field !py-1.5"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              title="Used by monthly admission report"
-            />
-          </label>
+          <MonthRangeFilter period={period} />
         </div>
       </div>
 

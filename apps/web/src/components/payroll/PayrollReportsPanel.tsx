@@ -14,6 +14,8 @@ import {
 } from "@/lib/payrollReportCatalog";
 import type { StaffStream } from "@/lib/foundationMasters";
 import type { PayrollRunStatus, PayrollPaymentMode } from "@/lib/payroll";
+import { MonthRangeFilter, useMonthRange } from "@/components/ui/month-range-filter";
+import { monthBounds } from "@/lib/monthRange";
 
 export function PayrollReportsPanel({
   academicYearCode,
@@ -21,9 +23,16 @@ export function PayrollReportsPanel({
   academicYearCode: string;
 }) {
   const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
-  const [monthFrom, setMonthFrom] = useState("");
-  const [monthTo, setMonthTo] = useState(currentMonthIso);
-  const [month, setMonth] = useState("");
+  // One period in whole months (lib/monthRange.ts): the single month and
+  // Month from / to always describe the same months, inside the session.
+  // Opens as before — any month up to this one.
+  const period = useMonthRange({
+    session: academicYearCode,
+    initial: { from: "", to: monthBounds(currentMonthIso())?.to ?? "" },
+    allowOpen: true,
+    storageKey: "payroll.reports",
+  });
+  const month = period.month;
   const [stream, setStream] = useState<StaffStream | "all">("all");
   const [staffId, setStaffId] = useState("");
   const [status, setStatus] = useState<
@@ -79,8 +88,8 @@ export function PayrollReportsPanel({
     const result = runPayrollReport(id, {
       academicYearCode,
       month: month || undefined,
-      monthFrom: month ? undefined : monthFrom || undefined,
-      monthTo: month ? undefined : monthTo || undefined,
+      monthFrom: month ? undefined : period.from.slice(0, 7) || undefined,
+      monthTo: month ? undefined : period.to.slice(0, 7) || undefined,
       stream,
       staffId: staffId || undefined,
       status,
@@ -128,38 +137,16 @@ export function PayrollReportsPanel({
         ) : null}
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <label className="text-xs font-semibold text-[var(--muted)]">
-            Single month (optional)
-            <input
-              type="month"
-              className="field mt-1 !py-2"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-            />
-            <span className="mt-0.5 block text-[10px] font-normal">
-              Clears range when set
-            </span>
-          </label>
-          <label className="text-xs font-semibold text-[var(--muted)]">
-            Month from
-            <input
-              type="month"
-              className="field mt-1 !py-2"
-              value={monthFrom}
-              disabled={!!month}
-              onChange={(e) => setMonthFrom(e.target.value)}
-            />
-          </label>
-          <label className="text-xs font-semibold text-[var(--muted)]">
-            Month to
-            <input
-              type="month"
-              className="field mt-1 !py-2"
-              value={monthTo}
-              disabled={!!month}
-              onChange={(e) => setMonthTo(e.target.value)}
-            />
-          </label>
+          <MonthRangeFilter
+            period={period}
+            granularity="month"
+            monthLabel="Single month (optional)"
+            fromLabel="Month from"
+            toLabel="Month to"
+            labelClassName="text-xs font-semibold text-[var(--muted)]"
+            captionClassName="block"
+            fieldClassName="field mt-1 !py-2"
+          />
           <label className="text-xs font-semibold text-[var(--muted)]">
             Run status
             <select

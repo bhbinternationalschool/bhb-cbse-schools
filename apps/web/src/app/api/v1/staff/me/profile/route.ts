@@ -55,6 +55,7 @@ async function view(ctx: ApiAuthContext, staffId: string) {
       empCode: s.empCode,
       fullName: s.fullName,
       photoUrl: s.photoUrl || "",
+      signatureUrl: s.signatureUrl || "",
       photoStatus: s.docs?.photo?.status || "",
       photoNote: s.docs?.photo?.reviewNote || "",
       designation,

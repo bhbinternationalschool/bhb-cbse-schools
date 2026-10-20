@@ -26,12 +26,21 @@ import {
 import { L_BANK, L_PG_CLEARING } from "@/lib/ledger/coa";
 import { ledgerPost, ledgerReverse } from "@/lib/ledger/ledger.server";
 import { buildPgSettlementVoucher } from "@/lib/ledger/projectionMap";
+import {
+  PAID_SETTLEMENT_STATUSES,
+  deriveSettlementStatus,
+  failedReconState,
+  findRetry,
+  mergeStoredStatus,
+  settlementPaymentWindow,
+  type RetriedAs,
+} from "@/lib/ledger/pgSettlementStatus";
 import { getServerTenantContext } from "@/lib/serverTenant";
 
 const PROVIDER = "cashfree";
 
 /** Statuses that mean the money is genuinely in the school's bank. */
-const PAID_STATUSES = new Set(["SUCCESS", "PAID", "COMPLETED"]);
+const PAID_STATUSES = PAID_SETTLEMENT_STATUSES;
 
 export type SettlementSyncOutcome = {
   seen: number;
@@ -139,6 +148,19 @@ async function storeSettlement(
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
 
+  // A FAILED we were told about is not undone by a later row that merely lacks
+  // the failure signals (see mergeStoredStatus). Read it first; a read error
+  // refuses the write rather than risk turning FAILED back into "in flight".
+  const { data: prior, error: priorErr } = await ctx.sb
+    .from("ledger_pg_settlements")
+    .select("status")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("provider", PROVIDER)
+    .eq("cf_settlement_id", s.cfSettlementId)
+    .maybeSingle();
+  if (priorErr) return { ok: false, error: priorErr.message };
+  const status = mergeStoredStatus(String(prior?.status ?? ""), s.status);
+
   const { error } = await ctx.sb.from("ledger_pg_settlements").upsert(
     {
       tenant_id: ctx.tenantId,
@@ -146,7 +168,7 @@ async function storeSettlement(
       cf_settlement_id: s.cfSettlementId,
       utr: s.utr,
       settlement_type: s.settlementType,
-      status: s.status,
+      status,
       payment_amount_paise: s.paymentAmountPaise,
       amount_settled_paise: s.amountSettledPaise,
       service_charge_paise: s.serviceChargePaise,
@@ -270,7 +292,34 @@ export async function postSettlement(
   if (error) return { ok: false, error: error.message };
   if (!row) return { ok: false, error: `settlement ${cfSettlementId} not stored` };
 
-  const status = String(row.status ?? "").toUpperCase();
+  // Re-derived from the stored gateway record too, so a row stored before the
+  // FAILED mapping existed is never posted on the strength of its old status.
+  // Only the failure signal is re-read here: the stored status is otherwise
+  // kept as it is, never promoted.
+  const status = deriveSettlementStatus({
+    explicit: String(row.status ?? ""),
+    hasSettledDate: false,
+    raw: row.raw,
+  });
+
+  // A failed settlement never reaches the book. If one somehow already has a
+  // voucher, that is money the bank never received sitting in the bank book:
+  // flag it loudly (the board shows it as a break) and leave the correction to
+  // a person — reversing it here would be a posting decided by a heuristic.
+  if (status === "FAILED") {
+    if (row.voucher_id) {
+      const flag = "Settlement FAILED at the gateway but has a voucher — reverse it after checking the bank statement";
+      if (String(row.post_error ?? "") !== flag) {
+        await ctx.sb
+          .from("ledger_pg_settlements")
+          .update({ post_error: flag, updated_at: new Date().toISOString() })
+          .eq("tenant_id", ctx.tenantId)
+          .eq("provider", PROVIDER)
+          .eq("cf_settlement_id", cfSettlementId);
+      }
+    }
+    return { ok: true, posted: false };
+  }
 
   // A reversal undoes a posting rather than editing it — the book is
   // append-only, so the correction is its own voucher pointing at the original.
@@ -370,8 +419,9 @@ async function resolveBankCode(row: Record<string, unknown>): Promise<string> {
 export async function ingestSettlementWebhook(
   data: Record<string, unknown>,
   actor = "cashfree webhook",
+  eventType = "",
 ): Promise<{ ok: boolean; error?: string; posted?: boolean }> {
-  const s = settlementFromWebhook(data);
+  const s = settlementFromWebhook(data, eventType);
   if (!s) return { ok: false, error: "no settlement in the event" };
 
   const bank = await resolveBank(s.bankAccountLast4);
@@ -383,7 +433,9 @@ export async function ingestSettlementWebhook(
   // is what lets a family's payment be traced to the credit that paid it.
   await pullSettlementEvents([s.cfSettlementId]).catch(() => undefined);
 
-  if (!PAID_STATUSES.has(s.status) && s.status !== "REVERSED") {
+  // FAILED goes through postSettlement only so a stray voucher gets flagged;
+  // it never posts.
+  if (!PAID_STATUSES.has(s.status) && s.status !== "REVERSED" && s.status !== "FAILED") {
     return { ok: true, posted: false };
   }
   const posted = await postSettlement(s.cfSettlementId, actor);
@@ -437,6 +489,13 @@ export async function syncCashfreeSettlements(input: {
       else outcome.errors.push(`${s.cfSettlementId}: ${rev.error}`);
       continue;
     }
+    if (s.status === "FAILED") {
+      // Never posted; postSettlement only flags one that already has a voucher.
+      const chk = await postSettlement(s.cfSettlementId, actor);
+      if (!chk.ok) outcome.errors.push(`${s.cfSettlementId}: ${chk.error}`);
+      outcome.skipped.push({ id: s.cfSettlementId, reason: "FAILED — Cashfree retries it as a new settlement" });
+      continue;
+    }
     if (!PAID_STATUSES.has(s.status)) {
       outcome.skipped.push({ id: s.cfSettlementId, reason: s.status || "not settled" });
       continue;
@@ -469,6 +528,11 @@ export type SettlementReconRow = {
   voucherNo: string;
   reconState: string;
   postError: string;
+  /** The payment window it covers, as the gateway states it. */
+  paymentFrom: string;
+  paymentTill: string;
+  /** For a failed settlement: the paid one that carried its money, if found. */
+  retriedAs: RetriedAs | null;
 };
 
 /**
@@ -496,7 +560,18 @@ export async function pgClearingBalancePaise(): Promise<number | null> {
   return Number(data.balance_paise ?? 0);
 }
 
-/** The recon board: every settlement in a window and whether it is explained. */
+const PAGE = 1000;
+
+/**
+ * The recon board: every settlement in a window and whether it is explained.
+ *
+ * The view's recon_state predates the FAILED mapping and calls a failed
+ * settlement "pending". So each row's status is re-derived here from the
+ * stored gateway record — which is what corrects the board the moment this
+ * ships, before the next pull rewrites the stored status — and a failed row
+ * is labelled with the paid settlement that retried it, looked for beyond the
+ * window too, since a retry lands a day or more later.
+ */
 export async function listSettlementRecon(range: {
   from: string;
   to: string;
@@ -504,21 +579,50 @@ export async function listSettlementRecon(range: {
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
 
-  const { data, error } = await ctx.sb
-    .from("ledger_v_pg_settlement_recon")
-    .select("*")
-    .eq("tenant_id", ctx.tenantId)
-    .gte("settled_on", range.from)
-    .lte("settled_on", range.to)
-    .order("settled_on", { ascending: false });
-  if (error) return { ok: false, error: error.message };
+  const viewRows: Record<string, unknown>[] = [];
+  for (let off = 0; ; off += PAGE) {
+    const { data, error } = await ctx.sb
+      .from("ledger_v_pg_settlement_recon")
+      .select("*")
+      .eq("tenant_id", ctx.tenantId)
+      .gte("settled_on", range.from)
+      .lte("settled_on", range.to)
+      .order("settled_on", { ascending: false })
+      .order("cf_settlement_id", { ascending: true })
+      .range(off, off + PAGE - 1);
+    if (error) return { ok: false, error: error.message };
+    viewRows.push(...((data ?? []) as Record<string, unknown>[]));
+    if ((data ?? []).length < PAGE) break;
+  }
 
-  return {
-    ok: true,
-    rows: (data ?? []).map((r) => ({
-      cfSettlementId: String(r.cf_settlement_id ?? ""),
+  // The gateway record behind each row: the failure signal and the window.
+  const rawById = new Map<string, unknown>();
+  const ids = viewRows.map((r) => String(r.cf_settlement_id ?? ""));
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await ctx.sb
+      .from("ledger_pg_settlements")
+      .select("cf_settlement_id, raw")
+      .eq("tenant_id", ctx.tenantId)
+      .eq("provider", PROVIDER)
+      .in("cf_settlement_id", ids.slice(i, i + 200));
+    if (error) return { ok: false, error: error.message };
+    for (const r of data ?? []) rawById.set(String(r.cf_settlement_id), r.raw);
+  }
+
+  const rows: SettlementReconRow[] = viewRows.map((r) => {
+    const id = String(r.cf_settlement_id ?? "");
+    const raw = rawById.get(id);
+    const status = deriveSettlementStatus({
+      explicit: String(r.status ?? ""),
+      hasSettledDate: false,
+      raw,
+    });
+    const win = settlementPaymentWindow(raw);
+    const voucherNo = String(r.voucher_no ?? "");
+    return {
+      cfSettlementId: id,
       utr: String(r.utr ?? ""),
-      status: String(r.status ?? ""),
+      status,
       settledOn: String(r.settled_on ?? ""),
       amountSettledPaise: Number(r.amount_settled_paise ?? 0),
       paymentAmountPaise: Number(r.payment_amount_paise ?? 0),
@@ -527,9 +631,49 @@ export async function listSettlementRecon(range: {
       eventCount: Number(r.event_count ?? 0),
       eventsTotalPaise: Number(r.events_total_paise ?? 0),
       derivedNetPaise: Number(r.derived_net_paise ?? 0),
-      voucherNo: String(r.voucher_no ?? ""),
-      reconState: String(r.recon_state ?? ""),
+      voucherNo,
+      reconState:
+        status === "FAILED" ? failedReconState(voucherNo) : String(r.recon_state ?? ""),
       postError: String(r.post_error ?? ""),
-    })),
-  };
+      paymentFrom: win.from,
+      paymentTill: win.till,
+      retriedAs: null,
+    };
+  });
+
+  const failed = rows.filter((r) => r.status === "FAILED");
+  if (failed.length > 0) {
+    // Paid settlements from the earliest failure onward — in or after the
+    // window. Paged: an old failure must not silently cap the search.
+    const earliest = failed.map((r) => r.settledOn).filter(Boolean).sort()[0] || range.from;
+    const candidates: Parameters<typeof findRetry>[1] = [];
+    for (let off = 0; ; off += PAGE) {
+      const { data, error } = await ctx.sb
+        .from("ledger_pg_settlements")
+        .select("cf_settlement_id, utr, status, raw")
+        .eq("tenant_id", ctx.tenantId)
+        .eq("provider", PROVIDER)
+        .in("status", [...PAID_STATUSES])
+        .gte("settled_on", earliest)
+        .order("settled_on", { ascending: true })
+        .order("cf_settlement_id", { ascending: true })
+        .range(off, off + PAGE - 1);
+      if (error) return { ok: false, error: error.message };
+      for (const c of data ?? []) {
+        const win = settlementPaymentWindow(c.raw);
+        candidates.push({
+          cfSettlementId: String(c.cf_settlement_id ?? ""),
+          utr: String(c.utr ?? ""),
+          // A paid row whose own record says failed is no retry.
+          status: deriveSettlementStatus({ explicit: String(c.status ?? ""), raw: c.raw }),
+          paymentFrom: win.from,
+          paymentTill: win.till,
+        });
+      }
+      if ((data ?? []).length < PAGE) break;
+    }
+    for (const r of failed) r.retriedAs = findRetry(r, candidates);
+  }
+
+  return { ok: true, rows };
 }
