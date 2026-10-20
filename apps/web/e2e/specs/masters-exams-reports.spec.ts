@@ -278,3 +278,54 @@ test.describe("a failed read is shown as a failure, never as an empty list", () 
     });
   }
 });
+
+/**
+ * Masters not answered yet (2.1h review): the Masters-drawn Exams tabs and
+ * the Exam report runner (Exams → Result reports) say "Loading…" — on the
+ * branch before the review fix they drew nothing (an empty tab) or an
+ * "All classes"-only picker. views/masters is held until "Loading…" is seen.
+ */
+async function holdView(page: Page, name: "masters"): Promise<() => void> {
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route(`**/api/data/views/${name}`, async (route) => {
+    await gate;
+    return route.fallback();
+  });
+  return release;
+}
+
+const LOADING: { name: string; tab: string; ready: (p: Page) => ReturnType<Page["locator"]> | null }[] = [
+  { name: "Date-sheet", tab: "Date-sheet", ready: () => null },
+  { name: "Seating", tab: "Seating", ready: () => null },
+  {
+    name: "Result reports (ExamReportsRunner)",
+    tab: "Result reports",
+    ready: (p) => p.locator("select").filter({ has: p.locator("option", { hasText: /^Nursery$/ }) }).first(),
+  },
+];
+
+test.describe("while Masters loads the screen says so, never an empty tab", () => {
+  for (const c of LOADING) {
+    for (const phone of [false, true]) {
+      test(`principal /exams ${c.name} (${phone ? "375 dark" : "desktop light"}): "Loading…" until views/masters answers`, async ({ browser }, testInfo) => {
+        const page = await contextPage(browser, "principal", phone);
+        const errors = collectPageErrors(page);
+        const release = await holdView(page, "masters");
+        await page.goto("/exams");
+        await page.getByRole("tab", { name: c.tab, exact: true }).click({ timeout: 30_000 });
+        const loading = page.getByText("Loading…", { exact: true });
+        await expect(loading.first()).toBeVisible({ timeout: 10_000 });
+        await page.screenshot({ path: testInfo.outputPath(`loading-${phone ? "375-dark" : "desktop"}.png`) });
+        release();
+        await expect(loading).toHaveCount(0, { timeout: 30_000 });
+        const ready = c.ready(page);
+        if (ready) await expect(ready).toBeVisible({ timeout: 30_000 });
+        await expect(page.getByText(/could not load/i)).toHaveCount(0);
+        await page.screenshot({ path: testInfo.outputPath(`ready-${phone ? "375-dark" : "desktop"}.png`) });
+        expect(errors, "no page errors").toEqual([]);
+        await page.context().close();
+      });
+    }
+  }
+});
