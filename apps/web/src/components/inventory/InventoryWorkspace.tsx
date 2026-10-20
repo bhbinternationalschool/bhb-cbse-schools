@@ -90,7 +90,10 @@ export function InventoryWorkspace() {
   // Class names come from the Masters view (data-layer 2.1i: the server's
   // book, kept fresh by the versions poll — not the page copy read once).
   // Only the labels are used here — kit assignments store class ids.
-  const mastersQ = useMasters();
+  /** The two tabs that name classes wait for them: unread is not "no classes". */
+  const needsClasses = tab === "counter" || tab === "kits";
+  // Only those two tabs read it: the others make no masters request.
+  const mastersQ = useMasters({ enabled: needsClasses });
   const book = mastersQ.data?.masters ?? null;
   const classes = useMemo(
     () =>
@@ -107,9 +110,6 @@ export function InventoryWorkspace() {
         .map((s) => ({ id: s.id, classId: s.classId, label: s.name })),
     [book],
   );
-  /** The two tabs that name classes wait for them: unread is not "no classes". */
-  const needsClasses = tab === "counter" || tab === "kits";
-
   // Someone holding only some Store functions (Counter, Purchase, …) sees
   // only their tabs. The inventory routes enforce the same split, writes
   // included (lib/inventory/route.server.ts).

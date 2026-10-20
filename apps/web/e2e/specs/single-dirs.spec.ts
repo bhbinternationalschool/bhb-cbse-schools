@@ -22,6 +22,7 @@
  */
 import type { Browser, Page } from "@playwright/test";
 import { APP_URL, collectPageErrors, expect, fx, metric, signIn, test, type Who } from "../support";
+import { teachingMastersSubset } from "@/lib/mastersTeachingSubset";
 
 const FAILED_READ = JSON.stringify({ ok: false, error: "Could not read the school setup — please try again." });
 const N = fx.expected.classes;
@@ -39,6 +40,25 @@ async function failMastersView(page: Page): Promise<() => Promise<number>> {
   };
 }
 
+/**
+ * Answer views/masters as the server answers someone without the Masters
+ * grant: scope "teaching", the real book cut by the server's own
+ * teachingMastersSubset (fee groups, heads, structure, concessions withheld).
+ */
+async function answerTeachingScope(page: Page): Promise<() => number> {
+  let hits = 0;
+  await page.route("**/api/data/views/masters", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { ok: boolean; data?: { scope: string; masters: Record<string, unknown> } };
+    if (body.ok && body.data) {
+      hits += 1;
+      body.data = { scope: "teaching", masters: { version: body.data.masters.version, ...teachingMastersSubset(body.data.masters) } };
+    }
+    await route.fulfill({ response: res, json: body });
+  });
+  return () => hits;
+}
+
 /** The select inside the label whose text starts with `label`. */
 const selectIn = (page: Page, label: RegExp) => page.locator("label", { hasText: label }).locator("select").first();
 
@@ -52,6 +72,12 @@ type Screen = {
   prepare?: (page: Page) => Promise<void>;
   /** What must NOT be drawn while the read failed (and is scrolled to for the screenshots). */
   absent: (page: Page) => ReturnType<Page["locator"]>;
+  /**
+   * The screen stays usable without Masters (the gate, the infirmary —
+   * director's standard): while the read fails `absent` must be DRAWN and
+   * working, with an in-place "could not load" + Try again for the names.
+   */
+  usableWithoutMasters?: true;
 };
 
 const classSelect = (page: Page) => selectIn(page, /^Class/);
@@ -91,6 +117,7 @@ const SCREENS: Screen[] = [
     path: "/health",
     ready: async (p) => expect(p.getByRole("tab", { name: "Visit log" })).toBeVisible({ timeout: 20_000 }),
     absent: (p) => p.getByRole("tab", { name: "Visit log" }),
+    usableWithoutMasters: true,
   },
   {
     name: "id-cards",
@@ -153,6 +180,7 @@ const SCREENS: Screen[] = [
     path: "/visitors",
     ready: async (p) => expect(p.getByRole("button", { name: "Check in", exact: true })).toBeVisible({ timeout: 20_000 }),
     absent: (p) => p.getByRole("button", { name: "Check in", exact: true }),
+    usableWithoutMasters: true,
   },
   {
     name: "accounts-daily-rate",
@@ -178,32 +206,48 @@ async function desktopLight(browser: Browser, who: Who): Promise<Page> {
   return context.newPage();
 }
 
+async function disciplineEnabled(page: Page): Promise<boolean | null> {
+  const r = await page.request.get("/api/data/views/module-registry");
+  const body = (await r.json().catch(() => null)) as { data?: { enabled?: Record<string, boolean> }; enabled?: Record<string, boolean> } | null;
+  const v = (body?.data?.enabled ?? body?.enabled)?.discipline;
+  return typeof v === "boolean" ? v : null;
+}
+
 /**
  * Discipline is a default-off module (lib/moduleRegistry.ts): the fixture
  * school has it switched off, so the principal is shown "Access restricted".
- * Switch it on through the app's own Modules screen for this file and back
- * off afterwards, so no later spec sees a different module list.
+ * Switch it on through the app's own Modules screen for this file, and put
+ * back whatever it WAS afterwards (read first; afterAll runs even when a test
+ * or beforeAll failed), so no later spec sees a different module list.
+ * Idempotent: a module already in the wanted state is left alone.
  */
 async function setDiscipline(browser: Browser, enabled: boolean): Promise<void> {
   const page = await desktopLight(browser, "principal");
+  if ((await disciplineEnabled(page)) === enabled) {
+    await page.context().close();
+    return;
+  }
   await page.goto("/modules");
   const row = page.locator("li", { hasText: "Discipline / behavior" }).first();
   await row.getByRole("button", { name: enabled ? "Enable" : "Disable" }).click({ timeout: 20_000 });
   await expect
-    .poll(
-      async () => {
-        const r = await page.request.get("/api/data/views/module-registry");
-        const body = (await r.json().catch(() => null)) as { data?: { enabled?: Record<string, boolean> }; enabled?: Record<string, boolean> } | null;
-        return (body?.data?.enabled ?? body?.enabled)?.discipline ?? null;
-      },
-      { timeout: 30_000, message: `module registry saved discipline=${enabled}` },
-    )
+    .poll(() => disciplineEnabled(page), { timeout: 30_000, message: `module registry saved discipline=${enabled}` })
     .toBe(enabled);
   await page.context().close();
 }
 
-test.beforeAll(async ({ browser }) => setDiscipline(browser, true));
-test.afterAll(async ({ browser }) => setDiscipline(browser, false));
+/** Discipline's state before this file touched it (null = not read yet). */
+let disciplineBefore: boolean | null = null;
+test.beforeAll(async ({ browser }) => {
+  const page = await desktopLight(browser, "principal");
+  disciplineBefore = await disciplineEnabled(page);
+  await page.context().close();
+  expect(disciplineBefore, "module registry readable before the file changes it").not.toBeNull();
+  await setDiscipline(browser, true);
+});
+test.afterAll(async ({ browser }) => {
+  if (disciplineBefore !== null) await setDiscipline(browser, disciplineBefore);
+});
 
 async function open(page: Page, s: Screen): Promise<void> {
   await page.goto(s.path);
@@ -242,14 +286,94 @@ test.describe("views/masters 503 = could not load, never a screen computed from 
       await expect(page.getByText(/could not load/i).first()).toBeVisible({ timeout: 30_000 });
       const shownAfterMs = Date.now() - t0;
       await expect(page.getByRole("button", { name: "Try again" }).first()).toBeVisible();
-      await expect(s.absent(page)).toHaveCount(0);
+      if (s.usableWithoutMasters) {
+        // Drawn and usable — the records and actions do not wait for Masters.
+        await expect(s.absent(page).first()).toBeVisible();
+      } else {
+        await expect(s.absent(page)).toHaveCount(0);
+      }
       await page.screenshot({ path: testInfo.outputPath(`${s.name}-failed-read-desktop-light.png`), fullPage: true });
       const hits = await lift();
       expect(hits, "the screen asked views/masters").toBeGreaterThan(0);
       await page.getByRole("button", { name: "Try again" }).first().click();
       await s.ready(page);
+      if (s.usableWithoutMasters) await expect(page.getByText(/could not load/i)).toHaveCount(0, { timeout: 20_000 });
       await metric(testInfo, "error", { page: s.path, read: "views/masters", failureShownAfterMs: shownAfterMs });
       await page.context().close();
     });
   }
+});
+
+// ── 2.1i review fixes ──────────────────────────────────────────────────────
+
+const CHILD = fx.sis.students.find((st) => st.academicYearCode === "2026-27" && st.status === "active")!;
+
+test.describe("views/masters 503: the gate and the infirmary still work", () => {
+  test("office health: visit log, records and the student picker work; class names say …", async ({ browser }, testInfo) => {
+    for (const shot of [{ dark: false }, { dark: true }]) {
+      const page = shot.dark ? await phoneDark(browser, "office") : await desktopLight(browser, "office");
+      const lift = await failMastersView(page);
+      await page.goto("/health");
+      await expect(page.getByText(/could not load class and section names/i)).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("tab", { name: "Visit log" })).toBeVisible();
+      await page.getByPlaceholder("Search name or admission no…").first().fill(CHILD.fullName);
+      await page.getByRole("button", { name: new RegExp(CHILD.fullName) }).first().click({ timeout: 20_000 });
+      // The picked child: name shown, class/section "…" (Masters not read) — never a guessed label.
+      await expect(page.getByText(`${CHILD.fullName} · …`)).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath(`health-no-masters-${shot.dark ? "phone375-dark" : "desktop-light"}.png`), fullPage: true });
+      expect(await lift()).toBeGreaterThan(0);
+      await page.context().close();
+    }
+  });
+
+  test("office visitors: check-in form and register drawn, Check in enabled; names say …", async ({ browser }, testInfo) => {
+    for (const shot of [{ dark: false }, { dark: true }]) {
+      const page = shot.dark ? await phoneDark(browser, "office") : await desktopLight(browser, "office");
+      const lift = await failMastersView(page);
+      await page.goto("/visitors");
+      await expect(page.getByText(/could not load class, section and staff names/i)).toBeVisible({ timeout: 30_000 });
+      const checkIn = page.getByRole("button", { name: "Check in", exact: true });
+      await expect(checkIn).toBeVisible();
+      await expect(checkIn).toBeEnabled();
+      await page.screenshot({ path: testInfo.outputPath(`visitors-no-masters-${shot.dark ? "phone375-dark" : "desktop-light"}.png`), fullPage: true });
+      expect(await lift()).toBeGreaterThan(0);
+      await page.context().close();
+    }
+  });
+});
+
+test.describe("teaching-scope Masters (fee lists withheld): unknown, never ₹0", () => {
+  test("certificates search: 'dues: not shown for your role', no 'open dues ₹'", async ({ browser }, testInfo) => {
+    const page = await desktopLight(browser, "office");
+    const hits = await answerTeachingScope(page);
+    await page.goto("/certificates");
+    await page.getByPlaceholder("Name, admission no, or mobile…").fill(CHILD.fullName, { timeout: 20_000 });
+    const hit = page.getByRole("button", { name: new RegExp(CHILD.fullName) }).first();
+    await expect(hit).toContainText("dues: not shown for your role", { timeout: 20_000 });
+    await expect(hit).not.toContainText("open dues");
+    expect(hits()).toBeGreaterThan(0);
+    await page.screenshot({ path: testInfo.outputPath("certificates-teaching-desktop-light.png"), fullPage: false });
+    await page.context().close();
+  });
+
+  test("documents 'Insert school facts': no '0 fee structures' line", async ({ browser }) => {
+    const page = await desktopLight(browser, "office");
+    await answerTeachingScope(page);
+    await page.goto("/documents?type=compliance_narrative");
+    await page.getByRole("button", { name: /Insert school facts from the ERP/ }).click({ timeout: 20_000 });
+    const box = page.getByPlaceholder("Student name, dates, purpose, reference numbers, addresses…");
+    await expect(box).toHaveValue(/Fee: not available for your role/, { timeout: 15_000 });
+    expect(await box.inputValue()).not.toMatch(/\b0 fee structures?\b/);
+    await page.context().close();
+  });
+
+  test("documents 'Insert school facts', full scope: the real count", async ({ browser }) => {
+    const page = await desktopLight(browser, "office");
+    await page.goto("/documents?type=compliance_narrative");
+    await page.getByRole("button", { name: /Insert school facts from the ERP/ }).click({ timeout: 20_000 });
+    await expect(page.getByPlaceholder("Student name, dates, purpose, reference numbers, addresses…")).toHaveValue(/Fee: \d+ fee structures? published/, {
+      timeout: 15_000,
+    });
+    await page.context().close();
+  });
 });

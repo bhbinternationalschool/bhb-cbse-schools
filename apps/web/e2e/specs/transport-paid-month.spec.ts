@@ -28,6 +28,33 @@ import { APP_URL, expect, signIn, test } from "../support";
 import { execFileSync } from "node:child_process";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { CHILD, NEW, MONTH_NAMES, APR_SEP } from "../transportPaidCase";
+import { teachingMastersSubset } from "@/lib/mastersTeachingSubset";
+// lib/transportAmend PAID_MONTHS_UNKNOWN_FOR_ROLE (not imported: it pulls lib/fees into the test runner).
+const PAID_MONTHS_UNKNOWN_FOR_ROLE = /^Paid months cannot be checked for your role/;
+
+/**
+ * Answer GET views/masters the way the server answers someone without the
+ * Masters grant (a transport in-charge): scope "teaching", the book cut to
+ * TEACHING_MASTERS_KEYS — fee groups, heads, structure and concessions
+ * withheld. The real answer is fetched and cut with the server's own
+ * function (lib/mastersTeachingSubset), so only the scope differs.
+ */
+async function answerTeachingScope(page: Page): Promise<() => number> {
+  let hits = 0;
+  await page.route("**/api/data/views/masters", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { ok: boolean; data?: { scope: string; masters: Record<string, unknown> } };
+    if (body.ok && body.data) {
+      hits += 1;
+      body.data = {
+        scope: "teaching",
+        masters: { version: body.data.masters.version, ...teachingMastersSubset(body.data.masters) },
+      };
+    }
+    await route.fulfill({ response: res, json: body });
+  });
+  return () => hits;
+}
 
 const SHOTS = process.env.TRANSPORT_PAID_SHOTS || path.join(__dirname, "..", "transport-paid-shots");
 
@@ -144,6 +171,46 @@ test("student fee card: October transport owing, September not", async ({ browse
   }
 });
 
+// 2.1i review: the amend dialog's paid-month floor is computed from the
+// screen's Masters book. For a teaching-scope answer (fee lists withheld) it
+// must refuse — on the old code it computed from the withheld book and
+// offered "Applies from October" as if the floor were known.
+for (const shot of [
+  { name: "desktop-light", width: 1440, height: 900, dark: false },
+  { name: "phone375-dark", width: 375, height: 812, dark: true },
+]) {
+  test(`amend dialog (${shot.name}): teaching-scope Masters refuses; full scope applies from October`, async ({ browser }) => {
+    const openDialog = async (page: Page) => {
+      await page.goto("/transport?tab=riders");
+      const row = page.locator("li").filter({ hasText: CHILD.fullName }).filter({ has: page.getByRole("button", { name: "Change", exact: true }) });
+      await row.first().getByRole("button", { name: "Change", exact: true }).click({ timeout: 30_000 });
+      return page.getByRole("dialog");
+    };
+    // Teaching scope.
+    const page = await open(browser, shot);
+    const teachingHits = await answerTeachingScope(page);
+    const dialog = await openDialog(page);
+    await expect(dialog.getByText(PAID_MONTHS_UNKNOWN_FOR_ROLE)).toBeVisible({ timeout: 15_000 });
+    await expect(dialog.getByText(/^Applies from/)).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: "Apply change" })).toBeDisabled();
+    // A backdated month is refused too (the refusal does not depend on it).
+    await dialog.getByLabel("Apply from (optional)").fill("2026-09");
+    await expect(dialog.getByText(PAID_MONTHS_UNKNOWN_FOR_ROLE)).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Apply change" })).toBeDisabled();
+    expect(teachingHits(), "the screen read the teaching answer").toBeGreaterThan(0);
+    await page.screenshot({ path: path.join(SHOTS, `amend-teaching-${shot.name}.png`), fullPage: false });
+    await page.context().close();
+    // Full scope: the floor is known — October, six paid months kept.
+    const full = await open(browser, shot);
+    const fullDialog = await openDialog(full);
+    await expect(fullDialog.getByText(/^Applies from October/)).toBeVisible({ timeout: 15_000 });
+    await expect(fullDialog.getByText(/^6 paid months/)).toBeVisible();
+    await expect(fullDialog.getByText(PAID_MONTHS_UNKNOWN_FOR_ROLE)).toHaveCount(0);
+    await full.screenshot({ path: path.join(SHOTS, `amend-full-${shot.name}.png`), fullPage: false });
+    await full.context().close();
+  });
+}
+
 test("riders form: a backdated start over paid months says the payment carries over", async ({ browser }) => {
   seed("end-new");
   for (const shot of [
@@ -166,4 +233,22 @@ test("riders form: a backdated start over paid months says the payment carries o
     await expect(note).toHaveCount(0);
     await page.context().close();
   }
+});
+
+test("riders form, teaching-scope Masters: dues and paid months say 'not shown', never ₹0 / nothing", async ({ browser }) => {
+  // After "end-new" above: the child rides nothing, so the Riders form offers her.
+  const page = await open(browser, { width: 1440, height: 900 });
+  await answerTeachingScope(page);
+  await page.goto("/transport?tab=riders");
+  await page.getByPlaceholder("Name, admission no, or mobile…").fill(CHILD.fullName);
+  const hit = page.getByRole("button", { name: new RegExp(CHILD.fullName) }).first();
+  await expect(hit).toContainText("dues: not shown for your role", { timeout: 30_000 });
+  await expect(hit).not.toContainText("open dues");
+  await hit.click();
+  await page.getByLabel("Effective from").fill("2026-09-01");
+  await expect(page.getByTestId("transport-paid-unknown")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("transport-paid-carry-over")).toHaveCount(0);
+  await page.getByTestId("transport-paid-unknown").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(SHOTS, "riders-teaching-desktop-light.png"), fullPage: false });
+  await page.context().close();
 });

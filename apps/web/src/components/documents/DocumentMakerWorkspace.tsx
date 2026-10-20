@@ -46,7 +46,7 @@ export function DocumentMakerWorkspace() {
   const session = useDemoSession();
   // data-layer 2.1i: the server's book (letterhead, the session) + the roster
   // the permission checks resolve against, kept fresh by the versions poll.
-  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
+  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [docType, setDocType] = useState<SchoolDocumentType>("formal_letter");
   const [language, setLanguage] = useState<SchoolDocumentLanguage>("both");
   const [details, setDetails] = useState("");
@@ -320,6 +320,8 @@ export function DocumentMakerWorkspace() {
                         masters,
                         students: sisMod.loadSis().students,
                         examTermCount: examsMod.listExamTerms(ay).length,
+                        // Teaching subset: fee groups withheld, never "0 published".
+                        feesWithheld: mastersScope !== "full",
                       });
                       const recorded = cf.complianceFactsToText(cf.loadComplianceFacts(), ay);
                       const all = recorded ? `${facts}\n\nRecorded under Compliance → School facts:\n${recorded}` : facts;

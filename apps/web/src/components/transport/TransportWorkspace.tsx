@@ -204,7 +204,13 @@ export function TransportWorkspace() {
   const [state, setState] = useState<TransportState | null>(null);
   // data-layer 2.1i: the server's book + the staff roster (drivers and
   // attendants, the permission checks), kept fresh by the versions poll.
-  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
+  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
+  // A caller answered with the teaching subset (no Masters grant — a
+  // transport in-charge, say) has the fee lists WITHHELD, not empty. Paid
+  // months computed from that book are unknown, never "nothing paid", so the
+  // amendment dialog refuses rather than land a change on a settled month
+  // (2.1i review; same rule as 2.1b's student fee cards).
+  const feesWithheld = mastersScope !== "full";
   const [sis, setSis] = useState<SisState | null>(null);
   const [query, setQuery] = useState("");
   const [classId, setClassId] = useState("");
@@ -226,7 +232,8 @@ export function TransportWorkspace() {
     studentName: string;
     classGroupCode: ClassGroupCode | null;
     home: { lat: number; lng: number } | null;
-    dues: FeeDueLine[];
+    /** null = the fee lines could not be read for this role (feesWithheld). */
+    dues: FeeDueLine[] | null;
   } | null>(null);
   const [holdCheck, setHoldCheck] = useState<HoldCheck | null>(null);
   const [holdDialog, setHoldDialog] = useState(false);
@@ -329,8 +336,8 @@ export function TransportWorkspace() {
       return;
     }
     const student = sis?.students.find((st) => st.id === rider.studentId) ?? null;
-    let dues: FeeDueLine[] = [];
-    if (student && masters) {
+    let dues: FeeDueLine[] | null = feesWithheld ? null : [];
+    if (dues && student && masters) {
       try {
         // Which months are already paid decides when a change may land, so
         // the ledger is read now rather than assumed.
@@ -682,6 +689,7 @@ export function TransportWorkspace() {
           {tab === "riders" ? (
             <RidersPanel
               canEdit={canWriteModuleTab(session, masters, "transport", tab)}
+              feesWithheld={feesWithheld}
               state={state}
               masters={masters}
               sis={sis}
@@ -945,6 +953,8 @@ type RidersPanelProps = {
   onNotice: (message: string | null) => void;
   /** Passed down rather than re-derived: `session` lives in the workspace. */
   canEdit: boolean;
+  /** Teaching-scope Masters: fee lists withheld — dues and paid months are unknown here. */
+  feesWithheld: boolean;
 };
 
 function RidersPanel(props: RidersPanelProps) {
@@ -990,6 +1000,7 @@ function RidersPanel(props: RidersPanelProps) {
     onRefresh,
     onFlash,
     onNotice,
+    feesWithheld,
   } = props;
 
   // Split the search hits by whether the child is already on a bus. Showing one
@@ -1023,7 +1034,8 @@ function RidersPanel(props: RidersPanelProps) {
     studentName: string;
     classGroupCode: ClassGroupCode | null;
     home: { lat: number; lng: number } | null;
-    dues: FeeDueLine[];
+    /** null = the fee lines could not be read for this role (feesWithheld). */
+    dues: FeeDueLine[] | null;
   } | null>(null);
 
   // Siblings on the same household who do not already ride. Transport is bought
@@ -1178,6 +1190,7 @@ function RidersPanel(props: RidersPanelProps) {
 
           <div className="mt-2 flex justify-end">
             <StudentHitsFilterExport
+              balanceWithheld={feesWithheld}
               title="Transport · student search"
               hits={hits}
               query={query}
@@ -1228,7 +1241,9 @@ function RidersPanel(props: RidersPanelProps) {
                               {hit.student.fatherName
                                 ? ` · F/O ${hit.student.fatherName}`
                                 : ""}{" "}
-                              · open dues {formatInr(hit.balancePaise)}
+                              {feesWithheld
+                                ? "· dues: not shown for your role"
+                                : `· open dues ${formatInr(hit.balancePaise)}`}
                             </div>
                           </button>
                         </li>
@@ -1465,6 +1480,7 @@ function RidersPanel(props: RidersPanelProps) {
             <PaidMonthsCarryOverNote
               student={selected.student}
               masters={masters}
+              feesWithheld={feesWithheld}
               effectiveFrom={effectiveFrom}
             />
           ) : null}
@@ -1630,8 +1646,8 @@ function RidersPanel(props: RidersPanelProps) {
                       onClick={() => {
                         // Which months are already paid decides when the change
                         // may land, so the ledger is read at open time.
-                        let dues: FeeDueLine[] = [];
-                        if (student && masters) {
+                        let dues: FeeDueLine[] | null = feesWithheld ? null : [];
+                        if (dues && student && masters) {
                           try {
                             dues = computeStudentDues(
                               student,

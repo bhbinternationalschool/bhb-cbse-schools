@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccessData } from "@/components/shell/useAccessData";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { Award, Sparkles } from "lucide-react";
@@ -125,7 +125,10 @@ export function CertificatesWorkspace() {
   const [certStep, setCertStep] = useState<CertStep>("student");
   // data-layer 2.1i: the server's book + the roster (class teacher, principal,
   // the officer's designation), kept fresh by the versions poll.
-  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
+  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
+  // Teaching-scope Masters (no Masters grant): fee lists are withheld, so a
+  // balance computed from this book is unknown, never ₹0 (2.1i review).
+  const feesWithheld = mastersScope !== "full";
   const [sis, setSis] = useState<SisState | null>(null);
   const [issues, setIssues] = useState<CertificateIssue[]>([]);
   // Every issue, folded by the IST month it was issued (newest open) — the
@@ -291,22 +294,30 @@ export function CertificatesWorkspace() {
       subjectsStudied: defaultSubjectsForClass(label),
       applicationDate: leavingDate || todayIso(),
       checkedByName: prev.checkedByName || session.fullName,
-      checkedByDesignation:
-        prev.checkedByDesignation ||
-        (() => {
-          const m = masters;
-          if (!m) return prev.checkedByDesignation;
-          const me = m.staff.find(
-            (s) =>
-              s.fullName === session.fullName ||
-              s.loginUsername === session.email,
-          );
-          return me
-            ? designationName(m, me.designationId)
-            : prev.checkedByDesignation;
-        })(),
     }));
+    // The form resets per student only; session/leavingDate are read at that
+    // moment on purpose (a later edit of either must not wipe the TC form).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [student?.id]);
+
+  // "Checked by" designation: the signer's, from the staff roster — once per
+  // student, as soon as Masters has answered. Keyed on `masters` so a book
+  // that lands after the student was picked still fills it; the ref stops a
+  // background refetch (versions poll) from re-filling a field the clerk
+  // cleared or changed.
+  const designationFilledFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!student || !masters || designationFilledFor.current === student.id) return;
+    designationFilledFor.current = student.id;
+    const me = masters.staff.find(
+      (s) => s.fullName === session.fullName || s.loginUsername === session.email,
+    );
+    if (!me) return;
+    const designation = designationName(masters, me.designationId);
+    setTcForm((prev) =>
+      prev.checkedByDesignation ? prev : { ...prev, checkedByDesignation: designation },
+    );
+  }, [student, masters, session.fullName, session.email]);
 
   // Show resolved class teacher hint when student selected
   const resolvedClassTeacher = useMemo(() => {
@@ -647,6 +658,7 @@ export function CertificatesWorkspace() {
 
             <div className="mt-2 flex justify-end">
               <StudentHitsFilterExport
+              balanceWithheld={feesWithheld}
                 title="Certificates · student search"
                 hits={hits}
                 query={query}
@@ -685,7 +697,10 @@ export function CertificatesWorkspace() {
                         ) : null}
                       </div>
                       <div className="text-[11px] text-[var(--muted)]">
-                        {h.classLabel} · open dues {formatInr(h.balancePaise)}
+                        {h.classLabel} ·{" "}
+                        {feesWithheld
+                          ? "dues: not shown for your role"
+                          : `open dues ${formatInr(h.balancePaise)}`}
                       </div>
                     </button>
                   </li>

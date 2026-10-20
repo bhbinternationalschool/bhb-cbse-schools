@@ -12,6 +12,7 @@ import type { RowAction } from "@/components/ui/erp-grid";
 import { DEFAULT_AY, type MastersState, currentAcademicYearCode } from "@/lib/masters";
 import { QueryError } from "@/components/data/QueryError";
 import { useScreenMasters } from "@/components/data/useScreenMasters";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { classSectionLabel } from "@/lib/timetable";
 import { loadSis, type SisState, type SisStudent, studentsInSession} from "@/lib/sis";
 import {
@@ -97,7 +98,7 @@ function StudentPicker({
       <div className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2">
         <span className="text-sm font-semibold">
           {value.fullName}
-          {masters ? ` · ${classSectionLabel(masters, value.classId, value.sectionId)}` : ""}
+          {` · ${masters ? classSectionLabel(masters, value.classId, value.sectionId) : "…"}`}
         </span>
         <button type="button" className="text-xs font-semibold text-[var(--brand-deep)] underline" onClick={onClear}>
           Change
@@ -177,10 +178,18 @@ export function HealthWorkspace() {
   }
 
   // The module grant, or the "Sick room & health records" function (which
-  // owns the whole health book, so it covers every tab here).
+  // owns the whole health book, so it covers every tab here). Decided from
+  // the access copy (roles + staff roster — the same staff side
+  // useScreenMasters adds to the book), so the infirmary works while the
+  // masters view is loading or has failed (2.1i review). Off until known.
+  const access = useAccessData();
   const canEdit = useMemo(
-    () => (masters ? canWriteModuleTab(session, masters, "health", tab) : false),
-    [session, masters, tab],
+    () =>
+      access.ready
+        ? canWriteModuleTab(session, access.masters, "health", tab, "edit", access.rbac ?? undefined)
+        : false,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [session, access.ready, access.version, tab],
   );
 
   /**
@@ -236,19 +245,22 @@ export function HealthWorkspace() {
   );
 
   const pickable = useMemo(() => {
-    if (!sis || !masters) return [];
+    if (!sis) return [];
     if (teacherMode) return studentsOfMySections(sis, my.academicYearCode, my);
     if (scopeUnknown) return [];
     // One row per child, this session. SIS keeps a row per child per
     // year and marks them all active, so the same name appeared several
     // times and, in a capped list, pushed real matches off the end.
-    return studentsInSession(sis, currentAcademicYearCode(masters));
-  }, [sis, masters, teacherMode, scopeUnknown, my]);
+    // Until Masters answers, the signed-in session's year.
+    return studentsInSession(sis, masters ? currentAcademicYearCode(masters) : ay);
+  }, [sis, masters, ay, teacherMode, scopeUnknown, my]);
 
   const tabs = useMemo(() => {
-    const allowed = visibleModuleTabs(TABS, session, masters, "health");
+    if (!access.ready) return [];
+    const allowed = visibleModuleTabs(TABS, session, access.masters, "health", access.rbac ?? undefined);
     return teacherMode ? allowed.filter((t) => TEACHER_TABS.has(t.id as Tab)) : allowed;
-  }, [session, masters, teacherMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+  }, [session, access.ready, access.version, teacherMode]);
   const shownTab: Tab = tabs.some((t) => t.id === tab) ? tab : ((tabs[0]?.id as Tab | undefined) ?? "log");
 
   // --- Log visit ---
@@ -656,22 +668,6 @@ export function HealthWorkspace() {
   ];
 
 
-  if (!masters) {
-    return (
-      <ErpWorkspaceShell
-        title="Health / infirmary"
-        subtitle="Nurse visit log, medication & vaccination records, emergency contacts"
-        icon={<HeartPulse className="size-6" aria-hidden />}
-      >
-        {mastersError ? (
-          <QueryError what="the school's classes and staff" error={mastersError} retry={retryMasters} />
-        ) : (
-          <p className="mt-4 text-sm text-[var(--muted)]">Loading the school&apos;s classes…</p>
-        )}
-      </ErpWorkspaceShell>
-    );
-  }
-
   return (
     <ErpWorkspaceShell
       title="Health / infirmary"
@@ -681,6 +677,12 @@ export function HealthWorkspace() {
       error={error}
     >
       <ModuleTabs value={shownTab} onChange={(id) => setTab(id as Tab)} items={tabs} />
+
+      {/* Visits, medications, vaccinations and their actions work without
+          Masters; only class / section names need it ("…" until then). */}
+      {mastersError ? (
+        <QueryError compact what="class and section names" error={mastersError} retry={retryMasters} />
+      ) : null}
 
       {teacherMode ? (
         <p className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-xs text-[var(--muted)]">

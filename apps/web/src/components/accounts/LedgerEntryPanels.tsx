@@ -1152,7 +1152,9 @@ export function QuickExpensePanel({
   // data-layer 2.1i: the holiday calendar from the Masters view (versions
   // poll), not the page copy — an unread calendar is "loading", never "no
   // holidays" (which would bill the shut days).
-  const { masters: holidayBook, error: holidayError, retry: retryHolidays } = useScreenMasters();
+  // Asked only once the daily-rate spread is ticked: a plain voucher makes
+  // no masters request.
+  const { masters: holidayBook, error: holidayError, retry: retryHolidays } = useScreenMasters({ enabled: spread });
   const plan = useMemo(() => {
     if (!spread || !holidayBook) return null;
     const masters = holidayBook;
