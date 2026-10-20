@@ -21,7 +21,7 @@ import {
   type VoucherTender,
 } from "@/lib/fees";
 import { pushFeesRemoteServer } from "@/lib/feesPersistence.server";
-import { sendPushToSubject } from "@/lib/webPush.server";
+import { notifyFeeReceived } from "@/lib/notify/feeNotify.server";
 
 export const runtime = "nodejs";
 
@@ -254,12 +254,16 @@ export async function POST(request: Request) {
       userAgent: meta.userAgent,
     });
 
-    await sendPushToSubject("parent", householdId, {
-      title: `Fee received · ${formatInr(total)}`,
-      body: `Receipt ${result.voucher.receiptNo} for ${student.fullName} (${classLabelOf(ctx, student)}). Thank you.`,
-      url: "/fees",
-      data: { kind: "fee_receipt", receiptNo: result.voucher.receiptNo },
-    }).catch(() => undefined);
+    await notifyFeeReceived({
+      voucherId: result.voucher.id,
+      receiptNo: result.voucher.receiptNo,
+      householdId,
+      totalPaise: total,
+      studentName: student.fullName,
+      classLabel: classLabelOf(ctx, student),
+      mode: [...new Set(tenders.map((t) => t.mode))].join(" + "),
+      collectedByStaffId: ctx.session.staffId,
+    });
 
     return apiOk({
       duplicate: false,
