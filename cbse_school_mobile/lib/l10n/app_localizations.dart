@@ -4532,6 +4532,186 @@ abstract class L {
   /// In en, this message translates to:
   /// **'{minutes} min'**
   String dateSheetMinutes(String minutes);
+
+  /// No description provided for @pmAllStaff.
+  ///
+  /// In en, this message translates to:
+  /// **'All staff'**
+  String get pmAllStaff;
+
+  /// No description provided for @pmStaffPayslipsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff payslips'**
+  String get pmStaffPayslipsTitle;
+
+  /// No description provided for @pmStaffAdvancesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff advances'**
+  String get pmStaffAdvancesTitle;
+
+  /// No description provided for @pmSession.
+  ///
+  /// In en, this message translates to:
+  /// **'Session {session}'**
+  String pmSession(String session);
+
+  /// No description provided for @pmNotRun.
+  ///
+  /// In en, this message translates to:
+  /// **'Not run'**
+  String get pmNotRun;
+
+  /// No description provided for @pmPreparing.
+  ///
+  /// In en, this message translates to:
+  /// **'Being prepared'**
+  String get pmPreparing;
+
+  /// No description provided for @pmGross.
+  ///
+  /// In en, this message translates to:
+  /// **'Gross'**
+  String get pmGross;
+
+  /// No description provided for @pmDeductions.
+  ///
+  /// In en, this message translates to:
+  /// **'Deductions'**
+  String get pmDeductions;
+
+  /// No description provided for @pmNet.
+  ///
+  /// In en, this message translates to:
+  /// **'Net pay'**
+  String get pmNet;
+
+  /// No description provided for @pmPayable.
+  ///
+  /// In en, this message translates to:
+  /// **'Payable'**
+  String get pmPayable;
+
+  /// No description provided for @pmPaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid'**
+  String get pmPaid;
+
+  /// No description provided for @pmUnpaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Still unpaid'**
+  String get pmUnpaid;
+
+  /// No description provided for @pmPaidOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid {date}'**
+  String pmPaidOn(String date);
+
+  /// No description provided for @pmNotPaidYet.
+  ///
+  /// In en, this message translates to:
+  /// **'Not paid yet'**
+  String get pmNotPaidYet;
+
+  /// No description provided for @pmOnHold.
+  ///
+  /// In en, this message translates to:
+  /// **'On hold'**
+  String get pmOnHold;
+
+  /// No description provided for @pmExtraRuns.
+  ///
+  /// In en, this message translates to:
+  /// **'This month appears in {count} more run(s) — check Payroll on the web.'**
+  String pmExtraRuns(String count);
+
+  /// No description provided for @pmMonthsRun.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} months run'**
+  String pmMonthsRun(String count);
+
+  /// No description provided for @pmLeft.
+  ///
+  /// In en, this message translates to:
+  /// **'Left'**
+  String get pmLeft;
+
+  /// No description provided for @pmNoStaff.
+  ///
+  /// In en, this message translates to:
+  /// **'No staff to show for this session.'**
+  String get pmNoStaff;
+
+  /// No description provided for @pmReadOnlyNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Read only — the figures are the payroll runs on the web. Months with no payroll run say \"Not run\".'**
+  String get pmReadOnlyNote;
+
+  /// No description provided for @pmTaken.
+  ///
+  /// In en, this message translates to:
+  /// **'Taken'**
+  String get pmTaken;
+
+  /// No description provided for @pmRecovered.
+  ///
+  /// In en, this message translates to:
+  /// **'Recovered'**
+  String get pmRecovered;
+
+  /// No description provided for @pmDue.
+  ///
+  /// In en, this message translates to:
+  /// **'Due'**
+  String get pmDue;
+
+  /// No description provided for @pmNoAdvances.
+  ///
+  /// In en, this message translates to:
+  /// **'No staff member holds an advance.'**
+  String get pmNoAdvances;
+
+  /// No description provided for @pmGiven.
+  ///
+  /// In en, this message translates to:
+  /// **'Given {date}'**
+  String pmGiven(String date);
+
+  /// No description provided for @pmReturned.
+  ///
+  /// In en, this message translates to:
+  /// **'Returned {date}'**
+  String pmReturned(String date);
+
+  /// No description provided for @pmFromSalary.
+  ///
+  /// In en, this message translates to:
+  /// **'From salary · {month}'**
+  String pmFromSalary(String month);
+
+  /// No description provided for @pmNothingRecovered.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing recovered yet.'**
+  String get pmNothingRecovered;
+
+  /// No description provided for @pmAdvancesNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Read only — the same advance register and totals as Payroll → Advances on the web.'**
+  String get pmAdvancesNote;
+
+  /// No description provided for @pmAdvanceCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} advance(s)'**
+  String pmAdvanceCount(String count);
 }
 
 class _LDelegate extends LocalizationsDelegate<L> {

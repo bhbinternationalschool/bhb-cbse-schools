@@ -23,6 +23,7 @@ part "staff_api.dart";
 part "online_classes_api.dart";
 part "my_class_api.dart";
 part "self_service_api.dart";
+part "payroll_mgmt_api.dart";
 part "teacher_tools_api.dart";
 part "teacher_ai_api.dart";
 part "transport_register_api.dart";

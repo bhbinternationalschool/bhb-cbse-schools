@@ -9,6 +9,7 @@ import "../../core/theme/app_theme.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
 import "my_attendance_calendar_screen.dart" show fullMonthLabel;
+import "staff_pay_overview_screens.dart";
 
 String rupees(double v) {
   final whole = v.round().abs();
@@ -110,6 +111,13 @@ class PayslipsScreen extends StatelessWidget {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         children: [
+          // Management only: everyone's payslips (the server gates it too).
+          ManagementEntryCard(
+            api: api,
+            feature: kStaffPayslipsAllFeature,
+            label: context.l10n.pmStaffPayslipsTitle,
+            open: () => StaffPayrollOverviewScreen(api: api),
+          ),
           if (p.preparing > 0)
             Card(
               color: ModuleTone.amber.background,
