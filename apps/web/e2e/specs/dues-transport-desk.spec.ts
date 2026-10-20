@@ -19,8 +19,8 @@
  * September paid, October owing. Written by scripts/e2e-seed-dues-transport.ts.
  *
  * The parent web portal (/parent) is checked too: a parent session is refused
- * every staff desk, so that page never holds the fee book either — it cannot
- * show fees without bus months; it shows no fees at all.
+ * every staff desk, and the page reads the family's dues from the server
+ * (PR #670), so its bus months are all there, the paid ones as paid.
  *
  * Screenshots: e2e/dues-transport-shots (git-ignored), desktop-light and
  * phone375-dark.
@@ -33,7 +33,7 @@ import { demoSessionCookieName } from "@/lib/auth";
 import { APP_URL, expect, signIn, test } from "../support";
 import { mintSessionCookie } from "../session";
 import { AY_CURRENT, E2E_TENANT_SLUG } from "../fixture";
-import { CHILD } from "../duesTransportCase";
+import { CHILD, PAID } from "../duesTransportCase";
 
 const SHOTS = process.env.DUES_TRANSPORT_SHOTS || path.join(__dirname, "..", "dues-transport-shots");
 const HOLD_MS = 8_000;
@@ -154,7 +154,7 @@ for (const shot of SHOTS_AT) {
   });
 }
 
-test("parent web portal: a parent reads no staff desk, so no partial dues", async ({ browser }) => {
+test("parent web portal: a parent reads no staff desk, and sees every bus month from the server", async ({ browser }) => {
   for (const shot of SHOTS_AT) {
     const context = await browser.newContext({
       baseURL: APP_URL,
@@ -183,9 +183,20 @@ test("parent web portal: a parent reads no staff desk, so no partial dues", asyn
       const res = await page.request.get(`/api/school-data/${desk}`);
       expect([401, 403], `${desk} is refused to a parent`).toContain(res.status());
     }
+    // The page reads the parent's own dues from the server instead
+    // (GET /api/payments/parent-dues, PR #670): every bus month is there,
+    // paid ones as paid — never a fee book with the bus months missing.
     await page.goto("/parent");
-    await expect(page.getByText(/No household linked/)).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText(/Transport · /)).toHaveCount(0);
+    await expect(page.getByTestId("parent-due-now")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/No household linked/)).toHaveCount(0);
+    const chip = page.locator(`button[data-student-id="${CHILD.id}"]`);
+    if (await chip.count()) await chip.click();
+    for (const ym of PAID) {
+      await expect(
+        page.locator(`li[data-due-kind="transport"][data-due-month="${ym}"]`),
+        `${ym} bus month shown as paid`,
+      ).toHaveAttribute("data-paid", "1");
+    }
     await page.screenshot({ path: path.join(SHOTS, `parent-portal-${shot.name}.png`), fullPage: false });
     await context.close();
   }

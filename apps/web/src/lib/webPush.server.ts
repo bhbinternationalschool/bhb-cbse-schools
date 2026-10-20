@@ -40,6 +40,9 @@ export type PushPayload = {
   url?: string;
   /** Extra string data for the native app (FCM only). */
   data?: Record<string, string>;
+  /** FCM only — see FcmPayload.channel / voiceTopic (lib/fcm.server.ts). */
+  channel?: string;
+  voiceTopic?: import("@/lib/pushVoice").PushVoiceKind;
 };
 
 function rowToRecord(row: {
