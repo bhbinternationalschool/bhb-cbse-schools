@@ -72,16 +72,21 @@ async function main(): Promise<void> {
   const principal = { cookie: sessionCookieHeader(fx.sessions.principal) };
   const teacher = { cookie: sessionCookieHeader(fx.sessions.teacher) }; // class teacher of Nursery-A only
 
-  const childIn = (k: number) => {
+  const childIn = (k: number, notIn: string[] = []) => {
     const s = fx.sis.students.find(
-      (x) => x.sectionId === sectionId(k) && x.academicYearCode === AY_CURRENT && x.status === "active" && !/inactive|dupadm/.test(x.householdId),
+      (x) =>
+        x.sectionId === sectionId(k) &&
+        x.academicYearCode === AY_CURRENT &&
+        x.status === "active" &&
+        !/inactive|dupadm/.test(x.householdId) &&
+        !notIn.includes(x.householdId),
     );
     if (!s) throw new Error(`no child in section ${k}`);
     return s;
   };
   const kidA = childIn(6); // III-A
-  const kidB = childIn(7); // IV-A
-  const kidC = childIn(9); // VI-A — not in the competition
+  const kidB = childIn(7, [kidA.householdId]); // IV-A, another family
+  const kidC = childIn(9, [kidA.householdId, kidB.householdId]); // VI-A — not in the competition
   const famA = cookieFor(parentSession(kidA.householdId));
   const famB = cookieFor(parentSession(kidB.householdId));
   const famC = cookieFor(parentSession(kidC.householdId));

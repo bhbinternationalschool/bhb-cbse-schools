@@ -22,9 +22,14 @@ import { APP_URL, expect, fx, metric, openAs, test } from "../support";
 
 const CLOCK = "2026-10-21T16:00:00+05:30";
 
-const childIn = (k: number) => {
+const childIn = (k: number, notIn: string[] = []) => {
   const s = fx.sis.students.find(
-    (x) => x.sectionId === sectionId(k) && x.academicYearCode === AY_CURRENT && x.status === "active" && !/inactive|dupadm/.test(x.householdId),
+    (x) =>
+      x.sectionId === sectionId(k) &&
+      x.academicYearCode === AY_CURRENT &&
+      x.status === "active" &&
+      !/inactive|dupadm/.test(x.householdId) &&
+      !notIn.includes(x.householdId),
   );
   if (!s) throw new Error(`no child in section ${k}`);
   return s;
@@ -71,7 +76,7 @@ test("a teacher launches a competition, two sections play, the leaderboard and t
   const { context, page } = await openAs(browser, "principal");
   await context.setExtraHTTPHeaders({ "x-e2e-clock": CLOCK });
   const kidA = childIn(6); // III-A
-  const kidB = childIn(7); // IV-A
+  const kidB = childIn(7, [kidA.householdId]); // IV-A, another family
   const famA = await familyApi(kidA.householdId);
   const famB = await familyApi(kidB.householdId);
   try {
