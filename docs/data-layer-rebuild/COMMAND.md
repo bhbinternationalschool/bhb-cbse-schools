@@ -603,6 +603,16 @@ pages (`/students`, `/attendance`, `/homework`) now make one extra small `/api` 
 (the versions poll); others unchanged. Bundle: every `(erp)` page loads two more chunks (react-query
 ≈ 34 KB raw / 10.3 KB gzip; the kernel + erpFetch ≈ 9.4 KB / 3.9 KB); public and parent pages unchanged.
 
+**When the poll runs (updated 20 Oct 2026, #681).** The header bell (`NotificationBell`) is an enabled
+`useErpQuery` on desk `erp_notifications`, mounted on every staff page, so the versions poll now runs on
+**every staff page** — on purpose: a notification must reach the bell within one poll on any page. It is
+still ONE poll per tab (the single `VersionsPoller` in `ErpQueryProvider`; the bell and every other desk query
+share it), at the 20 s cadence (≥ 5 s apart on a focus tick), and never for a family (the versions route is
+staff-only; `/parent`'s bell re-asks its own list every 30 s). `kernel.spec.ts` and `teacher.spec.ts` assert
+exactly this: ≥ 1 and ≤ 2 polls in 25 s on `/masters`, ≤ 3 in 22 s on `/__kernel` with the four views mounted,
+every gap ≥ 15 s, 0 on `/parent`; the closed header WhatsApp panel still asks no Masters view and opening it
+adds no versions request of its own.
+
 **Not done / not proven here.** No real screen reads `useMasters()` etc. yet (2.1) — the 12
 real-screen propagation cases stay expected-fail; the 2.1 bridge (`writeMastersLocalRaw` from
 `useMasters()`) is not built; `useErpMutation` has no consumer (2.2/1.5); `useErpCollection` over
