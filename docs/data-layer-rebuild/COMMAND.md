@@ -1077,7 +1077,7 @@ Ratchets: `load_masters_screen_files` 61 → **54**, `load_masters_calls_src` 42
 chat onto `useMasters({enabled: open})`). No owner login in the fixture: `OwnerHome` was not seen on a screen. The
 home's new access wait was not timed on the throttled phone profile.
 
-*(2.1i built 20 Oct 2026, PR #__PR__.)* **What exists.** The list, generated on origin/main ab545386 with
+*(2.1i built 20 Oct 2026, PR #688.)* **What exists.** The list, generated on origin/main ab545386 with
 `grep -rl 'loadMasters(' apps/web/src/components 'apps/web/src/app/(erp)'` minus 2.1a–2.1h's directories and the files
 kept by design (`useAccessData.ts`, `SchoolFavicon.tsx`), is **15 files in 15 directories** (the plan's "16" was counted on
 2f0eb3d4, which also had `timetable`, `homework` — 2.1a — and `app/(erp)/staff/job-applications` — 2.1f): `accounts/LedgerEntryPanels`,
