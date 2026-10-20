@@ -79,7 +79,7 @@ export default defineConfig<GateOptions>({
       // Writes a transport desk and receipts (the 15 Oct paid-month case), so
       // it runs after everything that reads the stack.
       name: "money-writes",
-      testMatch: /(transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues)\.spec\.ts/,
+      testMatch: /(transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|parent-web-tabs)\.spec\.ts/,
       dependencies: ["desktop", "phone-375-cpu4x"],
       use: { ...desktop },
     },
@@ -96,7 +96,6 @@ export default defineConfig<GateOptions>({
       // notification service), so it runs after everything that reads the stack.
       name: "notify-writes",
       testMatch: /notifications\.spec\.ts/,
-      testMatch: /(transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-tabs)\.spec\.ts/,
       dependencies: ["desktop", "phone-375-cpu4x"],
       use: { ...desktop },
     },
