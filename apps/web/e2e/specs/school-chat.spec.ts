@@ -19,6 +19,10 @@
  *  4. a muted child's sends are refused; a blocked family cannot read;
  *     lifting it restores them;
  *  5. when the AI check fails, the message is held, not passed;
+ *  5b. a teacher's abusive message is HELD like a child's (no staff
+ *     exception); with the AI down a teacher's message is posted but flagged
+ *     into the review queue (review of #679, item 2);
+ *  4b. a sender over 10 messages a minute is refused with 429 (item 4);
  *  6. the screens: the review queue (desktop, light) and a class group on a
  *     375 px phone in dark mode.
  */
@@ -68,7 +72,7 @@ type ChatJson = {
     blocked: boolean;
     conversations: { id: string }[];
     messages: ChatMsg[];
-    items: { id: string; body: string; checkedBy: string; categories: string[] }[];
+    items: { id: string; body: string; checkedBy: string; categories: string[]; flaggedStaff: boolean; status: string }[];
   };
   error: { message: string };
 };
@@ -218,6 +222,46 @@ test.describe.serial("school chat", () => {
     // Both are in the behaviour log.
     const sum = await principal.get("/api/v1/school-chat/moderation/summary?days=7");
     expect(sum.status).toBe(200);
+  });
+
+  test("4b. a sender over the rate limit (10 a minute) is refused with 429", async () => {
+    for (let i = 1; i <= 10; i += 1) {
+      const r = await famB.post("/api/v1/school-chat/send", { conversationId: cls(2), studentId: b1!.id, body: `rate ${i} ${tag}` });
+      expect(r.status, `message ${i}`).toBe(200);
+    }
+    // The 11th is refused before the AI check (the marker would otherwise hold it: 200 + held).
+    const over = await famB.post("/api/v1/school-chat/send", { conversationId: cls(2), studentId: b1!.id, body: `rate 11 [[ai-down]] ${tag}` });
+    expect(over.status).toBe(429);
+    expect(over.body.error.message).toMatch(/too fast \(10 a minute at most\)/);
+    expect(bodies(await msgs(famB, cls(2), b1!.id))).not.toContain(`rate 11 [[ai-down]] ${tag}`);
+    const q = await principal.get("/api/v1/school-chat/moderation/queue");
+    expect((q.body.data.items as { body: string }[]).some((i) => i.body.includes(`rate 11`) && i.body.includes(tag))).toBe(false);
+  });
+
+  test("5b. a teacher's abusive message is held; with the AI down it is posted and flagged", async () => {
+    const rude = `abe chutiye chup raho ${tag}`;
+    const s = await classTeacher.post("/api/v1/school-chat/send", { conversationId: cls(1), body: rude });
+    expect(s.status).toBe(200);
+    expect(s.body.data.held).toBe(true);
+    expect(bodies(await msgs(famA1, cls(1), a1!.id))).not.toContain(rude);
+    const outage = `Notice: PTM on Saturday [[ai-down]] staff ${tag}`;
+    const o = await classTeacher.post("/api/v1/school-chat/send", { conversationId: cls(1), body: outage });
+    expect(o.status).toBe(200);
+    expect(o.body.data.held).toBe(false);
+    expect(bodies(await msgs(famA1, cls(1), a1!.id))).toContain(outage);
+    const q = await principal.get("/api/v1/school-chat/moderation/queue");
+    const items = q.body.data.items;
+    const held = items.find((i) => i.body === rude);
+    expect(held?.status).toBe("held");
+    expect(held?.checkedBy).toBe("rules");
+    const flagged = items.find((i) => i.body === outage);
+    expect(flagged?.status).toBe("visible");
+    expect(flagged?.flaggedStaff).toBe(true);
+    expect(flagged?.checkedBy).toBe("ai_unavailable");
+    // Clear both so the screen test's queue stays as before.
+    for (const id of [held!.id, flagged!.id]) {
+      expect((await principal.post("/api/v1/school-chat/moderation/decide", { messageId: id, decision: "remove", note: "e2e: staff check" })).status).toBe(200);
+    }
   });
 
   test("5. when the AI check fails the message is held", async () => {
