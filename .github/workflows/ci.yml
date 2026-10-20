@@ -553,6 +553,8 @@ jobs:
           npm run test:staff-month-calendar
           npm run test:staff-roster-redact
           npm run test:sis-class-teacher
+          npm run test:student-contact
+          npm run test:student-doc-types
           npm run test:punch-code
           npm run test:wa-language-gate
           npm run test:answer-sheet-ai

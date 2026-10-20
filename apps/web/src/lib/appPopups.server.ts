@@ -235,6 +235,8 @@ export async function saveFamilyAadhaar(
   children: SisStudent[],
   numbers: Record<string, string>,
   by: string,
+  /** Who typed it, for the audit line ("the family in the app" unless a teacher read it off a card). */
+  source = "the family in the app",
 ): Promise<{ ok: true; saved: string[]; outcomes: AadhaarSaveOutcome[] } | { ok: false; error: string }> {
   const clean: Record<string, string> = {};
   for (const [k, v] of Object.entries(numbers)) {
@@ -309,7 +311,7 @@ export async function saveFamilyAadhaar(
       entityType: "student",
       entityId: child.id,
       // Never the numbers themselves in the audit trail — which ones arrived, and whether they corrected one.
-      summary: `Aadhaar given by the family in the app: ${[own ? "child" : "", father ? "father" : "", mother ? "mother" : ""].filter(Boolean).join(", ")}${changed.some((o) => o.status === "corrected") ? " (corrected an unverified number)" : ""}`,
+      summary: `Aadhaar given by ${source}: ${[own ? "child" : "", father ? "father" : "", mother ? "mother" : ""].filter(Boolean).join(", ")}${changed.some((o) => o.status === "corrected") ? " (corrected an unverified number)" : ""}`,
       before: {},
       after: { by },
     }).catch(() => null);

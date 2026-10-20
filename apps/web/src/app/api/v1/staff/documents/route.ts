@@ -5,6 +5,7 @@ import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { loadSisForStaff, type StudentDocKey } from "@/lib/sis";
 import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
 import { DOC_LABELS } from "@/lib/api/v1/studentDocs";
+import { readStudentDocTypes } from "@/lib/studentDocTypes.server";
 
 export const runtime = "nodejs";
 
@@ -57,11 +58,43 @@ export async function GET(request: Request) {
           reviewedBy: doc.reviewedBy || "",
           reviewedAt: doc.reviewedAt || "",
           reviewNote: doc.reviewNote || "",
+          typeId: doc.docType || "",
+          typeLabel: doc.docTypeLabel || "",
+        });
+      }
+    }
+    // Reviewed also lists what was verified OFF the child's slots (a
+    // parent's Aadhaar, a custom type) — lib/studentDocTypes.
+    let filedLoaded = true;
+    if (which === "reviewed") {
+      const state = await readStudentDocTypes();
+      filedLoaded = !!state;
+      const byId = new Map(sis.students.map((st) => [st.id, st]));
+      for (const f of state?.filed ?? []) {
+        const st = byId.get(f.studentId);
+        if (!st || st.status !== "active" || st.academicYearCode !== ay) continue;
+        if (!scopeAllows(scope, st.classId, st.sectionId)) continue;
+        rows.push({
+          studentId: st.id,
+          studentName: st.fullName,
+          classLabel: `${classNameOf(st.classId)} ${sectionNameOf(st.sectionId)}`.trim(),
+          key: f.fromSlot,
+          label: f.typeLabel,
+          status: "verified",
+          fileUrl: `/api/v1/staff/documents/filed/${encodeURIComponent(f.id)}`,
+          mimeType: f.mimeType,
+          submittedBy: f.submittedBy,
+          submittedAt: f.submittedAt || f.uploadedAt,
+          reviewedBy: f.verifiedBy,
+          reviewedAt: f.verifiedAt,
+          reviewNote: f.note,
+          typeId: f.typeId,
+          typeLabel: f.typeLabel,
         });
       }
     }
     rows.sort((a, b) => String(b.submittedAt).localeCompare(String(a.submittedAt)));
-    return apiOk({ status: which, rows: rows.slice(0, 200) });
+    return apiOk({ status: which, rows: rows.slice(0, 200), filedLoaded });
   } catch (e) {
     return apiErr(e);
   }

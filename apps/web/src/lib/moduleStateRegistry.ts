@@ -38,7 +38,8 @@ export type ModuleStateKey =
   | "app_popups"
   | "parent_linked_mobiles"
   | "parent_wa_verify"
-  | "staff_broadcasts";
+  | "staff_broadcasts"
+  | "student_doc_types";
 
 export const MODULE_STATE_DEFS: Record<
   ModuleStateKey,
@@ -75,6 +76,7 @@ export const MODULE_STATE_DEFS: Record<
   parent_linked_mobiles: { rbac: "students", label: "parent numbers linked from the app" },
   parent_wa_verify: { rbac: "students", label: "unknown numbers asked about their child on WhatsApp" },
   staff_broadcasts: { rbac: "notifications", label: "staff messages to class parents" },
+  student_doc_types: { rbac: "students", label: "document types chosen at verification, and documents filed off the child's slots" },
 };
 
 export function isModuleStateKey(raw: string): raw is ModuleStateKey {
