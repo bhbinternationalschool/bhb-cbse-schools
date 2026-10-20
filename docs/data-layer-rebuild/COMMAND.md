@@ -1077,6 +1077,49 @@ Ratchets: `load_masters_screen_files` 61 → **54**, `load_masters_calls_src` 42
 chat onto `useMasters({enabled: open})`). No owner login in the fixture: `OwnerHome` was not seen on a screen. The
 home's new access wait was not timed on the throttled phone profile.
 
+*(2.1i built 20 Oct 2026, PR #__PR__.)* **What exists.** The list, generated on origin/main ab545386 with
+`grep -rl 'loadMasters(' apps/web/src/components 'apps/web/src/app/(erp)'` minus 2.1a–2.1h's directories and the files
+kept by design (`useAccessData.ts`, `SchoolFavicon.tsx`), is **15 files in 15 directories** (the plan's "16" was counted on
+2f0eb3d4, which also had `timetable`, `homework` — 2.1a — and `app/(erp)/staff/job-applications` — 2.1f): `accounts/LedgerEntryPanels`,
+`certificates/CertificatesWorkspace`, `complaints/ComplaintsWorkspace`, `discipline/DisciplineWorkspace`,
+`documents/DocumentMakerWorkspace`, `health/HealthWorkspace`, `idCards/IdCardsWorkspace`, `inventory/InventoryWorkspace`,
+`library/LibraryWorkspace`, `login/LoginPanel`, `ptm/PtmWorkspace`, `rte/RteWorkspace`, `studentLeave/StudentLeaveWorkspace`,
+`transport/TransportWorkspace`, `visitors/VisitorsWorkspace`. **13 converted** to `useScreenMasters()` (every one resolves the
+signed-in person for a permission check or lists staff — assignees, drivers, borrowers, class teacher, principal, gate duty —
+so the access copy's roster is needed; `LedgerEntryPanels` reads only holidays/years but `isPublishedHoliday` takes a whole
+`MastersState`) or `useMasters()` (`InventoryWorkspace`: class/section labels only). Removed: every mount-time and `refresh()`
+read, `masters ?? loadMasters()` fallbacks, and every `ensureMastersHydrated` (in 11 files; the SIS / staff / own-desk hydrates
+stay). No file had a `bhb-masters-updated` listener. A masters read that never answered = `<QueryError>` (inside the workspace
+shell where the screen has one; PTM and Student leave in place of their existing "Loading…" block; Transport and Inventory
+under their tabs; the Accounts quick expense inline in the "daily rate" line); while unknown, "Loading…" — never a screen drawn
+from nothing. **Left on `loadMasters()` by design:** `RteWorkspace` — it writes Masters (`setRteHeadWaiver` /
+`removeRteFromStudent` save concessions and grants through `saveMasters` from the page copy) and draws the very grants it
+just wrote; moving its read to the view would show the old grants until the next poll, so it moves with its write path in 2.2.
+`LoginPanel` — runs before there is a session (the demo / page-copy staff-password match), so there is no masters view to
+read. **Masters writes left as they were (2.2):** `issueCertificate` → `persistSeriesUse` (certificate numbering) builds its
+book from the page copy inside `lib/certificates.ts`, as on main. **Behaviour changes.** (1) Accounts → Quick expense →
+"Bill a daily rate over a range": the billable days wait for the holiday calendar ("Loading the school's holiday calendar…" /
+"Could not load … Try again"); on main an unread calendar meant no holidays and every shut day ticked. Save is disabled until
+the calendar is known. (2) Complaints: tickets are not editable until the roster is known (on main "until masters load, the
+session decides alone" — writable). (3) Library: the staff roster (borrowers, overdue "With") is now read on open; on main it was
+read only inside `refresh()`, i.e. never on a page whose library desk did not change. (4) Each converted screen waits for one
+masters-view read (+1 request, ~37 KB until 2.3b) and shows "Loading …" for it; Discipline, Health, ID cards, Library,
+Visitors, Documents draw nothing but the shell until then. **Proof.** New `e2e/specs/single-dirs.spec.ts` (desktop project; it
+switches the default-off Discipline module on through `/modules` for the file and off again): 14 screens (the 13 files; Transport
+twice — dashboard and By class) seen desktop-light and 375-dark, no page error, class lists = 15 / sections = 13 where drawn;
+and each with `views/masters` 503 → "could not load" + Try again, the masters-dependent part absent, Try again recovers. Local:
+28/28. Fail-on-old (spec on this branch, the 13 components put back to ab545386, fresh build, same stack): **13 FAIL** (no "could
+not load" — main never asks the view); the student-leave case passes on main too (its page is the Attendance workspace, whose
+2.1a gate already shows the error first — so Student leave's own error state is not proven by this spec); the 14 "seen" cases
+pass on main (coverage, not a fix). Ratchets (on origin/main after #661): `load_masters_screen_files` 54 → **41**,
+`load_masters_calls_src` 410 → **385**, `ensure_hydrated_component_files` 67 → **65**. **Not done / not proven.** RTE and Login
+(above). Screens now hand lib helpers the server's raw book rather than `loadMasters()`'s normalised read — not audited field by
+field. Transport's change dialogs compute paid months with `computeStudentDues(student, masters, …)`: for a holder without the
+Masters grant (teaching answer) the fee structure is withheld, so no month reads as paid — exactly what the page copy gave the
+same person on main; should become a refusal in 2.2/2.3. On the ID-cards desktop shot the student list read "0 of 0" for the
+first moments (the SIS hydrate, Phase 3 — pre-existing S2), 274 once it landed. Saves on these screens are unchanged (their own
+desks). Teacher sessions were not exercised on these screens. CI scoreboard: see the PR.
+
 **2.2 Masters and staff editing write rows.** `MastersWorkspace` and its panels write through
 `useErpMutation` → `desk_slice_row_write` / `desk_slice_object_write` (one subject, one
 class-subject link, one section, one fee head at a time). The 14 non-Masters `saveMasters`
