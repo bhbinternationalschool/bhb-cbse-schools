@@ -143,6 +143,27 @@ void (async () => {
     assert.equal(stored.length, 0);
   });
 
+  await check("upload: a teacher with 'Post homework' switched off in the app → 403, nothing stored", async () => {
+    assert.ok(mod, "upload module exists");
+    stored.length = 0;
+    const { defaultMobileAccess } = await import("./mobileFeatures");
+    const access = defaultMobileAccess();
+    const rbac = {
+      ...fx.rbac,
+      mobile: {
+        ...access,
+        roleFeatures: Object.fromEntries(
+          Object.entries(access.roleFeatures).map(([k, v]) => [k, v.filter((f) => f !== "homework_post")]),
+        ),
+      },
+    };
+    await assert.rejects(
+      mod.uploadHomeworkAttachment(ctxFor(fx.sessions.teacher, rbac), form(own), store),
+      (e: unknown) => refused(403)(e) && /not enabled for you in the app/.test((e as Error).message),
+    );
+    assert.equal(stored.length, 0);
+  });
+
   await check("upload: a parent session → 403, nothing stored", async () => {
     assert.ok(mod, "upload module exists");
     stored.length = 0;

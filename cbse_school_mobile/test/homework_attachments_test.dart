@@ -288,6 +288,12 @@ void main() {
         ).hasMatch(parent),
         isTrue,
       );
+      expect(
+        parent,
+        contains(
+          'tools:remove="android:theme,android:dataExtractionRules,android:fullBackupContent"',
+        ),
+      );
     });
 
     test(
