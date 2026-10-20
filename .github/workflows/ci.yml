@@ -142,6 +142,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:online-classes
 
+      - name: Self-test — a member of staff sets only their own signature, and only a real small image
+        working-directory: apps/web
+        run: npm run test:staff-signature
+
       - name: Self-test — an in-class answer is a child's work, and the note only says what the teacher said
         working-directory: apps/web
         run: npm run test:online-class-qa
@@ -475,6 +479,7 @@ jobs:
           npm run test:concession-ground
           npm run test:fee-backdate
           npm run test:month-groups
+          npm run test:month-range
           npm run test:receipt-auto-wa
           npm run test:review-login
           npm run test:desk-sync-status
@@ -517,6 +522,7 @@ jobs:
           npm run test:closing-balance
           npm run test:accounts-position-rbac
           npm run test:voucher-filter
+          npm run test:pg-settlement-failed
           npm run test:voucher-amend
           npm run test:transport-finance
           npm run test:loans
@@ -621,6 +627,7 @@ jobs:
           npm run test:transport-shifts
           npm run test:transport-phone-empty-desk
           npm run test:transport-stop-links
+          npm run test:transport-paid-months
           npm run test:transport-boarding-log
           npm run test:transport-fuel-register
           npm run test:transport-vehicle-costs
@@ -684,6 +691,7 @@ jobs:
           npm run test:reference-views
           npm run test:masters-bridge
           npm run test:staff-requests
+          npm run test:survey-team-plan
           npm run test:parent-api-scope
 
   build:
@@ -821,6 +829,11 @@ jobs:
       # lock, with a base; masters rows synced in the same transaction.
       - name: SQL test — desk_slice_row_write / desk_slice_object_write
         run: bash scripts/e2e-stack.sh sql-test supabase/tests/desk_slice_row_write.test.sql
+
+      # A voided fee receipt stays voided: a stale whole-desk push can no
+      # longer clear voided_at and re-post the receipt (15 Oct 2026, R1).
+      - name: SQL test — a voided fee receipt stays voided
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/fee_voucher_void_is_final.test.sql
 
       # NEXT_PUBLIC_* are baked in at build time, so the build reads
       # apps/web/.env.e2e (127.0.0.1 URL, this run's anon key) and nothing else.

@@ -740,7 +740,7 @@ extension TransportRegisterApi on ApiClient {
         contentType: MediaType.parse(mime),
       ),
     );
-    final res = await http.Response.fromStream(await req.send());
+    final res = await http.Response.fromStream(await _uploadHttp.send(req));
     if (res.statusCode != 200) _throwFrom(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final url = "${body["url"] ?? ""}";

@@ -147,6 +147,9 @@ write_env_file() {
     echo "E2E_APP_URL=http://127.0.0.1:$APP_PORT"
     echo "NEXT_PUBLIC_DEMO_AUTH=false"
     echo "NEXT_PUBLIC_TENANT_SLUG=bhb-international"
+    echo "# The class gallery's AI check answers \"hold\" here (lib/classGalleryReview.server.ts"
+    echo "# honours it only with E2E=1 and a 127.0.0.1 Supabase URL) — never Gemini."
+    echo "CLASS_GALLERY_AI_STUB=hold"
     echo "# Every desk-cutover flag production runs with (deploy/desk-cutover-runtime.env)."
     grep -E '^[A-Z0-9_]+_(READ_FROM_DB|DUAL_WRITE_DB)=' "$ROOT/deploy/desk-cutover-runtime.env"
   } >"$ENV_FILE"
@@ -226,7 +229,7 @@ CONF
     -H "Authorization: Bearer $service" || { tail -20 "$STATE/postgrest.log"; die "postgrest did not come up"; }
   say "PostgREST $POSTGREST_VERSION on 127.0.0.1:$pgrst_port"
 
-  E2E_PROXY_PORT="$API_PORT" E2E_POSTGREST_URL="http://127.0.0.1:$pgrst_port" \
+  E2E_PROXY_PORT="$API_PORT" E2E_POSTGREST_URL="http://127.0.0.1:$pgrst_port" E2E_SERVICE_KEY="$service" \
     nohup node "$ROOT/scripts/e2e/proxy.mjs" >"$STATE/proxy.log" 2>&1 </dev/null &
   echo $! >"$STATE/proxy.pid"
   wait_http "http://127.0.0.1:$API_PORT/rest/v1/tenants?select=id&limit=1" 30 \

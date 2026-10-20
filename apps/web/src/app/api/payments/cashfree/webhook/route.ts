@@ -236,7 +236,7 @@ export async function POST(req: Request) {
   // transfer, not a payment — so they are handled before any link lookup.
   if (eventType.startsWith("SETTLEMENT_")) {
     const data = (event.data ?? {}) as Record<string, unknown>;
-    const res = await ingestSettlementWebhook(data);
+    const res = await ingestSettlementWebhook(data, "cashfree webhook", eventType);
     await recordPaymentGatewayEvent({
       provider: "cashfree",
       eventType,

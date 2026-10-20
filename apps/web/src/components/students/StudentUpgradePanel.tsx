@@ -6,12 +6,13 @@ import Link from "next/link";
 import {
   STUDENT_TYPES,
   STUDENT_TYPE_HINTS,
-  loadMasters,
   resolveFeeGroupId,
   type FeeStudentType,
   type MastersState,
   currentAcademicYearCode,
 } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   loadSis,
   studentTypeShort,
@@ -43,8 +44,10 @@ function classSectionLabel(
   return sec ? `${cls}-${sec}` : cls;
 }
 
-function feeGroupLabel(id: string | null, masters: MastersState): string {
+function feeGroupLabel(id: string | null, masters: MastersState, withheld = false): string {
   if (!id) return "—";
+  // A teacher is not sent the fee groups: say so, never print the raw id.
+  if (withheld) return "Not shown to your role";
   const g = masters.feeGroups.find((x) => x.id === id);
   return g ? g.name || g.code : id;
 }
@@ -60,7 +63,13 @@ export function StudentUpgradePanel({
   tick?: number;
   onChanged?: (sis: SisState) => void;
 }) {
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
+  /**
+   * A teacher's Masters carry no fee groups (withheld, not "none"): re-mapping
+   * against that empty list would set the child's fee group to nothing, so
+   * the option is not offered and never sent.
+   */
+  const feesWithheld = mastersScope === "teaching";
   const [sis, setSis] = useState<SisState | null>(null);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState("");
@@ -77,7 +86,6 @@ export function StudentUpgradePanel({
   const [saving, setSaving] = useState(false);
 
   function refresh() {
-    setMasters(loadMasters());
     setSis(loadSis());
   }
 
@@ -130,7 +138,7 @@ export function StudentUpgradePanel({
   const typeWillChange = !!(selected && toStudentType !== selected.studentType);
 
   const suggestedFeeGroupId = useMemo(() => {
-    if (!masters || !selected || !remapFee) return null;
+    if (!masters || !selected || !remapFee || feesWithheld) return null;
     if (!classWillChange && !typeWillChange) return null;
     const classId =
       mode === "class" && toClassId ? toClassId : selected.classId;
@@ -145,6 +153,7 @@ export function StudentUpgradePanel({
     toClassId,
     toStudentType,
     remapFee,
+    feesWithheld,
     classWillChange,
     typeWillChange,
     mode,
@@ -238,7 +247,7 @@ export function StudentUpgradePanel({
       toSectionId: targetSectionId || selected.sectionId,
       toStudentType,
       remapFeeGroup:
-        (mode === "class" || mode === "type" || typeWillChange) && remapFee,
+        (mode === "class" || mode === "type" || typeWillChange) && remapFee && !feesWithheld,
       resetCurriculum: mode === "class" && resetCurriculum,
       reason,
       effectiveOn,
@@ -272,6 +281,9 @@ export function StudentUpgradePanel({
     setReason("");
   }
 
+  if (mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
   if (!sis || !masters) {
     return (
       <p className="mt-4 text-sm text-[var(--muted)]">Loading upgrade…</p>
@@ -331,7 +343,7 @@ export function StudentUpgradePanel({
                   <div className="mt-0.5 text-[11px] text-[var(--muted)]">
                     Type: {studentTypeShort(selected.studentType).code} ·{" "}
                     {typeLabel(selected.studentType)} · Fee:{" "}
-                    {feeGroupLabel(selected.feeGroupId, masters)}
+                    {feeGroupLabel(selected.feeGroupId, masters, feesWithheld)}
                   </div>
                 </div>
                 <button
@@ -584,7 +596,7 @@ export function StudentUpgradePanel({
               </label>
             </div>
 
-            {(mode === "class" || mode === "type" || typeWillChange) && (
+            {(mode === "class" || mode === "type" || typeWillChange) && !feesWithheld && (
               <label className="flex items-start gap-2 text-xs text-[var(--brand-deep)]">
                 <input
                   type="checkbox"
@@ -747,9 +759,9 @@ export function StudentUpgradePanel({
                         {u.toStudentType || "—"}
                       </td>
                       <td className="px-2 py-2 text-xs text-[var(--muted)]">
-                        {feeGroupLabel(u.fromFeeGroupId, masters)}
+                        {feeGroupLabel(u.fromFeeGroupId, masters, feesWithheld)}
                         <span className="mx-1">→</span>
-                        {feeGroupLabel(u.toFeeGroupId, masters)}
+                        {feeGroupLabel(u.toFeeGroupId, masters, feesWithheld)}
                       </td>
                       <td className="px-2 py-2 text-xs text-[var(--muted)]">
                         {u.reason}

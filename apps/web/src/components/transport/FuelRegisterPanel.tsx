@@ -31,6 +31,8 @@ import {
   type FuelStatusKind,
   type FuelTableRow,
 } from "@/lib/fuelLog";
+import { MonthRangeFilter, useMonthRange } from "@/components/ui/month-range-filter";
+import { exactMonth, monthName } from "@/lib/monthRange";
 import { fuelRegisterPrintHtml } from "@/lib/fuelLogPrint";
 import { printWhenImagesReady } from "@/lib/printLetterheadHtml";
 import {
@@ -480,8 +482,10 @@ function tableRow(f: Fill): FuelTableRow & { fill: Fill } {
  */
 export function FuelRegisterPanel() {
   const presets = useMemo(() => fuelDatePresets(istToday()), []);
-  const [from, setFrom] = useState(presets.thisMonth.from);
-  const [to, setTo] = useState(presets.thisMonth.to);
+  // One period (lib/monthRange.ts): the month box and From / To always
+  // describe the same dates. Not bound to a session — fills go back years.
+  const period = useMonthRange({ initial: presets.thisMonth });
+  const { from, to } = period;
   const [vehicleId, setVehicleId] = useState("");
   const [fuelFilter, setFuelFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<FuelStatusKind | "">("");
@@ -953,21 +957,20 @@ export function FuelRegisterPanel() {
             aria-label="Vehicle"
           />
         </label>
-        <label className="text-xs">
-          <span className="block text-[var(--muted)]">From</span>
-          <input type="date" className={regField} value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label className="text-xs">
-          <span className="block text-[var(--muted)]">To</span>
-          <input type="date" className={regField} value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
-        <button type="button" className={chip} onClick={() => { setFrom(presets.thisMonth.from); setTo(presets.thisMonth.to); }}>
+        <MonthRangeFilter
+          period={period}
+          labelClassName="text-xs"
+          captionClassName="block text-[var(--muted)]"
+          fieldClassName={regField}
+          testId="fuel-period"
+        />
+        <button type="button" className={chip} onClick={() => period.setRange(presets.thisMonth)}>
           This month
         </button>
-        <button type="button" className={chip} onClick={() => { setFrom(presets.lastMonth.from); setTo(presets.lastMonth.to); }}>
+        <button type="button" className={chip} onClick={() => period.setRange(presets.lastMonth)}>
           Last month
         </button>
-        <button type="button" className={chip} onClick={() => { setFrom(presets.thisFy.from); setTo(presets.thisFy.to); }}>
+        <button type="button" className={chip} onClick={() => period.setRange(presets.thisFy)}>
           This FY
         </button>
         <label className="text-xs">
@@ -1071,7 +1074,13 @@ export function FuelRegisterPanel() {
 
       {view ? (
         <div className="space-y-2">
-          <h3 className="text-sm font-bold text-[var(--brand-deep)]">Per bus — {view.month}</h3>
+          <h3 className="text-sm font-bold text-[var(--brand-deep)]">Per bus — {monthName(view.month)}</h3>
+          {exactMonth(period.range) !== view.month ? (
+            <p className="text-[11px] font-semibold text-[var(--warning)]" data-testid="fuel-per-bus-month-note">
+              Per-bus totals are for the whole of {monthName(view.month)}; the fills above are{" "}
+              {from || "…"} to {to || "…"}. Pick a month to see both for the same dates.
+            </p>
+          ) : null}
           {!view.fleetEdge.ok ? (
             <p className="text-[11px] text-[var(--warning)]">Fleet Edge could not be read just now ({view.fleetEdge.error}); its columns are blank, not zero.</p>
           ) : (

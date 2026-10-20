@@ -31,7 +31,8 @@
  * to useMasters(): today a Masters copy lives per tab and nothing re-reads it
  * (evidence/propagation.md). Converted (must pass): /attendance, /timetable,
  * /homework (2.1a). Still expected to fail: /masters (2.1h) and the staff
- * cases (the roster is not on useStaffList() yet, 2.1c / 2.3a). The scoreboard records the step each one failed
+ * cases (the roster on both observers is still the tab's page copy: /staff
+ * until 2.2, the access copy behind useScreenMasters until 2.3a). The scoreboard records the step each one failed
  * at; the subject and section tests must fail at "propagation", never at
  * "control", "edit" or "database".
  *
@@ -404,9 +405,11 @@ for (const obs of STAFF_OBSERVERS) {
   test(`staff record renamed via api → visible on ${obs.path}`, async ({ browser }, testInfo) => {
     test.fail(
       true,
-      `${UNTIL}. Today the observer lists no staff at all, even before the edit (the /staff count defect, S1): ` +
-        "the control is recorded (metric controlShown:false) and the edit still runs, so the write path is proven, " +
-        "but propagation cannot be told apart from the empty list until that is fixed.",
+      `${UNTIL}. Measured 15 Oct 2026 (2.1c): the control passes on both observers (controlShown:true) and the ` +
+        "renamed name shows after a reload (visibleAfterReload:true) — so this fails on staleness alone. Both " +
+        "observers draw the roster from the tab's page copy, which the staff hydrate fills once per page: " +
+        "/staff's roster edits staff records and stays on its full-record read until 2.2; /timetable's Teacher " +
+        "picker reads useScreenMasters, whose staff side is the access copy until 2.3a puts it on useStaffList().",
     );
     const next = `Rohit Renamed ${tag()}`;
     const r: { propagatedAfterMs: number | null; visibleAfterReload?: boolean | string; controlShown?: boolean } = { propagatedAfterMs: null };
@@ -429,6 +432,9 @@ for (const obs of STAFF_OBSERVERS) {
   });
 }
 
+// Title kept for the scoreboard. Measured 15 Oct 2026 (2.1c): the Staff roster
+// DOES list its staff now (controlShown:true above); what is left is that its
+// editor still saves through the old whole-roster path — build this with 2.2.
 test.fixme(
   "staff record renamed via editor → visible elsewhere (the Staff roster lists no staff today, so its editor cannot be driven; build with the /staff fix)",
   async () => {},
