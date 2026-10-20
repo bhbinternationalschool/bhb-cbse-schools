@@ -393,3 +393,21 @@ test.describe("teaching-scope Masters (fee lists withheld): unknown, never ₹0"
     await page.context().close();
   });
 });
+
+test("accounts voucher: no views/masters read until the daily-rate spread is ticked", async ({ browser }) => {
+  const page = await desktopLight(browser, "office");
+  let reads = 0;
+  page.on("request", (r) => {
+    if (r.url().includes("/api/data/views/masters")) reads += 1;
+  });
+  await page.goto("/accounts?tab=vouchers");
+  const spread = page.getByRole("checkbox", { name: /Bill a daily rate over a range/ });
+  await expect(spread).toBeVisible({ timeout: 20_000 });
+  // Long enough for a mount-time read to have gone out (the screen's other reads have).
+  await page.waitForLoadState("networkidle");
+  expect(reads, "a plain voucher asks nothing of the masters view").toBe(0);
+  await spread.check();
+  await expect.poll(() => reads, { timeout: 15_000 }).toBeGreaterThan(0);
+  await expect(page.getByText(/day\(s\) ×/)).toBeVisible({ timeout: 20_000 });
+  await page.context().close();
+});

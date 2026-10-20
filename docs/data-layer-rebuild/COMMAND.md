@@ -1157,7 +1157,40 @@ field. Transport's change dialogs compute paid months with `computeStudentDues(s
 Masters grant (teaching answer) the fee structure is withheld, so no month reads as paid — exactly what the page copy gave the
 same person on main; should become a refusal in 2.2/2.3. On the ID-cards desktop shot the student list read "0 of 0" for the
 first moments (the SIS hydrate, Phase 3 — pre-existing S2), 274 once it landed. Saves on these screens are unchanged (their own
-desks). Teacher sessions were not exercised on these screens. CI scoreboard: see the PR.
+desks). Teacher sessions were not exercised on these screens. CI scoreboard: see the PR. **Review fixes (21 Oct 2026, same PR).**
+(1) *Money — Transport.* The hook's `scope` is now read: when the masters answer is not `"full"` (teaching subset — no
+Masters grant, e.g. a transport in-charge) the screen passes `dues: null` to `TransportAmendDialog` and
+`planTransportAmendment` refuses with `PAID_MONTHS_UNKNOWN_FOR_ROLE` ("Paid months cannot be checked for your role … Ask the
+office"), Apply stays off, any "Apply from" month included. The Riders form's carry-over note says "Paid months are not shown
+for your role" instead of nothing; search hits and their PDF/Excel export say "dues: not shown for your role" instead of
+"open dues ₹0". Measured on the fixture's paid-month case: on the old code the teaching answer still showed "Applies from Oct
+2026 · 6 paid months" — plain transport receipts are matched without the fee book — so the live risk is narrower than "no
+month reads paid": a month settled with a TRANSPORT-head concession (fee heads and concession grants are withheld) reads
+unpaid and the floor falls onto it. Refused either way. New selftest `test:screen-masters-dues`
+(`lib/screenMastersDues.selftest.ts`, CI + verify.sh): dues of all 250 fixture children and the paid-month case's paid months
+and amendment plan are **identical** from the raw server book and from `ensureFeeSetup` (loadMasters' normalisation:
+`ensureAprToMarInstallments` …), and again on a production-shaped fee book (12 dated installments, TUITION/TRANSPORT heads, a
+published group per class) — production holds 12 installments per year with no null `due_on` (read-only count, 21 Oct) — so no
+normalisation is added; the same check with one blank `dueOn` does differ (the test can see it). (2) *Certificates* search hits
+(and their export): "dues: not shown for your role" for a teaching answer. (3) *Documents* "Insert school facts": the fee
+line reads "Fee: not available for your role …", never "0 fee structures published" (`buildComplianceFactsFromMasters`
+`feesWithheld`). (4) `LedgerEntryPanels` asks views/masters only once the daily-rate spread is ticked
+(`useScreenMasters({enabled: spread})`); Inventory only on Counter / Kits (a `?tab=` deep link to another tab may still fire
+one read on the first render). (5) Certificates: the TC form's "Checked by" designation is filled by its own effect keyed on
+`[student, masters]` (once per student, ref-guarded so a refetch never re-fills a field the clerk changed); the per-student
+reset stays on `[student?.id]`. (6) *Availability.* Visitors and Health no longer wait for the masters view: tabs and edit
+rights come from the access copy (`useAccessData` — the same roster + roles the book's staff side is), records, forms and
+actions render; only class/section (and gate-duty staff) names show "…", and a failed read is an in-place `QueryError
+compact` strip with Try again. Library stays gated. (7) Spec: `setDiscipline` reads the module's state from the Modules screen
+first and restores THAT in `afterAll` (idempotent; reading the cached registry view before the write had primed it with the old
+answer). **Fail-on-old** (new tests, source put back to 8a22525e, fresh build): selftest 2 FAIL (null dues → TypeError;
+"0 fee structures"); single-dirs 6 FAIL (Health/Visitors usable ×4, certificates hit "open dues ₹0", documents fee line) + the
+ledger lazy read (1 read at mount); transport-paid-month: teaching amend dialog showed "Applies from Oct 2026", riders hit
+"open dues ₹0" (her October ₹500 transport is owing). The old spec left Discipline OFF after a run that found it ON (proved
+on the stack). Local on the fix: single-dirs 34/34, transport-paid-month 8/8. Not proven: a real transport in-charge login
+(teaching scope is simulated by cutting the real answer with the server's `teachingMastersSubset`); Certificates' step-3 "Open
+dues" and the TC/no-dues gate still read the page copy inside `lib/certificates.ts` (2.2) — for a non-Masters holder that is
+the teaching subset too, unchanged by this PR.
 
 **2.2 Masters and staff editing write rows.** `MastersWorkspace` and its panels write through
 `useErpMutation` → `desk_slice_row_write` / `desk_slice_object_write` (one subject, one

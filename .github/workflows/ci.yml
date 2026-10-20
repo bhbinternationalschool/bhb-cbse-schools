@@ -90,6 +90,9 @@ jobs:
       - name: Test — a teacher's Masters keeps its staff without a fee structure
         working-directory: apps/web
         run: npm run test:masters-teacher-no-fees
+      - name: Test — screen Masters dues — raw vs normalised book; teaching scope refuses, never ₹0
+        working-directory: apps/web
+        run: npm run test:screen-masters-dues
 
       - name: Test — a stale wipe signal expires
         working-directory: apps/web
