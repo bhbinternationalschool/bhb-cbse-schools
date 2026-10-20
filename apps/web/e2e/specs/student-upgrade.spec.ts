@@ -64,6 +64,7 @@ test.describe("student upgrade — fee group", () => {
     // says "no matching group".
     const NO_MATCH = "(no matching group found — keep current)";
     const classSelect = form.locator("select").nth(0);
+    const remapLabel = form.locator("label", { hasText: "Remap fee group" });
     const sectionSelect = form.locator("select").nth(1);
     const classOptions = (await classSelect.locator("option").allTextContents())
       .map((t) => t.trim())
@@ -80,9 +81,12 @@ test.describe("student upgrade — fee group", () => {
       const sections = (await sectionSelect.locator("option").allTextContents()).map((t) => t.trim());
       if (sections.length < 2) continue;
       await sectionSelect.selectOption({ index: 1 });
-      const noMatch = await page
-        .getByText(NO_MATCH)
-        .waitFor({ state: "visible", timeout: 3_000 })
+      // The hint sits inside the remap checkbox's label; read that label
+      // (getByText can match it twice — label and span — and strict mode
+      // then refuses, which read as "no hint" on CI).
+      const noMatch = await expect
+        .poll(async () => ((await remapLabel.innerText().catch(() => "")) || "").includes(NO_MATCH), { timeout: 3_000 })
+        .toBe(true)
         .then(() => true)
         .catch(() => false);
       if (noMatch) {
@@ -91,10 +95,10 @@ test.describe("student upgrade — fee group", () => {
       }
     }
     expect(target, `a class with no matching fee group among: ${classOptions.join(", ")}`).not.toBeNull();
-    await expect(page.getByText(NO_MATCH)).toBeVisible();
+    await expect(remapLabel).toContainText(NO_MATCH);
 
     fs.mkdirSync(SHOTS, { recursive: true });
-    await page.getByText(NO_MATCH).evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await remapLabel.evaluate((el) => el.scrollIntoView({ block: "center" }));
     await page.waitForTimeout(400);
     await page.screenshot({ path: path.join(SHOTS, "upgrade-before-desktop-light.png") });
 
