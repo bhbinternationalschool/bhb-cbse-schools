@@ -47,7 +47,7 @@ test.beforeAll(() => {
   execFileSync("npx", ["--yes", "tsx", path.join(__dirname, "..", "..", "..", "..", "scripts", "e2e-seed-transport-paid.ts")], {
     cwd: path.join(__dirname, "..", ".."),
     stdio: "inherit",
-    env: { ...process.env, TPM_STEP: "" },
+    env: { ...process.env, TPM_STEP: "", TPM_CASE: "" },
   });
   fs.mkdirSync(SHOTS, { recursive: true });
 });
