@@ -7,6 +7,7 @@ import "../../core/api/api_client.dart";
 import "../../core/ui/stale_banner.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/chat_inbox_screen.dart";
+import "../modules/school_chat_screen.dart";
 import "../modules/notice_detail_screen.dart";
 import "../modules/notices_screen.dart";
 import "admission_leads_screen.dart";
@@ -290,7 +291,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       Icons.chat_bubble_outline,
       ModuleTone.teal,
       "messages",
-      (api) => ChatInboxScreen(api: api),
+      (api) => staffSchoolChat(api),
     ),
     // An office-like member of staff may teach a section too; both tiles
     // show only when the ERP grants them.
@@ -468,6 +469,8 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
         _push(DocumentsScreen(api: widget.api));
       case "/chat":
         _push(ChatInboxScreen(api: widget.api));
+      case "/school-chat":
+        _push(staffSchoolChat(widget.api));
       case "/notices":
         // A tapped broadcast opens in full; otherwise the notices list.
         _push(noticesScreenForRoute(widget.api, Uri.tryParse(raw)));

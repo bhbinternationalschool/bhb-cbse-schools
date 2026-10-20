@@ -196,7 +196,12 @@ export function useErpMutation<T>(collection: string, opts: ErpMutationOptions<T
 
 // ── The versions poll ──────────────────────────────────────────────────────
 
-/** A mounted query that reads a desk: the poll has something to keep fresh. */
+/**
+ * A mounted, enabled query that reads a desk: the poll has something to keep
+ * fresh. A disabled one (`enabled: false` — e.g. the header WhatsApp panel
+ * while it is closed) reads nothing, so it is no reason to poll
+ * (Query.isActive is React Query's own "has an enabled observer").
+ */
 function hasDeskObservers(client: QueryClient): boolean {
   return client
     .getQueryCache()
