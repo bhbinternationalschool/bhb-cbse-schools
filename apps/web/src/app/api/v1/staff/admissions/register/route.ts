@@ -1,7 +1,6 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
-import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureAdmissionsHydratedServer } from "@/lib/admissionsPersistence";
 import {
   applyRegistrationToLead,
@@ -80,7 +79,6 @@ export async function POST(request: Request) {
     if (reg.collect) assertAdmissionsGrant(ctx, "admissions.registration", "create");
     const feeHeadName = heads.find((h) => h.id === reg.feeHeadId)?.name || "Registration fee";
 
-    await ensureSchoolMirrorHydrated();
     await ensureAdmissionsHydratedServer();
     let state: AdmissionsState = loadAdmissions();
     const by = ctx.session.fullName || "Counsellor";

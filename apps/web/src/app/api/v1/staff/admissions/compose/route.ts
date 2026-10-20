@@ -1,7 +1,6 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
-import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureAdmissionsHydratedServer } from "@/lib/admissionsPersistence";
 import { loadAdmissions } from "@/lib/admissions";
 import { fetchServerBlob } from "@/lib/serverBlob";
@@ -49,7 +48,6 @@ export async function GET(request: Request) {
     const leadId = (new URL(request.url).searchParams.get("leadId") || "").trim();
     if (!leadId) throw new ApiError("bad_request", "leadId required", 400);
 
-    await ensureSchoolMirrorHydrated();
     await ensureAdmissionsHydratedServer();
     const state = loadAdmissions();
     const lead = state.leads.find((l) => l.id === leadId);
