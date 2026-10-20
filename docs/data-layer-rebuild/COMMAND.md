@@ -1152,6 +1152,46 @@ holder of those screens without the Masters view). Pre-existing and untouched (s
 writes fee holds on every open (`setReportCardHoldFromStage`) — the teacher gets "You do not have permission", and on a
 fresh stack the office can get "fee holds: changed on another device" (also seen on `/attendance`); the teacher's
 "Couldn't load fee records" toast on `/reports`.
+*(2.1h review fixes, 21 Oct 2026, PR #686.)* **The Masters editor's overlay.** On the first cut a commit's state was
+shown until the first answer after its save — but that answer can predate the save (another instance's masters cache
+re-checks erp_versions at most every 2 s; a failed refetch keeps the old answer), so the screen reverted, the bridge put
+the old book in the page copy, and the next commit in another panel sent the old value of the first edit's section
+back: **edit A reverted on the server** (reproduced end to end, below). Now (`components/masters/mastersPending.ts`,
+pure): the overlay stays until an answer **provably** holds every save of it — built from the save's desk revision
+or later (`builtFrom.masters.updated_at` ≥ the `masters_desk_sync_meta.updated_at` the save wrote; `saveMasters` now
+answers it as `revision`, `useScreenMasters` exposes `builtFrom` via `useMastersBuiltFrom`), or reading every changed
+key back as sent (a save with no revision: function-only, no database). No proof while a commit is saving. Unproven
+answers are not shown; the editor re-asks every 2.5 s (4 times), then the versions poll. A **failed** save drops the
+overlay once nothing else is saving, says "Not saved — showing the school's saved Masters again." and refetches (main
+and the first cut left the refused edit on screen, to be re-sent by the next commit). `onMastersChanged` (subject
+requests) only refetches — it no longer clears the overlay, mid-save or otherwise. `POST /api/school-data/masters-desk`
+calls `invalidateServerMastersCache()` after any write that may have landed (not after a 409). **Deterministic
+normalisation:** `normalizeMastersRead` filled gaps with `Math.random` ids (classes of the standard list, fee groups of
+the 2026-27 structures, seed departments/designations) — a new id set on every answer; it now runs with `Math.random`
+seeded from the book's own fingerprint for that synchronous call (same book → same ids; restored in `finally`).
+**Loading:** Exams' Date-sheet / Seating / Invigilation / Admit cards / Question papers tabs and the Exam and Teaching
+report runners say "Loading…" (the runners `<QueryError>` on a failed read) while Masters is unknown, not an empty tab
+or an "All classes"-only picker. **Salary setup** for the teaching scope: an explicit refusal naming the grant
+(*Masters · View*, Masters → Roles & permissions) — kept as a refusal, a behaviour change from main, which silently
+worked salaries out on default EPF/ESIC rates. **Proof.** New self-test `test:masters-pending` (CI + verify.sh; 7
+checks on the e2e fixture's book: stale answer keeps A and the real `mastersSectionSave` does not resend A's section;
+Postgres-spelt revision; failed save; mid-save; proof by value; same book twice = same ids). Fail-on-old by mutation:
+the branch's old drop-on-first-answer rule fails check 1, the old keep-on-failure rule fails check 3, the unseeded
+normalisation fails check 7. New `e2e/specs/masters-overlay.spec.ts` ("propagation" project — it writes, then puts
+the campus and section back): principal inactivates Main Campus, every views/masters answer from then on is the
+pre-save body; the screen keeps "Inactive", class IV's section is renamed in another panel, and the server must hold
+both; then the refused-save case (409). `masters-exams-reports.spec` adds 6 cases (Date-sheet, Seating, Result
+reports × desktop-light / 375-dark) holding views/masters: "Loading…" shown, then the tab. **Fail-on-old** (specs on
+this branch, `apps/web/src` at the pre-fix head 561aca62, fresh build, same stack): the stale case FAILS on screen
+(back to "Active") and — with that check made soft — **on the server: Main Campus active again after B's save** (edit
+A reverted); the refused-save case FAILS (no "Not saved", the edit stays); all 6 Loading cases FAIL (nothing drawn).
+This branch: masters-overlay 2/2, the 6 Loading cases, masters-exams-reports + error 33/33 (desktop), /masters
+propagation 2/2. **Not proven:** the multi-instance staleness itself (the spec fakes the stale answer at the network,
+one local instance); a revision compared across server clocks (two instances with skewed clocks could leave an
+overlay unproven until the next save/poll answer reads it back by value); the Teaching runner's "Loading…" is
+unreachable on screen (Reports Center waits for Masters first) — typechecked and read only; the salary refusal still
+not run (no fixture holder without the Masters view). `normalizeMastersRead`'s determinism is per book: a book that
+changed elsewhere re-mints its fillers (ids no earlier answer had, never an earlier filler's id reused).
 
 **2.2 Masters and staff editing write rows.** `MastersWorkspace` and its panels write through
 `useErpMutation` → `desk_slice_row_write` / `desk_slice_object_write` (one subject, one
