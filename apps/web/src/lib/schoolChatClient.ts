@@ -41,7 +41,8 @@ export async function chatPost<T = unknown>(path: string, body: unknown): Promis
   } catch {
     return { ok: false, error: "Could not reach the server — check the connection and try again.", status: 0 };
   }
-  const j = (await res.json().catch(() => null)) as { ok?: boolean; data?: T; error?: { message?: string } } | null;
+  const j = (await res.json().catch(() => null)) as { ok?: boolean; data?: T; error?: string | { message?: string } } | null;
   if (res.ok && j?.ok) return { ok: true, data: j.data as T };
-  return { ok: false, error: j?.error?.message || `Request failed (${res.status})`, status: res.status };
+  const e = j?.error;
+  return { ok: false, error: (typeof e === "string" ? e : e?.message) || `Request failed (${res.status})`, status: res.status };
 }

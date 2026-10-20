@@ -1,6 +1,7 @@
 import { apiErr, apiOk } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
-import { decideMessage } from "@/lib/schoolChat.server";
+import { requireStaffPermissionOrFeature } from "@/lib/apiRouteAuth.server";
+import { CHAT_MODERATE_FEATURE, decideMessage } from "@/lib/schoolChat.server";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,9 @@ export const runtime = "nodejs";
  * original text. A message someone else already decided is a 409.
  */
 export async function POST(request: Request) {
+  // Staff holding School chat moderation (or Discipline · approve) only.
+  const gate = await requireStaffPermissionOrFeature(request, "discipline", "approve", CHAT_MODERATE_FEATURE, "approve");
+  if (!gate.ok) return gate.response;
   try {
     const ctx = await resolveApiAuth(request);
     const p = (await request.json().catch(() => ({}))) as { messageId?: string; decision?: string; note?: string };

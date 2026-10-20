@@ -24,7 +24,7 @@ import { readClassCoordinators } from "@/lib/attendanceCover.server";
 import { coordinatorBySection } from "@/lib/attendanceCover";
 import { readStudentById } from "@/lib/data/server/householdRead";
 import { currentAcademicYearCode, type MastersState } from "@/lib/masters";
-import { hasPermission, type RbacState } from "@/lib/rbac";
+import { hasFeaturePermission, type RbacState } from "@/lib/rbac";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { rowToStudent } from "@/lib/sisNormalized.server";
 import { normalizeStudent, type SisStudent } from "@/lib/sis";
@@ -86,10 +86,18 @@ export type ChatActor =
       ay: string;
     };
 
+/** The RBAC function behind moderation (lib/rbacFeatureCatalog/campus.ts). */
+export const CHAT_MODERATE_FEATURE = "discipline.chat_moderate";
+
+/**
+ * Moderator = holds the "School chat moderation" function for approve —
+ * through Discipline · approve (owner, principal, admin by default) or the
+ * function on its own (Masters → Roles). Unknown roles = not a moderator.
+ */
 export function isChatModerator(ctx: ApiAuthContext): boolean {
-  if (ctx.session.persona !== "staff") return false;
+  if (ctx.session.persona !== "staff" || ctx.rbacKnown === false) return false;
   try {
-    return hasPermission(ctx.session, ctx.masters, "discipline", "approve", ctx.rbac);
+    return hasFeaturePermission(ctx.session, ctx.masters, CHAT_MODERATE_FEATURE, "approve", ctx.rbac);
   } catch {
     return false;
   }
@@ -837,7 +845,7 @@ export async function chatContacts(
 
 export function requireModerator(ctx: ApiAuthContext): Extract<ChatActor, { kind: "staff" }> {
   if (!isChatModerator(ctx) || !ctx.session.staffId) {
-    throw new ApiError("forbidden", "Chat moderation is for staff who approve Discipline / behaviour (Settings → Roles).", 403);
+    throw new ApiError("forbidden", "Chat moderation needs the School chat moderation function (Masters → Roles).", 403);
   }
   return { kind: "staff", staffId: ctx.session.staffId, name: ctx.session.fullName, moderator: true, ay: staffWorkingYear(ctx) };
 }
@@ -1128,7 +1136,7 @@ export function chatModeratorStaffIds(masters: MastersState, rbac: RbacState, ay
     try {
       const roleCode = staffRoleCodeFor({ fullName: s.fullName, staffId: s.id }, masters, "teacher", rbac);
       const session = { persona: "staff" as const, fullName: s.fullName, roleCode, staffId: s.id, tenantSlug: "", academicYearCode: ay };
-      if (hasPermission(session, masters, "discipline", "approve", rbac)) out.push(s.id);
+      if (hasFeaturePermission(session, masters, CHAT_MODERATE_FEATURE, "approve", rbac)) out.push(s.id);
     } catch {
       /* not a moderator */
     }

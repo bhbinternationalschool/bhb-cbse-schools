@@ -19,6 +19,8 @@ import {
   type ChatBlock,
   type ChatRoster,
 } from "./schoolChat";
+import { defaultRbacState, hasFeaturePermission } from "./rbac";
+import { emptyMastersShell } from "./masters";
 import { checkRules, heldNotice, moderateMessage, parseModerationVerdict, type Classifier } from "./schoolChatModeration";
 
 let passed = 0;
@@ -231,6 +233,16 @@ await t("moderateMessage: fail closed, rules first, staff never held", async () 
   assert.equal(staff.status, "visible");
   assert.equal(staff.flagged, true);
   assert.equal((await moderateMessage("Homework: page 4", { sender: "staff", where: "g", classify: down })).logAction, "passed");
+});
+
+await t("moderation is a real function: principal / owner / admin by default, not teacher or office", () => {
+  const rbac = defaultRbacState();
+  const masters = emptyMastersShell();
+  const as = (roleCode: string) => ({ persona: "staff" as const, fullName: "X", roleCode, staffId: "", tenantSlug: "t", academicYearCode: AY });
+  for (const r of ["owner", "principal", "admin"]) assert.equal(hasFeaturePermission(as(r), masters, "discipline.chat_moderate", "approve", rbac), true, r);
+  for (const r of ["teacher", "office", "accounts"]) assert.equal(hasFeaturePermission(as(r), masters, "discipline.chat_moderate", "approve", rbac), false, r);
+  const withGrant = { ...rbac, roles: rbac.roles.map((x) => (x.code === "teacher" ? { ...x, featureGrants: [...(x.featureGrants ?? []), { feature: "discipline.chat_moderate", actions: ["view" as const, "approve" as const] }] } : x)) };
+  assert.equal(hasFeaturePermission(as("teacher"), masters, "discipline.chat_moderate", "approve", withGrant), true, "assignable in Masters → Roles");
 });
 
 await t("held notice: self-harm gets a helpline", () => {
