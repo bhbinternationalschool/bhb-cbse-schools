@@ -16,6 +16,8 @@ import { MessagesSquare } from "lucide-react";
 import { QueryError } from "@/components/data/QueryError";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
+import { RowActionMenu } from "@/components/ui/erp-grid";
 import { useErpQuery } from "@/lib/data/client/hooks";
 import {
   chatPost,
@@ -465,10 +467,10 @@ function BlocksPanel() {
       <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
         <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> Show lifted ones too
       </label>
-      <div className={`${card} overflow-x-auto`}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-[var(--muted)]">
+      <ErpTableShell>
+        <ErpTable minWidth="min-w-[640px]">
+          <ErpTableHead>
+            <tr>
               <th className="p-2">Who</th>
               <th className="p-2">Mode</th>
               <th className="p-2">Where</th>
@@ -476,10 +478,10 @@ function BlocksPanel() {
               <th className="p-2">By / when</th>
               <th className="p-2" />
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody hoverable>
             {(q.data?.blocks ?? []).map((b) => (
-              <tr key={b.id} className="border-t border-[var(--border)] text-[var(--ink)]">
+              <tr key={b.id} className="text-[var(--ink)]">
                 <td className="p-2">
                   {b.subjectKind} {b.subjectId}
                 </td>
@@ -493,17 +495,15 @@ function BlocksPanel() {
                   {b.liftedAt ? (
                     <span className="text-xs text-[var(--muted)]">lifted {fmt(b.liftedAt)}</span>
                   ) : (
-                    <button type="button" className={btn} onClick={() => void lift(b.id)}>
-                      Lift
-                    </button>
+                    <RowActionMenu row={b} label="Mute / block actions" actions={[{ id: "lift", label: "Lift…", onSelect: (x) => void lift(x.id) }]} />
                   )}
                 </td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
         {(q.data?.blocks ?? []).length === 0 ? <p className="p-4 text-sm text-[var(--muted)]">No one is muted or blocked.</p> : null}
-      </div>
+      </ErpTableShell>
     </div>
   );
 }
@@ -511,8 +511,16 @@ function BlocksPanel() {
 function BehaviourPanel() {
   const [days, setDays] = useState(7);
   const q = useErpQuery<BehaviourView>(["school-chat", "behaviour", days], `/api/v1/school-chat/moderation/summary?days=${days}`);
+  const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   if (q.isError) return <QueryError what="the behaviour summary" error={q.error} retry={q.refetch} />;
   const v = q.data;
+  async function restrict(p: { kind: string; id: string; label: string }, mode: "mute" | "block") {
+    const reason = window.prompt(`${mode === "mute" ? "Mute" : "Block"} ${p.label} school-wide — why? (kept in the log)`) || "";
+    if (!reason.trim()) return;
+    const r = await chatPost("/api/v1/school-chat/moderation/blocks", { op: "set", subjectKind: p.kind, subjectId: p.id, mode, reason });
+    setNotice(r.ok ? { kind: "ok", text: `${p.label} ${mode === "mute" ? "muted" : "blocked"}.` } : { kind: "error", text: r.error });
+    void q.refetch();
+  }
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 text-sm text-[var(--ink)]">
@@ -541,10 +549,10 @@ function BehaviourPanel() {
           ))}
         </div>
       ) : null}
-      <div className={`${card} overflow-x-auto`}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-[var(--muted)]">
+      <ErpTableShell>
+        <ErpTable minWidth="min-w-[640px]">
+          <ErpTableHead>
+            <tr>
               <th className="p-2">Who</th>
               <th className="p-2">Checked</th>
               <th className="p-2">Held</th>
@@ -552,11 +560,12 @@ function BehaviourPanel() {
               <th className="p-2">Warned</th>
               <th className="p-2">Mostly</th>
               <th className="p-2">Status</th>
+              <th className="p-2" />
             </tr>
-          </thead>
-          <tbody>
+          </ErpTableHead>
+          <ErpTableBody hoverable>
             {(v?.people ?? []).map((p) => (
-              <tr key={`${p.kind}:${p.id}`} className="border-t border-[var(--border)] text-[var(--ink)]">
+              <tr key={`${p.kind}:${p.id}`} className="text-[var(--ink)]">
                 <td className="p-2">
                   {p.label}
                   {p.repeat ? <span className="ml-2 rounded bg-[var(--danger)] px-1.5 text-xs font-semibold text-white">repeat</span> : null}
@@ -573,12 +582,23 @@ function BehaviourPanel() {
                     .join(", ")}
                 </td>
                 <td className="p-2 text-xs">{p.activeBlock}</td>
+                <td className="p-2">
+                  <RowActionMenu
+                    row={p}
+                    label="Behaviour actions"
+                    actions={[
+                      { id: "mute", label: "Mute school-wide…", onSelect: (x) => void restrict(x, "mute") },
+                      { id: "block", label: "Block school-wide…", tone: "danger", onSelect: (x) => void restrict(x, "block") },
+                    ]}
+                  />
+                </td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </ErpTableBody>
+        </ErpTable>
         {v && v.people.length === 0 ? <p className="p-4 text-sm text-[var(--muted)]">Nobody was held, removed or warned in this period.</p> : null}
-      </div>
+      </ErpTableShell>
+      {notice ? <p className={`text-xs ${notice.kind === "error" ? "text-[var(--danger)]" : "text-[var(--ok)]"}`}>{notice.text}</p> : null}
     </div>
   );
 }
