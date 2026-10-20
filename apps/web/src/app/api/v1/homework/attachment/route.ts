@@ -9,7 +9,8 @@
 
 import { NextResponse } from "next/server";
 import { apiErr, ApiError } from "@/lib/api/v1/errors";
-import { resolveApiAuth } from "@/lib/api/v1/auth";
+import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
+import { requireParentHousehold } from "@/lib/api/v1/household";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureHomeworkHydratedServer } from "@/lib/homeworkPersistence";
 import { loadHomework } from "@/lib/homework";
@@ -27,6 +28,10 @@ export async function GET(request: Request) {
     const postId = url.searchParams.get("postId")?.trim() || "";
     const attId = url.searchParams.get("attId")?.trim() || "";
     if (!postId || !attId) throw new ApiError("bad_request", "postId and attId required", 400);
+    // Early refusal before the desk is read; the full check (a child in the
+    // section / the section in scope) follows once the post is known.
+    if (ctx.session.persona === "parent") requireParentHousehold(ctx);
+    else assertPermission(ctx, "homework", "view");
 
     await ensureSchoolMirrorHydrated();
     await ensureHomeworkHydratedServer();
