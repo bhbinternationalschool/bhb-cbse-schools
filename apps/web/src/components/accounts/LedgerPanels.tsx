@@ -33,6 +33,12 @@ import { VoucherBrowserPanel } from "@/components/accounts/VoucherBrowserPanel";
 import { formatInr } from "@/lib/fees";
 import { hideCancelledLines, type StatementLineLike } from "@/lib/ledger/cancelledPairs";
 import { statementDrillTarget, type StatementTarget } from "@/lib/ledger/drillDown";
+import {
+  failedLabel,
+  isFailedState,
+  summariseSettlements,
+  type RetriedAs,
+} from "@/lib/ledger/pgSettlementStatus";
 import { VoucherDetailDialog, rowOpenProps } from "@/components/accounts/VoucherDetailDialog";
 import {
   ErpTable,
@@ -1643,6 +1649,9 @@ type SettlementRow = {
   voucherNo: string;
   reconState: string;
   postError: string;
+  paymentFrom?: string;
+  paymentTill?: string;
+  retriedAs?: RetriedAs | null;
 };
 
 type SettlementBoard = {
@@ -1697,6 +1706,17 @@ const SETTLEMENT_STATES: Record<
   events_disagree: {
     label: "Breakdown does not add up",
     hint: "The events do not sum to the net settled — a page of them is missing",
+    tone: "bad",
+  },
+  // The label for `failed` is built per row (failedLabel): it names the retry.
+  failed: {
+    label: "Failed",
+    hint: "The bank refused this transfer. Its money is paid by the retry, so it is not counted in the totals",
+    tone: "wait",
+  },
+  failed_posted: {
+    label: "Failed but in the book",
+    hint: "The gateway says this transfer failed, yet the book has a voucher for it — check the bank statement and reverse the voucher",
     tone: "bad",
   },
 };
@@ -1772,14 +1792,8 @@ export function GatewaySettlementPanel() {
   };
 
   const rows = board?.rows ?? [];
-  const totals = rows.reduce(
-    (acc, r) => ({
-      gross: acc.gross + r.paymentAmountPaise,
-      fee: acc.fee + r.feePaise,
-      net: acc.net + r.amountSettledPaise,
-    }),
-    { gross: 0, fee: 0, net: 0 },
-  );
+  // Failed attempts are left out: their money is the retry's money.
+  const totals = summariseSettlements(rows);
 
   return (
     <section className={`${CARD} mt-4`}>
@@ -1877,7 +1891,10 @@ export function GatewaySettlementPanel() {
             <Tile
               label="Gross collected"
               value={formatInr(totals.gross)}
-              hint={`${rows.length} settlement(s) in this window`}
+              hint={
+                `${totals.counted} settlement(s) in this window` +
+                (totals.failed ? ` · ${totals.failed} failed attempt(s) not counted` : "")
+              }
             />
             <Tile
               label="Gateway fee + GST"
@@ -1916,12 +1933,21 @@ export function GatewaySettlementPanel() {
                 </ErpTableHead>
                 <ErpTableBody>
                   {rows.map((r) => {
-                    const st =
+                    const base =
                       SETTLEMENT_STATES[r.reconState] ?? {
                         label: r.reconState,
                         hint: "",
                         tone: "bad" as const,
                       };
+                    const failed = isFailedState(r.reconState);
+                    const st =
+                      r.reconState === "failed"
+                        ? { ...base, label: failedLabel(r.retriedAs) }
+                        : base;
+                    // Shown, greyed and struck through, never summed.
+                    const amt = failed
+                      ? "text-[var(--muted)] line-through"
+                      : "";
                     return (
                       <tr
                         key={r.cfSettlementId}
@@ -1931,17 +1957,17 @@ export function GatewaySettlementPanel() {
                         <td className="px-2 py-1.5 font-mono text-[11px]">
                           {r.utr || (
                             <span className="text-[var(--muted)]">
-                              not issued yet
+                              {failed ? "none — transfer failed" : "not issued yet"}
                             </span>
                           )}
                         </td>
-                        <td className="px-2 py-1.5 text-right text-xs tabular-nums">
+                        <td className={`px-2 py-1.5 text-right text-xs tabular-nums ${amt}`}>
                           {formatInr(r.paymentAmountPaise)}
                         </td>
-                        <td className="px-2 py-1.5 text-right text-xs tabular-nums">
+                        <td className={`px-2 py-1.5 text-right text-xs tabular-nums ${amt}`}>
                           {formatInr(r.feePaise)}
                         </td>
-                        <td className="px-2 py-1.5 text-right text-xs font-semibold tabular-nums">
+                        <td className={`px-2 py-1.5 text-right text-xs tabular-nums ${failed ? amt : "font-semibold"}`}>
                           {formatInr(r.amountSettledPaise)}
                         </td>
                         <td className="px-2 py-1.5 text-right text-xs tabular-nums">
