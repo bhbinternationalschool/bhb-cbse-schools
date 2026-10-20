@@ -433,6 +433,7 @@
     "test:class-channel-subject": "npx tsx src/lib/classChannelSubject.selftest.ts",
     "test:review-demo-hidden": "npx tsx src/lib/reviewDemoHidden.selftest.ts",
     "test:payment-link-reuse": "npx tsx src/lib/paymentLinkReuse.selftest.ts",
+    "test:payment-link-concurrent-save": "npx tsx src/lib/paymentLinkConcurrentSave.selftest.ts",
     "test:student-leave-status-guard": "npx tsx src/lib/studentLeaveStatusGuard.selftest.ts",
     "test:ptm-row-stamps": "npx tsx src/lib/ptmRowStamps.selftest.ts",
     "test:propel-robot": "npx tsx src/lib/propelRobot.selftest.ts",

@@ -253,10 +253,14 @@ export async function pushPaymentLinksToDb(
   }
 
   for (let i = 0; i < headers.length; i += 100) {
-    const { error } = await sb
-      .from("payment_desk_links")
-      .upsert(headers.slice(i, i + 100));
-    if (error) return { ok: false, count: 0, error: error.message };
+    // The same race as pushPaymentLinkToDb (see isUniqueRace): a link this
+    // save carries may be being inserted by its own single-link save.
+    const chunk = headers.slice(i, i + 100);
+    const { error } = await retryUniqueRace("desk headers", async () => {
+      const r = await sb.from("payment_desk_links").upsert(chunk);
+      return r.error ? { ok: false, error: r.error.message } : { ok: true };
+    });
+    if (error) return { ok: false, count: 0, error };
   }
 
   const linkIds = new Set(writable.map((l) => l.id));
@@ -487,7 +491,63 @@ export async function pushPaymentLinkToDb(
   if (!paymentsDualWriteDbEnabled()) return { ok: true };
   const ctx = await resolveCtx();
   if (!ctx) return { ok: false, error: "No tenant" };
-  const { sb, tenantId } = ctx;
+  return writePaymentLinkToDb(ctx.sb, ctx.tenantId, link);
+}
+
+/**
+ * A unique violation that another writer of the SAME rows caused.
+ *
+ * Creating a link on the server saves it twice at once: savePayments starts
+ * the whole-desk save (pushPaymentDeskToDb, fire-and-forget) and the caller
+ * then saves the link itself (pushPaymentLinkToDb) — the parent checkout,
+ * /pay/due, the fee pay-link, autopay. Both insert the same new header and
+ * lines. Postgres resolves the race on the primary key (ON CONFLICT (id)),
+ * but not on the link's other unique key, (tenant_id, code); and
+ * replace_child_rows deletes then inserts, so a line the other save
+ * committed in between is "already exists". Either way the loser failed
+ * though the link it was writing was, by then, stored exactly — and the
+ * parent checkout answered 503 (CI, 20 Oct 2026, PRs #678 and #683:
+ * payment_desk_links_tenant_id_code_key and payment_desk_link_lines_pkey).
+ * Written again, the same rows are an update.
+ */
+export function isUniqueRace(error: { code?: string; message?: string } | string | null | undefined): boolean {
+  if (!error) return false;
+  if (typeof error !== "string" && error.code === "23505") return true;
+  const msg = typeof error === "string" ? error : error.message ?? "";
+  return /duplicate key value violates unique constraint/i.test(msg);
+}
+
+const RACE_RETRY_MS = [150, 400];
+
+/** Run `write` again (twice at most) when it lost a unique-key race; any other error is returned as is. */
+export async function retryUniqueRace<T extends { ok: boolean; error?: string }>(
+  label: string,
+  write: () => Promise<T>,
+): Promise<T> {
+  let res = await write();
+  for (const ms of RACE_RETRY_MS) {
+    if (res.ok || !isUniqueRace(res.error)) return res;
+    console.warn(`[payments-db] ${label}: lost a race to a concurrent save — writing again`, res.error);
+    await new Promise((r) => setTimeout(r, ms));
+    res = await write();
+  }
+  return res;
+}
+
+/** pushPaymentLinkToDb with the client given — exported for its self-test. */
+export async function writePaymentLinkToDb(
+  sb: SupabaseClient,
+  tenantId: string,
+  link: PaymentLink,
+): Promise<{ ok: boolean; error?: string }> {
+  return retryUniqueRace(`link ${link.id}`, () => writePaymentLinkOnce(sb, tenantId, link));
+}
+
+async function writePaymentLinkOnce(
+  sb: SupabaseClient,
+  tenantId: string,
+  link: PaymentLink,
+): Promise<{ ok: boolean; error?: string }> {
   const { header, lines } = linkToRows(tenantId, link);
 
   // Same rule as the whole-desk save: never move a stored link backwards
