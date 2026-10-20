@@ -179,12 +179,13 @@ for (const shot of [
   { name: "desktop-light", width: 1440, height: 900, dark: false },
   { name: "phone375-dark", width: 375, height: 812, dark: true },
 ]) {
-  test(`amend dialog (${shot.name}): teaching-scope Masters refuses; full scope applies from October`, async ({ browser }) => {
+  test(`amend dialog (${shot.name}): teaching-scope Masters refuses; full scope applies from Oct 2026`, async ({ browser }) => {
     const openDialog = async (page: Page) => {
       await page.goto("/transport?tab=riders");
       const row = page.locator("li").filter({ hasText: CHILD.fullName }).filter({ has: page.getByRole("button", { name: "Change", exact: true }) });
       await row.first().getByRole("button", { name: "Change", exact: true }).click({ timeout: 30_000 });
-      return page.getByRole("dialog");
+      // The amend popup (Base UI Dialog; its title names it).
+      return page.locator("[aria-labelledby=\"transport-amend-title\"]");
     };
     // Teaching scope.
     const page = await open(browser, shot);
@@ -200,10 +201,10 @@ for (const shot of [
     expect(teachingHits(), "the screen read the teaching answer").toBeGreaterThan(0);
     await page.screenshot({ path: path.join(SHOTS, `amend-teaching-${shot.name}.png`), fullPage: false });
     await page.context().close();
-    // Full scope: the floor is known — October, six paid months kept.
+    // Full scope: the floor is known — Oct 2026, six paid months kept.
     const full = await open(browser, shot);
     const fullDialog = await openDialog(full);
-    await expect(fullDialog.getByText(/^Applies from October/)).toBeVisible({ timeout: 15_000 });
+    await expect(fullDialog.getByText(/^Applies from Oct 2026/)).toBeVisible({ timeout: 15_000 });
     await expect(fullDialog.getByText(/^6 paid months/)).toBeVisible();
     await expect(fullDialog.getByText(PAID_MONTHS_UNKNOWN_FOR_ROLE)).toHaveCount(0);
     await full.screenshot({ path: path.join(SHOTS, `amend-full-${shot.name}.png`), fullPage: false });

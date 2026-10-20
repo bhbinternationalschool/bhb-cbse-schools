@@ -82,6 +82,10 @@ type Screen = {
 
 const classSelect = (page: Page) => selectIn(page, /^Class/);
 
+const SECTIONS_WITH_CHILDREN = new Set(
+  fx.sis.students.filter((st) => st.academicYearCode === "2026-27" && st.status === "active").map((st) => `${st.classId}|${st.sectionId}`),
+).size;
+
 const SCREENS: Screen[] = [
   {
     name: "certificates",
@@ -169,9 +173,11 @@ const SCREENS: Screen[] = [
     name: "transport-by-class",
     who: "office",
     path: "/transport?tab=classRosters",
-    // One row per section of the book (none has a rider in the fixture).
+    // One row per section that has children this session (none has a rider
+    // in the fixture). Not fx.expected.sections: class XII's section is empty
+    // (fixture since #675) and the roster has no row for it.
     ready: async (p) =>
-      expect(p.getByRole("button", { name: `Show ${fx.expected.sections} sections with no riders` })).toBeVisible({ timeout: 20_000 }),
+      expect(p.getByRole("button", { name: `Show ${SECTIONS_WITH_CHILDREN} sections with no riders` })).toBeVisible({ timeout: 20_000 }),
     absent: (p) => p.getByRole("heading", { name: "Riders by class & section" }),
   },
   {
@@ -206,11 +212,18 @@ async function desktopLight(browser: Browser, who: Who): Promise<Page> {
   return context.newPage();
 }
 
-async function disciplineEnabled(page: Page): Promise<boolean | null> {
-  const r = await page.request.get("/api/data/views/module-registry");
-  const body = (await r.json().catch(() => null)) as { data?: { enabled?: Record<string, boolean> }; enabled?: Record<string, boolean> } | null;
-  const v = (body?.data?.enabled ?? body?.enabled)?.discipline;
-  return typeof v === "boolean" ? v : null;
+/**
+ * Discipline's state as the Modules screen shows it: its row offers
+ * "Disable" when on, "Enable" when off. Read from the screen, not the
+ * module-registry view — the view is a cached reference read, and reading it
+ * BEFORE the write primed that cache with the old answer (local run, 21 Oct).
+ */
+async function disciplineRow(page: Page): Promise<{ row: ReturnType<Page["locator"]>; enabled: boolean }> {
+  await page.goto("/modules");
+  const row = page.locator("li", { hasText: "Discipline / behavior" }).first();
+  const toggle = row.getByRole("button", { name: /^(Enable|Disable)$/ });
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  return { row, enabled: (await toggle.textContent())?.trim() === "Disable" };
 }
 
 /**
@@ -223,16 +236,20 @@ async function disciplineEnabled(page: Page): Promise<boolean | null> {
  */
 async function setDiscipline(browser: Browser, enabled: boolean): Promise<void> {
   const page = await desktopLight(browser, "principal");
-  if ((await disciplineEnabled(page)) === enabled) {
-    await page.context().close();
-    return;
+  const { row, enabled: now } = await disciplineRow(page);
+  if (now !== enabled) {
+    await row.getByRole("button", { name: enabled ? "Enable" : "Disable" }).click({ timeout: 20_000 });
+    await expect
+      .poll(
+        async () => {
+          const r = await page.request.get("/api/data/views/module-registry");
+          const body = (await r.json().catch(() => null)) as { data?: { enabled?: Record<string, boolean> }; enabled?: Record<string, boolean> } | null;
+          return (body?.data?.enabled ?? body?.enabled)?.discipline ?? null;
+        },
+        { timeout: 30_000, message: `module registry saved discipline=${enabled}` },
+      )
+      .toBe(enabled);
   }
-  await page.goto("/modules");
-  const row = page.locator("li", { hasText: "Discipline / behavior" }).first();
-  await row.getByRole("button", { name: enabled ? "Enable" : "Disable" }).click({ timeout: 20_000 });
-  await expect
-    .poll(() => disciplineEnabled(page), { timeout: 30_000, message: `module registry saved discipline=${enabled}` })
-    .toBe(enabled);
   await page.context().close();
 }
 
@@ -240,9 +257,8 @@ async function setDiscipline(browser: Browser, enabled: boolean): Promise<void> 
 let disciplineBefore: boolean | null = null;
 test.beforeAll(async ({ browser }) => {
   const page = await desktopLight(browser, "principal");
-  disciplineBefore = await disciplineEnabled(page);
+  disciplineBefore = (await disciplineRow(page)).enabled;
   await page.context().close();
-  expect(disciplineBefore, "module registry readable before the file changes it").not.toBeNull();
   await setDiscipline(browser, true);
 });
 test.afterAll(async ({ browser }) => {
