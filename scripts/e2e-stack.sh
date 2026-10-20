@@ -211,7 +211,15 @@ cmd_up() {
   anon="$(node -e 'process.stdout.write(require(process.argv[1]).anonKey)' "$STATE/keys.json")"
   service="$(node -e 'process.stdout.write(require(process.argv[1]).serviceRoleKey)' "$STATE/keys.json")"
 
-  cat >"$STATE/postgrest.conf" <<CONF
+  # PostgREST's port is checked free, then bound a moment later. 54330-54399
+  # lies inside Linux's ephemeral range (32768-60999): any outgoing
+  # connection — the migration psql sessions included — can be holding that
+  # local port, and a connect() probe cannot see it, so the bind fails with
+  # "Address in use" (CI, 15 Oct 2026, twice on one PR). Start on the next
+  # free port instead of failing the run.
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    cat >"$STATE/postgrest.conf" <<CONF
 db-uri = "postgres://authenticator@127.0.0.1:$pg_port/postgres"
 db-schemas = "public"
 db-anon-role = "anon"
@@ -225,11 +233,29 @@ server-host = "127.0.0.1"
 server-port = $pgrst_port
 log-level = "error"
 CONF
-  chmod 600 "$STATE/postgrest.conf"
-  nohup "$pgrst" "$STATE/postgrest.conf" >"$STATE/postgrest.log" 2>&1 </dev/null &
-  echo $! >"$STATE/postgrest.pid"
-  wait_http "http://127.0.0.1:$pgrst_port/tenants?select=id&limit=1" 60 \
-    -H "Authorization: Bearer $service" || { tail -20 "$STATE/postgrest.log"; die "postgrest did not come up"; }
+    chmod 600 "$STATE/postgrest.conf"
+    nohup "$pgrst" "$STATE/postgrest.conf" >"$STATE/postgrest.log" 2>&1 </dev/null &
+    echo $! >"$STATE/postgrest.pid"
+    # Up, or exited: a PostgREST that cannot bind exits at once, so do not
+    # wait the full minute for an answer that cannot come.
+    local up=0 j=0
+    while [ "$j" -lt 120 ]; do
+      if curl -sf -m 5 -o /dev/null -H "Authorization: Bearer $service" \
+        "http://127.0.0.1:$pgrst_port/tenants?select=id&limit=1"; then up=1; break; fi
+      pid_alive "$STATE/postgrest.pid" || break
+      j=$((j + 1)); sleep 0.5
+    done
+    [ "$up" = 1 ] && break
+    # "Address in use" (Linux) / "Address already in use" (macOS) /
+    # "resource busy": the bind lost the race; any other failure is real.
+    if grep -qiE "address (already )?in use|resource busy" "$STATE/postgrest.log" && [ "$attempt" -lt 5 ]; then
+      say "PostgREST port $pgrst_port was taken between the check and the bind — trying the next one"
+      stop_pid "$STATE/postgrest.pid" postgrest
+      pgrst_port="$(free_port $((pgrst_port + 1)) 54399)"
+      continue
+    fi
+    tail -20 "$STATE/postgrest.log"; die "postgrest did not come up"
+  done
   say "PostgREST $POSTGREST_VERSION on 127.0.0.1:$pgrst_port"
 
   E2E_PROXY_PORT="$API_PORT" E2E_POSTGREST_URL="http://127.0.0.1:$pgrst_port" E2E_SERVICE_KEY="$service" \
