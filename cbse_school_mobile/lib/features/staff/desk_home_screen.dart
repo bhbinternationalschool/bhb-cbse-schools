@@ -38,6 +38,7 @@ import "transport_requests_screen.dart";
 import "vehicle_logbook_screen.dart";
 import "waiting_card.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/push/notification_bell.dart";
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -436,6 +437,8 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
   void _openDeepLink(String raw) {
     final path = Uri.tryParse(raw)?.path ?? raw;
     switch (path) {
+      case "/notifications":
+        openNotifications(context, widget.api, _openDeepLink);
       case "/leave":
         _push(StaffLeaveScreen(api: widget.api));
       case "/leave-approvals":
@@ -566,6 +569,10 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
                         ),
                       ],
                     ),
+                  ),
+                  NotificationBellButton(
+                    api: widget.api,
+                    onOpenRoute: _openDeepLink,
                   ),
                   const ScreenGuideButton(
                     guideId: "desk-home",

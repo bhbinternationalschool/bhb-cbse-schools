@@ -698,6 +698,8 @@ jobs:
           npm run test:reference-views
           npm run test:masters-bridge
           npm run test:staff-requests
+          npm run test:notify
+          npm run test:push-voice
           npm run test:survey-team-plan
           npm run test:parent-api-scope
 
@@ -841,6 +843,8 @@ jobs:
       # longer clear voided_at and re-post the receipt (15 Oct 2026, R1).
       - name: SQL test — a voided fee receipt stays voided
         run: bash scripts/e2e-stack.sh sql-test supabase/tests/fee_voucher_void_is_final.test.sql
+      - name: SQL test — notifications are stored once per person, bursts fold, reads go through the kernel
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/erp_notify_deliver.test.sql
 
       # NEXT_PUBLIC_* are baked in at build time, so the build reads
       # apps/web/.env.e2e (127.0.0.1 URL, this run's anon key) and nothing else.
