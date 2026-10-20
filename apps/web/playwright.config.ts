@@ -65,7 +65,7 @@ export default defineConfig<GateOptions>({
   projects: [
     {
       name: "desktop",
-      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|payroll)\.spec\.ts/,
+      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register)\.spec\.ts/,
       use: { ...desktop },
     },
     {
@@ -79,7 +79,15 @@ export default defineConfig<GateOptions>({
       // Writes a transport desk and receipts (the 15 Oct paid-month case), so
       // it runs after everything that reads the stack.
       name: "money-writes",
-      testMatch: /(transport-paid-month|dues-screens-transport|dues-transport-desk)\.spec\.ts/,
+      testMatch: /(transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues)\.spec\.ts/,
+      dependencies: ["desktop", "phone-375-cpu4x"],
+      use: { ...desktop },
+    },
+    {
+      // Writes a month of staff registers and a leave (15 Oct 2026, the staff
+      // month register), so it runs after everything that reads the stack.
+      name: "staff-register",
+      testMatch: /staff-month-register\.spec\.ts/,
       dependencies: ["desktop", "phone-375-cpu4x"],
       use: { ...desktop },
     },
