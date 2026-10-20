@@ -15,6 +15,7 @@
     "test:month-groups": "npx tsx src/lib/monthGroups.selftest.ts",
     "test:school-chat": "npx tsx src/lib/schoolChat.selftest.ts",
     "test:month-range": "npx tsx src/lib/monthRange.selftest.ts",
+    "test:class-upgrade-fee-group": "npx tsx src/lib/classUpgradeFeeGroup.selftest.ts",
     "test:receipt-auto-wa": "npx tsx src/lib/feeReceiptAutoWa.selftest.ts",
     "test:review-login": "npx tsx src/lib/reviewLogin.selftest.ts",
     "test:cash-pool-orphans": "npx tsx src/lib/cashPoolOrphans.selftest.ts",

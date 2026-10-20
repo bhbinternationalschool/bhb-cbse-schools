@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { loadMasters } from "@/lib/masters";
+import { useMasters, useStaffList } from "@/lib/data/client/hooks";
+import { QueryError } from "@/components/data/QueryError";
 import {
   loadWaTemplates,
   moduleLabel,
@@ -9,7 +10,6 @@ import {
   type WaTemplateModule,
 } from "@/lib/waTemplates";
 import { ensureWaTemplatesHydrated } from "@/lib/waTemplatesPersistence";
-import { ensureMastersHydrated } from "@/lib/mastersPersistence";
 import type { WaAudienceSpec, StaffStreamFilter } from "@/lib/waAudienceSpec";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { WaStudentPicker } from "@/components/comms/WaStudentPicker";
@@ -57,18 +57,17 @@ export function WaSendToAudiencePanel({ readOnly }: { readOnly: boolean }) {
 
   useEffect(() => {
     void (async () => {
-      await Promise.all([
-        ensureMastersHydrated().catch(() => false),
-        ensureWaTemplatesHydrated().catch(() => false),
-      ]);
+      await ensureWaTemplatesHydrated().catch(() => false);
       setReady(true);
     })();
   }, []);
 
-  const masters = useMemo(
-    () => (ready ? loadMasters() : null),
-    [ready],
-  );
+  // data-layer 2.1g: classes from the Masters view, departments from the
+  // staff directory — both kept fresh by the versions poll, neither a page copy.
+  const mastersQ = useMasters();
+  const staffQ = useStaffList();
+  const classes = mastersQ.data?.masters.classes;
+  const departments = staffQ.data?.departments;
 
   /**
    * Only families with BOTH languages approved are offered. Sending to a
@@ -320,8 +319,10 @@ export function WaSendToAudiencePanel({ readOnly }: { readOnly: boolean }) {
                 value={departmentId}
                 onChange={(e) => setDepartmentId(e.target.value)}
               >
-                <option value="">Any department</option>
-                {(masters?.departments ?? [])
+                <option value="">
+                  {departments ? "Any department" : staffQ.isError ? "Any department (list could not load)" : "Any department (loading…)"}
+                </option>
+                {(departments ?? [])
                   .filter((d) => d.isActive)
                   .map((d) => (
                     <option key={d.id} value={d.id}>
@@ -338,8 +339,13 @@ export function WaSendToAudiencePanel({ readOnly }: { readOnly: boolean }) {
             <p className="text-[11px] text-[var(--muted)]">
               Pick classes, or leave all unpicked for the whole school.
             </p>
+            {!classes && mastersQ.isError ? (
+              <QueryError what="the school's classes" error={mastersQ.error} retry={() => mastersQ.refetch()} />
+            ) : !classes ? (
+              <p className="text-[11px] text-[var(--muted)]">Loading classes…</p>
+            ) : null}
             <div className="flex flex-wrap gap-1.5">
-              {(masters?.classes ?? [])
+              {(classes ?? [])
                 .filter((c) => c.isActive)
                 .map((c) => (
                   <button
