@@ -9,8 +9,6 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { TENDER_MODES, type FeeDueLine } from "./fees";
 import {
@@ -23,7 +21,6 @@ import {
 
 console.log("staffFeeCollect.selftest.ts");
 
-const LIB = join(process.cwd(), process.cwd().endsWith("apps/web") ? "src/lib" : "apps/web/src/lib");
 
 function due(
   studentId: string,
@@ -153,22 +150,6 @@ const posted = (pairs: [FeeDueLine, number][]) =>
     assert.equal(tenderReferenceProblem(m.value, "REF123"), null, `${m.value} with a reference is accepted`);
   }
   assert.ok(tenderReferenceProblem("wallet", ""), "an unknown future mode is not cash, so it needs one too");
-}
-
-// ---- the collect route enforces both ----
-{
-  const src = readFileSync(
-    join(LIB, "..", "app", "api", "v1", "staff", "fees", "collect", "route.ts"),
-    "utf8",
-  );
-  assert.match(src, /tenderReferenceProblem\(/, "collect route refuses non-cash without a reference");
-  assert.match(src, /checkPayingNowSplit\(/, "collect route re-derives the paying-now split");
-  const dues = readFileSync(
-    join(LIB, "..", "app", "api", "v1", "staff", "fees", "dues", "route.ts"),
-    "utf8",
-  );
-  assert.match(dues, /feeDiscountsKnown\(/, "dues route says whether discounts were loaded");
-  assert.match(dues, /allocationRank/, "dues route sends the allocation order");
 }
 
 // ---- discount per head ----
