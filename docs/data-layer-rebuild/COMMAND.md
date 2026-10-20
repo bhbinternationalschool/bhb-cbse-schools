@@ -1135,6 +1135,109 @@ for a whole-book body; `deskFeatureGate` function-only branch gone (ratchet 0);
 `propagation.spec.ts` end to end through the real editor; `stale-writer.spec.ts`. Post-deploy
 measure: no `function-only push by` / `rejected unversioned push` lines in Cloud Run logs.
 
+**The director's decisions (20 Oct 2026).** (1) Masters list elements (subjects, class-subject links,
+sections, fee heads, concession grants, holidays …) carry a per-element `_rev`; an element write is a
+compare-and-set on that ONE element — two people editing different elements both land, only the same
+element at once conflicts; no writer, old or new, may ever reset a `_rev` (the "ABA" case). (2) Staff
+Remove is a **soft** remove: a marker with who and when, hidden from lists, restorable; never a hard
+delete. (3) Sensitive staff fields (bank account, IFSC, Aadhaar, PAN, salary) are written only by the
+owner or someone with the payroll / accounts function, enforced in the database path the app uses. (4) The
+fee-setup clone is all-or-nothing (a batch of element writes, one bad element = nothing written).
+
+**The split.** 2.2 is six PRs, in order: **2.2a** the database (below). **2.2b** staff records through the
+kernel: `sis.staff` / `sis.departments` / `sis.designations` registry collections, the staff editor and
+profile form write rows, Remove = the soft delete, the sensitive-field route, every `sis_staff` reader
+filters `deleted_at`, `scheduleStaffSync` deleted. **2.2c** `MastersWorkspace` and its panels write
+elements (registry `base: "rev"` for the 21 `masters.*` list collections). **2.2d** the non-Masters
+`saveMasters` callers (`lib/numberSeries.ts` → `masters_series_bump`; `counterConcession`, `feeAdjustments`,
+`fees`, `rteEws`, `referralRewards`, `staffAttendanceRules`, `profileDocVerification`, `TimetableRulesSetup`;
+`ensureStudentClassLinks` stops saving). **2.2e** the fee-setup clone through `desk_slice_rows_write`.
+**2.2f** delete the whole-book push, `mastersSectionSave` and the function-only branch; the 410 stub; the
+acceptance above. *(The split was given to the 2.2a executor as "2.2a–2.2f"; the per-PR contents above
+are its reading of the step list — the director may re-cut 2.2b–2.2f.)*
+
+*(2.2a built 21 Oct 2026, PR #… — migration `20261021090000_data_layer_masters_row_revs_staff_kernel.sql`:
+**the director applies it to production before 2.2b deploys**; it is safe to apply ahead of time — no
+live code calls the new functions, and the only change live code sees is that Masters elements gain
+`_rev`, which every client fingerprint already ignores (`rowFingerprint` in `sliceRevClient.ts`).)*
+**What exists.**
+- **Masters `_rev`.** `desk_slice_row_write` on `masters_desk_slices` takes the element's `_rev` as its base
+  (a whole number; absent = 0; new element → 1, changed → +1, identical → unchanged), exactly as the other
+  14 `_rev` desks. The slice stamp (a timestamp) is still accepted for Masters until 2.2c flips the registry
+  (`lib/data/registry.ts` `base: "slice"` → `"rev"`), and the element's `_rev` moves under it too.
+  Timetable keeps the slice stamp (its elements carry no `_rev`). The function body is now
+  `_desk_slice_element_apply` (internal, not executable by service_role) + the meta bump / row sync, so
+  the single-element and batch writers share one implementation; outcomes are unchanged.
+- **The ABA guard is a trigger, not TypeScript:** `masters_desk_slices_carry_revs` (BEFORE INSERT/UPDATE OF
+  payload) does `mergeWithRevs`-without-a-base in SQL for **every** writer — the kernel,
+  `masters_write_slices` (`pushMastersSlicesToDb`), `pushMastersDeskToDb`'s direct upsert, scripts: an
+  unchanged element keeps the stored element exactly; a changed one gets the **stored** `_rev` + 1; a new
+  one max(its `_rev`, 1); a writer's own `_rev` on an existing element is ignored. So the old paths did
+  not need a TypeScript change to carry `_rev`, and cannot reset one even from a copy that dropped it.
+  O(n) (an id-keyed lookup): 3,000 elements in ~10 ms (production's largest list is 270,
+  `feeStructureLines`; read-only count 21 Oct: no element without an id, no duplicate ids, none with `_rev`).
+  `masters_sync_rows_from_slices` copies only keys that are row-table columns; no `masters_desk_*` table has
+  a `_rev` column (asserted).
+- **`desk_slice_rows_write(p_tenant, p_table, p_ops)`**: ≤ 500 element ops `{slice, op, id, row, base, key}`
+  across the lists of one slice table, bases = element `_rev`s only (a stamp base, timetable, an element
+  twice, an empty batch → 22023). All applied in a sub-transaction; any conflict rolls it back and the
+  answer lists every op's outcome (`ok:false`); an invalid op raises. One meta bump and one Masters row
+  sync per batch.
+- **`masters_series_bump(p_tenant, p_series, p_used, p_ay default null)`**: series by code (or id), under
+  the slice lock, next = max(stored next, `p_used` + 1) — per year (`countersByAy`) when `resetOnAy` and
+  `p_ay` is given (as `advanceSeriesAfterUse`); a lower number is `unchanged` and moves nothing; unknown
+  series → `not_found`; `p_used` < 1 → 22023. No base.
+- **Staff rows**: `sis_staff` (soft delete), `sis_departments`, `sis_designations` (hard delete; they have
+  `is_active`) are in `desk_writable_tables` with **no** sync_meta: `erp_versions` already reports each from
+  the table itself (group 2, max(updated_at) + count(*)); a `sis_staff_sync_meta` table would have produced
+  a second `sis_staff` key. `sis_staff` gains `deleted_at`, `deleted_by`. `desk_write_guarded` v4: a soft
+  delete on a table with `deleted_by` needs the op's `by` (the route fills it from the session) and records
+  it; an upsert there may clear `deleted_at` (restore, with the removed row's revision; `deleted_by` is
+  cleared) but never set it. Unchanged for every other table.
+- **Sensitive staff fields** (`_sis_staff_sensitive_keys()`: profile `bankName`, `bankBranch`,
+  `bankAccountNo`, `bankIfsc`, `bankAccountName`, `upiId`, `aadhaarNo`, `panNo`, `basicPay`, `visitingPay`;
+  blank = null = "" = absent): `desk_write_guarded` refuses any op that sets, changes or blanks one
+  (42501 → 403 at the route; nothing written) unless the transaction carries the mark that only
+  **`sis_staff_write_sensitive(p_tenant, p_ops, p_authority 'owner'|'payroll'|'accounts', p_actor)`** sets
+  (transaction-local, cleared before it returns). Every marked change is recorded in the new
+  `sis_staff_sensitive_changes` (field names, actor, authority, when — never values).
+  **How 2.2b sets it:** `POST /api/data/sis.staff` → `repo.write` → `desk_write_guarded` can never change these
+  keys. A separate server path calls `sis_staff_write_sensitive` **only after** checking that the session
+  is the owner or holds the `payroll` or `accounts` function, passing which one and the session's id as
+  actor. Because `profile` is one jsonb column and the kernel patches top-level columns, a staff-edit save
+  must send the profile with the sensitive keys **as stored** (the route lays them on from the row it read)
+  — a profile without them is a blanking and is refused.
+- Grants: every new function `search_path = public`, revoked from public/anon/authenticated, executable by
+  service_role; the apply step and the trigger function owner-only; `sis_staff_sensitive_changes` RLS on,
+  service_role only.
+
+**Proof.** `supabase/tests/masters_row_revs_staff_kernel.test.sql` (69 checks in six self-contained
+sections; in CI). On origin/main's schema each section fails at its first check (A "a new Masters slice
+row gives every element _rev 1"; B and C the `_rev` base "1" is not a timestamp; D and F the functions
+do not exist; E "sis_staff … kernel-writable"), and the old contract shown directly: two people editing
+**different** subjects from one load → the second is `stale`. Eleven mutations of the new migration, each
+red: masters back to slice mode; the trigger trusting the writer's copy ("3 → 4, never reset"); the
+trigger removed; the batch not rolling back ("NOTHING of it was written"); no refusal at all; the series
+not monotone; remove without `by` accepted; hard delete ("the row is still there"); `sis_staff` not soft;
+an empty sensitive-key list; the mark not cleared. `desk_slice_row_write.test.sql` (51) — its "no _rev on
+a masters element" check now asserts `_rev` 1 → 2 (fails on origin/main's schema, as intended);
+`desk_write_guarded.test.sql` (37) — "every writable table names a sync_meta table" now exempts the three
+tables erp_versions reads directly. Migration applied twice on a fresh PG17 (idempotent; 393 applied, 0
+failed).
+
+**Not done / not proven.** No app code changes (2.2b–2.2f): nothing calls the new functions, the
+registry still sends Masters slice stamps, no screen soft-removes or restores staff, and no `sis_staff`
+reader filters `deleted_at` yet — **2.2b must add that filter to every reader (roster, logins, mobile
+auth, payroll, attendance) before it ships Remove**, or a removed member keeps showing and signing in.
+The e2e stack's `write-kernel.acceptance.ts` / `write-conflict` / `stale-writer` specs (slice-stamp Masters
+writes) were not run locally (no app build on this machine) — CI runs them. A delete and re-create of the
+same element id through the old path restarts at max(its `_rev`, 1): an old copy carrying the deleted
+element's `_rev` could then match (the old path resurrecting a deleted element is the replica's own bug;
+2.2f removes that path). `pfNumber` / `uanNumber` / `esicNumber` and the Aadhaar/PAN document files
+(`docs.*`) are **not** in the sensitive list — the director's list did not name them; adding one is a
+one-line change to `_sis_staff_sensitive_keys()`. Masters exports that dump whole elements will show a
+`_rev` field.
+
 **2.3a Delete the gate and the events.** With every component reader on hooks: delete
 `CoreDataGate` (React Query's loading state replaces it), the `bhb-masters-updated` /
 `bhb-rbac-updated` / `bhb-desk-first-hydrated` events and their listeners (one is the

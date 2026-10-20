@@ -81,9 +81,20 @@
 
 create or replace function public._masters_slice_carry_revs()
 returns trigger language plpgsql set search_path = public as $$
+declare
+  v_old jsonb := '{}'::jsonb;   -- id -> the stored element (the first one with that id)
 begin
   if new.payload is null or jsonb_typeof(new.payload) <> 'array' then
     return new;
+  end if;
+  -- The stored list as an id-keyed object: one lookup per new element, not a
+  -- scan of the stored list per element (3,000 elements: ~10 ms, not ~350 ms).
+  -- jsonb_object_agg keeps the LAST value of a repeated key, so aggregate in
+  -- reverse order and the first stored element with an id wins.
+  if tg_op = 'UPDATE' and jsonb_typeof(old.payload) = 'array' then
+    select coalesce(jsonb_object_agg(x.el->>'id', x.el order by x.ord desc), '{}'::jsonb) into v_old
+      from jsonb_array_elements(old.payload) with ordinality as x(el, ord)
+     where jsonb_typeof(x.el) = 'object' and nullif(x.el->>'id', '') is not null;
   end if;
   new.payload := (
     select coalesce(jsonb_agg(
@@ -99,12 +110,7 @@ begin
                  then floor((o.el->>'_rev')::numeric)::int else 0 end + 1)
       end order by e.ord), '[]'::jsonb)
     from jsonb_array_elements(new.payload) with ordinality as e(el, ord)
-    left join lateral (
-      select x.el from jsonb_array_elements(
-               case when tg_op = 'UPDATE' and jsonb_typeof(old.payload) = 'array' then old.payload else '[]'::jsonb end
-             ) with ordinality as x(el, ord)
-       where jsonb_typeof(x.el) = 'object' and x.el->>'id' = e.el->>'id'
-       order by x.ord limit 1) o on true);
+    cross join lateral (select case when jsonb_typeof(e.el) = 'object' then v_old->(e.el->>'id') end as el) o);
   return new;
 end $$;
 
