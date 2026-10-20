@@ -40,6 +40,7 @@ import {
   Users,
   UsersRound,
   Wallet,
+  Trophy,
 } from "lucide-react";
 
 export type HubTone =
@@ -294,6 +295,14 @@ export const HUB_GROUPS: HubGroup[] = [
         detail: "Schedule a live class for a section, announce it to parents' phones, and see who joined.",
         icon: Video,
         tone: "sky",
+      },
+      {
+        href: "/games",
+        title: "Learning games",
+        blurb: "Quizzes & competitions",
+        detail: "Launch a quiz or number-dash competition between sections, see the live leaderboard, review the question pool and set the daily play limits.",
+        icon: Trophy,
+        tone: "gold",
       },
       {
         href: "/teaching",

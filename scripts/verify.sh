@@ -191,6 +191,7 @@ SELFTESTS=(
   test:sis-bot-thread-merge
   test:job-applications
   test:online-classes
+  test:learning-games
   test:online-class-qa
   test:puter-ai
   test:open-lookups
