@@ -41,9 +41,9 @@ import {
   type ChatParentContact,
   type ChatSectionRef,
 } from "@/lib/erpChatAccess";
-import { loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis } from "@/lib/sis";
 import { useDemoSessionOptional } from "@/components/shell/SessionContext";
+import { useStableAccessCopy } from "@/components/shell/useStableAccessCopy";
 
 type TabId = "recent" | "staff" | "parents" | "groups";
 type ComposerMode = null | "new-group" | "new-announcement";
@@ -54,7 +54,11 @@ type ComposerMode = null | "new-group" | "new-announcement";
 export function StaffInternalChatButton() {
   const session = useDemoSessionOptional();
   const [open, setOpen] = useState(false);
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // Who this person is and whom they may message (the roster, the sections
+  // they teach) is resolved from the copies the sidebar decides with
+  // (data-layer 2.1f), kept by content so a desk landing does not rebuild the
+  // thread list. Null until they have loaded: the chat waits, it never guesses.
+  const { masters } = useStableAccessCopy();
   const [state, setState] = useState<ErpChatState | null>(null);
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<TabId>("recent");
@@ -87,7 +91,6 @@ export function StaffInternalChatButton() {
   }, []);
 
   useEffect(() => {
-    setMasters(loadMasters());
     setPrefs(loadChatAlertPrefs());
     refresh();
     void Promise.all([

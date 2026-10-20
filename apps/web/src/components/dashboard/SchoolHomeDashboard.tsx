@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ModuleDashboardView } from "@/components/dashboard/ModuleDashboard";
+import {
+  ModuleDashboardView,
+  type ModuleDashboardModel,
+} from "@/components/dashboard/ModuleDashboard";
 import {
   shouldShowTeacherHome,
   TeacherHome,
@@ -23,7 +26,6 @@ import {
   loadStatutoryRemit,
   statutoryDuesFromBatches,
 } from "@/lib/statutoryRemit";
-import { loadMasters } from "@/lib/masters";
 import { normalizeStatutoryConfig } from "@/lib/foundationMasters";
 import { listOverdueStatutoryAlerts } from "@/lib/statutoryCompliance";
 import { listLiveDefaulters } from "@/lib/playbook";
@@ -35,6 +37,8 @@ import { BroadcastModal } from "@/components/dashboard/BroadcastModal";
 import { MessageCircle, Receipt } from "lucide-react";
 import { useExpenseKpi } from "@/components/dashboard/expenseKpi";
 import { hasPermission } from "@/lib/rbac";
+import { useAccessData } from "@/components/shell/useAccessData";
+import { useMasters } from "@/lib/data/client/hooks";
 
 export function SchoolHomeDashboard() {
   const session = useDemoSession();
@@ -49,11 +53,18 @@ export function SchoolHomeDashboard() {
   // used to read the accounts desk, whose bank ledger holds fee receipts only
   // — see lib/accountsServerBook.ts.
   const serverBook = useServerBookPosition();
+  // Who sees what on this page (the teacher's home, the expenses tile) is a
+  // permission answer: it comes from the copies the sidebar and the module
+  // gate decide with (data-layer 2.1f), and waits for them — never a guess
+  // from a roster or roles that have not loaded.
+  const access = useAccessData();
   // Expenses tile — only for those who may see the school's money position
   // (the report behind it needs accounts_position on the server too).
   const expenseKpi = useExpenseKpi(
-    hasPermission(session, loadMasters(), "accounts_position", "view") &&
-      hasPermission(session, loadMasters(), "accounts", "view"),
+    access.ready &&
+      !!access.masters &&
+      hasPermission(session, access.masters, "accounts_position", "view", access.rbac ?? undefined) &&
+      hasPermission(session, access.masters, "accounts", "view", access.rbac ?? undefined),
   );
 
   function generateFeeLedger() {
@@ -127,7 +138,31 @@ export function SchoolHomeDashboard() {
     return <PrincipalCockpit />;
   }
 
-  if (!forceFull && shouldShowTeacherHome(session, true)) {
+  if (!access.ready) {
+    if (access.status === "failed") {
+      return (
+        <div className="mx-auto max-w-lg p-8" role="alert">
+          <h1 className="font-brand-name text-xl text-[var(--brand-deep)]">
+            Couldn&apos;t check your access
+          </h1>
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            Your roles or the staff list did not load. Check the connection and
+            try again.
+          </p>
+          <button
+            type="button"
+            onClick={access.retry}
+            className="mt-5 inline-flex rounded-xl bg-[var(--primary)] px-4 py-2.5 text-sm font-semibold text-[var(--primary-foreground)]"
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return <p className="text-base text-[var(--muted)]">Loading school dashboard…</p>;
+  }
+
+  if (!forceFull && shouldShowTeacherHome(session, access.masters)) {
     return (
       <TeacherHome
         onOpenFullDashboard={() => {
@@ -167,93 +202,18 @@ export function SchoolHomeDashboard() {
     }
   }
 
-  // Statutory (EPF/ESIC) overdue alerts — owner/super-admin only, never principal.
+  // Owner / super admin: the statutory alerts and the anomaly scan.
   if (isSuperAdminSession(session)) {
-    const config = normalizeStatutoryConfig(loadMasters().statutoryConfig);
-    const dues = statutoryDuesFromBatches(loadStatutoryRemit().batches);
-    const statutoryAlerts = listOverdueStatutoryAlerts(dues, config);
-    if (statutoryAlerts.length > 0) {
-      const estimatedTotal = statutoryAlerts.reduce(
-        (s, a) => s + a.estimatedPenalty,
-        0,
-      );
-      const kpi = {
-        id: "statutory-overdue",
-        label: "Statutory dues overdue",
-        value: String(statutoryAlerts.length),
-        hint: `Est. penalty ₹${estimatedTotal.toLocaleString("en-IN")} · submit ASAP`,
-        tone: "rose" as const,
-        href: "/payroll?tab=govt",
-      };
-      const financeSection = model.kpiSections?.find((s) => s.id === "finance");
-      if (financeSection) {
-        financeSection.kpis = [kpi, ...financeSection.kpis];
-      } else {
-        model.kpiSections = [
-          ...(model.kpiSections || []),
-          { id: "statutory", title: "Statutory compliance", kpis: [kpi] },
-        ];
-      }
-    }
-
-    const anomalyItems: AnomalyItem[] = [];
-    if (anomalies.attendance && anomalies.attendance.pending > 0) {
-      anomalyItems.push({
-        id: "attendance-pending",
-        tone: "warning",
-        title: `${anomalies.attendance.pending} attendance register${anomalies.attendance.pending === 1 ? "" : "s"} not marked`,
-        detail: "Today's sections still awaiting a class attendance mark",
-        href: "/attendance?tab=students",
-      });
-    }
-    if (anomalies.waFailures && anomalies.waFailures.count > 0) {
-      anomalyItems.push({
-        id: "wa-failures",
-        tone: "danger",
-        title: `${anomalies.waFailures.count} WhatsApp message${anomalies.waFailures.count === 1 ? "" : "s"} failed to deliver`,
-        detail: "In the last 24 hours",
-        href: "/comms",
-      });
-    }
-    if (atRiskCount && atRiskCount > 0) {
-      anomalyItems.push({
-        id: "fee-at-risk",
-        tone: "danger",
-        title: `${atRiskCount} fee payment${atRiskCount === 1 ? "" : "s"} at risk`,
-        detail: "High-risk defaulters flagged by the collections score",
-        href: "/fees/defaulters",
-      });
-    }
-
     return (
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setBroadcastOpen(true)}
-          >
-            <MessageCircle className="h-3.5 w-3.5" /> Broadcast WhatsApp
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={generateFeeLedger}>
-            <Receipt className="h-3.5 w-3.5" /> Generate fee ledger
-          </Button>
-          {ledgerNotice ? (
-            <span className="text-xs text-[var(--muted)]">{ledgerNotice}</span>
-          ) : null}
-        </div>
-        <BroadcastModal open={broadcastOpen} onOpenChange={setBroadcastOpen} />
-        {/* Families no WhatsApp message can reach. Top of the owner's own
-            screen, with the number box in it: a dashboard that only counts a
-            problem hands it back to somebody else. */}
-        <WaNumberGapBanner />
-        <AlertBannerList
-          alerts={statutoryAlerts.map((a) => ({ text: a.text, href: a.href }))}
-        />
-        <AnomalyGrid items={anomalyItems} />
-        <ModuleDashboardView model={model} variant="school" />
-      </div>
+      <OwnerHome
+        model={model}
+        anomalies={anomalies}
+        atRiskCount={atRiskCount}
+        broadcastOpen={broadcastOpen}
+        onBroadcastOpenChange={setBroadcastOpen}
+        ledgerNotice={ledgerNotice}
+        onGenerateFeeLedger={generateFeeLedger}
+      />
     );
   }
 
@@ -261,6 +221,150 @@ export function SchoolHomeDashboard() {
     <div className="space-y-4">
       <WaNumberGapBanner />
       <ModuleDashboardView model={model} variant="school" />
+    </div>
+  );
+}
+
+/**
+ * The owner's / super admin's home: statutory (EPF/ESIC) overdue alerts and
+ * the anomaly grid above the school dashboard (never the principal's).
+ *
+ * The statutory setup is read from the server's Masters (useMasters — kept
+ * fresh by the versions poll; data-layer 2.1f), not from this tab's copy, and
+ * only here: no other home reads the book, so no other home pays for it. A
+ * Masters read that failed is said on screen — never "nothing overdue".
+ */
+function OwnerHome({
+  model,
+  anomalies,
+  atRiskCount,
+  broadcastOpen,
+  onBroadcastOpenChange,
+  ledgerNotice,
+  onGenerateFeeLedger,
+}: {
+  model: ModuleDashboardModel;
+  anomalies: OwnerAnomalies;
+  atRiskCount: number | null;
+  broadcastOpen: boolean;
+  onBroadcastOpenChange: (open: boolean) => void;
+  ledgerNotice: string | null;
+  onGenerateFeeLedger: () => void;
+}) {
+  const book = useMasters();
+  // The full book only: a teaching answer withholds the statutory setup.
+  const statutoryConfig =
+    book.data?.scope === "full" ? book.data.masters.statutoryConfig : undefined;
+  const statutoryUnknown = book.isError && book.data === undefined;
+
+  // `model` is the parent's; this render may run again on its own (a Masters
+  // answer), so the tiles are added to copies, never to `model` itself.
+  const kpiSections = model.kpiSections?.map((sec) => ({ ...sec, kpis: [...sec.kpis] }));
+  const statutoryAlerts =
+    book.data?.scope === "full"
+      ? listOverdueStatutoryAlerts(
+          statutoryDuesFromBatches(loadStatutoryRemit().batches),
+          normalizeStatutoryConfig(statutoryConfig),
+        )
+      : [];
+  let sections = kpiSections;
+  if (statutoryAlerts.length > 0) {
+    const estimatedTotal = statutoryAlerts.reduce(
+      (s, a) => s + a.estimatedPenalty,
+      0,
+    );
+    const kpi = {
+      id: "statutory-overdue",
+      label: "Statutory dues overdue",
+      value: String(statutoryAlerts.length),
+      hint: `Est. penalty ₹${estimatedTotal.toLocaleString("en-IN")} · submit ASAP`,
+      tone: "rose" as const,
+      href: "/payroll?tab=govt",
+    };
+    const financeSection = sections?.find((s) => s.id === "finance");
+    if (financeSection) {
+      financeSection.kpis = [kpi, ...financeSection.kpis];
+    } else {
+      sections = [
+        ...(sections || []),
+        { id: "statutory", title: "Statutory compliance", kpis: [kpi] },
+      ];
+    }
+  }
+  const shown: ModuleDashboardModel = { ...model, kpiSections: sections };
+
+  const anomalyItems: AnomalyItem[] = [];
+  if (anomalies.attendance && anomalies.attendance.pending > 0) {
+    anomalyItems.push({
+      id: "attendance-pending",
+      tone: "warning",
+      title: `${anomalies.attendance.pending} attendance register${anomalies.attendance.pending === 1 ? "" : "s"} not marked`,
+      detail: "Today's sections still awaiting a class attendance mark",
+      href: "/attendance?tab=students",
+    });
+  }
+  if (anomalies.waFailures && anomalies.waFailures.count > 0) {
+    anomalyItems.push({
+      id: "wa-failures",
+      tone: "danger",
+      title: `${anomalies.waFailures.count} WhatsApp message${anomalies.waFailures.count === 1 ? "" : "s"} failed to deliver`,
+      detail: "In the last 24 hours",
+      href: "/comms",
+    });
+  }
+  if (atRiskCount && atRiskCount > 0) {
+    anomalyItems.push({
+      id: "fee-at-risk",
+      tone: "danger",
+      title: `${atRiskCount} fee payment${atRiskCount === 1 ? "" : "s"} at risk`,
+      detail: "High-risk defaulters flagged by the collections score",
+      href: "/fees/defaulters",
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => onBroadcastOpenChange(true)}
+        >
+          <MessageCircle className="h-3.5 w-3.5" /> Broadcast WhatsApp
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={onGenerateFeeLedger}>
+          <Receipt className="h-3.5 w-3.5" /> Generate fee ledger
+        </Button>
+        {ledgerNotice ? (
+          <span className="text-xs text-[var(--muted)]">{ledgerNotice}</span>
+        ) : null}
+      </div>
+      <BroadcastModal open={broadcastOpen} onOpenChange={onBroadcastOpenChange} />
+      {/* Families no WhatsApp message can reach. Top of the owner's own
+          screen, with the number box in it: a dashboard that only counts a
+          problem hands it back to somebody else. */}
+      <WaNumberGapBanner />
+      {statutoryUnknown ? (
+        <p
+          role="alert"
+          className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--muted)]"
+        >
+          Statutory (EPF/ESIC) dues could not be checked: the school&apos;s Masters did not load.
+          <button
+            type="button"
+            onClick={() => void book.refetch()}
+            className="font-semibold text-[var(--brand-deep)] underline"
+          >
+            Try again
+          </button>
+        </p>
+      ) : null}
+      <AlertBannerList
+        alerts={statutoryAlerts.map((a) => ({ text: a.text, href: a.href }))}
+      />
+      <AnomalyGrid items={anomalyItems} />
+      <ModuleDashboardView model={shown} variant="school" />
     </div>
   );
 }
