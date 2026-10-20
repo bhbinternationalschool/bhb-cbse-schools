@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { FileText } from "lucide-react";
-import { currentAcademicYearCode, loadMasters, type MastersState } from "@/lib/masters";
+import { currentAcademicYearCode, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   SCHOOL_DOCUMENT_PRESETS,
   buildComplianceFactsFromMasters,
@@ -42,7 +44,9 @@ function splitParagraphs(text: string): string[] {
 
 export function DocumentMakerWorkspace() {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1i: the server's book (letterhead, the session) + the roster
+  // the permission checks resolve against, kept fresh by the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [docType, setDocType] = useState<SchoolDocumentType>("formal_letter");
   const [language, setLanguage] = useState<SchoolDocumentLanguage>("both");
   const [details, setDetails] = useState("");
@@ -73,19 +77,6 @@ export function DocumentMakerWorkspace() {
     const l = sp.get("language");
     if (l === "en" || l === "hi" || l === "both") setLanguage(l);
     if (sp.get("mode") === "minutes") setMode("minutes");
-  }, []);
-
-  useEffect(() => {
-    setMasters(loadMasters());
-    void (async () => {
-      const [{ ensureMastersHydrated }, { withHydrationSlot }] =
-        await Promise.all([
-          import("@/lib/mastersPersistence"),
-          import("@/lib/deskHydrateGuard"),
-        ]);
-      await withHydrationSlot(() => ensureMastersHydrated());
-      setMasters(loadMasters());
-    })();
   }, []);
 
   const preset = presetForType(docType);
@@ -129,8 +120,8 @@ export function DocumentMakerWorkspace() {
   }
 
   async function printPdf() {
-    if (!generated || !canExport) return;
-    const m = masters ?? loadMasters();
+    if (!generated || !canExport || !masters) return;
+    const m = masters;
     const letterhead = await resolvePdfLetterhead(m);
     const brand = await resolveSchoolBrandAssets(m);
     const { jsPDF } = await import("jspdf");
@@ -187,6 +178,22 @@ export function DocumentMakerWorkspace() {
       reportAiOutcome({ ids: [generated.generationId], outcome: "accepted", targetType: "school_document" });
       setGenerated({ ...generated, generationId: "" });
     }
+  }
+
+  if (!masters) {
+    return (
+      <ErpWorkspaceShell
+        title="Document maker"
+        subtitle="AI letters, govt submissions, and official notices — English & Hindi with school letterhead"
+        icon={<FileText className="size-6" aria-hidden />}
+      >
+        {mastersError ? (
+          <QueryError what="the school's setup and staff" error={mastersError} retry={retryMasters} />
+        ) : (
+          <p className="text-sm text-[var(--muted)]">Loading the school&apos;s setup…</p>
+        )}
+      </ErpWorkspaceShell>
+    );
   }
 
   return (

@@ -45,7 +45,8 @@ import {
   allocateExpensePayment,
   buildExpenseVoucherLines,
 } from "@/lib/expenseVoucherDraft";
-import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
+import { currentAcademicYearCode } from "@/lib/masters";
+import { useMasters } from "@/lib/data/client/hooks";
 import { isPublishedHoliday } from "@/lib/foundationMasters";
 import {
   ErpTable,
@@ -1148,9 +1149,14 @@ export function QuickExpensePanel({
    * school was shut. The school's own holiday calendar decides which days
    * are billable, so a Sunday or a gazetted holiday drops out by itself.
    */
+  // data-layer 2.1i: the holiday calendar from the Masters view (versions
+  // poll), not the page copy — an unread calendar is "loading", never "no
+  // holidays" (which would bill the shut days).
+  const mastersQ = useMasters();
+  const holidayBook = mastersQ.data?.masters ?? null;
   const plan = useMemo(() => {
-    if (!spread) return null;
-    const masters = loadMasters();
+    if (!spread || !holidayBook) return null;
+    const masters = holidayBook;
     // The holiday list is per academic year, and the library default is a
     // past one — ask about the running session.
     const ay = currentAcademicYearCode(masters);
@@ -1160,7 +1166,7 @@ export function QuickExpensePanel({
       holidayReason: (d: string) =>
         isPublishedHoliday(masters, d, ay)?.title ?? null,
     });
-  }, [spread, date, toDate]);
+  }, [spread, date, toDate, holidayBook]);
 
   // Which days are billed: the office's picks once they have clicked, the
   // working days until then.
@@ -1401,7 +1407,18 @@ export function QuickExpensePanel({
               />
             </label>
             <p className="flex-1 rounded-lg bg-[var(--surface-sunken)] px-3 py-1.5 text-[11px]">
-              {!plan ? null : !plan.ok ? (
+              {!plan ? (
+                mastersQ.isError && !holidayBook ? (
+                  <span className="font-semibold text-[var(--danger)]">
+                    Could not load the school&apos;s holiday calendar.{" "}
+                    <button type="button" className="underline" onClick={() => void mastersQ.refetch()}>
+                      Try again
+                    </button>
+                  </span>
+                ) : (
+                  <span className="text-[var(--muted)]">Loading the school&apos;s holiday calendar…</span>
+                )
+              ) : !plan.ok ? (
                 <span className="font-semibold text-[var(--warning)]">
                   {plan.error}
                 </span>

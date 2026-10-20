@@ -9,7 +9,9 @@ import { field } from "@/components/ui/erp-ui";
 import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import type { RowAction } from "@/components/ui/erp-grid";
-import { DEFAULT_AY, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
+import { DEFAULT_AY, type MastersState, currentAcademicYearCode } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { classSectionLabel } from "@/lib/timetable";
 import { loadSis, type SisState, type SisStudent, studentsInSession} from "@/lib/sis";
 import {
@@ -140,7 +142,9 @@ export function HealthWorkspace() {
   const readOnly = useSessionReadOnly();
   const ay = session.academicYearCode || DEFAULT_AY;
   const [tab, setTab] = useState<Tab>("log");
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1i: the server's book + the roster the permission checks
+  // resolve against, kept fresh by the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [state, setState] = useState<HealthState>(emptyHealthState());
   const [notice, setNotice] = useState<string | null>(null);
@@ -149,21 +153,15 @@ export function HealthWorkspace() {
   // Re-read when the server copy of this module lands (login/refresh hydration).
   useModuleStateHydration("health", () => { setState(loadHealth()); });
   useEffect(() => {
-    setMasters(loadMasters());
     setSis(loadSis());
     setState(loadHealth());
     void (async () => {
-      const [{ ensureMastersHydrated }, { ensureSisHydrated }, { withHydrationSlot }] =
+      const [{ ensureSisHydrated }, { withHydrationSlot }] =
         await Promise.all([
-          import("@/lib/mastersPersistence"),
           import("@/lib/sisPersistence"),
           import("@/lib/deskHydrateGuard"),
         ]);
-      await Promise.all([
-        withHydrationSlot(() => ensureMastersHydrated()),
-        withHydrationSlot(() => ensureSisHydrated()),
-      ]);
-      setMasters(loadMasters());
+      await withHydrationSlot(() => ensureSisHydrated());
       setSis(loadSis());
     })();
   }, []);
@@ -238,7 +236,7 @@ export function HealthWorkspace() {
   );
 
   const pickable = useMemo(() => {
-    if (!sis) return [];
+    if (!sis || !masters) return [];
     if (teacherMode) return studentsOfMySections(sis, my.academicYearCode, my);
     if (scopeUnknown) return [];
     // One row per child, this session. SIS keeps a row per child per
@@ -657,6 +655,22 @@ export function HealthWorkspace() {
     },
   ];
 
+
+  if (!masters) {
+    return (
+      <ErpWorkspaceShell
+        title="Health / infirmary"
+        subtitle="Nurse visit log, medication & vaccination records, emergency contacts"
+        icon={<HeartPulse className="size-6" aria-hidden />}
+      >
+        {mastersError ? (
+          <QueryError what="the school's classes and staff" error={mastersError} retry={retryMasters} />
+        ) : (
+          <p className="mt-4 text-sm text-[var(--muted)]">Loading the school&apos;s classes…</p>
+        )}
+      </ErpWorkspaceShell>
+    );
+  }
 
   return (
     <ErpWorkspaceShell

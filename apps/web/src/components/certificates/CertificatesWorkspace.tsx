@@ -31,7 +31,9 @@ import {
   searchFeeStudents,
   type StudentSearchHit,
 } from "@/lib/fees";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
   designationName,
@@ -121,7 +123,9 @@ export function CertificatesWorkspace() {
     if (asked === "reports" || asked === "dashboard" || asked === "desk") setTab(asked);
   }, []);
   const [certStep, setCertStep] = useState<CertStep>("student");
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1i: the server's book + the roster (class teacher, principal,
+  // the officer's designation), kept fresh by the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [issues, setIssues] = useState<CertificateIssue[]>([]);
   // Every issue, folded by the IST month it was issued (newest open) — the
@@ -196,9 +200,7 @@ export function CertificatesWorkspace() {
   }, [shownTabs, tab]);
 
   function refresh() {
-    const m = loadMasters();
     const s = loadSis();
-    setMasters(m);
     setSis(s);
     setIssues(listCertificates(loadCertificates()));
     setTick((x) => x + 1);
@@ -292,7 +294,8 @@ export function CertificatesWorkspace() {
       checkedByDesignation:
         prev.checkedByDesignation ||
         (() => {
-          const m = loadMasters();
+          const m = masters;
+          if (!m) return prev.checkedByDesignation;
           const me = m.staff.find(
             (s) =>
               s.fullName === session.fullName ||
@@ -417,7 +420,11 @@ export function CertificatesWorkspace() {
       setError("Pick a student first — step 1 · Student");
       return;
     }
-    const mastersNow = masters ?? loadMasters();
+    if (!masters) {
+      setError("The school's setup is still loading — try again in a moment.");
+      return;
+    }
+    const mastersNow = masters;
     const ay = session.academicYearCode || DEFAULT_AY;
     const classTeacherName = resolveClassTeacherName(
       mastersNow,
@@ -551,7 +558,15 @@ export function CertificatesWorkspace() {
         </div>
       ) : null}
 
-      {tab === "desk" ? (
+      {tab === "desk" && !masters ? (
+        mastersError ? (
+          <QueryError what="the school's classes and staff" error={mastersError} retry={retryMasters} />
+        ) : (
+          <p className="mt-6 text-sm text-[var(--muted)]">Loading the school&apos;s classes…</p>
+        )
+      ) : null}
+
+      {tab === "desk" && masters ? (
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
         <div className="space-y-4">
           <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">

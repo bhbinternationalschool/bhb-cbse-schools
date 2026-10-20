@@ -1,5 +1,7 @@
 "use client";
 
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { PaidMonthsCarryOverNote } from "@/components/transport/PaidMonthsCarryOverNote";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -63,7 +65,6 @@ import {
 import { checkHold, type HoldCheck } from "@/lib/holds";
 import {
   DEFAULT_AY,
-  loadMasters,
   type ClassGroupCode,
   type MastersState,
 } from "@/lib/masters";
@@ -201,7 +202,9 @@ export function TransportWorkspace() {
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as TransportTab);
   }, []);
   const [state, setState] = useState<TransportState | null>(null);
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1i: the server's book + the staff roster (drivers and
+  // attendants, the permission checks), kept fresh by the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [query, setQuery] = useState("");
   const [classId, setClassId] = useState("");
@@ -363,18 +366,12 @@ export function TransportWorkspace() {
       migrateDemoFleetToReal();
       const transport = seedTransportIfEmpty();
       setState(transport);
-      setMasters(loadMasters());
       setSis(loadSis());
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load transport";
       setError(msg);
       // Avoid infinite “Loading transport…” if seed/load throws
       setState((prev) => prev ?? loadTransport());
-      try {
-        setMasters(loadMasters());
-      } catch {
-        /* ignore */
-      }
       try {
         setSis(loadSis());
       } catch {
@@ -395,6 +392,7 @@ export function TransportWorkspace() {
       // every per-bus roster reports zero. Hydrating only the transport desk
       // meant landing straight on /transport in a cold browser showed student
       // codes and empty buses while the assignments were perfectly fine.
+      // (The class masters now come from useScreenMasters — data-layer 2.1i.)
       //
       // The staff roster is a fourth hydrate, not part of masters: staff is
       // stripped out of the masters blob and lives in sis_staff. Without it
@@ -403,20 +401,17 @@ export function TransportWorkspace() {
       const [
         { ensureTransportHydrated },
         { ensureSisHydrated },
-        { ensureMastersHydrated },
         { ensureStaffHydrated },
         { withHydrationSlot },
       ] = await Promise.all([
         import("@/lib/transportPersistence"),
         import("@/lib/sisPersistence"),
-        import("@/lib/mastersPersistence"),
         import("@/lib/staffPersistence"),
         import("@/lib/deskHydrateGuard"),
       ]);
       await Promise.all([
         withHydrationSlot(() => ensureTransportHydrated()),
         withHydrationSlot(() => ensureSisHydrated()),
-        withHydrationSlot(() => ensureMastersHydrated()),
         withHydrationSlot(() => ensureStaffHydrated()),
       ]);
       refresh();
@@ -653,6 +648,12 @@ export function TransportWorkspace() {
 
       {!state ? (
         <p className="mt-6 text-sm text-[var(--muted)]">Loading transport…</p>
+      ) : !masters ? (
+        mastersError ? (
+          <QueryError what="the school's classes and staff" error={mastersError} retry={retryMasters} />
+        ) : (
+          <p className="mt-6 text-sm text-[var(--muted)]">Loading the school&apos;s classes and staff…</p>
+        )
       ) : (
         <>
           {tab === "dashboard" ? (

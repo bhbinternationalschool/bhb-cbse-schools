@@ -9,7 +9,9 @@ import { field } from "@/components/ui/erp-ui";
 import { ExportMenu, type RowAction } from "@/components/ui/erp-grid";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { openWaMe } from "@/lib/waMe";
-import { DEFAULT_AY, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
+import { DEFAULT_AY, type MastersState, currentAcademicYearCode } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { classSectionLabel } from "@/lib/timetable";
 import { loadSis, type SisState, type SisStudent, studentsInSession} from "@/lib/sis";
 import { dutyStaffLabel, loadDutyRoster, type DutyRosterState } from "@/lib/dutyRoster";
@@ -141,7 +143,9 @@ export function VisitorsWorkspace() {
   const readOnly = useSessionReadOnly();
   const ay = session.academicYearCode || DEFAULT_AY;
   const [tab, setTab] = useState<Tab>("register");
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1i: the server's book + the staff roster (gate duty, the
+  // permission checks), kept fresh by the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [dutyRoster, setDutyRoster] = useState<DutyRosterState | null>(null);
   const [state, setState] = useState<VisitorState>(emptyVisitorState());
@@ -193,22 +197,16 @@ export function VisitorsWorkspace() {
     };
   }, [tab]);
   useEffect(() => {
-    setMasters(loadMasters());
     setSis(loadSis());
     setDutyRoster(loadDutyRoster());
     setState(loadVisitors());
     void (async () => {
-      const [{ ensureMastersHydrated }, { ensureSisHydrated }, { withHydrationSlot }] =
+      const [{ ensureSisHydrated }, { withHydrationSlot }] =
         await Promise.all([
-          import("@/lib/mastersPersistence"),
           import("@/lib/sisPersistence"),
           import("@/lib/deskHydrateGuard"),
         ]);
-      await Promise.all([
-        withHydrationSlot(() => ensureMastersHydrated()),
-        withHydrationSlot(() => ensureSisHydrated()),
-      ]);
-      setMasters(loadMasters());
+      await withHydrationSlot(() => ensureSisHydrated());
       setSis(loadSis());
     })();
   }, []);
@@ -227,8 +225,8 @@ export function VisitorsWorkspace() {
    * The register saves the whole visitors book, which needs edit (module
    * grant or the "Gate register" function) — saveVisitors and the server
    * both refuse less. Without it the buttons are off rather than letting a
-   * check-in look saved on this screen and never reach the server. Until
-   * masters load, only the session's own read-only state decides.
+   * check-in look saved on this screen and never reach the server. The
+   * screen is not drawn until masters load (data-layer 2.1i).
    */
   const locked =
     readOnly || (masters !== null && !canWriteModuleTab(session, masters, "visitors", tab));
@@ -530,6 +528,22 @@ export function VisitorsWorkspace() {
     () => (dutyRoster ? onGateDutyNow(dutyRoster, todayIso()) : []),
     [dutyRoster],
   );
+
+  if (!masters) {
+    return (
+      <ErpWorkspaceShell
+        title="Visitor / gate management"
+        subtitle="Front-gate visitor register, QR passes, early-pickup gate passes"
+        icon={<DoorOpen className="size-6" aria-hidden />}
+      >
+        {mastersError ? (
+          <QueryError what="the school's classes and staff" error={mastersError} retry={retryMasters} />
+        ) : (
+          <p className="mt-4 text-sm text-[var(--muted)]">Loading the school&apos;s classes…</p>
+        )}
+      </ErpWorkspaceShell>
+    );
+  }
 
   return (
     <ErpWorkspaceShell

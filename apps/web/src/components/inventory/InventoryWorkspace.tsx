@@ -26,8 +26,8 @@ import { MastersTab } from "@/components/inventory/MastersTab";
 import { PurchaseTab } from "@/components/inventory/PurchaseTab";
 import { VendorsTab } from "@/components/inventory/VendorsTab";
 import { useInvBootstrap } from "@/lib/inventory/client";
-import { ensureMastersHydrated } from "@/lib/mastersPersistence";
-import { loadMasters } from "@/lib/masters";
+import { useMasters } from "@/lib/data/client/hooks";
+import { QueryError } from "@/components/data/QueryError";
 import { Button } from "@/components/ui/button";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { useAccessData } from "@/components/shell/useAccessData";
@@ -87,35 +87,28 @@ export function InventoryWorkspace() {
   }, []);
   const boot = useInvBootstrap();
 
-  // Class names come from masters, which is still a localStorage-backed
-  // module. Only the labels are used here — kit assignments store class ids.
-  const [classes, setClasses] = useState<{ id: string; label: string }[]>([]);
-  const [sections, setSections] = useState<
-    { id: string; classId: string; label: string }[]
-  >([]);
-  useEffect(() => {
-    let alive = true;
-    void ensureMastersHydrated()
-      .catch(() => false)
-      .then(() => {
-        if (!alive) return;
-        const m = loadMasters();
-        setClasses(
-          (m.classes ?? [])
-            .filter((c) => c.isActive !== false)
-            .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-            .map((c) => ({ id: c.id, label: c.name })),
-        );
-        setSections(
-          (m.sections ?? [])
-            .filter((s) => s.isActive !== false)
-            .map((s) => ({ id: s.id, classId: s.classId, label: s.name })),
-        );
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  // Class names come from the Masters view (data-layer 2.1i: the server's
+  // book, kept fresh by the versions poll — not the page copy read once).
+  // Only the labels are used here — kit assignments store class ids.
+  const mastersQ = useMasters();
+  const book = mastersQ.data?.masters ?? null;
+  const classes = useMemo(
+    () =>
+      (book?.classes ?? [])
+        .filter((c) => c.isActive !== false)
+        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+        .map((c) => ({ id: c.id, label: c.name })),
+    [book],
+  );
+  const sections = useMemo(
+    () =>
+      (book?.sections ?? [])
+        .filter((s) => s.isActive !== false)
+        .map((s) => ({ id: s.id, classId: s.classId, label: s.name })),
+    [book],
+  );
+  /** The two tabs that name classes wait for them: unread is not "no classes". */
+  const needsClasses = tab === "counter" || tab === "kits";
 
   // Someone holding only some Store functions (Counter, Purchase, …) sees
   // only their tabs. The inventory routes enforce the same split, writes
@@ -169,6 +162,12 @@ export function InventoryWorkspace() {
             Try again
           </Button>
         </div>
+      ) : needsClasses && !book ? (
+        mastersQ.isError ? (
+          <QueryError what="the school's classes" error={mastersQ.error} retry={mastersQ.refetch} />
+        ) : (
+          <InvSpinner label="Loading classes" />
+        )
       ) : (
         <div className="pt-1">
           {tab === "counter" ? (
