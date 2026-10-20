@@ -21,12 +21,16 @@ import { householdChildren } from "@/lib/appPopups.server";
 import type { SisStudent } from "@/lib/sis";
 import { normalizePaper, type ExamPaper } from "@/lib/examPapers";
 import { subjectDisplayName, subjectKeyFor } from "@/lib/tutorSyllabus";
+import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
+import { currentAcademicYearCode } from "@/lib/masters";
 import {
   checkAnswer,
+  competitionItemsFor,
   competitionStandings,
   firstName,
   gameGrade,
   gameLengthSeconds,
+  gameReview,
   gameQuestionFromPaper,
   istDayBefore,
   istParts,
@@ -175,6 +179,25 @@ export function describeChild(ctx: ApiAuthContext, child: SisStudent): GameChild
   };
 }
 
+/**
+ * Is `date` (IST, "YYYY-MM-DD") a full holiday for this child's class in the
+ * school's calendar (Masters → Holidays, published, this year)? Then there
+ * are no school hours to keep practice out of. A half holiday still has
+ * school, so it is not one here. Masters comes with the request (ctx); a
+ * year Masters cannot name falls back to the session's.
+ */
+export function isClassHoliday(ctx: ApiAuthContext, classId: string, date: string): boolean {
+  let year = "";
+  try {
+    year = currentAcademicYearCode(ctx.masters) || "";
+  } catch {
+    year = "";
+  }
+  year ||= ctx.session.academicYearCode || "";
+  if (!year || !classId) return false;
+  return classifyClassHolidayDay(ctx.masters, date, year, classId).status === "holiday";
+}
+
 // ── Sessions ──────────────────────────────────────────────────────────────
 
 type SessionRow = {
@@ -294,7 +317,8 @@ export async function gameStatus(ctx: ApiAuthContext, child: GameChild, nowMs: n
   const rows = await sessionsOfDays(child.student.id, from);
   const todays = rows.filter((r) => r.play_date === today);
   const used = usedSeconds(todays, nowMs);
-  const practice = playVerdict({ nowMs, settings, usedSecondsToday: used, gameSeconds: gameLengthSeconds("quiz", 10) });
+  const holiday = isClassHoliday(ctx, child.student.classId, today);
+  const practice = playVerdict({ nowMs, settings, usedSecondsToday: used, gameSeconds: gameLengthSeconds("quiz", 10), holiday });
   const days: { date: string; seconds: number; stars: number; games: number }[] = [];
   for (let i = 6; i >= 0; i--) {
     const d = istDayBefore(today, i);
@@ -314,6 +338,7 @@ export async function gameStatus(ctx: ApiAuthContext, child: GameChild, nowMs: n
       schoolStart: settings.schoolStart,
       schoolEnd: settings.schoolEnd,
       schoolDays: settings.schoolDays,
+      holidayToday: holiday,
       canPracticeNow: practice.ok,
       reason: practice.ok ? null : practice.reason,
       message: practice.ok ? "" : practice.message,
@@ -361,6 +386,7 @@ type QuestionRow = {
   source: "publisher_key" | "ai" | "teacher";
   review: "approved" | "pending" | "rejected";
   reviewed_by: string;
+  batch_id: string;
   created_by: string;
   created_at: string;
 };
@@ -439,7 +465,9 @@ export async function startGame(ctx: ApiAuthContext, child: GameChild, input: St
       throw new ApiError("not_found", "This competition is not for your class.", 404);
     }
     game = competition.game;
-    items = readItems(competition.items);
+    // The same questions for every player, but each in their own order with
+    // their own option order — answers cannot be passed along by position.
+    items = competitionItemsFor(readItems(competition.items), seedFrom(`${competition.id}:${child.student.id}`));
     source = {
       grade: competition.grade,
       subjectKey: competition.subject_key,
@@ -471,6 +499,7 @@ export async function startGame(ctx: ApiAuthContext, child: GameChild, input: St
     competition: competition
       ? { opensAtMs: ms(competition.opens_at), closesAtMs: ms(competition.closes_at), cancelled: competition.status === "cancelled" }
       : null,
+    holiday: isClassHoliday(ctx, child.student.classId, today),
   });
   if (!verdict.ok) {
     throw new ApiError("forbidden", verdict.message, 403, { reason: verdict.reason, messageHi: verdict.messageHi });
@@ -518,9 +547,10 @@ export async function startGame(ctx: ApiAuthContext, child: GameChild, input: St
     startedAt: iso(nowMs),
     deadlineAt: iso(nowMs + verdict.allowSeconds * 1000),
     secondsLeft: verdict.allowSeconds,
-    // In a competition the right option is shown only at the end, so a
-    // classmate sitting beside you cannot be told it.
+    // In a competition the right option is shown only after it closes, so
+    // a classmate sitting beside you cannot be told it.
     revealAnswers: !competition,
+    answersAt: competition ? competition.closes_at : null,
   };
 }
 
@@ -542,7 +572,8 @@ export async function answerGame(ctx: ApiAuthContext, sessionId: string, index: 
   }
   const reveal = !row.competition_id;
   return {
-    correct: verdict.correct,
+    // In a competition not even right/wrong is said per question.
+    correct: reveal ? verdict.correct : null,
     correctIndex: reveal ? verdict.correctIndex : null,
     secondsLeft: Math.max(0, Math.floor((ms(row.deadline_at) - nowMs) / 1000)),
   };
@@ -557,6 +588,16 @@ export async function finishGame(ctx: ApiAuthContext, sessionId: string, nowMs: 
   const { data, error } = await sb.from("game_answers").select("idx, chosen").eq("tenant_id", tenantId).eq("session_id", row.id).limit(500);
   if (error) readFailed("this game's answers", error);
   const chosen = new Map(((data ?? []) as { idx: number; chosen: number }[]).map((a) => [a.idx, a.chosen]));
+  // A competition's right options stay on the server until it closes (a
+  // finished child could read them out to one still playing); practice
+  // shows them at once. Calling finish again after the close shows them.
+  let closesAtMs: number | null = null;
+  if (row.competition_id) {
+    const c = await loadCompetition(row.competition_id);
+    // A competition row that cannot be found: hold the answers back (safe side).
+    closesAtMs = c ? ms(c.closes_at) : Number.POSITIVE_INFINITY;
+  }
+  const rv = gameReview(items, chosen, { competitionClosesAtMs: closesAtMs, nowMs });
   return {
     sessionId: row.id,
     game: row.game,
@@ -566,8 +607,10 @@ export async function finishGame(ctx: ApiAuthContext, sessionId: string, nowMs: 
     correct: r.correct,
     stars: r.stars,
     seconds: r.seconds,
-    // The review: each question, what was chosen and the right option.
-    review: items.map((it, i) => ({ prompt: it.prompt, picture: it.picture ?? null, options: it.options, chosen: chosen.has(i) ? chosen.get(i)! : null, correctIndex: it.answer })),
+    // The review: each question, what was chosen and (when shown) the right option.
+    answersShown: rv.answersShown,
+    answersAt: rv.answersAt,
+    review: rv.review,
   };
 }
 
@@ -593,6 +636,12 @@ type CompetitionRow = {
 
 const COMPETITION_COLUMNS =
   "id, title, game, sections, grade, subject_key, textbook_id, chapter_position, opens_at, closes_at, status, created_by_staff_id, created_by_name, created_at";
+
+/** Who a competition is for, or null when there is none — read before anything is written for it. */
+export async function competitionAudience(id: string): Promise<{ sections: CompetitionRow["sections"]; createdByStaffId: string } | null> {
+  const c = await loadCompetition(id);
+  return c ? { sections: c.sections, createdByStaffId: c.created_by_staff_id } : null;
+}
 
 async function loadCompetition(id: string): Promise<CompetitionRow | null> {
   const { sb, tenantId } = await db();
@@ -841,6 +890,7 @@ export function questionView(r: QuestionRow) {
     source: r.source,
     review: r.review,
     reviewedBy: r.reviewed_by,
+    batchId: r.batch_id ?? "",
     createdBy: r.created_by,
     createdAt: r.created_at,
   };
@@ -883,6 +933,8 @@ export async function addQuestions(
     sourceRef: string;
     review: "approved" | "pending";
     reviewedBy: string;
+    /** One import run or one AI draft: a teacher can approve a reviewed publisher batch at once. */
+    batchId?: string;
   }[],
   by: string,
   nowMs: number,
@@ -909,6 +961,7 @@ export async function addQuestions(
     review: r.review,
     reviewed_by: r.review === "approved" ? r.reviewedBy.slice(0, 120) : "",
     reviewed_at: r.review === "approved" ? iso(nowMs) : null,
+    batch_id: (r.batchId ?? "").slice(0, 60),
     created_by: by.slice(0, 120),
     created_at: iso(nowMs),
     };
@@ -927,18 +980,78 @@ export async function addQuestions(
   return { added };
 }
 
-export async function reviewQuestion(id: string, review: "approved" | "rejected", by: string, nowMs: number, allowedGrades: (grade: number) => boolean) {
+/** `allowed(grade, subjectKey)`: the reviewer teaches that subject in that grade (or is school-wide). */
+export async function reviewQuestion(
+  id: string,
+  review: "approved" | "rejected",
+  by: string,
+  nowMs: number,
+  allowed: (grade: number, subjectKey: string) => boolean,
+) {
   const { sb, tenantId } = await db();
-  const { data, error } = await sb.from("game_questions").select("id, grade").eq("tenant_id", tenantId).eq("id", id).maybeSingle();
+  const { data, error } = await sb.from("game_questions").select("id, grade, subject_key").eq("tenant_id", tenantId).eq("id", id).maybeSingle();
   if (error) readFailed("the question", error);
   if (!data) throw new ApiError("not_found", "No such question.", 404);
-  if (!allowedGrades((data as { grade: number }).grade)) throw new ApiError("forbidden", "That question is for a class you do not teach.", 403);
+  const q = data as { grade: number; subject_key: string };
+  if (!allowed(q.grade, q.subject_key)) {
+    throw new ApiError("forbidden", `That question is ${subjectDisplayName(q.subject_key)} for a class you do not teach it in.`, 403);
+  }
   const { error: e2 } = await sb
     .from("game_questions")
     .update({ review, reviewed_by: by.slice(0, 120), reviewed_at: iso(nowMs) })
     .eq("tenant_id", tenantId)
     .eq("id", id);
   if (e2) writeFailed("the review", e2);
+}
+
+/**
+ * "Approve all" for one reviewed import batch: the publisher-keyed questions
+ * of one subject in one grade still waiting from that import run — of those,
+ * only the ids the teacher was shown (`ids`). The
+ * caller has checked the teacher teaches that subject in that grade. AI
+ * drafts are never approved in bulk — each is read and approved alone.
+ */
+export async function approvePublisherBatch(
+  batchId: string,
+  grade: number,
+  subjectKey: string,
+  ids: string[],
+  by: string,
+  nowMs: number,
+): Promise<{ approved: number }> {
+  if (!batchId) throw new ApiError("bad_request", "Which import?", 400);
+  // Only the questions the teacher had on screen: one they did not see is not approved.
+  if (!ids.length) throw new ApiError("bad_request", "No questions to approve.", 400);
+  const { sb, tenantId } = await db();
+  const { data, error } = await sb
+    .from("game_questions")
+    .update({ review: "approved", reviewed_by: by.slice(0, 120), reviewed_at: iso(nowMs) })
+    .eq("tenant_id", tenantId)
+    .eq("batch_id", batchId)
+    .eq("grade", grade)
+    .eq("subject_key", subjectKey)
+    .eq("source", "publisher_key")
+    .eq("review", "pending")
+    .in("id", ids)
+    .select("id");
+  if (error) writeFailed("the approvals", error);
+  return { approved: (data ?? []).length };
+}
+
+/** Every question already filed under one chapter (any review), so a fresh AI draft can be told what not to repeat. */
+export async function chapterPrompts(grade: number, textbookId: string, chapterPosition: number): Promise<string[]> {
+  const { sb, tenantId } = await db();
+  const { data, error } = await sb
+    .from("game_questions")
+    .select("prompt")
+    .eq("tenant_id", tenantId)
+    .eq("grade", grade)
+    .eq("textbook_id", textbookId)
+    .eq("chapter_position", chapterPosition)
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (error) readFailed("the chapter's questions", error);
+  return ((data ?? []) as { prompt: string }[]).map((r) => r.prompt);
 }
 
 /**

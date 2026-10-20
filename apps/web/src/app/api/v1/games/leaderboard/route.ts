@@ -3,6 +3,7 @@ import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { requireParentHousehold } from "@/lib/api/v1/household";
 import {
   competitionDetail,
+  competitionAudience,
   gameNow,
   resolveGameChild,
   settleExpiredCompetitionGames,
@@ -28,11 +29,14 @@ export async function GET(request: Request) {
     const nowMs = gameNow(request);
     const competitionId = url.searchParams.get("competitionId") ?? "";
     if (competitionId) {
-      await settleExpiredCompetitionGames(competitionId, nowMs);
-      const d = await competitionDetail(competitionId, nowMs);
-      if (!d.competition.sections.some((s) => s.sectionId === child.student.sectionId)) {
+      // The child's section first: a family outside the competition must
+      // not be able to make the server close (write) anyone's games.
+      const audience = await competitionAudience(competitionId);
+      if (!audience || !audience.sections.some((s) => s.sectionId === child.student.sectionId)) {
         throw new ApiError("not_found", "This competition is not for your class.", 404);
       }
+      await settleExpiredCompetitionGames(competitionId, nowMs);
+      const d = await competitionDetail(competitionId, nowMs);
       const { createdByStaffId: _hidden, ...competition } = d.competition;
       void _hidden;
       return apiOk({ kind: "competition", competition, playing: d.playing, finished: d.finished, sections: d.sections, players: d.players });

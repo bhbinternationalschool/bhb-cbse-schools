@@ -20,6 +20,8 @@
  * nothing else it says about the score is read.
  */
 
+import { subjectKeyFor } from "./tutorSyllabus";
+
 // ── Kinds and settings ────────────────────────────────────────────────────
 
 export type GameKind = "quiz" | "maths_speed";
@@ -30,7 +32,7 @@ export type GameSettings = {
   dailyMinutes: number;
   /** "HH:MM" IST. No play before. */
   playFrom: string;
-  /** "HH:MM" IST; "24:00" = no evening cut-off. No play from this time on. */
+  /** "HH:MM" IST, at the latest "21:00". No play from this time on. */
   playUntil: string;
   schoolStart: string;
   schoolEnd: string;
@@ -50,22 +52,22 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
 
 const HHMM = /^(\d{1,2}):(\d{2})$/;
 
-/** "08:30" → 510; "24:00" → 1440; anything else → null. */
+/** 9 pm IST: the latest play may run, whatever the settings say. */
+export const PLAY_UNTIL_LATEST = 21 * 60;
+
+/** "08:30" → 510; anything that is not a time of day → null. */
 export function hhmmToMinutes(v: string): number | null {
   const m = HHMM.exec(String(v ?? "").trim());
   if (!m) return null;
   const h = Number(m[1]);
   const mm = Number(m[2]);
-  if (mm > 59) return null;
-  if (h === 24 && mm === 0) return 1440;
-  if (h > 23) return null;
+  if (mm > 59 || h > 23) return null;
   return h * 60 + mm;
 }
 
 function hhmm(v: unknown, fallback: string): string {
   const n = hhmmToMinutes(String(v ?? ""));
   if (n === null) return fallback;
-  if (n === 1440) return "24:00";
   return `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
 }
 
@@ -96,7 +98,7 @@ export function settingsProblems(s: GameSettings): string[] {
   const start = hhmmToMinutes(s.schoolStart)!;
   const end = hhmmToMinutes(s.schoolEnd)!;
   if (until <= from) out.push("Play must end after it starts.");
-  if (until > 21 * 60) out.push("Play may not run past 9 pm.");
+  if (until > PLAY_UNTIL_LATEST) out.push("Play may not run past 9 pm.");
   if (end <= start) out.push("School must end after it starts.");
   return out;
 }
@@ -180,8 +182,14 @@ export function refusalText(reason: RefusalReason): { en: string; hi: string } {
  * is left of today's allowance.
  *
  * `usedSecondsToday` is every minute played today, competitions included,
- * so a competition shortens the practice left — it is still time on a
- * screen.
+ * so a competition's minutes count towards the day's total and shorten the
+ * practice left — it is still time on a screen. Once the allowance is used
+ * up no new practice game starts; a competition game (one attempt, inside
+ * a teacher's window of at most an hour) still starts and runs its length.
+ *
+ * `holiday`: today is a holiday for the child's class in the school's
+ * calendar (Masters → Holidays) — no school hours, so practice is open
+ * (the 9 pm stop and the allowance still hold).
  */
 export function playVerdict(opts: {
   nowMs: number;
@@ -189,12 +197,14 @@ export function playVerdict(opts: {
   usedSecondsToday: number;
   gameSeconds: number;
   competition?: { opensAtMs: number; closesAtMs: number; cancelled?: boolean } | null;
+  holiday?: boolean;
 }): PlayVerdict {
   const s = opts.settings;
   if (!s.enabled) return refuse("disabled");
   const p = istParts(opts.nowMs);
   const from = hhmmToMinutes(s.playFrom) ?? 360;
-  const until = hhmmToMinutes(s.playUntil) ?? 1260;
+  // 9 pm holds even if a stored row says later (the table's CHECK refuses it too).
+  const until = Math.min(hhmmToMinutes(s.playUntil) ?? PLAY_UNTIL_LATEST, PLAY_UNTIL_LATEST);
   if (p.minutes < from || p.minutes >= until) return refuse("night");
   const secondsToNight = (until - p.minutes) * 60 - Math.floor(((opts.nowMs + IST_OFFSET_MS) % 60_000) / 1000);
 
@@ -207,7 +217,7 @@ export function playVerdict(opts: {
 
   const start = hhmmToMinutes(s.schoolStart) ?? 480;
   const end = hhmmToMinutes(s.schoolEnd) ?? 870;
-  if (s.schoolDays.includes(p.weekday) && p.minutes >= start && p.minutes < end) return refuse("school_hours");
+  if (!opts.holiday && s.schoolDays.includes(p.weekday) && p.minutes >= start && p.minutes < end) return refuse("school_hours");
 
   const left = s.dailyMinutes * 60 - Math.max(0, Math.floor(opts.usedSecondsToday));
   const allow = Math.min(opts.gameSeconds, left, secondsToNight);
@@ -315,6 +325,18 @@ export function pickQuizItems(
   return shuffled(pool, rnd)
     .slice(0, Math.max(0, count))
     .map((q) => shuffleOptions({ prompt: q.prompt, options: [...q.options], answer: q.answerIndex, qid: q.id }, rnd));
+}
+
+/**
+ * One player's copy of a competition's items: the same questions, in that
+ * player's own order and with that player's own option order (the answer
+ * follows its option), so "the third one is b" cannot be passed along a
+ * classroom. `seed` comes from the competition and the child, so a replay
+ * of the same child gets the same copy. True/False keep their order.
+ */
+export function competitionItemsFor(items: GameItem[], seed: number): GameItem[] {
+  const rnd = seededRandom(seed);
+  return shuffled(items, rnd).map((it) => shuffleOptions({ ...it, options: [...it.options] }, rnd));
 }
 
 // ── Number dash (the brain game), by age ───────────────────────────────────
@@ -467,6 +489,36 @@ export function starsFor(game: GameKind, correct: number): number {
   return game === "quiz" ? c : Math.floor(c / 2);
 }
 
+/**
+ * The answer review a finished game shows. Practice shows the right option
+ * at once. A competition holds it back (correctIndex null) until the
+ * competition closes — while it is open, a child who has finished could
+ * otherwise read the answers out to a classmate who has not. `answersAt`
+ * says when they appear (finish can be called again then).
+ */
+export function gameReview(
+  items: GameItem[],
+  chosen: Map<number, number>,
+  opts: { competitionClosesAtMs: number | null; nowMs: number },
+): {
+  answersShown: boolean;
+  answersAt: string | null;
+  review: { prompt: string; picture: string | null; options: string[]; chosen: number | null; correctIndex: number | null }[];
+} {
+  const hold = opts.competitionClosesAtMs !== null && opts.nowMs < opts.competitionClosesAtMs;
+  return {
+    answersShown: !hold,
+    answersAt: hold && Number.isFinite(opts.competitionClosesAtMs) ? new Date(opts.competitionClosesAtMs!).toISOString() : null,
+    review: items.map((it, i) => ({
+      prompt: it.prompt,
+      picture: it.picture ?? null,
+      options: it.options,
+      chosen: chosen.has(i) ? chosen.get(i)! : null,
+      correctIndex: hold ? null : it.answer,
+    })),
+  };
+}
+
 // ── Classes, names ─────────────────────────────────────────────────────────
 
 /** A class name → grade: Nursery -2, LKG -1, UKG 0, Class 1–12; null when it names none. */
@@ -479,6 +531,51 @@ export function gameGrade(className: string | undefined): number | null {
   const m = n.match(/[^a-z0-9](xii|xi|ix|x|viii|vii|vi|iv|v|iii|ii|i|1[0-2]|[1-9])[^a-z0-9]/);
   if (!m) return null;
   return roman[m[1]!] ?? Number(m[1]);
+}
+
+/**
+ * The grade bands a competition may span (director's review, 21 Oct 2026):
+ * pre-primary (Nursery–UKG), I–II, III–V, VI–VIII, IX–X, XI–XII. Sections
+ * in the same or neighbouring bands may compete; further apart is not a
+ * fair match (a UKG child against Class V).
+ */
+export const GRADE_BANDS = ["Pre-primary", "Classes I–II", "Classes III–V", "Classes VI–VIII", "Classes IX–X", "Classes XI–XII"] as const;
+
+export function gradeBand(grade: number): number {
+  if (grade <= 0) return 0;
+  if (grade <= 2) return 1;
+  if (grade <= 5) return 2;
+  if (grade <= 8) return 3;
+  if (grade <= 10) return 4;
+  return 5;
+}
+
+/** Why these grades cannot meet in one competition, or null when they can. A class with no known grade cannot be placed. */
+export function competitionGradeProblem(grades: (number | null)[]): string | null {
+  if (grades.some((g) => g === null)) return "Could not tell the level of one of the classes — pick classes by their grade.";
+  const bands = (grades as number[]).map(gradeBand);
+  const lo = Math.min(...bands);
+  const hi = Math.max(...bands);
+  if (hi - lo > 1) return `${GRADE_BANDS[lo]} and ${GRADE_BANDS[hi]} are too far apart to compete — pick sections in the same or the next band.`;
+  return null;
+}
+
+/**
+ * May this teacher review (or approve as written) a question of this grade
+ * and subject? Only if they teach THAT subject in a class of THAT grade —
+ * a Class 3 GK teacher does not approve Class 3 maths. Class teachers carry
+ * every subject of their class (staffTeachingScope). Subjects are matched
+ * by the game's subject key (subjectKeyFor on the Masters name or code).
+ */
+export function teachesSubjectInGrade(
+  teaching: { className: string; subjects: { name: string; code: string }[] }[],
+  grade: number,
+  subjectKey: string,
+): boolean {
+  if (!subjectKey) return false;
+  return teaching.some(
+    (t) => gameGrade(t.className) === grade && t.subjects.some((s) => (subjectKeyFor(s.name) ?? subjectKeyFor(s.code)) === subjectKey),
+  );
 }
 
 /** "Aarav Kumar Singh" → "Aarav". Nothing else of a child's name reaches a leaderboard. */
@@ -654,7 +751,15 @@ export type CompetitionInput = {
   closesAtMs: number;
 };
 
-/** A launch form, checked. Times are instants; the window is 5 minutes to 7 days. */
+/** The longest a competition stays open: an hour, on one IST day. */
+export const COMPETITION_MIN_MINUTES = 5;
+export const COMPETITION_MAX_MINUTES = 60;
+
+/**
+ * A launch form, checked. Times are instants; the window is 5 to 60 minutes
+ * and starts and ends on the same IST day — a competition is the one way to
+ * play in school hours, so it must not hold them open for a week.
+ */
 export function readCompetitionInput(raw: Record<string, unknown>, nowMs: number): { ok: true; input: CompetitionInput } | { ok: false; error: string } {
   const game = raw.game === "maths_speed" ? "maths_speed" : raw.game === "quiz" ? "quiz" : null;
   if (!game) return { ok: false, error: "Choose a game." };
@@ -675,7 +780,13 @@ export function readCompetitionInput(raw: Record<string, unknown>, nowMs: number
   const minutes = Math.round(Number(raw.durationMinutes));
   if (!Number.isFinite(opensAtMs)) return { ok: false, error: "The start time is not a time." };
   if (opensAtMs < nowMs - 5 * 60_000) return { ok: false, error: "The start time is in the past." };
-  if (!Number.isFinite(minutes) || minutes < 5 || minutes > 7 * 24 * 60) return { ok: false, error: "Run it for 5 minutes to 7 days." };
+  if (!Number.isFinite(minutes) || minutes < COMPETITION_MIN_MINUTES || minutes > COMPETITION_MAX_MINUTES) {
+    return { ok: false, error: `Run it for ${COMPETITION_MIN_MINUTES} to ${COMPETITION_MAX_MINUTES} minutes.` };
+  }
+  const opens = Math.max(opensAtMs, nowMs);
+  const closes = opens + minutes * 60_000;
+  // Ending at midnight exactly is still the same day.
+  if (istParts(opens).date !== istParts(closes - 1).date) return { ok: false, error: "A competition must start and end on the same day." };
   const count = Math.round(Number(raw.questionCount ?? QUIZ_DEFAULT_COUNT));
   const subjectKey = String(raw.subjectKey ?? "").slice(0, 30);
   if (game === "quiz" && !subjectKey) return { ok: false, error: "Choose the subject the questions come from." };
@@ -690,8 +801,9 @@ export function readCompetitionInput(raw: Record<string, unknown>, nowMs: number
       textbookId: game === "quiz" ? String(raw.textbookId ?? "").slice(0, 120) : "",
       chapterPosition: game === "quiz" && chapter !== null && Number.isFinite(chapter) ? chapter : null,
       questionCount: Math.min(QUIZ_MAX_COUNT, Math.max(QUIZ_MIN_COUNT, Number.isFinite(count) ? count : QUIZ_DEFAULT_COUNT)),
-      opensAtMs: Math.max(opensAtMs, nowMs - 5 * 60_000),
-      closesAtMs: Math.max(opensAtMs, nowMs) + minutes * 60_000,
+      // A start a few minutes ago (a slow form) opens now: the window is never longer than asked.
+      opensAtMs: opens,
+      closesAtMs: closes,
     },
   };
 }

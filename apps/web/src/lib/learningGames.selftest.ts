@@ -24,12 +24,17 @@ import assert from "node:assert/strict";
 import {
   checkAnswer,
   checkQuestionDraft,
+  competitionGradeProblem,
+  competitionItemsFor,
   competitionStandings,
   DEFAULT_GAME_SETTINGS,
   firstName,
   gameGrade,
   gameLengthSeconds,
   gameQuestionFromPaper,
+  gameReview,
+  gradeBand,
+  hhmmToMinutes,
   istParts,
   istWeekStart,
   mathsSpeedItems,
@@ -45,9 +50,10 @@ import {
   settingsProblems,
   starsFor,
   stripOptionLabel,
+  teachesSubjectInGrade,
   weeklyStandings,
 } from "./learningGames";
-import { parseGameQuestions } from "./learningGamesAi";
+import { buildGameQuestionsPrompt, freshDrafts, parseGameQuestions } from "./learningGamesAi";
 
 console.log("learningGames.selftest.ts");
 
@@ -381,11 +387,150 @@ assert.equal(istWeekStart(ist(SUN, "20:00")), "2026-10-19", "week starts Monday"
   assert.equal(past.ok, false, "cannot open in the past");
   const tooShort = readCompetitionInput({ game: "maths_speed", sections: [{ classId: "c3", sectionId: "s3" }, { classId: "c4", sectionId: "s4" }], durationMinutes: 2 }, now);
   assert.equal(tooShort.ok, false);
+  // Review fix 2 (21 Oct): at most an hour, on one IST day — a competition is
+  // the one way into school hours, so it cannot hold them open for a week.
+  const pairCD = [{ classId: "c3", sectionId: "s3" }, { classId: "c4", sectionId: "s4" }];
+  const hour = readCompetitionInput({ game: "maths_speed", sections: pairCD, durationMinutes: 60 }, now);
+  assert.ok(hour.ok && hour.input.closesAtMs - hour.input.opensAtMs === 60 * 60_000, "an hour is allowed");
+  const overHour = readCompetitionInput({ game: "maths_speed", sections: pairCD, durationMinutes: 61 }, now);
+  assert.equal(!overHour.ok && overHour.error, "Run it for 5 to 60 minutes.", "61 minutes is refused");
+  const week = readCompetitionInput({ game: "maths_speed", sections: pairCD, durationMinutes: 7 * 24 * 60 }, now);
+  assert.equal(week.ok, false, "a week-long competition is refused");
+  const lateNight = ist(WED, "23:30");
+  const overMidnight = readCompetitionInput({ game: "maths_speed", sections: pairCD, durationMinutes: 45 }, lateNight);
+  assert.equal(!overMidnight.ok && overMidnight.error, "A competition must start and end on the same day.", "23:30 + 45 min crosses into Thursday");
+  const toMidnight = readCompetitionInput({ game: "maths_speed", sections: pairCD, durationMinutes: 30 }, lateNight);
+  assert.ok(toMidnight.ok, "ending at midnight exactly is the same day");
+  const slowForm = readCompetitionInput({ game: "maths_speed", sections: pairCD, durationMinutes: 60, opensAt: new Date(now - 3 * 60_000).toISOString() }, now);
+  assert.ok(slowForm.ok && slowForm.input.opensAtMs === now && slowForm.input.closesAtMs - slowForm.input.opensAtMs === 60 * 60_000, "a start a few minutes ago opens now; the window is never longer than an hour");
   const many = readCompetitionInput({ game: "quiz", subjectKey: "maths", questionCount: 99, sections: [{ classId: "c3", sectionId: "s3" }, { classId: "c4", sectionId: "s4" }], durationMinutes: 30 }, now);
   assert.ok(many.ok && many.input.questionCount === 20, "at most 20 questions");
+}
+
+// ── 5. Review fixes (21 Oct 2026) ──────────────────────────────────────────
+
+{
+  // Fix 1: in a competition the answer review waits for the close, and each
+  // player gets their own question and option order.
+  const items = [
+    { prompt: "2 + 2", options: ["3", "4", "5"], answer: 1 },
+    { prompt: "Capital?", options: ["Delhi", "Pune", "Agra", "Goa"], answer: 0 },
+    { prompt: "Water is wet", options: ["True", "False"], answer: 0 },
+    { prompt: "3 × 3", options: ["6", "9", "12", "8"], answer: 1 },
+    { prompt: "10 − 7", options: ["3", "2", "4", "7"], answer: 0 },
+    { prompt: "Big?", options: ["99", "909", "990"], answer: 2 },
+  ];
+  const chosen = new Map([[0, 1], [1, 2]]);
+  const closes = ist(WED, "11:00");
+  const open = gameReview(items, chosen, { competitionClosesAtMs: closes, nowMs: ist(WED, "10:30") });
+  assert.equal(open.answersShown, false);
+  assert.ok(open.review.every((r) => r.correctIndex === null), "a competition still open: no right options in the review");
+  assert.equal(open.answersAt, new Date(closes).toISOString(), "it says when they appear");
+  assert.deepEqual(open.review[1]!.chosen, 2, "the child's own choice is shown");
+  const closed = gameReview(items, chosen, { competitionClosesAtMs: closes, nowMs: closes });
+  assert.deepEqual(closed.review.map((r) => r.correctIndex), [1, 0, 0, 1, 0, 2], "after the close: the right options");
+  assert.equal(closed.answersAt, null);
+  const practice = gameReview(items, chosen, { competitionClosesAtMs: null, nowMs: ist(WED, "17:00") });
+  assert.ok(practice.answersShown && practice.review[0]!.correctIndex === 1, "practice shows the answers at once");
+  const lost = gameReview(items, chosen, { competitionClosesAtMs: Number.POSITIVE_INFINITY, nowMs: ist(WED, "17:00") });
+  assert.ok(!lost.answersShown && lost.answersAt === null, "an unknown close holds them back");
+
+  const a = competitionItemsFor(items, 101);
+  const b = competitionItemsFor(items, 202);
+  assert.deepEqual(competitionItemsFor(items, 101), a, "the same child gets the same copy back");
+  assert.deepEqual(a.map((x) => x.prompt).sort(), items.map((x) => x.prompt).sort(), "the same questions for everyone");
+  for (const copy of [a, b]) {
+    for (const it of copy) {
+      const src = items.find((x) => x.prompt === it.prompt)!;
+      assert.equal(it.options[it.answer], src.options[src.answer], "the answer follows its option");
+      if (src.prompt === "Water is wet") assert.deepEqual(it.options, ["True", "False"]);
+    }
+  }
+  const layout = (c: typeof a) => c.map((x) => `${x.prompt}:${x.options.join("/")}`).join("|");
+  assert.notEqual(layout(a), layout(b), "two children do not see the same order");
+  assert.notEqual(layout(a), layout(items), "nor the competition's stored order");
+}
+
+{
+  // Fix 2: competition minutes count towards the day; once the allowance is
+  // used no new practice starts, while a competition game runs its length.
+  const comp = { opensAtMs: ist(WED, "17:00"), closesAtMs: ist(WED, "18:00") };
+  const compAfterCap = playVerdict({ nowMs: ist(WED, "17:10"), settings: S, usedSecondsToday: 30 * 60, gameSeconds: quiz10, competition: comp });
+  assert.deepEqual(compAfterCap, { ok: true, allowSeconds: quiz10 }, "a competition game is not cut to the allowance");
+  const practiceAfterComp = playVerdict({ nowMs: ist(WED, "17:30"), settings: S, usedSecondsToday: 25 * 60 + quiz10, gameSeconds: quiz10 });
+  assert.equal(!practiceAfterComp.ok && practiceAfterComp.reason, "daily_cap", "25 min practice + a 5-min competition: no new practice game");
+  // School hours open only inside the window.
+  const before = playVerdict({ nowMs: ist(WED, "09:59"), settings: S, usedSecondsToday: 0, gameSeconds: quiz10, competition: { opensAtMs: ist(WED, "10:00"), closesAtMs: ist(WED, "11:00") } });
+  assert.equal(!before.ok && before.reason, "competition_closed");
+}
+
+{
+  // Fix 3: 9 pm is the latest — "24:00" is not a time any more, and a row
+  // that says later still stops at 9.
+  assert.equal(hhmmToMinutes("24:00"), null, "no '24:00 = no cut-off'");
+  assert.equal(normalizeGameSettings({ playUntil: "24:00" }).playUntil, "21:00");
+  const lateRow = playVerdict({ nowMs: ist(WED, "21:30"), settings: { ...S, playUntil: "23:00" }, usedSecondsToday: 0, gameSeconds: quiz10 });
+  assert.equal(!lateRow.ok && lateRow.reason, "night", "a stored 23:00 still stops play at 9 pm");
+  const cut = playVerdict({ nowMs: ist(WED, "20:58"), settings: { ...S, playUntil: "23:00" }, usedSecondsToday: 0, gameSeconds: quiz10 });
+  assert.deepEqual(cut, { ok: true, allowSeconds: 120 }, "and cuts a game at 9 pm");
+}
+
+{
+  // Fix 5: review rights are the subject in the grade.
+  const teaching = [
+    { className: "III", subjects: [{ name: "General Knowledge", code: "GK" }] },
+    { className: "V", subjects: [{ name: "Mathematics", code: "MATH" }] },
+  ];
+  assert.equal(teachesSubjectInGrade(teaching, 3, "gk"), true, "GK in Class III: yes");
+  assert.equal(teachesSubjectInGrade(teaching, 3, "maths"), false, "maths in Class III: no — the grade alone is not enough");
+  assert.equal(teachesSubjectInGrade(teaching, 5, "maths"), true);
+  assert.equal(teachesSubjectInGrade(teaching, 4, "gk"), false, "not a grade they teach");
+  assert.equal(teachesSubjectInGrade(teaching, 3, ""), false);
+  assert.equal(teachesSubjectInGrade([{ className: "UKG", subjects: [{ name: "", code: "EVS" }] }], 0, "evs"), true, "matched by code when the name says nothing");
+}
+
+{
+  // Fix 6: grade bands — pre-primary, I–II, III–V, VI–VIII, IX–X, XI–XII.
+  assert.deepEqual([-2, -1, 0, 1, 2, 3, 5, 6, 8, 9, 10, 11, 12].map(gradeBand), [0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5]);
+  assert.equal(competitionGradeProblem([3, 4]), null, "III vs IV: same band");
+  assert.equal(competitionGradeProblem([2, 3]), null, "II vs III: neighbouring bands");
+  assert.equal(competitionGradeProblem([0, 1, 2]), null, "UKG, I, II: neighbouring");
+  assert.ok(competitionGradeProblem([0, 3]), "UKG vs III: two bands apart — refused");
+  assert.ok(competitionGradeProblem([1, 2, 6]), "I, II and VI: refused");
+  assert.equal(competitionGradeProblem([9, 12]), null, "IX vs XII: neighbouring bands (IX–X, XI–XII)");
+  assert.ok(competitionGradeProblem([8, 11]), "VIII vs XI: refused");
+  assert.ok(competitionGradeProblem([3, null]), "a class with no grade cannot be placed");
+}
+
+{
+  // Fix 8: asking the AI again for a chapter is a different request, and a
+  // draft already in the pool is not counted as new.
+  const facts = { className: "III", grade: 3, subjectLabel: "Mathematics", bookName: "Maths Magic", chapterName: "Fun with numbers", topics: ["place value"], lang: "en" as const, count: 10 };
+  const first = buildGameQuestionsPrompt(facts);
+  const again = buildGameQuestionsPrompt({ ...facts, avoid: ["What is 3 + 4?", "Which is bigger, 45 or 54?"] });
+  assert.notEqual(again, first, "the second ask is a different request (and cache key)");
+  assert.ok(again.includes("What is 3 + 4?") && /do NOT repeat/.test(again), "it lists what not to repeat");
+  assert.equal(buildGameQuestionsPrompt({ ...facts, avoid: [] }), first, "nothing to avoid: the same request as before");
+  const drafts = [
+    { prompt: "What is 3 + 4?", options: ["7", "8"], answerIndex: 0 },
+    { prompt: "What is 5 + 5?", options: ["10", "11"], answerIndex: 0 },
+  ];
+  assert.deepEqual(freshDrafts(drafts, ["  what is 3 +  4? "]).map((d) => d.prompt), ["What is 5 + 5?"], "a repeat (any case or spacing) is dropped");
+  assert.equal(freshDrafts(drafts.slice(0, 1), ["What is 3 + 4?"]).length, 0, "all repeats: nothing new (the route says so — 409, not a silent 0)");
+}
+
+{
+  // Fix 9: a holiday in the school's calendar has no school hours.
+  const holidayMorning = playVerdict({ nowMs: ist(WED, "10:00"), settings: S, usedSecondsToday: 0, gameSeconds: quiz10, holiday: true });
+  assert.deepEqual(holidayMorning, { ok: true, allowSeconds: quiz10 }, "a holiday Wednesday at 10 am: practice is open");
+  const holidayNight = playVerdict({ nowMs: ist(WED, "21:15"), settings: S, usedSecondsToday: 0, gameSeconds: quiz10, holiday: true });
+  assert.equal(!holidayNight.ok && holidayNight.reason, "night", "9 pm still holds on a holiday");
+  const holidayCap = playVerdict({ nowMs: ist(WED, "10:00"), settings: S, usedSecondsToday: 30 * 60, gameSeconds: quiz10, holiday: true });
+  assert.equal(!holidayCap.ok && holidayCap.reason, "daily_cap", "and so does the allowance");
 }
 
 console.log("  ✓ limits: allowance, school hours (competitions excepted), 9 pm for everyone");
 console.log("  ✓ score: server-judged answers, one per question, nothing after the deadline");
 console.log("  ✓ questions: only keyed, picture-free, single-answer items come in");
 console.log("  ✓ leaderboards: first name + class, per-player ranking, one attempt each");
+console.log("  ✓ review fixes: competition answers held to the close, own order per player; ≤60 min one-day windows; 9 pm max; subject+grade reviewers; grade bands; fresh AI drafts; holidays");

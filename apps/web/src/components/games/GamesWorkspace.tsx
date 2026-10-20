@@ -74,7 +74,9 @@ type PoolQuestion = {
   answerIndex: number;
   source: "publisher_key" | "ai" | "teacher";
   review: "approved" | "pending" | "rejected";
+  batchId: string;
   createdBy: string;
+  createdAt: string;
 };
 
 type Pool = {
@@ -390,11 +392,12 @@ function LaunchForm({
         <label className="space-y-1 text-sm">
           <span className="font-medium">Starts</span>
           <input className={field} type="datetime-local" value={startAt} onChange={(e) => setStartAt(e.target.value)} aria-label="Starts" />
-          <span className="text-xs text-muted-foreground">Leave empty to start now. School hours are fine for a competition; 9 pm still ends play.</span>
+          <span className="text-xs text-muted-foreground">Leave empty to start now. School hours are fine for a competition; 9 pm still ends play. It must end the same day.</span>
         </label>
         <label className="space-y-1 text-sm">
           <span className="font-medium">Runs for (minutes)</span>
-          <input className={field} type="number" min={5} max={10080} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} aria-label="Runs for minutes" />
+          <input className={field} type="number" min={5} max={60} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} aria-label="Runs for minutes" />
+          <span className="text-xs text-muted-foreground">5 to 60 minutes. Sections must be in the same or the next band (pre-primary, I–II, III–V, VI–VIII, IX–X, XI–XII).</span>
         </label>
       </div>
       <Button onClick={() => void launch()} disabled={busy || chosen.length < 2 || (game === "quiz" && !subjectKey)}>
@@ -528,7 +531,8 @@ function PoolPanel({ classes, onNotice, onError }: { classes: { id: string; name
               const skipped = Object.entries(r.skipped)
                 .map(([k, v]) => `${v} ${k}`)
                 .join(", ");
-              return `${r.papers} papers: ${r.added} new questions added (${r.usable} usable${skipped ? `; left on paper: ${skipped}` : ""}).`;
+              setReview("pending");
+              return `${r.papers} papers: ${r.added} new questions waiting for review below (${r.usable} usable${skipped ? `; left on paper: ${skipped}` : ""}).`;
             })
           }
         >
@@ -640,6 +644,28 @@ function PoolPanel({ classes, onNotice, onError }: { classes: { id: string; name
         {pool.isPending && cls ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
         {pool.error ? <p className="text-sm text-[var(--danger)]">Could not load the pool: {pool.error.message}</p> : null}
         {pool.data && pool.data.questions.length === 0 ? <p className="text-sm text-muted-foreground">Nothing here.</p> : null}
+        {review === "pending"
+          ? publisherBatches(pool.data?.questions ?? []).map((b) => (
+              <div key={`${b.batchId}|${b.subjectKey}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 p-3 text-sm" data-testid="games-pool-batch">
+                <span>
+                  {b.count} {b.subjectLabel} question{b.count === 1 ? "" : "s"} from the publisher&apos;s key, imported {new Date(b.createdAt).toLocaleDateString("en-IN")} — read them below, then approve the batch (you can still reject any one first).
+                </span>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={busy !== ""}
+                  onClick={() =>
+                    void run(`batch:${b.batchId}:${b.subjectKey}`, async () => {
+                      const r = await post<{ approved: number }>("/api/v1/staff/games/pool", { op: "approve_batch", classId: cls, batchId: b.batchId, subjectKey: b.subjectKey, ids: b.ids });
+                      return `${r.approved} approved.`;
+                    })
+                  }
+                >
+                  <CheckCircle2 className="size-3.5" aria-hidden /> Approve all {b.count}
+                </Button>
+              </div>
+            ))
+          : null}
         <ul className="space-y-2">
           {(pool.data?.questions ?? []).map((q) => (
             <li key={q.id} className="rounded-lg border border-border p-3 text-sm" data-testid="games-pool-question">
@@ -675,6 +701,20 @@ function PoolPanel({ classes, onNotice, onError }: { classes: { id: string; name
       </section>
     </div>
   );
+}
+
+/** The publisher-keyed questions still waiting, by import batch and subject (the unit "approve all" works on). */
+function publisherBatches(questions: PoolQuestion[]): { batchId: string; subjectKey: string; subjectLabel: string; count: number; ids: string[]; createdAt: string }[] {
+  const out = new Map<string, { batchId: string; subjectKey: string; subjectLabel: string; count: number; ids: string[]; createdAt: string }>();
+  for (const q of questions) {
+    if (q.source !== "publisher_key" || q.review !== "pending" || !q.batchId) continue;
+    const k = `${q.batchId}|${q.subjectKey}`;
+    const b = out.get(k) ?? { batchId: q.batchId, subjectKey: q.subjectKey, subjectLabel: q.subjectLabel, count: 0, ids: [], createdAt: q.createdAt };
+    b.count += 1;
+    b.ids.push(q.id);
+    out.set(k, b);
+  }
+  return [...out.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.subjectLabel.localeCompare(b.subjectLabel));
 }
 
 // ── Limits ─────────────────────────────────────────────────────────────────

@@ -28,7 +28,17 @@ export type GameQuestionFacts = {
   topics: string[];
   lang: "en" | "hi";
   count: number;
+  /**
+   * Questions already filed under this chapter (approved, waiting or
+   * rejected). The model is told not to repeat them, and the request — so
+   * its cache key — changes with them: asking again after rejecting a draft
+   * brings new questions, never the cached same ten.
+   */
+  avoid?: string[];
 };
+
+/** At most this many earlier questions go into the prompt. */
+export const GAME_QUESTIONS_AVOID_MAX = 40;
 
 export const GAME_QUESTIONS_SYSTEM = [
   "You write short multiple-choice practice questions for an Indian school's learning game, for one chapter of the class's own textbook.",
@@ -53,8 +63,22 @@ export function buildGameQuestionsPrompt(f: GameQuestionFacts): string {
     `Chapter: ${f.chapterName}`,
     topics.length ? `Topics in this chapter: ${topics.join("; ")}` : "Topics: (not listed — keep to what the chapter title clearly covers)",
     `Language: ${f.lang === "hi" ? "Hindi (Devanagari)" : "English"}`,
+    ...avoidLines(f.avoid),
     `Write ${f.count} questions.`,
   ].join("\n");
+}
+
+function avoidLines(avoid: string[] | undefined): string[] {
+  const list = [...new Set((avoid ?? []).map((t) => t.replace(/\s+/g, " ").trim().slice(0, 140)).filter(Boolean))].slice(0, GAME_QUESTIONS_AVOID_MAX);
+  if (!list.length) return [];
+  return ["Already in the pool — do NOT repeat or reword any of these; write different questions:", ...list.map((t) => `- ${t}`)];
+}
+
+/** Drafts that are not already in the pool (same question text, ignoring case and spaces). */
+export function freshDrafts(drafts: QuestionDraft[], existing: string[]): QuestionDraft[] {
+  const norm = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase();
+  const have = new Set(existing.map(norm));
+  return drafts.filter((d) => !have.has(norm(d.prompt)));
 }
 
 /**

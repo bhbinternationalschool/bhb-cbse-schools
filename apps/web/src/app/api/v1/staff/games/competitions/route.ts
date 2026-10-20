@@ -2,7 +2,7 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { sectionKey, staffSectionScope } from "@/lib/api/v1/staffScope";
 import { cancelCompetition, canSeeCompetition, competitionDetail, createCompetition, gameNow, listCompetitions } from "@/lib/learningGames.server";
-import { gameGrade, readCompetitionInput } from "@/lib/learningGames";
+import { competitionGradeProblem, gameGrade, readCompetitionInput } from "@/lib/learningGames";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +15,8 @@ export const dynamic = "force-dynamic";
  *        textbookId?, chapterPosition?, questionClassId?, questionCount?,
  *        opensAt?, durationMinutes, title? }
  *      A teacher may launch only for sections they teach (Staff → Duties /
- *      timetable). Quiz questions come from ONE class's approved pool
+ *      timetable). The sections must be in the same or neighbouring grade
+ *      bands; the window is 5–60 minutes on one IST day. Quiz questions come from ONE class's approved pool
  *      (questionClassId, default the first section's class) and every player
  *      gets the same questions.
  * POST { op: "cancel", id } — its creator, or principal / office.
@@ -61,7 +62,11 @@ export async function POST(request: Request) {
         throw new ApiError("forbidden", `You do not teach ${classOf(s.classId)?.name}-${sec.name}. Pick only your own sections.`, 403);
       }
     }
-    const grades = input.sections.map((s) => gameGrade(classOf(s.classId)?.name)).filter((g): g is number => g !== null);
+    // Same or neighbouring grade bands only (pre-primary, I–II, III–V, VI–VIII, IX–X, XI–XII).
+    const sectionGrades = input.sections.map((s) => gameGrade(classOf(s.classId)?.name));
+    const bandProblem = competitionGradeProblem(sectionGrades);
+    if (bandProblem) throw new ApiError("bad_request", bandProblem, 400, { reason: "grade_bands" });
+    const grades = sectionGrades.filter((g): g is number => g !== null);
     let grade: number | null;
     if (input.game === "quiz") {
       const qClass = String(body.questionClassId || input.sections[0]!.classId);

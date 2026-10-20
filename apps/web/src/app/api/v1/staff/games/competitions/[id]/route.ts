@@ -1,7 +1,7 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
-import { canSeeCompetition, competitionDetail, gameNow, settleExpiredCompetitionGames } from "@/lib/learningGames.server";
+import { canSeeCompetition, competitionAudience, competitionDetail, gameNow, settleExpiredCompetitionGames } from "@/lib/learningGames.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,12 +18,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const scope = await staffSectionScope(ctx);
     const { id } = await params;
     const nowMs = gameNow(request);
-    await settleExpiredCompetitionGames(id, nowMs);
-    const d = await competitionDetail(id, nowMs);
-    if (!canSeeCompetition(d.competition, ctx.session.staffId || "", scope.unrestricted, scope.sections)) {
+    // Scope first: nothing is written for a competition this person may not see.
+    const audience = await competitionAudience(id);
+    if (!audience || !canSeeCompetition(audience, ctx.session.staffId || "", scope.unrestricted, scope.sections)) {
       throw new ApiError("not_found", "No such competition.", 404);
     }
-    return apiOk(d);
+    await settleExpiredCompetitionGames(id, nowMs);
+    return apiOk(await competitionDetail(id, nowMs));
   } catch (e) {
     return apiErr(e);
   }

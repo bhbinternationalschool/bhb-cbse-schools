@@ -2774,8 +2774,10 @@ export async function generateModuleRequestJson(opts: {
  * Practice-game questions for one chapter of the school's own book
  * (lib/learningGamesAi.ts). Drafts only: the caller saves them as
  * review = 'pending' and no child sees one until a teacher approves it.
- * Cacheable: the same chapter, language and count give the same drafts, so a
- * second teacher asking for the same chapter costs nothing.
+ * Cacheable only while the chapter has no questions yet (a second teacher
+ * asking first costs nothing); after that the prompt carries the questions
+ * already there (facts.avoid) and is not cached, so asking again — say after
+ * rejecting a draft — brings new questions instead of the same cached ten.
  */
 export async function generateGameQuestionsJson(opts: { facts: GameQuestionFacts; requester?: string }): Promise<
   | { ok: true; drafts: QuestionDraft[]; engine: LlmEngine; generationId: string }
@@ -2789,7 +2791,10 @@ export async function generateGameQuestionsJson(opts: { facts: GameQuestionFacts
       // writes, and Hindi costs ~1.6x the tokens.
       maxTokens: opts.facts.lang === "hi" ? 3500 : 2500,
       temperature: 0.4,
-      meta: { route: "game-questions", promptVersion: GAME_QUESTIONS_PROMPT_VERSION, cacheable: true },
+      // Cached only for a chapter with nothing in the pool yet: once questions
+      // exist (approved, waiting or rejected) the teacher is asking for NEW
+      // ones, and the prompt lists what to avoid.
+      meta: { route: "game-questions", promptVersion: GAME_QUESTIONS_PROMPT_VERSION, cacheable: !(opts.facts.avoid ?? []).length },
       ...(opts.requester ? { precheck: startLlmPrecheck({ requester: opts.requester }) } : {}),
     },
     (text) => parseGameQuestions(text, opts.facts.count),

@@ -18,15 +18,17 @@
 create table if not exists public.game_settings (
   tenant_id uuid primary key references public.tenants(id) on delete cascade,
   enabled boolean not null default true,
-  -- Daily allowance per child for practice (competitions are not refused by
-  -- it, but their minutes count towards the day's total).
+  -- Daily allowance per child. Competition minutes count towards it; once
+  -- it is used up no new practice game starts (a competition game — one
+  -- attempt, in a teacher's window of at most an hour — still does).
   daily_minutes int not null default 30 check (daily_minutes between 1 and 240),
-  -- Wall-clock IST. No play before play_from or from play_until on —
-  -- competitions included. '24:00' = no evening cut-off.
+  -- Wall-clock IST, "HH:MM". No play before play_from or from play_until on —
+  -- competitions included. play_until is 21:00 at the latest (CHECK below).
   play_from text not null default '06:00',
   play_until text not null default '21:00',
-  -- School hours: practice is refused inside them on school days; a
-  -- teacher-launched competition is not.
+  -- School hours: practice is refused inside them on school days (not on a
+  -- holiday in Masters → Holidays); a teacher-launched competition is not,
+  -- inside its own window, for its own sections.
   school_start text not null default '08:00',
   school_end text not null default '14:30',
   -- 0 = Sunday … 6 = Saturday.
@@ -43,8 +45,9 @@ create table if not exists public.game_settings (
 -- source: 'publisher_key' = copied from an imported question paper whose
 -- answer came from the publisher's own key; 'ai' = drafted by the AI router
 -- from the chapter's name and topics; 'teacher' = written by a teacher.
--- Only review = 'approved' is ever put in front of a child. AI drafts start
--- 'pending' and wait for a teacher.
+-- Only review = 'approved' is ever put in front of a child. AI drafts and
+-- publisher-keyed imports start 'pending' and wait for a teacher of that
+-- subject in that grade (an import can be approved per batch after review).
 create table if not exists public.game_questions (
   id text primary key,
   tenant_id uuid not null references public.tenants(id) on delete cascade,
@@ -66,6 +69,8 @@ create table if not exists public.game_questions (
   review text not null default 'pending' check (review in ('approved', 'pending', 'rejected')),
   reviewed_by text not null default '',
   reviewed_at timestamptz,
+  -- One import run (or one AI draft): "approve all" works on one batch.
+  batch_id text not null default '',
   created_by text not null default '',
   created_at timestamptz not null default now()
 );
@@ -97,6 +102,7 @@ create table if not exists public.game_competitions (
   created_by_name text not null default '',
   created_at timestamptz not null default now(),
   check (closes_at > opens_at)
+  -- At most an hour, on one IST day: game_competitions_window_ck below.
 );
 
 create index if not exists game_competitions_window_idx
@@ -158,6 +164,44 @@ create table if not exists public.game_answers (
   primary key (session_id, idx)
 );
 
+-- ── Constraints added idempotently (this file may be re-run on a local DB
+-- that already holds the tables from an earlier draft of it) ─────────────
+alter table public.game_questions add column if not exists batch_id text not null default '';
+create index if not exists game_questions_batch_idx
+  on public.game_questions (tenant_id, batch_id) where batch_id <> '';
+
+do $$
+begin
+  -- 9 pm is the latest play may run (director, 15 Oct 2026); "HH:MM" only,
+  -- so the text comparison is a time comparison.
+  if not exists (select 1 from pg_constraint where conname = 'game_settings_play_until_ck') then
+    alter table public.game_settings add constraint game_settings_play_until_ck
+      check (play_until ~ '^[0-2][0-9]:[0-5][0-9]$' and play_until <= '21:00');
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'game_settings_play_from_ck') then
+    alter table public.game_settings add constraint game_settings_play_from_ck
+      check (play_from ~ '^[0-2][0-9]:[0-5][0-9]$' and play_from < play_until);
+  end if;
+  -- A competition window: at most 60 minutes, starting and ending on the
+  -- same IST day (ending at midnight exactly counts as the same day).
+  if not exists (select 1 from pg_constraint where conname = 'game_competitions_window_ck') then
+    alter table public.game_competitions add constraint game_competitions_window_ck
+      check (
+        closes_at <= opens_at + interval '60 minutes'
+        and (opens_at at time zone 'Asia/Kolkata')::date
+          = ((closes_at - interval '1 microsecond') at time zone 'Asia/Kolkata')::date
+      );
+  end if;
+end $$;
+
+-- Nothing here is for the browser: no grant to anon / authenticated (or
+-- to PUBLIC), whatever the project's default privileges hand out.
+revoke all on public.game_settings from public, anon, authenticated;
+revoke all on public.game_questions from public, anon, authenticated;
+revoke all on public.game_competitions from public, anon, authenticated;
+revoke all on public.game_sessions from public, anon, authenticated;
+revoke all on public.game_answers from public, anon, authenticated;
+
 -- Every new table needs an explicit service_role grant, or the server's
 -- writes fail 42501 (memory: erp-supabase-new-table-grant).
 grant select, insert, update, delete on public.game_settings to service_role;
@@ -166,7 +210,7 @@ grant select, insert, update, delete on public.game_competitions to service_role
 grant select, insert, update, delete on public.game_sessions to service_role;
 grant select, insert, update, delete on public.game_answers to service_role;
 
--- Nothing here is for the browser's anon key.
+-- RLS on with no policies: even a stray grant reads nothing.
 alter table public.game_settings enable row level security;
 alter table public.game_questions enable row level security;
 alter table public.game_competitions enable row level security;
