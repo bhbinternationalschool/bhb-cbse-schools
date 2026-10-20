@@ -28,6 +28,7 @@ part "teacher_ai_api.dart";
 part "transport_register_api.dart";
 part "results_api.dart";
 part "notifications_api.dart";
+part "bus_routes_live_api.dart";
 
 /// Session cookie minted by the ERP (see web /api/auth/*).
 const _cookieName = "bhb_demo_session";
