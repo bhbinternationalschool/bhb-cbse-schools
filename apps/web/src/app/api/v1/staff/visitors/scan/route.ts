@@ -1,6 +1,5 @@
-import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
-import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
-import { handleStaffScan, staffScanLimiter } from "@/lib/api/v1/staffScan.server";
+import { resolveApiAuth } from "@/lib/api/v1/auth";
+import { authorizeVisitorScan, handleStaffScan, staffScanLimiter } from "@/lib/api/v1/staffScan.server";
 import { readStaffScanImage } from "@/lib/aiLlm.server";
 import { istDate } from "@/lib/transportBoardingLog";
 
@@ -23,10 +22,7 @@ export const maxDuration = 60;
 export async function POST(request: Request) {
   return handleStaffScan(request, ["visitor_id", "vehicle_plate"], {
     auth: resolveApiAuth,
-    authorize: (ctx) => {
-      assertMobileFeature(ctx, "visitor_gate");
-      assertPermission(ctx, "visitors", "create");
-    },
+    authorize: authorizeVisitorScan,
     read: readStaffScanImage,
     limiter: staffScanLimiter,
     today: () => istDate(),

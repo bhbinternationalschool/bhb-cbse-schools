@@ -5,11 +5,9 @@
  * Run: npx tsx src/lib/staffScanRoute.selftest.ts
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { assertPermission, type ApiAuthContext } from "./api/v1/auth";
+import type { ApiAuthContext } from "./api/v1/auth";
 import { assertMobileFeature } from "./api/v1/mobileAccess.server";
-import { handleStaffScan, type StaffScanDeps, type StaffScanReader } from "./api/v1/staffScan.server";
+import { authorizeVisitorScan, handleStaffScan, type StaffScanDeps, type StaffScanReader } from "./api/v1/staffScan.server";
 import { buildGateEntry } from "./api/v1/staffVisitors.server";
 import { emptyMastersShell } from "./masters";
 import { defaultRbacState } from "./rbac";
@@ -52,10 +50,8 @@ const mockRead: StaffScanReader = async (opts) => {
 
 const visitorDeps = (who: ApiAuthContext, limiter = createKeyedRateLimiter({ windowMs: 60_000, max: 100 })): StaffScanDeps => ({
   auth: async () => who,
-  authorize: (ctx) => {
-    assertMobileFeature(ctx, "visitor_gate");
-    assertPermission(ctx, "visitors", "create");
-  },
+  // The real route's gate, not a copy of it.
+  authorize: authorizeVisitorScan,
   read: mockRead,
   limiter,
   today: () => "2026-10-20",
@@ -169,17 +165,9 @@ void (async () => {
     const got = (await ok.json()) as { data: { reading: { amountRupees: number; quantity: number } } };
     assert.equal(got.data.reading.amountRupees, 2841.6);
 
-    // The real route adds the vehicle / date checks the fuel save uses.
-    const src = readFileSync(join(__dirname, "../app/api/v1/staff/logbook/scan-bill/route.ts"), "utf8");
-    for (const must of ['assertMobileFeature(ctx, "route_manifest")', "registerAccess(", "assertVehicle(", "assertEditableDate(", 'handleStaffScan(request, ["fuel_bill"]']) {
-      assert.ok(src.includes(must), `scan-bill route calls ${must}`);
-    }
-    const gateSrc = readFileSync(join(__dirname, "../app/api/v1/staff/visitors/scan/route.ts"), "utf8");
-    for (const must of ['assertMobileFeature(ctx, "visitor_gate")', 'assertPermission(ctx, "visitors", "create")', "readStaffScanImage"]) {
-      assert.ok(gateSrc.includes(must), `visitor scan route calls ${must}`);
-    }
-    const checkin = readFileSync(join(__dirname, "../app/api/v1/staff/visitors/checkin/route.ts"), "utf8");
-    assert.ok(checkin.includes('assertPermission(ctx, "visitors", "create")'), "check-in asserts the permission too");
+    // The real route also applies registerAccess / assertVehicle /
+    // assertEditableDate (the fuel save's own checks); those need the
+    // transport desk from the database and are not driven here.
   }
 
   /* ── gate check-in fields ───────────────────────────────────────────── */

@@ -21,7 +21,8 @@
  */
 
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
-import type { ApiAuthContext } from "@/lib/api/v1/auth";
+import { assertPermission, type ApiAuthContext } from "@/lib/api/v1/auth";
+import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
 import { createKeyedRateLimiter, type KeyedRateLimiter } from "@/lib/rateLimit";
 import {
   STAFF_SCAN_MAX_BODY_BYTES,
@@ -55,6 +56,15 @@ export type StaffScanDeps = {
   /** IST date, YYYY-MM-DD — a bill dated after it is a misreading. */
   today: () => string;
 };
+
+/**
+ * The gate's scan: the same right as checking a visitor in — the Visitor
+ * gate app screen and visitors·create.
+ */
+export function authorizeVisitorScan(ctx: ApiAuthContext): void {
+  assertMobileFeature(ctx, "visitor_gate");
+  assertPermission(ctx, "visitors", "create");
+}
 
 /** One window per process, shared by both scan routes. */
 export const staffScanLimiter: KeyedRateLimiter = createKeyedRateLimiter(STAFF_SCAN_RATE);
