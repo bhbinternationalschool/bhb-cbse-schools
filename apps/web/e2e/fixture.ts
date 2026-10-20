@@ -334,17 +334,22 @@ function buildTimetable(): TimetableState {
 export const CURRENT_CHILDREN = 250;
 
 /**
- * The one child with a fee group, and that group (LKG, Promoted, 2026-27):
- * the Students → Upgrade test moves this child to UKG, for which no group
- * matches, and the child must keep this group (e2e/specs/student-upgrade).
- * Child 249 sits in LKG (sectionOfChild) and has no earlier-year rows.
+ * The one child with a fee group, and that group (class II, Promoted,
+ * 2026-27): the Students → Upgrade test moves this child to the next class,
+ * for which no group matches, and the child must keep this group
+ * (e2e/specs/student-upgrade). Class II, not LKG: the school's built-in
+ * Foundation structure (lib/feeStructureFoundation202627 — "Promoted ·
+ * Foundation (Nur–UKG)") matches every move inside Nursery–UKG, so an LKG
+ * child moving to UKG always finds a group (CI, 15–20 Oct 2026).
+ * Child 239 sits in class II (sectionOfChild: (239-1) % 13 + 1 = 5) and has
+ * no earlier-year rows (239 % 10 = 9).
  */
-export const UPGRADE_CHILD_INDEX = 249;
+export const UPGRADE_CHILD_INDEX = 239;
 export const UPGRADE_FEE_GROUP = {
-  id: "e2e_fg_lkg_promote",
-  code: "E2E-LKG-P",
-  name: "E2E LKG Promoted",
-  classKey: 2,
+  id: "e2e_fg_ii_promote",
+  code: "E2E-II-P",
+  name: "E2E II Promoted",
+  classKey: 5,
 } as const;
 
 const CHILD_FIRST = [

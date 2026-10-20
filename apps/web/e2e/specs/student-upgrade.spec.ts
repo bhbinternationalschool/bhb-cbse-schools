@@ -3,13 +3,13 @@
  *
  * Until 15 Oct 2026 the screen said "(no matching group found — keep
  * current)" and then saved the child with NO fee group (lib/classUpgrade.ts
- * assigned resolveFeeGroupId's null). The fixture gives one child, in LKG, the
- * only fee group (LKG, Promoted — e2e/fixture.ts UPGRADE_FEE_GROUP); this
+ * assigned resolveFeeGroupId's null). The fixture gives one child, in class II, the
+ * only fee group (class II, Promoted — e2e/fixture.ts UPGRADE_FEE_GROUP); this
  * moves that child to the first class no fee group matches, and asserts:
  *   - the hint promises to keep the current group;
  *   - after "Upgrade class" the panel and the history row show the group kept;
  *   - a fresh browser, reading the upgrade history from the server, shows
- *     the group kept ("E2E LKG Promoted → E2E LKG Promoted").
+ *     the group kept ("E2E II Promoted → E2E II Promoted").
  *
  * Writes to the stack, so it runs in the "propagation" project (after every
  * read-only spec). Screenshots to e2e/student-upgrade-shots (git-ignored).
@@ -58,7 +58,8 @@ test.describe("student upgrade — fee group", () => {
     const form = page.locator("form").filter({ has: page.getByRole("button", { name: "Upgrade class" }) });
     // The target must be a class NO fee group matches. Which classes match
     // depends on every fee group the shared fixture seeds (other specs add
-    // groups — "Foundation (Nur–UKG)" made UKG match on 15 Oct), so the class
+    // groups, and the built-in "Foundation (Nur–UKG)" matches every move inside
+    // Nursery–UKG), so the class
     // is found on screen rather than assumed: the first one whose remap line
     // says "no matching group".
     const NO_MATCH = "(no matching group found — keep current)";
@@ -66,7 +67,7 @@ test.describe("student upgrade — fee group", () => {
     const sectionSelect = form.locator("select").nth(1);
     const classOptions = (await classSelect.locator("option").allTextContents())
       .map((t) => t.trim())
-      .filter((t) => t && !/^(select|choose|—|-)/i.test(t) && t !== "LKG");
+      .filter((t) => t && !/^(select|choose|—|-)/i.test(t) && !/\(current\)/i.test(t));
     let target: { cls: string; section: string } | null = null;
     for (const cls of classOptions) {
       await classSelect.selectOption({ label: cls });
@@ -93,7 +94,7 @@ test.describe("student upgrade — fee group", () => {
     ).toBeVisible({ timeout: 30_000 });
     // The panel re-reads the saved child: the group is still there.
     await expect(page.getByText(`Fee: ${UPGRADE_FEE_GROUP.name}`)).toBeVisible();
-    // The history row says the group went nowhere ("E2E LKG Promoted → E2E LKG Promoted", not "→ —").
+    // The history row says the group went nowhere ("E2E II Promoted → E2E II Promoted", not "→ —").
     const kept = new RegExp(`${UPGRADE_FEE_GROUP.name}\\s*→\\s*${UPGRADE_FEE_GROUP.name}`);
     const historyRow = page.locator("tr", { hasText: CHILD.fullName }).first();
     await expect(historyRow.locator("td").filter({ hasText: kept })).toHaveCount(1);
