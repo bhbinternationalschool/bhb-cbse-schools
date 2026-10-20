@@ -76,7 +76,8 @@ import {
   type CommsReportId,
 } from "@/lib/commsReportCatalog";
 import type { CommsAudience } from "@/lib/schoolComms";
-import { loadMasters } from "@/lib/masters";
+import { useMasters } from "@/lib/data/client/hooks";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis } from "@/lib/sis";
 import { hasPermission } from "@/lib/rbac";
 import { useDemoSession } from "@/components/shell/SessionContext";
@@ -257,12 +258,19 @@ export function AccountsReportsRunner() {
 }
 
 export function TransportReportsRunner() {
+  // data-layer 2.1h: Masters from the query kernel, not a page-copy read per run.
+  const { masters } = useScreenMasters();
   const [format, setFormat] = useState<TransportReportFormat>("excel");
   const [date, setDate] = useState(todayIso);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function run(id: (typeof TRANSPORT_REPORTS)[number]["id"]) {
+    if (!masters) {
+      setError("The school's setup (Masters) has not loaded — wait a moment or press Try again on the page.");
+      setNotice(null);
+      return;
+    }
     // The boarding day sheet reads the bus register (server truth).
     let registerMarks: RegisterDayMark[] | null = null;
     if (id === "boarding_day_sheet") {
@@ -289,7 +297,7 @@ export function TransportReportsRunner() {
       date,
       format,
       transport: loadTransport(),
-      masters: loadMasters(),
+      masters,
       sis: loadSis(),
       registerMarks,
       costs,
@@ -455,9 +463,11 @@ export function HomeworkReportsRunner({ ay }: { ay: string }) {
   // here used to cover the whole school.
   const { my } = useMyTeaching();
   const teacherMode = isRestrictedTeacher(my);
+  // data-layer 2.1h: decided on useScreenMasters — no export while unknown.
+  const { masters: hwMasters } = useScreenMasters();
   const canExport = useMemo(
-    () => hasPermission(session, loadMasters(), "homework", "export"),
-    [session],
+    () => !!hwMasters && hasPermission(session, hwMasters, "homework", "export"),
+    [session, hwMasters],
   );
 
   function run(id: HomeworkReportId) {
@@ -582,7 +592,12 @@ export function ExamReportsRunner({ ay }: { ay: string }) {
   const [error, setError] = useState<string | null>(null);
 
   const terms = useMemo(() => listAllExamTerms(ay), [ay]);
-  const classes = useMemo(() => loadMasters().classes.filter((c) => c.isActive), []);
+  // data-layer 2.1h: classes from the Masters view (versions poll).
+  const examMastersQ = useMasters();
+  const classes = useMemo(
+    () => (examMastersQ.data?.masters.classes ?? []).filter((c) => c.isActive),
+    [examMastersQ.data],
+  );
 
   useEffect(() => {
     if (!examTermId && terms[0]) setExamTermId(terms[0].id);
@@ -701,9 +716,16 @@ export function LibraryReportsRunner() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // data-layer 2.1h: the staff side from useScreenMasters, not the page copy.
+  const { masters } = useScreenMasters();
+
   function run(id: LibraryReportId, label: string) {
+    if (!masters) {
+      setError("The school's setup (Masters) has not loaded — wait a moment or press Try again on the page.");
+      setNotice(null);
+      return;
+    }
     const sis = loadSis();
-    const masters = loadMasters();
     const r = runLibraryReport({
       reportId: id,
       format,
@@ -1280,7 +1302,12 @@ export function TeachingReportsRunner({ ay }: { ay: string }) {
   // A teacher's period delivery is their own; leadership sees everyone's.
   const ownOnly = isRestrictedTeacher(my);
   const [format, setFormat] = useState<"excel" | "pdf">("excel");
-  const classes = useMemo(() => loadMasters().classes.filter((c) => c.isActive !== false), []);
+  // data-layer 2.1h: classes from the Masters view (versions poll).
+  const teachMastersQ = useMasters();
+  const classes = useMemo(
+    () => (teachMastersQ.data?.masters.classes ?? []).filter((c) => c.isActive !== false),
+    [teachMastersQ.data],
+  );
   const [classId, setClassId] = useState("");
   const [fromDate, setFromDate] = useState(`${todayIso().slice(0, 7)}-01`);
   const [toDate, setToDate] = useState(todayIso);
