@@ -17,6 +17,7 @@ import {
   type HomeworkState,
 } from "@/lib/homework";
 import { speakText } from "@/lib/voiceClient";
+import { homeworkAttachmentsForReaders } from "@/lib/homeworkAttachments";
 import { HomeworkTutorChat } from "@/components/parent/HomeworkTutorChat";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
@@ -210,16 +211,19 @@ export function ParentHomeworkPortal({
                     {p.bodyEn}
                   </p>
                 ) : null}
-                {p.attachments[0]?.url ? (
+                {/* Every file, opened through /api/v1/homework/attachment —
+                    the stored /api/file reference is staff-only. */}
+                {homeworkAttachmentsForReaders(p).map((a) => (
                   <a
-                    href={p.attachments[0].url}
+                    key={a.id}
+                    href={a.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="mt-1 inline-block text-xs text-[#1565c0] underline"
+                    className="mr-3 mt-1 inline-block text-xs text-[#1565c0] underline"
                   >
-                    Attachment
+                    {a.label || "Attachment"}
                   </a>
-                ) : null}
+                ))}
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     type="button"

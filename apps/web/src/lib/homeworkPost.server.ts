@@ -25,6 +25,7 @@ import {
   rosterForSection,
   subjectLabel,
   writeHomeworkLocalRaw,
+  type HomeworkAttachment,
   type HomeworkPost,
 } from "@/lib/homework";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
@@ -47,6 +48,8 @@ export type PostHomeworkInput = {
   requiresSubmit?: boolean;
   /** "Ch 6 — Multiples and Factors" — opens the parent app's tutor on the right chapter. */
   aiTutorHint?: string;
+  /** Files already uploaded for this section (validated by the caller). */
+  attachments?: HomeworkAttachment[];
   /**
    * Message the parents on WhatsApp too. Default true: a homework post the
    * family never hears about is the state this ERP was already in — one
@@ -120,6 +123,7 @@ export async function postHomeworkServer(
     dueAt: input.dueAt || "",
     requiresSubmit: !!input.requiresSubmit,
     aiTutorHint,
+    attachments: input.attachments ?? [],
   });
   if (!result.ok) return { ok: false, error: result.error };
 
