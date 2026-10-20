@@ -142,6 +142,9 @@ jobs:
         working-directory: apps/web
         run: npm run test:online-classes
 
+      - name: Self-test — a member of staff sets only their own signature, and only a real small image
+        working-directory: apps/web
+        run: npm run test:staff-signature
       - name: Self-test — the staff month register counts what the register holds, and only the owner changes a mark
         working-directory: apps/web
         run: npm run test:staff-month-register
@@ -479,6 +482,7 @@ jobs:
           npm run test:concession-ground
           npm run test:fee-backdate
           npm run test:month-groups
+          npm run test:month-range
           npm run test:receipt-auto-wa
           npm run test:review-login
           npm run test:desk-sync-status
@@ -521,6 +525,7 @@ jobs:
           npm run test:closing-balance
           npm run test:accounts-position-rbac
           npm run test:voucher-filter
+          npm run test:pg-settlement-failed
           npm run test:voucher-amend
           npm run test:transport-finance
           npm run test:loans
@@ -690,6 +695,7 @@ jobs:
           npm run test:masters-bridge
           npm run test:staff-requests
           npm run test:survey-team-plan
+          npm run test:parent-api-scope
 
   build:
     name: Production build
