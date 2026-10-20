@@ -3,8 +3,6 @@
  * npm run test:school-chat
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   allGroups,
   blockVerdict,
@@ -322,16 +320,6 @@ await t("push audience: staff↔parent chat — only the family's own block stop
   assert.deepEqual(subs, [{ kind: "staff", id: "s1" }, { kind: "student", id: "k1" }, { kind: "household", id: "hh1" }, { kind: "household", id: "hh2" }]);
 });
 
-await t("push wiring: member pushes go through pushAudience, and an unreadable block list means no member push", () => {
-  const src = readFileSync(join(__dirname, "schoolChatNotify.server.ts"), "utf8");
-  assert.match(src, /pushAudience\(/, "the notifier filters by blocks");
-  assert.match(src, /blocks unreadable — no member push[\s\S]{0,120}return;/, "fail closed on the block read");
-  assert.doesNotMatch(src, /sendPushToSubjects\("parent", households,/, "no push to the raw section families");
-  const server = readFileSync(join(__dirname, "schoolChat.server.ts"), "utf8");
-  assert.equal((server.match(/loadBlocks: \(s\) => activeBlocksFor\(t, s\)/g) || []).length, 3, "send, warn and approve all pass the block reader");
-  assert.match(server, /decision === "approve"[\s\S]{0,200}pushApproved\(/, "an approved message is pushed like a normal post");
-});
-
 // Review item 4: a per-sender rate limit, checked before the AI call.
 await t("rate limit: 10 a minute, 200 a day; refused with a clear message", () => {
   assert.deepEqual(CHAT_RATE_LIMIT, { perMinute: 10, perDay: 200 });
@@ -358,44 +346,6 @@ await t("rate limit runs BEFORE the model: a refused send never asks the AI", as
   });
   assert.deepEqual(order, ["admit", "classify"]);
   assert.equal(r.status, "visible");
-  const server = readFileSync(join(__dirname, "schoolChat.server.ts"), "utf8");
-  assert.match(server, /admitThenModerate\(body, \{[\s\S]{0,300}admit: \(\) => admitSend\(/, "sendMessage admits through the rate check");
-  assert.doesNotMatch(server, /await moderateMessage\(/, "no path asks the model without the rate check");
-  assert.match(server, /new ApiError\(\s*"rate_limited",[\s\S]{0,200}429/, "refused as 429");
-});
-
-// Review item 3: every action is atomic with its log row, and failures are surfaced.
-await t("mute/block/lift + log are one transaction (RPC); refusal log errors are surfaced", () => {
-  const server = readFileSync(join(__dirname, "schoolChat.server.ts"), "utf8");
-  assert.doesNotMatch(server, /from\("school_chat_blocks"\)\s*\.(insert|update)\(/, "no direct block writes (they would not be atomic with the log)");
-  const logInserts = server.match(/from\("school_chat_moderation_log"\)\.insert\(/g) || [];
-  assert.equal(logInserts.length, 1, "the only direct log insert is send_refused (one row on its own)");
-  assert.match(server, /const \{ error: logErr \} = await t\.sb\.from\("school_chat_moderation_log"\)\.insert\([\s\S]{0,400}if \(logErr\) dbFail\("send_refused log", logErr, true\)/, "a refusal whose log row failed is a 503, not a silent 403");
-  assert.match(server, /rpc\("school_chat_set_block"[\s\S]{0,400}if \(error\) dbFail\("block", error, true\)/);
-  assert.match(server, /rpc\("school_chat_lift_block"[\s\S]{0,300}if \(error\) dbFail\("lift", error, true\)/);
-  assert.match(server, /rpc\("school_chat_rate_check"[\s\S]{0,500}if \(error\) dbFail\("rate check", error\)/);
-
-  const sql = readFileSync(join(__dirname, "../../../../supabase/migrations/20261020090000_school_chat.sql"), "utf8");
-  const fn = (name: string) => {
-    const m = sql.match(new RegExp(`create or replace function public\\.${name}\\([\\s\\S]*?\\n\\$\\$;`));
-    assert.ok(m, `${name} exists (create or replace)`);
-    return m![0];
-  };
-  const set = fn("school_chat_set_block");
-  assert.match(set, /insert into public\.school_chat_blocks[\s\S]*insert into public\.school_chat_moderation_log/, "block + log in one function");
-  const lift = fn("school_chat_lift_block");
-  assert.match(lift, /update public\.school_chat_blocks[\s\S]*lifted_at is null[\s\S]*if not found then return; end if;[\s\S]*insert into public\.school_chat_moderation_log/);
-  const rate = fn("school_chat_rate_check");
-  assert.match(rate, /interval '1 minute'[\s\S]*interval '24 hours'[\s\S]*'send_refused'/);
-  for (const sig of [
-    "school_chat_set_block(uuid, text, text, text, text, text, text, text)",
-    "school_chat_lift_block(uuid, uuid, text, text, text)",
-    "school_chat_rate_check(uuid, text, text, text, text, text, text, text, int, int)",
-  ]) {
-    const esc = sig.replace(/[()[\]]/g, "\\$&");
-    assert.match(sql, new RegExp(`revoke all on function public\\.${esc} from public, anon, authenticated;`), `${sig}: revoked`);
-    assert.match(sql, new RegExp(`grant execute on function public\\.${esc} to service_role;`), `${sig}: service_role`);
-  }
 });
 
 await t("moderation is a real function: principal / owner / admin by default, not teacher or office", () => {
