@@ -1025,7 +1025,7 @@ not shown to your role") in 2.2/2.3 — not changed here. Lib helpers now get th
 `loadMasters()`'s normalised read; only the keys above were audited. Process / Rebuild / Apply setup were not clicked
 in the spec (they write runs); they call the same builders with the same `masters` the setup review uses.
 
-*(2.1g built 20 Oct 2026, PR #TBD.)* **What exists.** `grep` lists 6 `components/admissions`, 5 `components/comms`
+*(2.1g built 20 Oct 2026, PR #682.)* **What exists.** `grep` lists 6 `components/admissions`, 5 `components/comms`
 and 3 `components/parent` files; 9 no longer call `loadMasters()`. `PublicEnquiryForm` / `PublicFamilyRegisterForm` only
 name it in a comment (public pages; not counted). **The 3 parent files (`ParentSubjectsPortal`, `ParentPtmPortal`,
 `ParentHomeworkPortal`) are left to #674** (open, CI green): a `/parent` page runs as a PARENT session, which the
