@@ -58,11 +58,26 @@ function childrenOf(k: number) {
   );
 }
 
-type Api = { ctx: APIRequestContext; get: (p: string) => Promise<{ status: number; body: any }>; post: (p: string, d: unknown) => Promise<{ status: number; body: any }> };
+/** The parts of the routes' answers these tests read (every route answers {ok, data} or {ok:false, error}). */
+type ChatMsg = { id: string; body: string; status: string; senderLabel: string };
+type ChatJson = {
+  data: {
+    id: string;
+    held: boolean;
+    notice: string | null;
+    blocked: boolean;
+    conversations: { id: string }[];
+    messages: ChatMsg[];
+    items: { id: string; body: string; checkedBy: string; categories: string[] }[];
+  };
+  error: { message: string };
+};
+type Res = { status: number; body: ChatJson };
+type Api = { ctx: APIRequestContext; get: (p: string) => Promise<Res>; post: (p: string, d: unknown) => Promise<Res> };
 
 async function api(session: DemoSession): Promise<Api> {
   const ctx = await pwRequest.newContext({ baseURL: APP_URL, extraHTTPHeaders: { cookie: sessionCookieHeader(session) } });
-  const wrap = async (r: Awaited<ReturnType<APIRequestContext["get"]>>) => ({ status: r.status(), body: await r.json().catch(() => null) });
+  const wrap = async (r: Awaited<ReturnType<APIRequestContext["get"]>>): Promise<Res> => ({ status: r.status(), body: (await r.json().catch(() => null)) as ChatJson });
   return {
     ctx,
     get: async (p) => wrap(await ctx.get(p)),
@@ -74,7 +89,7 @@ const [a1, a2] = childrenOf(1);
 const [b1] = childrenOf(2);
 const msgs = (who: Api, conv: string, studentId?: string) =>
   who.get(`/api/v1/school-chat/messages?conversationId=${encodeURIComponent(conv)}${studentId ? `&studentId=${studentId}` : ""}`);
-const bodies = (r: { body: any }): string[] => (r.body?.data?.messages ?? []).map((m: { body: string }) => m.body);
+const bodies = (r: Res): string[] => (r.body?.data?.messages ?? []).map((m) => m.body);
 
 test.describe.serial("school chat", () => {
   let famA1: Api, famA2: Api, famB: Api, classTeacher: Api, maths: Api, hindi: Api, principal: Api;
@@ -173,7 +188,7 @@ test.describe.serial("school chat", () => {
     expect(s.body.data.held).toBe(false);
     const t = await msgs(classTeacher, id);
     expect(t.status).toBe(200);
-    expect(t.body.data.messages.at(-1).senderLabel).toBe(`Parent of ${a1!.fullName} (Nursery-A)`);
+    expect(t.body.data.messages.at(-1)?.senderLabel).toBe(`Parent of ${a1!.fullName} (Nursery-A)`);
     expect((await msgs(famA2, id, a2!.id)).status).toBe(403);
     expect((await msgs(maths, id)).status).toBe(403);
   });
