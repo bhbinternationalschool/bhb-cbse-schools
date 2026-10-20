@@ -34,7 +34,8 @@ assert.equal(linkStatusRegresses("paid", "refunded-ish"), true, "an unknown stat
   const src = readFileSync(join(__dirname, "paymentsNormalized.server.ts"), "utf8");
   const many = src.slice(src.indexOf("export async function pushPaymentLinksToDb"), src.indexOf("export async function fetchPaymentLinksFromDb") > 0 ? src.indexOf("export async function fetchPaymentLinksFromDb") : undefined);
   assert.ok(/linkStatusRegresses\(storedStatus\.get\(l\.id\), l\.status\)/.test(many), "the whole-desk save checks each link");
-  assert.ok(many.indexOf("linkStatusRegresses(") < many.indexOf('.from("payment_desk_links")\n      .upsert('), "before writing headers");
+  assert.ok(many.indexOf("linkStatusRegresses(") < many.indexOf('.from("payment_desk_links").upsert(chunk)'), "before writing headers");
+  assert.ok(many.indexOf('.from("payment_desk_links").upsert(chunk)') > 0, "the header write is where this check looks");
   assert.ok(/for \(const link of writable\)/.test(many) && /const linkIds = new Set\(writable\.map/.test(many), "kept links' lines are not rewritten either");
   assert.ok(/if \(read\.error\) \{\s*return \{ ok: false/.test(many), "unreadable statuses → nothing written");
 
