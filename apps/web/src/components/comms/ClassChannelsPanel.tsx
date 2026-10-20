@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { applyClassChannelDraftToErp } from "@/lib/waClassChannelApply";
-import { loadMasters } from "@/lib/masters";
+import { useMasters } from "@/lib/data/client/hooks";
 import { TENANT } from "@/lib/types";
 import { composeClassGroupMessage, waShareUrl } from "@/lib/classGroupMessage";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
@@ -68,7 +68,9 @@ export function ClassChannelsPanel() {
   const [draftBody, setDraftBody] = useState("");
   const [draftSubjectId, setDraftSubjectId] = useState("");
 
-  const subjects = loadMasters().subjects ?? [];
+  // data-layer 2.1g: subjects from the Masters view (versions poll), not the page copy on every render.
+  const mastersQ = useMasters();
+  const subjects = mastersQ.data?.masters.subjects ?? [];
 
   // Read through a ref so `refresh` keeps one identity for the life of the
   // panel — it used to depend on selectedChannelId, which re-ran the effect
@@ -519,7 +521,9 @@ Then reply: YES`}
                 value={draftSubjectId}
                 onChange={(e) => setDraftSubjectId(e.target.value)}
               >
-                <option value="">Subject</option>
+                <option value="">
+                  {mastersQ.data ? "Subject" : mastersQ.isError ? "Subjects could not load" : "Loading subjects…"}
+                </option>
                 {subjects.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.nameEn}

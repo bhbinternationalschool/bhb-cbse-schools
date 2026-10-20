@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { childrenOfHousehold, loadSis, studentsInSession } from "@/lib/sis";
-import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
+import { currentAcademicYearCode } from "@/lib/masters";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { classLabelForStudent } from "@/lib/parentPortal";
 import { householdCandidateNumbers } from "@/lib/waHouseholdNumbers";
 import {
@@ -315,9 +316,14 @@ export function WaChatHubPanel({
    * (householdCandidateNumbers), not just the one field somebody typed
    * into "WhatsApp".
    */
+  // data-layer 2.1g: the session year and class labels from the server's
+  // book (versions poll), not a once-at-mount page-copy read. Until it
+  // answers no family is resolved (labels would otherwise read "—").
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const familyFor = useMemo(() => {
+    const byMobile = new Map<string, { name: string; classId: string; label: string }[]>();
+    if (!masters) return byMobile;
     const sis = loadSis();
-    const masters = loadMasters();
     const ay = currentAcademicYearCode(masters);
     const inYear = studentsInSession(sis, ay).filter((s) => s.status === "active");
     const kidsByHousehold = new Map<string, typeof inYear>();
@@ -326,7 +332,6 @@ export function WaChatHubPanel({
       list.push(s);
       kidsByHousehold.set(s.householdId, list);
     }
-    const byMobile = new Map<string, { name: string; classId: string; label: string }[]>();
     for (const hh of sis.households ?? []) {
       const kids = kidsByHousehold.get(hh.id) ?? childrenOfHousehold(sis, hh.id, ay);
       if (!kids.length) continue;
@@ -340,7 +345,7 @@ export function WaChatHubPanel({
       }
     }
     return byMobile;
-  }, []);
+  }, [masters]);
 
   const childrenOfThread = useCallback(
     (mobile: string) => familyFor.get((mobile || "").replace(/\D/g, "").slice(-10)) ?? [],
@@ -348,16 +353,15 @@ export function WaChatHubPanel({
   );
 
   const classOptions = useMemo(() => {
-    const masters = loadMasters();
     const seen = new Map<string, string>();
     for (const t of threads) {
       for (const c of childrenOfThread(t.mobile)) {
         if (c.classId) seen.set(c.classId, c.label.split("-")[0] || c.label);
       }
     }
-    const order = new Map((masters.classes ?? []).map((c, i) => [c.id, i]));
+    const order = new Map((masters?.classes ?? []).map((c, i) => [c.id, i]));
     return [...seen.entries()].sort((a, b) => (order.get(a[0]) ?? 99) - (order.get(b[0]) ?? 99));
-  }, [threads, childrenOfThread]);
+  }, [threads, childrenOfThread, masters]);
 
   const visibleThreads = useMemo(() => {
     if (classFilter === "all") return threads;
@@ -563,6 +567,14 @@ export function WaChatHubPanel({
               {visibleThreads.length} of {threads.length}
             </span>
           </label>
+        ) : null}
+        {mastersError ? (
+          <span className="ml-auto text-[11px] text-[var(--danger)]">
+            Families and classes could not load ·{" "}
+            <button type="button" className="underline" onClick={() => void retryMasters()}>
+              Try again
+            </button>
+          </span>
         ) : null}
       </div>
 
