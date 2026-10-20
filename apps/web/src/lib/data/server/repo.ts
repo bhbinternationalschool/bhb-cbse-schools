@@ -545,6 +545,16 @@ export async function write(
       conflicts: [],
     };
   }
+  return writeRows(def.table, ops);
+}
+
+/**
+ * The same, for a table no collection exposes through the generic API —
+ * a server module that decides every op itself (lib/notify/inbox.ts: a
+ * reader marks THEIR OWN notifications read). The table must still be in
+ * desk_writable_tables, or the function refuses it (42501).
+ */
+export async function writeRows(table: string, ops: readonly WriteOp<Row>[]): Promise<WriteResult<Row>> {
   if (ops.length === 0) {
     return { ok: true, results: [], versions: {} };
   }
@@ -561,7 +571,7 @@ export async function write(
 
   const { data, error } = await ctx.sb.rpc("desk_write_guarded", {
     p_tenant_id: ctx.tenantId,
-    p_table: def.table,
+    p_table: table,
     p_ops: ops,
   });
 

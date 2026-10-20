@@ -14,6 +14,8 @@ import { writeAudit } from "@/lib/audit.server";
 import { readStaffHrServer, saveStaffHrServer } from "@/lib/api/v1/staffLeave";
 import { ApiError } from "@/lib/api/v1/errors";
 import { decideLeaveWithRules } from "@/lib/staffLeaveRules.server";
+import { staffLeaveDecided } from "@/lib/notify/events";
+import { notify } from "@/lib/notify/notify.server";
 
 export const runtime = "nodejs";
 
@@ -85,5 +87,19 @@ export async function POST(req: Request) {
     summary: `Staff leave ${result.after.status}: ${req0?.typeCode ?? ""} ${req0?.fromDate ?? ""}${result.notice ? ` (${result.notice})` : ""}`,
     after: { status: result.after.status, note, notice: result.notice },
   });
+  if (req0) {
+    await notify(
+      staffLeaveDecided({
+        requestId: id,
+        staffId: req0.staffId,
+        status: result.after.status,
+        typeCode: req0.typeCode,
+        fromDate: req0.fromDate,
+        toDate: req0.toDate,
+        note,
+        decidedBy: ctx.session.fullName || "Principal",
+      }),
+    );
+  }
   return NextResponse.json({ ok: true, status: result.after.status, notice: result.notice });
 }

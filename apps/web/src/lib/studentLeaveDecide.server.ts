@@ -32,7 +32,8 @@ import {
 } from "@/lib/studentLeaveNormalized.server";
 import { applyApprovedLeaveToRegisters } from "@/lib/studentLeaveAttendance.server";
 import { loadSis } from "@/lib/sis";
-import { sendPushToSubject } from "@/lib/webPush.server";
+import { studentLeaveDecided } from "@/lib/notify/events";
+import { notify } from "@/lib/notify/notify.server";
 
 export type DecideLeaveInput = {
   session: DemoSession;
@@ -113,13 +114,18 @@ export async function decideStudentLeaveServer(
 
   let pushSent = 0;
   if (student.householdId) {
-    const r = await sendPushToSubject("parent", student.householdId, {
-      title: `Leave ${decided.status} · ${student.fullName}`,
-      body: `${req.fromDate}${req.toDate && req.toDate !== req.fromDate ? ` to ${req.toDate}` : ""} — ${decided.status} by ${input.session.fullName}.`,
-      url: "/leave",
-      data: { kind: "leave", requestId: decided.id },
-    }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));
-    pushSent = r.sent;
+    const r = await notify(
+      studentLeaveDecided({
+        requestId: decided.id,
+        householdId: student.householdId,
+        studentName: student.fullName,
+        status: decided.status,
+        fromDate: req.fromDate,
+        toDate: req.toDate,
+        decidedBy: input.session.fullName,
+      }),
+    );
+    pushSent = r.ok ? r.pushed : 0;
   }
 
   return {

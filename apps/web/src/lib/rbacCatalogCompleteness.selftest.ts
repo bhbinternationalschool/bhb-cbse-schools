@@ -301,6 +301,10 @@ const PUBLIC_API_ROUTES: Record<string, string> = {
     "Staff → Requests view (15 Oct 2026): any staff session, gated in lib/staffRequests.server.ts (requireStaffApi; parents 403, mirror secret 403); a manager (canManageStaffLeave with the saved roles) gets every request, anyone else only their own",
   "staff/requests":
     "Staff → Requests writes (15 Oct 2026): gated in lib/staffRequests.server.ts (requireStaffApi) — any member of staff raises their own; only a manager (canManageStaffLeave) assigns/resolves; mirror secret 403",
+  "data/views/notifications":
+    "the caller's OWN notifications (20 Oct 2026): any signed-in staff member or family, gated in lib/notify/inbox.ts (resolveApiAuth 401; API keys 403); every query is filtered to the session's own push key — no request field can name another recipient. Who receives what is decided by roles at send time (lib/notify/audience.ts)",
+  "v1/notifications":
+    "the apps' list + read marks + settings for the caller's OWN notifications (20 Oct 2026): gated in lib/notify/inbox.ts (resolveApiAuth 401; API keys 403); rows and settings are addressed only by the session's own push key",
   "data/views/module-registry":
     "reference view (data-layer 1.4): any staff session, gated in lib/data/server/views.ts (requireStaffApi); which modules are switched on, no rows",
   "auth/first-login/request-otp": "sign-in: sends an OTP to a registered number",

@@ -164,15 +164,9 @@ export async function checkClassMedia(
 }
 
 async function tell(title: string, body: string, photoId: string) {
-  try {
-    const { leadershipStaffIds } = await import("@/lib/jobApplications.server");
-    const ids = await leadershipStaffIds();
-    if (!ids.length) return;
-    const { sendPushToSubjects } = await import("@/lib/webPush.server");
-    await sendPushToSubjects("staff", ids, { title, body, data: { kind: "class_gallery_review", id: photoId } });
-  } catch (e) {
-    console.warn("[class-gallery] review push failed", e);
-  }
+  // Whoever may edit the gallery school-wide (lib/notify) — bell + phone.
+  const [{ notify }, { galleryHeld }] = await Promise.all([import("@/lib/notify/notify.server"), import("@/lib/notify/events")]);
+  await notify(galleryHeld({ photoId, title, body }));
 }
 
 /** Copy a passed item to Drive: Class gallery / <year> / <class> / <event>. A failure is recorded, never fatal. */
