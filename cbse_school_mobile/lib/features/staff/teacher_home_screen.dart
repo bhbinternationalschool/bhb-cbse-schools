@@ -52,6 +52,7 @@ import "timetable_screen.dart";
 import "online_classes_teacher_screen.dart";
 import "waiting_card.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/push/notification_bell.dart";
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -382,6 +383,12 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     }
   }
 
+  /// An item's link from the notifications list.
+  void _openRoute(String route) {
+    _pendingRoute = route;
+    _consumePendingRoute();
+  }
+
   void _consumePendingRoute() {
     final raw = _pendingRoute;
     _pendingRoute = null;
@@ -389,6 +396,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     final uri = Uri.tryParse(raw);
     if (uri == null) return;
     switch (uri.path) {
+      case "/notifications":
+        openNotifications(context, widget.api, _openRoute);
       case "/chat":
         Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => ChatInboxScreen(api: widget.api)),
@@ -810,6 +819,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                         ),
                       ],
                     ),
+                  ),
+                  NotificationBellButton(
+                    api: widget.api,
+                    onOpenRoute: _openRoute,
                   ),
                   const ScreenGuideButton(
                     guideId: "teacher-home",

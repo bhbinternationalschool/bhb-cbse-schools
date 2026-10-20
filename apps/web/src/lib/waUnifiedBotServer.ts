@@ -1577,6 +1577,31 @@ async function submitLeave(opts: {
     return `✅ ${leaveTypeLabel(req.typeCode)} on ${dates} is approved and marked.`;
   }
 
+  // The ERP bell and the apps of whoever decides staff leave, by role.
+  {
+    const [{ notify }, { staffLeaveRequested }, { approversToNotify }] = await Promise.all([
+      import("@/lib/notify/notify.server"),
+      import("@/lib/notify/events"),
+      import("@/lib/staffLeaveRules.server"),
+    ]);
+    const { loadServerMasters } = await import("@/lib/api/v1/auth");
+    const named = await loadServerMasters()
+      .then((m) => approversToNotify(m, staff.id))
+      .catch(() => [] as string[]);
+    await notify(
+      staffLeaveRequested({
+        requestId: req.id,
+        staffId: staff.id,
+        staffName: staff.fullName || "Staff",
+        typeCode: req.typeCode,
+        fromDate: req.fromDate,
+        toDate: req.toDate,
+        reason: draft.reason || "",
+        namedApproverIds: named,
+      }),
+    );
+  }
+
   // A code the approvers answer with.
   const store = await readStore();
   // Codes of long-past leave are dropped, so the list stays small.
@@ -1716,6 +1741,23 @@ export async function handleLeaveCodeDecision(opts: { fromWaId: string; text: st
   }
   const after = result.after;
   const label = leaveTypeLabel(req.typeCode);
+  {
+    const [{ notify }, { staffLeaveDecided }] = await Promise.all([
+      import("@/lib/notify/notify.server"),
+      import("@/lib/notify/events"),
+    ]);
+    await notify(
+      staffLeaveDecided({
+        requestId: req.id,
+        staffId: req.staffId,
+        status: after.status,
+        typeCode: req.typeCode,
+        fromDate: req.fromDate,
+        toDate: req.toDate,
+        decidedBy: byName,
+      }),
+    );
+  }
 
   if (after.status === "approved") {
     const { markApprovedLeaveOnRegisters } = await import("@/lib/staffAttendance.server");
