@@ -5,7 +5,7 @@
  * current)" and then saved the child with NO fee group (lib/classUpgrade.ts
  * assigned resolveFeeGroupId's null). The fixture gives one child, in LKG, the
  * only fee group (LKG, Promoted — e2e/fixture.ts UPGRADE_FEE_GROUP); this
- * moves that child to UKG, where nothing matches, and asserts:
+ * moves that child to the first class no fee group matches, and asserts:
  *   - the hint promises to keep the current group;
  *   - after "Upgrade class" the panel and the history row show the group kept;
  *   - a fresh browser, reading the upgrade history from the server, shows
@@ -56,17 +56,41 @@ test.describe("student upgrade — fee group", () => {
 
     await page.getByRole("group", { name: "Upgrade mode" }).getByRole("button", { name: "Class + section" }).click();
     const form = page.locator("form").filter({ has: page.getByRole("button", { name: "Upgrade class" }) });
-    await form.locator("select").nth(0).selectOption({ label: "UKG" });
-    await form.locator("select").nth(1).selectOption({ index: 1 });
-    await expect(page.getByText("(no matching group found — keep current)")).toBeVisible();
+    // The target must be a class NO fee group matches. Which classes match
+    // depends on every fee group the shared fixture seeds (other specs add
+    // groups — "Foundation (Nur–UKG)" made UKG match on 15 Oct), so the class
+    // is found on screen rather than assumed: the first one whose remap line
+    // says "no matching group".
+    const NO_MATCH = "(no matching group found — keep current)";
+    const classSelect = form.locator("select").nth(0);
+    const sectionSelect = form.locator("select").nth(1);
+    const classOptions = (await classSelect.locator("option").allTextContents())
+      .map((t) => t.trim())
+      .filter((t) => t && !/^(select|choose|—|-)/i.test(t) && t !== "LKG");
+    let target: { cls: string; section: string } | null = null;
+    for (const cls of classOptions) {
+      await classSelect.selectOption({ label: cls });
+      const sections = (await sectionSelect.locator("option").allTextContents()).map((t) => t.trim());
+      if (sections.length < 2) continue;
+      await sectionSelect.selectOption({ index: 1 });
+      if (await page.getByText(NO_MATCH).isVisible().catch(() => false)) {
+        target = { cls, section: sections[1]! };
+        break;
+      }
+    }
+    expect(target, `a class with no matching fee group among: ${classOptions.join(", ")}`).not.toBeNull();
+    await expect(page.getByText(NO_MATCH)).toBeVisible();
 
     fs.mkdirSync(SHOTS, { recursive: true });
-    await page.getByText("(no matching group found — keep current)").evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await page.getByText(NO_MATCH).evaluate((el) => el.scrollIntoView({ block: "center" }));
     await page.waitForTimeout(400);
     await page.screenshot({ path: path.join(SHOTS, "upgrade-before-desktop-light.png") });
 
     await page.getByRole("button", { name: "Upgrade class" }).click();
-    await expect(page.getByText(/^Updated .* → UKG-A$/)).toBeVisible({ timeout: 30_000 });
+    const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    await expect(
+      page.getByText(new RegExp(`^Updated .* → ${escape(target!.cls)}-${escape(target!.section)}$`)),
+    ).toBeVisible({ timeout: 30_000 });
     // The panel re-reads the saved child: the group is still there.
     await expect(page.getByText(`Fee: ${UPGRADE_FEE_GROUP.name}`)).toBeVisible();
     // The history row says the group went nowhere ("E2E LKG Promoted → E2E LKG Promoted", not "→ —").
