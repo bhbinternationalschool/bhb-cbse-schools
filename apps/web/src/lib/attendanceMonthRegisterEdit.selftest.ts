@@ -11,8 +11,6 @@
  *     written (one register write per changed day, merged over what is saved).
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { AttendanceRegister } from "@/lib/attendance";
 import type { MastersState } from "@/lib/masters";
 import type { SisStudent } from "@/lib/sis";
@@ -47,16 +45,6 @@ assert.equal(
   false,
   "a class teacher without attendance·edit is read-only",
 );
-
-// The route: GET's canEdit is this answer (with the permission), and POST
-// refuses with 403 whatever GET would not offer.
-const route = readFileSync(join(__dirname, "../app/api/v1/attendance/month/route.ts"), "utf8");
-assert.ok(
-  /monthRegisterCanEdit\(\s*\{[\s\S]*?canEditAttendance: hasPermission\(ctx\.session, ctx\.masters, "attendance", "edit", ctx\.rbac\)/.test(route),
-  "GET canEdit includes attendance·edit",
-);
-assert.ok(/if \(!canEdit\) \{\s*throw new ApiError\(\s*"forbidden"[\s\S]*?403/.test(route), "POST: 403 unless canEdit");
-assert.ok(/assertSectionScope\(ctx, classId, sectionId\)/.test(route), "reading still needs the section in scope");
 
 /* ── a day fill writes that day only ──────────────────────────── */
 

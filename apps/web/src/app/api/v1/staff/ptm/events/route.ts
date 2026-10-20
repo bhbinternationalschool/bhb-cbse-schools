@@ -2,7 +2,6 @@ import { writeAudit } from "@/lib/audit.server";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { assertMobileFeature, hasMobileFeature } from "@/lib/api/v1/mobileAccess.server";
-import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensurePtmHydratedServer, pushPtmRemoteServer } from "@/lib/ptmPersistence";
 import { loadPtm, writePtmLocalRaw } from "@/lib/ptm";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
@@ -66,8 +65,9 @@ export async function POST(request: Request) {
     assertMobileFeature(ctx, "ptm_meet");
     assertPermission(ctx, "ptm", "edit");
     const body = (await request.json().catch(() => ({}))) as PtmScheduleInput;
+    // Scope reads Masters (ctx) and the timetable itself; the PTM desk is
+    // hydrated on its own below — no whole-school replica is needed.
     const scope = await staffSectionScope(ctx);
-    await ensureSchoolMirrorHydrated();
     const planned = planPtmEvent({
       body,
       scope,

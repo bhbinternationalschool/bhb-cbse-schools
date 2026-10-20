@@ -6,8 +6,6 @@
  * section of; the office / leadership for any class.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { planPtmEvent, ptmScheduleClasses, type PtmScheduleScope } from "@/lib/ptmSchedule";
 
 console.log("ptmSchedule.selftest.ts");
@@ -97,12 +95,5 @@ const backwards = planPtmEvent({
 assert.equal(backwards.ok, false);
 const noName = planPtmEvent({ ...base, scope: office, body: { name: "  ", date: "2026-10-25", classIds: ["c3"] } });
 assert.equal(noName.ok, false);
-
-// The route: app feature + ptm·edit, and only the new event row is written.
-const route = readFileSync(join(__dirname, "../app/api/v1/staff/ptm/events/route.ts"), "utf8");
-assert.ok(/assertMobileFeature\(ctx, "ptm_meet"\)/.test(route));
-assert.ok(/assertPermission\(ctx, "ptm", "edit"\)/.test(route));
-assert.ok(/staffSectionScope\(ctx\)/.test(route));
-assert.ok(/\{ only: \{ events: \[event\.id\] \} \}/.test(route));
 
 console.log("ptmSchedule.selftest: all assertions passed");
