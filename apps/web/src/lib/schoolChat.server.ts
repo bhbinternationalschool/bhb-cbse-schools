@@ -254,7 +254,11 @@ export type ConversationAccess = {
   speakAs: "staff" | "student" | "parent";
 };
 
+/** Group rows this process has already made sure of (they are never deleted). */
+const ensuredGroups = new Set<string>();
+
 async function ensureGroupRow(t: Tenant, g: GroupRef, ay: string, createdBy: string): Promise<void> {
+  if (ensuredGroups.has(`${t.tenantId}|${g.id}`)) return;
   const { error } = await t.sb.from("school_chat_conversations").upsert(
     {
       id: g.id,
@@ -270,6 +274,7 @@ async function ensureGroupRow(t: Tenant, g: GroupRef, ay: string, createdBy: str
     { onConflict: "id", ignoreDuplicates: true },
   );
   if (error) dbFail("group row", error);
+  ensuredGroups.add(`${t.tenantId}|${g.id}`);
 }
 
 async function readConvRow(t: Tenant, id: string): Promise<ConvRow | null> {
