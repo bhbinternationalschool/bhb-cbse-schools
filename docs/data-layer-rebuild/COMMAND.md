@@ -1235,6 +1235,23 @@ checks, the timing check and the p95 check fail. `test:parent-api-scope` (reader
 200 warm sequential requests across families, shared Mac): **46–58 ms** (p50 27–31); origin/main 101–124 ms
 (p50 66–73). **Not done:** `schoolAadhaarGaps`, `popupResponses`, `markAadhaarVerified` (office screens)
 still hydrate the roster; production timing needs the deploy.
+*(4.1b built 15 Oct 2026, PR #653.)* **What exists.** `GET /api/v1/parent/attendance` reads the
+student by id (`lib/data/server/householdRead.ts`, shared with 4.1a/c) and that child's marks in one query:
+`attendance_desk_marks` by `student_id` inner-joined to `attendance_desk_registers` filtered on the child's
+section, the session's year and `attendance_date >= since` (one mark per register and student is a unique
+key). No `ensureSchoolMirrorHydrated`, no `ensureAttendanceHydratedServer`. R6: a failed student or marks
+read is 503 (origin/main answered 200 from its process copy). One
+`{"event":"route-timing","route":"v1/parent/attendance",authMs,queryMs,buildMs,totalMs,entries}` line per
+request. **Proof.** Golden: origin/main and this build on the same seeded stack (728 registers, 13,706
+marks of every status, this year and last, 150 days) — every student row of all 169 families at 90 and 366
+days as the parent, every row as the office, the refusals: 1,374/1,374 answers byte-identical.
+`e2e/v1-parent-attendance.acceptance.ts`: 798 answers equal to the marks counted independently with psql,
+cross-family 403 for every family, inactive family 403, 404/400, `attendance_desk_marks` / `sis_students`
+SELECT revoked → 503, timing lines, p95; on origin/main the two 503 checks, the timing check and p95 fail.
+p95 (local stack, 200 warm sequential requests, shared Mac): **65 ms** (p50 29; a second, noisier run
+p95 119 / p50 25); origin/main p95 324–423 ms (p50 167–234). **Intended difference (production only):** a
+register that exists only in a process copy (deleted from the table, or carried from the old blob) is no
+longer shown. **Not done:** production timing needs the deploy.
 
 **4.2 Teacher scope in the app.** Depends on 1.7; verify every `app/api/v1/staff/*` route uses
 it. Acceptance: a teacher whose only link is the timetable sees her sections in the app.
