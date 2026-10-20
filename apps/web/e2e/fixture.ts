@@ -6,7 +6,7 @@
  * assert exact numbers (`expected` below). The names are obviously fake.
  *
  * The shape mirrors production on 13 Oct 2026 (masters_desk_sync_meta /
- * sis_sync_meta): 15 classes, 13 sections, 44 subjects, 35 staff of whom 34
+ * sis_sync_meta): 15 classes, 14 sections, 44 subjects, 35 staff of whom 34
  * are active, ~250 current-year children — and the awkward parts that broke
  * production before, kept on purpose:
  *  - 30 % of children carry 2–4 per-year rows (one active row per year,
@@ -73,8 +73,15 @@ const CLASS_NAMES = [
   "VI", "VII", "VIII", "IX", "X", "XI", "XII",
 ] as const;
 
-/** Classes 1–13 (Nursery … X) have one section, A; XI and XII have none — 13 sections. */
+/**
+ * Classes 1–13 (Nursery … X) have one section, A, and every child sits in
+ * one of them. XII has an EMPTY section A (no children): the one class with
+ * a section that no fee group matches — the built-in 2026-27 groups cover
+ * Nursery–X — which student-upgrade.spec moves a child into. XI has none.
+ * 14 sections.
+ */
 const SECTIONED_CLASSES = 13;
+const EMPTY_SECTION_CLASS = 15; // XII
 
 export const classId = (k: number) => `e2e_cls_${pad(k, 2)}`;
 export const sectionId = (k: number) => `e2e_sec_${pad(k, 2)}a`;
@@ -87,6 +94,7 @@ function buildClasses(): { classes: SchoolClass[]; sections: Section[] } {
   for (let k = 1; k <= SECTIONED_CLASSES; k++) {
     sections.push({ id: sectionId(k), classId: classId(k), name: "A", isActive: true });
   }
+  sections.push({ id: sectionId(EMPTY_SECTION_CLASS), classId: classId(EMPTY_SECTION_CLASS), name: "A", isActive: true });
   return { classes, sections };
 }
 
@@ -333,6 +341,26 @@ function buildTimetable(): TimetableState {
 
 export const CURRENT_CHILDREN = 250;
 
+/**
+ * The one child with a fee group, and that group (class II, Promoted,
+ * 2026-27): the Students → Upgrade test moves this child to the next class,
+ * for which no group matches, and the child must keep this group
+ * (e2e/specs/student-upgrade). Class II, not LKG: the school's built-in
+ * Foundation structure (lib/feeStructureFoundation202627 — "Promoted ·
+ * Foundation (Nur–UKG)") matches every move inside Nursery–UKG, so an LKG
+ * child moving to UKG always finds a group (CI, 15–20 Oct 2026).
+ * Child 239 sits in class II (sectionOfChild: (239-1) % 13 + 1 = 5) and has
+ * no earlier-year rows (239 % 10 = 9). The group is INACTIVE (see feeGroups
+ * below) so no other child is matched to it.
+ */
+export const UPGRADE_CHILD_INDEX = 239;
+export const UPGRADE_FEE_GROUP = {
+  id: "e2e_fg_ii_promote",
+  code: "E2E-II-P",
+  name: "E2E II Promoted",
+  classKey: 5,
+} as const;
+
 const CHILD_FIRST = [
   "Aarav", "Bhavya", "Chirag", "Diya", "Eshan", "Fatima", "Gaurav", "Hiral", "Ishaan", "Jiya",
   "Kabir", "Lavanya", "Manan", "Nisha", "Om", "Pari", "Qasim", "Riya", "Shaurya", "Tanvi",
@@ -407,6 +435,7 @@ function buildSis(): { households: Household[]; students: SisStudent[] } {
         sectionId: sectionId(k),
         academicYearCode: AY_CURRENT,
         rollNo: String(Math.ceil(i / SECTIONED_CLASSES)),
+        ...(i === UPGRADE_CHILD_INDEX ? { feeGroupId: UPGRADE_FEE_GROUP.id } : {}),
       }),
     );
     // Earlier years' rows: a class lower per year; the third extra row is an
@@ -629,6 +658,24 @@ export function buildFixture(): E2eFixture {
     sections,
     subjects,
     classSubjects,
+    feeGroups: [
+      {
+        id: UPGRADE_FEE_GROUP.id,
+        code: UPGRADE_FEE_GROUP.code,
+        name: UPGRADE_FEE_GROUP.name,
+        academicYearCode: AY_CURRENT,
+        studentType: "PROMOTE",
+        classIds: [classId(UPGRADE_FEE_GROUP.classKey)],
+        // Inactive: held by child 239 only. An active group for class II would
+        // be resolved for every other Promoted class II child too (lib/masters
+        // resolveFeeGroupId) — it has no structure lines, so their checkout
+        // answered 503 (parent-web-dues spec, 20 Oct 2026). A retired group a
+        // child still holds is also the realistic case for "keep current".
+        isActive: false,
+        structurePublishedAt: null,
+        structurePublishedBy: "",
+      },
+    ],
     // The Staff module owns these; they are seeded through its own write path.
     staff: [],
     departments: [],
