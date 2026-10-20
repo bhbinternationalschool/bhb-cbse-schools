@@ -2596,4 +2596,45 @@ class LHi extends L {
   String dateSheetMinutes(String minutes) {
     return '$minutes मिनट';
   }
+
+  @override
+  String get visitorMobileOptional => 'मोबाइल नंबर (वैकल्पिक)';
+
+  @override
+  String get numberOfPeople => 'कितने लोग';
+
+  @override
+  String get vehicleNumberOptional => 'वाहन नंबर (वैकल्पिक)';
+
+  @override
+  String get visitorAddressOptional => 'पता (वैकल्पिक)';
+
+  @override
+  String get scanIdCard => 'पहचान पत्र स्कैन करें';
+
+  @override
+  String get scanNumberPlate => 'नंबर प्लेट स्कैन करें';
+
+  @override
+  String get readFromIdCheck => 'पहचान पत्र से पढ़ा — जाँच लें';
+
+  @override
+  String get readFromPlateCheck => 'नंबर प्लेट से पढ़ा — जाँच लें';
+
+  @override
+  String get readFromBillCheck => 'बिल से पढ़ा — जाँच लें';
+
+  @override
+  String get readingThePhoto => 'फ़ोटो पढ़ी जा रही है…';
+
+  @override
+  String get readTheBill => 'बिल पढ़ें';
+
+  @override
+  String get aadhaarLast4Only => 'आधार के केवल अंतिम 4 अंक रखे जाते हैं';
+
+  @override
+  String visitorPeopleCount(int count) {
+    return '$count लोग';
+  }
 }

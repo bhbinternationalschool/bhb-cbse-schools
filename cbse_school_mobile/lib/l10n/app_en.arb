@@ -1530,5 +1530,19 @@
   "dateSheetTitle": "Date sheet",
   "dateSheetNone": "No upcoming exams have been published for this child yet.",
   "dateSheetMinutes": "{minutes} min",
-  "@dateSheetMinutes": {"placeholders": {"minutes": {"type": "String"}}}
+  "@dateSheetMinutes": {"placeholders": {"minutes": {"type": "String"}}},
+  "visitorMobileOptional": "Mobile number (optional)",
+  "numberOfPeople": "Number of people",
+  "vehicleNumberOptional": "Vehicle number (optional)",
+  "visitorAddressOptional": "Address (optional)",
+  "scanIdCard": "Scan ID card",
+  "scanNumberPlate": "Scan number plate",
+  "readFromIdCheck": "Read from ID — check",
+  "readFromPlateCheck": "Read from plate — check",
+  "readFromBillCheck": "Read from bill — check",
+  "readingThePhoto": "Reading the photo…",
+  "readTheBill": "Read the bill",
+  "aadhaarLast4Only": "Aadhaar is kept as the last 4 digits only",
+  "visitorPeopleCount": "{count} people",
+  "@visitorPeopleCount": {"placeholders": {"count": {"type": "int"}}}
 }

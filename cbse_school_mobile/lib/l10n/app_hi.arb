@@ -751,5 +751,18 @@
   "resultsPrintHint": "रिपोर्ट कार्ड प्रिंट करने या PDF में सहेजने के लिए स्कूल की वेबसाइट पर अभिभावक पोर्टल खोलें और परिणाम में जाएँ।",
   "dateSheetTitle": "परीक्षा कार्यक्रम",
   "dateSheetNone": "इस बच्चे की कोई आने वाली परीक्षा अभी प्रकाशित नहीं हुई है।",
-  "dateSheetMinutes": "{minutes} मिनट"
+  "dateSheetMinutes": "{minutes} मिनट",
+  "visitorMobileOptional": "मोबाइल नंबर (वैकल्पिक)",
+  "numberOfPeople": "कितने लोग",
+  "vehicleNumberOptional": "वाहन नंबर (वैकल्पिक)",
+  "visitorAddressOptional": "पता (वैकल्पिक)",
+  "scanIdCard": "पहचान पत्र स्कैन करें",
+  "scanNumberPlate": "नंबर प्लेट स्कैन करें",
+  "readFromIdCheck": "पहचान पत्र से पढ़ा — जाँच लें",
+  "readFromPlateCheck": "नंबर प्लेट से पढ़ा — जाँच लें",
+  "readFromBillCheck": "बिल से पढ़ा — जाँच लें",
+  "readingThePhoto": "फ़ोटो पढ़ी जा रही है…",
+  "readTheBill": "बिल पढ़ें",
+  "aadhaarLast4Only": "आधार के केवल अंतिम 4 अंक रखे जाते हैं",
+  "visitorPeopleCount": "{count} लोग"
 }
