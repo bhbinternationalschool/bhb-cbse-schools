@@ -93,10 +93,15 @@ async function main(): Promise<void> {
   record("rpc: erp_versions answers (service key)", first.status === 200 && keys.length > 0, `HTTP ${first.status}, ${keys.length} keys`);
   // 35 in production before 1.5; data-layer 1.5 adds website_desk_sync_meta
   // and udise_sheet_desk_sync_meta (the generic write route's two desks);
-  // admission_survey_sync_meta (the survey team & beats rows, 15 Oct 2026).
+  // admission_survey_sync_meta (the survey team & beats rows, 15 Oct 2026);
+  // erp_notifications_sync_meta (the notification inbox, 20 Oct 2026).
   record(
-    "rpc: one key per *_sync_meta table present (38)",
-    syncMetaKeys.length === 38 && syncMetaKeys.includes("website") && syncMetaKeys.includes("udise_sheet") && syncMetaKeys.includes("admission_survey"),
+    "rpc: one key per *_sync_meta table present (39)",
+    syncMetaKeys.length === 39 &&
+      syncMetaKeys.includes("website") &&
+      syncMetaKeys.includes("udise_sheet") &&
+      syncMetaKeys.includes("admission_survey") &&
+      syncMetaKeys.includes("erp_notifications"),
     `${syncMetaKeys.length} desk keys: ${syncMetaKeys.join(" ")}`,
   );
   record("rpc: dropped purchase/store desks are absent, not an error", !("purchase" in v) && !("store" in v) && !("store_state" in v), "purchase, store, store_state absent");
