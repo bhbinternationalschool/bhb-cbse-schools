@@ -84,6 +84,17 @@ export function StaffRegistrationCollectApp({
   function ensureLeadState():
     | { ok: true; state: ReturnType<typeof loadAdmissions>; id: string }
     | { ok: false; reason: string } {
+    // data-layer 2.1h: never record a fee or build a UPI link before the
+    // school's setup has answered — the UPI id would be the built-in
+    // fallback and the fee head blank (main did exactly that on a cold page).
+    if (!masters) {
+      return {
+        ok: false,
+        reason: mastersQ.isError
+          ? "The school's setup could not load — reload the page and try again."
+          : "The school's setup is still loading — wait a moment and try again.",
+      };
+    }
     let state = loadAdmissions();
     let id = leadId;
 

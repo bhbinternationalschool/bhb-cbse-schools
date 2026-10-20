@@ -10,7 +10,7 @@
  * record and the audit trail.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import {
   buildReportCard,
@@ -110,6 +110,12 @@ export function RemarksPanel(props: {
     masters,
     canEdit,
   } = props;
+  // Read at rebuild time, as the old page-copy read was — NOT a rebuild trigger: a
+  // Masters answer arriving from the versions poll must not wipe typed remarks.
+  const mastersRef = useRef(masters);
+  useEffect(() => {
+    mastersRef.current = masters;
+  }, [masters]);
 
   const [rows, setRows] = useState<RowState[]>([]);
 
@@ -156,7 +162,7 @@ export function RemarksPanel(props: {
     // Every store once for the section, not once per child.
     const deps: ExamDeps = {
       state: loadExams(),
-      masters,
+      masters: mastersRef.current,
       sis: loadSis(),
       attendance: loadAttendance(),
       holdChecks: checkHoldsForStudents(
@@ -205,7 +211,7 @@ export function RemarksPanel(props: {
     setRows(next);
     setDirty(false);
     setExpanded(new Set());
-  }, [ay, term, sectionId, classId, roster, subjects, sheet, classLabel, masters]);
+  }, [ay, term, sectionId, classId, roster, subjects, sheet, classLabel]);
 
   function factsFor(row: RowState): StudentRemarkFacts | null {
     const st = roster.find((s) => s.id === row.studentId);
