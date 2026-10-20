@@ -252,6 +252,8 @@ SELFTESTS=(
   test:payment-link-reuse
   test:student-leave-status-guard
   test:ptm-row-stamps
+  test:ptm-schedule
+  test:attendance-month-register-edit
   test:propel-robot
   test:library-ebooks
   test:pinnacle-books
