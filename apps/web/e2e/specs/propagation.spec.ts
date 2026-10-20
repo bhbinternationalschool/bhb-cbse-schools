@@ -129,6 +129,7 @@ const SUBJECT_OBSERVERS: Observer[] = [
   },
   {
     path: "/masters?tab=subjects",
+    kernel: true, // 2.1h
     open: async (page) => {
       await page.getByRole("tab", { name: "3 · Subjects by class" }).click({ timeout: 20_000 });
       await pickV(page);
