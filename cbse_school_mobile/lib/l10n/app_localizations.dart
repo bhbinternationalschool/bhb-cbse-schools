@@ -4532,6 +4532,216 @@ abstract class L {
   /// In en, this message translates to:
   /// **'{minutes} min'**
   String dateSheetMinutes(String minutes);
+
+  /// No description provided for @mrEditHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap a box to mark it. Tap a date to fill that day for every child not yet marked, then tap the exceptions.'**
+  String get mrEditHint;
+
+  /// No description provided for @mrViewOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'View only — the class teacher (or the office) fills this class\'s month register.'**
+  String get mrViewOnly;
+
+  /// No description provided for @mrUnsavedCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} unsaved change(s)'**
+  String mrUnsavedCount(String count);
+
+  /// No description provided for @mrSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get mrSave;
+
+  /// No description provided for @mrDiscard.
+  ///
+  /// In en, this message translates to:
+  /// **'Discard'**
+  String get mrDiscard;
+
+  /// No description provided for @mrDiscardTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Discard unsaved changes?'**
+  String get mrDiscardTitle;
+
+  /// No description provided for @mrDiscardBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The marks you changed have not been saved.'**
+  String get mrDiscardBody;
+
+  /// No description provided for @mrKeepEditing.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep editing'**
+  String get mrKeepEditing;
+
+  /// No description provided for @mrClearMark.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear mark'**
+  String get mrClearMark;
+
+  /// No description provided for @mrFillDayTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Fill {date}'**
+  String mrFillDayTitle(String date);
+
+  /// No description provided for @mrFillDayBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Every child not yet marked on this day gets the mark you choose. Marks already there stay.'**
+  String get mrFillDayBody;
+
+  /// No description provided for @mrFillDayDone.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} children marked — tap the exceptions, then Save.'**
+  String mrFillDayDone(String count);
+
+  /// No description provided for @mrFillDayNothing.
+  ///
+  /// In en, this message translates to:
+  /// **'Every child already has a mark on this day.'**
+  String get mrFillDayNothing;
+
+  /// No description provided for @mrSavedDays.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved {count} day(s).'**
+  String mrSavedDays(String count);
+
+  /// No description provided for @mrNotSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Not saved: {reasons}'**
+  String mrNotSaved(String reasons);
+
+  /// No description provided for @ptmScheduleButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Schedule PTM'**
+  String get ptmScheduleButton;
+
+  /// No description provided for @ptmScheduleTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Schedule a PTM'**
+  String get ptmScheduleTitle;
+
+  /// No description provided for @ptmScheduleName.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get ptmScheduleName;
+
+  /// No description provided for @ptmScheduleNameDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Parent-teacher meeting'**
+  String get ptmScheduleNameDefault;
+
+  /// No description provided for @ptmScheduleDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Date'**
+  String get ptmScheduleDate;
+
+  /// No description provided for @ptmScheduleEndDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Last day (if more than one day)'**
+  String get ptmScheduleEndDate;
+
+  /// No description provided for @ptmScheduleClasses.
+  ///
+  /// In en, this message translates to:
+  /// **'Classes'**
+  String get ptmScheduleClasses;
+
+  /// No description provided for @ptmScheduleClassesHintTeacher.
+  ///
+  /// In en, this message translates to:
+  /// **'Only the classes you teach. A PTM is for the whole class — each of its teachers adds their own slots.'**
+  String get ptmScheduleClassesHintTeacher;
+
+  /// No description provided for @ptmScheduleClassesHintOffice.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick one or more classes. One PTM covers all of them.'**
+  String get ptmScheduleClassesHintOffice;
+
+  /// No description provided for @ptmScheduleSelectAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Select all'**
+  String get ptmScheduleSelectAll;
+
+  /// No description provided for @ptmScheduleMode.
+  ///
+  /// In en, this message translates to:
+  /// **'How'**
+  String get ptmScheduleMode;
+
+  /// No description provided for @ptmModeInPerson.
+  ///
+  /// In en, this message translates to:
+  /// **'In person'**
+  String get ptmModeInPerson;
+
+  /// No description provided for @ptmModeVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Video'**
+  String get ptmModeVideo;
+
+  /// No description provided for @ptmModePhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone'**
+  String get ptmModePhone;
+
+  /// No description provided for @ptmScheduleNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Note for parents (optional)'**
+  String get ptmScheduleNote;
+
+  /// No description provided for @ptmScheduleSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Schedule'**
+  String get ptmScheduleSave;
+
+  /// No description provided for @ptmScheduleNeedClass.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick at least one class.'**
+  String get ptmScheduleNeedClass;
+
+  /// No description provided for @ptmScheduleNeedName.
+  ///
+  /// In en, this message translates to:
+  /// **'Give the PTM a name.'**
+  String get ptmScheduleNeedName;
+
+  /// No description provided for @ptmScheduleDone.
+  ///
+  /// In en, this message translates to:
+  /// **'PTM scheduled — now add your slots to it.'**
+  String get ptmScheduleDone;
+
+  /// No description provided for @ptmScheduleNoClasses.
+  ///
+  /// In en, this message translates to:
+  /// **'You have no classes to schedule a PTM for — ask the office to add yours (Staff → Duties).'**
+  String get ptmScheduleNoClasses;
 }
 
 class _LDelegate extends LocalizationsDelegate<L> {

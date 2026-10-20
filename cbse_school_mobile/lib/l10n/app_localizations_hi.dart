@@ -2596,4 +2596,125 @@ class LHi extends L {
   String dateSheetMinutes(String minutes) {
     return '$minutes मिनट';
   }
+
+  @override
+  String get mrEditHint =>
+      'किसी खाने को दबाकर हाज़िरी लगाएँ। तारीख़ दबाकर उस दिन के सभी बिना-हाज़िरी बच्चों को एक साथ भरें, फिर अपवाद बदलें।';
+
+  @override
+  String get mrViewOnly =>
+      'केवल देखने के लिए — इस कक्षा का मासिक रजिस्टर कक्षाध्यापक (या दफ़्तर) भरते हैं।';
+
+  @override
+  String mrUnsavedCount(String count) {
+    return '$count बदलाव सहेजे नहीं गए';
+  }
+
+  @override
+  String get mrSave => 'सहेजें';
+
+  @override
+  String get mrDiscard => 'रद्द करें';
+
+  @override
+  String get mrDiscardTitle => 'बिना सहेजे बदलाव छोड़ दें?';
+
+  @override
+  String get mrDiscardBody => 'आपके बदले हुए निशान अभी सहेजे नहीं गए हैं।';
+
+  @override
+  String get mrKeepEditing => 'बदलाव जारी रखें';
+
+  @override
+  String get mrClearMark => 'निशान हटाएँ';
+
+  @override
+  String mrFillDayTitle(String date) {
+    return '$date भरें';
+  }
+
+  @override
+  String get mrFillDayBody =>
+      'इस दिन जिन बच्चों की हाज़िरी नहीं लगी, उन्हें चुना गया निशान मिलेगा। पहले से लगे निशान नहीं बदलेंगे।';
+
+  @override
+  String mrFillDayDone(String count) {
+    return '$count बच्चों की हाज़िरी भरी — अपवाद बदलें, फिर सहेजें।';
+  }
+
+  @override
+  String get mrFillDayNothing => 'इस दिन सभी बच्चों का निशान पहले से लगा है।';
+
+  @override
+  String mrSavedDays(String count) {
+    return '$count दिन सहेजे गए।';
+  }
+
+  @override
+  String mrNotSaved(String reasons) {
+    return 'नहीं सहेजा गया: $reasons';
+  }
+
+  @override
+  String get ptmScheduleButton => 'पीटीएम तय करें';
+
+  @override
+  String get ptmScheduleTitle => 'पीटीएम तय करें';
+
+  @override
+  String get ptmScheduleName => 'नाम';
+
+  @override
+  String get ptmScheduleNameDefault => 'अभिभावक-शिक्षक बैठक';
+
+  @override
+  String get ptmScheduleDate => 'तारीख़';
+
+  @override
+  String get ptmScheduleEndDate => 'आख़िरी दिन (एक से ज़्यादा दिन हो तो)';
+
+  @override
+  String get ptmScheduleClasses => 'कक्षाएँ';
+
+  @override
+  String get ptmScheduleClassesHintTeacher =>
+      'केवल वे कक्षाएँ जिन्हें आप पढ़ाते हैं। पीटीएम पूरी कक्षा के लिए होता है — उसके हर शिक्षक अपने समय जोड़ते हैं।';
+
+  @override
+  String get ptmScheduleClassesHintOffice =>
+      'एक या अधिक कक्षाएँ चुनें। एक पीटीएम इन सबके लिए होगा।';
+
+  @override
+  String get ptmScheduleSelectAll => 'सभी चुनें';
+
+  @override
+  String get ptmScheduleMode => 'कैसे';
+
+  @override
+  String get ptmModeInPerson => 'आमने-सामने';
+
+  @override
+  String get ptmModeVideo => 'वीडियो';
+
+  @override
+  String get ptmModePhone => 'फ़ोन';
+
+  @override
+  String get ptmScheduleNote => 'अभिभावकों के लिए नोट (वैकल्पिक)';
+
+  @override
+  String get ptmScheduleSave => 'तय करें';
+
+  @override
+  String get ptmScheduleNeedClass => 'कम से कम एक कक्षा चुनें।';
+
+  @override
+  String get ptmScheduleNeedName => 'पीटीएम का नाम लिखें।';
+
+  @override
+  String get ptmScheduleDone => 'पीटीएम तय हो गया — अब इसमें अपने समय जोड़ें।';
+
+  @override
+  String get ptmScheduleNoClasses =>
+      'पीटीएम के लिए आपकी कोई कक्षा नहीं है — दफ़्तर से अपनी कक्षाएँ जुड़वाएँ (Staff → Duties)।';
 }

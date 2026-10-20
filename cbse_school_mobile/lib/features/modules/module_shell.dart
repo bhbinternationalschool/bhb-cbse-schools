@@ -42,7 +42,9 @@ class ModuleShell<T> extends StatefulWidget {
   /// Null shows the generic "Nothing here yet." in the app's language.
   final String? emptyText;
   final bool Function(T data)? isEmpty;
-  final Widget Function(
+
+  /// May return null to show no button for this data.
+  final Widget? Function(
     BuildContext context,
     T data,
     Future<void> Function() reload,
@@ -115,7 +117,10 @@ class _ModuleShellState<T> extends State<ModuleShell<T>> {
         // language he cannot read.
         actions: [
           if (widget.guideId != null)
-            ScreenGuideButton(guideId: widget.guideId!, screenLabel: widget.title),
+            ScreenGuideButton(
+              guideId: widget.guideId!,
+              screenLabel: widget.title,
+            ),
           const LanguageToggle(onLight: true),
         ],
       ),

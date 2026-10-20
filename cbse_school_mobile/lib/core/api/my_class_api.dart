@@ -5,6 +5,7 @@ part of "api_client.dart";
 //   GET  /api/v1/staff/class-students[?sectionId=]
 //   POST /api/v1/staff/class-sheet
 //   GET  /api/v1/attendance/month?classId&sectionId&month=YYYY-MM
+//   POST /api/v1/attendance/month   (one register write per changed day)
 // The helpers _s / _i / _d / _b / _list live in staff_api.dart (same library).
 
 /// Every value of a `{key: value}` object as text; a missing object is empty.
@@ -239,6 +240,22 @@ class MonthRegister {
   final List<MonthRegisterStudent> students;
 }
 
+/// What a month-register save did: days written, and every change the
+/// server refused (a future day, a holiday, a child not admitted yet…) or
+/// could not write — nothing is dropped silently.
+class MonthRegisterSaveResult {
+  MonthRegisterSaveResult.fromJson(Map<String, dynamic> j)
+    : saved = ((j["saved"] as List?) ?? const []).map((e) => "$e").toList(),
+      refused = ((j["refused"] as List?) ?? const []).map((e) => "$e").toList(),
+      failed = ((j["failed"] as List?) ?? const []).map((e) => "$e").toList();
+
+  final List<String> saved;
+  final List<String> refused;
+  final List<String> failed;
+
+  List<String> get problems => [...refused, ...failed];
+}
+
 extension MyClassApi on ApiClient {
   /// The class teacher's children (or, for the office, [sectionId]'s).
   Future<ClassStudentsData> fetchClassStudents({String sectionId = ""}) async {
@@ -280,4 +297,23 @@ extension MyClassApi on ApiClient {
       await _getData("/api/v1/attendance/month?$q"),
     );
   }
+
+  /// Saves edited cells of the month register. [days] is
+  /// `[{date, marks: [{studentId, status}]}]` with only the changed
+  /// children — the server merges each day over what is saved and writes
+  /// one register per changed day (never the whole month). Only the class
+  /// teacher or the office may (403 otherwise).
+  Future<MonthRegisterSaveResult> saveMonthRegister({
+    required String classId,
+    required String sectionId,
+    required String month,
+    required List<Map<String, dynamic>> days,
+  }) async => MonthRegisterSaveResult.fromJson(
+    await _postData("/api/v1/attendance/month", {
+      "classId": classId,
+      "sectionId": sectionId,
+      "month": month,
+      "days": days,
+    }),
+  );
 }

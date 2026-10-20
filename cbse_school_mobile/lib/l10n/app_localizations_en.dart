@@ -2595,4 +2595,125 @@ class LEn extends L {
   String dateSheetMinutes(String minutes) {
     return '$minutes min';
   }
+
+  @override
+  String get mrEditHint =>
+      'Tap a box to mark it. Tap a date to fill that day for every child not yet marked, then tap the exceptions.';
+
+  @override
+  String get mrViewOnly =>
+      'View only — the class teacher (or the office) fills this class\'s month register.';
+
+  @override
+  String mrUnsavedCount(String count) {
+    return '$count unsaved change(s)';
+  }
+
+  @override
+  String get mrSave => 'Save';
+
+  @override
+  String get mrDiscard => 'Discard';
+
+  @override
+  String get mrDiscardTitle => 'Discard unsaved changes?';
+
+  @override
+  String get mrDiscardBody => 'The marks you changed have not been saved.';
+
+  @override
+  String get mrKeepEditing => 'Keep editing';
+
+  @override
+  String get mrClearMark => 'Clear mark';
+
+  @override
+  String mrFillDayTitle(String date) {
+    return 'Fill $date';
+  }
+
+  @override
+  String get mrFillDayBody =>
+      'Every child not yet marked on this day gets the mark you choose. Marks already there stay.';
+
+  @override
+  String mrFillDayDone(String count) {
+    return '$count children marked — tap the exceptions, then Save.';
+  }
+
+  @override
+  String get mrFillDayNothing => 'Every child already has a mark on this day.';
+
+  @override
+  String mrSavedDays(String count) {
+    return 'Saved $count day(s).';
+  }
+
+  @override
+  String mrNotSaved(String reasons) {
+    return 'Not saved: $reasons';
+  }
+
+  @override
+  String get ptmScheduleButton => 'Schedule PTM';
+
+  @override
+  String get ptmScheduleTitle => 'Schedule a PTM';
+
+  @override
+  String get ptmScheduleName => 'Name';
+
+  @override
+  String get ptmScheduleNameDefault => 'Parent-teacher meeting';
+
+  @override
+  String get ptmScheduleDate => 'Date';
+
+  @override
+  String get ptmScheduleEndDate => 'Last day (if more than one day)';
+
+  @override
+  String get ptmScheduleClasses => 'Classes';
+
+  @override
+  String get ptmScheduleClassesHintTeacher =>
+      'Only the classes you teach. A PTM is for the whole class — each of its teachers adds their own slots.';
+
+  @override
+  String get ptmScheduleClassesHintOffice =>
+      'Pick one or more classes. One PTM covers all of them.';
+
+  @override
+  String get ptmScheduleSelectAll => 'Select all';
+
+  @override
+  String get ptmScheduleMode => 'How';
+
+  @override
+  String get ptmModeInPerson => 'In person';
+
+  @override
+  String get ptmModeVideo => 'Video';
+
+  @override
+  String get ptmModePhone => 'Phone';
+
+  @override
+  String get ptmScheduleNote => 'Note for parents (optional)';
+
+  @override
+  String get ptmScheduleSave => 'Schedule';
+
+  @override
+  String get ptmScheduleNeedClass => 'Pick at least one class.';
+
+  @override
+  String get ptmScheduleNeedName => 'Give the PTM a name.';
+
+  @override
+  String get ptmScheduleDone => 'PTM scheduled — now add your slots to it.';
+
+  @override
+  String get ptmScheduleNoClasses =>
+      'You have no classes to schedule a PTM for — ask the office to add yours (Staff → Duties).';
 }

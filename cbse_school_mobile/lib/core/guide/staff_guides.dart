@@ -163,6 +163,9 @@ const List<ScreenGuide> staffScreenGuides = [
       "Grey columns marked **H** are holidays and Sundays.",
       "Under each name, **P/W** shows days present out of working days this month.",
       "The last row counts how many children were present each day.",
+      "Class teacher or office: tap a box to set P, A, L (late), HD or LE (leave).",
+      "Tap a date to fill that day for every child not yet marked (e.g. all P), then tap the absentees.",
+      "Tap **Save** at the bottom; a holiday or a future day is never saved.",
     ],
     stepsHi: [
       "पहले आपकी अपनी कक्षा खुलती है; दूसरी कक्षा के लिए ऊपर दो-तीर वाला बटन दबाएँ।",
@@ -171,6 +174,9 @@ const List<ScreenGuide> staffScreenGuides = [
       "**H** लिखे स्लेटी कॉलम छुट्टी और रविवार हैं।",
       "हर नाम के नीचे **P/W** इस महीने के कार्य-दिवसों में से उपस्थित दिन दिखाता है।",
       "आख़िरी पंक्ति हर दिन उपस्थित बच्चों की गिनती है।",
+      "कक्षाध्यापक या दफ़्तर: खाना दबाकर P, A, L (देर), HD या LE (छुट्टी) लगाएँ।",
+      "तारीख़ दबाकर उस दिन के सभी बिना-हाज़िरी बच्चों को एक साथ भरें (जैसे सब P), फिर अनुपस्थित बदलें।",
+      "नीचे **सहेजें** दबाएँ; छुट्टी या आगे का दिन कभी सहेजा नहीं जाता।",
     ],
     tipsEn: [
       "**L** means Late (counted present). Leave is **LE**; **HD** is a half day.",
@@ -865,6 +871,7 @@ const List<ScreenGuide> staffScreenGuides = [
     titleHi: "पीटीएम के दिन अभिभावकों से मिलें",
     stepsEn: [
       "See your PTM slots with time and room, and which family has booked each.",
+      "To call a new PTM, tap **Schedule PTM**: pick the date and one or more of your classes.",
       "To add your own slots to a PTM the office opened, tap **Add my slots**.",
       "Change a slot nobody has booked with the pencil, or remove it with the bin.",
       "Tap **Call** to phone a parent if needed.",
@@ -874,6 +881,7 @@ const List<ScreenGuide> staffScreenGuides = [
     ],
     stepsHi: [
       "अपने पीटीएम समय, कमरा और हर समय किस परिवार ने बुक किया, देखें।",
+      "नया पीटीएम बुलाने के लिए **पीटीएम तय करें** दबाएँ: तारीख़ और अपनी एक या अधिक कक्षाएँ चुनें।",
       "दफ़्तर के खोले पीटीएम में अपने समय जोड़ने के लिए **समय जोड़ें** दबाएँ।",
       "जिस समय को किसी ने बुक नहीं किया, उसे पेंसिल से बदलें या कूड़ेदान से हटाएँ।",
       "ज़रूरत हो तो अभिभावक को **फ़ोन करें** दबाएँ।",
