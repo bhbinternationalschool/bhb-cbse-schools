@@ -31,6 +31,7 @@ import "../modules/receipts_screen.dart";
 import "../modules/teachers_screen.dart";
 import "../modules/transport_screen.dart";
 import "../modules/tutor_screen.dart";
+import "../modules/games_screen.dart";
 import "../profile/profile_screen.dart";
 import "home_stats.dart";
 import "student_id_screen.dart";
@@ -49,6 +50,9 @@ const _modules = [
   _Module("Attendance", Icons.fact_check_outlined, ModuleTone.teal),
   _Module("Homework", Icons.menu_book_outlined, ModuleTone.purple),
   _Module("Tutor", Icons.school_outlined, ModuleTone.amber),
+  // Learning games: practice from the class's own books, number dash and
+  // teacher-launched competitions; time played and stars for the parent.
+  _Module("Games", Icons.sports_esports_outlined, ModuleTone.purple),
   _Module("Notices", Icons.campaign_outlined, ModuleTone.coral),
   _Module("Transport", Icons.directions_bus_outlined, ModuleTone.pink),
   // Results and Date sheet open real data: only exams the school released
@@ -74,6 +78,7 @@ String _moduleLabel(BuildContext context, String id) {
     "Attendance" => l.homeModuleAttendance,
     "Homework" => l.homeModuleHomework,
     "Tutor" => l.homeModuleTutor,
+    "Games" => l.homeModuleGames,
     "Notices" => l.notices,
     "Transport" => l.transport,
     "Online class" => l.homeModuleOnlineClass,
@@ -376,6 +381,8 @@ class _HomeScreenState extends State<HomeScreen> {
           studentId: child.id,
           child: child,
         );
+      case "Games":
+        screen = GamesScreen(backend: ApiGamesBackend(api), child: child);
       case "Notices":
         screen = NoticesScreen(api: api);
       case "PTM":
