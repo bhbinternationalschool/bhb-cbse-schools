@@ -169,6 +169,8 @@ class FakeGames implements GamesBackend {
       "correct": got,
       "stars": got,
       "seconds": 40,
+      // A competition still open: the server holds the right options back.
+      "answersAt": reveal ? null : "2026-10-21T05:30:00.000Z",
       "review": [
         for (var i = 0; i < 3; i++)
           {
@@ -176,7 +178,7 @@ class FakeGames implements GamesBackend {
             "picture": null,
             "options": ["a", "b", "c"],
             "chosen": i < answers.length ? answers[i][2] : null,
-            "correctIndex": right[i],
+            "correctIndex": reveal ? right[i] : null,
           },
       ],
     });
@@ -485,6 +487,51 @@ void main() {
     expect(find.text("Right!"), findsNothing);
     expect(find.text("Not quite"), findsNothing);
     await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets("a competition still open: the review shows the child's choices and when the answers come, never a right option", (
+    tester,
+  ) async {
+    await _phone(tester);
+    final fake = FakeGames(reveal: false);
+    final session = await fake.startGame({"competitionId": "gmc_1"});
+    await tester.pumpWidget(
+      _app(
+        _framed(
+          GamePlayScreen(
+            backend: fake,
+            session: session,
+            title: "III vs IV maths",
+            studentId: "stu_1",
+            feedbackDelay: const Duration(milliseconds: 10),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    for (final o in [1, 0, 0]) {
+      await tester.tap(find.byKey(ValueKey("games-option-$o")));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await tester.pumpAndSettle();
+    expect(fake.finished, ["gms_1"]);
+    expect(find.byKey(const ValueKey("games-answers-after-close")), findsOneWidget);
+    expect(find.textContaining("Right answer:"), findsNothing);
+    expect(find.text("Your answer: b"), findsOneWidget);
+    await _shot(tester, "games-result-competition-375");
+  });
+
+  test("a review item with no right option (competition open) parses as null, not option 0", () {
+    final r = GameResult.fromJson({
+      "total": 1,
+      "answersAt": "2026-10-21T05:30:00.000Z",
+      "review": [
+        {"prompt": "Q", "options": ["a", "b"], "chosen": 1, "correctIndex": null},
+      ],
+    });
+    expect(r.review.single.correctIndex, isNull);
+    expect(r.answersAt, isNotNull);
   });
 
   testWidgets("when the server's clock runs out, the game finishes", (

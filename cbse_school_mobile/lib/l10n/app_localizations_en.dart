@@ -2759,6 +2759,11 @@ class LEn extends L {
   }
 
   @override
+  String gamesAnswersAfterClose(String time) {
+    return 'The right answers appear when the competition closes ($time).';
+  }
+
+  @override
   String gamesClassBoard(String label) {
     return '$label this week';
   }

@@ -866,14 +866,30 @@ class GameResultScreen extends StatelessWidget {
             l.gamesReview,
             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
           ),
+          if (result.answersAt != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 4),
+              child: Text(
+                l.gamesAnswersAfterClose(
+                  MaterialLocalizations.of(context).formatTimeOfDay(
+                    TimeOfDay.fromDateTime(result.answersAt!),
+                  ),
+                ),
+                key: const ValueKey("games-answers-after-close"),
+              ),
+            ),
           for (final r in result.review)
             Card(
               child: ListTile(
                 leading: Icon(
-                  r.chosen == r.correctIndex
+                  r.correctIndex == null
+                      ? Icons.help_outline
+                      : r.chosen == r.correctIndex
                       ? Icons.check_circle
                       : Icons.cancel_outlined,
-                  color: r.chosen == r.correctIndex
+                  color: r.correctIndex == null
+                      ? null
+                      : r.chosen == r.correctIndex
                       ? AppColors.success
                       : AppColors.warning,
                 ),
@@ -885,7 +901,8 @@ class GameResultScreen extends StatelessWidget {
                     r.chosen == null
                         ? l.gamesNotAnswered
                         : l.gamesYourAnswer(r.options[r.chosen!]),
-                    l.gamesRightAnswer(r.options[r.correctIndex]),
+                    if (r.correctIndex != null)
+                      l.gamesRightAnswer(r.options[r.correctIndex!]),
                   ].join("\n"),
                 ),
               ),

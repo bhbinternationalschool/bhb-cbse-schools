@@ -217,13 +217,16 @@ class GameReviewItem {
           .map((o) => "$o")
           .toList(),
       chosen = _giOrNull(j, "chosen"),
-      correctIndex = _gi(j, "correctIndex");
+      correctIndex = _giOrNull(j, "correctIndex");
 
   final String prompt;
   final String picture;
   final List<String> options;
   final int? chosen;
-  final int correctIndex;
+
+  /// Null while a competition is still open: the server holds the right
+  /// option back until it closes (GameResult.answersAt).
+  final int? correctIndex;
 }
 
 class GameResult {
@@ -236,6 +239,7 @@ class GameResult {
       correct = _gi(j, "correct"),
       stars = _gi(j, "stars"),
       seconds = _gi(j, "seconds"),
+      answersAt = DateTime.tryParse("${j["answersAt"] ?? ""}")?.toLocal(),
       review = _list(j, "review").map(GameReviewItem.fromJson).toList();
 
   final String sessionId;
@@ -246,6 +250,10 @@ class GameResult {
   final int correct;
   final int stars;
   final int seconds;
+
+  /// When a competition's right answers appear (it closes); null when they
+  /// are already in the review.
+  final DateTime? answersAt;
   final List<GameReviewItem> review;
 }
 

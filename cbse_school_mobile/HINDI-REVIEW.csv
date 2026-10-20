@@ -709,6 +709,7 @@ gamesDone,Learning games (parent),Done,हो गया
 gamesYourAnswer,Learning games (parent),Your answer: {answer},आपका उत्तर: {answer}
 gamesNotAnswered,Learning games (parent),Not answered,उत्तर नहीं दिया
 gamesRightAnswer,Learning games (parent),Right answer: {answer},सही उत्तर: {answer}
+gamesAnswersAfterClose,Learning games (parent),The right answers appear when the competition closes ({time}).,सही उत्तर प्रतियोगिता बंद होने पर ({time}) दिखेंगे।
 gamesClassBoard,Learning games (parent),{label} this week,इस सप्ताह {label}
 gamesSchoolBoard,Learning games (parent),Whole school this week,इस सप्ताह पूरा विद्यालय
 gamesRightPerPlayer,Learning games (parent),{avg} right per player,प्रति खिलाड़ी {avg} सही

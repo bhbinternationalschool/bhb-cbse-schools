@@ -796,6 +796,7 @@
   "gamesYourAnswer": "आपका उत्तर: {answer}",
   "gamesNotAnswered": "उत्तर नहीं दिया",
   "gamesRightAnswer": "सही उत्तर: {answer}",
+  "gamesAnswersAfterClose": "सही उत्तर प्रतियोगिता बंद होने पर ({time}) दिखेंगे।",
   "gamesClassBoard": "इस सप्ताह {label}",
   "gamesSchoolBoard": "इस सप्ताह पूरा विद्यालय",
   "gamesRightPerPlayer": "प्रति खिलाड़ी {avg} सही",

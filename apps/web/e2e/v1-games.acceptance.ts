@@ -20,7 +20,14 @@
  *     refused; the leaderboard ranks the sections and shows first names only;
  *     a family of another section cannot read it.
  *  4. R6: with game_sessions unreadable, status is a 503, not a fresh day.
- * Everything written (game_* rows, the settings row) is removed at the end.
+ *  5. Review fixes (21 Oct 2026): a competition's answer review waits for its
+ *     close and every player has their own order; windows are 5–60 minutes
+ *     on one IST day; sections more than one grade band apart are refused; a
+ *     family outside a competition cannot make the server settle its games;
+ *     review / approve-as-written needs the subject in the grade; publisher
+ *     imports arrive pending and are approved per batch.
+ * Everything written (game_* rows, the settings row, the probe paper) is
+ * removed at the end; a papers slice that was there before is put back.
  */
 
 import { buildFixture, AY_CURRENT, classId, sectionId } from "./fixture";
@@ -58,6 +65,15 @@ async function cleanup(tid: string): Promise<void> {
   await db.remove(`game_competitions?tenant_id=eq.${tid}`);
   await db.remove(`game_questions?tenant_id=eq.${tid}`);
   await db.remove(`game_settings?tenant_id=eq.${tid}`);
+}
+
+/** The papers slice as it was before the probe paper (none = no row). */
+let prevPapers: { payload: unknown[] }[] | null = null;
+
+async function restorePapers(tid: string, prev: { payload: unknown[] }[] | null): Promise<void> {
+  if (prev === null) return;
+  if (prev.length) await rest().insert("exam_papers_desk_slices", [{ tenant_id: tid, slice_key: "papers", payload: prev[0]!.payload }], "tenant_id,slice_key");
+  else await rest().remove(`exam_papers_desk_slices?tenant_id=eq.${tid}&slice_key=eq.papers`);
 }
 
 async function main(): Promise<void> {
@@ -124,6 +140,79 @@ async function main(): Promise<void> {
     const tPool = await call(app, "POST", "/api/v1/staff/games/pool", teacher, at("09:00"), { op: "add", classId: classId(6), subjectKey: "maths", prompt: "x?", options: ["a", "b"], answerIndex: 0 });
     r.record("a teacher cannot add to another class's pool", tPool.status === 403, String(tPool.status));
 
+    // ── 5. Review rights: the subject in the grade ─────────────────────────
+    // The timetable teacher has GK periods in III-A and V-A, nothing else.
+    const ttTeacher = { cookie: sessionCookieHeader(fx.sessions.timetableTeacher) };
+    await rest().insert("game_questions", [
+      { id: "e2e_gmq_maths3", tenant_id: tid, grade: 3, subject_key: "maths", prompt: "4 + 4 = ?", options: ["8", "9"], answer_index: 0, source: "ai", source_ref: "e2e:maths3", review: "pending" },
+      { id: "e2e_gmq_gk3", tenant_id: tid, grade: 3, subject_key: "gk", prompt: "Capital of India?", options: ["Delhi", "Agra"], answer_index: 0, source: "ai", source_ref: "e2e:gk3", review: "pending" },
+    ]);
+    const revGk = await call(app, "POST", "/api/v1/staff/games/pool", ttTeacher, at("09:00"), { op: "review", id: "e2e_gmq_gk3", review: "approved" });
+    r.record("a Class III GK teacher approves a Class III GK question", revGk.status === 200, `${revGk.status} ${revGk.text.slice(0, 80)}`);
+    const revMaths = await call(app, "POST", "/api/v1/staff/games/pool", ttTeacher, at("09:00"), { op: "review", id: "e2e_gmq_maths3", review: "approved" });
+    const maths3 = (await rest().select(`game_questions?id=eq.e2e_gmq_maths3&select=review`)) as { review: string }[];
+    r.record("but not a Class III maths question (grade alone is not enough)", revMaths.status === 403 && maths3[0]?.review === "pending", `${revMaths.status} ${maths3[0]?.review}`);
+    const addMaths = await call(app, "POST", "/api/v1/staff/games/pool", ttTeacher, at("09:00"), { op: "add", classId: classId(6), subjectKey: "maths", prompt: "6 + 1 = ?", options: ["7", "8"], answerIndex: 0 });
+    r.record("nor add a Class III maths question approved as written", addMaths.status === 403 && reason(addMaths) === "subject_not_taught", `${addMaths.status} ${reason(addMaths)}`);
+    const addGk = await call(app, "POST", "/api/v1/staff/games/pool", ttTeacher, at("09:00"), { op: "add", classId: classId(6), subjectKey: "gk", prompt: "Colour of the sky?", options: ["Blue", "Red"], answerIndex: 0 });
+    r.record("a GK question of her own is added", addGk.status === 200 && data(addGk).added === 1, `${addGk.status}`);
+    await rest().remove(`game_questions?tenant_id=eq.${tid}&subject_key=eq.gk`);
+    await rest().remove(`game_questions?id=eq.e2e_gmq_maths3`);
+
+    // ── 5. Publisher imports arrive pending; approved per batch ────────────
+    const gkSubject = fx.masters.subjects.find((x) => x.code === "GK");
+    const probePaper = {
+      id: "e2e_games_probe_paper",
+      classId: classId(6),
+      subjectId: gkSubject?.id ?? "",
+      title: "GK probe paper",
+      status: "ready",
+      sets: [
+        {
+          id: "e2e_set_a",
+          setCode: "A",
+          sections: [
+            {
+              id: "e2e_sec_a",
+              questions: [
+                { id: "q1", type: "mcq", text: "Which is a planet?", options: ["Mars", "Moon", "Sun"], answerKey: "Mars" },
+                { id: "q2", type: "mcq", text: "How many days in a week?", options: ["5", "7", "10"], answerKey: "7" },
+                { id: "q3", type: "true_false", text: "Fish live in water.", answerKey: "True" },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    prevPapers = (await rest().select(`exam_papers_desk_slices?tenant_id=eq.${tid}&slice_key=eq.papers&select=payload`)) as { payload: unknown[] }[];
+    const before = Array.isArray(prevPapers[0]?.payload) ? prevPapers[0]!.payload : [];
+    await rest().insert("exam_papers_desk_slices", [{ tenant_id: tid, slice_key: "papers", payload: [...before, probePaper] }], "tenant_id,slice_key");
+    const imp = await call(app, "POST", "/api/v1/staff/games/pool", principal, at("09:00"), { op: "import_papers", classId: classId(6) });
+    const batchId = String(data(imp).batchId ?? "");
+    // Only the probe paper's rows (a paper another check left on the stack is not counted).
+    const probeRows = `game_questions?tenant_id=eq.${tid}&source=eq.publisher_key&source_ref=like.e2e_games_probe_paper:*`;
+    const imported = (await rest().select(`${probeRows}&select=id,review,batch_id&order=source_ref`)) as { id: string; review: string; batch_id: string }[];
+    r.record(
+      "the publisher's keyed questions arrive PENDING, as one batch",
+      imp.status === 200 && Number(data(imp).added) >= 3 && imported.length === 3 && imported.every((q) => q.review === "pending" && q.batch_id === batchId && !!batchId),
+      `${imp.status} ${JSON.stringify(imported.map((q) => q.review))} ${batchId}`,
+    );
+    const ids = imported.map((q) => q.id);
+    const wrongSubject = await call(app, "POST", "/api/v1/staff/games/pool", ttTeacher, at("09:00"), { op: "approve_batch", classId: classId(6), batchId, subjectKey: "maths", ids });
+    r.record("approving the batch as maths: refused to a GK teacher", wrongSubject.status === 403, String(wrongSubject.status));
+    const nursery = await call(app, "POST", "/api/v1/staff/games/pool", teacher, at("09:00"), { op: "approve_batch", classId: classId(6), batchId, subjectKey: "gk", ids });
+    r.record("approving it: refused to a teacher of another class", nursery.status === 403, String(nursery.status));
+    const approveAll = await call(app, "POST", "/api/v1/staff/games/pool", ttTeacher, at("09:00"), { op: "approve_batch", classId: classId(6), batchId, subjectKey: "gk", ids: ids.slice(0, 2) });
+    const afterApprove = (await rest().select(`${probeRows}&select=id,review`)) as { id: string; review: string }[];
+    r.record(
+      "the GK teacher approves the batch — only the questions she was shown",
+      approveAll.status === 200 && data(approveAll).approved === 2 && afterApprove.filter((q) => q.review === "approved").length === 2 && afterApprove.find((q) => q.id === ids[2])?.review === "pending",
+      `${approveAll.status} ${approveAll.text.slice(0, 80)}`,
+    );
+    await rest().remove(`game_questions?tenant_id=eq.${tid}&source=eq.publisher_key`);
+    await restorePapers(tid, prevPapers);
+    prevPapers = null;
+
     // ── 3. A competition (morning, in school hours) ───────────────────────
     const pair = [
       { classId: classId(6), sectionId: sectionId(6) },
@@ -171,10 +260,30 @@ async function main(): Promise<void> {
     // It is school time: practice is refused, a competition still plays.
     const pa = await playComp(famA, kidA.id, 4, at("10:05"));
     r.record("a competition plays in school hours", pa.start.status === 200, `${pa.start.status} ${reason(pa.start)}`);
-    r.record("in a competition the right option is not revealed per question", pa.firstAnswer?.status === 200 && obj(obj(pa.firstAnswer.body).data).correctIndex === null, pa.firstAnswer?.text.slice(0, 100) ?? "");
+    r.record(
+      "in a competition neither the right option nor right/wrong is said per question",
+      pa.firstAnswer?.status === 200 && obj(obj(pa.firstAnswer.body).data).correctIndex === null && obj(obj(pa.firstAnswer.body).data).correct === null,
+      pa.firstAnswer?.text.slice(0, 100) ?? "",
+    );
     r.record("A: 4 right of 5", !!pa.finish && data(pa.finish).correct === 4 && data(pa.finish).stars === 4, pa.finish?.text.slice(0, 100) ?? "");
+    // Review fix 1: while the competition is open the review holds the answers back.
+    const reviewOpen = pa.finish ? arr(data(pa.finish).review).map((x) => obj(x)) : [];
+    r.record(
+      "while it is open, A's review has A's own choices but no right options (shown at 11:00)",
+      reviewOpen.length === 5 && reviewOpen.every((x) => x.correctIndex === null) && reviewOpen.some((x) => x.chosen !== null) && data(pa.finish!).answersAt === at("11:00"),
+      JSON.stringify({ answersAt: pa.finish ? data(pa.finish).answersAt : null, first: reviewOpen[0] }).slice(0, 200),
+    );
     const pb = await playComp(famB, kidB.id, 2, at("10:10"));
     r.record("B: 2 right of 5", !!pb.finish && data(pb.finish).correct === 2, pb.finish?.text.slice(0, 100) ?? "");
+    const layouts = (await rest().select(`game_sessions?competition_id=eq.${cid}&select=student_id,items`)) as { student_id: string; items: { prompt: string; options: string[] }[] }[];
+    const layoutOf = (sid: string) => (layouts.find((x) => x.student_id === sid)?.items ?? []).map((it) => `${it.prompt}:${it.options.join("/")}`);
+    const la = layoutOf(kidA.id);
+    const lb = layoutOf(kidB.id);
+    r.record(
+      "A and B get the same questions in their own order and option order",
+      la.length === 5 && lb.length === 5 && la.join("|") !== lb.join("|") && [...la.map((x) => x.split(":")[0])].sort().join() === [...lb.map((x) => x.split(":")[0])].sort().join(),
+      JSON.stringify({ a: la.slice(0, 2), b: lb.slice(0, 2) }).slice(0, 200),
+    );
     const twice = await call(app, "POST", "/api/v1/games/start", famA, at("10:20"), { studentId: kidA.id, competitionId: cid });
     r.record("one attempt per child", twice.status === 409 && reason(twice) === "already_played", `${twice.status} ${reason(twice)}`);
     const outsider = await call(app, "POST", "/api/v1/games/start", famC, at("10:20"), { studentId: kidC.id, competitionId: cid });
@@ -195,6 +304,59 @@ async function main(): Promise<void> {
     r.record("a competing family sees the same leaderboard", parentBoard.status === 200 && arr(data(parentBoard).sections).length === 2 && !parentBoard.text.includes(kidA.fullName) && !parentBoard.text.includes("createdByStaffId"), `${parentBoard.status}`);
     const otherBoard = await call(app, "GET", `/api/v1/games/leaderboard?studentId=${kidC.id}&competitionId=${cid}`, famC, at("10:30"));
     r.record("another section's family cannot", otherBoard.status === 404, String(otherBoard.status));
+    // After the close, finishing again shows A the right options.
+    const pastClose = await call(app, "POST", "/api/v1/games/finish", famA, at("11:01"), { sessionId: String(data(pa.start).sessionId) });
+    const reviewClosed = arr(data(pastClose).review).map((x) => obj(x));
+    r.record(
+      "after the close A's review shows the right options",
+      pastClose.status === 200 && reviewClosed.length === 5 && reviewClosed.every((x) => typeof x.correctIndex === "number") && data(pastClose).correct === 4,
+      pastClose.text.slice(0, 160),
+    );
+
+    // ── 5. Review fixes: windows, grade bands ─────────────────────────────
+    const long = await call(app, "POST", "/api/v1/staff/games/competitions", principal, at("10:30"), { op: "create", game: "maths_speed", sections: pair, durationMinutes: 61 });
+    r.record("a competition longer than an hour is refused", long.status === 400, `${long.status} ${long.text.slice(0, 80)}`);
+    const weekLong = await call(app, "POST", "/api/v1/staff/games/competitions", principal, at("10:30"), { op: "create", game: "maths_speed", sections: pair, durationMinutes: 7 * 24 * 60 });
+    r.record("a week-long competition is refused", weekLong.status === 400, `${weekLong.status}`);
+    const midnight = await call(app, "POST", "/api/v1/staff/games/competitions", principal, at("10:30"), { op: "create", game: "maths_speed", sections: pair, opensAt: at("23:40"), durationMinutes: 30 });
+    r.record("a competition over midnight is refused", midnight.status === 400, `${midnight.status} ${midnight.text.slice(0, 80)}`);
+    const farApart = await call(app, "POST", "/api/v1/staff/games/competitions", principal, at("10:30"), {
+      op: "create",
+      game: "maths_speed",
+      sections: [
+        { classId: classId(3), sectionId: sectionId(3) }, // UKG — pre-primary
+        { classId: classId(6), sectionId: sectionId(6) }, // III — two bands up
+      ],
+      durationMinutes: 30,
+    });
+    r.record("UKG-A against III-A (two grade bands apart) is refused", farApart.status === 400 && reason(farApart) === "grade_bands", `${farApart.status} ${reason(farApart)}`);
+    const nextBand = await call(app, "POST", "/api/v1/staff/games/competitions", principal, at("10:30"), {
+      op: "create",
+      game: "maths_speed",
+      sections: [
+        { classId: classId(5), sectionId: sectionId(5) }, // II
+        { classId: classId(6), sectionId: sectionId(6) }, // III — the next band
+      ],
+      durationMinutes: 30,
+    });
+    r.record("II-A against III-A (neighbouring bands) is allowed", nextBand.status === 200, `${nextBand.status} ${nextBand.text.slice(0, 80)}`);
+
+    // ── 5. A family outside a competition cannot make the server write ────
+    const made3 = await call(app, "POST", "/api/v1/staff/games/competitions", principal, at("15:00"), { op: "create", game: "maths_speed", sections: pair, durationMinutes: 60 });
+    const cid3 = String(obj(data(made3).competition).id ?? "");
+    const abandoned = await call(app, "POST", "/api/v1/games/start", famB, at("15:00"), { studentId: kidB.id, competitionId: cid3 });
+    const abandonedId = String(data(abandoned).sessionId ?? "");
+    // B's app closes mid-game; the 60 s clock runs out by 15:05.
+    const outsiderBoard = await call(app, "GET", `/api/v1/games/leaderboard?studentId=${kidC.id}&competitionId=${cid3}`, famC, at("15:05"));
+    const stillOpen = (await rest().select(`game_sessions?id=eq.${abandonedId}&select=status`)) as { status: string }[];
+    r.record(
+      "an outside family's leaderboard request is refused before anything is settled",
+      abandoned.status === 200 && outsiderBoard.status === 404 && stillOpen[0]?.status === "playing",
+      `${abandoned.status} ${outsiderBoard.status} ${stillOpen[0]?.status}`,
+    );
+    const insiderBoard = await call(app, "GET", `/api/v1/games/leaderboard?studentId=${kidB.id}&competitionId=${cid3}`, famB, at("15:05"));
+    const settled = (await rest().select(`game_sessions?id=eq.${abandonedId}&select=status`)) as { status: string }[];
+    r.record("a competing family's request settles the abandoned game", insiderBoard.status === 200 && settled[0]?.status === "done", `${insiderBoard.status} ${settled[0]?.status}`);
     // ── 2. The limits are the server's ────────────────────────────────────
     const school = await call(app, "POST", "/api/v1/games/start", famA, at("10:00"), { studentId: kidA.id, game: "maths_speed" });
     r.record("practice refused in school hours", school.status === 403 && reason(school) === "school_hours", `${school.status} ${reason(school)}`);
@@ -265,7 +427,7 @@ async function main(): Promise<void> {
 
     // ── Evening ───────────────────────────────────────────────────────────
     // A competition does not run past 9 pm.
-    const evening = await call(app, "POST", "/api/v1/staff/games/competitions", principal, at("20:30"), { op: "create", game: "maths_speed", sections: pair, durationMinutes: 120 });
+    const evening = await call(app, "POST", "/api/v1/staff/games/competitions", principal, at("20:30"), { op: "create", game: "maths_speed", sections: pair, durationMinutes: 60 });
     const eid = String(obj(data(evening).competition).id ?? "");
     const nine = await call(app, "POST", "/api/v1/games/start", famB, at("21:05"), { studentId: kidB.id, competitionId: eid });
     r.record("a competition is not played after 9 pm", nine.status === 403 && reason(nine) === "night", `${nine.status} ${reason(nine)}`);
@@ -277,6 +439,7 @@ async function main(): Promise<void> {
     const blind = await withUnreadableTable(stateDir, "game_sessions", () => call(app, "GET", `/api/v1/games/status?studentId=${kidB.id}`, famB, at("17:00")));
     r.record("game_sessions unreadable: status is 503, not a fresh allowance", blind.status === 503, String(blind.status));
   } finally {
+    await restorePapers(tid, prevPapers);
     await cleanup(tid);
   }
   r.finish("v1-games.acceptance");

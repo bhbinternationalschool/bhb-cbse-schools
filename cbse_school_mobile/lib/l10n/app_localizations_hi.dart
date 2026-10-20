@@ -2758,6 +2758,11 @@ class LHi extends L {
   }
 
   @override
+  String gamesAnswersAfterClose(String time) {
+    return 'सही उत्तर प्रतियोगिता बंद होने पर ($time) दिखेंगे।';
+  }
+
+  @override
   String gamesClassBoard(String label) {
     return 'इस सप्ताह $label';
   }

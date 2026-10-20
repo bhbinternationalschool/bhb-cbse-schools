@@ -4797,6 +4797,12 @@ abstract class L {
   /// **'Right answer: {answer}'**
   String gamesRightAnswer(String answer);
 
+  /// No description provided for @gamesAnswersAfterClose.
+  ///
+  /// In en, this message translates to:
+  /// **'The right answers appear when the competition closes ({time}).'**
+  String gamesAnswersAfterClose(String time);
+
   /// No description provided for @gamesClassBoard.
   ///
   /// In en, this message translates to:

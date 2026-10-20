@@ -1587,6 +1587,8 @@
   "gamesNotAnswered": "Not answered",
   "gamesRightAnswer": "Right answer: {answer}",
   "@gamesRightAnswer": {"placeholders": {"answer": {"type": "String"}}},
+  "gamesAnswersAfterClose": "The right answers appear when the competition closes ({time}).",
+  "@gamesAnswersAfterClose": {"placeholders": {"time": {"type": "String"}}},
   "gamesClassBoard": "{label} this week",
   "@gamesClassBoard": {"placeholders": {"label": {"type": "String"}}},
   "gamesSchoolBoard": "Whole school this week",
