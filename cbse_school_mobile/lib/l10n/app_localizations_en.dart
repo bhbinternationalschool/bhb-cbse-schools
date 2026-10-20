@@ -2595,4 +2595,151 @@ class LEn extends L {
   String dateSheetMinutes(String minutes) {
     return '$minutes min';
   }
+
+  @override
+  String get bcAudienceAllParents => 'All parents';
+
+  @override
+  String get bcAudienceSections => 'Classes / sections';
+
+  @override
+  String get bcAudienceStaff => 'Staff';
+
+  @override
+  String get bcAudienceRoutes => 'Bus routes';
+
+  @override
+  String get bcAudienceFeeDefaulters => 'Fee defaulters';
+
+  @override
+  String get bcOwnSectionsOnly =>
+      'You can message the families of your own sections.';
+
+  @override
+  String get bcStaffAll => 'All';
+
+  @override
+  String get bcStaffTeaching => 'Teaching';
+
+  @override
+  String get bcStaffNonTeaching => 'Non-teaching';
+
+  @override
+  String get bcStaffRolesHint => 'Roles (leave empty for everyone)';
+
+  @override
+  String get bcPickAtLeastOne => 'Pick at least one.';
+
+  @override
+  String get bcChannel => 'Send by';
+
+  @override
+  String get bcChannelWhatsapp => 'WhatsApp + app';
+
+  @override
+  String get bcChannelApp => 'App only (free)';
+
+  @override
+  String get bcChannelAppHint =>
+      'Only an app notification — no WhatsApp message, no cost. Reaches families and staff who have the school app.';
+
+  @override
+  String get bcModeTemplate => 'WhatsApp template';
+
+  @override
+  String get bcModeCustom => 'Custom message';
+
+  @override
+  String get bcChooseTemplate => 'Choose a template';
+
+  @override
+  String get bcTemplatesNotLoaded => 'Templates could not be loaded.';
+
+  @override
+  String get bcNoTemplates =>
+      'No template is approved in both Hindi and English yet.';
+
+  @override
+  String get bcAutoFilledHint =>
+      'Names, child and class are filled in for each family.';
+
+  @override
+  String get bcCustomTitle => 'Title (optional)';
+
+  @override
+  String get bcCustomHint =>
+      'Goes as typed to anyone who messaged the school in the last 24 hours. Everyone else gets it inside the approved “School notice” template, which WhatsApp delivers to all.';
+
+  @override
+  String get bcCustomTemplateNotReady =>
+      'The “School notice” template is not approved in both languages, so people outside the 24-hour window cannot be reached.';
+
+  @override
+  String get bcLoadFailed => 'Could not load broadcast options.';
+
+  @override
+  String get bcReadyToSend => 'Ready to send';
+
+  @override
+  String bcFamiliesInAudience(String count) {
+    return 'In this audience: $count';
+  }
+
+  @override
+  String bcAsFreeText(String count) {
+    return 'As free text (inside 24 hours): $count';
+  }
+
+  @override
+  String bcViaTemplate(String count) {
+    return 'Inside the approved template: $count';
+  }
+
+  @override
+  String bcCannotReach(String count) {
+    return 'Cannot be reached (template not approved in their language): $count';
+  }
+
+  @override
+  String get bcWindowUnknown =>
+      'The 24-hour window could not be read, so everyone gets the template.';
+
+  @override
+  String bcSkipped(String optOut, String dead, String noNumber) {
+    return 'Skipped: $optOut opted out, $dead not on WhatsApp, $noNumber no number';
+  }
+
+  @override
+  String bcEstimate(String amount, String gst) {
+    return 'Estimated WhatsApp cost: $amount + $gst% GST';
+  }
+
+  @override
+  String get bcEstimateDefaults =>
+      'Estimate uses default rates — confirm them on the web (WhatsApp usage).';
+
+  @override
+  String get bcEstimateUnknown => 'Cost estimate not loaded.';
+
+  @override
+  String get bcAppNotificationToo =>
+      'An app notification also goes to everyone in the audience who has the app (free).';
+
+  @override
+  String bcSendNow(String count) {
+    return 'Send to $count now';
+  }
+
+  @override
+  String get bcConfirmTitle => 'Send this message?';
+
+  @override
+  String bcConfirmBody(String audience, String count) {
+    return '$audience: $count will get it. This cannot be undone.';
+  }
+
+  @override
+  String bcResult(String sent, String failed, String deferred, String push) {
+    return 'WhatsApp: $sent accepted, $failed failed, $deferred held for quiet hours. App notifications: $push.';
+  }
 }

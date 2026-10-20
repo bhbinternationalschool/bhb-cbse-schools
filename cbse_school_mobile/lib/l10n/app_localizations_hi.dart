@@ -2596,4 +2596,151 @@ class LHi extends L {
   String dateSheetMinutes(String minutes) {
     return '$minutes मिनट';
   }
+
+  @override
+  String get bcAudienceAllParents => 'सभी अभिभावक';
+
+  @override
+  String get bcAudienceSections => 'कक्षाएँ / सेक्शन';
+
+  @override
+  String get bcAudienceStaff => 'स्टाफ';
+
+  @override
+  String get bcAudienceRoutes => 'बस रूट';
+
+  @override
+  String get bcAudienceFeeDefaulters => 'फीस बकायादार';
+
+  @override
+  String get bcOwnSectionsOnly =>
+      'आप केवल अपने सेक्शन के परिवारों को संदेश भेज सकते हैं।';
+
+  @override
+  String get bcStaffAll => 'सभी';
+
+  @override
+  String get bcStaffTeaching => 'शिक्षण';
+
+  @override
+  String get bcStaffNonTeaching => 'गैर-शिक्षण';
+
+  @override
+  String get bcStaffRolesHint => 'पद (सभी के लिए खाली छोड़ें)';
+
+  @override
+  String get bcPickAtLeastOne => 'कम से कम एक चुनें।';
+
+  @override
+  String get bcChannel => 'भेजने का तरीका';
+
+  @override
+  String get bcChannelWhatsapp => 'WhatsApp + ऐप';
+
+  @override
+  String get bcChannelApp => 'केवल ऐप (मुफ़्त)';
+
+  @override
+  String get bcChannelAppHint =>
+      'केवल ऐप सूचना — कोई WhatsApp संदेश नहीं, कोई खर्च नहीं। स्कूल ऐप वाले परिवारों और स्टाफ तक पहुँचती है।';
+
+  @override
+  String get bcModeTemplate => 'WhatsApp टेम्पलेट';
+
+  @override
+  String get bcModeCustom => 'अपना संदेश';
+
+  @override
+  String get bcChooseTemplate => 'टेम्पलेट चुनें';
+
+  @override
+  String get bcTemplatesNotLoaded => 'टेम्पलेट लोड नहीं हो सके।';
+
+  @override
+  String get bcNoTemplates =>
+      'अभी कोई टेम्पलेट हिंदी और अंग्रेज़ी दोनों में स्वीकृत नहीं है।';
+
+  @override
+  String get bcAutoFilledHint =>
+      'नाम, बच्चा और कक्षा हर परिवार के लिए अपने आप भरे जाते हैं।';
+
+  @override
+  String get bcCustomTitle => 'शीर्षक (वैकल्पिक)';
+
+  @override
+  String get bcCustomHint =>
+      'जिन्होंने पिछले 24 घंटे में स्कूल को संदेश भेजा है, उन्हें यह जैसा लिखा है वैसा जाएगा। बाकी सभी को यह स्वीकृत “विद्यालय सूचना” टेम्पलेट के अंदर मिलेगा, जिसे WhatsApp सभी तक पहुँचाता है।';
+
+  @override
+  String get bcCustomTemplateNotReady =>
+      '“विद्यालय सूचना” टेम्पलेट दोनों भाषाओं में स्वीकृत नहीं है, इसलिए 24 घंटे से बाहर वाले लोगों तक संदेश नहीं पहुँचेगा।';
+
+  @override
+  String get bcLoadFailed => 'ब्रॉडकास्ट विकल्प लोड नहीं हो सके।';
+
+  @override
+  String get bcReadyToSend => 'भेजने के लिए तैयार';
+
+  @override
+  String bcFamiliesInAudience(String count) {
+    return 'इस समूह में: $count';
+  }
+
+  @override
+  String bcAsFreeText(String count) {
+    return 'सीधा संदेश (24 घंटे के अंदर): $count';
+  }
+
+  @override
+  String bcViaTemplate(String count) {
+    return 'स्वीकृत टेम्पलेट के अंदर: $count';
+  }
+
+  @override
+  String bcCannotReach(String count) {
+    return 'नहीं पहुँच सकते (उनकी भाषा में टेम्पलेट स्वीकृत नहीं): $count';
+  }
+
+  @override
+  String get bcWindowUnknown =>
+      '24 घंटे की जानकारी पढ़ी नहीं जा सकी, इसलिए सभी को टेम्पलेट जाएगा।';
+
+  @override
+  String bcSkipped(String optOut, String dead, String noNumber) {
+    return 'छोड़े गए: $optOut ने मना किया, $dead WhatsApp पर नहीं, $noNumber का नंबर नहीं';
+  }
+
+  @override
+  String bcEstimate(String amount, String gst) {
+    return 'अनुमानित WhatsApp खर्च: $amount + $gst% GST';
+  }
+
+  @override
+  String get bcEstimateDefaults =>
+      'अनुमान डिफ़ॉल्ट दरों पर है — वेब पर (WhatsApp usage) दरें पक्की करें।';
+
+  @override
+  String get bcEstimateUnknown => 'खर्च का अनुमान लोड नहीं हुआ।';
+
+  @override
+  String get bcAppNotificationToo =>
+      'समूह में जिनके पास ऐप है, उन्हें ऐप सूचना भी जाएगी (मुफ़्त)।';
+
+  @override
+  String bcSendNow(String count) {
+    return 'अभी $count को भेजें';
+  }
+
+  @override
+  String get bcConfirmTitle => 'यह संदेश भेजें?';
+
+  @override
+  String bcConfirmBody(String audience, String count) {
+    return '$audience: $count को मिलेगा। इसे वापस नहीं लिया जा सकता।';
+  }
+
+  @override
+  String bcResult(String sent, String failed, String deferred, String push) {
+    return 'WhatsApp: $sent स्वीकार, $failed विफल, $deferred शांत समय के लिए रुके। ऐप सूचनाएँ: $push।';
+  }
 }

@@ -28,6 +28,7 @@ part "teacher_ai_api.dart";
 part "transport_register_api.dart";
 part "results_api.dart";
 part "notifications_api.dart";
+part "broadcast_audience_api.dart";
 
 /// Session cookie minted by the ERP (see web /api/auth/*).
 const _cookieName = "bhb_demo_session";
@@ -3000,6 +3001,7 @@ class ApiClient {
     "/api/v1/homework/post",
     "/api/v1/staff/class-gallery/complete",
     "/api/v1/staff/broadcast",
+    "/api/v1/staff/broadcast/audience",
     "/api/v1/owner/broadcast",
     // 35 s once in production (7 days to 15 Oct). No screen calls it today;
     // listed so a future caller does not inherit the 30 s deadline.
