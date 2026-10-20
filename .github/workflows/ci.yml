@@ -142,6 +142,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:online-classes
 
+      - name: Self-test — a member of staff sets only their own signature, and only a real small image
+        working-directory: apps/web
+        run: npm run test:staff-signature
+
       - name: Self-test — an in-class answer is a child's work, and the note only says what the teacher said
         working-directory: apps/web
         run: npm run test:online-class-qa
@@ -475,6 +479,7 @@ jobs:
           npm run test:concession-ground
           npm run test:fee-backdate
           npm run test:month-groups
+          npm run test:month-range
           npm run test:receipt-auto-wa
           npm run test:review-login
           npm run test:desk-sync-status
@@ -517,6 +522,7 @@ jobs:
           npm run test:closing-balance
           npm run test:accounts-position-rbac
           npm run test:voucher-filter
+          npm run test:pg-settlement-failed
           npm run test:voucher-amend
           npm run test:transport-finance
           npm run test:loans
@@ -621,6 +627,7 @@ jobs:
           npm run test:transport-shifts
           npm run test:transport-phone-empty-desk
           npm run test:transport-stop-links
+          npm run test:transport-paid-months
           npm run test:transport-boarding-log
           npm run test:transport-fuel-register
           npm run test:transport-vehicle-costs
@@ -684,6 +691,8 @@ jobs:
           npm run test:reference-views
           npm run test:masters-bridge
           npm run test:staff-requests
+          npm run test:survey-team-plan
+          npm run test:parent-api-scope
 
   build:
     name: Production build

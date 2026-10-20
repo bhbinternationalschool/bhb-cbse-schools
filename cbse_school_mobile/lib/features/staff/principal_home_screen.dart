@@ -17,6 +17,7 @@ import "bus_register_screen.dart";
 import "vehicle_logbook_screen.dart";
 import "attendance_screen.dart";
 import "broadcast_screen.dart";
+import "class_gallery_screen.dart";
 import "class_message_screen.dart";
 import "ptm_teacher_screen.dart";
 import "admission_leads_screen.dart";
@@ -381,6 +382,19 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
           label: "Message my classes",
           tone: ModuleTone.coral,
           onTap: () => _push(ClassMessageScreen(api: widget.api)),
+        ),
+      ),
+    // The school's photos: post to the whole school or any class, and
+    // decide on what the AI check held (15 Oct 2026 — the principal had no
+    // way in on the phone).
+    if (_features.has("class_gallery"))
+      (
+        "class_gallery",
+        _Action(
+          icon: Icons.photo_library_outlined,
+          label: "Gallery",
+          tone: ModuleTone.pink,
+          onTap: () => _push(ClassGalleryScreen(api: widget.api)),
         ),
       ),
     if (_features.has("ptm_meet"))

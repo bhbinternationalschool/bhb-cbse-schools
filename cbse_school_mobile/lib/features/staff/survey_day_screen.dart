@@ -9,6 +9,7 @@ import "../../core/guide/screen_guides.dart";
 import "../../core/punch/punch_device_key.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
+import "survey_manage_screen.dart";
 import "survey_screen.dart";
 
 /// A field surveyor's day in the app (director, 13 Oct 2026) — the
@@ -149,6 +150,21 @@ class _SurveyDayScreenState extends State<SurveyDayScreen> {
       ts: ts,
       geo: geo,
       payload: payload,
+    );
+  }
+
+  /// The team leader's "team" / "manage" call, signed like every step
+  /// (extra = the change's op and target — surveyManageExtra).
+  Future<SurveyTeamInfo> _team(String action, [Map<String, dynamic>? change]) async {
+    final key = await PunchDeviceKey.load();
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final extra = action == "manage" ? surveyManageExtra(change ?? const {}) : "";
+    return widget.api.surveyTeamStep(
+      action: action,
+      deviceJwk: key.publicJwk,
+      signature: key.sign(PunchDeviceKey.surveyMessage(action: action, extra: extra, ts: ts)),
+      ts: ts,
+      change: change,
     );
   }
 
@@ -351,6 +367,20 @@ class _SurveyDayScreenState extends State<SurveyDayScreen> {
         style: AppText.bodySmallMuted,
       ),
       const SizedBox(height: 12),
+      if (s.canManage) ...[
+        OutlinedButton.icon(
+          key: const Key("survey-manage-team"),
+          icon: const Icon(Icons.groups_outlined),
+          onPressed: () async {
+            await Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => SurveyManageScreen(call: _team)),
+            );
+            if (mounted) await _load();
+          },
+          label: const Text("Manage team & beats · टीम और बीट"),
+        ),
+        const SizedBox(height: 12),
+      ],
       if (day == null) ..._startView(s) else ..._dayView(s, day),
       if (s.captures.isNotEmpty) ...[
         const SizedBox(height: 16),
@@ -375,13 +405,15 @@ class _SurveyDayScreenState extends State<SurveyDayScreen> {
             ),
           ),
       ],
+      ..._plainSurveyLink(),
     ];
   }
 
   List<Widget> _pairView() => [
     _note(
       "This phone is not registered for the survey yet. School staff: punch IN once at the gate from this app — "
-      "that registers it. Or ask the office for a 6-digit code (Admissions → Field survey → Team → Pair phone).",
+      "that registers it. Or ask the office for a 6-digit phone code (ERP: Admissions → Field survey → Team → "
+      "your name → Get phone code) and type it here. It works once, for 10 minutes.",
       ModuleTone.amber,
     ),
     const SizedBox(height: 12),
@@ -412,7 +444,8 @@ class _SurveyDayScreenState extends State<SurveyDayScreen> {
     const SizedBox(height: 16),
     TextButton.icon(
       icon: const Icon(Icons.map_outlined),
-      label: const Text("Record families without a survey day"),
+      key: const Key("survey-no-day"),
+      label: const Text("Record a family without a survey day · बिना सर्वे दिवस"),
       onPressed: () => Navigator.of(
         context,
       ).push(MaterialPageRoute(builder: (_) => SurveyScreen(api: widget.api))),

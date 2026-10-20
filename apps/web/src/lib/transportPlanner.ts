@@ -1049,7 +1049,13 @@ export function buildFleetRosters(
         // priced, measured, or handed to a driver. Carried explicitly so the
         // screen distinguishes it from a stop that merely has no distance.
         const stopLinkBroken = !stop;
-        const expected = expectedMonthlyFeePaise(route, stop, state.feePolicy);
+        // Exactly what the fee engine bills (computeTransportPeriodDues): no
+        // stop, no policy fee. Under a flat/per-km/slab policy this used to
+        // show the route's fee for a broken-link rider the engine bills ₹0 —
+        // a rider billed nothing, reported as billed.
+        const expected = stop
+          ? expectedMonthlyFeePaise(route, stop, state.feePolicy)
+          : 0;
         const fullFee = asg.monthlyFeePaise > 0 ? asg.monthlyFeePaise : expected;
         const fee = applyServiceMode(fullFee, asg.serviceMode);
         const km = stop?.distanceKm ?? 0;

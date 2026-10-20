@@ -168,4 +168,39 @@ assert.ok(
   "a split with nothing before it should be an edit, and should say so",
 );
 
+/* ── 15 Oct 2026: everything paid, nothing owing (Anvi Yadav) ───────
+ * Her assignment billed ₹0 (orphaned stop), so no transport due was owing;
+ * the floor fell to the current month and a 14 Sep stop change was split
+ * from 1 Sep — over a September paid on 10 Sep. Paid months must hold the
+ * floor even when nothing is owing. */
+{
+  const allPaid = ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"].map((m) =>
+    due(m, { paid: 50000 }),
+  );
+  const p = planTransportAmendment({
+    dues: allPaid,
+    currentEffectiveFrom: "2026-04-01",
+    currentMonth: "2026-09",
+  });
+  assert.equal(p.ok, true);
+  if (p.ok) {
+    assert.equal(p.plan.fromMonth, "2026-10", "a paid September is not re-priced");
+    assert.equal(p.plan.endCurrentOn, "2026-09-30");
+  }
+  const asked = planTransportAmendment({
+    dues: allPaid,
+    requestedMonth: "2026-09",
+    currentEffectiveFrom: "2026-04-01",
+    currentMonth: "2026-09",
+  });
+  assert.equal(asked.ok, false, "asking for the paid month is refused");
+  // Paid only in the past: the current month is still the floor.
+  const old = planTransportAmendment({
+    dues: [due("2026-04", { paid: 50000 })],
+    currentEffectiveFrom: "2026-04-01",
+    currentMonth: "2026-09",
+  });
+  assert.equal(old.ok && old.plan.fromMonth, "2026-09");
+}
+
 console.log("  ok");

@@ -17,7 +17,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { ExportMenu, RowActionMenu } from "@/components/ui/erp-grid";
-import { listSessionYearOptions, loadMasters, type MastersState } from "@/lib/masters";
+import { listSessionYearOptions, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { STAFF_CATEGORIES } from "@/lib/foundationMasters";
 import { nextAcademicYear, type ApproverRule, type ApproverScopeKind, type CarryPlan, type LeavePolicy, type LeavePolicyType } from "@/lib/staffLeaveRules";
 
@@ -68,7 +70,10 @@ async function call<T>(url: string, body?: unknown): Promise<T & { ok: boolean; 
 }
 
 export function StaffLeaveRulesPanel({ ay: sessionAy, canEdit }: { ay: string; canEdit: boolean }) {
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // Masters (years, departments) + the roster with each person's category
+  // (data-layer 2.1c). Null = not known yet: the steps wait rather than count
+  // "0 staff".
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [ay, setAy] = useState(sessionAy);
   const [step, setStep] = useState<Step>("policy");
   const [data, setData] = useState<PolicyResp | null>(null);
@@ -76,7 +81,6 @@ export function StaffLeaveRulesPanel({ ay: sessionAy, canEdit }: { ay: string; c
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => setMasters(loadMasters()), []);
   const years = useMemo(() => (masters ? listSessionYearOptions(masters) : []), [masters]);
   const staff = useMemo(() => (masters?.staff ?? []).filter((s) => s.status === "active").sort((a, b) => a.fullName.localeCompare(b.fullName)), [masters]);
   const nameOf = useCallback(
@@ -150,14 +154,16 @@ export function StaffLeaveRulesPanel({ ay: sessionAy, canEdit }: { ay: string; c
         <p className={`rounded-lg px-3 py-2 text-sm font-medium ${msg.bad ? "bg-[var(--danger-soft)] text-[var(--danger)]" : "bg-[var(--surface-sunken)] text-[var(--brand-deep)]"}`}>{msg.text}</p>
       ) : null}
 
-      {loadErr ? (
+      {mastersError ? (
+        <QueryError what="the school's setup" error={mastersError} retry={retryMasters} />
+      ) : loadErr ? (
         <div className={card}>
           <p className="text-sm font-semibold text-[var(--danger)]">Couldn&apos;t load the leave rules: {loadErr}</p>
           <button type="button" className={`${btn} mt-2`} onClick={() => void load()}>
             Try again
           </button>
         </div>
-      ) : !data ? (
+      ) : !data || !masters ? (
         <p className="text-sm text-[var(--muted)]">Loading leave rules…</p>
       ) : (
         <StepTabs steps={steps} value={step} onChange={setStep} aria-label="Leave rules steps">

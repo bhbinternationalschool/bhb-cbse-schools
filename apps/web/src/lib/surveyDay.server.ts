@@ -2,8 +2,8 @@ import "server-only";
 import { createHash, randomInt } from "crypto";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { deviceIdOf, type PunchJwk } from "@/lib/punchDevices.server";
-import { ensureAdmissionsHydratedServer } from "@/lib/admissionsPersistence";
-import { loadAdmissions, type SurveyTeamMember } from "@/lib/admissions";
+import { surveyTeamOrNull } from "@/lib/surveyTeam.server";
+import { surveyMemberKey, type SurveyBeatRow, type SurveyMemberRow } from "@/lib/surveyTeamShared";
 import { istParts } from "@/lib/punchSchedule";
 import {
   externalMemberKey,
@@ -25,6 +25,11 @@ import {
  */
 
 export type SurveyMember = {
+  /** The team row's id (admission_survey_members). */
+  id: string;
+  role: "leader" | "agent";
+  /** Beats this member works; [] = any active beat. */
+  beatIds: string[];
   memberKey: string;
   name: string;
   staffId: string;
@@ -33,8 +38,8 @@ export type SurveyMember = {
   mobile: string;
 };
 
-export function memberKeyOf(m: SurveyTeamMember): string {
-  return m.kind === "external" ? externalMemberKey(m.externalId) : m.staffId;
+export function memberKeyOf(m: Pick<SurveyMemberRow, "kind" | "staffId" | "externalId">): string {
+  return m.kind === "external" ? externalMemberKey(m.externalId) : surveyMemberKey(m);
 }
 
 export function istDateAndTime(nowMs = Date.now()): { date: string; time: string } {
@@ -44,19 +49,21 @@ export function istDateAndTime(nowMs = Date.now()): { date: string; time: string
   return { date: p.date, time: `${hh}:${mm}` };
 }
 
-/** The survey team as the office set it up (assigned members only). */
-export async function loadSurveyTeam(): Promise<SurveyTeamMember[] | null> {
-  try {
-    await ensureAdmissionsHydratedServer();
-    return (loadAdmissions().surveyTeam ?? []).filter((m) => m.assigned);
-  } catch {
-    return null;
-  }
+/**
+ * The survey team as stored (admission_survey_members, assigned members
+ * only), read through the erp_versions-keyed copy — an assignment made in
+ * the ERP is seen on the phone's next call. null = could not read.
+ */
+export async function loadSurveyTeam(): Promise<SurveyMemberRow[] | null> {
+  const team = await surveyTeamOrNull();
+  return team ? team.members.filter((m) => m.assigned) : null;
 }
 
-export async function loadSurveyBeats() {
-  await ensureAdmissionsHydratedServer();
-  return (loadAdmissions().surveyBeats ?? []).filter((b) => b.isActive);
+/** The active beats as stored; throws when they cannot be read (never "no beats"). */
+export async function loadSurveyBeats(): Promise<SurveyBeatRow[]> {
+  const team = await surveyTeamOrNull();
+  if (!team) throw new Error("Could not read the survey beats");
+  return team.beats.filter((b) => b.isActive);
 }
 
 export type WhoIs =
@@ -94,6 +101,9 @@ export async function surveyMemberForKey(jwk: PunchJwk): Promise<WhoIs> {
     ok: true,
     deviceId,
     member: {
+      id: m.id,
+      role: m.role,
+      beatIds: m.beatIds,
       memberKey: key,
       name: m.fullName,
       staffId: m.kind === "staff" ? m.staffId : "",
@@ -210,6 +220,17 @@ export async function completeSurveyPairing(input: {
     return { ok: false, error: "This code was just used. Ask the office for a new one.", status: 409 };
   }
   if (ownerKey === row.member_key) return { ok: true, memberKey: row.member_key };
+  // The team view shows each member's phone: move its change signal so an
+  // open office screen shows "registered" on its next versions poll.
+  const touchTeamSignal = () =>
+    ctx.sb
+      .from("admission_survey_sync_meta")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("tenant_id", ctx.tenantId)
+      .then(
+        () => undefined,
+        () => undefined,
+      );
   await ctx.sb
     .from("staff_punch_devices")
     .update({ status: "revoked", decided_by: "replaced by pairing code", decided_at: nowIso, updated_at: nowIso })
@@ -228,6 +249,7 @@ export async function completeSurveyPairing(input: {
     last_used_at: nowIso,
   });
   if (insErr) return { ok: false, error: "Could not register this phone — try again.", status: 503 };
+  await touchTeamSignal();
   return { ok: true, memberKey: row.member_key };
 }
 
@@ -359,7 +381,9 @@ export async function updateSurveyDay(
 }
 
 export async function recordSurveyCapture(input: {
-  dayId: string;
+  /** null = recorded without a survey day. */
+  dayId: string | null;
+  locatedBy?: "gps" | "map";
   memberKey: string;
   leadId: string;
   enquiryNo: string;
@@ -371,6 +395,7 @@ export async function recordSurveyCapture(input: {
   const { error } = await ctx.sb.from("survey_captures").insert({
     tenant_id: ctx.tenantId,
     survey_day_id: input.dayId,
+    located_by: input.locatedBy ?? "gps",
     member_key: input.memberKey,
     lead_id: input.leadId,
     enquiry_no: input.enquiryNo,
@@ -382,6 +407,7 @@ export async function recordSurveyCapture(input: {
 }
 
 export type SurveyCaptureRow = {
+  /** "" = recorded without a survey day. */
   surveyDayId: string;
   memberKey: string;
   leadId: string;
@@ -389,9 +415,28 @@ export type SurveyCaptureRow = {
   childName: string;
   geo: SurveyFix;
   capturedAt: string;
+  locatedBy: "gps" | "map";
 };
 
-/** Every day on one date, with its captures — the office's view. */
+const CAPTURE_COLS = "survey_day_id, member_key, lead_id, enquiry_no, child_name, geo, captured_at, located_by";
+
+function captureOf(c: Record<string, unknown>): SurveyCaptureRow {
+  return {
+    surveyDayId: c.survey_day_id ? String(c.survey_day_id) : "",
+    memberKey: String(c.member_key),
+    leadId: String(c.lead_id),
+    enquiryNo: String(c.enquiry_no || ""),
+    childName: String(c.child_name || ""),
+    geo: c.geo as SurveyFix,
+    capturedAt: String(c.captured_at),
+    locatedBy: c.located_by === "map" ? "map" : "gps",
+  };
+}
+
+/**
+ * Every day on one date, with its captures — the office's view — plus the
+ * families recorded that IST date without a survey day.
+ */
 export async function listSurveyDays(
   date: string,
 ): Promise<{ days: SurveyDay[]; captures: SurveyCaptureRow[] } | null> {
@@ -405,27 +450,32 @@ export async function listSurveyDays(
     .order("started_at", { ascending: true });
   if (error) return null;
   const days = (data ?? []).map((r) => fromRow(r as DayRow));
-  if (days.length === 0) return { days, captures: [] };
-  const { data: caps, error: capErr } = await ctx.sb
-    .from("survey_captures")
-    .select("survey_day_id, member_key, lead_id, enquiry_no, child_name, geo, captured_at")
-    .eq("tenant_id", ctx.tenantId)
-    .in(
-      "survey_day_id",
-      days.map((d) => d.id),
-    )
-    .order("captured_at", { ascending: true });
-  if (capErr) return null;
+  const from = new Date(`${date}T00:00:00+05:30`).toISOString();
+  const to = new Date(Date.parse(from) + 86_400_000).toISOString();
+  const [dayCaps, noDay] = await Promise.all([
+    days.length
+      ? ctx.sb
+          .from("survey_captures")
+          .select(CAPTURE_COLS)
+          .eq("tenant_id", ctx.tenantId)
+          .in(
+            "survey_day_id",
+            days.map((d) => d.id),
+          )
+          .order("captured_at", { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
+    ctx.sb
+      .from("survey_captures")
+      .select(CAPTURE_COLS)
+      .eq("tenant_id", ctx.tenantId)
+      .is("survey_day_id", null)
+      .gte("captured_at", from)
+      .lt("captured_at", to)
+      .order("captured_at", { ascending: true }),
+  ]);
+  if (dayCaps.error || noDay.error) return null;
   return {
     days,
-    captures: (caps ?? []).map((c) => ({
-      surveyDayId: String(c.survey_day_id),
-      memberKey: String(c.member_key),
-      leadId: String(c.lead_id),
-      enquiryNo: String(c.enquiry_no || ""),
-      childName: String(c.child_name || ""),
-      geo: c.geo as SurveyFix,
-      capturedAt: String(c.captured_at),
-    })),
+    captures: [...(dayCaps.data ?? []), ...(noDay.data ?? [])].map((c) => captureOf(c as Record<string, unknown>)),
   };
 }

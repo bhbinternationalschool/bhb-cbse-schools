@@ -11,7 +11,8 @@ import {
   staffAllowedSections,
   type ChatSectionRef,
 } from "@/lib/erpChatAccess";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis } from "@/lib/sis";
 import {
   computeLeaveDays,
@@ -110,7 +111,9 @@ async function postOutdoorDuty(
 export function StaffBroadcastButton() {
   const session = useDemoSession();
   const [open, setOpen] = useState(false);
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // Masters + the roster (data-layer 2.1c), asked for only once the panel is
+  // opened: this button sits in every page's header.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters({ enabled: open });
   const [audience, setAudience] = useState<Audience>("class_parents");
   const [mode, setMode] = useState<Mode>("message");
   const [sectionId, setSectionId] = useState("");
@@ -155,7 +158,6 @@ export function StaffBroadcastButton() {
 
   useEffect(() => {
     if (!open) return;
-    setMasters(loadMasters());
     setTemplates(listApprovedTemplates(loadWaTemplates()));
     void withHydrationSlot(() => ensureWaTemplatesHydrated()).then(() => {
       setTemplates(listApprovedTemplates(loadWaTemplates()));
@@ -519,7 +521,9 @@ export function StaffBroadcastButton() {
             <span className="ml-1 font-semibold">→</span>
           </a>
 
-          {sentResult ? (
+          {mastersError ? (
+            <QueryError what="the school's classes and staff" error={mastersError} retry={retryMasters} />
+          ) : sentResult ? (
             <div className="space-y-2 text-sm">
               <p>
                 Sent to {sentResult.sent ?? 0} of{" "}

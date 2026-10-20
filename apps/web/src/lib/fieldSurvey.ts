@@ -3,11 +3,9 @@
  * Beats/attendance live in admissions state; offline drafts in a separate localStorage key.
  */
 
-import { recordDeskDeletion } from "@/lib/deskNamedDeletes";
 import {
   createEnquiry,
   loadAdmissions,
-  saveAdmissions,
   sendLeadToRegistration,
   todayYmd,
   type AdmissionLead,
@@ -21,7 +19,6 @@ import {
   type SurveyWorkSession,
 } from "@/lib/admissions";
 import { normalizeMobile } from "@/lib/sis";
-import type { StaffRecord } from "@/lib/foundationMasters";
 import {
   syncStaffAttendanceOnSurveyEnd,
   syncStaffAttendanceOnSurveyStart,
@@ -163,46 +160,7 @@ export function ensureSurveyMasters(state: AdmissionsState): AdmissionsState {
   };
 }
 
-export function upsertSurveyBeat(
-  state: AdmissionsState,
-  beat: Partial<SurveyBeat> & { name: string },
-): AdmissionsState {
-  const s = ensureSurveyMasters(state);
-  const beats = [...s.surveyBeats];
-  if (beat.id && beats.some((b) => b.id === beat.id)) {
-    return {
-      ...s,
-      surveyBeats: beats.map((b) =>
-        b.id === beat.id ? emptySurveyBeat({ ...b, ...beat }) : b,
-      ),
-    };
-  }
-  const seq = s.nextBeatSeq || beats.length + 1;
-  const row = emptySurveyBeat({
-    ...beat,
-    id: nid("sbt"),
-    code: beat.code || `BT-${String(seq).padStart(2, "0")}`,
-  });
-  return {
-    ...s,
-    surveyBeats: [row, ...beats],
-    nextBeatSeq: seq + 1,
-  };
-}
 
-export function setSurveyBeatActive(
-  state: AdmissionsState,
-  beatId: string,
-  isActive: boolean,
-): AdmissionsState {
-  const s = ensureSurveyMasters(state);
-  return {
-    ...s,
-    surveyBeats: s.surveyBeats.map((b) =>
-      b.id === beatId ? { ...b, isActive } : b,
-    ),
-  };
-}
 
 export function checkInSurveyAgent(
   state: AdmissionsState,
@@ -542,10 +500,6 @@ export function reloadAdmissionsWithSurvey(): AdmissionsState {
   return ensureSurveyMasters(loadAdmissions());
 }
 
-export function persistAdmissions(state: AdmissionsState): void {
-  saveAdmissions(ensureSurveyMasters(state));
-}
-
 /* ─── Survey team, geo sessions, breaks, analytics ─── */
 
 export async function captureSurveyGeo(): Promise<SurveyGeoPoint | null> {
@@ -602,162 +556,12 @@ export function sessionWorkedMs(
   return Math.max(0, end - start - sessionBreakMs(session, now));
 }
 
-export function addSurveyExternal(
-  state: AdmissionsState,
-  draft: { fullName: string; mobile: string; note?: string },
-):
-  | { ok: true; state: AdmissionsState; agent: SurveyExternalAgent }
-  | { ok: false; reason: string } {
-  const s = ensureSurveyMasters(state);
-  const fullName = draft.fullName.trim();
-  const mobile = normalizeMobile(draft.mobile);
-  if (!fullName) return { ok: false, reason: "Name is required" };
-  if (mobile.length !== 10) {
-    return { ok: false, reason: "Mobile must be 10 digits" };
-  }
-  if (s.surveyExternals.some((e) => e.mobile === mobile)) {
-    return { ok: false, reason: "External survey staff with this mobile exists" };
-  }
-  const agent: SurveyExternalAgent = {
-    id: nid("sve"),
-    fullName,
-    mobile,
-    note: draft.note || "",
-    createdAt: new Date().toISOString(),
-  };
-  return {
-    ok: true,
-    agent,
-    state: { ...s, surveyExternals: [agent, ...s.surveyExternals] },
-  };
-}
 
-export function addStaffToSurveyTeam(
-  state: AdmissionsState,
-  staff: Pick<StaffRecord, "id" | "fullName" | "mobile" | "empCode">,
-  asLeader = false,
-):
-  | { ok: true; state: AdmissionsState; member: SurveyTeamMember }
-  | { ok: false; reason: string } {
-  const s = ensureSurveyMasters(state);
-  if (!staff.id) return { ok: false, reason: "Select staff" };
-  if (s.surveyTeam.some((m) => m.kind === "staff" && m.staffId === staff.id)) {
-    return { ok: false, reason: "Staff already on survey team" };
-  }
-  let team = [...s.surveyTeam];
-  if (asLeader) {
-    team = team.map((m) =>
-      m.role === "leader" ? { ...m, role: "agent" as const } : m,
-    );
-  }
-  const member: SurveyTeamMember = {
-    id: nid("stm"),
-    kind: "staff",
-    staffId: staff.id,
-    externalId: "",
-    fullName: staff.fullName,
-    mobile: normalizeMobile(staff.mobile || ""),
-    empCode: staff.empCode || "",
-    role: asLeader ? "leader" : "agent",
-    assigned: true,
-    startMode: "school",
-    createdAt: new Date().toISOString(),
-  };
-  return {
-    ok: true,
-    member,
-    state: { ...s, surveyTeam: [member, ...team] },
-  };
-}
 
-export function addExternalToSurveyTeam(
-  state: AdmissionsState,
-  externalId: string,
-):
-  | { ok: true; state: AdmissionsState; member: SurveyTeamMember }
-  | { ok: false; reason: string } {
-  const s = ensureSurveyMasters(state);
-  const ext = s.surveyExternals.find((e) => e.id === externalId);
-  if (!ext) return { ok: false, reason: "External agent not found" };
-  if (
-    s.surveyTeam.some(
-      (m) => m.kind === "external" && m.externalId === externalId,
-    )
-  ) {
-    return { ok: false, reason: "Already on survey team" };
-  }
-  const member: SurveyTeamMember = {
-    id: nid("stm"),
-    kind: "external",
-    staffId: "",
-    externalId: ext.id,
-    fullName: ext.fullName,
-    mobile: ext.mobile,
-    empCode: "EXT",
-    role: "agent",
-    assigned: true,
-    startMode: "field",
-    createdAt: new Date().toISOString(),
-  };
-  return {
-    ok: true,
-    member,
-    state: { ...s, surveyTeam: [member, ...s.surveyTeam] },
-  };
-}
 
-export function setSurveyTeamAssigned(
-  state: AdmissionsState,
-  memberId: string,
-  assigned: boolean,
-): AdmissionsState {
-  const s = ensureSurveyMasters(state);
-  return {
-    ...s,
-    surveyTeam: s.surveyTeam.map((m) =>
-      m.id === memberId ? { ...m, assigned } : m,
-    ),
-  };
-}
 
-export function setSurveyTeamStartMode(
-  state: AdmissionsState,
-  memberId: string,
-  startMode: "school" | "field",
-): AdmissionsState {
-  const s = ensureSurveyMasters(state);
-  return {
-    ...s,
-    surveyTeam: s.surveyTeam.map((m) => (m.id === memberId ? { ...m, startMode } : m)),
-  };
-}
 
-export function setSurveyTeamLeader(
-  state: AdmissionsState,
-  memberId: string,
-): AdmissionsState {
-  const s = ensureSurveyMasters(state);
-  return {
-    ...s,
-    surveyTeam: s.surveyTeam.map((m) => ({
-      ...m,
-      role: m.id === memberId ? ("leader" as const) : ("agent" as const),
-    })),
-  };
-}
 
-export function removeSurveyTeamMember(
-  state: AdmissionsState,
-  memberId: string,
-): AdmissionsState {
-  const s = ensureSurveyMasters(state);
-  // Named, so the save removes them — a save never deletes by absence.
-  if (typeof window !== "undefined") recordDeskDeletion("admissions", "admission_survey_team", [memberId]);
-  return {
-    ...s,
-    surveyTeam: s.surveyTeam.filter((m) => m.id !== memberId),
-  };
-}
 
 /** Assigned members — app shows Start survey only for these. */
 export function assignedSurveyMembers(
@@ -1096,16 +900,3 @@ export function surveyDayAnalytics(
   };
 }
 
-/** Team leader (or office) may upsert beats from mobile. */
-export function leaderUpsertBeat(
-  state: AdmissionsState,
-  memberId: string,
-  beat: Partial<SurveyBeat> & { name: string },
-):
-  | { ok: true; state: AdmissionsState }
-  | { ok: false; reason: string } {
-  if (!isSurveyTeamLeader(state, memberId)) {
-    return { ok: false, reason: "Only team leader can edit beats" };
-  }
-  return { ok: true, state: upsertSurveyBeat(state, beat) };
-}
