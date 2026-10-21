@@ -7,6 +7,8 @@
  * one of them — "Username required when login is enabled" — although Save
  * itself fills the username from the employee code and the field says
  * "Defaults to emp code". The edit never left the page.
+ * Also: Aadhaar / PAN / IFSC are not checked for a user who cannot edit them
+ * (fix/staff-locked-field-validation).
  * Run: npx tsx src/lib/staffProfileValidate.selftest.ts
  */
 import { defaultStaffLoginUsername, validateStaffProfile } from "./staffResolve";
@@ -46,6 +48,29 @@ expect("login off", validateStaffProfile(rec({ loginEnabled: false })), {});
 expect("typed username", validateStaffProfile(rec({ loginUsername: "sx" })), {});
 // The other checks are unchanged.
 expect("bad mobile still refused", Object.keys(validateStaffProfile(rec({ mobile: "123" }))), ["mobile"]);
+
+// Locked sensitive fields (fix/staff-locked-field-validation): a user without
+// the "Bank, ID & pay details" function cannot change Aadhaar, PAN or IFSC, so
+// a malformed STORED value (legacy data) must not refuse their Save.
+const legacy = rec({ panNo: "BADPAN", aadhaarNo: "1234", bankIfsc: "XYZ" });
+expect("locked: malformed stored PAN/Aadhaar/IFSC not checked", validateStaffProfile(legacy, { sensitive: false }), {});
+expect(
+  "locked: the other checks still run",
+  Object.keys(validateStaffProfile(rec({ panNo: "BADPAN", mobile: "123", fullName: "" }), { sensitive: false })).sort(),
+  ["fullName", "mobile"],
+);
+expect(
+  "locked: blank username with a usable code still saves (#705)",
+  validateStaffProfile(rec({ panNo: "BADPAN" }), { sensitive: false }),
+  {},
+);
+// Holders of the function / the owner: still checked (explicit and default).
+expect(
+  "editable: malformed values refused",
+  Object.keys(validateStaffProfile(legacy, { sensitive: true })).sort(),
+  ["aadhaarNo", "bankIfsc", "panNo"],
+);
+expect("default: still checked", Object.keys(validateStaffProfile(rec({ panNo: "BADPAN" }))), ["panNo"]);
 
 if (failed) {
   console.error(`staffProfileValidate: ${failed} failed`);

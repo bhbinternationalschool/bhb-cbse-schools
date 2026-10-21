@@ -264,8 +264,17 @@ export function validateStaffProfile(
     | "loginUsername"
     | "loginEnabled"
   >,
+  /**
+   * `sensitive: false` — the person saving cannot edit Aadhaar, PAN or bank
+   * details (no "Bank, ID & pay details" function, not the owner): those
+   * inputs are locked, so they are not this save's to check. A malformed
+   * stored value (legacy data) must not refuse the office's Save and send it
+   * to a tab it cannot change (21 Oct 2026, fix/staff-locked-field-validation).
+   */
+  opts: { sensitive?: boolean } = {},
 ): StaffFieldErrors {
   const errors: StaffFieldErrors = {};
+  const checkSensitive = opts.sensitive !== false;
   if (!draft.empCode.trim()) errors.empCode = "Employee code is required";
   if (!draft.fullName.trim()) errors.fullName = "Full name is required";
   const mobile = draft.mobile.replace(/\D/g, "");
@@ -276,15 +285,15 @@ export function validateStaffProfile(
     errors.email = "Invalid email";
   }
   const aadhaar = draft.aadhaarNo.replace(/\D/g, "");
-  if (draft.aadhaarNo.trim() && aadhaar.length !== 12) {
+  if (checkSensitive && draft.aadhaarNo.trim() && aadhaar.length !== 12) {
     errors.aadhaarNo = "Aadhaar must be 12 digits";
   }
   const pan = draft.panNo.trim().toUpperCase();
-  if (pan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
+  if (checkSensitive && pan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
     errors.panNo = "PAN format: AAAAA9999A";
   }
   const ifsc = draft.bankIfsc.trim().toUpperCase();
-  if (ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
+  if (checkSensitive && ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
     errors.bankIfsc = "IFSC format: ABCD0XXXXXX";
   }
   // A blank username is not an error while there is an employee code to
