@@ -11,6 +11,7 @@
  * Pure — no I/O — so the selftest pins every rule.
  */
 
+import type { PrintSignatureSet } from "@/lib/printSignatures";
 import type { DefaulterFacts, HoldGate } from "@/lib/defaulterHoldPolicy";
 import type { ReportCard } from "@/lib/exams";
 import type { FeesState } from "@/lib/fees";
@@ -76,7 +77,15 @@ export type ParentPrintStudent = {
 };
 
 /** ReportCard minus the student record, with what the card hides removed. */
-export type ParentPrintableCard = Omit<ReportCard, "student"> & { student: ParentPrintStudent };
+export type ParentPrintableCard = Omit<ReportCard, "student"> & {
+  student: ParentPrintStudent;
+  /**
+   * The staff signatures this card prints (lib/printSignatures), embedded
+   * as data URLs — the only way a parent session ever receives a staff
+   * signature. Absent / null lines print blank.
+   */
+  signatures?: PrintSignatureSet | null;
+};
 
 export function gradesOnlyCard(card: Pick<ReportCard, "presentation" | "displayMode">): boolean {
   return card.presentation.layout === "hpc" || card.displayMode !== "marks_grade";

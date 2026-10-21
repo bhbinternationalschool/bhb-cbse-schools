@@ -7,6 +7,8 @@
 import { SchoolLetterhead } from "@/components/shared/SchoolLetterhead";
 import { reportLinePartsText, type ReportCard } from "@/lib/exams";
 import { StudentAvatar } from "@/components/students/StudentAvatar";
+import { SignatureOnLine } from "@/components/shared/SignatureOnLine";
+import { signatureForLabel, type PrintSignatureSet } from "@/lib/printSignatures";
 import {
   schoolShortName,
   schoolStatutoryLine,
@@ -44,7 +46,14 @@ function fmtDob(iso: string): string {
  * assessment scheme's switches as fallback — so the same component prints
  * a Holistic Progress Card for Nursery and a board-style statement for X.
  */
-export function ReportCardSheet({ card }: { card: ReportCard }) {
+export function ReportCardSheet({
+  card,
+  signatures = null,
+}: {
+  card: ReportCard;
+  /** Staff signatures for the signing lines (lib/printSignatures); null = blank lines. */
+  signatures?: PrintSignatureSet | null;
+}) {
   const p = card.presentation;
   const compact = p.layout === "compact";
   const hpc = p.layout === "hpc";
@@ -437,8 +446,9 @@ export function ReportCardSheet({ card }: { card: ReportCard }) {
             style={{ gridTemplateColumns: `repeat(${p.signatureLabels.length}, minmax(0, 1fr))` }}
           >
             {p.signatureLabels.map((l, i) => (
-              <div key={`${l}-${i}`} className="border-t border-[rgba(32,48,80,0.25)] pt-2">
-                {l}
+              <div key={`${l}-${i}`} className="flex flex-col justify-end">
+                <SignatureOnLine sig={signatureForLabel(l, signatures)} />
+                <div className="border-t border-[rgba(32,48,80,0.25)] pt-2">{l}</div>
               </div>
             ))}
           </div>
