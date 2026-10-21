@@ -122,6 +122,7 @@
     "test:masters-cold-client": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/lib/mastersColdClient.selftest.ts",
     "test:masters-teacher-no-fees": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/lib/mastersTeacherNoFees.selftest.ts",
     "test:screen-masters-dues": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/lib/screenMastersDues.selftest.ts",
+    "test:certificate-dues-gate": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/lib/certificateDuesGate.selftest.ts",
     "test:data-contract": "npx tsx src/lib/data/contract.selftest.ts",
     "test:projection": "npx tsx src/lib/data/projection.selftest.ts",
     "test:read-client": "npx tsx src/lib/data/readClient.selftest.ts",
