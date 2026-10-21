@@ -11,9 +11,9 @@
  *
  *  - an element that differs between shown and next → one upsert of it (the
  *    whole element as the editor holds it, minus `_rev`; a key the served one
- *    has and the edited one lacks is sent as null), base = its served `_rev`
- *    (null when the server has no such element: a new one);
- *  - an element in shown and not in next → a delete, base = its served `_rev`,
+ *    has and the edited one lacks is sent as null), on the base above (null
+ *    when the server has no such element and this tab saved none: a new one);
+ *  - an element in shown and not in next → a delete on the same base,
  *    ONE PER REQUEST (the server refuses more than one removal per save — a
  *    user action that removes several, e.g. a subject with its components from
  *    a class, is several saves in a row, the parent first);
