@@ -38,7 +38,9 @@ import {
 import { TabsContent, WorkspaceTabs, type WorkspaceTabItem } from "@/components/ui/workspace-tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
 import { loadSis, type SisState } from "@/lib/sis";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
@@ -325,9 +327,9 @@ function OfficeStudentLeaveWorkspace({
     "apply",
     "reports",
   ]);
-  const [masters, setMasters] = useState<MastersState | null>(() =>
-    typeof window !== "undefined" ? loadMasters() : null,
-  );
+  // data-layer 2.1i: the server's book (class names, the reports), kept
+  // fresh by the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(() =>
     typeof window !== "undefined" ? loadSis() : null,
   );
@@ -357,7 +359,6 @@ function OfficeStudentLeaveWorkspace({
   }
 
   function refresh() {
-    setMasters(loadMasters());
     setSis(loadSis());
     setState(loadStudentLeave());
   }
@@ -530,6 +531,9 @@ function OfficeStudentLeaveWorkspace({
     setTab("pending");
   }
 
+  if (!masters && mastersError) {
+    return <QueryError what="the school's classes" error={mastersError} retry={retryMasters} />;
+  }
   if (!state || !masters || !sis) {
     return (
       <div className="flex items-center justify-center px-4 py-8 text-sm text-muted-foreground">

@@ -1193,6 +1193,82 @@ unreachable on screen (Reports Center waits for Masters first) — typechecked a
 not run (no fixture holder without the Masters view). `normalizeMastersRead`'s determinism is per book: a book that
 changed elsewhere re-mints its fillers (ids no earlier answer had, never an earlier filler's id reused).
 
+*(2.1i built 20 Oct 2026, PR #688.)* **What exists.** The list, generated on origin/main ab545386 with
+`grep -rl 'loadMasters(' apps/web/src/components 'apps/web/src/app/(erp)'` minus 2.1a–2.1h's directories and the files
+kept by design (`useAccessData.ts`, `SchoolFavicon.tsx`), is **15 files in 15 directories** (the plan's "16" was counted on
+2f0eb3d4, which also had `timetable`, `homework` — 2.1a — and `app/(erp)/staff/job-applications` — 2.1f): `accounts/LedgerEntryPanels`,
+`certificates/CertificatesWorkspace`, `complaints/ComplaintsWorkspace`, `discipline/DisciplineWorkspace`,
+`documents/DocumentMakerWorkspace`, `health/HealthWorkspace`, `idCards/IdCardsWorkspace`, `inventory/InventoryWorkspace`,
+`library/LibraryWorkspace`, `login/LoginPanel`, `ptm/PtmWorkspace`, `rte/RteWorkspace`, `studentLeave/StudentLeaveWorkspace`,
+`transport/TransportWorkspace`, `visitors/VisitorsWorkspace`. **13 converted** to `useScreenMasters()` (every one resolves the
+signed-in person for a permission check or lists staff — assignees, drivers, borrowers, class teacher, principal, gate duty —
+so the access copy's roster is needed; `LedgerEntryPanels` reads only holidays/years but `isPublishedHoliday` takes a whole
+`MastersState`) or `useMasters()` (`InventoryWorkspace`: class/section labels only). Removed: every mount-time and `refresh()`
+read, `masters ?? loadMasters()` fallbacks, and every `ensureMastersHydrated` (in 11 files; the SIS / staff / own-desk hydrates
+stay). No file had a `bhb-masters-updated` listener. A masters read that never answered = `<QueryError>` (inside the workspace
+shell where the screen has one; PTM and Student leave in place of their existing "Loading…" block; Transport and Inventory
+under their tabs; the Accounts quick expense inline in the "daily rate" line); while unknown, "Loading…" — never a screen drawn
+from nothing. **Left on `loadMasters()` by design:** `RteWorkspace` — it writes Masters (`setRteHeadWaiver` /
+`removeRteFromStudent` save concessions and grants through `saveMasters` from the page copy) and draws the very grants it
+just wrote; moving its read to the view would show the old grants until the next poll, so it moves with its write path in 2.2.
+`LoginPanel` — runs before there is a session (the demo / page-copy staff-password match), so there is no masters view to
+read. **Masters writes left as they were (2.2):** `issueCertificate` → `persistSeriesUse` (certificate numbering) builds its
+book from the page copy inside `lib/certificates.ts`, as on main. **Behaviour changes.** (1) Accounts → Quick expense →
+"Bill a daily rate over a range": the billable days wait for the holiday calendar ("Loading the school's holiday calendar…" /
+"Could not load … Try again"); on main an unread calendar meant no holidays and every shut day ticked. Save is disabled until
+the calendar is known. (2) Complaints: tickets are not editable until the roster is known (on main "until masters load, the
+session decides alone" — writable). (3) Library: the staff roster (borrowers, overdue "With") is now read on open; on main it was
+read only inside `refresh()`, i.e. never on a page whose library desk did not change. (4) Each converted screen waits for one
+masters-view read (+1 request, ~37 KB until 2.3b) and shows "Loading …" for it; Discipline, Health, ID cards, Library,
+Visitors, Documents draw nothing but the shell until then. **Proof.** New `e2e/specs/single-dirs.spec.ts` (desktop project; it
+switches the default-off Discipline module on through `/modules` for the file and off again): 14 screens (the 13 files; Transport
+twice — dashboard and By class) seen desktop-light and 375-dark, no page error, class lists = 15 / sections = 13 where drawn;
+and each with `views/masters` 503 → "could not load" + Try again, the masters-dependent part absent, Try again recovers. Local:
+28/28. Fail-on-old (spec on this branch, the 13 components put back to ab545386, fresh build, same stack): **13 FAIL** (no "could
+not load" — main never asks the view); the student-leave case passes on main too (its page is the Attendance workspace, whose
+2.1a gate already shows the error first — so Student leave's own error state is not proven by this spec); the 14 "seen" cases
+pass on main (coverage, not a fix). Ratchets (on origin/main after #661): `load_masters_screen_files` 54 → **41**,
+`load_masters_calls_src` 410 → **385**, `ensure_hydrated_component_files` 67 → **65**. **Not done / not proven.** RTE and Login
+(above). Screens now hand lib helpers the server's raw book rather than `loadMasters()`'s normalised read — not audited field by
+field. Transport's change dialogs compute paid months with `computeStudentDues(student, masters, …)`: for a holder without the
+Masters grant (teaching answer) the fee structure is withheld, so no month reads as paid — exactly what the page copy gave the
+same person on main; should become a refusal in 2.2/2.3. On the ID-cards desktop shot the student list read "0 of 0" for the
+first moments (the SIS hydrate, Phase 3 — pre-existing S2), 274 once it landed. Saves on these screens are unchanged (their own
+desks). Teacher sessions were not exercised on these screens. CI scoreboard: see the PR. **Review fixes (21 Oct 2026, same PR).**
+(1) *Money — Transport.* The hook's `scope` is now read: when the masters answer is not `"full"` (teaching subset — no
+Masters grant, e.g. a transport in-charge) the screen passes `dues: null` to `TransportAmendDialog` and
+`planTransportAmendment` refuses with `PAID_MONTHS_UNKNOWN_FOR_ROLE` ("Paid months cannot be checked for your role … Ask the
+office"), Apply stays off, any "Apply from" month included. The Riders form's carry-over note says "Paid months are not shown
+for your role" instead of nothing; search hits and their PDF/Excel export say "dues: not shown for your role" instead of
+"open dues ₹0". Measured on the fixture's paid-month case: on the old code the teaching answer still showed "Applies from Oct
+2026 · 6 paid months" — plain transport receipts are matched without the fee book — so the live risk is narrower than "no
+month reads paid": a month settled with a TRANSPORT-head concession (fee heads and concession grants are withheld) reads
+unpaid and the floor falls onto it. Refused either way. New selftest `test:screen-masters-dues`
+(`lib/screenMastersDues.selftest.ts`, CI + verify.sh): dues of all 250 fixture children and the paid-month case's paid months
+and amendment plan are **identical** from the raw server book and from `ensureFeeSetup` (loadMasters' normalisation:
+`ensureAprToMarInstallments` …), and again on a production-shaped fee book (12 dated installments, TUITION/TRANSPORT heads, a
+published group per class) — production holds 12 installments per year with no null `due_on` (read-only count, 21 Oct) — so no
+normalisation is added; the same check with one blank `dueOn` does differ (the test can see it). (2) *Certificates* search hits
+(and their export): "dues: not shown for your role" for a teaching answer. (3) *Documents* "Insert school facts": the fee
+line reads "Fee: not available for your role …", never "0 fee structures published" (`buildComplianceFactsFromMasters`
+`feesWithheld`). (4) `LedgerEntryPanels` asks views/masters only once the daily-rate spread is ticked
+(`useScreenMasters({enabled: spread})`); Inventory only on Counter / Kits (a `?tab=` deep link to another tab may still fire
+one read on the first render). (5) Certificates: the TC form's "Checked by" designation is filled by its own effect keyed on
+`[student, masters]` (once per student, ref-guarded so a refetch never re-fills a field the clerk changed); the per-student
+reset stays on `[student?.id]`. (6) *Availability.* Visitors and Health no longer wait for the masters view: tabs and edit
+rights come from the access copy (`useAccessData` — the same roster + roles the book's staff side is), records, forms and
+actions render; only class/section (and gate-duty staff) names show "…", and a failed read is an in-place `QueryError
+compact` strip with Try again. Library stays gated. (7) Spec: `setDiscipline` reads the module's state from the Modules screen
+first and restores THAT in `afterAll` (idempotent; reading the cached registry view before the write had primed it with the old
+answer). **Fail-on-old** (new tests, source put back to 8a22525e, fresh build): selftest 2 FAIL (null dues → TypeError;
+"0 fee structures"); single-dirs 6 FAIL (Health/Visitors usable ×4, certificates hit "open dues ₹0", documents fee line) + the
+ledger lazy read (1 read at mount); transport-paid-month: teaching amend dialog showed "Applies from Oct 2026", riders hit
+"open dues ₹0" (her October ₹500 transport is owing). The old spec left Discipline OFF after a run that found it ON (proved
+on the stack). Local on the fix: single-dirs 34/34, transport-paid-month 8/8. Not proven: a real transport in-charge login
+(teaching scope is simulated by cutting the real answer with the server's `teachingMastersSubset`); Certificates' step-3 "Open
+dues" and the TC/no-dues gate still read the page copy inside `lib/certificates.ts` (2.2) — for a non-Masters holder that is
+the teaching subset too, unchanged by this PR.
+
 **2.2 Masters and staff editing write rows.** `MastersWorkspace` and its panels write through
 `useErpMutation` → `desk_slice_row_write` / `desk_slice_object_write` (one subject, one
 class-subject link, one section, one fee head at a time). The 14 non-Masters `saveMasters`
