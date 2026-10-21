@@ -352,8 +352,27 @@ function pageMemoryBridgeDeps(): MastersBridgeDeps | null {
  * only once opened — the header WhatsApp button); an answer another screen
  * already cached is still returned.
  */
+const MASTERS_VIEW_PATH = "/api/data/views/masters";
+
+/**
+ * The erp_versions the masters answer in this tab's cache was built from
+ * (the view's `versions`), or null when there is none or the server could
+ * not prove it current (a stale copy). Pass useMasters()'s `dataUpdatedAt`:
+ * it moves with every answer, also one whose content did not change (React
+ * Query then keeps the same `data` object). The Masters editor uses it to
+ * tell whether an answer holds its own save.
+ */
+export function useMastersBuiltFrom(dataUpdatedAt: number): Versions | null {
+  const client = useQueryClient();
+  return useMemo(() => {
+    void dataUpdatedAt;
+    const raw = client.getQueryData<Raw<MastersView>>(["masters", MASTERS_VIEW_PATH]);
+    return raw?.builtFrom ?? null;
+  }, [client, dataUpdatedAt]);
+}
+
 export function useMasters(opts: { enabled?: boolean } = {}): UseQueryResult<MastersView, Error> {
-  return useErpQuery<MastersView>("masters", "/api/data/views/masters", {
+  return useErpQuery<MastersView>("masters", MASTERS_VIEW_PATH, {
     desk: ["masters"],
     parse: (d) => acceptMastersAnswer(d),
     enabled: opts.enabled,

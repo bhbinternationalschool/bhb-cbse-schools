@@ -4629,6 +4629,324 @@ abstract class L {
   /// **'Parent messages to the class teacher'**
   String get schoolChatParentInbox;
 
+  /// No description provided for @homeModuleGames.
+  ///
+  /// In en, this message translates to:
+  /// **'Games'**
+  String get homeModuleGames;
+
+  /// No description provided for @gamesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Learning games'**
+  String get gamesTitle;
+
+  /// No description provided for @gamesPlayedToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Played today: {played} of {cap} min'**
+  String gamesPlayedToday(String played, String cap);
+
+  /// No description provided for @gamesTimeLeft.
+  ///
+  /// In en, this message translates to:
+  /// **'{minutes} min left today'**
+  String gamesTimeLeft(String minutes);
+
+  /// No description provided for @gamesStarsToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Stars today'**
+  String get gamesStarsToday;
+
+  /// No description provided for @gamesStarsWeek.
+  ///
+  /// In en, this message translates to:
+  /// **'This week'**
+  String get gamesStarsWeek;
+
+  /// No description provided for @gamesStarsTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'All time'**
+  String get gamesStarsTotal;
+
+  /// No description provided for @gamesLast7Days.
+  ///
+  /// In en, this message translates to:
+  /// **'Last 7 days'**
+  String get gamesLast7Days;
+
+  /// No description provided for @gamesDayMinutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{minutes} min'**
+  String gamesDayMinutes(String minutes);
+
+  /// No description provided for @gamesCompetitions.
+  ///
+  /// In en, this message translates to:
+  /// **'Competitions'**
+  String get gamesCompetitions;
+
+  /// No description provided for @gamesPlay.
+  ///
+  /// In en, this message translates to:
+  /// **'Play'**
+  String get gamesPlay;
+
+  /// No description provided for @gamesPlayed.
+  ///
+  /// In en, this message translates to:
+  /// **'Played'**
+  String get gamesPlayed;
+
+  /// No description provided for @gamesOpensAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Opens {time}'**
+  String gamesOpensAt(String time);
+
+  /// No description provided for @gamesClosesAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Open till {time}'**
+  String gamesClosesAt(String time);
+
+  /// No description provided for @gamesLeaderboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Leaderboard'**
+  String get gamesLeaderboard;
+
+  /// No description provided for @gamesPractice.
+  ///
+  /// In en, this message translates to:
+  /// **'Practice'**
+  String get gamesPractice;
+
+  /// No description provided for @gamesNumberDash.
+  ///
+  /// In en, this message translates to:
+  /// **'Number dash'**
+  String get gamesNumberDash;
+
+  /// No description provided for @gamesNumberDashBlurb.
+  ///
+  /// In en, this message translates to:
+  /// **'As many as you can in 60 seconds'**
+  String get gamesNumberDashBlurb;
+
+  /// No description provided for @gamesCounting.
+  ///
+  /// In en, this message translates to:
+  /// **'Count the pictures'**
+  String get gamesCounting;
+
+  /// No description provided for @gamesCountingBlurb.
+  ///
+  /// In en, this message translates to:
+  /// **'How many can you see?'**
+  String get gamesCountingBlurb;
+
+  /// No description provided for @gamesQuestions.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} questions'**
+  String gamesQuestions(String count);
+
+  /// No description provided for @gamesWholeSubject.
+  ///
+  /// In en, this message translates to:
+  /// **'Whole subject'**
+  String get gamesWholeSubject;
+
+  /// No description provided for @gamesNoQuizYet.
+  ///
+  /// In en, this message translates to:
+  /// **'No quizzes for this class yet — the teachers are adding questions.'**
+  String get gamesNoQuizYet;
+
+  /// No description provided for @gamesRefusedNight.
+  ///
+  /// In en, this message translates to:
+  /// **'Games rest at night — come back in the morning.'**
+  String get gamesRefusedNight;
+
+  /// No description provided for @gamesRefusedSchoolHours.
+  ///
+  /// In en, this message translates to:
+  /// **'It is school time. Practice opens after school; a competition your teacher starts can be played now.'**
+  String get gamesRefusedSchoolHours;
+
+  /// No description provided for @gamesRefusedDailyCap.
+  ///
+  /// In en, this message translates to:
+  /// **'Today\'s game time is used up. See you tomorrow!'**
+  String get gamesRefusedDailyCap;
+
+  /// No description provided for @gamesRefusedDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Games are switched off by the school.'**
+  String get gamesRefusedDisabled;
+
+  /// No description provided for @gamesRefusedClosed.
+  ///
+  /// In en, this message translates to:
+  /// **'This competition is not open now.'**
+  String get gamesRefusedClosed;
+
+  /// No description provided for @gamesRefusedAlreadyPlayed.
+  ///
+  /// In en, this message translates to:
+  /// **'You have already played this competition.'**
+  String get gamesRefusedAlreadyPlayed;
+
+  /// No description provided for @gamesRefusedAlreadyPlaying.
+  ///
+  /// In en, this message translates to:
+  /// **'A game is already being played on another phone.'**
+  String get gamesRefusedAlreadyPlaying;
+
+  /// No description provided for @gamesQuestionOf.
+  ///
+  /// In en, this message translates to:
+  /// **'Question {n} of {total}'**
+  String gamesQuestionOf(String n, String total);
+
+  /// No description provided for @gamesSecondsLeft.
+  ///
+  /// In en, this message translates to:
+  /// **'{seconds}s'**
+  String gamesSecondsLeft(String seconds);
+
+  /// No description provided for @gamesRight.
+  ///
+  /// In en, this message translates to:
+  /// **'Right!'**
+  String get gamesRight;
+
+  /// No description provided for @gamesWrong.
+  ///
+  /// In en, this message translates to:
+  /// **'Not quite'**
+  String get gamesWrong;
+
+  /// No description provided for @gamesAnswerSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Answer saved'**
+  String get gamesAnswerSaved;
+
+  /// No description provided for @gamesTimeUp.
+  ///
+  /// In en, this message translates to:
+  /// **'Time\'s up!'**
+  String get gamesTimeUp;
+
+  /// No description provided for @gamesResultTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Well played!'**
+  String get gamesResultTitle;
+
+  /// No description provided for @gamesResultScore.
+  ///
+  /// In en, this message translates to:
+  /// **'{correct} of {total} right'**
+  String gamesResultScore(String correct, String total);
+
+  /// No description provided for @gamesStarsEarned.
+  ///
+  /// In en, this message translates to:
+  /// **'{stars} stars'**
+  String gamesStarsEarned(String stars);
+
+  /// No description provided for @gamesReview.
+  ///
+  /// In en, this message translates to:
+  /// **'Answers'**
+  String get gamesReview;
+
+  /// No description provided for @gamesDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get gamesDone;
+
+  /// No description provided for @gamesYourAnswer.
+  ///
+  /// In en, this message translates to:
+  /// **'Your answer: {answer}'**
+  String gamesYourAnswer(String answer);
+
+  /// No description provided for @gamesNotAnswered.
+  ///
+  /// In en, this message translates to:
+  /// **'Not answered'**
+  String get gamesNotAnswered;
+
+  /// No description provided for @gamesRightAnswer.
+  ///
+  /// In en, this message translates to:
+  /// **'Right answer: {answer}'**
+  String gamesRightAnswer(String answer);
+
+  /// No description provided for @gamesAnswersAfterClose.
+  ///
+  /// In en, this message translates to:
+  /// **'The right answers appear when the competition closes ({time}).'**
+  String gamesAnswersAfterClose(String time);
+
+  /// No description provided for @gamesClassBoard.
+  ///
+  /// In en, this message translates to:
+  /// **'{label} this week'**
+  String gamesClassBoard(String label);
+
+  /// No description provided for @gamesSchoolBoard.
+  ///
+  /// In en, this message translates to:
+  /// **'Whole school this week'**
+  String get gamesSchoolBoard;
+
+  /// No description provided for @gamesRightPerPlayer.
+  ///
+  /// In en, this message translates to:
+  /// **'{avg} right per player'**
+  String gamesRightPerPlayer(String avg);
+
+  /// No description provided for @gamesPlayersCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} played'**
+  String gamesPlayersCount(String count);
+
+  /// No description provided for @gamesNobodyYet.
+  ///
+  /// In en, this message translates to:
+  /// **'Nobody has finished yet.'**
+  String get gamesNobodyYet;
+
+  /// No description provided for @gamesPlayingNow.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} playing now'**
+  String gamesPlayingNow(String count);
+
+  /// No description provided for @gamesHealthyNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Stars are for learning. Games rest during school hours and after 9 pm.'**
+  String get gamesHealthyNote;
+
+  /// No description provided for @gamesSeeLeaderboard.
+  ///
+  /// In en, this message translates to:
+  /// **'See the leaderboard'**
+  String get gamesSeeLeaderboard;
+
   /// No description provided for @admAddWalkInLead.
   ///
   /// In en, this message translates to:

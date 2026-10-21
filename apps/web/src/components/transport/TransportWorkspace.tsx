@@ -1,5 +1,7 @@
 "use client";
 
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { PaidMonthsCarryOverNote } from "@/components/transport/PaidMonthsCarryOverNote";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -63,7 +65,6 @@ import {
 import { checkHold, type HoldCheck } from "@/lib/holds";
 import {
   DEFAULT_AY,
-  loadMasters,
   type ClassGroupCode,
   type MastersState,
 } from "@/lib/masters";
@@ -201,7 +202,15 @@ export function TransportWorkspace() {
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as TransportTab);
   }, []);
   const [state, setState] = useState<TransportState | null>(null);
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1i: the server's book + the staff roster (drivers and
+  // attendants, the permission checks), kept fresh by the versions poll.
+  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
+  // A caller answered with the teaching subset (no Masters grant — a
+  // transport in-charge, say) has the fee lists WITHHELD, not empty. Paid
+  // months computed from that book are unknown, never "nothing paid", so the
+  // amendment dialog refuses rather than land a change on a settled month
+  // (2.1i review; same rule as 2.1b's student fee cards).
+  const feesWithheld = mastersScope !== "full";
   const [sis, setSis] = useState<SisState | null>(null);
   const [query, setQuery] = useState("");
   const [classId, setClassId] = useState("");
@@ -223,7 +232,8 @@ export function TransportWorkspace() {
     studentName: string;
     classGroupCode: ClassGroupCode | null;
     home: { lat: number; lng: number } | null;
-    dues: FeeDueLine[];
+    /** null = the fee lines could not be read for this role (feesWithheld). */
+    dues: FeeDueLine[] | null;
   } | null>(null);
   const [holdCheck, setHoldCheck] = useState<HoldCheck | null>(null);
   const [holdDialog, setHoldDialog] = useState(false);
@@ -326,8 +336,8 @@ export function TransportWorkspace() {
       return;
     }
     const student = sis?.students.find((st) => st.id === rider.studentId) ?? null;
-    let dues: FeeDueLine[] = [];
-    if (student && masters) {
+    let dues: FeeDueLine[] | null = feesWithheld ? null : [];
+    if (dues && student && masters) {
       try {
         // Which months are already paid decides when a change may land, so
         // the ledger is read now rather than assumed.
@@ -363,18 +373,12 @@ export function TransportWorkspace() {
       migrateDemoFleetToReal();
       const transport = seedTransportIfEmpty();
       setState(transport);
-      setMasters(loadMasters());
       setSis(loadSis());
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load transport";
       setError(msg);
       // Avoid infinite “Loading transport…” if seed/load throws
       setState((prev) => prev ?? loadTransport());
-      try {
-        setMasters(loadMasters());
-      } catch {
-        /* ignore */
-      }
       try {
         setSis(loadSis());
       } catch {
@@ -395,6 +399,7 @@ export function TransportWorkspace() {
       // every per-bus roster reports zero. Hydrating only the transport desk
       // meant landing straight on /transport in a cold browser showed student
       // codes and empty buses while the assignments were perfectly fine.
+      // (The class masters now come from useScreenMasters — data-layer 2.1i.)
       //
       // The staff roster is a fourth hydrate, not part of masters: staff is
       // stripped out of the masters blob and lives in sis_staff. Without it
@@ -403,20 +408,17 @@ export function TransportWorkspace() {
       const [
         { ensureTransportHydrated },
         { ensureSisHydrated },
-        { ensureMastersHydrated },
         { ensureStaffHydrated },
         { withHydrationSlot },
       ] = await Promise.all([
         import("@/lib/transportPersistence"),
         import("@/lib/sisPersistence"),
-        import("@/lib/mastersPersistence"),
         import("@/lib/staffPersistence"),
         import("@/lib/deskHydrateGuard"),
       ]);
       await Promise.all([
         withHydrationSlot(() => ensureTransportHydrated()),
         withHydrationSlot(() => ensureSisHydrated()),
-        withHydrationSlot(() => ensureMastersHydrated()),
         withHydrationSlot(() => ensureStaffHydrated()),
       ]);
       refresh();
@@ -653,6 +655,12 @@ export function TransportWorkspace() {
 
       {!state ? (
         <p className="mt-6 text-sm text-[var(--muted)]">Loading transport…</p>
+      ) : !masters ? (
+        mastersError ? (
+          <QueryError what="the school's classes and staff" error={mastersError} retry={retryMasters} />
+        ) : (
+          <p className="mt-6 text-sm text-[var(--muted)]">Loading the school&apos;s classes and staff…</p>
+        )
       ) : (
         <>
           {tab === "dashboard" ? (
@@ -681,6 +689,7 @@ export function TransportWorkspace() {
           {tab === "riders" ? (
             <RidersPanel
               canEdit={canWriteModuleTab(session, masters, "transport", tab)}
+              feesWithheld={feesWithheld}
               state={state}
               masters={masters}
               sis={sis}
@@ -944,6 +953,8 @@ type RidersPanelProps = {
   onNotice: (message: string | null) => void;
   /** Passed down rather than re-derived: `session` lives in the workspace. */
   canEdit: boolean;
+  /** Teaching-scope Masters: fee lists withheld — dues and paid months are unknown here. */
+  feesWithheld: boolean;
 };
 
 function RidersPanel(props: RidersPanelProps) {
@@ -989,6 +1000,7 @@ function RidersPanel(props: RidersPanelProps) {
     onRefresh,
     onFlash,
     onNotice,
+    feesWithheld,
   } = props;
 
   // Split the search hits by whether the child is already on a bus. Showing one
@@ -1022,7 +1034,8 @@ function RidersPanel(props: RidersPanelProps) {
     studentName: string;
     classGroupCode: ClassGroupCode | null;
     home: { lat: number; lng: number } | null;
-    dues: FeeDueLine[];
+    /** null = the fee lines could not be read for this role (feesWithheld). */
+    dues: FeeDueLine[] | null;
   } | null>(null);
 
   // Siblings on the same household who do not already ride. Transport is bought
@@ -1177,6 +1190,7 @@ function RidersPanel(props: RidersPanelProps) {
 
           <div className="mt-2 flex justify-end">
             <StudentHitsFilterExport
+              balanceWithheld={feesWithheld}
               title="Transport · student search"
               hits={hits}
               query={query}
@@ -1227,7 +1241,9 @@ function RidersPanel(props: RidersPanelProps) {
                               {hit.student.fatherName
                                 ? ` · F/O ${hit.student.fatherName}`
                                 : ""}{" "}
-                              · open dues {formatInr(hit.balancePaise)}
+                              {feesWithheld
+                                ? "· dues: not shown for your role"
+                                : `· open dues ${formatInr(hit.balancePaise)}`}
                             </div>
                           </button>
                         </li>
@@ -1464,6 +1480,7 @@ function RidersPanel(props: RidersPanelProps) {
             <PaidMonthsCarryOverNote
               student={selected.student}
               masters={masters}
+              feesWithheld={feesWithheld}
               effectiveFrom={effectiveFrom}
             />
           ) : null}
@@ -1629,8 +1646,8 @@ function RidersPanel(props: RidersPanelProps) {
                       onClick={() => {
                         // Which months are already paid decides when the change
                         // may land, so the ledger is read at open time.
-                        let dues: FeeDueLine[] = [];
-                        if (student && masters) {
+                        let dues: FeeDueLine[] | null = feesWithheld ? null : [];
+                        if (dues && student && masters) {
                           try {
                             dues = computeStudentDues(
                               student,

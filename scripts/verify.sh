@@ -67,6 +67,7 @@ SELFTESTS=(
   test:masters-revision-everywhere
   test:masters-cold-client
   test:masters-teacher-no-fees
+  test:screen-masters-dues
   test:masters-freeze
   test:session-year
   test:academic-year-resolve
@@ -191,6 +192,7 @@ SELFTESTS=(
   test:sis-bot-thread-merge
   test:job-applications
   test:online-classes
+  test:learning-games
   test:online-class-qa
   test:puter-ai
   test:open-lookups
@@ -566,6 +568,7 @@ SELFTESTS=(
   test:query-kernel
   test:reference-views
   test:masters-bridge
+  test:masters-pending
   test:staff-requests
   test:survey-team-plan
   test:parent-api-scope
