@@ -215,6 +215,14 @@ import {
   staffScanAuditDescriptor,
   type StaffScanKind,
 } from "@/lib/staffScanReading";
+import {
+  buildGameQuestionsPrompt,
+  GAME_QUESTIONS_PROMPT_VERSION,
+  GAME_QUESTIONS_SYSTEM,
+  parseGameQuestions,
+  type GameQuestionFacts,
+} from "@/lib/learningGamesAi";
+import type { QuestionDraft } from "@/lib/learningGames";
 
 export type LlmEngine = "openai" | "gemini" | "none";
 export type PreferredEngine = "auto" | "openai" | "gemini";
@@ -2838,6 +2846,39 @@ export async function readStaffScanImage<T>(opts: {
   noteAiBudgetUse(requester, (r.usage.promptTokens ?? 0) + (r.usage.completionTokens ?? 0));
   if (!parsed) return { ok: false, failure: "read-failed", error: parseError };
   return { ok: true, result: parsed, generationId };
+}
+
+/**
+ * Practice-game questions for one chapter of the school's own book
+ * (lib/learningGamesAi.ts). Drafts only: the caller saves them as
+ * review = 'pending' and no child sees one until a teacher approves it.
+ * Cacheable only while the chapter has no questions yet (a second teacher
+ * asking first costs nothing); after that the prompt carries the questions
+ * already there (facts.avoid) and is not cached, so asking again — say after
+ * rejecting a draft — brings new questions instead of the same cached ten.
+ */
+export async function generateGameQuestionsJson(opts: { facts: GameQuestionFacts; requester?: string }): Promise<
+  | { ok: true; drafts: QuestionDraft[]; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: GAME_QUESTIONS_SYSTEM,
+      userMessage: buildGameQuestionsPrompt(opts.facts),
+      // Ten short items; a thinking model spends part of the budget before it
+      // writes, and Hindi costs ~1.6x the tokens.
+      maxTokens: opts.facts.lang === "hi" ? 3500 : 2500,
+      temperature: 0.4,
+      // Cached only for a chapter with nothing in the pool yet: once questions
+      // exist (approved, waiting or rejected) the teacher is asking for NEW
+      // ones, and the prompt lists what to avoid.
+      meta: { route: "game-questions", promptVersion: GAME_QUESTIONS_PROMPT_VERSION, cacheable: !(opts.facts.avoid ?? []).length },
+      ...(opts.requester ? { precheck: startLlmPrecheck({ requester: opts.requester }) } : {}),
+    },
+    (text) => parseGameQuestions(text, opts.facts.count),
+  );
+  if (r.ok) return { ok: true, drafts: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "No AI engine configured", engine: r.engine };
 }
 
 /**
