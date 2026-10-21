@@ -100,6 +100,12 @@ export type StudentDocFile = {
   reviewedBy?: string;
   reviewedAt?: string;
   reviewNote?: string;
+  /**
+   * What the verifier said this document IS (lib/studentDocTypes) — set by
+   * the staff app's verify step. Empty for documents never typed.
+   */
+  docType?: string;
+  docTypeLabel?: string;
 };
 
 export type StudentDocs = Record<StudentDocKey, StudentDocFile>;
@@ -517,6 +523,9 @@ export function normalizeDocFile(raw: unknown): StudentDocFile {
     reviewedBy: typeof o.reviewedBy === "string" ? o.reviewedBy : "",
     reviewedAt: typeof o.reviewedAt === "string" ? o.reviewedAt : "",
     reviewNote: typeof o.reviewNote === "string" ? o.reviewNote : "",
+    // Only when set — an untyped document round-trips unchanged.
+    ...(typeof o.docType === "string" && o.docType ? { docType: o.docType } : {}),
+    ...(typeof o.docTypeLabel === "string" && o.docTypeLabel ? { docTypeLabel: o.docTypeLabel } : {}),
   };
 }
 

@@ -17,13 +17,19 @@ import { ApiError } from "@/lib/api/v1/errors";
 import type { ApiAuthContext } from "@/lib/api/v1/auth";
 import {
   mergeWriteVisitorState,
-  normalizeMobile10,
   openVisitFor,
   readVisitorState,
   todayIstKey,
 } from "@/lib/visitorSelfService.server";
 import {
+  cleanIndianMobile,
+  cleanPeopleCount,
+  cleanVehicleNo,
+  maskAadhaarInText,
+} from "@/lib/staffScanReading";
+import {
   VISITOR_PURPOSES,
+  peopleCountOf,
   gatePassStatusLabel,
   nextVisitorNo,
   visitorPurposeLabel,
@@ -66,6 +72,9 @@ export type GateVisitorOut = {
   linkedTo: string;
   source: string;
   idProofNote: string;
+  peopleCount: number;
+  vehicleNo: string;
+  address: string;
   inTime: string;
   outTime: string | null;
   onCampus: boolean;
@@ -84,6 +93,9 @@ export function toGateVisitor(v: VisitorEntry): GateVisitorOut {
     linkedTo: v.linkedTo || "",
     source: v.source || "reception",
     idProofNote: v.idProofNote || "",
+    peopleCount: peopleCountOf(v.peopleCount),
+    vehicleNo: v.vehicleNo || "",
+    address: v.address || "",
     inTime: v.inTime,
     outTime: v.outTime,
     onCampus: !v.outTime,
@@ -168,63 +180,102 @@ export function gatePassesForDay(
     }));
 }
 
+/** A phone-made visit id: lets a retried check-in find the visit it already made. */
+const CLIENT_VISIT_ID = /^visit_[a-z0-9]{8,24}$/;
+
+export type GateCheckInInput = {
+  visitorName: string;
+  /** Optional (the visitor register never required one); 10-digit Indian when given. */
+  mobile: string;
+  purpose: VisitorPurpose;
+  personToMeet?: string;
+  idProofNote?: string;
+  linkedTo?: string;
+  peopleCount?: unknown;
+  vehicleNo?: string;
+  address?: string;
+  /** Made by the phone when the sheet opens, kept across retries. */
+  clientId?: string;
+};
+
 /**
- * Check a visitor in from the gate.
- *
- * Returns the open visit unchanged when this mobile is already on campus,
- * rather than opening a second one — a guard tapping twice on a slow
- * connection must not put the same person in the log two times.
+ * Validate and build the entry — pure, so the rules have a test of their own
+ * (staffScanReading.selftest.ts). A string is the reason it was refused.
  */
-export async function gateCheckIn(
-  ctx: ApiAuthContext,
-  input: {
-    visitorName: string;
-    mobile: string;
-    purpose: VisitorPurpose;
-    personToMeet?: string;
-    idProofNote?: string;
-    linkedTo?: string;
-  },
-): Promise<{ entry: VisitorEntry; alreadyIn: boolean }> {
+export function buildGateEntry(
+  state: VisitorState,
+  input: GateCheckInInput,
+  actor: string,
+  now: Date,
+  newId: () => string,
+): VisitorEntry | string {
   const name = input.visitorName.trim();
-  if (!name) throw new ApiError("bad_request", "Visitor name required", 400);
-  const mobile = normalizeMobile10(input.mobile);
-  if (mobile.length !== 10) {
-    throw new ApiError("bad_request", "Enter a valid 10-digit mobile number", 400);
-  }
-  if (!isVisitorPurpose(input.purpose)) {
-    throw new ApiError("bad_request", "Unknown purpose", 400);
-  }
-
-  const state = await loadVisitorState();
-  const existing = openVisitFor(state, mobile);
-  if (existing) return { entry: existing, alreadyIn: true };
-
-  const now = new Date();
-  const id = `visit_${Math.random().toString(36).slice(2, 10)}`;
-  const entry: VisitorEntry = {
+  if (!name) return "Visitor name required";
+  const mobile = cleanIndianMobile(input.mobile);
+  if (!mobile.ok) return mobile.error;
+  if (!isVisitorPurpose(input.purpose)) return "Unknown purpose";
+  const people = cleanPeopleCount(input.peopleCount);
+  if (!people.ok) return people.error;
+  const clientId = (input.clientId || "").trim();
+  const id = CLIENT_VISIT_ID.test(clientId) ? clientId : newId();
+  return {
     id,
     visitorNo: nextVisitorNo(state, now),
     source: "reception",
     linkedTo: input.linkedTo?.trim() || undefined,
-    visitorName: name,
-    mobile,
+    visitorName: name.slice(0, 120),
+    mobile: mobile.mobile,
     purpose: input.purpose,
     personToMeet: (input.personToMeet || "").trim().slice(0, 120),
     inTime: now.toISOString(),
     outTime: null,
-    idProofNote: (input.idProofNote || "").trim().slice(0, 200),
+    // Masked here as well as in the normaliser: an Aadhaar typed in full by
+    // the guard must not reach the store, the audit row or the reply.
+    idProofNote: maskAadhaarInText((input.idProofNote || "").trim()).slice(0, 200),
+    peopleCount: people.count,
+    vehicleNo: cleanVehicleNo(input.vehicleNo) || undefined,
+    address: maskAadhaarInText((input.address || "").trim()).slice(0, 200) || undefined,
     qrPayload: visitorQrPayload(id, name),
-    createdBy: actorName(ctx),
+    createdBy: actor,
     createdAt: now.toISOString(),
   };
+}
+
+/**
+ * Check a visitor in from the gate.
+ *
+ * Idempotent two ways, because a guard taps twice on a slow connection: the
+ * phone's own visit id finds the visit this sheet already made, and a mobile
+ * already on campus returns its open visit rather than a second one.
+ */
+export async function gateCheckIn(
+  ctx: ApiAuthContext,
+  input: GateCheckInInput,
+): Promise<{ entry: VisitorEntry; alreadyIn: boolean }> {
+  const state = await loadVisitorState();
+  const built = buildGateEntry(
+    state,
+    input,
+    actorName(ctx),
+    new Date(),
+    () => `visit_${Math.random().toString(36).slice(2, 10)}`,
+  );
+  if (typeof built === "string") throw new ApiError("bad_request", built, 400);
+
+  const same = state.visitorLog.find((v) => v.id === built.id);
+  if (same) return { entry: same, alreadyIn: true };
+  if (built.mobile) {
+    const existing = openVisitFor(state, built.mobile);
+    if (existing) return { entry: existing, alreadyIn: true };
+  }
+
   const merged = await mergeWriteVisitorState({
     version: 1,
-    visitorLog: [entry],
+    visitorLog: [built],
     gatePasses: [],
   });
   if (!merged) throw new ApiError("server_error", "Could not save the check-in", 500);
-  return { entry, alreadyIn: false };
+  return { entry: built, alreadyIn: false };
 }
 
 /** Check a visitor out. Already-out is reported, not silently re-stamped. */

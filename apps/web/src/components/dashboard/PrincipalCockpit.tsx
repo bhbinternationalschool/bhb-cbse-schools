@@ -196,7 +196,7 @@ export function PrincipalCockpit() {
     },
     students: { activeCount: 0 },
     attendance: { date: "Today", studentPresent: 0, studentAbsent: 0, studentLeave: 0, studentMarkedPct: 0, sectionsMarked: 0 },
-    staff: { activeCount: 0, presentToday: 0, absentToday: 0 },
+    staff: { activeCount: 0, presentToday: 0, absentToday: 0, countsKnown: false },
     admissions: { pipeline: 0, enrolled: 0, followUpsDue: 0 },
     alerts: { vaultExpiring30d: 0, lowStockSkus: 0, attendanceRegistersPending: 0 },
   };

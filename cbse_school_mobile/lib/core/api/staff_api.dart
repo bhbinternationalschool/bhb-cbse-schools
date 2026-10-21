@@ -1367,6 +1367,9 @@ class GateVisitor {
       linkedTo = _s(j, "linkedTo"),
       source = _s(j, "source"),
       idProofNote = _s(j, "idProofNote"),
+      peopleCount = _i(j, "peopleCount") < 1 ? 1 : _i(j, "peopleCount"),
+      vehicleNo = _s(j, "vehicleNo"),
+      address = _s(j, "address"),
       inTime = _s(j, "inTime"),
       outTime = _s(j, "outTime"),
       onCampus = _b(j, "onCampus"),
@@ -1382,6 +1385,9 @@ class GateVisitor {
   final String linkedTo;
   final String source;
   final String idProofNote;
+  final int peopleCount;
+  final String vehicleNo;
+  final String address;
   final String inTime;
   final String outTime;
   final bool onCampus;
@@ -1881,6 +1887,50 @@ extension StaffApi on ApiClient {
     return erpUrl("${data["signatureUrl"] ?? ""}");
   }
 
+  /// One homework file (a scanned page, a photo or a PDF) for a section the
+  /// teacher posts to — POST /api/v1/staff/homework/attachment. Stored in the
+  /// school's private files; the returned ref goes on the post.
+  Future<UploadedHomeworkFile> uploadHomeworkAttachment({
+    required String classId,
+    required String sectionId,
+    required Uint8List bytes,
+    required String fileName,
+    required String mime,
+    required String label,
+  }) async {
+    final req = http.MultipartRequest(
+      "POST",
+      _uri("/api/v1/staff/homework/attachment"),
+    );
+    final headers = await _authHeaders();
+    headers.remove("Content-Type");
+    req.headers.addAll(headers);
+    req.fields["classId"] = classId;
+    req.fields["sectionId"] = sectionId;
+    req.fields["label"] = label;
+    req.files.add(
+      http.MultipartFile.fromBytes(
+        "file",
+        bytes,
+        filename: fileName,
+        contentType: MediaType.parse(mime),
+      ),
+    );
+    final res = await http.Response.fromStream(await _uploadHttp.send(req));
+    if (res.statusCode != 200) _throwFrom(res);
+    final data =
+        ((jsonDecode(res.body) as Map<String, dynamic>)["data"]
+            as Map<String, dynamic>?) ??
+        const {};
+    final a = (data["attachment"] as Map<String, dynamic>?) ?? const {};
+    return UploadedHomeworkFile(
+      id: _s(a, "id"),
+      label: _s(a, "label"),
+      kind: _s(a, "kind"),
+      ref: _s(a, "url"),
+    );
+  }
+
   /// Take the signature off the signed-in member of staff's record.
   Future<void> removeMySignature() async {
     final res = await _http.delete(
@@ -2200,7 +2250,8 @@ extension StaffApi on ApiClient {
       );
 
   /// Returns (visitor, alreadyIn). `alreadyIn` means this mobile was already
-  /// on campus and the OPEN visit came back — not a second check-in.
+  /// on campus (or this sheet's [clientId] already checked them in) and the
+  /// OPEN visit came back — not a second check-in. [mobile] may be "".
   Future<(GateVisitor, bool)> gateCheckIn({
     required String visitorName,
     required String mobile,
@@ -2208,6 +2259,10 @@ extension StaffApi on ApiClient {
     String personToMeet = "",
     String idProofNote = "",
     String linkedTo = "",
+    int peopleCount = 1,
+    String vehicleNo = "",
+    String address = "",
+    String clientId = "",
   }) async {
     final data = await _postData("/api/v1/staff/visitors/checkin", {
       "visitorName": visitorName,
@@ -2216,11 +2271,31 @@ extension StaffApi on ApiClient {
       "personToMeet": personToMeet,
       "idProofNote": idProofNote,
       "linkedTo": linkedTo,
+      "peopleCount": peopleCount,
+      "vehicleNo": vehicleNo,
+      "address": address,
+      if (clientId.isNotEmpty) "clientId": clientId,
     });
     return (
       GateVisitor.fromJson(data["visitor"] as Map<String, dynamic>),
       _b(data, "alreadyIn"),
     );
+  }
+
+  /// Read a photo at the gate — [kind] is "visitor_id" or "vehicle_plate".
+  /// Returns the server's reading (a draft; nothing is saved, and the photo
+  /// is not kept). An Aadhaar number only ever comes back masked.
+  Future<Map<String, dynamic>> scanAtGate({
+    required String kind,
+    required String imageBase64,
+    String mimeType = "image/jpeg",
+  }) async {
+    final data = await _postData("/api/v1/staff/visitors/scan", {
+      "kind": kind,
+      "imageBase64": imageBase64,
+      "mimeType": mimeType,
+    });
+    return Map<String, dynamic>.from((data["reading"] as Map?) ?? const {});
   }
 
   /// Returns (visitor, alreadyOut) — an already-closed visit keeps its
@@ -2253,6 +2328,23 @@ extension StaffApi on ApiClient {
     if (res.statusCode != 200) _throwFrom(res);
     return (res.bodyBytes, res.headers["content-type"] ?? "");
   }
+}
+
+/// A homework file already in the school's storage, not yet on a post.
+class UploadedHomeworkFile {
+  const UploadedHomeworkFile({
+    required this.id,
+    required this.label,
+    required this.kind,
+    required this.ref,
+  });
+
+  final String id;
+  final String label;
+  final String kind;
+
+  /// The stored reference (`/api/file/homework/…`) the post route checks.
+  final String ref;
 }
 
 // --------------------------------------------------------------- my profile

@@ -3093,4 +3093,934 @@ class LHi extends L {
 
   @override
   String get feeBankMissing => 'बैंक का नाम लिखें';
+
+  @override
+  String get bcAudienceAllParents => 'सभी अभिभावक';
+
+  @override
+  String get bcAudienceSections => 'कक्षाएँ / सेक्शन';
+
+  @override
+  String get bcAudienceStaff => 'स्टाफ';
+
+  @override
+  String get bcAudienceRoutes => 'बस रूट';
+
+  @override
+  String get bcAudienceFeeDefaulters => 'फीस बकायादार';
+
+  @override
+  String get bcOwnSectionsOnly =>
+      'आप केवल अपने सेक्शन के परिवारों को संदेश भेज सकते हैं।';
+
+  @override
+  String get bcStaffAll => 'सभी';
+
+  @override
+  String get bcStaffTeaching => 'शिक्षण';
+
+  @override
+  String get bcStaffNonTeaching => 'गैर-शिक्षण';
+
+  @override
+  String get bcStaffRolesHint => 'पद (सभी के लिए खाली छोड़ें)';
+
+  @override
+  String get bcPickAtLeastOne => 'कम से कम एक चुनें।';
+
+  @override
+  String get bcChannel => 'भेजने का तरीका';
+
+  @override
+  String get bcChannelWhatsapp => 'WhatsApp + ऐप';
+
+  @override
+  String get bcChannelApp => 'केवल ऐप (मुफ़्त)';
+
+  @override
+  String get bcChannelAppHint =>
+      'केवल ऐप सूचना — कोई WhatsApp संदेश नहीं, कोई खर्च नहीं। स्कूल ऐप वाले परिवारों और स्टाफ तक पहुँचती है।';
+
+  @override
+  String get bcModeTemplate => 'WhatsApp टेम्पलेट';
+
+  @override
+  String get bcModeCustom => 'अपना संदेश';
+
+  @override
+  String get bcChooseTemplate => 'टेम्पलेट चुनें';
+
+  @override
+  String get bcTemplatesNotLoaded => 'टेम्पलेट लोड नहीं हो सके।';
+
+  @override
+  String get bcNoTemplates =>
+      'अभी कोई टेम्पलेट हिंदी और अंग्रेज़ी दोनों में स्वीकृत नहीं है।';
+
+  @override
+  String get bcAutoFilledHint =>
+      'नाम, बच्चा और कक्षा हर परिवार के लिए अपने आप भरे जाते हैं।';
+
+  @override
+  String get bcCustomTitle => 'शीर्षक (वैकल्पिक)';
+
+  @override
+  String get bcCustomHint =>
+      'जिन्होंने पिछले 24 घंटे में स्कूल को संदेश भेजा है, उन्हें यह जैसा लिखा है वैसा जाएगा। बाकी सभी को यह स्वीकृत “विद्यालय सूचना” टेम्पलेट के अंदर मिलेगा, जिसे WhatsApp सभी तक पहुँचाता है।';
+
+  @override
+  String get bcCustomTemplateNotReady =>
+      '“विद्यालय सूचना” टेम्पलेट दोनों भाषाओं में स्वीकृत नहीं है, इसलिए 24 घंटे से बाहर वाले लोगों तक संदेश नहीं पहुँचेगा।';
+
+  @override
+  String get bcLoadFailed => 'ब्रॉडकास्ट विकल्प लोड नहीं हो सके।';
+
+  @override
+  String get bcReadyToSend => 'भेजने के लिए तैयार';
+
+  @override
+  String bcFamiliesInAudience(String count) {
+    return 'इस समूह में: $count';
+  }
+
+  @override
+  String bcAsFreeText(String count) {
+    return 'सीधा संदेश (24 घंटे के अंदर): $count';
+  }
+
+  @override
+  String bcViaTemplate(String count) {
+    return 'स्वीकृत टेम्पलेट के अंदर: $count';
+  }
+
+  @override
+  String bcCannotReach(String count) {
+    return 'नहीं पहुँच सकते (उनकी भाषा में टेम्पलेट स्वीकृत नहीं): $count';
+  }
+
+  @override
+  String get bcWindowUnknown =>
+      '24 घंटे की जानकारी पढ़ी नहीं जा सकी, इसलिए सभी को टेम्पलेट जाएगा।';
+
+  @override
+  String bcSkipped(String optOut, String dead, String noNumber) {
+    return 'छोड़े गए: $optOut ने मना किया, $dead WhatsApp पर नहीं, $noNumber का नंबर नहीं';
+  }
+
+  @override
+  String bcEstimate(String amount, String gst) {
+    return 'अनुमानित WhatsApp खर्च: $amount + $gst% GST';
+  }
+
+  @override
+  String get bcEstimateDefaults =>
+      'अनुमान डिफ़ॉल्ट दरों पर है — वेब पर (WhatsApp usage) दरें पक्की करें।';
+
+  @override
+  String get bcEstimateUnknown => 'खर्च का अनुमान लोड नहीं हुआ।';
+
+  @override
+  String get bcAppNotificationToo =>
+      'समूह में जिनके पास ऐप है, उन्हें ऐप सूचना भी जाएगी (मुफ़्त)।';
+
+  @override
+  String bcSendNow(String count) {
+    return 'अभी $count को भेजें';
+  }
+
+  @override
+  String get bcConfirmTitle => 'यह संदेश भेजें?';
+
+  @override
+  String bcConfirmBody(String audience, String count) {
+    return '$audience: $count को मिलेगा। इसे वापस नहीं लिया जा सकता।';
+  }
+
+  @override
+  String bcResult(String sent, String failed, String deferred, String push) {
+    return 'WhatsApp: $sent स्वीकार, $failed विफल, $deferred शांत समय के लिए रुके। ऐप सूचनाएँ: $push।';
+  }
+
+  @override
+  String get visitorMobileOptional => 'मोबाइल नंबर (वैकल्पिक)';
+
+  @override
+  String get numberOfPeople => 'कितने लोग';
+
+  @override
+  String get vehicleNumberOptional => 'वाहन नंबर (वैकल्पिक)';
+
+  @override
+  String get visitorAddressOptional => 'पता (वैकल्पिक)';
+
+  @override
+  String get scanIdCard => 'पहचान पत्र स्कैन करें';
+
+  @override
+  String get scanNumberPlate => 'नंबर प्लेट स्कैन करें';
+
+  @override
+  String get readFromIdCheck => 'पहचान पत्र से पढ़ा — जाँच लें';
+
+  @override
+  String get readFromPlateCheck => 'नंबर प्लेट से पढ़ा — जाँच लें';
+
+  @override
+  String get readFromBillCheck => 'बिल से पढ़ा — जाँच लें';
+
+  @override
+  String get readingThePhoto => 'फ़ोटो पढ़ी जा रही है…';
+
+  @override
+  String get readTheBill => 'बिल पढ़ें';
+
+  @override
+  String get aadhaarLast4Only => 'आधार के केवल अंतिम 4 अंक रखे जाते हैं';
+
+  @override
+  String visitorPeopleCount(int count) {
+    return '$count लोग';
+  }
+
+  @override
+  String get homeworkScanPage => 'पेज स्कैन करें';
+
+  @override
+  String get homeworkUploadFile => 'फ़ाइल अपलोड करें';
+
+  @override
+  String homeworkPageLabel(int n) {
+    return 'पेज $n';
+  }
+
+  @override
+  String homeworkAttachLimit(int max) {
+    return 'एक होमवर्क में अधिकतम $max फ़ाइलें';
+  }
+
+  @override
+  String homeworkFileTooLarge(String name) {
+    return '$name 20 MB से बड़ी है — जोड़ी नहीं गई';
+  }
+
+  @override
+  String get homeworkFileWrongType => 'फ़ोटो (JPG, PNG, WebP) या PDF जोड़ें';
+
+  @override
+  String get homeworkWaitForUploads =>
+      'फ़ाइलें अपलोड होने तक रुकें, या जो नहीं हुईं उन्हें हटाएँ';
+
+  @override
+  String get homeworkCameraUnavailable => 'कैमरा नहीं खुल सका';
+
+  @override
+  String get homeworkUploadFailedRetry =>
+      'अपलोड नहीं हुई — फिर से कोशिश के लिए टैप करें';
+
+  @override
+  String get homeworkCouldNotOpenFile => 'फ़ाइल नहीं खुल सकी';
+
+  @override
+  String get homeworkAttachmentsHint =>
+      'पेज और फ़ाइलें इस होमवर्क के साथ अभिभावकों को जाएँगी।';
+
+  @override
+  String get busLiveTitle => 'लाइव रूट';
+
+  @override
+  String get busLiveTapHint =>
+      'किसी रूट पर टैप करें — नक्शे पर बस की लाइव जगह और हर स्टॉप पर पहुँचने का समय दिखेगा।';
+
+  @override
+  String busLiveOnRun(String run) {
+    return 'सड़क पर · $run';
+  }
+
+  @override
+  String busLivePositionAt(String time, String ago) {
+    return '$time की जगह ($ago)';
+  }
+
+  @override
+  String busLiveStale(String time) {
+    return 'आखिरी बार $time पर दिखी — लाइव नहीं';
+  }
+
+  @override
+  String busLiveStaleDetail(String minutes) {
+    return 'ट्रैकर ने $minutes मिनट से ज़्यादा समय से जगह नहीं भेजी, इसलिए पहुँचने का समय नहीं दिखाया गया।';
+  }
+
+  @override
+  String get busLiveOffShift => 'अभी कोई फेरा नहीं चल रहा';
+
+  @override
+  String busLiveOffShiftLastSeen(String time) {
+    return 'आखिरी बार $time पर दिखी। पहुँचने का समय केवल फेरे के दौरान दिखता है।';
+  }
+
+  @override
+  String get busLiveOffShiftNoFix =>
+      'पहुँचने का समय केवल फेरे के दौरान दिखता है।';
+
+  @override
+  String get busLiveUntracked => 'इस गाड़ी से कोई GPS जगह नहीं मिली';
+
+  @override
+  String busLiveUntrackedDetail(String vehicle) {
+    return '$vehicle का कोई ट्रैकर जगह नहीं भेज रहा, इसलिए उसकी जगह और पहुँचने का समय नहीं दिखाया जा सकता।';
+  }
+
+  @override
+  String get busLiveNoVehicle => 'इस रूट से कोई गाड़ी जुड़ी नहीं है';
+
+  @override
+  String get busLiveTrailUnread =>
+      'बस का रास्ता पढ़ा नहीं जा सका, इसलिए निकले हुए स्टॉप और पहुँचने का समय नहीं दिखाया गया।';
+
+  @override
+  String busLivePassedAt(String time) {
+    return '$time पर निकली';
+  }
+
+  @override
+  String get busLiveNotSeen => 'नहीं दिखी — बस पास नहीं आई';
+
+  @override
+  String busLiveEta(String time, String minutes) {
+    return 'लगभग $time · $minutes मिनट';
+  }
+
+  @override
+  String get busLiveNoEta => 'अभी समय नहीं';
+
+  @override
+  String get busLiveUnpinned => 'नक्शे पर पिन नहीं';
+
+  @override
+  String busLiveSchoolEta(String time, String minutes) {
+    return 'स्कूल: लगभग $time · $minutes मिनट';
+  }
+
+  @override
+  String get busLiveEstimateNote =>
+      'समय बस की जगह से अनुमान है, वादा नहीं। स्टॉप इस फेरे के क्रम में हैं।';
+
+  @override
+  String get busLiveRouteMissing =>
+      'यह रूट आपके लिए लाइव नहीं दिखता। ड्राइवर केवल अपनी बस देखते हैं।';
+
+  @override
+  String get mrEditHint =>
+      'किसी खाने को दबाकर हाज़िरी लगाएँ। तारीख़ दबाकर उस दिन के सभी बिना-हाज़िरी बच्चों को एक साथ भरें, फिर अपवाद बदलें।';
+
+  @override
+  String get mrViewOnly =>
+      'केवल देखने के लिए — इस कक्षा का मासिक रजिस्टर कक्षाध्यापक (या दफ़्तर) भरते हैं।';
+
+  @override
+  String mrUnsavedCount(String count) {
+    return '$count बदलाव सहेजे नहीं गए';
+  }
+
+  @override
+  String get mrSave => 'सहेजें';
+
+  @override
+  String get mrDiscard => 'रद्द करें';
+
+  @override
+  String get mrDiscardTitle => 'बिना सहेजे बदलाव छोड़ दें?';
+
+  @override
+  String get mrDiscardBody => 'आपके बदले हुए निशान अभी सहेजे नहीं गए हैं।';
+
+  @override
+  String get mrKeepEditing => 'बदलाव जारी रखें';
+
+  @override
+  String get mrClearMark => 'निशान हटाएँ';
+
+  @override
+  String mrFillDayTitle(String date) {
+    return '$date भरें';
+  }
+
+  @override
+  String get mrFillDayBody =>
+      'इस दिन जिन बच्चों की हाज़िरी नहीं लगी, उन्हें चुना गया निशान मिलेगा। पहले से लगे निशान नहीं बदलेंगे।';
+
+  @override
+  String mrFillDayDone(String count) {
+    return '$count बच्चों की हाज़िरी भरी — अपवाद बदलें, फिर सहेजें।';
+  }
+
+  @override
+  String get mrFillDayNothing => 'इस दिन सभी बच्चों का निशान पहले से लगा है।';
+
+  @override
+  String mrSavedDays(String count) {
+    return '$count दिन सहेजे गए।';
+  }
+
+  @override
+  String mrNotSaved(String reasons) {
+    return 'नहीं सहेजा गया: $reasons';
+  }
+
+  @override
+  String get ptmScheduleButton => 'पीटीएम तय करें';
+
+  @override
+  String get ptmScheduleTitle => 'पीटीएम तय करें';
+
+  @override
+  String get ptmScheduleName => 'नाम';
+
+  @override
+  String get ptmScheduleNameDefault => 'अभिभावक-शिक्षक बैठक';
+
+  @override
+  String get ptmScheduleDate => 'तारीख़';
+
+  @override
+  String get ptmScheduleEndDate => 'आख़िरी दिन (एक से ज़्यादा दिन हो तो)';
+
+  @override
+  String get ptmScheduleClasses => 'कक्षाएँ';
+
+  @override
+  String get ptmScheduleClassesHintTeacher =>
+      'केवल वे कक्षाएँ जिन्हें आप पढ़ाते हैं। पीटीएम पूरी कक्षा के लिए होता है — उसके हर शिक्षक अपने समय जोड़ते हैं।';
+
+  @override
+  String get ptmScheduleClassesHintOffice =>
+      'एक या अधिक कक्षाएँ चुनें। एक पीटीएम इन सबके लिए होगा।';
+
+  @override
+  String get ptmScheduleSelectAll => 'सभी चुनें';
+
+  @override
+  String get ptmScheduleMode => 'कैसे';
+
+  @override
+  String get ptmModeInPerson => 'आमने-सामने';
+
+  @override
+  String get ptmModeVideo => 'वीडियो';
+
+  @override
+  String get ptmModePhone => 'फ़ोन';
+
+  @override
+  String get ptmScheduleNote => 'अभिभावकों के लिए नोट (वैकल्पिक)';
+
+  @override
+  String get ptmScheduleSave => 'तय करें';
+
+  @override
+  String get ptmScheduleNeedClass => 'कम से कम एक कक्षा चुनें।';
+
+  @override
+  String get ptmScheduleNeedName => 'पीटीएम का नाम लिखें।';
+
+  @override
+  String get ptmScheduleDone => 'पीटीएम तय हो गया — अब इसमें अपने समय जोड़ें।';
+
+  @override
+  String get ptmScheduleNoClasses =>
+      'पीटीएम के लिए आपकी कोई कक्षा नहीं है — दफ़्तर से अपनी कक्षाएँ जुड़वाएँ (Staff → Duties)।';
+
+  @override
+  String get scCallFamily => 'परिवार को कॉल करें';
+
+  @override
+  String get scMessageFamily => 'परिवार को संदेश';
+
+  @override
+  String get scAppChat => 'परिवार से ऐप चैट';
+
+  @override
+  String get scAppChatHint => 'अभिभावक ऐप में संदेश — परिवार वहीं उत्तर देगा';
+
+  @override
+  String get scWhatsAppMessage => 'WhatsApp संदेश भेजें';
+
+  @override
+  String get scWhatsAppMessageHint =>
+      'विद्यालय के WhatsApp नंबर से — भेजने से पहले आप देखेंगे';
+
+  @override
+  String get scAddWhatsApp => 'WhatsApp नंबर जोड़ें';
+
+  @override
+  String get scChangeWhatsApp => 'WhatsApp नंबर बदलें';
+
+  @override
+  String get scNoNumberOnRecord => 'रिकॉर्ड में कोई नंबर नहीं';
+
+  @override
+  String get scNoWhatsAppOnRecord => 'रिकॉर्ड में कोई WhatsApp नंबर नहीं';
+
+  @override
+  String get scAskClassTeacherToAdd => 'कक्षा अध्यापक या कार्यालय से जुड़वाएँ।';
+
+  @override
+  String scCallNumber(String number) {
+    return '$number पर कॉल करें';
+  }
+
+  @override
+  String get scCallSourceGuardian => 'अभिभावक का मोबाइल';
+
+  @override
+  String get scCallSourceWhatsApp =>
+      'परिवार का WhatsApp नंबर (अभिभावक मोबाइल दर्ज नहीं)';
+
+  @override
+  String get scLoadingFamily => 'परिवार के नंबर पढ़े जा रहे हैं…';
+
+  @override
+  String get scWhatsAppNumberLabel => 'WhatsApp नंबर (10 अंक)';
+
+  @override
+  String scCurrentNumber(String number) {
+    return 'अभी: $number';
+  }
+
+  @override
+  String get scSave => 'सहेजें';
+
+  @override
+  String get scCancel => 'रद्द करें';
+
+  @override
+  String get scNumberSaved =>
+      'विद्यालय संदेशों के लिए WhatsApp नंबर सहेजा गया।';
+
+  @override
+  String get scErrEmpty => 'परिवार का 10 अंकों का WhatsApp नंबर लिखें';
+
+  @override
+  String get scErrNotMobile =>
+      '10 अंकों का भारतीय मोबाइल नंबर लिखें (6–9 से शुरू)';
+
+  @override
+  String scErrPlaceholder(String number) {
+    return '$number नकली/खाली नंबर है, परिवार का नंबर नहीं';
+  }
+
+  @override
+  String get scErrSame => 'यही परिवार का WhatsApp नंबर पहले से है';
+
+  @override
+  String get scMessageLabel => 'परिवार के लिए आपका संदेश';
+
+  @override
+  String get scMessageHint => 'छोटा और साफ़ — परिवार इसे WhatsApp पर पढ़ेगा';
+
+  @override
+  String get scPreview => 'पूर्वावलोकन';
+
+  @override
+  String get scPreviewTitle => 'परिवार यह पढ़ेगा';
+
+  @override
+  String scPreviewTo(String number, String language) {
+    return '$number को · $language में';
+  }
+
+  @override
+  String get scEdit => 'बदलें';
+
+  @override
+  String get scSend => 'भेजें';
+
+  @override
+  String get scSending => 'भेजा जा रहा है…';
+
+  @override
+  String get scSent => 'विद्यालय के WhatsApp से भेजा गया।';
+
+  @override
+  String scNotSent(String reason) {
+    return 'नहीं भेजा गया: $reason';
+  }
+
+  @override
+  String get scLanguageHindi => 'हिंदी';
+
+  @override
+  String get scLanguageEnglish => 'अंग्रेज़ी';
+
+  @override
+  String get dtTypeLabel => 'यह कौन-सा दस्तावेज़ है?';
+
+  @override
+  String get dtPickType => 'दस्तावेज़ का प्रकार चुनें';
+
+  @override
+  String get dtCreateCustom => 'नया प्रकार बनाएँ…';
+
+  @override
+  String get dtCustomName => 'नए प्रकार का नाम';
+
+  @override
+  String get dtCustomHint => 'जैसे राशन कार्ड';
+
+  @override
+  String get dtCreate => 'बनाएँ';
+
+  @override
+  String get dtCustomNotLoaded =>
+      'विद्यालय के अपने प्रकार पढ़े नहीं जा सके — केवल सामान्य प्रकार दिख रहे हैं।';
+
+  @override
+  String get dtAadhaarNumber => 'कार्ड पर आधार नंबर (वैकल्पिक)';
+
+  @override
+  String get dtAadhaarHint => '12 अंक — यह रिकॉर्ड में सहेजा जाएगा';
+
+  @override
+  String get dtAadhaarInvalid => 'आधार नंबर 12 अंकों का होता है';
+
+  @override
+  String dtGoesToSlot(String label) {
+    return 'सत्यापन के बाद यह यहाँ जाएगा: $label';
+  }
+
+  @override
+  String dtGoesOffSlot(String label, String from) {
+    return 'सत्यापन के बाद यह $label के रूप में रखा जाएगा — बच्चे का \"$from\" सही दस्तावेज़ के लिए खाली रहेगा।';
+  }
+
+  @override
+  String dtVerifiedAs(String label) {
+    return '$label के रूप में सत्यापित।';
+  }
+
+  @override
+  String get dtAadhaarSaved => 'आधार नंबर रिकॉर्ड में सहेजा गया।';
+
+  @override
+  String get dtAadhaarKept =>
+      'रिकॉर्ड में UDISE+ पर सत्यापित दूसरा आधार है — बदला नहीं गया। कार्यालय को बताएँ।';
+
+  @override
+  String dtAadhaarNotSaved(String reason) {
+    return 'दस्तावेज़ सत्यापित, पर आधार नंबर सहेजा नहीं गया: $reason';
+  }
+
+  @override
+  String get dtVerify => 'सत्यापित करें';
+
+  @override
+  String get pmAllStaff => 'सभी स्टाफ';
+
+  @override
+  String get pmStaffPayslipsTitle => 'स्टाफ वेतन पर्ची';
+
+  @override
+  String get pmStaffAdvancesTitle => 'स्टाफ एडवांस';
+
+  @override
+  String pmSession(String session) {
+    return 'सत्र $session';
+  }
+
+  @override
+  String get pmNotRun => 'वेतन नहीं बना';
+
+  @override
+  String get pmPreparing => 'तैयार हो रहा है';
+
+  @override
+  String get pmGross => 'कुल वेतन';
+
+  @override
+  String get pmDeductions => 'कटौती';
+
+  @override
+  String get pmNet => 'शुद्ध वेतन';
+
+  @override
+  String get pmPayable => 'देय';
+
+  @override
+  String get pmPaid => 'भुगतान हुआ';
+
+  @override
+  String get pmUnpaid => 'अभी बाकी';
+
+  @override
+  String pmPaidOn(String date) {
+    return 'भुगतान $date';
+  }
+
+  @override
+  String get pmNotPaidYet => 'अभी भुगतान नहीं';
+
+  @override
+  String get pmOnHold => 'रोकी गई';
+
+  @override
+  String pmExtraRuns(String count) {
+    return 'यह महीना $count और रन में भी है — वेब पर पेरोल देखें।';
+  }
+
+  @override
+  String pmMonthsRun(String count) {
+    return '$count महीने का वेतन बना';
+  }
+
+  @override
+  String get pmLeft => 'छोड़ चुके';
+
+  @override
+  String get pmNoStaff => 'इस सत्र के लिए कोई स्टाफ नहीं।';
+
+  @override
+  String get pmReadOnlyNote =>
+      'केवल देखने के लिए — आँकड़े वेब के पेरोल रन से हैं। जिस महीने वेतन नहीं बना, वहाँ \"वेतन नहीं बना\" लिखा है।';
+
+  @override
+  String get pmTaken => 'लिया';
+
+  @override
+  String get pmRecovered => 'वसूल';
+
+  @override
+  String get pmDue => 'बाकी';
+
+  @override
+  String get pmNoAdvances => 'किसी स्टाफ के नाम एडवांस नहीं है।';
+
+  @override
+  String pmGiven(String date) {
+    return 'दिया $date';
+  }
+
+  @override
+  String pmReturned(String date) {
+    return 'लौटाया $date';
+  }
+
+  @override
+  String pmFromSalary(String month) {
+    return 'वेतन से · $month';
+  }
+
+  @override
+  String get pmNothingRecovered => 'अभी कोई वसूली नहीं हुई।';
+
+  @override
+  String get pmAdvancesNote =>
+      'केवल देखने के लिए — वेब के पेरोल → एडवांस वाला ही रजिस्टर और जोड़।';
+
+  @override
+  String pmAdvanceCount(String count) {
+    return '$count एडवांस';
+  }
+
+  @override
+  String get hcCreateNotice => 'सूचना / समाचार बनाएँ';
+
+  @override
+  String get hcNoticeTitle => 'शीर्षक';
+
+  @override
+  String get hcNoticeMessage => 'संदेश';
+
+  @override
+  String get hcNewsSummary => 'छोटा सार (वैकल्पिक)';
+
+  @override
+  String get hcAudience => 'किसके लिए';
+
+  @override
+  String get hcAudienceAll => 'सभी';
+
+  @override
+  String get hcAudienceParents => 'अभिभावक';
+
+  @override
+  String get hcAudienceStaff => 'स्टाफ़';
+
+  @override
+  String get hcPinToTop => 'सबसे ऊपर रखें';
+
+  @override
+  String get hcPublish => 'प्रकाशित करें';
+
+  @override
+  String get hcPublished => 'प्रकाशित हो गया।';
+
+  @override
+  String get hcWriteTitle => 'शीर्षक लिखें।';
+
+  @override
+  String get hcWriteMessage => 'संदेश लिखें।';
+
+  @override
+  String get hcTooLong => 'यह बहुत लंबा है — कृपया छोटा करें।';
+
+  @override
+  String get hcNoticePushNote =>
+      'सूचना जिनके लिए है, उनके फ़ोन पर सूचना भी जाती है।';
+
+  @override
+  String get hcConfirmPublish =>
+      'इसे अभी प्रकाशित करें? जिनके लिए है, वे सभी इसे ऐप में देखेंगे।';
+
+  @override
+  String get hcTodaysCollections => 'आज की वसूली';
+
+  @override
+  String get hcNothingCollectedToday => 'आज कोई वसूली नहीं हुई।';
+
+  @override
+  String hcByCashier(String name) {
+    return '$name द्वारा';
+  }
+
+  @override
+  String get hcStaffList => 'स्टाफ़ सूची';
+
+  @override
+  String get hcStaffProfile => 'स्टाफ़ प्रोफ़ाइल';
+
+  @override
+  String get hcEmpCode => 'कर्मचारी कोड';
+
+  @override
+  String get hcDepartment => 'विभाग';
+
+  @override
+  String get hcJoined => 'कार्यभार ग्रहण';
+
+  @override
+  String get hcClassTeacherOf => 'कक्षा अध्यापक';
+
+  @override
+  String get hcMobile => 'मोबाइल';
+
+  @override
+  String get hcNoOtherDetails => 'कोई और विवरण दर्ज नहीं है।';
+
+  @override
+  String get hcChangeMobile => 'मोबाइल जोड़ें / बदलें';
+
+  @override
+  String hcRosterMissingMobile(int missing, int total) {
+    return '$total में से $missing स्टाफ़ का मोबाइल दर्ज नहीं है, इसलिए वे स्टाफ़ ऐप में साइन इन नहीं कर सकते। नंबर जोड़ने के लिए लाल फ़ोन दबाएँ।';
+  }
+
+  @override
+  String get hcStaffPresentToday => 'आज उपस्थित स्टाफ़';
+
+  @override
+  String get hcStaffAbsentToday => 'आज अनुपस्थित स्टाफ़';
+
+  @override
+  String get hcNoStaffPresent => 'अभी किसी को उपस्थित दर्ज नहीं किया गया।';
+
+  @override
+  String get hcNoStaffAbsent => 'आज किसी को अनुपस्थित दर्ज नहीं किया गया।';
+
+  @override
+  String get hcExemptNotListed =>
+      'हाज़िरी से छूट वाले स्टाफ़ न गिने जाते हैं, न दिखते हैं।';
+
+  @override
+  String get hcStaffCountsNotLoaded =>
+      'उपस्थित और अनुपस्थित लोड नहीं हो सके — दोबारा कोशिश के लिए नीचे खींचें।';
+
+  @override
+  String get hcStaffToday => 'आज का स्टाफ़';
+
+  @override
+  String get hcOpenAttendance => 'हाज़िरी';
+
+  @override
+  String get hcNothingRecordedToday => 'आज कुछ दर्ज नहीं';
+
+  @override
+  String get hcAuditNotLoaded =>
+      'अंक प्रविष्टि, छुट्टी के फ़ैसले और ऐसा काम लोड नहीं हो सका — दोबारा कोशिश के लिए नीचे खींचें।';
+
+  @override
+  String hcActivitySummary(int active, int total) {
+    return '$total में से $active स्टाफ़ का आज काम दर्ज है';
+  }
+
+  @override
+  String hcActPunchIn(String time) {
+    return '$time पर पंच इन';
+  }
+
+  @override
+  String hcActPunchOut(String time) {
+    return '$time पर पंच आउट';
+  }
+
+  @override
+  String hcActRegisters(int count) {
+    return 'हाज़िरी लगाई ($count)';
+  }
+
+  @override
+  String hcActHomework(int count) {
+    return 'गृहकार्य दिया ($count)';
+  }
+
+  @override
+  String hcActMarks(int qty) {
+    return '$qty छात्रों के अंक भरे';
+  }
+
+  @override
+  String hcActCoScholastic(int count) {
+    return 'सह-शैक्षिक ग्रेड ($count)';
+  }
+
+  @override
+  String hcActClassSheet(int count) {
+    return 'कक्षा शीट अपडेट की ($count)';
+  }
+
+  @override
+  String hcActStudentRecords(int count) {
+    return 'छात्र रिकॉर्ड अपडेट किए ($count)';
+  }
+
+  @override
+  String hcActFees(String amount, int count) {
+    return '$count रसीदों में $amount वसूले';
+  }
+
+  @override
+  String hcActReceiptEdit(int count) {
+    return 'रसीदें बदलीं ($count)';
+  }
+
+  @override
+  String get hcActLeaveApplied => 'छुट्टी के लिए आवेदन किया';
+
+  @override
+  String hcActStaffLeave(int count) {
+    return 'स्टाफ़ छुट्टी पर फ़ैसला ($count)';
+  }
+
+  @override
+  String hcActStudentLeave(int count) {
+    return 'छात्र छुट्टी पर फ़ैसला ($count)';
+  }
+
+  @override
+  String get hcActProfile => 'अपनी प्रोफ़ाइल अपडेट की';
+
+  @override
+  String hcActLastAt(String time) {
+    return 'आख़िरी $time पर';
+  }
 }

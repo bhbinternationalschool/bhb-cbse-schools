@@ -9,7 +9,7 @@
  * SRN, documents) are NOT here and cannot be sent.
  */
 
-import { BLOOD_GROUPS, STUDENT_CATEGORIES } from "@/lib/sis";
+import { BLOOD_GROUPS, STUDENT_CATEGORIES, isPlaceholderMobile } from "@/lib/sis";
 
 /** Student fields → sis_students column. */
 export const CLASS_TEACHER_STUDENT_FIELDS = {
@@ -108,6 +108,12 @@ export function cleanClassTeacherPatch(
       } else {
         const m = mobile10(v);
         if (!m) return { ok: false, error: `${LABEL[k] || k}: enter a 10-digit mobile number` };
+        // 0000000000 / 9999999999 / 9876543210 are what a form gets when
+        // nobody knew the number — they once merged unrelated families into
+        // one household (PR #377). Never saved as a family's number.
+        if (isPlaceholderMobile(m)) {
+          return { ok: false, error: `${LABEL[k] || k}: ${m} is a placeholder, not the family's number` };
+        }
         v = m;
       }
     } else if (k === "fullName" || k === "guardianName") {

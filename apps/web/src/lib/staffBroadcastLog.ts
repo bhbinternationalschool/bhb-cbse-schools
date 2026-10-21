@@ -13,7 +13,18 @@ export type StaffBroadcastEntry = {
   at: string;
   staffId: string;
   staffName: string;
-  audience: "class_parents" | "leadership";
+  /**
+   * "audience" = the app's Broadcast screen (20 Oct 2026): any audience the
+   * web offers, named in `audienceLabel`.
+   */
+  audience: "class_parents" | "leadership" | "audience";
+  /** "Parents of 5-A + 5-B", "Teaching staff" — set for "audience" sends. */
+  audienceLabel?: string;
+  /** "template" or "custom" — set for "audience" sends. */
+  mode?: "template" | "custom";
+  /** Custom sends: how many went as free text and how many in the template. */
+  viaFreeText?: number;
+  viaTemplate?: number;
   sectionIds: string[];
   /** "Class 5 A", as the sections were named when the message went out. */
   sectionLabels: string[];
@@ -57,7 +68,20 @@ export function normalizeStaffBroadcastLog(raw: unknown): StaffBroadcastLog {
       at: str(r.at),
       staffId,
       staffName: str(r.staffName),
-      audience: r.audience === "leadership" ? "leadership" : "class_parents",
+      audience:
+        r.audience === "leadership"
+          ? "leadership"
+          : r.audience === "audience"
+            ? "audience"
+            : "class_parents",
+      ...(r.audience === "audience"
+        ? {
+            audienceLabel: str(r.audienceLabel),
+            mode: r.mode === "custom" ? ("custom" as const) : ("template" as const),
+            viaFreeText: num(r.viaFreeText),
+            viaTemplate: num(r.viaTemplate),
+          }
+        : {}),
       sectionIds: strs(r.sectionIds),
       sectionLabels: strs(r.sectionLabels),
       body: str(r.body),

@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "module_shell.dart";
+import "notice_compose_screen.dart";
 import "notice_detail_screen.dart";
 import "../../core/i18n/locale_controller.dart";
 
@@ -23,9 +24,12 @@ class NoticesScreen extends StatelessWidget {
       emptyIcon: Icons.campaign_outlined,
       emptyText: context.l10n.noNoticesPublishedYetSchoolCirculars,
       isEmpty: (items) => items.isEmpty,
+      floatingActionButton: (context, _, reload) =>
+          _ComposeButton(api: api, onPublished: reload),
       builder: (context, items, _) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16),
+        // Room under the last notice for the create button.
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
         children: [
           for (final item in items)
             Card(
@@ -112,6 +116,65 @@ class NoticesScreen extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// "+ Create notice / news" (request mr_mv9y435vx6e5) — only for staff who
+/// may create them on the web: the staff home's features answer carries
+/// `notices_create` / `news_create` (/api/v1/staff/features). Read from the
+/// copy the home saved, so the parent app (no staff features) never shows
+/// it; the server refuses anyone else whatever a phone shows.
+class _ComposeButton extends StatefulWidget {
+  const _ComposeButton({required this.api, required this.onPublished});
+
+  final ApiClient api;
+  final Future<void> Function() onPublished;
+
+  @override
+  State<_ComposeButton> createState() => _ComposeButtonState();
+}
+
+class _ComposeButtonState extends State<_ComposeButton> {
+  bool _notice = false;
+  bool _news = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.api
+        .cachedStaffFeatures()
+        .then((c) {
+          if (!mounted || c == null) return;
+          setState(() {
+            _notice = c.value.has("notices_create");
+            _news = c.value.has("news_create");
+          });
+        })
+        .catchError((_) {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_notice && !_news) return const SizedBox.shrink();
+    return FloatingActionButton.extended(
+      heroTag: "notice-compose",
+      backgroundColor: AppColors.primary,
+      foregroundColor: Colors.white,
+      icon: const Icon(Icons.add),
+      label: Text(context.l10n.hcCreateNotice),
+      onPressed: () async {
+        final done = await Navigator.of(context).push<bool>(
+          MaterialPageRoute(
+            builder: (_) => NoticeComposeScreen(
+              api: widget.api,
+              canNotice: _notice,
+              canNews: _news,
+            ),
+          ),
+        );
+        if (done == true) await widget.onPublished();
+      },
     );
   }
 }

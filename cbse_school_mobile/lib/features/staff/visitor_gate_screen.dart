@@ -1,11 +1,15 @@
+import "dart:convert";
+
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
+import "package:image_picker/image_picker.dart";
 
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
+import "staff_scan_rules.dart";
 
 /// The gate, on the phone of whoever is standing at it.
 ///
@@ -277,7 +281,14 @@ class _VisitorCard extends StatelessWidget {
             "$since · ${v.purposeLabel}",
             if (v.linkedTo.isNotEmpty) v.linkedTo,
             if (v.personToMeet.isNotEmpty) "To meet ${v.personToMeet}",
-            if (v.visitorNo.isNotEmpty) "${v.visitorNo} · ${v.mobile}",
+            if (v.peopleCount > 1 || v.vehicleNo.isNotEmpty)
+              [
+                if (v.peopleCount > 1)
+                  context.l10n.visitorPeopleCount(v.peopleCount),
+                if (v.vehicleNo.isNotEmpty) v.vehicleNo,
+              ].join(" · "),
+            if (v.visitorNo.isNotEmpty)
+              [v.visitorNo, if (v.mobile.isNotEmpty) v.mobile].join(" · "),
           ].join("\n"),
           style: AppText.bodySmallMuted,
         ),
@@ -368,6 +379,19 @@ class _CheckInSheetState extends State<_CheckInSheet> {
   final _name = TextEditingController();
   final _meet = TextEditingController();
   final _idNote = TextEditingController();
+  final _people = TextEditingController(text: "1");
+  final _vehicle = TextEditingController();
+  final _address = TextEditingController();
+
+  /// Made when the sheet opens and kept across retries, so a second tap on
+  /// a slow connection finds this visit instead of making another.
+  final String _clientId = transportClientId("visit");
+
+  /// Fields the last scan filled — each shows "read from … — check" until
+  /// the guard edits it.
+  final Set<String> _fromScan = {};
+  String? _scanning;
+  String? _scanNote;
 
   String _purpose = "";
   String _linkedTo = "";
@@ -388,6 +412,9 @@ class _CheckInSheetState extends State<_CheckInSheet> {
     _name.dispose();
     _meet.dispose();
     _idNote.dispose();
+    _people.dispose();
+    _vehicle.dispose();
+    _address.dispose();
     super.dispose();
   }
 
@@ -419,6 +446,80 @@ class _CheckInSheetState extends State<_CheckInSheet> {
     }
   }
 
+  /// Photograph an ID card or a number plate and pre-fill from it. Only
+  /// EMPTY fields are filled — what the guard typed always wins — and the
+  /// visitor is never checked in from here: they still press Check in.
+  Future<void> _scan(String kind) async {
+    final XFile? shot;
+    try {
+      shot = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1600,
+        imageQuality: 75,
+      );
+    } catch (_) {
+      if (mounted) setState(() => _error = "Could not open the camera.");
+      return;
+    }
+    if (shot == null || !mounted) return;
+    setState(() {
+      _scanning = kind;
+      _scanNote = null;
+      _error = null;
+    });
+    try {
+      final b64 = base64Encode(await shot.readAsBytes());
+      final reading = await widget.api.scanAtGate(kind: kind, imageBase64: b64);
+      if (!mounted) return;
+      setState(() {
+        if (kind == "vehicle_plate") {
+          final r = PlateScan.fromJson(reading);
+          if (r.readable && r.plate.isNotEmpty) {
+            _vehicle.text = r.plate;
+            _fromScan.add("vehicle");
+          }
+          _scanNote = r.readable ? null : r.note;
+          return;
+        }
+        final r = VisitorIdScan.fromJson(reading);
+        if (!r.readable) {
+          _scanNote = r.note;
+          return;
+        }
+        void fill(String key, TextEditingController c, String v) {
+          if (v.isEmpty || c.text.trim().isNotEmpty) return;
+          c.text = v;
+          _fromScan.add(key);
+        }
+
+        fill("name", _name, r.name);
+        fill("id", _idNote, r.idProofNote);
+        fill("address", _address, r.address);
+        _scanNote = r.note.isEmpty ? null : r.note;
+      });
+      Haptics.success();
+    } on ApiException catch (e) {
+      Haptics.warning();
+      if (mounted) setState(() => _scanNote = e.message);
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _scanNote = "Could not read the photo — type the details in.",
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _scanning = null);
+    }
+  }
+
+  /// "read from … — check" under a field the scan filled.
+  String? _scanHint(String key) {
+    if (!_fromScan.contains(key)) return null;
+    return key == "vehicle"
+        ? context.l10n.readFromPlateCheck
+        : context.l10n.readFromIdCheck;
+  }
+
   Future<void> _checkOutOpen(GateVisitor open) async {
     setState(() => _saving = true);
     try {
@@ -437,13 +538,20 @@ class _CheckInSheetState extends State<_CheckInSheet> {
 
   Future<void> _save() async {
     final name = _name.text.trim();
-    final m = _mobile.text.replaceAll(RegExp(r"\D"), "");
     if (name.isEmpty) {
       setState(() => _error = "Enter the visitor's name");
       return;
     }
-    if (m.length < 10) {
-      setState(() => _error = "Enter a 10-digit mobile number");
+    final mobileError = indianMobileError(_mobile.text);
+    if (mobileError != null) {
+      setState(() => _error = mobileError);
+      return;
+    }
+    final people = peopleCountOf(_people.text);
+    if (people == null) {
+      setState(
+        () => _error = "Number of people should be a whole number, 1 or more",
+      );
       return;
     }
     if (_purpose.isEmpty) {
@@ -457,11 +565,15 @@ class _CheckInSheetState extends State<_CheckInSheet> {
     try {
       final (visitor, alreadyIn) = await widget.api.gateCheckIn(
         visitorName: name,
-        mobile: m.substring(m.length - 10),
+        mobile: indianMobile10(_mobile.text) ?? "",
         purpose: _purpose,
         personToMeet: _meet.text.trim(),
         idProofNote: _idNote.text.trim(),
         linkedTo: _linkedTo,
+        peopleCount: people,
+        vehicleNo: _vehicle.text.trim(),
+        address: _address.text.trim(),
+        clientId: _clientId,
       );
       Haptics.success();
       if (!mounted) return;
@@ -506,6 +618,33 @@ class _CheckInSheetState extends State<_CheckInSheet> {
                 fontWeight: FontWeight.w700,
               ),
             ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _scanning != null || _saving
+                  ? null
+                  : () => _scan("visitor_id"),
+              icon: _scanning == "visitor_id"
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.badge_outlined),
+              label: Text(
+                _scanning == "visitor_id"
+                    ? context.l10n.readingThePhoto
+                    : context.l10n.scanIdCard,
+              ),
+            ),
+            if (_scanNote != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                _scanNote!,
+                style: AppText.bodySmall.copyWith(
+                  color: ModuleTone.amber.foreground,
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             TextField(
               controller: _mobile,
@@ -515,7 +654,7 @@ class _CheckInSheetState extends State<_CheckInSheet> {
                 LengthLimitingTextInputFormatter(12),
               ],
               decoration: InputDecoration(
-                labelText: context.l10n.mobileNumber,
+                labelText: context.l10n.visitorMobileOptional,
                 suffixIcon: _looking
                     ? const Padding(
                         padding: EdgeInsets.all(12),
@@ -570,7 +709,23 @@ class _CheckInSheetState extends State<_CheckInSheet> {
             TextField(
               controller: _name,
               textCapitalization: TextCapitalization.words,
-              decoration: InputDecoration(labelText: context.l10n.visitorSName),
+              decoration: InputDecoration(
+                labelText: context.l10n.visitorSName,
+                helperText: _scanHint("name"),
+              ),
+              onChanged: (_) => setState(() => _fromScan.remove("name")),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _people,
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(2),
+              ],
+              decoration: InputDecoration(
+                labelText: context.l10n.numberOfPeople,
+              ),
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
@@ -598,7 +753,46 @@ class _CheckInSheetState extends State<_CheckInSheet> {
               decoration: InputDecoration(
                 labelText: context.l10n.idShownOptional,
                 hintText: context.l10n.aadhaarLastLicenceNo,
+                helperText: _scanHint("id") ?? context.l10n.aadhaarLast4Only,
               ),
+              onChanged: (_) => setState(() => _fromScan.remove("id")),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _address,
+              textCapitalization: TextCapitalization.words,
+              decoration: InputDecoration(
+                labelText: context.l10n.visitorAddressOptional,
+                helperText: _scanHint("address"),
+              ),
+              onChanged: (_) => setState(() => _fromScan.remove("address")),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _vehicle,
+              textCapitalization: TextCapitalization.characters,
+              decoration: InputDecoration(
+                labelText: context.l10n.vehicleNumberOptional,
+                hintText: "UP 32 AB 1234",
+                helperText: _scanHint("vehicle"),
+                suffixIcon: _scanning == "vehicle_plate"
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : IconButton(
+                        tooltip: context.l10n.scanNumberPlate,
+                        icon: const Icon(Icons.photo_camera_outlined),
+                        onPressed: _scanning != null || _saving
+                            ? null
+                            : () => _scan("vehicle_plate"),
+                      ),
+              ),
+              onChanged: (_) => setState(() => _fromScan.remove("vehicle")),
             ),
             if (_error != null) ...[
               const SizedBox(height: 10),

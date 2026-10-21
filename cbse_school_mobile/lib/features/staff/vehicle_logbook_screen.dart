@@ -1,3 +1,4 @@
+import "dart:convert" show base64Encode;
 import "dart:io" show File;
 
 import "package:flutter/material.dart";
@@ -6,7 +7,9 @@ import "package:image_picker/image_picker.dart";
 import "../../core/api/api_client.dart";
 import "../../core/guide/screen_guides.dart";
 import "../../core/theme/app_theme.dart";
+import "../../core/i18n/locale_controller.dart";
 import "../../core/ui/haptics.dart";
+import "staff_scan_rules.dart";
 import "bus_register_screen.dart" show TransportDayPicker, shiftMonth;
 
 /// The driver's log book — start / end odometer per vehicle per day, fuel
@@ -664,6 +667,12 @@ class _FuelSheetState extends State<_FuelSheet> {
   bool _busy = false;
   String? _error;
 
+  /// Fields the bill reading filled — each shows "read from bill — check"
+  /// until the driver edits it. Nothing is ever saved from a reading alone.
+  final Set<String> _fromBill = {};
+  List<String> _billNotes = const [];
+  bool _reading = false;
+
   @override
   void dispose() {
     _qty.dispose();
@@ -687,7 +696,70 @@ class _FuelSheetState extends State<_FuelSheet> {
       });
     } catch (_) {
       if (mounted) setState(() => _error = "Could not open the camera.");
+      return;
     }
+    await _readBill();
+  }
+
+  /// Ask the server to read the bill, then fill only the EMPTY fields and
+  /// mark them. A failed or unclear reading leaves the form as it was, with
+  /// a short note — the driver types it in, exactly as before.
+  Future<void> _readBill() async {
+    final photo = _photo;
+    if (photo == null) return;
+    setState(() {
+      _reading = true;
+      _billNotes = const [];
+    });
+    try {
+      final reading = await widget.api.scanFuelBill(
+        vehicleId: widget.vehicle.id,
+        date: widget.date,
+        imageBase64: base64Encode(await photo.readAsBytes()),
+      );
+      if (!mounted) return;
+      final p = FuelBillPrefill.from(
+        FuelBillScan.fromJson(reading),
+        current: {
+          "quantity": _qty.text,
+          "amount": _amount.text,
+          "odometer": _odo.text,
+          "note": _note.text,
+        },
+        entryDate: widget.date,
+        unitShort: widget.vehicle.fuelUnit == "kg" ? "kg" : "L",
+      );
+      setState(() {
+        final byKey = {
+          "quantity": _qty,
+          "amount": _amount,
+          "odometer": _odo,
+          "note": _note,
+        };
+        p.values.forEach((k, v) => byKey[k]?.text = v);
+        _fromBill.addAll(p.filled);
+        _billNotes = p.notes;
+      });
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _billNotes = [e.message]);
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _billNotes = [
+            "Could not read the bill just now — fill it in by hand.",
+          ],
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _reading = false);
+    }
+  }
+
+  String? _billHint(String key) =>
+      _fromBill.contains(key) ? context.l10n.readFromBillCheck : null;
+
+  void _edited(String key) {
+    if (_fromBill.contains(key)) setState(() => _fromBill.remove(key));
   }
 
   Future<void> _submit() async {
@@ -763,31 +835,39 @@ class _FuelSheetState extends State<_FuelSheet> {
               ),
               decoration: InputDecoration(
                 labelText: "Quantity ($unit) · मात्रा",
+                helperText: _billHint("quantity"),
               ),
+              onChanged: (_) => _edited("quantity"),
             ),
             TextField(
               controller: _amount,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: "Amount paid (₹) · रक़म",
+                helperText: _billHint("amount"),
               ),
+              onChanged: (_) => _edited("amount"),
             ),
             TextField(
               controller: _odo,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: "Odometer (km) — optional · मीटर",
+                helperText: _billHint("odometer"),
               ),
+              onChanged: (_) => _edited("odometer"),
             ),
             TextField(
               controller: _note,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: "Pump / note — optional",
+                helperText: _billHint("note"),
               ),
+              onChanged: (_) => _edited("note"),
             ),
             const SizedBox(height: 10),
             Row(
@@ -816,6 +896,41 @@ class _FuelSheetState extends State<_FuelSheet> {
                 ),
               ],
             ),
+            if (_reading)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      context.l10n.readingThePhoto,
+                      style: AppText.bodyMedium,
+                    ),
+                  ],
+                ),
+              )
+            else if (_photo != null && _billNotes.isEmpty && _fromBill.isEmpty)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _busy ? null : _readBill,
+                  icon: const Icon(Icons.document_scanner_outlined),
+                  label: Text(context.l10n.readTheBill),
+                ),
+              ),
+            for (final n in _billNotes)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  n,
+                  style: AppText.bodyMedium.copyWith(color: AppColors.warning),
+                ),
+              ),
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -827,7 +942,7 @@ class _FuelSheetState extends State<_FuelSheet> {
             SizedBox(
               width: double.infinity,
               child: FilledButton(
-                onPressed: _busy ? null : _submit,
+                onPressed: _busy || _reading ? null : _submit,
                 child: Text(_busy ? "Saving…" : "Save fuel · सेव करें"),
               ),
             ),

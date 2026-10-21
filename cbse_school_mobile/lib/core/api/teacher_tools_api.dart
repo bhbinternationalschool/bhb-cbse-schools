@@ -7,7 +7,40 @@ part of "api_client.dart";
 //   * PTM slots — /api/v1/staff/ptm/slots. A teacher adds, changes or
 //     cancels their OWN slots in a PTM the office opened; a booked slot is
 //     never moved or removed from the phone.
+//   * Schedule a PTM — /api/v1/staff/ptm/events (20 Oct 2026). One PTM
+//     covering the classes picked; a teacher only for classes they teach,
+//     the office / leadership for any class.
 // The JSON helpers (_s, _i, _b, _list) are staff_api.dart's — same library.
+
+// ---------------------------------------------------------- schedule a PTM
+
+class PtmScheduleClass {
+  PtmScheduleClass.fromJson(Map<String, dynamic> j)
+    : id = _s(j, "id"),
+      name = _s(j, "name"),
+      sections = _s(j, "sections");
+
+  final String id;
+  final String name;
+
+  /// The teacher's own sections of the class ("A, B"); "" for the office.
+  final String sections;
+}
+
+class PtmScheduleOptions {
+  PtmScheduleOptions.fromJson(Map<String, dynamic> j)
+    : canSchedule = _b(j, "canSchedule"),
+      unrestricted = _b(j, "unrestricted"),
+      today = _s(j, "today"),
+      classes = _list(j, "classes").map(PtmScheduleClass.fromJson).toList();
+
+  final bool canSchedule;
+  final bool unrestricted;
+
+  /// IST today (YYYY-MM-DD) — the first date the picker offers.
+  final String today;
+  final List<PtmScheduleClass> classes;
+}
 
 // ------------------------------------------------------- message my classes
 
@@ -31,6 +64,7 @@ class ClassBroadcastSent {
     : id = _s(j, "id"),
       at = _s(j, "at"),
       audience = _s(j, "audience"),
+      audienceLabel = _s(j, "audienceLabel"),
       sectionLabels = ((j["sectionLabels"] as List?) ?? const [])
           .map((e) => "$e")
           .toList(),
@@ -45,6 +79,9 @@ class ClassBroadcastSent {
 
   final String id;
   final String at;
+
+  /// Sends from the Broadcast screen name their audience ("Teaching staff").
+  final String audienceLabel;
   final String audience;
   final List<String> sectionLabels;
   final String body;
@@ -176,6 +213,31 @@ extension TeacherToolsApi on ApiClient {
     return ClassBroadcastResult.fromJson(
       jsonDecode(res.body) as Map<String, dynamic>,
     );
+  }
+
+  /// Who may schedule, and which classes they may pick.
+  Future<PtmScheduleOptions> fetchPtmScheduleOptions() async =>
+      PtmScheduleOptions.fromJson(await _getData("/api/v1/staff/ptm/events"));
+
+  /// Schedules ONE PTM covering [classIds]. Returns the new event's id.
+  Future<String> schedulePtm({
+    required String name,
+    required String date,
+    String endDate = "",
+    required List<String> classIds,
+    String mode = "in_person",
+    String note = "",
+  }) async {
+    final data = await _postData("/api/v1/staff/ptm/events", {
+      "name": name,
+      "date": date,
+      if (endDate.isNotEmpty) "endDate": endDate,
+      "classIds": classIds,
+      "mode": mode,
+      "note": note,
+    });
+    final ev = data["event"];
+    return ev is Map ? "${ev["id"] ?? ""}" : "";
   }
 
   /// Add my own slots to a PTM the office opened. Returns how many were made.

@@ -8,6 +8,7 @@ import {
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { assertSubjectScope } from "@/lib/api/v1/staffScope";
 import { postHomeworkServer } from "@/lib/homeworkPost.server";
+import { validateHomeworkAttachmentRefs } from "@/lib/homeworkAttachments";
 
 export const runtime = "nodejs";
 
@@ -21,6 +22,8 @@ type PostBody = {
   date?: string;
   dueAt?: string;
   requiresSubmit?: boolean;
+  /** Refs from POST /api/v1/staff/homework/attachment, for THIS section only. */
+  attachments?: unknown;
 };
 
 /** POST /api/v1/homework/post — teacher publishes homework for a section */
@@ -45,6 +48,11 @@ export async function POST(request: Request) {
       body.subjectId || "",
     );
 
+    // Files must have been uploaded into this section's homework folder —
+    // never another section's, never any other private file.
+    const files = validateHomeworkAttachmentRefs(body.attachments, body.classId || "", body.sectionId || "");
+    if (!files.ok) throw new ApiError("bad_request", files.error, 400);
+
     // Create + persist + notify live in one server-side helper, shared with
     // the ERP command desk so both cannot drift apart.
     const result = await postHomeworkServer({
@@ -59,6 +67,7 @@ export async function POST(request: Request) {
       date: body.date,
       dueAt: body.dueAt,
       requiresSubmit: body.requiresSubmit,
+      attachments: files.attachments,
     });
     if (!result.ok) throw new ApiError("bad_request", result.error, 400);
 
@@ -70,7 +79,11 @@ export async function POST(request: Request) {
       entityType: "post",
       entityId: result.post.id,
       summary: `Posted homework "${result.post.title}" for section ${body.sectionId}`,
-      after: { date: result.post.date, subjectId: result.post.subjectId },
+      after: {
+        date: result.post.date,
+        subjectId: result.post.subjectId,
+        attachments: result.post.attachments.length,
+      },
       ip: meta.ip,
       userAgent: meta.userAgent,
     });

@@ -346,6 +346,8 @@ class _SentTile extends StatelessWidget {
         : "${formatDateLabel(m.at)} · ${hhmmLabel("${when.hour.toString().padLeft(2, "0")}:${when.minute.toString().padLeft(2, "0")}")}";
     final to = m.audience == "leadership"
         ? "Leadership"
+        : m.audienceLabel.isNotEmpty
+        ? m.audienceLabel
         : (m.sectionLabels.isEmpty ? "My classes" : m.sectionLabels.join(", "));
     return Card(
       margin: const EdgeInsets.only(bottom: 8),

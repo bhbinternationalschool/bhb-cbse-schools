@@ -4,6 +4,7 @@ import "../../core/api/api_client.dart";
 import "../../core/guide/screen_guides.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../../core/theme/app_theme.dart";
+import "month_register_edit.dart";
 import "section_picker.dart";
 
 /// The school's register legend (web lib/attendance.ts). L is LATE — not
@@ -73,8 +74,14 @@ const _weekday = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 
 /// Month attendance register: children down, days across, the school's
 /// marks, holidays and Sundays shaded, month and session totals per child
-/// (GET /api/v1/attendance/month). Read-only here — a day is marked from
-/// the Attendance register; back-dating a month stays on the web ERP.
+/// (GET /api/v1/attendance/month).
+///
+/// Since 20 Oct 2026 (request mr_mv9ysuiwc6ks) whoever the server says may
+/// edit (canEdit: the section's class teacher or the office / leadership,
+/// with attendance·edit — the web panel's rule) taps a box to set its mark
+/// and taps a date to fill that day; the save goes through POST
+/// /api/v1/attendance/month, one register write per changed day, merged
+/// over what is saved. Everyone else sees the read-only register.
 class MonthRegisterScreen extends StatefulWidget {
   const MonthRegisterScreen({super.key, required this.api});
 
@@ -91,6 +98,8 @@ class _MonthRegisterScreenState extends State<MonthRegisterScreen> {
   MonthRegister? _data;
   String? _error;
   bool _loading = true;
+  final _edits = MonthRegisterEdits();
+  bool _saving = false;
 
   @override
   void initState() {
@@ -158,6 +167,7 @@ class _MonthRegisterScreenState extends State<MonthRegisterScreen> {
         _data = data;
         _month = data.month;
         _loading = false;
+        _edits.clear();
       });
     } on ApiException catch (e) {
       if (mounted) {
@@ -176,8 +186,137 @@ class _MonthRegisterScreenState extends State<MonthRegisterScreen> {
     }
   }
 
+  /// True when there is nothing unsaved, or the user chose to drop it.
+  Future<bool> _confirmDiscard() async {
+    if (_edits.isEmpty) return true;
+    final l = context.l10n;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(l.mrDiscardTitle),
+        content: Text(l.mrDiscardBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(l.mrKeepEditing),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(l.mrDiscard),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  Future<void> _refresh() async {
+    if (!await _confirmDiscard()) return;
+    await _load();
+  }
+
+  Future<void> _tapCell(MonthRegisterStudent s, MonthRegisterDay d) async {
+    final data = _data;
+    if (data == null || _saving || !monthCellMarkable(data, s, d)) return;
+    final cur = _edits.valueOf(s, d);
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => _MarkSheet(
+        title: "${s.name} · ${_dayLabel(d.date)}",
+        current: cur,
+        allowClear: cur.isNotEmpty,
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _edits.set(s, d, picked));
+  }
+
+  Future<void> _tapDay(MonthRegisterDay d) async {
+    final data = _data;
+    if (data == null || _saving || !data.canEdit || !d.working || d.future) {
+      return;
+    }
+    final l = context.l10n;
+    final mark = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => _MarkSheet(
+        title: l.mrFillDayTitle(_dayLabel(d.date)),
+        subtitle: l.mrFillDayBody,
+        current: "",
+        allowClear: false,
+      ),
+    );
+    if (mark == null || mark.isEmpty || !mounted) return;
+    var n = 0;
+    setState(() => n = _edits.fillDay(data, d, mark: mark));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(n == 0 ? l.mrFillDayNothing : l.mrFillDayDone("$n")),
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    final data = _data;
+    final sec = _section;
+    if (data == null || sec == null || _edits.isEmpty || _saving) return;
+    final l = context.l10n;
+    setState(() => _saving = true);
+    try {
+      final r = await widget.api.saveMonthRegister(
+        classId: sec.$1,
+        sectionId: sec.$2,
+        month: data.month,
+        days: _edits.payload(),
+      );
+      if (!mounted) return;
+      final problems = r.problems;
+      final msg = [
+        l.mrSavedDays("${r.saved.length}"),
+        if (problems.isNotEmpty)
+          l.mrNotSaved(
+            "${problems.take(4).join("; ")}"
+            "${problems.length > 4 ? " (+${problems.length - 4})" : ""}",
+          ),
+      ].join(" ");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: problems.isEmpty ? null : AppColors.danger,
+        ),
+      );
+      setState(() => _saving = false);
+      await _load();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l.homeCouldNotReachServerCheckConnection),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    }
+  }
+
   Future<void> _pickSection() async {
     if (_classes.isEmpty) return;
+    if (!await _confirmDiscard() || !mounted) return;
     final picked = await showModalBottomSheet<(String, String, String)>(
       context: context,
       backgroundColor: Colors.white,
@@ -198,13 +337,14 @@ class _MonthRegisterScreenState extends State<MonthRegisterScreen> {
 
   /// [step] +1 = the next (newer) month, -1 = the one before. `months` is
   /// newest first and holds only the session's months up to today.
-  void _go(int step) {
+  Future<void> _go(int step) async {
     final months = _data?.months ?? const [];
     final i = months.indexOf(_month);
     final j = i - step;
     if (i < 0 || j < 0 || j >= months.length) return;
+    if (!await _confirmDiscard()) return;
     setState(() => _month = months[j]);
-    _load();
+    await _load();
   }
 
   @override
@@ -212,73 +352,130 @@ class _MonthRegisterScreenState extends State<MonthRegisterScreen> {
     final data = _data;
     final months = data?.months ?? const <String>[];
     final i = months.indexOf(_month);
-    return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              "Month register · मासिक रजिस्टर",
-              style: AppText.titleMedium,
-            ),
-            if (_section != null)
-              Text(
-                _section!.$3,
-                style: AppText.labelMedium.copyWith(
-                  color: const Color(0xFFB8C0D4),
-                ),
-              ),
-          ],
-        ),
-        actions: [
-          if (_classes.length > 1 ||
-              (_classes.isNotEmpty && _classes.first.sections.length > 1))
-            IconButton(
-              tooltip: "Change class",
-              icon: const Icon(Icons.swap_horiz),
-              onPressed: _pickSection,
-            ),
-          const ScreenGuideButton(
-            guideId: "month-register",
-            screenLabel: "Month register",
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-            child: Row(
-              children: [
-                IconButton(
-                  tooltip: "Previous month",
-                  onPressed: _loading || i < 0 || i >= months.length - 1
-                      ? null
-                      : () => _go(-1),
-                  icon: const Icon(Icons.chevron_left),
-                ),
-                Expanded(
-                  child: Text(
-                    _month.isEmpty ? "" : monthTitle(_month),
-                    textAlign: TextAlign.center,
-                    style: AppText.titleSmallInk,
+    final l = context.l10n;
+    return PopScope(
+      canPop: _edits.isEmpty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final nav = Navigator.of(context);
+        if (await _confirmDiscard()) {
+          setState(_edits.clear);
+          nav.pop();
+        }
+      },
+      child: Scaffold(
+        bottomNavigationBar: _edits.isEmpty
+            ? null
+            : SafeArea(
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    border: Border(top: BorderSide(color: Color(0xFFE4E2DA))),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          l.mrUnsavedCount("${_edits.count}"),
+                          style: AppText.bodyMediumInk,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _saving
+                            ? null
+                            : () => setState(_edits.clear),
+                        child: Text(l.mrDiscard),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        key: const Key("month-register-save"),
+                        onPressed: _saving ? null : _save,
+                        child: _saving
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Text(l.mrSave),
+                      ),
+                    ],
                   ),
                 ),
-                IconButton(
-                  tooltip: "Next month",
-                  onPressed: _loading || i <= 0 ? null : () => _go(1),
-                  icon: const Icon(Icons.chevron_right),
+              ),
+        appBar: AppBar(
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Month register · मासिक रजिस्टर",
+                style: AppText.titleMedium,
+              ),
+              if (_section != null)
+                Text(
+                  _section!.$3,
+                  style: AppText.labelMedium.copyWith(
+                    color: const Color(0xFFB8C0D4),
+                  ),
                 ),
-              ],
-            ),
+            ],
           ),
-          if (_loading)
-            const LinearProgressIndicator(
-              minHeight: 2,
-              color: AppColors.primary,
+          actions: [
+            if (_classes.length > 1 ||
+                (_classes.isNotEmpty && _classes.first.sections.length > 1))
+              IconButton(
+                tooltip: "Change class",
+                icon: const Icon(Icons.swap_horiz),
+                onPressed: _pickSection,
+              ),
+            const ScreenGuideButton(
+              guideId: "month-register",
+              screenLabel: "Month register",
             ),
-          Expanded(child: _body(data)),
-        ],
+          ],
+        ),
+        body: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: "Previous month",
+                    onPressed:
+                        _loading || _saving || i < 0 || i >= months.length - 1
+                        ? null
+                        : () => _go(-1),
+                    icon: const Icon(Icons.chevron_left),
+                  ),
+                  Expanded(
+                    child: Text(
+                      _month.isEmpty ? "" : monthTitle(_month),
+                      textAlign: TextAlign.center,
+                      style: AppText.titleSmallInk,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: "Next month",
+                    onPressed: _loading || _saving || i <= 0
+                        ? null
+                        : () => _go(1),
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                ],
+              ),
+            ),
+            if (_loading)
+              const LinearProgressIndicator(
+                minHeight: 2,
+                color: AppColors.primary,
+              ),
+            Expanded(child: _body(data)),
+          ],
+        ),
       ),
     );
   }
@@ -336,7 +533,7 @@ class _MonthRegisterScreenState extends State<MonthRegisterScreen> {
     }
     if (data == null) return const SizedBox.shrink();
     return RefreshIndicator(
-      onRefresh: _load,
+      onRefresh: _refresh,
       color: AppColors.primary,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -350,6 +547,21 @@ class _MonthRegisterScreenState extends State<MonthRegisterScreen> {
                 style: AppText.bodySmall.copyWith(color: AppColors.danger),
               ),
             ),
+          if (data.students.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                data.canEdit
+                    ? context.l10n.mrEditHint
+                    : context.l10n.mrViewOnly,
+                key: Key(
+                  data.canEdit
+                      ? "month-register-edit-hint"
+                      : "month-register-view-only",
+                ),
+                style: AppText.bodySmallMuted,
+              ),
+            ),
           if (data.students.isEmpty)
             Padding(
               padding: const EdgeInsets.all(24),
@@ -360,7 +572,12 @@ class _MonthRegisterScreenState extends State<MonthRegisterScreen> {
               ),
             )
           else
-            MonthRegisterGrid(register: data),
+            MonthRegisterGrid(
+              register: data,
+              edits: data.canEdit ? _edits : null,
+              onCellTap: data.canEdit ? _tapCell : null,
+              onDayTap: data.canEdit ? _tapDay : null,
+            ),
           const SizedBox(height: 12),
           _Legend(),
         ],
@@ -371,9 +588,27 @@ class _MonthRegisterScreenState extends State<MonthRegisterScreen> {
 
 /// The grid: the name column stays put, the days scroll sideways.
 class MonthRegisterGrid extends StatelessWidget {
-  const MonthRegisterGrid({super.key, required this.register});
+  const MonthRegisterGrid({
+    super.key,
+    required this.register,
+    this.edits,
+    this.onCellTap,
+    this.onDayTap,
+  });
 
   final MonthRegister register;
+
+  /// Unsaved changes to show over the saved marks; null = read-only.
+  final MonthRegisterEdits? edits;
+
+  /// Set only when the server said canEdit; a cell that cannot be marked
+  /// (holiday, future, before admission) never gets a tap.
+  final void Function(MonthRegisterStudent s, MonthRegisterDay d)? onCellTap;
+
+  /// "Fill this day" — a tap on a working, non-future date.
+  final void Function(MonthRegisterDay d)? onDayTap;
+
+  static const _edited = Color(0xFFFFF4CC);
 
   static const _rowH = 40.0;
   static const _headH = 40.0;
@@ -386,6 +621,23 @@ class MonthRegisterGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final days = register.days;
     final students = register.students;
+    final ed = edits;
+
+    /// The cell as shown: an unsaved change wins over the saved mark.
+    String shown(MonthRegisterStudent s, MonthRegisterDay d) =>
+        ed != null && monthCellMarkable(register, s, d)
+        ? ed.valueOf(s, d)
+        : monthCell(s, d);
+
+    double headcount(MonthRegisterDay d) {
+      if (!d.working || d.future) return 0;
+      var n = 0.0;
+      for (final s in students) {
+        final m = shown(s, d);
+        n += m == "P" || m == "L" ? 1 : (m == "HD" ? 0.5 : 0);
+      }
+      return n;
+    }
 
     Widget cell(
       String text, {
@@ -493,13 +745,25 @@ class MonthRegisterGrid extends StatelessWidget {
         Row(
           children: [
             for (final d in days)
-              _DayHead(
-                day: d,
-                width: _cellW,
-                height: _headH,
-                holidayBg: _holiday,
-                line: _line,
-              ),
+              onDayTap != null && d.working && !d.future
+                  ? InkWell(
+                      key: Key("month-day-${d.date}"),
+                      onTap: () => onDayTap!(d),
+                      child: _DayHead(
+                        day: d,
+                        width: _cellW,
+                        height: _headH,
+                        holidayBg: _holiday,
+                        line: _line,
+                      ),
+                    )
+                  : _DayHead(
+                      day: d,
+                      width: _cellW,
+                      height: _headH,
+                      holidayBg: _holiday,
+                      line: _line,
+                    ),
             cell(
               "Month\nP/W",
               bg: AppColors.surface,
@@ -521,13 +785,22 @@ class MonthRegisterGrid extends StatelessWidget {
             children: [
               for (final d in days)
                 () {
-                  final v = monthCell(s, d);
-                  return cell(
+                  final v = shown(s, d);
+                  final edited = ed?.isEdited(s, d) ?? false;
+                  final box = cell(
                     v,
-                    bg: d.working ? null : _holiday,
+                    bg: !d.working ? _holiday : (edited ? _edited : null),
                     fg: v == "H" || v == "–" ? AppColors.muted : _markColor(v),
                     bold: v != "H" && v != "–",
                     tip: d.working ? null : d.label,
+                  );
+                  if (onCellTap == null || !monthCellMarkable(register, s, d)) {
+                    return box;
+                  }
+                  return InkWell(
+                    key: Key("month-cell-${s.id}-${d.date}"),
+                    onTap: () => onCellTap!(s, d),
+                    child: box,
                   );
                 }(),
               cell(
@@ -554,7 +827,7 @@ class MonthRegisterGrid extends StatelessWidget {
                     ? "H"
                     : d.future
                     ? ""
-                    : _num(dayHeadcount(students, d)),
+                    : _num(headcount(d)),
                 bg: AppColors.surface,
                 fg: AppColors.muted,
                 bold: false,
@@ -705,6 +978,76 @@ class _Legend extends StatelessWidget {
               "P/W = days present / working days. Present counts P and L as 1, HD as ½. Mark a day from Attendance.",
               style: AppText.bodySmallMuted,
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _dayLabel(String ymd) {
+  final dt = DateTime.tryParse(ymd);
+  if (dt == null) return ymd;
+  return "${dt.day} ${_monthNames[dt.month - 1].substring(0, 3)}";
+}
+
+/// Pick a mark — the register's own five (kMonthMarks), spelled out in both
+/// languages; "Clear mark" when the cell holds one.
+class _MarkSheet extends StatelessWidget {
+  const _MarkSheet({
+    required this.title,
+    this.subtitle,
+    required this.current,
+    required this.allowClear,
+  });
+
+  final String title;
+  final String? subtitle;
+  final String current;
+  final bool allowClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: AppText.titleSmallInk),
+            if (subtitle != null) ...[
+              const SizedBox(height: 4),
+              Text(subtitle!, style: AppText.bodySmallMuted),
+            ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final l in kRegisterLegend)
+                  if (kMonthMarks.contains(l.$1))
+                    ChoiceChip(
+                      key: Key("mark-${l.$1}"),
+                      selected: current == l.$1,
+                      label: Text("${l.$1} · ${l.$2} · ${l.$3}"),
+                      labelStyle: TextStyle(
+                        color: l.$4,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      onSelected: (_) => Navigator.pop(context, l.$1),
+                    ),
+              ],
+            ),
+            if (allowClear) ...[
+              const SizedBox(height: 8),
+              TextButton.icon(
+                key: const Key("mark-clear"),
+                onPressed: () => Navigator.pop(context, ""),
+                icon: const Icon(Icons.backspace_outlined, size: 18),
+                label: Text(context.l10n.mrClearMark),
+              ),
+            ],
           ],
         ),
       ),
