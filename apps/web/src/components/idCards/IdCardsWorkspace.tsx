@@ -6,7 +6,9 @@ import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionCo
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { field } from "@/components/ui/erp-ui";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
   buildStaffIdCardDoc,
@@ -47,7 +49,9 @@ export function IdCardsWorkspace() {
   const readOnly = useSessionReadOnly();
   const ay = session.academicYearCode || DEFAULT_AY;
   const [tab, setTab] = useState<Tab>("student");
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1i: the server's book + the full staff roster (staff cards,
+  // the permission checks), kept fresh by the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -83,21 +87,15 @@ export function IdCardsWorkspace() {
   // Re-read when the server copy of this module lands (login/refresh hydration).
   useModuleStateHydration("id_card_template", () => { setTemplateState(loadIdCardTemplateState()); });
   useEffect(() => {
-    setMasters(loadMasters());
     setSis(loadSis());
     setTemplateState(loadIdCardTemplateState());
     void (async () => {
-      const [{ ensureMastersHydrated }, { ensureSisHydrated }, { withHydrationSlot }] =
+      const [{ ensureSisHydrated }, { withHydrationSlot }] =
         await Promise.all([
-          import("@/lib/mastersPersistence"),
           import("@/lib/sisPersistence"),
           import("@/lib/deskHydrateGuard"),
         ]);
-      await Promise.all([
-        withHydrationSlot(() => ensureMastersHydrated()),
-        withHydrationSlot(() => ensureSisHydrated()),
-      ]);
-      setMasters(loadMasters());
+      await withHydrationSlot(() => ensureSisHydrated());
       setSis(loadSis());
     })();
   }, []);
@@ -258,6 +256,22 @@ export function IdCardsWorkspace() {
           ))}
         </div>
       </div>
+    );
+  }
+
+  if (!masters) {
+    return (
+      <ErpWorkspaceShell
+        title="ID cards"
+        subtitle="Batch-print student & staff ID cards — photo, QR, class/roll or emp code"
+        icon={<CreditCard className="size-6" aria-hidden />}
+      >
+        {mastersError ? (
+          <QueryError what="the school's classes and staff" error={mastersError} retry={retryMasters} />
+        ) : (
+          <p className="mt-4 text-sm text-[var(--muted)]">Loading the school&apos;s classes…</p>
+        )}
+      </ErpWorkspaceShell>
     );
   }
 

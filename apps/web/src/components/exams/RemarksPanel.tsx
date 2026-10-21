@@ -10,7 +10,7 @@
  * record and the audit trail.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import {
   buildReportCard,
@@ -26,7 +26,7 @@ import {
   type StudentOverallRemark,
 } from "@/lib/exams";
 import { loadSis, type SisStudent } from "@/lib/sis";
-import { loadMasters } from "@/lib/masters";
+import type { MastersState } from "@/lib/masters";
 import { loadAttendance } from "@/lib/attendance";
 import { checkHoldsForStudents } from "@/lib/holds";
 import {
@@ -91,6 +91,8 @@ export function RemarksPanel(props: {
   roster: SisStudent[];
   subjects: ExamSubject[];
   policy: ExamPolicy;
+  /** The workspace's Masters (data-layer 2.1h: useScreenMasters), never a page-copy read. */
+  masters: MastersState;
   canEdit: boolean;
   onSaved: () => void;
   onFlash: (msg: string) => void;
@@ -105,8 +107,15 @@ export function RemarksPanel(props: {
     classLabel,
     roster,
     subjects,
+    masters,
     canEdit,
   } = props;
+  // Read at rebuild time, as the old page-copy read was — NOT a rebuild trigger: a
+  // Masters answer arriving from the versions poll must not wipe typed remarks.
+  const mastersRef = useRef(masters);
+  useEffect(() => {
+    mastersRef.current = masters;
+  }, [masters]);
 
   const [rows, setRows] = useState<RowState[]>([]);
 
@@ -153,7 +162,7 @@ export function RemarksPanel(props: {
     // Every store once for the section, not once per child.
     const deps: ExamDeps = {
       state: loadExams(),
-      masters: loadMasters(),
+      masters: mastersRef.current,
       sis: loadSis(),
       attendance: loadAttendance(),
       holdChecks: checkHoldsForStudents(

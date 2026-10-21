@@ -22,7 +22,8 @@ import {
   todayYmd,
 } from "@/lib/admissions";
 import { formatInr, TENDER_MODES, type TenderMode } from "@/lib/fees";
-import { loadMasters } from "@/lib/masters";
+import type { MastersState } from "@/lib/masters";
+import { useMasters } from "@/lib/data/client/hooks";
 import type { DemoSession } from "@/lib/auth";
 import { TENANT } from "@/lib/types";
 import { openWaMe } from "@/lib/waMe";
@@ -35,14 +36,23 @@ export function StaffRegistrationCollectApp({
 }: {
   session: DemoSession;
 }) {
-  const masters = useMemo(() => loadMasters(), []);
+  // data-layer 2.1h: classes, registration fee heads and the school's UPI
+  // from the Masters view (the field layout mounts the query provider), not a
+  // once-at-mount page-copy read (empty on a cold /field page).
+  const mastersQ = useMasters();
+  const masters = (mastersQ.data?.masters ?? null) as MastersState | null;
+  /** Teaching subset: fee heads are WITHHELD, not none. */
+  const feeHeadsWithheld = mastersQ.data?.scope === "teaching";
   const classes = useMemo(
-    () => (masters.classes ?? []).filter((c) => c.isActive),
+    () => (masters?.classes ?? []).filter((c) => c.isActive),
     [masters],
   );
-  const feeHeads = useMemo(() => registrationFeeHeads(masters), [masters]);
+  const feeHeads = useMemo(
+    () => (masters && !feeHeadsWithheld ? registrationFeeHeads(masters) : []),
+    [masters, feeHeadsWithheld],
+  );
   const { vpa, payeeName } = useMemo(
-    () => resolveSchoolCollectionsUpi(masters),
+    () => resolveSchoolCollectionsUpi(masters ?? undefined),
     [masters],
   );
   const by = session.fullName;
@@ -74,6 +84,17 @@ export function StaffRegistrationCollectApp({
   function ensureLeadState():
     | { ok: true; state: ReturnType<typeof loadAdmissions>; id: string }
     | { ok: false; reason: string } {
+    // data-layer 2.1h: never record a fee or build a UPI link before the
+    // school's setup has answered — the UPI id would be the built-in
+    // fallback and the fee head blank (main did exactly that on a cold page).
+    if (!masters) {
+      return {
+        ok: false,
+        reason: mastersQ.isError
+          ? "The school's setup could not load — reload the page and try again."
+          : "The school's setup is still loading — wait a moment and try again.",
+      };
+    }
     let state = loadAdmissions();
     let id = leadId;
 
@@ -344,7 +365,9 @@ export function StaffRegistrationCollectApp({
           value={classSoughtId}
           onChange={(e) => setClassSoughtId(e.target.value)}
         >
-          <option value="">Class (optional)</option>
+          <option value="">
+            {mastersQ.data ? "Class (optional)" : mastersQ.isError ? "Classes could not load" : "Loading classes…"}
+          </option>
           {classes.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
@@ -356,6 +379,17 @@ export function StaffRegistrationCollectApp({
           value={feeHeadId}
           onChange={(e) => setFeeHeadId(e.target.value)}
         >
+          {feeHeads.length === 0 ? (
+            <option value="">
+              {!mastersQ.data
+                ? mastersQ.isError
+                  ? "Fee heads could not load"
+                  : "Loading fee heads…"
+                : feeHeadsWithheld
+                  ? "Registration fee (fee heads not shown to your role)"
+                  : "Registration fee (no registration head in Masters)"}
+            </option>
+          ) : null}
           {feeHeads.map((h) => (
             <option key={h.id} value={h.id}>
               {h.name}

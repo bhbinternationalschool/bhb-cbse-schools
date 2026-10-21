@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccessData } from "@/components/shell/useAccessData";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { Award, Sparkles } from "lucide-react";
@@ -31,7 +31,9 @@ import {
   searchFeeStudents,
   type StudentSearchHit,
 } from "@/lib/fees";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
   designationName,
@@ -121,7 +123,12 @@ export function CertificatesWorkspace() {
     if (asked === "reports" || asked === "dashboard" || asked === "desk") setTab(asked);
   }, []);
   const [certStep, setCertStep] = useState<CertStep>("student");
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1i: the server's book + the roster (class teacher, principal,
+  // the officer's designation), kept fresh by the versions poll.
+  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
+  // Teaching-scope Masters (no Masters grant): fee lists are withheld, so a
+  // balance computed from this book is unknown, never ₹0 (2.1i review).
+  const feesWithheld = mastersScope !== "full";
   const [sis, setSis] = useState<SisState | null>(null);
   const [issues, setIssues] = useState<CertificateIssue[]>([]);
   // Every issue, folded by the IST month it was issued (newest open) — the
@@ -196,9 +203,7 @@ export function CertificatesWorkspace() {
   }, [shownTabs, tab]);
 
   function refresh() {
-    const m = loadMasters();
     const s = loadSis();
-    setMasters(m);
     setSis(s);
     setIssues(listCertificates(loadCertificates()));
     setTick((x) => x + 1);
@@ -289,21 +294,30 @@ export function CertificatesWorkspace() {
       subjectsStudied: defaultSubjectsForClass(label),
       applicationDate: leavingDate || todayIso(),
       checkedByName: prev.checkedByName || session.fullName,
-      checkedByDesignation:
-        prev.checkedByDesignation ||
-        (() => {
-          const m = loadMasters();
-          const me = m.staff.find(
-            (s) =>
-              s.fullName === session.fullName ||
-              s.loginUsername === session.email,
-          );
-          return me
-            ? designationName(m, me.designationId)
-            : prev.checkedByDesignation;
-        })(),
     }));
+    // The form resets per student only; session/leavingDate are read at that
+    // moment on purpose (a later edit of either must not wipe the TC form).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [student?.id]);
+
+  // "Checked by" designation: the signer's, from the staff roster — once per
+  // student, as soon as Masters has answered. Keyed on `masters` so a book
+  // that lands after the student was picked still fills it; the ref stops a
+  // background refetch (versions poll) from re-filling a field the clerk
+  // cleared or changed.
+  const designationFilledFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!student || !masters || designationFilledFor.current === student.id) return;
+    designationFilledFor.current = student.id;
+    const me = masters.staff.find(
+      (s) => s.fullName === session.fullName || s.loginUsername === session.email,
+    );
+    if (!me) return;
+    const designation = designationName(masters, me.designationId);
+    setTcForm((prev) =>
+      prev.checkedByDesignation ? prev : { ...prev, checkedByDesignation: designation },
+    );
+  }, [student, masters, session.fullName, session.email]);
 
   // Show resolved class teacher hint when student selected
   const resolvedClassTeacher = useMemo(() => {
@@ -417,7 +431,11 @@ export function CertificatesWorkspace() {
       setError("Pick a student first — step 1 · Student");
       return;
     }
-    const mastersNow = masters ?? loadMasters();
+    if (!masters) {
+      setError("The school's setup is still loading — try again in a moment.");
+      return;
+    }
+    const mastersNow = masters;
     const ay = session.academicYearCode || DEFAULT_AY;
     const classTeacherName = resolveClassTeacherName(
       mastersNow,
@@ -551,7 +569,15 @@ export function CertificatesWorkspace() {
         </div>
       ) : null}
 
-      {tab === "desk" ? (
+      {tab === "desk" && !masters ? (
+        mastersError ? (
+          <QueryError what="the school's classes and staff" error={mastersError} retry={retryMasters} />
+        ) : (
+          <p className="mt-6 text-sm text-[var(--muted)]">Loading the school&apos;s classes…</p>
+        )
+      ) : null}
+
+      {tab === "desk" && masters ? (
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
         <div className="space-y-4">
           <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
@@ -632,6 +658,7 @@ export function CertificatesWorkspace() {
 
             <div className="mt-2 flex justify-end">
               <StudentHitsFilterExport
+              balanceWithheld={feesWithheld}
                 title="Certificates · student search"
                 hits={hits}
                 query={query}
@@ -670,7 +697,10 @@ export function CertificatesWorkspace() {
                         ) : null}
                       </div>
                       <div className="text-[11px] text-[var(--muted)]">
-                        {h.classLabel} · open dues {formatInr(h.balancePaise)}
+                        {h.classLabel} ·{" "}
+                        {feesWithheld
+                          ? "dues: not shown for your role"
+                          : `open dues ${formatInr(h.balancePaise)}`}
                       </div>
                     </button>
                   </li>

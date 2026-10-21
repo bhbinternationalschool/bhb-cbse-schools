@@ -9,7 +9,10 @@ import { field } from "@/components/ui/erp-ui";
 import { ExportMenu, type RowAction } from "@/components/ui/erp-grid";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { openWaMe } from "@/lib/waMe";
-import { DEFAULT_AY, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
+import { DEFAULT_AY, type MastersState, currentAcademicYearCode } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { classSectionLabel } from "@/lib/timetable";
 import { loadSis, type SisState, type SisStudent, studentsInSession} from "@/lib/sis";
 import { dutyStaffLabel, loadDutyRoster, type DutyRosterState } from "@/lib/dutyRoster";
@@ -68,12 +71,16 @@ function todayIso() {
 function StudentPicker({
   sis,
   masters,
+  sessionYear,
   value,
   onPick,
   onClear,
 }: {
   sis: SisState | null;
+  /** null while the masters view has not answered: the picker still works, class names show "…". */
   masters: MastersState | null;
+  /** The signed-in session's year — the search's year until Masters answers. */
+  sessionYear: string;
   value: SisStudent | null;
   onPick: (s: SisStudent) => void;
   onClear: () => void;
@@ -86,17 +93,17 @@ function StudentPicker({
       // One row per child, this session. SIS keeps a row per child per
       // year and marks them all active, so the same name appeared several
       // times and, in a capped list, pushed real matches off the end.
-    return studentsInSession(sis, currentAcademicYearCode(masters))
+    return studentsInSession(sis, masters ? currentAcademicYearCode(masters) : sessionYear)
       .filter((s) => s.fullName.toLowerCase().includes(q) || s.admissionNo.toLowerCase().includes(q))
       .slice(0, 15);
-  }, [sis, query]);
+  }, [sis, query, masters, sessionYear]);
 
   if (value) {
     return (
       <div className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2">
         <span className="text-sm font-semibold">
           {value.fullName}
-          {masters ? ` · ${classSectionLabel(masters, value.classId, value.sectionId)}` : ""}
+          {` · ${masters ? classSectionLabel(masters, value.classId, value.sectionId) : "…"}`}
         </span>
         <button type="button" className="text-xs font-semibold text-[var(--brand-deep)] underline" onClick={onClear}>
           Change
@@ -141,7 +148,9 @@ export function VisitorsWorkspace() {
   const readOnly = useSessionReadOnly();
   const ay = session.academicYearCode || DEFAULT_AY;
   const [tab, setTab] = useState<Tab>("register");
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1i: the server's book + the staff roster (gate duty, the
+  // permission checks), kept fresh by the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [dutyRoster, setDutyRoster] = useState<DutyRosterState | null>(null);
   const [state, setState] = useState<VisitorState>(emptyVisitorState());
@@ -193,30 +202,32 @@ export function VisitorsWorkspace() {
     };
   }, [tab]);
   useEffect(() => {
-    setMasters(loadMasters());
     setSis(loadSis());
     setDutyRoster(loadDutyRoster());
     setState(loadVisitors());
     void (async () => {
-      const [{ ensureMastersHydrated }, { ensureSisHydrated }, { withHydrationSlot }] =
+      const [{ ensureSisHydrated }, { withHydrationSlot }] =
         await Promise.all([
-          import("@/lib/mastersPersistence"),
           import("@/lib/sisPersistence"),
           import("@/lib/deskHydrateGuard"),
         ]);
-      await Promise.all([
-        withHydrationSlot(() => ensureMastersHydrated()),
-        withHydrationSlot(() => ensureSisHydrated()),
-      ]);
-      setMasters(loadMasters());
+      await withHydrationSlot(() => ensureSisHydrated());
       setSis(loadSis());
     })();
   }, []);
 
   // Someone holding only some Visitors functions sees only their tabs.
+  // Decided from the access copy (roles + staff roster — the same staff side
+  // useScreenMasters adds to the book), so the gate is usable while the
+  // masters view is loading or has failed (2.1i review: the gate must work).
+  const access = useAccessData();
   const shownTabs = useMemo(
-    () => visibleModuleTabs(lang === "hi" ? TABS_HI : TABS_EN, session, masters, "visitors"),
-    [lang, session, masters],
+    () =>
+      access.ready
+        ? visibleModuleTabs(lang === "hi" ? TABS_HI : TABS_EN, session, access.masters, "visitors", access.rbac ?? undefined)
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [lang, session, access.ready, access.version],
   );
   useEffect(() => {
     if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
@@ -227,11 +238,13 @@ export function VisitorsWorkspace() {
    * The register saves the whole visitors book, which needs edit (module
    * grant or the "Gate register" function) — saveVisitors and the server
    * both refuse less. Without it the buttons are off rather than letting a
-   * check-in look saved on this screen and never reach the server. Until
-   * masters load, only the session's own read-only state decides.
+   * check-in look saved on this screen and never reach the server. Off
+   * until the access copy (roles + roster) is known.
    */
   const locked =
-    readOnly || (masters !== null && !canWriteModuleTab(session, masters, "visitors", tab));
+    readOnly ||
+    !access.ready ||
+    !canWriteModuleTab(session, access.masters, "visitors", tab, "edit", access.rbac ?? undefined);
 
   function flash(msg: string) {
     setNotice(msg);
@@ -548,6 +561,12 @@ export function VisitorsWorkspace() {
         </button>
       </div>
 
+      {/* The register, passes and QR work without Masters; only class /
+          section names and the duty roster's names need it ("…" until then). */}
+      {mastersError ? (
+        <QueryError compact what="class, section and staff names" error={mastersError} retry={retryMasters} />
+      ) : null}
+
       {tab === "gateqr" ? <GateQrPanel lang={lang} /> : null}
 
       {tab === "register" ? (
@@ -668,7 +687,7 @@ export function VisitorsWorkspace() {
             <p className="text-sm font-bold">Log early-pickup gate pass</p>
             <label className="block text-sm">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">Student</span>
-              <StudentPicker sis={sis} masters={masters} value={gpStudent} onPick={setGpStudent} onClear={() => setGpStudent(null)} />
+              <StudentPicker sis={sis} masters={masters} sessionYear={ay} value={gpStudent} onPick={setGpStudent} onClear={() => setGpStudent(null)} />
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="block text-sm">
@@ -722,7 +741,7 @@ export function VisitorsWorkspace() {
             <ul className="space-y-2">
               {todayDutyAssignments.map((a) => (
                 <li key={a.id} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 text-sm">
-                  <span className="font-semibold">{masters ? dutyStaffLabel(masters, a.staffId) : a.staffId}</span>
+                  <span className="font-semibold">{masters ? dutyStaffLabel(masters, a.staffId) : "…"}</span>
                   {a.note ? <span className="ml-2 text-[var(--muted)]">{a.note}</span> : null}
                 </li>
               ))}

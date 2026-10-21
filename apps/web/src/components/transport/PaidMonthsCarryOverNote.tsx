@@ -19,13 +19,20 @@ export function PaidMonthsCarryOverNote({
   student,
   masters,
   effectiveFrom,
+  feesWithheld = false,
 }: {
   student: SisStudent | null | undefined;
   masters: MastersState | null | undefined;
   effectiveFrom: string;
+  /**
+   * Teaching-scope Masters (no Masters grant): the fee lists are withheld, so
+   * which months are paid is unknown — say so instead of saying nothing,
+   * which reads as "no month is paid".
+   */
+  feesWithheld?: boolean;
 }) {
   const months = useMemo(() => {
-    if (!student || !masters || !effectiveFrom) return [];
+    if (feesWithheld || !student || !masters || !effectiveFrom) return [];
     try {
       const dues = computeStudentDues(student, masters, loadFees(), {
         includeFuture: true,
@@ -44,8 +51,20 @@ export function PaidMonthsCarryOverNote({
     } catch {
       return [];
     }
-  }, [student, masters, effectiveFrom]);
+  }, [student, masters, effectiveFrom, feesWithheld]);
 
+  if (feesWithheld && student) {
+    return (
+      <p
+        role="status"
+        data-testid="transport-paid-unknown"
+        className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--warning)_50%,transparent)] bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-[11px] text-[var(--ink)]"
+      >
+        Paid months are not shown for your role — check with the office before
+        backdating a start over months the family may already have paid.
+      </p>
+    );
+  }
   if (months.length === 0) return null;
   const names = months.map(transportPeriodLabel);
   const list =
