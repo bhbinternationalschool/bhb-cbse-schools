@@ -147,13 +147,13 @@ test.describe.serial("locked sensitive fields are not validated for who cannot e
       const father = page.locator("label", { hasText: "Father's name" }).locator("input");
       await father.fill(next);
       const posted = page.waitForResponse(
-        (r) => r.url().includes("/api/school-data/staff-roster") && r.request().method() === "POST",
+        (r) => r.url().endsWith("/api/data/sis.staff") && r.request().method() === "POST",
         { timeout: 15_000 },
       );
       await page.getByRole("button", { name: "Save profile" }).first().click();
       await expect(page.getByText("Fix the highlighted fields before saving"), "Save refused the profile").toHaveCount(0);
       const res = await posted;
-      expect(res.status(), "POST staff-roster").toBe(200);
+      expect(res.status(), "POST sis.staff").toBe(200);
 
       const after = (await (await context.request.get("/api/school-data/staff-roster")).json()) as Roster;
       const saved = after.staff.find((s) => s.id === TARGET);
@@ -173,7 +173,7 @@ test.describe.serial("locked sensitive fields are not validated for who cannot e
     try {
       let posts = 0;
       page.on("request", (r) => {
-        if (r.url().includes("/api/school-data/staff-roster") && r.method() === "POST") posts += 1;
+        if (/\/api\/(data\/sis\.staff|school-data\/staff-roster)/.test(r.url()) && r.method() === "POST") posts += 1;
       });
       await page.goto(`/staff/${TARGET}/edit`);
       await page.locator('[aria-label="Staff profile sections"]').getByText("IDs", { exact: true }).first().click({ timeout: 30_000 });

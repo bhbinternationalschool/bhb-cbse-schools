@@ -9,8 +9,6 @@
  * conflict answer), and the old staff-roster save's guard.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { redactStoredForAnswer } from "../answerRedaction";
 import { collectionDef } from "../registry";
 import {
@@ -283,16 +281,9 @@ async function section2(): Promise<void> {
   console.log("  ✓ sensitive route: only protected keys, login owner-only, no password set, base required");
 }
 
-/* ── 7. The OLD staff-roster save is gone (data-layer 2.2d): POST answers 410
- *      (route below); its guard (rosterSaveRefusal / prepareRosterRows) went
- *      with it. The staff screens write through sis.staff (sections 1–5). ── */
-{
-  const route = readFileSync(join(__dirname, "../../../app/api/school-data/staff-roster/route.ts"), "utf8");
-  const post = route.slice(route.indexOf("export async function POST"), route.indexOf("export async function DELETE"));
-  assert.match(post, /status: 410/, "POST staff-roster answers 410");
-  assert.ok(!/pushStaffRemoteServer/.test(post), "…and writes nothing");
-  console.log("  ✓ old staff-roster save: POST is 410, nothing written");
-}
+/* ── 7. The OLD staff-roster save is gone (data-layer 2.2d): POST answers 410,
+ *      its guard (rosterSaveRefusal / prepareRosterRows) went with it — proved
+ *      on the stack (e2e/staff-kernel.acceptance.ts, section E). ── */
 
 /* ── 8. withStoredProtectedKeys / protectedChanges edge cases ── */
 {

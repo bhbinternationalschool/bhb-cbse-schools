@@ -4,7 +4,7 @@ import { PropelProgressPanel } from "@/components/staff/PropelProgressPanel";
 import { CoordinatorsPanel } from "@/components/staff/CoordinatorsPanel";
 import { ProfileChangeRequestsCard } from "@/components/staff/ProfileChangeRequestsCard";
 import { useAccessData } from "@/components/shell/useAccessData";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -22,6 +22,8 @@ import {
 } from "@/lib/foundationMasters";
 import { loadMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
 import { readRemovedStaff, useStaffBookWrites } from "@/lib/data/client/staffBookWrites";
+import { useStaffList } from "@/lib/data/client/hooks";
+import { bridgeStaffAfterWrite } from "@/lib/data/client/staffBridge";
 import {
   applyStaffImport,
   downloadStaffImportTemplate,
@@ -247,6 +249,26 @@ export function StaffWorkspace() {
     window.addEventListener("bhb-masters-updated", onMasters);
     return () => window.removeEventListener("bhb-masters-updated", onMasters);
   }, []);
+
+  // Another tab or device changed a staff record (data-layer 2.2d): the
+  // versions poll refetches the staff list when sis_staff / departments /
+  // designations move; the roster this screen edits (the page copy) is then
+  // re-read from the server — server wins — so a rename made elsewhere shows
+  // here within one poll, without a reload. Not on the first answer (the
+  // mount's own hydrate reads it), and not while a save of this screen runs.
+  const staffList = useStaffList();
+  const seenStaffAnswer = useRef<number>(0);
+  useEffect(() => {
+    const at = staffList.dataUpdatedAt;
+    if (!at) return;
+    if (seenStaffAnswer.current === 0) {
+      seenStaffAnswer.current = at;
+      return;
+    }
+    if (at === seenStaffAnswer.current) return;
+    seenStaffAnswer.current = at;
+    void bridgeStaffAfterWrite().then(() => setState(loadMasters()));
+  }, [staffList.dataUpdatedAt]);
 
   // Every change here is a staff record write (data-layer 2.2d): the
   // difference between the roster on screen and the action's result, laid on
