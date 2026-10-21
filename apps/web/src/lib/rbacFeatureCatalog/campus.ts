@@ -32,6 +32,19 @@ export const CAMPUS_FEATURES: RbacFeatureDef[] = [
     routes: ["/api/wa/dispatch"],
   },
   {
+    // School chat (16 Oct 2026): the review queue, mute / block and the
+    // behaviour summary. Holders of Discipline · approve (built in: owner,
+    // principal, admin) have it through the module; the office can give it
+    // on its own in Masters → Roles. The member routes (send, read) are not
+    // RBAC-gated — membership is decided per request by the server.
+    id: "discipline.chat_moderate",
+    module: "discipline",
+    label: "School chat moderation",
+    blurb: "Review held chat messages (approve / remove / warn), mute or block anyone, and see the behaviour summary.",
+    actions: ["view", "approve"],
+    routes: ["/api/v1/school-chat/moderation"],
+  },
+  {
     id: "health.infirmary",
     module: "health",
     label: "Sick room & health records",

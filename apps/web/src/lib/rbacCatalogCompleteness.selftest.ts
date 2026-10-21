@@ -301,6 +301,16 @@ const PUBLIC_API_ROUTES: Record<string, string> = {
     "Staff → Requests view (15 Oct 2026): any staff session, gated in lib/staffRequests.server.ts (requireStaffApi; parents 403, mirror secret 403); a manager (canManageStaffLeave with the saved roles) gets every request, anyone else only their own",
   "staff/requests":
     "Staff → Requests writes (15 Oct 2026): gated in lib/staffRequests.server.ts (requireStaffApi) — any member of staff raises their own; only a manager (canManageStaffLeave) assigns/resolves; mirror secret 403",
+  "v1/school-chat/contacts":
+    "school chat member route (16 Oct 2026): staff AND parent sessions by design (resolveApiAuth 401); membership is decided per request in lib/schoolChat.server (chatActor: a family must name its own active child; accessConversation: groups from the roster / published timetable / Staff → Duties, DMs by participant) — 403 otherwise. No module grant fits a child's class group; moderation is the discipline.chat_moderate function",
+  "v1/school-chat/conversations":
+    "school chat member route (16 Oct 2026): staff AND parent sessions by design (resolveApiAuth 401); membership is decided per request in lib/schoolChat.server (chatActor: a family must name its own active child; accessConversation: groups from the roster / published timetable / Staff → Duties, DMs by participant) — 403 otherwise. No module grant fits a child's class group; moderation is the discipline.chat_moderate function",
+  "v1/school-chat/direct":
+    "school chat member route (16 Oct 2026): staff AND parent sessions by design (resolveApiAuth 401); membership is decided per request in lib/schoolChat.server (chatActor: a family must name its own active child; accessConversation: groups from the roster / published timetable / Staff → Duties, DMs by participant) — 403 otherwise. No module grant fits a child's class group; moderation is the discipline.chat_moderate function",
+  "v1/school-chat/messages":
+    "school chat member route (16 Oct 2026): staff AND parent sessions by design (resolveApiAuth 401); membership is decided per request in lib/schoolChat.server (chatActor: a family must name its own active child; accessConversation: groups from the roster / published timetable / Staff → Duties, DMs by participant) — 403 otherwise. No module grant fits a child's class group; moderation is the discipline.chat_moderate function",
+  "v1/school-chat/send":
+    "school chat member route (16 Oct 2026): staff AND parent sessions by design (resolveApiAuth 401); membership is decided per request in lib/schoolChat.server (chatActor: a family must name its own active child; accessConversation: groups from the roster / published timetable / Staff → Duties, DMs by participant) — 403 otherwise. No module grant fits a child's class group; moderation is the discipline.chat_moderate function",
   "data/views/notifications":
     "the caller's OWN notifications (20 Oct 2026): any signed-in staff member or family, gated in lib/notify/inbox.ts (resolveApiAuth 401; API keys 403); every query is filtered to the session's own push key — no request field can name another recipient. Who receives what is decided by roles at send time (lib/notify/audience.ts)",
   "v1/notifications":
