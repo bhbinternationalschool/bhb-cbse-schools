@@ -32,6 +32,7 @@ part "notifications_api.dart";
 part "home_cards_api.dart";
 part "student_contact_api.dart";
 part "bus_routes_live_api.dart";
+part "broadcast_audience_api.dart";
 part "school_chat_api.dart";
 part "games_api.dart";
 
@@ -3060,6 +3061,7 @@ class ApiClient {
     "/api/v1/school-chat/send",
     "/api/v1/staff/class-gallery/complete",
     "/api/v1/staff/broadcast",
+    "/api/v1/staff/broadcast/audience",
     "/api/v1/owner/broadcast",
     // 35 s once in production (7 days to 15 Oct). No screen calls it today;
     // listed so a future caller does not inherit the 30 s deadline.

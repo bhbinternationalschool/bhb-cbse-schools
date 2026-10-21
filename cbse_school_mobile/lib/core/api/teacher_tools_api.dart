@@ -64,6 +64,7 @@ class ClassBroadcastSent {
     : id = _s(j, "id"),
       at = _s(j, "at"),
       audience = _s(j, "audience"),
+      audienceLabel = _s(j, "audienceLabel"),
       sectionLabels = ((j["sectionLabels"] as List?) ?? const [])
           .map((e) => "$e")
           .toList(),
@@ -78,6 +79,9 @@ class ClassBroadcastSent {
 
   final String id;
   final String at;
+
+  /// Sends from the Broadcast screen name their audience ("Teaching staff").
+  final String audienceLabel;
   final String audience;
   final List<String> sectionLabels;
   final String body;

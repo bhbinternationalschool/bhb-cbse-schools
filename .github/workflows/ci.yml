@@ -687,6 +687,7 @@ jobs:
           npm run test:wa-failure-reason
           npm run test:wa-household-numbers
           npm run test:wa-audience-spec
+          npm run test:staff-app-broadcast
           npm run test:wa-audience-households
           npm run test:wa-tutor-bot
           npm run test:wa-student-link

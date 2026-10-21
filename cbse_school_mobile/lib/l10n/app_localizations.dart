@@ -5348,6 +5348,246 @@ abstract class L {
   /// **'Enter the bank name'**
   String get feeBankMissing;
 
+  /// No description provided for @bcAudienceAllParents.
+  ///
+  /// In en, this message translates to:
+  /// **'All parents'**
+  String get bcAudienceAllParents;
+
+  /// No description provided for @bcAudienceSections.
+  ///
+  /// In en, this message translates to:
+  /// **'Classes / sections'**
+  String get bcAudienceSections;
+
+  /// No description provided for @bcAudienceStaff.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff'**
+  String get bcAudienceStaff;
+
+  /// No description provided for @bcAudienceRoutes.
+  ///
+  /// In en, this message translates to:
+  /// **'Bus routes'**
+  String get bcAudienceRoutes;
+
+  /// No description provided for @bcAudienceFeeDefaulters.
+  ///
+  /// In en, this message translates to:
+  /// **'Fee defaulters'**
+  String get bcAudienceFeeDefaulters;
+
+  /// No description provided for @bcOwnSectionsOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'You can message the families of your own sections.'**
+  String get bcOwnSectionsOnly;
+
+  /// No description provided for @bcStaffAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get bcStaffAll;
+
+  /// No description provided for @bcStaffTeaching.
+  ///
+  /// In en, this message translates to:
+  /// **'Teaching'**
+  String get bcStaffTeaching;
+
+  /// No description provided for @bcStaffNonTeaching.
+  ///
+  /// In en, this message translates to:
+  /// **'Non-teaching'**
+  String get bcStaffNonTeaching;
+
+  /// No description provided for @bcStaffRolesHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Roles (leave empty for everyone)'**
+  String get bcStaffRolesHint;
+
+  /// No description provided for @bcPickAtLeastOne.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick at least one.'**
+  String get bcPickAtLeastOne;
+
+  /// No description provided for @bcChannel.
+  ///
+  /// In en, this message translates to:
+  /// **'Send by'**
+  String get bcChannel;
+
+  /// No description provided for @bcChannelWhatsapp.
+  ///
+  /// In en, this message translates to:
+  /// **'WhatsApp + app'**
+  String get bcChannelWhatsapp;
+
+  /// No description provided for @bcChannelApp.
+  ///
+  /// In en, this message translates to:
+  /// **'App only (free)'**
+  String get bcChannelApp;
+
+  /// No description provided for @bcChannelAppHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Only an app notification — no WhatsApp message, no cost. Reaches families and staff who have the school app.'**
+  String get bcChannelAppHint;
+
+  /// No description provided for @bcModeTemplate.
+  ///
+  /// In en, this message translates to:
+  /// **'WhatsApp template'**
+  String get bcModeTemplate;
+
+  /// No description provided for @bcModeCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom message'**
+  String get bcModeCustom;
+
+  /// No description provided for @bcChooseTemplate.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a template'**
+  String get bcChooseTemplate;
+
+  /// No description provided for @bcTemplatesNotLoaded.
+  ///
+  /// In en, this message translates to:
+  /// **'Templates could not be loaded.'**
+  String get bcTemplatesNotLoaded;
+
+  /// No description provided for @bcNoTemplates.
+  ///
+  /// In en, this message translates to:
+  /// **'No template is approved in both Hindi and English yet.'**
+  String get bcNoTemplates;
+
+  /// No description provided for @bcAutoFilledHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Names, child and class are filled in for each family.'**
+  String get bcAutoFilledHint;
+
+  /// No description provided for @bcCustomTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Title (optional)'**
+  String get bcCustomTitle;
+
+  /// No description provided for @bcCustomHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Goes as typed to anyone who messaged the school in the last 24 hours. Everyone else gets it inside the approved “School notice” template, which WhatsApp delivers to all.'**
+  String get bcCustomHint;
+
+  /// No description provided for @bcCustomTemplateNotReady.
+  ///
+  /// In en, this message translates to:
+  /// **'The “School notice” template is not approved in both languages, so people outside the 24-hour window cannot be reached.'**
+  String get bcCustomTemplateNotReady;
+
+  /// No description provided for @bcLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load broadcast options.'**
+  String get bcLoadFailed;
+
+  /// No description provided for @bcReadyToSend.
+  ///
+  /// In en, this message translates to:
+  /// **'Ready to send'**
+  String get bcReadyToSend;
+
+  /// No description provided for @bcFamiliesInAudience.
+  ///
+  /// In en, this message translates to:
+  /// **'In this audience: {count}'**
+  String bcFamiliesInAudience(String count);
+
+  /// No description provided for @bcAsFreeText.
+  ///
+  /// In en, this message translates to:
+  /// **'As free text (inside 24 hours): {count}'**
+  String bcAsFreeText(String count);
+
+  /// No description provided for @bcViaTemplate.
+  ///
+  /// In en, this message translates to:
+  /// **'Inside the approved template: {count}'**
+  String bcViaTemplate(String count);
+
+  /// No description provided for @bcCannotReach.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot be reached (template not approved in their language): {count}'**
+  String bcCannotReach(String count);
+
+  /// No description provided for @bcWindowUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'The 24-hour window could not be read, so everyone gets the template.'**
+  String get bcWindowUnknown;
+
+  /// No description provided for @bcSkipped.
+  ///
+  /// In en, this message translates to:
+  /// **'Skipped: {optOut} opted out, {dead} not on WhatsApp, {noNumber} no number'**
+  String bcSkipped(String optOut, String dead, String noNumber);
+
+  /// No description provided for @bcEstimate.
+  ///
+  /// In en, this message translates to:
+  /// **'Estimated WhatsApp cost: {amount} + {gst}% GST'**
+  String bcEstimate(String amount, String gst);
+
+  /// No description provided for @bcEstimateDefaults.
+  ///
+  /// In en, this message translates to:
+  /// **'Estimate uses default rates — confirm them on the web (WhatsApp usage).'**
+  String get bcEstimateDefaults;
+
+  /// No description provided for @bcEstimateUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Cost estimate not loaded.'**
+  String get bcEstimateUnknown;
+
+  /// No description provided for @bcAppNotificationToo.
+  ///
+  /// In en, this message translates to:
+  /// **'An app notification also goes to everyone in the audience who has the app (free).'**
+  String get bcAppNotificationToo;
+
+  /// No description provided for @bcSendNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Send to {count} now'**
+  String bcSendNow(String count);
+
+  /// No description provided for @bcConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Send this message?'**
+  String get bcConfirmTitle;
+
+  /// No description provided for @bcConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'{audience}: {count} will get it. This cannot be undone.'**
+  String bcConfirmBody(String audience, String count);
+
+  /// No description provided for @bcResult.
+  ///
+  /// In en, this message translates to:
+  /// **'WhatsApp: {sent} accepted, {failed} failed, {deferred} held for quiet hours. App notifications: {push}.'**
+  String bcResult(String sent, String failed, String deferred, String push);
+
   /// No description provided for @visitorMobileOptional.
   ///
   /// In en, this message translates to:

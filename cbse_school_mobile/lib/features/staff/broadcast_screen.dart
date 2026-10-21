@@ -4,19 +4,25 @@ import "../../core/guide/screen_guides.dart";
 import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../l10n/app_localizations.dart";
 import "../modules/dictate_field.dart";
 
-/// School-wide WhatsApp + app-push broadcast for principal/owner roles —
-/// the same choices as the web owner dashboard's Broadcast modal:
+/// Broadcast — the web ERP's WhatsApp send, from the phone (20 Oct 2026,
+/// requests mr_mva0gr5aop3y and mr_mva0ik2uqmoy).
 ///
-///  • **Approved template** (default when any exist): Meta delivers it to
-///    every recipient regardless of the 24-hour session window.
-///  • **Free text**: only reaches parents/staff who messaged the school's
-///    WhatsApp number in the last 24 hours — Meta blocks the rest.
+///  • **Audience**: all parents, chosen classes/sections, staff (all or by
+///    stream/role), bus routes, fee defaulters — the web's audiences. The
+///    server decides what this person may pick: a teacher gets only their
+///    own sections; school-wide audiences need the broadcast permission.
+///  • **Message**: an approved WhatsApp template (each family in its own
+///    language), or a **custom message** — free text to people inside their
+///    24-hour window, the approved "School notice" template for the rest.
+///  • **Channel**: WhatsApp + app notification, or the app alone (free).
 ///
-/// Two-step by design: the first tap is always a server dry-run that only
-/// counts recipients; the live send needs a second, explicit confirmation
-/// showing that count. The server itself also defaults to dry-run.
+/// Two steps by design: "Preview recipients" is a server dry run that only
+/// counts (free text vs template, cost estimate); the send needs a second,
+/// explicit confirmation showing that count, and the server refuses it if
+/// the audience has moved since.
 class BroadcastScreen extends StatefulWidget {
   const BroadcastScreen({super.key, required this.api});
   final ApiClient api;
@@ -26,110 +32,127 @@ class BroadcastScreen extends StatefulWidget {
 }
 
 class _BroadcastScreenState extends State<BroadcastScreen> {
-  String _audience = "parents";
-  final _body = TextEditingController();
+  BroadcastAudienceOptions? _options;
+  String? _loadError;
+
+  final _audience = BroadcastAudienceSelection();
+  String _channel = "whatsapp"; // "whatsapp" | "app"
+  String _mode = "template"; // "template" | "custom"
+
+  BroadcastTemplateFamily? _template;
   final Map<String, TextEditingController> _vars = {};
-
-  List<WaBroadcastTemplate>? _templates; // null = loading
-  String? _templatesError;
-
-  /// null → free text
-  WaBroadcastTemplate? _template;
+  final _text = TextEditingController();
+  final _title = TextEditingController();
 
   bool _busy = false;
-  BroadcastResult? _preview;
-  BroadcastResult? _sent;
+  AudienceBroadcastResult? _preview;
+
+  /// One per preview: the live send claims it once on the server.
+  String? _sendId;
+  AudienceBroadcastResult? _sent;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _loadTemplates();
+    _load();
   }
 
   @override
   void dispose() {
-    _body.dispose();
+    _text.dispose();
+    _title.dispose();
     for (final c in _vars.values) {
       c.dispose();
     }
     super.dispose();
   }
 
-  Future<void> _loadTemplates() async {
+  Future<void> _load() async {
+    setState(() {
+      _loadError = null;
+      _options = null;
+    });
     try {
-      final list = await widget.api.fetchBroadcastTemplates();
+      final o = await widget.api.fetchBroadcastAudienceOptions();
       if (!mounted) return;
       setState(() {
-        _templates = list;
-        // Templates reach everyone — make that the default when available.
-        _selectTemplate(_pickDefault(list));
+        _options = o;
+        final offered = BroadcastAudienceSelection.offered(o);
+        if (offered.isNotEmpty && !offered.contains(_audience.kind)) {
+          _audience.kind = offered.first;
+        }
+        // No template to pick → start on the custom message.
+        if ((o.templates ?? const []).isEmpty) _mode = "custom";
       });
     } on ApiException catch (e) {
-      if (mounted) {
-        setState(() {
-          _templates = const [];
-          _templatesError = e.message;
-        });
-      }
+      if (mounted) setState(() => _loadError = e.message);
     } catch (_) {
-      if (mounted) {
-        setState(() {
-          _templates = const [];
-          _templatesError = "Could not load templates — free text only.";
-        });
-      }
+      if (mounted) setState(() => _loadError = context.l10n.bcLoadFailed);
     }
   }
 
-  /// Prefer an English broadcast-style template; skip the OTP one, which is
-  /// approved but not something anyone broadcasts.
-  WaBroadcastTemplate? _pickDefault(List<WaBroadcastTemplate> list) {
-    final usable = list
-        .where((t) => !t.metaName.toLowerCase().contains("otp"))
-        .toList();
-    if (usable.isEmpty) return null;
-    return usable.firstWhere(
-      (t) => t.language == "en",
-      orElse: () => usable.first,
-    );
+  void _changed() {
+    setState(() {
+      _preview = null;
+      _sendId = null;
+      _sent = null;
+      _error = null;
+    });
   }
 
-  void _selectTemplate(WaBroadcastTemplate? t) {
+  void _pickTemplate(BroadcastTemplateFamily? t) {
     _template = t;
-    _preview = null;
-    _sent = null;
-    _error = null;
     if (t != null) {
-      for (final v in t.variables) {
+      for (final v in t.askFor) {
         _vars.putIfAbsent(v.key, TextEditingController.new);
       }
     }
+    _changed();
   }
 
   Map<String, String> _variableValues() {
     final t = _template;
     if (t == null) return const {};
-    return {
-      for (final v in t.variables) v.key: (_vars[v.key]?.text ?? "").trim(),
-    };
+    return {for (final v in t.askFor) v.key: (_vars[v.key]?.text ?? "").trim()};
   }
 
-  bool get _canPreview {
+  String? _whyNotReady() {
+    final l = context.l10n;
+    if (_audience.toSpec() == null) return l.bcPickAtLeastOne;
+    if (_mode == "custom") {
+      if (_text.text.trim().isEmpty) return l.freeTextOnlyReachesRecipientsWho;
+      return null;
+    }
     final t = _template;
-    if (t == null) return _body.text.trim().isNotEmpty;
-    return t.variables.every(
-      (v) => (_vars[v.key]?.text ?? "").trim().isNotEmpty,
-    );
+    if (t == null) return l.bcChooseTemplate;
+    if (t.askFor.any((v) => (_vars[v.key]?.text ?? "").trim().isEmpty)) {
+      return l.theSameValueIsUsedFor;
+    }
+    return null;
   }
+
+  Future<AudienceBroadcastResult> _call({
+    required bool dryRun,
+    int? confirmCount,
+    String? sendId,
+  }) => widget.api.broadcastToAudience(
+    audience: _audience.toSpec()!,
+    mode: _mode,
+    templateFamilyKey: _template?.familyKey ?? "",
+    variables: _variableValues(),
+    text: _text.text.trim(),
+    title: _title.text.trim(),
+    channel: _channel,
+    dryRun: dryRun,
+    confirmCount: confirmCount,
+    sendId: sendId,
+  );
 
   Future<void> _dryRun() async {
-    if (!_canPreview) {
-      setState(
-        () => _error = _template == null
-            ? "Type the message first."
-            : "Fill every template field first.",
-      );
+    final why = _whyNotReady();
+    if (why != null) {
+      setState(() => _error = why);
       return;
     }
     setState(() {
@@ -139,14 +162,13 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
       _sent = null;
     });
     try {
-      final r = await widget.api.ownerBroadcast(
-        audience: _audience,
-        body: _body.text.trim(),
-        template: _template,
-        variables: _variableValues(),
-        dryRun: true,
-      );
-      if (mounted) setState(() => _preview = r);
+      final r = await _call(dryRun: true);
+      if (mounted) {
+        setState(() {
+          _preview = r;
+          _sendId = newBroadcastSendId();
+        });
+      }
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
@@ -160,19 +182,14 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
 
   Future<void> _sendLive() async {
     final preview = _preview;
-    if (preview == null) return;
-    final who = _audience == "parents" ? "parent families" : "staff members";
-    final viaTemplate = _template != null;
+    final sendId = _sendId;
+    if (preview == null || sendId == null) return;
+    final count = "${preview.recipientCount}";
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(context.l10n.sendToEveryone),
-        content: Text(
-          "This will send ${viaTemplate ? "the approved template “${_template!.name}”" : "your message"} "
-          "on WhatsApp to ${preview.recipientCount} $who"
-          "${preview.skippedOptOut > 0 ? " (${preview.skippedOptOut} opted out are skipped)" : ""}"
-          " and as an app notification. This cannot be undone.",
-        ),
+        title: Text(context.l10n.bcConfirmTitle),
+        content: Text(context.l10n.bcConfirmBody(preview.audienceLabel, count)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -180,7 +197,7 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text("Send to ${preview.recipientCount}"),
+            child: Text(context.l10n.bcSendNow(count)),
           ),
         ],
       ),
@@ -191,17 +208,16 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
       _error = null;
     });
     try {
-      final r = await widget.api.ownerBroadcast(
-        audience: _audience,
-        body: _body.text.trim(),
-        template: _template,
-        variables: _variableValues(),
+      final r = await _call(
         dryRun: false,
+        confirmCount: preview.recipientCount,
+        sendId: sendId,
       );
       if (mounted) {
         setState(() {
           _sent = r;
           _preview = null;
+          _sendId = null;
         });
       }
     } on ApiException catch (e) {
@@ -215,122 +231,223 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
     }
   }
 
-  void _resetOutcome() {
-    if (_preview != null || _sent != null) {
-      setState(() {
-        _preview = null;
-        _sent = null;
-      });
+  // ------------------------------------------------------------------ UI
+
+  String _kindLabel(BroadcastAudienceKind k) {
+    final l = context.l10n;
+    switch (k) {
+      case BroadcastAudienceKind.parents:
+        return l.bcAudienceAllParents;
+      case BroadcastAudienceKind.sections:
+        return l.bcAudienceSections;
+      case BroadcastAudienceKind.staff:
+        return l.bcAudienceStaff;
+      case BroadcastAudienceKind.route:
+        return l.bcAudienceRoutes;
+      case BroadcastAudienceKind.feeDefaulters:
+        return l.bcAudienceFeeDefaulters;
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final preview = _preview;
-    final sent = _sent;
-    final templates = _templates;
-    final t = _template;
-    return Scaffold(
-      appBar: AppBar(
-        actions: [ScreenGuideButton(guideId: "broadcast", screenLabel: "broadcast")],title: Text(context.l10n.broadcastMessage)),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text(
-            context.l10n.audience,
-            style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink),
+  Widget _heading(String text) => Padding(
+    padding: const EdgeInsets.only(top: 16, bottom: 6),
+    child: Text(
+      text,
+      style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink),
+    ),
+  );
+
+  Widget _chips(List<BroadcastIdLabel> items, Set<String> selected) => Wrap(
+    spacing: 6,
+    runSpacing: 6,
+    children: [
+      for (final it in items)
+        FilterChip(
+          label: Text(it.label),
+          selected: selected.contains(it.id),
+          onSelected: _busy
+              ? null
+              : (on) {
+                  on ? selected.add(it.id) : selected.remove(it.id);
+                  _changed();
+                },
+        ),
+    ],
+  );
+
+  Widget _audiencePicker(BroadcastAudienceOptions o) {
+    final l = context.l10n;
+    final offered = BroadcastAudienceSelection.offered(o);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _heading(l.audience),
+        if (!o.schoolWide)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(l.bcOwnSectionsOnly, style: AppText.labelMediumMuted),
           ),
-          SizedBox(height: 6),
-          SegmentedButton<String>(
-            segments: [
-              ButtonSegment(
-                value: "parents",
-                label: Text(context.l10n.allParents),
-                icon: Icon(Icons.family_restroom_outlined),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final k in offered)
+              ChoiceChip(
+                label: Text(_kindLabel(k)),
+                selected: _audience.kind == k,
+                onSelected: _busy
+                    ? null
+                    : (_) {
+                        _audience.kind = k;
+                        _changed();
+                      },
               ),
-              ButtonSegment(
-                value: "staff",
-                label: Text(context.l10n.allStaff),
-                icon: Icon(Icons.badge_outlined),
-              ),
-            ],
-            selected: {_audience},
-            onSelectionChanged: _busy
-                ? null
-                : (s) => setState(() {
-                    _audience = s.first;
-                    _preview = null;
-                    _sent = null;
-                  }),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            context.l10n.messageType,
-            style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink),
-          ),
-          const SizedBox(height: 6),
-          if (templates == null)
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (_audience.kind == BroadcastAudienceKind.sections)
+          for (final c in o.classes)
             Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.only(top: 6),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    width: 64,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(c.name, style: AppText.labelMediumInk),
+                    ),
                   ),
-                  SizedBox(width: 10),
-                  Text(
-                    context.l10n.loadingApprovedTemplates,
-                    style: AppText.bodySmallMuted,
+                  Expanded(
+                    child: _chips([
+                      for (final s in c.sections)
+                        BroadcastIdLabel(
+                          s.id,
+                          s.name.isEmpty ? s.label : s.name,
+                        ),
+                    ], _audience.sectionIds),
                   ),
                 ],
               ),
+            ),
+        if (_audience.kind == BroadcastAudienceKind.staff) ...[
+          SegmentedButton<String>(
+            segments: [
+              ButtonSegment(value: "all", label: Text(l.bcStaffAll)),
+              ButtonSegment(value: "teaching", label: Text(l.bcStaffTeaching)),
+              ButtonSegment(
+                value: "non_teaching",
+                label: Text(l.bcStaffNonTeaching),
+              ),
+            ],
+            selected: {_audience.staffStream},
+            onSelectionChanged: _busy
+                ? null
+                : (s) {
+                    _audience.staffStream = s.first;
+                    _changed();
+                  },
+          ),
+          if (o.designations.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(l.bcStaffRolesHint, style: AppText.labelMediumMuted),
+            const SizedBox(height: 4),
+            _chips(o.designations, _audience.designationIds),
+          ],
+        ],
+        if (_audience.kind == BroadcastAudienceKind.route)
+          _chips(o.routes, _audience.routeIds),
+        if (_audience.kind == BroadcastAudienceKind.feeDefaulters)
+          _chips(o.feeStages, _audience.feeStages),
+      ],
+    );
+  }
+
+  Widget _messagePicker(BroadcastAudienceOptions o) {
+    final l = context.l10n;
+    final templates = o.templates;
+    final t = _template;
+    // Parents read Hindi unless they chose English; staff read English.
+    final hindiPreview = _audience.kind != BroadcastAudienceKind.staff;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _heading(l.bcChannel),
+        SegmentedButton<String>(
+          segments: [
+            ButtonSegment(
+              value: "whatsapp",
+              label: Text(l.bcChannelWhatsapp),
+              icon: const Icon(Icons.chat_outlined),
+            ),
+            ButtonSegment(
+              value: "app",
+              label: Text(l.bcChannelApp),
+              icon: const Icon(Icons.notifications_outlined),
+            ),
+          ],
+          selected: {_channel},
+          onSelectionChanged: _busy
+              ? null
+              : (s) {
+                  _channel = s.first;
+                  _changed();
+                },
+        ),
+        if (_channel == "app")
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(l.bcChannelAppHint, style: AppText.labelMediumMuted),
+          ),
+        _heading(l.messageType),
+        SegmentedButton<String>(
+          segments: [
+            ButtonSegment(value: "template", label: Text(l.bcModeTemplate)),
+            ButtonSegment(value: "custom", label: Text(l.bcModeCustom)),
+          ],
+          selected: {_mode},
+          onSelectionChanged: _busy
+              ? null
+              : (s) {
+                  _mode = s.first;
+                  _changed();
+                },
+        ),
+        const SizedBox(height: 10),
+        if (_mode == "template") ...[
+          if (templates == null)
+            Text(
+              l.bcTemplatesNotLoaded,
+              style: AppText.labelMedium.copyWith(color: AppColors.danger),
             )
+          else if (templates.isEmpty)
+            Text(l.bcNoTemplates, style: AppText.labelMediumMuted)
           else
             DropdownButtonFormField<String>(
-              // Keyed on the selection so a programmatic change (default
-              // template after load) re-seeds the field's initial value.
-              key: ValueKey("tpl-${t?.id ?? ""}"),
-              initialValue: t?.id ?? "",
+              key: ValueKey("tpl-${t?.familyKey ?? ""}"),
+              initialValue: t?.familyKey,
               isExpanded: true,
+              hint: Text(l.bcChooseTemplate),
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
               items: [
-                DropdownMenuItem(
-                  value: "",
-                  child: Text(context.l10n.freeTextHourWindowOnly),
-                ),
-                for (final tpl in templates)
+                for (final f in templates)
                   DropdownMenuItem(
-                    value: tpl.id,
-                    child: Text(
-                      "${tpl.name} (${tpl.language.toUpperCase()})",
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    value: f.familyKey,
+                    child: Text(f.name, overflow: TextOverflow.ellipsis),
                   ),
               ],
               onChanged: _busy
                   ? null
-                  : (id) => setState(() {
-                      _selectTemplate(
-                        id == null || id.isEmpty
-                            ? null
-                            : templates.firstWhere((x) => x.id == id),
-                      );
-                    }),
+                  : (k) => _pickTemplate(
+                      templates.where((f) => f.familyKey == k).firstOrNull,
+                    ),
             ),
-          if (_templatesError != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              _templatesError!,
-              style: AppText.labelMedium.copyWith(color: AppColors.danger),
-            ),
-          ],
-          const SizedBox(height: 12),
           if (t != null) ...[
+            const SizedBox(height: 8),
             Card(
               color: ModuleTone.teal.background,
               child: Padding(
@@ -339,153 +456,267 @@ class _BroadcastScreenState extends State<BroadcastScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      t.preview(_variableValues()),
+                      t.preview(_variableValues(), hindi: hindiPreview),
                       style: AppText.bodyMediumInk,
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      context.l10n.approvedTemplateReachesEveryRecipientRegardl,
-                      style: AppText.labelMedium.copyWith(
-                        color: ModuleTone.teal.foreground,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            if (t.variables.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                context.l10n.theSameValueIsUsedFor,
-                style: AppText.labelMediumMuted,
-              ),
-              for (final v in t.variables)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: TextField(
-                    controller: _vars[v.key],
-                    enabled: !_busy,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: InputDecoration(
-                      labelText: v.label,
-                      border: const OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    onChanged: (_) => setState(_resetOutcome),
-                  ),
-                ),
-            ],
-          ] else ...[
-            DictateField(
-              label: context.l10n.message,
-              controller: _body,
-              enabled: !_busy,
-              minLines: 4,
-              maxLines: 10,
-              textCapitalization: TextCapitalization.sentences,
-              onChanged: (_) => _resetOutcome(),
-              hint: context.l10n.eGSchoolWillRemainClosed,
-            ),
-            Text(
-              context.l10n.freeTextOnlyReachesRecipientsWho,
-              style: AppText.labelMedium.copyWith(color: AppColors.warning),
-            ),
-          ],
-          if (_error != null) ...[
-            const SizedBox(height: 6),
-            Text(
-              _error!,
-              style: AppText.bodySmall.copyWith(color: AppColors.danger),
-            ),
-          ],
-          const SizedBox(height: 12),
-          if (sent != null)
-            Card(
-              color: ModuleTone.teal.background,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.check_circle,
+                    if (t.variables.any((v) => v.auto)) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        l.bcAutoFilledHint,
+                        style: AppText.labelMedium.copyWith(
                           color: ModuleTone.teal.foreground,
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          context.l10n.sent,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: ModuleTone.teal.foreground,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      "WhatsApp: ${sent.sent} accepted by the gateway"
-                      "${sent.failed > 0 ? ", ${sent.failed} failed" : ""}"
-                      "${sent.skippedOptOut > 0 ? ", ${sent.skippedOptOut} opted out skipped" : ""}.\n"
-                      "App notifications: ${sent.pushSent} sent.",
-                      style: AppText.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else if (preview != null)
-            Card(
-              color: ModuleTone.coral.background,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "Ready to send to ${preview.recipientCount} "
-                      "${_audience == "parents" ? "families" : "staff"}"
-                      "${preview.skippedOptOut > 0 ? " (${preview.skippedOptOut} opted out will be skipped)" : ""}.",
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: ModuleTone.coral.foreground,
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      context.l10n.nothingHasBeenSentYetReview,
-                      style: AppText.bodySmallMuted,
-                    ),
-                    const SizedBox(height: 10),
-                    FilledButton.icon(
-                      onPressed: _busy ? null : _sendLive,
-                      icon: const Icon(Icons.send),
-                      label: Text("Send to ${preview.recipientCount} now"),
-                    ),
+                    ],
                   ],
                 ),
               ),
-            )
-          else
-            FilledButton.tonalIcon(
-              onPressed: _busy || templates == null ? null : _dryRun,
-              icon: _busy
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.people_outline),
-              label: Text(context.l10n.previewRecipients),
             ),
-          const SizedBox(height: 16),
-          Text(
-            context.l10n.goesOutOnWhatsappFromThe,
-            style: AppText.labelMediumMuted,
+            for (final v in t.askFor)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: TextField(
+                  controller: _vars[v.key],
+                  enabled: !_busy,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: InputDecoration(
+                    labelText: v.label,
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (_) => _changed(),
+                ),
+              ),
+          ],
+        ] else ...[
+          if (_channel == "whatsapp")
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: TextField(
+                controller: _title,
+                enabled: !_busy,
+                maxLength: 60,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(
+                  labelText: l.bcCustomTitle,
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+                onChanged: (_) => _changed(),
+              ),
+            ),
+          DictateField(
+            label: l.message,
+            controller: _text,
+            enabled: !_busy,
+            minLines: 4,
+            maxLines: 10,
+            textCapitalization: TextCapitalization.sentences,
+            onChanged: (_) => _changed(),
+            hint: l.eGSchoolWillRemainClosed,
           ),
+          if (_text.text.length > o.customMax)
+            Text(
+              "${_text.text.length} / ${o.customMax}",
+              style: AppText.labelMedium.copyWith(color: AppColors.danger),
+            ),
+          if (_channel == "whatsapp") ...[
+            const SizedBox(height: 4),
+            Text(l.bcCustomHint, style: AppText.labelMediumMuted),
+            if (o.customTemplateReady == false)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  l.bcCustomTemplateNotReady,
+                  style: AppText.labelMedium.copyWith(color: AppColors.warning),
+                ),
+              ),
+          ],
         ],
+      ],
+    );
+  }
+
+  Widget _previewCard(AudienceBroadcastResult p) {
+    final l = context.l10n;
+    return Card(
+      color: ModuleTone.coral.background,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              l.bcReadyToSend,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: ModuleTone.coral.foreground,
+              ),
+            ),
+            const SizedBox(height: 4),
+            for (final line in broadcastPreviewLines(l, p))
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(line, style: AppText.bodySmall),
+              ),
+            if (p.sample.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                p.sample.join(" · "),
+                style: AppText.labelMediumMuted,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+            const SizedBox(height: 4),
+            Text(l.nothingHasBeenSentYetReview, style: AppText.bodySmallMuted),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: _busy || p.recipientCount == 0 ? null : _sendLive,
+              icon: const Icon(Icons.send),
+              label: Text(l.bcSendNow("${p.recipientCount}")),
+            ),
+          ],
+        ),
       ),
     );
   }
+
+  Widget _sentCard(AudienceBroadcastResult s) => Card(
+    color: ModuleTone.teal.background,
+    child: Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.check_circle, color: ModuleTone.teal.foreground),
+              const SizedBox(width: 8),
+              Text(
+                context.l10n.sent,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: ModuleTone.teal.foreground,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            context.l10n.bcResult(
+              "${s.sent}",
+              "${s.failed}",
+              "${s.deferred}",
+              "${s.pushSent}",
+            ),
+            style: AppText.bodySmall,
+          ),
+          if (s.error.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              s.error,
+              style: AppText.bodySmall.copyWith(color: AppColors.danger),
+            ),
+          ],
+        ],
+      ),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final o = _options;
+    return Scaffold(
+      appBar: AppBar(
+        actions: [
+          ScreenGuideButton(guideId: "broadcast", screenLabel: "broadcast"),
+        ],
+        title: Text(context.l10n.broadcastMessage),
+      ),
+      body: o == null
+          ? Center(
+              child: _loadError == null
+                  ? const CircularProgressIndicator()
+                  : Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(_loadError!, textAlign: TextAlign.center),
+                          const SizedBox(height: 12),
+                          OutlinedButton(
+                            onPressed: _load,
+                            child: Text(context.l10n.tryAgain),
+                          ),
+                        ],
+                      ),
+                    ),
+            )
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              children: [
+                _audiencePicker(o),
+                _messagePicker(o),
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _error!,
+                    style: AppText.bodySmall.copyWith(color: AppColors.danger),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                if (_sent != null)
+                  _sentCard(_sent!)
+                else if (_preview != null)
+                  _previewCard(_preview!)
+                else
+                  FilledButton.tonalIcon(
+                    onPressed: _busy ? null : _dryRun,
+                    icon: _busy
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.people_outline),
+                    label: Text(context.l10n.previewRecipients),
+                  ),
+                const SizedBox(height: 16),
+                Text(
+                  context.l10n.goesOutOnWhatsappFromThe,
+                  style: AppText.labelMediumMuted,
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+/// The preview card's lines: how many go as free text, how many in the
+/// template, who cannot be reached, what it should cost. Pure, for tests.
+List<String> broadcastPreviewLines(L l, AudienceBroadcastResult p) {
+  final whatsapp = p.channel != "app";
+  final custom = p.messageMode == "custom";
+  final est = p.estimate;
+  return [
+    p.audienceLabel,
+    l.bcFamiliesInAudience("${p.families}"),
+    if (whatsapp && custom) l.bcAsFreeText("${p.viaFreeText}"),
+    if (whatsapp) l.bcViaTemplate("${p.viaTemplate}"),
+    if (whatsapp && p.cannotReach > 0) l.bcCannotReach("${p.cannotReach}"),
+    if (whatsapp && custom && !p.windowKnown) l.bcWindowUnknown,
+    if (whatsapp && p.skippedTotal > 0)
+      l.bcSkipped(
+        "${p.skippedOptOut}",
+        "${p.skippedNotOnWhatsApp}",
+        "${p.skippedNoNumber}",
+      ),
+    if (whatsapp)
+      est == null
+          ? l.bcEstimateUnknown
+          : l.bcEstimate(est.rupees, est.gstPct.toStringAsFixed(0)),
+    if (whatsapp && est != null && !est.ratesConfirmed) l.bcEstimateDefaults,
+    l.bcAppNotificationToo,
+  ];
 }
