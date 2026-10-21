@@ -250,6 +250,7 @@ SELFTESTS=(
   test:class-channel-subject
   test:review-demo-hidden
   test:payment-link-reuse
+  test:payment-link-concurrent-save
   test:student-leave-status-guard
   test:ptm-row-stamps
   test:ptm-schedule
@@ -375,6 +376,7 @@ SELFTESTS=(
   test:fee-backdate
   test:month-groups
   test:month-range
+  test:class-upgrade-fee-group
   test:receipt-auto-wa
   test:review-login
   test:desk-sync-status

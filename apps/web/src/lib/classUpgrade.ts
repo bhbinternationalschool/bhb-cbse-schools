@@ -140,11 +140,15 @@ export function upgradeStudentClass(
   if (input.feeGroupId !== undefined) {
     nextFeeGroupId = input.feeGroupId;
   } else if (remap && (classChanged || typeChanged)) {
-    nextFeeGroupId = resolveFeeGroupId(masters, {
-      studentType: nextType,
-      classId: input.toClassId,
-      academicYearCode: student.academicYearCode,
-    });
+    // No matching group keeps the current one — what the Upgrade screen
+    // promises ("no matching group found — keep current"). Until 15 Oct 2026
+    // a failed match saved the child with NO fee group.
+    nextFeeGroupId =
+      resolveFeeGroupId(masters, {
+        studentType: nextType,
+        classId: input.toClassId,
+        academicYearCode: student.academicYearCode,
+      }) ?? student.feeGroupId;
   }
 
   let curriculum = student.curriculum;

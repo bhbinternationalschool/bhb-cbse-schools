@@ -4533,6 +4533,102 @@ abstract class L {
   /// **'{minutes} min'**
   String dateSheetMinutes(String minutes);
 
+  /// No description provided for @schoolChatTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'School chat'**
+  String get schoolChatTitle;
+
+  /// No description provided for @schoolChatGroups.
+  ///
+  /// In en, this message translates to:
+  /// **'Groups'**
+  String get schoolChatGroups;
+
+  /// No description provided for @schoolChatDirect.
+  ///
+  /// In en, this message translates to:
+  /// **'Direct chats'**
+  String get schoolChatDirect;
+
+  /// No description provided for @schoolChatClassTeacherThread.
+  ///
+  /// In en, this message translates to:
+  /// **'Message the class teacher'**
+  String get schoolChatClassTeacherThread;
+
+  /// No description provided for @schoolChatNewMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Message a teacher'**
+  String get schoolChatNewMessage;
+
+  /// No description provided for @schoolChatNoMessages.
+  ///
+  /// In en, this message translates to:
+  /// **'No messages yet.'**
+  String get schoolChatNoMessages;
+
+  /// No description provided for @schoolChatNone.
+  ///
+  /// In en, this message translates to:
+  /// **'No chats yet. A class or subject group appears once a teacher is assigned to it.'**
+  String get schoolChatNone;
+
+  /// No description provided for @schoolChatWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for review'**
+  String get schoolChatWaiting;
+
+  /// No description provided for @schoolChatRemoved.
+  ///
+  /// In en, this message translates to:
+  /// **'Removed by the school'**
+  String get schoolChatRemoved;
+
+  /// No description provided for @schoolChatMuted.
+  ///
+  /// In en, this message translates to:
+  /// **'The school has muted you in this chat. You can still read messages.'**
+  String get schoolChatMuted;
+
+  /// No description provided for @schoolChatPaused.
+  ///
+  /// In en, this message translates to:
+  /// **'The school has paused chat for this login. Please speak to the class teacher.'**
+  String get schoolChatPaused;
+
+  /// No description provided for @schoolChatSafety.
+  ///
+  /// In en, this message translates to:
+  /// **'Messages are checked before others see them. Please be kind.'**
+  String get schoolChatSafety;
+
+  /// No description provided for @schoolChatAsChild.
+  ///
+  /// In en, this message translates to:
+  /// **'Writing as {name}'**
+  String schoolChatAsChild(String name);
+
+  /// No description provided for @schoolChatAsParent.
+  ///
+  /// In en, this message translates to:
+  /// **'Writing as the parent'**
+  String get schoolChatAsParent;
+
+  /// No description provided for @schoolChatGroupNoMessages.
+  ///
+  /// In en, this message translates to:
+  /// **'Group — no messages yet'**
+  String get schoolChatGroupNoMessages;
+
+  /// No description provided for @schoolChatParentInbox.
+  ///
+  /// In en, this message translates to:
+  /// **'Parent messages to the class teacher'**
+  String get schoolChatParentInbox;
+
   /// No description provided for @mrEditHint.
   ///
   /// In en, this message translates to:
