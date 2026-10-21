@@ -30,6 +30,7 @@ part "results_api.dart";
 part "notifications_api.dart";
 part "home_cards_api.dart";
 part "school_chat_api.dart";
+part "games_api.dart";
 
 /// Session cookie minted by the ERP (see web /api/auth/*).
 const _cookieName = "bhb_demo_session";

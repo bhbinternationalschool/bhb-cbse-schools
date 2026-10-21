@@ -30,7 +30,7 @@
  * Every test on a real screen is EXPECTED TO FAIL until step 2.1 converts it
  * to useMasters(): today a Masters copy lives per tab and nothing re-reads it
  * (evidence/propagation.md). Converted (must pass): /attendance, /timetable,
- * /homework (2.1a). Still expected to fail: /masters (2.1h) and the staff
+ * /homework (2.1a), /masters?tab=subjects (2.1h). Still expected to fail: the staff
  * cases (the roster on both observers is still the tab's page copy: /staff
  * until 2.2, the access copy behind useScreenMasters until 2.3a). The scoreboard records the step each one failed
  * at; the subject and section tests must fail at "propagation", never at
@@ -129,6 +129,7 @@ const SUBJECT_OBSERVERS: Observer[] = [
   },
   {
     path: "/masters?tab=subjects",
+    kernel: true, // 2.1h
     open: async (page) => {
       await page.getByRole("tab", { name: "3 · Subjects by class" }).click({ timeout: 20_000 });
       await pickV(page);
