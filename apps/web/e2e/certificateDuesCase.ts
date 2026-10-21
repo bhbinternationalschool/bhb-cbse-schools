@@ -2,9 +2,9 @@
  * The TC / no-dues gate case (specs/certificates-dues-gate.spec.ts): a
  * TUITION fee structure for one class, so its children owe fees that only a
  * reader of the FULL Masters book can see. The fixture school bills nothing
- * from a structure (one inactive group), so without this case every dues
- * figure on the stack comes from the fees / transport desks — which the
- * Accountant (no Masters grant, the teaching subset) reads in full anyway.
+ * from a structure (one inactive group), so without this case no dues
+ * figure on the stack depends on the fee structure — the part of Masters the
+ * teaching subset withholds.
  *
  * Written through the app's own Masters write path (pushMastersSlicesToDb —
  * masters_write_slices, slice-level, so a concurrent Masters edit by another

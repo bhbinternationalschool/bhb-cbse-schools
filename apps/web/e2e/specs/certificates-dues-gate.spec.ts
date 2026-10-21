@@ -3,12 +3,13 @@
  * dues") is issued only on dues the server counted from the whole fee book,
  * never on a partial copy's ₹0 (21 Oct 2026).
  *
- * The defect: the gate counted dues from the tab's page copy of Masters. The
- * built-in Accountant (Fees, Transport, Certificates — no Masters grant) is
- * answered with the teaching subset: fee groups, heads and structure
- * withheld. Every child's tuition came out at ₹0, so "Issue & print" was
- * enabled for a child owing a year's tuition. On origin/main the cases marked
- * (fails on old) below fail.
+ * The defect: the gate counted dues from the tab's page copies. Someone who
+ * may issue certificates without the Masters grant (the fixture's
+ * "Certificates clerk": Students + Certificates, no Masters / Fees /
+ * Transport) holds the teaching subset of Masters — fee groups, heads and
+ * structure withheld — and no fees or transport desk at all. Every child came
+ * out at ₹0, so "Issue & print" was enabled for a child who owed fees. On
+ * origin/main the cases marked (fails on old) below fail.
  *
  * The case (e2e/certificateDuesCase.ts): ₹1,000/month tuition for one class;
  * OWES owes ₹12,000 from that structure only, CLEAR owes nothing. Seeded in
@@ -24,7 +25,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import type { Browser, Page } from "@playwright/test";
-import { APP_URL, expect, signIn, test, type Who } from "../support";
+import { APP_URL, expect, fx, signIn, test, type Who } from "../support";
 import { CLEAR, OWES } from "../certificateDuesCase";
 
 const SHOTS = process.env.CERT_DUES_SHOTS || path.join(__dirname, "..", "certificates-dues-shots");
@@ -50,7 +51,6 @@ async function waitForServer(studentId: string, ok: (paise: number) => boolean, 
   const { request } = await import("@playwright/test");
   const { mintSessionCookie } = await import("../session");
   const { demoSessionCookieName } = await import("@/lib/auth");
-  const { fx } = await import("../support");
   const ctx = await request.newContext({ baseURL: APP_URL });
   const cookie = `${demoSessionCookieName()}=${mintSessionCookie(fx.sessions.office)}`;
   const deadline = Date.now() + 90_000;
@@ -94,6 +94,9 @@ async function toIssueStep(page: Page, child: { fullName: string; admissionNo: s
   await page.getByRole("tab", { name: /Preview & issue/ }).click();
 }
 
+/** A child the fixture charged ₹450 (an activity-fee voucher) — on the fees desk, which the clerk cannot read. */
+const VOUCHER_CHILD = fx.sis.students.find((s) => s.id === fx.growing.chargeVouchers[0]!.studentId)!;
+
 const issueButton = (page: Page) => page.getByRole("button", { name: "Issue & print" });
 const openDues = (page: Page) => page.getByTestId("cert-open-dues");
 
@@ -103,7 +106,7 @@ test.describe("before the structure: a child owing nothing", () => {
     await waitForServer(CLEAR!.id, (p) => p === 0, "precondition: CLEAR owes nothing");
   });
 
-  for (const who of ["accountant", "office"] as const) {
+  for (const who of ["certClerk", "office"] as const) {
     for (const kind of ["tc", "fee_clearance"] as const) {
       test(`${who}, ${kind}: ₹0 from the server, issue allowed`, async ({ browser }) => {
         const page = await openAs(browser, who, DESKTOP);
@@ -114,9 +117,18 @@ test.describe("before the structure: a child owing nothing", () => {
       });
     }
   }
+  test("clerk, fee_clearance, child with an open charge voucher: the server's figure, refused (fails on old)", async ({ browser }) => {
+    const page = await openAs(browser, "certClerk", DESKTOP);
+    await toIssueStep(page, VOUCHER_CHILD, "fee_clearance");
+    await expect(openDues(page)).toContainText(/Open dues: ₹[1-9]/, { timeout: 30_000 });
+    await expect(page.getByText(/^Open dues ₹[1-9][\d,]* — clear fees before issuing no-dues/)).toBeVisible();
+    await expect(issueButton(page)).toBeDisabled();
+    await page.context().close();
+  });
+
   test("dues route refused (403): 'not shown for your role', refused with the role message (fails on old)", async ({ browser }) => {
     for (const shot of [DESKTOP, PHONE]) {
-      const page = await openAs(browser, "accountant", shot);
+      const page = await openAs(browser, "certClerk", shot);
       let asked = 0;
       await page.route("**/api/data/views/certificate-dues**", (route) => {
         asked += 1;
@@ -128,13 +140,13 @@ test.describe("before the structure: a child owing nothing", () => {
       await expect(issueButton(page)).toBeDisabled();
       expect(asked, "the screen asked the server").toBeGreaterThan(0);
       await openDues(page).scrollIntoViewIfNeeded();
-      await page.screenshot({ path: path.join(SHOTS, `accountant-route-403-${shot.name}.png`), fullPage: true });
+      await page.screenshot({ path: path.join(SHOTS, `clerk-route-403-${shot.name}.png`), fullPage: true });
       await page.context().close();
     }
   });
 
   test("issue-time re-check: the fresh answer decides — dues found at issue refuse it (fails on old)", async ({ browser }) => {
-    const page = await openAs(browser, "accountant", DESKTOP);
+    const page = await openAs(browser, "certClerk", DESKTOP);
     let freshAsked = 0;
     await page.route("**/api/data/views/certificate-dues**", async (route) => {
       if (!route.request().url().includes("fresh=1")) return route.continue();
@@ -166,16 +178,16 @@ test.describe("with the structure: a child owing a year's tuition", () => {
   });
 
   for (const kind of ["tc", "fee_clearance"] as const) {
-    test(`accountant (teaching-subset book), ${kind}, child owing tuition: the server's ₹12,000 shown, issue refused (fails on old)`, async ({ browser }) => {
+    test(`clerk (teaching-subset book), ${kind}, child owing tuition: the server's ₹12,000 shown, issue refused (fails on old)`, async ({ browser }) => {
       for (const shot of kind === "tc" ? [DESKTOP, PHONE] : [DESKTOP]) {
-        const page = await openAs(browser, "accountant", shot);
+        const page = await openAs(browser, "certClerk", shot);
         await toIssueStep(page, OWES!, kind);
         await expect(openDues(page)).toContainText("₹12,000", { timeout: 30_000 });
         await expect(openDues(page)).toContainText("12 lines");
         await expect(page.getByText(/^Open dues ₹12,000 — /)).toBeVisible();
         await expect(issueButton(page)).toBeDisabled();
         await openDues(page).scrollIntoViewIfNeeded();
-        await page.screenshot({ path: path.join(SHOTS, `accountant-${kind}-owes-${shot.name}.png`), fullPage: true });
+        await page.screenshot({ path: path.join(SHOTS, `clerk-${kind}-owes-${shot.name}.png`), fullPage: true });
         await page.context().close();
       }
     });
