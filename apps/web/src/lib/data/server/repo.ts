@@ -430,6 +430,47 @@ export async function staffSignInLinks(): Promise<Row[]> {
   return res.rows;
 }
 
+/**
+ * Every mobile a sign-in resolves somebody by — live staff (the registered
+ * mobile), families (mobile, WhatsApp, alternate) and logins (profiles) — as
+ * the last 10 digits (+91, spaces, dashes and all spellings alike), each with
+ * whose it is. `exceptStaffId`: that member's own number is not "in use". For
+ * the director's mobile rule (21 Oct 2026). Throws on a failed read.
+ */
+export async function signInMobilesInUse(exceptStaffId?: string): Promise<Set<string>> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) throw new Error("Supabase tenant not configured");
+  const out = new Set<string>();
+  const add = (v: unknown) => {
+    const k = String(v ?? "").replace(/\D/g, "").slice(-10);
+    if (k.length === 10 && !/^0+$/.test(k)) out.add(k);
+  };
+  const page = (table: string, cols: string, liveOnly = false) =>
+    fetchAllPages<Row>((from, to) => {
+      const q = ctx.sb.from(table).select(cols).eq("tenant_id", ctx.tenantId);
+      return (liveOnly ? q.is("deleted_at", null) : q).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{
+        data: Row[] | null;
+        error: { message: string } | null;
+      }>;
+    });
+  const [staff, homes, logins] = await Promise.all([
+    page("sis_staff", "id, mobile", true),
+    page("sis_households", "id, mobile, whatsapp_mobile, alt_mobile"),
+    page("profiles", "id, mobile"),
+  ]);
+  for (const r of [staff, homes, logins]) {
+    if (r.error || r.truncated) throw new Error(r.error ?? "sign-in numbers truncated");
+  }
+  for (const s of staff.rows) if (String(s.id) !== exceptStaffId) add(s.mobile);
+  for (const h of homes.rows) {
+    add(h.mobile);
+    add(h.whatsapp_mobile);
+    add(h.alt_mobile);
+  }
+  for (const l of logins.rows) add(l.mobile);
+  return out;
+}
+
 /** How many elements one list slice holds now. Throws on a failed read. */
 export async function sliceElementCount(src: SliceSource): Promise<number> {
   const ctx = await getServerTenantContext();

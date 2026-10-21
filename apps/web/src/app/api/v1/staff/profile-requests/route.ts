@@ -9,23 +9,37 @@
  */
 
 import { NextResponse } from "next/server";
-import { requireStaffPermission, requireStaffPermissionOrFeature } from "@/lib/apiRouteAuth.server";
+import { requireStaffPermissionOrFeature } from "@/lib/apiRouteAuth.server";
 import { hasPermission } from "@/lib/rbac";
 import { invalidateServerMastersCache, requestMeta } from "@/lib/api/v1/auth";
-import { readRowsByIds, writeStaffSensitive } from "@/lib/data/server/repo";
+import { readRowsByIds, signInMobilesInUse, writeStaffSensitive } from "@/lib/data/server/repo";
+import { logMobileFills } from "@/lib/staffMobileFillLog.server";
 import { asRevision } from "@/lib/data/types";
 import { resetStaffPersistenceCache } from "@/lib/staffPersistence";
-import { STAFF_SENSITIVE_FEATURE, STAFF_SENSITIVE_PROFILE_KEYS, staffActorOf, staffSensitiveAuthority } from "@/lib/staffProtectedFields";
+import {
+  STAFF_SENSITIVE_FEATURE,
+  STAFF_SENSITIVE_PROFILE_KEYS,
+  isBlankMobile,
+  mobileFillCheck,
+  mobileKey,
+  staffActorOf,
+  staffHoldsPowerfulAccess,
+  staffSensitiveAuthority,
+} from "@/lib/staffProtectedFields";
 import { writeAudit } from "@/lib/audit.server";
 import { PROFILE_FIELD } from "@/lib/staffSelfProfile";
 import { changeProfileRequests, patchStaffRow, readProfileRequests } from "@/lib/staffSelfProfile.server";
-import { getServerTenantContext } from "@/lib/serverTenant";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const auth = await requireStaffPermission(req, "staff", "edit");
+  // Staff · edit sees every request; the bank & pay details function (the
+  // accountant) sees the requests it can decide — bank, ID and pay only.
+  const auth = await requireStaffPermissionOrFeature(req, "staff", "edit", STAFF_SENSITIVE_FEATURE, "edit");
   if (!auth.ok) return auth.response;
+  const staffEditor = auth.viaMirrorSecret || hasPermission(auth.ctx.session, auth.ctx.masters, "staff", "edit", auth.ctx.rbac);
+  const decidable = (r: { fields: Record<string, unknown> }) =>
+    staffEditor || Object.keys(r.fields).every((k) => (STAFF_SENSITIVE_PROFILE_KEYS as readonly string[]).includes(k));
   const got = await readProfileRequests();
   if (!got) return NextResponse.json({ ok: false, error: "Could not read the requests — try again." }, { status: 503 });
   const label = (k: string) => PROFILE_FIELD.get(k as never)?.label || k;
@@ -35,8 +49,8 @@ export async function GET(req: Request) {
   });
   return NextResponse.json({
     ok: true,
-    pending: got.state.requests.filter((r) => r.status === "pending").map(shape),
-    decided: got.state.requests.filter((r) => r.status !== "pending").slice(0, 30).map(shape),
+    pending: got.state.requests.filter((r) => r.status === "pending" && decidable(r)).map(shape),
+    decided: got.state.requests.filter((r) => r.status !== "pending" && decidable(r)).slice(0, 30).map(shape),
   });
 }
 
@@ -66,20 +80,58 @@ export async function POST(req: Request) {
     );
   }
 
+  let mobileFilled = false;
   if (decision === "approve") {
     const changes: Record<string, string> = {};
     for (const [k, v] of Object.entries(reqRow.fields)) if (PROFILE_FIELD.get(k as never)?.approval) changes[k] = v.to;
-    if (changes.mobile) {
-      // The staff OTP login resolves on this number: it must be one person's.
-      const t = await getServerTenantContext();
-      const clash = t
-        ? await t.sb.from("sis_staff").select("id, full_name").eq("tenant_id", t.tenantId).eq("mobile", changes.mobile).eq("status", "active").is("deleted_at", null).neq("id", reqRow.staffId).limit(1)
-        : null;
-      if (clash?.data?.length) {
-        return NextResponse.json(
-          { ok: false, error: `${changes.mobile} is already the registered mobile of ${(clash.data[0] as { full_name: string }).full_name}. Not approved.` },
-          { status: 409 },
-        );
+    if (changes.mobile !== undefined) {
+      // The registered mobile is a sign-in link (staff OTP). Director, 21 Oct
+      // 2026: a MISSING one may be recorded (no other member, family or login
+      // has the number — compared as the last 10 digits — and the member holds
+      // no powerful access); changing a set one is the owner's.
+      let cur: Record<string, unknown> | undefined;
+      let inUse: Set<string>;
+      try {
+        cur = (await readRowsByIds("sis_staff", [reqRow.staffId])).get(reqRow.staffId);
+        inUse = await signInMobilesInUse(reqRow.staffId);
+      } catch (e) {
+        return NextResponse.json({ ok: false, error: `Not applied — ${e instanceof Error ? e.message : String(e)}` }, { status: 503 });
+      }
+      if (!cur || cur.deleted_at) {
+        return NextResponse.json({ ok: false, error: "Not applied — the staff member is not on the roster (removed)." }, { status: 409 });
+      }
+      if (mobileKey(cur.mobile) !== mobileKey(changes.mobile)) {
+        const isOwner =
+          staffSensitiveAuthority(auth.ctx.session, auth.ctx.masters, auth.ctx.rbac, { rbacKnown: auth.ctx.rbacKnown !== false }) === "owner";
+        if (inUse.has(mobileKey(changes.mobile))) {
+          return NextResponse.json(
+            { ok: false, error: `${changes.mobile} is already the sign-in number of another member of staff, a family or a login. Not approved.` },
+            { status: 409 },
+          );
+        }
+        if (!isOwner) {
+          if (!isBlankMobile(cur.mobile)) {
+            return NextResponse.json(
+              { ok: false, error: `${reqRow.staffName} already has a registered mobile — only the owner changes a sign-in link.` },
+              { status: 403 },
+            );
+          }
+          const fill = mobileFillCheck(
+            { mobile: cur.mobile },
+            { mobile: changes.mobile },
+            {
+              inUse,
+              powerful: staffHoldsPowerfulAccess(
+                { id: reqRow.staffId, email: cur.email, fullName: cur.full_name, designationId: cur.designation_id },
+                auth.ctx.masters,
+                auth.ctx.rbac,
+              ),
+              name: reqRow.staffName,
+            },
+          );
+          if (fill.kind === "refuse") return NextResponse.json({ ok: false, error: fill.message }, { status: 403 });
+          if (fill.kind === "fill") mobileFilled = true;
+        }
       }
     }
     // Bank, UPI, Aadhaar, PAN (and pay) are the owner's and the accountant's
@@ -136,6 +188,7 @@ export async function POST(req: Request) {
       const w = await patchStaffRow(reqRow.staffId, () => changes);
       if (!w.ok) return NextResponse.json({ ok: false, error: `Not applied — ${w.error}` }, { status: 503 });
     }
+    if (mobileFilled) await logMobileFills(auth.ctx.session, [reqRow.staffId], "profile request approved");
   }
 
   const now = new Date().toISOString();

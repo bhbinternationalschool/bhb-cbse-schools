@@ -19,6 +19,8 @@ import { STAFF_DIRECTORY_KEYS } from "@/lib/staffRosterRedact";
 import {
   STAFF_NEVER_SENT_PROFILE_KEYS,
   protectedChangeRefusal,
+  isBlankMobile,
+  mobileFillCheck,
   protectedChanges,
   redactStaffRowProfile,
   takenLinksOf,
@@ -29,7 +31,7 @@ import type { WriteOp } from "../types";
 type Row = Record<string, unknown>;
 
 export type StaffOpsVerdict =
-  | { ok: true; ops: WriteOp<Row>[] }
+  | { ok: true; ops: WriteOp<Row>[]; /** Records whose missing mobile this write fills (logged by the route). */ mobileFills: string[] }
   | { ok: false; status: 400 | 403 | 503; message: string };
 
 /** Same instant to the millisecond (a base and a stored updated_at may be spelled differently). */
@@ -53,7 +55,14 @@ export async function prepareStaffOps(
   readStored: (ids: string[]) => Promise<Map<string, Row>>,
   /** The sign-in links (e-mail, mobile) of every live member, for the "not another member's" rule. */
   readLinks: () => Promise<readonly Row[]> = async () => [],
+  /** The director's mobile rule (21 Oct): who may get a missing mobile filled by a non-owner. */
+  mobileRule: { inUse: () => Promise<ReadonlySet<string>>; isPowerful: (stored: Row) => boolean } = {
+    inUse: async () => new Set(),
+    isPowerful: () => true,
+  },
 ): Promise<StaffOpsVerdict> {
+  const mobileFills: string[] = [];
+  let inUse: ReadonlySet<string> | null = null;
   if (!by.trim()) return { ok: false, status: 403, message: "A signed-in member of staff is required to change staff records." };
   const touches = (r: Row) => "profile" in r || "email" in r || "mobile" in r;
   const needsStored = ops.filter((o) => o.op === "upsert" && isObj((o as { row?: unknown }).row) && touches((o as { row: Row }).row));
@@ -120,17 +129,30 @@ export async function prepareStaffOps(
         }
       }
       const taken = takenLinksOf((links ?? []).filter((l) => String(l.id) !== op.id));
-      const change = protectedChanges(storedView, view, { empCode, taken });
-      const why = protectedChangeRefusal(
-        String(row.full_name ?? (profile as Row).fullName ?? before?.full_name ?? op.id),
-        lands ? change : { sensitive: [], login: change.login },
-      );
+      const name = String(row.full_name ?? (profile as Row).fullName ?? before?.full_name ?? op.id);
+      // A missing mobile may be recorded by the office, under safeguards.
+      let fillKind: "none" | "fill" = "none";
+      if (storedView && "mobile" in view && isBlankMobile(storedView.mobile)) {
+        if (inUse === null) {
+          try {
+            inUse = await mobileRule.inUse();
+          } catch (e) {
+            return { ok: false, status: 503, message: `Could not check the mobile — nothing was written (${e instanceof Error ? e.message : String(e)}).` };
+          }
+        }
+        const fill = mobileFillCheck(storedView, view, { inUse, powerful: mobileRule.isPowerful(before!), name });
+        if (fill.kind === "refuse") return { ok: false, status: 403, message: fill.message };
+        fillKind = fill.kind;
+      }
+      const change = protectedChanges(storedView, view, { empCode, taken, mobileFillAllowed: fillKind === "fill" });
+      const why = protectedChangeRefusal(name, lands ? change : { sensitive: [], login: change.login });
       if (why) return { ok: false, status: 403, message: why };
+      if (fillKind === "fill") mobileFills.push(op.id);
       if ("profile" in row) row.profile = profile;
     }
     out.push({ op: "upsert", id: op.id, base: op.base, row });
   }
-  return { ok: true, ops: out };
+  return { ok: true, ops: out, mobileFills };
 }
 
 /** Top-level sis_staff columns a directory row keeps (the rest is the profile's business). */

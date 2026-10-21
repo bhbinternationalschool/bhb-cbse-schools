@@ -723,6 +723,9 @@ export function defaultBuiltInRoles(): RbacRole[] {
       ],
       // The accountant changes staff bank / ID / pay details (director, 21 Oct 2026).
       featureGrants: [{ feature: "staff.sensitive_edit", actions: ["edit"] }],
+      // A fresh role already carries it: stamped, so a later removal by the
+      // office stands (BUILT_IN_GRANT_ADDITIONS runs once per stored role).
+      defaultsApplied: BUILT_IN_GRANT_ADDITIONS.filter((a) => a.roleCode === "accounts").map((a) => a.id),
     },
     {
       id: "role_transport",

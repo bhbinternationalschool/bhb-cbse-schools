@@ -22,6 +22,7 @@ import {
   STAFF_LOGIN_PROFILE_KEYS,
   STAFF_SENSITIVE_PROFILE_KEYS,
   STAFF_SIGNIN_LINK_KEYS,
+  mobileKey,
   protectedChangeRefusal,
   protectedChanges,
   refusedProtectedKeys,
@@ -63,9 +64,31 @@ export function buildSensitiveOps(
   ops: readonly SensitiveRequestOp[],
   stored: ReadonlyMap<string, Row>,
   authority: StaffAuthority,
+  /** E-mails held by members other than `staffId`, and every sign-in mobile in use (last 10 digits). */
+  inUse: (staffId: string) => { emails: ReadonlySet<string>; mobiles: ReadonlySet<string> } = () => ({
+    emails: new Set(),
+    mobiles: new Set(),
+  }),
 ): SensitiveBuild {
   const out: WriteOp<Row>[] = [];
   for (const op of ops) {
+    // Even the owner gives a sign-in detail to one person only (review C).
+    if ("email" in op.fields || "mobile" in op.fields) {
+      const used = inUse(op.id);
+      const em = String(op.fields.email ?? "").trim().toLowerCase();
+      if ("email" in op.fields && em && used.emails.has(em)) {
+        return { ok: false, status: 409, message: `${op.id}: that e-mail is already another member's — a sign-in detail must be one person's` };
+      }
+      const mob = mobileKey(op.fields.mobile);
+      const own = mobileKey(stored.get(op.id)?.mobile);
+      if ("mobile" in op.fields && mob && mob !== own && used.mobiles.has(mob)) {
+        return {
+          ok: false,
+          status: 409,
+          message: `${op.id}: that mobile is already the sign-in number of another member, a family or a login — a sign-in detail must be one person's`,
+        };
+      }
+    }
     const row = stored.get(op.id);
     if (!row) return { ok: false, status: 404, message: `${op.id}: no such staff record` };
     if (row.deleted_at) return { ok: false, status: 409, message: `${String(row.full_name || op.id)} is removed — restore the record first` };

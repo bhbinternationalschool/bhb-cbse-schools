@@ -10,7 +10,9 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { resetStaffPersistenceCache } from "@/lib/staffPersistence";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
-import { mobileKey, staffSensitiveAuthority } from "@/lib/staffProtectedFields";
+import { isBlankMobile, mobileFillCheck, mobileKey, staffHoldsPowerfulAccess, staffSensitiveAuthority } from "@/lib/staffProtectedFields";
+import { signInMobilesInUse } from "@/lib/data/server/repo";
+import { logMobileFills } from "@/lib/staffMobileFillLog.server";
 
 export const runtime = "nodejs";
 
@@ -45,17 +47,35 @@ export async function POST(request: Request) {
     await ensureSchoolMirrorHydrated();
     const staff = ctx.masters.staff.find((s) => s.id === staffId);
     if (!staff) throw new ApiError("not_found", "Staff member not found", 404);
-    const clash = ctx.masters.staff.find(
-      (s) => s.id !== staffId && (s.mobile || "").replace(/\D/g, "").endsWith(mobile),
-    );
-    if (clash) {
-      throw new ApiError("bad_request", `That number is already on ${clash.fullName}'s record`, 400);
+    // The mobile is a sign-in link (staff OTP). Director, 21 Oct 2026:
+    // recording a MISSING one is the office's — if no other member, family or
+    // login already has the number (compared as the last 10 digits) and the
+    // member holds no powerful access; changing a set one is the owner's.
+    const isOwner =
+      staffSensitiveAuthority(ctx.session, ctx.masters, ctx.rbac, { rbacKnown: ctx.rbacKnown !== false }) === "owner";
+    let inUse: Set<string>;
+    try {
+      inUse = await signInMobilesInUse(staffId);
+    } catch {
+      throw new ApiError("server_error", "Could not check the mobile numbers in use — nothing was saved. Try again.", 503);
     }
-    // The mobile is a sign-in link (staff OTP): setting or changing it puts
-    // that person's sign-in on a phone — the owner's (data-layer 2.2b review,
-    // 21 Oct 2026; a new member's first number comes with their record).
-    if (mobileKey(staff.mobile) !== mobile && staffSensitiveAuthority(ctx.session, ctx.masters, ctx.rbac, { rbacKnown: ctx.rbacKnown !== false }) !== "owner") {
-      throw new ApiError("forbidden", `${staff.fullName}'s registered mobile is a sign-in detail — only the owner changes a sign-in link.`, 403);
+    let isFill = false;
+    if (mobileKey(staff.mobile) !== mobile) {
+      if (isOwner) {
+        if (inUse.has(mobile)) {
+          throw new ApiError("bad_request", "That number is already another member's, a family's or a login's — a sign-in number must be one person's", 400);
+        }
+      } else if (isBlankMobile(staff.mobile)) {
+        const fill = mobileFillCheck(staff as unknown as Record<string, unknown>, { mobile }, {
+          inUse,
+          powerful: staffHoldsPowerfulAccess(staff, ctx.masters, ctx.rbac),
+          name: staff.fullName,
+        });
+        if (fill.kind === "refuse") throw new ApiError("forbidden", fill.message, 403);
+        isFill = fill.kind === "fill";
+      } else {
+        throw new ApiError("forbidden", `${staff.fullName} already has a registered mobile — only the owner changes a sign-in link.`, 403);
+      }
     }
 
     const tctx = await getServerTenantContext();
@@ -81,6 +101,7 @@ export async function POST(request: Request) {
     invalidateServerMastersCache();
     await ensureSchoolMirrorHydrated({ force: true }).catch(() => undefined);
 
+    if (isFill) await logMobileFills(ctx.session, [staffId], "roster mobile, staff app");
     const meta = requestMeta(request);
     await writeAudit({
       session: ctx.session,
@@ -89,8 +110,9 @@ export async function POST(request: Request) {
       entityType: "staff",
       entityId: staffId,
       summary: `Mobile ${staff.mobile ? "changed" : "added"} for ${staff.fullName} from the app`,
-      before: { mobile: staff.mobile || "" },
-      after: { mobile },
+      // A sign-in number is not written to the audit log (director, 21 Oct 2026).
+      before: { mobile: isBlankMobile(staff.mobile) ? "blank" : "set" },
+      after: { mobile: "set" },
       ip: meta.ip,
       userAgent: meta.userAgent,
     });

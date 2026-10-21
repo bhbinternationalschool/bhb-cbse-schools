@@ -7,11 +7,14 @@ import {
   softRemoveStaffRosterServer,
 } from "@/lib/staffPersistence";
 import { invalidateServerMastersCache } from "@/lib/api/v1/auth";
+import { signInMobilesInUse } from "@/lib/data/server/repo";
+import { logMobileFills } from "@/lib/staffMobileFillLog.server";
 import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
 import {
   prepareRosterRows,
   rosterSaveRefusal,
   staffActorOf,
+  staffHoldsPowerfulAccess,
   staffSensitiveAuthority,
   type StaffAuthority,
 } from "@/lib/staffProtectedFields";
@@ -98,6 +101,7 @@ export async function POST(req: Request) {
   const incoming = (body.state.staff ?? []) as StaffRecord[];
   let stamps = readStampsParam(body.stamps, STAFF_STAMPED_SLICES);
   let refused: { refusedIds: string[]; message: string } | null = null;
+  let mobileFillIds: string[] = [];
   if (incoming.length > 0) {
     // Read the stored roster to judge this save against (always, since 2.2b:
     // the protected-field rule below needs it, not only the password fill).
@@ -128,7 +132,26 @@ export async function POST(req: Request) {
       ? null
       : staffSensitiveAuthority(auth.ctx.session, auth.ctx.masters, auth.ctx.rbac, { rbacKnown: auth.ctx.rbacKnown !== false });
     const named = stamps ? new Set(Object.keys(stamps.staff ?? {})) : null;
-    const refusal = rosterSaveRefusal(storedStaff as unknown as Rec[], filled as unknown as Rec[], named, authority);
+    // The director's mobile rule (21 Oct): a MISSING mobile may be recorded
+    // here, if no other member, family or login has the number and the member
+    // holds no powerful access; each such fill is logged.
+    let inUse: Set<string>;
+    try {
+      inUse = await signInMobilesInUse();
+    } catch {
+      return NextResponse.json(
+        { ok: false, error: "Could not check the mobile numbers in use — nothing was written, try again" },
+        { status: 503 },
+      );
+    }
+    const fills: string[] = [];
+    const refusal = rosterSaveRefusal(storedStaff as unknown as Rec[], filled as unknown as Rec[], named, authority, {
+      inUse,
+      isPowerful: (t) =>
+        auth.viaMirrorSecret ? true : staffHoldsPowerfulAccess(t as unknown as StaffRecord, auth.ctx.masters, auth.ctx.rbac),
+      fills,
+    });
+    mobileFillIds = fills;
     if (refusal) {
       console.warn(
         `[staff-roster] refused ${refusal.refusedIds.length} row(s) of a save by ${auth.viaMirrorSecret ? "mirror" : auth.ctx.session.staffId || "?"}: ${refusal.message}`,
@@ -165,6 +188,9 @@ export async function POST(req: Request) {
   if (result.kept) {
     console.warn(`[staff-roster] unstamped save left ${result.kept} stored row(s) as they were`);
   }
+  const written = new Set(Object.keys(result.stamps?.staff ?? {}));
+  const filledNow = mobileFillIds.filter((id) => written.has(id) || !stamps);
+  if (filledNow.length && !auth.viaMirrorSecret) await logMobileFills(auth.ctx.session, filledNow, "staff roster save");
   // Refused rows are said: the browser forgets their stamps, re-reads the
   // roster (its copy of those rows goes back to the server's) and toasts the
   // reason once — never re-sending them with every later save.

@@ -6,10 +6,10 @@
 import { NextResponse } from "next/server";
 import { invalidateServerMastersCache } from "@/lib/api/v1/auth";
 import { functionGrantHeldOnServer, requireStaffApi } from "@/lib/apiRouteAuth.server";
-import { readRowsByIds, writeStaffSensitive } from "@/lib/data/server/repo";
+import { readRowsByIds, signInMobilesInUse, staffSignInLinks, writeStaffSensitive } from "@/lib/data/server/repo";
 import { buildSensitiveOps, parseSensitiveOps } from "@/lib/data/server/staffSensitive";
 import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
-import { STAFF_SENSITIVE_FEATURE, staffActorOf, staffSensitiveAuthority } from "@/lib/staffProtectedFields";
+import { STAFF_SENSITIVE_FEATURE, staffActorOf, staffSensitiveAuthority, takenLinksOf } from "@/lib/staffProtectedFields";
 import { withBuildCheck } from "@/lib/staleBuild.server";
 
 export const runtime = "nodejs";
@@ -60,7 +60,19 @@ export const POST = withBuildCheck(async (req: Request, ctx: RouteCtx) => {
   } catch (e) {
     return fail(503, "unavailable", `Could not read the staff records — nothing was written (${e instanceof Error ? e.message : String(e)}).`);
   }
-  const built = buildSensitiveOps(parsed, stored, authority);
+  let links: Record<string, unknown>[] = [];
+  let mobiles = new Set<string>();
+  if (parsed.some((o) => "email" in o.fields || "mobile" in o.fields)) {
+    try {
+      [links, mobiles] = await Promise.all([staffSignInLinks(), signInMobilesInUse()]);
+    } catch (e) {
+      return fail(503, "unavailable", `Could not check the sign-in details in use — nothing was written (${e instanceof Error ? e.message : String(e)}).`);
+    }
+  }
+  const built = buildSensitiveOps(parsed, stored, authority, (id) => ({
+    emails: takenLinksOf(links.filter((l) => String(l.id) !== id)).emails,
+    mobiles,
+  }));
   if (!built.ok) {
     const kind = built.status === 403 ? "auth" : built.status === 404 ? "not_found" : built.status === 409 ? "conflict" : "invalid";
     return fail(built.status, kind, built.message);

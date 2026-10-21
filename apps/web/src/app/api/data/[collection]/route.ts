@@ -36,6 +36,7 @@ import {
   list,
   readRowsByIds,
   revisionsOf,
+  signInMobilesInUse,
   sliceElementCount,
   staffSignInLinks,
   write,
@@ -46,7 +47,8 @@ import {
 } from "@/lib/data/server/repo";
 import { sliceFunctionGate } from "@/lib/data/server/sliceFunctionGate";
 import { prepareStaffOps, staffListRows } from "@/lib/data/server/staffKernel";
-import { staffActorOf } from "@/lib/staffProtectedFields";
+import { staffActorOf, staffHoldsPowerfulAccess } from "@/lib/staffProtectedFields";
+import { logMobileFills } from "@/lib/staffMobileFillLog.server";
 import type { Cursor, FailCode, WriteOp, WriteResult } from "@/lib/data/types";
 import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
 import { hasPermission } from "@/lib/rbac";
@@ -364,14 +366,25 @@ async function postOps(req: Request, ctx: RouteCtx) {
   }
 
   // Staff records: protected fields, `by` from the session (data-layer 2.2b).
+  let mobileFills: string[] = [];
   if (def.staffRecords) {
     const by = auth.viaMirrorSecret ? "mirror-sync" : staffActorOf(auth.ctx.session);
-    const prepared = await prepareStaffOps(ops, by, (ids) => readRowsByIds(def.table, ids), () => staffSignInLinks());
+    const actx = auth.ctx;
+    const prepared = await prepareStaffOps(ops, by, (ids) => readRowsByIds(def.table, ids), () => staffSignInLinks(), {
+      inUse: () => signInMobilesInUse(),
+      isPowerful: (r) =>
+        staffHoldsPowerfulAccess(
+          { id: String(r.id), email: r.email, fullName: r.full_name, designationId: r.designation_id },
+          actx.masters,
+          actx.rbac,
+        ),
+    });
     if (!prepared.ok) {
       const kind = prepared.status === 403 ? "auth" : prepared.status === 400 ? "invalid" : "unavailable";
       return NextResponse.json({ ok: false, kind, message: prepared.message, conflicts: [] }, { status: prepared.status });
     }
     ops = prepared.ops;
+    mobileFills = prepared.mobileFills;
   } else {
     // `by` is the server's to say, on every collection: a delete is stamped
     // with the session (desk_write_guarded records it where the table has
@@ -397,5 +410,6 @@ async function postOps(req: Request, ctx: RouteCtx) {
   if (!result.ok) {
     return NextResponse.json(result, { status: statusFor(result.kind) });
   }
+  if (mobileFills.length && !auth.viaMirrorSecret) await logMobileFills(auth.ctx.session, mobileFills, "staff record (kernel)");
   return NextResponse.json(result);
 }

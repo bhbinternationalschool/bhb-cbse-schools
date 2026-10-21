@@ -123,7 +123,12 @@ export function takenLinksOf(
   return { emails, mobiles };
 }
 
-export type ProtectedChange = { sensitive: string[]; login: string[] };
+export type ProtectedChange = {
+  sensitive: string[];
+  login: string[];
+  /** Of `login`: a NEW record's e-mail / mobile refused because another member, family or login already has it. */
+  takenOnCreate?: string[];
+};
 
 /**
  * Which protected keys `incoming` changes against `stored` (null = a new
@@ -139,7 +144,7 @@ export type ProtectedChange = { sensitive: string[]; login: string[] };
 export function protectedChanges(
   stored: Profile | null,
   incoming: Profile,
-  opts: { empCode?: string; taken?: TakenLinks } = {},
+  opts: { empCode?: string; taken?: TakenLinks; mobileFillAllowed?: boolean } = {},
 ): ProtectedChange {
   const sensitive: string[] = [];
   const login: string[] = [];
@@ -160,17 +165,21 @@ export function protectedChanges(
   // too — is the owner's (filling the principal's blank mobile with your own
   // phone would sign you in as the principal). A NEW record may carry ones no
   // other member holds (and no owner e-mail).
+  const takenOnCreate: string[] = [];
   if ("email" in incoming && profileValueChanged(stored?.email, incoming.email)) {
     const next = String(incoming.email ?? "").trim().toLowerCase();
-    const freeOnCreate = stored === null && !opts.taken?.emails.has(next) && !isProtectedSuperAdminEmail(next);
-    if (!freeOnCreate) login.push("email");
+    const held = !!opts.taken?.emails.has(next) || isProtectedSuperAdminEmail(next);
+    if (stored !== null || held) login.push("email");
+    if (stored === null && held) takenOnCreate.push("email");
   }
   if ("mobile" in incoming && mobileKey(stored?.mobile) !== mobileKey(incoming.mobile)) {
     const next = mobileKey(incoming.mobile);
-    const freeOnCreate = stored === null && !opts.taken?.mobiles.has(next);
-    if (!freeOnCreate) login.push("mobile");
+    const held = !!opts.taken?.mobiles.has(next);
+    // A blank mobile filled under mobileFillCheck's safeguards (director, 21 Oct).
+    if ((stored !== null && !opts.mobileFillAllowed) || (stored === null && held)) login.push("mobile");
+    if (stored === null && held) takenOnCreate.push("mobile");
   }
-  return { sensitive, login };
+  return takenOnCreate.length ? { sensitive, login, takenOnCreate } : { sensitive, login };
 }
 
 /**
@@ -187,11 +196,83 @@ export function withStoredProtectedKeys(stored: Profile | null, incoming: Profil
   return out;
 }
 
+/** An all-zero placeholder (two staff carry 0000000000) counts as no mobile. */
+export function isBlankMobile(v: unknown): boolean {
+  const k = mobileKey(v);
+  return k === "" || /^0+$/.test(k);
+}
+
+/**
+ * Does this staff member hold access a planted mobile would hand over? The
+ * principal designation; a role coded owner / admin / accounts / principal;
+ * payroll · edit or accounts · edit; the bank & pay details function; or a
+ * protected owner e-mail. Decided from the server's roles copy (director,
+ * 21 Oct 2026: such records get a mobile from the owner only).
+ */
+export function staffHoldsPowerfulAccess(
+  staff: { id: string; email?: unknown; fullName?: unknown; designationId?: unknown },
+  masters: MastersState | null,
+  rbac: RbacState,
+): boolean {
+  const email = String(staff.email ?? "");
+  if (isProtectedSuperAdminEmail(email)) return true;
+  const des = (masters?.designations ?? []).find((d) => d.id === staff.designationId);
+  if (des && /principal/i.test(`${des.code ?? ""} ${des.name ?? ""}`)) return true;
+  const as: SessionLike = { persona: "staff", roleCode: "", staffId: staff.id, email, fullName: String(staff.fullName ?? "") };
+  if (resolveSessionRoles(rbac, as, masters).some((r) => ["owner", "admin", "accounts", "principal"].includes(r.code))) return true;
+  if (hasPermission(as, masters, "payroll", "edit", rbac) || hasPermission(as, masters, "accounts", "edit", rbac)) return true;
+  return featureGrantHeld(as, masters, STAFF_SENSITIVE_FEATURE, "edit", rbac);
+}
+
+export type MobileFill = { kind: "none" } | { kind: "fill" } | { kind: "refuse"; message: string };
+
+/**
+ * The office may record a MISSING mobile on an existing staff record
+ * (director, 21 Oct 2026) — the mobile is a sign-in link, so only when:
+ * the record had none (blank or 0000000000) and gets a 10-digit number;
+ * the number is not any other member's, family's or login's (`inUse`); and
+ * the member holds no powerful access (staffHoldsPowerfulAccess). "none" =
+ * not a fill (no change, a change of a set number, a new record) — the
+ * ordinary rules decide; "refuse" = a fill these safeguards stop.
+ */
+export function mobileFillCheck(
+  stored: Profile | null,
+  incoming: Profile,
+  opts: { inUse: ReadonlySet<string>; powerful: boolean; name: string },
+): MobileFill {
+  if (stored === null || !("mobile" in incoming)) return { kind: "none" };
+  const next = mobileKey(incoming.mobile);
+  if (next === mobileKey(stored.mobile) || !isBlankMobile(stored.mobile) || next.length !== 10 || /^0+$/.test(next)) {
+    return { kind: "none" };
+  }
+  if (opts.inUse.has(next)) {
+    return {
+      kind: "refuse",
+      message: `${opts.name}: that mobile is already the sign-in number of another member of staff, a family or a login — not saved; only the owner changes a sign-in link.`,
+    };
+  }
+  if (opts.powerful) {
+    return {
+      kind: "refuse",
+      message: `${opts.name} holds principal, owner, admin, accounts or payroll access — a registered mobile there is recorded by the owner; only the owner changes a sign-in link.`,
+    };
+  }
+  return { kind: "fill" };
+}
+
 const SENSITIVE_WORDS = "bank, UPI, Aadhaar, PAN and pay";
 
 /** The refusal for a plain staff edit that touched a protected key. Ends in a
  * phrase isFeatureRefusalMessage knows, so the browser toasts it. */
 export function protectedChangeRefusal(name: string, c: ProtectedChange): string | null {
+  const taken = (c.takenOnCreate ?? []).filter((k) => c.login.includes(k));
+  if (taken.length && taken.length === c.login.length) {
+    return (
+      `${name}: not saved — that ${taken.map((k) => (k === "email" ? "e-mail" : "mobile")).join(" and ")} is already another ` +
+      "member's, a family's or a login's (a shared family phone?). A sign-in detail must be one person's, so it can be " +
+      "given only by the owner — save without it, then ask the owner; only the owner changes a sign-in link."
+    );
+  }
   if (c.login.length) {
     return (
       `${name}: ${c.login.join(", ")} not saved — a sign-in detail (login, e-mail or mobile) of a member is set or ` +
@@ -265,6 +346,7 @@ export function refusedProtectedKeys(
   authority: StaffAuthority | null,
 ): ProtectedChange {
   return {
+    ...(c.takenOnCreate ? { takenOnCreate: c.takenOnCreate } : {}),
     sensitive: authority ? [] : [...c.sensitive],
     login: c.login.filter((k) => {
       if (authority !== "owner") return true;
@@ -328,6 +410,10 @@ export function rosterSaveRefusal(
   incoming: readonly RosterRecord[],
   namedIds: ReadonlySet<string> | null,
   authority: StaffAuthority | null,
+  mobile: { inUse: ReadonlySet<string>; isPowerful: (target: RosterRecord) => boolean; fills?: string[] } = {
+    inUse: new Set(),
+    isPowerful: () => true,
+  },
 ): { refusedIds: string[]; message: string } | null {
   const refusedIds: string[] = [];
   let message = "";
@@ -341,8 +427,24 @@ export function rosterSaveRefusal(
       why = `${name}: employee code ${rosterEmpKey(row.empCode)} belongs to another member — not saved; only the owner changes a sign-in link.`;
     } else {
       const taken = takenLinksOf(stored.filter((s) => s.id !== target?.id));
-      const change = protectedChanges(target, row, { empCode: rosterEmpKey(row.empCode), taken });
-      why = protectedChangeRefusal(name, refusedProtectedKeys(change, row, authority));
+      // A missing mobile filled by a non-owner, under the safeguards (the owner may anyway).
+      const fill =
+        authority === "owner" ? ({ kind: "none" } as MobileFill) : mobileFillCheck(target, row, {
+          inUse: mobile.inUse,
+          powerful: target ? mobile.isPowerful(target) : true,
+          name,
+        });
+      if (fill.kind === "refuse") {
+        why = fill.message;
+      } else {
+        const change = protectedChanges(target, row, {
+          empCode: rosterEmpKey(row.empCode),
+          taken,
+          mobileFillAllowed: fill.kind === "fill",
+        });
+        why = protectedChangeRefusal(name, refusedProtectedKeys(change, row, authority));
+        if (!why && fill.kind === "fill" && target) mobile.fills?.push(target.id);
+      }
     }
     if (why) {
       refusedIds.push(row.id);

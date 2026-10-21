@@ -335,9 +335,11 @@ async function section2(): Promise<void> {
   // A NEW record: free links fine; another member's or an owner e-mail refused.
   const fresh = { id: "n2", empCode: "E-200", fullName: "New" };
   assert.equal(refuse(stored, [{ ...fresh, email: "new@school.test", mobile: "9000000077" }], null, null), null, "a new member's free e-mail and mobile");
-  assert.match(String(refuse(stored, [{ ...fresh, email: "ASHA@school.test" }], null, null)), /email/, "…not another member's");
-  assert.match(String(refuse(stored, [{ ...fresh, email: "director@bhbinternational.school" }], null, null)), /email/, "…nor an owner e-mail");
-  assert.match(String(refuse(stored, [{ ...fresh, mobile: "+91 98765 43210" }], null, null)), /mobile/, "…nor another member's mobile");
+  // Review E: said clearly — whose, why, and that the owner can set it.
+  assert.match(String(refuse(stored, [{ ...fresh, email: "ASHA@school.test" }], null, null)), /e-mail is already another member's.*owner/, "…not another member's");
+  assert.match(String(refuse(stored, [{ ...fresh, email: "director@bhbinternational.school" }], null, null)), /e-mail is already/, "…nor an owner e-mail");
+  assert.match(String(refuse(stored, [{ ...fresh, mobile: "+91 98765 43210" }], null, null)), /mobile is already another member's.*shared family phone/, "…nor another member's mobile");
+  assert.ok(isFeatureRefusalMessage(String(refuse(stored, [{ ...fresh, mobile: "+91 98765 43210" }], null, null))), "and toasted");
 
   // Item 4 — several rows: only the offending one is refused, the others go.
   const two = rosterSaveRefusal(stored, [{ ...A, bankAccountNo: "X" }, { ...B, fullName: "Bina K" }], new Set(["stf_7", "stf_8"]), null);
