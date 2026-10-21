@@ -232,10 +232,15 @@ export async function fetchStaffRemoteServer(): Promise<StaffRemoteBundle | null
   const { sb, tenantId } = ctx;
 
   // Paged: PostgREST stops at 1,000 rows and calls the cut a success.
+  // A soft-removed member (deleted_at set — data-layer 2.2a/2.2b) is not on
+  // the roster: not listed, not resolved for permissions, and their session
+  // ends (revalidateStaffSession finds no record). Restoring clears deleted_at
+  // and they are back on the next read.
   const page = (table: string) =>
-    fetchAllPages<Record<string, unknown>>((from, to) =>
-      sb.from(table).select("*").eq("tenant_id", tenantId).order("id").range(from, to),
-    );
+    fetchAllPages<Record<string, unknown>>((from, to) => {
+      const q = sb.from(table).select("*").eq("tenant_id", tenantId);
+      return (table === "sis_staff" ? q.is("deleted_at", null) : q).order("id").range(from, to);
+    });
   const [depRes, desRes, stfRes] = await Promise.all([
     page("sis_departments"),
     page("sis_designations"),
@@ -598,6 +603,13 @@ async function pushStaffSliceNow(
     if (!res.ok || !body?.ok) {
       const message = body?.error || `HTTP ${res.status}`;
       console.warn("[staff] push failed", message);
+      // A protected-field refusal (bank / Aadhaar / PAN / pay, the login —
+      // 2.2b) is said where the person is, not only in the console: the
+      // shared desk-sync record toasts a 403 whose message it recognises.
+      if (res.status === 403) {
+        const { recordDeskSyncFailure } = await import("@/lib/deskSyncStatus");
+        recordDeskSyncFailure(MODULE, { status: 403, error: message });
+      }
       return { ok: false, error: message };
     }
     applyStampedSave(MODULE, holder, stamps, body, STAFF_STAMPED_SLICES);
@@ -610,51 +622,40 @@ async function pushStaffSliceNow(
   }
 }
 
-async function wipeStaffBundle(
-  sb: SupabaseClient,
-  tenantId: string,
-): Promise<{ ok: boolean; error?: string }> {
-  const { error: stfErr } = await sb
-    .from("sis_staff")
-    .delete()
-    .eq("tenant_id", tenantId);
-  if (stfErr) {
-    console.warn("[staff] wipe staff failed", stfErr.message);
-    return { ok: false, error: stfErr.message };
-  }
-  const { error: desErr } = await sb
-    .from("sis_designations")
-    .delete()
-    .eq("tenant_id", tenantId);
-  if (desErr) {
-    console.warn("[staff] wipe designations failed", desErr.message);
-    return { ok: false, error: desErr.message };
-  }
-  const { error: depErr } = await sb
-    .from("sis_departments")
-    .delete()
-    .eq("tenant_id", tenantId);
-  if (depErr) {
-    console.warn("[staff] wipe departments failed", depErr.message);
-    return { ok: false, error: depErr.message };
-  }
-  return { ok: true };
-}
-
-/** Service-role wipe — used by the API route (tenant reset flows). */
-export async function wipeRemoteStaffRosterServer(): Promise<{
+/**
+ * The old route's "wipe the roster" (DELETE /api/school-data/staff-roster),
+ * since data-layer 2.2b a SOFT remove: every staff row not already removed
+ * gets deleted_at = now and deleted_by = `by` (the session, set by the
+ * route), exactly as the kernel's Remove does — hidden everywhere, restorable
+ * one by one. Departments and designations are left as they are: they are
+ * the school's setup, and a restored member must find theirs. Nothing is
+ * hard-deleted any more (the director's decision, 20 Oct 2026).
+ */
+export async function softRemoveStaffRosterServer(by: string): Promise<{
   ok: boolean;
   error?: string;
+  removed?: number;
 }> {
+  if (!by.trim()) return { ok: false, error: "who removed the roster is required" };
   const { getServerTenantContext } = await import("@/lib/serverTenant");
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
-  const result = await wipeStaffBundle(ctx.sb, ctx.tenantId);
-  if (result.ok) resetStaffPersistenceCache();
-  return result;
+  const now = new Date().toISOString();
+  const { data, error } = await ctx.sb
+    .from("sis_staff")
+    .update({ deleted_at: now, deleted_by: by.trim(), updated_at: now })
+    .eq("tenant_id", ctx.tenantId)
+    .is("deleted_at", null)
+    .select("id");
+  if (error) {
+    console.warn("[staff] soft remove failed", error.message);
+    return { ok: false, error: error.message };
+  }
+  resetStaffPersistenceCache();
+  return { ok: true, removed: (data ?? []).length };
 }
 
-/** Browser: wipe staff roster via the server API. */
+/** Browser: soft-remove the whole roster via the server API (no caller today). */
 export async function wipeRemoteStaffRoster(): Promise<{
   ok: boolean;
   error?: string;

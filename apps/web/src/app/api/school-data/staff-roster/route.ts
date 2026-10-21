@@ -4,8 +4,16 @@ import { requireStaffApi, requireStaffPermission } from "@/lib/apiRouteAuth.serv
 import {
   fetchStaffRemoteServer,
   pushStaffRemoteServer,
-  wipeRemoteStaffRosterServer,
+  softRemoveStaffRosterServer,
 } from "@/lib/staffPersistence";
+import { invalidateServerMastersCache } from "@/lib/api/v1/auth";
+import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
+import {
+  rosterSaveRefusal,
+  staffActorOf,
+  staffSensitiveAuthority,
+  type StaffAuthority,
+} from "@/lib/staffProtectedFields";
 import type { MastersState } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { hasPermission } from "@/lib/rbac";
@@ -86,10 +94,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Missing state" }, { status: 400 });
   }
 
-  // Browsers never receive loginPassword any more (staffRosterRedact), so a
-  // blank one in a save means "not sent", not "clear it": keep the stored.
   const incoming = (body.state.staff ?? []) as StaffRecord[];
-  if (incoming.some((s) => !s.loginPassword)) {
+  const stamps = readStampsParam(body.stamps, STAFF_STAMPED_SLICES);
+  if (incoming.length > 0) {
+    // Read the stored roster to judge this save against (always, since 2.2b:
+    // the protected-field rule below needs it, not only the password fill).
     const stored = await fetchStaffRemoteServer();
     if (!stored) {
       return NextResponse.json(
@@ -97,19 +106,36 @@ export async function POST(req: Request) {
         { status: 503 },
       );
     }
+    // Browsers never receive loginPassword any more (staffRosterRedact), so a
+    // blank one in a save means "not sent", not "clear it": keep the stored.
     const pw = new Map((stored.staff as StaffRecord[]).map((s) => [s.id, s.loginPassword || ""]));
-    body.state = {
-      ...body.state,
-      staff: incoming.map((s) => (s.loginPassword ? s : { ...s, loginPassword: pw.get(s.id) || "" })),
-    };
+    const filled = incoming.map((s) => (s.loginPassword ? s : { ...s, loginPassword: pw.get(s.id) || "" }));
+    body.state = { ...body.state, staff: filled };
+
+    // Bank, UPI, Aadhaar, PAN and pay: only the owner or the payroll /
+    // accounts function; the login username: only the owner; a password:
+    // never set (data-layer 2.2b, director 20 Oct 2026). This route writes
+    // sis_staff directly, past the database's own guard, so it is checked
+    // here — from the session, never from the body.
+    const authority: StaffAuthority | null = auth.viaMirrorSecret
+      ? null
+      : staffSensitiveAuthority(auth.ctx.session, auth.ctx.masters, auth.ctx.rbac);
+    const named = stamps ? new Set(Object.keys(stamps.staff ?? {})) : null;
+    const refusal = rosterSaveRefusal(
+      stored.staff as unknown as Parameters<typeof rosterSaveRefusal>[0],
+      filled as unknown as Parameters<typeof rosterSaveRefusal>[1],
+      named,
+      authority,
+    );
+    if (refusal) {
+      console.warn(`[staff-roster] refused a save by ${auth.viaMirrorSecret ? "mirror" : auth.ctx.session.staffId || "?"}: ${refusal}`);
+      return NextResponse.json({ ok: false, error: refusal, reason: "protected_fields" }, { status: 403 });
+    }
   }
 
   // Stamped (current browsers): only the rows named, each at its stamp.
   // Unstamped (older tabs): new rows added, stored rows never replaced.
-  const result = await pushStaffRemoteServer(
-    body.state as MastersState,
-    readStampsParam(body.stamps, STAFF_STAMPED_SLICES),
-  );
+  const result = await pushStaffRemoteServer(body.state as MastersState, stamps);
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error || "Push failed" },
@@ -122,17 +148,25 @@ export async function POST(req: Request) {
   return NextResponse.json({ ok: true, stamps: result.stamps, conflicts: result.conflicts });
 }
 
-/** DELETE — wipe staff roster (used by tenant reset flows) */
+/**
+ * DELETE — remove the whole staff roster. Since data-layer 2.2b a SOFT
+ * remove (deleted_at + deleted_by = this session): hidden everywhere,
+ * restorable; departments and designations stay. It hard-deleted every
+ * sis_staff, sis_designations and sis_departments row before.
+ */
 export async function DELETE(req: Request) {
   const auth = await requireStaffPermission(req, "staff", "delete");
   if (!auth.ok) return auth.response;
 
-  const result = await wipeRemoteStaffRosterServer();
+  const by = auth.viaMirrorSecret ? "mirror-sync" : staffActorOf(auth.ctx.session) || auth.ctx.session.fullName;
+  const result = await softRemoveStaffRosterServer(by);
   if (!result.ok) {
     return NextResponse.json(
-      { ok: false, error: result.error || "Wipe failed" },
+      { ok: false, error: result.error || "Remove failed" },
       { status: 502 },
     );
   }
-  return NextResponse.json({ ok: true });
+  clearDeskProbeCache("staff-roster");
+  invalidateServerMastersCache();
+  return NextResponse.json({ ok: true, removed: result.removed ?? 0, soft: true });
 }

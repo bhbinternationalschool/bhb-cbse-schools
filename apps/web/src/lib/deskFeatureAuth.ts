@@ -42,7 +42,8 @@ type Row = { id?: unknown } & Record<string, unknown>;
 export function isFeatureRefusalMessage(msg: string | null | undefined): boolean {
   return (
     !!msg &&
-    /(ask the office to give your role this\.|only for the classes you teach\.|could not be read — nothing was saved\.)$/.test(
+    // The last two: staff records' protected fields (lib/staffProtectedFields, 2.2b).
+    /(ask the office to give your role this\.|only for the classes you teach\.|could not be read — nothing was saved\.|or with the payroll or accounts function\.|only the owner changes a login username\.)$/.test(
       msg.trim(),
     )
   );

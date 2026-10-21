@@ -23,6 +23,7 @@
 
 import type { RbacModule } from "@/lib/rbac";
 import type { ApprovalRule } from "@/lib/data/approvalGate";
+import { STAFF_ANSWER_REDACTED_PROFILE_KEYS } from "@/lib/staffProtectedKeys";
 
 /** Scope filters the repo will refuse to build a query without. */
 export type ScopeKey = "tenant_id" | "academic_year_code";
@@ -109,6 +110,24 @@ export type CollectionDef = {
     readonly probeCaches?: readonly string[];
     readonly reference?: readonly ("masters" | "rbac")[];
   };
+  /**
+   * What a CONFLICT answer may not carry of the stored row (data-layer 2.2b):
+   * `desk_write_guarded` hands back the whole stored row with a refusal, and
+   * the route forwards it to whoever's write was refused. Listed keys are
+   * removed first — `columns` from the row, `jsonb` from inside a jsonb
+   * column. Applied in the repo, so no route can forget it.
+   */
+  readonly answerRedaction?: {
+    readonly columns?: readonly string[];
+    readonly jsonb?: Readonly<Record<string, readonly string[]>>;
+  };
+  /**
+   * Staff records (sis.staff): the route applies the staff rules — list rows
+   * redacted to a directory for non-editors, protected profile fields
+   * (lib/staffProtectedFields) never changed through this collection, a
+   * removal recorded with the session as `by`.
+   */
+  readonly staffRecords?: boolean;
   readonly list: {
     /** Column for keyset pagination. Must be unique with `id`. */
     readonly sortColumn: string;
@@ -216,7 +235,8 @@ export const COLLECTIONS: readonly CollectionDef[] = [
   // class outlives any one session.
   //
   // Staff-owned lists (staff, departments, designations) and the students
-  // projection are not here: the RPC refuses them.
+  // projection are not here: the RPC refuses them. Staff records are the
+  // sis.* row collections below (2.2b).
   ...(
     [
       ["classes", "masters_desk_classes", "classes"],
@@ -249,11 +269,17 @@ export const COLLECTIONS: readonly CollectionDef[] = [
       // reads and writes go to the slice.
       table,
       kind: "slice",
-      slice: { table: "masters_desk_slices", key: sliceKey, base: "slice" },
+      // Since data-layer 2.2b the base is the ELEMENT's own `_rev` (2.2a's
+      // migration gave every Masters element one): two people editing
+      // different subjects both land; only the same element at once
+      // conflicts (director, 20 Oct 2026). The database still accepts the old
+      // slice stamp from a copy that holds one, but a read no longer hands
+      // one out for these lists.
+      slice: { table: "masters_desk_slices", key: sliceKey, base: "rev" },
       rbac: { view: "masters", edit: "masters" },
       scope: ["tenant_id"],
       // Masters elements are referenced by student, lead and fee records by
-      // id; a delete removes the element (the write needs the slice stamp).
+      // id; a delete removes the element (the write needs its `_rev`).
       softDelete: false,
       invalidates: { probeCaches: ["masters-desk-rows"], reference: ["masters"] },
       list: { sortColumn: "id", defaultLimit: 500, maxLimit: 1000 },
@@ -280,6 +306,62 @@ export const COLLECTIONS: readonly CollectionDef[] = [
       list: { sortColumn: "id", defaultLimit: 1, maxLimit: 1 },
     }),
   ),
+  // ── Staff (data-layer 2.2b) ─────────────────────────────────────────────
+  // sis_staff / sis_departments / sis_designations are in desk_writable_tables
+  // since 2.2a (no sync_meta: erp_versions reads each table directly). These
+  // entries are the kernel path for them; the Staff screens move onto it in
+  // 2.2d — until then the old staff-roster route writes them too (with the
+  // same protected-field rule, lib/staffProtectedFields).
+  {
+    id: "sis.staff",
+    module: "staff",
+    table: "sis_staff",
+    rbac: { view: "staff", edit: "staff" },
+    // Remove is SOFT (director, 20 Oct 2026): deleted_at + deleted_by — the
+    // session, filled by the route, never the body — hidden everywhere,
+    // restorable by an upsert clearing deleted_at at the removed row's
+    // revision. A removal is a decision: staff · delete, as the old route's
+    // DELETE asked.
+    softDelete: true,
+    approval: {
+      module: "staff",
+      action: "delete",
+      onDelete: true,
+      message: "Removing a member of staff needs the Staff delete permission. Ask the principal to remove the record.",
+    },
+    scope: ["tenant_id"],
+    staffRecords: true,
+    // Bank, UPI, Aadhaar, PAN, pay, the login: never in a conflict answer.
+    answerRedaction: { jsonb: { profile: STAFF_ANSWER_REDACTED_PROFILE_KEYS } },
+    invalidates: { probeCaches: ["staff-roster"], reference: ["masters"] },
+    list: { sortColumn: "emp_code", defaultLimit: 200, maxLimit: 500 },
+  },
+  ...(
+    [
+      ["sis.departments", "sis_departments", "Removing a department"],
+      ["sis.designations", "sis_designations", "Removing a designation"],
+    ] as const
+  ).map(
+    ([id, table, what]): CollectionDef => ({
+      id,
+      module: "staff",
+      table,
+      rbac: { view: "staff", edit: "staff" },
+      // Hard delete (they have is_active to retire one); a delete orphans the
+      // staff records that point at it, so it is a decision, as for staff.
+      softDelete: false,
+      approval: {
+        module: "staff",
+        action: "delete",
+        onDelete: true,
+        message: `${what} needs the Staff delete permission. Retire it (inactive) instead, or ask the principal.`,
+      },
+      scope: ["tenant_id"],
+      invalidates: { probeCaches: ["staff-roster"], reference: ["masters"] },
+      list: { sortColumn: "code", defaultLimit: 200, maxLimit: 500 },
+    }),
+  ),
+
   // ── Website (Phase 1) ──────────────────────────────────────────────────
   // Server-authoritative from the first commit, unlike most desks here. A
   // parent, a search engine and an admissions enquiry all read the public
