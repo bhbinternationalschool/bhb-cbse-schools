@@ -44,9 +44,10 @@ function seed(mode: "seed" | "restore") {
   });
 }
 
-test.describe.configure({ mode: "serial" });
+// Not "serial": one failed case must not skip the rest (the fail-on-old run
+// reports every case). The file runs in order on one worker regardless.
 
-/** GET the dues route as the office until `ok` holds (the app's mirror re-reads on its next probe, ≤ 45 s). */
+/** GET the child's ledger as the office until `ok` holds (the app's mirror re-reads on its next probe, ≤ 45 s). */
 async function waitForServer(studentId: string, ok: (paise: number) => boolean, what: string): Promise<void> {
   const { request } = await import("@playwright/test");
   const { mintSessionCookie } = await import("../session");
@@ -56,9 +57,11 @@ async function waitForServer(studentId: string, ok: (paise: number) => boolean, 
   const deadline = Date.now() + 90_000;
   try {
     for (;;) {
-      const r = await ctx.get(`/api/data/views/certificate-dues?studentId=${studentId}`, { headers: { cookie } });
-      const b = (await r.json()) as { data?: { openBalancePaise: number } };
-      if (b.data && ok(b.data.openBalancePaise)) return;
+      // The fee ledger (not the route under test): what the server holds now,
+      // due and ahead — the same in old and new code.
+      const r = await ctx.get(`/api/v1/fees/ledger/${studentId}`, { headers: { cookie } });
+      const b = (await r.json()) as { data?: { openBalancePaise: number; futureBalancePaise?: number } };
+      if (b.data && ok(b.data.openBalancePaise + (b.data.futureBalancePaise ?? 0))) return;
       if (Date.now() > deadline) throw new Error(`${what}: ${JSON.stringify(b)}`);
       await new Promise((res) => setTimeout(res, 3_000));
     }
@@ -98,7 +101,8 @@ async function toIssueStep(page: Page, child: { fullName: string; admissionNo: s
 const VOUCHER_CHILD = fx.sis.students.find((s) => s.id === fx.growing.chargeVouchers[0]!.studentId)!;
 
 const issueButton = (page: Page) => page.getByRole("button", { name: "Issue & print" });
-const openDues = (page: Page) => page.getByTestId("cert-open-dues");
+/** The "Open dues: …" line of step 5 (the same words on old and new code). */
+const openDues = (page: Page) => page.locator("p", { hasText: /^Open dues:/ });
 
 // ── Before the structure is seeded: CLEAR owes nothing on the server ──────
 test.describe("before the structure: a child owing nothing", () => {
