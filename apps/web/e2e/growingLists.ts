@@ -243,21 +243,34 @@ export function buildOutdoorDuty(staff: StaffRecord[]): OutdoorDutySession[] {
   }));
 }
 
-export function buildCertificates(children: Child[]): CertificatesState {
+/**
+ * Four certificates. Signing lines (lib/printSignatures, print-signatures
+ * spec): #1 is a bonafide issued by the principal and naming the class
+ * teacher — both sign; #2 was issued by "E2E Principal", who is nobody on
+ * the roll — its principal line stays blank; #3 is a TC checked by the
+ * office — principal, class teacher and checker sign.
+ */
+export function buildCertificates(
+  children: Child[],
+  signers: { principalName: string; classTeacherName: string; checkedByName: string },
+): CertificatesState {
   const plan = ["2026-10-07", "2026-10-02", "2026-09-16", "2026-08-26"];
   const issues = plan.map((on, i) => {
     const ch = children[i]!;
+    const kind = i === 2 ? "tc" : "bonafide";
     return {
       id: `e2e_cert_${i + 1}`,
-      kind: "bonafide",
-      certNo: `E2E-BON-${i + 1}`,
+      kind,
+      certNo: kind === "tc" ? `E2E-TC-${i + 1}` : `E2E-BON-${i + 1}`,
       studentId: ch.id,
       householdId: ch.householdId,
       academicYearCode: GROWING_AY,
       studentName: ch.fullName,
       admissionNo: ch.admissionNo,
       issuedOn: on,
-      issuedBy: "E2E Principal",
+      issuedBy: i === 0 || i === 2 ? signers.principalName : "E2E Principal",
+      classTeacherName: i === 0 || i === 2 ? signers.classTeacherName : "",
+      ...(kind === "tc" ? { tc: { checkedByName: signers.checkedByName, checkedByDesignation: "Office" } } : {}),
       createdAt: `${on}T06:00:00.000Z`,
       voidedAt: null,
     } as Partial<CertificateIssue>;

@@ -3953,6 +3953,7 @@ class ApiClient {
     String text = "",
     Map<String, String> variables = const {},
     bool urgent = false,
+    bool textOnly = false,
   }) async {
     final envelope = await postJson("/api/v1/staff/wa/send", {
       "mobile": mobile,
@@ -3960,6 +3961,8 @@ class ApiClient {
       if (text.isNotEmpty) "text": text,
       if (variables.isNotEmpty) "variables": variables,
       if (urgent) "urgent": true,
+      // The words the staff member reviewed, not the template.
+      if (textOnly) "textOnly": true,
     });
 
     // postJson only throws on 5xx and hands back the raw envelope, so a 400 —
