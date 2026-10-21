@@ -7,7 +7,9 @@ import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { field } from "@/components/ui/erp-ui";
 import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
-import { DEFAULT_AY, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
+import { DEFAULT_AY, currentAcademicYearCode } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { canWriteModuleTab, visibleModuleTabs } from "@/lib/rbac";
 import { classSectionLabel } from "@/lib/timetable";
 import { loadSis, type SisState, type SisStudent, studentsInSession} from "@/lib/sis";
@@ -67,7 +69,9 @@ export function DisciplineWorkspace() {
   const readOnly = useSessionReadOnly();
   const ay = session.academicYearCode || DEFAULT_AY;
   const [tab, setTab] = useState<Tab>("log");
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1i: the server's book + the roster the permission checks
+  // resolve against, kept fresh by the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [state, setState] = useState<DisciplineState>({ version: 1, incidents: [] });
   const [notice, setNotice] = useState<string | null>(null);
@@ -76,21 +80,15 @@ export function DisciplineWorkspace() {
   // Re-read when the server copy of this module lands (login/refresh hydration).
   useModuleStateHydration("discipline", () => { setState(loadDiscipline()); });
   useEffect(() => {
-    setMasters(loadMasters());
     setSis(loadSis());
     setState(loadDiscipline());
     void (async () => {
-      const [{ ensureMastersHydrated }, { ensureSisHydrated }, { withHydrationSlot }] =
+      const [{ ensureSisHydrated }, { withHydrationSlot }] =
         await Promise.all([
-          import("@/lib/mastersPersistence"),
           import("@/lib/sisPersistence"),
           import("@/lib/deskHydrateGuard"),
         ]);
-      await Promise.all([
-        withHydrationSlot(() => ensureMastersHydrated()),
-        withHydrationSlot(() => ensureSisHydrated()),
-      ]);
-      setMasters(loadMasters());
+      await withHydrationSlot(() => ensureSisHydrated());
       setSis(loadSis());
     })();
   }, []);
@@ -186,7 +184,7 @@ export function DisciplineWorkspace() {
 
   /** Children a picker may offer: the teacher's sections, or the school. */
   const pickable = useMemo(() => {
-    if (!sis) return [];
+    if (!sis || !masters) return [];
     if (teacherMode) return studentsOfMySections(sis, my.academicYearCode, my);
     if (scopeUnknown) return [];
     // One row per child, this session. SIS keeps a row per child per year and
@@ -482,6 +480,22 @@ export function DisciplineWorkspace() {
           disabled: () => readOnly || !canEdit,
         },
       ];
+
+  if (!masters) {
+    return (
+      <ErpWorkspaceShell
+        title="Discipline / behavior"
+        subtitle="Incident log, merit/demerit points, escalation ladder, parent WhatsApp notify"
+        icon={<ShieldAlert className="size-6" aria-hidden />}
+      >
+        {mastersError ? (
+          <QueryError what="the school's classes and staff" error={mastersError} retry={retryMasters} />
+        ) : (
+          <p className="mt-4 text-sm text-[var(--muted)]">Loading the school&apos;s classes…</p>
+        )}
+      </ErpWorkspaceShell>
+    );
+  }
 
   return (
     <ErpWorkspaceShell

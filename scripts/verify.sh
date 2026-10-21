@@ -67,6 +67,7 @@ SELFTESTS=(
   test:masters-revision-everywhere
   test:masters-cold-client
   test:masters-teacher-no-fees
+  test:screen-masters-dues
   test:masters-freeze
   test:session-year
   test:academic-year-resolve
@@ -191,6 +192,7 @@ SELFTESTS=(
   test:sis-bot-thread-merge
   test:job-applications
   test:online-classes
+  test:learning-games
   test:online-class-qa
   test:puter-ai
   test:open-lookups
@@ -250,6 +252,7 @@ SELFTESTS=(
   test:class-channel-subject
   test:review-demo-hidden
   test:payment-link-reuse
+  test:payment-link-concurrent-save
   test:student-leave-status-guard
   test:ptm-row-stamps
   test:propel-robot
@@ -373,6 +376,7 @@ SELFTESTS=(
   test:fee-backdate
   test:month-groups
   test:month-range
+  test:class-upgrade-fee-group
   test:receipt-auto-wa
   test:review-login
   test:desk-sync-status
@@ -563,6 +567,7 @@ SELFTESTS=(
   test:query-kernel
   test:reference-views
   test:masters-bridge
+  test:masters-pending
   test:staff-requests
   test:survey-team-plan
   test:parent-api-scope
