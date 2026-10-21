@@ -90,7 +90,6 @@ Copy `.env.example`; never commit `.env` (already git-ignored).
 | Variable | What it is | Where it comes from |
 |---|---|---|
 | `N8N_ENCRYPTION_KEY` | encrypts credentials inside n8n's DB. Losing it means re-entering every credential | `openssl rand -hex 24`, once; back it up with the VM |
-| `POSTGRES_PASSWORD` | n8n's own Postgres | any long random string |
 | `ANTHROPIC_API_KEY` | **a dedicated key** named `n8n-office` | console.anthropic.com → API keys. Dedicated so it can be rotated or revoked alone, and so the usage dashboard shows the office on its own line |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | the ERP's Supabase project | Supabase → Project settings → API. The service-role key bypasses RLS; the workflows **read** ERP tables and **write only** `office_*` |
 | `OFFICE_TENANT_ID` | the school's tenant uuid | see *Find OFFICE_TENANT_ID* below |
