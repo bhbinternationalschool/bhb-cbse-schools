@@ -1241,6 +1241,10 @@ one-line change to `_sis_staff_sensitive_keys()`. Masters exports that dump whol
 `_rev` field.
 
 *(2.2b built 21 Oct 2026, PR #TBD — kernel plumbing; no screen moved, no migration.)* **What exists.**
+- **A staff write never wipes the record:** `profile` is one jsonb column and the kernel patches columns, so an
+  upsert's profile keys are laid on the STORED profile (a key is cleared by sending it blank, never by leaving it
+  out) — without this, a profile carrying only the changed keys replaced the whole record (found on the stack: an
+  edit sending `{fullName, mobile}` wiped 67 other keys; fixed and asserted key by key).
 - **Staff collections** (`lib/data/registry.ts`): `sis.staff` (soft delete; `staffRecords`), `sis.departments`,
   `sis.designations` (hard delete) — module `staff`, view/edit `staff`; a delete of any of the three is a decision:
   `staff · delete` (new `ApprovalRule.action`; the approval gate asked only `approve` before). `POST /api/data/sis.staff`:
@@ -1308,8 +1312,8 @@ absent, `by` = session, conflict redaction, list directory, authority matrix inc
 rules, the old route's guard), `test:masters-writes` (registry flip, commit adapter, function rule, the masters view's
 `_rev` + stamps, the bridge), `test:desk-feature-rev`. Fail-on-old: `test:desk-feature-rev` fails on the old
 `deskFeatureAuth` ("You may not change class subjects"); 16 mutations of the new code each turn a self-test red.
-Stack (`e2e/staff-kernel.acceptance.ts`, in `e2e-stack.sh check`): on this branch 16/16; the same file against the
-old app code built on the same stack: **3/16** — a member marked removed still listed by staff-roster, the staff-list
+Stack (`e2e/staff-kernel.acceptance.ts`, in `e2e-stack.sh check`): on this branch **18/18**; the same file (16 checks at
+the time) against the base branch's app code, built on the same stack: **3/16** — a member marked removed still listed by staff-roster, the staff-list
 view and the mobile roster and still signed in; a plain editor's bank change through the old route written ("OLD-ROUTE");
 the old DELETE hard-deleted 35 staff, 3 departments and 8 designations; the teacher's own-class link 403; sis.staff and
 the sensitive route 404. `write-kernel.acceptance.ts` §3 now on element `_rev`s (adds: a different element from the
@@ -1317,7 +1321,7 @@ same load lands; two ops = one batch, a stale one writes nothing); `stale-writer
 element's `_rev`. CI scoreboard: see the PR.
 **Not done / not proven.** No screen writes through the new hooks (2.2c/2.2d). The refusal TOAST of the old staff
 editor was not seen on a screen: on the stack the old editor (`/staff/<id>/edit`, opened from the roster) sends no
-`POST /api/school-data/staff-roster` at all on Save (no request in 30 s, built from the base branch too) — the old
+`POST /api/school-data/staff-roster` at all on Save (no request in 30 s; seen on the base branch's build) — the old
 save path is gated on the staff desk having been loaded by that page (`scheduleStaffSync`/`hasDeskLoaded`); a
 pre-existing defect, left to 2.2d, which replaces that path. The function-grant path writes only `_rev` lists (an
 object slice still needs masters · edit). `pfNumber`/`uanNumber`/`esicNumber` and document files are still not
