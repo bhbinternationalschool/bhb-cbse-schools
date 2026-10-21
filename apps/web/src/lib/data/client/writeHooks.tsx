@@ -27,7 +27,7 @@ import { TEACHING_MASTERS_KEYS } from "@/lib/mastersTeachingSubset";
 import { COLLECTIONS, collectionKind } from "../registry";
 import { asRevision, type Revision, type WriteFail, type WriteResult } from "../types";
 import { invalidateDesks, useErpMutation, useMasters } from "./hooks";
-import { applyStaffLinkChange, type ElementRequest, type StaffLinkChange } from "./mastersElementPlan";
+import { applyStaffLinkChange, MASTERS_BATCH_PATH, type ElementRequest, type StaffLinkChange } from "./mastersElementPlan";
 import { writeRecords } from "./mutate";
 import { readAll } from "./query";
 import { mastersListCommitOps, mastersObjectCommitOp } from "./mastersCommit";
@@ -120,42 +120,47 @@ export function useStaffMutation(
 export type ElementWritesOutcome =
   | {
       ok: true;
-      /** Per request (same order as sent): the revision each element now has. */
-      versions: Readonly<Record<string, Revision>>[];
+      /** The revision each written element now has, keyed `${sliceKey}|${id}`. */
+      versions: Readonly<Record<string, Revision>>;
     }
   | {
       ok: false;
       kind: WriteFail<Row>["kind"];
       message: string;
-      /** Requests that landed before the failure (same order as sent). */
-      versions: Readonly<Record<string, Revision>>[];
-      /** The failed request's index (requests.length = the staff links). */
+      /** What landed before the failure, keyed `${sliceKey}|${id}`. */
+      versions: Readonly<Record<string, Revision>>;
+      /** The failed request's index; -1 = the staff links (sent first; nothing else was sent). */
       failedAt: number;
     };
 
 /**
- * The Masters editor's element writes (data-layer 2.2c). Requests go one after
- * another and stop at the first refusal — each is all-or-none on the server,
- * and none removes more than one element. Then the staff link changes, each
- * laid on the member's record as stored NOW (read just before, its revision
- * the base): a link someone else added to the same member meanwhile is kept.
- * The masters view (and the staff list) refetch afterwards, also after a
- * failure — the screen must show what the server holds.
+ * The Masters editor's element writes (data-layer 2.2c). Staff link changes
+ * go FIRST (children before parents: a refusal later leaves a class or a
+ * subject with no teacher link, never a link to a removed one), each laid on
+ * the member's record as stored NOW (read just before, its revision the
+ * base) — a link someone else added to the same member meanwhile is kept.
+ * Then the Masters requests, one after another, stopping at the first
+ * refusal; each is all-or-none on the server, and a cascade across lists is
+ * ONE batch (POST /api/data/masters/batch). The masters view (and the staff
+ * list) refetch afterwards, also after a failure — the screen must show what
+ * the server holds.
  */
 export function useMastersElementWrites(): (requests: readonly ElementRequest[], staff: readonly StaffLinkChange[]) => Promise<ElementWritesOutcome> {
   const client = useQueryClient();
   return useCallback(
     async (requests, staff) => {
-      const versions: Readonly<Record<string, Revision>>[] = [];
+      const versions: Record<string, Revision> = {};
       try {
-        for (let i = 0; i < requests.length; i++) {
-          const r = await writeRecords<Row>(requests[i].collection, requests[i].ops);
-          if (!r.ok) return { ok: false, kind: r.kind, message: describeElementFailure(r), versions, failedAt: i };
-          versions.push(r.versions);
-        }
         if (staff.length) {
           const failed = await writeStaffLinks(staff);
-          if (failed) return { ok: false, kind: failed.kind, message: failed.message, versions, failedAt: requests.length };
+          if (failed) return { ok: false, kind: failed.kind, message: failed.message, versions, failedAt: -1 };
+        }
+        for (let i = 0; i < requests.length; i++) {
+          const req = requests[i];
+          const r = req.kind === "batch" ? await writeBatch(req) : await writeRecords<Row>(req.collection, req.ops);
+          if (!r.ok) return { ok: false, kind: r.kind, message: describeElementFailure(r), versions, failedAt: i };
+          if (req.kind === "batch") Object.assign(versions, r.versions);
+          else for (const [id, rev] of Object.entries(r.versions)) versions[`${req.sliceKey}|${id}`] = rev;
         }
         return { ok: true, versions };
       } finally {
@@ -172,6 +177,42 @@ export function useMastersElementWrites(): (requests: readonly ElementRequest[],
     },
     [client],
   );
+}
+
+/** One all-or-none batch across lists; versions keyed `${sliceKey}|${id}`. Never throws. */
+async function writeBatch(
+  req: ElementRequest,
+): Promise<{ ok: true; versions: Record<string, Revision> } | WriteFail<Row>> {
+  const parts = req.parts ?? [];
+  let res: Response;
+  try {
+    res = await fetch(`/api/data/${MASTERS_BATCH_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ops: req.ops.map((op, i) => ({ collection: parts[i]?.collection, ...op })) }),
+    });
+  } catch (e) {
+    return { ok: false, kind: "network", message: e instanceof Error ? e.message : "Network request failed", conflicts: [] };
+  }
+  const body = (await res.json().catch(() => null)) as {
+    ok?: boolean;
+    kind?: WriteFail<Row>["kind"];
+    message?: string;
+    error?: string;
+    results?: { collection?: string; id?: string; status?: string; revision?: string }[];
+  } | null;
+  if (!res.ok || !body?.ok || !Array.isArray(body.results)) {
+    const kind: WriteFail<Row>["kind"] =
+      body?.kind ?? (res.status === 409 ? "conflict" : res.status === 403 ? "auth" : res.status === 400 ? "invalid" : "unavailable");
+    return { ok: false, kind, message: body?.message ?? body?.error ?? `Request failed (${res.status})`, conflicts: [] };
+  }
+  const versions: Record<string, Revision> = {};
+  body.results.forEach((r, i) => {
+    const part = parts[i];
+    if (!part || r.status === "deleted" || r.revision == null) return;
+    versions[`${part.sliceKey}|${String(r.id ?? "")}`] = asRevision(String(r.revision));
+  });
+  return { ok: true, versions };
 }
 
 function describeElementFailure(r: WriteFail<Row>): string {

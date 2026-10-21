@@ -45,7 +45,12 @@ export type PendingElement = {
   saveId: number;
   /** When the save answered (0 while saving). */
   savedAt: number;
+  /** When it was sent (an entry whose request never answers goes after SEND_TIMEOUT_MS). */
+  sentAt?: number;
 };
+
+/** A save that has not answered in this long is given up on screen (the next answer shows the truth). */
+export const SEND_TIMEOUT_MS = 120_000;
 
 const isObj = (v: unknown): v is Row => !!v && typeof v === "object" && !Array.isArray(v);
 
@@ -107,7 +112,14 @@ export function pendingAfterAnswer(
   stamps: Readonly<Record<string, string>> | null | undefined,
   now: number,
 ): PendingElement[] {
-  const out = pending.filter((p) => !(answerHolds(p, served, stamps) || (p.savedAt > 0 && now - p.savedAt > HOLD_MS)));
+  const out = pending.filter(
+    (p) =>
+      !(
+        answerHolds(p, served, stamps) ||
+        (p.savedAt > 0 && now - p.savedAt > HOLD_MS) ||
+        (p.savedAt === 0 && p.sentAt !== undefined && now - p.sentAt > SEND_TIMEOUT_MS)
+      ),
+  );
   return out.length === pending.length ? (pending as PendingElement[]) : out;
 }
 
@@ -122,7 +134,11 @@ export function pendingAfterSave(
   return pending.map((p) =>
     p.saveId !== saveId
       ? p
-      : { ...p, revision: p.value === null ? "deleted" : String(answer.versions[p.id] ?? ""), savedAt: now },
+      : {
+          ...p,
+          revision: p.value === null ? "deleted" : String(answer.versions[`${p.sliceKey}|${p.id}`] ?? answer.versions[p.id] ?? ""),
+          savedAt: now,
+        },
   );
 }
 

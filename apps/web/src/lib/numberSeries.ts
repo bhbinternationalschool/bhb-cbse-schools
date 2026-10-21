@@ -187,15 +187,48 @@ export function persistSeriesUse(
   // Already past it as far as this tab knows: nothing to move.
   if (used + 1 <= peekNextSeriesNumber(series, academicYearCode)) return;
   const ay = series.resetOnAy && academicYearCode?.trim() ? academicYearCode.trim() : undefined;
-  void fetch(`/api/data/${encodeURIComponent("masters.number-series")}/bump`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ series: series.code || series.id, used, ...(ay ? { ay } : {}) }),
-  })
-    .then(async (res) => {
-      if (!res.ok) console.warn(`[number-series] ${code} ${used}: not moved (${res.status}) ${(await res.text()).slice(0, 200)}`);
-    })
-    .catch((e: unknown) => console.warn(`[number-series] ${code} ${used}: not moved`, e));
+  void bumpSeriesOnServer(series.code || series.id, series.label || code, used, ay);
+}
+
+/**
+ * POST the bump; a failure is retried once (a network blink), and a failure
+ * that stands is SAID on screen — the next number offered may otherwise repeat
+ * one already issued. A refusal (403 not your series, 409 too far ahead) is
+ * not retried.
+ */
+export async function bumpSeriesOnServer(
+  series: string,
+  label: string,
+  used: number,
+  ay: string | undefined,
+  deps: { post?: typeof fetch; say?: (message: string) => void } = {},
+): Promise<boolean> {
+  const post = deps.post ?? fetch;
+  let last = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await post(`/api/data/${encodeURIComponent("masters.number-series")}/bump`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ series, used, ...(ay ? { ay } : {}) }),
+      });
+      if (res.ok) return true;
+      const body = (await res.json().catch(() => null)) as { message?: string } | null;
+      last = body?.message || `HTTP ${res.status}`;
+      if (res.status === 403 || res.status === 409 || res.status === 400 || res.status === 404) break;
+    } catch (e) {
+      last = e instanceof Error ? e.message : String(e);
+    }
+  }
+  const message = `${label}: the next number was not moved past ${used} (${last}). The next number offered may repeat — check it before issuing.`;
+  console.warn(`[number-series] ${message}`);
+  if (deps.say) deps.say(message);
+  else if (typeof window !== "undefined") {
+    void import("@/components/shell/Toast")
+      .then(({ pushToast }) => pushToast({ kind: "error", message, durationMs: 0 }))
+      .catch(() => undefined);
+  }
+  return false;
 }
 
 export function bumpStudentSeriesUses(

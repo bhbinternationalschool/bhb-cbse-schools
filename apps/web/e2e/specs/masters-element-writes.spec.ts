@@ -26,7 +26,8 @@
 import type { APIRequestContext, Browser, Page, Request, Route } from "@playwright/test";
 import { normalizeSubject } from "@/lib/foundationMasters";
 import { classId, sectionId } from "../fixture";
-import { elementOf, listOf, mastersView, putElement, writeElements } from "../mastersKernel";
+import { classGroupCodeForName } from "@/lib/masters";
+import { elementOf, listOf, mastersView, putElement, putObject, writeElements } from "../mastersKernel";
 import { APP_URL, collectPageErrors, expect, signIn, test, type Who } from "../support";
 
 const CLASS_IV = classId(7);
@@ -300,4 +301,156 @@ test("class teacher: set on the Sections screen, written to the two staff record
     await a.context().close();
   }
   expect(errors, "no page errors").toEqual([]);
+});
+
+// ── Review fixes (22 Oct 2026) ──────────────────────────────────────────────
+
+test("object: a profile form opened before another save conflicts instead of putting the old values back", async ({ browser }) => {
+  const a = await pageAs(browser, "principal");
+  const b = await pageAs(browser, "principal");
+  const original = (await mastersView(a.request)).schoolProfile as Record<string, unknown>;
+  const theirs = "https://e2e-theirs.example";
+  try {
+    await a.goto("/masters?tab=school");
+    const tagline = a.getByRole("textbox", { name: "Tagline", exact: true });
+    await tagline.fill("Typed before the other save", { timeout: 30_000 });
+    // B saves a newer profile (another website).
+    await putObject(b.request, "masters.school-profile", "schoolProfile", { ...original, website: theirs });
+    // A's screen receives it (tables show the SAVED profile) — the typing stays.
+    await expect(a.getByRole("definition").filter({ hasText: theirs })).toHaveCount(1, { timeout: 45_000 });
+    await expect(tagline).toHaveValue("Typed before the other save");
+    await a.getByRole("button", { name: "Save profile", exact: true }).click();
+    await expect(a.getByText(/^Not saved — Someone changed this on another device/)).toBeVisible({ timeout: 15_000 });
+    await a.screenshot({ path: test.info().outputPath("object-conflict.png") });
+    const now = (await mastersView(a.request)).schoolProfile as Record<string, unknown>;
+    expect(now.website, "B's website stays").toBe(theirs);
+    expect(now.tagline, "A's stale form wrote nothing").toBe(original.tagline);
+  } finally {
+    await putObject(a.request, "masters.school-profile", "schoolProfile", original);
+    await a.context().close();
+    await b.context().close();
+  }
+});
+
+const ZZ = "e2e_22c_cls_zz";
+
+async function seedClassWithLinks(req: APIRequestContext, n: number): Promise<string[]> {
+  const subjects = listOf(await mastersView(req), "subjects").filter((s) => !s.parentId).slice(0, n);
+  expect(subjects.length, `${n} subjects to link`).toBe(n);
+  const cls = { id: ZZ, name: "XIII", sortOrder: 99, isActive: true, groupCode: classGroupCodeForName("XIII") };
+  const w1 = await writeElements(req, "masters.classes", [{ op: "upsert", id: ZZ, base: null, row: cls }]);
+  expect(w1.status, `seed class: ${JSON.stringify(w1.body).slice(0, 200)}`).toBe(200);
+  const ids = subjects.map((s, i) => `e2e_22c_zz_link_${i}`);
+  const w2 = await writeElements(
+    req,
+    "masters.class-subjects",
+    subjects.map((s, i) => ({ op: "upsert" as const, id: ids[i], base: null, row: { id: ids[i], classId: ZZ, subjectId: String(s.id), periodsPerWeek: 2, isActive: true, isOptional: false } })),
+  );
+  expect(w2.status, `seed links: ${JSON.stringify(w2.body).slice(0, 200)}`).toBe(200);
+  return ids;
+}
+
+async function dropClassZZ(req: APIRequestContext): Promise<void> {
+  const book = await mastersView(req);
+  const ops = [
+    ...(elementOf(book, "classes", ZZ) ? [{ collection: "masters.classes", op: "delete", id: ZZ, base: String(elementOf(book, "classes", ZZ)!._rev ?? 1) }] : []),
+    ...listOf(book, "classSubjects")
+      .filter((l) => l.classId === ZZ)
+      .map((l) => ({ collection: "masters.class-subjects", op: "delete", id: String(l.id), base: String(l._rev ?? 1) })),
+  ];
+  if (!ops.length) return;
+  const res = await req.post("/api/data/masters/batch", { data: { ops } });
+  expect(res.status(), `clean up XIII: ${(await res.text()).slice(0, 200)}`).toBe(200);
+}
+
+async function removeXIIIOnScreen(page: Page): Promise<void> {
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("listitem").filter({ has: page.getByRole("button", { name: "XIII 0 sections", exact: true }) }).getByRole("button", { name: "Remove", exact: true }).click({ timeout: 30_000 });
+}
+
+test("cascade: removing a class with its links is all or none — a stale link refuses the whole removal", async ({ browser }) => {
+  const a = await pageAs(browser, "principal");
+  try {
+    const ids = await seedClassWithLinks(a.request, 3);
+    // A's screen keeps the answer it loaded; meanwhile one link changes elsewhere.
+    let first: string | null = null;
+    await a.route("**/api/data/views/masters", async (route: Route) => {
+      if (first) return route.fulfill({ status: 200, contentType: "application/json", body: first });
+      const res = await route.fetch();
+      first = await res.text();
+      return route.fulfill({ response: res, body: first });
+    });
+    await a.goto("/masters?tab=classes");
+    await expect(a.getByRole("button", { name: "XIII 0 sections", exact: true })).toBeVisible({ timeout: 30_000 });
+    const l2 = elementOf(await mastersView(a.request), "classSubjects", ids[2])!;
+    await putElement(a.request, "masters.class-subjects", "classSubjects", { ...l2, periodsPerWeek: 3 });
+    await removeXIIIOnScreen(a);
+    await expect(a.getByText(/^Not saved — /)).toBeVisible({ timeout: 15_000 });
+    await a.screenshot({ path: test.info().outputPath("cascade-refused.png") });
+    const book = await mastersView(a.request);
+    expect(!!elementOf(book, "classes", ZZ), "the class is still there").toBe(true);
+    expect(listOf(book, "classSubjects").filter((l) => l.classId === ZZ).length, "every link is still there").toBe(3);
+  } finally {
+    await a.unroute("**/api/data/views/masters");
+    await dropClassZZ(a.request);
+    await a.context().close();
+  }
+});
+
+test("cascade: a class with 14 subject links is removed whole, in one batch", async ({ browser }) => {
+  const a = await pageAs(browser, "principal");
+  const writes = recordWrites(a);
+  try {
+    await seedClassWithLinks(a.request, 14);
+    await a.goto("/masters?tab=classes");
+    await expect(a.getByRole("button", { name: "XIII 0 sections", exact: true })).toBeVisible({ timeout: 30_000 });
+    await removeXIIIOnScreen(a);
+    await expect
+      .poll(async () => {
+        const book = await mastersView(a.request);
+        return [!!elementOf(book, "classes", ZZ), listOf(book, "classSubjects").filter((l) => l.classId === ZZ).length];
+      }, { timeout: 20_000 })
+      .toEqual([false, 0]);
+    await expect(a.getByText(/^Not saved/)).toHaveCount(0);
+    const batches = writes.filter((w) => w.url === "data/masters/batch");
+    expect(batches.length, `one batch (sent: ${writes.map((w) => w.url).join(", ")})`).toBe(1);
+    expect((batches[0].body as { ops: unknown[] }).ops.length, "the class and its 14 links").toBe(15);
+    expect(writes.filter((w) => w.url !== "data/masters/batch"), "nothing else").toEqual([]);
+  } finally {
+    await dropClassZZ(a.request);
+    await a.context().close();
+  }
+});
+
+test("number series: only the module that issues a series moves it, and never far past its next number", async ({ browser }) => {
+  const principal = await pageAs(browser, "principal");
+  const clerk = await pageAs(browser, "certClerk");
+  const before = listOf(await mastersView(principal.request), "numberSeries");
+  const receipt = before.find((s) => s.code === "RECEIPT")!;
+  const voucher = before.find((s) => s.code === "EXPENSE_VOUCHER")!;
+  const bump = (p: Page, body: Record<string, unknown>) => p.request.post("/api/data/masters.number-series/bump", { data: body });
+  try {
+    // The certificates clerk (students + certificates edit) may not move the fee receipts.
+    const r1 = await bump(clerk, { series: "RECEIPT", used: Number(receipt.nextNumber) });
+    expect(r1.status(), `clerk → RECEIPT: ${(await r1.text()).slice(0, 200)}`).toBe(403);
+    // Far past the next number: refused, nothing moves.
+    const far = Number(voucher.nextNumber) + 100;
+    const r2 = await bump(principal, { series: "EXPENSE_VOUCHER", used: far });
+    expect(r2.status(), `+100: ${(await r2.text()).slice(0, 200)}`).toBe(409);
+    const mid = listOf(await mastersView(principal.request), "numberSeries").find((s) => s.code === "EXPENSE_VOUCHER")!;
+    expect(mid.nextNumber, "not moved").toBe(voucher.nextNumber);
+    // The next number itself: moves by one.
+    const r3 = await bump(principal, { series: "EXPENSE_VOUCHER", used: Number(voucher.nextNumber) });
+    expect(r3.status()).toBe(200);
+    const after = listOf(await mastersView(principal.request), "numberSeries").find((s) => s.code === "EXPENSE_VOUCHER")!;
+    expect(after.nextNumber).toBe(Number(voucher.nextNumber) + 1);
+  } finally {
+    const cur = listOf(await mastersView(principal.request), "numberSeries");
+    for (const s of [receipt, voucher]) {
+      const now = cur.find((x) => x.id === s.id);
+      if (now && now.nextNumber !== s.nextNumber) await putElement(principal.request, "masters.number-series", "numberSeries", { ...now, nextNumber: s.nextNumber });
+    }
+    await principal.context().close();
+    await clerk.context().close();
+  }
 });

@@ -13,10 +13,12 @@
  *    whole element as the editor holds it, minus `_rev`; a key the served one
  *    has and the edited one lacks is sent as null), on the base above (null
  *    when the server has no such element and this tab saved none: a new one);
- *  - an element in shown and not in next → a delete on the same base,
- *    ONE PER REQUEST (the server refuses more than one removal per save — a
- *    user action that removes several, e.g. a subject with its components from
- *    a class, is several saves in a row, the parent first);
+ *  - an element in shown and not in next → a delete on the same base;
+ *  - an action that writes more than one list, or removes more than one
+ *    element (a class with its links, a subject with its components' links,
+ *    a class with its two new sections) → ONE all-or-none batch
+ *    (POST /api/data/masters/batch → desk_slice_rows_write); a single list
+ *    with at most one removal → that list's own route;
  *  - an object slice (school profile, timing, statutory setup) that differs →
  *    one upsert of the object on the stamp the view served;
  *  - a change to a staff record's class / subject teacher links → a link
@@ -62,15 +64,35 @@ export const STAFF_LINK_FIELDS = ["classTeacherLinks", "subjectTeachingLinks"] a
 
 export type FoundationKey = (typeof FOUNDATION_LIST_KEYS)[number] | (typeof FOUNDATION_OBJECT_KEYS)[number];
 
-/** One action may remove at most this many elements (each its own save). A stale or truncated copy removes far more. */
-export const MAX_REMOVALS = 12;
+/**
+ * One action may remove at most this many elements (the batch route's cap).
+ * Production's largest cascades (21 Oct): a class with 14 subject links, a
+ * subject linked to 12 classes. A whole-list wipe removes far more.
+ */
+export const MAX_REMOVALS = 100;
+
+/** The batch route: several elements across lists, all or none (POST /api/data/masters/batch). */
+export const MASTERS_BATCH_PATH = "masters/batch";
 
 export type ElementRequest = {
+  /** The (first) list or object it writes. */
   sliceKey: FoundationKey;
-  /** The registry collection (masters.classes …). */
+  /** The registry collection (masters.classes …), or MASTERS_BATCH_PATH. */
   collection: string;
-  kind: "slice" | "object";
+  /** "batch": `ops` span several lists, `parts[i]` says which; one all-or-none request. */
+  kind: "slice" | "object" | "batch";
   ops: WriteOp<Row>[];
+  parts?: { sliceKey: FoundationKey; collection: string }[];
+};
+
+/** What a panel may say about its commit. */
+export type MastersCommitOpts = {
+  /**
+   * Object slices: the stamp the panel's form was LOADED at (useObjectDraft).
+   * The save is based on it — a newer save by someone else is then a conflict,
+   * not silently overwritten.
+   */
+  objectBases?: Partial<Record<string, string | undefined>>;
 };
 
 export type StaffLinkChange = {
@@ -85,7 +107,7 @@ export type StaffLinkChange = {
 export type ElementPlan =
   | {
       ok: true;
-      /** In order: upserts per list (parents first), objects, then one request per removal (parents first). */
+      /** In order: the list writes (one request, or ONE batch when several), then each object. Staff links go first (the writer). */
       requests: ElementRequest[];
       staff: StaffLinkChange[];
       /** Other changed keys, for the old save (fees 2.2e, staff setup 2.2d). */
@@ -167,6 +189,8 @@ export function planMastersElementCommit(input: {
   /** The masters view's object-slice stamps. */
   stamps?: Readonly<Record<string, string>> | null;
   revisionOf?: RevisionOverride;
+  /** The stamps the panel's form was loaded at (MastersCommitOpts). */
+  objectBases?: MastersCommitOpts["objectBases"];
 }): ElementPlan {
   const shown = isObj(input.shown) ? input.shown : {};
   const next = isObj(input.next) ? input.next : {};
@@ -196,7 +220,12 @@ export function planMastersElementCommit(input: {
     if (isObject) {
       const value = next[key];
       if (!isObj(value) || Object.keys(value).length === 0) return { ok: false, reason: `${key}: an empty value is not saved.` };
-      const stamp = input.revisionOf?.(key, key) ?? (input.stamps?.[key] ? asRevision(input.stamps[key]) : null);
+      // This tab's own unproven save first (the form holds it), else the stamp
+      // the form was loaded at, else the view's latest.
+      const formBase = input.objectBases?.[key];
+      const stamp =
+        input.revisionOf?.(key, key) ??
+        (formBase ? asRevision(formBase) : input.stamps?.[key] ? asRevision(input.stamps[key]) : null);
       if (served[key] != null && !stamp) {
         return { ok: false, reason: `${key}: the server did not say which version was read — reload and try again.` };
       }
@@ -243,19 +272,34 @@ export function planMastersElementCommit(input: {
     }
   }
 
-  if (removals.length > MAX_REMOVALS) {
-    return {
-      ok: false,
-      reason: `This would remove ${removals.length} items at once — nothing was saved. Remove them in smaller steps.`,
-    };
-  }
   const order = (k: string) => {
     const i = (FOUNDATION_LIST_KEYS as readonly string[]).indexOf(k);
     return i < 0 ? FOUNDATION_LIST_KEYS.length : i;
   };
   upserts.sort((a, b) => order(a.sliceKey) - order(b.sliceKey));
   removals.sort((a, b) => order(a.sliceKey) - order(b.sliceKey));
-  return { ok: true, requests: [...upserts, ...objects, ...removals], staff, rest };
+  if (removals.length > MAX_REMOVALS) {
+    return {
+      ok: false,
+      reason: `This would remove ${removals.length} items at once — nothing was saved. Remove them in smaller steps.`,
+    };
+  }
+  const lists = [...upserts, ...removals];
+  // One list, at most one removal: the list's own route. Anything more — a
+  // cascade, several lists, several removals — is ONE all-or-none batch
+  // (data-layer 2.2c review: a part-way refusal must not leave links
+  // pointing at a removed class or subject).
+  let listRequests: ElementRequest[] = lists;
+  if (lists.length > 1) {
+    const ops: WriteOp<Row>[] = [];
+    const parts: { sliceKey: FoundationKey; collection: string }[] = [];
+    for (const r of lists) for (const op of r.ops) {
+      ops.push(op);
+      parts.push({ sliceKey: r.sliceKey, collection: r.collection });
+    }
+    listRequests = [{ sliceKey: lists[0].sliceKey, collection: MASTERS_BATCH_PATH, kind: "batch", ops, parts }];
+  }
+  return { ok: true, requests: [...listRequests, ...objects], staff, rest };
 }
 
 /** Apply link changes to a member's stored link list (the record as read just now). */

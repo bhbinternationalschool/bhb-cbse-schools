@@ -12,9 +12,13 @@
  *  4. guardFoundationListsOverwrite: the old path may not remove > 1 element.
  */
 import assert from "node:assert/strict";
-import { applyStaffLinkChange, MAX_REMOVALS, planMastersElementCommit } from "./mastersElementPlan";
+import { applyStaffLinkChange, MASTERS_BATCH_PATH, MAX_REMOVALS, planMastersElementCommit } from "./mastersElementPlan";
+import { bridgeMastersDeskAfterWrite, mastersDeskBridgeSettled } from "./mastersDeskBridge";
+import { objectDraftStep } from "@/components/masters/useObjectDraft";
+import { bumpSeriesOnServer } from "@/lib/numberSeries";
 import {
   HOLD_MS,
+  SEND_TIMEOUT_MS,
   answerHolds,
   pendingAfterAnswer,
   pendingAfterSave,
@@ -83,12 +87,13 @@ function main(): void {
       sections: [...served.sections, { id: "s2", classId: "c2", name: "A" }, { id: "s3", classId: "c2", name: "B" }],
     };
     const p = ok(planMastersElementCommit({ shown: served, next, served }));
-    assert.deepEqual(p.requests.map((r) => r.collection), ["masters.classes", "masters.sections"]);
-    assert.deepEqual(p.requests[1].ops.map((o) => [o.op, o.id, o.base]), [["upsert", "s2", null], ["upsert", "s3", null]]);
-    console.log("  ✓ new class + sections: classes before sections, new elements on base null");
+    assert.deepEqual(p.requests.map((r) => r.collection), [MASTERS_BATCH_PATH], "one all-or-none batch");
+    assert.deepEqual(p.requests[0].parts?.map((x) => x.collection), ["masters.classes", "masters.sections", "masters.sections"]);
+    assert.deepEqual(p.requests[0].ops.map((o) => [o.op, o.id, o.base]), [["upsert", "c2", null], ["upsert", "s2", null], ["upsert", "s3", null]]);
+    console.log("  ✓ new class + sections: one batch, classes before sections, new elements on base null");
   }
 
-  /* ── 1c. Removals: one per request; the class before its links ── */
+  /* ── 1c. Removals of a cascade: one batch, the class before its links ── */
   {
     const next = {
       ...served,
@@ -105,17 +110,12 @@ function main(): void {
     const served2 = { ...served, classes: shown.classes };
     const next2 = { ...shown, classes: served.classes, classSubjects: served.classSubjects.filter((l) => l.id === "l4") };
     const p = ok(planMastersElementCommit({ shown, next: next2, served: served2 }));
+    assert.equal(p.requests.length, 1);
     assert.deepEqual(
-      p.requests.map((r) => [r.collection, r.ops.map((o) => `${o.op}:${o.id}:${o.base}`).join(",")]),
-      [
-        ["masters.classes", "delete:c9:1"],
-        ["masters.class-subjects", "delete:l1:1"],
-        ["masters.class-subjects", "delete:l2:1"],
-        ["masters.class-subjects", "delete:l3:1"],
-      ],
+      p.requests[0].ops.map((o, i) => `${p.requests[0].parts?.[i]?.collection}:${o.op}:${o.id}:${o.base}`),
+      ["masters.classes:delete:c9:1", "masters.class-subjects:delete:l1:1", "masters.class-subjects:delete:l2:1", "masters.class-subjects:delete:l3:1"],
     );
-    for (const r of p.requests) assert.ok(r.ops.filter((o) => o.op === "delete").length <= 1, "≤ 1 removal per request");
-    console.log("  ✓ removals: one per request, parents first; emptying a list refused");
+    console.log("  ✓ a cascade's removals: one all-or-none batch, parents first; emptying a list refused");
   }
 
   /* ── 1d. Too many removals at once ── */
@@ -245,7 +245,111 @@ function main(): void {
     console.log("  ✓ old whole-book path: > 1 removal from a Foundation list (or emptying one) refused");
   }
 
-  console.log("mastersElementPlan.selftest.ts: all passed");
+  /* ── 5. (review) Objects: the form's LOADED stamp is the base ── */
+  {
+    // A loaded the profile at stamp S1 and typed; B saved (S2). A's save must be on S1 → a conflict, not a revert.
+    const shown = { schoolProfile: { name: "BHB", website: "b.example" } };
+    const next = { schoolProfile: { name: "BHB (typed)", website: "a-old.example" } };
+    const p = ok(planMastersElementCommit({ shown, next, served: shown, stamps: { schoolProfile: "S2" }, objectBases: { schoolProfile: "S1" } }));
+    assert.equal(String(p.requests[0].ops[0].base), "S1", "the stamp the form was loaded at");
+    // The form's draft: typing survives a newer value and keeps its base; a clean form follows; own save moves the base.
+    let st = { draft: { v: 1 }, loaded: { v: 1 }, base: "S1" as string | undefined };
+    st = { ...st, draft: { v: 5 } }; // typing
+    st = objectDraftStep(st, { v: 2 }, "S2"); // B's save arrives
+    assert.deepEqual([st.draft, st.base], [{ v: 5 }, "S1"], "typing kept, base kept");
+    let clean = { draft: { v: 1 }, loaded: { v: 1 }, base: "S1" as string | undefined };
+    clean = objectDraftStep(clean, { v: 2 }, "S2");
+    assert.deepEqual([clean.draft, clean.base], [{ v: 2 }, "S2"], "a clean form follows");
+    let own = { draft: { v: 7 }, loaded: { v: 1 }, base: "S1" as string | undefined };
+    own = objectDraftStep(own, { v: 7 }, "S3"); // its own save comes back
+    assert.deepEqual([own.draft, own.base], [{ v: 7 }, "S3"], "own save moves the base on");
+    console.log("  ✓ objects: saved on the stamp the form was loaded at; typing keeps its base");
+  }
+
+  /* ── 6. (review) A cascade is ONE all-or-none batch; 14 links fit ── */
+  {
+    const links = Array.from({ length: 14 }, (_, i) => ({ id: `cl${i}`, classId: "cz", subjectId: `s${i}`, _rev: 1 }));
+    const book = { classes: [{ id: "c1", name: "I", _rev: 1 }, { id: "cz", name: "ZZ", _rev: 2 }], classSubjects: [...links, { id: "keep", classId: "c1", subjectId: "s0", _rev: 1 }] };
+    const next = { classes: [book.classes[0]], classSubjects: [book.classSubjects[14]] };
+    const p = ok(planMastersElementCommit({ shown: book, next, served: book }));
+    assert.equal(p.requests.length, 1, "one request");
+    const r = p.requests[0];
+    assert.equal(r.kind, "batch");
+    assert.equal(r.collection, MASTERS_BATCH_PATH);
+    assert.equal(r.ops.length, 15);
+    assert.deepEqual(r.parts?.map((x) => x.collection).filter((c, i, a) => a.indexOf(c) === i), ["masters.classes", "masters.class-subjects"]);
+    // A class with two new sections: one batch too (both or neither).
+    const add = ok(planMastersElementCommit({ shown: served, next: { ...served, classes: [...served.classes, { id: "c2", name: "II" }], sections: [...served.sections, { id: "s2", classId: "c2", name: "A" }] }, served }));
+    assert.deepEqual(add.requests.map((x) => x.kind), ["batch"]);
+    // One list, one removal: still its own route.
+    const one = ok(planMastersElementCommit({ shown: book, next: { ...book, classSubjects: book.classSubjects.slice(1) }, served: book }));
+    assert.deepEqual(one.requests.map((x) => [x.kind, x.collection]), [["slice", "masters.class-subjects"]]);
+    console.log("  ✓ a cascade (class + 14 links) is one all-or-none batch; single removals keep their route");
+  }
+
+  /* ── 7. (review) Overlay: a save that never answers is given up ── */
+  {
+    const p: PendingElement = { sliceKey: "subjects", id: "eng", kind: "slice", value: { id: "eng" }, revision: "", saveId: 9, savedAt: 0, sentAt: 1000 };
+    assert.equal(pendingAfterAnswer([p], {}, null, 1000 + SEND_TIMEOUT_MS - 1).length, 1);
+    assert.equal(pendingAfterAnswer([p], {}, null, 1000 + SEND_TIMEOUT_MS + 1).length, 0);
+    console.log("  ✓ an entry whose request never answers goes after SEND_TIMEOUT_MS");
+  }
+}
+
+async function asyncChecks(): Promise<void> {
+  /* ── 8. (review) Number series bump: retried once, a failure is said ── */
+  {
+    let calls = 0;
+    const said: string[] = [];
+    const flaky = (async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("network down");
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as unknown as typeof fetch;
+    assert.equal(await bumpSeriesOnServer("RECEIPT", "Fee receipt", 12, undefined, { post: flaky, say: (m) => said.push(m) }), true);
+    assert.equal(calls, 2, "retried once");
+    calls = 0;
+    const refused = (async () => {
+      calls += 1;
+      return new Response(JSON.stringify({ ok: false, message: "too far ahead" }), { status: 409 });
+    }) as unknown as typeof fetch;
+    assert.equal(await bumpSeriesOnServer("RECEIPT", "Fee receipt", 9999, undefined, { post: refused, say: (m) => said.push(m) }), false);
+    assert.equal(calls, 1, "a refusal is not retried");
+    assert.match(said[0] ?? "", /Fee receipt: the next number was not moved past 9999 \(too far ahead\)/);
+    console.log("  ✓ series bump: one retry on a blink; a refusal or a standing failure is said on screen");
+  }
+
+  /* ── 9. (review) Concurrent desk re-reads share one follow-up ── */
+  {
+    let hydrates = 0;
+    let release: () => void = () => undefined;
+    const deps = {
+      reset: () => undefined,
+      hydrate: () =>
+        new Promise<boolean>((res) => {
+          hydrates += 1;
+          release = () => res(true);
+        }),
+    };
+    const a = bridgeMastersDeskAfterWrite(deps);
+    const b = bridgeMastersDeskAfterWrite(deps);
+    const c = bridgeMastersDeskAfterWrite(deps);
+    assert.equal(hydrates, 1);
+    release();
+    await a;
+    await new Promise((r) => setTimeout(r, 0));
+    release();
+    await Promise.all([b, c]);
+    await mastersDeskBridgeSettled();
+    assert.equal(hydrates, 2, "three writes → the running read + ONE follow-up");
+    console.log("  ✓ desk re-reads: writes during a re-read share one follow-up");
+  }
 }
 
 main();
+asyncChecks()
+  .then(() => console.log("mastersElementPlan.selftest.ts: all passed"))
+  .catch((e: unknown) => {
+    console.error(e);
+    process.exit(1);
+  });

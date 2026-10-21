@@ -29,6 +29,8 @@ import {
   type NumberSeries,
 } from "@/lib/foundationMasters";
 import { formatSeriesNumber } from "@/lib/numberSeries";
+import { useObjectDraft } from "@/components/masters/useObjectDraft";
+import type { MastersCommitOpts } from "@/lib/data/client/mastersElementPlan";
 import {
   UP_HOLIDAY_CALENDAR,
   UP_HOLIDAY_CALENDAR_SESSION,
@@ -80,7 +82,7 @@ import { forgetSchoolIdentity } from "@/lib/schoolIdentity";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import type { RowAction } from "@/components/ui/erp-grid";
 
-type Commit = (s: MastersState, msg?: string) => void;
+type Commit = (s: MastersState, msg?: string, opts?: MastersCommitOpts) => void;
 
 export function CompletenessDashboard({
   state,
@@ -310,18 +312,14 @@ export function SchoolProfilePanel({
   commit: Commit;
 }) {
   const p = state.schoolProfile;
-  const [draft, setDraft] = useState(p);
-  const [schoolStep, setSchoolStep] = useState<SchoolStep>("profile");
   // The tables show the SAVED profile (the working form says "save to update
   // tables above"). A profile saved elsewhere reaches this open panel with
   // the next masters answer (data-layer 2.2c): the form follows it too, unless
-  // it holds unsaved typing — then the typing stays.
-  const [loaded, setLoaded] = useState(p);
-  useEffect(() => {
-    if (JSON.stringify(p) === JSON.stringify(loaded)) return;
-    setDraft((d) => (JSON.stringify(d) === JSON.stringify(loaded) ? p : d));
-    setLoaded(p);
-  }, [p, loaded]);
+  // it holds unsaved typing — then the typing stays, and its save is based on
+  // the stamp it was LOADED at, so it conflicts instead of putting the other
+  // person's values back (useObjectDraft).
+  const { draft, setDraft, base: profileBase } = useObjectDraft("schoolProfile", p);
+  const [schoolStep, setSchoolStep] = useState<SchoolStep>("profile");
 
   function set<K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -557,6 +555,7 @@ export function SchoolProfilePanel({
                 commit(
                   { ...state, schoolProfile: draft },
                   "School profile saved",
+                  { objectBases: { schoolProfile: profileBase } },
                 );
               }}
             >

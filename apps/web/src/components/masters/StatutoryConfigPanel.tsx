@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo } from "react";
+import { useObjectDraft } from "@/components/masters/useObjectDraft";
+import type { MastersCommitOpts } from "@/lib/data/client/mastersElementPlan";
 import {
   MastersTableCard,
   MastersTablesRow,
@@ -13,7 +15,7 @@ import {
   type StatutoryPenaltySlab,
 } from "@/lib/foundationMasters";
 
-type Commit = (s: MastersState, msg?: string) => void;
+type Commit = (s: MastersState, msg?: string, opts?: MastersCommitOpts) => void;
 
 function Field({
   label,
@@ -122,8 +124,9 @@ export function StatutoryConfigPanel({
   state: MastersState;
   commit: Commit;
 }) {
-  const config = normalizeStatutoryConfig(state.statutoryConfig);
-  const [draft, setDraft] = useState<StatutoryEstablishmentConfig>(config);
+  const config = useMemo(() => normalizeStatutoryConfig(state.statutoryConfig), [state.statutoryConfig]);
+  // The draft and the stamp it was loaded at: a save over a newer setup conflicts (useObjectDraft).
+  const { draft, setDraft, base } = useObjectDraft<StatutoryEstablishmentConfig>("statutoryConfig", config);
 
   function set<K extends keyof StatutoryEstablishmentConfig>(
     key: K,
@@ -270,6 +273,7 @@ export function StatutoryConfigPanel({
               commit(
                 { ...state, statutoryConfig: normalizeStatutoryConfig(draft) },
                 "Statutory setup saved",
+                { objectBases: { statutoryConfig: base } },
               )
             }
           >

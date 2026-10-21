@@ -33,21 +33,38 @@ async function pageCopyDeps(): Promise<MastersDeskBridgeDeps | null> {
 }
 
 let inFlight: Promise<boolean> | null = null;
+let queued: Promise<boolean> | null = null;
 
-/** Re-read the masters desk into this tab (its stamps become the old save's base). Never throws. */
+async function rereadOnce(deps: MastersDeskBridgeDeps | null | undefined): Promise<boolean> {
+  try {
+    const d = deps === undefined ? await pageCopyDeps() : deps;
+    if (!d) return false;
+    d.reset();
+    await d.hydrate();
+    return true;
+  } catch (e) {
+    console.warn("[masters-desk-bridge] the desk could not be re-read after a write", e);
+    return false;
+  }
+}
+
+/**
+ * Re-read the masters desk into this tab (its stamps become the old save's
+ * base). Never throws. Writes that land while a re-read runs share ONE
+ * follow-up re-read (it must start after them), never one each.
+ */
 export function bridgeMastersDeskAfterWrite(deps?: MastersDeskBridgeDeps | null): Promise<boolean> {
-  const run = (async () => {
-    try {
-      const d = deps === undefined ? await pageCopyDeps() : deps;
-      if (!d) return false;
-      d.reset();
-      await d.hydrate();
-      return true;
-    } catch (e) {
-      console.warn("[masters-desk-bridge] the desk could not be re-read after a write", e);
-      return false;
+  if (inFlight) {
+    if (!queued) {
+      const after = inFlight;
+      queued = after.then(() => {
+        queued = null;
+        return bridgeMastersDeskAfterWrite(deps);
+      });
     }
-  })();
+    return queued;
+  }
+  const run = rereadOnce(deps);
   inFlight = run;
   void run.finally(() => {
     if (inFlight === run) inFlight = null;
@@ -55,7 +72,7 @@ export function bridgeMastersDeskAfterWrite(deps?: MastersDeskBridgeDeps | null)
   return run;
 }
 
-/** Resolves once no re-read is running — an old save waits for it, so it is based on the new stamps. */
+/** Resolves once no re-read is running or queued — an old save waits for it, so it is based on the new stamps. */
 export async function mastersDeskBridgeSettled(): Promise<void> {
-  while (inFlight) await inFlight;
+  while (inFlight || queued) await (queued ?? inFlight);
 }

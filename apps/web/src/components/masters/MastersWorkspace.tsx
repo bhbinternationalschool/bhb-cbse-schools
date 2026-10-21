@@ -49,7 +49,7 @@ import {
 } from "@/components/masters/mastersElementPending";
 import { useMasters } from "@/lib/data/client/hooks";
 import { mastersDeskBridgeSettled } from "@/lib/data/client/mastersDeskBridge";
-import { planMastersElementCommit } from "@/lib/data/client/mastersElementPlan";
+import { planMastersElementCommit, type MastersCommitOpts } from "@/lib/data/client/mastersElementPlan";
 import { useMastersElementWrites } from "@/lib/data/client/writeHooks";
 import {
   answerHoldsOverlay,
@@ -278,7 +278,9 @@ export function MastersWorkspace() {
       for (const k of overlay.keys) b[k] = o[k];
       base = b as unknown as MastersState;
     }
-    return withPending(base, pending);
+    // Rows laid on from a save are the editor's own (normalised) elements, but
+    // a dropped key travels as null: normalise the result like every answer.
+    return pending.length ? normalizeMastersRead(withPending(base, pending)) : base;
   }, [overlay, read, pending]);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -311,9 +313,12 @@ export function MastersWorkspace() {
     if (!pendingRef.current.length) return;
     const left = pendingAfterAnswer(pendingRef.current, view?.masters, view?.stamps, Date.now());
     if (left !== pendingRef.current) setPending(left);
-    if (!left.some((p) => p.savedAt > 0 && p.kind !== "staff")) return;
+    const unproven = left.some((p) => p.savedAt > 0 && p.kind !== "staff");
+    // A save still in flight is re-checked too (an answer that never comes
+    // is given up after SEND_TIMEOUT_MS), without asking for the view.
+    if (!unproven && !left.some((p) => p.savedAt === 0)) return;
     const t = window.setTimeout(() => {
-      void retryMasters();
+      if (unproven) void retryMasters();
       setPendingTick((n) => n + 1);
     }, 2_500);
     return () => window.clearTimeout(t);
@@ -403,7 +408,7 @@ export function MastersWorkspace() {
     window.setTimeout(() => setNotice((n) => (n === msg ? null : n)), ms);
   }
 
-  function commit(next: MastersState, msg?: string) {
+  function commit(next: MastersState, msg?: string, opts?: MastersCommitOpts) {
     if (readOnly) {
       flash("Selected session is closed — masters are read-only", 2800);
       return;
@@ -415,6 +420,7 @@ export function MastersWorkspace() {
       served: view?.masters,
       stamps: view?.stamps,
       revisionOf: (key, id) => pendingRevision(pendingRef.current, key, id),
+      objectBases: opts?.objectBases,
     });
     if (!plan.ok) {
       flash(plan.reason, 5000);
@@ -473,18 +479,21 @@ export function MastersWorkspace() {
     if (elementWork) {
       const saveId = ++saveSeq.current;
       const sent: PendingElement[] = [];
+      const sentAt = Date.now();
       for (const r of plan.requests) {
-        for (const op of r.ops) {
+        r.ops.forEach((op, i) => {
+          const sliceKey = r.kind === "batch" ? (r.parts?.[i]?.sliceKey ?? r.sliceKey) : r.sliceKey;
           sent.push({
-            sliceKey: r.sliceKey,
+            sliceKey,
             id: op.id,
-            kind: r.kind,
+            kind: r.kind === "object" ? "object" : "slice",
             value: op.op === "delete" ? null : ((r.kind === "object" ? (next as unknown as Record<string, unknown>)[r.sliceKey] : (op as { row: Record<string, unknown> }).row) as Record<string, unknown>),
             revision: "",
             saveId,
             savedAt: 0,
+            sentAt,
           });
-        }
+        });
       }
       for (const c of plan.staff) {
         const member = (next.staff ?? []).find((s) => s.id === c.staffId) as unknown as Record<string, unknown> | undefined;
@@ -496,6 +505,7 @@ export function MastersWorkspace() {
           revision: "",
           saveId,
           savedAt: 0,
+          sentAt,
         });
       }
       setPending([...pendingRef.current, ...sent]);
@@ -506,23 +516,21 @@ export function MastersWorkspace() {
         // bridge); masters elements once an answer serves them.
         after = after.filter((p) => !(p.saveId === saveId && p.kind === "staff"));
         if (outcome.ok) {
-          const versions: Record<string, string> = {};
-          plan.requests.forEach((r, i) => {
-            for (const [id, rev] of Object.entries(outcome.versions[i] ?? {})) versions[id] = rev;
-          });
-          after = pendingAfterSave(after, saveId, { ok: true, versions }, now);
+          after = pendingAfterSave(after, saveId, { ok: true, versions: outcome.versions }, now);
         } else {
           // What landed before the failure stays held until served; the rest
           // was not stored and goes now.
           const landed = new Set<string>();
-          const versions: Record<string, string> = {};
-          plan.requests.slice(0, outcome.failedAt).forEach((r, i) => {
-            for (const op of r.ops) landed.add(`${r.sliceKey}|${op.id}`);
-            for (const [id, rev] of Object.entries(outcome.versions[i] ?? {})) versions[id] = rev;
+          plan.requests.slice(0, Math.max(0, outcome.failedAt)).forEach((r) => {
+            r.ops.forEach((op, i) => landed.add(`${r.kind === "batch" ? (r.parts?.[i]?.sliceKey ?? r.sliceKey) : r.sliceKey}|${op.id}`));
           });
           after = after
             .filter((p) => p.saveId !== saveId || landed.has(`${p.sliceKey}|${p.id}`))
-            .map((p) => (p.saveId === saveId ? { ...p, revision: p.value === null ? "deleted" : String(versions[p.id] ?? ""), savedAt: now } : p));
+            .map((p) =>
+              p.saveId === saveId
+                ? { ...p, revision: p.value === null ? "deleted" : String(outcome.versions[`${p.sliceKey}|${p.id}`] ?? ""), savedAt: now }
+                : p,
+            );
         }
         setPending(after);
         done(outcome.ok, outcome.ok ? undefined : `Not saved — ${outcome.message}`);
