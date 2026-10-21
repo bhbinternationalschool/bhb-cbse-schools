@@ -2,7 +2,8 @@
 
 import { useMemo, useRef } from "react";
 import type { MastersState } from "@/lib/masters";
-import { useMasters } from "@/lib/data/client/hooks";
+import { useMasters, useMastersBuiltFrom } from "@/lib/data/client/hooks";
+import type { Versions } from "@/lib/data/client/queryKernel";
 import { screenMastersOf } from "@/lib/data/client/mastersBridge";
 import { useAccessData } from "@/components/shell/useAccessData";
 
@@ -18,6 +19,11 @@ export type ScreenMasters = {
   /** The masters read failed — render <QueryError what=… error={error} retry={retry} />. */
   error: Error | null;
   retry: () => unknown;
+  /**
+   * The erp_versions the shown answer was built from (null = not proven
+   * current). The Masters editor compares it with its own save's revision.
+   */
+  builtFrom: Versions | null;
 };
 
 /**
@@ -51,7 +57,9 @@ export function useScreenMasters(opts: { enabled?: boolean } = {}): ScreenMaster
   // A failed BACKGROUND refetch keeps the last good answer on screen (React
   // Query keeps `data`); only a read that never produced one is an error.
   const failed = q.isError && q.data === undefined;
+  const builtFrom = useMastersBuiltFrom(q.dataUpdatedAt);
   return {
+    builtFrom: failed ? null : builtFrom,
     masters: failed ? null : masters,
     scope: q.data?.scope ?? null,
     error: failed ? q.error : null,

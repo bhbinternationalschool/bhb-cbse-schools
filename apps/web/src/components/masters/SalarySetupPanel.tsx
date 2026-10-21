@@ -9,7 +9,9 @@ import {
   type StaffCategory,
   type StaffStream,
 } from "@/lib/foundationMasters";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import type { MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   buildStructureLinesFromPack,
   cloneSalaryStructure,
@@ -74,13 +76,14 @@ const HEAD_KINDS: { value: SalaryHeadKind; label: string }[] = [
 
 export function SalarySetupPanel() {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1h: the server's book (statutory setup, designations) + the
+  // access copy's full staff records (salary links) — no mount-time page-copy read.
+  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [state, setState] = useState<SalarySetupState | null>(null);
   const [tab, setTab] = useState<SalTab>("settings");
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    setMasters(loadMasters());
     setState(loadSalarySetup());
     // Pull the server copy (salary_setup_state) and re-read; the login-time
     // cache wipe means the local copy is empty on a fresh session.
@@ -119,6 +122,9 @@ export function SalarySetupPanel() {
     window.setTimeout(() => setNotice(null), 2400);
   }
 
+  if (!masters && mastersError) {
+    return <QueryError what="the school's statutory setup and staff" error={mastersError} retry={retryMasters} />;
+  }
   if (!state || !masters) {
     return <p className="text-sm text-[var(--muted)]">Loading salary setup…</p>;
   }
@@ -129,6 +135,28 @@ export function SalarySetupPanel() {
         Salary setup is Admin / Principal only. Accounts cannot view or edit
         salary structures (§6i.4).
       </p>
+    );
+  }
+
+  if (mastersScope === "teaching") {
+    // The teaching subset withholds statutoryConfig: every amount below would
+    // be computed from default EPF/ESIC rates, not the school's — refuse.
+    // Deliberately a refusal, not main's silent fallback to default rates: a
+    // salary worked out on rates that are not the school's is wrong money.
+    return (
+      <div
+        role="alert"
+        className="rounded-xl border border-[rgba(180,35,24,0.25)] bg-[rgba(180,35,24,0.06)] px-4 py-3 text-sm text-[var(--brand-deep)]"
+      >
+        <p className="font-semibold">Salary setup needs the Masters · View permission.</p>
+        <p className="mt-1">
+          The school&apos;s EPF and ESIC rates are part of Masters, and your role is not allowed to see Masters, so no
+          salary amount is worked out here — working it out on default rates could give wrong pay.
+        </p>
+        <p className="mt-1">
+          Ask the Principal or Admin to give your role <strong>Masters · View</strong> (Masters → Roles &amp; permissions).
+        </p>
+      </div>
     );
   }
 
