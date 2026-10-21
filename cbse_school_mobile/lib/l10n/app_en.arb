@@ -1591,6 +1591,187 @@
   "schoolChatAsParent": "Writing as the parent",
   "schoolChatGroupNoMessages": "Group — no messages yet",
   "schoolChatParentInbox": "Parent messages to the class teacher",
+  "homeModuleGames": "Games",
+  "gamesTitle": "Learning games",
+  "gamesPlayedToday": "Played today: {played} of {cap} min",
+  "@gamesPlayedToday": {
+    "placeholders": {
+      "played": {
+        "type": "String"
+      },
+      "cap": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesTimeLeft": "{minutes} min left today",
+  "@gamesTimeLeft": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesStarsToday": "Stars today",
+  "gamesStarsWeek": "This week",
+  "gamesStarsTotal": "All time",
+  "gamesLast7Days": "Last 7 days",
+  "gamesDayMinutes": "{minutes} min",
+  "@gamesDayMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesCompetitions": "Competitions",
+  "gamesPlay": "Play",
+  "gamesPlayed": "Played",
+  "gamesOpensAt": "Opens {time}",
+  "@gamesOpensAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesClosesAt": "Open till {time}",
+  "@gamesClosesAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesLeaderboard": "Leaderboard",
+  "gamesPractice": "Practice",
+  "gamesNumberDash": "Number dash",
+  "gamesNumberDashBlurb": "As many as you can in 60 seconds",
+  "gamesCounting": "Count the pictures",
+  "gamesCountingBlurb": "How many can you see?",
+  "gamesQuestions": "{count} questions",
+  "@gamesQuestions": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesWholeSubject": "Whole subject",
+  "gamesNoQuizYet": "No quizzes for this class yet — the teachers are adding questions.",
+  "gamesRefusedNight": "Games rest at night — come back in the morning.",
+  "gamesRefusedSchoolHours": "It is school time. Practice opens after school; a competition your teacher starts can be played now.",
+  "gamesRefusedDailyCap": "Today's game time is used up. See you tomorrow!",
+  "gamesRefusedDisabled": "Games are switched off by the school.",
+  "gamesRefusedClosed": "This competition is not open now.",
+  "gamesRefusedAlreadyPlayed": "You have already played this competition.",
+  "gamesRefusedAlreadyPlaying": "A game is already being played on another phone.",
+  "gamesQuestionOf": "Question {n} of {total}",
+  "@gamesQuestionOf": {
+    "placeholders": {
+      "n": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesSecondsLeft": "{seconds}s",
+  "@gamesSecondsLeft": {
+    "placeholders": {
+      "seconds": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesRight": "Right!",
+  "gamesWrong": "Not quite",
+  "gamesAnswerSaved": "Answer saved",
+  "gamesTimeUp": "Time's up!",
+  "gamesResultTitle": "Well played!",
+  "gamesResultScore": "{correct} of {total} right",
+  "@gamesResultScore": {
+    "placeholders": {
+      "correct": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesStarsEarned": "{stars} stars",
+  "@gamesStarsEarned": {
+    "placeholders": {
+      "stars": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesReview": "Answers",
+  "gamesDone": "Done",
+  "gamesYourAnswer": "Your answer: {answer}",
+  "@gamesYourAnswer": {
+    "placeholders": {
+      "answer": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesNotAnswered": "Not answered",
+  "gamesRightAnswer": "Right answer: {answer}",
+  "@gamesRightAnswer": {
+    "placeholders": {
+      "answer": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesAnswersAfterClose": "The right answers appear when the competition closes ({time}).",
+  "@gamesAnswersAfterClose": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesClassBoard": "{label} this week",
+  "@gamesClassBoard": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesSchoolBoard": "Whole school this week",
+  "gamesRightPerPlayer": "{avg} right per player",
+  "@gamesRightPerPlayer": {
+    "placeholders": {
+      "avg": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesPlayersCount": "{count} played",
+  "@gamesPlayersCount": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesNobodyYet": "Nobody has finished yet.",
+  "gamesPlayingNow": "{count} playing now",
+  "@gamesPlayingNow": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "gamesHealthyNote": "Stars are for learning. Games rest during school hours and after 9 pm.",
+  "gamesSeeLeaderboard": "See the leaderboard",
   "scCallFamily": "Call family",
   "scMessageFamily": "Message family",
   "scAppChat": "App chat with the family",
