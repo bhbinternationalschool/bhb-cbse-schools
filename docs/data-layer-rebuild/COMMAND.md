@@ -1244,7 +1244,7 @@ one-line change to `_sis_staff_sensitive_keys()`. Masters exports that dump whol
 - **A staff write never wipes the record:** `profile` is one jsonb column and the kernel patches columns, so an
   upsert's profile keys are laid on the STORED profile (a key is cleared by sending it blank, never by leaving it
   out) — without this, a profile carrying only the changed keys replaced the whole record (found on the stack: an
-  edit sending `{fullName, mobile}` wiped 67 other keys; fixed and asserted key by key).
+  edit sending `{fullName, mobile}` replaced a 69-key profile with those keys plus the protected ones; fixed and asserted key by key).
 - **Staff collections** (`lib/data/registry.ts`): `sis.staff` (soft delete; `staffRecords`), `sis.departments`,
   `sis.designations` (hard delete) — module `staff`, view/edit `staff`; a delete of any of the three is a decision:
   `staff · delete` (new `ApprovalRule.action`; the approval gate asked only `approve` before). `POST /api/data/sis.staff`:
