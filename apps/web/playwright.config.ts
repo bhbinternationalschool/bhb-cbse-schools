@@ -65,7 +65,7 @@ export default defineConfig<GateOptions>({
   projects: [
     {
       name: "desktop",
-      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay|parent-web-tabs|fuel-per-bus-range|certificates-dues-gate|staff-editor-save|print-signatures|staff-sensitive-screens)\.spec\.ts/,
+      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay|masters-element-writes|parent-web-tabs|fuel-per-bus-range|certificates-dues-gate|staff-editor-save|print-signatures|staff-sensitive-screens)\.spec\.ts/,
       use: { ...desktop },
     },
     {
@@ -129,7 +129,7 @@ export default defineConfig<GateOptions>({
     {
       // Writes to the stack, so it runs after everything that reads it.
       name: "propagation",
-      testMatch: /(propagation|student-upgrade|masters-overlay|staff-editor-save)\.spec\.ts/,
+      testMatch: /(propagation|student-upgrade|masters-overlay|masters-element-writes|staff-editor-save)\.spec\.ts/,
       dependencies: ["desktop", "phone-375-cpu4x"],
       use: { ...desktop },
     },
