@@ -130,13 +130,27 @@ test.afterAll(async ({ browser }) => {
   }
 });
 
-async function openCertificate(page: Page, certNo: string, issueId: string) {
+async function openCertificate(page: Page, certNo: string, issueId: string, olderMonth?: string) {
   await page.goto("/certificates");
+  // The "New here?" helper floats over the preview; put it away for the screenshots.
+  await page.getByRole("button", { name: /^Dismiss$/ }).first().click({ timeout: 5_000 }).catch(() => undefined);
+  if (olderMonth) {
+    // Recent issues opens on the latest month; older months are folded.
+    const month = page.getByRole("button", { name: new RegExp(olderMonth) }).first();
+    await month.waitFor({ state: "visible", timeout: 60_000 });
+    await month.click();
+  }
   const row = page.getByRole("button", { name: new RegExp(certNo) }).first();
   await row.waitFor({ state: "visible", timeout: 60_000 });
   await row.click();
   const sheet = page.locator(`#certificate-${issueId}`);
   await sheet.waitFor({ state: "visible" });
+  // The floating assistant bubble sits over the sheet's corner in a screenshot (not on paper).
+  await page.evaluate(() => {
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>("body *"))) {
+      if (getComputedStyle(el).position === "fixed" && /drag me/i.test(el.textContent || "")) el.style.visibility = "hidden";
+    }
+  });
   return sheet;
 }
 
@@ -197,7 +211,7 @@ test("a certificate issued by someone else: the principal line stays blank", asy
 test("a TC: class teacher, checked-by and principal each sign their own line", async ({ browser }) => {
   const { context, page } = await openAs(browser, "office");
   try {
-    const sheet = await openCertificate(page, "E2E-TC-3", "e2e_cert_3");
+    const sheet = await openCertificate(page, "E2E-TC-3", "e2e_cert_3", "September 2026");
     await expect(sheet.locator(`[data-signature-of="${OFFICE.id}"] img`)).toBeVisible({ timeout: 15_000 });
     await expect.poll(async () => (await signaturesOn(sheet)).every((s) => s.decoded)).toBe(true);
     const sigs = await signaturesOn(sheet);
@@ -206,7 +220,10 @@ test("a TC: class teacher, checked-by and principal each sign their own line", a
     expect(sigs.find((s) => s.staffId === OFFICE.id)!.line).toMatch(/Checked by/);
     expect(sigs.find((s) => s.staffId === PRINCIPAL.id)!.line).toMatch(/Signature of Principal/);
     await page.emulateMedia({ media: "print" });
-    await sheet.screenshot({ path: path.join(SHOTS, "tc-signed-desktop-light-print.png") });
+    // The TC is taller than the preview pane: its foot, where the signing lines are.
+    const foot = sheet.getByText("Signature of Principal").locator("xpath=../..");
+    await foot.scrollIntoViewIfNeeded();
+    await foot.screenshot({ path: path.join(SHOTS, "tc-signed-desktop-light-print.png") });
     await page.emulateMedia({ media: "screen" });
   } finally {
     await context.close();
@@ -241,9 +258,11 @@ test("nobody else reads a signature: signed out 401, a parent 403 (route and fil
     await context.close();
   }
   // The office (Certificates · view) gets it — as an embedded image.
-  const ok = await asStaff(browser, "office", (page) => page.request.get(`/api/v1/print/signatures?${q}`));
-  expect(ok.status()).toBe(200);
-  const body = (await ok.json()) as { data: { principal: { staffId: string; src: string } | null } };
+  const { status, body } = await asStaff(browser, "office", async (page) => {
+    const r = await page.request.get(`/api/v1/print/signatures?${q}`);
+    return { status: r.status(), body: (await r.json()) as { data: { principal: { staffId: string; src: string } | null } } };
+  });
+  expect(status).toBe(200);
   expect(body.data.principal?.staffId).toBe(PRINCIPAL.id);
   expect(body.data.principal?.src.startsWith("data:image/png;base64,")).toBe(true);
 });
