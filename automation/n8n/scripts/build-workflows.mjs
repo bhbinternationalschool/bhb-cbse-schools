@@ -3,8 +3,10 @@
  * Builds the importable n8n workflows in ../workflows from the charters in
  * ../charters. The JSON files are what the director imports; this script is
  * their source, so a charter edit is `node scripts/build-workflows.mjs` away
- * from the workflows, and the three files share one set of helpers (Claude
- * call + usage ledger, Supabase REST, WhatsApp through the ERP).
+ * from the workflows, and the files share one set of helpers (Claude call +
+ * usage ledger, Supabase REST, Telegram Bot API for the director and the
+ * principal, WhatsApp through the ERP as the fallback before the bot token
+ * is set).
  *
  * No dependencies. Node 18+.
  */
@@ -244,6 +246,28 @@ function claudeRequest({ model, system, user, maxTokens, effort }) {
 }
 `;
 
+/* Telegram (api.telegram.org, plain HTTP — the token is $env.TELEGRAM_BOT_TOKEN,
+ * never an n8n credential, never in this repo). Internal messages go here
+ * once the token is set; the chat ids are the director's and the principal's. */
+const JS_TG = `
+const TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();
+const TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };
+function tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+// Telegram takes 4096 characters per message. Cut at a line break, so an
+// HTML tag or entity is never split; a single over-long line is cut hard.
+function tgChunks(text, max) {
+  max = max || 4096; const out = []; let rest = String(text || '');
+  while (rest.length > max) {
+    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;
+    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');
+  }
+  if (rest) out.push(rest);
+  return out;
+}
+function tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }
+function tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }
+`;
+
 const JS_DATES = `
 function istNow() { return new Date(Date.now() + 5.5 * 3600 * 1000); }
 function isoDate(d) { return d.toISOString().slice(0, 10); }
@@ -314,38 +338,50 @@ return ${each ? "{ json: out }" : "[{ json: out }]"};
 }
 
 /**
- * WhatsApp through the ERP. Each input item carries `$json.wa_text` and
- * `$json.wa_to` (array of 10-digit mobiles), optionally `wa_buttons`
- * ([{ id, title }], ≤ 3 — Meta reply buttons under the text) and, for an
- * approval request, `wa_approval` ({ draft_id, summary }). Free text (with
- * its buttons) first; when Meta's 24-hour window is closed the dispatch
- * result says so and the item is resent as a template — the approval
- * template (OFFICE_WA_APPROVAL_TEMPLATE, quick replies that carry
+ * An internal message item (what the chains below consume):
+ *   { text, to: ['director' | 'principal'...],
+ *     approval?: { draft_id, summary },   // a draft to approve or reject
+ *     tasks_button?: true }               // offer "📋 Open tasks" (Telegram)
+ *
+ * `internalChain` sends it by Telegram when TELEGRAM_BOT_TOKEN is set,
+ * else by WhatsApp through the ERP (`waChain`): Meta reply buttons
+ * "Approve n" / "Reject n" inside the 24-hour window; outside it the
+ * dispatch result says so and the item is resent as a template — the
+ * approval template (OFFICE_WA_APPROVAL_TEMPLATE, quick replies that carry
  * "Approve n" / "Reject n") for an approval, else OFFICE_WA_TEMPLATE.
+ * (`wa_text` / `wa_to` are still read for an older caller.)
  */
 function waChain(wf, prefix) {
   const build = code(
     wf,
     `${prefix}: build WhatsApp`,
     `
-const items = $input.all().map((i) => i.json).filter((j) => j && (j.wa_text || j.wa_to));
+// Telegram carries internal messages once the bot token is set (tgChain).
+if (String($env.TELEGRAM_BOT_TOKEN || '').trim()) return [];
+const ROLE_MOBILE = { director: $env.DIRECTOR_WA_MOBILE, principal: $env.PRINCIPAL_WA_MOBILE };
+const items = $input.all().map((i) => i.json).filter((j) => j && (j.text || j.wa_text));
 const ts = Date.now();
 const messages = []; const sources = [];
 items.forEach((src) => {
-  const to = [...new Set((src.wa_to || []).map((m) => String(m || '').replace(/\\D/g, '').slice(-10)).filter((m) => m.length === 10))];
-  const body = String(src.wa_text || '').slice(0, 4000);
+  const roles = Array.isArray(src.to) ? src.to : [];
+  const to = [...new Set([...roles.map((r) => ROLE_MOBILE[r]), ...(src.wa_to || [])].map((m) => String(m || '').replace(/\\D/g, '').slice(-10)).filter((m) => m.length === 10))];
+  const a = src.approval && src.approval.draft_id ? src.approval : null;
+  const id = a ? String(a.draft_id).replace(/\\D/g, '') : '';
+  let body = String(src.text || src.wa_text || '').trim();
+  if (a) body += '\\n\\nTap Approve or Reject — or reply APPROVE ' + id + ' / REJECT ' + id + '.';
+  body = body.slice(0, 4000);
   if (!to.length || !body) return;
-  const buttons = Array.isArray(src.wa_buttons) && src.wa_buttons.length ? src.wa_buttons.slice(0, 3) : null;
+  const buttons = a ? [{ id: 'approve-' + id, title: 'Approve ' + id }, { id: 'reject-' + id, title: 'Reject ' + id }] : null;
   const idx = sources.length;
-  sources.push({ idx, text: body, buttons, approval: src.wa_approval || null });
+  sources.push({ idx, text: body, buttons, approval: a });
   for (const mobile of to) {
-    const id = (n) => 'office-' + idx + '-' + n + '-' + ts + '-' + mobile;
-    if (!buttons) { messages.push({ mobile, body, urgent: true, messageId: id(0) }); continue; }
+    const mid = (n) => 'office-' + idx + '-' + n + '-' + ts + '-' + mobile;
+    if (!buttons) { messages.push({ mobile, body, urgent: true, messageId: mid(0) }); continue; }
     // Meta caps a reply-buttons body at 1024 characters. A longer draft goes
     // out whole as text, then a short message carries the buttons.
-    if (body.length <= 1000) { messages.push({ mobile, body, buttons, urgent: true, messageId: id(0) }); continue; }
-    messages.push({ mobile, body, urgent: true, messageId: id(0) });
-    messages.push({ mobile, body: String(src.wa_buttons_lead || 'Your decision on the draft above?').slice(0, 1000), buttons, urgent: true, messageId: id(1) });
+    if (body.length <= 1000) { messages.push({ mobile, body, buttons, urgent: true, messageId: mid(0) }); continue; }
+    messages.push({ mobile, body, urgent: true, messageId: mid(0) });
+    messages.push({ mobile, body: '✉️ Draft #' + id + ' above — your decision?', buttons, urgent: true, messageId: mid(1) });
   }
 });
 if (!messages.length) return [];
@@ -491,6 +527,73 @@ function switchOn(wf, name, field, values) {
 
 const TENANT = "{{ $env.OFFICE_TENANT_ID }}";
 
+/** One Telegram Bot API call per item: `{ tg_method, tg }` → POST. */
+function tgCall(wf, name, extra = {}) {
+  return wf.add(
+    name,
+    "n8n-nodes-base.httpRequest",
+    4.2,
+    {
+      method: "POST",
+      url: "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + $json.tg_method }}",
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: "Content-Type", value: "application/json" }] },
+      sendBody: true,
+      specifyBody: "json",
+      jsonBody: "={{ JSON.stringify($json.tg) }}",
+      options: { timeout: 30000 },
+    },
+    { onError: "continueRegularOutput", ...extra },
+  );
+}
+
+/**
+ * Telegram for the director and the principal (see the item shape above).
+ * HTML parse mode, the first line in bold, 4096-character chunks; an
+ * approval item gets the ✅ Approve / ❌ Reject inline keyboard
+ * (callback_data "approve:<id>" / "reject:<id>") on its last chunk, a
+ * `tasks_button` item the "📋 Open tasks" button. Does nothing until
+ * TELEGRAM_BOT_TOKEN is set.
+ */
+function tgChain(wf, prefix) {
+  const build = code(
+    wf,
+    `${prefix}: build Telegram`,
+    `${JS_TG}
+if (!TG_TOKEN) return [];
+const items = $input.all().map((i) => i.json).filter((j) => j && (j.text || j.wa_text));
+const out = [];
+for (const src of items) {
+  const chats = tgChatsFor(Array.isArray(src.to) && src.to.length ? src.to : ['director']);
+  const raw = String(src.text || src.wa_text || '').trim();
+  if (!chats.length || !raw) continue;
+  const nl = raw.indexOf('\\n');
+  const html = nl > 0 ? '<b>' + tgEscape(raw.slice(0, nl)) + '</b>' + tgEscape(raw.slice(nl)) : tgEscape(raw);
+  const a = src.approval && src.approval.draft_id ? src.approval : null;
+  const id = a ? String(a.draft_id).replace(/\\D/g, '') : '';
+  let keyboard = null;
+  if (a) keyboard = [[{ text: '✅ Approve', callback_data: 'approve:' + id }, { text: '❌ Reject', callback_data: 'reject:' + id }]];
+  else if (src.tasks_button) keyboard = [[{ text: '📋 Open tasks', callback_data: 'tasks' }]];
+  const chunks = tgChunks(html);
+  for (const chat_id of chats) chunks.forEach((text, i) => {
+    const tg = { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true };
+    if (keyboard && i === chunks.length - 1) tg.reply_markup = { inline_keyboard: keyboard };
+    out.push({ json: { tg_method: 'sendMessage', tg } });
+  });
+}
+return out;
+`,
+  );
+  wf.chain(build, tgCall(wf, `${prefix}: send Telegram`));
+  return build;
+}
+
+/** Internal message → Telegram when the bot token is set, else WhatsApp. */
+function internalChain(wf, prefix, from) {
+  wf.link(from, tgChain(wf, prefix));
+  wf.link(from, waChain(wf, prefix));
+}
+
 /* ═══════════════════════════════════════════════════════════════
    1. Receptionist
    ═══════════════════════════════════════════════════════════════ */
@@ -634,15 +737,15 @@ return { json: { row } };
     wf,
     "Build: director approval message",
     `
-// One WhatsApp per draft, with Approve / Reject buttons the director taps
-// (a tap lands in wa_messages as "Approve 42" — what the poller reads). A
-// draft Claude could not write is a plain note without buttons.
+// One message per draft, to the director: Telegram with ✅ Approve / ❌ Reject
+// (telegram-office-bot.json acts on the tap), or WhatsApp reply buttons
+// before the bot token is set. A draft Claude could not write is a plain note.
 const rows = $input.all().map((i) => i.json);
 const out = [];
 for (const t of rows) {
   const p = t.payload || {};
   if (p.draft_error) {
-    out.push({ json: { wa_text: '⚠️ Could not draft a reply for "' + p.in_reply_to_subject + '" (' + p.draft_error + '). Task #' + t.id + ' is open for the office.', wa_to: [$env.DIRECTOR_WA_MOBILE] } });
+    out.push({ json: { text: '⚠️ Could not draft a reply for "' + p.in_reply_to_subject + '" (' + p.draft_error + '). Task #' + t.id + ' is open for the office.', to: ['director'] } });
     continue;
   }
   const id = String(t.id);
@@ -650,20 +753,14 @@ for (const t of rows) {
   const text = '✉️ Draft #' + id + ' (' + p.category + ', ' + (p.language || '?') + ')\\n' + head
     + '\\n\\n' + p.body
     + (p.open_questions && p.open_questions.length ? '\\n\\nOpen: ' + p.open_questions.join('; ') : '')
-    + (p.note_for_director ? '\\nNote: ' + p.note_for_director : '')
-    + '\\n\\nTap Approve or Reject — or reply APPROVE ' + id + ' / REJECT ' + id + '.';
-  out.push({ json: {
-    wa_text: text, wa_to: [$env.DIRECTOR_WA_MOBILE],
-    wa_buttons: [{ id: 'approve-' + id, title: 'Approve ' + id }, { id: 'reject-' + id, title: 'Reject ' + id }],
-    wa_buttons_lead: '✉️ Draft #' + id + ' above — your decision?',
-    wa_approval: { draft_id: id, summary: head + '\\n' + p.body },
-  } });
+    + (p.note_for_director ? '\\nNote: ' + p.note_for_director : '');
+  out.push({ json: { text, to: ['director'], approval: { draft_id: id, summary: head + '\\n' + p.body } } });
 }
 return out;
 `,
   );
   wf.link("Insert: approval task", buildDirectorWa);
-  wf.link(buildDirectorWa, waChain(wf, "Approval"));
+  internalChain(wf, "Approval", buildDirectorWa);
 
   /* task branch */
   const buildAcademicTask = code(
@@ -705,7 +802,9 @@ return { json: { row } };
   wf.link(sw, buildNote, 2);
   wf.link(buildNote, sbInsert(wf, "Insert: filed note", "office_notes", "row", { row: 2 }));
 
-  /* ── B. Director's decisions (poll) ── */
+  /* ── B. Director's decisions on WhatsApp (poll) — the fallback before
+     TELEGRAM_BOT_TOKEN is set; with the token, telegram-office-bot.json
+     decides drafts and this branch stays idle. ── */
   const poll = cron(wf, "Every 5 minutes", "*/5 * * * *");
   const pending = sbGet(
     wf,
@@ -717,6 +816,7 @@ return { json: { row } };
     wf,
     "Collect: pending",
     `
+if (String($env.TELEGRAM_BOT_TOKEN || '').trim()) return []; // Telegram decides (telegram-office-bot.json)
 const pending = $input.all().map((i) => i.json).filter((r) => r && r.id);
 if (!pending.length) return [];
 const oldest = pending.map((r) => r.created_at).sort()[0];
@@ -824,11 +924,11 @@ for (const name of ['Build: approved patch', 'Build: rejected patch']) {
 const rows = $input.all().map((i) => i.json);
 const acks = rows.map((row) => (built.find((b) => String(b.task_id) === String(row.id)) || {}).ack).filter(Boolean);
 if (!acks.length) return [];
-return [{ json: { wa_text: acks.join('\\n'), wa_to: [$env.DIRECTOR_WA_MOBILE] } }];
+return [{ json: { text: acks.join('\\n'), to: ['director'] } }];
 `,
   );
   wf.link(patch, ack);
-  wf.link(ack, waChain(wf, "Decision"));
+  internalChain(wf, "Decision", ack);
 
   return wf;
 }
@@ -1023,8 +1123,7 @@ const note_row = { tenant_id: $env.OFFICE_TENANT_ID, role: 'academic_incharge', 
 const task_rows = decisions.map((d) => ({ tenant_id: $env.OFFICE_TENANT_ID, from_role: 'academic_incharge', to_role: 'director',
   title: String(d.title || 'Decision needed').slice(0, 80), detail: String(d.detail || '').slice(0, 600), status: 'open', source: 'academic', approval_state: 'none',
   due_on: d.due_on || null, payload: { kind: 'decision', date: it.ctx.today } }));
-const wa_to = [$env.PRINCIPAL_WA_MOBILE, $env.DIRECTOR_WA_MOBILE];
-return [{ json: { note_row, task_rows, wa_text, wa_to } }];
+return [{ json: { note_row, task_rows, text: wa_text, to: ['principal', 'director'], tasks_button: true } }];
 `,
   );
   wf.link(parsePlan, outputs);
@@ -1040,7 +1139,7 @@ return rows.length ? [{ json: { rows } }] : [];
   );
   wf.link(outputs, taskFilter);
   wf.link(taskFilter, sbInsert(wf, "Insert: director tasks", "office_tasks", "rows", { row: 1 }));
-  wf.link(outputs, waChain(wf, "Plan"));
+  internalChain(wf, "Plan", outputs);
 
   const holidayNote = code(
     wf,
@@ -1208,7 +1307,7 @@ const task_rows = decisions.map((d) => ({ tenant_id: $env.OFFICE_TENANT_ID, from
 const meeting_row = { tenant_id: $env.OFFICE_TENANT_ID, meeting_date: it.today, kind: 'huddle', agenda: it.agenda, transcript: it.transcript, minutes, decisions };
 const lines = Array.isArray(m.director_lines) && m.director_lines.length ? m.director_lines : decisions.map((d) => d.to_role + ': ' + d.title + (d.due_on ? ' by ' + d.due_on : ''));
 const wa_text = '🧑‍🏫 Huddle ' + it.today + '\\n' + (lines.length ? lines.map((l) => '• ' + l).join('\\n') : '• No decisions today.') + (minutes && !lines.length ? '\\n\\n' + minutes.slice(0, 1500) : '');
-return [{ json: { meeting_row, task_rows, wa_text, wa_to: [$env.DIRECTOR_WA_MOBILE] } }];
+return [{ json: { meeting_row, task_rows, text: wa_text, to: ['director', 'principal'], tasks_button: true } }];
 `,
   );
   wf.link(parseMinutes, records);
@@ -1224,8 +1323,298 @@ return rows.length ? [{ json: { rows } }] : [];
   );
   wf.link(records, taskFilter);
   wf.link(taskFilter, sbInsert(wf, "Insert: decision tasks", "office_tasks", "rows", { row: 1 }));
-  wf.link(records, waChain(wf, "Minutes"));
+  internalChain(wf, "Minutes", records);
 
+  return wf;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   4. Telegram office bot (@BHB_Office_bot)
+   ═══════════════════════════════════════════════════════════════
+   n8n's Telegram Trigger is webhook-only and this n8n is loopback-only
+   behind an SSH tunnel, so the bot POLLS: every minute, getUpdates with the
+   stored offset (workflow static data), then
+     - a tap on ✅ Approve / ❌ Reject (callback_data "approve:<id>") or a
+       typed APPROVE 42 / REJECT 42 from the director's chat decides the
+       draft: Gmail reply on approve, office_tasks patched, the callback
+       answered, the original message edited to show the decision;
+     - /drafts, /tasks (or the "📋 Open tasks" button), /huddle, /plan,
+       /start, /help from the director's or the principal's chat.
+   Anything else — any other chat — is ignored (an unknown chat gets its
+   chat id from /start, nothing more). One poller per bot: never set a
+   webhook on @BHB_Office_bot and never run this workflow twice. */
+function buildTelegramBot() {
+  const wf = new Workflow(
+    "Office: Telegram bot",
+    "Polls @BHB_Office_bot every minute: approve/reject taps and typed decisions on the Receptionist's drafts (Gmail reply on approve), and the /drafts /tasks /huddle /plan commands for the director and the principal.",
+  );
+  const TENANT = "{{ $env.OFFICE_TENANT_ID }}";
+  const tick = cron(wf, "Every minute", "* * * * *");
+  const buildPoll = code(
+    wf,
+    "Build: getUpdates",
+    `${JS_TG}
+if (!TG_TOKEN) return [];
+// The offset confirms every earlier update to Telegram; it survives restarts
+// in the workflow's static data (saved after each production execution).
+const st = $getWorkflowStaticData('global');
+const offset = Number(st.tg_offset || 0);
+return [{ json: { tg_method: 'getUpdates', tg: { offset, timeout: 0, limit: 100, allowed_updates: ['message', 'callback_query'] } } }];
+`,
+  );
+  const poll = tgCall(wf, "Telegram: getUpdates");
+  const parse = code(
+    wf,
+    "Parse: updates",
+    `${JS_TG}
+const res = $input.first().json || {};
+const updates = res.ok && Array.isArray(res.result) ? res.result : [];
+if (!updates.length) return [];
+const st = $getWorkflowStaticData('global');
+st.tg_offset = Math.max(...updates.map((u) => Number(u.update_id || 0))) + 1;
+// (?![a-z]) instead of \\b: JS word boundaries are ASCII-only, so Devanagari words never matched.
+const APPROVE = /^\\s*\\/?(approve|approved|ok|okay|yes|send|haan|ha|हाँ|हां|ठीक|भेज)(?![a-z])[^0-9]*#?\\s*(\\d+)?/i;
+const REJECT = /^\\s*\\/?(reject|rejected|no|cancel|nahi|nahin|नहीं|रद्द)(?![a-z])[^0-9]*#?\\s*(\\d+)?/i;
+const COMMANDS = { start: 'start', help: 'start', drafts: 'drafts', tasks: 'tasks', huddle: 'huddle', plan: 'plan' };
+const out = [];
+for (const u of updates) {
+  const cq = u.callback_query;
+  if (cq) {
+    const chat_id = String((cq.message && cq.message.chat && cq.message.chat.id) || (cq.from && cq.from.id) || '');
+    const role = tgRoleOf(chat_id);
+    const data = String(cq.data || '');
+    const base = { chat_id, role, callback_id: cq.id, message_id: cq.message ? cq.message.message_id : null, message_text: cq.message ? String(cq.message.text || '') : '' };
+    if (!role) continue;
+    const m = /^(approve|reject):(\\d+)$/.exec(data);
+    if (m && role === 'director') { out.push({ json: { kind: 'decision', decision: m[1], task_id: Number(m[2]), via: 'tap', ...base } }); continue; }
+    if (m) { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    if (data === 'tasks') { out.push({ json: { kind: 'command', cmd: 'tasks', ...base } }); continue; }
+    continue;
+  }
+  const msg = u.message;
+  if (!msg || !msg.text) continue;
+  const chat_id = String(msg.chat && msg.chat.id || '');
+  const role = tgRoleOf(chat_id);
+  const text = String(msg.text || '').trim();
+  const base = { chat_id, role, callback_id: null, message_id: null, message_text: '' };
+  const cmd = /^\\/([a-z]+)(?:@\\w+)?\\b/i.exec(text);
+  if (cmd && COMMANDS[cmd[1].toLowerCase()]) {
+    const name = COMMANDS[cmd[1].toLowerCase()];
+    if (role || name === 'start') out.push({ json: { kind: 'command', cmd: name, ...base } });
+    continue;
+  }
+  if (!role) continue;
+  let decision = null; let m = text.match(APPROVE);
+  if (m) decision = 'approve'; else { m = text.match(REJECT); if (m) decision = 'reject'; }
+  if (!decision) continue;
+  if (role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+  out.push({ json: { kind: 'decision', decision, task_id: m[2] ? Number(m[2]) : null, via: 'text', ...base } });
+}
+return out;
+`,
+  );
+  wf.chain(tick, buildPoll, poll, parse);
+  const kind = switchOn(wf, "Switch: update kind", "kind", ["decision", "command"]);
+  wf.link(parse, kind);
+
+  /* ── decisions ── */
+  const pending = sbGet(
+    wf,
+    "Fetch: pending drafts",
+    "office_tasks",
+    `tenant_id=eq.${TENANT}&approval_state=eq.pending&source=eq.receptionist&status=eq.open&select=*&order=created_at.asc&limit=50`,
+  );
+  wf.link(kind, pending, 0);
+  const match = code(
+    wf,
+    "Match: decisions",
+    `
+const pending = $input.all().map((i) => i.json).filter((r) => r && r.id);
+const asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'decision');
+const out = []; const decided = new Set();
+for (const a of asks) {
+  let task = null;
+  if (a.task_id) task = pending.find((t) => Number(t.id) === Number(a.task_id));
+  else if (pending.length === 1) task = pending[0];
+  let ack = '';
+  if (!task) ack = a.task_id ? 'No draft #' + a.task_id + ' is waiting.' : (pending.length ? 'Which draft? ' + pending.map((t) => '#' + t.id).join(', ') + ' are waiting — tap its button or reply APPROVE <id>.' : 'No draft is waiting.');
+  else if (decided.has(task.id)) ack = 'Draft #' + task.id + ' is already decided.';
+  if (ack) { out.push({ json: { ...a, decision: 'none', task: null, ack } }); continue; }
+  decided.add(task.id);
+  out.push({ json: { ...a, task } });
+}
+return out;
+`,
+  );
+  wf.link(pending, match);
+  const decSwitch = switchOn(wf, "Switch: decision", "decision", ["approve", "reject", "none"]);
+  wf.link(match, decSwitch);
+
+  const gmailReply = wf.add(
+    "Gmail: send approved reply",
+    "n8n-nodes-base.gmail",
+    2.1,
+    {
+      resource: "message",
+      operation: "reply",
+      messageId: "={{ $json.task.payload.gmail_message_id }}",
+      emailType: "text",
+      message: "={{ $json.task.payload.body }}",
+      options: {},
+    },
+  );
+  wf.link(decSwitch, gmailReply, 0);
+  const patchApproved = code(
+    wf,
+    "Build: approved patch",
+    `
+const d = $('Match: decisions').item.json;
+const sent = $input.item.json;
+const now = new Date().toISOString();
+return { json: { ...d, task_id: d.task.id, patch: { approval_state: 'approved', status: 'done', decided_by: 'director', decided_at: now, updated_at: now,
+  payload: { ...d.task.payload, decision_reply: 'telegram ' + d.via, sent_at: now, gmail_sent_id: sent.id || '' } },
+  ack: '✅ Sent reply #' + d.task.id + ' to ' + (d.task.payload.to_name || d.task.payload.to) + '.' } };
+`,
+    { each: true },
+  );
+  wf.link(gmailReply, patchApproved);
+  const patchRejected = code(
+    wf,
+    "Build: rejected patch",
+    `
+const d = $input.item.json;
+const now = new Date().toISOString();
+return { json: { ...d, task_id: d.task.id, patch: { approval_state: 'rejected', status: 'cancelled', decided_by: 'director', decided_at: now, updated_at: now,
+  payload: { ...d.task.payload, decision_reply: 'telegram ' + d.via } },
+  ack: '🚫 Draft #' + d.task.id + ' rejected — nothing sent to ' + (d.task.payload.to_name || d.task.payload.to) + '.' } };
+`,
+    { each: true, row: 1 },
+  );
+  wf.link(decSwitch, patchRejected, 1);
+  const patch = sbPatchTask(wf, "Patch: task decided");
+  wf.link(patchApproved, patch);
+  wf.link(patchRejected, patch);
+  const noDecision = code(
+    wf,
+    "Build: no decision",
+    `
+return { json: { ...$input.item.json, patched: false } };
+`,
+    { each: true, row: 2 },
+  );
+  wf.link(decSwitch, noDecision, 2);
+  const ackTg = code(
+    wf,
+    "Build: decision replies",
+    `${JS_TG}
+// Answer the tap, edit the draft message so the decision shows under it
+// (the keyboard goes away), or reply to a typed decision.
+const built = [];
+for (const name of ['Build: approved patch', 'Build: rejected patch', 'Build: no decision']) {
+  try { for (const x of $(name).all()) built.push(x.json); } catch (e) { /* branch did not run */ }
+}
+const out = [];
+for (const b of built) {
+  const ack = String(b.ack || '');
+  if (b.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: b.callback_id, text: ack.slice(0, 200) } } });
+  if (b.message_id && b.decision !== 'none') {
+    const text = tgChunks(String(b.message_text || '') + '\\n\\n' + ack).slice(-1)[0];
+    out.push({ json: { tg_method: 'editMessageText', tg: { chat_id: b.chat_id, message_id: b.message_id, text } } });
+  } else {
+    out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: b.chat_id, text: ack } } });
+  }
+}
+return out;
+`,
+  );
+  wf.link(patch, ackTg);
+  wf.link(noDecision, ackTg);
+  const reply = tgCall(wf, "Telegram: reply");
+  wf.link(ackTg, reply);
+
+  /* ── commands ── */
+  const openTasks = sbGet(
+    wf,
+    "Fetch: open tasks",
+    "office_tasks",
+    `tenant_id=eq.${TENANT}&status=in.(open,doing)&select=id,from_role,to_role,title,detail,status,due_on,source,approval_state,payload,created_at&order=created_at.asc&limit=100`,
+    { row: 1 },
+  );
+  wf.link(kind, openTasks, 1);
+  const huddle = sbGet(
+    wf,
+    "Fetch: latest huddle",
+    "office_meetings",
+    `tenant_id=eq.${TENANT}&kind=eq.huddle&select=meeting_date,minutes,decisions&order=meeting_date.desc&limit=1`,
+    { row: 1 },
+  );
+  const plan = sbGet(
+    wf,
+    "Fetch: latest plan",
+    "office_notes",
+    `tenant_id=eq.${TENANT}&role=eq.academic_incharge&select=body,facts,created_at&order=created_at.desc&limit=1`,
+    { row: 1 },
+  );
+  wf.chain(openTasks, huddle, plan);
+  const commandReplies = code(
+    wf,
+    "Build: command replies",
+    `${JS_TG}${JS_DATES}
+const rows = (name) => { try { return $(name).all().map((i) => i.json).filter((r) => r && Object.keys(r).length); } catch (e) { return []; } };
+const tasks = rows('Fetch: open tasks').filter((r) => r.id);
+const meeting = rows('Fetch: latest huddle')[0] || null;
+const planNote = rows('Fetch: latest plan')[0] || null;
+const asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'command');
+const today = isoDate(istNow());
+const line = (t) => '#' + t.id + ' [' + t.to_role + '] ' + t.title + (t.due_on ? ' (due ' + t.due_on + ')' : '') + (t.approval_state === 'pending' ? ' — waiting for you' : '');
+const out = [];
+const send = (chat_id, text, keyboard) => {
+  const chunks = tgChunks(text);
+  chunks.forEach((c, i) => {
+    const tg = { chat_id, text: c, parse_mode: 'HTML', disable_web_page_preview: true };
+    if (keyboard && i === chunks.length - 1) tg.reply_markup = { inline_keyboard: keyboard };
+    out.push({ json: { tg_method: 'sendMessage', tg } });
+  });
+};
+for (const a of asks) {
+  if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });
+  if (a.cmd === 'start') {
+    const who = a.role ? 'You are the ' + a.role + '.' : 'This chat is not registered yet. Give the office this chat id: <code>' + tgEscape(a.chat_id) + '</code>';
+    send(a.chat_id, '<b>BHB office bot</b>\\n' + who + (a.role ? '\\n\\n/drafts — replies waiting for your decision\\n/tasks — open office tasks\\n/huddle — this morning\\'s minutes\\n/plan — today\\'s substitution plan' : ''));
+    continue;
+  }
+  if (a.cmd === 'not_director') { send(a.chat_id, 'Only the director decides drafts.'); continue; }
+  if (a.cmd === 'drafts') {
+    const drafts = tasks.filter((t) => t.approval_state === 'pending' && t.source === 'receptionist');
+    if (!drafts.length) { send(a.chat_id, 'No draft is waiting for a decision.'); continue; }
+    const text = '<b>Drafts waiting (' + drafts.length + ')</b>\\n' + drafts.map((t) => { const p = t.payload || {}; return '#' + t.id + ' ' + tgEscape((p.category || '') + ' → ' + (p.to_name || p.to || '') + ' — ' + (p.subject || t.title)); }).join('\\n');
+    const keyboard = a.role === 'director' ? drafts.slice(0, 10).map((t) => [{ text: '✅ Approve ' + t.id, callback_data: 'approve:' + t.id }, { text: '❌ Reject ' + t.id, callback_data: 'reject:' + t.id }]) : null;
+    send(a.chat_id, text, keyboard);
+    continue;
+  }
+  if (a.cmd === 'tasks') {
+    send(a.chat_id, tasks.length ? '<b>Open tasks (' + tasks.length + ')</b>\\n' + tasks.map((t) => tgEscape(line(t))).join('\\n') : 'No open tasks.');
+    continue;
+  }
+  if (a.cmd === 'huddle') {
+    if (!meeting) { send(a.chat_id, 'No huddle on record yet.'); continue; }
+    const dec = Array.isArray(meeting.decisions) ? meeting.decisions : [];
+    send(a.chat_id, '<b>Huddle ' + tgEscape(meeting.meeting_date) + '</b>\\n' + tgEscape(String(meeting.minutes || '').slice(0, 3000)) + (dec.length ? '\\n\\n<b>Decisions</b>\\n' + dec.map((d) => tgEscape('• ' + (d.to_role || '') + ': ' + (d.title || '') + (d.due_on ? ' by ' + d.due_on : ''))).join('\\n') : ''));
+    continue;
+  }
+  if (a.cmd === 'plan') {
+    if (!planNote) { send(a.chat_id, 'No substitution plan on record yet.'); continue; }
+    const when = String(planNote.created_at || '').slice(0, 10);
+    send(a.chat_id, (when === today ? '<b>Today\\'s plan</b>\\n' : '<b>No plan yet today — last plan ' + tgEscape(when) + '</b>\\n') + tgEscape(String(planNote.body || '').slice(0, 3500)));
+    continue;
+  }
+}
+return out;
+`,
+    { row: 1 },
+  );
+  wf.link(plan, commandReplies);
+  wf.link(commandReplies, reply);
   return wf;
 }
 
@@ -1235,6 +1624,7 @@ const builds = {
   "receptionist.json": buildReceptionist,
   "academic-incharge.json": buildAcademicIncharge,
   "morning-huddle.json": buildMorningHuddle,
+  "telegram-office-bot.json": buildTelegramBot,
 };
 
 fs.mkdirSync(outDir, { recursive: true });

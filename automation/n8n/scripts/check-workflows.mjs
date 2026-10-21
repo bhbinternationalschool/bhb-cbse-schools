@@ -109,8 +109,10 @@ for (const file of fs.readdirSync(wfDir).filter((f) => f.endsWith(".json")).sort
   for (const m of models) {
     if (!["claude-haiku-5-5", "claude-sonnet-5-5"].includes(m)) fail(file, `unexpected model id ${m}`);
   }
-  if (!models.length) fail(file, "no model id found in Code nodes");
-  if (!/cache_control: \{ type: 'ephemeral' \}/.test(code)) fail(file, "no cache_control on the system block");
+  if (claude.length && !models.length) fail(file, "no model id found in Code nodes");
+  if (claude.length && !/cache_control: \{ type: 'ephemeral' \}/.test(code)) fail(file, "no cache_control on the system block");
+  // The Telegram token is $env.TELEGRAM_BOT_TOKEN, never pasted into a node.
+  if (/api\.telegram\.org\/bot[0-9]{6,}:/.test(text)) fail(file, "a literal Telegram bot token is in the workflow");
   const embedded = [...code.matchAll(/(?:const SYSTEM = |"[a-z_]+":)("(?:[^"\\]|\\.)*")/g)].map((m) => JSON.parse(m[1]));
   const expect = {
     "receptionist.json": ["receptionist"],
@@ -121,7 +123,7 @@ for (const file of fs.readdirSync(wfDir).filter((f) => f.endsWith(".json")).sort
     if (!embedded.includes(charters[role])) fail(file, `embedded charter for ${role} is stale — run scripts/build-workflows.mjs`);
   }
 
-  console.log(`✓ ${file}: ${wf.nodes.length} nodes, ${claude.length} Claude call(s), models ${[...new Set(models)].join("+")}`);
+  console.log(`✓ ${file}: ${wf.nodes.length} nodes, ${claude.length} Claude call(s)${models.length ? `, models ${[...new Set(models)].join("+")}` : ""}`);
 }
 
 if (failures) {
