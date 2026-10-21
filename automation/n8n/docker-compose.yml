@@ -1,0 +1,91 @@
+# BHB International School — virtual staff room (n8n + Postgres).
+#
+# One small VM in GCP project school-erp-prod-493619 runs this file. Copy
+# .env.example to .env, fill it in, then `docker compose up -d`. n8n keeps
+# its own state (workflows, credentials, executions) in the Postgres
+# container; the school's data stays in Supabase and the ERP.
+#
+# Validate with `docker compose config` before the first start.
+
+name: bhb-office
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-n8n}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-n8n}
+    volumes:
+      - db_storage:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER:-n8n} -d ${POSTGRES_DB:-n8n}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:${N8N_VERSION:-2.44.5}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      # Loopback only; the director reaches it over an SSH tunnel or
+      # Cloudflare Tunnel / IAP, never a public port (see README).
+      - "127.0.0.1:5678:5678"
+    environment:
+      # --- n8n itself ---
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      N8N_EDITOR_BASE_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      GENERIC_TIMEZONE: Asia/Kolkata
+      TZ: Asia/Kolkata
+      NODE_ENV: production
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      # The workflows read their secrets with {{ $env.NAME }} in HTTP nodes
+      # and Code nodes. n8n 2.x blocks that by default; this opens it for
+      # this one instance, whose only users are the school's own workflows.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # Executions: keep two weeks, prune nightly, save data on error only.
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: all
+      EXECUTIONS_DATA_SAVE_ON_ERROR: all
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: 336
+      # Code nodes run on the built-in task runner (n8n 2.x default).
+      N8N_RUNNERS_ENABLED: "true"
+      # --- n8n's own database ---
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-n8n}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER:-n8n}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      # --- what the workflows need ($env.*) ---
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}
+      SUPABASE_URL: ${SUPABASE_URL:?set SUPABASE_URL in .env}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?set SUPABASE_SERVICE_ROLE_KEY in .env}
+      OFFICE_TENANT_ID: ${OFFICE_TENANT_ID:?set OFFICE_TENANT_ID in .env}
+      ERP_BASE_URL: ${ERP_BASE_URL:-https://bhbinternational.school}
+      WA_DISPATCH_SECRET: ${WA_DISPATCH_SECRET:?set WA_DISPATCH_SECRET in .env}
+      DIRECTOR_WA_MOBILE: ${DIRECTOR_WA_MOBILE:?set DIRECTOR_WA_MOBILE in .env}
+      PRINCIPAL_WA_MOBILE: ${PRINCIPAL_WA_MOBILE:-}
+      OFFICE_WA_TEMPLATE: ${OFFICE_WA_TEMPLATE:-}
+      OFFICE_WA_TEMPLATE_LANG: ${OFFICE_WA_TEMPLATE_LANG:-en}
+      SCHOOL_INBOX: ${SCHOOL_INBOX:-}
+      OFFICE_ROSTER: ${OFFICE_ROSTER:-receptionist,academic_incharge}
+    volumes:
+      - n8n_storage:/home/node/.n8n
+      # Read-only copy of this folder so `n8n import:workflow` can run
+      # inside the container (README → Import the workflows).
+      - ./workflows:/office/workflows:ro
+
+volumes:
+  db_storage:
+  n8n_storage:
