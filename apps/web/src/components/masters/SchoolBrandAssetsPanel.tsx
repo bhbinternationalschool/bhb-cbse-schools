@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useObjectDraft } from "@/components/masters/useObjectDraft";
+import type { MastersCommitOpts } from "@/lib/data/client/mastersElementPlan";
 import type { MastersState } from "@/lib/masters";
 import { StaffImageField } from "@/components/staff/StaffImageField";
 import {
@@ -8,7 +10,7 @@ import {
   MastersWorkCard,
 } from "@/components/masters/MastersLayout";
 
-type Commit = (s: MastersState, msg?: string) => void;
+type Commit = (s: MastersState, msg?: string, opts?: MastersCommitOpts) => void;
 
 export function SchoolBrandAssetsPanel({
   state,
@@ -18,7 +20,7 @@ export function SchoolBrandAssetsPanel({
   commit: Commit;
 }) {
   const p = state.schoolProfile;
-  const [draft, setDraft] = useState(p);
+  const { draft, setDraft, base } = useObjectDraft("schoolProfile", p);
   const [error, setError] = useState<string | null>(null);
 
   function set<K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) {
@@ -175,6 +177,7 @@ export function SchoolBrandAssetsPanel({
                 commit(
                   { ...state, schoolProfile: draft },
                   "Brand assets saved",
+                  { objectBases: { schoolProfile: base } },
                 );
               }}
             >

@@ -32,6 +32,7 @@ import {
   type ReadResult,
   type RecordOutcome,
   type Revision,
+  type WriteFail,
   type WriteOp,
   type WriteResult,
 } from "../types";
@@ -534,6 +535,61 @@ function rpcFailure(
   return { kind: "unavailable", message: error.message };
 }
 
+/** One number series as stored (by code, else id), or null. Throws on a failed read. */
+export async function readNumberSeries(series: string): Promise<Row | null> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) throw new Error("Supabase tenant not configured");
+  const { data, error } = await ctx.sb
+    .from("masters_desk_slices")
+    .select("payload")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("slice_key", "numberSeries")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const payload = (data as { payload?: unknown } | null)?.payload;
+  const list = Array.isArray(payload) ? (payload as Row[]) : [];
+  return list.find((e) => e && e.code === series) ?? list.find((e) => e && e.id === series) ?? null;
+}
+
+/**
+ * masters_series_bump (data-layer 2.2a/2.2c): a number series' next number
+ * moves past one just issued — monotone, under the slice lock, no base.
+ */
+export async function bumpNumberSeries(
+  series: string,
+  used: number,
+  ay: string | null,
+): Promise<
+  | { ok: true; changed: boolean; status: "applied" | "unchanged"; id: string; next: number }
+  | { ok: false; status: 400 | 404 | 503; kind: "invalid" | "not_found" | "unavailable" | "auth"; message: string }
+> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, status: 503, kind: "unavailable", message: "Supabase tenant not configured" };
+  const { data, error } = await ctx.sb.rpc("masters_series_bump", {
+    p_tenant: ctx.tenantId,
+    p_series: series,
+    p_used: used,
+    p_ay: ay,
+  });
+  if (error) {
+    const f = rpcFailure(error);
+    return { ok: false, status: f.kind === "invalid" ? 400 : 503, kind: f.kind, message: f.message };
+  }
+  const res = (data ?? {}) as { ok?: boolean; status?: string; changed?: boolean; id?: string; next?: number };
+  if (res.ok !== true) {
+    return res.status === "not_found"
+      ? { ok: false, status: 404, kind: "not_found", message: `No number series ${series} in Masters.` }
+      : { ok: false, status: 503, kind: "unavailable", message: "The series bump returned no outcome" };
+  }
+  return {
+    ok: true,
+    changed: res.changed === true,
+    status: res.status === "applied" ? "applied" : "unchanged",
+    id: String(res.id ?? ""),
+    next: Number(res.next ?? 0),
+  };
+}
+
 function asReason(v: unknown): ConflictReason | undefined {
   return v === "stale" || v === "unversioned" || v === "deleted" ? v : undefined;
 }
@@ -655,6 +711,81 @@ export async function writeSliceBatch(collectionId: string, ops: readonly WriteO
     };
   });
   return { ok: true, results, versions, revision: res.revision ? asRevision(String(res.revision)) : null };
+}
+
+/**
+ * Element writes across SEVERAL `_rev` lists of masters_desk_slices in one
+ * all-or-none desk_slice_rows_write batch (data-layer 2.2c review: a cascade —
+ * a class with its subject links, a subject with its components' links — must
+ * land whole or not at all). Each item names its collection. Results come back
+ * in the order sent, with their collection.
+ */
+export async function writeMastersBatch(
+  items: readonly { collection: string; op: WriteOp<Row> }[],
+): Promise<
+  | { ok: true; results: (RecordOutcome<Row> & { collection: string })[]; revision: Revision | null }
+  | (WriteFail<Row> & { results?: undefined })
+> {
+  if (items.length === 0) return { ok: true, results: [], revision: null };
+  if (items.length > 500) return { ok: false, kind: "invalid", message: `At most 500 changes in one save (got ${items.length})`, conflicts: [] };
+  const srcs = items.map((it) => {
+    const def = collectionDef(it.collection);
+    return def && def.slice && collectionKind(def) === "slice" && def.slice.base === "rev" && def.slice.table === "masters_desk_slices" ? def.slice : null;
+  });
+  const bad = srcs.findIndex((x) => !x);
+  if (bad >= 0) return { ok: false, kind: "invalid", message: `${items[bad].collection} does not take a batch of element writes`, conflicts: [] };
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, kind: "unavailable", message: "Supabase tenant not configured", conflicts: [] };
+  const p_ops = items.map((it, i) => ({
+    slice: srcs[i]!.key,
+    op: it.op.op,
+    id: typeof it.op?.id === "string" ? it.op.id : "",
+    row: it.op.op === "upsert" ? ((it.op as { row?: unknown }).row ?? null) : null,
+    base: it.op.base == null ? null : String(it.op.base),
+    key: srcs[i]!.keyField ?? "id",
+  }));
+  const { data, error } = await ctx.sb.rpc("desk_slice_rows_write", {
+    p_tenant: ctx.tenantId,
+    p_table: "masters_desk_slices",
+    p_ops,
+  });
+  if (error) {
+    const f = rpcFailure(error);
+    return { ok: false, kind: f.kind, message: f.message, conflicts: [] };
+  }
+  const res = (data ?? {}) as {
+    ok?: boolean;
+    revision?: string | null;
+    results?: { id?: string; ok?: boolean; status?: string; reason?: string; rev?: number | null; stored?: Row | null }[];
+  };
+  const outcomes = res.results ?? [];
+  if (res.ok !== true) {
+    const conflicts: RecordOutcome<Row>[] = outcomes
+      .filter((r) => r.ok !== true)
+      .map((r) => ({
+        id: String(r.id ?? ""),
+        status: "conflict" as const,
+        revision: asRevision(r.rev == null ? "" : String(r.rev)),
+        stored: (r.stored ?? {}) as Row,
+        reason: asReason(r.reason),
+      }));
+    return {
+      ok: false,
+      kind: "conflict",
+      message: `${conflicts.length} of ${items.length} change(s) were made elsewhere first — nothing was written`,
+      conflicts,
+    };
+  }
+  return {
+    ok: true,
+    revision: res.revision ? asRevision(String(res.revision)) : null,
+    results: outcomes.map((r, i) => ({
+      collection: items[i]?.collection ?? "",
+      id: String(r.id ?? ""),
+      status: r.status === "unchanged" ? "unchanged" : r.status === "deleted" ? "deleted" : "applied",
+      revision: asRevision(r.rev == null ? "" : String(r.rev)),
+    })) as (RecordOutcome<Row> & { collection: string })[],
+  };
 }
 
 async function writeSliceOp(src: SliceSource, isObject: boolean, op: WriteOp<Row>): Promise<WriteResult<Row>> {

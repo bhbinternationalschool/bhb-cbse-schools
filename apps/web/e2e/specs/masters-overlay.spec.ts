@@ -1,7 +1,8 @@
 /**
- * masters-overlay — data-layer 2.1h review fixes: the Masters editor keeps
- * what a commit sent until an answer of the masters view provably holds it
- * (components/masters/mastersPending.ts). Writes Masters, so it runs in the
+ * masters-overlay — data-layer 2.1h review fixes, on element writes since
+ * 2.2c: the Masters editor keeps what a save sent until an answer of the
+ * masters view provably holds it — per element, on its `_rev`
+ * (components/masters/mastersElementPending.ts). Writes Masters, so it runs in the
  * "propagation" project (after every reader), and puts the school back.
  *
  *   1. A stale answer after a save cannot revert edit A. The principal
@@ -12,12 +13,13 @@
  *      renames class IV's section in another panel (edit B). Edit A must
  *      still be on the server after B's save, and once views/masters answers
  *      truthfully again the screen shows both.
- *      On the branch before this fix the stale answer dropped the overlay,
+ *      On the branch before the 2.1h fix the stale answer dropped the overlay,
  *      the screen went back to "Active", and B's save sent the campuses
- *      section again with the old value: A reverted on the server.
- *   2. A refused save: masters-desk answers 409; the screen goes back to the
- *      stored value and says "Not saved" (before: the refused edit stayed on
- *      screen and was sent again with the next commit).
+ *      section again with the old value: A reverted on the server. Since
+ *      2.2c B's save is B's element alone (asserted).
+ *   2. A refused save: the element write answers 409; the screen goes back
+ *      to the stored value and says "Not saved — …" (before 2.1h: the refused
+ *      edit stayed on screen and was sent again with the next commit).
  */
 import type { APIRequestContext, Page, Route } from "@playwright/test";
 import { APP_URL, collectPageErrors, expect, signIn, test } from "../support";
@@ -83,7 +85,7 @@ test("a stale masters answer after a save does not revert edit A (on screen or o
     expect(preSave, "the page read views/masters").not.toBeNull();
 
     // Edit A. Every answer from here on is the pre-save book.
-    const savedA = page.waitForResponse((r) => r.url().includes("/api/school-data/masters-desk") && r.request().method() === "POST");
+    const savedA = page.waitForResponse((r) => r.url().includes("/api/data/masters.campuses") && r.request().method() === "POST");
     staleMode = true;
     await campusRow(page).getByRole("button", { name: "Inactivate" }).click();
     expect((await savedA).status(), "edit A saved").toBe(200);
@@ -103,12 +105,13 @@ test("a stale masters answer after a save does not revert edit A (on screen or o
     const row = page.getByRole("listitem").filter({ hasText: /^IV-A/ });
     await row.getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByRole("textbox", { name: "Rename section" }).fill("B");
-    const savedB = page.waitForResponse((r) => r.url().includes("/api/school-data/masters-desk") && r.request().method() === "POST");
+    const savedB = page.waitForResponse((r) => r.url().includes("/api/data/masters.sections") && r.request().method() === "POST");
     await page.getByRole("button", { name: "Update", exact: true }).click();
     const resB = await savedB;
-    const bodyB = resB.request().postDataJSON() as Record<string, unknown>;
+    const bodyB = resB.request().postDataJSON() as { ops: { id: string }[] };
     expect(resB.status(), "edit B saved").toBe(200);
-    expect(Object.keys(bodyB), "B's save carries its own section").toContain("sections");
+    // Since 2.2c: B's save is ONE element (IV's section), nothing of campuses.
+    expect(bodyB.ops.map((o) => o.id), "B's save carries its own section only").toEqual(["e2e_sec_07a"]);
 
     // The proof: A is still on the server after B's save, and B landed too.
     const after = await desk(page.request);
@@ -135,22 +138,27 @@ test("a refused save puts the stored value back on screen and says so", async ({
   try {
     await page.goto("/masters?tab=campuses");
     await expect(campusRow(page).getByRole("button", { name: "Inactivate" })).toBeVisible({ timeout: 30_000 });
-    await page.route("**/api/school-data/masters-desk", (route) =>
+    await page.route("**/api/data/masters.campuses", (route) =>
       route.request().method() === "POST"
         ? route.fulfill({
             status: 409,
             contentType: "application/json",
-            body: JSON.stringify({ error: "Someone changed the same part of Masters on another device.", reason: "slice_stale", conflicts: ["campuses"] }),
+            body: JSON.stringify({
+              ok: false,
+              kind: "conflict",
+              message: "Changed on another device since you loaded it",
+              conflicts: [{ id: CAMPUS, status: "conflict", revision: "9", stored: {}, reason: "stale" }],
+            }),
           })
         : route.fallback(),
     );
     await campusRow(page).getByRole("button", { name: "Inactivate" }).click();
-    await expect(page.getByText("Not saved — showing the school's saved Masters again.")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/^Not saved — Someone changed this on another device/)).toBeVisible({ timeout: 15_000 });
     await expect(campusRow(page).getByRole("button", { name: "Inactivate" })).toBeVisible({ timeout: 15_000 });
     await page.screenshot({ path: test.info().outputPath("refused-save.png") });
     expect((await desk(page.request)).campuses.find((c) => c.id === CAMPUS)?.isActive, "nothing stored").toBe(true);
   } finally {
-    await page.unroute("**/api/school-data/masters-desk");
+    await page.unroute("**/api/data/masters.campuses");
     await page.context().close();
   }
   expect(errors, "no page errors").toEqual([]);

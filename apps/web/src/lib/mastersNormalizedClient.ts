@@ -118,14 +118,6 @@ export function readLocalMastersEditAt(): string {
   }
 }
 
-/** True when local save is newer than last successful desk push meta. */
-export function mastersDeskPushPending(): boolean {
-  const localEditAt = readLocalMastersEditAt();
-  if (!localEditAt) return false;
-  const meta = readMeta();
-  return !meta.updatedAt || localEditAt > meta.updatedAt;
-}
-
 /** Optimistic desk meta after local save — prevents stale DB overwriting edits on refresh. */
 export function touchMastersDeskLocalMeta(state: MastersState, at?: string) {
   if (typeof window === "undefined") return;

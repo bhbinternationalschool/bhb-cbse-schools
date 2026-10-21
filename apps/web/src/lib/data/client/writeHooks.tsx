@@ -12,16 +12,26 @@
  *                                  refetches and the staff bridge re-reads the
  *                                  roster into the page copy (staffBridge.ts).
  *
- * Nothing on a screen uses them yet: 2.2c (Masters panels) and 2.2d (staff
- * editor) do.
+ *   useMastersElementWrites()      data-layer 2.2c: the Masters editor's commit,
+ *                                  planned by mastersElementPlan.ts, sent request
+ *                                  by request (each ≤ one removal); staff link
+ *                                  changes laid on each record AS STORED.
+ *
+ * Users: the Masters editor (2.2c), Timetable → Subject rules (2.2c); the
+ * staff editor moves in 2.2d.
  */
 
 import { useCallback, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { TEACHING_MASTERS_KEYS } from "@/lib/mastersTeachingSubset";
 import { COLLECTIONS, collectionKind } from "../registry";
-import type { WriteFail, WriteResult } from "../types";
-import { useErpMutation, useMasters } from "./hooks";
+import { asRevision, type Revision, type WriteFail, type WriteResult } from "../types";
+import { invalidateDesks, useErpMutation, useMasters } from "./hooks";
+import { applyStaffLinkChange, MASTERS_BATCH_PATH, type ElementRequest, type StaffLinkChange } from "./mastersElementPlan";
+import { writeRecords } from "./mutate";
+import { readAll } from "./query";
 import { mastersListCommitOps, mastersObjectCommitOp } from "./mastersCommit";
+import { bridgeMastersDeskAfterWrite } from "./mastersDeskBridge";
 import { bridgeStaffAfterWrite } from "./staffBridge";
 import type { UseSaveMutation } from "./useSaveMutation";
 
@@ -58,7 +68,14 @@ export type UseMastersMutation = UseSaveMutation<Row> & {
 export function useMastersMutation(sliceKey: string): UseMastersMutation {
   const masters = useMasters();
   const target = useMemo(() => mastersCollectionFor(sliceKey), [sliceKey]);
-  const mutation = useErpMutation<Row>(target?.id ?? `masters.unknown-${sliceKey}`, { desk: ["masters"] });
+  const mutation = useErpMutation<Row>(target?.id ?? `masters.unknown-${sliceKey}`, {
+    desk: ["masters"],
+    // The old whole-book save's base follows the server (mastersDeskBridge).
+    onSaved: () => void bridgeMastersDeskAfterWrite(),
+    onFailed: (r) => {
+      if (r.kind === "conflict") void bridgeMastersDeskAfterWrite();
+    },
+  });
   const view = masters.data;
   const { save } = mutation;
 
@@ -98,4 +115,137 @@ export function useStaffMutation(
       if (r.kind === "conflict") void bridgeStaffAfterWrite();
     },
   });
+}
+
+export type ElementWritesOutcome =
+  | {
+      ok: true;
+      /** The revision each written element now has, keyed `${sliceKey}|${id}`. */
+      versions: Readonly<Record<string, Revision>>;
+    }
+  | {
+      ok: false;
+      kind: WriteFail<Row>["kind"];
+      message: string;
+      /** What landed before the failure, keyed `${sliceKey}|${id}`. */
+      versions: Readonly<Record<string, Revision>>;
+      /** The failed request's index; -1 = the staff links (sent first; nothing else was sent). */
+      failedAt: number;
+    };
+
+/**
+ * The Masters editor's element writes (data-layer 2.2c). Staff link changes
+ * go FIRST (children before parents: a refusal later leaves a class or a
+ * subject with no teacher link, never a link to a removed one), each laid on
+ * the member's record as stored NOW (read just before, its revision the
+ * base) — a link someone else added to the same member meanwhile is kept.
+ * Then the Masters requests, one after another, stopping at the first
+ * refusal; each is all-or-none on the server, and a cascade across lists is
+ * ONE batch (POST /api/data/masters/batch). The masters view (and the staff
+ * list) refetch afterwards, also after a failure — the screen must show what
+ * the server holds.
+ */
+export function useMastersElementWrites(): (requests: readonly ElementRequest[], staff: readonly StaffLinkChange[]) => Promise<ElementWritesOutcome> {
+  const client = useQueryClient();
+  return useCallback(
+    async (requests, staff) => {
+      const versions: Record<string, Revision> = {};
+      try {
+        if (staff.length) {
+          const failed = await writeStaffLinks(staff);
+          if (failed) return { ok: false, kind: failed.kind, message: failed.message, versions, failedAt: -1 };
+        }
+        for (let i = 0; i < requests.length; i++) {
+          const req = requests[i];
+          const r = req.kind === "batch" ? await writeBatch(req) : await writeRecords<Row>(req.collection, req.ops);
+          if (!r.ok) return { ok: false, kind: r.kind, message: describeElementFailure(r), versions, failedAt: i };
+          if (req.kind === "batch") Object.assign(versions, r.versions);
+          else for (const [id, rev] of Object.entries(r.versions)) versions[`${req.sliceKey}|${id}`] = rev;
+        }
+        return { ok: true, versions };
+      } finally {
+        if (requests.length) {
+          invalidateDesks(client, ["masters"]);
+          // Not awaited: the old save waits for it (mastersDeskBridgeSettled).
+          void bridgeMastersDeskAfterWrite();
+        }
+        if (staff.length) {
+          invalidateDesks(client, STAFF_DESKS);
+          await bridgeStaffAfterWrite();
+        }
+      }
+    },
+    [client],
+  );
+}
+
+/** One all-or-none batch across lists; versions keyed `${sliceKey}|${id}`. Never throws. */
+async function writeBatch(
+  req: ElementRequest,
+): Promise<{ ok: true; versions: Record<string, Revision> } | WriteFail<Row>> {
+  const parts = req.parts ?? [];
+  let res: Response;
+  try {
+    res = await fetch(`/api/data/${MASTERS_BATCH_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ops: req.ops.map((op, i) => ({ collection: parts[i]?.collection, ...op })) }),
+    });
+  } catch (e) {
+    return { ok: false, kind: "network", message: e instanceof Error ? e.message : "Network request failed", conflicts: [] };
+  }
+  const body = (await res.json().catch(() => null)) as {
+    ok?: boolean;
+    kind?: WriteFail<Row>["kind"];
+    message?: string;
+    error?: string;
+    results?: { collection?: string; id?: string; status?: string; revision?: string }[];
+  } | null;
+  if (!res.ok || !body?.ok || !Array.isArray(body.results)) {
+    const kind: WriteFail<Row>["kind"] =
+      body?.kind ?? (res.status === 409 ? "conflict" : res.status === 403 ? "auth" : res.status === 400 ? "invalid" : "unavailable");
+    return { ok: false, kind, message: body?.message ?? body?.error ?? `Request failed (${res.status})`, conflicts: [] };
+  }
+  const versions: Record<string, Revision> = {};
+  body.results.forEach((r, i) => {
+    const part = parts[i];
+    if (!part || r.status === "deleted" || r.revision == null) return;
+    versions[`${part.sliceKey}|${String(r.id ?? "")}`] = asRevision(String(r.revision));
+  });
+  return { ok: true, versions };
+}
+
+function describeElementFailure(r: WriteFail<Row>): string {
+  if (r.kind === "conflict") {
+    return "Someone changed this on another device a moment ago — nothing was saved. The screen now shows their version; make your change again.";
+  }
+  return r.message || "Not saved.";
+}
+
+async function writeStaffLinks(changes: readonly StaffLinkChange[]): Promise<{ kind: WriteFail<Row>["kind"]; message: string } | null> {
+  const read = await readAll<Row>("sis.staff", { limit: 500, maxPages: 2 });
+  if (!read.ok) return { kind: "unavailable", message: `Could not read the staff records to save the teachers — nothing was saved (${read.error}).` };
+  const byId = new Map(read.rows.map((r) => [String(r.id), r]));
+  const ids = [...new Set(changes.map((c) => c.staffId))];
+  const ops = [];
+  for (const id of ids) {
+    const row = byId.get(id);
+    const profile = row?.profile;
+    if (!row || !profile || typeof profile !== "object") {
+      return {
+        kind: row ? "auth" : "not_found",
+        message: row
+          ? "Teacher assignments are saved on staff records — that needs the Staff · edit permission."
+          : "A member of staff in this change is no longer on the roster — nothing was saved.",
+      };
+    }
+    const patch: Row = {};
+    for (const c of changes.filter((x) => x.staffId === id)) {
+      patch[c.field] = applyStaffLinkChange((patch[c.field] as unknown) ?? (profile as Row)[c.field], c);
+    }
+    ops.push({ op: "upsert" as const, id, base: row.updated_at ? asRevision(String(row.updated_at)) : null, row: { profile: patch } });
+  }
+  const r = await writeRecords<Row>("sis.staff", ops);
+  if (r.ok) return null;
+  return { kind: r.kind, message: describeElementFailure(r) };
 }

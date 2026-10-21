@@ -10,7 +10,6 @@ import {
 import { setMirrorSlice } from "@/lib/schoolDataMirror";
 import {
   hydrateMastersDeskFromDb,
-  mastersDeskPushPending,
   scheduleMastersDeskSync,
 } from "@/lib/mastersNormalizedClient";
 import { mergeDbDeskIntoMastersState } from "@/lib/mastersNormalizedMerge";
@@ -174,10 +173,11 @@ async function hydrateMastersOnce(): Promise<boolean> {
     if (!readFromDb) {
       scheduleMastersSync(loadMasters());
     }
-  } else if (readFromDb && mastersDeskPushPending()) {
-    // Local edits never reached DB (tab closed, failed push) — push now.
-    scheduleMastersSync(loadMasters());
   }
+  // (data-layer 2.2c: a read no longer re-sends "local edits that never
+  // reached the DB" — that pushed the tab's whole copy from a READ, and the
+  // masters-desk re-read after every element write would have sent a refused
+  // fee save's stale book again. A failed save says so and is redone by hand.)
   const changedAnything = mirrorChanged || normChanged;
   // Tell the screens already painted from the old copy. Until now only
   // saveMasters() and the staff hydrate raised this, so a workspace that

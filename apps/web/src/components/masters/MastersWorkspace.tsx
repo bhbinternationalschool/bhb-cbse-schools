@@ -16,6 +16,7 @@ import {
   listConcessionPolicies,
   normalizeMastersRead,
   newId,
+  readMastersPageCopyRaw,
   removeCampus,
   removeClass,
   removeFeeHead,
@@ -39,6 +40,17 @@ import { CustomFieldsPanel } from "@/components/masters/CustomFieldsPanel";
 import { QueryError } from "@/components/data/QueryError";
 import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { TutorPassesPanel } from "@/components/masters/TutorPassesPanel";
+import {
+  pendingAfterAnswer,
+  pendingAfterSave,
+  pendingRevision,
+  withPending,
+  type PendingElement,
+} from "@/components/masters/mastersElementPending";
+import { useMasters } from "@/lib/data/client/hooks";
+import { mastersDeskBridgeSettled } from "@/lib/data/client/mastersDeskBridge";
+import { planMastersElementCommit, type MastersCommitOpts } from "@/lib/data/client/mastersElementPlan";
+import { useMastersElementWrites } from "@/lib/data/client/writeHooks";
 import {
   answerHoldsOverlay,
   overlayOnCommit,
@@ -218,18 +230,23 @@ export function MastersWorkspace() {
   // data-layer 2.1h — READS: the server's book + the access copy's staff side
   // (useScreenMasters, kept fresh by the versions poll), normalised exactly as
   // loadMasters() normalised the page copy, so every panel sees the same shape.
-  // WRITES are unchanged until 2.2: commit() still saves the whole book through
-  // saveMasters(); what a commit sent is shown (the overlay) until an answer
-  // PROVABLY holds that save — built from the save's desk revision or later,
-  // or reading back every changed key as sent (./mastersPending). The first
-  // answer after a save can be older than it (another instance's cache); taking
-  // it reverted the screen, and the next commit sent the old value back.
+  // data-layer 2.2c — WRITES of the Foundation (campuses, years, terms,
+  // classes, sections, subjects, streams, class subjects, numbering,
+  // holidays, school profile / timing / statutory setup) and of the class /
+  // subject teacher links are ELEMENT writes: commit() works out what the
+  // action changed (mastersElementPlan) and sends only those elements, each on
+  // the `_rev` the view served. Until an answer serves an element at the
+  // revision its save answered, the element as sent is laid over the answer
+  // (./mastersElementPending). Fee setup (2.2e) and staff setup (2.2d) still
+  // save through saveMasters with the 2.1h whole-book overlay
+  // (./mastersPending) — only when an action changed one of those.
   const {
     masters: screenMasters,
     builtFrom,
     error: mastersError,
     retry: retryMasters,
   } = useScreenMasters();
+  const view = useMasters().data ?? null;
   const read = useMemo(
     () => (screenMasters ? normalizeMastersRead(screenMasters) : null),
     [screenMasters],
@@ -240,9 +257,31 @@ export function MastersWorkspace() {
     overlayRef.current = next;
     setOverlayState(next);
   };
+  const [pending, setPendingState] = useState<PendingElement[]>([]);
+  const pendingRef = useRef<PendingElement[]>([]);
+  const setPending = (next: PendingElement[]) => {
+    pendingRef.current = next;
+    setPendingState(next);
+  };
+  const saveSeq = useRef(0);
+  const writeElements = useMastersElementWrites();
   /** Re-asks for the masters answer after a save while it does not hold it yet. */
   const reasks = useRef(0);
-  const state = overlay?.state ?? read;
+  const state = useMemo(() => {
+    if (!read) return null;
+    // The old save's overlay holds only the keys its saves changed (fee /
+    // staff setup); everything else is the server's latest answer.
+    let base = read;
+    if (overlay) {
+      const b = { ...read } as unknown as Record<string, unknown>;
+      const o = overlay.state as unknown as Record<string, unknown>;
+      for (const k of overlay.keys) b[k] = o[k];
+      base = b as unknown as MastersState;
+    }
+    // Rows laid on from a save are the editor's own (normalised) elements, but
+    // a dropped key travels as null: normalise the result like every answer.
+    return pending.length ? normalizeMastersRead(withPending(base, pending)) : base;
+  }, [overlay, read, pending]);
   const [notice, setNotice] = useState<string | null>(null);
 
   // An answer that holds every save of the overlay replaces it. One that does
@@ -263,6 +302,28 @@ export function MastersWorkspace() {
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- retryMasters is React Query's refetch (stable)
   }, [overlay, read, builtFrom]);
+
+  // Element saves: every answer drops the elements it serves at (or past)
+  // the revision their save answered. While some are unproven, ask again
+  // every 2.5 s (an identical answer keeps React Query's data object, so
+  // the tick — not the answer — re-runs this); an entry no answer proves
+  // within HOLD_MS goes anyway (mastersElementPending).
+  const [pendingTick, setPendingTick] = useState(0);
+  useEffect(() => {
+    if (!pendingRef.current.length) return;
+    const left = pendingAfterAnswer(pendingRef.current, view?.masters, view?.stamps, Date.now());
+    if (left !== pendingRef.current) setPending(left);
+    const unproven = left.some((p) => p.savedAt > 0 && p.kind !== "staff");
+    // A save still in flight is re-checked too (an answer that never comes
+    // is given up after SEND_TIMEOUT_MS), without asking for the view.
+    if (!unproven && !left.some((p) => p.savedAt === 0)) return;
+    const t = window.setTimeout(() => {
+      if (unproven) void retryMasters();
+      setPendingTick((n) => n + 1);
+    }, 2_500);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- retryMasters is React Query's refetch (stable)
+  }, [view, pending, pendingTick]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -342,40 +403,139 @@ export function MastersWorkspace() {
     }
   }, [tab, session, state, rbac]);
 
-  function commit(next: MastersState, msg?: string) {
+  function flash(msg: string, ms = 2200) {
+    setNotice(msg);
+    window.setTimeout(() => setNotice((n) => (n === msg ? null : n)), ms);
+  }
+
+  function commit(next: MastersState, msg?: string, opts?: MastersCommitOpts) {
     if (readOnly) {
-      setNotice("Selected session is closed — masters are read-only");
-      window.setTimeout(() => setNotice(null), 2800);
+      flash("Selected session is closed — masters are read-only", 2800);
       return;
     }
-    setOverlay(overlayOnCommit(overlayRef.current, state, next));
-    reasks.current = 0;
+    if (!state) return;
+    const plan = planMastersElementCommit({
+      shown: state,
+      next,
+      served: view?.masters,
+      stamps: view?.stamps,
+      revisionOf: (key, id) => pendingRevision(pendingRef.current, key, id),
+      objectBases: opts?.objectBases,
+    });
+    if (!plan.ok) {
+      flash(plan.reason, 5000);
+      return;
+    }
+    const elementWork = plan.requests.length > 0 || plan.staff.length > 0;
+    if (!elementWork && plan.rest.length === 0) {
+      // Nothing changed: panels pass the book unchanged with a message
+      // ("Campus code already exists", "Already linked to V").
+      if (msg) flash(msg);
+      return;
+    }
     // The success notice must wait for the database, not for React. Showing
     // it synchronously is what made 16 refused writes look like 16 saves on
-    // 2026-08-09 — the screen said "session changed" every time while the
-    // server was rejecting the push. On failure we stay silent here: the
-    // push path raises a sticky error toast naming the actual reason.
+    // 2026-08-09.
     if (msg) setNotice("Saving…");
-    void saveMasters(next).then((outcome) => {
-      const after = overlayOnSaved(
-        overlayRef.current,
-        outcome.ok ? { ok: true, revision: outcome.revision } : { ok: false },
-      );
-      setOverlay(after);
-      // Read the server's book now (not at the next poll): after a save to
-      // see it, after a refusal to show what IS stored (the page copy held
-      // the refused edit; the answer replaces it).
-      void retryMasters();
-      if (!outcome.ok) {
-        setNotice(after ? null : "Not saved — showing the school's saved Masters again.");
-        if (!after) window.setTimeout(() => setNotice(null), 4000);
-        return;
+    let waiting = (elementWork ? 1 : 0) + (plan.rest.length ? 1 : 0);
+    let failed = false;
+    const done = (ok: boolean, why?: string) => {
+      waiting -= 1;
+      if (!ok) failed = true;
+      if (!ok && why) flash(why, 6000);
+      if (waiting > 0) return;
+      if (!failed && msg) flash(msg);
+    };
+
+    if (plan.rest.length) {
+      // Fee setup / staff setup: the old whole-book save, with only those
+      // keys taken from `next`. Everything else is the tab's page copy AS
+      // LOADED (raw — what the old save compares with; read after any
+      // re-read of the desk has finished), so the old save never sends a
+      // Foundation list: those go as elements, below.
+      const legacyBook = (): MastersState => {
+        const book = { ...(readMastersPageCopyRaw() ?? state) } as unknown as Record<string, unknown>;
+        for (const k of plan.rest) book[k] = (next as unknown as Record<string, unknown>)[k];
+        return book as unknown as MastersState;
+      };
+      // What the screen holds meanwhile: its own book with those keys as sent.
+      const shownBase = state;
+      const shownNext = { ...shownBase } as unknown as Record<string, unknown>;
+      for (const k of plan.rest) shownNext[k] = (next as unknown as Record<string, unknown>)[k];
+      setOverlay(overlayOnCommit(overlayRef.current, shownBase, shownNext as unknown as MastersState));
+      reasks.current = 0;
+      // Based on the stamps after this tab's last element write (mastersDeskBridge).
+      void mastersDeskBridgeSettled().then(() => saveMasters(legacyBook())).then((outcome) => {
+        const after = overlayOnSaved(
+          overlayRef.current,
+          outcome.ok ? { ok: true, revision: outcome.revision } : { ok: false },
+        );
+        setOverlay(after);
+        void retryMasters();
+        done(outcome.ok, outcome.ok ? undefined : after ? undefined : "Not saved — showing the school's saved Masters again.");
+      });
+    }
+
+    if (elementWork) {
+      const saveId = ++saveSeq.current;
+      const sent: PendingElement[] = [];
+      const sentAt = Date.now();
+      for (const r of plan.requests) {
+        r.ops.forEach((op, i) => {
+          const sliceKey = r.kind === "batch" ? (r.parts?.[i]?.sliceKey ?? r.sliceKey) : r.sliceKey;
+          sent.push({
+            sliceKey,
+            id: op.id,
+            kind: r.kind === "object" ? "object" : "slice",
+            value: op.op === "delete" ? null : ((r.kind === "object" ? (next as unknown as Record<string, unknown>)[r.sliceKey] : (op as { row: Record<string, unknown> }).row) as Record<string, unknown>),
+            revision: "",
+            saveId,
+            savedAt: 0,
+            sentAt,
+          });
+        });
       }
-      if (msg) {
-        setNotice(msg);
-        window.setTimeout(() => setNotice(null), 2200);
+      for (const c of plan.staff) {
+        const member = (next.staff ?? []).find((s) => s.id === c.staffId) as unknown as Record<string, unknown> | undefined;
+        sent.push({
+          sliceKey: "staff",
+          id: c.staffId,
+          kind: "staff",
+          value: member ? { [c.field]: member[c.field] } : null,
+          revision: "",
+          saveId,
+          savedAt: 0,
+          sentAt,
+        });
       }
-    });
+      setPending([...pendingRef.current, ...sent]);
+      void writeElements(plan.requests, plan.staff).then((outcome) => {
+        const now = Date.now();
+        let after = pendingRef.current;
+        // Staff link entries go once the roster was re-read (the write's own
+        // bridge); masters elements once an answer serves them.
+        after = after.filter((p) => !(p.saveId === saveId && p.kind === "staff"));
+        if (outcome.ok) {
+          after = pendingAfterSave(after, saveId, { ok: true, versions: outcome.versions }, now);
+        } else {
+          // What landed before the failure stays held until served; the rest
+          // was not stored and goes now.
+          const landed = new Set<string>();
+          plan.requests.slice(0, Math.max(0, outcome.failedAt)).forEach((r) => {
+            r.ops.forEach((op, i) => landed.add(`${r.kind === "batch" ? (r.parts?.[i]?.sliceKey ?? r.sliceKey) : r.sliceKey}|${op.id}`));
+          });
+          after = after
+            .filter((p) => p.saveId !== saveId || landed.has(`${p.sliceKey}|${p.id}`))
+            .map((p) =>
+              p.saveId === saveId
+                ? { ...p, revision: p.value === null ? "deleted" : String(outcome.versions[`${p.sliceKey}|${p.id}`] ?? ""), savedAt: now }
+                : p,
+            );
+        }
+        setPending(after);
+        done(outcome.ok, outcome.ok ? undefined : `Not saved — ${outcome.message}`);
+      });
+    }
   }
 
   if (!state && mastersError) {
