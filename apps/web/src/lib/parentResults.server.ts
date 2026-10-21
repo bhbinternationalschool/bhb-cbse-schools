@@ -39,6 +39,8 @@ import {
   type ParentDateSheetExam,
   type ParentTermResult,
 } from "@/lib/parentResults";
+import { reportCardSignatureRequest, shareSignatureImages } from "@/lib/printSignatures";
+import { loadPrintSignatures } from "@/lib/printSignatures.server";
 import { getSchoolMirrorSync } from "@/lib/schoolDataMirror";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
@@ -225,7 +227,7 @@ function cardFor(
 export async function buildParentResults(
   ctx: ApiAuthContext,
   householdId: string,
-): Promise<{ releasedTermCount: number; children: ParentChildResults[] }> {
+): Promise<{ releasedTermCount: number; children: ParentChildResults[]; signatureImages: Record<string, string> }> {
   const release = await readExamParentRelease();
   if (!release) {
     throw new ApiError("server_error", "Could not check which results the school has published. Please try again.", 503);
@@ -245,6 +247,7 @@ export async function buildParentResults(
   if (released.length === 0 || kids.length === 0) {
     return {
       releasedTermCount: released.length,
+      signatureImages: {},
       children: kids.map((k) => ({
         studentId: k.id,
         fullName: k.fullName,
@@ -267,6 +270,10 @@ export async function buildParentResults(
     attendanceOverrides: normalizeAttendanceResultOverrides(overridesRow?.state ?? null),
   };
   const holdOf = await reportCardHoldChecker(sis, masters);
+  // Each ready card's signatures, read once per image for the whole answer.
+  const signing: Promise<void>[] = [];
+  const signatureMemo = new Map<string, Promise<string | null>>();
+  const signatureImages: Record<string, string> = {};
 
   const children: ParentChildResults[] = kids.map((kid) => {
     const terms: ParentTermResult[] = [];
@@ -295,12 +302,22 @@ export async function buildParentResults(
         continue;
       }
       if (!attendanceKnown) card = { ...card, attendance: null };
+      const printable = toParentPrintableCard(card);
+      const sigReq = reportCardSignatureRequest(card);
+      if (sigReq) {
+        signing.push(
+          loadPrintSignatures(masters, sigReq, { memo: signatureMemo }).then(
+            (set) => void (printable.signatures = shareSignatureImages(set, signatureImages)),
+            () => void (printable.signatures = null),
+          ),
+        );
+      }
       terms.push({
         ...base,
         status: "ready",
         message: "",
         card: toParentReportCardView(card),
-        printable: toParentPrintableCard(card),
+        printable,
       });
     }
     return {
@@ -311,7 +328,8 @@ export async function buildParentResults(
     };
   });
 
-  return { releasedTermCount: released.length, children };
+  await Promise.all(signing);
+  return { releasedTermCount: released.length, children, signatureImages };
 }
 
 

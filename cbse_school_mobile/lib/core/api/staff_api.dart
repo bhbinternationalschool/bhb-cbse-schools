@@ -797,7 +797,13 @@ class CounterDue {
       label = _s(j, "label"),
       dueOn = _s(j, "dueOn"),
       balancePaise = _i(j, "balancePaise"),
-      balanceLabel = _s(j, "balanceLabel");
+      balanceLabel = _s(j, "balanceLabel"),
+      billedPaise = _i(j, "billedPaise"),
+      discountPaise = (j["discountPaise"] as num?)?.toInt(),
+      discountLines = ((j["discountLines"] as List?) ?? const [])
+          .whereType<String>()
+          .toList(),
+      allocationRank = (j["allocationRank"] as num?)?.toInt();
 
   final String dueKey;
   final String kind;
@@ -805,6 +811,22 @@ class CounterDue {
   final String dueOn;
   final int balancePaise;
   final String balanceLabel;
+
+  /// Billed before any discount (0 when the server did not say).
+  final int billedPaise;
+
+  /// Concession + counter discount on this due, as the web counter shows it.
+  ///
+  /// null = the server could not read every discount source (or is too old
+  /// to send one). Shown as "not loaded" — never as ₹0.
+  final int? discountPaise;
+
+  /// One line per concession / counter discount, e.g. "Sibling discount · 10% · −₹150".
+  final List<String> discountLines;
+
+  /// Position in the order a "total paying now" fills dues (0 = first), from
+  /// the server's own comparator. null on an older server.
+  final int? allocationRank;
 }
 
 class FeeStudentHit {
@@ -857,13 +879,17 @@ class TenderModeInfo {
       label = _s(j, "label"),
       refLabel = _s(j, "refLabel"),
       needsRef = _b(j, "needsRef"),
-      needsInstrumentDate = _b(j, "needsInstrumentDate");
+      needsInstrumentDate = _b(j, "needsInstrumentDate"),
+      needsBank = _b(j, "needsBank");
 
   final String value;
   final String label;
   final String refLabel;
   final bool needsRef;
   final bool needsInstrumentDate;
+
+  /// Cheque / RTGS / NEFT / IMPS / bank deposit: the web counter asks for the bank.
+  final bool needsBank;
 }
 
 class FeeCounter {
@@ -1038,7 +1064,13 @@ class AdmissionLeadRow {
       lastOutcome = _s(j, "lastOutcome"),
       lastChannel = _s(j, "lastChannel"),
       lastNote = _s(j, "lastNote"),
-      followUpCount = _i(j, "followUpCount");
+      followUpCount = _i(j, "followUpCount"),
+      registered = _b(j, "registered"),
+      applicationNo = _s(j, "applicationNo"),
+      registrationFeeRupees = _i(j, "registrationFeeRupees"),
+      registrationCollectedRupees = _i(j, "registrationCollectedRupees"),
+      registrationBalanceRupees = _i(j, "registrationBalanceRupees"),
+      registrationPaymentStatus = _s(j, "registrationPaymentStatus");
 
   final String id;
   final String enquiryNo;
@@ -1059,6 +1091,18 @@ class AdmissionLeadRow {
   final String lastChannel;
   final String lastNote;
   final int followUpCount;
+
+  /// Registered or Verified on the web — fee set, not yet sent to SIS.
+  final bool registered;
+  final String applicationNo;
+
+  /// 0 = no fee set on the lead (shown as "fee not set", never as "paid").
+  final int registrationFeeRupees;
+  final int registrationCollectedRupees;
+  final int registrationBalanceRupees;
+
+  /// none | pending | partial | paid | waived
+  final String registrationPaymentStatus;
 }
 
 class AdmissionLeadList {
@@ -1071,11 +1115,103 @@ class AdmissionLeadList {
         Map<String, dynamic>.from((j["counts"] as Map?) ?? {}),
         "today",
       ),
+      registered = _i(
+        Map<String, dynamic>.from((j["counts"] as Map?) ?? {}),
+        "registered",
+      ),
       leads = _list(j, "leads").map(AdmissionLeadRow.fromJson).toList();
 
   final int overdue;
   final int dueToday;
+  final int registered;
   final List<AdmissionLeadRow> leads;
+}
+
+/// What the walk-in and registration forms pick from.
+class AdmissionFormOptions {
+  AdmissionFormOptions.fromJson(Map<String, dynamic> j)
+    : classes = _list(
+        j,
+        "classes",
+      ).map((c) => (id: _s(c, "id"), name: _s(c, "name"))).toList(),
+      feeHeads = _list(
+        j,
+        "registrationFeeHeads",
+      ).map((c) => (id: _s(c, "id"), name: _s(c, "name"))).toList(),
+      tenderModes = _list(j, "tenderModes")
+          .map(
+            (c) => (
+              id: _s(c, "id"),
+              label: _s(c, "label"),
+              needsRef: _b(c, "needsRef"),
+              refLabel: _s(c, "refLabel"),
+            ),
+          )
+          .toList();
+
+  final List<({String id, String name})> classes;
+  final List<({String id, String name})> feeHeads;
+  final List<({String id, String label, bool needsRef, String refLabel})>
+  tenderModes;
+}
+
+/// The message icon's composer: nothing is sent until Send is tapped.
+class LeadComposer {
+  LeadComposer.fromJson(Map<String, dynamic> j)
+    : leadId = _s(j, "leadId"),
+      mobile = _s(j, "mobile"),
+      familyKey = _s(j, "familyKey"),
+      draft = _s(j, "draft"),
+      inWindow = _b(j, "inWindow"),
+      templateOk = ((j["template"] as Map?) ?? const {})["ok"] == true,
+      templateBody = "${((j["template"] as Map?) ?? const {})["body"] ?? ""}",
+      templateReason =
+          "${((j["template"] as Map?) ?? const {})["reason"] ?? ""}",
+      variables = ((j["variables"] as Map?) ?? const {}).map(
+        (k, v) => MapEntry("$k", "$v"),
+      );
+
+  final String leadId;
+  final String mobile;
+  final String familyKey;
+  final String draft;
+
+  /// The family wrote to the school in the last 24 hours, so WhatsApp will
+  /// deliver free text. Outside it only the approved template goes.
+  final bool inWindow;
+  final bool templateOk;
+
+  /// The approved template with this family's names — the exact words.
+  final String templateBody;
+  final String templateReason;
+  final Map<String, String> variables;
+}
+
+class AdmissionRegistrationResult {
+  AdmissionRegistrationResult.fromJson(Map<String, dynamic> j)
+    : leadId = _s(j, "leadId"),
+      enquiryNo = _s(j, "enquiryNo"),
+      applicationNo = _s(j, "applicationNo"),
+      feeRupees = _d(j, "feeRupees"),
+      balanceRupees = _d(j, "balanceRupees"),
+      paymentCode = _s(
+        Map<String, dynamic>.from((j["payment"] as Map?) ?? {}),
+        "code",
+      ),
+      paidRupees = _d(
+        Map<String, dynamic>.from((j["payment"] as Map?) ?? {}),
+        "amountRupees",
+      );
+
+  final String leadId;
+  final String enquiryNo;
+  final String applicationNo;
+  final double feeRupees;
+  final double balanceRupees;
+
+  /// RF-… code of the money taken now; "" when nothing was received.
+  final String paymentCode;
+  final double paidRupees;
 }
 
 // ------------------------------------------------------------------ survey
@@ -1773,8 +1909,22 @@ extension StaffApi on ApiClient {
     required String studentId,
     required String clientRef,
     required List<({String studentId, String dueKey, int paise})> lines,
-    required List<({String mode, int paise, String ref})> tenders,
+    required List<
+      ({
+        String mode,
+        int paise,
+        String ref,
+        String instrumentDate,
+        String bankName,
+      })
+    >
+    tenders,
     String note = "",
+
+    /// "Total paying now" in paise, when the amounts in [lines] are the split
+    /// of one total. The server re-derives the split from its own dues and
+    /// refuses a mismatch or anything above what is open.
+    int? payingNowPaise,
 
     /// The day the money was handed over, YYYY-MM-DD. Empty means today.
     ///
@@ -1787,6 +1937,7 @@ extension StaffApi on ApiClient {
       "clientRef": clientRef,
       "note": note,
       if (collectionDate.isNotEmpty) "collectionDate": collectionDate,
+      "payingNowPaise": ?payingNowPaise,
       "lines": [
         for (final l in lines)
           {
@@ -1797,7 +1948,13 @@ extension StaffApi on ApiClient {
       ],
       "tenders": [
         for (final t in tenders)
-          {"mode": t.mode, "amountPaise": t.paise, "ref": t.ref},
+          {
+            "mode": t.mode,
+            "amountPaise": t.paise,
+            "ref": t.ref,
+            if (t.instrumentDate.isNotEmpty) "instrumentDate": t.instrumentDate,
+            if (t.bankName.isNotEmpty) "bankName": t.bankName,
+          },
       ],
     }),
   );
@@ -1840,6 +1997,78 @@ extension StaffApi on ApiClient {
   }) async => AdmissionLeadList.fromJson(
     await _getData(
       "/api/v1/staff/admissions/leads?filter=$filter&q=${Uri.encodeQueryComponent(q)}",
+    ),
+  );
+
+  /// "Add walk-in lead" — the web's walk-in enquiry (createEnquiry).
+  Future<({String leadId, String enquiryNo, bool linkedExisting})>
+  createWalkInLead({
+    required String childName,
+    required String classSoughtId,
+    required String guardianName,
+    required String mobile,
+    String note = "",
+  }) async {
+    final d = await _postData("/api/v1/staff/admissions/leads", {
+      "childName": childName,
+      "classSoughtId": classSoughtId,
+      "guardianName": guardianName,
+      "mobile": mobile,
+      "note": note,
+    });
+    return (
+      leadId: _s(d, "leadId"),
+      enquiryNo: _s(d, "enquiryNo"),
+      linkedExisting: _b(d, "linkedExisting"),
+    );
+  }
+
+  Future<AdmissionFormOptions> fetchAdmissionFormOptions() async =>
+      AdmissionFormOptions.fromJson(
+        await _getData("/api/v1/staff/admissions/options"),
+      );
+
+  /// Register a lead ([leadId]) or a new child, with the registration fee
+  /// and — optionally — money received now. The server runs the web's
+  /// Registration desk functions; the RF- code comes back.
+  Future<AdmissionRegistrationResult> registerAdmission({
+    String leadId = "",
+    String childName = "",
+    String classSoughtId = "",
+    String guardianName = "",
+    String motherName = "",
+    String mobile = "",
+    required String feeHeadId,
+    required int feeAmountRupees,
+    int collectRupees = 0,
+    String collectMode = "",
+    String collectRef = "",
+  }) async => AdmissionRegistrationResult.fromJson(
+    await _postData("/api/v1/staff/admissions/register", {
+      if (leadId.isNotEmpty) "leadId": leadId,
+      if (leadId.isEmpty) ...{
+        "childName": childName,
+        "classSoughtId": classSoughtId,
+        "guardianName": guardianName,
+        "mobile": mobile,
+      },
+      if (motherName.isNotEmpty) "motherName": motherName,
+      "feeHeadId": feeHeadId,
+      "feeAmountRupees": feeAmountRupees,
+      if (collectRupees > 0)
+        "collect": {
+          "amountRupees": collectRupees,
+          "mode": collectMode,
+          "ref": collectRef,
+        },
+    }),
+  );
+
+  Future<LeadComposer> fetchLeadComposer(
+    String leadId,
+  ) async => LeadComposer.fromJson(
+    await _getData(
+      "/api/v1/staff/admissions/compose?leadId=${Uri.encodeQueryComponent(leadId)}",
     ),
   );
 

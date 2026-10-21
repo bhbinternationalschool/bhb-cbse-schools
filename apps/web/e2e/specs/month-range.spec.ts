@@ -54,6 +54,13 @@ async function openPrincipal(
   return context.newPage();
 }
 
+/** "1 Sep 2026" as the screen prints it (en-IN; ICU may say "Sept"). */
+function dayLabelRe(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number) as [number, number, number];
+  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1]!;
+  return `${d} ${mon}${mon === "Sep" ? "t?" : ""} ${y}`;
+}
+
 const box = (page: Page, prefix: string, part: "month" | "from" | "to" | "day") =>
   page.getByTestId(`${prefix}-${part}`);
 
@@ -251,7 +258,7 @@ test.describe("month ↔ range filters", () => {
     await page.context().close();
   });
 
-  test("fuel register: month and range in step, per-bus month said out loud", async ({ browser }) => {
+  test("fuel register: month and range in step, per-bus totals for the same dates", async ({ browser }) => {
     const page = await openPrincipal(browser);
     await page.goto("/transport?tab=fuel");
     const P = "fuel-period";
@@ -262,16 +269,20 @@ test.describe("month ↔ range filters", () => {
     await page.getByRole("button", { name: "Last month" }).click();
     await expectMonthLabel(page, P, monthName(LAST_MONTH));
     await expectRange(page, P, LAST_B.from, LAST_B.to);
-    await expect(page.getByRole("heading", { name: `Per bus — ${monthName(LAST_MONTH)}` })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("fuel-per-bus-month-note")).toHaveCount(0);
+    await expect(page.getByTestId("fuel-per-bus-heading")).toHaveText(`Per bus — ${monthName(LAST_MONTH)}`, { timeout: 30_000 });
 
-    // A range across two months: Custom, and the per-bus month is named.
+    // A range across two months: Custom, and the per-bus table covers the
+    // same dates (21 Oct 2026 — it used to stay on one whole month; the sums
+    // are proven in fuel-per-bus-range.spec.ts).
     await setDate(page, P, "to", `${THIS_MONTH}-10`);
     await expectMonthLabel(page, P, "Custom");
-    await expect(page.getByTestId("fuel-per-bus-month-note")).toContainText(`whole of ${monthName(THIS_MONTH)}`);
+    await expect(page.getByTestId("fuel-per-bus-heading")).toHaveText(
+      new RegExp(`^Per bus — ${dayLabelRe(LAST_B.from)} → ${dayLabelRe(`${THIS_MONTH}-10`)}$`),
+      { timeout: 30_000 },
+    );
     await box(page, P, "month").selectOption(THIS_MONTH);
     await expectRange(page, P, THIS_B.from, THIS_B.to);
-    await expect(page.getByTestId("fuel-per-bus-month-note")).toHaveCount(0);
+    await expect(page.getByTestId("fuel-per-bus-heading")).toHaveText(`Per bus — ${monthName(THIS_MONTH)}`, { timeout: 30_000 });
     await page.context().close();
   });
 
@@ -302,7 +313,7 @@ test.describe("month ↔ range filters", () => {
       await expect(box(page, "fuel-period", "month")).toBeVisible({ timeout: 90_000 });
       await page.getByRole("button", { name: "Last month" }).click();
       await expectRange(page, "fuel-period", LAST_B.from, LAST_B.to);
-      await expect(page.getByRole("heading", { name: `Per bus — ${monthName(LAST_MONTH)}` })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId("fuel-per-bus-heading")).toHaveText(`Per bus — ${monthName(LAST_MONTH)}`, { timeout: 30_000 });
       await page.screenshot({ path: path.join(SHOTS, `fuel-register-${tag}.png`), fullPage: true });
 
       await page.goto("/attendance?tab=student-reports");

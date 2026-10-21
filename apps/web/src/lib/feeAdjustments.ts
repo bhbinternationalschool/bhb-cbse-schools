@@ -125,6 +125,18 @@ let adjustCache: { raw: string; rows: FeeAdjustment[] } | null = null;
  */
 let memoryAdjustments: FeeAdjustment[] | null = null;
 
+/**
+ * Whether the posted adjustments are actually known here.
+ *
+ * On the server `loadFeeAdjustments` returns [] both when there are none and
+ * when the desk was never read; a screen that shows a waiver must tell those
+ * apart ("not loaded", never ₹0). In the browser the cache is the source.
+ */
+export function feeAdjustmentsLoaded(): boolean {
+  if (typeof window === "undefined") return memoryAdjustments !== null;
+  return true;
+}
+
 export function loadFeeAdjustments(): FeeAdjustment[] {
   if (typeof window === "undefined") return memoryAdjustments ?? [];
   try {

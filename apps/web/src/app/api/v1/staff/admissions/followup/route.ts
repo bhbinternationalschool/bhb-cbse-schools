@@ -15,6 +15,7 @@ import {
   type FollowUpOutcome,
 } from "@/lib/admissions";
 import { istToday } from "@/lib/api/v1/staffFees";
+import { assertAdmissionsGrant } from "@/lib/api/v1/staffAdmissions.server";
 
 export const runtime = "nodejs";
 
@@ -48,6 +49,9 @@ export async function POST(request: Request) {
   try {
     const ctx = await resolveApiAuth(request);
     assertMobileFeature(ctx, "admission_leads");
+    // A write: the feature is a view grant, so the change right is checked
+    // too (every staff write route holds both).
+    assertAdmissionsGrant(ctx, "admissions.leads", "edit");
 
     const body = (await request.json().catch(() => ({}))) as Body;
     const leadId = (body.leadId || "").trim();

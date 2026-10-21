@@ -22,8 +22,9 @@ import type {
   ParentTermResult,
 } from "@/lib/parentResults";
 import { normalizeStudent } from "@/lib/sis";
+import { withSignatureImages } from "@/lib/printSignatures";
 
-type ResultsData = { releasedTermCount: number; children: ParentChildResults[] };
+type ResultsData = { releasedTermCount: number; children: ParentChildResults[]; signatureImages?: Record<string, string> };
 type DateSheetData = { publishedTermCount: number; today: string; children: ParentChildDateSheet[] };
 
 async function getData<T>(url: string): Promise<{ data: T } | { error: string }> {
@@ -211,7 +212,7 @@ export function ParentResultsPortal() {
                     </div>
                     <div className="overflow-x-auto">
                       <div className="min-w-[640px]">
-                        <ReportCardSheet card={printable} />
+                        <ReportCardSheet card={printable} signatures={withSignatureImages(term?.printable?.signatures, results?.signatureImages)} />
                       </div>
                     </div>
                   </>
