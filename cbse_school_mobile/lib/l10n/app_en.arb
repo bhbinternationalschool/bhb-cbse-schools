@@ -97,8 +97,12 @@
   "leadRevisionHint": "Revise in the LEAD app: {book} → {chapter}",
   "@leadRevisionHint": {
     "placeholders": {
-      "book": {"type": "String"},
-      "chapter": {"type": "String"}
+      "book": {
+        "type": "String"
+      },
+      "chapter": {
+        "type": "String"
+      }
     }
   },
   "couldNotOpenLeadApp": "Could not open the LEAD app",
@@ -1065,10 +1069,22 @@
   "profAadhaarAdd": "Add",
   "profAadhaarCorrect": "Correct",
   "profAadhaarDialogTitle": "{who} — Aadhaar number",
-  "@profAadhaarDialogTitle": {"placeholders": {"who": {"type": "String"}}},
+  "@profAadhaarDialogTitle": {
+    "placeholders": {
+      "who": {
+        "type": "String"
+      }
+    }
+  },
   "profAadhaarInvalid": "This is not a valid 12-digit Aadhaar number — please check it.",
   "profAadhaarSaved": "Saved — XXXX-XXXX-{last4}",
-  "@profAadhaarSaved": {"placeholders": {"last4": {"type": "String"}}},
+  "@profAadhaarSaved": {
+    "placeholders": {
+      "last4": {
+        "type": "String"
+      }
+    }
+  },
   "profAadhaarUnchanged": "That number is already on record.",
   "profAadhaarKeptVerified": "The school has already verified this Aadhaar, so it was not changed. Please contact the school office.",
   "profDetailsOnRecord": "Details on record",
@@ -1513,7 +1529,16 @@
   "resultsOverallGrade": "Overall grade",
   "resultsRank": "Rank",
   "resultsRankOf": "{rank} of {size}",
-  "@resultsRankOf": {"placeholders": {"rank": {"type": "String"}, "size": {"type": "String"}}},
+  "@resultsRankOf": {
+    "placeholders": {
+      "rank": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
   "resultsClassAverage": "Class average",
   "resultsResult": "Result",
   "resultsAttendance": "Attendance",
@@ -1521,7 +1546,13 @@
   "resultsTeacherRemarks": "Class teacher's remarks",
   "resultsAbsentAll": "Absent in this examination",
   "resultsAbsentFor": "Absent for: {subjects}",
-  "@resultsAbsentFor": {"placeholders": {"subjects": {"type": "String"}}},
+  "@resultsAbsentFor": {
+    "placeholders": {
+      "subjects": {
+        "type": "String"
+      }
+    }
+  },
   "resultsAggregateNote": "Weighted result of the exams that count toward it.",
   "resultsNoMarks": "Marks for this exam are not ready yet. Please check again later.",
   "resultsHeld": "This report card is being held by the school office. Please contact the office.",
@@ -1530,7 +1561,36 @@
   "dateSheetTitle": "Date sheet",
   "dateSheetNone": "No upcoming exams have been published for this child yet.",
   "dateSheetMinutes": "{minutes} min",
-  "@dateSheetMinutes": {"placeholders": {"minutes": {"type": "String"}}},
+  "@dateSheetMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "schoolChatTitle": "School chat",
+  "schoolChatGroups": "Groups",
+  "schoolChatDirect": "Direct chats",
+  "schoolChatClassTeacherThread": "Message the class teacher",
+  "schoolChatNewMessage": "Message a teacher",
+  "schoolChatNoMessages": "No messages yet.",
+  "schoolChatNone": "No chats yet. A class or subject group appears once a teacher is assigned to it.",
+  "schoolChatWaiting": "Waiting for review",
+  "schoolChatRemoved": "Removed by the school",
+  "schoolChatMuted": "The school has muted you in this chat. You can still read messages.",
+  "schoolChatPaused": "The school has paused chat for this login. Please speak to the class teacher.",
+  "schoolChatSafety": "Messages are checked before others see them. Please be kind.",
+  "schoolChatAsChild": "Writing as {name}",
+  "@schoolChatAsChild": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "schoolChatAsParent": "Writing as the parent",
+  "schoolChatGroupNoMessages": "Group — no messages yet",
+  "schoolChatParentInbox": "Parent messages to the class teacher",
   "scCallFamily": "Call family",
   "scMessageFamily": "Message family",
   "scAppChat": "App chat with the family",
@@ -1543,33 +1603,66 @@
   "scNoWhatsAppOnRecord": "No WhatsApp number on record",
   "scAskClassTeacherToAdd": "Ask the class teacher or the office to add it.",
   "scCallNumber": "Call {number}",
-  "@scCallNumber": {"placeholders": {"number": {"type": "String"}}},
+  "@scCallNumber": {
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
   "scCallSourceGuardian": "Guardian's mobile",
   "scCallSourceWhatsApp": "Family's WhatsApp number (no guardian mobile on record)",
   "scLoadingFamily": "Reading the family's numbers…",
   "scWhatsAppNumberLabel": "WhatsApp number (10 digits)",
   "scCurrentNumber": "Now: {number}",
-  "@scCurrentNumber": {"placeholders": {"number": {"type": "String"}}},
+  "@scCurrentNumber": {
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
   "scSave": "Save",
   "scCancel": "Cancel",
   "scNumberSaved": "WhatsApp number saved for school messages.",
   "scErrEmpty": "Type the family's 10-digit WhatsApp number",
   "scErrNotMobile": "Enter a 10-digit Indian mobile number (starting 6–9)",
   "scErrPlaceholder": "{number} is a placeholder, not the family's number",
-  "@scErrPlaceholder": {"placeholders": {"number": {"type": "String"}}},
+  "@scErrPlaceholder": {
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
   "scErrSame": "That is already the family's WhatsApp number",
   "scMessageLabel": "Your message to the family",
   "scMessageHint": "Short and clear — the family reads it on WhatsApp",
   "scPreview": "Preview",
   "scPreviewTitle": "The family will read this",
   "scPreviewTo": "To {number} · in {language}",
-  "@scPreviewTo": {"placeholders": {"number": {"type": "String"}, "language": {"type": "String"}}},
+  "@scPreviewTo": {
+    "placeholders": {
+      "number": {
+        "type": "String"
+      },
+      "language": {
+        "type": "String"
+      }
+    }
+  },
   "scEdit": "Edit",
   "scSend": "Send",
   "scSending": "Sending…",
   "scSent": "Sent from the school's WhatsApp.",
   "scNotSent": "Not sent: {reason}",
-  "@scNotSent": {"placeholders": {"reason": {"type": "String"}}},
+  "@scNotSent": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
   "scLanguageHindi": "Hindi",
   "scLanguageEnglish": "English",
   "dtTypeLabel": "What is this document?",
@@ -1583,14 +1676,41 @@
   "dtAadhaarHint": "12 digits — it is saved to the record",
   "dtAadhaarInvalid": "An Aadhaar number has 12 digits",
   "dtGoesToSlot": "Verified, it goes to: {label}",
-  "@dtGoesToSlot": {"placeholders": {"label": {"type": "String"}}},
+  "@dtGoesToSlot": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
   "dtGoesOffSlot": "Verified, it is filed as {label} — the child's \"{from}\" stays empty for the right document.",
-  "@dtGoesOffSlot": {"placeholders": {"label": {"type": "String"}, "from": {"type": "String"}}},
+  "@dtGoesOffSlot": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      },
+      "from": {
+        "type": "String"
+      }
+    }
+  },
   "dtVerifiedAs": "Verified as {label}.",
-  "@dtVerifiedAs": {"placeholders": {"label": {"type": "String"}}},
+  "@dtVerifiedAs": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
   "dtAadhaarSaved": "Aadhaar number saved to the record.",
   "dtAadhaarKept": "The record already has a different Aadhaar verified on UDISE+ — not changed. Tell the office.",
   "dtAadhaarNotSaved": "Document verified, but the Aadhaar number was not saved: {reason}",
-  "@dtAadhaarNotSaved": {"placeholders": {"reason": {"type": "String"}}},
+  "@dtAadhaarNotSaved": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
   "dtVerify": "Verify"
 }

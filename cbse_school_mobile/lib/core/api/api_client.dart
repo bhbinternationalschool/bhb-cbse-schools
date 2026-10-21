@@ -29,6 +29,7 @@ part "transport_register_api.dart";
 part "results_api.dart";
 part "notifications_api.dart";
 part "student_contact_api.dart";
+part "school_chat_api.dart";
 
 /// Session cookie minted by the ERP (see web /api/auth/*).
 const _cookieName = "bhb_demo_session";
@@ -2999,6 +3000,8 @@ class ApiClient {
     "/api/v1/teaching/syllabus-scan",
     "/api/v1/teaching/syllabus-import",
     "/api/v1/homework/post",
+    // The message is checked (rules, then the model, up to 15 s) before it is stored.
+    "/api/v1/school-chat/send",
     "/api/v1/staff/class-gallery/complete",
     "/api/v1/staff/broadcast",
     "/api/v1/owner/broadcast",
