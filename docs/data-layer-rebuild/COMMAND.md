@@ -1688,10 +1688,25 @@ on a6560347 (the modules did not exist / the planner refused > 12). `masters-ele
 on a6560347 (fresh build, fresh stack): object (no conflict — the stale form saved), cascade with a stale link (the
 class was removed, links part-way), class with 14 links (refused, not removed), series (the certificates clerk moved
 RECEIPT: 200). This head, fresh stack: see the PR comment for the re-run.
+*(Director's follow-up, 22 Oct 2026.)* **A lagging counter is worse than a big jump** (it re-issues numbers in use). The
+bump may move a series more than 50 past its next number when the records hold that number
+(`lib/data/server/numberSeriesIssued.ts`: ADMISSION → `sis_students.admission_no`, SRN → `sis_students.srn`, RECEIPT →
+`fee_desk_vouchers.receipt_no`; prefix + digits); anything unverifiable beyond +50 stays refused and logged. Every bump
+of those series also lifts a counter found behind its records past them (logged). New `POST
+/api/data/masters.number-series/next` answers max(counter, highest on record + 1) and lifts a lagging counter; the New
+student form takes it for the admission number when the field is untouched. The batch route allows a FUNCTION holder
+(a teacher's own-class grant) one removal per batch, as the single route. `ay` is validated (YYYY-YY). The dead
+`mastersDeskPushPending` is deleted (frozen file, deletion). Tests (`masters-element-writes.spec`, each failing on
+2784c1f3 except where said): 60 imported SRNs + one bump with the last → the series ends past it (old: 409); an
+unverified +60 ADMISSION bump → 409 (passes on old too — coverage); 70 admissions on record with the counter behind →
+`next` answers max+1, lifts the counter, and the New student form shows it (old: 404); a teacher's batch with two
+removals → 400 (old: 200, both removed). Self-test +1 (prefix/tail rules, the next-number answer). **Not wired:** the
+fee counter's receipt number and the SRN suggestion still come from the tab's copy + counter (receipts are 2.2e's
+money path) — after the first receipt bump the counter can no longer lag behind the records.
 **Behaviour changes (review).** A form saved after someone else changed the same setting is refused and shows theirs
 (typing in that form is lost on the conflict — re-enter it). Removing a class or a subject with its links is all or
-nothing. Number series: a jump of more than 50 is refused — **a bulk student import whose admission numbers run more
-than 50 past the series' next number no longer moves the series** (the toast says so; set it in Masters → Numbering).
+nothing. Number series: a jump of more than 50 is refused unless the records hold the number (follow-up below — an import's
+numbers do move the series).
 The certificates clerk / counter can move only their own series.
 
 **2.3a Delete the gate and the events.** With every component reader on hooks: delete

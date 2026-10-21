@@ -15,7 +15,8 @@ import assert from "node:assert/strict";
 import { applyStaffLinkChange, MASTERS_BATCH_PATH, MAX_REMOVALS, planMastersElementCommit } from "./mastersElementPlan";
 import { bridgeMastersDeskAfterWrite, mastersDeskBridgeSettled } from "./mastersDeskBridge";
 import { objectDraftStep } from "@/components/masters/useObjectDraft";
-import { bumpSeriesOnServer } from "@/lib/numberSeries";
+import { bumpSeriesOnServer, fetchSeriesNext } from "@/lib/numberSeries";
+import { seriesPrefix, tailNumber } from "../server/numberSeriesIssued";
 import {
   HOLD_MS,
   SEND_TIMEOUT_MS,
@@ -297,6 +298,20 @@ function main(): void {
 }
 
 async function asyncChecks(): Promise<void> {
+  /* ── 10. (director) Numbers on record: prefix + digits only ── */
+  {
+    assert.equal(seriesPrefix({ prefix: "BHB-", includeSessionInPrefix: false }, "2026-27"), "BHB-");
+    assert.equal(seriesPrefix({ prefix: "TC/", includeSessionInPrefix: true }, "2026-27"), "TC/2026-27/");
+    assert.equal(tailNumber("SRN-00060", "SRN-"), 60);
+    assert.equal(tailNumber("SRN-00060A", "SRN-"), null);
+    assert.equal(tailNumber("RCV-12", "SRN-"), null);
+    const fake = (async () => new Response(JSON.stringify({ ok: true, next: 1071, formatted: "BHB-1071", lifted: true }), { status: 200 })) as unknown as typeof fetch;
+    assert.deepEqual(await fetchSeriesNext("ADMISSION", "2026-27", { post: fake }), { next: 1071, formatted: "BHB-1071", lifted: true });
+    const down = (async () => new Response("{}", { status: 503 })) as unknown as typeof fetch;
+    assert.equal(await fetchSeriesNext("ADMISSION", "2026-27", { post: down }), null, "unknown → the caller keeps its own suggestion");
+    console.log("  ✓ numbers on record: prefix + digits; the next-number answer, and null when unknown");
+  }
+
   /* ── 8. (review) Number series bump: retried once, a failure is said ── */
   {
     let calls = 0;
