@@ -4023,4 +4023,12 @@ class LHi extends L {
   String hcActLastAt(String time) {
     return 'आख़िरी $time पर';
   }
+
+  @override
+  String get cmFamiliesNotLoaded =>
+      'हर कक्षा के परिवारों की संख्या लोड नहीं हुई — नीचे जाँचने पर गिनती दिखेगी।';
+
+  @override
+  String get cmNoneReachable =>
+      'इन कक्षाओं का कोई परिवार WhatsApp पर नहीं मिल सकता — कुछ नहीं भेजा जाएगा।';
 }

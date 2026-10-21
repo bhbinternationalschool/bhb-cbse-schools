@@ -1144,5 +1144,7 @@
   "hcActStaffLeave": "स्टाफ़ छुट्टी पर फ़ैसला ({count})",
   "hcActStudentLeave": "छात्र छुट्टी पर फ़ैसला ({count})",
   "hcActProfile": "अपनी प्रोफ़ाइल अपडेट की",
-  "hcActLastAt": "आख़िरी {time} पर"
+  "hcActLastAt": "आख़िरी {time} पर",
+  "cmFamiliesNotLoaded": "हर कक्षा के परिवारों की संख्या लोड नहीं हुई — नीचे जाँचने पर गिनती दिखेगी।",
+  "cmNoneReachable": "इन कक्षाओं का कोई परिवार WhatsApp पर नहीं मिल सकता — कुछ नहीं भेजा जाएगा।"
 }
