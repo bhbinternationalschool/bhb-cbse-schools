@@ -235,7 +235,38 @@ The pattern (Phase 2 will add the Marketing Manager, Counsellor and Transport In
    then import the changed JSON (section 3). `check-workflows.mjs` fails if a charter in the JSON is stale, a Code node does not parse, a model id is wrong, or a Claude call has no usage-ledger leaf.
 6. **Migration?** Usually none: new roles use the same four tables. Add a new `source` value to the `office_tasks.source` check constraint only when a role needs its own.
 
-## 7. Files
+## 7. Deployed instance (21 Oct 2026)
+
+| | |
+|---|---|
+| VM | `office-n8n`, `us-central1-a`, e2-micro, 30 GB pd-standard, Debian 12, Docker 29 + Compose v5, 2 GB swap (Always Free tier) |
+| n8n | 2.44.5, loopback `127.0.0.1:5678`, SQLite; the three workflows are imported (inactive) |
+| Folder on the VM | `~/office` (a copy of this folder; `.env` has `N8N_ENCRYPTION_KEY` and `OFFICE_TENANT_ID` filled) |
+| Supabase | migration `office_staff_room` applied to project BHB School; tenant id `6558f3c4-6d12-4636-bf53-17423b0eaad3` |
+| ERP | `WA_DISPATCH_SECRET` is bound on Cloud Run from Secret Manager secret `school-erp-wa-dispatch-secret` |
+
+Still to do by hand (secrets are never written by automation):
+
+```bash
+gcloud compute ssh office-n8n --project=school-erp-prod-493619 --zone=us-central1-a
+nano ~/office/.env   # fill ANTHROPIC_API_KEY, SUPABASE_SERVICE_ROLE_KEY, WA_DISPATCH_SECRET, DIRECTOR_WA_MOBILE, PRINCIPAL_WA_MOBILE
+```
+
+The two ERP values come from Secret Manager (run on the Mac, paste into nano):
+
+```bash
+gcloud secrets versions access latest --secret=school-erp-supabase-service-role-key --project=school-erp-prod-493619
+```
+
+```bash
+gcloud secrets versions access latest --secret=school-erp-wa-dispatch-secret --project=school-erp-prod-493619
+```
+
+`ANTHROPIC_API_KEY` is a new key named `n8n-office` from console.anthropic.com. Then on the VM `cd ~/office && sudo docker compose up -d` (re-reads `.env`), open the SSH tunnel (section 1), create the owner account at <http://localhost:5678>, add the Gmail OAuth2 credential (section 2) and select it on the two Gmail nodes, run **Test workflow** on the Academic Incharge, and activate all three.
+
+To update the workflows after a change in this repo: `gcloud compute scp --recurse automation/n8n/workflows office-n8n:~/office/ --zone=us-central1-a`, then `sudo docker compose exec -T n8n n8n import:workflow --separate --input=/office/workflows` and delete the older copies in the editor (import creates new workflows, it does not replace).
+
+## 8. Files
 
 ```
 automation/n8n/
