@@ -148,7 +148,7 @@ function HomeworkFor({ child }: { child: ParentChild }) {
                     href={a.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="mr-3 mt-1 inline-block text-xs text-[#1565c0] underline"
+                    className="mr-3 mt-1 inline-block text-xs text-[var(--brand-mid)] underline"
                   >
                     {a.label || "Attachment"}
                   </a>
