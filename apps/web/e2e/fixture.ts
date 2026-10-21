@@ -587,7 +587,11 @@ function buildGrowing(students: SisStudent[], staff: StaffRecord[]): E2eFixture[
     feeAdjustments: buildFeeAdjustments(children),
     staffHr: buildStaffHr(staff),
     outdoorDuty: buildOutdoorDuty(staff),
-    certificates: buildCertificates(children),
+    certificates: buildCertificates(children, {
+      principalName: staff[PRINCIPAL_STAFF - 1]!.fullName,
+      classTeacherName: staff[CLASS_TEACHER - 1]!.fullName,
+      checkedByName: staff[OFFICE_STAFF - 1]!.fullName,
+    }),
   };
 }
 

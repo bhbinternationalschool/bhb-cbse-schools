@@ -65,7 +65,7 @@ export default defineConfig<GateOptions>({
   projects: [
     {
       name: "desktop",
-      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay)\.spec\.ts/,
+      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay|print-signatures)\.spec\.ts/,
       use: { ...desktop },
     },
     {
@@ -104,6 +104,15 @@ export default defineConfig<GateOptions>({
       // after everything that reads the stack (16 Oct 2026, school chat).
       name: "chat-writes",
       testMatch: /school-chat\.spec\.ts/,
+      dependencies: ["desktop", "phone-375-cpu4x"],
+      use: { ...desktop },
+    },
+    {
+      // Puts signatures on three staff records (and takes them off again —
+      // 21 Oct 2026, staff signatures on printed documents), so it runs
+      // after everything that reads the stack.
+      name: "signature-writes",
+      testMatch: /print-signatures\.spec\.ts/,
       dependencies: ["desktop", "phone-375-cpu4x"],
       use: { ...desktop },
     },
