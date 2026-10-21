@@ -1,7 +1,8 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   appendRbacAudit,
   canConfigureRbac,
@@ -66,7 +67,9 @@ function emptyScope() {
 
 export function RolesPermissionsPanel() {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1h: the server's book + the access copy's staff side (who
+  // each grant belongs to) — no mount-time read, no 'bhb-masters-updated'.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [state, setState] = useState<RbacState | null>(null);
 
   // Sorting by Expires shows which role assignments lapse soonest.
@@ -112,9 +115,7 @@ export function RolesPermissionsPanel() {
   const [copyReplace, setCopyReplace] = useState(true);
 
   useEffect(() => {
-    const m = loadMasters();
     const r = loadRbac();
-    setMasters(m);
     setState(r);
     setRoleId(
       r.roles.find((x) => x.code === "principal")?.id || r.roles[0]?.id || "",
@@ -150,19 +151,15 @@ export function RolesPermissionsPanel() {
     };
   }, [loadTick]);
 
-  // The staff roster is loaded on demand (memory-only storage): ask for it,
-  // and pick it up whenever it lands.
+  // The staff roster is loaded on demand (memory-only storage): ask for it.
+  // useScreenMasters' staff side (the access copy) picks it up when it lands.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const refresh = () => setMasters(loadMasters());
-    window.addEventListener("bhb-masters-updated", refresh);
     void Promise.all([import("@/lib/staffPersistence"), import("@/lib/deskHydrateGuard")])
       .then(([{ ensureStaffHydrated }, { withHydrationSlot }]) =>
         withHydrationSlot(() => ensureStaffHydrated()),
       )
-      .then(refresh)
       .catch(() => undefined);
-    return () => window.removeEventListener("bhb-masters-updated", refresh);
   }, []);
 
   const allowed = useMemo(() => {
@@ -446,6 +443,9 @@ export function RolesPermissionsPanel() {
     );
   }
 
+  if (!masters && mastersError) {
+    return <QueryError what="the school's staff and classes" error={mastersError} retry={retryMasters} />;
+  }
   if (!state || !masters) {
     return <p className="text-sm text-[var(--muted)]">Loading roles…</p>;
   }

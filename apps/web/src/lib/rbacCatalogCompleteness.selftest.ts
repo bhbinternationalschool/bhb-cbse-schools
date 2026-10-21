@@ -125,6 +125,8 @@ for (const screen of RBAC_SCREEN_TABS) {
  */
 const NOT_RBAC_SCREENS: Record<string, string> = {
   "components/staff/MyPayWorkspace.tsx": "the signed-in person's own attendance, leave, payslips and advances",
+  "components/games/GamesWorkspace.tsx":
+    "views of one teaching screen (/games → teaching): every action is gated server-side by the caller's own sections (staffSectionScope) and the play limits by assertSchoolWide — there is no function to grant",
   "components/reports/ReportsCenterWorkspace.tsx": "hub views (dashboard / catalog / recent); each report is gated by its module (REPORTS_CENTER_RBAC_MODULES)",
 };
 
