@@ -77,6 +77,7 @@ apps/web/e2e/test-results/
 apps/web/e2e/month-groups-shots/
 apps/web/e2e/month-range-shots/
 apps/web/e2e/counter-sales-shots/
+apps/web/e2e/student-upgrade-shots/
 apps/web/e2e/transport-paid-shots/
 apps/web/e2e/scoreboard.json
 
@@ -84,3 +85,4 @@ apps/web/e2e/dues-screens-shots/
 apps/web/e2e/parent-web-shots/
 apps/web/e2e/dues-transport-shots/
 apps/web/e2e/staff-register-shots/
+apps/web/e2e/notify-shots/

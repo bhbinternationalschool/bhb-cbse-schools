@@ -97,8 +97,12 @@
   "leadRevisionHint": "Revise in the LEAD app: {book} → {chapter}",
   "@leadRevisionHint": {
     "placeholders": {
-      "book": {"type": "String"},
-      "chapter": {"type": "String"}
+      "book": {
+        "type": "String"
+      },
+      "chapter": {
+        "type": "String"
+      }
     }
   },
   "couldNotOpenLeadApp": "Could not open the LEAD app",
@@ -1065,10 +1069,22 @@
   "profAadhaarAdd": "Add",
   "profAadhaarCorrect": "Correct",
   "profAadhaarDialogTitle": "{who} — Aadhaar number",
-  "@profAadhaarDialogTitle": {"placeholders": {"who": {"type": "String"}}},
+  "@profAadhaarDialogTitle": {
+    "placeholders": {
+      "who": {
+        "type": "String"
+      }
+    }
+  },
   "profAadhaarInvalid": "This is not a valid 12-digit Aadhaar number — please check it.",
   "profAadhaarSaved": "Saved — XXXX-XXXX-{last4}",
-  "@profAadhaarSaved": {"placeholders": {"last4": {"type": "String"}}},
+  "@profAadhaarSaved": {
+    "placeholders": {
+      "last4": {
+        "type": "String"
+      }
+    }
+  },
   "profAadhaarUnchanged": "That number is already on record.",
   "profAadhaarKeptVerified": "The school has already verified this Aadhaar, so it was not changed. Please contact the school office.",
   "profDetailsOnRecord": "Details on record",
@@ -1513,7 +1529,16 @@
   "resultsOverallGrade": "Overall grade",
   "resultsRank": "Rank",
   "resultsRankOf": "{rank} of {size}",
-  "@resultsRankOf": {"placeholders": {"rank": {"type": "String"}, "size": {"type": "String"}}},
+  "@resultsRankOf": {
+    "placeholders": {
+      "rank": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
   "resultsClassAverage": "Class average",
   "resultsResult": "Result",
   "resultsAttendance": "Attendance",
@@ -1521,7 +1546,13 @@
   "resultsTeacherRemarks": "Class teacher's remarks",
   "resultsAbsentAll": "Absent in this examination",
   "resultsAbsentFor": "Absent for: {subjects}",
-  "@resultsAbsentFor": {"placeholders": {"subjects": {"type": "String"}}},
+  "@resultsAbsentFor": {
+    "placeholders": {
+      "subjects": {
+        "type": "String"
+      }
+    }
+  },
   "resultsAggregateNote": "Weighted result of the exams that count toward it.",
   "resultsNoMarks": "Marks for this exam are not ready yet. Please check again later.",
   "resultsHeld": "This report card is being held by the school office. Please contact the office.",
@@ -1530,7 +1561,36 @@
   "dateSheetTitle": "Date sheet",
   "dateSheetNone": "No upcoming exams have been published for this child yet.",
   "dateSheetMinutes": "{minutes} min",
-  "@dateSheetMinutes": {"placeholders": {"minutes": {"type": "String"}}},
+  "@dateSheetMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "schoolChatTitle": "School chat",
+  "schoolChatGroups": "Groups",
+  "schoolChatDirect": "Direct chats",
+  "schoolChatClassTeacherThread": "Message the class teacher",
+  "schoolChatNewMessage": "Message a teacher",
+  "schoolChatNoMessages": "No messages yet.",
+  "schoolChatNone": "No chats yet. A class or subject group appears once a teacher is assigned to it.",
+  "schoolChatWaiting": "Waiting for review",
+  "schoolChatRemoved": "Removed by the school",
+  "schoolChatMuted": "The school has muted you in this chat. You can still read messages.",
+  "schoolChatPaused": "The school has paused chat for this login. Please speak to the class teacher.",
+  "schoolChatSafety": "Messages are checked before others see them. Please be kind.",
+  "schoolChatAsChild": "Writing as {name}",
+  "@schoolChatAsChild": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "schoolChatAsParent": "Writing as the parent",
+  "schoolChatGroupNoMessages": "Group — no messages yet",
+  "schoolChatParentInbox": "Parent messages to the class teacher",
   "admAddWalkInLead": "Add walk-in lead",
   "admWalkInTitle": "New walk-in lead",
   "admChildName": "Child's name",
@@ -1543,16 +1603,46 @@
   "admSaveLead": "Save lead",
   "admSaving": "Saving…",
   "admFieldRequired": "{field} is required",
-  "@admFieldRequired": {"placeholders": {"field": {"type": "String"}}},
+  "@admFieldRequired": {
+    "placeholders": {
+      "field": {
+        "type": "String"
+      }
+    }
+  },
   "admMobileTenDigits": "Mobile must be 10 digits",
   "admWalkInSaved": "Lead {enquiryNo} added",
-  "@admWalkInSaved": {"placeholders": {"enquiryNo": {"type": "String"}}},
+  "@admWalkInSaved": {
+    "placeholders": {
+      "enquiryNo": {
+        "type": "String"
+      }
+    }
+  },
   "admWalkInSavedLinked": "Lead {enquiryNo} added to a family already on file",
-  "@admWalkInSavedLinked": {"placeholders": {"enquiryNo": {"type": "String"}}},
+  "@admWalkInSavedLinked": {
+    "placeholders": {
+      "enquiryNo": {
+        "type": "String"
+      }
+    }
+  },
   "admOptionsNotLoaded": "Classes and fee heads could not be loaded: {reason}",
-  "@admOptionsNotLoaded": {"placeholders": {"reason": {"type": "String"}}},
+  "@admOptionsNotLoaded": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
   "admComposerTitle": "Message to {name}",
-  "@admComposerTitle": {"placeholders": {"name": {"type": "String"}}},
+  "@admComposerTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "admComposerLoading": "Preparing the message…",
   "admComposerYourWords": "Your message",
   "admComposerInWindow": "The family wrote to the school in the last 24 hours, so your message can go as written. Check or edit it, then tap Send.",
@@ -1560,18 +1650,36 @@
   "admComposerApproved": "School's approved message",
   "admComposerApprovedNote": "Approved by WhatsApp in these exact words — it cannot be edited. It goes in the family's chosen language.",
   "admComposerTemplateUnavailable": "The approved message cannot be sent: {reason}",
-  "@admComposerTemplateUnavailable": {"placeholders": {"reason": {"type": "String"}}},
+  "@admComposerTemplateUnavailable": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
   "admComposerSendMine": "Send my message",
   "admComposerSendApproved": "Send approved message",
   "admComposerEmpty": "Write a message first",
   "admComposerSent": "Sent from the school's WhatsApp.",
   "admComposerQueued": "Held — it goes out after the family's quiet hours.",
   "admComposerNotSent": "Not sent: {reason}",
-  "@admComposerNotSent": {"placeholders": {"reason": {"type": "String"}}},
+  "@admComposerNotSent": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
   "admNewRegistration": "New registration",
   "admRegister": "Register",
   "admRegisterChild": "Register {child}",
-  "@admRegisterChild": {"placeholders": {"child": {"type": "String"}}},
+  "@admRegisterChild": {
+    "placeholders": {
+      "child": {
+        "type": "String"
+      }
+    }
+  },
   "admFeeHead": "Fee head",
   "admRegistrationFee": "Registration fee (₹)",
   "admMoneyReceivedNow": "Money received now",
@@ -1579,17 +1687,53 @@
   "admAmountReceived": "Amount received (₹)",
   "admPaidBy": "Paid by",
   "admRefRequired": "{label} is required for a non-cash payment",
-  "@admRefRequired": {"placeholders": {"label": {"type": "String"}}},
+  "@admRefRequired": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
   "admAmountMoreThanFee": "Amount received is more than the fee",
   "admWholeRupees": "Enter whole rupees",
   "admNoFeeHeads": "No registration fee head is set up. The office adds one in Masters → Fee heads.",
   "admRegisteredDue": "Registered {appNo} · fee ₹{fee} due",
-  "@admRegisteredDue": {"placeholders": {"appNo": {"type": "String"}, "fee": {"type": "String"}}},
+  "@admRegisteredDue": {
+    "placeholders": {
+      "appNo": {
+        "type": "String"
+      },
+      "fee": {
+        "type": "String"
+      }
+    }
+  },
   "admRegisteredPaid": "Registered {appNo} · received ₹{paid} as {code} · balance ₹{balance}",
-  "@admRegisteredPaid": {"placeholders": {"appNo": {"type": "String"}, "paid": {"type": "String"}, "code": {"type": "String"}, "balance": {"type": "String"}}},
+  "@admRegisteredPaid": {
+    "placeholders": {
+      "appNo": {
+        "type": "String"
+      },
+      "paid": {
+        "type": "String"
+      },
+      "code": {
+        "type": "String"
+      },
+      "balance": {
+        "type": "String"
+      }
+    }
+  },
   "admTabLeads": "Leads",
   "admTabRegistered": "Registered ({count})",
-  "@admTabRegistered": {"placeholders": {"count": {"type": "String"}}},
+  "@admTabRegistered": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
   "admFollowUp": "Follow up",
   "admSendToSis": "Send to SIS",
   "admSendToSisNote": "Admitting into SIS gives the admission number, section and fee group and posts the fee receipt — that is done on the web ERP's Admissions screen. Open this lead there?",
@@ -1598,6 +1742,18 @@
   "admFeeNotSet": "Registration fee not set",
   "admFeeWaived": "Registration fee waived",
   "admFeeStatus": "Fee ₹{fee} · paid ₹{paid} · due ₹{due}",
-  "@admFeeStatus": {"placeholders": {"fee": {"type": "String"}, "paid": {"type": "String"}, "due": {"type": "String"}}},
+  "@admFeeStatus": {
+    "placeholders": {
+      "fee": {
+        "type": "String"
+      },
+      "paid": {
+        "type": "String"
+      },
+      "due": {
+        "type": "String"
+      }
+    }
+  },
   "admNoRegisteredLeads": "No registered leads are waiting to be sent to SIS."
 }

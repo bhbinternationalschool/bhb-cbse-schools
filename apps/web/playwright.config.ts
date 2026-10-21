@@ -65,7 +65,7 @@ export default defineConfig<GateOptions>({
   projects: [
     {
       name: "desktop",
-      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register)\.spec\.ts/,
+      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat)\.spec\.ts/,
       use: { ...desktop },
     },
     {
@@ -92,9 +92,25 @@ export default defineConfig<GateOptions>({
       use: { ...desktop },
     },
     {
+      // Raises a staff request and takes ₹1 at the counter (20 Oct 2026, the
+      // notification service), so it runs after everything that reads the stack.
+      name: "notify-writes",
+      testMatch: /notifications\.spec\.ts/,
+      dependencies: ["desktop", "phone-375-cpu4x"],
+      use: { ...desktop },
+    },
+    {
+      // Writes chat messages, a mute and a block (lifted again), so it runs
+      // after everything that reads the stack (16 Oct 2026, school chat).
+      name: "chat-writes",
+      testMatch: /school-chat\.spec\.ts/,
+      dependencies: ["desktop", "phone-375-cpu4x"],
+      use: { ...desktop },
+    },
+    {
       // Writes to the stack, so it runs after everything that reads it.
       name: "propagation",
-      testMatch: /propagation\.spec\.ts/,
+      testMatch: /(propagation|student-upgrade)\.spec\.ts/,
       dependencies: ["desktop", "phone-375-cpu4x"],
       use: { ...desktop },
     },

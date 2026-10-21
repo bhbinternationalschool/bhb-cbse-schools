@@ -44,11 +44,13 @@ import "student_leave_queue_screen.dart";
 import "timetable_screen.dart";
 import "waiting_card.dart";
 import "../modules/chat_inbox_screen.dart";
+import "../modules/school_chat_screen.dart";
 import "principal_lists.dart";
 import "section_picker.dart";
 import "self_attendance_screen.dart";
 import "students_screen.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/push/notification_bell.dart";
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -138,7 +140,14 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
     final raw = widget.openRoute;
     if (raw == null || _deepLinkDone) return;
     _deepLinkDone = true;
+    _openRoute(raw);
+  }
+
+  /// A deep link: a tapped push, or an item of the notifications list.
+  void _openRoute(String raw) {
     switch (Uri.tryParse(raw)?.path ?? raw) {
+      case "/notifications":
+        openNotifications(context, widget.api, _openRoute);
       case "/leave-approvals":
         _push(LeaveApprovalsScreen(api: widget.api));
       case "/student-leave":
@@ -151,6 +160,8 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
         _push(StaffLeaveScreen(api: widget.api));
       case "/chat":
         _push(ChatInboxScreen(api: widget.api));
+      case "/school-chat":
+        _push(staffSchoolChat(widget.api));
       case "/notices":
         // A tapped broadcast opens in full; otherwise the notices list.
         _push(noticesScreenForRoute(widget.api, Uri.tryParse(raw)));
@@ -494,7 +505,7 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
         icon: Icons.chat_bubble_outline,
         label: "Messages",
         tone: ModuleTone.teal,
-        onTap: () => _push(ChatInboxScreen(api: widget.api)),
+        onTap: () => _push(staffSchoolChat(widget.api)),
       ),
     ),
     if (_features.has("fee_take"))
@@ -814,6 +825,10 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         ),
                       ],
                     ),
+                  ),
+                  NotificationBellButton(
+                    api: widget.api,
+                    onOpenRoute: _openRoute,
                   ),
                   const ScreenGuideButton(
                     guideId: "principal-home",

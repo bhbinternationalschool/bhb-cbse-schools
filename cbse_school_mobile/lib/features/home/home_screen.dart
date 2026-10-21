@@ -17,6 +17,7 @@ import "../modules/attendance_history_screen.dart";
 import "../modules/exam_date_sheet_screen.dart";
 import "../modules/results_screen.dart";
 import "../modules/chat_thread_screen.dart";
+import "../modules/school_chat_screen.dart";
 import "../modules/complaints_screen.dart";
 import "../modules/ebook_shelf_screen.dart";
 import "../modules/online_classes_screen.dart";
@@ -35,6 +36,7 @@ import "../profile/profile_screen.dart";
 import "home_stats.dart";
 import "student_id_screen.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/push/notification_bell.dart";
 
 class _Module {
   const _Module(this.label, this.icon, this.tone);
@@ -167,6 +169,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Turn a notification deep link into the same navigation a tap on the
   /// module grid would do. Unknown routes just land on Home.
+  /// An item's link from the notifications list.
+  void _openRoute(String route) {
+    _pendingRoute = route;
+    _consumePendingRoute();
+  }
+
   void _consumePendingRoute() {
     final raw = _pendingRoute;
     _pendingRoute = null;
@@ -184,6 +192,8 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
     switch (uri.path) {
+      case "/notifications":
+        openNotifications(context, widget.api, _openRoute);
       case "/homework":
         _openModule("Homework", child);
       case "/attendance":
@@ -236,6 +246,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         );
+      case "/school-chat":
+        _openSchoolChat(child);
     }
   }
 
@@ -408,6 +420,26 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// School chat for the picked child: its class group, its subject groups
+  /// and direct chats with its teachers; the older class-teacher thread is
+  /// the first row.
+  void _openSchoolChat(ParentChild child) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SchoolChatScreen(
+          api: widget.api,
+          studentId: child.id,
+          childName: child.fullName,
+          classTeacherThread: (_) => ChatThreadScreen(
+            api: widget.api,
+            studentId: child.id,
+            studentName: child.fullName,
+          ),
+        ),
+      ),
+    );
+  }
+
   void _openProfile() {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -508,6 +540,10 @@ class _HomeScreenState extends State<HomeScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
             _Header(
+              bell: NotificationBellButton(
+                api: widget.api,
+                onOpenRoute: _openRoute,
+              ),
               child: child,
               siblings: summary.children,
               selectedIndex: _childIndex,
@@ -637,15 +673,7 @@ class _HomeScreenState extends State<HomeScreen> {
             case 1:
               _openModule("Fees", child);
             case 2:
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => ChatThreadScreen(
-                    api: widget.api,
-                    studentId: child.id,
-                    studentName: child.fullName,
-                  ),
-                ),
-              );
+              _openSchoolChat(child);
             case 3:
               _openProfile();
           }
@@ -681,8 +709,11 @@ class _Header extends StatelessWidget {
     required this.onSelectChild,
     required this.onNotices,
     required this.onLogout,
+    required this.bell,
   });
 
+  /// The notifications bell (core/push/notification_bell.dart).
+  final Widget bell;
   final ParentChild child;
   final List<ParentChild> siblings;
   final int selectedIndex;
@@ -734,12 +765,14 @@ class _Header extends StatelessWidget {
                         ),
                       ),
                     ),
+                    bell,
                     const ScreenGuideButton(
                       guideId: "parent-home",
                       screenLabel: "Home",
                     ),
                     _RoundAction(
-                      icon: Icons.notifications_none_rounded,
+                      // The bell is the notifications list now; notices keep their own button.
+                      icon: Icons.campaign_outlined,
                       tooltip: context.l10n.notices,
                       onTap: onNotices,
                     ),

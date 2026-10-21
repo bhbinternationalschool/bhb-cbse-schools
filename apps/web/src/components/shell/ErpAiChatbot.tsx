@@ -28,12 +28,11 @@ import {
 } from "@/lib/erpAiPageGuides";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { soundsLikeChangeRequest } from "@/lib/moduleRequests";
-import { loadMasters, type MastersState } from "@/lib/masters";
 import {
   inferRoleCodes,
-  loadRbac,
   resolveSessionRoles,
 } from "@/lib/rbac";
+import { useStableAccessCopy } from "@/components/shell/useStableAccessCopy";
 import { TENANT } from "@/lib/types";
 import { VoiceMicButton } from "@/components/voice/VoiceMicButton";
 import { speakText } from "@/lib/voiceClient";
@@ -116,7 +115,11 @@ export function ErpAiChatbot() {
 
   const [open, setOpen] = useState(false);
   const [minimized, setMinimized] = useState(false);
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // What the assistant may offer this person is a permission answer: it
+  // reads the copies the sidebar decides with (data-layer 2.1f), kept by
+  // content so a desk landing does not reload the conversation. Null until
+  // they have loaded — the assistant stays disabled rather than guess.
+  const { masters, rbac } = useStableAccessCopy();
   const [messages, setMessages] = useState<ErpAiMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [typing, setTyping] = useState(false);
@@ -164,14 +167,13 @@ export function ErpAiChatbot() {
   );
 
   const roleBadge = useMemo(() => {
-    if (!masters) return session.roleCode || "Staff";
-    const rbac = loadRbac();
+    if (!masters || !rbac) return session.roleCode || "Staff";
     const roles = resolveSessionRoles(rbac, session, masters);
     if (roles[0]?.name) return roles[0].name;
     const codes = inferRoleCodes(session, masters);
     const named = rbac.roles.find((r) => r.code === codes[0]);
     return named?.name || codes[0] || session.roleCode || "Staff";
-  }, [session, masters]);
+  }, [session, masters, rbac]);
 
   const pageGuide = useMemo(
     () => (masters ? resolveErpAiPageGuide(pathname, tab) : null),
@@ -179,7 +181,6 @@ export function ErpAiChatbot() {
   );
 
   useEffect(() => {
-    setMasters(loadMasters());
     void fetch("/api/erp-ai")
       .then((r) => r.json())
       .then(
