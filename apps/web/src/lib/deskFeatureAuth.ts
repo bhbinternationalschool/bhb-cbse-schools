@@ -61,12 +61,18 @@ function rowsById(v: unknown): Map<string, Row> | null {
 }
 
 /** Key order does not make a row different: the database and the browser
- * build the same row with keys in different orders. */
+ * build the same row with keys in different orders. Nor does `_rev`: since
+ * data-layer 2.2a the server owns every Masters element's `_rev` (the
+ * masters_desk_slices_carry_revs trigger keeps the stored one whatever a
+ * writer sends), so a copy holding an older `_rev` — or none — of a row it
+ * did not change has not changed it. Compared with `_rev`, a function
+ * holder's re-push after anyone else's save was refused "You may not …". */
 function stable(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(stable);
   if (v && typeof v === "object") {
     const out: Record<string, unknown> = {};
     for (const k of Object.keys(v as object).sort()) {
+      if (k === "_rev") continue;
       const x = (v as Record<string, unknown>)[k];
       if (x !== undefined) out[k] = stable(x);
     }
