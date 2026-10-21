@@ -4,7 +4,8 @@
  *
  * The exact shape, written through the app's own server write paths
  * (pushTransportDeskToDb — the transport-desk POST; pushFeeDeskToDb — the
- * fee-desk POST), for one fixture child no other spec touches:
+ * fee-desk POST), for one fixture child no other spec pays for
+ * (e2e/transportPaidCase.ts OFFICE_CASE; dues-screens-transport reads it too):
  *
  *   old assignment  Apr–Aug, stop id that NO LONGER EXISTS on the route, no
  *                   fee of its own (stop-id churn) → the engine bills it ₹0
@@ -76,7 +77,7 @@ function seed(step = ""): void {
   execFileSync("npx", ["--yes", "tsx", path.join(__dirname, "..", "..", "..", "..", "scripts", "e2e-seed-transport-paid.ts")], {
     cwd: path.join(__dirname, "..", ".."),
     stdio: "inherit",
-    env: { ...process.env, TPM_STEP: step },
+    env: { ...process.env, TPM_STEP: step, TPM_CASE: "" },
   });
 }
 

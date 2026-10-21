@@ -26,6 +26,7 @@ import {
   type GatewayMethodGroup,
 } from "@/lib/gatewayFees";
 import { fetchEligibleMethodGroups, loadGatewayFeePolicy } from "@/lib/gatewayFeePolicy.server";
+import { uniqueDuesByKey } from "@/lib/payments";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadSis } from "@/lib/sis";
@@ -68,7 +69,9 @@ export async function resolveChosenDues(householdId: string, wanted: Set<string>
   const hh = sis.households.find((h) => h.id === householdId);
   if (!hh) return { ok: false as const, status: 404, error: "Household not found" };
   const bundle = computeHouseholdDues(hh.id, sis, masters, fees, { includeFuture: true });
-  const dues = openFeeDues(bundle.flatMap((r) => r.dues)).filter(
+  // One line per due key (lib/payments.ts uniqueDuesByKey): the link stores
+  // its lines by key, and a key listed twice would be charged twice.
+  const dues = uniqueDuesByKey(openFeeDues(bundle.flatMap((r) => r.dues))).filter(
     (d) => wanted.has(d.dueKey) && d.balancePaise > 0,
   );
   if (dues.length === 0) {
