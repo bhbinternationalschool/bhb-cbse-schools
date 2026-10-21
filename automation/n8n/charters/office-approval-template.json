@@ -8,7 +8,7 @@
     "components": [
       {
         "type": "BODY",
-        "text": "✉️ Draft #{{1}} from the school office needs your decision.\n\n{{2}}",
+        "text": "✉️ Draft #{{1}} from the school office needs your decision.\n\n{{2}}\n\nTap a button below to decide.",
         "example": {
           "body_text": [
             [
@@ -21,8 +21,14 @@
       {
         "type": "BUTTONS",
         "buttons": [
-          { "type": "QUICK_REPLY", "text": "✅ Approve" },
-          { "type": "QUICK_REPLY", "text": "❌ Reject" }
+          {
+            "type": "QUICK_REPLY",
+            "text": "✅ Approve"
+          },
+          {
+            "type": "QUICK_REPLY",
+            "text": "❌ Reject"
+          }
         ]
       }
     ]
@@ -34,7 +40,7 @@
     "components": [
       {
         "type": "BODY",
-        "text": "✉️ विद्यालय कार्यालय का ड्राफ्ट #{{1}} आपके निर्णय की प्रतीक्षा में है।\n\n{{2}}",
+        "text": "✉️ विद्यालय कार्यालय का ड्राफ्ट #{{1}} आपके निर्णय की प्रतीक्षा में है।\n\n{{2}}\n\nनिर्णय के लिए नीचे का बटन दबाएँ।",
         "example": {
           "body_text": [
             [
@@ -47,8 +53,14 @@
       {
         "type": "BUTTONS",
         "buttons": [
-          { "type": "QUICK_REPLY", "text": "✅ स्वीकृत" },
-          { "type": "QUICK_REPLY", "text": "❌ अस्वीकृत" }
+          {
+            "type": "QUICK_REPLY",
+            "text": "✅ स्वीकृत"
+          },
+          {
+            "type": "QUICK_REPLY",
+            "text": "❌ अस्वीकृत"
+          }
         ]
       }
     ]
