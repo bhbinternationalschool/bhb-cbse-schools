@@ -18,6 +18,9 @@ import {
 import { useHoldDecisions } from "@/lib/useHoldDecisions";
 import { field } from "@/components/ui/erp-ui";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { printSignaturesPath } from "@/components/shared/usePrintSignatures";
+import { readView } from "@/lib/data/client/query";
+import { ADMIT_CARD_SIGNATURE_REQUEST, type PrintSignatureSet } from "@/lib/printSignatures";
 
 type Props = {
   academicYearCode: string;
@@ -154,8 +157,16 @@ export function AdmitCardsPanel({ academicYearCode, masters, terms }: Props) {
           examSubjects: exams.subjects,
         }),
       );
-      await downloadAdmitCardsPdf(docs, { masters });
-      setNotice(`${docs.length} admit card(s) generated.`);
+      // The principal's signature on the "Principal" line. Not on file, or
+      // not readable just now: the line prints blank, as it did before.
+      const sig = await readView<PrintSignatureSet>(printSignaturesPath(ADMIT_CARD_SIGNATURE_REQUEST));
+      const principalSignature = sig.ok ? sig.data.principal?.src || null : null;
+      await downloadAdmitCardsPdf(docs, { masters, principalSignature });
+      setNotice(
+        `${docs.length} admit card(s) generated${
+          principalSignature ? " with the principal's signature" : sig.ok ? " — no principal's signature on file, the line is blank" : " — the principal's signature could not be loaded, the line is blank"
+        }.`,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

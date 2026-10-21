@@ -99,12 +99,10 @@ import {
   HoldStatusBanner,
   PrincipalHoldOverrideDialog,
 } from "@/components/fees/PrincipalHoldOverrideDialog";
+import { printReportCard } from "@/components/exams/ReportCardSheet";
 import {
-  ReportCardSheet,
-  printReportCard,
-} from "@/components/exams/ReportCardSheet";
-import {
-  ClassResultSheetView,
+  SignedClassResultSheetView,
+  SignedReportCardSheet,
   printClassResultSheet,
 } from "@/components/exams/ClassResultSheet";
 import { useHoldDecisions } from "@/lib/useHoldDecisions";
@@ -2980,7 +2978,7 @@ export function ExamsWorkspace() {
                     Print report card
                   </button>
                 </div>
-                <ReportCardSheet card={preview} />
+                <SignedReportCardSheet card={preview} />
               </div>
             ) : (
               <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
@@ -3260,7 +3258,7 @@ export function ExamsWorkspace() {
                 </div>
               </ErpTableShell>
 
-              <ClassResultSheetView sheet={classResult.sheet} />
+              <SignedClassResultSheetView sheet={classResult.sheet} />
             </>
           ) : null}
         </div>
