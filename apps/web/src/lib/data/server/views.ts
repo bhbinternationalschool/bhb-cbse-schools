@@ -32,7 +32,7 @@ import { NextResponse } from "next/server";
 import type { ApiAuthContext } from "@/lib/api/v1/auth";
 import type { RouteAuthResult } from "@/lib/apiRouteAuth.server";
 import type { MastersReadScope } from "@/lib/mastersReadScope.server";
-import { teachingMastersSubset } from "@/lib/mastersTeachingSubset";
+import { TEACHING_MASTERS_KEYS, teachingMastersSubset } from "@/lib/mastersTeachingSubset";
 import type { MastersState } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import type { RbacState } from "@/lib/rbac";
@@ -127,7 +127,11 @@ export async function mastersViewGet(req: Request, deps: ViewDeps): Promise<Resp
   const all = deps.mastersStamps?.(read.value) ?? null;
   if (all) {
     for (const k of MASTERS_OBJECT_SLICE_KEYS) {
-      if (all[k] && (masters as unknown as Record<string, unknown>)[k] !== undefined) stamps[k] = all[k]!;
+      // The teaching subset fills withheld keys with the empty shell's
+      // defaults: only a key it is the truth for gets a stamp (a commit of a
+      // withheld object then has no base and is refused).
+      const served = access.scope === "full" || (TEACHING_MASTERS_KEYS as readonly string[]).includes(k);
+      if (served && all[k] && (masters as unknown as Record<string, unknown>)[k] !== undefined) stamps[k] = all[k]!;
     }
   }
   const view: MastersView = { scope: access.scope, masters, stamps };
