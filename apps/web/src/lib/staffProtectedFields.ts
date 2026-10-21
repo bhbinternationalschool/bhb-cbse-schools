@@ -25,9 +25,9 @@
  *    by the owner.
  *  - SIGN-IN LINKS (`email`, `mobile`, and `loginUsername` above): sign-in
  *    resolves a person by them (/api/auth/session by email or username, the
- *    staff OTP and provisioning by mobile). Setting a blank one is allowed
- *    unless another member already has it (or it is a protected super-admin
- *    e-mail); CHANGING a set one is the owner's (review of #702, 21 Oct).
+ *    staff OTP and provisioning by mobile). On an existing record any change
+ *    — filling a blank one too — is the owner's; a new record may carry ones
+ *    no other member holds (never a protected owner e-mail). Review of #702.
  *
  * Pure: no I/O. Self-tested in staffProtectedFields.selftest.ts.
  */
@@ -133,8 +133,8 @@ export type ProtectedChange = { sensitive: string[]; login: string[] };
  *
  * `login` collects the sign-in keys: loginUsername, loginPassword, email,
  * mobile. Allowed without the owner (so not listed): the form's default
- * username (from the employee code) where none was set; a blank e-mail or
- * mobile given a value no other member holds (`taken`).
+ * username (from the employee code) where none was set; on a NEW record an
+ * e-mail / mobile no other member holds (`taken`).
  */
 export function protectedChanges(
   stored: Profile | null,
@@ -156,16 +156,19 @@ export function protectedChanges(
     const isDefault = next === defaultLoginUsername(opts.empCode ?? "");
     if (!(isBlank(stored?.loginUsername) && (next === "" || isDefault))) login.push("loginUsername");
   }
+  // E-mail and mobile: on an EXISTING record any change — filling a blank one
+  // too — is the owner's (filling the principal's blank mobile with your own
+  // phone would sign you in as the principal). A NEW record may carry ones no
+  // other member holds (and no owner e-mail).
   if ("email" in incoming && profileValueChanged(stored?.email, incoming.email)) {
     const next = String(incoming.email ?? "").trim().toLowerCase();
-    const fills = isBlank(stored?.email) && !opts.taken?.emails.has(next) && !isProtectedSuperAdminEmail(next);
-    if (!fills) login.push("email");
+    const freeOnCreate = stored === null && !opts.taken?.emails.has(next) && !isProtectedSuperAdminEmail(next);
+    if (!freeOnCreate) login.push("email");
   }
   if ("mobile" in incoming && mobileKey(stored?.mobile) !== mobileKey(incoming.mobile)) {
     const next = mobileKey(incoming.mobile);
-    const was = mobileKey(stored?.mobile);
-    const fills = (was === "" || /^0+$/.test(was)) && !opts.taken?.mobiles.has(next);
-    if (!fills) login.push("mobile");
+    const freeOnCreate = stored === null && !opts.taken?.mobiles.has(next);
+    if (!freeOnCreate) login.push("mobile");
   }
   return { sensitive, login };
 }
@@ -191,8 +194,8 @@ const SENSITIVE_WORDS = "bank, UPI, Aadhaar, PAN and pay";
 export function protectedChangeRefusal(name: string, c: ProtectedChange): string | null {
   if (c.login.length) {
     return (
-      `${name}: ${c.login.join(", ")} not saved — a sign-in detail (login, e-mail or mobile) that is already set, ` +
-      "or that another member holds, is changed only by the owner; only the owner changes a sign-in link."
+      `${name}: ${c.login.join(", ")} not saved — a sign-in detail (login, e-mail or mobile) of a member is set or ` +
+      "changed only by the owner; only the owner changes a sign-in link."
     );
   }
   if (c.sensitive.length) {

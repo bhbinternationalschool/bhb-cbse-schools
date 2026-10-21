@@ -1480,6 +1480,44 @@ pre-existing defect, left to 2.2d, which replaces that path. The function-grant 
 object slice still needs masters · edit). `pfNumber`/`uanNumber`/`esicNumber` and document files are still not
 protected (2.2a's list). The e-mail column is an identity link too (sign-in matches it) and stays plain staff · edit.
 
+*(2.2b review fixes, 21 Oct 2026, same PR #702.)* An independent review found eight faults; all fixed, each with a
+self-test that fails on the earlier head (shown by reverting each fix: red) and a stack acceptance re-run (22 checks;
+the earlier head's app on the same stack: **11/22**).
+- **Director's decision (21 Oct): sensitive staff fields = owner + accountant only.** Payroll·edit / accounts·edit are
+  NOT the authority any more: the Office role (production: payroll·edit + accounts·edit, 2 active staff) runs payroll
+  and the books daily, and Admin (accounts·edit, 2 active staff) the accounts — taking those grants away would stop
+  that work. So a new FUNCTION `staff.sensitive_edit` ("Bank, ID & pay details", `lib/rbacFeatureCatalog/people.ts`)
+  is the authority, held as a function grant only (`featureGrantHeld` / `functionGrantHeldOnServer` — never via the
+  staff, payroll or accounts module as such), given to the built-in **Accounts** role in code (`defaultBuiltInRoles`)
+  and, for schools that already stored their roles, through `BUILT_IN_GRANT_ADDITIONS`
+  (`2026-10-21.accounts.staff_sensitive_edit`: added once to the stored Accounts role — production: 2 active staff
+  hold it). Production read-only, 21 Oct: roles with payroll·edit or accounts·edit and active staff assigned —
+  office 2, admin 2, accounts 2, principal 2; personal grants: 2 `payroll` edit DENIES, 2 `staff` edit allows; no one
+  holds the new function yet. After deploy only the owner and the Accounts role's 2 members can change these fields;
+  the principal (whole modules, no function grant) no longer can.
+- **Old route judges each row where the write lands**: by employee code (upper-cased, trimmed — the write's remap now
+  uses the same key, `rosterEmpKey`) first, else id; an id that is one member with another member's code is refused.
+- **Absent = keep** on the old route (`prepareRosterRows`): its push normalised an absent key to "" — leaving the bank
+  keys out blanked them.
+- **The form's default username** (derived from the employee code on every save) over a blank one is not a login
+  change (29 of 35 active production staff have no username: the office could otherwise save almost nobody).
+- **Refused rows only**: the old route writes the other rows of a save, answers `refused: {staff: [ids]}` with the
+  reason; the browser toasts it once and re-reads the roster (the refused rows go back to the server's copy) instead
+  of re-sending them with every later save.
+- **Profile-request approvals** of bank / Aadhaar / PAN go through `sis_staff_write_sensitive` (logged, owner or the
+  function — the accountant may decide such requests without staff·edit), never to a removed member.
+- **Sign-in links**: `email` and `mobile` (sign-in resolves people by them) on an existing record — set or changed — are
+  the owner's (kernel, old route, `/api/v1/staff/roster/mobile`); a new record may carry ones no other member holds;
+  a member may not give themselves another member's or an owner's e-mail (self-service profile).
+- **Server-side commit caps** on `POST /api/data/masters.*`: more than one removal, a removal emptying the list, or more
+  than 500 ops (every collection) → 400.
+- **Canonical comparison** (sorted keys; a number and the string that spells it alike; leading zeros kept).
+- Minor: an empty roster that was READ ends non-owner sessions (all removed); the owner is never locked out by the
+  roster; `visitingPay` single-row reads and `patchStaffRow` skip removed members.
+**Behaviour changes (review):** the office, admin and principal can no longer change bank / UPI / Aadhaar / PAN / pay;
+the office can no longer set or change anyone's e-mail or registered mobile on an existing record (the owner can) —
+including recording a missing mobile from the phone; a save with one refused row now saves its other rows.
+
 **2.3a Delete the gate and the events.** With every component reader on hooks: delete
 `CoreDataGate` (React Query's loading state replaces it), the `bhb-masters-updated` /
 `bhb-rbac-updated` / `bhb-desk-first-hydrated` events and their listeners (one is the

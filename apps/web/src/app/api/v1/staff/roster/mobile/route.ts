@@ -51,12 +51,11 @@ export async function POST(request: Request) {
     if (clash) {
       throw new ApiError("bad_request", `That number is already on ${clash.fullName}'s record`, 400);
     }
-    // The mobile is a sign-in link (staff OTP): recording a missing one is the
-    // office's job; CHANGING one that is set hands that person's sign-in to
-    // another phone — the owner's (data-layer 2.2b review, 21 Oct 2026).
-    const was = mobileKey(staff.mobile);
-    if (was && !/^0+$/.test(was) && was !== mobile && staffSensitiveAuthority(ctx.session, ctx.masters, ctx.rbac, { rbacKnown: ctx.rbacKnown !== false }) !== "owner") {
-      throw new ApiError("forbidden", `${staff.fullName} already has a registered mobile — only the owner changes a sign-in link.`, 403);
+    // The mobile is a sign-in link (staff OTP): setting or changing it puts
+    // that person's sign-in on a phone — the owner's (data-layer 2.2b review,
+    // 21 Oct 2026; a new member's first number comes with their record).
+    if (mobileKey(staff.mobile) !== mobile && staffSensitiveAuthority(ctx.session, ctx.masters, ctx.rbac, { rbacKnown: ctx.rbacKnown !== false }) !== "owner") {
+      throw new ApiError("forbidden", `${staff.fullName}'s registered mobile is a sign-in detail — only the owner changes a sign-in link.`, 403);
     }
 
     const tctx = await getServerTenantContext();

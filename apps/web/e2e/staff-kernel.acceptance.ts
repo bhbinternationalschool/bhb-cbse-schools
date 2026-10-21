@@ -106,7 +106,7 @@ async function main(): Promise<void> {
     req(`${api}/rest/v1/${path}`, { method: "PATCH", headers: { ...svc, Prefer: "return=minimal" }, body });
   const post = (collection: string, who: Record<string, string>, ops: unknown[]) =>
     req(`${app}/api/data/${collection}`, { method: "POST", headers: who, body: { ops } });
-  const staffRow = async (id = TARGET) => (await rest(`sis_staff?id=eq.${id}&tenant_id=eq.${tenantId}&select=*`))[0] ?? {};
+  const staffRow = async (id: string = TARGET) => (await rest(`sis_staff?id=eq.${id}&tenant_id=eq.${tenantId}&select=*`))[0] ?? {};
   const prof = (r: Record<string, unknown>) => obj(r.profile);
   const inRoster = async (who: Record<string, string>) =>
     arr((await req(`${app}/api/school-data/staff-roster`, { headers: who })).body.staff).map(obj).some((s) => s.id === TARGET);
@@ -131,6 +131,7 @@ async function main(): Promise<void> {
   const original = await staffRow();
   if (!original.id) throw new Error(`${TARGET} is not on the stack`);
   const originalProfile = prof(original);
+  const otherOriginal = await staffRow(staffId(27));
 
   // ── A. Readers hide a removed member (marked in the database directly) ──
   {
@@ -166,6 +167,32 @@ async function main(): Promise<void> {
     );
   }
 
+  // ── Who is who for B–G ───────────────────────────────────────────────────
+  // The accountant: staff 26 given the built-in Accounts role (which carries
+  // the staff.sensitive_edit function) through the rbac desk's own server
+  // write path; removed again at the end (assignments is a MERGE slice: a
+  // row goes only when the save names it). The owner: a protected owner
+  // e-mail session (no roster row). The principal and the office are NOT
+  // authorities (director, 21 Oct 2026).
+  const ACC = staffId(26);
+  const ACC_ASSIGN = "e2e_22b_acc_assign";
+  const accRole = (fx.rbac.roles as { id: string; code: string }[]).find((r) => r.code === "accounts")!;
+  const pushRbac = async (withAccountant: boolean) => {
+    const assignments = withAccountant
+      ? [...fx.rbac.assignments, { id: ACC_ASSIGN, staffId: ACC, roleId: accRole.id, isPrimary: true, scope: { campusIds: [], classIds: [], departmentIds: [] }, expiresOn: "", note: "2.2b acceptance" }]
+      : fx.rbac.assignments;
+    const r = await pushDeskSliceToDb(
+      "rbac",
+      { ...fx.rbac, assignments } as never,
+      withAccountant ? undefined : { deletes: { assignments: [ACC_ASSIGN] } },
+    );
+    if (!(r as { ok?: boolean }).ok) throw new Error(`rbac push failed: ${short(r)}`);
+    await sleep(PAST_VERSIONS_WINDOW);
+  };
+  const accountant = as({ ...fx.sessions.office, staffId: ACC, fullName: fx.staff.staff.find((s) => s.id === ACC)!.fullName, roleCode: "accounts" });
+  const owner = as({ ...fx.sessions.office, staffId: undefined, roleCode: "owner", fullName: "Director", email: "director@bhbinternational.school" });
+  await pushRbac(true);
+
   // ── B. The sensitive route ──────────────────────────────────────────────
   const sens = (who: Record<string, string>, ops: unknown[]) =>
     req(`${app}/api/data/sis.staff/sensitive`, { method: "POST", headers: who, body: { ops } });
@@ -173,29 +200,33 @@ async function main(): Promise<void> {
   {
     const r0 = await staffRow();
     const t = await sens(teacher, [{ id: TARGET, base: r0.updated_at, fields: { bankAccountNo: "TEACHER" } }]);
-    const p = await sens(principal, [{ id: TARGET, base: r0.updated_at, fields: SEED }]);
+    const pr = await sens(principal, [{ id: TARGET, base: r0.updated_at, fields: { bankAccountNo: "PRINCIPAL" } }]);
+    const of = await sens(office, [{ id: TARGET, base: r0.updated_at, fields: { bankAccountNo: "OFFICE" } }]);
+    const p = await sens(accountant, [{ id: TARGET, base: r0.updated_at, fields: SEED }]);
     const r1 = await staffRow();
     const log = await rest(`sis_staff_sensitive_changes?staff_id=eq.${TARGET}&tenant_id=eq.${tenantId}&order=changed_at.desc&limit=1&select=fields,authority,actor`);
     record(
-      "sensitive route: teacher → 403; principal (payroll · edit) → 200, written; recorded with authority and the session as actor, field names only",
-      t.status === 403 && p.status === 200 && prof(r1).bankAccountNo === SEED.bankAccountNo && prof(r1).panNo === SEED.panNo &&
-        obj(log[0]).authority === "payroll" && obj(log[0]).actor === fx.sessions.principal.staffId &&
+      "sensitive route: teacher, principal and office → 403 (owner + accountant only); the accountant → 200, recorded with authority and the session as actor, field names only",
+      t.status === 403 && pr.status === 403 && of.status === 403 && p.status === 200 &&
+        prof(r1).bankAccountNo === SEED.bankAccountNo && prof(r1).panNo === SEED.panNo &&
+        obj(log[0]).authority === "accounts" && obj(log[0]).actor === ACC &&
         JSON.stringify(obj(log[0]).fields) === JSON.stringify(["aadhaarNo", "bankAccountNo", "basicPay", "panNo"]) &&
         !JSON.stringify(log).includes(SEED.bankAccountNo) && prof(r1).addressCurrent === originalProfile.addressCurrent,
-      `teacher ${t.status} ${short(t.body.message)}; principal ${p.status} ${p.status === 200 ? "" : short(p.body)}; log ${short(log)}`,
+      `teacher ${t.status}, principal ${pr.status}, office ${of.status}; accountant ${p.status} ${p.status === 200 ? "" : short(p.body)}; log ${short(log)}`,
     );
-    const stale = await sens(principal, [{ id: TARGET, base: r0.updated_at, fields: { panNo: "STALE" } }]);
-    const other = await sens(principal, [{ id: TARGET, base: r1.updated_at, fields: { fullName: "X" } }]);
-    const login = await sens(principal, [{ id: TARGET, base: r1.updated_at, fields: { loginUsername: "someone.else" } }]);
+    const stale = await sens(accountant, [{ id: TARGET, base: r0.updated_at, fields: { panNo: "STALE" } }]);
+    const other = await sens(accountant, [{ id: TARGET, base: r1.updated_at, fields: { fullName: "X" } }]);
+    const login = await sens(accountant, [{ id: TARGET, base: r1.updated_at, fields: { loginUsername: "someone.else" } }]);
+    const mail = await sens(accountant, [{ id: TARGET, base: r1.updated_at, fields: { email: "someone@else.test" } }]);
     const r2 = await staffRow();
     record(
-      "sensitive route: stale base → 409; a non-protected field → 400; a login username by a non-owner → 403; nothing written",
-      stale.status === 409 && other.status === 400 && login.status === 403 && r2.updated_at === r1.updated_at && prof(r2).panNo === SEED.panNo,
-      `stale ${stale.status}, other ${other.status}, login ${login.status} ${short(login.body.message)}`,
+      "sensitive route: stale base → 409; a non-protected field → 400; a login or e-mail by a non-owner → 403; nothing written",
+      stale.status === 409 && other.status === 400 && login.status === 403 && mail.status === 403 && r2.updated_at === r1.updated_at,
+      `stale ${stale.status}, other ${other.status}, login ${login.status}, email ${mail.status} ${short(mail.body.message)}`,
     );
   }
 
-  // ── C. POST /api/data/sis.staff: protected keys never change here ─────────
+  // ── C. POST /api/data/sis.staff: protected keys and set sign-in links never change here ──
   {
     const r1 = await staffRow();
     const asRead = { ...prof(r1) };
@@ -203,27 +234,32 @@ async function main(): Promise<void> {
     const bank = await post("sis.staff", principal, [{ op: "upsert", id: TARGET, base: r1.updated_at, row: { profile: { ...asRead, bankAccountNo: "CHANGED" } } }]);
     const pan = await post("sis.staff", principal, [{ op: "upsert", id: TARGET, base: r1.updated_at, row: { profile: { ...asRead, panNo: "" } } }]);
     const login = await post("sis.staff", principal, [{ op: "upsert", id: TARGET, base: r1.updated_at, row: { profile: { ...asRead, loginUsername: "director@bhbinternational.school" } } }]);
+    const pRow = await staffRow(fx.sessions.principal.staffId!);
+    const mail = await post("sis.staff", office, [{ op: "upsert", id: String(pRow.id), base: pRow.updated_at, row: { email: "office.takes.over@else.test" } }]);
+    const mob = await post("sis.staff", office, [{ op: "upsert", id: TARGET, base: r1.updated_at, row: { mobile: "9111111111" } }]);
     const rA = await staffRow();
+    const pAfter = await staffRow(fx.sessions.principal.staffId!);
     record(
-      "sis.staff: bank change / PAN blanking / login username → 403 even for the principal; nothing written",
-      bank.status === 403 && pan.status === 403 && login.status === 403 && rA.updated_at === r1.updated_at,
-      `bank ${bank.status} ${short(bank.body.message)}; pan ${pan.status}; login ${login.status}`,
+      "sis.staff: bank change / PAN blanking / login username → 403 even for the principal; the principal's e-mail or a set mobile changed by the office → 403; nothing written",
+      bank.status === 403 && pan.status === 403 && login.status === 403 && mail.status === 403 && mob.status === 403 &&
+        rA.updated_at === r1.updated_at && pAfter.updated_at === pRow.updated_at,
+      `bank ${bank.status} ${short(bank.body.message)}; pan ${pan.status}; login ${login.status}; email ${mail.status} ${short(mail.body.message)}; mobile ${mob.status}`,
     );
     const slim = await post("sis.staff", office, [
-      { op: "upsert", id: TARGET, base: r1.updated_at, row: { mobile: "9000000099", profile: { fullName: targetRec.fullName, mobile: "9000000099" } } },
+      { op: "upsert", id: TARGET, base: r1.updated_at, row: { full_name: targetRec.fullName, profile: { addressCurrent: "E2E 2.2b street" } } },
     ]);
     const rB = await staffRow();
     // Every other profile key exactly as before: the sent keys are laid on the stored profile.
     const wiped = Object.keys(prof(r1)).filter(
-      (k) => !["mobile", "fullName"].includes(k) && JSON.stringify(prof(rB)[k]) !== JSON.stringify(prof(r1)[k]),
+      (k) => k !== "addressCurrent" && JSON.stringify(prof(rB)[k]) !== JSON.stringify(prof(r1)[k]),
     );
     record(
       "sis.staff: a profile with only the changed keys wipes nothing — protected keys and every other key kept; the edit lands",
-      slim.status === 200 && rB.mobile === "9000000099" && prof(rB).bankAccountNo === SEED.bankAccountNo && prof(rB).panNo === SEED.panNo &&
-        prof(rB).basicPay === SEED.basicPay && wiped.length === 0 && Object.keys(prof(r1)).length > 20,
-      `HTTP ${slim.status} ${slim.status === 200 ? "" : short(slim.body)}; bank ${short(prof(rB).bankAccountNo)}; keys ${Object.keys(prof(r1)).length}, changed besides mobile: ${short(wiped)}`,
+      slim.status === 200 && prof(rB).addressCurrent === "E2E 2.2b street" && prof(rB).bankAccountNo === SEED.bankAccountNo &&
+        prof(rB).panNo === SEED.panNo && prof(rB).basicPay === SEED.basicPay && wiped.length === 0 && Object.keys(prof(r1)).length > 20,
+      `HTTP ${slim.status} ${slim.status === 200 ? "" : short(slim.body)}; keys ${Object.keys(prof(r1)).length}, changed besides the address: ${short(wiped)}`,
     );
-    const stale = await post("sis.staff", office, [{ op: "upsert", id: TARGET, base: r1.updated_at, row: { mobile: "9000000001" } }]);
+    const stale = await post("sis.staff", office, [{ op: "upsert", id: TARGET, base: r1.updated_at, row: { full_name: "Stale" } }]);
     const c = obj(arr(stale.body.conflicts)[0]);
     const leaked = SENSITIVE.filter((k) => k in obj(obj(c.stored).profile));
     record(
@@ -232,8 +268,6 @@ async function main(): Promise<void> {
         !JSON.stringify(stale.body).includes(SEED.bankAccountNo),
       `HTTP ${stale.status} reason ${String(c.reason)}; leaked ${short(leaked)}`,
     );
-    // Put the mobile back.
-    await post("sis.staff", office, [{ op: "upsert", id: TARGET, base: rB.updated_at, row: { mobile: original.mobile, profile: { mobile: original.mobile } } }]);
   }
 
   // ── D. Remove through the kernel: soft, by the session, restorable ──────
@@ -270,71 +304,81 @@ async function main(): Promise<void> {
 
   // ── E. The OLD staff-roster save and DELETE ──────────────────────────────
   {
-    const deny = (module: string) => ({
-      id: `e2e_deny_${module}`, staffId: fx.sessions.office.staffId, denyModule: module, effect: "deny", actions: ["edit"],
-      note: "2.2b acceptance", grantedBy: "acceptance", grantedAt: new Date().toISOString(), expiresOn: "",
-    });
-    // userGrants is a MERGE slice: a grant is removed only when the save names
-    // it (`deletes`), never by leaving it out.
-    const DENY_IDS = ["e2e_deny_payroll", "e2e_deny_accounts"];
-    const pushRbac = async (userGrants: unknown[]) => {
-      const r = await pushDeskSliceToDb(
-        "rbac",
-        { ...fx.rbac, userGrants } as never,
-        userGrants.length ? undefined : { deletes: { userGrants: DENY_IDS } },
-      );
-      if (!(r as { ok?: boolean }).ok) throw new Error(`rbac push failed: ${short(r)}`);
-      await sleep(PAST_VERSIONS_WINDOW);
-    };
+    const OTHER = staffId(27);
     const rosterNow = async () => {
       const g = await req(`${app}/api/school-data/staff-roster`, { headers: office });
-      const me = arr(g.body.staff).map(obj).find((s) => s.id === TARGET)!;
-      const stamp = String(obj(obj(g.body.stamps).staff)[TARGET] ?? "");
-      return { me, stamp };
+      const all = arr(g.body.staff).map(obj);
+      const stamps = obj(obj(g.body.stamps).staff);
+      return {
+        me: all.find((s) => s.id === TARGET)!,
+        other: all.find((s) => s.id === OTHER)!,
+        stamp: String(stamps[TARGET] ?? ""),
+        otherStamp: String(stamps[OTHER] ?? ""),
+      };
     };
-    const save = (rec: Record<string, unknown>, stamp: string) =>
-      req(`${app}/api/school-data/staff-roster`, {
-        method: "POST",
-        headers: office,
-        body: { state: { staff: [rec] }, stamps: { staff: { [TARGET]: stamp } } },
-      });
-    try {
-      await pushRbac([deny("payroll"), deny("accounts")]);
-      const a = await rosterNow();
-      const bank = await save({ ...a.me, bankAccountNo: "OLD-ROUTE" }, a.stamp);
-      const rA = await staffRow();
-      const mob = await save({ ...a.me, mobile: "9000000098" }, a.stamp);
-      const rB = await staffRow();
-      record(
-        "old staff-roster save: a plain staff editor's bank change → 403, nothing written; a mobile change → 200 (bank kept)",
-        bank.status === 403 && prof(rA).bankAccountNo === SEED.bankAccountNo,
-        `bank ${bank.status} ${short(bank.body.error)}; mobile ${mob.status}; stored bank ${short(prof(rB).bankAccountNo)}`,
-      );
-      record(
-        "old staff-roster save: the plain edit lands",
-        mob.status === 200 && rB.mobile === "9000000098" && prof(rB).bankAccountNo === SEED.bankAccountNo,
-        `mobile ${mob.status} ${short(mob.body)}`,
-      );
-    } finally {
-      await pushRbac([]);
-    }
-    const left = (await rest(`rbac_desk_slices?tenant_id=eq.${tenantId}&slice_key=eq.userGrants&select=payload`))[0];
-    const stillThere = arr(obj(left).payload).map(obj).filter((g) => DENY_IDS.includes(String(g.id)));
-    record("old staff-roster save: the two personal denies are removed again", stillThere.length === 0, `left ${stillThere.length}`);
-    const b = await rosterNow();
-    const back = await save({ ...b.me, mobile: String(original.mobile ?? ""), bankAccountNo: SEED.bankAccountNo }, b.stamp);
-    const withAuth = await (async () => {
-      const c = await rosterNow();
-      return save({ ...c.me, bankAccountNo: "PAYROLL-OK" }, c.stamp);
-    })();
-    const rC = await staffRow();
+    const save = (who: Record<string, string>, rows: Record<string, unknown>[], stamps: Record<string, string>) =>
+      req(`${app}/api/school-data/staff-roster`, { method: "POST", headers: who, body: { state: { staff: rows }, stamps: { staff: stamps } } });
+
+    // The office (staff · edit, no bank & pay function) is a plain staff editor.
+    const a = await rosterNow();
+    const bank = await save(office, [{ ...a.me, bankAccountNo: "OLD-ROUTE" }], { [TARGET]: a.stamp });
+    const rA = await staffRow();
     record(
-      "old staff-roster save: with the payroll authority (office role) the bank change lands",
-      back.status === 200 && withAuth.status === 200 && prof(rC).bankAccountNo === "PAYROLL-OK",
-      `put back ${back.status}, with authority ${withAuth.status} ${short(withAuth.body)}`,
+      "old staff-roster save: the office's bank change → 403, nothing written",
+      bank.status === 403 && prof(rA).bankAccountNo === SEED.bankAccountNo,
+      `bank ${bank.status} ${short(bank.body.error)}`,
     );
 
-    // DELETE: a soft remove of the roster.
+    // Review #1: own id with another member's employee code → refused (the write would land on the other member).
+    const hijack = await save(office, [{ ...a.me, empCode: a.other.empCode }], { [TARGET]: a.stamp });
+    const lower = await save(office, [{ ...a.me, id: "e2e_22b_new_id", empCode: String(a.other.empCode).toLowerCase() }], { e2e_22b_new_id: a.otherStamp });
+    const rO = await staffRow(OTHER);
+    record(
+      "old staff-roster save: an id/employee-code mismatch → 403; a new id with another member's code (lower-case) is judged against THAT member → 403; nothing written",
+      hijack.status === 403 && /belongs to another member/.test(String(hijack.body.error)) && lower.status === 403 &&
+        prof(rO).bankAccountNo !== SEED.bankAccountNo,
+      `mismatch ${hijack.status} ${short(hijack.body.error)}; lower-case ${lower.status} ${short(lower.body.error)}`,
+    );
+
+    // Item 4: two rows, one refused → the other saves; the refused one is named.
+    const both = await save(
+      office,
+      [{ ...a.me, bankAccountNo: "OLD-ROUTE" }, { ...a.other, addressCurrent: "E2E other street" }],
+      { [TARGET]: a.stamp, [OTHER]: a.otherStamp },
+    );
+    const rOther = await staffRow(OTHER);
+    const rT = await staffRow();
+    record(
+      "old staff-roster save: one row refused, the other row saves; the refused one is named",
+      both.status === 200 && JSON.stringify(obj(both.body.refused).staff) === JSON.stringify([TARGET]) &&
+        prof(rOther).addressCurrent === "E2E other street" && prof(rT).bankAccountNo === SEED.bankAccountNo,
+      `HTTP ${both.status} ${short(both.body)}`,
+    );
+
+    // Review #2: a row WITHOUT the bank keys keeps them (absent = keep); review #3: blank username → the form's default.
+    const b = await rosterNow();
+    const lean: Record<string, unknown> = { ...b.me, addressCurrent: "E2E lean street", loginUsername: String(b.me.empCode).toLowerCase() };
+    for (const k of ["bankAccountNo", "upiId", "panNo", "aadhaarNo", "basicPay", "bankIfsc", "bankName"]) delete lean[k];
+    const leanSave = await save(office, [lean], { [TARGET]: b.stamp });
+    const rL = await staffRow();
+    record(
+      "old staff-roster save: a row without the bank keys keeps them; a blank login username → the form's default saves",
+      leanSave.status === 200 && !obj(leanSave.body).refused && prof(rL).bankAccountNo === SEED.bankAccountNo && prof(rL).panNo === SEED.panNo &&
+        prof(rL).basicPay === SEED.basicPay && prof(rL).addressCurrent === "E2E lean street" && prof(rL).loginUsername === String(b.me.empCode).toLowerCase(),
+      `HTTP ${leanSave.status} ${short(leanSave.body)}; bank ${short(prof(rL).bankAccountNo)}; username ${short(prof(rL).loginUsername)} (stored before: ${short(prof(original).loginUsername)})`,
+    );
+
+    // The owner may.
+    const c = await rosterNow();
+    const own = await save(owner, [{ ...c.me, bankAccountNo: "OWNER-OK" }], { [TARGET]: c.stamp });
+    const rC = await staffRow();
+    record(
+      "old staff-roster save: the owner's bank change lands",
+      own.status === 200 && !obj(own.body).refused && prof(rC).bankAccountNo === "OWNER-OK",
+      `owner ${own.status} ${short(own.body)}`,
+    );
+
+    // DELETE: a soft remove of the roster; meanwhile a non-owner session ends, the owner's does not.
     const countAll = async () => ({
       staff: (await rest(`sis_staff?tenant_id=eq.${tenantId}&select=id`)).length,
       removed: (await rest(`sis_staff?tenant_id=eq.${tenantId}&deleted_at=not.is.null&select=id,deleted_by`)),
@@ -344,30 +388,70 @@ async function main(): Promise<void> {
     const c0 = await countAll();
     const wipe = await req(`${app}/api/school-data/staff-roster`, { method: "DELETE", headers: principal });
     const c1 = await countAll();
-    // Put every row back exactly as it was before (only these rows were removed now).
+    await sleep(PAST_VERSIONS_WINDOW);
+    const teacherWhileEmpty = (await req(`${app}/api/data/views/staff-list`, { headers: teacher })).status;
+    const ownerWhileEmpty = (await req(`${app}/api/data/views/staff-list`, { headers: owner })).status;
     const ids = c1.removed.map((r) => String(r.id));
     if (ids.length) {
       await patch(`sis_staff?tenant_id=eq.${tenantId}&id=in.(${ids.join(",")})`, { deleted_at: null, deleted_by: null, updated_at: new Date().toISOString() });
     }
     const c2 = await countAll();
+    await sleep(PAST_VERSIONS_WINDOW);
     record(
-      "old staff-roster DELETE: soft — every staff row kept with deleted_at + deleted_by (the session); departments and designations untouched; restored",
+      "old staff-roster DELETE: soft — every staff row kept with deleted_at + deleted_by (the session); departments and designations untouched; with nobody on the roster a teacher's session ends (401), the owner's does not; restored",
       wipe.status === 200 && c1.staff === c0.staff && c0.removed.length === 0 && c1.removed.length === c0.staff &&
         c1.removed.every((r) => r.deleted_by === fx.sessions.principal.staffId) && c1.deps === c0.deps && c1.des === c0.des &&
-        c2.removed.length === 0 && c2.staff === c0.staff,
-      `HTTP ${wipe.status} ${short(wipe.body)}; staff ${c0.staff} → ${c1.staff} (removed ${c1.removed.length}); deps ${c0.deps} → ${c1.deps}; des ${c0.des} → ${c1.des}; after restore removed ${c2.removed.length}`,
+        teacherWhileEmpty === 401 && ownerWhileEmpty === 200 && c2.removed.length === 0 && c2.staff === c0.staff,
+      `HTTP ${wipe.status} ${short(wipe.body)}; staff ${c0.staff} → removed ${c1.removed.length}; deps ${c0.deps} → ${c1.deps}; des ${c0.des} → ${c1.des}; teacher ${teacherWhileEmpty}, owner ${ownerWhileEmpty}; after restore removed ${c2.removed.length}`,
     );
   }
 
-  // Put the target's protected fields back as seeded (the owner-less way: payroll).
+  // ── G. A staff member's own request for a bank change ──────────────────
   {
+    const ask = await req(`${app}/api/v1/staff/me/profile`, { method: "PATCH", headers: removedSelf, body: { fields: { bankAccountNo: "220022002200" } } });
+    const list = await req(`${app}/api/v1/staff/profile-requests`, { headers: office });
+    const pending = arr(list.body.pending).map(obj).find((r) => r.staffId === TARGET && JSON.stringify(r.fields).includes("220022002200"));
+    const id = String(pending?.id ?? "");
+    const byOffice = await req(`${app}/api/v1/staff/profile-requests`, { method: "POST", headers: office, body: { id, decision: "approve" } });
+    const byAcc = await req(`${app}/api/v1/staff/profile-requests`, { method: "POST", headers: accountant, body: { id, decision: "approve" } });
     const r = await staffRow();
-    const fields: Record<string, unknown> = {};
-    for (const k of ["bankAccountNo", "panNo", "aadhaarNo", "basicPay"]) fields[k] = originalProfile[k] ?? "";
-    const w = await sens(principal, [{ id: TARGET, base: r.updated_at, fields }]);
-    const r2 = await staffRow();
-    await post("sis.staff", office, [{ op: "upsert", id: TARGET, base: r2.updated_at, row: { mobile: original.mobile, profile: { mobile: original.mobile } } }]);
-    record("put back: the target's bank / PAN / Aadhaar / pay as seeded", w.status === 200, `HTTP ${w.status}`);
+    const log = await rest(`sis_staff_sensitive_changes?staff_id=eq.${TARGET}&tenant_id=eq.${tenantId}&order=changed_at.desc&limit=1&select=fields,authority,actor`);
+    record(
+      "profile request: a bank change approved by the office → 403; by the accountant → written through the sensitive door and logged",
+      ask.status === 200 && !!id && byOffice.status === 403 && byAcc.status === 200 && prof(r).bankAccountNo === "220022002200" &&
+        obj(log[0]).authority === "accounts" && obj(log[0]).actor === ACC && JSON.stringify(obj(log[0]).fields) === JSON.stringify(["bankAccountNo"]),
+      `ask ${ask.status} ${ask.status === 200 ? "" : short(ask.body)}; request ${id || "none"}; office ${byOffice.status} ${short(byOffice.body.error)}; accountant ${byAcc.status} ${short(byAcc.body)}; log ${short(log)}`,
+    );
+  }
+
+  // ── H. Masters lists: the commit caps on the server too ────────────────
+  {
+    const subj = arr((await req(`${app}/api/data/masters.subjects?limit=1000`, { headers: principal })).body.rows).map(obj);
+    const two = await post("masters.subjects", principal, [
+      { op: "delete", id: String(subj[0]!.id), base: String(subj[0]!._rev ?? "") },
+      { op: "delete", id: String(subj[1]!.id), base: String(subj[1]!._rev ?? "") },
+    ]);
+    const cam = arr((await req(`${app}/api/data/masters.campuses`, { headers: principal })).body.rows).map(obj);
+    const last = await post("masters.campuses", principal, [{ op: "delete", id: String(cam[0]!.id), base: String(cam[0]!._rev ?? "") }]);
+    const subjAfter = arr((await req(`${app}/api/data/masters.subjects?limit=1000`, { headers: principal })).body.rows).length;
+    const camAfter = arr((await req(`${app}/api/data/masters.campuses`, { headers: principal })).body.rows).length;
+    const many = await post("masters.subjects", principal, Array.from({ length: 501 }, (_, i) => ({ op: "upsert", id: `x${i}`, base: null, row: {} })));
+    record(
+      "masters: two removals in one request → 400; removing the only campus → 400; 501 ops → 400; nothing removed",
+      two.status === 400 && last.status === 400 && many.status === 400 && subjAfter === subj.length && cam.length === 1 && camAfter === 1,
+      `two ${two.status} ${short(two.body.message)}; last ${last.status} ${short(last.body.message)}; 501 ${many.status}; subjects ${subj.length} → ${subjAfter}; campuses ${cam.length} → ${camAfter}`,
+    );
+  }
+
+  // Put back: the accountant assignment, the other member's address.
+  await pushRbac(false);
+  {
+    const left = (await rest(`rbac_desk_slices?tenant_id=eq.${tenantId}&slice_key=eq.assignments&select=payload`))[0];
+    const still = arr(obj(left).payload).map(obj).filter((g) => g.id === ACC_ASSIGN);
+    record("put back: the accountant assignment is removed again", still.length === 0, `left ${still.length}`);
+    await patch(`sis_staff?id=eq.${otherOriginal.id}&tenant_id=eq.${tenantId}`, { profile: otherOriginal.profile, updated_at: new Date().toISOString() });
+    const back = await staffRow(String(otherOriginal.id));
+    record("put back: the other member's record exactly as found", JSON.stringify(prof(back)) === JSON.stringify(prof(otherOriginal)), "");
   }
 
   // The target's whole record exactly as it was found (profile, mobile).
@@ -375,12 +459,13 @@ async function main(): Promise<void> {
     await patch(`sis_staff?id=eq.${TARGET}&tenant_id=eq.${tenantId}`, {
       profile: original.profile,
       mobile: original.mobile,
+      email: original.email,
       updated_at: new Date().toISOString(),
     });
     const r = await staffRow();
     record(
       "put back: the target's profile and mobile exactly as found",
-      JSON.stringify(prof(r)) === JSON.stringify(originalProfile) && r.mobile === original.mobile && r.deleted_at === null,
+      JSON.stringify(prof(r)) === JSON.stringify(originalProfile) && r.mobile === original.mobile && r.email === original.email && r.deleted_at === null,
       `${Object.keys(prof(r)).length} profile keys`,
     );
   }

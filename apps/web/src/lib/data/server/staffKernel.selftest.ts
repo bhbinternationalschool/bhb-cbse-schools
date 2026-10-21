@@ -328,12 +328,16 @@ async function section2(): Promise<void> {
   assert.match(String(refuse(stored, edit({ mobile: "9999999999" }), named, "accounts")), /mobile/, "changing a set mobile");
   assert.equal(refuse(stored, edit({ mobile: "+91 98765 43210" }), named, null), null, "the same number spelt differently");
   const blankB = new Set(["stf_8"]);
-  assert.equal(refuse(stored, [{ ...B, email: "bina@school.test" }], blankB, null), null, "filling a blank e-mail");
-  assert.match(String(refuse(stored, [{ ...B, email: "ASHA@school.test" }], blankB, null)), /email/, "…but not with another member's");
-  assert.match(String(refuse(stored, [{ ...B, email: "director@bhbinternational.school" }], blankB, null)), /email/, "…nor an owner e-mail");
+  assert.match(String(refuse(stored, [{ ...B, email: "bina@school.test" }], blankB, null)), /email/, "filling a member's blank e-mail: the owner's");
+  assert.equal(refuse(stored, [{ ...B, email: "bina@school.test" }], blankB, "owner"), null);
   const noMobile = { ...B, mobile: "" };
-  assert.match(String(refuse([A, noMobile], [{ ...noMobile, mobile: "9876543210" }], blankB, null)), /mobile/, "a blank mobile filled with another member's");
-  assert.equal(refuse([A, noMobile], [{ ...noMobile, mobile: "9000000077" }], blankB, null), null, "a blank mobile filled with a free one");
+  assert.match(String(refuse([A, noMobile], [{ ...noMobile, mobile: "9000000077" }], blankB, "accounts")), /mobile/, "filling a member's blank mobile: the owner's");
+  // A NEW record: free links fine; another member's or an owner e-mail refused.
+  const fresh = { id: "n2", empCode: "E-200", fullName: "New" };
+  assert.equal(refuse(stored, [{ ...fresh, email: "new@school.test", mobile: "9000000077" }], null, null), null, "a new member's free e-mail and mobile");
+  assert.match(String(refuse(stored, [{ ...fresh, email: "ASHA@school.test" }], null, null)), /email/, "…not another member's");
+  assert.match(String(refuse(stored, [{ ...fresh, email: "director@bhbinternational.school" }], null, null)), /email/, "…nor an owner e-mail");
+  assert.match(String(refuse(stored, [{ ...fresh, mobile: "+91 98765 43210" }], null, null)), /mobile/, "…nor another member's mobile");
 
   // Item 4 — several rows: only the offending one is refused, the others go.
   const two = rosterSaveRefusal(stored, [{ ...A, bankAccountNo: "X" }, { ...B, fullName: "Bina K" }], new Set(["stf_7", "stf_8"]), null);
