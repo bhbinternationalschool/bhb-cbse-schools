@@ -17,6 +17,7 @@ import "../modules/attendance_history_screen.dart";
 import "../modules/exam_date_sheet_screen.dart";
 import "../modules/results_screen.dart";
 import "../modules/chat_thread_screen.dart";
+import "../modules/school_chat_screen.dart";
 import "../modules/complaints_screen.dart";
 import "../modules/ebook_shelf_screen.dart";
 import "../modules/online_classes_screen.dart";
@@ -31,6 +32,7 @@ import "../modules/receipts_screen.dart";
 import "../modules/teachers_screen.dart";
 import "../modules/transport_screen.dart";
 import "../modules/tutor_screen.dart";
+import "../modules/games_screen.dart";
 import "../profile/profile_screen.dart";
 import "home_stats.dart";
 import "student_id_screen.dart";
@@ -50,6 +52,9 @@ const _modules = [
   _Module("Attendance", Icons.fact_check_outlined, ModuleTone.teal),
   _Module("Homework", Icons.menu_book_outlined, ModuleTone.purple),
   _Module("Tutor", Icons.school_outlined, ModuleTone.amber),
+  // Learning games: practice from the class's own books, number dash and
+  // teacher-launched competitions; time played and stars for the parent.
+  _Module("Games", Icons.sports_esports_outlined, ModuleTone.purple),
   _Module("Notices", Icons.campaign_outlined, ModuleTone.coral),
   _Module("Transport", Icons.directions_bus_outlined, ModuleTone.pink),
   // Results and Date sheet open real data: only exams the school released
@@ -75,6 +80,7 @@ String _moduleLabel(BuildContext context, String id) {
     "Attendance" => l.homeModuleAttendance,
     "Homework" => l.homeModuleHomework,
     "Tutor" => l.homeModuleTutor,
+    "Games" => l.homeModuleGames,
     "Notices" => l.notices,
     "Transport" => l.transport,
     "Online class" => l.homeModuleOnlineClass,
@@ -245,6 +251,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         );
+      case "/school-chat":
+        _openSchoolChat(child);
     }
   }
 
@@ -385,6 +393,8 @@ class _HomeScreenState extends State<HomeScreen> {
           studentId: child.id,
           child: child,
         );
+      case "Games":
+        screen = GamesScreen(backend: ApiGamesBackend(api), child: child);
       case "Notices":
         screen = NoticesScreen(api: api);
       case "PTM":
@@ -415,6 +425,26 @@ class _HomeScreenState extends State<HomeScreen> {
     if (screen != null) {
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen!));
     }
+  }
+
+  /// School chat for the picked child: its class group, its subject groups
+  /// and direct chats with its teachers; the older class-teacher thread is
+  /// the first row.
+  void _openSchoolChat(ParentChild child) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SchoolChatScreen(
+          api: widget.api,
+          studentId: child.id,
+          childName: child.fullName,
+          classTeacherThread: (_) => ChatThreadScreen(
+            api: widget.api,
+            studentId: child.id,
+            studentName: child.fullName,
+          ),
+        ),
+      ),
+    );
   }
 
   void _openProfile() {
@@ -650,15 +680,7 @@ class _HomeScreenState extends State<HomeScreen> {
             case 1:
               _openModule("Fees", child);
             case 2:
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => ChatThreadScreen(
-                    api: widget.api,
-                    studentId: child.id,
-                    studentName: child.fullName,
-                  ),
-                ),
-              );
+              _openSchoolChat(child);
             case 3:
               _openProfile();
           }

@@ -1,7 +1,7 @@
 "use client";
 // ratchet-allow: grids_without_row_menu — rows carry EditControl (which shows which row is open in the form beside it) and RemoveControl (which holds the check explaining why a row cannot be deleted); neither survives being folded into a menu
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { SlidersHorizontal } from "lucide-react";
 import {
@@ -13,8 +13,8 @@ import {
   checkFeeHeadRemoval,
   checkSectionRemoval,
   feeHeadCategoryLabel,
-  loadMasters,
   listConcessionPolicies,
+  normalizeMastersRead,
   newId,
   removeCampus,
   removeClass,
@@ -36,7 +36,15 @@ import {
   classGroupCodeForName,
 } from "@/lib/masters";
 import { CustomFieldsPanel } from "@/components/masters/CustomFieldsPanel";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { TutorPassesPanel } from "@/components/masters/TutorPassesPanel";
+import {
+  answerHoldsOverlay,
+  overlayOnCommit,
+  overlayOnSaved,
+  type MastersOverlay,
+} from "@/components/masters/mastersPending";
 import { EditControl } from "@/components/masters/EditControl";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { SectionTeachersPanel } from "@/components/masters/SectionTeachersPanel";
@@ -207,15 +215,54 @@ export function MastersWorkspace() {
   const [rbac, setRbac] = useState(() =>
     typeof window === "undefined" ? null : loadRbac(),
   );
-  const [state, setState] = useState<MastersState | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      return loadMasters();
-    } catch {
-      return null;
-    }
-  });
+  // data-layer 2.1h — READS: the server's book + the access copy's staff side
+  // (useScreenMasters, kept fresh by the versions poll), normalised exactly as
+  // loadMasters() normalised the page copy, so every panel sees the same shape.
+  // WRITES are unchanged until 2.2: commit() still saves the whole book through
+  // saveMasters(); what a commit sent is shown (the overlay) until an answer
+  // PROVABLY holds that save — built from the save's desk revision or later,
+  // or reading back every changed key as sent (./mastersPending). The first
+  // answer after a save can be older than it (another instance's cache); taking
+  // it reverted the screen, and the next commit sent the old value back.
+  const {
+    masters: screenMasters,
+    builtFrom,
+    error: mastersError,
+    retry: retryMasters,
+  } = useScreenMasters();
+  const read = useMemo(
+    () => (screenMasters ? normalizeMastersRead(screenMasters) : null),
+    [screenMasters],
+  );
+  const [overlay, setOverlayState] = useState<MastersOverlay | null>(null);
+  const overlayRef = useRef<MastersOverlay | null>(null);
+  const setOverlay = (next: MastersOverlay | null) => {
+    overlayRef.current = next;
+    setOverlayState(next);
+  };
+  /** Re-asks for the masters answer after a save while it does not hold it yet. */
+  const reasks = useRef(0);
+  const state = overlay?.state ?? read;
   const [notice, setNotice] = useState<string | null>(null);
+
+  // An answer that holds every save of the overlay replaces it. One that does
+  // not (older than the save) is not shown: ask again shortly — another
+  // instance's cache sees the new revision within ~2 s — and after a few
+  // tries leave it to the versions poll, which refetches when Masters moves.
+  useEffect(() => {
+    if (!overlay || overlay.saving > 0) return;
+    if (answerHoldsOverlay(overlay, read, builtFrom)) {
+      setOverlay(null);
+      return;
+    }
+    if (reasks.current >= 4) return;
+    const t = window.setTimeout(() => {
+      reasks.current += 1;
+      void retryMasters();
+    }, 2_500);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- retryMasters is React Query's refetch (stable)
+  }, [overlay, read, builtFrom]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -252,25 +299,20 @@ export function MastersWorkspace() {
   }, []);
 
   useEffect(() => {
-    setState(loadMasters());
     void (async () => {
       const [
-        { ensureMastersHydrated },
         { ensureStaffHydrated },
         { ensureRbacHydrated },
         { withHydrationSlot },
       ] = await Promise.all([
-        import("@/lib/mastersPersistence"),
         import("@/lib/staffPersistence"),
         import("@/lib/rbacPersistence"),
         import("@/lib/deskHydrateGuard"),
       ]);
       await Promise.all([
-        withHydrationSlot(() => ensureMastersHydrated()),
         withHydrationSlot(() => ensureStaffHydrated()),
         withHydrationSlot(() => ensureRbacHydrated()),
       ]);
-      setState(loadMasters());
       setRbac(loadRbac());
     })();
   }, []);
@@ -306,7 +348,8 @@ export function MastersWorkspace() {
       window.setTimeout(() => setNotice(null), 2800);
       return;
     }
-    setState(next);
+    setOverlay(overlayOnCommit(overlayRef.current, state, next));
+    reasks.current = 0;
     // The success notice must wait for the database, not for React. Showing
     // it synchronously is what made 16 refused writes look like 16 saves on
     // 2026-08-09 — the screen said "session changed" every time while the
@@ -314,8 +357,18 @@ export function MastersWorkspace() {
     // push path raises a sticky error toast naming the actual reason.
     if (msg) setNotice("Saving…");
     void saveMasters(next).then((outcome) => {
+      const after = overlayOnSaved(
+        overlayRef.current,
+        outcome.ok ? { ok: true, revision: outcome.revision } : { ok: false },
+      );
+      setOverlay(after);
+      // Read the server's book now (not at the next poll): after a save to
+      // see it, after a refusal to show what IS stored (the page copy held
+      // the refused edit; the answer replaces it).
+      void retryMasters();
       if (!outcome.ok) {
-        setNotice(null);
+        setNotice(after ? null : "Not saved — showing the school's saved Masters again.");
+        if (!after) window.setTimeout(() => setNotice(null), 4000);
         return;
       }
       if (msg) {
@@ -325,6 +378,9 @@ export function MastersWorkspace() {
     });
   }
 
+  if (!state && mastersError) {
+    return <QueryError what="the school's Masters" error={mastersError} retry={retryMasters} />;
+  }
   if (!state) {
     return (
       <p className="text-sm text-[var(--muted)]">Loading masters…</p>
@@ -379,7 +435,11 @@ export function MastersWorkspace() {
             <SubjectRequestsCard
               subjects={state.subjects ?? []}
               canEdit={!readOnly}
-              onMastersChanged={() => setState(loadMasters())}
+              onMastersChanged={() => {
+                // The card changed Masters on the server: ask now. An open
+                // overlay stays until an answer holds it (never mid-save).
+                void retryMasters();
+              }}
             />
             <SubjectsPanel state={state} commit={commit} />
           </div>

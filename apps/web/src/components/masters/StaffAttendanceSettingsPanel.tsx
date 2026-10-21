@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MastersWorkCard } from "@/components/masters/MastersLayout";
-import { loadMasters } from "@/lib/masters";
+import { useStaffList } from "@/lib/data/client/hooks";
+import { QueryError } from "@/components/data/QueryError";
 import {
   loadStaffAttendance,
   normalizeAttendanceSettings,
@@ -15,22 +16,20 @@ export function StaffAttendanceSettingsPanel() {
   const [state, setState] = useState<StaffAttendanceState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const [roster, setRoster] = useState<
-    { id: string; fullName: string; empCode: string }[]
-  >([]);
+  // data-layer 2.1h: the staff directory (versions poll), not a once-at-mount
+  // page-copy read (which said "No active staff" on a cold page).
+  const staffQ = useStaffList();
+  const roster = useMemo(
+    () =>
+      (staffQ.data?.staff ?? [])
+        .filter((st) => st.status === "active")
+        .map((st) => ({ id: st.id, fullName: st.fullName, empCode: st.empCode }))
+        .sort((a, b) => a.empCode.localeCompare(b.empCode)),
+    [staffQ.data],
+  );
 
   useEffect(() => {
     setState(loadStaffAttendance());
-    setRoster(
-      (loadMasters().staff ?? [])
-        .filter((st) => st.status === "active")
-        .map((st) => ({
-          id: st.id,
-          fullName: st.fullName,
-          empCode: st.empCode,
-        }))
-        .sort((a, b) => a.empCode.localeCompare(b.empCode)),
-    );
   }, []);
 
   function flash(msg: string) {
@@ -189,7 +188,13 @@ export function StaffAttendanceSettingsPanel() {
                 </label>
               );
             })}
-            {roster.length === 0 ? (
+            {!staffQ.data ? (
+              staffQ.isError ? (
+                <QueryError what="the staff list" error={staffQ.error} retry={() => staffQ.refetch()} />
+              ) : (
+                <p className="text-xs text-[var(--muted)]">Loading staff…</p>
+              )
+            ) : roster.length === 0 ? (
               <p className="text-xs text-[var(--muted)]">
                 No active staff on record.
               </p>
