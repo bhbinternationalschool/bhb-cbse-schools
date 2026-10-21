@@ -2598,6 +2598,60 @@ class LHi extends L {
   }
 
   @override
+  String get schoolChatTitle => 'स्कूल चैट';
+
+  @override
+  String get schoolChatGroups => 'समूह';
+
+  @override
+  String get schoolChatDirect => 'सीधी बातचीत';
+
+  @override
+  String get schoolChatClassTeacherThread => 'कक्षा अध्यापक को संदेश';
+
+  @override
+  String get schoolChatNewMessage => 'किसी शिक्षक को संदेश';
+
+  @override
+  String get schoolChatNoMessages => 'अभी कोई संदेश नहीं।';
+
+  @override
+  String get schoolChatNone =>
+      'अभी कोई चैट नहीं। कक्षा या विषय में शिक्षक नियुक्त होते ही उसका समूह यहाँ दिखेगा।';
+
+  @override
+  String get schoolChatWaiting => 'समीक्षा की प्रतीक्षा में';
+
+  @override
+  String get schoolChatRemoved => 'स्कूल ने हटा दिया';
+
+  @override
+  String get schoolChatMuted =>
+      'स्कूल ने इस चैट में आपको अभी के लिए रोका है। आप संदेश पढ़ सकते हैं।';
+
+  @override
+  String get schoolChatPaused =>
+      'स्कूल ने इस लॉगिन की चैट रोक दी है। कृपया कक्षा अध्यापक से बात करें।';
+
+  @override
+  String get schoolChatSafety =>
+      'संदेश दूसरों को दिखने से पहले जाँचे जाते हैं। कृपया अच्छा व्यवहार रखें।';
+
+  @override
+  String schoolChatAsChild(String name) {
+    return '$name के रूप में लिख रहे हैं';
+  }
+
+  @override
+  String get schoolChatAsParent => 'अभिभावक के रूप में लिख रहे हैं';
+
+  @override
+  String get schoolChatGroupNoMessages => 'समूह — अभी कोई संदेश नहीं';
+
+  @override
+  String get schoolChatParentInbox => 'कक्षा अध्यापक के लिए अभिभावकों के संदेश';
+
+  @override
   String get feeTotalPayingNow => 'अभी कुल भुगतान (₹)';
 
   @override

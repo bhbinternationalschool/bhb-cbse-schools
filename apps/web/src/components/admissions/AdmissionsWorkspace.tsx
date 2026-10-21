@@ -59,7 +59,10 @@ import {
   type GuardianRelation,
   type TransportInterest,
 } from "@/lib/admissions";
-import { listSessionYearOptions, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
+import { listSessionYearOptions, type MastersState, currentAcademicYearCode} from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
+import { withheldFeeGroupRefusal } from "@/components/admissions/withheldFeeGroup";
 import { admissionDocumentHref, buildAdmissionDocumentDetails, pendingDocumentsForLead } from "@/lib/admissionDocumentLinks";
 import { leadConversionLikelihood } from "@/lib/admissionsAi";
 import { pushToast } from "@/components/shell/Toast";
@@ -191,9 +194,12 @@ type EnquiryStep = "household" | "children";
 export function AdmissionsWorkspace() {
   const session = useDemoSession();
   const sessionReadOnly = useSessionReadOnly();
-  const [masters, setMasters] = useState<MastersState | null>(() =>
-    typeof window !== "undefined" ? loadMasters() : null,
-  );
+  // data-layer 2.1g: the server's book + the access copy's staff side (the
+  // permission helpers resolve the signed-in person through it); kept fresh
+  // by the versions poll — no mount-time page-copy read.
+  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
+  /** Teaching subset: fee groups are WITHHELD, not none (never enrol on "no group"). */
+  const feesWithheld = mastersScope === "teaching";
   const [state, setState] = useState<AdmissionsState | null>(() =>
     typeof window !== "undefined" ? loadAdmissions() : null,
   );
@@ -306,7 +312,6 @@ export function AdmissionsWorkspace() {
   ]);
 
   useEffect(() => {
-    setMasters(loadMasters());
     const adm = loadAdmissions();
     setState(adm);
     const sisNow = loadSis();
@@ -769,6 +774,12 @@ export function AdmissionsWorkspace() {
   function doAdmitLead(leadId: string) {
     if (!masters) return;
     const cur = loadAdmissions();
+    const refusal = withheldFeeGroupRefusal(feesWithheld, cur.leads.find((l) => l.id === leadId));
+    if (refusal) {
+      setNotice(refusal);
+      window.setTimeout(() => setNotice(null), 3200);
+      return;
+    }
     const r = enrollLead(cur, leadId, session.fullName, masters);
     if (!r.ok) {
       setNotice(r.reason);
@@ -921,6 +932,11 @@ export function AdmissionsWorkspace() {
 
   function doEnroll() {
     if (!state || !selected || !masters) return;
+    const refusal = withheldFeeGroupRefusal(feesWithheld, selected);
+    if (refusal) {
+      setNotice(refusal);
+      return;
+    }
     const r = enrollLead(state, selected.id, session.fullName, masters);
     if (!r.ok) {
       setNotice(r.reason);
@@ -1142,6 +1158,9 @@ export function AdmissionsWorkspace() {
     openLead(r.lead.id);
   }
 
+  if (!masters && mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
   if (!state || !masters) {
     return <p className="text-sm text-[var(--muted)]">Loading admissions…</p>;
   }
@@ -2101,6 +2120,7 @@ export function AdmissionsWorkspace() {
         <AdmissionRegistrationPanel
           state={state}
           masters={masters}
+          feesWithheld={feesWithheld}
           sis={sis}
           by={session.fullName}
           canEdit={canWriteTab("registration")}
@@ -2628,14 +2648,16 @@ export function AdmissionsWorkspace() {
               masters.classes.find((c) => c.id === ps.classId)?.name || "—";
             const sec =
               masters.sections.find((s) => s.id === ps.sectionId)?.name || "";
-            const feeGroupLabel =
-              masters.feeGroups?.find((g) => g.id === ps.feeGroupId)?.name ||
-              "—";
+            const feeGroupLabel = feesWithheld
+              ? "Not shown to your role"
+              : masters.feeGroups?.find((g) => g.id === ps.feeGroupId)?.name ||
+                "—";
             return (
               <StudentProfileModal
                 student={ps}
                 sis={sis}
                 masters={masters}
+                feesWithheld={feesWithheld}
                 classLabel={sec ? `${cls} · ${sec}` : cls}
                 feeGroupLabel={feeGroupLabel}
                 onClose={() => setProfileStudentId("")}
@@ -4099,3 +4121,4 @@ function LeadDetail({
     </div>
   );
 }
+

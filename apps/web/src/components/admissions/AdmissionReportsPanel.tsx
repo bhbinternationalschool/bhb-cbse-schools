@@ -23,7 +23,8 @@ import {
   type AdmissionReportFormat,
   type AdmissionReportId,
 } from "@/lib/admissionReportCatalog";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
 export function AdmissionReportsPanel({
@@ -33,7 +34,8 @@ export function AdmissionReportsPanel({
   tick?: number;
   onNotice?: (msg: string) => void;
 }) {
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1g: the server's book (class names), kept fresh by the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [admissions, setAdmissions] = useState<AdmissionsState | null>(null);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -72,7 +74,6 @@ export function AdmissionReportsPanel({
   const [running, setRunning] = useState<string | null>(null);
 
   useEffect(() => {
-    setMasters(loadMasters());
     setAdmissions(loadAdmissions());
   }, [tick]);
 
@@ -205,6 +206,9 @@ export function AdmissionReportsPanel({
     setIncludeLost(false);
   }
 
+  if (!masters && mastersError) {
+    return <QueryError what="the school's classes for the reports" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters || !admissions) {
     return (
       <p className="mt-4 text-sm text-[var(--muted)]">Loading reports…</p>
