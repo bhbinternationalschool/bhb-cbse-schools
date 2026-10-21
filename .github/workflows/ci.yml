@@ -168,6 +168,12 @@ jobs:
       - name: Self-test — the principal's staff cards count what their lists show, exempt staff in neither; staff today is what staff did
         working-directory: apps/web
         run: npm run test:staff-home-cards
+      - name: Self-test — the month register is filled only by those who may, one day at a time
+        working-directory: apps/web
+        run: npm run test:attendance-month-register-edit
+      - name: Self-test — a PTM scheduled from the app covers only the classes its scheduler teaches
+        working-directory: apps/web
+        run: npm run test:ptm-schedule
 
       - name: Self-test — an in-class answer is a child's work, and the note only says what the teacher said
         working-directory: apps/web

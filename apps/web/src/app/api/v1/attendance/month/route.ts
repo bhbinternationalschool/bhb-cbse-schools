@@ -1,13 +1,19 @@
 import { writeAudit } from "@/lib/audit.server";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
+import { hasPermission } from "@/lib/rbac";
 import { assertSectionScope } from "@/lib/api/v1/staffScope";
-import { sectionKey } from "@/lib/staffTeachingScope";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureAttendanceHydratedServer } from "@/lib/attendancePersistence";
 import { loadAttendance } from "@/lib/attendance";
 import { markAttendanceServer } from "@/lib/attendanceMark.server";
-import { buildMonthView, planMonthSave, sessionMonths, type MonthSaveDay } from "@/lib/attendanceMonthRegister";
+import {
+  buildMonthView,
+  monthRegisterCanEdit,
+  planMonthSave,
+  sessionMonths,
+  type MonthSaveDay,
+} from "@/lib/attendanceMonthRegister";
 import { loadSisForStaff, studentsInSession } from "@/lib/sis";
 import { istToday } from "@/lib/dailyBrief.server";
 
@@ -39,7 +45,15 @@ async function sectionContext(request: Request, classId: string, sectionId: stri
   const students = studentsInSession(loadSisForStaff(), ay).filter(
     (s) => s.classId === classId && s.sectionId === sectionId && s.status === "active",
   );
-  const canEdit = scope.unrestricted || scope.classTeacherOf.has(sectionKey(classId, sectionId));
+  const canEdit = monthRegisterCanEdit(
+    {
+      unrestricted: scope.unrestricted,
+      classTeacherOf: scope.classTeacherOf,
+      canEditAttendance: hasPermission(ctx.session, ctx.masters, "attendance", "edit", ctx.rbac),
+    },
+    classId,
+    sectionId,
+  );
   return { ctx, scope, ay, students, canEdit };
 }
 

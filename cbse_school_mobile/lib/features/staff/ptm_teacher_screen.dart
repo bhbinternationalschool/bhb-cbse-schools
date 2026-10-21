@@ -7,6 +7,7 @@ import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../modules/dictate_field.dart";
+import "ptm_schedule_screen.dart";
 import "ptm_slots_screen.dart";
 import "ai_ptm_brief_screen.dart";
 
@@ -17,6 +18,32 @@ import "ai_ptm_brief_screen.dart";
 /// Since 13 Oct 2026 a teacher also lays out their own slots here: add them
 /// to a PTM the office opened (PtmAddSlotsScreen), and change or cancel one
 /// nobody has booked. A booked slot is the family's — the office moves them.
+///
+/// Since 20 Oct 2026 (request mr_mv9yydt031or) a teacher schedules a PTM for
+/// their own classes, and the office / leadership for any class, with
+/// **Schedule PTM** (PtmScheduleScreen) — shown only when the server says
+/// this person may (GET /api/v1/staff/ptm/events).
+class PtmTeacherView {
+  const PtmTeacherView(this.events, this.schedule);
+
+  final List<PtmTeacherEvent> events;
+
+  /// Null when the options could not be read — the button is then hidden,
+  /// never offered on a guess.
+  final PtmScheduleOptions? schedule;
+}
+
+Future<PtmTeacherView> loadPtmTeacherView(ApiClient api) async {
+  final events = await api.fetchTeacherPtm();
+  PtmScheduleOptions? schedule;
+  try {
+    schedule = await api.fetchPtmScheduleOptions();
+  } catch (_) {
+    schedule = null;
+  }
+  return PtmTeacherView(events, schedule);
+}
+
 class PtmTeacherScreen extends StatelessWidget {
   const PtmTeacherScreen({super.key, required this.api, this.canBrief = false});
 
@@ -27,19 +54,43 @@ class PtmTeacherScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ModuleShell<List<PtmTeacherEvent>>(
+    return ModuleShell<PtmTeacherView>(
       guideId: "ptm-teacher",
       title: "PTM",
       subtitle: "My slots and bookings",
-      load: api.fetchTeacherPtm,
+      load: () => loadPtmTeacherView(api),
       emptyIcon: Icons.groups_outlined,
       emptyText: context.l10n.noPtmSlotsAreYoursRight,
-      isEmpty: (e) => e.isEmpty,
-      builder: (context, events, reload) => ListView(
+      isEmpty: (v) => v.events.isEmpty,
+      floatingActionButton: (context, view, reload) {
+        final opt = view.schedule;
+        if (opt == null || !opt.canSchedule || opt.classes.isEmpty) {
+          return null;
+        }
+        return FloatingActionButton.extended(
+          key: const Key("ptm-schedule-fab"),
+          onPressed: () async {
+            final messenger = ScaffoldMessenger.of(context);
+            final done = context.l10n.ptmScheduleDone;
+            final made = await Navigator.of(context).push<bool>(
+              MaterialPageRoute(
+                builder: (_) => PtmScheduleScreen(api: api, options: opt),
+              ),
+            );
+            if (made == true) {
+              messenger.showSnackBar(SnackBar(content: Text(done)));
+              await reload();
+            }
+          },
+          icon: const Icon(Icons.event_available_outlined),
+          label: Text(context.l10n.ptmScheduleButton),
+        );
+      },
+      builder: (context, view, reload) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         children: [
-          for (final e in events) ...[
+          for (final e in view.events) ...[
             Text(
               "${e.name} · ${formatDateLabel(e.date)}${e.modeLabel.isNotEmpty ? " · ${e.modeLabel}" : ""}",
               style: AppText.bodyLargeInk.copyWith(fontWeight: FontWeight.w700),

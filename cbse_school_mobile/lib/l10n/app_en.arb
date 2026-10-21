@@ -1975,6 +1975,76 @@
   },
   "feeBankName": "Bank name (required)",
   "feeBankMissing": "Enter the bank name",
+  "mrEditHint": "Tap a box to mark it. Tap a date to fill that day for every child not yet marked, then tap the exceptions.",
+  "mrViewOnly": "View only — the class teacher (or the office) fills this class's month register.",
+  "mrUnsavedCount": "{count} unsaved change(s)",
+  "@mrUnsavedCount": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "mrSave": "Save",
+  "mrDiscard": "Discard",
+  "mrDiscardTitle": "Discard unsaved changes?",
+  "mrDiscardBody": "The marks you changed have not been saved.",
+  "mrKeepEditing": "Keep editing",
+  "mrClearMark": "Clear mark",
+  "mrFillDayTitle": "Fill {date}",
+  "@mrFillDayTitle": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "mrFillDayBody": "Every child not yet marked on this day gets the mark you choose. Marks already there stay.",
+  "mrFillDayDone": "{count} children marked — tap the exceptions, then Save.",
+  "@mrFillDayDone": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "mrFillDayNothing": "Every child already has a mark on this day.",
+  "mrSavedDays": "Saved {count} day(s).",
+  "@mrSavedDays": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "mrNotSaved": "Not saved: {reasons}",
+  "@mrNotSaved": {
+    "placeholders": {
+      "reasons": {
+        "type": "String"
+      }
+    }
+  },
+  "ptmScheduleButton": "Schedule PTM",
+  "ptmScheduleTitle": "Schedule a PTM",
+  "ptmScheduleName": "Name",
+  "ptmScheduleNameDefault": "Parent-teacher meeting",
+  "ptmScheduleDate": "Date",
+  "ptmScheduleEndDate": "Last day (if more than one day)",
+  "ptmScheduleClasses": "Classes",
+  "ptmScheduleClassesHintTeacher": "Only the classes you teach. A PTM is for the whole class — each of its teachers adds their own slots.",
+  "ptmScheduleClassesHintOffice": "Pick one or more classes. One PTM covers all of them.",
+  "ptmScheduleSelectAll": "Select all",
+  "ptmScheduleMode": "How",
+  "ptmModeInPerson": "In person",
+  "ptmModeVideo": "Video",
+  "ptmModePhone": "Phone",
+  "ptmScheduleNote": "Note for parents (optional)",
+  "ptmScheduleSave": "Schedule",
+  "ptmScheduleNeedClass": "Pick at least one class.",
+  "ptmScheduleNeedName": "Give the PTM a name.",
+  "ptmScheduleDone": "PTM scheduled — now add your slots to it.",
+  "ptmScheduleNoClasses": "You have no classes to schedule a PTM for — ask the office to add yours (Staff → Duties).",
   "scCallFamily": "Call family",
   "scMessageFamily": "Message family",
   "scAppChat": "App chat with the family",
