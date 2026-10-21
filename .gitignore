@@ -76,6 +76,7 @@ apps/web/e2e/report/
 apps/web/e2e/test-results/
 apps/web/e2e/month-groups-shots/
 apps/web/e2e/month-range-shots/
+apps/web/e2e/fuel-range-shots/
 apps/web/e2e/counter-sales-shots/
 apps/web/e2e/student-upgrade-shots/
 apps/web/e2e/transport-paid-shots/

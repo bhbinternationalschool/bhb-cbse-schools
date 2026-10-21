@@ -65,7 +65,7 @@ export default defineConfig<GateOptions>({
   projects: [
     {
       name: "desktop",
-      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay|parent-web-tabs|print-signatures)\.spec\.ts/,
+      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay|parent-web-tabs|fuel-per-bus-range|print-signatures)\.spec\.ts/,
       use: { ...desktop },
     },
     {
@@ -76,10 +76,11 @@ export default defineConfig<GateOptions>({
       use: { ...devices["Pixel 7"], viewport: { width: 375, height: 812 }, cpuThrottle: 4 },
     },
     {
-      // Writes a transport desk and receipts (the 15 Oct paid-month case), so
-      // it runs after everything that reads the stack.
+      // Writes a transport desk and receipts (the 15 Oct paid-month case) and
+      // a bus with fuel fills (21 Oct, fuel-per-bus-range), so it runs after
+      // everything that reads the stack.
       name: "money-writes",
-      testMatch: /(transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|parent-web-tabs)\.spec\.ts/,
+      testMatch: /(transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|parent-web-tabs|fuel-per-bus-range)\.spec\.ts/,
       dependencies: ["desktop", "phone-375-cpu4x"],
       use: { ...desktop },
     },
