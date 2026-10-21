@@ -160,6 +160,8 @@ SELFTESTS=(
   test:udise-doc-intake
   test:homework-expand
   test:homework-page-scan
+  test:staff-scan
+  test:staff-scan-route
   test:homework-submission
   test:exam-drill
   test:drill-skills

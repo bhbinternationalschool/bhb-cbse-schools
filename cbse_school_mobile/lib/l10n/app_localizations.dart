@@ -5348,6 +5348,84 @@ abstract class L {
   /// **'Enter the bank name'**
   String get feeBankMissing;
 
+  /// No description provided for @visitorMobileOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'Mobile number (optional)'**
+  String get visitorMobileOptional;
+
+  /// No description provided for @numberOfPeople.
+  ///
+  /// In en, this message translates to:
+  /// **'Number of people'**
+  String get numberOfPeople;
+
+  /// No description provided for @vehicleNumberOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'Vehicle number (optional)'**
+  String get vehicleNumberOptional;
+
+  /// No description provided for @visitorAddressOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'Address (optional)'**
+  String get visitorAddressOptional;
+
+  /// No description provided for @scanIdCard.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan ID card'**
+  String get scanIdCard;
+
+  /// No description provided for @scanNumberPlate.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan number plate'**
+  String get scanNumberPlate;
+
+  /// No description provided for @readFromIdCheck.
+  ///
+  /// In en, this message translates to:
+  /// **'Read from ID — check'**
+  String get readFromIdCheck;
+
+  /// No description provided for @readFromPlateCheck.
+  ///
+  /// In en, this message translates to:
+  /// **'Read from plate — check'**
+  String get readFromPlateCheck;
+
+  /// No description provided for @readFromBillCheck.
+  ///
+  /// In en, this message translates to:
+  /// **'Read from bill — check'**
+  String get readFromBillCheck;
+
+  /// No description provided for @readingThePhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading the photo…'**
+  String get readingThePhoto;
+
+  /// No description provided for @readTheBill.
+  ///
+  /// In en, this message translates to:
+  /// **'Read the bill'**
+  String get readTheBill;
+
+  /// No description provided for @aadhaarLast4Only.
+  ///
+  /// In en, this message translates to:
+  /// **'Aadhaar is kept as the last 4 digits only'**
+  String get aadhaarLast4Only;
+
+  /// No description provided for @visitorPeopleCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} people'**
+  String visitorPeopleCount(int count);
+
   /// No description provided for @homeworkScanPage.
   ///
   /// In en, this message translates to:

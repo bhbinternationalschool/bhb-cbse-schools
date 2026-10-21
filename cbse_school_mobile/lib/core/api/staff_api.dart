@@ -1367,6 +1367,9 @@ class GateVisitor {
       linkedTo = _s(j, "linkedTo"),
       source = _s(j, "source"),
       idProofNote = _s(j, "idProofNote"),
+      peopleCount = _i(j, "peopleCount") < 1 ? 1 : _i(j, "peopleCount"),
+      vehicleNo = _s(j, "vehicleNo"),
+      address = _s(j, "address"),
       inTime = _s(j, "inTime"),
       outTime = _s(j, "outTime"),
       onCampus = _b(j, "onCampus"),
@@ -1382,6 +1385,9 @@ class GateVisitor {
   final String linkedTo;
   final String source;
   final String idProofNote;
+  final int peopleCount;
+  final String vehicleNo;
+  final String address;
   final String inTime;
   final String outTime;
   final bool onCampus;
@@ -2244,7 +2250,8 @@ extension StaffApi on ApiClient {
       );
 
   /// Returns (visitor, alreadyIn). `alreadyIn` means this mobile was already
-  /// on campus and the OPEN visit came back — not a second check-in.
+  /// on campus (or this sheet's [clientId] already checked them in) and the
+  /// OPEN visit came back — not a second check-in. [mobile] may be "".
   Future<(GateVisitor, bool)> gateCheckIn({
     required String visitorName,
     required String mobile,
@@ -2252,6 +2259,10 @@ extension StaffApi on ApiClient {
     String personToMeet = "",
     String idProofNote = "",
     String linkedTo = "",
+    int peopleCount = 1,
+    String vehicleNo = "",
+    String address = "",
+    String clientId = "",
   }) async {
     final data = await _postData("/api/v1/staff/visitors/checkin", {
       "visitorName": visitorName,
@@ -2260,11 +2271,31 @@ extension StaffApi on ApiClient {
       "personToMeet": personToMeet,
       "idProofNote": idProofNote,
       "linkedTo": linkedTo,
+      "peopleCount": peopleCount,
+      "vehicleNo": vehicleNo,
+      "address": address,
+      if (clientId.isNotEmpty) "clientId": clientId,
     });
     return (
       GateVisitor.fromJson(data["visitor"] as Map<String, dynamic>),
       _b(data, "alreadyIn"),
     );
+  }
+
+  /// Read a photo at the gate — [kind] is "visitor_id" or "vehicle_plate".
+  /// Returns the server's reading (a draft; nothing is saved, and the photo
+  /// is not kept). An Aadhaar number only ever comes back masked.
+  Future<Map<String, dynamic>> scanAtGate({
+    required String kind,
+    required String imageBase64,
+    String mimeType = "image/jpeg",
+  }) async {
+    final data = await _postData("/api/v1/staff/visitors/scan", {
+      "kind": kind,
+      "imageBase64": imageBase64,
+      "mimeType": mimeType,
+    });
+    return Map<String, dynamic>.from((data["reading"] as Map?) ?? const {});
   }
 
   /// Returns (visitor, alreadyOut) — an already-closed visit keeps its

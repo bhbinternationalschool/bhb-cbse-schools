@@ -1975,6 +1975,26 @@
   },
   "feeBankName": "Bank name (required)",
   "feeBankMissing": "Enter the bank name",
+  "visitorMobileOptional": "Mobile number (optional)",
+  "numberOfPeople": "Number of people",
+  "vehicleNumberOptional": "Vehicle number (optional)",
+  "visitorAddressOptional": "Address (optional)",
+  "scanIdCard": "Scan ID card",
+  "scanNumberPlate": "Scan number plate",
+  "readFromIdCheck": "Read from ID — check",
+  "readFromPlateCheck": "Read from plate — check",
+  "readFromBillCheck": "Read from bill — check",
+  "readingThePhoto": "Reading the photo…",
+  "readTheBill": "Read the bill",
+  "aadhaarLast4Only": "Aadhaar is kept as the last 4 digits only",
+  "visitorPeopleCount": "{count} people",
+  "@visitorPeopleCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "homeworkScanPage": "Scan page",
   "homeworkUploadFile": "Upload file",
   "homeworkPageLabel": "Page {n}",

@@ -15,6 +15,7 @@ import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { householdOf, householdWhatsApp, type SisState } from "@/lib/sis";
 import { listAssignmentsForDate, type DutyRosterState } from "@/lib/dutyRoster";
 import { trackServerWork } from "@/lib/serverWork";
+import { cleanPeopleCount, cleanVehicleNo, maskAadhaarInText } from "@/lib/staffScanReading";
 
 export type VisitorPurpose =
   | "admission"
@@ -49,7 +50,14 @@ export type VisitorEntry = {
   inTime: string;
   /** ISO timestamp, null while still on campus */
   outTime: string | null;
+  /** Free text; any Aadhaar number in it is masked to the last 4 (UIDAI). */
   idProofNote: string;
+  /** How many people came in together (2026-10-20). Absent on older entries = 1. */
+  peopleCount?: number;
+  /** Vehicle they came in, normalised like "UP 32 AB 1234" when it is a plate. */
+  vehicleNo?: string;
+  /** Address as shown on the ID, when the guard kept it. */
+  address?: string;
   qrPayload: string;
   createdBy: string;
   createdAt: string;
@@ -111,7 +119,13 @@ export function visitorQrPayload(id: string, visitorName: string): string {
   return JSON.stringify({ type: "bhb_visitor", visitorName: visitorName.trim(), id });
 }
 
-function normalizeVisitorEntry(raw: Partial<VisitorEntry> | null | undefined): VisitorEntry | null {
+/** A stored count, or 1 when absent / unusable (an old entry was one person). */
+export function peopleCountOf(raw: unknown): number {
+  const r = cleanPeopleCount(raw);
+  return r.ok ? r.count : 1;
+}
+
+export function normalizeVisitorEntry(raw: Partial<VisitorEntry> | null | undefined): VisitorEntry | null {
   if (!raw?.visitorName || !raw.inTime) return null;
   const purpose = PURPOSE_SET.has(raw.purpose as VisitorPurpose) ? (raw.purpose as VisitorPurpose) : "other";
   const id = raw.id || nid("visit");
@@ -126,7 +140,13 @@ function normalizeVisitorEntry(raw: Partial<VisitorEntry> | null | undefined): V
     personToMeet: String(raw.personToMeet || "").trim(),
     inTime: raw.inTime,
     outTime: raw.outTime || null,
-    idProofNote: String(raw.idProofNote || "").trim(),
+    idProofNote: maskAadhaarInText(String(raw.idProofNote || "").trim()),
+    // Carried, never dropped: the desk pushes the whole log back through this
+    // normaliser, so a field it forgot here would vanish from every entry the
+    // gate phone wrote.
+    peopleCount: peopleCountOf(raw.peopleCount),
+    vehicleNo: cleanVehicleNo(raw.vehicleNo) || undefined,
+    address: maskAadhaarInText(String(raw.address || "").trim()).slice(0, 200) || undefined,
     qrPayload: raw.qrPayload || visitorQrPayload(id, raw.visitorName),
     createdBy: raw.createdBy || "",
     createdAt: raw.createdAt || nowIso(),

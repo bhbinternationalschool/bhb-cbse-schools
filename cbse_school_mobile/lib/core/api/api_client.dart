@@ -3049,6 +3049,9 @@ class ApiClient {
   /// POSTs whose server side legitimately takes longer than 30 s.
   static const _slowPaths = {
     "/api/v1/commands",
+    // A photo read by the vision model (gate ID / plate, fuel bill).
+    "/api/v1/staff/visitors/scan",
+    "/api/v1/staff/logbook/scan-bill",
     "/api/v1/teaching/lesson-plan",
     "/api/v1/teaching/syllabus-scan",
     "/api/v1/teaching/syllabus-import",

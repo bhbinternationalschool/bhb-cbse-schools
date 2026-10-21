@@ -246,6 +246,8 @@
     "test:udise-doc-intake": "npx tsx src/lib/udiseDocIntake.selftest.ts",
     "test:homework-expand": "npx tsx src/lib/homeworkExpand.selftest.ts",
     "test:homework-page-scan": "npx tsx src/lib/homeworkPageScanAi.selftest.ts",
+    "test:staff-scan": "npx tsx src/lib/staffScanReading.selftest.ts",
+    "test:staff-scan-route": "npx tsx src/lib/staffScanRoute.selftest.ts",
     "test:homework-submission": "npx tsx src/lib/homeworkSubmission.selftest.ts",
     "test:homework-attachments": "npx tsx src/lib/homeworkAttachments.selftest.ts",
     "test:exam-drill": "npx tsx src/lib/examDrill.selftest.ts",

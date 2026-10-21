@@ -3097,6 +3097,47 @@ class LEn extends L {
   String get feeBankMissing => 'Enter the bank name';
 
   @override
+  String get visitorMobileOptional => 'Mobile number (optional)';
+
+  @override
+  String get numberOfPeople => 'Number of people';
+
+  @override
+  String get vehicleNumberOptional => 'Vehicle number (optional)';
+
+  @override
+  String get visitorAddressOptional => 'Address (optional)';
+
+  @override
+  String get scanIdCard => 'Scan ID card';
+
+  @override
+  String get scanNumberPlate => 'Scan number plate';
+
+  @override
+  String get readFromIdCheck => 'Read from ID — check';
+
+  @override
+  String get readFromPlateCheck => 'Read from plate — check';
+
+  @override
+  String get readFromBillCheck => 'Read from bill — check';
+
+  @override
+  String get readingThePhoto => 'Reading the photo…';
+
+  @override
+  String get readTheBill => 'Read the bill';
+
+  @override
+  String get aadhaarLast4Only => 'Aadhaar is kept as the last 4 digits only';
+
+  @override
+  String visitorPeopleCount(int count) {
+    return '$count people';
+  }
+
+  @override
   String get homeworkScanPage => 'Scan page';
 
   @override
