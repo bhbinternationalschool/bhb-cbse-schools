@@ -223,7 +223,7 @@ export async function runSeed(): Promise<void> {
   const rb = await fetchDeskSliceFromDb("rbac");
   if (!rb.ok) throw new Error(`seed read-back: rbac read failed: ${rb.error}`);
   check("rbac roles", Array.isArray(rb.bundle.roles) ? rb.bundle.roles.length : -1, fx.rbac.roles.length);
-  check("rbac assignments", Array.isArray(rb.bundle.assignments) ? rb.bundle.assignments.length : -1, 1);
+  check("rbac assignments", Array.isArray(rb.bundle.assignments) ? rb.bundle.assignments.length : -1, fx.rbac.assignments.length);
   const mr = await fetchDeskSliceFromDb("module_registry");
   if (!mr.ok) throw new Error(`seed read-back: module registry read failed: ${mr.error}`);
   check(

@@ -47,6 +47,7 @@ import {
   checkStaffRemoval,
   removeStaff,
   validateStaffProfile,
+  defaultStaffLoginUsername,
   type StaffFieldErrors,
 } from "@/lib/staffResolve";
 
@@ -258,9 +259,7 @@ export function StaffProfileForm(props: Props) {
         ? draft.addressCurrent
         : draft.addressPermanent,
       qrPayload: staffQrPayload(code, draft.id),
-      loginUsername:
-        draft.loginUsername.trim() ||
-        code.toLowerCase().replace(/[^a-z0-9._-]/g, ""),
+      loginUsername: draft.loginUsername.trim() || defaultStaffLoginUsername(code),
     });
 
     const staff =
