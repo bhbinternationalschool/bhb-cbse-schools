@@ -154,6 +154,7 @@ async function insertAndMaybeSend(row: Record<string, unknown>, byOwner: boolean
   }
   if (needsApproval) {
     const r = await getPayoutRequest(id);
+    if (r) await tellPayout("held", r, requestedBy);
     return r ? { ok: true, request: r, message: "Prepared. It goes out once the owner approves it." } : { ok: false, error: "Could not read back" };
   }
   return dispatchPayoutRequest(id);
@@ -336,8 +337,29 @@ export async function approvePayoutRequest(id: string, by: string): Promise<Requ
   const r = await getPayoutRequest(id);
   if (!r) return { ok: false, error: "No such payment" };
   if (r.status !== "PENDING_APPROVAL") return { ok: false, error: `This payment is ${r.status.toLowerCase()}, not waiting` };
-  if (!r.approvedAt) await update(id, { approved_by: by, approved_at: new Date().toISOString() });
-  return dispatchPayoutRequest(id);
+  const wasHeld = !r.approvedAt;
+  if (wasHeld) await update(id, { approved_by: by, approved_at: new Date().toISOString() });
+  const sent = await dispatchPayoutRequest(id);
+  if (wasHeld) await tellPayout("approved", r, by);
+  return sent;
+}
+
+/**
+ * The ERP bell + phones (lib/notify): a held payment → the owner's logins;
+ * the owner's decision → whoever approves accounts school-wide. Never throws.
+ */
+async function tellPayout(what: "held" | "approved" | "rejected", r: PayoutRequestRow, by: string, note = ""): Promise<void> {
+  try {
+    const [{ notify }, { payoutHeld, payoutDecided }] = await Promise.all([import("@/lib/notify/notify.server"), import("@/lib/notify/events")]);
+    const amountLabel = `₹${(r.amountPaise / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+    await notify(
+      what === "held"
+        ? payoutHeld({ requestId: r.id, payeeName: r.payeeName, amountLabel, reason: r.reason, requestedBy: by })
+        : payoutDecided({ requestId: r.id, payeeName: r.payeeName, amountLabel, approved: what === "approved", decidedBy: by, note }),
+    );
+  } catch (e) {
+    console.warn("[payouts] notify failed", (e as Error)?.message);
+  }
 }
 
 export async function rejectPayoutRequest(id: string, by: string, note: string): Promise<RequestResult> {
@@ -346,6 +368,7 @@ export async function rejectPayoutRequest(id: string, by: string, note: string):
   if (r.status !== "PENDING_APPROVAL") return { ok: false, error: `This payment is ${r.status.toLowerCase()}, not waiting` };
   await update(id, { status: "REJECTED", decided_note: `${by}: ${note}`.trim() });
   await freeVisitingSheet(id, "Payment not approved");
+  await tellPayout("rejected", r, by, note);
   const fresh = await getPayoutRequest(id);
   return fresh ? { ok: true, request: fresh, message: "Not approved. Nothing was sent." } : { ok: false, error: "Could not read back" };
 }

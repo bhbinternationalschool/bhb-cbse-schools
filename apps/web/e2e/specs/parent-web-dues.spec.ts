@@ -8,7 +8,8 @@
  * (found by PR #667/#668). The page now reads GET /api/payments/parent-dues:
  * computed on the server, for the session's household only.
  *
- * Fixture: the Anvi shape (e2e/transportPaidCase.ts) — Apr–Aug paid under an
+ * Fixture: the Anvi shape (e2e/transportPaidCase.ts, its PARENT case — a
+ * child of its own, in a family no other spec seeds or pays for) — Apr–Aug paid under an
  * assignment whose stop vanished, September paid under the old id and re-billed
  * under a backdated new stop, October ₹500 owing — signed in as THAT child's
  * parent, with a session minted the way the app's login mints one.
@@ -36,7 +37,9 @@ import { demoSessionCookieName } from "@/lib/auth";
 import { APP_URL, expect, fx, test } from "../support";
 import { mintSessionCookie } from "../session";
 import { AY_CURRENT } from "../fixture";
-import { APR_SEP, CHILD, MONTH_NAMES } from "../transportPaidCase";
+import { APR_SEP, MONTH_NAMES, PARENT_CASE } from "../transportPaidCase";
+
+const CHILD = PARENT_CASE.child;
 
 const SHOTS = process.env.PARENT_WEB_SHOTS || path.join(__dirname, "..", "parent-web-shots");
 const PATH = "/api/payments/parent-dues";
@@ -127,7 +130,7 @@ test.beforeAll(() => {
   execFileSync("npx", ["--yes", "tsx", path.join(__dirname, "..", "..", "..", "..", "scripts", "e2e-seed-transport-paid.ts")], {
     cwd: path.join(__dirname, "..", ".."),
     stdio: "inherit",
-    env: { ...process.env, TPM_STEP: "" },
+    env: { ...process.env, TPM_STEP: "", TPM_CASE: "parent" },
   });
   fs.mkdirSync(SHOTS, { recursive: true });
 });
@@ -145,7 +148,7 @@ test("the server answers with this family's dues: Apr–Sep bus months paid, Oct
     for (const c of data.children) expect(MY_CHILDREN.has(c.student.id), c.student.id).toBe(true);
     expect(data.children.map((c) => c.student.id)).toContain(CHILD.id);
     for (const r of data.receipts) expect(r.householdId).toBe(MY_HH);
-    expect(data.receipts.filter((r) => r.id.startsWith("e2e_tpm_rcv_"))).toHaveLength(6);
+    expect(data.receipts.filter((r) => r.id.startsWith(PARENT_CASE.receiptIdPrefix))).toHaveLength(6);
 
     const bus = data.children.find((c) => c.student.id === CHILD.id)!.dues.filter((d) => d.kind === "transport");
     const month = (ym: string) => bus.filter((d) => d.dueKey.endsWith(`:${ym}`));
@@ -253,7 +256,7 @@ for (const size of SIZES) {
     // Receipts: the family's six bus receipts.
     await page.getByRole("tab", { name: "Receipts" }).or(page.getByRole("button", { name: "Receipts" })).first().click();
     for (let i = 1; i <= 6; i++) {
-      await expect(page.getByText(`E2E-TPM-${String(i).padStart(4, "0")}`)).toBeVisible();
+      await expect(page.getByText(`${PARENT_CASE.receiptNoPrefix}${String(i).padStart(4, "0")}`)).toBeVisible();
     }
     await page.screenshot({ path: path.join(SHOTS, `parent-receipts-${size.name}.png`), fullPage: true });
     await context.close();
