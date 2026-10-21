@@ -97,6 +97,9 @@ jobs:
       - name: Test — screen Masters dues — raw vs normalised book; teaching scope refuses, never ₹0
         working-directory: apps/web
         run: npm run test:screen-masters-dues
+      - name: Test — certificates TC / no-dues gate — refuses on unknown dues, never ₹0
+        working-directory: apps/web
+        run: npm run test:certificate-dues-gate
 
       - name: Test — a stale wipe signal expires
         working-directory: apps/web
