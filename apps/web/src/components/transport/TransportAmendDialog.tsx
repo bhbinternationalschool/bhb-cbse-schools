@@ -66,8 +66,12 @@ export function TransportAmendDialog({
    */
   canEdit: boolean;
   state: TransportState;
-  /** The student's fee lines — the caller has the student and masters to build them. */
-  dues: FeeDueLine[];
+  /**
+   * The student's fee lines — the caller has the student and masters to build
+   * them. null = they could not be read for this role (teaching-scope Masters):
+   * the plan then refuses (PAID_MONTHS_UNKNOWN_FOR_ROLE) and Apply stays off.
+   */
+  dues: FeeDueLine[] | null;
   onClose: () => void;
   onDone: (message: string) => void;
 }) {
