@@ -1,36 +1,20 @@
-# BHB International School — virtual staff room (n8n + Postgres).
+# BHB International School — virtual staff room (n8n, single container).
 #
-# One small VM in GCP project school-erp-prod-493619 runs this file. Copy
-# .env.example to .env, fill it in, then `docker compose up -d`. n8n keeps
-# its own state (workflows, credentials, executions) in the Postgres
-# container; the school's data stays in Supabase and the ERP.
+# Runs on GCP's Always Free e2-micro (1 GB RAM) in project
+# school-erp-prod-493619, so n8n keeps its own state (workflows,
+# credentials, executions) in its built-in SQLite file on the n8n_storage
+# volume — no Postgres container, which would not fit in 1 GB anyway. The
+# school's data stays in Supabase and the ERP. Copy .env.example to .env,
+# fill it in, then `docker compose up -d`.
 #
 # Validate with `docker compose config` before the first start.
 
 name: bhb-office
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-n8n}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: ${POSTGRES_DB:-n8n}
-    volumes:
-      - db_storage:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER:-n8n} -d ${POSTGRES_DB:-n8n}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   n8n:
     image: docker.n8n.io/n8nio/n8n:${N8N_VERSION:-2.44.5}
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
     ports:
       # Loopback only; the director reaches it over an SSH tunnel or
       # Cloudflare Tunnel / IAP, never a public port (see README).
@@ -60,13 +44,12 @@ services:
       EXECUTIONS_DATA_MAX_AGE: 336
       # Code nodes run on the built-in task runner (n8n 2.x default).
       N8N_RUNNERS_ENABLED: "true"
-      # --- n8n's own database ---
-      DB_TYPE: postgresdb
-      DB_POSTGRESDB_HOST: postgres
-      DB_POSTGRESDB_PORT: 5432
-      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-n8n}
-      DB_POSTGRESDB_USER: ${POSTGRES_USER:-n8n}
-      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      # --- n8n's own database: SQLite on the volume (default DB_TYPE) ---
+      DB_SQLITE_POOL_SIZE: 2
+      DB_SQLITE_VACUUM_ON_STARTUP: "true"
+      # 1 GB VM: cap the Node heap so the kernel never OOM-kills n8n mid-huddle
+      # (the README also adds a 2 GB swap file).
+      NODE_OPTIONS: --max-old-space-size=640
       # --- what the workflows need ($env.*) ---
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}
       SUPABASE_URL: ${SUPABASE_URL:?set SUPABASE_URL in .env}
@@ -87,5 +70,4 @@ services:
       - ./workflows:/office/workflows:ro
 
 volumes:
-  db_storage:
   n8n_storage:

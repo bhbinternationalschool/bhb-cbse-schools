@@ -26,19 +26,27 @@ every Claude call ──▶ office_ai_usage (tokens, estimated USD)
 ## 1. Run n8n on a VM in GCP
 
 Project `school-erp-prod-493619`, same project as the ERP's Cloud Run service.
-An **e2-small** (2 vCPU shared, 2 GB RAM) is enough: n8n idles at ~300 MB and
-Postgres at ~50 MB. Debian 12 with Docker is the simplest base.
+Use GCP's **Always Free** tier: one **e2-micro** (2 shared vCPU, 1 GB RAM)
+with a 30 GB standard disk in `us-central1`, `us-west1` or `us-east1` costs
+₹0 for as long as the account exists. The free tier is region-locked to
+those three, so do not create it in `asia-south1`; latency to India does not
+matter for a workflow that runs on a timer. n8n idles at ~300 MB and keeps its
+own state in SQLite on the VM's disk, so 1 GB plus a swap file is enough for
+Phase 1 (three Claude calls a morning and a Gmail poll).
 
 ```bash
 gcloud compute instances create office-n8n \
-  --project=school-erp-prod-493619 --zone=asia-south1-a \
-  --machine-type=e2-small --image-family=debian-12 --image-project=debian-cloud \
-  --boot-disk-size=20GB --tags=office-n8n
+  --project=school-erp-prod-493619 --zone=us-central1-a \
+  --machine-type=e2-micro --image-family=debian-12 --image-project=debian-cloud \
+  --boot-disk-size=30GB --boot-disk-type=pd-standard --tags=office-n8n
 ```
 
-On the VM:
+On the VM (the swap file is what keeps a 1 GB machine alive when n8n and
+Docker both page in at 6 am):
 
 ```bash
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 sudo apt-get update && sudo apt-get install -y ca-certificates curl git
 curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker "$USER" && newgrp docker
 git clone --depth 1 --filter=blob:none --sparse https://github.com/bhbinternationalschool/CBSE-Schools.git
@@ -52,7 +60,7 @@ n8n listens on `127.0.0.1:5678` only. Reach it from your Mac over an SSH tunnel
 (no public port, no firewall rule needed):
 
 ```bash
-gcloud compute ssh office-n8n --project=school-erp-prod-493619 --zone=asia-south1-a -- -N -L 5678:127.0.0.1:5678
+gcloud compute ssh office-n8n --project=school-erp-prod-493619 --zone=us-central1-a -- -N -L 5678:127.0.0.1:5678
 ```
 
 then open <http://localhost:5678>, create the owner account (the director's
@@ -68,7 +76,8 @@ preinstalled, but `docker compose` must be run through the
 
 | Item | ₹ / month (approx.) |
 |---|---|
-| e2-small, 20 GB pd-balanced, asia-south1 | ~₹1,400 (≈ $17; ~₹900 with a 1-year commitment) |
+| e2-micro + 30 GB pd-standard in us-central1 (Always Free tier: one per billing account, no expiry; egress to India stays far under the free 1 GB/month) | ₹0 |
+| If Phase 2 outgrows 1 GB: e2-small in the same region ≈ ₹1,100, or keep the free VM and move n8n's DB to Postgres (`DB_TYPE=postgresdb`, see n8n docs) | 0 until then |
 | Claude API at Phase-1 volume (≈ 40 inbox mails/day, one plan, one huddle): Haiku ≈ $0.01/day, Sonnet ≈ $0.25–0.40/day | ≈ $8–12 ⇒ the $100 credit lasts 8–12 months |
 | WhatsApp | internal messages to the director/principal are free-form text inside Meta's 24-hour window; a template fallback (if configured) is a utility message, ≈ ₹0.12 each |
 
@@ -231,7 +240,7 @@ The pattern (Phase 2 will add the Marketing Manager, Counsellor and Transport In
 
 ```
 automation/n8n/
-├── docker-compose.yml        n8n + Postgres; loopback only; env passthrough for the workflows
+├── docker-compose.yml        n8n alone (SQLite on a volume); loopback only; env passthrough for the workflows
 ├── .env.example              every variable, placeholders only
 ├── README.md                 this file
 ├── charters/
