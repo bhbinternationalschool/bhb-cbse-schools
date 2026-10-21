@@ -30,6 +30,7 @@ import {
   type TcDetails,
 } from "@/lib/certificates";
 import { ErpQueryError, useErpQuery } from "@/lib/data/client/hooks";
+import { readView } from "@/lib/data/client/query";
 import {
   formatInr,
   searchFeeStudents,
@@ -470,12 +471,18 @@ export function CertificatesWorkspace() {
     const issuedBy = principal?.fullName || session.fullName;
     // A certificate that states the fees are clear is decided on a fresh
     // answer, not one read when the student was picked.
-    const dues = certificateNeedsDuesCheck(kind)
-      ? await duesQuery
-          .refetch()
-          // A failed re-check is a failed check, even with an older answer cached.
-          .then((r) => (r.isError ? duesAnswerOf(undefined, r.error) : duesAnswerOf(r.data, null)))
+    // The server re-reads the fee book for this one call (fresh=1). A failed
+    // re-check is a failed check, even with an older answer on screen.
+    const dues: CertificateDuesAnswer = certificateNeedsDuesCheck(kind)
+      ? await readView<CertificateDuesView>(
+          `/api/data/views/certificate-dues?studentId=${encodeURIComponent(student.id)}&fresh=1`,
+        ).then((r) =>
+          r.ok
+            ? duesAnswerOf(r.data, null)
+            : duesAnswerOf(undefined, new ErpQueryError(r.status, r.error)),
+        )
       : duesAnswer;
+    if (certificateNeedsDuesCheck(kind)) void duesQuery.refetch();
     const result = issueCertificate({
       dues: { server: dues, bookIsFull: mastersScope === "full" },
       kind,

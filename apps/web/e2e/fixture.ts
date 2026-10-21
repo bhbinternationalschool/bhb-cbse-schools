@@ -189,6 +189,12 @@ export const OFFICE_STAFF = 2;
 export const TIMETABLE_TEACHER = 3;
 /** Class teacher of Nursery-A (section 1), nothing else. */
 export const CLASS_TEACHER = 4;
+/**
+ * The built-in Accountant by assignment: Fees, Transport, Certificates
+ * (issue) — and NO Masters grant, so Masters answers the teaching subset (fee
+ * structure withheld). The TC / no-dues gate spec signs in as this person.
+ */
+export const ACCOUNTANT_STAFF = 27;
 /** The sections the timetable-only teacher has periods in: III-A and V-A. */
 export const TIMETABLE_TEACHER_SECTIONS = [6, 8] as const;
 
@@ -296,7 +302,18 @@ function buildRbac(): RbacState {
     expiresOn: "",
     note: "e2e fixture: office by assignment",
   };
-  return { ...state, assignments: [assignment] };
+  const accounts = state.roles.find((r) => r.code === "accounts");
+  if (!accounts) throw new Error("fixture: built-in accounts role missing");
+  const accountant: UserRoleAssignment = {
+    id: "e2e_asg_accounts",
+    staffId: staffId(ACCOUNTANT_STAFF),
+    roleId: accounts.id,
+    isPrimary: true,
+    scope: { campusIds: [], classIds: [], departmentIds: [] },
+    expiresOn: "",
+    note: "e2e fixture: accountant by assignment (no Masters grant)",
+  };
+  return { ...state, assignments: [assignment, accountant] };
 }
 
 function buildModuleRegistry(): ModuleRegistryState {
@@ -621,7 +638,13 @@ export type E2eFixture = {
    * propagation specs make their Masters changes as her);
    * teacher — class teacher of Nursery-A; timetableTeacher — timetable-only.
    */
-  sessions: { office: DemoSession; principal: DemoSession; teacher: DemoSession; timetableTeacher: DemoSession };
+  sessions: {
+    office: DemoSession;
+    principal: DemoSession;
+    teacher: DemoSession;
+    timetableTeacher: DemoSession;
+    accountant: DemoSession;
+  };
   expected: {
     classes: number;
     sections: number;
@@ -714,6 +737,7 @@ export function buildFixture(): E2eFixture {
       principal: session(PRINCIPAL_STAFF, "principal"),
       teacher: session(CLASS_TEACHER, "teacher"),
       timetableTeacher: session(TIMETABLE_TEACHER, "teacher"),
+      accountant: session(ACCOUNTANT_STAFF, "accounts"),
     },
     expected: {
       classes: classes.length,

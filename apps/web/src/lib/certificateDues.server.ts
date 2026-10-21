@@ -30,11 +30,21 @@ export type CertificateDuesRead =
   | { ok: true; view: CertificateDuesView }
   | { ok: false; status: 404 | 503; error: string };
 
-export async function readCertificateDues(studentId: string): Promise<CertificateDuesRead> {
+/**
+ * `fresh`: re-read every input now instead of trusting this instance's copy
+ * (which may be up to 45 s old — lib/schoolMirrorRemote.server.ts). The
+ * screen asks for it once, at the moment it issues a TC or a fee clearance;
+ * the figure shown while the clerk fills the form uses the cheap read.
+ */
+export async function readCertificateDues(
+  studentId: string,
+  opts: { fresh?: boolean } = {},
+): Promise<CertificateDuesRead> {
+  const force = opts.fresh === true;
   try {
-    await ensureSchoolMirrorHydrated();
+    await ensureSchoolMirrorHydrated({ force });
     const { ensureFeeDuesInputsHydrated } = await import("@/lib/feeDuesInputs.server");
-    await ensureFeeDuesInputsHydrated();
+    await ensureFeeDuesInputsHydrated({ force });
   } catch {
     return { ok: false, status: 503, error: "Could not read the fee records — please try again." };
   }
