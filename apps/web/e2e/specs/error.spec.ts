@@ -118,7 +118,8 @@ async function failMastersView(page: Page): Promise<() => Promise<void>> {
   };
 }
 
-for (const p of PAGES.filter((x) => x.path !== "/masters")) {
+// 2.1h: /masters reads the view too (MastersWorkspace → useScreenMasters).
+for (const p of PAGES) {
   test(`office ${p.path}: views/masters 503 shows "could not load" + Try again, not empty pickers; Try again recovers`, async ({ page }, testInfo) => {
     const lift = await failMastersView(page);
     const t0 = Date.now();

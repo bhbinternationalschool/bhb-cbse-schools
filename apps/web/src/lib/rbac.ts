@@ -1798,6 +1798,9 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/timetable")) return "timetable";
   if (path.startsWith("/online-classes")) return "online_classes";
   if (path.startsWith("/teaching")) return "teaching";
+  // Learning games: a teaching screen (teachers launch for their own sections;
+  // the server checks each section and the settings are school-wide only).
+  if (path === "/games" || path.startsWith("/games/")) return "teaching";
   if (path.startsWith("/ptm")) return "ptm";
   if (path.startsWith("/events")) return "events";
   if (path.startsWith("/student-leave")) return "student_leave";

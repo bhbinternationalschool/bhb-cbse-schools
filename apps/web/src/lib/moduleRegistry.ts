@@ -628,6 +628,7 @@ export function registryModuleForHref(href: string): RegistryModuleId | null {
   if (path === "/online-classes" || path.startsWith("/online-classes/"))
     return "online_classes";
   if (path === "/teaching" || path.startsWith("/teaching/")) return "teaching";
+  if (path === "/games" || path.startsWith("/games/")) return "teaching";
   if (path === "/ptm" || path.startsWith("/ptm/")) return "ptm";
   if (path === "/events" || path.startsWith("/events/")) return "events";
   if (path === "/exams" || path.startsWith("/exams/")) return "exams";
