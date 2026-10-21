@@ -1,13 +1,14 @@
 /**
- * The 21 Oct 2026 fuel per-bus case: one CNG bus with four September fills,
- * written through the app's own server write paths by `seedFuelRangeCase` —
- * the transport desk push (the vehicle, merged into the saved desk) and
- * addOfficeFill (the Transport → Fuel "add" write). Run under tsx
+ * The 21 Oct 2026 fuel per-bus case: one CNG bus with four September fills.
+ *
+ * `seedFuelRangeCase` writes the BUS through the app's transport desk push
+ * (merged into the saved desk: only this vehicle is replaced), under tsx
  * (scripts/e2e-seed-fuel-range.ts), because the server modules import each
  * other through the "@/" alias, which Playwright's loader does not resolve.
- *
- * Idempotent: the vehicle replaces only itself, the fills upsert by id.
- * Never posted to accounts (no payment mode), so no voucher is written.
+ * The FILLS are added by the spec through POST /api/v1/transport/fuel
+ * {action:"add"} — the Transport → Fuel screen's own write — as the
+ * principal, with no payment mode, so no voucher is written. Both are
+ * idempotent: the vehicle replaces only itself, a fill upserts by its id.
  */
 import { assertLocalStack } from "./session";
 import type { TransportState } from "@/lib/transport";
@@ -27,7 +28,6 @@ export async function seedFuelRangeCase(): Promise<void> {
   assertLocalStack();
   const { fetchTransportDeskFromDb, pushTransportDeskToDb } = await import("@/lib/transportNormalized.server");
   const { normalizeVehicle } = await import("@/lib/transport");
-  const { addOfficeFill } = await import("@/lib/transportFuelRegister.server");
 
   const saved = await fetchTransportDeskFromDb();
   if (!saved.ok) throw new Error("transport desk unreadable");
@@ -47,27 +47,4 @@ export async function seedFuelRangeCase(): Promise<void> {
   } as unknown as TransportState;
   const t = await pushTransportDeskToDb(transport);
   if (!t.ok) throw new Error(`transport desk: ${t.error}`);
-
-  for (const f of FUEL_FILLS) {
-    await addOfficeFill({
-      id: f.id,
-      vehicleId: FUEL_BUS.id,
-      fillDate: f.fillDate,
-      quantity: f.quantity,
-      unit: "kg",
-      fuelType: "cng",
-      ratePaise: null,
-      amountPaise: f.amountPaise,
-      odometerKm: f.odometerKm,
-      receiptPath: "",
-      note: "e2e fuel per-bus range case",
-      dealerName: "E2E CNG pump",
-      billNo: "",
-      paymentMode: "",
-      bankAccountId: "",
-      paymentRef: "",
-      staffId: "",
-      name: "e2e seed",
-    });
-  }
 }

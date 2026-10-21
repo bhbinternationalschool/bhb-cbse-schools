@@ -7,7 +7,7 @@
  * Excel/PDF export were the WHOLE month's — 8–20 Sep listed 2 fills and
  * totalled 4.
  *
- * The case (e2e/fuelRangeCase.ts, seeded through the app's own write paths):
+ * The case (e2e/fuelRangeCase.ts, written through the app's own write paths):
  * one CNG bus, fills on 3, 9, 16 and 24 Sep 2026 with odometer readings.
  * Asserted from the DOM and from the downloaded Excel:
  *   - 8–20 Sep: per-bus fills / kg / ₹ / km equal the sum of the visible
@@ -48,6 +48,29 @@ async function open(browser: Browser, opts: { width: number; height: number; dar
   await signIn(context, "principal");
   await context.addCookies([{ name: "bhb_theme", value: opts.dark ? "dark" : "light", url: APP_URL }]);
   return context.newPage();
+}
+
+/** The four fills, through the screen's own write (idempotent by id); retried while the server's desk read lags the seed. */
+async function addFills(page: Page) {
+  for (const f of FUEL_FILLS) {
+    await expect(async () => {
+      const res = await page.request.post("/api/v1/transport/fuel", {
+        data: {
+          action: "add",
+          id: f.id,
+          vehicleId: FUEL_BUS.id,
+          date: f.fillDate,
+          fuelType: "cng",
+          quantity: String(f.quantity),
+          amountRupees: (f.amountPaise / 100).toFixed(2),
+          odometerKm: String(f.odometerKm),
+          dealerName: "E2E CNG pump",
+          note: "e2e fuel per-bus range case",
+        },
+      });
+      expect(res.status(), await res.text()).toBe(200);
+    }).toPass({ timeout: 90_000, intervals: [2_000, 5_000] });
+  }
 }
 
 async function setDate(page: Page, part: "from" | "to", iso: string) {
@@ -92,6 +115,7 @@ async function showPeriod(page: Page, from: string, to: string, expectedFills: n
 
 test("a range inside a month: per-bus totals = the visible rows", async ({ browser }) => {
   const page = await open(browser, { width: 1440, height: 900 });
+  await addFills(page);
   const inRange = FUEL_FILLS.filter((f) => f.fillDate >= FUEL_RANGE.from && f.fillDate <= FUEL_RANGE.to);
   expect(inRange.map((f) => f.id)).toEqual(["e2e_fuelr_2", "e2e_fuelr_3"]);
   await showPeriod(page, FUEL_RANGE.from, FUEL_RANGE.to, inRange.length);
@@ -126,7 +150,11 @@ test("a range inside a month: per-bus totals = the visible rows", async ({ brows
   const head = aoa.findIndex((r) => r.map(String).includes("Fills"));
   expect(head, "Excel has the per-bus header").toBeGreaterThanOrEqual(0);
   const cols = aoa[head]!.map(String);
-  const row = aoa.slice(head + 1).find((r) => r.map(String).some((c) => c.includes(FUEL_BUS.registrationNo)));
+  // The Bus column is the vehicle's label: its plate, or its name when the
+  // plate does not read as one (vehicleLabel).
+  const row = aoa
+    .slice(head + 1)
+    .find((r) => r.map(String).some((c) => c.includes(FUEL_BUS.registrationNo) || c.includes(FUEL_BUS.name)));
   expect(row, "Excel has the bus").toBeTruthy();
   expect(Number(row![cols.indexOf("Fills")])).toBe(2);
   expect(Number(row![cols.indexOf("₹")])).toBe(135_050);
@@ -153,6 +181,9 @@ test("screenshots: desktop light and 375 px dark", async ({ browser }) => {
     await showPeriod(page, FUEL_RANGE.from, FUEL_RANGE.to, 2);
     await expect(page.getByTestId("fuel-per-bus-heading")).toHaveText(/^Per bus — 8 Sept? 2026 → 20 Sept? 2026$/);
     await page.screenshot({ path: path.join(SHOTS, `fuel-per-bus-range-${tag}.png`), fullPage: true });
+    // The page scrolls inside the shell, so the per-bus table is shot in view.
+    await page.getByTestId("fuel-per-bus").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(SHOTS, `fuel-per-bus-range-${tag}-per-bus.png`) });
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow, "page must not scroll sideways").toBeLessThanOrEqual(1);
     await page.context().close();
