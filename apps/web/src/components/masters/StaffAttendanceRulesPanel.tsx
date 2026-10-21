@@ -13,10 +13,10 @@ import {
   ErpTableHead,
   ErpTableShell,
 } from "@/components/ui/erp-roster";
-import { loadMasters } from "@/lib/masters";
+import { useStaffList } from "@/lib/data/client/hooks";
+import { QueryError } from "@/components/data/QueryError";
 import {
   RULE_STEP_DEFS,
-  activeStaffSorted,
   assignRuleToStaff,
   checkAttendanceRuleRemoval,
   clearStaffRuleAssignments,
@@ -52,7 +52,16 @@ export function StaffAttendanceRulesPanel() {
   /** Assign's own message, shown beside the button — the page-top banner is out of sight down here. */
   const [assignMsg, setAssignMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const roster = useMemo(() => activeStaffSorted(loadMasters().staff ?? []), [state]);
+  // data-layer 2.1h: the staff directory (versions poll), not the page copy
+  // re-read on every rules change. Unknown is "Loading…", never "No active staff".
+  const staffQ = useStaffList();
+  const roster = useMemo(
+    () =>
+      (staffQ.data?.staff ?? [])
+        .filter((s) => s.status === "active")
+        .sort((a, b) => a.empCode.localeCompare(b.empCode)),
+    [staffQ.data],
+  );
 
   // Which staff have no rule yet is the question this screen exists for, so
   // "Assigned rule" sorts — an empty one comes first ascending, which is the
@@ -561,7 +570,17 @@ export function StaffAttendanceRulesPanel() {
                   </tr>
                 );
               })}
-              {roster.length === 0 ? (
+              {!staffQ.data ? (
+                <tr>
+                  <td colSpan={3} className="px-3 py-6 text-center text-sm text-[var(--muted)]">
+                    {staffQ.isError ? (
+                      <QueryError what="the staff list" error={staffQ.error} retry={() => staffQ.refetch()} />
+                    ) : (
+                      "Loading staff…"
+                    )}
+                  </td>
+                </tr>
+              ) : roster.length === 0 ? (
                 <tr>
                   <td
                     colSpan={3}

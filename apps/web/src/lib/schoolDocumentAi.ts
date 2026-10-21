@@ -213,6 +213,12 @@ export function buildComplianceFactsFromMasters(input: {
   };
   students: { status: string; classId: string; gender?: string; academicYearCode?: string }[];
   examTermCount: number;
+  /**
+   * The caller's Masters is the teaching subset (no Masters grant): the fee
+   * groups are WITHHELD, not none — the fee line says so instead of writing
+   * "0 fee structures published" into a document (2.1i review).
+   */
+  feesWithheld?: boolean;
 }): string {
   const { masters } = input;
   const activeClasses = masters.classes.filter((c) => c.isActive !== false);
@@ -236,7 +242,9 @@ export function buildComplianceFactsFromMasters(input: {
     `Enrolment (active): ${students.length} students (${boys} boys, ${girls} girls) across ${activeClasses.length} classes and ${activeSections.length} sections.`,
     `Class-wise: ${perClass}`,
     `Staff (active): ${staff.length} total; ${teaching.length} teaching, ${staff.length - teaching.length} non-teaching. Qualification recorded for ${withQual} of ${teaching.length} teachers.`,
-    `Fee: ${publishedGroups} fee structure${publishedGroups === 1 ? "" : "s"} published for the session (see the fee disclosure page).`,
+    input.feesWithheld
+      ? "Fee: not available for your role — add the published fee structures from the fee disclosure page."
+      : `Fee: ${publishedGroups} fee structure${publishedGroups === 1 ? "" : "s"} published for the session (see the fee disclosure page).`,
     `Assessment: ${input.examTermCount} exam term${input.examTermCount === 1 ? "" : "s"} configured for the session.`,
     "",
     "Sections to write (add facts below each; leave blank to get a 'To be provided' line):",
