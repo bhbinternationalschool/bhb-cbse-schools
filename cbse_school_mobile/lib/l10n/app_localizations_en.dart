@@ -3058,6 +3058,45 @@ class LEn extends L {
       'No registered leads are waiting to be sent to SIS.';
 
   @override
+  String get feeTotalPayingNow => 'Total paying now (₹)';
+
+  @override
+  String get feeTotalPayingNowHelp =>
+      'Part payment is fine. It fills the oldest dues first — the ticked ones, or the whole bill if none are ticked.';
+
+  @override
+  String feeTotalPayingNowTooMuch(String amount) {
+    return 'More than the $amount outstanding';
+  }
+
+  @override
+  String feeDiscountLabel(String amount) {
+    return 'Discount $amount';
+  }
+
+  @override
+  String get feeDiscountNone => 'No discount';
+
+  @override
+  String get feeDiscountNotLoaded => 'Discount: not loaded';
+
+  @override
+  String feeReferenceRequired(String label) {
+    return '$label (required)';
+  }
+
+  @override
+  String feeReferenceMissing(String label) {
+    return 'Enter the $label — every payment that is not cash needs a reference';
+  }
+
+  @override
+  String get feeBankName => 'Bank name (required)';
+
+  @override
+  String get feeBankMissing => 'Enter the bank name';
+
+  @override
   String get pmAllStaff => 'All staff';
 
   @override

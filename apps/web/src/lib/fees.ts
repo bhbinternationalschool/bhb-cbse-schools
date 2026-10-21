@@ -414,6 +414,22 @@ export function voucherLineFromDue(
 }
 
 /**
+ * The order a part payment fills dues in: oldest due date first, then due
+ * key. One comparator, shared by the web counter's `allocateCollectionToDues`
+ * and the staff app (which is sent each due's rank in this order rather than
+ * re-implementing `localeCompare` on a phone). Array sort is stable, so ties
+ * keep the caller's order.
+ */
+export function compareDuesForAllocation(
+  a: Pick<FeeDueLine, "dueOn" | "dueKey">,
+  b: Pick<FeeDueLine, "dueOn" | "dueKey">,
+): number {
+  const byDue = (a.dueOn || "").localeCompare(b.dueOn || "");
+  if (byDue !== 0) return byDue;
+  return a.dueKey.localeCompare(b.dueKey);
+}
+
+/**
  * Spread a collection amount across open due lines (oldest due date first).
  * Used for partial payments when multiple months/heads are selected.
  */
@@ -439,11 +455,7 @@ export function allocateCollectionToDues(
     };
   }
 
-  const sorted = [...open].sort((a, b) => {
-    const byDue = a.dueOn.localeCompare(b.dueOn);
-    if (byDue !== 0) return byDue;
-    return a.dueKey.localeCompare(b.dueKey);
-  });
+  const sorted = [...open].sort(compareDuesForAllocation);
 
   let remain = amountPaise;
   const lines: VoucherLine[] = [];

@@ -5288,6 +5288,66 @@ abstract class L {
   /// **'No registered leads are waiting to be sent to SIS.'**
   String get admNoRegisteredLeads;
 
+  /// No description provided for @feeTotalPayingNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Total paying now (₹)'**
+  String get feeTotalPayingNow;
+
+  /// No description provided for @feeTotalPayingNowHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Part payment is fine. It fills the oldest dues first — the ticked ones, or the whole bill if none are ticked.'**
+  String get feeTotalPayingNowHelp;
+
+  /// No description provided for @feeTotalPayingNowTooMuch.
+  ///
+  /// In en, this message translates to:
+  /// **'More than the {amount} outstanding'**
+  String feeTotalPayingNowTooMuch(String amount);
+
+  /// No description provided for @feeDiscountLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Discount {amount}'**
+  String feeDiscountLabel(String amount);
+
+  /// No description provided for @feeDiscountNone.
+  ///
+  /// In en, this message translates to:
+  /// **'No discount'**
+  String get feeDiscountNone;
+
+  /// No description provided for @feeDiscountNotLoaded.
+  ///
+  /// In en, this message translates to:
+  /// **'Discount: not loaded'**
+  String get feeDiscountNotLoaded;
+
+  /// No description provided for @feeReferenceRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'{label} (required)'**
+  String feeReferenceRequired(String label);
+
+  /// No description provided for @feeReferenceMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the {label} — every payment that is not cash needs a reference'**
+  String feeReferenceMissing(String label);
+
+  /// No description provided for @feeBankName.
+  ///
+  /// In en, this message translates to:
+  /// **'Bank name (required)'**
+  String get feeBankName;
+
+  /// No description provided for @feeBankMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the bank name'**
+  String get feeBankMissing;
+
   /// No description provided for @pmAllStaff.
   ///
   /// In en, this message translates to:
