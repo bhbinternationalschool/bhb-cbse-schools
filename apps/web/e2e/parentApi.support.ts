@@ -96,7 +96,7 @@ export function cookieFor(session: DemoSession): Record<string, string> {
 
 // ── The local stack's PostgREST, as the service role ─────────────────────
 
-function rest() {
+export function rest() {
   assertLocalStack();
   const api = localUrl("NEXT_PUBLIC_SUPABASE_URL", process.env.NEXT_PUBLIC_SUPABASE_URL);
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";

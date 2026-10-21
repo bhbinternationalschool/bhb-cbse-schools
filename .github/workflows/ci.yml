@@ -94,6 +94,9 @@ jobs:
       - name: Test — a teacher's Masters keeps its staff without a fee structure
         working-directory: apps/web
         run: npm run test:masters-teacher-no-fees
+      - name: Test — screen Masters dues — raw vs normalised book; teaching scope refuses, never ₹0
+        working-directory: apps/web
+        run: npm run test:screen-masters-dues
 
       - name: Test — a stale wipe signal expires
         working-directory: apps/web
@@ -145,6 +148,10 @@ jobs:
       - name: Self-test — an online class opens on the clock, and a link goes only where a class can be
         working-directory: apps/web
         run: npm run test:online-classes
+
+      - name: Self-test — learning games — limits hold, the score is the server's, only playable questions come in
+        working-directory: apps/web
+        run: npm run test:learning-games
 
       - name: Self-test — a member of staff sets only their own signature, and only a real small image
         working-directory: apps/web
@@ -699,6 +706,7 @@ jobs:
           npm run test:query-kernel
           npm run test:reference-views
           npm run test:masters-bridge
+          npm run test:masters-pending
           npm run test:staff-requests
           npm run test:notify
           npm run test:push-voice
@@ -847,6 +855,10 @@ jobs:
         run: bash scripts/e2e-stack.sh sql-test supabase/tests/fee_voucher_void_is_final.test.sql
       - name: SQL test — notifications are stored once per person, bursts fold, reads go through the kernel
         run: bash scripts/e2e-stack.sh sql-test supabase/tests/erp_notify_deliver.test.sql
+      # Learning games: no grants to anon/authenticated; play never past
+      # 21:00; a competition window is at most an hour on one IST day.
+      - name: SQL test — learning games tables refuse what the rules refuse
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/learning_games.test.sql
 
       # NEXT_PUBLIC_* are baked in at build time, so the build reads
       # apps/web/.env.e2e (127.0.0.1 URL, this run's anon key) and nothing else.

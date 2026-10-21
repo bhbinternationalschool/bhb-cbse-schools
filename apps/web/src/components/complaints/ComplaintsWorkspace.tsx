@@ -6,7 +6,9 @@ import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionCo
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { field } from "@/components/ui/erp-ui";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import type { MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { teacherLabel } from "@/lib/timetable";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
@@ -186,7 +188,9 @@ function OfficeComplaintsWorkspace() {
   const session = useDemoSession();
   const readOnly = useSessionReadOnly();
   const [tab, setTab] = useState<Tab>("all");
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1i: the server's book + the staff roster (assignees, the
+  // permission check), kept fresh by the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [state, setState] = useState<ComplaintState>(emptyComplaintState());
   const [notice, setNotice] = useState<string | null>(null);
@@ -195,21 +199,15 @@ function OfficeComplaintsWorkspace() {
   // Re-read when the server copy of this module lands (login/refresh hydration).
   useModuleStateHydration("complaints", () => { setState(loadComplaints()); });
   useEffect(() => {
-    setMasters(loadMasters());
     setSis(loadSis());
     setState(loadComplaints());
     void (async () => {
-      const [{ ensureMastersHydrated }, { ensureSisHydrated }, { withHydrationSlot }] =
+      const [{ ensureSisHydrated }, { withHydrationSlot }] =
         await Promise.all([
-          import("@/lib/mastersPersistence"),
           import("@/lib/sisPersistence"),
           import("@/lib/deskHydrateGuard"),
         ]);
-      await Promise.all([
-        withHydrationSlot(() => ensureMastersHydrated()),
-        withHydrationSlot(() => ensureSisHydrated()),
-      ]);
-      setMasters(loadMasters());
+      await withHydrationSlot(() => ensureSisHydrated());
       setSis(loadSis());
     })();
     void (async () => {
@@ -289,9 +287,10 @@ function OfficeComplaintsWorkspace() {
     }
   }, [shownTabs, tab]);
   // Ticket changes save the whole complaints book (edit); AI reports close
-  // through their own route. Until masters load, the session decides alone.
+  // through their own route. Until the roster is known nothing is writable
+  // (the permission check resolves the person through it).
   const locked =
-    readOnly || (masters !== null && !canWriteModuleTab(session, masters, "complaints", tab));
+    readOnly || masters === null || !canWriteModuleTab(session, masters, "complaints", tab);
 
   return (
     <ErpWorkspaceShell
@@ -337,7 +336,13 @@ function OfficeComplaintsWorkspace() {
           </div>
         ) : null}
 
-        {tab === "ai" ? null : rows.length === 0 ? (
+        {tab === "ai" ? null : !masters ? (
+          mastersError ? (
+            <QueryError what="the school's staff roster" error={mastersError} retry={retryMasters} />
+          ) : (
+            <p className="text-sm text-[var(--muted)]">Loading the staff roster…</p>
+          )
+        ) : rows.length === 0 ? (
           <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
             {tab === "all" ? "No complaints match this filter." : "No tickets assigned to you."}
           </p>

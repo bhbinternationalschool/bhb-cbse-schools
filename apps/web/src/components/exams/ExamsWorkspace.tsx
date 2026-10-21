@@ -70,7 +70,9 @@ import { AssessmentSchemesPanel } from "@/components/exams/AssessmentSchemesPane
 import { ReportCardTemplatesPanel } from "@/components/exams/ReportCardTemplatesPanel";
 import { coScholasticRatingsFor, pickableGrades, type CoScholasticArea, type GradeBand } from "@/lib/examSchemes";
 import { rosterForSection } from "@/lib/attendance";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
 import {
   checkHold,
@@ -616,6 +618,9 @@ const EXAM_TABS: ModuleTabItem[] = [
   { id: "setup", label: "Exams & policy", tone: "navy" },
 ];
 
+/** Tabs drawn only from Masters (classes, rooms, staff) — "Loading…" until it answers. */
+const MASTERS_TABS = new Set<string>(["datesheet", "seating", "invigilation", "admitcards", "papers"]);
+
 export function ExamsWorkspace() {
   // Fee holds are server truth. Without this the gates below read an
   // unloaded snapshot and every child looks allowed.
@@ -637,9 +642,10 @@ export function ExamsWorkspace() {
       if (urlAsksForTab(window.location.search, t)) setTab(t);
     }
   }, []);
-  const [masters, setMasters] = useState<MastersState | null>(() =>
-    typeof window !== "undefined" ? loadMasters() : null,
-  );
+  // data-layer 2.1h: the server's book + the access copy's staff side
+  // (invigilators, permission checks); kept fresh by the versions poll — no
+  // mount-time read, no 'bhb-masters-updated' listener, no ensureMastersHydrated.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(() =>
     typeof window !== "undefined" ? loadSis() : null,
   );
@@ -710,7 +716,6 @@ export function ExamsWorkspace() {
   const ay = session.academicYearCode || DEFAULT_AY;
 
   function refresh() {
-    setMasters(loadMasters());
     setSis(loadSis());
     const p = getExamPolicy();
     setPolicyDraft(p);
@@ -726,18 +731,6 @@ export function ExamsWorkspace() {
     const onFailed = () => setConflicts(examSheetConflicts());
     window.addEventListener("bhb-desk-sync-failed", onFailed);
     return () => window.removeEventListener("bhb-desk-sync-failed", onFailed);
-  }, []);
-
-  // Masters is read once at mount, and the staff roster is the slice that
-  // arrives last: it has its own hydrate, kicked from whichever desk asked for
-  // it. This desk never asked, so a browser that opened on Exams held masters
-  // with no staff and the invigilator picker had nobody to offer. Repaint
-  // whenever a hydrate reports masters changed.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const onMasters = () => setMasters(loadMasters());
-    window.addEventListener("bhb-masters-updated", onMasters);
-    return () => window.removeEventListener("bhb-masters-updated", onMasters);
   }, []);
 
   // Corrected result attendance hydrates from module_local_state after
@@ -756,20 +749,17 @@ export function ExamsWorkspace() {
       const [
         { ensureSisHydrated },
         { ensureExamsHydrated },
-        { ensureMastersHydrated },
         { ensureStaffHydrated },
         { withHydrationSlot },
       ] = await Promise.all([
         import("@/lib/sisPersistence"),
         import("@/lib/examsPersistence"),
-        import("@/lib/mastersPersistence"),
         import("@/lib/staffPersistence"),
         import("@/lib/deskHydrateGuard"),
       ]);
       await Promise.all([
         withHydrationSlot(() => ensureSisHydrated()),
         withHydrationSlot(() => ensureExamsHydrated()),
-        withHydrationSlot(() => ensureMastersHydrated()),
         // Invigilation, seating and admit cards all read masters.staff.
         withHydrationSlot(() => ensureStaffHydrated()),
       ]);
@@ -1669,6 +1659,10 @@ export function ExamsWorkspace() {
       error={error}
       notice={notice}
     >
+      {!masters && mastersError ? (
+        <QueryError what="the school's classes, subjects and staff" error={mastersError} retry={retryMasters} />
+      ) : (
+      <>
       <ModuleTabs
         aria-label="Exams sections"
         value={tab}
@@ -1763,6 +1757,12 @@ export function ExamsWorkspace() {
             </select>
           </label>
         </div>
+      ) : null}
+
+      {!masters && MASTERS_TABS.has(tab) ? (
+        // Masters not answered yet (a failed read shows QueryError above):
+        // say so, never an empty tab.
+        <p className="mt-4 text-sm text-[var(--muted)]">Loading…</p>
       ) : null}
 
       {tab === "datesheet" && masters ? (
@@ -2867,8 +2867,11 @@ export function ExamsWorkspace() {
         />
       ) : null}
 
-      {tab === "remarks" ? (
+      {tab === "remarks" && !masters ? (
+        <p className="mt-4 text-sm text-[var(--muted)]">Loading…</p>
+      ) : tab === "remarks" && masters ? (
         <RemarksPanel
+          masters={masters}
           ay={ay}
           term={term}
           terms={terms}
@@ -2878,7 +2881,7 @@ export function ExamsWorkspace() {
           roster={roster}
           subjects={subjects}
           policy={policy}
-          canEdit={!!masters && canWriteModuleTab(session, masters, "exams", "remarks")}
+          canEdit={canWriteModuleTab(session, masters, "exams", "remarks")}
           onSaved={refresh}
           onFlash={flash}
           onError={setError}
@@ -3286,6 +3289,8 @@ export function ExamsWorkspace() {
           onGranted={retryReportAfterUnlock}
         />
       ) : null}
+      </>
+      )}
     </ErpWorkspaceShell>
   );
 }

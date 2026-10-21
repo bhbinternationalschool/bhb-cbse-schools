@@ -30,7 +30,9 @@ import { DeskListActions } from "@/components/ui/desk-list-actions";
 import { ExportMenu, RowActionMenu } from "@/components/ui/erp-grid";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import { DOC_ACCEPT, DOC_MAX_BYTES, studentsInSession} from "@/lib/sis";
-import { DEFAULT_AY, formatInr, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
+import { DEFAULT_AY, formatInr, currentAcademicYearCode } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
   availableCountForTitle,
@@ -136,7 +138,10 @@ export function LibraryWorkspace() {
   const [tick, setTick] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1i: the server's book + the staff roster (staff borrowers),
+  // kept fresh by the versions poll. On main this was read only inside
+  // refresh(), so a page whose library desk did not change never had it.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
 
   // Catalogue
@@ -257,7 +262,6 @@ export function LibraryWorkspace() {
 
   function refresh(msg?: string) {
     setTick((n) => n + 1);
-    setMasters(loadMasters());
     setSis(loadSis());
     if (msg) {
       setNotice(msg);
@@ -364,7 +368,7 @@ export function LibraryWorkspace() {
   // child this session (SIS keeps a row per child per year), active staff.
   const studentPeople = useMemo(
     () =>
-      sis
+      sis && masters
         ? studentsInSession(sis, currentAcademicYearCode(masters)).map((s) => ({
             id: s.id,
             label: s.fullName,
@@ -660,6 +664,22 @@ export function LibraryWorkspace() {
   function accessionForIssue(issue: LibraryIssue): string {
     const copy = state.copies.find((c) => c.id === issue.copyId);
     return copy?.accessionNo || "—";
+  }
+
+  if (!masters) {
+    return (
+      <ErpWorkspaceShell
+        title="Library"
+        subtitle={`${stats.titles} titles · ${stats.available} available · ${stats.issued} issued · ${stats.overdue} overdue`}
+        icon={<Library className="size-6" aria-hidden />}
+      >
+        {mastersError ? (
+          <QueryError what="the school's classes and staff" error={mastersError} retry={retryMasters} />
+        ) : (
+          <p className="mt-4 text-sm text-[var(--muted)]">Loading the school&apos;s classes and staff…</p>
+        )}
+      </ErpWorkspaceShell>
+    );
   }
 
   return (
