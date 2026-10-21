@@ -1975,6 +1975,38 @@
   },
   "feeBankName": "Bank name (required)",
   "feeBankMissing": "Enter the bank name",
+  "homeworkScanPage": "Scan page",
+  "homeworkUploadFile": "Upload file",
+  "homeworkPageLabel": "Page {n}",
+  "@homeworkPageLabel": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "homeworkAttachLimit": "At most {max} files on one homework",
+  "@homeworkAttachLimit": {
+    "placeholders": {
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "homeworkFileTooLarge": "{name} is larger than 20 MB — it was not attached",
+  "@homeworkFileTooLarge": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "homeworkFileWrongType": "Attach a photo (JPG, PNG, WebP) or a PDF",
+  "homeworkWaitForUploads": "Wait for the files to finish uploading, or remove the ones that failed",
+  "homeworkCameraUnavailable": "Could not open the camera",
+  "homeworkUploadFailedRetry": "Not uploaded — tap to try again",
+  "homeworkCouldNotOpenFile": "Could not open the file",
+  "homeworkAttachmentsHint": "Pages and files go to the parents with this homework.",
   "busLiveTitle": "Live route",
   "busLiveTapHint": "Tap a route to see the bus live on the map, with arrival times at each stop.",
   "busLiveOnRun": "On the road · {run}",

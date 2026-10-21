@@ -3097,6 +3097,48 @@ class LEn extends L {
   String get feeBankMissing => 'Enter the bank name';
 
   @override
+  String get homeworkScanPage => 'Scan page';
+
+  @override
+  String get homeworkUploadFile => 'Upload file';
+
+  @override
+  String homeworkPageLabel(int n) {
+    return 'Page $n';
+  }
+
+  @override
+  String homeworkAttachLimit(int max) {
+    return 'At most $max files on one homework';
+  }
+
+  @override
+  String homeworkFileTooLarge(String name) {
+    return '$name is larger than 20 MB — it was not attached';
+  }
+
+  @override
+  String get homeworkFileWrongType =>
+      'Attach a photo (JPG, PNG, WebP) or a PDF';
+
+  @override
+  String get homeworkWaitForUploads =>
+      'Wait for the files to finish uploading, or remove the ones that failed';
+
+  @override
+  String get homeworkCameraUnavailable => 'Could not open the camera';
+
+  @override
+  String get homeworkUploadFailedRetry => 'Not uploaded — tap to try again';
+
+  @override
+  String get homeworkCouldNotOpenFile => 'Could not open the file';
+
+  @override
+  String get homeworkAttachmentsHint =>
+      'Pages and files go to the parents with this homework.';
+
+  @override
   String get busLiveTitle => 'Live route';
 
   @override

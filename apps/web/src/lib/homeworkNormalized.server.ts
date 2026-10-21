@@ -539,3 +539,25 @@ export async function fetchHomeworkDeskFromDb(): Promise<{
     meta: mapMetaRow(metaRow as Record<string, unknown> | null),
   };
 }
+
+/**
+ * One homework post by id, read from SQL — for a route that needs a single
+ * post (the attachment reader), not the whole desk. Null = no such post;
+ * {ok:false} = the read failed (unknown, not "not found").
+ */
+export async function readHomeworkPostById(
+  postId: string,
+): Promise<{ ok: true; post: HomeworkPost | null } | { ok: false; reason: string }> {
+  if (!postId) return { ok: true, post: null };
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, reason: "no tenant context" };
+  const { data, error } = await ctx.sb
+    .from("homework_desk_posts")
+    .select("*")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("id", postId)
+    .limit(1);
+  if (error) return { ok: false, reason: error.message };
+  const row = ((data ?? []) as Record<string, unknown>[]).find((r) => String(r.id) === postId);
+  return { ok: true, post: row ? rowToPost(row) : null };
+}

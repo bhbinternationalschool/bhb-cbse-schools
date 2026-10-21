@@ -3095,6 +3095,48 @@ class LHi extends L {
   String get feeBankMissing => 'बैंक का नाम लिखें';
 
   @override
+  String get homeworkScanPage => 'पेज स्कैन करें';
+
+  @override
+  String get homeworkUploadFile => 'फ़ाइल अपलोड करें';
+
+  @override
+  String homeworkPageLabel(int n) {
+    return 'पेज $n';
+  }
+
+  @override
+  String homeworkAttachLimit(int max) {
+    return 'एक होमवर्क में अधिकतम $max फ़ाइलें';
+  }
+
+  @override
+  String homeworkFileTooLarge(String name) {
+    return '$name 20 MB से बड़ी है — जोड़ी नहीं गई';
+  }
+
+  @override
+  String get homeworkFileWrongType => 'फ़ोटो (JPG, PNG, WebP) या PDF जोड़ें';
+
+  @override
+  String get homeworkWaitForUploads =>
+      'फ़ाइलें अपलोड होने तक रुकें, या जो नहीं हुईं उन्हें हटाएँ';
+
+  @override
+  String get homeworkCameraUnavailable => 'कैमरा नहीं खुल सका';
+
+  @override
+  String get homeworkUploadFailedRetry =>
+      'अपलोड नहीं हुई — फिर से कोशिश के लिए टैप करें';
+
+  @override
+  String get homeworkCouldNotOpenFile => 'फ़ाइल नहीं खुल सकी';
+
+  @override
+  String get homeworkAttachmentsHint =>
+      'पेज और फ़ाइलें इस होमवर्क के साथ अभिभावकों को जाएँगी।';
+
+  @override
   String get busLiveTitle => 'लाइव रूट';
 
   @override
