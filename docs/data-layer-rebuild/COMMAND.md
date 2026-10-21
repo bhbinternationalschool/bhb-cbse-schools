@@ -1560,6 +1560,13 @@ including recording a missing mobile from the phone; a save with one refused row
 `e2e/specs/staff-sensitive-screens.spec.ts` (project `staff-sensitive`): fails on the review head (no locked note, no
 panel); passes here; screens seen — the office's locked Bank tab and the accountant's panel saving, desktop light and
 phone 375 (the app's dark theme was not applied by the browser's colour-scheme emulation — dark not seen).
+*(2.2b follow-up, built 21 Oct 2026, PR #706 — fix/staff-locked-field-validation.)* The full profile's Save no
+longer checks Aadhaar / PAN / IFSC format for a user who cannot edit them (`validateStaffProfile(draft, { sensitive:
+canSensitive })`): a malformed stored value (legacy import) refused Save and sent them to a tab they cannot change.
+Holders of the function and the owner are still checked. Self-test cases in `staffProfileValidate.selftest.ts`;
+`e2e/specs/staff-locked-validation.spec.ts` (project `staff-sensitive`) red on main, green here. Found, not fixed: the
+fixture's office (staff · edit, Masters view-only) has its profile Save blocked by `saveMasters` before any request,
+while the form still says "Staff updated".
 
 **2.3a Delete the gate and the events.** With every component reader on hooks: delete
 `CoreDataGate` (React Query's loading state replaces it), the `bhb-masters-updated` /
