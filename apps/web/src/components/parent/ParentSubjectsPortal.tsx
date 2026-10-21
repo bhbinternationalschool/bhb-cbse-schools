@@ -1,268 +1,199 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { useMemo, useState } from "react";
+import { emptyMastersShell, type MastersState } from "@/lib/masters";
+import type { SisStudent } from "@/lib/sis";
 import {
-  classLabelForStudent,
-  householdForSession,
-} from "@/lib/parentPortal";
-import {
-  loadSis,
-  pendingCurriculumRequests,
-  submitCurriculumRequest,
-  type CurriculumRequest,
-  type Household,
-  type SisStudent,
-  childrenOfHousehold,
-} from "@/lib/sis";
-import {
-  curriculumChoiceMode,
-  classGroupForStudent,
-  defaultCurriculum,
-  resolveStudentSubjects,
-  type StudentCurriculum,
   validateCurriculum,
+  type StudentCurriculum,
 } from "@/lib/studentCurriculum";
 import { StudentCurriculumEditor } from "@/components/students/StudentCurriculumEditor";
-import { StudentNameLabel } from "@/components/students/StudentAvatar";
+import {
+  ChildPicker,
+  Flash,
+  ParentReadState,
+  parentPost,
+  useActiveChild,
+  useFlash,
+  useParentRead,
+  useParentRefresh,
+} from "@/components/parent/parentData";
 
-export function ParentSubjectsPortal({
-  guardianDisplayName,
-  householdId,
-}: {
-  guardianDisplayName: string;
-  /** From the signed-in session — the only household this page may show. */
-  householdId?: string;
-}) {
-  const [masters, setMasters] = useState<MastersState | null>(null);
-  const [household, setHousehold] = useState<Household | null>(null);
-  const [children, setChildren] = useState<SisStudent[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<StudentCurriculum | null>(null);
-  const [note, setNote] = useState("");
-  const [notice, setNotice] = useState<string | null>(null);
-  const [pending, setPending] = useState<CurriculumRequest | null>(null);
+/** GET /api/parent-portal/subjects (lib/parentSubjects.server.ts). */
+type SubjectsChild = {
+  id: string;
+  fullName: string;
+  admissionNo: string;
+  classId: string;
+  classLabel: string;
+  academicYearCode: string;
+  choiceMode: "none" | "middle_options" | "secondary_cart" | "senior_cart";
+  confirmed: { id: string; code: string; nameEn: string }[];
+  draft: StudentCurriculum;
+  pending: { id: string; requestedAt: string; note: string } | null;
+};
+type SubjectsView = {
+  children: SubjectsChild[];
+  masters: Pick<
+    MastersState,
+    "classes" | "subjects" | "classSubjects" | "seniorStreams" | "academicYears"
+  >;
+};
 
-  function flash(msg: string) {
-    setNotice(msg);
-    window.setTimeout(() => setNotice(null), 2800);
-  }
+const KEY = ["subjects"] as const;
 
-  function reload() {
-    const m = loadMasters();
-    const sis = loadSis();
-    setMasters(m);
-    const hh = householdForSession(sis, householdId);
-    setHousehold(hh);
-    if (!hh) {
-      setChildren([]);
-      setActiveId(null);
-      return;
-    }
-    // One row per child, this session. SIS keeps a row per child per year and
-    // leaves them all active, so the unscoped filter showed a family their own
-    // child once for every year they had been enrolled.
-    const kids = childrenOfHousehold(sis, hh.id, DEFAULT_AY);
-    setChildren(kids);
-    const aid = activeId && kids.some((k) => k.id === activeId)
-      ? activeId
-      : kids[0]?.id ?? null;
-    setActiveId(aid);
-    const stu = kids.find((k) => k.id === aid);
-    if (stu) {
-      setDraft(
-        defaultCurriculum(
-          {
-            classId: stu.classId,
-            academicYearCode: stu.academicYearCode,
-            curriculum: stu.curriculum,
-          },
-          m,
-        ),
-      );
-      setPending(pendingCurriculumRequests(sis, stu.id)[0] ?? null);
-    } else {
-      setDraft(null);
-      setPending(null);
-    }
-  }
-
-  useEffect(() => {
-    void (async () => {
-      const [{ ensureSisHydrated }, { withHydrationSlot }] = await Promise.all([
-        import("@/lib/sisPersistence"),
-        import("@/lib/deskHydrateGuard"),
-      ]);
-      await withHydrationSlot(() => ensureSisHydrated());
-      reload();
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guardianDisplayName, householdId]);
-
-  const active = useMemo(
-    () => children.find((c) => c.id === activeId) ?? null,
-    [children, activeId],
+/**
+ * Subjects for the parent's own children: what the office has confirmed, and
+ * a subject-change request the server validates and files for office review.
+ */
+export function ParentSubjectsPortal() {
+  const query = useParentRead<SubjectsView>(
+    KEY,
+    "/api/parent-portal/subjects",
+    (v) =>
+      Array.isArray(v.children) &&
+      !!v.masters &&
+      Array.isArray(v.masters.subjects),
+    "Subjects",
   );
+  return (
+    <ParentReadState query={query} what="subjects">
+      {(v) =>
+        v.children.length === 0 ? (
+          <p className="px-4 py-8 text-sm text-[var(--muted)]">
+            No children are on your family&apos;s record this year. Please
+            contact the school office.
+          </p>
+        ) : (
+          <SubjectsBody view={v} />
+        )
+      }
+    </ParentReadState>
+  );
+}
 
-  const choiceMode = active && masters
-    ? curriculumChoiceMode(classGroupForStudent(active, masters))
-    : "none";
+function SubjectsBody({ view }: { view: SubjectsView }) {
+  const masters = useMemo(
+    () => ({ ...emptyMastersShell(), ...view.masters }) as MastersState,
+    [view.masters],
+  );
+  const { child, setActiveId, list } = useActiveChild(view.children);
+  const active = view.children.find((c) => c.id === child?.id) ?? null;
+  return (
+    <div className="px-4 py-4" data-testid="parent-subjects">
+      <ChildPicker list={list} child={child} onPick={setActiveId} />
+      {active ? (
+        <ChildSubjects key={active.id} child={active} masters={masters} />
+      ) : null}
+    </div>
+  );
+}
 
-  const confirmedSubjects =
-    active && masters
-      ? resolveStudentSubjects(active, masters)
-      : [];
+function ChildSubjects({
+  child,
+  masters,
+}: {
+  child: SubjectsChild;
+  masters: MastersState;
+}) {
+  const [draft, setDraft] = useState<StudentCurriculum>(child.draft);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const flash = useFlash();
+  const refresh = useParentRefresh();
+  const student = {
+    id: child.id,
+    classId: child.classId,
+    academicYearCode: child.academicYearCode,
+    fullName: child.fullName,
+  } as SisStudent;
 
-  function selectChild(id: string) {
-    if (!masters) return;
-    setActiveId(id);
-    const stu = children.find((c) => c.id === id);
-    if (!stu) return;
-    const sis = loadSis();
-    setDraft(
-      defaultCurriculum(
-        {
-          classId: stu.classId,
-          academicYearCode: stu.academicYearCode,
-          curriculum: stu.curriculum,
-        },
-        masters,
-      ),
-    );
-    setPending(pendingCurriculumRequests(sis, stu.id)[0] ?? null);
-    setNote("");
-  }
-
-  function submitRequest() {
-    if (!active || !draft || !masters) return;
-    const check = validateCurriculum(active, draft, masters);
-    if (!check.ok) {
-      flash(check.errors[0] ?? "Fix choices");
-      return;
-    }
-    const res = submitCurriculumRequest({
-      studentId: active.id,
-      academicYearCode: active.academicYearCode || DEFAULT_AY,
+  async function submit() {
+    const check = validateCurriculum(student, draft, masters);
+    if (!check.ok) return flash.fail(check.errors[0] ?? "Fix choices");
+    setBusy(true);
+    const r = await parentPost("/api/parent-portal/subjects", {
+      studentId: child.id,
       proposedStreamId: draft.seniorStreamId,
       proposedChosenSubjectIds: draft.chosenSubjectIds,
       note: note.trim(),
     });
-    if (!res.ok) {
-      flash(res.error);
-      return;
-    }
-    setPending(res.request);
-    flash("Request sent — office will confirm");
-  }
-
-  if (!household || !masters) {
-    return (
-      <p className="px-4 py-8 text-sm text-[var(--muted)]">
-        We could not find your family&apos;s record. Please contact the school
-        office.
-      </p>
-    );
+    setBusy(false);
+    if (!r.ok) return flash.fail(r.error);
+    await refresh(KEY);
+    flash.ok("Request sent — the office will confirm");
   }
 
   return (
-    <div className="px-4 py-4">
-      {notice ? (
-        <p className="mb-3 rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-2 text-xs font-medium text-[var(--brand-deep)]">
-          {notice}
+    <div className="mt-3 space-y-4">
+      <Flash notice={flash.notice} error={flash.error} />
+      <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[var(--card)] p-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+          {child.classLabel} · confirmed this year
         </p>
-      ) : null}
-
-      <div className="flex gap-2 overflow-x-auto pb-2">
-        {children.map((c) => (
-          <button
-            key={c.id}
-            type="button"
-            onClick={() => selectChild(c.id)}
-            className={`shrink-0 rounded-xl border px-3 py-2 text-left ${
-              c.id === activeId
-                ? "border-[var(--brand-deep)] bg-white"
-                : "border-[rgba(32,48,80,0.1)] bg-[rgba(32,48,80,0.03)]"
-            }`}
+        {child.confirmed.length === 0 ? (
+          <p className="mt-2 text-xs text-[var(--muted)]">
+            The office has not confirmed subjects yet.
+          </p>
+        ) : (
+          <ul
+            className="mt-2 space-y-1"
+            data-testid="parent-subjects-confirmed"
           >
-            <div className="text-sm font-semibold text-[var(--brand-deep)]">
-              <StudentNameLabel student={c} />
-            </div>
-            <div className="text-[10px] text-[var(--muted)]">
-              {classLabelForStudent(c, masters)}
-            </div>
-          </button>
-        ))}
+            {child.confirmed.map((s) => (
+              <li key={s.id} className="text-sm text-[var(--brand-deep)]">
+                <span className="font-semibold">{s.code}</span> {s.nameEn}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
-
-      {active && draft ? (
-        <div className="mt-3 space-y-4">
-          <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-              Confirmed this year
-            </p>
-            {confirmedSubjects.length === 0 ? (
-              <p className="mt-2 text-xs text-[var(--muted)]">
-                Office has not confirmed subjects yet — use the cart below to
-                request a subject mix for this grade.
-              </p>
-            ) : (
-              <ul className="mt-2 space-y-1">
-                {confirmedSubjects.map((s) => (
-                  <li key={s.id} className="text-sm text-[var(--brand-deep)]">
-                    <span className="font-semibold">{s.code}</span> {s.nameEn}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          {pending ? (
-            <div className="rounded-xl border border-[rgba(196,149,58,0.35)] bg-[rgba(196,149,58,0.08)] p-3 text-sm">
-              <p className="font-bold text-[var(--brand-deep)]">
-                Change request pending
-              </p>
-              <p className="mt-1 text-xs text-[var(--muted)]">
-                Office will approve or reject. You cannot send another request
-                until then.
-              </p>
-            </div>
-          ) : choiceMode === "none" ? (
-            <p className="text-xs text-[var(--muted)]">
-              This class has a fixed subject set — no parent choice needed.
-            </p>
-          ) : (
-            <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-white p-3">
-              <StudentCurriculumEditor
-                student={active}
-                masters={masters}
-                curriculum={draft}
-                onChange={setDraft}
-                mode="parent"
-                disabled={!!pending}
-              />
-              <label className="mt-3 block text-sm">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                  Note to office
-                </span>
-                <textarea
-                  className="field min-h-[72px]"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Optional message"
-                />
-              </label>
-              <button
-                type="button"
-                className="mt-3 w-full rounded-xl bg-[var(--brand-deep)] py-2.5 text-sm font-bold text-white"
-                onClick={submitRequest}
-              >
-                Request subject change
-              </button>
-            </div>
-          )}
+      {child.pending ? (
+        <div
+          className="rounded-xl border border-[rgba(196,149,58,0.35)] bg-[rgba(196,149,58,0.08)] p-3 text-sm"
+          data-testid="parent-subjects-pending"
+        >
+          <p className="font-bold text-[var(--brand-deep)]">
+            Change request pending
+          </p>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            The office will approve or reject it. You cannot send another
+            request until then.
+          </p>
         </div>
+      ) : child.choiceMode === "none" ? (
+        <p className="text-xs text-[var(--muted)]">
+          This class has a fixed subject set — no parent choice needed.
+        </p>
       ) : (
-        <p className="mt-6 text-sm text-[var(--muted)]">No children on this household.</p>
+        <div className="rounded-xl border border-[rgba(32,48,80,0.1)] bg-[var(--card)] p-3">
+          <StudentCurriculumEditor
+            student={student}
+            masters={masters}
+            curriculum={draft}
+            onChange={setDraft}
+            mode="parent"
+          />
+          <label className="mt-3 block text-sm">
+            <span className="mb-1 block text-[11px] text-[var(--muted)]">
+              Note to office
+            </span>
+            <textarea
+              className="field min-h-[72px]"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Optional message"
+            />
+          </label>
+          <button
+            type="button"
+            className="mt-3 w-full rounded-xl bg-[var(--brand-deep)] py-2.5 text-sm font-bold text-white disabled:opacity-50"
+            disabled={busy}
+            onClick={() => void submit()}
+          >
+            {busy ? "Sending…" : "Request subject change"}
+          </button>
+        </div>
       )}
     </div>
   );

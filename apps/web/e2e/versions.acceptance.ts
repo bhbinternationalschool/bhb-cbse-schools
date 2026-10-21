@@ -288,10 +288,16 @@ async function main(): Promise<void> {
   });
   const back = await req(`${app}/api/school-data/masters-desk`, { headers: office });
   const restored = obj(arr(back.body.subjects).map(obj).find((s) => s.id === target.id));
+  // Content exactly as seeded; its `_rev` (data-layer 2.2a) moved twice — the
+  // rename and the restore are two versions, never a reset to the old number.
+  const { _rev: revBack, ...restoredContent } = restored;
+  const { _rev: revSeed, ...seedContent } = target;
   record(
-    "masters: the subject is restored exactly as seeded",
-    restore.status === 200 && JSON.stringify(restored) === JSON.stringify(target),
-    `HTTP ${restore.status}, "${String(restored.nameEn)}"`,
+    "masters: the subject is restored exactly as seeded (its _rev moved on: rename + restore)",
+    restore.status === 200 &&
+      JSON.stringify(restoredContent) === JSON.stringify(seedContent) &&
+      Number(revBack) === Number(revSeed ?? 0) + 2,
+    `HTTP ${restore.status}, "${String(restored.nameEn)}", _rev ${String(revSeed)} → ${String(revBack)}`,
   );
 
   const failed = outcomes.filter((o) => !o.ok);

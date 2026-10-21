@@ -65,7 +65,7 @@ export default defineConfig<GateOptions>({
   projects: [
     {
       name: "desktop",
-      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|fuel-per-bus-range|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay)\.spec\.ts/,
+      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay|parent-web-tabs|fuel-per-bus-range)\.spec\.ts/,
       use: { ...desktop },
     },
     {
@@ -80,7 +80,7 @@ export default defineConfig<GateOptions>({
       // a bus with fuel fills (21 Oct, fuel-per-bus-range), so it runs after
       // everything that reads the stack.
       name: "money-writes",
-      testMatch: /(transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|fuel-per-bus-range)\.spec\.ts/,
+      testMatch: /(transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|parent-web-tabs|fuel-per-bus-range)\.spec\.ts/,
       dependencies: ["desktop", "phone-375-cpu4x"],
       use: { ...desktop },
     },
