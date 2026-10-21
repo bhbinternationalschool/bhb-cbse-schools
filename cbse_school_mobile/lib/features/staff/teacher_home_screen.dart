@@ -8,6 +8,7 @@ import "../../core/api/api_client.dart";
 import "../../core/ui/stale_banner.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/chat_inbox_screen.dart";
+import "../modules/school_chat_screen.dart";
 import "../modules/homework_screen.dart";
 import "../modules/notice_detail_screen.dart";
 import "../modules/notices_screen.dart";
@@ -401,6 +402,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       case "/chat":
         Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => ChatInboxScreen(api: widget.api)),
+        );
+      case "/school-chat":
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => staffSchoolChat(widget.api)),
         );
       case "/notices":
         // A tapped broadcast opens in full; otherwise the notices list.
@@ -1094,7 +1099,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
             case 2:
               Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => ChatInboxScreen(api: widget.api),
+                  builder: (_) => staffSchoolChat(widget.api),
                 ),
               );
             case 3:

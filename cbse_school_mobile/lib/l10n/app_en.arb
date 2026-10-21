@@ -97,8 +97,12 @@
   "leadRevisionHint": "Revise in the LEAD app: {book} → {chapter}",
   "@leadRevisionHint": {
     "placeholders": {
-      "book": {"type": "String"},
-      "chapter": {"type": "String"}
+      "book": {
+        "type": "String"
+      },
+      "chapter": {
+        "type": "String"
+      }
     }
   },
   "couldNotOpenLeadApp": "Could not open the LEAD app",
@@ -1065,10 +1069,22 @@
   "profAadhaarAdd": "Add",
   "profAadhaarCorrect": "Correct",
   "profAadhaarDialogTitle": "{who} — Aadhaar number",
-  "@profAadhaarDialogTitle": {"placeholders": {"who": {"type": "String"}}},
+  "@profAadhaarDialogTitle": {
+    "placeholders": {
+      "who": {
+        "type": "String"
+      }
+    }
+  },
   "profAadhaarInvalid": "This is not a valid 12-digit Aadhaar number — please check it.",
   "profAadhaarSaved": "Saved — XXXX-XXXX-{last4}",
-  "@profAadhaarSaved": {"placeholders": {"last4": {"type": "String"}}},
+  "@profAadhaarSaved": {
+    "placeholders": {
+      "last4": {
+        "type": "String"
+      }
+    }
+  },
   "profAadhaarUnchanged": "That number is already on record.",
   "profAadhaarKeptVerified": "The school has already verified this Aadhaar, so it was not changed. Please contact the school office.",
   "profDetailsOnRecord": "Details on record",
@@ -1513,7 +1529,16 @@
   "resultsOverallGrade": "Overall grade",
   "resultsRank": "Rank",
   "resultsRankOf": "{rank} of {size}",
-  "@resultsRankOf": {"placeholders": {"rank": {"type": "String"}, "size": {"type": "String"}}},
+  "@resultsRankOf": {
+    "placeholders": {
+      "rank": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
   "resultsClassAverage": "Class average",
   "resultsResult": "Result",
   "resultsAttendance": "Attendance",
@@ -1521,7 +1546,13 @@
   "resultsTeacherRemarks": "Class teacher's remarks",
   "resultsAbsentAll": "Absent in this examination",
   "resultsAbsentFor": "Absent for: {subjects}",
-  "@resultsAbsentFor": {"placeholders": {"subjects": {"type": "String"}}},
+  "@resultsAbsentFor": {
+    "placeholders": {
+      "subjects": {
+        "type": "String"
+      }
+    }
+  },
   "resultsAggregateNote": "Weighted result of the exams that count toward it.",
   "resultsNoMarks": "Marks for this exam are not ready yet. Please check again later.",
   "resultsHeld": "This report card is being held by the school office. Please contact the office.",
@@ -1530,35 +1561,127 @@
   "dateSheetTitle": "Date sheet",
   "dateSheetNone": "No upcoming exams have been published for this child yet.",
   "dateSheetMinutes": "{minutes} min",
-  "@dateSheetMinutes": {"placeholders": {"minutes": {"type": "String"}}},
+  "@dateSheetMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "schoolChatTitle": "School chat",
+  "schoolChatGroups": "Groups",
+  "schoolChatDirect": "Direct chats",
+  "schoolChatClassTeacherThread": "Message the class teacher",
+  "schoolChatNewMessage": "Message a teacher",
+  "schoolChatNoMessages": "No messages yet.",
+  "schoolChatNone": "No chats yet. A class or subject group appears once a teacher is assigned to it.",
+  "schoolChatWaiting": "Waiting for review",
+  "schoolChatRemoved": "Removed by the school",
+  "schoolChatMuted": "The school has muted you in this chat. You can still read messages.",
+  "schoolChatPaused": "The school has paused chat for this login. Please speak to the class teacher.",
+  "schoolChatSafety": "Messages are checked before others see them. Please be kind.",
+  "schoolChatAsChild": "Writing as {name}",
+  "@schoolChatAsChild": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "schoolChatAsParent": "Writing as the parent",
+  "schoolChatGroupNoMessages": "Group — no messages yet",
+  "schoolChatParentInbox": "Parent messages to the class teacher",
   "busLiveTitle": "Live route",
   "busLiveTapHint": "Tap a route to see the bus live on the map, with arrival times at each stop.",
   "busLiveOnRun": "On the road · {run}",
-  "@busLiveOnRun": {"placeholders": {"run": {"type": "String"}}},
+  "@busLiveOnRun": {
+    "placeholders": {
+      "run": {
+        "type": "String"
+      }
+    }
+  },
   "busLivePositionAt": "Position at {time} ({ago})",
-  "@busLivePositionAt": {"placeholders": {"time": {"type": "String"}, "ago": {"type": "String"}}},
+  "@busLivePositionAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      },
+      "ago": {
+        "type": "String"
+      }
+    }
+  },
   "busLiveStale": "Last seen {time} — not live",
-  "@busLiveStale": {"placeholders": {"time": {"type": "String"}}},
+  "@busLiveStale": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "busLiveStaleDetail": "The tracker has not reported for over {minutes} minutes, so no arrival times are shown.",
-  "@busLiveStaleDetail": {"placeholders": {"minutes": {"type": "String"}}},
+  "@busLiveStaleDetail": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
   "busLiveOffShift": "Not on a run right now",
   "busLiveOffShiftLastSeen": "Last seen {time}. Arrival times show only while a run is on.",
-  "@busLiveOffShiftLastSeen": {"placeholders": {"time": {"type": "String"}}},
+  "@busLiveOffShiftLastSeen": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "busLiveOffShiftNoFix": "Arrival times show only while a run is on.",
   "busLiveUntracked": "No GPS position from this vehicle",
   "busLiveUntrackedDetail": "{vehicle} has no tracker reporting, so its position and arrival times cannot be shown.",
-  "@busLiveUntrackedDetail": {"placeholders": {"vehicle": {"type": "String"}}},
+  "@busLiveUntrackedDetail": {
+    "placeholders": {
+      "vehicle": {
+        "type": "String"
+      }
+    }
+  },
   "busLiveNoVehicle": "No vehicle is linked to this route",
   "busLiveTrailUnread": "The bus's track could not be read, so passed stops and arrival times are not shown.",
   "busLivePassedAt": "passed at {time}",
-  "@busLivePassedAt": {"placeholders": {"time": {"type": "String"}}},
+  "@busLivePassedAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "busLiveNotSeen": "not seen — the bus did not come near",
   "busLiveEta": "about {time} · {minutes} min",
-  "@busLiveEta": {"placeholders": {"time": {"type": "String"}, "minutes": {"type": "String"}}},
+  "@busLiveEta": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      },
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
   "busLiveNoEta": "no time yet",
   "busLiveUnpinned": "not pinned on the map",
   "busLiveSchoolEta": "School: about {time} · {minutes} min",
-  "@busLiveSchoolEta": {"placeholders": {"time": {"type": "String"}, "minutes": {"type": "String"}}},
+  "@busLiveSchoolEta": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      },
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
   "busLiveEstimateNote": "Times are estimates from the bus's position, not promises. Stops are in the order this run visits them.",
   "busLiveRouteMissing": "This route is not shown live for you. A driver sees only their own bus."
 }
