@@ -1638,7 +1638,7 @@ subjects removed), teacher FAILS (whole-book masters-desk save), class teacher F
 save), both masters-overlay cases FAIL, all 7 new propagation cases FAIL ("no whole-book save"); same element passes
 on main too (coverage). This branch, fresh stack: `e2e-stack.sh check` all green (16, 22, 26, 31 + v1); counts +
 teacher + kernel + error + masters-exams-reports + stale-writer + write-conflict, desktop and phone-375: **73/73**;
-propagation + masters-overlay + masters-element-writes + student-upgrade + staff-editor-save: **34 passed, 1 skipped**
+propagation + masters-overlay + masters-element-writes + student-upgrade + staff-editor-save: **34 passed, 1 skipped**; after merging main (#706), fresh stack: payroll-writes + staff-sensitive **7/7**
 (the staff cases stay expected-fail). Screens seen desktop-light and 375-dark: campuses, session, numbering, holidays,
 school, classes → sections → teachers, subjects, Timetable → Subject rules. counts.spec unchanged.
 **Behaviour changes users will notice.** Two people editing different items of one Masters list both save (before:
@@ -1653,7 +1653,7 @@ callers (2.2d) still save whole. The masters-desk bridge re-reads the desk (~235
 the old save lives. A class teacher set on another tab reaches B only after a reload (the staff side is the access
 copy until 2.3a — not tested as propagation). Multi-instance staleness is simulated at the network (one local
 instance). Brand & stamps / school timing / statutory panels write through the same path but have no spec of their
-own; the statutory setup is covered by `payroll.spec` (not run locally). The number-series bump route is exercised only
+own (`payroll.spec` writes the statutory setup through the kernel API, not the panel; it passes here). The number-series bump route is exercised only
 by type and read-through (no spec issues a number). A re-run of the holiday case on a used stack fails its control
 (Holi is left unpublished, not removed — a fresh stack is needed, as for the rest of the propagation project).
 
