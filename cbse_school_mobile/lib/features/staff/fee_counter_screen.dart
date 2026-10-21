@@ -9,6 +9,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "payslips_screen.dart" show rupees;
+import "fee_counter_logic.dart";
 import "../../core/i18n/locale_controller.dart";
 
 /// Fee counter on a phone: find the child, tick what is being paid, take the
@@ -70,7 +71,9 @@ class _FeeCounterScreenState extends State<FeeCounterScreen> {
     final hits = _hits;
     return Scaffold(
       appBar: AppBar(
-        actions: [ScreenGuideButton(guideId: "fee-counter", screenLabel: "fee-counter")],
+        actions: [
+          ScreenGuideButton(guideId: "fee-counter", screenLabel: "fee-counter"),
+        ],
         title: Text(context.l10n.collectFees, style: AppText.titleMedium),
       ),
       body: Column(
@@ -220,7 +223,11 @@ class _CounterScreenState extends State<CounterScreen> {
   final Map<String, int> _picked = {};
   String _mode = "cash";
   final _ref = TextEditingController();
+  final _bank = TextEditingController();
   final _note = TextEditingController();
+
+  /// "Total paying now", whole rupees. Empty = the per-due amounts are used.
+  final _payingNow = TextEditingController();
 
   /// The day the money was handed over. Empty = today.
   ///
@@ -247,7 +254,9 @@ class _CounterScreenState extends State<CounterScreen> {
   @override
   void dispose() {
     _ref.dispose();
+    _bank.dispose();
     _note.dispose();
+    _payingNow.dispose();
     super.dispose();
   }
 
@@ -271,6 +280,39 @@ class _CounterScreenState extends State<CounterScreen> {
   }
 
   int get _total => _picked.values.fold(0, (a, b) => a + b);
+
+  /// The dues a "total paying now" is spread over: the ticked ones, or the
+  /// whole bill when nothing is ticked. Listed in the counter's own order.
+  List<AllocDue> _basis(FeeCounter c) {
+    final all = [
+      for (final ch in c.children)
+        for (final d in ch.dues)
+          AllocDue(
+            key: "${ch.studentId}|${d.dueKey}",
+            dueKey: d.dueKey,
+            dueOn: d.dueOn,
+            balancePaise: d.balancePaise,
+            rank: d.allocationRank,
+          ),
+    ];
+    if (_picked.isEmpty) return all;
+    return all.where((d) => _picked.containsKey(d.key)).toList();
+  }
+
+  /// The split of the typed total, or null when no total is typed.
+  PayingNowSplit? _split(FeeCounter c) {
+    final p = payingNowPaiseFrom(_payingNow.text);
+    if (p == null) return null;
+    return splitPayingNow(_basis(c), p);
+  }
+
+  /// What "Collect" will take: the typed total when it splits cleanly, the
+  /// ticked amounts when no total is typed, otherwise nothing.
+  int _takingFor(FeeCounter c) {
+    final split = _split(c);
+    if (split == null) return _total;
+    return split.ok ? split.amounts.values.fold(0, (a, b) => a + b) : 0;
+  }
 
   void _toggle(FeeChild child, CounterDue due, bool on) {
     final key = "${child.studentId}|${due.dueKey}";
@@ -343,22 +385,40 @@ class _CounterScreenState extends State<CounterScreen> {
 
   Future<void> _collect() async {
     final c = _counter;
-    if (c == null || _total <= 0) return;
+    if (c == null) return;
+    final split = _split(c);
+    final taking = _takingFor(c);
+    if (taking <= 0) return;
     final mode = c.tenderModes.firstWhere(
       (m) => m.value == _mode,
       orElse: () => c.tenderModes.first,
     );
-    if (mode.needsRef && _ref.text.trim().isEmpty) {
+    // Every payment that is not cash carries a reference — the server
+    // refuses it otherwise, so say so before the confirm dialog.
+    if (referenceMissing(mode.value, _ref.text)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Enter the ${mode.refLabel.toLowerCase()}")),
+        SnackBar(
+          content: Text(
+            context.l10n.feeReferenceMissing(
+              (mode.refLabel.isEmpty ? "reference" : mode.refLabel)
+                  .toLowerCase(),
+            ),
+          ),
+        ),
       );
+      return;
+    }
+    if (mode.needsBank && _bank.text.trim().isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.feeBankMissing)));
       return;
     }
 
     final sure = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text("Take ${rupees(_total / 100)}?"),
+        title: Text("Take ${rupees(taking / 100)}?"),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -388,7 +448,8 @@ class _CounterScreenState extends State<CounterScreen> {
 
     setState(() => _busy = true);
     try {
-      final lines = _picked.entries.map((e) {
+      final source = split != null ? split.amounts : _picked;
+      final lines = source.entries.map((e) {
         final parts = e.key.split("|");
         return (
           studentId: parts[0],
@@ -400,9 +461,24 @@ class _CounterScreenState extends State<CounterScreen> {
         studentId: widget.student.id,
         clientRef: _clientRef,
         lines: lines,
-        tenders: [(mode: _mode, paise: _total, ref: _ref.text.trim())],
+        tenders: [
+          (
+            mode: mode.value,
+            paise: taking,
+            ref: _ref.text.trim(),
+            // The txn date defaults to the day the money was taken, as the
+            // web counter pre-fills it.
+            instrumentDate: mode.value == "cash"
+                ? ""
+                : (_collectionDate.isEmpty
+                      ? c.collectionDate
+                      : _collectionDate),
+            bankName: mode.needsBank ? _bank.text.trim() : "",
+          ),
+        ],
         note: _note.text.trim(),
         collectionDate: _collectionDate,
+        payingNowPaise: split != null ? taking : null,
       );
       Haptics.success();
       if (!mounted) return;
@@ -415,7 +491,9 @@ class _CounterScreenState extends State<CounterScreen> {
       setState(() {
         _clientRef = _mintRef();
         _ref.clear();
+        _bank.clear();
         _note.clear();
+        _payingNow.clear();
         _collectionDate = "";
       });
       await _load();
@@ -437,9 +515,16 @@ class _CounterScreenState extends State<CounterScreen> {
   @override
   Widget build(BuildContext context) {
     final c = _counter;
+    final split = c == null ? null : _split(c);
+    final taking = c == null ? 0 : _takingFor(c);
     return Scaffold(
       appBar: AppBar(
-        actions: [ScreenGuideButton(guideId: "fee-counter-student", screenLabel: "fee-counter-student")],
+        actions: [
+          ScreenGuideButton(
+            guideId: "fee-counter-student",
+            screenLabel: "fee-counter-student",
+          ),
+        ],
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -507,24 +592,46 @@ class _CounterScreenState extends State<CounterScreen> {
                         ),
                         onChanged: (v) => _toggle(child, d, v ?? false),
                         title: Text(d.label, style: AppText.bodyMediumInk),
-                        subtitle: Text(
-                          "${d.balanceLabel} outstanding${d.dueOn.isEmpty ? "" : " · due ${formatDateLabel(d.dueOn)}"}",
-                          style: AppText.labelMediumMuted,
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "${d.balanceLabel} outstanding${d.dueOn.isEmpty ? "" : " · due ${formatDateLabel(d.dueOn)}"}",
+                              style: AppText.labelMediumMuted,
+                            ),
+                            FeeDueDiscount(due: d),
+                          ],
                         ),
-                        secondary: TextButton(
-                          onPressed: () => _editAmount(child, d),
-                          child: Text(
-                            _picked.containsKey(
-                                  "${child.studentId}|${d.dueKey}",
-                                )
-                                ? rupees(
-                                    _picked["${child.studentId}|${d.dueKey}"]! /
+                        secondary: split != null
+                            // The typed total decides each amount; the
+                            // per-due "Part" editor would only fight it.
+                            ? Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
+                                child: Text(
+                                  rupees(
+                                    (split.amounts["${child.studentId}|${d.dueKey}"] ??
+                                            0) /
                                         100,
-                                  )
-                                : "Part",
-                            style: AppText.bodySmall,
-                          ),
-                        ),
+                                  ),
+                                  style: AppText.bodySmall,
+                                ),
+                              )
+                            : TextButton(
+                                onPressed: () => _editAmount(child, d),
+                                child: Text(
+                                  _picked.containsKey(
+                                        "${child.studentId}|${d.dueKey}",
+                                      )
+                                      ? rupees(
+                                          _picked["${child.studentId}|${d.dueKey}"]! /
+                                              100,
+                                        )
+                                      : "Part",
+                                  style: AppText.bodySmall,
+                                ),
+                              ),
                       ),
                     ),
                 ],
@@ -548,6 +655,27 @@ class _CounterScreenState extends State<CounterScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: TextField(
+                      key: const ValueKey("fee-paying-now"),
+                      controller: _payingNow,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        labelText: context.l10n.feeTotalPayingNow,
+                        helperText: context.l10n.feeTotalPayingNowHelp,
+                        helperMaxLines: 2,
+                        errorText: split != null && split.error == "over"
+                            ? context.l10n.feeTotalPayingNowTooMuch(
+                                rupees(split.basisPaise / 100),
+                              )
+                            : null,
+                      ),
+                    ),
+                  ),
                   SizedBox(
                     height: 38,
                     child: ListView(
@@ -566,16 +694,36 @@ class _CounterScreenState extends State<CounterScreen> {
                       ],
                     ),
                   ),
-                  if (c.tenderModes.any((m) => m.value == _mode && m.needsRef))
+                  // Not cash → a reference, always (the server refuses
+                  // without one); shown for every such mode, not only the
+                  // ones an older server flagged.
+                  if (_mode != "cash")
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: TextField(
+                        key: const ValueKey("fee-reference"),
                         controller: _ref,
                         decoration: InputDecoration(
                           isDense: true,
-                          labelText: c.tenderModes
-                              .firstWhere((m) => m.value == _mode)
-                              .refLabel,
+                          labelText: context.l10n.feeReferenceRequired(
+                            c.tenderModes
+                                .firstWhere(
+                                  (m) => m.value == _mode,
+                                  orElse: () => c.tenderModes.first,
+                                )
+                                .refLabel,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (c.tenderModes.any((m) => m.value == _mode && m.needsBank))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: TextField(
+                        controller: _bank,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          labelText: context.l10n.feeBankName,
                         ),
                       ),
                     ),
@@ -628,11 +776,11 @@ class _CounterScreenState extends State<CounterScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          _total == 0
+                          taking == 0
                               ? "Tick what is being paid"
-                              : "Taking ${rupees(_total / 100)}",
+                              : "Taking ${rupees(taking / 100)}",
                           style: AppText.titleSmall.copyWith(
-                            color: _total == 0
+                            color: taking == 0
                                 ? AppColors.muted
                                 : AppColors.ink,
                             fontWeight: FontWeight.w700,
@@ -640,7 +788,7 @@ class _CounterScreenState extends State<CounterScreen> {
                         ),
                       ),
                       FilledButton.icon(
-                        onPressed: _busy || _total <= 0 ? null : _collect,
+                        onPressed: _busy || taking <= 0 ? null : _collect,
                         icon: const Icon(Icons.receipt_long_outlined, size: 18),
                         label: Text(_busy ? "Saving…" : "Collect"),
                       ),
@@ -702,5 +850,47 @@ class _ReceiptDialog extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+/// The discount on one due, as the web counter lists it: the total and one
+/// line per concession or counter discount. A discount the server could not
+/// read says "not loaded" — never ₹0.
+class FeeDueDiscount extends StatelessWidget {
+  const FeeDueDiscount({super.key, required this.due});
+
+  final CounterDue due;
+
+  @override
+  Widget build(BuildContext context) {
+    switch (discountStateOf(due.discountPaise)) {
+      case DiscountState.notLoaded:
+        return Text(
+          context.l10n.feeDiscountNotLoaded,
+          style: AppText.labelMediumMuted.copyWith(color: AppColors.warning),
+        );
+      case DiscountState.none:
+        return Text(
+          context.l10n.feeDiscountNone,
+          style: AppText.labelMediumMuted,
+        );
+      case DiscountState.some:
+        final billed = due.billedPaise > 0
+            ? " · billed ${rupees(due.billedPaise / 100)}"
+            : "";
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "${context.l10n.feeDiscountLabel("−${rupees(due.discountPaise! / 100)}")}$billed",
+              style: AppText.labelMediumMuted.copyWith(
+                color: AppColors.success,
+              ),
+            ),
+            for (final l in due.discountLines)
+              Text(l, style: AppText.labelMediumMuted),
+          ],
+        );
+    }
   }
 }

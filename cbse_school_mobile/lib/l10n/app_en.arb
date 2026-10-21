@@ -1937,6 +1937,44 @@
     }
   },
   "admNoRegisteredLeads": "No registered leads are waiting to be sent to SIS.",
+  "feeTotalPayingNow": "Total paying now (₹)",
+  "feeTotalPayingNowHelp": "Part payment is fine. It fills the oldest dues first — the ticked ones, or the whole bill if none are ticked.",
+  "feeTotalPayingNowTooMuch": "More than the {amount} outstanding",
+  "@feeTotalPayingNowTooMuch": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "feeDiscountLabel": "Discount {amount}",
+  "@feeDiscountLabel": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "feeDiscountNone": "No discount",
+  "feeDiscountNotLoaded": "Discount: not loaded",
+  "feeReferenceRequired": "{label} (required)",
+  "@feeReferenceRequired": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "feeReferenceMissing": "Enter the {label} — every payment that is not cash needs a reference",
+  "@feeReferenceMissing": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "feeBankName": "Bank name (required)",
+  "feeBankMissing": "Enter the bank name",
   "scCallFamily": "Call family",
   "scMessageFamily": "Message family",
   "scAppChat": "App chat with the family",
