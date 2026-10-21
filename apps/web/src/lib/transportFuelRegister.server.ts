@@ -19,7 +19,7 @@ import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
 import {
   buildFuelVoucher,
   FUEL_EXPENSE_CODE,
-  fleetEdgeMonthByVehicle,
+  fleetEdgeRangeByVehicle,
   mapDeskFuelLog,
   matchExistingFuelLine,
   type DeskFuelLog,
@@ -620,16 +620,15 @@ export async function importDeskFuelLogs(input: {
  * Fleet Edge distance and fuel used per desk vehicle for one IST month, read
  * from `details` events only, paged past the 1,000-row cap.
  */
-export async function readFleetEdgeMonth(
-  month: string,
+export async function readFleetEdgeRange(
+  period: { from: string; to: string },
   vehicles: { id: string; registrationNo: string; chassisNo?: string }[],
 ): Promise<{ ok: true; byVehicle: Map<string, { km: number; fuelUsed: number; windows: number }> } | { ok: false; error: string }> {
   const { sb, tenantId } = await tenant();
-  const [y, m] = month.split("-").map(Number) as [number, number];
-  // A little either side of the IST month; the pure function keeps only the
+  // A little either side of the IST period; the pure function keeps only the
   // windows whose start falls inside it.
-  const from = new Date(Date.UTC(y, m - 1, 1) - 86_400_000).toISOString();
-  const to = new Date(Date.UTC(y, m, 1) + 2 * 86_400_000).toISOString();
+  const from = new Date(Date.parse(`${period.from}T00:00:00Z`) - 86_400_000).toISOString();
+  const to = new Date(Date.parse(`${period.to}T00:00:00Z`) + 3 * 86_400_000).toISOString();
   const res = await fetchAllPages<Record<string, unknown>>(
     (a, b) =>
       sb
@@ -655,7 +654,10 @@ export async function readFleetEdgeMonth(
     km: r.km,
     fuelUsed: r.fuel,
   }));
-  return { ok: true, byVehicle: fleetEdgeMonthByVehicle({ month, vehicles, rows, ignoreRefs: NON_FLEET_VEHICLE_REFS }) };
+  return {
+    ok: true,
+    byVehicle: fleetEdgeRangeByVehicle({ from: period.from, to: period.to, vehicles, rows, ignoreRefs: NON_FLEET_VEHICLE_REFS }),
+  };
 }
 
 /* ─── one-transaction posting (migration 20261014150000) ───── */

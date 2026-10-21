@@ -152,6 +152,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:online-classes
 
+      - name: Self-test — learning games — limits hold, the score is the server's, only playable questions come in
+        working-directory: apps/web
+        run: npm run test:learning-games
+
       - name: Self-test — a member of staff sets only their own signature, and only a real small image
         working-directory: apps/web
         run: npm run test:staff-signature
@@ -847,12 +851,23 @@ jobs:
       - name: SQL test — desk_slice_row_write / desk_slice_object_write
         run: bash scripts/e2e-stack.sh sql-test supabase/tests/desk_slice_row_write.test.sql
 
+      # data-layer 2.2a: Masters elements compare-and-set on their own _rev
+      # (two different elements both land), no writer resets a _rev (ABA),
+      # batches are all-or-none, number series only move up, staff Remove is
+      # soft and restorable, bank/Aadhaar/PAN/pay need payroll/accounts.
+      - name: SQL test — Masters element _rev, batch, series bump, staff kernel rows
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/masters_row_revs_staff_kernel.test.sql
+
       # A voided fee receipt stays voided: a stale whole-desk push can no
       # longer clear voided_at and re-post the receipt (15 Oct 2026, R1).
       - name: SQL test — a voided fee receipt stays voided
         run: bash scripts/e2e-stack.sh sql-test supabase/tests/fee_voucher_void_is_final.test.sql
       - name: SQL test — notifications are stored once per person, bursts fold, reads go through the kernel
         run: bash scripts/e2e-stack.sh sql-test supabase/tests/erp_notify_deliver.test.sql
+      # Learning games: no grants to anon/authenticated; play never past
+      # 21:00; a competition window is at most an hour on one IST day.
+      - name: SQL test — learning games tables refuse what the rules refuse
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/learning_games.test.sql
 
       # NEXT_PUBLIC_* are baked in at build time, so the build reads
       # apps/web/.env.e2e (127.0.0.1 URL, this run's anon key) and nothing else.
