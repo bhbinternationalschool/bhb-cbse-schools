@@ -15,6 +15,7 @@ export function StudentHitsFilterExport({
   sectionLabel,
   academicYearCode,
   onMessage,
+  balanceWithheld = false,
 }: {
   title: string;
   hits: StudentSearchHit[];
@@ -23,6 +24,8 @@ export function StudentHitsFilterExport({
   sectionLabel?: string;
   academicYearCode?: string;
   onMessage?: (msg: string) => void;
+  /** The caller's Masters withholds fee lists (teaching scope): the balance is unknown, not ₹0. */
+  balanceWithheld?: boolean;
 }) {
   const session = useDemoSessionOptional();
   const ay =
@@ -54,7 +57,7 @@ export function StudentHitsFilterExport({
         classLabel: h.classLabel,
         type: h.student.studentType,
         mobile: h.household?.mobile ?? "",
-        balance: formatInr(h.balancePaise),
+        balance: balanceWithheld ? "Not shown for your role" : formatInr(h.balancePaise),
       }))}
       onMessage={onMessage}
     />

@@ -42,7 +42,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
 import { cn } from "@/lib/utils";
 import { visibleModuleTabs } from "@/lib/rbac";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, type SisState } from "@/lib/sis";
 import { loadFees, type FeesState } from "@/lib/fees";
 import { loadExams, type ExamsState } from "@/lib/exams";
@@ -106,7 +108,9 @@ export function EventsWorkspace() {
     "interschool",
   ]);
 
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1h: the server's book (classes, holidays) + the access copy's
+  // staff side (tab permissions); kept fresh by the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
 
   // Someone holding only some Events functions (Masters → Roles) sees only
   // their tabs; the dashboard belongs to the whole module.
@@ -151,7 +155,6 @@ export function EventsWorkspace() {
   }
 
   const refreshLocal = useCallback(() => {
-    setMasters(loadMasters());
     setSis(loadSis());
     setFees(loadFees());
     setExamsState(loadExams());
@@ -369,6 +372,9 @@ export function EventsWorkspace() {
     return hh?.guardianName || householdId;
   }
 
+  if (!masters && mastersError) {
+    return <QueryError what="the school's classes and holidays" error={mastersError} retry={retryMasters} />;
+  }
   if (loading && !masters) {
     return (
       <div className="flex items-center justify-center px-4 py-12 text-sm text-muted-foreground">

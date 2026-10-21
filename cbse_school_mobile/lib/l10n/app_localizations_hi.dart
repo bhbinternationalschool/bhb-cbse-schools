@@ -2652,6 +2652,204 @@ class LHi extends L {
   String get schoolChatParentInbox => 'कक्षा अध्यापक के लिए अभिभावकों के संदेश';
 
   @override
+  String get homeModuleGames => 'खेल';
+
+  @override
+  String get gamesTitle => 'सीखने के खेल';
+
+  @override
+  String gamesPlayedToday(String played, String cap) {
+    return 'आज खेला: $cap में से $played मिनट';
+  }
+
+  @override
+  String gamesTimeLeft(String minutes) {
+    return 'आज $minutes मिनट बाकी';
+  }
+
+  @override
+  String get gamesStarsToday => 'आज के तारे';
+
+  @override
+  String get gamesStarsWeek => 'इस सप्ताह';
+
+  @override
+  String get gamesStarsTotal => 'कुल';
+
+  @override
+  String get gamesLast7Days => 'पिछले 7 दिन';
+
+  @override
+  String gamesDayMinutes(String minutes) {
+    return '$minutes मिनट';
+  }
+
+  @override
+  String get gamesCompetitions => 'प्रतियोगिताएँ';
+
+  @override
+  String get gamesPlay => 'खेलें';
+
+  @override
+  String get gamesPlayed => 'खेल लिया';
+
+  @override
+  String gamesOpensAt(String time) {
+    return '$time पर खुलेगी';
+  }
+
+  @override
+  String gamesClosesAt(String time) {
+    return '$time तक खुली';
+  }
+
+  @override
+  String get gamesLeaderboard => 'लीडरबोर्ड';
+
+  @override
+  String get gamesPractice => 'अभ्यास';
+
+  @override
+  String get gamesNumberDash => 'नंबर दौड़';
+
+  @override
+  String get gamesNumberDashBlurb => '60 सेकंड में जितने हो सकें';
+
+  @override
+  String get gamesCounting => 'चित्र गिनो';
+
+  @override
+  String get gamesCountingBlurb => 'कितने दिख रहे हैं?';
+
+  @override
+  String gamesQuestions(String count) {
+    return '$count प्रश्न';
+  }
+
+  @override
+  String get gamesWholeSubject => 'पूरा विषय';
+
+  @override
+  String get gamesNoQuizYet =>
+      'इस कक्षा के लिए अभी प्रश्नोत्तरी नहीं है — शिक्षक प्रश्न जोड़ रहे हैं।';
+
+  @override
+  String get gamesRefusedNight => 'रात में खेल बंद रहते हैं — सुबह फिर आइए।';
+
+  @override
+  String get gamesRefusedSchoolHours =>
+      'अभी स्कूल का समय है। अभ्यास स्कूल के बाद खुलेगा; शिक्षक की प्रतियोगिता अभी खेली जा सकती है।';
+
+  @override
+  String get gamesRefusedDailyCap =>
+      'आज के खेल का समय पूरा हुआ। कल फिर मिलेंगे!';
+
+  @override
+  String get gamesRefusedDisabled => 'स्कूल ने खेल अभी बंद रखे हैं।';
+
+  @override
+  String get gamesRefusedClosed => 'यह प्रतियोगिता अभी खुली नहीं है।';
+
+  @override
+  String get gamesRefusedAlreadyPlayed => 'यह प्रतियोगिता आप खेल चुके हैं।';
+
+  @override
+  String get gamesRefusedAlreadyPlaying =>
+      'किसी दूसरे फ़ोन पर पहले से खेल चल रहा है।';
+
+  @override
+  String gamesQuestionOf(String n, String total) {
+    return 'प्रश्न $n / $total';
+  }
+
+  @override
+  String gamesSecondsLeft(String seconds) {
+    return '$seconds से.';
+  }
+
+  @override
+  String get gamesRight => 'सही!';
+
+  @override
+  String get gamesWrong => 'थोड़ा चूक गए';
+
+  @override
+  String get gamesAnswerSaved => 'उत्तर दर्ज हुआ';
+
+  @override
+  String get gamesTimeUp => 'समय पूरा!';
+
+  @override
+  String get gamesResultTitle => 'बहुत बढ़िया!';
+
+  @override
+  String gamesResultScore(String correct, String total) {
+    return '$total में से $correct सही';
+  }
+
+  @override
+  String gamesStarsEarned(String stars) {
+    return '$stars तारे';
+  }
+
+  @override
+  String get gamesReview => 'उत्तर';
+
+  @override
+  String get gamesDone => 'हो गया';
+
+  @override
+  String gamesYourAnswer(String answer) {
+    return 'आपका उत्तर: $answer';
+  }
+
+  @override
+  String get gamesNotAnswered => 'उत्तर नहीं दिया';
+
+  @override
+  String gamesRightAnswer(String answer) {
+    return 'सही उत्तर: $answer';
+  }
+
+  @override
+  String gamesAnswersAfterClose(String time) {
+    return 'सही उत्तर प्रतियोगिता बंद होने पर ($time) दिखेंगे।';
+  }
+
+  @override
+  String gamesClassBoard(String label) {
+    return 'इस सप्ताह $label';
+  }
+
+  @override
+  String get gamesSchoolBoard => 'इस सप्ताह पूरा विद्यालय';
+
+  @override
+  String gamesRightPerPlayer(String avg) {
+    return 'प्रति खिलाड़ी $avg सही';
+  }
+
+  @override
+  String gamesPlayersCount(String count) {
+    return '$count ने खेला';
+  }
+
+  @override
+  String get gamesNobodyYet => 'अभी किसी ने पूरा नहीं किया।';
+
+  @override
+  String gamesPlayingNow(String count) {
+    return '$count अभी खेल रहे हैं';
+  }
+
+  @override
+  String get gamesHealthyNote =>
+      'तारे सीखने के लिए हैं। स्कूल के समय और रात 9 बजे के बाद खेल बंद रहते हैं।';
+
+  @override
+  String get gamesSeeLeaderboard => 'लीडरबोर्ड देखें';
+
+  @override
   String get bcAudienceAllParents => 'सभी अभिभावक';
 
   @override
