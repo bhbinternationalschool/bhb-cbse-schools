@@ -30,6 +30,7 @@ import {
 import { recordInboundMedia } from "@/lib/waInboundMedia.server";
 import { findHouseholdByWaMobile } from "@/lib/waSisBotServer";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
+import { looksLikeOfficeApprovalReply } from "@/lib/waOfficeApproval";
 import {
   parseComplaintFlowResponse,
   parseComplaintFlowToken,
@@ -262,6 +263,32 @@ export async function POST(req: Request) {
         }
       } catch (e) {
         console.error("[wa/webhook] staff leave decision failed", msg.waMessageId, e);
+      }
+    }
+
+    // "APPROVE 9" / "REJECT 12" — the director answering a draft the n8n
+    // office (automation/n8n) sent for approval. Ahead of the relay and of
+    // every lookup: on 22 Oct 2026 the command desk read "APPROVE 9" as a
+    // student search and answered "I couldn't find an active student
+    // matching 'approve class 9'". Only acknowledged here; the office poller
+    // reads the same wa_messages row and owns approval_state. Anyone who is
+    // not staff falls through untouched.
+    if (looksLikeOfficeApprovalReply(msg.text || "")) {
+      try {
+        const { handleOfficeApprovalReply } = await import("@/lib/waOfficeApproval.server");
+        const decision = await handleOfficeApprovalReply({ fromWaId: msg.fromWaId, text: msg.text });
+        if (decision.handled) {
+          results.push({
+            audience: "office_approval_reply",
+            from: msg.fromWaId,
+            escalate: false,
+            replied: true,
+            stub: false,
+          });
+          continue;
+        }
+      } catch (e) {
+        console.error("[wa/webhook] office approval reply failed", msg.waMessageId, e);
       }
     }
 
