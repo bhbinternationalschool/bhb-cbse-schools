@@ -1568,7 +1568,7 @@ Holders of the function and the owner are still checked. Self-test cases in `sta
 fixture's office (staff · edit, Masters view-only) has its profile Save blocked by `saveMasters` before any request,
 while the form still says "Staff updated".
 
-*(2.2c built 21 Oct 2026, PR #PRNUM — the Foundation panels, the class/subject teacher links, Timetable's periods/week and
+*(2.2c built 21 Oct 2026, PR #708 — the Foundation panels, the class/subject teacher links, Timetable's periods/week and
 the number series write elements; no migration.)* **What exists.**
 - **The Masters editor's commit** (`components/masters/MastersWorkspace.tsx`): panels still hand `commit(next)` a book;
   `planMastersElementCommit` (`lib/data/client/mastersElementPlan.ts`, pure) turns the difference between the book ON
