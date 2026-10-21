@@ -68,6 +68,7 @@ SELFTESTS=(
   test:masters-cold-client
   test:masters-teacher-no-fees
   test:screen-masters-dues
+  test:certificate-dues-gate
   test:masters-freeze
   test:session-year
   test:academic-year-resolve
@@ -284,6 +285,7 @@ SELFTESTS=(
   test:payment-link-status-guard
   test:attendance-today
   test:staff-signature
+  test:print-signatures
   test:staff-month-register
   test:sis-wire-payload
   test:print-palette
@@ -464,6 +466,7 @@ SELFTESTS=(
   test:teacher-contacts
   test:staff-month-calendar
   test:staff-roster-redact
+  test:staff-profile-validate
   test:sis-class-teacher
   test:punch-code
   test:wa-language-gate
@@ -493,6 +496,7 @@ SELFTESTS=(
   test:payroll-staggered-runs
   test:bank-file-safety
   test:staff-payslips
+  test:staff-admissions-app
   test:diksha-index
   test:teacher-contact
   test:question-bank

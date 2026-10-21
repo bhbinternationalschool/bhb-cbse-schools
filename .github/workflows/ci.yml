@@ -97,6 +97,9 @@ jobs:
       - name: Test — screen Masters dues — raw vs normalised book; teaching scope refuses, never ₹0
         working-directory: apps/web
         run: npm run test:screen-masters-dues
+      - name: Test — certificates TC / no-dues gate — refuses on unknown dues, never ₹0
+        working-directory: apps/web
+        run: npm run test:certificate-dues-gate
 
       - name: Test — a stale wipe signal expires
         working-directory: apps/web
@@ -156,6 +159,9 @@ jobs:
       - name: Self-test — a member of staff sets only their own signature, and only a real small image
         working-directory: apps/web
         run: npm run test:staff-signature
+      - name: Self-test — which staff signature goes on which printed signing line, and a doubtful one is blank
+        working-directory: apps/web
+        run: npm run test:print-signatures
       - name: Self-test — the staff month register counts what the register holds, and only the owner changes a mark
         working-directory: apps/web
         run: npm run test:staff-month-register
@@ -570,6 +576,7 @@ jobs:
           npm run test:teacher-contacts
           npm run test:staff-month-calendar
           npm run test:staff-roster-redact
+          npm run test:staff-profile-validate
           npm run test:sis-class-teacher
           npm run test:punch-code
           npm run test:wa-language-gate
@@ -853,6 +860,13 @@ jobs:
       # lock, with a base; masters rows synced in the same transaction.
       - name: SQL test — desk_slice_row_write / desk_slice_object_write
         run: bash scripts/e2e-stack.sh sql-test supabase/tests/desk_slice_row_write.test.sql
+
+      # data-layer 2.2a: Masters elements compare-and-set on their own _rev
+      # (two different elements both land), no writer resets a _rev (ABA),
+      # batches are all-or-none, number series only move up, staff Remove is
+      # soft and restorable, bank/Aadhaar/PAN/pay need payroll/accounts.
+      - name: SQL test — Masters element _rev, batch, series bump, staff kernel rows
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/masters_row_revs_staff_kernel.test.sql
 
       # A voided fee receipt stays voided: a stale whole-desk push can no
       # longer clear voided_at and re-post the receipt (15 Oct 2026, R1).
