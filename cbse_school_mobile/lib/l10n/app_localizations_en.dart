@@ -4027,4 +4027,12 @@ class LEn extends L {
   String hcActLastAt(String time) {
     return 'last at $time';
   }
+
+  @override
+  String get cmFamiliesNotLoaded =>
+      'Families per class not loaded — the check below counts them.';
+
+  @override
+  String get cmNoneReachable =>
+      'No family in these classes can be reached on WhatsApp — nothing would be sent.';
 }
