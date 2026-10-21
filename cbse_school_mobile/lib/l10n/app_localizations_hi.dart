@@ -2850,6 +2850,251 @@ class LHi extends L {
   String get gamesSeeLeaderboard => 'लीडरबोर्ड देखें';
 
   @override
+  String get admAddWalkInLead => 'वॉक-इन लीड जोड़ें';
+
+  @override
+  String get admWalkInTitle => 'नई वॉक-इन लीड';
+
+  @override
+  String get admChildName => 'बच्चे का नाम';
+
+  @override
+  String get admClassSought => 'किस कक्षा में प्रवेश';
+
+  @override
+  String get admParentName => 'अभिभावक का नाम';
+
+  @override
+  String get admMotherNameOptional => 'माँ का नाम (वैकल्पिक)';
+
+  @override
+  String get admParentMobile => 'अभिभावक का मोबाइल (10 अंक)';
+
+  @override
+  String get admNotes => 'टिप्पणी';
+
+  @override
+  String get admSourceWalkIn => 'स्रोत: वॉक-इन';
+
+  @override
+  String get admSaveLead => 'लीड सहेजें';
+
+  @override
+  String get admSaving => 'सहेजा जा रहा है…';
+
+  @override
+  String admFieldRequired(String field) {
+    return '$field भरना ज़रूरी है';
+  }
+
+  @override
+  String get admMobileTenDigits => 'मोबाइल 10 अंकों का होना चाहिए';
+
+  @override
+  String admWalkInSaved(String enquiryNo) {
+    return 'लीड $enquiryNo जोड़ी गई';
+  }
+
+  @override
+  String admWalkInSavedLinked(String enquiryNo) {
+    return 'लीड $enquiryNo पहले से दर्ज परिवार में जोड़ी गई';
+  }
+
+  @override
+  String admOptionsNotLoaded(String reason) {
+    return 'कक्षाएँ और शुल्क मद लोड नहीं हो सके: $reason';
+  }
+
+  @override
+  String admComposerTitle(String name) {
+    return '$name को संदेश';
+  }
+
+  @override
+  String get admComposerLoading => 'संदेश तैयार हो रहा है…';
+
+  @override
+  String get admComposerYourWords => 'आपका संदेश';
+
+  @override
+  String get admComposerInWindow =>
+      'परिवार ने पिछले 24 घंटों में स्कूल को संदेश भेजा है, इसलिए आपका संदेश जैसा लिखा है वैसा जा सकता है। जाँचें या बदलें, फिर भेजें दबाएँ।';
+
+  @override
+  String get admComposerOutOfWindow =>
+      'WhatsApp आपके अपने शब्द तभी पहुँचाता है जब परिवार ने पिछले 24 घंटों में स्कूल को संदेश भेजा हो। अन्यथा केवल नीचे दिया स्कूल का स्वीकृत संदेश भेजा जा सकता है।';
+
+  @override
+  String get admComposerApproved => 'स्कूल का स्वीकृत संदेश';
+
+  @override
+  String get admComposerApprovedNote =>
+      'WhatsApp ने यही शब्द स्वीकृत किए हैं — इन्हें बदला नहीं जा सकता। यह परिवार की चुनी हुई भाषा में जाता है।';
+
+  @override
+  String admComposerTemplateUnavailable(String reason) {
+    return 'स्वीकृत संदेश नहीं भेजा जा सकता: $reason';
+  }
+
+  @override
+  String get admComposerSendMine => 'मेरा संदेश भेजें';
+
+  @override
+  String get admComposerSendApproved => 'स्वीकृत संदेश भेजें';
+
+  @override
+  String get admComposerEmpty => 'पहले संदेश लिखें';
+
+  @override
+  String get admComposerSent => 'स्कूल के WhatsApp से भेजा गया।';
+
+  @override
+  String get admComposerQueued => 'रोका गया — परिवार के शांत समय के बाद जाएगा।';
+
+  @override
+  String admComposerNotSent(String reason) {
+    return 'नहीं भेजा गया: $reason';
+  }
+
+  @override
+  String get admNewRegistration => 'नया पंजीकरण';
+
+  @override
+  String get admRegister => 'पंजीकरण करें';
+
+  @override
+  String admRegisterChild(String child) {
+    return '$child का पंजीकरण';
+  }
+
+  @override
+  String get admFeeHead => 'शुल्क मद';
+
+  @override
+  String get admRegistrationFee => 'पंजीकरण शुल्क (₹)';
+
+  @override
+  String get admMoneyReceivedNow => 'अभी राशि प्राप्त हुई';
+
+  @override
+  String get admMoneyReceivedNowNote =>
+      'यदि परिवार बाद में काउंटर पर भुगतान करेगा तो इसे बंद रहने दें — शुल्क बकाया रहेगा।';
+
+  @override
+  String get admAmountReceived => 'प्राप्त राशि (₹)';
+
+  @override
+  String get admPaidBy => 'भुगतान का तरीका';
+
+  @override
+  String admRefRequired(String label) {
+    return 'नकद के अलावा भुगतान के लिए $label ज़रूरी है';
+  }
+
+  @override
+  String get admAmountMoreThanFee => 'प्राप्त राशि शुल्क से अधिक है';
+
+  @override
+  String get admWholeRupees => 'पूरे रुपये लिखें';
+
+  @override
+  String get admNoFeeHeads =>
+      'कोई पंजीकरण शुल्क मद नहीं बना है। कार्यालय इसे मास्टर्स → शुल्क मद में जोड़ता है।';
+
+  @override
+  String admRegisteredDue(String appNo, String fee) {
+    return 'पंजीकृत $appNo · शुल्क ₹$fee बकाया';
+  }
+
+  @override
+  String admRegisteredPaid(
+    String appNo,
+    String paid,
+    String code,
+    String balance,
+  ) {
+    return 'पंजीकृत $appNo · ₹$paid प्राप्त ($code) · शेष ₹$balance';
+  }
+
+  @override
+  String get admTabLeads => 'लीड';
+
+  @override
+  String admTabRegistered(String count) {
+    return 'पंजीकृत ($count)';
+  }
+
+  @override
+  String get admFollowUp => 'फॉलो-अप';
+
+  @override
+  String get admSendToSis => 'SIS में भेजें';
+
+  @override
+  String get admSendToSisNote =>
+      'SIS में प्रवेश से प्रवेश संख्या, सेक्शन और शुल्क समूह मिलते हैं और शुल्क रसीद दर्ज होती है — यह वेब ERP की प्रवेश स्क्रीन पर होता है। यह लीड वहाँ खोलें?';
+
+  @override
+  String get admOpenInErp => 'वेब ERP में खोलें';
+
+  @override
+  String get admCouldNotOpenErp => 'वेब ERP नहीं खुल सका';
+
+  @override
+  String get admFeeNotSet => 'पंजीकरण शुल्क तय नहीं';
+
+  @override
+  String get admFeeWaived => 'पंजीकरण शुल्क माफ़';
+
+  @override
+  String admFeeStatus(String fee, String paid, String due) {
+    return 'शुल्क ₹$fee · जमा ₹$paid · बकाया ₹$due';
+  }
+
+  @override
+  String get admNoRegisteredLeads =>
+      'SIS में भेजे जाने के लिए कोई पंजीकृत लीड नहीं है।';
+
+  @override
+  String get feeTotalPayingNow => 'अभी कुल भुगतान (₹)';
+
+  @override
+  String get feeTotalPayingNowHelp =>
+      'आंशिक भुगतान चलेगा। यह सबसे पुराने बकाया पहले भरता है — टिक किए हुए, या कुछ टिक न हो तो पूरा बिल।';
+
+  @override
+  String feeTotalPayingNowTooMuch(String amount) {
+    return 'बकाया $amount से अधिक';
+  }
+
+  @override
+  String feeDiscountLabel(String amount) {
+    return 'छूट $amount';
+  }
+
+  @override
+  String get feeDiscountNone => 'कोई छूट नहीं';
+
+  @override
+  String get feeDiscountNotLoaded => 'छूट: लोड नहीं हुई';
+
+  @override
+  String feeReferenceRequired(String label) {
+    return '$label (ज़रूरी)';
+  }
+
+  @override
+  String feeReferenceMissing(String label) {
+    return '$label लिखें — नकद के अलावा हर भुगतान में संदर्भ ज़रूरी है';
+  }
+
+  @override
+  String get feeBankName => 'बैंक का नाम (ज़रूरी)';
+
+  @override
+  String get feeBankMissing => 'बैंक का नाम लिखें';
+
+  @override
   String get homeworkScanPage => 'पेज स्कैन करें';
 
   @override

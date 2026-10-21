@@ -9,13 +9,19 @@ import {
   classLabelOf,
   householdContact,
   loadFeeContext,
-  openDuesFor,
+  openDueLinesFor,
 } from "@/lib/api/v1/staffFees";
+import {
+  checkPayingNowSplit,
+  dueRefKey,
+  tenderReferenceProblem,
+} from "@/lib/staffFeeCollect";
 import {
   TENDER_MODES,
   collectPayment,
   formatInr,
   loadFees,
+  type FeeDueLine,
   type TenderMode,
   type VoucherLine,
   type VoucherTender,
@@ -48,6 +54,14 @@ type Body = {
   collectionDate?: string;
   /** Idempotency key minted by the app; a retry with the same one is a no-op. */
   clientRef?: string;
+  /**
+   * "Total paying now" (paise): the app split one amount across the posted
+   * dues, oldest first. The server re-derives that split from its own dues
+   * with the web counter's `allocateCollectionToDues` and refuses if the
+   * posted per-due amounts differ or the total exceeds what is open.
+   * Absent = the per-due amounts are taken as typed (each still capped).
+   */
+  payingNowPaise?: number;
 };
 
 const MODE_VALUES = new Set(TENDER_MODES.map((m) => m.value));
@@ -77,6 +91,13 @@ export async function POST(request: Request) {
     if (!studentId) throw new ApiError("bad_request", "studentId required", 400);
     if (!wanted.length) throw new ApiError("bad_request", "Select at least one due", 400);
     if (!clientRef) throw new ApiError("bad_request", "clientRef required", 400);
+    // Every payment that is not cash carries a reference — refused before
+    // anything is loaded, whatever the app did or did not check.
+    for (const t of body.tenders ?? []) {
+      if (Math.round(Number(t.amountPaise) || 0) <= 0) continue;
+      const problem = tenderReferenceProblem((t.mode || "cash").trim(), t.ref);
+      if (problem) throw new ApiError("bad_request", problem, 400);
+    }
 
     const { sis, fees, masters } = await loadFeeContext();
     await assertFeeBookComplete(fees);
@@ -104,19 +125,54 @@ export async function POST(request: Request) {
 
     // Re-derive what is actually open, per child of this household.
     const ay = ctx.session.academicYearCode;
-    const openByKey = new Map<string, { label: string; kind: string; balancePaise: number; studentName: string }>();
+    const openByKey = new Map<
+      string,
+      { label: string; kind: string; balancePaise: number; studentName: string; line: FeeDueLine }
+    >();
     for (const s of sis.students) {
       if (s.householdId !== householdId || s.status !== "active" || s.academicYearCode !== ay) {
         continue;
       }
-      for (const d of openDuesFor(s, masters, fees)) {
-        openByKey.set(`${s.id}|${d.dueKey}`, {
+      for (const d of openDueLinesFor(s, masters, fees)) {
+        openByKey.set(dueRefKey(s.id, d.dueKey), {
           label: d.label,
           kind: d.kind,
           balancePaise: d.balancePaise,
           studentName: s.fullName,
+          line: d,
         });
       }
+    }
+
+    // "Total paying now": the split is the server's, not the phone's.
+    let splitAmounts: Map<string, number> | null = null;
+    if (body.payingNowPaise !== undefined && body.payingNowPaise !== null) {
+      const posted = new Map<string, number>();
+      const selected: FeeDueLine[] = [];
+      for (const l of wanted) {
+        const key = dueRefKey((l.studentId || studentId).trim(), (l.dueKey || "").trim());
+        const open = openByKey.get(key);
+        if (!open) {
+          throw new ApiError(
+            "bad_request",
+            `That due is no longer open — reload the counter and try again`,
+            409,
+          );
+        }
+        if (posted.has(key)) {
+          throw new ApiError("bad_request", "The same due was sent twice", 400);
+        }
+        posted.set(key, Math.round(Number(l.amountPaise) || 0));
+      }
+      // Household order, exactly as the counter listed them.
+      for (const [key, open] of openByKey) if (posted.has(key)) selected.push(open.line);
+      const check = checkPayingNowSplit({
+        selected,
+        payingNowPaise: Number(body.payingNowPaise),
+        posted,
+      });
+      if (!check.ok) throw new ApiError("bad_request", check.error, check.status);
+      splitAmounts = check.amounts;
     }
 
     const lines: VoucherLine[] = [];
@@ -130,7 +186,9 @@ export async function POST(request: Request) {
           409,
         );
       }
-      const asked = Math.round(Number(l.amountPaise) || 0);
+      const asked = splitAmounts
+        ? (splitAmounts.get(key) ?? 0)
+        : Math.round(Number(l.amountPaise) || 0);
       if (asked <= 0) continue;
       if (asked > open.balancePaise) {
         throw new ApiError(
@@ -151,6 +209,9 @@ export async function POST(request: Request) {
     if (!lines.length) throw new ApiError("bad_request", "Nothing to collect", 400);
     const total = lines.reduce((n, l) => n + l.amountPaise, 0);
 
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    const collectionDate = (body.collectionDate || "").trim() || today;
+
     const tenders: VoucherTender[] = [];
     for (const t of body.tenders ?? []) {
       const amountPaise = Math.round(Number(t.amountPaise) || 0);
@@ -163,7 +224,11 @@ export async function POST(request: Request) {
         mode,
         amountPaise,
         ref: (t.ref || "").trim(),
-        instrumentDate: (t.instrumentDate || "").trim(),
+        // The txn / instrument date defaults to the day the money was
+        // taken, exactly as the web counter pre-fills it. The phone never
+        // sent one, so every non-cash collection from it was refused by
+        // collectPayment ("enter instrument / txn date").
+        instrumentDate: (t.instrumentDate || "").trim() || (mode === "cash" ? "" : collectionDate),
         bankName: (t.bankName || "").trim(),
         realisation: mode === "cheque" ? "subject_to_clearance" : "cleared",
       });
@@ -186,9 +251,6 @@ export async function POST(request: Request) {
         400,
       );
     }
-
-    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-    const collectionDate = (body.collectionDate || "").trim() || today;
 
     // The school's setting and this person's authority are resolved HERE.
     // The app sends a date and nothing else; it cannot tell the server that
