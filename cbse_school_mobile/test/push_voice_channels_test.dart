@@ -92,6 +92,32 @@ void main() {
       expect(android.deleted, isNot(contains("bhb_default")));
     });
 
+    test("the server renames the same channels, from this build on", () {
+      // apps/web/src/lib/pushVoice.ts sends `_v2` ids only to builds
+      // ≥ PUSH_VOICE_V2_MIN_BUILD; this app build must be one of them.
+      final ts = File("../apps/web/src/lib/pushVoice.ts").readAsStringSync();
+      final kinds = RegExp(
+        r"PUSH_VOICE_V2_KINDS[^=]*=\s*\[([^\]]*)\]",
+      ).firstMatch(ts);
+      expect(kinds, isNotNull);
+      expect(
+        RegExp(
+          r'"([a-z]+)"',
+        ).allMatches(kinds!.group(1)!).map((m) => m.group(1)).toSet(),
+        PushService.voiceV2Kinds,
+      );
+      final minBuild = int.parse(
+        RegExp(r"PUSH_VOICE_V2_MIN_BUILD = (\d+)").firstMatch(ts)!.group(1)!,
+      );
+      final build = int.parse(
+        RegExp(
+          r"^version:\s*\S+\+(\d+)",
+          multiLine: true,
+        ).firstMatch(File("pubspec.yaml").readAsStringSync())!.group(1)!,
+      );
+      expect(build, greaterThanOrEqualTo(minBuild));
+    });
+
     test("channel ids and clip names map both ways", () {
       expect(
         PushService.voiceChannelId("approval", "en"),

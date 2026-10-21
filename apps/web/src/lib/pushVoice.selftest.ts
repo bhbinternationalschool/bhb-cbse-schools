@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { readFileSync } from "node:fs";
 import {
   PUSH_VOICE_KINDS,
   PUSH_VOICE_V2_KINDS,
-  PUSH_VOICE_V2_MIN_BUILD,
   pushVoiceChannel,
   pushVoiceChannelForApp,
   pushVoiceKind,
@@ -64,17 +62,7 @@ for (const k of PUSH_VOICE_KINDS) {
   }
 }
 
-// The app agrees: same v2 kinds, and its version is at least the build the
-// server waits for before naming a v2 channel.
-const dart = readFileSync(join(mobile, "lib/core/push/push_service.dart"), "utf8");
-const v2 = /static const voiceV2Kinds = \{([^}]*)\}/.exec(dart);
-assert.ok(v2, "push_service.dart declares voiceV2Kinds");
-assert.deepEqual(
-  [...v2[1].matchAll(/"([a-z]+)"/g)].map((m) => m[1]).sort(),
-  [...PUSH_VOICE_V2_KINDS].sort(),
-  "app and server rename the same channels",
-);
-const build = /^version:\s*\S+\+(\d+)/m.exec(readFileSync(join(mobile, "pubspec.yaml"), "utf8"));
-assert.ok(build && Number(build[1]) >= PUSH_VOICE_V2_MIN_BUILD, "the app build that creates v2 channels is ≥ PUSH_VOICE_V2_MIN_BUILD");
+// App/server parity (v2 kinds, build ≥ PUSH_VOICE_V2_MIN_BUILD) is checked
+// in cbse_school_mobile/test/push_voice_channels_test.dart.
 
 console.log("pushVoice.selftest: all assertions passed");
