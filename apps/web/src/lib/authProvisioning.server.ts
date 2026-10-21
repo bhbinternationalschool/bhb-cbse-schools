@@ -83,6 +83,8 @@ export async function resolvePersonByMobile(
       .select("id, tenant_id, full_name, email, mobile, status")
       .eq("mobile", mobile10)
       .eq("status", "active")
+      // A removed member (2.2b soft remove) is not provisioned a login.
+      .is("deleted_at", null)
       .limit(1)
       .maybeSingle();
     if (!data) return null;

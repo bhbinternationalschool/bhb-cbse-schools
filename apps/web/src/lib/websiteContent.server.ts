@@ -282,6 +282,8 @@ async function loadPeople(ids: string[]): Promise<Record<string, PersonItem>> {
       .from("sis_staff")
       .select("id, full_name, designation_id, status")
       .eq("tenant_id", ctx.tenantId)
+      // A removed member (2.2b soft remove) is not shown on the website.
+      .is("deleted_at", null)
       .in("id", ids),
     ctx.sb
       .from("sis_designations")

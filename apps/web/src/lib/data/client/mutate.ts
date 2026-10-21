@@ -43,10 +43,35 @@ export async function writeRecords<T>(
   ops: readonly WriteOp<T>[],
 ): Promise<WriteResult<T>> {
   if (ops.length === 0) return { ok: true, results: [], versions: {} };
+  return postOps<T>(`/api/data/${encodeURIComponent(collection)}`, ops);
+}
 
+/** One protected-field change of a staff record: which fields, at which revision. */
+export type StaffSensitiveChange = {
+  readonly id: string;
+  /** The record's `updated_at` as read — as for every row write. */
+  readonly base: Revision | null;
+  /** Only bank, UPI, Aadhaar, PAN, pay, the login (lib/staffProtectedFields). */
+  readonly fields: Readonly<Record<string, unknown>>;
+};
+
+/**
+ * Bank / UPI / Aadhaar / PAN / pay (and, for the owner, the login) of staff
+ * records, through POST /api/data/sis.staff/sensitive (data-layer 2.2b) —
+ * the only path that may change them. Who may is decided by the server from
+ * the session; a refusal is `kind: "auth"`. Never throws.
+ */
+export async function writeStaffSensitiveFields<T = Record<string, unknown>>(
+  changes: readonly StaffSensitiveChange[],
+): Promise<WriteResult<T>> {
+  if (changes.length === 0) return { ok: true, results: [], versions: {} };
+  return postOps<T>("/api/data/sis.staff/sensitive", changes);
+}
+
+async function postOps<T>(url: string, ops: readonly unknown[]): Promise<WriteResult<T>> {
   let res: Response;
   try {
-    res = await fetch(`/api/data/${encodeURIComponent(collection)}`, {
+    res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // Always a list of ops. Whole-module state is what this replaces.

@@ -65,6 +65,8 @@ export async function resolveChatActorLite(
       .from("sis_staff")
       .select("id, emp_code, full_name, email, mobile, status, stream, designation_id")
       .eq("id", session.staffId)
+      // A removed member (2.2b soft remove) is no chat actor.
+      .is("deleted_at", null)
       .maybeSingle(),
     sb.from("sis_designations").select("id, code, name"),
   ]);

@@ -211,6 +211,10 @@ async function buildServerMasters(): Promise<BuildResult<MastersState>> {
     return { ok: false, error: "masters_desk_slices" };
   }
   const state = deskBundleToMastersState(read.bundle);
+  // Each slice's stamp, read in the same query as its payload: an object
+  // slice's (schoolProfile, …) is the base of its next kernel write, and the
+  // masters view hands it out (data-layer 2.2b).
+  if (read.sliceStamps) mastersSliceStamps.set(state, { ...read.sliceStamps });
   if (!staffBundle) {
     // The roster is unknown, not empty. With a copy, the cache keeps the
     // copy; without one, answer with no roster (revalidateStaffSession then
@@ -226,6 +230,14 @@ async function buildServerMasters(): Promise<BuildResult<MastersState>> {
     state.designations = staffBundle.designations;
   }
   return { ok: true, value: state };
+}
+
+/** The slice stamps each cached Masters copy was read with (by object identity; never in the copy itself). */
+const mastersSliceStamps = new WeakMap<MastersState, Record<string, string>>();
+
+/** The `updated_at` of each Masters slice as read for this copy; null if unknown. */
+export function serverMastersSliceStamps(state: MastersState): Record<string, string> | null {
+  return mastersSliceStamps.get(state) ?? null;
 }
 
 const mastersCache = referenceCache<MastersState>("masters", MASTERS_DESK_KEYS, buildServerMasters);

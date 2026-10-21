@@ -268,6 +268,8 @@ export async function listVisitingStaff(): Promise<{ ok: true; staff: VisitingSt
       .select("id, full_name, emp_code, category, status, mobile, profile")
       .eq("tenant_id", ctx.tenantId)
       .eq("category", "visiting")
+      // Removed members (2.2b soft remove) are not listed for visiting pay.
+      .is("deleted_at", null)
       .order("id")
       .range(from, to),
   );

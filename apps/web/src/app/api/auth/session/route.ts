@@ -105,6 +105,8 @@ export async function POST(request: Request) {
         .from("sis_staff")
         .select("id, full_name, email, profile")
         .eq("tenant_id", profile.tenant_id)
+        // A removed member (2.2b soft remove) does not sign in.
+        .is("deleted_at", null)
         .limit(200);
       const hit = (staffRows ?? []).find((row) => {
         const em = String(row.email ?? "").trim().toLowerCase();

@@ -59,7 +59,7 @@ export async function POST(req: Request) {
       // The staff OTP login resolves on this number: it must be one person's.
       const t = await getServerTenantContext();
       const clash = t
-        ? await t.sb.from("sis_staff").select("id, full_name").eq("tenant_id", t.tenantId).eq("mobile", changes.mobile).eq("status", "active").neq("id", reqRow.staffId).limit(1)
+        ? await t.sb.from("sis_staff").select("id, full_name").eq("tenant_id", t.tenantId).eq("mobile", changes.mobile).eq("status", "active").is("deleted_at", null).neq("id", reqRow.staffId).limit(1)
         : null;
       if (clash?.data?.length) {
         return NextResponse.json(

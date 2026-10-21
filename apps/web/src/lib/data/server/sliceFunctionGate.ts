@@ -36,8 +36,8 @@ export async function sliceFunctionGate(
 ): Promise<SliceGateVerdict> {
   const src = def.slice;
   if (!src) return { ok: false, status: 404, kind: "not_found", message: "Unknown slice collection" };
-  const module = def.module as RbacModule;
-  const feature = RBAC_FEATURES.find((f) => f.module === module && f.slices?.includes(src.key)) ?? null;
+  const deskModule = def.module as RbacModule;
+  const feature = RBAC_FEATURES.find((f) => f.module === deskModule && f.slices?.includes(src.key)) ?? null;
   if (!feature) {
     return mode === "module" ? { ok: true } : { ok: false, status: 403, kind: "auth", message: "Forbidden" };
   }
@@ -51,7 +51,7 @@ export async function sliceFunctionGate(
     });
   } else {
     // Roles unreadable, or no function of this module held: refused.
-    const gate = await deskFeatureGateFor(req, module, "write");
+    const gate = await deskFeatureGateFor(req, deskModule, "write");
     if (!gate) return { ok: false, status: 403, kind: "auth", message: "Forbidden" };
     access = (featureId, action) => featureAccess(ctx.session, ctx.masters, featureId, action, ctx.rbac);
     ownClassIds = gate.ownClassIds;

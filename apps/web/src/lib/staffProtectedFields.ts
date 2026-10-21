@@ -44,9 +44,6 @@ export type StaffAuthority = "owner" | "payroll" | "accounts";
 
 type Profile = Record<string, unknown>;
 
-const asProfile = (v: unknown): Profile =>
-  v && typeof v === "object" && !Array.isArray(v) ? (v as Profile) : {};
-
 /** blank = null = "" = absent, exactly as `_sis_staff_sensitive_diff` decides. */
 function norm(v: unknown): string | null {
   if (v === undefined || v === null || v === "") return null;
