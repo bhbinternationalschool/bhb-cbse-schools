@@ -12,9 +12,10 @@ import {
   loadFees,
   openFeeDues,
   tenderModeLabel,
+  type FeesState,
 } from "@/lib/fees";
 import { checkHold, holdCodeForCertificate } from "@/lib/holds";
-import { DEFAULT_AY, loadMasters } from "@/lib/masters";
+import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import {
   persistSeriesUse,
   suggestFromSeriesCode,
@@ -721,12 +722,22 @@ export function classLabelForStudent(student: SisStudent): string {
   return sec ? `${c}-${sec}` : c;
 }
 
-export function studentOpenBalance(student: SisStudent): {
+export type OpenBalance = {
   openBalancePaise: number;
   openDueCount: number;
-} {
-  const masters = loadMasters();
-  const fees = loadFees();
+};
+
+/**
+ * A child's open dues from one fee book: every open line, future months and
+ * an inactive child included (a TC is issued for a child leaving). Shared by
+ * this screen's own figure and the server's (GET
+ * /api/data/views/certificate-dues), so both count the same way.
+ */
+export function openBalanceFrom(
+  student: SisStudent,
+  masters: MastersState,
+  fees: FeesState,
+): OpenBalance {
   const dues = computeStudentDues(student, masters, fees, {
     includeFuture: true,
     includeInactive: true,
@@ -738,9 +749,95 @@ export function studentOpenBalance(student: SisStudent): {
   };
 }
 
+/** This tab's own figure, from its page copies (Masters, fees, transport). */
+export function studentOpenBalance(student: SisStudent): OpenBalance {
+  return openBalanceFrom(student, loadMasters(), loadFees());
+}
+
+/** GET /api/data/views/certificate-dues → data. */
+export type CertificateDuesView = { studentId: string } & OpenBalance;
+
+/**
+ * The server's answer for one child's open dues (GET
+ * /api/data/views/certificate-dues), as the gate may use it:
+ *   known    the server computed it from the whole fee book;
+ *   checking not answered yet;
+ *   role     the server will not answer this person (401/403);
+ *   failed   the server could not answer just now (503, network).
+ */
+export type CertificateDuesAnswer =
+  | ({ state: "known" } & OpenBalance)
+  | { state: "checking" }
+  | { state: "role" }
+  | { state: "failed" };
+
+/**
+ * What the gate decides from.
+ *
+ * `server` — the server's answer (above).
+ * `bookIsFull` — this screen's Masters book is the FULL one (scope "full").
+ * A person without the Masters grant is answered with the teaching subset:
+ * fee groups, heads, structure and grants withheld. A figure computed from
+ * that book is ₹0 for every child — never a fact (21 Oct 2026: it let a TC
+ * or a no-dues certificate through for a child who owed fees). Only a full
+ * book's own figure is counted, and then only as a second opinion: the larger
+ * of the two decides, so the gate is never looser than it was for the office.
+ */
+export type CertificateDuesInput = {
+  server: CertificateDuesAnswer;
+  bookIsFull: boolean;
+};
+
+export const DUES_UNKNOWN_FOR_ROLE =
+  "Fee dues could not be checked for your role — ask the office";
+export const DUES_CHECK_FAILED =
+  "Fee dues could not be checked just now — try again";
+export const DUES_CHECKING = "Checking fee dues…";
+
+/** Certificates that state, or are only issued when, the child's fees are clear. */
+export function certificateNeedsDuesCheck(kind: CertificateKind): boolean {
+  return kind === "tc" || kind === "fee_clearance";
+}
+
+export type ResolvedCertificateDues =
+  | ({
+      known: true;
+      /** This screen's own figure, when its book is full and it differs from the server's. */
+      screenDiffers: OpenBalance | null;
+    } & OpenBalance)
+  | { known: false; state: "checking" | "role" | "failed" };
+
+/**
+ * Open dues for the gate: the server's answer, or unknown. Never a partial
+ * book's ₹0. With a full book the larger of its figure and the server's is
+ * used.
+ */
+export function resolveCertificateDues(
+  student: SisStudent,
+  input: CertificateDuesInput,
+  localImpl: (s: SisStudent) => OpenBalance = studentOpenBalance,
+): ResolvedCertificateDues {
+  const server = input.server;
+  if (server.state !== "known") return { known: false, state: server.state };
+  const fromServer: OpenBalance = {
+    openBalancePaise: server.openBalancePaise,
+    openDueCount: server.openDueCount,
+  };
+  if (!input.bookIsFull) return { known: true, screenDiffers: null, ...fromServer };
+  const local = localImpl(student);
+  const differs =
+    local.openBalancePaise !== fromServer.openBalancePaise ||
+    local.openDueCount !== fromServer.openDueCount;
+  const larger = local.openBalancePaise > fromServer.openBalancePaise ? local : fromServer;
+  return { known: true, screenDiffers: differs ? local : null, ...larger };
+}
+
 export type CertEligibility = {
-  openBalancePaise: number;
-  openDueCount: number;
+  /** Null = not known (the server did not answer) — never shown or used as ₹0. */
+  openBalancePaise: number | null;
+  openDueCount: number | null;
+  /** Why the dues are not known, when they are not. */
+  duesUnknown: "checking" | "role" | "failed" | null;
   canIssue: boolean;
   requiresOverride: boolean;
   blockers: string[];
@@ -750,8 +847,12 @@ export type CertEligibility = {
 export function certificateEligibility(
   student: SisStudent,
   kind: CertificateKind,
+  duesInput: CertificateDuesInput,
 ): CertEligibility {
-  const { openBalancePaise, openDueCount } = studentOpenBalance(student);
+  const dues = resolveCertificateDues(student, duesInput);
+  const openBalancePaise = dues.known ? dues.openBalancePaise : null;
+  const openDueCount = dues.known ? dues.openDueCount : null;
+  const owing = dues.known && dues.openDueCount > 0;
   const blockers: string[] = [];
   const warnings: string[] = [];
   let canIssue = true;
@@ -763,19 +864,40 @@ export function certificateEligibility(
     );
   }
 
-  if (kind === "tc" && openDueCount > 0) {
+  // A TC prints "dues paid up to" and a fee clearance says "no outstanding
+  // fee dues": neither is issued on dues nobody could check.
+  if (certificateNeedsDuesCheck(kind) && !dues.known) {
+    canIssue = false;
+    blockers.push(
+      dues.state === "role"
+        ? DUES_UNKNOWN_FOR_ROLE
+        : dues.state === "failed"
+          ? DUES_CHECK_FAILED
+          : DUES_CHECKING,
+    );
+  }
+
+  if (dues.known && dues.screenDiffers) {
+    warnings.push(
+      `This screen's copy shows ${formatInr(dues.screenDiffers.openBalancePaise)} open, the fee office's records ${formatInr(
+        duesInput.server.state === "known" ? duesInput.server.openBalancePaise : 0,
+      )} — the larger is used`,
+    );
+  }
+
+  if (kind === "tc" && owing) {
     canIssue = false;
     requiresOverride = true;
     blockers.push(
-      `Open dues ${formatInr(openBalancePaise)} — settle via Fee Adjustments (leave write-off) or collect before TC`,
+      `Open dues ${formatInr(openBalancePaise ?? 0)} — settle via Fee Adjustments (leave write-off) or collect before TC`,
     );
   }
 
   if (kind === "fee_clearance") {
-    if (openDueCount > 0) {
+    if (owing) {
       canIssue = false;
       blockers.push(
-        `Open dues ${formatInr(openBalancePaise)} — clear fees before issuing no-dues`,
+        `Open dues ${formatInr(openBalancePaise ?? 0)} — clear fees before issuing no-dues`,
       );
     }
   } else if (kind === "fees_paid") {
@@ -795,9 +917,9 @@ export function certificateEligibility(
       warnings.push(
         `Principal override active until ${hold.override.expiresOn}: ${hold.override.reason}`,
       );
-    } else if (openDueCount > 0 && kind !== "fees_paid") {
+    } else if (owing && kind !== "fees_paid") {
       warnings.push(
-        `Open dues ${formatInr(openBalancePaise)} — stage clear of this hold for now`,
+        `Open dues ${formatInr(openBalancePaise ?? 0)} — stage clear of this hold for now`,
       );
     }
   }
@@ -805,6 +927,7 @@ export function certificateEligibility(
   return {
     openBalancePaise,
     openDueCount,
+    duesUnknown: dues.known ? null : dues.state,
     canIssue,
     requiresOverride,
     blockers,
@@ -833,6 +956,12 @@ export type IssueCertificateInput = {
   conduct?: string;
   remarks?: string;
   overrideDues?: boolean;
+  /**
+   * The child's open dues: the server's answer and whether this screen's
+   * Masters book is the full one (certificateEligibility). Required — a TC or
+   * a fee clearance is refused when the dues could not be checked.
+   */
+  dues: CertificateDuesInput;
   inactivateOnTc?: boolean;
   /** Override snapshot PEN / APAAR when correcting at issue time */
   pen?: string;
@@ -858,7 +987,7 @@ export function issueCertificate(
   const student = sis.students.find((s) => s.id === input.studentId);
   if (!student) return { ok: false, error: "Student not found" };
 
-  const eligibility = certificateEligibility(student, input.kind);
+  const eligibility = certificateEligibility(student, input.kind, input.dues);
   if (!eligibility.canIssue) {
     return {
       ok: false,
@@ -903,6 +1032,8 @@ export function issueCertificate(
   const ay = student.academicYearCode || DEFAULT_AY;
   const classLabel = classLabelForStudent(student);
   const issuedOn = input.issuedOn || todayIso();
+  // Unknown dues (only possible for a certificate that does not state them —
+  // the gate refused the others) are recorded as not cleared, never as ₹0.
   const duesCleared = eligibility.openDueCount === 0;
   const lastClass = input.lastClassStudied?.trim() || classLabel;
   const promoted = input.promotedTo?.trim() || "";
@@ -951,7 +1082,9 @@ export function issueCertificate(
             tcPatch.duesPaidUpto ||
             (duesCleared
               ? monthNameFromIso(input.leavingDate || issuedOn)
-              : `Outstanding ${formatInr(eligibility.openBalancePaise)}`),
+              : eligibility.openBalancePaise === null
+                ? ""
+                : `Outstanding ${formatInr(eligibility.openBalancePaise)}`),
           feeConcession: tcPatch.feeConcession,
           workingDays: tcPatch.workingDays,
           daysPresent: tcPatch.daysPresent,
@@ -991,7 +1124,7 @@ export function issueCertificate(
     customTitle: input.customTitle?.trim() || "",
     customBody: input.customBody?.trim() || "",
     aiGenerated: !!input.aiGenerated,
-    openBalancePaise: eligibility.openBalancePaise,
+    openBalancePaise: eligibility.openBalancePaise ?? 0,
     duesCleared,
     overrideDues: !!input.overrideDues && eligibility.requiresOverride,
     issuedOn,

@@ -1269,6 +1269,21 @@ on the stack). Local on the fix: single-dirs 34/34, transport-paid-month 8/8. No
 dues" and the TC/no-dues gate still read the page copy inside `lib/certificates.ts` (2.2) — for a non-Masters holder that is
 the teaching subset too, unchanged by this PR.
 
+**Certificates TC / no-dues gate (2.1i follow-up, money).** *(Built 21 Oct 2026, PR #701.)* The gate no longer decides
+from the page copy. `GET /api/data/views/certificate-dues?studentId=…` (Certificates create, its "Issue & register"
+function, or Fees view; mirror secret refused; 403 / 404 / 503, never ₹0) counts one child's open dues on the server from
+the inputs every server dues figure uses (school mirror + transport + fee adjustments — `lib/certificateDues.server.ts`,
+`openBalanceFrom` shared with the screen). `certificateEligibility(student, kind, {server, bookIsFull})` /
+`issueCertificate({…, dues})`: a TC or fee clearance with no server answer (checking / role / failed) is REFUSED ("Fee dues
+could not be checked for your role — ask the office"); with a full Masters book the larger of the screen's figure and the
+server's decides (never looser than before for the office); dues for other kinds are `null` when unknown, recorded as not
+cleared. Issue & print re-asks with `fresh=1` (forced mirror + inputs re-read) for TC / fee clearance. Step 5 shows "Open
+dues: not shown for your role" / "could not load · Try again" instead of ₹0. Proof: `test:certificate-dues-gate` (in CI and
+verify; 13 FAIL on old) and `e2e/specs/certificates-dues-gate.spec.ts` (own project `cert-gate`, runs after every writer —
+seeding a tuition structure switches on the built-in 2026-27 structures for every class; a fixture "Certificates clerk"
+role: Students + Certificates, no Masters/Fees/Transport): 10/10 on the fix, 5 FAIL on old (₹0 shown, Issue enabled; old
+code issued the fee clearance at issue time).
+
 **2.2 Masters and staff editing write rows.** `MastersWorkspace` and its panels write through
 `useErpMutation` → `desk_slice_row_write` / `desk_slice_object_write` (one subject, one
 class-subject link, one section, one fee head at a time). The 14 non-Masters `saveMasters`
