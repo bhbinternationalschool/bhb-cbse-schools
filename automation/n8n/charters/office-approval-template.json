@@ -1,0 +1,56 @@
+{
+  "_about": "Meta message template the staff room sends when the director's 24-hour window is closed. Generated from the ERP's seed `staff_office_approval` (apps/web/src/lib/waTemplates.ts) with buildMetaTemplateCreatePayload — the ERP's template autopilot submits it to Meta on its own within an hour of deploy; this file is the exact payload for a manual submission (README §8).",
+  "_send": "POST /api/wa/dispatch with template { name: 'bhb_office_approval', language: 'en', variableKeys: ['draftId','draftSummary'], variables: { draftId, draftSummary }, quickReplyPayloads: ['Approve <id>', 'Reject <id>'] } — a tap then arrives as the payload, which the poller reads like a typed reply.",
+  "en": {
+    "name": "bhb_office_approval",
+    "language": "en",
+    "category": "UTILITY",
+    "components": [
+      {
+        "type": "BODY",
+        "text": "✉️ Draft #{{1}} from the school office needs your decision.\n\n{{2}}",
+        "example": {
+          "body_text": [
+            [
+              "42",
+              "To: Mrs. Sharma | Subject: Re: TC request | Dear Mrs. Sharma, the transfer certificate will be ready on Friday."
+            ]
+          ]
+        }
+      },
+      {
+        "type": "BUTTONS",
+        "buttons": [
+          { "type": "QUICK_REPLY", "text": "✅ Approve" },
+          { "type": "QUICK_REPLY", "text": "❌ Reject" }
+        ]
+      }
+    ]
+  },
+  "hi": {
+    "name": "bhb_office_approval",
+    "language": "hi",
+    "category": "UTILITY",
+    "components": [
+      {
+        "type": "BODY",
+        "text": "✉️ विद्यालय कार्यालय का ड्राफ्ट #{{1}} आपके निर्णय की प्रतीक्षा में है।\n\n{{2}}",
+        "example": {
+          "body_text": [
+            [
+              "42",
+              "To: Mrs. Sharma | Subject: Re: TC request | Dear Mrs. Sharma, the transfer certificate will be ready on Friday."
+            ]
+          ]
+        }
+      },
+      {
+        "type": "BUTTONS",
+        "buttons": [
+          { "type": "QUICK_REPLY", "text": "✅ स्वीकृत" },
+          { "type": "QUICK_REPLY", "text": "❌ अस्वीकृत" }
+        ]
+      }
+    ]
+  }
+}

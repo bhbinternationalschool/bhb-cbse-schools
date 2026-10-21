@@ -154,17 +154,20 @@ Two triggers in one workflow.
 1. `Build: classify` → **Claude Haiku** classifies into `cbse / udise / vendor / parent / spam / other`, extracts a one-line summary, a deadline (if the mail states one) and the sender's language.
 2. `Switch: by route`
    - **parent / vendor** → `Build: draft` → **Claude Sonnet** writes the reply in the sender's language (Hindi in Devanagari, or English) → the draft is inserted in `office_tasks` (`to_role = director`, `approval_state = pending`, the Gmail ids and the draft in `payload`) → the director gets it on WhatsApp:
-     > ✉️ Draft #42 (parent, hi) … Reply APPROVE 42 to send, or REJECT 42.
+     > ✉️ Draft #42 (parent, hi) … Tap Approve or Reject — or reply APPROVE 42 / REJECT 42.  **[Approve 42] [Reject 42]**
+
+     One WhatsApp per draft, with two reply buttons (a draft longer than 1,000 characters goes out as text, then a short message carries the buttons). Outside the director's 24-hour window the same draft goes as the `bhb_office_approval` template with ✅ Approve / ❌ Reject quick replies — see §8.
    - **cbse / udise** → an `office_tasks` row for `academic_incharge`, with the deadline as `due_on`.
    - **everything else** (spam, other, items that need no reply, or a classification Claude could not produce) → an `office_notes` row.
 3. `Build: run status note` writes one `office_notes` row per run: how many mails, how many drafts waiting, routed, filed.
 
 **B. Director's decisions** (every 5 minutes)
 
-Reads pending drafts, then the director's inbound WhatsApp texts from
-`wa_messages` (the ERP logs every inbound message there), matches
-`APPROVE 42` / `REJECT 42` (also `ok`, `yes`, `haan`, `ठीक`, `no`, `nahi`, `नहीं`; a
-bare `APPROVE` works when exactly one draft is pending). Approve → the reply
+Reads pending drafts, then the director's inbound WhatsApp texts and button
+taps from `wa_messages` (the ERP logs every inbound message there; a tap is
+logged as its label with the button id in `button_id`), matches
+`Approve 42` / `Reject 42` — tapped or typed, also `ok`, `yes`, `haan`, `ठीक`,
+`no`, `nahi`, `नहीं`; a bare `APPROVE` works when exactly one draft is pending. Approve → the reply
 goes out through Gmail in the original thread → the task becomes
 `approved / done` → the director gets "✅ Sent reply #42". Reject → `rejected /
 cancelled`, "🚫 Draft #42 rejected". A reply that came in before the draft
@@ -209,7 +212,7 @@ them; arranging the substitution in the ERP remains the office's click.
 ## 5. Guardrails
 
 - **No direct ERP writes.** The workflows write exactly four tables: `office_tasks`, `office_notes`, `office_meetings`, `office_ai_usage`. ERP data (timetable, attendance, leave, fees, admissions, students, staff) is read-only to them; a change there goes through the ERP's screens and authenticated routes, by a person. The service-role key is in n8n because PostgREST has no narrower key; the convention is enforced by review of `scripts/build-workflows.mjs`, where every `sbInsert` / `sbPatchTask` names its table.
-- **Approval gate.** Anything addressed to a parent, a vendor, an official or the public is an `office_tasks` row with `approval_state = pending` and goes nowhere until the director replies `APPROVE <id>` on WhatsApp. Internal messages (the 6 am plan, the huddle minutes, acknowledgements) go to the director/principal only and are not gated.
+- **Approval gate.** Anything addressed to a parent, a vendor, an official or the public is an `office_tasks` row with `approval_state = pending` and goes nowhere until the director taps **Approve** (or replies `APPROVE <id>`) on WhatsApp. Internal messages (the 6 am plan, the huddle minutes, acknowledgements) go to the director/principal only and are not gated.
 - **WhatsApp only through the ERP.** `POST /api/wa/dispatch` with `x-wa-dispatch-secret`; the ERP applies opt-outs, the 24-hour rule and logs the message in `wa_messages`. No Meta token lives in n8n.
 - **Grounding.** Every charter carries the house rule: say "not known" rather than invent a fee, a date, a student or a staff member. Prompts hand the model only the data the workflow fetched; a reply the model cannot structure is filed as a note, never sent.
 - **Prompt injection.** Email bodies, notes and task text are content, not instructions — the house rules say so, and nothing an email says can reach a send without the director's APPROVE.
@@ -296,3 +299,42 @@ twice on a throwaway Postgres 16 with the repo's grant convention. Docker was
 not available on the build Mac, so `docker compose config` is the first
 thing to run on the VM; the compose file was parsed and its `${VARS}`
 cross-checked against `.env.example` instead.
+
+## 8. Approval buttons and the `bhb_office_approval` template
+
+The director decides a draft with a tap. Inside Meta's 24-hour window
+(the director wrote to the school number within a day) the Receptionist
+sends the draft through `POST /api/wa/dispatch` with
+`buttons: [{ id: "approve-42", title: "Approve 42" }, { id: "reject-42", title: "Reject 42" }]`
+— Meta's interactive reply buttons. A tap reaches the ERP webhook, which logs
+it in `wa_messages` as `body = "Approve 42"`, `button_id = "approve-42"`,
+`kind = "button"`; the 5-minute poller reads either column.
+
+Outside the window Meta refuses free text and buttons alike. The dispatch
+result then carries `windowClosed: true` and the chain resends the draft as
+the template named by `OFFICE_WA_APPROVAL_TEMPLATE`:
+
+- body `✉️ Draft #{{1}} from the school office needs your decision.\n\n{{2}}`;
+- two QUICK_REPLY buttons, ✅ Approve / ❌ Reject, sent with the payloads
+  `Approve 42` / `Reject 42` (`quickReplyPayloads`), so the tap arrives
+  with the draft number even though the label carries none.
+
+**Getting the template approved.** It is seeded in the ERP as
+`staff_office_approval` (`apps/web/src/lib/waTemplates.ts`, Meta name
+`bhb_office_approval`, en + hi). The ERP's template autopilot submits every
+seeded utility template that has never been sent to Meta, hourly, so after
+the ERP release that carries the seed it appears in **Masters → WhatsApp
+templates** as *pending* and turns *approved* when Meta clears it (usually
+within the hour; a status webhook updates the desk). Nothing to do unless it
+is still *draft* after a day — then, in the templates desk, open *Office
+draft needs a decision* and press **Submit to Meta**. For a submission by
+hand (Meta Business Suite → WhatsApp Manager → Message templates → Create),
+`charters/office-approval-template.json` is the exact payload for both
+languages. Until the template is approved the chain falls back to
+`OFFICE_WA_TEMPLATE` (the school notice) and the director types
+`APPROVE 42` as before.
+
+**Needs the ERP release with** `apps/web/src/lib/waReplyButtons.ts` (dispatch
+`buttons` / `quickReplyPayloads`, `windowClosed`) and the migration
+`20261022090000_wa_messages_button_id.sql` applied to the database before
+this workflow is imported — the poller selects `button_id`.

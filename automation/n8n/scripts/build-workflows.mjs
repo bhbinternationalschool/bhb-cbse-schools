@@ -314,24 +314,43 @@ return ${each ? "{ json: out }" : "[{ json: out }]"};
 }
 
 /**
- * WhatsApp through the ERP. The input item carries `$json.wa_text` and
- * `$json.wa_to` (array of 10-digit mobiles). Free text first; when Meta's
- * 24-hour window is closed and OFFICE_WA_TEMPLATE is set, the same text is
- * resent as that template's single body variable.
+ * WhatsApp through the ERP. Each input item carries `$json.wa_text` and
+ * `$json.wa_to` (array of 10-digit mobiles), optionally `wa_buttons`
+ * ([{ id, title }], ≤ 3 — Meta reply buttons under the text) and, for an
+ * approval request, `wa_approval` ({ draft_id, summary }). Free text (with
+ * its buttons) first; when Meta's 24-hour window is closed the dispatch
+ * result says so and the item is resent as a template — the approval
+ * template (OFFICE_WA_APPROVAL_TEMPLATE, quick replies that carry
+ * "Approve n" / "Reject n") for an approval, else OFFICE_WA_TEMPLATE.
  */
 function waChain(wf, prefix) {
   const build = code(
     wf,
     `${prefix}: build WhatsApp`,
     `
-const src = $input.first().json;
-const to = [...new Set((src.wa_to || []).map((m) => String(m || '').replace(/\\D/g, '').slice(-10)).filter((m) => m.length === 10))];
-const body = String(src.wa_text || '').slice(0, 4000);
-if (!to.length || !body) return [];
-return [{ json: { wa: {
-  module: 'notifications',
-  messages: to.map((mobile) => ({ mobile, body, urgent: true, messageId: 'office-' + Date.now() + '-' + mobile })),
-}, wa_text: body, wa_to: to } }];
+const items = $input.all().map((i) => i.json).filter((j) => j && (j.wa_text || j.wa_to));
+const ts = Date.now();
+const messages = []; const sources = [];
+items.forEach((src) => {
+  const to = [...new Set((src.wa_to || []).map((m) => String(m || '').replace(/\\D/g, '').slice(-10)).filter((m) => m.length === 10))];
+  const body = String(src.wa_text || '').slice(0, 4000);
+  if (!to.length || !body) return;
+  const buttons = Array.isArray(src.wa_buttons) && src.wa_buttons.length ? src.wa_buttons.slice(0, 3) : null;
+  const idx = sources.length;
+  sources.push({ idx, text: body, buttons, approval: src.wa_approval || null });
+  for (const mobile of to) {
+    const id = (n) => 'office-' + idx + '-' + n + '-' + ts + '-' + mobile;
+    if (!buttons) { messages.push({ mobile, body, urgent: true, messageId: id(0) }); continue; }
+    // Meta caps a reply-buttons body at 1024 characters. A longer draft goes
+    // out whole as text, then a short message carries the buttons.
+    if (body.length <= 1000) { messages.push({ mobile, body, buttons, urgent: true, messageId: id(0) }); continue; }
+    messages.push({ mobile, body, urgent: true, messageId: id(0) });
+    messages.push({ mobile, body: String(src.wa_buttons_lead || 'Your decision on the draft above?').slice(0, 1000), buttons, urgent: true, messageId: id(1) });
+  }
+});
+if (!messages.length) return [];
+return [{ json: { wa: { module: 'notifications', messages }, sources,
+  wa_text: sources.map((s) => s.text).join('\\n\\n'), wa_to: [...new Set(messages.map((m) => m.mobile))] } }];
 `,
   );
   const send = wf.add(
@@ -359,40 +378,65 @@ return [{ json: { wa: {
     wf,
     `${prefix}: template fallback?`,
     `
-// Meta refuses free text when the recipient has not written to the school
-// number in 24 hours. The ERP's dispatch route reports that per number.
+// Meta refuses free text — and reply buttons — when the recipient has not
+// written to the school number in 24 hours. The ERP's dispatch route says so
+// per message (windowClosed; older builds only in the error text).
 const res = $input.first().json;
 const built = $('${prefix}: build WhatsApp').first().json;
 const tpl = ($env.OFFICE_WA_TEMPLATE || '').trim();
-if (!tpl) return [];
-const failed = (res.results || []).filter((r) => r.status === 'failed' && /24h|template/i.test(String(r.error || '')));
+const approvalTpl = ($env.OFFICE_WA_APPROVAL_TEMPLATE || '').trim();
+if (!tpl && !approvalTpl) return [];
+const failed = (res.results || []).filter((r) => r.status === 'failed' && (r.windowClosed || /24h|template/i.test(String(r.error || ''))));
 if (!failed.length) return [];
 // Meta rejects newlines, tabs and 4+ spaces inside a template parameter.
 const flat = (v, max) => String(v || '').replace(/\\s*[\\r\\n\\t]+\\s*/g, ' | ').replace(/ {4,}/g, '   ').trim().slice(0, max);
-const raw = String(built.wa_text || '');
-// OFFICE_WA_TEMPLATE_KEYS lists the template's body variables in order.
+// Meta caps the rendered template at 1024 characters (error #132005). When
+// cutting, keep the tail so a closing line survives.
+const trim = (s, max) => (s.length > max ? s.slice(0, max - 160) + ' … ' + s.slice(-140) : s);
+// OFFICE_WA_TEMPLATE_KEYS lists the notice template's body variables in order.
 // One key: the whole text goes in it. Three keys (the ERP's school-notice
 // template: schoolName, noticeTitle, noticeBody): school name, first line, rest.
 const keys = ($env.OFFICE_WA_TEMPLATE_KEYS || '1').split(',').map((k) => k.trim()).filter(Boolean);
-const nl = raw.indexOf('\\n');
-const title = flat(nl > 0 ? raw.slice(0, nl) : raw, 80);
-// Meta caps the rendered template at 1024 characters (error #132005 "Translated
-// text too long"); the notice template's own text is ~140. Keep the body under
-// 700 and, when cutting, keep the tail so a trailing "Reply APPROVE n" survives.
-let restRaw = nl > 0 ? raw.slice(nl + 1) : raw;
-if (restRaw.length > 700) restRaw = restRaw.slice(0, 540) + ' … ' + restRaw.slice(-140);
-const rest = flat(restRaw, 700);
-let variables;
-if (keys.length >= 3) variables = { [keys[0]]: $env.OFFICE_SCHOOL_NAME || 'BHB International School', [keys[1]]: title, [keys[2]]: rest };
-else if (keys.length === 2) variables = { [keys[0]]: title, [keys[1]]: rest };
-else variables = { [keys[0]]: flat(raw, 1000) };
-return [{ json: { wa: {
-  module: 'notifications',
-  messages: failed.map((r) => ({
-    mobile: r.mobile, urgent: true, messageId: 'office-tpl-' + Date.now() + '-' + r.mobile,
-    template: { name: tpl, language: $env.OFFICE_WA_TEMPLATE_LANG || 'en', variableKeys: keys, variables },
-  })),
-} } }];
+const noticeMessage = (mobile, raw, tag) => {
+  if (!tpl) return null;
+  const nl = raw.indexOf('\\n');
+  const title = flat(nl > 0 ? raw.slice(0, nl) : raw, 80);
+  const rest = flat(trim(nl > 0 ? raw.slice(nl + 1) : raw, 700), 700);
+  let variables;
+  if (keys.length >= 3) variables = { [keys[0]]: $env.OFFICE_SCHOOL_NAME || 'BHB International School', [keys[1]]: title, [keys[2]]: rest };
+  else if (keys.length === 2) variables = { [keys[0]]: title, [keys[1]]: rest };
+  else variables = { [keys[0]]: flat(trim(raw, 1000), 1000) };
+  return { mobile, urgent: true, messageId: 'office-tpl-' + tag + '-' + Date.now() + '-' + mobile,
+    template: { name: tpl, language: $env.OFFICE_WA_TEMPLATE_LANG || 'en', variableKeys: keys, variables } };
+};
+// One template per (source, number): a draft that went out as text plus a
+// buttons message failed twice but is resent once.
+const sources = Array.isArray(built.sources) && built.sources.length ? built.sources : [{ idx: 0, text: String(built.wa_text || ''), approval: null }];
+const done = new Set(); const messages = [];
+for (const r of failed) {
+  const m = /^office-(\\d+)-/.exec(String(r.messageId || ''));
+  const src = sources[m ? Number(m[1]) : 0] || sources[0];
+  const key = src.idx + ':' + r.mobile;
+  if (done.has(key)) continue;
+  done.add(key);
+  const a = src.approval;
+  if (a && a.draft_id && approvalTpl) {
+    // bhb_office_approval: {{1}} draft id, {{2}} summary. Its two quick
+    // replies go out with the payloads "Approve n" / "Reject n", so a tap
+    // reaches the poller exactly like a typed reply.
+    const id = String(a.draft_id).replace(/\\D/g, '');
+    messages.push({ mobile: r.mobile, urgent: true, messageId: 'office-tpl-' + src.idx + '-' + Date.now() + '-' + r.mobile,
+      template: { name: approvalTpl, language: $env.OFFICE_WA_APPROVAL_TEMPLATE_LANG || 'en',
+        variableKeys: ['draftId', 'draftSummary'],
+        variables: { draftId: id, draftSummary: flat(trim(String(a.summary || src.text), 880), 880) },
+        quickReplyPayloads: ['Approve ' + id, 'Reject ' + id] } });
+    continue;
+  }
+  const n = noticeMessage(r.mobile, src.text, src.idx);
+  if (n) messages.push(n);
+}
+if (!messages.length) return [];
+return [{ json: { wa: { module: 'notifications', messages } } }];
 `,
   );
   const sendTpl = wf.add(
@@ -454,7 +498,7 @@ const TENANT = "{{ $env.OFFICE_TENANT_ID }}";
 function buildReceptionist() {
   const wf = new Workflow(
     "Office — Receptionist",
-    "Sorts every email to the school inbox (Haiku), drafts parent/vendor replies (Sonnet) for the director's APPROVE/REJECT on WhatsApp, routes CBSE/UDISE+ items to the Academic Incharge, logs the rest.",
+    "Sorts every email to the school inbox (Haiku), drafts parent/vendor replies (Sonnet) for the director's Approve/Reject tap on WhatsApp, routes CBSE/UDISE+ items to the Academic Incharge, logs the rest.",
   );
   const W = "receptionist";
 
@@ -590,19 +634,32 @@ return { json: { row } };
     wf,
     "Build: director approval message",
     `
+// One WhatsApp per draft, with Approve / Reject buttons the director taps
+// (a tap lands in wa_messages as "Approve 42" — what the poller reads). A
+// draft Claude could not write is a plain note without buttons.
 const rows = $input.all().map((i) => i.json);
-const lines = [];
+const out = [];
 for (const t of rows) {
   const p = t.payload || {};
-  if (p.draft_error) { lines.push('⚠️ Could not draft a reply for "' + p.in_reply_to_subject + '" (' + p.draft_error + '). Task #' + t.id + ' is open for the office.'); continue; }
-  lines.push('✉️ Draft #' + t.id + ' (' + p.category + ', ' + (p.language || '?') + ')\\nTo: ' + (p.to_name ? p.to_name + ' <' + p.to + '>' : p.to)
-    + '\\nSubject: ' + p.subject + '\\n\\n' + p.body
+  if (p.draft_error) {
+    out.push({ json: { wa_text: '⚠️ Could not draft a reply for "' + p.in_reply_to_subject + '" (' + p.draft_error + '). Task #' + t.id + ' is open for the office.', wa_to: [$env.DIRECTOR_WA_MOBILE] } });
+    continue;
+  }
+  const id = String(t.id);
+  const head = 'To: ' + (p.to_name ? p.to_name + ' <' + p.to + '>' : p.to) + '\\nSubject: ' + p.subject;
+  const text = '✉️ Draft #' + id + ' (' + p.category + ', ' + (p.language || '?') + ')\\n' + head
+    + '\\n\\n' + p.body
     + (p.open_questions && p.open_questions.length ? '\\n\\nOpen: ' + p.open_questions.join('; ') : '')
     + (p.note_for_director ? '\\nNote: ' + p.note_for_director : '')
-    + '\\n\\nReply APPROVE ' + t.id + ' to send, or REJECT ' + t.id + '.');
+    + '\\n\\nTap Approve or Reject — or reply APPROVE ' + id + ' / REJECT ' + id + '.';
+  out.push({ json: {
+    wa_text: text, wa_to: [$env.DIRECTOR_WA_MOBILE],
+    wa_buttons: [{ id: 'approve-' + id, title: 'Approve ' + id }, { id: 'reject-' + id, title: 'Reject ' + id }],
+    wa_buttons_lead: '✉️ Draft #' + id + ' above — your decision?',
+    wa_approval: { draft_id: id, summary: head + '\\n' + p.body },
+  } });
 }
-if (!lines.length) return [];
-return [{ json: { wa_text: lines.join('\\n\\n— — —\\n\\n'), wa_to: [$env.DIRECTOR_WA_MOBILE] } }];
+return out;
 `,
   );
   wf.link("Insert: approval task", buildDirectorWa);
@@ -670,7 +727,7 @@ return [{ json: { pending, since: oldest } }];
     wf,
     "Fetch: director replies",
     "wa_messages",
-    `tenant_id=eq.${TENANT}&mobile10=eq.{{ String($env.DIRECTOR_WA_MOBILE || '').replace(/\\D/g, '').slice(-10) }}&direction=eq.in&kind=eq.text&created_at=gte.{{ encodeURIComponent($json.since) }}&select=id,body,created_at&order=created_at.asc&limit=200`,
+    `tenant_id=eq.${TENANT}&mobile10=eq.{{ String($env.DIRECTOR_WA_MOBILE || '').replace(/\\D/g, '').slice(-10) }}&direction=eq.in&kind=in.(text,button)&created_at=gte.{{ encodeURIComponent($json.since) }}&select=id,body,button_id,created_at&order=created_at.asc&limit=200`,
   );
   const match = code(
     wf,
@@ -683,7 +740,9 @@ const APPROVE = /^\\s*(approve|approved|ok|okay|yes|send|haan|ha|हाँ|ह�
 const REJECT = /^\\s*(reject|rejected|no|cancel|nahi|nahin|नहीं|रद्द)(?![a-z])[^0-9]*#?\\s*(\\d+)?/i;
 const out = []; const decided = new Set();
 for (const r of replies) {
-  const body = String(r.body || '');
+  // A tap logs its label as body ("Approve 42") and its id ("approve-42") or
+  // template payload ("Approve 42") as button_id; either names the draft.
+  const body = String(r.button_id || r.body || '');
   let decision = null; let m = body.match(APPROVE);
   if (m) decision = 'approve'; else { m = body.match(REJECT); if (m) decision = 'reject'; }
   if (!decision) continue;
