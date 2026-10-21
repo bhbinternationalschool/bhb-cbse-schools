@@ -263,12 +263,12 @@ test("Print waits for the signatures: disabled with 'Loading signatures…' unti
     const row = page.locator("li", { has: page.getByRole("button", { name: /E2E-BON-1/ }) }).first();
     await row.waitFor({ state: "visible", timeout: 60_000 });
     await row.getByRole("button", { name: "Print", exact: true }).click();
-    const button = page.getByTestId("print-with-signatures");
-    await expect(button).toBeDisabled();
-    await expect(button).toHaveText("Loading signatures…");
     await page.waitForTimeout(1_500);
     expect(held).toBeGreaterThan(0);
     expect(await prints(page), "nothing printed while the signatures were outstanding").toEqual([]);
+    const button = page.getByTestId("print-with-signatures");
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveText("Loading signatures…");
     release();
     // Answered: the requested print goes out once, with both signatures on the sheet.
     await expect.poll(() => prints(page), { timeout: 15_000 }).toEqual([2]);
