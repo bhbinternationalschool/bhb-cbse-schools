@@ -23,6 +23,9 @@
  *                             own class; she is reached by the class
  *                             relationship ({staff}), not by the grant.
  *   { staffLeaveApprovers }   canManageStaffLeave — who decides staff leave
+ *   { owners }                the protected super-admins only (the director's
+ *                             logins): what only the owner may approve, e.g.
+ *                             a payout held for approval
  *
  * The protected super-admins (the director's logins) hold every grant; one
  * whose email is not on the roster is addressed by that email — the key the
@@ -52,7 +55,8 @@ export type AudienceRule =
   | { households: readonly string[] }
   | { permission: RbacModule; action: RbacAction; schoolWide?: boolean }
   | { feature: string; action: RbacAction; schoolWide?: boolean }
-  | { staffLeaveApprovers: true };
+  | { staffLeaveApprovers: true }
+  | { owners: true };
 
 export type AudienceContext = {
   masters: MastersState;
@@ -130,6 +134,10 @@ export function resolveAudience(
         (s) => hasFeaturePermission(s, ctx.masters, rule.feature, rule.action, ctx.rbac) && (!wide || schoolWide(s, ctx)),
       ))
         add(r);
+    } else if ("owners" in rule) {
+      const supers = new Set(ctx.superAdminEmails.map((e) => e.trim().toLowerCase()));
+      for (const st of activeStaff(ctx)) if (supers.has((st.email || "").trim().toLowerCase())) add({ type: "staff", id: st.id });
+      for (const r of offRosterOwners(ctx)) add(r);
     } else if ("staffLeaveApprovers" in rule) {
       for (const r of holders(ctx, (s) => canManageStaffLeave(s, ctx.masters, ctx.rbac))) add(r);
     }

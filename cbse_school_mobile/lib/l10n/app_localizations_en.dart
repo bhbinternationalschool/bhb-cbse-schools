@@ -2597,6 +2597,60 @@ class LEn extends L {
   }
 
   @override
+  String get schoolChatTitle => 'School chat';
+
+  @override
+  String get schoolChatGroups => 'Groups';
+
+  @override
+  String get schoolChatDirect => 'Direct chats';
+
+  @override
+  String get schoolChatClassTeacherThread => 'Message the class teacher';
+
+  @override
+  String get schoolChatNewMessage => 'Message a teacher';
+
+  @override
+  String get schoolChatNoMessages => 'No messages yet.';
+
+  @override
+  String get schoolChatNone =>
+      'No chats yet. A class or subject group appears once a teacher is assigned to it.';
+
+  @override
+  String get schoolChatWaiting => 'Waiting for review';
+
+  @override
+  String get schoolChatRemoved => 'Removed by the school';
+
+  @override
+  String get schoolChatMuted =>
+      'The school has muted you in this chat. You can still read messages.';
+
+  @override
+  String get schoolChatPaused =>
+      'The school has paused chat for this login. Please speak to the class teacher.';
+
+  @override
+  String get schoolChatSafety =>
+      'Messages are checked before others see them. Please be kind.';
+
+  @override
+  String schoolChatAsChild(String name) {
+    return 'Writing as $name';
+  }
+
+  @override
+  String get schoolChatAsParent => 'Writing as the parent';
+
+  @override
+  String get schoolChatGroupNoMessages => 'Group — no messages yet';
+
+  @override
+  String get schoolChatParentInbox => 'Parent messages to the class teacher';
+
+  @override
   String get bcAudienceAllParents => 'All parents';
 
   @override

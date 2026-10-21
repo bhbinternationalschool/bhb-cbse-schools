@@ -250,6 +250,7 @@ SELFTESTS=(
   test:class-channel-subject
   test:review-demo-hidden
   test:payment-link-reuse
+  test:payment-link-concurrent-save
   test:student-leave-status-guard
   test:ptm-row-stamps
   test:propel-robot
