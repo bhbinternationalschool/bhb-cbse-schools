@@ -105,9 +105,10 @@ async function main(): Promise<void> {
       ["l1", { id: "l1", classId: "c6", subjectId: "eng", _rev: 2 }],
       ["l3", { id: "l3", classId: "c7", subjectId: "eng", _rev: 1 }],
     ]);
-    const teacher = (_f: string, a: string) => ({ allowed: a !== "view" || true, ownClassesOnly: true });
+    type Access = (featureId: string, action: string) => { allowed: boolean; ownClassesOnly: boolean };
+    const teacher: Access = () => ({ allowed: true, ownClassesOnly: true });
     const own = new Set(["c6"]);
-    const run = (ops: object[], access = teacher, ownIds: Set<string> | null = own, mode: "module" | "function" = "function") =>
+    const run = (ops: object[], access: Access = teacher, ownIds: Set<string> | null = own, mode: "module" | "function" = "function") =>
       decideSliceOps({ feature, ops: ops as WriteOp<Row>[], stored, access, ownClassIds: ownIds, mode, classLabel: (c) => ({ c6: "Class 6", c7: "Class 7" })[c] ?? c });
     assert.ok(run([{ op: "upsert", id: "l1", base: "2", row: { periodsPerWeek: 6 } }]).ok, "edit in her class");
     assert.ok(run([{ op: "upsert", id: "l9", base: null, row: { classId: "c6", subjectId: "art" } }]).ok, "add in her class");

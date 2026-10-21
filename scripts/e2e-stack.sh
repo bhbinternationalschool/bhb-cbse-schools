@@ -10,6 +10,7 @@
 #   bash scripts/e2e-stack.sh check    the acceptance checks (apps/web/e2e/acceptance.ts,
 #                                      then e2e/versions.acceptance.ts — step 1.3,
 #                                      then e2e/write-kernel.acceptance.ts — step 1.5,
+#                                      then e2e/staff-kernel.acceptance.ts — step 2.2b,
 #                                      then every e2e/v1-*.acceptance.ts — step 4.1)
 #   bash scripts/e2e-stack.sh sql-test <file.sql>
 #                                      run a behavioural SQL test (supabase/tests)
@@ -321,6 +322,11 @@ cmd_check() {
   # teacher reach, slice and object writes, erp_versions moving). Puts back
   # everything it changes.
   in_web npx --yes tsx e2e/write-kernel.acceptance.ts
+  # data-layer 2.2b: staff records through the kernel, the protected staff
+  # fields, removed staff hidden by every reader, the old staff-roster route's
+  # guard and soft DELETE, a teacher's own-class class subjects. Puts back
+  # everything it changes.
+  in_web npx --yes tsx e2e/staff-kernel.acceptance.ts
   # data-layer 4.1: the mobile API's per-person routes, one file per converted
   # route (e2e/v1-*.acceptance.ts). Each seeds what it reads, reads the app's
   # log in $STATE, briefly revokes a table's SELECT to prove a failed read is
