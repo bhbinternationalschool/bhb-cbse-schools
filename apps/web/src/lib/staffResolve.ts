@@ -246,6 +246,11 @@ export type StaffFieldErrors = Partial<
   >
 >;
 
+/** The login username a staff record falls back to when none is typed. */
+export function defaultStaffLoginUsername(empCode: string): string {
+  return empCode.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
+}
+
 export function validateStaffProfile(
   draft: Pick<
     StaffRecord,
@@ -282,7 +287,11 @@ export function validateStaffProfile(
   if (ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
     errors.bankIfsc = "IFSC format: ABCD0XXXXXX";
   }
-  if (draft.loginEnabled && !draft.loginUsername.trim()) {
+  // A blank username is not an error while there is an employee code to
+  // default it from: Save fills it in (StaffProfileForm) and the field says
+  // "Defaults to emp code". Refusing it here kept Save from ever sending an
+  // edit for 29 of 35 staff (21 Oct 2026, hotfix/staff-editor-save).
+  if (draft.loginEnabled && !draft.loginUsername.trim() && !defaultStaffLoginUsername(draft.empCode)) {
     errors.loginUsername = "Username required when login is enabled";
   }
   return errors;

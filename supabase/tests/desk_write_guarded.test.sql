@@ -49,8 +49,10 @@ begin
        from public.desk_writable_tables where table_name = 'sis_households'),
     'sis_households names its change signal');
   perform pg_temp.check(
-    not exists (select 1 from public.desk_writable_tables where sync_meta_table is null),
-    'every writable table names a sync_meta table');
+    not exists (select 1 from public.desk_writable_tables where sync_meta_table is null
+                   -- erp_versions reads these three from the table itself (group 2), 2.2a
+                   and table_name not in ('sis_staff','sis_departments','sis_designations')),
+    'every writable table names a sync_meta table (or is one erp_versions reads directly)');
 
   -- ── Malformed batches are errors, never skipped ─────────────────────────
   perform pg_temp.check(pg_temp.state_of(t, 'sis_households', '[{"op":"upsert","row":{"code":"X"}}]') = '22023',

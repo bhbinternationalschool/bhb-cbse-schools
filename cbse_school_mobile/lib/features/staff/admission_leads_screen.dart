@@ -6,8 +6,7 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
-import "../modules/dictate_field.dart";
-import "../../core/api/school_whatsapp.dart";
+import "admission_sheets.dart";
 
 /// The counsellor's call list. Overdue first, because that is the order the
 /// day gets worked through: call, say what happened, set the next date.
@@ -47,6 +46,20 @@ class _AdmissionLeadsScreenState extends State<AdmissionLeadsScreen> {
       emptyIcon: Icons.how_to_reg_outlined,
       emptyText: context.l10n.nothingToCallRightNow,
       isEmpty: (l) => l.leads.isEmpty,
+      // A walk-in can be added from an empty list too — the button is not
+      // part of the list for exactly that reason.
+      floatingActionButton: (context, _, reload) =>
+          FloatingActionButton.extended(
+            heroTag: "add-walk-in-lead",
+            onPressed: () async {
+              Haptics.tap();
+              if (await showWalkInLeadSheet(context, widget.api)) {
+                await reload();
+              }
+            },
+            icon: const Icon(Icons.person_add_alt_1_outlined),
+            label: Text(context.l10n.admAddWalkInLead),
+          ),
       builder: (context, list, reload) => ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
@@ -90,6 +103,8 @@ class _AdmissionLeadsScreenState extends State<AdmissionLeadsScreen> {
           const SizedBox(height: 8),
           for (final l in list.leads)
             _LeadCard(api: widget.api, lead: l, reload: reload),
+          // Room for the floating button over the last card.
+          const SizedBox(height: 72),
         ],
       ),
     );
@@ -120,12 +135,6 @@ class _LeadCard extends StatelessWidget {
       "later" => ModuleTone.teal,
       _ => ModuleTone.gray,
     };
-    final text = Uri.encodeComponent(
-      "Namaste ${lead.guardianName}, this is from the school admissions office about ${lead.childName}"
-      "${lead.classSought.isEmpty ? "" : " for ${lead.classSought}"}. "
-      "May we help you with the admission?",
-    );
-
     return Card(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 12, 8, 6),
@@ -205,12 +214,13 @@ class _LeadCard extends StatelessWidget {
                 if (wa.length >= 10)
                   IconButton(
                     tooltip: context.l10n.whatsapp,
-                    onPressed: () => sendSchoolWhatsApp(
+                    // Opens the composer: the drafted text to check and edit,
+                    // and Send. Nothing goes out on this tap.
+                    onPressed: () => showLeadComposer(
                       context,
                       api,
-                      mobile: wa,
-                      familyKey: "admissions_followup",
-                      text: text,
+                      leadId: lead.id,
+                      guardianName: lead.guardianName,
                     ),
                     icon: const Icon(
                       Icons.chat_outlined,
@@ -230,156 +240,13 @@ class _LeadCard extends StatelessWidget {
   }
 
   Future<void> _log(BuildContext context) async {
-    final saved = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (_) => _LeadFollowupSheet(api: api, lead: lead),
+    final saved = await showLeadFollowupSheet(
+      context,
+      api,
+      leadId: lead.id,
+      guardianName: lead.guardianName,
+      childName: lead.childName,
     );
-    if (saved == true) await reload();
-  }
-}
-
-class _LeadFollowupSheet extends StatefulWidget {
-  const _LeadFollowupSheet({required this.api, required this.lead});
-
-  final ApiClient api;
-  final AdmissionLeadRow lead;
-
-  @override
-  State<_LeadFollowupSheet> createState() => _LeadFollowupSheetState();
-}
-
-class _LeadFollowupSheetState extends State<_LeadFollowupSheet> {
-  String _channel = "call";
-  String _outcome = "connected";
-  DateTime _next = DateTime.now().add(const Duration(days: 3));
-  final _note = TextEditingController();
-  bool _busy = false;
-
-  @override
-  void dispose() {
-    _note.dispose();
-    super.dispose();
-  }
-
-  String _iso(DateTime d) => d.toIso8601String().substring(0, 10);
-
-  Future<void> _save() async {
-    setState(() => _busy = true);
-    try {
-      await widget.api.logLeadFollowup(
-        leadId: widget.lead.id,
-        channel: _channel,
-        outcome: _outcome,
-        note: _note.text.trim(),
-        nextFollowUpAt: _iso(_next),
-      );
-      Haptics.success();
-      if (mounted) Navigator.pop(context, true);
-    } on ApiException catch (e) {
-      Haptics.warning();
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(e.message)));
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        20,
-        16,
-        20,
-        MediaQuery.viewInsetsOf(context).bottom + 20,
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              "Call with ${widget.lead.guardianName}",
-              style: AppText.titleMediumInk,
-            ),
-            Text(
-              "about ${widget.lead.childName}",
-              style: AppText.bodySmallMuted,
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 6,
-              children: [
-                for (final (v, l) in const [
-                  ("call", "Called"),
-                  ("whatsapp", "WhatsApp"),
-                  ("visit", "Visited"),
-                ])
-                  ChoiceChip(
-                    label: Text(l, style: AppText.bodySmall),
-                    selected: _channel == v,
-                    onSelected: (_) => setState(() => _channel = v),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              children: [
-                for (final (v, l) in const [
-                  ("connected", "Spoke"),
-                  ("no_answer", "No answer"),
-                  ("busy", "Busy"),
-                  ("visit_scheduled", "Visit fixed"),
-                  ("not_interested", "Not interested"),
-                  ("wrong_number", "Wrong number"),
-                  ("admitted", "Admitted"),
-                ])
-                  ChoiceChip(
-                    label: Text(l, style: AppText.bodySmall),
-                    selected: _outcome == v,
-                    onSelected: (_) => setState(() => _outcome = v),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: () async {
-                final d = await showDatePicker(
-                  context: context,
-                  initialDate: _next,
-                  firstDate: DateTime.now(),
-                  lastDate: DateTime.now().add(const Duration(days: 365)),
-                );
-                if (d != null) setState(() => _next = d);
-              },
-              icon: const Icon(Icons.event_outlined, size: 16),
-              label: Text("Call again on ${formatDateLabel(_iso(_next))}"),
-            ),
-            const SizedBox(height: 8),
-            DictateField(
-              label: context.l10n.whatWasSaid,
-              controller: _note,
-              maxLines: 2,
-              textCapitalization: TextCapitalization.sentences,
-            ),
-            const SizedBox(height: 14),
-            FilledButton(
-              onPressed: _busy ? null : _save,
-              child: Text(_busy ? "Saving…" : "Save"),
-            ),
-          ],
-        ),
-      ),
-    );
+    if (saved) await reload();
   }
 }

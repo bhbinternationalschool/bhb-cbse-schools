@@ -17,6 +17,9 @@
  *     refuses ambiguity and reversed vouchers.
  *  6. Fleet Edge: a re-sent 30-minute window counts once; "NA" windows follow
  *     the tracker that reported the plate; no windows → no figure.
+ *  7. The per-bus totals follow the period the fill list shows (21 Oct 2026):
+ *     a fill before From or after To — even in the same month — is not in
+ *     fills, quantity, ₹, km or km per unit; Fleet Edge counts the same dates.
  */
 
 import assert from "node:assert/strict";
@@ -25,7 +28,9 @@ import {
   accountsStatus,
   buildFuelVoucher,
   busMonthTotals,
+  busPeriodTotals,
   fleetEdgeMonthByVehicle,
+  fleetEdgeRangeByVehicle,
   importedFillId,
   istDayOf,
   kmBetweenFills,
@@ -388,6 +393,73 @@ const line = (lineId: string, narration: string, extra: Partial<FuelVoucherLine>
   ];
   const m = fleetEdgeMonthByVehicle({ month: "2026-10", vehicles: [{ id: "magic2", registrationNo: "UP65RT9825" }], rows });
   assert.deepEqual(m.get("magic2"), { km: 4, fuelUsed: 0.3, windows: 1 }, "latest copy of a revised window, counted once");
+}
+
+/* 7. the period, not the month */
+{
+  // One bus, October: fills on 2, 8, 15, 22 and 29 Oct (odometer every time),
+  // one in late September. The screen shows 5–20 Oct.
+  const fills = [
+    f("p0", "bus", "2026-09-28", 1000, { quantity: 6, amountPaise: 50_000 }),
+    f("p1", "bus", "2026-10-02", 1100, { quantity: 7, amountPaise: 60_000 }), // before From
+    f("p2", "bus", "2026-10-08", 1250, { quantity: 8, amountPaise: 70_000 }), // in
+    f("p3", "bus", "2026-10-15", 1450, { quantity: 9, amountPaise: 80_000 }), // in
+    f("p4", "bus", "2026-10-16", 1500, { quantity: 1, amountPaise: 9_000, voided: true }), // in, voided
+    f("p5", "bus", "2026-10-22", 1600, { quantity: 10, amountPaise: 90_000 }), // after To
+    f("p6", "bus", "2026-10-29", 1700, { quantity: 11, amountPaise: 99_000 }), // after To
+  ];
+  const [t] = busPeriodTotals({
+    from: "2026-10-05",
+    to: "2026-10-20",
+    vehicleIds: ["bus"],
+    fills,
+    dayLogKm: new Map(),
+    fleetEdge: new Map(),
+  });
+  assert.ok(t);
+  assert.equal(t.from, "2026-10-05");
+  assert.equal(t.to, "2026-10-20");
+  assert.equal(t.fills, 2, "only p2 and p3 — not the October fills either side of the range");
+  assert.equal(t.kg, 17);
+  assert.equal(t.amountPaise, 150_000);
+  // Km since the previous fill, as the list row shows it: p2 150 (from p1,
+  // which is before From — still the distance since the last fill), p3 200.
+  assert.equal(t.km, 350);
+  assert.equal(t.kmSource, "fill_odometer");
+  assert.equal(t.kmPerUnit, 20.59);
+  assert.equal(t.rupeesPerKm, 4.29);
+
+  // Both ends included: a one-day period holds that day's fill.
+  const [d] = busPeriodTotals({ from: "2026-10-15", to: "2026-10-15", vehicleIds: ["bus"], fills, dayLogKm: new Map(), fleetEdge: new Map() });
+  assert.equal(d!.fills, 1);
+  assert.equal(d!.amountPaise, 80_000);
+  assert.equal(d!.km, 200);
+
+  // A period across months counts both sides of the month end.
+  const [x] = busPeriodTotals({ from: "2026-09-25", to: "2026-10-03", vehicleIds: ["bus"], fills, dayLogKm: new Map(), fleetEdge: new Map() });
+  assert.equal(x!.fills, 2);
+  assert.equal(x!.amountPaise, 110_000);
+
+  // The whole month is the month (busMonthTotals is the same rule).
+  const [m] = busMonthTotals({ month: "2026-10", vehicleIds: ["bus"], fills, dayLogKm: new Map(), fleetEdge: new Map() });
+  assert.equal(m!.fills, 5);
+  assert.equal(m!.amountPaise, 399_000);
+  assert.equal(m!.from, "2026-10-01");
+  assert.equal(m!.to, "2026-10-31");
+  const [feb] = busMonthTotals({ month: "2028-02", vehicleIds: ["bus"], fills: [], dayLogKm: new Map(), fleetEdge: new Map() });
+  assert.equal(feb!.to, "2028-02-29");
+
+  // Fleet Edge windows: only those starting on the period's IST dates.
+  const ev = (from: string, km: number) => ({ vehicleRef: "MATBUS1", registrationNumber: "UP65AB1234", windowFrom: from, receivedAt: from, km, fuelUsed: 1 });
+  const rows = [
+    ev("2026-10-04T18:29:00Z", 1), // 4 Oct 23:59 IST — out
+    ev("2026-10-04T18:30:00Z", 2), // 5 Oct 00:00 IST — in
+    ev("2026-10-12T03:00:00Z", 4), // in
+    ev("2026-10-20T18:00:00Z", 8), // 20 Oct 23:30 IST — in
+    ev("2026-10-20T18:30:00Z", 16), // 21 Oct IST — out
+  ];
+  const fe = fleetEdgeRangeByVehicle({ from: "2026-10-05", to: "2026-10-20", vehicles: [{ id: "bus", registrationNo: "UP65AB1234" }], rows });
+  assert.deepEqual(fe.get("bus"), { km: 14, fuelUsed: 3, windows: 3 });
 }
 
 console.log("transportFuelRegister selftest: ok");
