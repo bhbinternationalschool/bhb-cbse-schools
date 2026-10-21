@@ -272,6 +272,14 @@ export const HUB_GROUPS: HubGroup[] = [
         tone: "violet",
       },
       {
+        href: "/school-chat",
+        title: "School chat",
+        blurb: "Class & subject groups",
+        detail: "Class and subject groups with their teachers, staff and family chats. Children's messages are checked before others see them; moderators review, mute and block.",
+        icon: MessagesSquare,
+        tone: "sky",
+      },
+      {
         href: "/homework",
         title: "Homework",
         blurb: "Class diary",

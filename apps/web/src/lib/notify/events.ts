@@ -368,3 +368,86 @@ export function noticePublished(p: {
     data: { noticeId: p.noticeId },
   };
 }
+
+// ── More messages and approvals (follow-up, 20 Oct 2026) ───────────────────
+
+/**
+ * A WhatsApp message the bot handed to the office (lib/waRelay.server.ts) →
+ * the staff whose phones are the relay route for its category; with no such
+ * person on the roster, the school-wide office (notices.edit — the inbox is
+ * the office's: lib/apiRouteAuth requireWaStaffApi).
+ */
+export function messageRelayed(p: { relayId: string; code: string; categoryLabel: string; senderName: string; text: string; routeStaffIds: readonly string[] }): NotifyEvent {
+  return {
+    kind: "message.relayed",
+    key: `relay:${p.relayId}`,
+    audience: p.routeStaffIds.length ? [{ staff: p.routeStaffIds }] : [{ permission: "notices", action: "edit", schoolWide: true }],
+    title: { en: `WhatsApp · ${p.categoryLabel} · ${p.senderName || "Unknown"}` },
+    body: { en: `${short(p.text || "(attachment)", 140)} · code ${p.code}` },
+    link: "/notifications",
+    webLink: "/comms?tab=whatsapp",
+    data: { relayId: p.relayId, code: p.code },
+    actor: p.senderName,
+  };
+}
+
+/** A message in the ERP's own chat (staff ↔ staff, staff ↔ family, class announcements) → the thread's other members. */
+export function erpChatMessage(p: {
+  messageId: string;
+  threadId: string;
+  threadTitle: string;
+  senderName: string;
+  senderStaffId?: string;
+  senderHouseholdId?: string;
+  staffIds: readonly string[];
+  householdIds: readonly string[];
+  text: string;
+}): NotifyEvent {
+  return {
+    kind: "message.staff_chat",
+    key: `erp_chat:${p.messageId}`,
+    audience: [{ staff: p.staffIds }, { households: p.householdIds }],
+    exclude: [
+      ...(p.senderStaffId ? [{ type: "staff" as const, id: p.senderStaffId }] : []),
+      ...(p.senderHouseholdId ? [{ type: "parent" as const, id: p.senderHouseholdId }] : []),
+    ],
+    title: { en: `${p.senderName} · ${p.threadTitle}`, hi: `${p.senderName} · ${p.threadTitle}` },
+    body: { en: short(p.text, 140), hi: short(p.text, 140) },
+    link: "/notifications",
+    webLink: "/home",
+    data: { threadId: p.threadId },
+    actor: p.senderName,
+    group: { key: `erp_chat:${p.threadId}`, windowMinutes: 120, title: { en: `{n} messages · ${p.threadTitle}`, hi: `{n} संदेश · ${p.threadTitle}` } },
+  };
+}
+
+/** A payout (vendor bill, voucher, visiting fee) was held for the owner → the owner's logins only. */
+export function payoutHeld(p: { requestId: string; payeeName: string; amountLabel: string; reason: string; requestedBy: string }): NotifyEvent {
+  return {
+    kind: "payout.held",
+    key: `payout:${p.requestId}:held`,
+    audience: [{ owners: true }],
+    title: { en: `Payment to approve · ${p.amountLabel}` },
+    body: { en: `${p.payeeName}${p.reason ? ` · ${short(p.reason, 80)}` : ""} · asked by ${p.requestedBy}` },
+    link: "/notifications",
+    webLink: "/accounts?tab=payouts",
+    data: { requestId: p.requestId },
+    actor: p.requestedBy,
+  };
+}
+
+/** The owner approved / turned down a held payout → whoever approves accounts school-wide (the people who asked). */
+export function payoutDecided(p: { requestId: string; payeeName: string; amountLabel: string; approved: boolean; decidedBy: string; decidedByStaffId?: string; note?: string }): NotifyEvent {
+  return {
+    kind: "payout.decided",
+    key: `payout:${p.requestId}:${p.approved ? "approved" : "rejected"}`,
+    audience: [{ permission: "accounts", action: "approve", schoolWide: true }],
+    exclude: p.decidedByStaffId ? [{ type: "staff", id: p.decidedByStaffId }] : [],
+    title: { en: `Payment ${p.approved ? "approved" : "turned down"} · ${p.amountLabel}` },
+    body: { en: `${p.payeeName} · by ${p.decidedBy}${p.note ? ` · ${short(p.note, 80)}` : ""}` },
+    link: "/notifications",
+    webLink: "/accounts?tab=payouts",
+    data: { requestId: p.requestId },
+    actor: p.decidedBy,
+  };
+}

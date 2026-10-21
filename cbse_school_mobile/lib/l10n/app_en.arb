@@ -97,8 +97,12 @@
   "leadRevisionHint": "Revise in the LEAD app: {book} → {chapter}",
   "@leadRevisionHint": {
     "placeholders": {
-      "book": {"type": "String"},
-      "chapter": {"type": "String"}
+      "book": {
+        "type": "String"
+      },
+      "chapter": {
+        "type": "String"
+      }
     }
   },
   "couldNotOpenLeadApp": "Could not open the LEAD app",
@@ -1065,10 +1069,22 @@
   "profAadhaarAdd": "Add",
   "profAadhaarCorrect": "Correct",
   "profAadhaarDialogTitle": "{who} — Aadhaar number",
-  "@profAadhaarDialogTitle": {"placeholders": {"who": {"type": "String"}}},
+  "@profAadhaarDialogTitle": {
+    "placeholders": {
+      "who": {
+        "type": "String"
+      }
+    }
+  },
   "profAadhaarInvalid": "This is not a valid 12-digit Aadhaar number — please check it.",
   "profAadhaarSaved": "Saved — XXXX-XXXX-{last4}",
-  "@profAadhaarSaved": {"placeholders": {"last4": {"type": "String"}}},
+  "@profAadhaarSaved": {
+    "placeholders": {
+      "last4": {
+        "type": "String"
+      }
+    }
+  },
   "profAadhaarUnchanged": "That number is already on record.",
   "profAadhaarKeptVerified": "The school has already verified this Aadhaar, so it was not changed. Please contact the school office.",
   "profDetailsOnRecord": "Details on record",
@@ -1513,7 +1529,16 @@
   "resultsOverallGrade": "Overall grade",
   "resultsRank": "Rank",
   "resultsRankOf": "{rank} of {size}",
-  "@resultsRankOf": {"placeholders": {"rank": {"type": "String"}, "size": {"type": "String"}}},
+  "@resultsRankOf": {
+    "placeholders": {
+      "rank": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
   "resultsClassAverage": "Class average",
   "resultsResult": "Result",
   "resultsAttendance": "Attendance",
@@ -1521,7 +1546,13 @@
   "resultsTeacherRemarks": "Class teacher's remarks",
   "resultsAbsentAll": "Absent in this examination",
   "resultsAbsentFor": "Absent for: {subjects}",
-  "@resultsAbsentFor": {"placeholders": {"subjects": {"type": "String"}}},
+  "@resultsAbsentFor": {
+    "placeholders": {
+      "subjects": {
+        "type": "String"
+      }
+    }
+  },
   "resultsAggregateNote": "Weighted result of the exams that count toward it.",
   "resultsNoMarks": "Marks for this exam are not ready yet. Please check again later.",
   "resultsHeld": "This report card is being held by the school office. Please contact the office.",
@@ -1530,7 +1561,36 @@
   "dateSheetTitle": "Date sheet",
   "dateSheetNone": "No upcoming exams have been published for this child yet.",
   "dateSheetMinutes": "{minutes} min",
-  "@dateSheetMinutes": {"placeholders": {"minutes": {"type": "String"}}},
+  "@dateSheetMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "schoolChatTitle": "School chat",
+  "schoolChatGroups": "Groups",
+  "schoolChatDirect": "Direct chats",
+  "schoolChatClassTeacherThread": "Message the class teacher",
+  "schoolChatNewMessage": "Message a teacher",
+  "schoolChatNoMessages": "No messages yet.",
+  "schoolChatNone": "No chats yet. A class or subject group appears once a teacher is assigned to it.",
+  "schoolChatWaiting": "Waiting for review",
+  "schoolChatRemoved": "Removed by the school",
+  "schoolChatMuted": "The school has muted you in this chat. You can still read messages.",
+  "schoolChatPaused": "The school has paused chat for this login. Please speak to the class teacher.",
+  "schoolChatSafety": "Messages are checked before others see them. Please be kind.",
+  "schoolChatAsChild": "Writing as {name}",
+  "@schoolChatAsChild": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "schoolChatAsParent": "Writing as the parent",
+  "schoolChatGroupNoMessages": "Group — no messages yet",
+  "schoolChatParentInbox": "Parent messages to the class teacher",
   "hcCreateNotice": "Create notice / news",
   "hcNoticeTitle": "Title",
   "hcNoticeMessage": "Message",
@@ -1550,7 +1610,13 @@
   "hcTodaysCollections": "Today's collections",
   "hcNothingCollectedToday": "Nothing has been collected today.",
   "hcByCashier": "by {name}",
-  "@hcByCashier": {"placeholders": {"name": {"type": "String"}}},
+  "@hcByCashier": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "hcStaffList": "Staff list",
   "hcStaffProfile": "Staff profile",
   "hcEmpCode": "Employee code",
@@ -1561,7 +1627,16 @@
   "hcNoOtherDetails": "No other details on record.",
   "hcChangeMobile": "Add / change mobile",
   "hcRosterMissingMobile": "{missing} of {total} staff have no mobile on record, so they cannot sign in to the staff app. Tap the red phone to add the number.",
-  "@hcRosterMissingMobile": {"placeholders": {"missing": {"type": "int"}, "total": {"type": "int"}}},
+  "@hcRosterMissingMobile": {
+    "placeholders": {
+      "missing": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
   "hcStaffPresentToday": "Staff present today",
   "hcStaffAbsentToday": "Staff absent today",
   "hcNoStaffPresent": "No one is marked present yet.",
@@ -1573,33 +1648,123 @@
   "hcNothingRecordedToday": "Nothing recorded today",
   "hcAuditNotLoaded": "Marks entry, leave decisions and similar work could not be loaded — pull down to try again.",
   "hcActivitySummary": "{active} of {total} staff have recorded work today",
-  "@hcActivitySummary": {"placeholders": {"active": {"type": "int"}, "total": {"type": "int"}}},
+  "@hcActivitySummary": {
+    "placeholders": {
+      "active": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
   "hcActPunchIn": "Punched in at {time}",
-  "@hcActPunchIn": {"placeholders": {"time": {"type": "String"}}},
+  "@hcActPunchIn": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "hcActPunchOut": "Punched out at {time}",
-  "@hcActPunchOut": {"placeholders": {"time": {"type": "String"}}},
+  "@hcActPunchOut": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "hcActRegisters": "Marked attendance ({count})",
-  "@hcActRegisters": {"placeholders": {"count": {"type": "int"}}},
+  "@hcActRegisters": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "hcActHomework": "Posted homework ({count})",
-  "@hcActHomework": {"placeholders": {"count": {"type": "int"}}},
+  "@hcActHomework": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "hcActMarks": "Entered marks for {qty} students",
-  "@hcActMarks": {"placeholders": {"qty": {"type": "int"}}},
+  "@hcActMarks": {
+    "placeholders": {
+      "qty": {
+        "type": "int"
+      }
+    }
+  },
   "hcActCoScholastic": "Co-scholastic ratings ({count})",
-  "@hcActCoScholastic": {"placeholders": {"count": {"type": "int"}}},
+  "@hcActCoScholastic": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "hcActClassSheet": "Updated the class sheet ({count})",
-  "@hcActClassSheet": {"placeholders": {"count": {"type": "int"}}},
+  "@hcActClassSheet": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "hcActStudentRecords": "Updated student records ({count})",
-  "@hcActStudentRecords": {"placeholders": {"count": {"type": "int"}}},
+  "@hcActStudentRecords": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "hcActFees": "Collected {amount} in {count} receipts",
-  "@hcActFees": {"placeholders": {"amount": {"type": "String"}, "count": {"type": "int"}}},
+  "@hcActFees": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "hcActReceiptEdit": "Edited receipts ({count})",
-  "@hcActReceiptEdit": {"placeholders": {"count": {"type": "int"}}},
+  "@hcActReceiptEdit": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "hcActLeaveApplied": "Applied for leave",
   "hcActStaffLeave": "Decided staff leave ({count})",
-  "@hcActStaffLeave": {"placeholders": {"count": {"type": "int"}}},
+  "@hcActStaffLeave": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "hcActStudentLeave": "Decided student leave ({count})",
-  "@hcActStudentLeave": {"placeholders": {"count": {"type": "int"}}},
+  "@hcActStudentLeave": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "hcActProfile": "Updated own profile",
   "hcActLastAt": "last at {time}",
-  "@hcActLastAt": {"placeholders": {"time": {"type": "String"}}}
+  "@hcActLastAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  }
 }

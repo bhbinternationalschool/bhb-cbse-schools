@@ -6,14 +6,13 @@ import { ChevronDown, LogOut, Pencil, Shield, UserRound } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { SessionSelector } from "@/components/shell/SessionSelector";
 import type { DemoSession } from "@/lib/auth";
-import { loadMasters } from "@/lib/masters";
 import {
   canConfigureRbac,
   inferRoleCodes,
-  loadRbac,
   resolveSessionRoles,
 } from "@/lib/rbac";
 import { resolveSessionStaff } from "@/lib/staffResolve";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { TENANT } from "@/lib/types";
 
 function initials(name: string) {
@@ -38,9 +37,17 @@ export function UserAccountMenu({
   const [showRoles, setShowRoles] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  const { staff, roleLabels, canManageRoles } = useMemo(() => {
-    const masters = loadMasters();
-    const rbac = loadRbac();
+  // The same copies the sidebar and the module gate decide with (data-layer
+  // 2.1f). Until they have loaded, no profile link and no role line — never
+  // a guess from the built-in defaults; they follow a roster or roles change
+  // without a reload (this used to be read once, when the menu mounted).
+  const access = useAccessData();
+  const { staff, roleLabels, canManageRoles, known } = useMemo(() => {
+    const masters = access.masters;
+    const rbac = access.rbac;
+    if (!masters || !rbac) {
+      return { staff: null, roleLabels: [] as string[], canManageRoles: false, known: false };
+    }
     const staffRow = resolveSessionStaff(session, masters);
     const roles = resolveSessionRoles(rbac, session, masters);
     const labels =
@@ -54,10 +61,14 @@ export function UserAccountMenu({
       staff: staffRow,
       roleLabels: [...new Set(labels.filter(Boolean))],
       canManageRoles: canConfigureRbac(session, masters, rbac),
+      known: true,
     };
-  }, [session]);
+  }, [session, access.masters, access.rbac]);
 
   const profileHref = staff ? `/staff/${staff.id}/edit` : null;
+  // Not known yet is not "none": say which.
+  const unknownHint =
+    access.status === "failed" ? "Your staff record did not load" : "Loading…";
   const myDocsHref = staff ? "/staff?tab=my_docs" : null;
 
   useEffect(() => {
@@ -150,7 +161,24 @@ export function UserAccountMenu({
                 Your roles
               </p>
               <ul className="mt-2 space-y-1">
-                {roleLabels.length ? (
+                {!known ? (
+                  <li className="text-xs text-[var(--muted)]">
+                    {access.status === "failed" ? (
+                      <>
+                        Your roles did not load.{" "}
+                        <button
+                          type="button"
+                          onClick={access.retry}
+                          className="font-semibold text-[var(--brand-deep)] underline"
+                        >
+                          Try again
+                        </button>
+                      </>
+                    ) : (
+                      "Loading your roles…"
+                    )}
+                  </li>
+                ) : roleLabels.length ? (
                   roleLabels.map((label) => (
                     <li
                       key={label}
@@ -197,7 +225,7 @@ export function UserAccountMenu({
                 <MenuButton
                   icon={<UserRound className="h-4 w-4" />}
                   label="Profile"
-                  hint="No staff profile linked"
+                  hint={known ? "No staff profile linked" : unknownHint}
                   disabled
                 />
               )}
@@ -213,7 +241,7 @@ export function UserAccountMenu({
                 <MenuButton
                   icon={<Pencil className="h-4 w-4" />}
                   label="Update profile"
-                  hint="No staff profile linked"
+                  hint={known ? "No staff profile linked" : unknownHint}
                   disabled
                 />
               )}
