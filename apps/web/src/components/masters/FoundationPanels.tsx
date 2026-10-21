@@ -312,6 +312,16 @@ export function SchoolProfilePanel({
   const p = state.schoolProfile;
   const [draft, setDraft] = useState(p);
   const [schoolStep, setSchoolStep] = useState<SchoolStep>("profile");
+  // The tables show the SAVED profile (the working form says "save to update
+  // tables above"). A profile saved elsewhere reaches this open panel with
+  // the next masters answer (data-layer 2.2c): the form follows it too, unless
+  // it holds unsaved typing — then the typing stays.
+  const [loaded, setLoaded] = useState(p);
+  useEffect(() => {
+    if (JSON.stringify(p) === JSON.stringify(loaded)) return;
+    setDraft((d) => (JSON.stringify(d) === JSON.stringify(loaded) ? p : d));
+    setLoaded(p);
+  }, [p, loaded]);
 
   function set<K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -335,14 +345,14 @@ export function SchoolProfilePanel({
             <dl className="divide-y divide-[var(--border)] text-sm">
               {(
                 [
-                  ["Legal name", draft.legalName],
-                  ["Display", draft.displayName],
-                  ["UDISE", draft.udiseCode || "—"],
-                  ["Board", `${BOARD_MODES.find((b) => b.value === draft.boardMode)?.label || draft.boardMode}${
-                    draft.cbseAffiliationInProcess ? " · CBSE affiliation under process" : ""
+                  ["Legal name", p.legalName],
+                  ["Display", p.displayName],
+                  ["UDISE", p.udiseCode || "—"],
+                  ["Board", `${BOARD_MODES.find((b) => b.value === p.boardMode)?.label || p.boardMode}${
+                    p.cbseAffiliationInProcess ? " · CBSE affiliation under process" : ""
                   }`],
-                  ["Affiliation", draft.affiliationNo || "—"],
-                  ["Address", [draft.address, draft.city, draft.state, draft.pincode].filter(Boolean).join(", ") || "—"],
+                  ["Affiliation", p.affiliationNo || "—"],
+                  ["Address", [p.address, p.city, p.state, p.pincode].filter(Boolean).join(", ") || "—"],
                 ] as const
               ).map(([k, v]) => (
                 <div
@@ -361,16 +371,16 @@ export function SchoolProfilePanel({
             <dl className="divide-y divide-[var(--border)] text-sm">
               {(
                 [
-                  ["Office phone", draft.phone || "—"],
-                  ["Mobile", draft.mobile || "—"],
-                  ["WhatsApp", draft.whatsapp || "—"],
-                  ["Email", draft.email || "—"],
-                  ["Website", draft.website || "—"],
-                  ["Facebook", draft.facebook || "—"],
-                  ["Instagram", draft.instagram || "—"],
-                  ["Google", draft.google || "—"],
-                  ["YouTube", draft.youtube || "—"],
-                  ["Collections UPI", draft.collectionsUpiVpa || "—"],
+                  ["Office phone", p.phone || "—"],
+                  ["Mobile", p.mobile || "—"],
+                  ["WhatsApp", p.whatsapp || "—"],
+                  ["Email", p.email || "—"],
+                  ["Website", p.website || "—"],
+                  ["Facebook", p.facebook || "—"],
+                  ["Instagram", p.instagram || "—"],
+                  ["Google", p.google || "—"],
+                  ["YouTube", p.youtube || "—"],
+                  ["Collections UPI", p.collectionsUpiVpa || "—"],
                 ] as const
               ).map(([k, v]) => (
                 <div
