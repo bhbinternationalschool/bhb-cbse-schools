@@ -1772,6 +1772,171 @@
   },
   "gamesHealthyNote": "Stars are for learning. Games rest during school hours and after 9 pm.",
   "gamesSeeLeaderboard": "See the leaderboard",
+  "admAddWalkInLead": "Add walk-in lead",
+  "admWalkInTitle": "New walk-in lead",
+  "admChildName": "Child's name",
+  "admClassSought": "Class sought",
+  "admParentName": "Parent's name",
+  "admMotherNameOptional": "Mother's name (optional)",
+  "admParentMobile": "Parent's mobile (10 digits)",
+  "admNotes": "Notes",
+  "admSourceWalkIn": "Source: walk-in",
+  "admSaveLead": "Save lead",
+  "admSaving": "Saving…",
+  "admFieldRequired": "{field} is required",
+  "@admFieldRequired": {
+    "placeholders": {
+      "field": {
+        "type": "String"
+      }
+    }
+  },
+  "admMobileTenDigits": "Mobile must be 10 digits",
+  "admWalkInSaved": "Lead {enquiryNo} added",
+  "@admWalkInSaved": {
+    "placeholders": {
+      "enquiryNo": {
+        "type": "String"
+      }
+    }
+  },
+  "admWalkInSavedLinked": "Lead {enquiryNo} added to a family already on file",
+  "@admWalkInSavedLinked": {
+    "placeholders": {
+      "enquiryNo": {
+        "type": "String"
+      }
+    }
+  },
+  "admOptionsNotLoaded": "Classes and fee heads could not be loaded: {reason}",
+  "@admOptionsNotLoaded": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "admComposerTitle": "Message to {name}",
+  "@admComposerTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "admComposerLoading": "Preparing the message…",
+  "admComposerYourWords": "Your message",
+  "admComposerInWindow": "The family wrote to the school in the last 24 hours, so your message can go as written. Check or edit it, then tap Send.",
+  "admComposerOutOfWindow": "WhatsApp delivers your own words only within 24 hours of the family's last message to the school. Outside that, only the school's approved message below can be sent.",
+  "admComposerApproved": "School's approved message",
+  "admComposerApprovedNote": "Approved by WhatsApp in these exact words — it cannot be edited. It goes in the family's chosen language.",
+  "admComposerTemplateUnavailable": "The approved message cannot be sent: {reason}",
+  "@admComposerTemplateUnavailable": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "admComposerSendMine": "Send my message",
+  "admComposerSendApproved": "Send approved message",
+  "admComposerEmpty": "Write a message first",
+  "admComposerSent": "Sent from the school's WhatsApp.",
+  "admComposerQueued": "Held — it goes out after the family's quiet hours.",
+  "admComposerNotSent": "Not sent: {reason}",
+  "@admComposerNotSent": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "admNewRegistration": "New registration",
+  "admRegister": "Register",
+  "admRegisterChild": "Register {child}",
+  "@admRegisterChild": {
+    "placeholders": {
+      "child": {
+        "type": "String"
+      }
+    }
+  },
+  "admFeeHead": "Fee head",
+  "admRegistrationFee": "Registration fee (₹)",
+  "admMoneyReceivedNow": "Money received now",
+  "admMoneyReceivedNowNote": "Leave off if the family will pay at the counter later — the fee stays due.",
+  "admAmountReceived": "Amount received (₹)",
+  "admPaidBy": "Paid by",
+  "admRefRequired": "{label} is required for a non-cash payment",
+  "@admRefRequired": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "admAmountMoreThanFee": "Amount received is more than the fee",
+  "admWholeRupees": "Enter whole rupees",
+  "admNoFeeHeads": "No registration fee head is set up. The office adds one in Masters → Fee heads.",
+  "admRegisteredDue": "Registered {appNo} · fee ₹{fee} due",
+  "@admRegisteredDue": {
+    "placeholders": {
+      "appNo": {
+        "type": "String"
+      },
+      "fee": {
+        "type": "String"
+      }
+    }
+  },
+  "admRegisteredPaid": "Registered {appNo} · received ₹{paid} as {code} · balance ₹{balance}",
+  "@admRegisteredPaid": {
+    "placeholders": {
+      "appNo": {
+        "type": "String"
+      },
+      "paid": {
+        "type": "String"
+      },
+      "code": {
+        "type": "String"
+      },
+      "balance": {
+        "type": "String"
+      }
+    }
+  },
+  "admTabLeads": "Leads",
+  "admTabRegistered": "Registered ({count})",
+  "@admTabRegistered": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "admFollowUp": "Follow up",
+  "admSendToSis": "Send to SIS",
+  "admSendToSisNote": "Admitting into SIS gives the admission number, section and fee group and posts the fee receipt — that is done on the web ERP's Admissions screen. Open this lead there?",
+  "admOpenInErp": "Open in web ERP",
+  "admCouldNotOpenErp": "Could not open the web ERP",
+  "admFeeNotSet": "Registration fee not set",
+  "admFeeWaived": "Registration fee waived",
+  "admFeeStatus": "Fee ₹{fee} · paid ₹{paid} · due ₹{due}",
+  "@admFeeStatus": {
+    "placeholders": {
+      "fee": {
+        "type": "String"
+      },
+      "paid": {
+        "type": "String"
+      },
+      "due": {
+        "type": "String"
+      }
+    }
+  },
+  "admNoRegisteredLeads": "No registered leads are waiting to be sent to SIS.",
   "scCallFamily": "Call family",
   "scMessageFamily": "Message family",
   "scAppChat": "App chat with the family",

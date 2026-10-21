@@ -20,6 +20,8 @@ import {
 } from "@/lib/schoolIdentity";
 import { TENANT } from "@/lib/types";
 import { SchoolLetterhead } from "@/components/shared/SchoolLetterhead";
+import { SignatureOnLine } from "@/components/shared/SignatureOnLine";
+import type { PrintSignatureSet } from "@/lib/printSignatures";
 
 export function printCertificate(issueId: string) {
   const sheet = document.getElementById(`certificate-${issueId}`);
@@ -39,10 +41,23 @@ export function printCertificate(issueId: string) {
   window.setTimeout(cleanup, 1000);
 }
 
-export function CertificateSheet({ issue }: { issue: CertificateIssue }) {
+/**
+ * `signatures`: the staff signatures for the signing lines
+ * (lib/printSignatures certificateSignatureRequest, loaded by the page with
+ * usePrintSignatures); null = blank lines. A void certificate never shows
+ * any, whatever it is given.
+ */
+export function CertificateSheet({
+  issue,
+  signatures = null,
+}: {
+  issue: CertificateIssue;
+  signatures?: PrintSignatureSet | null;
+}) {
   const voided = !!issue.voidedAt;
   const title = certificateKindLabel(issue.kind);
   const isTc = issue.kind === "tc";
+  const sigs = voided ? null : signatures;
 
   return (
     <div
@@ -62,7 +77,7 @@ export function CertificateSheet({ issue }: { issue: CertificateIssue }) {
         }`}
       >
         {isTc ? (
-          <TcSheet issue={issue} voided={voided} />
+          <TcSheet issue={issue} voided={voided} sigs={sigs} />
         ) : (
           <>
             <SchoolLetterhead />
@@ -104,7 +119,9 @@ export function CertificateSheet({ issue }: { issue: CertificateIssue }) {
 
             <div className="mt-10 grid grid-cols-2 gap-6 text-xs">
               <div>
-                <div className="h-10 border-b border-[rgba(32,48,80,0.25)]" />
+                <div className="h-10 border-b border-[rgba(32,48,80,0.25)]">
+                  <SignatureOnLine sig={sigs?.classTeacher} align="left" />
+                </div>
                 <p className="mt-1 text-[var(--muted)]">Class teacher</p>
                 {issue.classTeacherName ? (
                   <p className="font-semibold text-[var(--brand-deep)]">
@@ -113,7 +130,9 @@ export function CertificateSheet({ issue }: { issue: CertificateIssue }) {
                 ) : null}
               </div>
               <div className="text-right">
-                <div className="ml-auto h-10 w-40 border-b border-[rgba(32,48,80,0.25)]" />
+                <div className="ml-auto h-10 w-40 border-b border-[rgba(32,48,80,0.25)]">
+                  <SignatureOnLine sig={sigs?.principal} align="right" />
+                </div>
                 <p className="mt-1 text-[var(--muted)]">
                   Principal / authorised
                 </p>
@@ -139,9 +158,11 @@ export function CertificateSheet({ issue }: { issue: CertificateIssue }) {
 function TcSheet({
   issue,
   voided,
+  sigs,
 }: {
   issue: CertificateIssue;
   voided: boolean;
+  sigs: PrintSignatureSet | null;
 }) {
   const tc = issue.tc;
   const rows = tcRows(issue, tc);
@@ -226,14 +247,18 @@ function TcSheet({
 
       <div className="mt-8 grid grid-cols-3 gap-3 text-[10px] text-[var(--brand-deep)]">
         <div>
-          <div className="h-12 border-b border-[rgba(32,48,80,0.3)]" />
+          <div className="h-12 border-b border-[rgba(32,48,80,0.3)]">
+            <SignatureOnLine sig={sigs?.classTeacher} heightClass="h-12" />
+          </div>
           <p className="mt-1 font-semibold">Signature of Class Teacher</p>
           {issue.classTeacherName ? (
             <p className="text-[var(--muted)]">{issue.classTeacherName}</p>
           ) : null}
         </div>
         <div>
-          <div className="h-12 border-b border-[rgba(32,48,80,0.3)]" />
+          <div className="h-12 border-b border-[rgba(32,48,80,0.3)]">
+            <SignatureOnLine sig={sigs?.checkedBy} heightClass="h-12" />
+          </div>
           <p className="mt-1 font-semibold">Checked by</p>
           <p className="text-[var(--muted)]">
             {(tc?.checkedByName || "—") +
@@ -243,7 +268,9 @@ function TcSheet({
           </p>
         </div>
         <div>
-          <div className="h-12 border-b border-[rgba(32,48,80,0.3)]" />
+          <div className="h-12 border-b border-[rgba(32,48,80,0.3)]">
+            <SignatureOnLine sig={sigs?.principal} heightClass="h-12" />
+          </div>
           <p className="mt-1 font-semibold">Signature of Principal</p>
           <p className="text-[var(--muted)]">
             with date &amp; school seal

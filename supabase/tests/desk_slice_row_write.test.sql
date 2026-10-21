@@ -83,8 +83,9 @@ begin
     'the slice has a new updated_at, returned as the new base');
   select e into subj from public.masters_desk_slices, jsonb_array_elements(payload) e
    where tenant_id = t and slice_key = 'subjects' and e->>'id' = 's_eng';
-  perform pg_temp.check(subj->>'nameEn' = 'English Language' and subj->>'code' = 'ENG' and not (subj ? '_rev'),
-    'one element patched (other keys kept), no _rev on a masters element');
+  -- 2.2a: a Masters element carries _rev (1 when the slice row was inserted, +1 per change).
+  perform pg_temp.check(subj->>'nameEn' = 'English Language' and subj->>'code' = 'ENG' and (subj->>'_rev')::int = 2,
+    'one element patched (other keys kept), its _rev moved 1 → 2');
   perform pg_temp.check((select jsonb_array_length(payload) from public.masters_desk_slices where tenant_id=t and slice_key='subjects') = 2
     and (select payload->1->>'id' from public.masters_desk_slices where tenant_id=t and slice_key='subjects') = 's_hin',
     'the other element is untouched and in place');

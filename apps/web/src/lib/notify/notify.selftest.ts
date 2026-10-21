@@ -219,17 +219,34 @@ assert.deepEqual(prefsFrom({ muted_topics: ["fees", "bogus"], voice: false, quie
 // ── FCM: the channel a push rings on ───────────────────────────────────────
 
 {
-  const voiced = buildFcmMessage("tok", { title: "Leave request", body: "CL", url: "/leave-approvals", voiceTopic: "approval" }, "en");
-  assert.equal(voiced.message.android.notification.channel_id, "bhb_voice_approval_en");
+  // 21 Oct 2026: approval/document ring on `_v2` channels for apps that have
+  // them (build ≥ 35); the clip (sound) keeps its name.
+  const voiced = buildFcmMessage("tok", { title: "Leave request", body: "CL", url: "/leave-approvals", voiceTopic: "approval" }, "en", "1.0.34+35");
+  assert.equal(voiced.message.android.notification.channel_id, "bhb_voice_approval_en_v2");
   assert.equal(voiced.message.android.notification.sound, "bhb_voice_approval_en");
-  assert.equal(voiced.message.data.voice, "bhb_voice_approval_en", "the app's foreground notification uses the same line");
-  const plain = buildFcmMessage("tok", { title: "x", body: "y", url: "/fees", channel: "bhb_default" }, "hi");
+  assert.equal(voiced.message.data.voice, "bhb_voice_approval_en_v2", "the app's foreground notification uses the same line");
+  const doc = buildFcmMessage("tok", { title: "x", body: "y", voiceTopic: "document" }, "hi", "1.0.40+41");
+  assert.equal(doc.message.android.notification.channel_id, "bhb_voice_document_hi_v2");
+  assert.equal(doc.message.android.notification.sound, "bhb_voice_document_hi");
+  // An app older than the v2 release keeps the channel it has.
+  for (const old of ["1.0.33+34", "1.0.25+26", "", undefined, null, "garbage"]) {
+    const m = buildFcmMessage("tok", { title: "x", body: "y", voiceTopic: "approval" }, "en", old);
+    assert.equal(m.message.android.notification.channel_id, "bhb_voice_approval_en", `old app ${old}`);
+    assert.equal(m.message.data.voice, "bhb_voice_approval_en", `old app ${old}`);
+  }
+  // Other topics are unchanged on every app.
+  for (const v of ["1.0.34+35", "1.0.33+34"]) {
+    const m = buildFcmMessage("tok", { title: "x", body: "y", voiceTopic: "fees" }, "hi", v);
+    assert.equal(m.message.android.notification.channel_id, "bhb_voice_fees_hi");
+    assert.equal(m.message.android.notification.sound, "bhb_voice_fees_hi");
+  }
+  const plain = buildFcmMessage("tok", { title: "x", body: "y", url: "/fees", channel: "bhb_default" }, "hi", "1.0.34+35");
   assert.equal(plain.message.android.notification.channel_id, "bhb_default", "voice off = the normal channel");
   assert.equal(plain.message.android.notification.sound, "default");
   assert.equal(plain.message.data.voice, "");
-  const legacy = buildFcmMessage("tok", { title: "x", body: "y", url: "/homework" }, "hi");
+  const legacy = buildFcmMessage("tok", { title: "x", body: "y", url: "/homework" }, "hi", "1.0.34+35");
   assert.equal(legacy.message.android.notification.channel_id, "bhb_voice_homework_hi", "older send sites keep their inferred clip");
-  assert.equal(pushVoiceChannel("document", "hi"), "bhb_voice_document_hi");
+  assert.equal(pushVoiceChannel("document", "hi"), "bhb_voice_document_hi_v2");
 }
 
 // ── notify(): stored once per recipient, pushed per settings ───────────────
