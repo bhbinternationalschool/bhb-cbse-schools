@@ -1393,7 +1393,7 @@ element's `_rev` could then match (the old path resurrecting a deleted element i
 one-line change to `_sis_staff_sensitive_keys()`. Masters exports that dump whole elements will show a
 `_rev` field.
 
-*(2.2b built 21 Oct 2026, PR #TBD — kernel plumbing; no screen moved, no migration.)* **What exists.**
+*(2.2b built 21 Oct 2026, PR #702 — kernel plumbing; no screen moved, no migration.)* **What exists.**
 - **A staff write never wipes the record:** `profile` is one jsonb column and the kernel patches columns, so an
   upsert's profile keys are laid on the STORED profile (a key is cleared by sending it blank, never by leaving it
   out) — without this, a profile carrying only the changed keys replaced the whole record (found on the stack: an
@@ -1464,7 +1464,7 @@ one-line change to `_sis_staff_sensitive_keys()`. Masters exports that dump whol
 absent, `by` = session, conflict redaction, list directory, authority matrix incl. a personal deny, sensitive-route
 rules, the old route's guard), `test:masters-writes` (registry flip, commit adapter, function rule, the masters view's
 `_rev` + stamps, the bridge), `test:desk-feature-rev`. Fail-on-old: `test:desk-feature-rev` fails on the old
-`deskFeatureAuth` ("You may not change class subjects"); 16 mutations of the new code each turn a self-test red.
+`deskFeatureAuth` ("You may not change class subjects"); 17 mutations of the new code each turn a self-test red.
 Stack (`e2e/staff-kernel.acceptance.ts`, in `e2e-stack.sh check`): on this branch **18/18**; the same file (16 checks at
 the time) against the base branch's app code, built on the same stack: **3/16** — a member marked removed still listed by staff-roster, the staff-list
 view and the mobile roster and still signed in; a plain editor's bank change through the old route written ("OLD-ROUTE");
