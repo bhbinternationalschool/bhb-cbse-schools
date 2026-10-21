@@ -97,8 +97,12 @@
   "leadRevisionHint": "Revise in the LEAD app: {book} → {chapter}",
   "@leadRevisionHint": {
     "placeholders": {
-      "book": {"type": "String"},
-      "chapter": {"type": "String"}
+      "book": {
+        "type": "String"
+      },
+      "chapter": {
+        "type": "String"
+      }
     }
   },
   "couldNotOpenLeadApp": "Could not open the LEAD app",
@@ -1065,10 +1069,22 @@
   "profAadhaarAdd": "Add",
   "profAadhaarCorrect": "Correct",
   "profAadhaarDialogTitle": "{who} — Aadhaar number",
-  "@profAadhaarDialogTitle": {"placeholders": {"who": {"type": "String"}}},
+  "@profAadhaarDialogTitle": {
+    "placeholders": {
+      "who": {
+        "type": "String"
+      }
+    }
+  },
   "profAadhaarInvalid": "This is not a valid 12-digit Aadhaar number — please check it.",
   "profAadhaarSaved": "Saved — XXXX-XXXX-{last4}",
-  "@profAadhaarSaved": {"placeholders": {"last4": {"type": "String"}}},
+  "@profAadhaarSaved": {
+    "placeholders": {
+      "last4": {
+        "type": "String"
+      }
+    }
+  },
   "profAadhaarUnchanged": "That number is already on record.",
   "profAadhaarKeptVerified": "The school has already verified this Aadhaar, so it was not changed. Please contact the school office.",
   "profDetailsOnRecord": "Details on record",
@@ -1513,7 +1529,16 @@
   "resultsOverallGrade": "Overall grade",
   "resultsRank": "Rank",
   "resultsRankOf": "{rank} of {size}",
-  "@resultsRankOf": {"placeholders": {"rank": {"type": "String"}, "size": {"type": "String"}}},
+  "@resultsRankOf": {
+    "placeholders": {
+      "rank": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
   "resultsClassAverage": "Class average",
   "resultsResult": "Result",
   "resultsAttendance": "Attendance",
@@ -1521,7 +1546,13 @@
   "resultsTeacherRemarks": "Class teacher's remarks",
   "resultsAbsentAll": "Absent in this examination",
   "resultsAbsentFor": "Absent for: {subjects}",
-  "@resultsAbsentFor": {"placeholders": {"subjects": {"type": "String"}}},
+  "@resultsAbsentFor": {
+    "placeholders": {
+      "subjects": {
+        "type": "String"
+      }
+    }
+  },
   "resultsAggregateNote": "Weighted result of the exams that count toward it.",
   "resultsNoMarks": "Marks for this exam are not ready yet. Please check again later.",
   "resultsHeld": "This report card is being held by the school office. Please contact the office.",
@@ -1530,7 +1561,13 @@
   "dateSheetTitle": "Date sheet",
   "dateSheetNone": "No upcoming exams have been published for this child yet.",
   "dateSheetMinutes": "{minutes} min",
-  "@dateSheetMinutes": {"placeholders": {"minutes": {"type": "String"}}},
+  "@dateSheetMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
   "schoolChatTitle": "School chat",
   "schoolChatGroups": "Groups",
   "schoolChatDirect": "Direct chats",
@@ -1544,29 +1581,68 @@
   "schoolChatPaused": "The school has paused chat for this login. Please speak to the class teacher.",
   "schoolChatSafety": "Messages are checked before others see them. Please be kind.",
   "schoolChatAsChild": "Writing as {name}",
-  "@schoolChatAsChild": {"placeholders": {"name": {"type": "String"}}},
+  "@schoolChatAsChild": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "schoolChatAsParent": "Writing as the parent",
   "schoolChatGroupNoMessages": "Group — no messages yet",
   "schoolChatParentInbox": "Parent messages to the class teacher",
   "homeModuleGames": "Games",
   "gamesTitle": "Learning games",
   "gamesPlayedToday": "Played today: {played} of {cap} min",
-  "@gamesPlayedToday": {"placeholders": {"played": {"type": "String"}, "cap": {"type": "String"}}},
+  "@gamesPlayedToday": {
+    "placeholders": {
+      "played": {
+        "type": "String"
+      },
+      "cap": {
+        "type": "String"
+      }
+    }
+  },
   "gamesTimeLeft": "{minutes} min left today",
-  "@gamesTimeLeft": {"placeholders": {"minutes": {"type": "String"}}},
+  "@gamesTimeLeft": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
   "gamesStarsToday": "Stars today",
   "gamesStarsWeek": "This week",
   "gamesStarsTotal": "All time",
   "gamesLast7Days": "Last 7 days",
   "gamesDayMinutes": "{minutes} min",
-  "@gamesDayMinutes": {"placeholders": {"minutes": {"type": "String"}}},
+  "@gamesDayMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
   "gamesCompetitions": "Competitions",
   "gamesPlay": "Play",
   "gamesPlayed": "Played",
   "gamesOpensAt": "Opens {time}",
-  "@gamesOpensAt": {"placeholders": {"time": {"type": "String"}}},
+  "@gamesOpensAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "gamesClosesAt": "Open till {time}",
-  "@gamesClosesAt": {"placeholders": {"time": {"type": "String"}}},
+  "@gamesClosesAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "gamesLeaderboard": "Leaderboard",
   "gamesPractice": "Practice",
   "gamesNumberDash": "Number dash",
@@ -1574,7 +1650,13 @@
   "gamesCounting": "Count the pictures",
   "gamesCountingBlurb": "How many can you see?",
   "gamesQuestions": "{count} questions",
-  "@gamesQuestions": {"placeholders": {"count": {"type": "String"}}},
+  "@gamesQuestions": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
   "gamesWholeSubject": "Whole subject",
   "gamesNoQuizYet": "No quizzes for this class yet — the teachers are adding questions.",
   "gamesRefusedNight": "Games rest at night — come back in the morning.",
@@ -1585,37 +1667,274 @@
   "gamesRefusedAlreadyPlayed": "You have already played this competition.",
   "gamesRefusedAlreadyPlaying": "A game is already being played on another phone.",
   "gamesQuestionOf": "Question {n} of {total}",
-  "@gamesQuestionOf": {"placeholders": {"n": {"type": "String"}, "total": {"type": "String"}}},
+  "@gamesQuestionOf": {
+    "placeholders": {
+      "n": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
   "gamesSecondsLeft": "{seconds}s",
-  "@gamesSecondsLeft": {"placeholders": {"seconds": {"type": "String"}}},
+  "@gamesSecondsLeft": {
+    "placeholders": {
+      "seconds": {
+        "type": "String"
+      }
+    }
+  },
   "gamesRight": "Right!",
   "gamesWrong": "Not quite",
   "gamesAnswerSaved": "Answer saved",
   "gamesTimeUp": "Time's up!",
   "gamesResultTitle": "Well played!",
   "gamesResultScore": "{correct} of {total} right",
-  "@gamesResultScore": {"placeholders": {"correct": {"type": "String"}, "total": {"type": "String"}}},
+  "@gamesResultScore": {
+    "placeholders": {
+      "correct": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
   "gamesStarsEarned": "{stars} stars",
-  "@gamesStarsEarned": {"placeholders": {"stars": {"type": "String"}}},
+  "@gamesStarsEarned": {
+    "placeholders": {
+      "stars": {
+        "type": "String"
+      }
+    }
+  },
   "gamesReview": "Answers",
   "gamesDone": "Done",
   "gamesYourAnswer": "Your answer: {answer}",
-  "@gamesYourAnswer": {"placeholders": {"answer": {"type": "String"}}},
+  "@gamesYourAnswer": {
+    "placeholders": {
+      "answer": {
+        "type": "String"
+      }
+    }
+  },
   "gamesNotAnswered": "Not answered",
   "gamesRightAnswer": "Right answer: {answer}",
-  "@gamesRightAnswer": {"placeholders": {"answer": {"type": "String"}}},
+  "@gamesRightAnswer": {
+    "placeholders": {
+      "answer": {
+        "type": "String"
+      }
+    }
+  },
   "gamesAnswersAfterClose": "The right answers appear when the competition closes ({time}).",
-  "@gamesAnswersAfterClose": {"placeholders": {"time": {"type": "String"}}},
+  "@gamesAnswersAfterClose": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "gamesClassBoard": "{label} this week",
-  "@gamesClassBoard": {"placeholders": {"label": {"type": "String"}}},
+  "@gamesClassBoard": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
   "gamesSchoolBoard": "Whole school this week",
   "gamesRightPerPlayer": "{avg} right per player",
-  "@gamesRightPerPlayer": {"placeholders": {"avg": {"type": "String"}}},
+  "@gamesRightPerPlayer": {
+    "placeholders": {
+      "avg": {
+        "type": "String"
+      }
+    }
+  },
   "gamesPlayersCount": "{count} played",
-  "@gamesPlayersCount": {"placeholders": {"count": {"type": "String"}}},
+  "@gamesPlayersCount": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
   "gamesNobodyYet": "Nobody has finished yet.",
   "gamesPlayingNow": "{count} playing now",
-  "@gamesPlayingNow": {"placeholders": {"count": {"type": "String"}}},
+  "@gamesPlayingNow": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
   "gamesHealthyNote": "Stars are for learning. Games rest during school hours and after 9 pm.",
-  "gamesSeeLeaderboard": "See the leaderboard"
+  "gamesSeeLeaderboard": "See the leaderboard",
+  "admAddWalkInLead": "Add walk-in lead",
+  "admWalkInTitle": "New walk-in lead",
+  "admChildName": "Child's name",
+  "admClassSought": "Class sought",
+  "admParentName": "Parent's name",
+  "admMotherNameOptional": "Mother's name (optional)",
+  "admParentMobile": "Parent's mobile (10 digits)",
+  "admNotes": "Notes",
+  "admSourceWalkIn": "Source: walk-in",
+  "admSaveLead": "Save lead",
+  "admSaving": "Saving…",
+  "admFieldRequired": "{field} is required",
+  "@admFieldRequired": {
+    "placeholders": {
+      "field": {
+        "type": "String"
+      }
+    }
+  },
+  "admMobileTenDigits": "Mobile must be 10 digits",
+  "admWalkInSaved": "Lead {enquiryNo} added",
+  "@admWalkInSaved": {
+    "placeholders": {
+      "enquiryNo": {
+        "type": "String"
+      }
+    }
+  },
+  "admWalkInSavedLinked": "Lead {enquiryNo} added to a family already on file",
+  "@admWalkInSavedLinked": {
+    "placeholders": {
+      "enquiryNo": {
+        "type": "String"
+      }
+    }
+  },
+  "admOptionsNotLoaded": "Classes and fee heads could not be loaded: {reason}",
+  "@admOptionsNotLoaded": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "admComposerTitle": "Message to {name}",
+  "@admComposerTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "admComposerLoading": "Preparing the message…",
+  "admComposerYourWords": "Your message",
+  "admComposerInWindow": "The family wrote to the school in the last 24 hours, so your message can go as written. Check or edit it, then tap Send.",
+  "admComposerOutOfWindow": "WhatsApp delivers your own words only within 24 hours of the family's last message to the school. Outside that, only the school's approved message below can be sent.",
+  "admComposerApproved": "School's approved message",
+  "admComposerApprovedNote": "Approved by WhatsApp in these exact words — it cannot be edited. It goes in the family's chosen language.",
+  "admComposerTemplateUnavailable": "The approved message cannot be sent: {reason}",
+  "@admComposerTemplateUnavailable": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "admComposerSendMine": "Send my message",
+  "admComposerSendApproved": "Send approved message",
+  "admComposerEmpty": "Write a message first",
+  "admComposerSent": "Sent from the school's WhatsApp.",
+  "admComposerQueued": "Held — it goes out after the family's quiet hours.",
+  "admComposerNotSent": "Not sent: {reason}",
+  "@admComposerNotSent": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "admNewRegistration": "New registration",
+  "admRegister": "Register",
+  "admRegisterChild": "Register {child}",
+  "@admRegisterChild": {
+    "placeholders": {
+      "child": {
+        "type": "String"
+      }
+    }
+  },
+  "admFeeHead": "Fee head",
+  "admRegistrationFee": "Registration fee (₹)",
+  "admMoneyReceivedNow": "Money received now",
+  "admMoneyReceivedNowNote": "Leave off if the family will pay at the counter later — the fee stays due.",
+  "admAmountReceived": "Amount received (₹)",
+  "admPaidBy": "Paid by",
+  "admRefRequired": "{label} is required for a non-cash payment",
+  "@admRefRequired": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "admAmountMoreThanFee": "Amount received is more than the fee",
+  "admWholeRupees": "Enter whole rupees",
+  "admNoFeeHeads": "No registration fee head is set up. The office adds one in Masters → Fee heads.",
+  "admRegisteredDue": "Registered {appNo} · fee ₹{fee} due",
+  "@admRegisteredDue": {
+    "placeholders": {
+      "appNo": {
+        "type": "String"
+      },
+      "fee": {
+        "type": "String"
+      }
+    }
+  },
+  "admRegisteredPaid": "Registered {appNo} · received ₹{paid} as {code} · balance ₹{balance}",
+  "@admRegisteredPaid": {
+    "placeholders": {
+      "appNo": {
+        "type": "String"
+      },
+      "paid": {
+        "type": "String"
+      },
+      "code": {
+        "type": "String"
+      },
+      "balance": {
+        "type": "String"
+      }
+    }
+  },
+  "admTabLeads": "Leads",
+  "admTabRegistered": "Registered ({count})",
+  "@admTabRegistered": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "admFollowUp": "Follow up",
+  "admSendToSis": "Send to SIS",
+  "admSendToSisNote": "Admitting into SIS gives the admission number, section and fee group and posts the fee receipt — that is done on the web ERP's Admissions screen. Open this lead there?",
+  "admOpenInErp": "Open in web ERP",
+  "admCouldNotOpenErp": "Could not open the web ERP",
+  "admFeeNotSet": "Registration fee not set",
+  "admFeeWaived": "Registration fee waived",
+  "admFeeStatus": "Fee ₹{fee} · paid ₹{paid} · due ₹{due}",
+  "@admFeeStatus": {
+    "placeholders": {
+      "fee": {
+        "type": "String"
+      },
+      "paid": {
+        "type": "String"
+      },
+      "due": {
+        "type": "String"
+      }
+    }
+  },
+  "admNoRegisteredLeads": "No registered leads are waiting to be sent to SIS."
 }
