@@ -65,7 +65,7 @@ export default defineConfig<GateOptions>({
   projects: [
     {
       name: "desktop",
-      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay|parent-web-tabs|fuel-per-bus-range|certificates-dues-gate|staff-editor-save|print-signatures|staff-sensitive-screens)\.spec\.ts/,
+      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay|parent-web-tabs|fuel-per-bus-range|certificates-dues-gate|staff-editor-save|print-signatures|staff-sensitive-screens|staff-locked-validation)\.spec\.ts/,
       use: { ...desktop },
     },
     {
@@ -113,7 +113,7 @@ export default defineConfig<GateOptions>({
       // writes a bank number back as found (2.2b), so it runs after everything
       // that reads the stack.
       name: "staff-sensitive",
-      testMatch: /staff-sensitive-screens\.spec\.ts/,
+      testMatch: /(staff-sensitive-screens|staff-locked-validation)\.spec\.ts/,
       dependencies: ["desktop", "phone-375-cpu4x"],
       use: { ...desktop },
     },

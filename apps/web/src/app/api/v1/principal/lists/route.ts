@@ -14,15 +14,18 @@ import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { householdWhatsApp, loadSisForStaff } from "@/lib/sis";
 import { loadStaffAttendance } from "@/lib/staffAttendance";
+import { staffTodayRows, staffTodayTotals } from "@/lib/staffToday";
+import { readStaffTodayExempt } from "@/lib/staffToday.server";
+import { collectStaffActivityToday } from "@/lib/staffActivityToday.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type Kind = "defaulters" | "registers" | "staff_attendance" | "followups";
+type Kind = "defaulters" | "registers" | "staff_attendance" | "staff_activity" | "followups";
 
 /**
- * GET /api/v1/principal/lists?kind=defaulters|registers|staff_attendance|followups
+ * GET /api/v1/principal/lists?kind=defaulters|registers|staff_attendance|staff_activity|followups
  *
  * The drill-down behind each principal-snapshot number. Same source libs and
  * the same filters as buildPrincipalSnapshot() so the list always adds up to
@@ -155,30 +158,30 @@ export async function GET(request: Request) {
         const reg = (staffAtt.registers ?? []).find(
           (r) => r.date === today && r.academicYearCode === ay,
         );
-        const marks = new Map((reg?.marks ?? []).map((m) => [m.staffId, m]));
-        const desigName = (id: string | null) =>
-          (masters.designations ?? []).find((d) => d.id === id)?.name || "";
-        const staff = (masters.staff ?? [])
-          .filter((s) => s.status === "active")
-          .map((s) => {
-            const m = marks.get(s.id);
-            return {
-              staffId: s.id,
-              fullName: s.fullName,
-              designation: desigName(s.designationId),
-              mobile: s.mobile || "",
-              status: m?.status || "",
-              inTime: m?.inTime || "",
-              outTime: m?.outTime || "",
-              punchWay: m?.punchWay || "",
-            };
-          })
-          .sort((a, b) => {
-            // Unmarked and absent first — that's what the principal is looking for.
-            const rank = (s: string) => (s === "" ? 0 : s === "A" ? 1 : s === "L" ? 2 : 3);
-            return rank(a.status) - rank(b.status) || a.fullName.localeCompare(b.fullName);
-          });
-        data = { date: today, marked: !!reg, staff };
+        // lib/staffToday: the rows the home's Present / Absent cards count,
+        // so a card and the list it opens always agree. Exempt staff never
+        // appear; if who is exempt cannot be read, say so — never list the
+        // director and the admins as absent.
+        const exempt = await readStaffTodayExempt(ctx.rbacKnown === false ? null : ctx.rbac);
+        if (!exempt.known) {
+          throw new ApiError(
+            "server_error",
+            "Could not read who is exempt from attendance. Try again.",
+            503,
+          );
+        }
+        const staff = staffTodayRows({
+          staff: masters.staff ?? [],
+          designations: masters.designations ?? [],
+          marks: reg?.marks ?? [],
+          exempt: exempt.ids,
+        });
+        data = { date: today, marked: !!reg, staff, totals: staffTodayTotals(staff) };
+        break;
+      }
+
+      case "staff_activity": {
+        data = await collectStaffActivityToday(masters, ay);
         break;
       }
 

@@ -15,6 +15,7 @@ import { emptyWaVerifyState } from "@/lib/waNumberVerify";
 import { emptyAppPopupsState } from "@/lib/appPopups";
 import { emptyParentLinkState } from "@/lib/parentNumberLink";
 import { emptyStaffBroadcastLog } from "@/lib/staffBroadcastLog";
+import { emptyStudentDocTypesState } from "@/lib/studentDocTypes";
 import {
   createModuleStatePersistence,
   type ModuleStatePersistence,
@@ -155,6 +156,14 @@ const registry: Record<ModuleStateKey, ModuleStatePersistence<any>> = {
     key: "staff_broadcasts",
     isEmpty: () => true,
     loadLocal: emptyStaffBroadcastLog,
+    writeLocalRaw: () => undefined,
+  }),
+  // Written only by the server (the staff app's document verification:
+  // custom document types and documents filed off the child's slots).
+  student_doc_types: createModuleStatePersistence({
+    key: "student_doc_types",
+    isEmpty: () => true,
+    loadLocal: emptyStudentDocTypesState,
     writeLocalRaw: () => undefined,
   }),
   // Written only by the server (Comms → App pop-ups saves through its route).

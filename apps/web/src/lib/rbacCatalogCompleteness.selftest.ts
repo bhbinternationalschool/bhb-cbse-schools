@@ -371,6 +371,9 @@ const MODULE_GATES = new RegExp(
       "parentHouseholdFrom",
       "verify[A-Z][A-Za-z]+",
       "assertMobileFeature",
+      // lib/api/v1/staffPayrollMgmtGate: mobile feature + payroll / advances grant.
+      "assertStaffPayrollOverviewAccess",
+      "assertStaffAdvancesOverviewAccess",
       "hasPermission",
       "requireStaffPrincipal",
       "authorizeDocumentAction",

@@ -27,6 +27,8 @@ type HomeworkFeed = {
     dueAt: string | null;
     requiresSubmit: boolean;
     attachmentCount: number;
+    /** Each file, opened through /api/v1/homework/attachment (older servers omit it). */
+    attachments?: { id: string; label: string; url: string }[];
   }[];
   diary: {
     id: string;
@@ -130,7 +132,7 @@ function HomeworkFor({ child }: { child: ParentChild }) {
                 <p className="mt-1 text-[11px] text-[var(--muted)]">
                   {[
                     p.teacherName,
-                    p.attachmentCount > 0
+                    p.attachmentCount > 0 && !p.attachments?.length
                       ? `${p.attachmentCount} attachment${p.attachmentCount > 1 ? "s" : ""} — open in the BHB Parent app`
                       : "",
                     p.requiresSubmit ? "to be submitted" : "",
@@ -138,6 +140,19 @@ function HomeworkFor({ child }: { child: ParentChild }) {
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
+                {/* Every file, opened through /api/v1/homework/attachment —
+                    the stored /api/file reference is staff-only. */}
+                {(p.attachments ?? []).map((a) => (
+                  <a
+                    key={a.id}
+                    href={a.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mr-3 mt-1 inline-block text-xs text-[var(--brand-mid)] underline"
+                  >
+                    {a.label || "Attachment"}
+                  </a>
+                ))}
                 <button
                   type="button"
                   className="mt-2 text-xs font-semibold text-[var(--brand-mid)] underline"

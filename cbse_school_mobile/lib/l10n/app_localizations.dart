@@ -5347,6 +5347,1554 @@ abstract class L {
   /// In en, this message translates to:
   /// **'Enter the bank name'**
   String get feeBankMissing;
+
+  /// No description provided for @bcAudienceAllParents.
+  ///
+  /// In en, this message translates to:
+  /// **'All parents'**
+  String get bcAudienceAllParents;
+
+  /// No description provided for @bcAudienceSections.
+  ///
+  /// In en, this message translates to:
+  /// **'Classes / sections'**
+  String get bcAudienceSections;
+
+  /// No description provided for @bcAudienceStaff.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff'**
+  String get bcAudienceStaff;
+
+  /// No description provided for @bcAudienceRoutes.
+  ///
+  /// In en, this message translates to:
+  /// **'Bus routes'**
+  String get bcAudienceRoutes;
+
+  /// No description provided for @bcAudienceFeeDefaulters.
+  ///
+  /// In en, this message translates to:
+  /// **'Fee defaulters'**
+  String get bcAudienceFeeDefaulters;
+
+  /// No description provided for @bcOwnSectionsOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'You can message the families of your own sections.'**
+  String get bcOwnSectionsOnly;
+
+  /// No description provided for @bcStaffAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get bcStaffAll;
+
+  /// No description provided for @bcStaffTeaching.
+  ///
+  /// In en, this message translates to:
+  /// **'Teaching'**
+  String get bcStaffTeaching;
+
+  /// No description provided for @bcStaffNonTeaching.
+  ///
+  /// In en, this message translates to:
+  /// **'Non-teaching'**
+  String get bcStaffNonTeaching;
+
+  /// No description provided for @bcStaffRolesHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Roles (leave empty for everyone)'**
+  String get bcStaffRolesHint;
+
+  /// No description provided for @bcPickAtLeastOne.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick at least one.'**
+  String get bcPickAtLeastOne;
+
+  /// No description provided for @bcChannel.
+  ///
+  /// In en, this message translates to:
+  /// **'Send by'**
+  String get bcChannel;
+
+  /// No description provided for @bcChannelWhatsapp.
+  ///
+  /// In en, this message translates to:
+  /// **'WhatsApp + app'**
+  String get bcChannelWhatsapp;
+
+  /// No description provided for @bcChannelApp.
+  ///
+  /// In en, this message translates to:
+  /// **'App only (free)'**
+  String get bcChannelApp;
+
+  /// No description provided for @bcChannelAppHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Only an app notification — no WhatsApp message, no cost. Reaches families and staff who have the school app.'**
+  String get bcChannelAppHint;
+
+  /// No description provided for @bcModeTemplate.
+  ///
+  /// In en, this message translates to:
+  /// **'WhatsApp template'**
+  String get bcModeTemplate;
+
+  /// No description provided for @bcModeCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom message'**
+  String get bcModeCustom;
+
+  /// No description provided for @bcChooseTemplate.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a template'**
+  String get bcChooseTemplate;
+
+  /// No description provided for @bcTemplatesNotLoaded.
+  ///
+  /// In en, this message translates to:
+  /// **'Templates could not be loaded.'**
+  String get bcTemplatesNotLoaded;
+
+  /// No description provided for @bcNoTemplates.
+  ///
+  /// In en, this message translates to:
+  /// **'No template is approved in both Hindi and English yet.'**
+  String get bcNoTemplates;
+
+  /// No description provided for @bcAutoFilledHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Names, child and class are filled in for each family.'**
+  String get bcAutoFilledHint;
+
+  /// No description provided for @bcCustomTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Title (optional)'**
+  String get bcCustomTitle;
+
+  /// No description provided for @bcCustomHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Goes as typed to anyone who messaged the school in the last 24 hours. Everyone else gets it inside the approved “School notice” template, which WhatsApp delivers to all.'**
+  String get bcCustomHint;
+
+  /// No description provided for @bcCustomTemplateNotReady.
+  ///
+  /// In en, this message translates to:
+  /// **'The “School notice” template is not approved in both languages, so people outside the 24-hour window cannot be reached.'**
+  String get bcCustomTemplateNotReady;
+
+  /// No description provided for @bcLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load broadcast options.'**
+  String get bcLoadFailed;
+
+  /// No description provided for @bcReadyToSend.
+  ///
+  /// In en, this message translates to:
+  /// **'Ready to send'**
+  String get bcReadyToSend;
+
+  /// No description provided for @bcFamiliesInAudience.
+  ///
+  /// In en, this message translates to:
+  /// **'In this audience: {count}'**
+  String bcFamiliesInAudience(String count);
+
+  /// No description provided for @bcAsFreeText.
+  ///
+  /// In en, this message translates to:
+  /// **'As free text (inside 24 hours): {count}'**
+  String bcAsFreeText(String count);
+
+  /// No description provided for @bcViaTemplate.
+  ///
+  /// In en, this message translates to:
+  /// **'Inside the approved template: {count}'**
+  String bcViaTemplate(String count);
+
+  /// No description provided for @bcCannotReach.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot be reached (template not approved in their language): {count}'**
+  String bcCannotReach(String count);
+
+  /// No description provided for @bcWindowUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'The 24-hour window could not be read, so everyone gets the template.'**
+  String get bcWindowUnknown;
+
+  /// No description provided for @bcSkipped.
+  ///
+  /// In en, this message translates to:
+  /// **'Skipped: {optOut} opted out, {dead} not on WhatsApp, {noNumber} no number'**
+  String bcSkipped(String optOut, String dead, String noNumber);
+
+  /// No description provided for @bcEstimate.
+  ///
+  /// In en, this message translates to:
+  /// **'Estimated WhatsApp cost: {amount} + {gst}% GST'**
+  String bcEstimate(String amount, String gst);
+
+  /// No description provided for @bcEstimateDefaults.
+  ///
+  /// In en, this message translates to:
+  /// **'Estimate uses default rates — confirm them on the web (WhatsApp usage).'**
+  String get bcEstimateDefaults;
+
+  /// No description provided for @bcEstimateUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Cost estimate not loaded.'**
+  String get bcEstimateUnknown;
+
+  /// No description provided for @bcAppNotificationToo.
+  ///
+  /// In en, this message translates to:
+  /// **'An app notification also goes to everyone in the audience who has the app (free).'**
+  String get bcAppNotificationToo;
+
+  /// No description provided for @bcSendNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Send to {count} now'**
+  String bcSendNow(String count);
+
+  /// No description provided for @bcConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Send this message?'**
+  String get bcConfirmTitle;
+
+  /// No description provided for @bcConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'{audience}: {count} will get it. This cannot be undone.'**
+  String bcConfirmBody(String audience, String count);
+
+  /// No description provided for @bcResult.
+  ///
+  /// In en, this message translates to:
+  /// **'WhatsApp: {sent} accepted, {failed} failed, {deferred} held for quiet hours. App notifications: {push}.'**
+  String bcResult(String sent, String failed, String deferred, String push);
+
+  /// No description provided for @visitorMobileOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'Mobile number (optional)'**
+  String get visitorMobileOptional;
+
+  /// No description provided for @numberOfPeople.
+  ///
+  /// In en, this message translates to:
+  /// **'Number of people'**
+  String get numberOfPeople;
+
+  /// No description provided for @vehicleNumberOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'Vehicle number (optional)'**
+  String get vehicleNumberOptional;
+
+  /// No description provided for @visitorAddressOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'Address (optional)'**
+  String get visitorAddressOptional;
+
+  /// No description provided for @scanIdCard.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan ID card'**
+  String get scanIdCard;
+
+  /// No description provided for @scanNumberPlate.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan number plate'**
+  String get scanNumberPlate;
+
+  /// No description provided for @readFromIdCheck.
+  ///
+  /// In en, this message translates to:
+  /// **'Read from ID — check'**
+  String get readFromIdCheck;
+
+  /// No description provided for @readFromPlateCheck.
+  ///
+  /// In en, this message translates to:
+  /// **'Read from plate — check'**
+  String get readFromPlateCheck;
+
+  /// No description provided for @readFromBillCheck.
+  ///
+  /// In en, this message translates to:
+  /// **'Read from bill — check'**
+  String get readFromBillCheck;
+
+  /// No description provided for @readingThePhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading the photo…'**
+  String get readingThePhoto;
+
+  /// No description provided for @readTheBill.
+  ///
+  /// In en, this message translates to:
+  /// **'Read the bill'**
+  String get readTheBill;
+
+  /// No description provided for @aadhaarLast4Only.
+  ///
+  /// In en, this message translates to:
+  /// **'Aadhaar is kept as the last 4 digits only'**
+  String get aadhaarLast4Only;
+
+  /// No description provided for @visitorPeopleCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} people'**
+  String visitorPeopleCount(int count);
+
+  /// No description provided for @homeworkScanPage.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan page'**
+  String get homeworkScanPage;
+
+  /// No description provided for @homeworkUploadFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload file'**
+  String get homeworkUploadFile;
+
+  /// No description provided for @homeworkPageLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Page {n}'**
+  String homeworkPageLabel(int n);
+
+  /// No description provided for @homeworkAttachLimit.
+  ///
+  /// In en, this message translates to:
+  /// **'At most {max} files on one homework'**
+  String homeworkAttachLimit(int max);
+
+  /// No description provided for @homeworkFileTooLarge.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} is larger than 20 MB — it was not attached'**
+  String homeworkFileTooLarge(String name);
+
+  /// No description provided for @homeworkFileWrongType.
+  ///
+  /// In en, this message translates to:
+  /// **'Attach a photo (JPG, PNG, WebP) or a PDF'**
+  String get homeworkFileWrongType;
+
+  /// No description provided for @homeworkWaitForUploads.
+  ///
+  /// In en, this message translates to:
+  /// **'Wait for the files to finish uploading, or remove the ones that failed'**
+  String get homeworkWaitForUploads;
+
+  /// No description provided for @homeworkCameraUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open the camera'**
+  String get homeworkCameraUnavailable;
+
+  /// No description provided for @homeworkUploadFailedRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Not uploaded — tap to try again'**
+  String get homeworkUploadFailedRetry;
+
+  /// No description provided for @homeworkCouldNotOpenFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open the file'**
+  String get homeworkCouldNotOpenFile;
+
+  /// No description provided for @homeworkAttachmentsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Pages and files go to the parents with this homework.'**
+  String get homeworkAttachmentsHint;
+
+  /// No description provided for @busLiveTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Live route'**
+  String get busLiveTitle;
+
+  /// No description provided for @busLiveTapHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap a route to see the bus live on the map, with arrival times at each stop.'**
+  String get busLiveTapHint;
+
+  /// No description provided for @busLiveOnRun.
+  ///
+  /// In en, this message translates to:
+  /// **'On the road · {run}'**
+  String busLiveOnRun(String run);
+
+  /// No description provided for @busLivePositionAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Position at {time} ({ago})'**
+  String busLivePositionAt(String time, String ago);
+
+  /// No description provided for @busLiveStale.
+  ///
+  /// In en, this message translates to:
+  /// **'Last seen {time} — not live'**
+  String busLiveStale(String time);
+
+  /// No description provided for @busLiveStaleDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'The tracker has not reported for over {minutes} minutes, so no arrival times are shown.'**
+  String busLiveStaleDetail(String minutes);
+
+  /// No description provided for @busLiveOffShift.
+  ///
+  /// In en, this message translates to:
+  /// **'Not on a run right now'**
+  String get busLiveOffShift;
+
+  /// No description provided for @busLiveOffShiftLastSeen.
+  ///
+  /// In en, this message translates to:
+  /// **'Last seen {time}. Arrival times show only while a run is on.'**
+  String busLiveOffShiftLastSeen(String time);
+
+  /// No description provided for @busLiveOffShiftNoFix.
+  ///
+  /// In en, this message translates to:
+  /// **'Arrival times show only while a run is on.'**
+  String get busLiveOffShiftNoFix;
+
+  /// No description provided for @busLiveUntracked.
+  ///
+  /// In en, this message translates to:
+  /// **'No GPS position from this vehicle'**
+  String get busLiveUntracked;
+
+  /// No description provided for @busLiveUntrackedDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'{vehicle} has no tracker reporting, so its position and arrival times cannot be shown.'**
+  String busLiveUntrackedDetail(String vehicle);
+
+  /// No description provided for @busLiveNoVehicle.
+  ///
+  /// In en, this message translates to:
+  /// **'No vehicle is linked to this route'**
+  String get busLiveNoVehicle;
+
+  /// No description provided for @busLiveTrailUnread.
+  ///
+  /// In en, this message translates to:
+  /// **'The bus\'s track could not be read, so passed stops and arrival times are not shown.'**
+  String get busLiveTrailUnread;
+
+  /// No description provided for @busLivePassedAt.
+  ///
+  /// In en, this message translates to:
+  /// **'passed at {time}'**
+  String busLivePassedAt(String time);
+
+  /// No description provided for @busLiveNotSeen.
+  ///
+  /// In en, this message translates to:
+  /// **'not seen — the bus did not come near'**
+  String get busLiveNotSeen;
+
+  /// No description provided for @busLiveEta.
+  ///
+  /// In en, this message translates to:
+  /// **'about {time} · {minutes} min'**
+  String busLiveEta(String time, String minutes);
+
+  /// No description provided for @busLiveNoEta.
+  ///
+  /// In en, this message translates to:
+  /// **'no time yet'**
+  String get busLiveNoEta;
+
+  /// No description provided for @busLiveUnpinned.
+  ///
+  /// In en, this message translates to:
+  /// **'not pinned on the map'**
+  String get busLiveUnpinned;
+
+  /// No description provided for @busLiveSchoolEta.
+  ///
+  /// In en, this message translates to:
+  /// **'School: about {time} · {minutes} min'**
+  String busLiveSchoolEta(String time, String minutes);
+
+  /// No description provided for @busLiveEstimateNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Times are estimates from the bus\'s position, not promises. Stops are in the order this run visits them.'**
+  String get busLiveEstimateNote;
+
+  /// No description provided for @busLiveRouteMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'This route is not shown live for you. A driver sees only their own bus.'**
+  String get busLiveRouteMissing;
+
+  /// No description provided for @mrEditHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap a box to mark it. Tap a date to fill that day for every child not yet marked, then tap the exceptions.'**
+  String get mrEditHint;
+
+  /// No description provided for @mrViewOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'View only — the class teacher (or the office) fills this class\'s month register.'**
+  String get mrViewOnly;
+
+  /// No description provided for @mrUnsavedCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} unsaved change(s)'**
+  String mrUnsavedCount(String count);
+
+  /// No description provided for @mrSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get mrSave;
+
+  /// No description provided for @mrDiscard.
+  ///
+  /// In en, this message translates to:
+  /// **'Discard'**
+  String get mrDiscard;
+
+  /// No description provided for @mrDiscardTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Discard unsaved changes?'**
+  String get mrDiscardTitle;
+
+  /// No description provided for @mrDiscardBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The marks you changed have not been saved.'**
+  String get mrDiscardBody;
+
+  /// No description provided for @mrKeepEditing.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep editing'**
+  String get mrKeepEditing;
+
+  /// No description provided for @mrClearMark.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear mark'**
+  String get mrClearMark;
+
+  /// No description provided for @mrFillDayTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Fill {date}'**
+  String mrFillDayTitle(String date);
+
+  /// No description provided for @mrFillDayBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Every child not yet marked on this day gets the mark you choose. Marks already there stay.'**
+  String get mrFillDayBody;
+
+  /// No description provided for @mrFillDayDone.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} children marked — tap the exceptions, then Save.'**
+  String mrFillDayDone(String count);
+
+  /// No description provided for @mrFillDayNothing.
+  ///
+  /// In en, this message translates to:
+  /// **'Every child already has a mark on this day.'**
+  String get mrFillDayNothing;
+
+  /// No description provided for @mrSavedDays.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved {count} day(s).'**
+  String mrSavedDays(String count);
+
+  /// No description provided for @mrNotSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Not saved: {reasons}'**
+  String mrNotSaved(String reasons);
+
+  /// No description provided for @ptmScheduleButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Schedule PTM'**
+  String get ptmScheduleButton;
+
+  /// No description provided for @ptmScheduleTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Schedule a PTM'**
+  String get ptmScheduleTitle;
+
+  /// No description provided for @ptmScheduleName.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get ptmScheduleName;
+
+  /// No description provided for @ptmScheduleNameDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Parent-teacher meeting'**
+  String get ptmScheduleNameDefault;
+
+  /// No description provided for @ptmScheduleDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Date'**
+  String get ptmScheduleDate;
+
+  /// No description provided for @ptmScheduleEndDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Last day (if more than one day)'**
+  String get ptmScheduleEndDate;
+
+  /// No description provided for @ptmScheduleClasses.
+  ///
+  /// In en, this message translates to:
+  /// **'Classes'**
+  String get ptmScheduleClasses;
+
+  /// No description provided for @ptmScheduleClassesHintTeacher.
+  ///
+  /// In en, this message translates to:
+  /// **'Only the classes you teach. A PTM is for the whole class — each of its teachers adds their own slots.'**
+  String get ptmScheduleClassesHintTeacher;
+
+  /// No description provided for @ptmScheduleClassesHintOffice.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick one or more classes. One PTM covers all of them.'**
+  String get ptmScheduleClassesHintOffice;
+
+  /// No description provided for @ptmScheduleSelectAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Select all'**
+  String get ptmScheduleSelectAll;
+
+  /// No description provided for @ptmScheduleMode.
+  ///
+  /// In en, this message translates to:
+  /// **'How'**
+  String get ptmScheduleMode;
+
+  /// No description provided for @ptmModeInPerson.
+  ///
+  /// In en, this message translates to:
+  /// **'In person'**
+  String get ptmModeInPerson;
+
+  /// No description provided for @ptmModeVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Video'**
+  String get ptmModeVideo;
+
+  /// No description provided for @ptmModePhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone'**
+  String get ptmModePhone;
+
+  /// No description provided for @ptmScheduleNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Note for parents (optional)'**
+  String get ptmScheduleNote;
+
+  /// No description provided for @ptmScheduleSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Schedule'**
+  String get ptmScheduleSave;
+
+  /// No description provided for @ptmScheduleNeedClass.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick at least one class.'**
+  String get ptmScheduleNeedClass;
+
+  /// No description provided for @ptmScheduleNeedName.
+  ///
+  /// In en, this message translates to:
+  /// **'Give the PTM a name.'**
+  String get ptmScheduleNeedName;
+
+  /// No description provided for @ptmScheduleDone.
+  ///
+  /// In en, this message translates to:
+  /// **'PTM scheduled — now add your slots to it.'**
+  String get ptmScheduleDone;
+
+  /// No description provided for @ptmScheduleNoClasses.
+  ///
+  /// In en, this message translates to:
+  /// **'You have no classes to schedule a PTM for — ask the office to add yours (Staff → Duties).'**
+  String get ptmScheduleNoClasses;
+
+  /// No description provided for @scCallFamily.
+  ///
+  /// In en, this message translates to:
+  /// **'Call family'**
+  String get scCallFamily;
+
+  /// No description provided for @scMessageFamily.
+  ///
+  /// In en, this message translates to:
+  /// **'Message family'**
+  String get scMessageFamily;
+
+  /// No description provided for @scAppChat.
+  ///
+  /// In en, this message translates to:
+  /// **'App chat with the family'**
+  String get scAppChat;
+
+  /// No description provided for @scAppChatHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Messages in the parent app — the family replies there'**
+  String get scAppChatHint;
+
+  /// No description provided for @scWhatsAppMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Send WhatsApp message'**
+  String get scWhatsAppMessage;
+
+  /// No description provided for @scWhatsAppMessageHint.
+  ///
+  /// In en, this message translates to:
+  /// **'From the school\'s WhatsApp number — you see it before it goes'**
+  String get scWhatsAppMessageHint;
+
+  /// No description provided for @scAddWhatsApp.
+  ///
+  /// In en, this message translates to:
+  /// **'Add WhatsApp number'**
+  String get scAddWhatsApp;
+
+  /// No description provided for @scChangeWhatsApp.
+  ///
+  /// In en, this message translates to:
+  /// **'Change WhatsApp number'**
+  String get scChangeWhatsApp;
+
+  /// No description provided for @scNoNumberOnRecord.
+  ///
+  /// In en, this message translates to:
+  /// **'No number on record'**
+  String get scNoNumberOnRecord;
+
+  /// No description provided for @scNoWhatsAppOnRecord.
+  ///
+  /// In en, this message translates to:
+  /// **'No WhatsApp number on record'**
+  String get scNoWhatsAppOnRecord;
+
+  /// No description provided for @scAskClassTeacherToAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask the class teacher or the office to add it.'**
+  String get scAskClassTeacherToAdd;
+
+  /// No description provided for @scCallNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Call {number}'**
+  String scCallNumber(String number);
+
+  /// No description provided for @scCallSourceGuardian.
+  ///
+  /// In en, this message translates to:
+  /// **'Guardian\'s mobile'**
+  String get scCallSourceGuardian;
+
+  /// No description provided for @scCallSourceWhatsApp.
+  ///
+  /// In en, this message translates to:
+  /// **'Family\'s WhatsApp number (no guardian mobile on record)'**
+  String get scCallSourceWhatsApp;
+
+  /// No description provided for @scLoadingFamily.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading the family\'s numbers…'**
+  String get scLoadingFamily;
+
+  /// No description provided for @scWhatsAppNumberLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'WhatsApp number (10 digits)'**
+  String get scWhatsAppNumberLabel;
+
+  /// No description provided for @scCurrentNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Now: {number}'**
+  String scCurrentNumber(String number);
+
+  /// No description provided for @scSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get scSave;
+
+  /// No description provided for @scCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get scCancel;
+
+  /// No description provided for @scNumberSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'WhatsApp number saved for school messages.'**
+  String get scNumberSaved;
+
+  /// No description provided for @scErrEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Type the family\'s 10-digit WhatsApp number'**
+  String get scErrEmpty;
+
+  /// No description provided for @scErrNotMobile.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a 10-digit Indian mobile number (starting 6–9)'**
+  String get scErrNotMobile;
+
+  /// No description provided for @scErrPlaceholder.
+  ///
+  /// In en, this message translates to:
+  /// **'{number} is a placeholder, not the family\'s number'**
+  String scErrPlaceholder(String number);
+
+  /// No description provided for @scErrSame.
+  ///
+  /// In en, this message translates to:
+  /// **'That is already the family\'s WhatsApp number'**
+  String get scErrSame;
+
+  /// No description provided for @scMessageLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Your message to the family'**
+  String get scMessageLabel;
+
+  /// No description provided for @scMessageHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Short and clear — the family reads it on WhatsApp'**
+  String get scMessageHint;
+
+  /// No description provided for @scPreview.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview'**
+  String get scPreview;
+
+  /// No description provided for @scPreviewTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'The family will read this'**
+  String get scPreviewTitle;
+
+  /// No description provided for @scPreviewTo.
+  ///
+  /// In en, this message translates to:
+  /// **'To {number} · in {language}'**
+  String scPreviewTo(String number, String language);
+
+  /// No description provided for @scEdit.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get scEdit;
+
+  /// No description provided for @scSend.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get scSend;
+
+  /// No description provided for @scSending.
+  ///
+  /// In en, this message translates to:
+  /// **'Sending…'**
+  String get scSending;
+
+  /// No description provided for @scSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent from the school\'s WhatsApp.'**
+  String get scSent;
+
+  /// No description provided for @scNotSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Not sent: {reason}'**
+  String scNotSent(String reason);
+
+  /// No description provided for @scLanguageHindi.
+  ///
+  /// In en, this message translates to:
+  /// **'Hindi'**
+  String get scLanguageHindi;
+
+  /// No description provided for @scLanguageEnglish.
+  ///
+  /// In en, this message translates to:
+  /// **'English'**
+  String get scLanguageEnglish;
+
+  /// No description provided for @dtTypeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'What is this document?'**
+  String get dtTypeLabel;
+
+  /// No description provided for @dtPickType.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick the document type'**
+  String get dtPickType;
+
+  /// No description provided for @dtCreateCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Create a custom type…'**
+  String get dtCreateCustom;
+
+  /// No description provided for @dtCustomName.
+  ///
+  /// In en, this message translates to:
+  /// **'Name of the new type'**
+  String get dtCustomName;
+
+  /// No description provided for @dtCustomHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. Ration card'**
+  String get dtCustomHint;
+
+  /// No description provided for @dtCreate.
+  ///
+  /// In en, this message translates to:
+  /// **'Create'**
+  String get dtCreate;
+
+  /// No description provided for @dtCustomNotLoaded.
+  ///
+  /// In en, this message translates to:
+  /// **'The school\'s own types could not be read — only the standard types are listed.'**
+  String get dtCustomNotLoaded;
+
+  /// No description provided for @dtAadhaarNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Aadhaar number on the card (optional)'**
+  String get dtAadhaarNumber;
+
+  /// No description provided for @dtAadhaarHint.
+  ///
+  /// In en, this message translates to:
+  /// **'12 digits — it is saved to the record'**
+  String get dtAadhaarHint;
+
+  /// No description provided for @dtAadhaarInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'An Aadhaar number has 12 digits'**
+  String get dtAadhaarInvalid;
+
+  /// No description provided for @dtGoesToSlot.
+  ///
+  /// In en, this message translates to:
+  /// **'Verified, it goes to: {label}'**
+  String dtGoesToSlot(String label);
+
+  /// No description provided for @dtGoesOffSlot.
+  ///
+  /// In en, this message translates to:
+  /// **'Verified, it is filed as {label} — the child\'s \"{from}\" stays empty for the right document.'**
+  String dtGoesOffSlot(String label, String from);
+
+  /// No description provided for @dtVerifiedAs.
+  ///
+  /// In en, this message translates to:
+  /// **'Verified as {label}.'**
+  String dtVerifiedAs(String label);
+
+  /// No description provided for @dtAadhaarSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Aadhaar number saved to the record.'**
+  String get dtAadhaarSaved;
+
+  /// No description provided for @dtAadhaarKept.
+  ///
+  /// In en, this message translates to:
+  /// **'The record already has a different Aadhaar verified on UDISE+ — not changed. Tell the office.'**
+  String get dtAadhaarKept;
+
+  /// No description provided for @dtAadhaarNotSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Document verified, but the Aadhaar number was not saved: {reason}'**
+  String dtAadhaarNotSaved(String reason);
+
+  /// No description provided for @dtVerify.
+  ///
+  /// In en, this message translates to:
+  /// **'Verify'**
+  String get dtVerify;
+
+  /// No description provided for @pmAllStaff.
+  ///
+  /// In en, this message translates to:
+  /// **'All staff'**
+  String get pmAllStaff;
+
+  /// No description provided for @pmStaffPayslipsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff payslips'**
+  String get pmStaffPayslipsTitle;
+
+  /// No description provided for @pmStaffAdvancesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff advances'**
+  String get pmStaffAdvancesTitle;
+
+  /// No description provided for @pmSession.
+  ///
+  /// In en, this message translates to:
+  /// **'Session {session}'**
+  String pmSession(String session);
+
+  /// No description provided for @pmNotRun.
+  ///
+  /// In en, this message translates to:
+  /// **'Not run'**
+  String get pmNotRun;
+
+  /// No description provided for @pmPreparing.
+  ///
+  /// In en, this message translates to:
+  /// **'Being prepared'**
+  String get pmPreparing;
+
+  /// No description provided for @pmGross.
+  ///
+  /// In en, this message translates to:
+  /// **'Gross'**
+  String get pmGross;
+
+  /// No description provided for @pmDeductions.
+  ///
+  /// In en, this message translates to:
+  /// **'Deductions'**
+  String get pmDeductions;
+
+  /// No description provided for @pmNet.
+  ///
+  /// In en, this message translates to:
+  /// **'Net pay'**
+  String get pmNet;
+
+  /// No description provided for @pmPayable.
+  ///
+  /// In en, this message translates to:
+  /// **'Payable'**
+  String get pmPayable;
+
+  /// No description provided for @pmPaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid'**
+  String get pmPaid;
+
+  /// No description provided for @pmUnpaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Still unpaid'**
+  String get pmUnpaid;
+
+  /// No description provided for @pmPaidOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid {date}'**
+  String pmPaidOn(String date);
+
+  /// No description provided for @pmNotPaidYet.
+  ///
+  /// In en, this message translates to:
+  /// **'Not paid yet'**
+  String get pmNotPaidYet;
+
+  /// No description provided for @pmOnHold.
+  ///
+  /// In en, this message translates to:
+  /// **'On hold'**
+  String get pmOnHold;
+
+  /// No description provided for @pmExtraRuns.
+  ///
+  /// In en, this message translates to:
+  /// **'This month appears in {count} more run(s) — check Payroll on the web.'**
+  String pmExtraRuns(String count);
+
+  /// No description provided for @pmMonthsRun.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} months run'**
+  String pmMonthsRun(String count);
+
+  /// No description provided for @pmLeft.
+  ///
+  /// In en, this message translates to:
+  /// **'Left'**
+  String get pmLeft;
+
+  /// No description provided for @pmNoStaff.
+  ///
+  /// In en, this message translates to:
+  /// **'No staff to show for this session.'**
+  String get pmNoStaff;
+
+  /// No description provided for @pmReadOnlyNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Read only — the figures are the payroll runs on the web. Months with no payroll run say \"Not run\".'**
+  String get pmReadOnlyNote;
+
+  /// No description provided for @pmTaken.
+  ///
+  /// In en, this message translates to:
+  /// **'Taken'**
+  String get pmTaken;
+
+  /// No description provided for @pmRecovered.
+  ///
+  /// In en, this message translates to:
+  /// **'Recovered'**
+  String get pmRecovered;
+
+  /// No description provided for @pmDue.
+  ///
+  /// In en, this message translates to:
+  /// **'Due'**
+  String get pmDue;
+
+  /// No description provided for @pmNoAdvances.
+  ///
+  /// In en, this message translates to:
+  /// **'No staff member holds an advance.'**
+  String get pmNoAdvances;
+
+  /// No description provided for @pmGiven.
+  ///
+  /// In en, this message translates to:
+  /// **'Given {date}'**
+  String pmGiven(String date);
+
+  /// No description provided for @pmReturned.
+  ///
+  /// In en, this message translates to:
+  /// **'Returned {date}'**
+  String pmReturned(String date);
+
+  /// No description provided for @pmFromSalary.
+  ///
+  /// In en, this message translates to:
+  /// **'From salary · {month}'**
+  String pmFromSalary(String month);
+
+  /// No description provided for @pmNothingRecovered.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing recovered yet.'**
+  String get pmNothingRecovered;
+
+  /// No description provided for @pmAdvancesNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Read only — the same advance register and totals as Payroll → Advances on the web.'**
+  String get pmAdvancesNote;
+
+  /// No description provided for @pmAdvanceCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} advance(s)'**
+  String pmAdvanceCount(String count);
+
+  /// No description provided for @hcCreateNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'Create notice / news'**
+  String get hcCreateNotice;
+
+  /// No description provided for @hcNoticeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Title'**
+  String get hcNoticeTitle;
+
+  /// No description provided for @hcNoticeMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Message'**
+  String get hcNoticeMessage;
+
+  /// No description provided for @hcNewsSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Short summary (optional)'**
+  String get hcNewsSummary;
+
+  /// No description provided for @hcAudience.
+  ///
+  /// In en, this message translates to:
+  /// **'Who is it for'**
+  String get hcAudience;
+
+  /// No description provided for @hcAudienceAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Everyone'**
+  String get hcAudienceAll;
+
+  /// No description provided for @hcAudienceParents.
+  ///
+  /// In en, this message translates to:
+  /// **'Parents'**
+  String get hcAudienceParents;
+
+  /// No description provided for @hcAudienceStaff.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff'**
+  String get hcAudienceStaff;
+
+  /// No description provided for @hcPinToTop.
+  ///
+  /// In en, this message translates to:
+  /// **'Pin to the top'**
+  String get hcPinToTop;
+
+  /// No description provided for @hcPublish.
+  ///
+  /// In en, this message translates to:
+  /// **'Publish'**
+  String get hcPublish;
+
+  /// No description provided for @hcPublished.
+  ///
+  /// In en, this message translates to:
+  /// **'Published.'**
+  String get hcPublished;
+
+  /// No description provided for @hcWriteTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Write a title.'**
+  String get hcWriteTitle;
+
+  /// No description provided for @hcWriteMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Write the message.'**
+  String get hcWriteMessage;
+
+  /// No description provided for @hcTooLong.
+  ///
+  /// In en, this message translates to:
+  /// **'This is too long — please shorten it.'**
+  String get hcTooLong;
+
+  /// No description provided for @hcNoticePushNote.
+  ///
+  /// In en, this message translates to:
+  /// **'A notice also rings the phones of everyone it is for.'**
+  String get hcNoticePushNote;
+
+  /// No description provided for @hcConfirmPublish.
+  ///
+  /// In en, this message translates to:
+  /// **'Publish this now? Everyone it is for will see it in the app.'**
+  String get hcConfirmPublish;
+
+  /// No description provided for @hcTodaysCollections.
+  ///
+  /// In en, this message translates to:
+  /// **'Today\'s collections'**
+  String get hcTodaysCollections;
+
+  /// No description provided for @hcNothingCollectedToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing has been collected today.'**
+  String get hcNothingCollectedToday;
+
+  /// No description provided for @hcByCashier.
+  ///
+  /// In en, this message translates to:
+  /// **'by {name}'**
+  String hcByCashier(String name);
+
+  /// No description provided for @hcStaffList.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff list'**
+  String get hcStaffList;
+
+  /// No description provided for @hcStaffProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff profile'**
+  String get hcStaffProfile;
+
+  /// No description provided for @hcEmpCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Employee code'**
+  String get hcEmpCode;
+
+  /// No description provided for @hcDepartment.
+  ///
+  /// In en, this message translates to:
+  /// **'Department'**
+  String get hcDepartment;
+
+  /// No description provided for @hcJoined.
+  ///
+  /// In en, this message translates to:
+  /// **'Joined'**
+  String get hcJoined;
+
+  /// No description provided for @hcClassTeacherOf.
+  ///
+  /// In en, this message translates to:
+  /// **'Class teacher of'**
+  String get hcClassTeacherOf;
+
+  /// No description provided for @hcMobile.
+  ///
+  /// In en, this message translates to:
+  /// **'Mobile'**
+  String get hcMobile;
+
+  /// No description provided for @hcNoOtherDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'No other details on record.'**
+  String get hcNoOtherDetails;
+
+  /// No description provided for @hcChangeMobile.
+  ///
+  /// In en, this message translates to:
+  /// **'Add / change mobile'**
+  String get hcChangeMobile;
+
+  /// No description provided for @hcRosterMissingMobile.
+  ///
+  /// In en, this message translates to:
+  /// **'{missing} of {total} staff have no mobile on record, so they cannot sign in to the staff app. Tap the red phone to add the number.'**
+  String hcRosterMissingMobile(int missing, int total);
+
+  /// No description provided for @hcStaffPresentToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff present today'**
+  String get hcStaffPresentToday;
+
+  /// No description provided for @hcStaffAbsentToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff absent today'**
+  String get hcStaffAbsentToday;
+
+  /// No description provided for @hcNoStaffPresent.
+  ///
+  /// In en, this message translates to:
+  /// **'No one is marked present yet.'**
+  String get hcNoStaffPresent;
+
+  /// No description provided for @hcNoStaffAbsent.
+  ///
+  /// In en, this message translates to:
+  /// **'No one is marked absent today.'**
+  String get hcNoStaffAbsent;
+
+  /// No description provided for @hcExemptNotListed.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff exempt from attendance are not counted or listed.'**
+  String get hcExemptNotListed;
+
+  /// No description provided for @hcStaffCountsNotLoaded.
+  ///
+  /// In en, this message translates to:
+  /// **'Present and absent could not be loaded — pull down to try again.'**
+  String get hcStaffCountsNotLoaded;
+
+  /// No description provided for @hcStaffToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff today'**
+  String get hcStaffToday;
+
+  /// No description provided for @hcOpenAttendance.
+  ///
+  /// In en, this message translates to:
+  /// **'Attendance'**
+  String get hcOpenAttendance;
+
+  /// No description provided for @hcNothingRecordedToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing recorded today'**
+  String get hcNothingRecordedToday;
+
+  /// No description provided for @hcAuditNotLoaded.
+  ///
+  /// In en, this message translates to:
+  /// **'Marks entry, leave decisions and similar work could not be loaded — pull down to try again.'**
+  String get hcAuditNotLoaded;
+
+  /// No description provided for @hcActivitySummary.
+  ///
+  /// In en, this message translates to:
+  /// **'{active} of {total} staff have recorded work today'**
+  String hcActivitySummary(int active, int total);
+
+  /// No description provided for @hcActPunchIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Punched in at {time}'**
+  String hcActPunchIn(String time);
+
+  /// No description provided for @hcActPunchOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Punched out at {time}'**
+  String hcActPunchOut(String time);
+
+  /// No description provided for @hcActRegisters.
+  ///
+  /// In en, this message translates to:
+  /// **'Marked attendance ({count})'**
+  String hcActRegisters(int count);
+
+  /// No description provided for @hcActHomework.
+  ///
+  /// In en, this message translates to:
+  /// **'Posted homework ({count})'**
+  String hcActHomework(int count);
+
+  /// No description provided for @hcActMarks.
+  ///
+  /// In en, this message translates to:
+  /// **'Entered marks for {qty} students'**
+  String hcActMarks(int qty);
+
+  /// No description provided for @hcActCoScholastic.
+  ///
+  /// In en, this message translates to:
+  /// **'Co-scholastic ratings ({count})'**
+  String hcActCoScholastic(int count);
+
+  /// No description provided for @hcActClassSheet.
+  ///
+  /// In en, this message translates to:
+  /// **'Updated the class sheet ({count})'**
+  String hcActClassSheet(int count);
+
+  /// No description provided for @hcActStudentRecords.
+  ///
+  /// In en, this message translates to:
+  /// **'Updated student records ({count})'**
+  String hcActStudentRecords(int count);
+
+  /// No description provided for @hcActFees.
+  ///
+  /// In en, this message translates to:
+  /// **'Collected {amount} in {count} receipts'**
+  String hcActFees(String amount, int count);
+
+  /// No description provided for @hcActReceiptEdit.
+  ///
+  /// In en, this message translates to:
+  /// **'Edited receipts ({count})'**
+  String hcActReceiptEdit(int count);
+
+  /// No description provided for @hcActLeaveApplied.
+  ///
+  /// In en, this message translates to:
+  /// **'Applied for leave'**
+  String get hcActLeaveApplied;
+
+  /// No description provided for @hcActStaffLeave.
+  ///
+  /// In en, this message translates to:
+  /// **'Decided staff leave ({count})'**
+  String hcActStaffLeave(int count);
+
+  /// No description provided for @hcActStudentLeave.
+  ///
+  /// In en, this message translates to:
+  /// **'Decided student leave ({count})'**
+  String hcActStudentLeave(int count);
+
+  /// No description provided for @hcActProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Updated own profile'**
+  String get hcActProfile;
+
+  /// No description provided for @hcActLastAt.
+  ///
+  /// In en, this message translates to:
+  /// **'last at {time}'**
+  String hcActLastAt(String time);
 }
 
 class _LDelegate extends LocalizationsDelegate<L> {

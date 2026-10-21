@@ -65,3 +65,42 @@ export function sessionParentHits(
     sis.households ?? [],
   );
 }
+
+/** The fields of a transport assignment a route audience reads. */
+export type RouteAssignmentLike = {
+  studentId: string;
+  routeId: string;
+  academicYearCode: string;
+  effectiveTo: string | null;
+  boardingSuspended?: boolean;
+};
+
+/**
+ * Children riding any of `routeIds` today — the same rule the bus-delay
+ * notice uses: live assignments only (no end date, or one still ahead),
+ * each route read in the latest academic year that has riders on it, and a
+ * child whose boarding is suspended is not on the bus.
+ */
+export function routeRiderStudentIds(
+  assignments: RouteAssignmentLike[],
+  routeIds: string[],
+  todayIso: string,
+): Set<string> {
+  const want = new Set(routeIds);
+  const today = todayIso.slice(0, 10);
+  const live = assignments.filter(
+    (a) => want.has(a.routeId) && (!a.effectiveTo || a.effectiveTo >= today),
+  );
+  const latestAy = new Map<string, string>();
+  for (const a of live) {
+    const cur = latestAy.get(a.routeId) || "";
+    if ((a.academicYearCode || "") > cur) latestAy.set(a.routeId, a.academicYearCode);
+  }
+  const out = new Set<string>();
+  for (const a of live) {
+    if (a.boardingSuspended) continue;
+    if ((a.academicYearCode || "") !== (latestAy.get(a.routeId) || "")) continue;
+    out.add(a.studentId);
+  }
+  return out;
+}

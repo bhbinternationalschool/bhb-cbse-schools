@@ -63,6 +63,8 @@ const kLocalFeatureGroups = <String, String>{
   "staff_roster": "Leadership",
   "broadcast": "Leadership",
   "transport_requests": "Leadership",
+  "staff_payslips_all": "Leadership",
+  "staff_advances_all": "Leadership",
   "visitor_gate": "Gate",
   "gate_pass_release": "Gate",
   "route_manifest": "Transport",

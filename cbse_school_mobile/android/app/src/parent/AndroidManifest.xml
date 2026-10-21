@@ -57,8 +57,19 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
 
-    <!-- flutter_background_service registers this even when unused. -->
-    <application>
+    <!-- flutter_background_service registers this even when unused. The
+         homework "Scan page" scanner (cunning_document_scanner) is staff
+         only: its fallback camera activity and file provider are dropped
+         here, and CAMERA stays removed above. Its library manifest also sets
+         an app-wide theme and backup rules; the parent app keeps its own. -->
+    <application
+        tools:remove="android:theme,android:dataExtractionRules,android:fullBackupContent">
+        <activity
+            android:name="biz.cunning.cunning_document_scanner.fallback.DocumentScannerActivity"
+            tools:node="remove" />
+        <provider
+            android:name="biz.cunning.cunning_document_scanner.fallback.DocumentScannerFileProvider"
+            tools:node="remove" />
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
             tools:node="remove" />

@@ -711,6 +711,25 @@ extension TransportRegisterApi on ApiClient {
     return FuelFill.fromJson(_trMap(data, "fill"));
   }
 
+  /// Read a fuel bill photo → a draft for the fuel form (amount, date,
+  /// quantity, rate, odometer, pump, bill no.). Saves nothing; fields that
+  /// could not be read come back empty.
+  Future<Map<String, dynamic>> scanFuelBill({
+    required String vehicleId,
+    required String date,
+    required String imageBase64,
+    String mimeType = "image/jpeg",
+  }) async {
+    final data = await _postData("/api/v1/staff/logbook/scan-bill", {
+      "kind": "fuel_bill",
+      "vehicleId": vehicleId,
+      "date": date,
+      "imageBase64": imageBase64,
+      "mimeType": mimeType,
+    });
+    return Map<String, dynamic>.from((data["reading"] as Map?) ?? const {});
+  }
+
   /// Uploads a bill photo to the school's private files (the same /api/upload
   /// the web log book uses) and returns its `/api/file/…` URL, which is what
   /// the fuel entry stores.

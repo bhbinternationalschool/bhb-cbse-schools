@@ -160,6 +160,8 @@ SELFTESTS=(
   test:udise-doc-intake
   test:homework-expand
   test:homework-page-scan
+  test:staff-scan
+  test:staff-scan-route
   test:homework-submission
   test:exam-drill
   test:drill-skills
@@ -256,6 +258,8 @@ SELFTESTS=(
   test:payment-link-concurrent-save
   test:student-leave-status-guard
   test:ptm-row-stamps
+  test:ptm-schedule
+  test:attendance-month-register-edit
   test:propel-robot
   test:library-ebooks
   test:pinnacle-books
@@ -466,6 +470,8 @@ SELFTESTS=(
   test:staff-roster-redact
   test:staff-profile-validate
   test:sis-class-teacher
+  test:student-contact
+  test:student-doc-types
   test:punch-code
   test:wa-language-gate
   test:answer-sheet-ai

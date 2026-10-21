@@ -10,6 +10,7 @@ import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../modules/dictate_field.dart";
+import "doc_type_verify_sheet.dart";
 
 /// Parent-uploaded documents waiting for verification — the class
 /// teacher's queue (everything for the office). Open the file, then verify
@@ -36,10 +37,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return PopWithChanged(
-      changed: () => _changed,
-      child: _shell(context),
-    );
+    return PopWithChanged(changed: () => _changed, child: _shell(context));
   }
 
   Widget _shell(BuildContext context) {
@@ -226,6 +224,18 @@ class _ReviewScreenState extends State<_ReviewScreen> {
     }
   }
 
+  /// Verify: first say what the document IS (request mr_mv9z5lg1jlih) —
+  /// the sheet saves it with the type, and the server puts it where the
+  /// record keeps that kind.
+  Future<void> _verifyWithType() async {
+    final done = await showDocTypeVerifySheet(
+      context,
+      api: widget.api,
+      item: widget.d,
+    );
+    if (done == true && mounted) Navigator.pop(context, true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final d = widget.d;
@@ -288,7 +298,7 @@ class _ReviewScreenState extends State<_ReviewScreen> {
                       child: FilledButton(
                         onPressed: _busy || bytes == null
                             ? null
-                            : () => _decide(true),
+                            : _verifyWithType,
                         child: Text(_busy ? "Saving…" : "Verify"),
                       ),
                     ),

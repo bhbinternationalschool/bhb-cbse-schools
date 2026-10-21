@@ -39,7 +39,12 @@ export type WaAudienceSpec =
   /** Families at a given fee recovery stage. */
   | { kind: "fee_stage"; stages: string[] }
   /** Hand-picked students, by SIS id. */
-  | { kind: "students"; studentIds: string[] };
+  | { kind: "students"; studentIds: string[] }
+  /**
+   * Families with a child riding one of these transport routes (live
+   * assignments). Added 20 Oct 2026 for the staff app's broadcast.
+   */
+  | { kind: "transport_route"; routeIds: string[] };
 
 export type WaAudienceValidation =
   | { ok: true; spec: WaAudienceSpec }
@@ -118,9 +123,18 @@ export function parseWaAudienceSpec(raw: unknown): WaAudienceValidation {
     return { ok: true, spec: { kind: "students", studentIds } };
   }
 
+  if (kind === "transport_route") {
+    const routeIds = ids(a.routeIds);
+    if (!routeIds.length) {
+      return { ok: false, error: "Pick at least one transport route" };
+    }
+    return { ok: true, spec: { kind: "transport_route", routeIds } };
+  }
+
   return {
     ok: false,
-    error: 'audience kind must be "staff", "parents", "fee_stage" or "students"',
+    error:
+      'audience kind must be "staff", "parents", "fee_stage", "students" or "transport_route"',
   };
 }
 
@@ -156,6 +170,7 @@ export function describeWaAudience(
     sections?: Record<string, string>;
     departments?: Record<string, string>;
     designations?: Record<string, string>;
+    routes?: Record<string, string>;
   },
 ): string {
   const list = (xs: string[], lookup?: Record<string, string>) =>
@@ -192,6 +207,10 @@ export function describeWaAudience(
 
   if (spec.kind === "fee_stage") {
     return `Families at fee stage ${spec.stages.join(", ")}`;
+  }
+
+  if (spec.kind === "transport_route") {
+    return `Families on ${spec.routeIds.length === 1 ? "route" : "routes"} ${list(spec.routeIds, names?.routes)}`;
   }
 
   return `${spec.studentIds.length} selected student${

@@ -165,6 +165,15 @@ jobs:
       - name: Self-test — the staff month register counts what the register holds, and only the owner changes a mark
         working-directory: apps/web
         run: npm run test:staff-month-register
+      - name: Self-test — the principal's staff cards count what their lists show, exempt staff in neither; staff today is what staff did
+        working-directory: apps/web
+        run: npm run test:staff-home-cards
+      - name: Self-test — the month register is filled only by those who may, one day at a time
+        working-directory: apps/web
+        run: npm run test:attendance-month-register-edit
+      - name: Self-test — a PTM scheduled from the app covers only the classes its scheduler teaches
+        working-directory: apps/web
+        run: npm run test:ptm-schedule
 
       - name: Self-test — an in-class answer is a child's work, and the note only says what the teacher said
         working-directory: apps/web
@@ -418,10 +427,14 @@ jobs:
           npm run test:erp-ask
           npm run test:erp-reports
           npm run test:fleet-live
+          npm run test:bus-route-eta
           npm run test:udise-doc-intake
           npm run test:homework-expand
           npm run test:homework-page-scan
+          npm run test:staff-scan
+          npm run test:staff-scan-route
           npm run test:homework-submission
+          npm run test:homework-attachments
           npm run test:exam-drill
           npm run test:drill-skills
           npm run test:fee-server-persistence
@@ -572,6 +585,8 @@ jobs:
           npm run test:staff-roster-redact
           npm run test:staff-profile-validate
           npm run test:sis-class-teacher
+          npm run test:student-contact
+          npm run test:student-doc-types
           npm run test:punch-code
           npm run test:wa-language-gate
           npm run test:answer-sheet-ai
@@ -585,6 +600,7 @@ jobs:
           npm run test:staff-day-status
           npm run test:payroll-no-register
           npm run test:mobile-features
+          npm run test:staff-payroll-mgmt
           npm run test:cashfree-checkout
           npm run test:gateway-fees
           npm run test:gateway-methods
@@ -671,6 +687,7 @@ jobs:
           npm run test:wa-failure-reason
           npm run test:wa-household-numbers
           npm run test:wa-audience-spec
+          npm run test:staff-app-broadcast
           npm run test:wa-audience-households
           npm run test:wa-tutor-bot
           npm run test:wa-student-link

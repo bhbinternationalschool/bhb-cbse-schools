@@ -1,6 +1,6 @@
 import { writeAudit } from "@/lib/audit.server";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
-import { requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
+import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
 import {
   gateCheckIn,
@@ -17,19 +17,26 @@ type Body = {
   personToMeet?: string;
   idProofNote?: string;
   linkedTo?: string;
+  peopleCount?: unknown;
+  vehicleNo?: string;
+  address?: string;
+  clientId?: string;
 };
 
 /**
  * POST /api/v1/staff/visitors/checkin — let somebody in.
  *
- * If that mobile is already on campus the open visit comes back with
- * `alreadyIn: true` rather than a second row: a guard tapping twice on a bad
- * connection must not put the same person in the log twice.
+ * If that mobile is already on campus — or the phone's own visit id is
+ * already in the log — the open visit comes back with `alreadyIn: true`
+ * rather than a second row: a guard tapping twice on a bad connection must
+ * not put the same person in the log twice. The mobile is optional (the
+ * register never required one); people count defaults to 1.
  */
 export async function POST(request: Request) {
   try {
     const ctx = await resolveApiAuth(request);
     assertMobileFeature(ctx, "visitor_gate");
+    assertPermission(ctx, "visitors", "create");
 
     const body = (await request.json().catch(() => ({}))) as Body;
     const purpose = (body.purpose || "").trim();
@@ -44,6 +51,10 @@ export async function POST(request: Request) {
       personToMeet: body.personToMeet,
       idProofNote: body.idProofNote,
       linkedTo: body.linkedTo,
+      peopleCount: body.peopleCount,
+      vehicleNo: body.vehicleNo,
+      address: body.address,
+      clientId: body.clientId,
     });
 
     if (!alreadyIn) {
@@ -60,6 +71,8 @@ export async function POST(request: Request) {
           mobile: entry.mobile,
           purpose: entry.purpose,
           personToMeet: entry.personToMeet,
+          peopleCount: entry.peopleCount,
+          vehicleNo: entry.vehicleNo,
         },
         ip: meta.ip,
         userAgent: meta.userAgent,

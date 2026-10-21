@@ -91,6 +91,17 @@ export async function pushPayrollRemoteServer(
   return pushServerBlob("payroll_state", state);
 }
 
+let lastServerDbReadOk = true;
+
+/**
+ * Whether the last server hydration read the payroll desk tables. False =
+ * the runs in memory may be stale or empty for want of a read, so a reader
+ * that would print "not run" must say "not loaded" instead.
+ */
+export function payrollServerDbReadOk(): boolean {
+  return lastServerDbReadOk;
+}
+
 export async function ensurePayrollHydratedServer(): Promise<boolean> {
   if (typeof window !== "undefined") return false;
 
@@ -115,6 +126,7 @@ export async function ensurePayrollHydratedServer(): Promise<boolean> {
   }
 
   const dbDesk = await fetchPayrollDeskFromDb();
+  lastServerDbReadOk = dbDesk.ok;
   if (dbDesk.bundle.runs.length > 0 || payrollReadFromDbEnabled()) {
     state = mergeDbDeskIntoPayrollState(state, dbDesk.bundle, {
       preferDb: payrollReadFromDbEnabled() || (state.runs?.length ?? 0) === 0,

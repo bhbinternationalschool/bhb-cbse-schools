@@ -1974,5 +1974,728 @@
     }
   },
   "feeBankName": "Bank name (required)",
-  "feeBankMissing": "Enter the bank name"
+  "feeBankMissing": "Enter the bank name",
+  "bcAudienceAllParents": "All parents",
+  "bcAudienceSections": "Classes / sections",
+  "bcAudienceStaff": "Staff",
+  "bcAudienceRoutes": "Bus routes",
+  "bcAudienceFeeDefaulters": "Fee defaulters",
+  "bcOwnSectionsOnly": "You can message the families of your own sections.",
+  "bcStaffAll": "All",
+  "bcStaffTeaching": "Teaching",
+  "bcStaffNonTeaching": "Non-teaching",
+  "bcStaffRolesHint": "Roles (leave empty for everyone)",
+  "bcPickAtLeastOne": "Pick at least one.",
+  "bcChannel": "Send by",
+  "bcChannelWhatsapp": "WhatsApp + app",
+  "bcChannelApp": "App only (free)",
+  "bcChannelAppHint": "Only an app notification — no WhatsApp message, no cost. Reaches families and staff who have the school app.",
+  "bcModeTemplate": "WhatsApp template",
+  "bcModeCustom": "Custom message",
+  "bcChooseTemplate": "Choose a template",
+  "bcTemplatesNotLoaded": "Templates could not be loaded.",
+  "bcNoTemplates": "No template is approved in both Hindi and English yet.",
+  "bcAutoFilledHint": "Names, child and class are filled in for each family.",
+  "bcCustomTitle": "Title (optional)",
+  "bcCustomHint": "Goes as typed to anyone who messaged the school in the last 24 hours. Everyone else gets it inside the approved “School notice” template, which WhatsApp delivers to all.",
+  "bcCustomTemplateNotReady": "The “School notice” template is not approved in both languages, so people outside the 24-hour window cannot be reached.",
+  "bcLoadFailed": "Could not load broadcast options.",
+  "bcReadyToSend": "Ready to send",
+  "bcFamiliesInAudience": "In this audience: {count}",
+  "@bcFamiliesInAudience": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "bcAsFreeText": "As free text (inside 24 hours): {count}",
+  "@bcAsFreeText": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "bcViaTemplate": "Inside the approved template: {count}",
+  "@bcViaTemplate": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "bcCannotReach": "Cannot be reached (template not approved in their language): {count}",
+  "@bcCannotReach": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "bcWindowUnknown": "The 24-hour window could not be read, so everyone gets the template.",
+  "bcSkipped": "Skipped: {optOut} opted out, {dead} not on WhatsApp, {noNumber} no number",
+  "@bcSkipped": {
+    "placeholders": {
+      "optOut": {
+        "type": "String"
+      },
+      "dead": {
+        "type": "String"
+      },
+      "noNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "bcEstimate": "Estimated WhatsApp cost: {amount} + {gst}% GST",
+  "@bcEstimate": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      },
+      "gst": {
+        "type": "String"
+      }
+    }
+  },
+  "bcEstimateDefaults": "Estimate uses default rates — confirm them on the web (WhatsApp usage).",
+  "bcEstimateUnknown": "Cost estimate not loaded.",
+  "bcAppNotificationToo": "An app notification also goes to everyone in the audience who has the app (free).",
+  "bcSendNow": "Send to {count} now",
+  "@bcSendNow": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "bcConfirmTitle": "Send this message?",
+  "bcConfirmBody": "{audience}: {count} will get it. This cannot be undone.",
+  "@bcConfirmBody": {
+    "placeholders": {
+      "audience": {
+        "type": "String"
+      },
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "bcResult": "WhatsApp: {sent} accepted, {failed} failed, {deferred} held for quiet hours. App notifications: {push}.",
+  "@bcResult": {
+    "placeholders": {
+      "sent": {
+        "type": "String"
+      },
+      "failed": {
+        "type": "String"
+      },
+      "deferred": {
+        "type": "String"
+      },
+      "push": {
+        "type": "String"
+      }
+    }
+  },
+  "visitorMobileOptional": "Mobile number (optional)",
+  "numberOfPeople": "Number of people",
+  "vehicleNumberOptional": "Vehicle number (optional)",
+  "visitorAddressOptional": "Address (optional)",
+  "scanIdCard": "Scan ID card",
+  "scanNumberPlate": "Scan number plate",
+  "readFromIdCheck": "Read from ID — check",
+  "readFromPlateCheck": "Read from plate — check",
+  "readFromBillCheck": "Read from bill — check",
+  "readingThePhoto": "Reading the photo…",
+  "readTheBill": "Read the bill",
+  "aadhaarLast4Only": "Aadhaar is kept as the last 4 digits only",
+  "visitorPeopleCount": "{count} people",
+  "@visitorPeopleCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "homeworkScanPage": "Scan page",
+  "homeworkUploadFile": "Upload file",
+  "homeworkPageLabel": "Page {n}",
+  "@homeworkPageLabel": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "homeworkAttachLimit": "At most {max} files on one homework",
+  "@homeworkAttachLimit": {
+    "placeholders": {
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "homeworkFileTooLarge": "{name} is larger than 20 MB — it was not attached",
+  "@homeworkFileTooLarge": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "homeworkFileWrongType": "Attach a photo (JPG, PNG, WebP) or a PDF",
+  "homeworkWaitForUploads": "Wait for the files to finish uploading, or remove the ones that failed",
+  "homeworkCameraUnavailable": "Could not open the camera",
+  "homeworkUploadFailedRetry": "Not uploaded — tap to try again",
+  "homeworkCouldNotOpenFile": "Could not open the file",
+  "homeworkAttachmentsHint": "Pages and files go to the parents with this homework.",
+  "busLiveTitle": "Live route",
+  "busLiveTapHint": "Tap a route to see the bus live on the map, with arrival times at each stop.",
+  "busLiveOnRun": "On the road · {run}",
+  "@busLiveOnRun": {
+    "placeholders": {
+      "run": {
+        "type": "String"
+      }
+    }
+  },
+  "busLivePositionAt": "Position at {time} ({ago})",
+  "@busLivePositionAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      },
+      "ago": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveStale": "Last seen {time} — not live",
+  "@busLiveStale": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveStaleDetail": "The tracker has not reported for over {minutes} minutes, so no arrival times are shown.",
+  "@busLiveStaleDetail": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveOffShift": "Not on a run right now",
+  "busLiveOffShiftLastSeen": "Last seen {time}. Arrival times show only while a run is on.",
+  "@busLiveOffShiftLastSeen": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveOffShiftNoFix": "Arrival times show only while a run is on.",
+  "busLiveUntracked": "No GPS position from this vehicle",
+  "busLiveUntrackedDetail": "{vehicle} has no tracker reporting, so its position and arrival times cannot be shown.",
+  "@busLiveUntrackedDetail": {
+    "placeholders": {
+      "vehicle": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveNoVehicle": "No vehicle is linked to this route",
+  "busLiveTrailUnread": "The bus's track could not be read, so passed stops and arrival times are not shown.",
+  "busLivePassedAt": "passed at {time}",
+  "@busLivePassedAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveNotSeen": "not seen — the bus did not come near",
+  "busLiveEta": "about {time} · {minutes} min",
+  "@busLiveEta": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      },
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveNoEta": "no time yet",
+  "busLiveUnpinned": "not pinned on the map",
+  "busLiveSchoolEta": "School: about {time} · {minutes} min",
+  "@busLiveSchoolEta": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      },
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveEstimateNote": "Times are estimates from the bus's position, not promises. Stops are in the order this run visits them.",
+  "busLiveRouteMissing": "This route is not shown live for you. A driver sees only their own bus.",
+  "mrEditHint": "Tap a box to mark it. Tap a date to fill that day for every child not yet marked, then tap the exceptions.",
+  "mrViewOnly": "View only — the class teacher (or the office) fills this class's month register.",
+  "mrUnsavedCount": "{count} unsaved change(s)",
+  "@mrUnsavedCount": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "mrSave": "Save",
+  "mrDiscard": "Discard",
+  "mrDiscardTitle": "Discard unsaved changes?",
+  "mrDiscardBody": "The marks you changed have not been saved.",
+  "mrKeepEditing": "Keep editing",
+  "mrClearMark": "Clear mark",
+  "mrFillDayTitle": "Fill {date}",
+  "@mrFillDayTitle": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "mrFillDayBody": "Every child not yet marked on this day gets the mark you choose. Marks already there stay.",
+  "mrFillDayDone": "{count} children marked — tap the exceptions, then Save.",
+  "@mrFillDayDone": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "mrFillDayNothing": "Every child already has a mark on this day.",
+  "mrSavedDays": "Saved {count} day(s).",
+  "@mrSavedDays": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "mrNotSaved": "Not saved: {reasons}",
+  "@mrNotSaved": {
+    "placeholders": {
+      "reasons": {
+        "type": "String"
+      }
+    }
+  },
+  "ptmScheduleButton": "Schedule PTM",
+  "ptmScheduleTitle": "Schedule a PTM",
+  "ptmScheduleName": "Name",
+  "ptmScheduleNameDefault": "Parent-teacher meeting",
+  "ptmScheduleDate": "Date",
+  "ptmScheduleEndDate": "Last day (if more than one day)",
+  "ptmScheduleClasses": "Classes",
+  "ptmScheduleClassesHintTeacher": "Only the classes you teach. A PTM is for the whole class — each of its teachers adds their own slots.",
+  "ptmScheduleClassesHintOffice": "Pick one or more classes. One PTM covers all of them.",
+  "ptmScheduleSelectAll": "Select all",
+  "ptmScheduleMode": "How",
+  "ptmModeInPerson": "In person",
+  "ptmModeVideo": "Video",
+  "ptmModePhone": "Phone",
+  "ptmScheduleNote": "Note for parents (optional)",
+  "ptmScheduleSave": "Schedule",
+  "ptmScheduleNeedClass": "Pick at least one class.",
+  "ptmScheduleNeedName": "Give the PTM a name.",
+  "ptmScheduleDone": "PTM scheduled — now add your slots to it.",
+  "ptmScheduleNoClasses": "You have no classes to schedule a PTM for — ask the office to add yours (Staff → Duties).",
+  "scCallFamily": "Call family",
+  "scMessageFamily": "Message family",
+  "scAppChat": "App chat with the family",
+  "scAppChatHint": "Messages in the parent app — the family replies there",
+  "scWhatsAppMessage": "Send WhatsApp message",
+  "scWhatsAppMessageHint": "From the school's WhatsApp number — you see it before it goes",
+  "scAddWhatsApp": "Add WhatsApp number",
+  "scChangeWhatsApp": "Change WhatsApp number",
+  "scNoNumberOnRecord": "No number on record",
+  "scNoWhatsAppOnRecord": "No WhatsApp number on record",
+  "scAskClassTeacherToAdd": "Ask the class teacher or the office to add it.",
+  "scCallNumber": "Call {number}",
+  "@scCallNumber": {
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
+  "scCallSourceGuardian": "Guardian's mobile",
+  "scCallSourceWhatsApp": "Family's WhatsApp number (no guardian mobile on record)",
+  "scLoadingFamily": "Reading the family's numbers…",
+  "scWhatsAppNumberLabel": "WhatsApp number (10 digits)",
+  "scCurrentNumber": "Now: {number}",
+  "@scCurrentNumber": {
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
+  "scSave": "Save",
+  "scCancel": "Cancel",
+  "scNumberSaved": "WhatsApp number saved for school messages.",
+  "scErrEmpty": "Type the family's 10-digit WhatsApp number",
+  "scErrNotMobile": "Enter a 10-digit Indian mobile number (starting 6–9)",
+  "scErrPlaceholder": "{number} is a placeholder, not the family's number",
+  "@scErrPlaceholder": {
+    "placeholders": {
+      "number": {
+        "type": "String"
+      }
+    }
+  },
+  "scErrSame": "That is already the family's WhatsApp number",
+  "scMessageLabel": "Your message to the family",
+  "scMessageHint": "Short and clear — the family reads it on WhatsApp",
+  "scPreview": "Preview",
+  "scPreviewTitle": "The family will read this",
+  "scPreviewTo": "To {number} · in {language}",
+  "@scPreviewTo": {
+    "placeholders": {
+      "number": {
+        "type": "String"
+      },
+      "language": {
+        "type": "String"
+      }
+    }
+  },
+  "scEdit": "Edit",
+  "scSend": "Send",
+  "scSending": "Sending…",
+  "scSent": "Sent from the school's WhatsApp.",
+  "scNotSent": "Not sent: {reason}",
+  "@scNotSent": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "scLanguageHindi": "Hindi",
+  "scLanguageEnglish": "English",
+  "dtTypeLabel": "What is this document?",
+  "dtPickType": "Pick the document type",
+  "dtCreateCustom": "Create a custom type…",
+  "dtCustomName": "Name of the new type",
+  "dtCustomHint": "e.g. Ration card",
+  "dtCreate": "Create",
+  "dtCustomNotLoaded": "The school's own types could not be read — only the standard types are listed.",
+  "dtAadhaarNumber": "Aadhaar number on the card (optional)",
+  "dtAadhaarHint": "12 digits — it is saved to the record",
+  "dtAadhaarInvalid": "An Aadhaar number has 12 digits",
+  "dtGoesToSlot": "Verified, it goes to: {label}",
+  "@dtGoesToSlot": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "dtGoesOffSlot": "Verified, it is filed as {label} — the child's \"{from}\" stays empty for the right document.",
+  "@dtGoesOffSlot": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      },
+      "from": {
+        "type": "String"
+      }
+    }
+  },
+  "dtVerifiedAs": "Verified as {label}.",
+  "@dtVerifiedAs": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "dtAadhaarSaved": "Aadhaar number saved to the record.",
+  "dtAadhaarKept": "The record already has a different Aadhaar verified on UDISE+ — not changed. Tell the office.",
+  "dtAadhaarNotSaved": "Document verified, but the Aadhaar number was not saved: {reason}",
+  "@dtAadhaarNotSaved": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "dtVerify": "Verify",
+  "pmAllStaff": "All staff",
+  "pmStaffPayslipsTitle": "Staff payslips",
+  "pmStaffAdvancesTitle": "Staff advances",
+  "pmSession": "Session {session}",
+  "@pmSession": {
+    "placeholders": {
+      "session": {
+        "type": "String"
+      }
+    }
+  },
+  "pmNotRun": "Not run",
+  "pmPreparing": "Being prepared",
+  "pmGross": "Gross",
+  "pmDeductions": "Deductions",
+  "pmNet": "Net pay",
+  "pmPayable": "Payable",
+  "pmPaid": "Paid",
+  "pmUnpaid": "Still unpaid",
+  "pmPaidOn": "Paid {date}",
+  "@pmPaidOn": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "pmNotPaidYet": "Not paid yet",
+  "pmOnHold": "On hold",
+  "pmExtraRuns": "This month appears in {count} more run(s) — check Payroll on the web.",
+  "@pmExtraRuns": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "pmMonthsRun": "{count} months run",
+  "@pmMonthsRun": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "pmLeft": "Left",
+  "pmNoStaff": "No staff to show for this session.",
+  "pmReadOnlyNote": "Read only — the figures are the payroll runs on the web. Months with no payroll run say \"Not run\".",
+  "pmTaken": "Taken",
+  "pmRecovered": "Recovered",
+  "pmDue": "Due",
+  "pmNoAdvances": "No staff member holds an advance.",
+  "pmGiven": "Given {date}",
+  "@pmGiven": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "pmReturned": "Returned {date}",
+  "@pmReturned": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "pmFromSalary": "From salary · {month}",
+  "@pmFromSalary": {
+    "placeholders": {
+      "month": {
+        "type": "String"
+      }
+    }
+  },
+  "pmNothingRecovered": "Nothing recovered yet.",
+  "pmAdvancesNote": "Read only — the same advance register and totals as Payroll → Advances on the web.",
+  "pmAdvanceCount": "{count} advance(s)",
+  "@pmAdvanceCount": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "hcCreateNotice": "Create notice / news",
+  "hcNoticeTitle": "Title",
+  "hcNoticeMessage": "Message",
+  "hcNewsSummary": "Short summary (optional)",
+  "hcAudience": "Who is it for",
+  "hcAudienceAll": "Everyone",
+  "hcAudienceParents": "Parents",
+  "hcAudienceStaff": "Staff",
+  "hcPinToTop": "Pin to the top",
+  "hcPublish": "Publish",
+  "hcPublished": "Published.",
+  "hcWriteTitle": "Write a title.",
+  "hcWriteMessage": "Write the message.",
+  "hcTooLong": "This is too long — please shorten it.",
+  "hcNoticePushNote": "A notice also rings the phones of everyone it is for.",
+  "hcConfirmPublish": "Publish this now? Everyone it is for will see it in the app.",
+  "hcTodaysCollections": "Today's collections",
+  "hcNothingCollectedToday": "Nothing has been collected today.",
+  "hcByCashier": "by {name}",
+  "@hcByCashier": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "hcStaffList": "Staff list",
+  "hcStaffProfile": "Staff profile",
+  "hcEmpCode": "Employee code",
+  "hcDepartment": "Department",
+  "hcJoined": "Joined",
+  "hcClassTeacherOf": "Class teacher of",
+  "hcMobile": "Mobile",
+  "hcNoOtherDetails": "No other details on record.",
+  "hcChangeMobile": "Add / change mobile",
+  "hcRosterMissingMobile": "{missing} of {total} staff have no mobile on record, so they cannot sign in to the staff app. Tap the red phone to add the number.",
+  "@hcRosterMissingMobile": {
+    "placeholders": {
+      "missing": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "hcStaffPresentToday": "Staff present today",
+  "hcStaffAbsentToday": "Staff absent today",
+  "hcNoStaffPresent": "No one is marked present yet.",
+  "hcNoStaffAbsent": "No one is marked absent today.",
+  "hcExemptNotListed": "Staff exempt from attendance are not counted or listed.",
+  "hcStaffCountsNotLoaded": "Present and absent could not be loaded — pull down to try again.",
+  "hcStaffToday": "Staff today",
+  "hcOpenAttendance": "Attendance",
+  "hcNothingRecordedToday": "Nothing recorded today",
+  "hcAuditNotLoaded": "Marks entry, leave decisions and similar work could not be loaded — pull down to try again.",
+  "hcActivitySummary": "{active} of {total} staff have recorded work today",
+  "@hcActivitySummary": {
+    "placeholders": {
+      "active": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActPunchIn": "Punched in at {time}",
+  "@hcActPunchIn": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "hcActPunchOut": "Punched out at {time}",
+  "@hcActPunchOut": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "hcActRegisters": "Marked attendance ({count})",
+  "@hcActRegisters": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActHomework": "Posted homework ({count})",
+  "@hcActHomework": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActMarks": "Entered marks for {qty} students",
+  "@hcActMarks": {
+    "placeholders": {
+      "qty": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActCoScholastic": "Co-scholastic ratings ({count})",
+  "@hcActCoScholastic": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActClassSheet": "Updated the class sheet ({count})",
+  "@hcActClassSheet": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActStudentRecords": "Updated student records ({count})",
+  "@hcActStudentRecords": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActFees": "Collected {amount} in {count} receipts",
+  "@hcActFees": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActReceiptEdit": "Edited receipts ({count})",
+  "@hcActReceiptEdit": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActLeaveApplied": "Applied for leave",
+  "hcActStaffLeave": "Decided staff leave ({count})",
+  "@hcActStaffLeave": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActStudentLeave": "Decided student leave ({count})",
+  "@hcActStudentLeave": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActProfile": "Updated own profile",
+  "hcActLastAt": "last at {time}",
+  "@hcActLastAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  }
 }
