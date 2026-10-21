@@ -1015,7 +1015,7 @@ export function FuelRegisterPanel() {
       </div>
 
       {view ? (
-        <div className="space-y-2">
+        <div className="space-y-2" data-testid="fuel-log">
           <h3 className="text-sm font-bold text-[var(--brand-deep)]">
             Fuel log — {filterNote} ({rows.length})
           </h3>
@@ -1079,7 +1079,7 @@ export function FuelRegisterPanel() {
       ) : null}
 
       {view ? (
-        <div className="space-y-2">
+        <div className="space-y-2" data-testid="fuel-per-bus">
           <h3 className="text-sm font-bold text-[var(--brand-deep)]" data-testid="fuel-per-bus-heading">
             Per bus — {perBusPeriod}
           </h3>
