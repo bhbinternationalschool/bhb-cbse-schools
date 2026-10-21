@@ -35,6 +35,7 @@ import "my_profile_screen.dart";
 import "my_class_screen.dart";
 import "month_register_screen.dart";
 import "payslips_screen.dart";
+import "staff_pay_overview_screens.dart";
 import "marks_screen.dart";
 import "teacher_ai_tools_screen.dart";
 import "staff_complaints_screen.dart";
@@ -426,6 +427,24 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
         label: "Staff leave",
         tone: ModuleTone.amber,
         onTap: () => _push(LeaveApprovalsScreen(api: widget.api)),
+      ),
+    ),
+    (
+      kStaffPayslipsAllFeature,
+      _Action(
+        icon: Icons.receipt_long_outlined,
+        label: context.l10n.pmStaffPayslipsTitle,
+        tone: ModuleTone.gray,
+        onTap: () => _push(StaffPayrollOverviewScreen(api: widget.api)),
+      ),
+    ),
+    (
+      kStaffAdvancesAllFeature,
+      _Action(
+        icon: Icons.account_balance_wallet_outlined,
+        label: context.l10n.pmStaffAdvancesTitle,
+        tone: ModuleTone.amber,
+        onTap: () => _push(StaffAdvancesOverviewScreen(api: widget.api)),
       ),
     ),
     (

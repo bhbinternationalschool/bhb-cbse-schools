@@ -22,6 +22,7 @@ import "visitor_gate_screen.dart";
 import "my_collections_screen.dart";
 import "survey_day_screen.dart";
 import "home_groups.dart";
+import "staff_pay_overview_screens.dart";
 import "leave_approvals_screen.dart";
 import "my_attendance_calendar_screen.dart";
 import "my_advances_screen.dart";
@@ -229,6 +230,23 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       ModuleTone.blue,
       "transport_requests",
       (api) => TransportRequestsScreen(api: api),
+    ),
+    // Management, read only (20 Oct 2026): everyone's pay and advances.
+    _Tile(
+      "Staff payslips",
+      "स्टाफ वेतन पर्ची",
+      Icons.receipt_long_outlined,
+      ModuleTone.gray,
+      kStaffPayslipsAllFeature,
+      (api) => StaffPayrollOverviewScreen(api: api),
+    ),
+    _Tile(
+      "Staff advances",
+      "स्टाफ एडवांस",
+      Icons.account_balance_wallet_outlined,
+      ModuleTone.amber,
+      kStaffAdvancesAllFeature,
+      (api) => StaffAdvancesOverviewScreen(api: api),
     ),
     // A desk person given the class grants (an office in-charge who keeps a
     // class): the class records and the month register. The server still

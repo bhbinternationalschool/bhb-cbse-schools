@@ -5,6 +5,8 @@ import "../../core/theme/app_theme.dart";
 import "../modules/module_shell.dart";
 import "my_attendance_calendar_screen.dart" show fullMonthLabel;
 import "payslips_screen.dart" show rupees;
+import "staff_pay_overview_screens.dart";
+import "../../core/i18n/locale_controller.dart";
 
 /// My salary advances, read straight from the office's advance register
 /// (GET /api/v1/staff/my-advances): what was given and when, what has been
@@ -36,6 +38,13 @@ class MyAdvancesScreen extends StatelessWidget {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         children: [
+          // Management only: everyone's advances (the server gates it too).
+          ManagementEntryCard(
+            api: api,
+            feature: kStaffAdvancesAllFeature,
+            label: context.l10n.pmStaffAdvancesTitle,
+            open: () => StaffAdvancesOverviewScreen(api: api),
+          ),
           _OutstandingCard(total: d.outstanding, hindi: hindi),
           const SizedBox(height: 8),
           for (final a in d.advances) _AdvanceCard(a: a, hindi: hindi),

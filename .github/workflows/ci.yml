@@ -588,6 +588,7 @@ jobs:
           npm run test:staff-day-status
           npm run test:payroll-no-register
           npm run test:mobile-features
+          npm run test:staff-payroll-mgmt
           npm run test:cashfree-checkout
           npm run test:gateway-fees
           npm run test:gateway-methods

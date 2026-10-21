@@ -3097,6 +3097,114 @@ class LEn extends L {
   String get feeBankMissing => 'Enter the bank name';
 
   @override
+  String get pmAllStaff => 'All staff';
+
+  @override
+  String get pmStaffPayslipsTitle => 'Staff payslips';
+
+  @override
+  String get pmStaffAdvancesTitle => 'Staff advances';
+
+  @override
+  String pmSession(String session) {
+    return 'Session $session';
+  }
+
+  @override
+  String get pmNotRun => 'Not run';
+
+  @override
+  String get pmPreparing => 'Being prepared';
+
+  @override
+  String get pmGross => 'Gross';
+
+  @override
+  String get pmDeductions => 'Deductions';
+
+  @override
+  String get pmNet => 'Net pay';
+
+  @override
+  String get pmPayable => 'Payable';
+
+  @override
+  String get pmPaid => 'Paid';
+
+  @override
+  String get pmUnpaid => 'Still unpaid';
+
+  @override
+  String pmPaidOn(String date) {
+    return 'Paid $date';
+  }
+
+  @override
+  String get pmNotPaidYet => 'Not paid yet';
+
+  @override
+  String get pmOnHold => 'On hold';
+
+  @override
+  String pmExtraRuns(String count) {
+    return 'This month appears in $count more run(s) — check Payroll on the web.';
+  }
+
+  @override
+  String pmMonthsRun(String count) {
+    return '$count months run';
+  }
+
+  @override
+  String get pmLeft => 'Left';
+
+  @override
+  String get pmNoStaff => 'No staff to show for this session.';
+
+  @override
+  String get pmReadOnlyNote =>
+      'Read only — the figures are the payroll runs on the web. Months with no payroll run say \"Not run\".';
+
+  @override
+  String get pmTaken => 'Taken';
+
+  @override
+  String get pmRecovered => 'Recovered';
+
+  @override
+  String get pmDue => 'Due';
+
+  @override
+  String get pmNoAdvances => 'No staff member holds an advance.';
+
+  @override
+  String pmGiven(String date) {
+    return 'Given $date';
+  }
+
+  @override
+  String pmReturned(String date) {
+    return 'Returned $date';
+  }
+
+  @override
+  String pmFromSalary(String month) {
+    return 'From salary · $month';
+  }
+
+  @override
+  String get pmNothingRecovered => 'Nothing recovered yet.';
+
+  @override
+  String get pmAdvancesNote =>
+      'Read only — the same advance register and totals as Payroll → Advances on the web.';
+
+  @override
+  String pmAdvanceCount(String count) {
+    return '$count advance(s)';
+  }
+
+  @override
   String get hcCreateNotice => 'Create notice / news';
 
   @override

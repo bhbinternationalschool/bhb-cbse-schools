@@ -3095,6 +3095,114 @@ class LHi extends L {
   String get feeBankMissing => 'बैंक का नाम लिखें';
 
   @override
+  String get pmAllStaff => 'सभी स्टाफ';
+
+  @override
+  String get pmStaffPayslipsTitle => 'स्टाफ वेतन पर्ची';
+
+  @override
+  String get pmStaffAdvancesTitle => 'स्टाफ एडवांस';
+
+  @override
+  String pmSession(String session) {
+    return 'सत्र $session';
+  }
+
+  @override
+  String get pmNotRun => 'वेतन नहीं बना';
+
+  @override
+  String get pmPreparing => 'तैयार हो रहा है';
+
+  @override
+  String get pmGross => 'कुल वेतन';
+
+  @override
+  String get pmDeductions => 'कटौती';
+
+  @override
+  String get pmNet => 'शुद्ध वेतन';
+
+  @override
+  String get pmPayable => 'देय';
+
+  @override
+  String get pmPaid => 'भुगतान हुआ';
+
+  @override
+  String get pmUnpaid => 'अभी बाकी';
+
+  @override
+  String pmPaidOn(String date) {
+    return 'भुगतान $date';
+  }
+
+  @override
+  String get pmNotPaidYet => 'अभी भुगतान नहीं';
+
+  @override
+  String get pmOnHold => 'रोकी गई';
+
+  @override
+  String pmExtraRuns(String count) {
+    return 'यह महीना $count और रन में भी है — वेब पर पेरोल देखें।';
+  }
+
+  @override
+  String pmMonthsRun(String count) {
+    return '$count महीने का वेतन बना';
+  }
+
+  @override
+  String get pmLeft => 'छोड़ चुके';
+
+  @override
+  String get pmNoStaff => 'इस सत्र के लिए कोई स्टाफ नहीं।';
+
+  @override
+  String get pmReadOnlyNote =>
+      'केवल देखने के लिए — आँकड़े वेब के पेरोल रन से हैं। जिस महीने वेतन नहीं बना, वहाँ \"वेतन नहीं बना\" लिखा है।';
+
+  @override
+  String get pmTaken => 'लिया';
+
+  @override
+  String get pmRecovered => 'वसूल';
+
+  @override
+  String get pmDue => 'बाकी';
+
+  @override
+  String get pmNoAdvances => 'किसी स्टाफ के नाम एडवांस नहीं है।';
+
+  @override
+  String pmGiven(String date) {
+    return 'दिया $date';
+  }
+
+  @override
+  String pmReturned(String date) {
+    return 'लौटाया $date';
+  }
+
+  @override
+  String pmFromSalary(String month) {
+    return 'वेतन से · $month';
+  }
+
+  @override
+  String get pmNothingRecovered => 'अभी कोई वसूली नहीं हुई।';
+
+  @override
+  String get pmAdvancesNote =>
+      'केवल देखने के लिए — वेब के पेरोल → एडवांस वाला ही रजिस्टर और जोड़।';
+
+  @override
+  String pmAdvanceCount(String count) {
+    return '$count एडवांस';
+  }
+
+  @override
   String get hcCreateNotice => 'सूचना / समाचार बनाएँ';
 
   @override
