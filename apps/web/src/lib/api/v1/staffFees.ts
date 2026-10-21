@@ -12,6 +12,8 @@ import {
   type FeeDueLine,
 } from "@/lib/fees";
 import { loadMasters } from "@/lib/masters";
+import { feeAdjustmentsLoaded } from "@/lib/feeAdjustments";
+import { dueDiscountOut, type DueDiscountOut } from "@/lib/staffFeeCollect";
 import { householdWhatsApp, loadSis, type SisStudent } from "@/lib/sis";
 
 /**
@@ -75,31 +77,59 @@ export type DueOut = {
   dueOn: string | null;
   balancePaise: number;
   balanceLabel: string;
-};
+} & DueDiscountOut;
 
-export function openDuesFor(
+/** The server's own open dues for one child, as full `FeeDueLine`s. */
+export function openDueLinesFor(
   student: SisStudent,
   masters: ReturnType<typeof loadMasters>,
   fees: ReturnType<typeof loadFees>,
   asOf = istToday(),
-): DueOut[] {
-  const rows: FeeDueLine[] = openFeeDues(
+): FeeDueLine[] {
+  return openFeeDues(
     computeStudentDues(student, masters, fees, {
       asOf,
       includeFuture: false,
       includePaid: true,
     }),
-  );
-  return rows
-    .filter((d) => d.balancePaise > 0)
-    .map((d) => ({
-      dueKey: d.dueKey,
-      kind: d.kind,
-      label: d.label,
-      dueOn: d.dueOn || null,
-      balancePaise: d.balancePaise,
-      balanceLabel: formatInr(d.balancePaise),
-    }));
+  ).filter((d) => d.balancePaise > 0);
+}
+
+/**
+ * Open dues for the phone. `discountsKnown` false (the adjustments desk or
+ * the receipt book could not be read) sends every discount as "not loaded".
+ */
+export function openDuesFor(
+  student: SisStudent,
+  masters: ReturnType<typeof loadMasters>,
+  fees: ReturnType<typeof loadFees>,
+  asOf = istToday(),
+  discountsKnown = true,
+): DueOut[] {
+  return openDueLinesFor(student, masters, fees, asOf).map((d) => ({
+    dueKey: d.dueKey,
+    kind: d.kind,
+    label: d.label,
+    dueOn: d.dueOn || null,
+    balancePaise: d.balancePaise,
+    balanceLabel: formatInr(d.balancePaise),
+    ...dueDiscountOut(d, discountsKnown),
+  }));
+}
+
+/**
+ * Whether every discount source behind a due is actually loaded: the posted
+ * adjustments (manual waivers) and the whole receipt book (counter discounts
+ * are read back off receipts). Never throws — a failed check is "not known".
+ */
+export async function feeDiscountsKnown(fees: ReturnType<typeof loadFees>): Promise<boolean> {
+  if (!feeAdjustmentsLoaded()) return false;
+  try {
+    await assertFeeBookComplete(fees);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function classLabelOf(

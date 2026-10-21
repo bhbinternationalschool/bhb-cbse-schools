@@ -261,7 +261,15 @@ async function main(): Promise<void> {
     const r = await post("masters.subjects", principal, [{ op: "upsert", id: subj.id, base: stamp1, row: { nameEn: name0 } }]);
     const back = await req(`${app}/api/data/masters.subjects?limit=1000`, { headers: principal });
     const restored = obj(arr(back.body.rows).map(obj).find((s) => s.id === subj.id));
-    record("slice: restored the seeded subject exactly", r.status === 200 && JSON.stringify(restored) === JSON.stringify(subj), `HTTP ${r.status} ${short(restored.nameEn)}`);
+    // Content exactly as seeded; the element's `_rev` (data-layer 2.2a) moved on by
+    // the rename and the restore — two versions, never a reset.
+    const { _rev: revBack, ...restoredContent } = restored;
+    const { _rev: revSeed, ...seedContent } = subj;
+    record(
+      "slice: restored the seeded subject exactly (content; its _rev moved on by 2)",
+      r.status === 200 && JSON.stringify(restoredContent) === JSON.stringify(seedContent) && Number(revBack) === Number(revSeed ?? 0) + 2,
+      `HTTP ${r.status} ${short(restored.nameEn)}, _rev ${String(revSeed)} → ${String(revBack)}`,
+    );
   }
   {
     const prof = await req(`${app}/api/data/masters.school-profile`, { headers: principal });

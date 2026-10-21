@@ -353,42 +353,61 @@ export type TotalsFill = KmFill & { quantity: number; unit: FuelUnit; amountPais
 
 export type BusMonthTotals = {
   vehicleId: string;
-  month: string;
+  /** The period these figures cover, both ends included (IST dates). */
+  from: string;
+  to: string;
   fills: number;
   litres: number;
   kg: number;
   amountPaise: number;
-  /** Km for the month, or null when no source knows it. */
+  /** Km for the period, or null when no source knows it. */
   km: number | null;
   kmSource: "" | "day_log" | "fill_odometer";
   /** ₹ per km — only when km is known and > 0. */
   rupeesPerKm: number | null;
-  /** Km per kg / per litre — only when km is known AND the month used one unit. */
+  /** Km per kg / per litre — only when km is known AND the period used one unit. */
   kmPerUnit: number | null;
   kmPerUnitUnit: FuelUnit | null;
-  /** Fleet Edge for the same bus and month; null when Fleet Edge sent nothing. */
+  /** Fleet Edge for the same bus and period; null when Fleet Edge sent nothing. */
   fleetEdgeKm: number | null;
   fleetEdgeFuelUsed: number | null;
 };
 
+/** First and last IST date of a YYYY-MM month. */
+function monthBoundsOf(month: string): { from: string; to: string } {
+  const [y, m] = month.split("-").map(Number) as [number, number];
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return { from: `${month}-01`, to: `${month}-${String(last).padStart(2, "0")}` };
+}
+
 /**
- * Per bus per month. Km comes from the driver's day log (days with both
- * readings) first, because that is a reading per day; failing that, from the
- * odometer at consecutive fills. Neither → km is null, never 0, and every
- * ratio built on it is null too.
+ * Per bus for one period — exactly the dates the fill list shows (Transport →
+ * Fuel: the month box or From / To). Fills, quantity, ₹ and km count only
+ * fills dated from..to (both included); a fill's km is the distance since the
+ * bus's previous fill, which may be before `from` — the same "Km since last"
+ * the list row shows. Km comes from the driver's day log (days with both
+ * readings, read for the same period) first, because that is a reading per
+ * day; failing that, from the odometer at consecutive fills. Neither → km is
+ * null, never 0, and every ratio built on it is null too.
+ *
+ * 21 Oct 2026: these were the whole month's even when the list showed a part
+ * of it (1–10 Oct listed, 1–31 Oct totalled).
  */
-export function busMonthTotals(input: {
-  month: string;
+export function busPeriodTotals(input: {
+  from: string;
+  to: string;
   vehicleIds: string[];
-  /** All fills up to the month's end (earlier ones are needed for km). */
+  /** All fills up to `to` (earlier ones are needed for km). */
   fills: TotalsFill[];
-  /** Day-log km per vehicle for the month (sum of complete days), absent = none. */
+  /** Day-log km per vehicle for the period (sum of complete days), absent = none. */
   dayLogKm: Map<string, { km: number; days: number }>;
   fleetEdge: Map<string, { km: number; fuelUsed: number }>;
 }): BusMonthTotals[] {
   const kmByFill = kmBetweenFills(input.fills);
   return input.vehicleIds.map((vehicleId) => {
-    const inMonth = input.fills.filter((f) => !f.voided && f.vehicleId === vehicleId && f.fillDate.slice(0, 7) === input.month);
+    const inMonth = input.fills.filter(
+      (f) => !f.voided && f.vehicleId === vehicleId && f.fillDate >= input.from && f.fillDate <= input.to,
+    );
     const litres = inMonth.filter((f) => f.unit === "litre").reduce((s, f) => s + f.quantity, 0);
     const kg = inMonth.filter((f) => f.unit === "kg").reduce((s, f) => s + f.quantity, 0);
     const amountPaise = inMonth.reduce((s, f) => s + f.amountPaise, 0);
@@ -413,7 +432,8 @@ export function busMonthTotals(input: {
     const fe = input.fleetEdge.get(vehicleId);
     return {
       vehicleId,
-      month: input.month,
+      from: input.from,
+      to: input.to,
       fills: inMonth.length,
       litres: Math.round(litres * 100) / 100,
       kg: Math.round(kg * 100) / 100,
@@ -427,6 +447,18 @@ export function busMonthTotals(input: {
       fleetEdgeFuelUsed: fe ? Math.round(fe.fuelUsed * 100) / 100 : null,
     };
   });
+}
+
+/** busPeriodTotals for one whole YYYY-MM month. */
+export function busMonthTotals(input: {
+  month: string;
+  vehicleIds: string[];
+  fills: TotalsFill[];
+  dayLogKm: Map<string, { km: number; days: number }>;
+  fleetEdge: Map<string, { km: number; fuelUsed: number }>;
+}): BusMonthTotals[] {
+  const { month, ...rest } = input;
+  return busPeriodTotals({ ...monthBoundsOf(month), ...rest });
 }
 
 /* ─── Fleet Edge ───────────────────────────────────────────── */
@@ -465,6 +497,21 @@ export function fleetEdgeMonthByVehicle(input: {
   rows: FleetEdgeDetailsRow[];
   ignoreRefs?: Set<string>;
 }): Map<string, { km: number; fuelUsed: number; windows: number }> {
+  const { month, ...rest } = input;
+  return fleetEdgeRangeByVehicle({ ...monthBoundsOf(month), ...rest });
+}
+
+/**
+ * fleetEdgeMonthByVehicle for any IST period from..to (both included): the
+ * windows whose start falls on those dates — the period the fuel list shows.
+ */
+export function fleetEdgeRangeByVehicle(input: {
+  from: string;
+  to: string;
+  vehicles: { id: string; registrationNo: string; chassisNo?: string }[];
+  rows: FleetEdgeDetailsRow[];
+  ignoreRefs?: Set<string>;
+}): Map<string, { km: number; fuelUsed: number; windows: number }> {
   // Every key a vehicle has (vehicleFleetKeys: registration, chassis no.).
   // Registrations claim first; a key already claimed is not re-pointed, so
   // one tracker is never split between two vehicles.
@@ -492,7 +539,8 @@ export function fleetEdgeMonthByVehicle(input: {
     const vehicleId = vehicleOfRef.get(ref);
     if (!vehicleId) continue;
     const at = r.windowFrom || r.receivedAt;
-    if (istDayOf(at).slice(0, 7) !== input.month) continue;
+    const day = istDayOf(at);
+    if (day < input.from || day > input.to) continue;
     const key = `${ref}|${r.windowFrom || r.receivedAt}`;
     const cur = latest.get(key);
     if (!cur || r.receivedAt > cur.row.receivedAt) latest.set(key, { row: r, vehicleId });
