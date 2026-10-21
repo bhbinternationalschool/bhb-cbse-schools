@@ -42,7 +42,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import { DeskListActions } from "@/components/ui/desk-list-actions";
 import { cn } from "@/lib/utils";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { householdOf, loadSis, type SisState } from "@/lib/sis";
 import { buildPtmBriefFacts } from "@/lib/ptmBriefFacts";
 import type { PtmBriefDraft } from "@/lib/ptmBriefAi";
@@ -169,7 +171,9 @@ export function PtmWorkspace() {
     "feedback",
     "reports",
   ]);
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1i: the server's book + the staff roster (teachers for
+  // slots, the permission checks), kept fresh by the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [state, setState] = useState<PtmState | null>(null);
   const [eventId, setEventId] = useState("");
@@ -240,7 +244,6 @@ export function PtmWorkspace() {
         return false;
       }
       const ptm = body.data.state;
-      setMasters(loadMasters());
       setSis(loadSis());
       setState(ptm);
       setMyStaffId(body.data.staffId || "");
@@ -264,7 +267,6 @@ export function PtmWorkspace() {
       void loadTeacherDesk();
       return;
     }
-    setMasters(loadMasters());
     setSis(loadSis());
     const ptm = seedPtmIfEmpty(ay);
     setState(ptm);
@@ -724,6 +726,9 @@ export function PtmWorkspace() {
     }
   }
 
+  if (!masters && mastersError) {
+    return <QueryError what="the school's classes and staff" error={mastersError} retry={retryMasters} />;
+  }
   if (!state || !masters || !sis) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 px-4 py-12 text-sm text-muted-foreground">

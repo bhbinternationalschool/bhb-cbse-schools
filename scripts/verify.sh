@@ -67,6 +67,7 @@ SELFTESTS=(
   test:masters-revision-everywhere
   test:masters-cold-client
   test:masters-teacher-no-fees
+  test:screen-masters-dues
   test:masters-freeze
   test:session-year
   test:academic-year-resolve
