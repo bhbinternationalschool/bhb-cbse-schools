@@ -1269,7 +1269,7 @@ on the stack). Local on the fix: single-dirs 34/34, transport-paid-month 8/8. No
 dues" and the TC/no-dues gate still read the page copy inside `lib/certificates.ts` (2.2) — for a non-Masters holder that is
 the teaching subset too, unchanged by this PR.
 
-**Certificates TC / no-dues gate (2.1i follow-up, money).** *(Built 21 Oct 2026, PR #TBD.)* The gate no longer decides
+**Certificates TC / no-dues gate (2.1i follow-up, money).** *(Built 21 Oct 2026, PR #701.)* The gate no longer decides
 from the page copy. `GET /api/data/views/certificate-dues?studentId=…` (Certificates create, its "Issue & register"
 function, or Fees view; mirror secret refused; 403 / 404 / 503, never ₹0) counts one child's open dues on the server from
 the inputs every server dues figure uses (school mirror + transport + fee adjustments — `lib/certificateDues.server.ts`,
