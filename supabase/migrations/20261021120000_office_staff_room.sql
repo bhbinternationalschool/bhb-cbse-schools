@@ -121,27 +121,16 @@ alter table public.office_notes enable row level security;
 alter table public.office_meetings enable row level security;
 alter table public.office_ai_usage enable row level security;
 
+-- Server only (director, 22 Oct 2026): these hold the director's huddle
+-- minutes, drafted replies to parents and AI cost — no signed-in browser
+-- user (teacher, office) may read them. n8n uses the service role; any ERP
+-- screen that shows them must read through a server route with its own
+-- permission check.
 drop policy if exists office_tasks_tenant_read on public.office_tasks;
-create policy office_tasks_tenant_read
-  on public.office_tasks for select to authenticated
-  using (public.is_tenant_member(tenant_id));
-
 drop policy if exists office_notes_tenant_read on public.office_notes;
-create policy office_notes_tenant_read
-  on public.office_notes for select to authenticated
-  using (public.is_tenant_member(tenant_id));
-
 drop policy if exists office_meetings_tenant_read on public.office_meetings;
-create policy office_meetings_tenant_read
-  on public.office_meetings for select to authenticated
-  using (public.is_tenant_member(tenant_id));
-
 drop policy if exists office_ai_usage_tenant_read on public.office_ai_usage;
-create policy office_ai_usage_tenant_read
-  on public.office_ai_usage for select to authenticated
-  using (public.is_tenant_member(tenant_id));
-
-grant select on public.office_tasks, public.office_notes, public.office_meetings, public.office_ai_usage to authenticated;
+revoke all on public.office_tasks, public.office_notes, public.office_meetings, public.office_ai_usage from public, anon, authenticated;
 grant select, insert, update, delete on public.office_tasks, public.office_notes, public.office_meetings, public.office_ai_usage to service_role;
 grant usage, select on sequence public.office_tasks_id_seq to service_role;
 grant usage, select on sequence public.office_notes_id_seq to service_role;
