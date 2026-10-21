@@ -457,7 +457,10 @@ function buildReceptionist() {
   const trigger = wf.add("New mail in school inbox", "n8n-nodes-base.gmailTrigger", 1.2, {
     pollTimes: { item: [{ mode: "everyMinute" }] },
     simple: false,
-    filters: { labelIds: ["INBOX"] },
+    // Only mail addressed to the office alias: the credential may belong to
+    // a person's mailbox (the director's), and their private mail must never
+    // reach the classifier. SCHOOL_INBOX is the alias, e.g. office@school.
+    filters: { labelIds: ["INBOX"], q: "={{ 'to:' + $env.SCHOOL_INBOX }}" },
     options: {},
   });
 
