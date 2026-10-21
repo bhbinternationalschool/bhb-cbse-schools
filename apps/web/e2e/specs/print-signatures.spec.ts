@@ -230,6 +230,77 @@ test("a TC: class teacher, checked-by and principal each sign their own line", a
   }
 });
 
+/**
+ * window.print, recorded instead of opening the dialog: each call notes how
+ * many signature images the sheet held at that moment.
+ */
+async function recordPrints(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __prints: number[] };
+    w.__prints = [];
+    window.print = () => {
+      w.__prints.push(document.querySelectorAll('.print-target [data-testid="print-signature"] img, [data-testid="print-signature"] img').length);
+    };
+  });
+}
+const prints = (page: Page) => page.evaluate(() => (window as unknown as { __prints: number[] }).__prints);
+
+test("Print waits for the signatures: disabled with 'Loading signatures…' until they answer, never a blank-lined copy", async ({ browser }) => {
+  const { context, page } = await openAs(browser, "office");
+  try {
+    await recordPrints(page);
+    let release!: () => void;
+    const answered = new Promise<void>((r) => (release = r));
+    let held = 0;
+    await page.route("**/api/v1/print/signatures**", async (route) => {
+      held++;
+      await answered;
+      await route.continue();
+    });
+    await page.goto("/certificates");
+    await page.getByRole("button", { name: /^Dismiss$/ }).first().click({ timeout: 5_000 }).catch(() => undefined);
+    // "Print" on the register row, while the signatures are still on their way.
+    const row = page.locator("li", { has: page.getByRole("button", { name: /E2E-BON-1/ }) }).first();
+    await row.waitFor({ state: "visible", timeout: 60_000 });
+    await row.getByRole("button", { name: "Print", exact: true }).click();
+    const button = page.getByTestId("print-with-signatures");
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveText("Loading signatures…");
+    await page.waitForTimeout(1_500);
+    expect(held).toBeGreaterThan(0);
+    expect(await prints(page), "nothing printed while the signatures were outstanding").toEqual([]);
+    release();
+    // Answered: the requested print goes out once, with both signatures on the sheet.
+    await expect.poll(() => prints(page), { timeout: 15_000 }).toEqual([2]);
+    await expect(button).toBeEnabled();
+    await expect(button).toHaveText("Print");
+  } finally {
+    await context.close();
+  }
+});
+
+test("signatures that could not be read: Print asks, and prints without them only when told to", async ({ browser }) => {
+  const { context, page } = await openAs(browser, "office");
+  try {
+    await recordPrints(page);
+    await page.route("**/api/v1/print/signatures**", (route) =>
+      route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ ok: false, error: { message: "down" } }) }),
+    );
+    await openCertificate(page, "E2E-BON-1", "e2e_cert_1");
+    const button = page.getByTestId("print-with-signatures");
+    await expect(button).toHaveText("Loading signatures…");
+    // The query retries a 5xx twice (1 s, 2 s) before it calls it failed.
+    await expect(button).toBeEnabled({ timeout: 20_000 });
+    await button.click();
+    await expect(page.getByText("Signatures could not be loaded — print without them?")).toBeVisible();
+    expect(await prints(page), "not printed before the person chose").toEqual([]);
+    await page.getByRole("button", { name: "Print without signatures" }).click();
+    await expect.poll(() => prints(page)).toEqual([0]);
+  } finally {
+    await context.close();
+  }
+});
+
 test("nobody else reads a signature: signed out 401, a parent 403 (route and file)", async ({ playwright, browser }) => {
   const q = `doc=certificate&want=principal&principalName=${encodeURIComponent(PRINCIPAL.fullName)}`;
   const anon = await playwright.request.newContext({ baseURL: APP_URL });
