@@ -2697,5 +2697,7 @@
         "type": "String"
       }
     }
-  }
+  },
+  "cmFamiliesNotLoaded": "Families per class not loaded — the check below counts them.",
+  "cmNoneReachable": "No family in these classes can be reached on WhatsApp — nothing would be sent."
 }

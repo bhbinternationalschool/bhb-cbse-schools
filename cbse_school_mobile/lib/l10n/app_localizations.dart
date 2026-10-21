@@ -6895,6 +6895,18 @@ abstract class L {
   /// In en, this message translates to:
   /// **'last at {time}'**
   String hcActLastAt(String time);
+
+  /// No description provided for @cmFamiliesNotLoaded.
+  ///
+  /// In en, this message translates to:
+  /// **'Families per class not loaded — the check below counts them.'**
+  String get cmFamiliesNotLoaded;
+
+  /// No description provided for @cmNoneReachable.
+  ///
+  /// In en, this message translates to:
+  /// **'No family in these classes can be reached on WhatsApp — nothing would be sent.'**
+  String get cmNoneReachable;
 }
 
 class _LDelegate extends LocalizationsDelegate<L> {
