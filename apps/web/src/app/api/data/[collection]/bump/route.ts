@@ -16,12 +16,16 @@
  * fee counter's, an admission number the office's, never anyone's with edit
  * on some other module. A number may move the series at most MAX_JUMP past
  * its stored next (a typo'd "1000099" would otherwise skip a million numbers,
- * irreversibly): further is refused, logged, and the screen says so.
+ * irreversibly) — unless the records hold it (ADMISSION / SRN in sis_students,
+ * RECEIPT in fee_desk_vouchers: an import's numbers really were issued);
+ * anything else further is refused, logged, and the screen says so. A counter
+ * found behind its records is lifted past them (lib/data/server/numberSeriesIssued).
  * Any other collection here is a 404.
  */
 import { NextResponse } from "next/server";
 import { invalidateServerMastersCache } from "@/lib/api/v1/auth";
 import { requireStaffApi } from "@/lib/apiRouteAuth.server";
+import { maxIssuedNumber, nextOf, SERIES_ISSUER, seriesIssuedOnRecord, seriesPrefix } from "@/lib/data/server/numberSeriesIssued";
 import { bumpNumberSeries, readNumberSeries } from "@/lib/data/server/repo";
 import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
 import { hasPermission, type RbacModule } from "@/lib/rbac";
@@ -31,37 +35,10 @@ export const runtime = "nodejs";
 
 type RouteCtx = { params: Promise<{ collection: string }> };
 
-/** Which module issues each built-in series (lib/foundationMasters defaultNumberSeries). */
-const SERIES_ISSUER: Readonly<Record<string, readonly RbacModule[]>> = {
-  ADMISSION: ["students", "admissions"],
-  REGISTRATION: ["admissions", "students"],
-  SRN: ["students", "admissions"],
-  RECEIPT: ["fees"],
-  TC: ["certificates"],
-  CERT_BONAFIDE: ["certificates"],
-  CERT_CHARACTER: ["certificates"],
-  CERT_CLEARANCE: ["certificates"],
-  CERT_FEES_PAID: ["certificates"],
-  STAFF_AGREEMENT: ["staff"],
-  STAFF_ID: ["staff"],
-  EXPENSE_VOUCHER: ["accounts"],
-};
-
 /** How far past its stored next number one issued number may move a series. */
 const MAX_JUMP = 50;
 
 const fail = (status: number, kind: string, message: string) => NextResponse.json({ ok: false, kind, message }, { status });
-
-function nextOf(el: Record<string, unknown>, ay: string | null): number {
-  const n = (v: unknown) => (typeof v === "number" ? v : Number(v));
-  const base = Number.isFinite(n(el.nextNumber)) ? Math.floor(n(el.nextNumber)) : 1;
-  if (ay && el.resetOnAy === true) {
-    const by = (el.countersByAy ?? {}) as Record<string, unknown>;
-    const v = n(by[ay]);
-    return Number.isFinite(v) ? Math.floor(v) : base;
-  }
-  return base;
-}
 
 export const POST = withBuildCheck(async (req: Request, ctx: RouteCtx) => {
   const { collection } = await ctx.params;
@@ -78,6 +55,7 @@ export const POST = withBuildCheck(async (req: Request, ctx: RouteCtx) => {
   const used = typeof body.used === "number" ? body.used : Number.NaN;
   const ay = typeof body.ay === "string" && body.ay.trim() ? body.ay.trim() : null;
   if (!series) return fail(400, "invalid", "series (a code or id) is required");
+  if (ay !== null && !/^\d{4}-\d{2}$/.test(ay)) return fail(400, "invalid", "ay must be an academic year like 2026-27");
   if (!Number.isInteger(used) || used < 1) return fail(400, "invalid", "used must be a whole number, 1 or more");
 
   let stored: Record<string, unknown> | null;
@@ -96,17 +74,37 @@ export const POST = withBuildCheck(async (req: Request, ctx: RouteCtx) => {
       return fail(403, "auth", `Issuing ${code || series} numbers needs edit on ${issuers.join(" or ")}.`);
     }
   }
-  const current = nextOf(stored, ay);
-  if (used > current - 1 + MAX_JUMP) {
-    console.warn(`[number-series] refused bump ${code} to ${used + 1}: stored next ${current}, at most ${MAX_JUMP} ahead`);
-    return fail(
-      409,
-      "invalid",
-      `${code || series}: ${used} is more than ${MAX_JUMP} past the next number (${current}) — the series was not moved. Check the number, or set the series in Masters → Numbering.`,
-    );
+  const perAy = stored.resetOnAy === true ? ay : null;
+  const current = nextOf(stored, perAy);
+  // A series whose numbers live in a table: what has REALLY been issued
+  // (director, 22 Oct 2026 — a lagging counter re-issues a number in use,
+  // worse than a big jump). A jump past MAX_JUMP is accepted only when the
+  // records hold that number; a counter behind the records is lifted past
+  // them (logged).
+  const prefix = seriesPrefix(stored, ay);
+  const issued = seriesIssuedOnRecord(code) ? await maxIssuedNumber(code, prefix) : null;
+  let target = used;
+  if (issued?.ok && issued.max > target && issued.max + 1 > current) {
+    console.warn(`[number-series] ${code}: counter ${current} behind the records (${prefix}${issued.max}) — lifted past them`);
+    target = issued.max;
+  }
+  if (target > current - 1 + MAX_JUMP) {
+    const verified = issued?.ok === true && issued.max >= target;
+    if (!verified) {
+      console.warn(
+        `[number-series] refused bump ${code} to ${target + 1}: stored next ${current}, at most ${MAX_JUMP} ahead unless the records hold it` +
+          (issued && !issued.ok ? ` (records unreadable: ${issued.error})` : ""),
+      );
+      return fail(
+        409,
+        "invalid",
+        `${code || series}: ${used} is more than ${MAX_JUMP} past the next number (${current}) and is not on record — the series was not moved. Check the number, or set the series in Masters → Numbering.`,
+      );
+    }
+    console.warn(`[number-series] ${code}: jump to ${target + 1} accepted — ${prefix}${issued.max} is on record`);
   }
 
-  const out = await bumpNumberSeries(series, used, ay);
+  const out = await bumpNumberSeries(series, target, ay);
   if (!out.ok) return fail(out.status, out.kind, out.message);
   if (out.changed) {
     clearDeskProbeCache("masters-desk-rows");

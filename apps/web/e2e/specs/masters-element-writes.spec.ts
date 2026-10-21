@@ -472,3 +472,134 @@ test("number series: only the module that issues a series moves it, and never fa
     await clerk.context().close();
   }
 });
+
+// ── Number series against the records (director's review, 22 Oct 2026) ─────
+
+const seriesOf = async (req: APIRequestContext, code: string) =>
+  listOf(await mastersView(req), "numberSeries").find((s) => s.code === code)!;
+
+/** Inactive rows in XII (no counts read them) carrying the given numbers. */
+async function seedStudents(req: APIRequestContext, tag: string, rows: { admissionNo?: string; srn?: string }[]): Promise<string[]> {
+  const ids = rows.map((_, i) => `e2e_22c_${tag}_${i}`);
+  const ops = rows.map((r, i) => ({
+    op: "upsert" as const,
+    id: ids[i],
+    base: null,
+    row: {
+      id: ids[i],
+      full_name: `E2E ${tag} ${i}`,
+      status: "inactive",
+      class_id: classId(15),
+      section_id: sectionId(15),
+      academic_year_code: AY,
+      admission_no: r.admissionNo ?? "",
+      srn: r.srn ?? "",
+    },
+  }));
+  const res = await req.post("/api/data/sis.students", { data: { ops } });
+  expect(res.status(), `seed students: ${(await res.text()).slice(0, 300)}`).toBe(200);
+  return ids;
+}
+
+async function dropStudents(req: APIRequestContext, ids: string[]): Promise<void> {
+  const res = await req.get(`/api/data/sis.students?ids=${ids.join(",")}`);
+  if (res.status() !== 200) return;
+  const rows = ((await res.json()) as { rows?: { id: string; updated_at: string }[] }).rows ?? [];
+  if (!rows.length) return;
+  await req.post("/api/data/sis.students", { data: { ops: rows.map((r) => ({ op: "delete", id: r.id, base: r.updated_at })) } });
+}
+
+async function putSeries(req: APIRequestContext, was: Record<string, unknown>): Promise<void> {
+  const now = await seriesOf(req, String(was.code));
+  if (now && now.nextNumber !== was.nextNumber) await putElement(req, "masters.number-series", "numberSeries", { ...now, nextNumber: was.nextNumber });
+}
+
+test("number series: an import of 60 students moves SRN past the last one — the numbers are on record", async ({ browser }) => {
+  const p = await pageAs(browser, "principal");
+  const srn = await seriesOf(p.request, "SRN");
+  const start = Number(srn.nextNumber);
+  const pad = Number(srn.padWidth) || 0;
+  const fmt = (n: number) => `${String(srn.prefix)}${String(n).padStart(pad, "0")}`;
+  let ids: string[] = [];
+  try {
+    ids = await seedStudents(p.request, "srn", Array.from({ length: 60 }, (_, i) => ({ srn: fmt(start + i) })));
+    // studentImport bumps SRN ONCE, with the largest number imported.
+    const r = await p.request.post("/api/data/masters.number-series/bump", { data: { series: "SRN", used: start + 59 } });
+    expect(r.status(), `bump to the import's last SRN: ${(await r.text()).slice(0, 200)}`).toBe(200);
+    expect((await seriesOf(p.request, "SRN")).nextNumber, "the series ends past the last one").toBe(start + 60);
+  } finally {
+    await dropStudents(p.request, ids);
+    await putSeries(p.request, srn);
+    await p.context().close();
+  }
+});
+
+test("number series: an unverified jump of 60 is refused and moves nothing", async ({ browser }) => {
+  const p = await pageAs(browser, "principal");
+  const adm = await seriesOf(p.request, "ADMISSION");
+  try {
+    const r = await p.request.post("/api/data/masters.number-series/bump", { data: { series: "ADMISSION", used: Number(adm.nextNumber) + 60 } });
+    expect(r.status(), (await r.text()).slice(0, 200)).toBe(409);
+    expect((await seriesOf(p.request, "ADMISSION")).nextNumber).toBe(adm.nextNumber);
+  } finally {
+    await putSeries(p.request, adm);
+    await p.context().close();
+  }
+});
+
+test("number series: with the counter behind the records, the next admission number skips to max + 1 (server and screen)", async ({ browser }) => {
+  const p = await pageAs(browser, "principal");
+  const adm = await seriesOf(p.request, "ADMISSION");
+  const start = Number(adm.nextNumber);
+  const pad = Number(adm.padWidth) || 0;
+  const fmt = (n: number) => `${String(adm.prefix)}${String(n).padStart(pad, "0")}`;
+  let ids: string[] = [];
+  try {
+    // 70 admissions on record that never moved the counter (another desk, an old import).
+    ids = await seedStudents(p.request, "adm", Array.from({ length: 70 }, (_, i) => ({ admissionNo: fmt(start + i) })));
+    const r = await p.request.post("/api/data/masters.number-series/next", { data: { series: "ADMISSION", ay: AY } });
+    const body = (await r.json().catch(() => ({}))) as { next?: number; formatted?: string; lifted?: boolean };
+    expect(r.status(), JSON.stringify(body).slice(0, 200)).toBe(200);
+    expect([body.next, body.formatted, body.lifted]).toEqual([start + 70, fmt(start + 70), true]);
+    expect((await seriesOf(p.request, "ADMISSION")).nextNumber, "the counter is lifted").toBe(start + 70);
+    // The screen offers it (the New student form).
+    await putSeries(p.request, adm); // lagging again: the form must find it itself
+    await p.goto("/students/new");
+    await expect(p.getByRole("textbox", { name: /Admission no \(system\)/ })).toHaveValue(fmt(start + 70), { timeout: 30_000 });
+    await p.screenshot({ path: test.info().outputPath("admission-next.png") });
+  } finally {
+    await dropStudents(p.request, ids);
+    await putSeries(p.request, adm);
+    await p.context().close();
+  }
+});
+
+test("batch: a teacher (Class subjects function) removes one element per save, as on the single route", async ({ browser }) => {
+  const principal = await pageAs(browser, "principal");
+  const t = await pageAs(browser, "teacher");
+  const NURSERY = classId(1);
+  const ids = ["e2e_22c_t_link_a", "e2e_22c_t_link_b"];
+  try {
+    const w = await writeElements(
+      principal.request,
+      "masters.class-subjects",
+      ["e2e_sub_eng_pract", "e2e_sub_hin_pract"].map((sub, i) => ({ op: "upsert" as const, id: ids[i], base: null, row: { id: ids[i], classId: NURSERY, subjectId: sub, periodsPerWeek: 1, isActive: true, isOptional: false } })),
+    );
+    expect(w.status, JSON.stringify(w.body).slice(0, 200)).toBe(200);
+    const book = await mastersView(principal.request);
+    const ops = ids.map((id) => ({ collection: "masters.class-subjects", op: "delete", id, base: String(elementOf(book, "classSubjects", id)?._rev ?? 1) }));
+    const two = await t.request.post("/api/data/masters/batch", { data: { ops } });
+    expect(two.status(), `teacher, two removals in one batch: ${(await two.text()).slice(0, 200)}`).toBe(400);
+    expect(listOf(await mastersView(principal.request), "classSubjects").filter((l) => ids.includes(String(l.id))).length, "nothing removed").toBe(2);
+    const one = await t.request.post("/api/data/masters/batch", { data: { ops: ops.slice(0, 1) } });
+    expect(one.status(), `teacher, one removal: ${(await one.text()).slice(0, 200)}`).toBe(200);
+  } finally {
+    const book = await mastersView(principal.request);
+    for (const id of ids) {
+      const el = elementOf(book, "classSubjects", id);
+      if (el) await writeElements(principal.request, "masters.class-subjects", [{ op: "delete", id, base: String(el._rev ?? 1) }]);
+    }
+    await principal.context().close();
+    await t.context().close();
+  }
+});

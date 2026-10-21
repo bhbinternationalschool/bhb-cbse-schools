@@ -12,7 +12,7 @@ import {
   suggestFeeStudentType,
   type FeeStudentType,
 } from "@/lib/masters";
-import { bumpStudentSeriesUses } from "@/lib/numberSeries";
+import { bumpStudentSeriesUses, fetchSeriesNext } from "@/lib/numberSeries";
 import { QueryError } from "@/components/data/QueryError";
 import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { StudentAttendanceCard } from "@/components/students/StudentAttendanceCard";
@@ -444,9 +444,15 @@ export function StudentForm({
       return;
     }
 
-    setAdmissionNo(
-      suggestAdmissionNo(sis.students, m, session.academicYearCode),
-    );
+    const suggested = suggestAdmissionNo(sis.students, m, session.academicYearCode);
+    setAdmissionNo(suggested);
+    // The tab's copy can be behind the school's records (an import, another
+    // desk): ask the server for the next number NOT on record — it also lifts
+    // a lagging counter (data-layer 2.2c). Taken only if the field is untouched.
+    void fetchSeriesNext("ADMISSION", session.academicYearCode).then((srv) => {
+      if (!srv || !(srv.next > (Number((suggested.match(/(\d+)$/) ?? [])[1]) || 0))) return;
+      setAdmissionNo((cur) => (cur === suggested ? srv.formatted : cur));
+    });
     setLegacyErpAdmissionNo("");
     setImportedViaLegacyList(false);
     setSystemAdmissionPending(false);

@@ -73,6 +73,12 @@ export const POST = withBuildCheck(async (req: Request, ctx: RouteCtx) => {
     });
   }
   const removals = items.filter((i) => i.op.op === "delete").length;
+  // A function holder (a teacher's own-class class subjects) removes one
+  // element per save, as on the single-list route; the cascade allowance is
+  // for Masters editors.
+  if (mode === "function" && removals > 1) {
+    return fail(400, "invalid", `One removal per save (this one removes ${removals}) — nothing was saved.`);
+  }
   if (removals > MAX_BATCH_REMOVALS) {
     return fail(400, "invalid", `This action removes ${removals} items at once (the limit is ${MAX_BATCH_REMOVALS}) — nothing was saved.`);
   }

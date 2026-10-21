@@ -249,3 +249,31 @@ export function bumpStudentSeriesUses(
     persistSeriesUse("SRN", academicYearCode, student.srn);
   }
 }
+
+/**
+ * The next number to issue from a series, NOT already on record
+ * (POST /api/data/masters.number-series/next — data-layer 2.2c). The server
+ * lifts a counter that is behind the records. Null when it cannot say (no
+ * network, no permission, a series not on record): the caller keeps its own
+ * suggestion.
+ */
+export async function fetchSeriesNext(
+  code: string,
+  academicYearCode: string | undefined,
+  deps: { post?: typeof fetch } = {},
+): Promise<{ next: number; formatted: string; lifted: boolean } | null> {
+  if (typeof window === "undefined" && !deps.post) return null;
+  try {
+    const res = await (deps.post ?? fetch)(`/api/data/${encodeURIComponent("masters.number-series")}/next`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ series: code, ...(academicYearCode ? { ay: academicYearCode } : {}) }),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; next?: number; formatted?: string; lifted?: boolean } | null;
+    if (!body?.ok || typeof body.next !== "number" || typeof body.formatted !== "string") return null;
+    return { next: body.next, formatted: body.formatted, lifted: body.lifted === true };
+  } catch {
+    return null;
+  }
+}
