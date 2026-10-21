@@ -283,6 +283,7 @@ SELFTESTS=(
   test:payment-link-status-guard
   test:attendance-today
   test:staff-signature
+  test:print-signatures
   test:staff-month-register
   test:sis-wire-payload
   test:print-palette

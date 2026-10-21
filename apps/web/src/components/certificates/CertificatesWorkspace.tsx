@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAccessData } from "@/components/shell/useAccessData";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { Award, Sparkles } from "lucide-react";
@@ -60,6 +60,9 @@ import {
   printCertificate,
 } from "@/components/certificates/CertificateSheet";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { PrintWithSignaturesButton } from "@/components/shared/PrintWithSignaturesButton";
+import { usePrintSignatures } from "@/components/shared/usePrintSignatures";
+import { certificateSignatureRequest } from "@/lib/printSignatures";
 import {
   HoldStatusBanner,
   PrincipalHoldOverrideDialog,
@@ -373,6 +376,17 @@ export function CertificatesWorkspace() {
     () => issues.find((i) => i.id === previewId) ?? null,
     [issues, previewId],
   );
+  // The preview's signatures; Print waits for them (PrintWithSignaturesButton).
+  const previewSigRequest = useMemo(
+    () => (preview && !isUidaiFormKind(preview.kind) ? certificateSignatureRequest(preview) : null),
+    [preview],
+  );
+  const previewSigs = usePrintSignatures(previewSigRequest);
+  const [printRequested, setPrintRequested] = useState(false);
+  const clearPrintRequest = useCallback(() => setPrintRequested(false), []);
+  const printPreview = useCallback(() => {
+    if (preview) printCertificate(preview.id);
+  }, [preview]);
 
   const voidTarget = useMemo(
     () => issues.find((i) => i.id === voidTargetId) ?? null,
@@ -568,7 +582,8 @@ export function CertificatesWorkspace() {
     if (isUidaiFormKind(result.issue.kind)) {
       window.open(uidaiFormUrl(result.issue.studentId, result.issue.issuedOn), "_blank", "noopener");
     } else {
-      window.setTimeout(() => printCertificate(result.issue.id), 200);
+      // Printed once its signatures have answered (PrintWithSignaturesButton).
+      setPrintRequested(true);
     }
   }
 
@@ -1491,10 +1506,8 @@ export function CertificatesWorkspace() {
                                 window.open(uidaiFormUrl(iss.studentId, iss.issuedOn), "_blank", "noopener");
                                 return;
                               }
-                              window.setTimeout(
-                                () => printCertificate(iss.id),
-                                100,
-                              );
+                              // Printed once its signatures have answered.
+                              setPrintRequested(true);
                             }}
                           >
                             Print
@@ -1524,17 +1537,23 @@ export function CertificatesWorkspace() {
                 <h2 className="text-sm font-bold text-[var(--brand-deep)]">
                   Preview
                 </h2>
-                <button
-                  type="button"
-                  className="btn-accent rounded-lg px-3 py-1.5 text-xs font-bold"
-                  onClick={() =>
-                    isUidaiFormKind(preview.kind)
-                      ? window.open(uidaiFormUrl(preview.studentId, preview.issuedOn), "_blank", "noopener")
-                      : printCertificate(preview.id)
-                  }
-                >
-                  Print
-                </button>
+                {isUidaiFormKind(preview.kind) ? (
+                  <button
+                    type="button"
+                    className="btn-accent rounded-lg px-3 py-1.5 text-xs font-bold"
+                    onClick={() => window.open(uidaiFormUrl(preview.studentId, preview.issuedOn), "_blank", "noopener")}
+                  >
+                    Print
+                  </button>
+                ) : (
+                  <PrintWithSignaturesButton
+                    status={previewSigs.status}
+                    onPrint={printPreview}
+                    onRetry={previewSigs.retry}
+                    requested={printRequested}
+                    onRequestHandled={clearPrintRequest}
+                  />
+                )}
               </div>
               {isUidaiFormKind(preview.kind) ? (
                 <iframe
@@ -1543,7 +1562,7 @@ export function CertificatesWorkspace() {
                   className="h-[720px] w-full rounded-lg border border-[var(--border)] bg-white"
                 />
               ) : (
-                <CertificateSheet issue={preview} />
+                <CertificateSheet issue={preview} signatures={previewSigs.signatures} />
               )}
             </div>
           ) : null}

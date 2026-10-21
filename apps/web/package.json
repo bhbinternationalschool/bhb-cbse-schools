@@ -468,6 +468,7 @@
     "test:payment-link-status-guard": "npx tsx src/lib/paymentLinkStatusGuard.selftest.ts",
     "test:attendance-today": "npx tsx src/lib/attendanceToday.selftest.ts",
     "test:staff-signature": "npx tsx src/lib/staffSignature.selftest.ts",
+    "test:print-signatures": "npx tsx src/lib/printSignatures.selftest.ts",
     "test:staff-month-register": "npx tsx src/lib/staffMonthRegister.selftest.ts",
     "test:sis-wire-payload": "npx tsx src/lib/sisWirePayload.selftest.ts",
     "test:print-palette": "npx tsx src/lib/printPalette.selftest.ts",

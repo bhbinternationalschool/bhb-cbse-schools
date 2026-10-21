@@ -159,6 +159,9 @@ jobs:
       - name: Self-test — a member of staff sets only their own signature, and only a real small image
         working-directory: apps/web
         run: npm run test:staff-signature
+      - name: Self-test — which staff signature goes on which printed signing line, and a doubtful one is blank
+        working-directory: apps/web
+        run: npm run test:print-signatures
       - name: Self-test — the staff month register counts what the register holds, and only the owner changes a mark
         working-directory: apps/web
         run: npm run test:staff-month-register
