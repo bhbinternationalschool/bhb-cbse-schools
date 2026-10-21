@@ -497,9 +497,9 @@ export function FuelRegisterPanel() {
   const [importing, setImporting] = useState(false);
   const [voucher, setVoucher] = useState<VoucherRef | null>(null);
 
-  // Per-bus totals and Fleet Edge are a month's: the range's own when it sits
-  // in one month, else the month the range ends in — or this month, when the
-  // range runs on into the future (This FY).
+  // The month sent is only the server's fallback when From or To is blank
+  // (the range's own month, else the month it ends in). The list, the
+  // per-bus totals and Fleet Edge all read exactly From..To.
   const today = istToday();
   const month = singleMonthOf(from, to) || (to && to < today ? to : today).slice(0, 7);
 
@@ -594,6 +594,12 @@ export function FuelRegisterPanel() {
   ]
     .filter(Boolean)
     .join(" · ");
+
+  // The per-bus table's period is the one the server read (view.from..to) —
+  // the same dates as the fill list; a whole month is named as the month.
+  const perBusMonth = view ? exactMonth({ from: view.from, to: view.to }) : null;
+  const perBusPeriod = !view ? "" : perBusMonth ? monthName(perBusMonth) : `${dateLabel(view.from)} → ${dateLabel(view.to)}`;
+  const perBusNote = [vehicleName, perBusPeriod].filter(Boolean).join(" · ");
 
   const openVoucher = (f: Fill) => {
     if (f.voucherNo && view?.canViewVouchers) setVoucher({ voucherId: f.voucherId ?? undefined, voucherNo: f.voucherNo });
@@ -1074,19 +1080,15 @@ export function FuelRegisterPanel() {
 
       {view ? (
         <div className="space-y-2">
-          <h3 className="text-sm font-bold text-[var(--brand-deep)]">Per bus — {monthName(view.month)}</h3>
-          {exactMonth(period.range) !== view.month ? (
-            <p className="text-[11px] font-semibold text-[var(--warning)]" data-testid="fuel-per-bus-month-note">
-              Per-bus totals are for the whole of {monthName(view.month)}; the fills above are{" "}
-              {from || "…"} to {to || "…"}. Pick a month to see both for the same dates.
-            </p>
-          ) : null}
+          <h3 className="text-sm font-bold text-[var(--brand-deep)]" data-testid="fuel-per-bus-heading">
+            Per bus — {perBusPeriod}
+          </h3>
           {!view.fleetEdge.ok ? (
             <p className="text-[11px] text-[var(--warning)]">Fleet Edge could not be read just now ({view.fleetEdge.error}); its columns are blank, not zero.</p>
           ) : (
             <p className="text-[11px] text-[var(--muted)]">
               Km comes from the log book (days with both readings), else from odometers at consecutive fills; blank when
-              neither is known. Fleet Edge columns are what the tracker reported for the month (each 30-minute window
+              neither is known. Fleet Edge columns are what the tracker reported for these dates (each 30-minute window
               counted once); its fuel figure is as Fleet Edge sends it and is not a meter reading of CNG.
             </p>
           )}
@@ -1097,8 +1099,9 @@ export function FuelRegisterPanel() {
             rowActions={totalsActions}
             pageSize={20}
             minWidth="min-w-[900px]"
-            exportFileBaseName={`fuel-by-bus-${view.month}`}
-            exportTitle={`Fuel by bus — ${view.month}`}
+            exportFileBaseName={`fuel-by-bus-${view.from}-${view.to}`}
+            exportTitle={`Fuel by bus — ${perBusPeriod}`}
+            exportFilterNote={perBusNote}
           />
         </div>
       ) : null}
