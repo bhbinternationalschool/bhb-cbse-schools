@@ -6,7 +6,7 @@
  *
  *   kind   what happened ('staff_leave.requested'); stored on the row
  *   topic  the group a person mutes in settings, and the spoken line the
- *          phone plays (lib/pushVoice.ts: channel bhb_voice_<topic>_<hi|en>)
+ *          phone plays (lib/pushVoice.ts: channel bhb_voice_<topic>_<hi|en>, `_v2` for approval/document)
  */
 import type { PushVoiceKind } from "@/lib/pushVoice";
 
