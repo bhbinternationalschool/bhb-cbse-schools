@@ -10,6 +10,7 @@ import type { StaffRecord } from "@/lib/foundationMasters";
 import {
   certificateSignatureRequest,
   parsePrintSignatureQuery,
+  printGate,
   printSignatureQuery,
   reportCardSignatureRequest,
   resolvePrintSignatories,
@@ -208,6 +209,15 @@ assert.equal(signatureSource("https://x.supabase.co/storage/v1/object/sign/a.png
 assert.equal(signatureSource("data:image/svg+xml;base64,PHN2Zz4="), null, "never an SVG");
 assert.equal(signatureSource(""), null);
 assert.equal(signatureSource("data:image/png;base64,iVBORw0KGgo=")?.kind, "data");
+
+/* ── when Print may run ───────────────────────────────────────────────── */
+
+assert.equal(printGate("loading"), "wait", "never print while the signatures are outstanding");
+assert.equal(printGate("loading", true), "wait", "not even when told to print without them");
+assert.equal(printGate("ready"), "print", "answered (with images or with none on file): print");
+assert.equal(printGate("none"), "print", "nothing to sign: print");
+assert.equal(printGate("failed"), "ask", "unreadable: ask first");
+assert.equal(printGate("failed", true), "print", "and print without them only when the person says so");
 
 /* ── loading: bytes are checked, failures are blank lines ─────────────── */
 

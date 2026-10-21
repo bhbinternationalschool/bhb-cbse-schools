@@ -6,19 +6,14 @@
 
 import { SchoolLetterhead } from "@/components/shared/SchoolLetterhead";
 import { SignatureOnLine } from "@/components/shared/SignatureOnLine";
-import { usePrintSignatures } from "@/components/shared/usePrintSignatures";
 import {
   RESULT_SHEET_SIGNATURE_LABELS,
-  reportCardSignatureRequest,
-  resultSheetSignatureRequest,
   signatureForLabel,
   type PrintSignatureSet,
 } from "@/lib/printSignatures";
-import { ReportCardSheet } from "@/components/exams/ReportCardSheet";
 import {
   promotionDecisionLabel,
   type ClassResultSheet,
-  type ReportCard,
 } from "@/lib/exams";
 import {
   schoolShortName,
@@ -220,14 +215,3 @@ export function ClassResultSheetView({
   );
 }
 
-/** Staff pages: the class result sheet with its class teacher's and principal's signatures. */
-export function SignedClassResultSheetView({ sheet }: { sheet: ClassResultSheet }) {
-  const signatures = usePrintSignatures(resultSheetSignatureRequest(sheet));
-  return <ClassResultSheetView sheet={sheet} signatures={signatures} />;
-}
-
-/** Staff pages: a report card with its section's class teacher's and the principal's signatures. */
-export function SignedReportCardSheet({ card }: { card: ReportCard }) {
-  const signatures = usePrintSignatures(reportCardSignatureRequest(card));
-  return <ReportCardSheet card={card} signatures={signatures} />;
-}

@@ -330,3 +330,22 @@ export function withSignatureImages(set: PrintSignatureSet | null | undefined, i
   };
   return { principal: fill(set.principal), classTeacher: fill(set.classTeacher), checkedBy: fill(set.checkedBy) };
 }
+
+/**
+ * May this sheet print now? While the signatures are outstanding: wait (a
+ * copy printed now would have blank lines only because the answer was
+ * slow). Answered — with images or with nobody's on file — or nothing to
+ * sign: print. Could not be read: ask, and print without them only when
+ * the person says so.
+ */
+export function printGate(
+  status: "none" | "loading" | "ready" | "failed",
+  printWithoutConfirmed = false,
+): "wait" | "print" | "ask" {
+  if (status === "loading") return "wait";
+  if (status === "failed") return printWithoutConfirmed ? "print" : "ask";
+  return "print";
+}
+
+export const PRINT_SIGNATURES_LOADING = "Loading signatures…";
+export const PRINT_SIGNATURES_FAILED = "Signatures could not be loaded — print without them?";

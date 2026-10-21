@@ -99,12 +99,14 @@ import {
   HoldStatusBanner,
   PrincipalHoldOverrideDialog,
 } from "@/components/fees/PrincipalHoldOverrideDialog";
-import { printReportCard } from "@/components/exams/ReportCardSheet";
+import { ReportCardSheet, printReportCard } from "@/components/exams/ReportCardSheet";
 import {
-  SignedClassResultSheetView,
-  SignedReportCardSheet,
+  ClassResultSheetView,
   printClassResultSheet,
 } from "@/components/exams/ClassResultSheet";
+import { PrintWithSignaturesButton } from "@/components/shared/PrintWithSignaturesButton";
+import { usePrintSignatures } from "@/components/shared/usePrintSignatures";
+import { reportCardSignatureRequest, resultSheetSignatureRequest } from "@/lib/printSignatures";
 import { useHoldDecisions } from "@/lib/useHoldDecisions";
 import { ExamDateSheetGrid } from "@/components/exams/ExamDateSheetGrid";
 import { ParentReleasePanel } from "@/components/exams/ParentReleasePanel";
@@ -1538,6 +1540,17 @@ export function ExamsWorkspace() {
     return { sheet: built } as const;
   }, [tab, tick, examTermId, classId, sectionId, roster, classLabel, ay, examDeps]);
 
+  // Signatures on the printed sheets (lib/printSignatures); Print waits for
+  // them (PrintWithSignaturesButton) so a slow answer never prints blank lines.
+  const previewSigRequest = useMemo(() => (preview ? reportCardSignatureRequest(preview) : null), [preview]);
+  const previewSigs = usePrintSignatures(previewSigRequest);
+  const resultSheetForSigs = classResult && "sheet" in classResult ? classResult.sheet : null;
+  const resultSigRequest = useMemo(
+    () => (resultSheetForSigs ? resultSheetSignatureRequest(resultSheetForSigs) : null),
+    [resultSheetForSigs],
+  );
+  const resultSigs = usePrintSignatures(resultSigRequest);
+
   // The result sheet, best first; every column sorts (decision by its label).
   const resultSort = useTableSort(
     classResult?.sheet?.rows ?? [],
@@ -2956,10 +2969,11 @@ export function ExamsWorkspace() {
                   <h2 className="text-sm font-bold text-[var(--brand-deep)]">
                     Preview
                   </h2>
-                  <button
-                    type="button"
-                    className="btn-accent rounded-lg px-3 py-1.5 text-xs font-bold"
-                    onClick={() => {
+                  <PrintWithSignaturesButton
+                    label="Print report card"
+                    status={previewSigs.status}
+                    onRetry={previewSigs.retry}
+                    onPrint={() => {
                       const gate = canPrintReportCard(preview.student.id);
                       if (!gate.allowed) {
                         setError(gate.message);
@@ -2974,11 +2988,9 @@ export function ExamsWorkspace() {
                         preview.examTerm.id,
                       );
                     }}
-                  >
-                    Print report card
-                  </button>
+                  />
                 </div>
-                <SignedReportCardSheet card={preview} />
+                <ReportCardSheet card={preview} signatures={previewSigs.signatures} />
               </div>
             ) : (
               <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
@@ -3035,17 +3047,17 @@ export function ExamsWorkspace() {
                   >
                     Apply promotions to SIS
                   </button>
-                  <button
-                    type="button"
+                  <PrintWithSignaturesButton
+                    label="Print result sheet"
                     className="btn-accent rounded-lg px-3 py-1.5 text-xs font-semibold"
-                    onClick={() =>
+                    status={resultSigs.status}
+                    onRetry={resultSigs.retry}
+                    onPrint={() =>
                       printClassResultSheet(
                         `class-result-${classResult.sheet.examTerm.id}-${classResult.sheet.sectionId}`,
                       )
                     }
-                  >
-                    Print result sheet
-                  </button>
+                  />
                 </div>
               </div>
 
@@ -3258,7 +3270,7 @@ export function ExamsWorkspace() {
                 </div>
               </ErpTableShell>
 
-              <SignedClassResultSheetView sheet={classResult.sheet} />
+              <ClassResultSheetView sheet={classResult.sheet} signatures={resultSigs.signatures} />
             </>
           ) : null}
         </div>

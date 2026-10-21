@@ -18,9 +18,9 @@ import {
 import { useHoldDecisions } from "@/lib/useHoldDecisions";
 import { field } from "@/components/ui/erp-ui";
 import { useDemoSession } from "@/components/shell/SessionContext";
-import { printSignaturesPath } from "@/components/shared/usePrintSignatures";
-import { readView } from "@/lib/data/client/query";
-import { ADMIT_CARD_SIGNATURE_REQUEST, type PrintSignatureSet } from "@/lib/printSignatures";
+import { usePrintSignatures } from "@/components/shared/usePrintSignatures";
+import { PrintWithSignaturesButton } from "@/components/shared/PrintWithSignaturesButton";
+import { ADMIT_CARD_SIGNATURE_REQUEST } from "@/lib/printSignatures";
 
 type Props = {
   academicYearCode: string;
@@ -44,6 +44,8 @@ export function AdmitCardsPanel({ academicYearCode, masters, terms }: Props) {
     check: Extract<HoldCheck, { allowed: false }>;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  // The principal's signature for the "Principal" line; Print waits for it.
+  const sigs = usePrintSignatures(ADMIT_CARD_SIGNATURE_REQUEST);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -157,14 +159,17 @@ export function AdmitCardsPanel({ academicYearCode, masters, terms }: Props) {
           examSubjects: exams.subjects,
         }),
       );
-      // The principal's signature on the "Principal" line. Not on file, or
-      // not readable just now: the line prints blank, as it did before.
-      const sig = await readView<PrintSignatureSet>(printSignaturesPath(ADMIT_CARD_SIGNATURE_REQUEST));
-      const principalSignature = sig.ok ? sig.data.principal?.src || null : null;
+      // The principal's signature on the "Principal" line. Not on file: the
+      // line is blank. Not readable: the person chose to print without it.
+      const principalSignature = sigs.signatures?.principal?.src || null;
       await downloadAdmitCardsPdf(docs, { masters, principalSignature });
       setNotice(
         `${docs.length} admit card(s) generated${
-          principalSignature ? " with the principal's signature" : sig.ok ? " — no principal's signature on file, the line is blank" : " — the principal's signature could not be loaded, the line is blank"
+          principalSignature
+            ? " with the principal's signature"
+            : sigs.status === "failed"
+              ? " without the principal's signature (it could not be loaded)"
+              : " — no principal's signature on file, the line is blank"
         }.`,
       );
     } catch (e) {
@@ -318,14 +323,14 @@ export function AdmitCardsPanel({ academicYearCode, masters, terms }: Props) {
             )}
           </div>
 
-          <button
-            type="button"
+          <PrintWithSignaturesButton
             className="btn-accent rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
+            status={sigs.status}
+            onRetry={sigs.retry}
             disabled={busy || !selectedIds.length || !examTermId}
-            onClick={onGenerate}
-          >
-            {busy ? "Generating…" : `Print ${selectedIds.length} admit card(s)`}
-          </button>
+            onPrint={() => void onGenerate()}
+            label={busy ? "Generating…" : `Print ${selectedIds.length} admit card(s)`}
+          />
         </>
       )}
 

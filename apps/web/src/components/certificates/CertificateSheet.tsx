@@ -21,8 +21,7 @@ import {
 import { TENANT } from "@/lib/types";
 import { SchoolLetterhead } from "@/components/shared/SchoolLetterhead";
 import { SignatureOnLine } from "@/components/shared/SignatureOnLine";
-import { usePrintSignatures } from "@/components/shared/usePrintSignatures";
-import { certificateSignatureRequest, type PrintSignatureSet } from "@/lib/printSignatures";
+import type { PrintSignatureSet } from "@/lib/printSignatures";
 
 export function printCertificate(issueId: string) {
   const sheet = document.getElementById(`certificate-${issueId}`);
@@ -42,11 +41,23 @@ export function printCertificate(issueId: string) {
   window.setTimeout(cleanup, 1000);
 }
 
-export function CertificateSheet({ issue }: { issue: CertificateIssue }) {
+/**
+ * `signatures`: the staff signatures for the signing lines
+ * (lib/printSignatures certificateSignatureRequest, loaded by the page with
+ * usePrintSignatures); null = blank lines. A void certificate never shows
+ * any, whatever it is given.
+ */
+export function CertificateSheet({
+  issue,
+  signatures = null,
+}: {
+  issue: CertificateIssue;
+  signatures?: PrintSignatureSet | null;
+}) {
   const voided = !!issue.voidedAt;
   const title = certificateKindLabel(issue.kind);
   const isTc = issue.kind === "tc";
-  const sigs = usePrintSignatures(certificateSignatureRequest(issue));
+  const sigs = voided ? null : signatures;
 
   return (
     <div
