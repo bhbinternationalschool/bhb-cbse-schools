@@ -121,7 +121,7 @@ test.describe("before the structure: a child owing nothing", () => {
     const page = await openAs(browser, "certClerk", DESKTOP);
     await toIssueStep(page, VOUCHER_CHILD, "fee_clearance");
     await expect(openDues(page)).toContainText(/Open dues: ₹[1-9]/, { timeout: 30_000 });
-    await expect(page.getByText(/^Open dues ₹[1-9][\d,]* — clear fees before issuing no-dues/)).toBeVisible();
+    await expect(page.getByText(/^Open dues ₹[1-9][\d,]* — clear fees before issuing no-dues/).first()).toBeVisible();
     await expect(issueButton(page)).toBeDisabled();
     await page.context().close();
   });
@@ -139,8 +139,8 @@ test.describe("before the structure: a child owing nothing", () => {
       await expect(page.getByText(ROLE_MSG)).toBeVisible();
       await expect(issueButton(page)).toBeDisabled();
       expect(asked, "the screen asked the server").toBeGreaterThan(0);
-      await openDues(page).scrollIntoViewIfNeeded();
-      await page.screenshot({ path: path.join(SHOTS, `clerk-route-403-${shot.name}.png`), fullPage: true });
+      await openDues(page).evaluate((el) => el.scrollIntoView({ block: "center" }));
+      await page.screenshot({ path: path.join(SHOTS, `clerk-route-403-${shot.name}.png`), fullPage: !shot.dark });
       await page.context().close();
     }
   });
@@ -184,10 +184,10 @@ test.describe("with the structure: a child owing a year's tuition", () => {
         await toIssueStep(page, OWES!, kind);
         await expect(openDues(page)).toContainText("₹12,000", { timeout: 30_000 });
         await expect(openDues(page)).toContainText("12 lines");
-        await expect(page.getByText(/^Open dues ₹12,000 — /)).toBeVisible();
+        await expect(page.getByText(/^Open dues ₹12,000 — /).first()).toBeVisible();
         await expect(issueButton(page)).toBeDisabled();
-        await openDues(page).scrollIntoViewIfNeeded();
-        await page.screenshot({ path: path.join(SHOTS, `clerk-${kind}-owes-${shot.name}.png`), fullPage: true });
+        await openDues(page).evaluate((el) => el.scrollIntoView({ block: "center" }));
+        await page.screenshot({ path: path.join(SHOTS, `clerk-${kind}-owes-${shot.name}.png`), fullPage: !shot.dark });
         await page.context().close();
       }
     });
