@@ -500,6 +500,7 @@
     "test:versions-route": "npx tsx src/lib/data/server/versionsRoute.selftest.ts",
     "test:query-kernel": "npx tsx src/lib/data/client/queryKernel.selftest.ts",
     "test:masters-bridge": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/lib/data/client/mastersBridge.selftest.ts",
+    "test:masters-pending": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/components/masters/mastersPending.selftest.ts",
     "test:reference-views": "npx tsx src/lib/data/server/views.selftest.ts",
     "test:staff-requests": "npx tsx src/lib/staffRequests.selftest.ts",
     "test:notify": "npx tsx src/lib/notify/notify.selftest.ts && npx tsx src/lib/notify/inbox.selftest.ts",

@@ -566,6 +566,7 @@ SELFTESTS=(
   test:query-kernel
   test:reference-views
   test:masters-bridge
+  test:masters-pending
   test:staff-requests
   test:survey-team-plan
   test:parent-api-scope
