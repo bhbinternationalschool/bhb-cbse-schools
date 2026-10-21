@@ -8,6 +8,7 @@ import "../../core/i18n/locale_controller.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "class_sheet_rules.dart";
+import "student_contact_sheet.dart";
 
 /// A 10-digit Indian mobile from whatever is stored, or null — the web's
 /// lib/sisClassTeacher mobile10.
@@ -315,7 +316,7 @@ class _ChildrenList extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    "${kids.length} children · $unreachable not reachable on WhatsApp · tap 📞 to call the family",
+                    "${kids.length} children · $unreachable not reachable on WhatsApp · tap a name to call, message or change the WhatsApp number",
                     style: AppText.bodySmallMuted,
                   ),
                   if (!data.verdictsAvailable)
@@ -342,6 +343,15 @@ class _ChildrenList extends StatelessWidget {
           return Card(
             child: ListTile(
               dense: true,
+              // Request mr_mv9zkoot06df: the child's name opens the family's
+              // actions — add / change the WhatsApp number, call, message.
+              onTap: () => showStudentContactActions(
+                context,
+                api: api,
+                studentId: s.id,
+                studentName: s.fullName,
+                onNumberChanged: onRefresh,
+              ),
               leading: _StudentPhoto(
                 api: api,
                 url: s.photoUrl,

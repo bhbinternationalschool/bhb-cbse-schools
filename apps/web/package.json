@@ -60,6 +60,8 @@
     "test:staff-roster-redact": "npx tsx src/lib/staffRosterRedact.selftest.ts",
     "test:staff-profile-validate": "npx tsx src/lib/staffProfileValidate.selftest.ts",
     "test:sis-class-teacher": "npx tsx src/lib/sisClassTeacher.selftest.ts",
+    "test:student-contact": "npx tsx src/lib/studentContact.selftest.ts",
+    "test:student-doc-types": "npx tsx src/lib/studentDocTypes.selftest.ts",
     "test:punch-code": "npx tsx src/lib/punchCode.selftest.ts",
     "test:wa-language-gate": "npx tsx src/lib/waSisBotLanguageGate.selftest.ts",
     "test:answer-sheet-ai": "npx tsx src/lib/answerSheetAi.selftest.ts",

@@ -42,7 +42,7 @@ class StudentsScreen extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: [
           Text(
-            "${roster.students.length} students · attendance ${roster.attendanceMarked ? "marked" : "not marked"} today · tap a student for a merit, discipline or sick-room note",
+            "${roster.students.length} students · attendance ${roster.attendanceMarked ? "marked" : "not marked"} today · tap a student to call or message the family, or for a merit, discipline or sick-room note",
             style: AppText.bodySmallMuted,
           ),
           const SizedBox(height: 10),

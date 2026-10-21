@@ -466,6 +466,8 @@ SELFTESTS=(
   test:staff-roster-redact
   test:staff-profile-validate
   test:sis-class-teacher
+  test:student-contact
+  test:student-doc-types
   test:punch-code
   test:wa-language-gate
   test:answer-sheet-ai
