@@ -375,8 +375,13 @@ const raw = String(built.wa_text || '');
 // template: schoolName, noticeTitle, noticeBody): school name, first line, rest.
 const keys = ($env.OFFICE_WA_TEMPLATE_KEYS || '1').split(',').map((k) => k.trim()).filter(Boolean);
 const nl = raw.indexOf('\\n');
-const title = flat(nl > 0 ? raw.slice(0, nl) : raw, 120);
-const rest = flat(nl > 0 ? raw.slice(nl + 1) : raw, 1000);
+const title = flat(nl > 0 ? raw.slice(0, nl) : raw, 80);
+// Meta caps the rendered template at 1024 characters (error #132005 "Translated
+// text too long"); the notice template's own text is ~140. Keep the body under
+// 700 and, when cutting, keep the tail so a trailing "Reply APPROVE n" survives.
+let restRaw = nl > 0 ? raw.slice(nl + 1) : raw;
+if (restRaw.length > 700) restRaw = restRaw.slice(0, 540) + ' … ' + restRaw.slice(-140);
+const rest = flat(restRaw, 700);
 let variables;
 if (keys.length >= 3) variables = { [keys[0]]: $env.OFFICE_SCHOOL_NAME || 'BHB International School', [keys[1]]: title, [keys[2]]: rest };
 else if (keys.length === 2) variables = { [keys[0]]: title, [keys[1]]: rest };
