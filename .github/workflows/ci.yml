@@ -165,6 +165,9 @@ jobs:
       - name: Self-test — the staff month register counts what the register holds, and only the owner changes a mark
         working-directory: apps/web
         run: npm run test:staff-month-register
+      - name: Self-test — the principal's staff cards count what their lists show, exempt staff in neither; staff today is what staff did
+        working-directory: apps/web
+        run: npm run test:staff-home-cards
 
       - name: Self-test — an in-class answer is a child's work, and the note only says what the teacher said
         working-directory: apps/web

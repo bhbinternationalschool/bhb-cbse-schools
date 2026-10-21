@@ -3095,4 +3095,206 @@ class LEn extends L {
 
   @override
   String get feeBankMissing => 'Enter the bank name';
+
+  @override
+  String get hcCreateNotice => 'Create notice / news';
+
+  @override
+  String get hcNoticeTitle => 'Title';
+
+  @override
+  String get hcNoticeMessage => 'Message';
+
+  @override
+  String get hcNewsSummary => 'Short summary (optional)';
+
+  @override
+  String get hcAudience => 'Who is it for';
+
+  @override
+  String get hcAudienceAll => 'Everyone';
+
+  @override
+  String get hcAudienceParents => 'Parents';
+
+  @override
+  String get hcAudienceStaff => 'Staff';
+
+  @override
+  String get hcPinToTop => 'Pin to the top';
+
+  @override
+  String get hcPublish => 'Publish';
+
+  @override
+  String get hcPublished => 'Published.';
+
+  @override
+  String get hcWriteTitle => 'Write a title.';
+
+  @override
+  String get hcWriteMessage => 'Write the message.';
+
+  @override
+  String get hcTooLong => 'This is too long — please shorten it.';
+
+  @override
+  String get hcNoticePushNote =>
+      'A notice also rings the phones of everyone it is for.';
+
+  @override
+  String get hcConfirmPublish =>
+      'Publish this now? Everyone it is for will see it in the app.';
+
+  @override
+  String get hcTodaysCollections => 'Today\'s collections';
+
+  @override
+  String get hcNothingCollectedToday => 'Nothing has been collected today.';
+
+  @override
+  String hcByCashier(String name) {
+    return 'by $name';
+  }
+
+  @override
+  String get hcStaffList => 'Staff list';
+
+  @override
+  String get hcStaffProfile => 'Staff profile';
+
+  @override
+  String get hcEmpCode => 'Employee code';
+
+  @override
+  String get hcDepartment => 'Department';
+
+  @override
+  String get hcJoined => 'Joined';
+
+  @override
+  String get hcClassTeacherOf => 'Class teacher of';
+
+  @override
+  String get hcMobile => 'Mobile';
+
+  @override
+  String get hcNoOtherDetails => 'No other details on record.';
+
+  @override
+  String get hcChangeMobile => 'Add / change mobile';
+
+  @override
+  String hcRosterMissingMobile(int missing, int total) {
+    return '$missing of $total staff have no mobile on record, so they cannot sign in to the staff app. Tap the red phone to add the number.';
+  }
+
+  @override
+  String get hcStaffPresentToday => 'Staff present today';
+
+  @override
+  String get hcStaffAbsentToday => 'Staff absent today';
+
+  @override
+  String get hcNoStaffPresent => 'No one is marked present yet.';
+
+  @override
+  String get hcNoStaffAbsent => 'No one is marked absent today.';
+
+  @override
+  String get hcExemptNotListed =>
+      'Staff exempt from attendance are not counted or listed.';
+
+  @override
+  String get hcStaffCountsNotLoaded =>
+      'Present and absent could not be loaded — pull down to try again.';
+
+  @override
+  String get hcStaffToday => 'Staff today';
+
+  @override
+  String get hcOpenAttendance => 'Attendance';
+
+  @override
+  String get hcNothingRecordedToday => 'Nothing recorded today';
+
+  @override
+  String get hcAuditNotLoaded =>
+      'Marks entry, leave decisions and similar work could not be loaded — pull down to try again.';
+
+  @override
+  String hcActivitySummary(int active, int total) {
+    return '$active of $total staff have recorded work today';
+  }
+
+  @override
+  String hcActPunchIn(String time) {
+    return 'Punched in at $time';
+  }
+
+  @override
+  String hcActPunchOut(String time) {
+    return 'Punched out at $time';
+  }
+
+  @override
+  String hcActRegisters(int count) {
+    return 'Marked attendance ($count)';
+  }
+
+  @override
+  String hcActHomework(int count) {
+    return 'Posted homework ($count)';
+  }
+
+  @override
+  String hcActMarks(int qty) {
+    return 'Entered marks for $qty students';
+  }
+
+  @override
+  String hcActCoScholastic(int count) {
+    return 'Co-scholastic ratings ($count)';
+  }
+
+  @override
+  String hcActClassSheet(int count) {
+    return 'Updated the class sheet ($count)';
+  }
+
+  @override
+  String hcActStudentRecords(int count) {
+    return 'Updated student records ($count)';
+  }
+
+  @override
+  String hcActFees(String amount, int count) {
+    return 'Collected $amount in $count receipts';
+  }
+
+  @override
+  String hcActReceiptEdit(int count) {
+    return 'Edited receipts ($count)';
+  }
+
+  @override
+  String get hcActLeaveApplied => 'Applied for leave';
+
+  @override
+  String hcActStaffLeave(int count) {
+    return 'Decided staff leave ($count)';
+  }
+
+  @override
+  String hcActStudentLeave(int count) {
+    return 'Decided student leave ($count)';
+  }
+
+  @override
+  String get hcActProfile => 'Updated own profile';
+
+  @override
+  String hcActLastAt(String time) {
+    return 'last at $time';
+  }
 }

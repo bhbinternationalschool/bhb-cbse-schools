@@ -1,5 +1,6 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
+import { hasPermission } from "@/lib/rbac";
 import { resolveMobileAccess } from "@/lib/api/v1/mobileAccess.server";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import { isGalleryLeader } from "@/lib/classGallery.server";
@@ -17,6 +18,8 @@ const FEATURE_GROUP: Record<string, string> = {
   subject_requests: "Teaching",
   class_gallery: "Students",
   teacher_ai_tools: "Teaching",
+  notices_create: "Self service",
+  news_create: "Self service",
 };
 
 /**
@@ -70,6 +73,15 @@ export async function GET(request: Request) {
     }
     if (AI_TOOL_BASES.some((f) => features.includes(f)) && !features.includes("teacher_ai_tools")) {
       features.push("teacher_ai_tools");
+    }
+    // "+ Create notice / news" on Notices & news (request mr_mv9y435vx6e5):
+    // whoever may create them on the web (Notices · create, News · create),
+    // with the app's Notices switch on. POST /api/v1/staff/notices checks
+    // the same; these only decide whether the button shows.
+    if (features.includes("notices")) {
+      const can = (m: "notices" | "news") => hasPermission(ctx.session, ctx.masters, m, "create", ctx.rbac);
+      if (can("notices")) features.push("notices_create");
+      if (can("news")) features.push("news_create");
     }
     return apiOk({
       staffId: ctx.session.staffId || "",

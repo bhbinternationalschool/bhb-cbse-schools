@@ -1974,5 +1974,181 @@
     }
   },
   "feeBankName": "Bank name (required)",
-  "feeBankMissing": "Enter the bank name"
+  "feeBankMissing": "Enter the bank name",
+  "hcCreateNotice": "Create notice / news",
+  "hcNoticeTitle": "Title",
+  "hcNoticeMessage": "Message",
+  "hcNewsSummary": "Short summary (optional)",
+  "hcAudience": "Who is it for",
+  "hcAudienceAll": "Everyone",
+  "hcAudienceParents": "Parents",
+  "hcAudienceStaff": "Staff",
+  "hcPinToTop": "Pin to the top",
+  "hcPublish": "Publish",
+  "hcPublished": "Published.",
+  "hcWriteTitle": "Write a title.",
+  "hcWriteMessage": "Write the message.",
+  "hcTooLong": "This is too long — please shorten it.",
+  "hcNoticePushNote": "A notice also rings the phones of everyone it is for.",
+  "hcConfirmPublish": "Publish this now? Everyone it is for will see it in the app.",
+  "hcTodaysCollections": "Today's collections",
+  "hcNothingCollectedToday": "Nothing has been collected today.",
+  "hcByCashier": "by {name}",
+  "@hcByCashier": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "hcStaffList": "Staff list",
+  "hcStaffProfile": "Staff profile",
+  "hcEmpCode": "Employee code",
+  "hcDepartment": "Department",
+  "hcJoined": "Joined",
+  "hcClassTeacherOf": "Class teacher of",
+  "hcMobile": "Mobile",
+  "hcNoOtherDetails": "No other details on record.",
+  "hcChangeMobile": "Add / change mobile",
+  "hcRosterMissingMobile": "{missing} of {total} staff have no mobile on record, so they cannot sign in to the staff app. Tap the red phone to add the number.",
+  "@hcRosterMissingMobile": {
+    "placeholders": {
+      "missing": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "hcStaffPresentToday": "Staff present today",
+  "hcStaffAbsentToday": "Staff absent today",
+  "hcNoStaffPresent": "No one is marked present yet.",
+  "hcNoStaffAbsent": "No one is marked absent today.",
+  "hcExemptNotListed": "Staff exempt from attendance are not counted or listed.",
+  "hcStaffCountsNotLoaded": "Present and absent could not be loaded — pull down to try again.",
+  "hcStaffToday": "Staff today",
+  "hcOpenAttendance": "Attendance",
+  "hcNothingRecordedToday": "Nothing recorded today",
+  "hcAuditNotLoaded": "Marks entry, leave decisions and similar work could not be loaded — pull down to try again.",
+  "hcActivitySummary": "{active} of {total} staff have recorded work today",
+  "@hcActivitySummary": {
+    "placeholders": {
+      "active": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActPunchIn": "Punched in at {time}",
+  "@hcActPunchIn": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "hcActPunchOut": "Punched out at {time}",
+  "@hcActPunchOut": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "hcActRegisters": "Marked attendance ({count})",
+  "@hcActRegisters": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActHomework": "Posted homework ({count})",
+  "@hcActHomework": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActMarks": "Entered marks for {qty} students",
+  "@hcActMarks": {
+    "placeholders": {
+      "qty": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActCoScholastic": "Co-scholastic ratings ({count})",
+  "@hcActCoScholastic": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActClassSheet": "Updated the class sheet ({count})",
+  "@hcActClassSheet": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActStudentRecords": "Updated student records ({count})",
+  "@hcActStudentRecords": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActFees": "Collected {amount} in {count} receipts",
+  "@hcActFees": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActReceiptEdit": "Edited receipts ({count})",
+  "@hcActReceiptEdit": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActLeaveApplied": "Applied for leave",
+  "hcActStaffLeave": "Decided staff leave ({count})",
+  "@hcActStaffLeave": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActStudentLeave": "Decided student leave ({count})",
+  "@hcActStudentLeave": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "hcActProfile": "Updated own profile",
+  "hcActLastAt": "last at {time}",
+  "@hcActLastAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  }
 }

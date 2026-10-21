@@ -28,6 +28,7 @@ part "teacher_ai_api.dart";
 part "transport_register_api.dart";
 part "results_api.dart";
 part "notifications_api.dart";
+part "home_cards_api.dart";
 part "school_chat_api.dart";
 part "games_api.dart";
 
@@ -2058,6 +2059,7 @@ class PrincipalSnapshot {
     required this.staffActive,
     required this.staffPresent,
     required this.staffAbsent,
+    this.staffCountsKnown = true,
     required this.admissionsPipeline,
     required this.admissionsEnrolled,
     required this.followUpsDue,
@@ -2104,6 +2106,9 @@ class PrincipalSnapshot {
       staffActive: n(staff, "activeCount"),
       staffPresent: n(staff, "presentToday"),
       staffAbsent: n(staff, "absentToday"),
+      // false = the server could not read who is exempt from attendance;
+      // the cards then say "not loaded". An older server sends nothing.
+      staffCountsKnown: staff["countsKnown"] != false,
       admissionsPipeline: n(adm, "pipeline"),
       admissionsEnrolled: n(adm, "enrolled"),
       followUpsDue: n(adm, "followUpsDue"),
@@ -2133,6 +2138,10 @@ class PrincipalSnapshot {
   final int staffActive;
   final int staffPresent;
   final int staffAbsent;
+
+  /// false = who is exempt from attendance could not be read on the
+  /// server; present / absent are then not shown as fact.
+  final bool staffCountsKnown;
   final int admissionsPipeline;
   final int admissionsEnrolled;
   final int followUpsDue;

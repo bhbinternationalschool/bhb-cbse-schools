@@ -5347,6 +5347,336 @@ abstract class L {
   /// In en, this message translates to:
   /// **'Enter the bank name'**
   String get feeBankMissing;
+
+  /// No description provided for @hcCreateNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'Create notice / news'**
+  String get hcCreateNotice;
+
+  /// No description provided for @hcNoticeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Title'**
+  String get hcNoticeTitle;
+
+  /// No description provided for @hcNoticeMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Message'**
+  String get hcNoticeMessage;
+
+  /// No description provided for @hcNewsSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Short summary (optional)'**
+  String get hcNewsSummary;
+
+  /// No description provided for @hcAudience.
+  ///
+  /// In en, this message translates to:
+  /// **'Who is it for'**
+  String get hcAudience;
+
+  /// No description provided for @hcAudienceAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Everyone'**
+  String get hcAudienceAll;
+
+  /// No description provided for @hcAudienceParents.
+  ///
+  /// In en, this message translates to:
+  /// **'Parents'**
+  String get hcAudienceParents;
+
+  /// No description provided for @hcAudienceStaff.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff'**
+  String get hcAudienceStaff;
+
+  /// No description provided for @hcPinToTop.
+  ///
+  /// In en, this message translates to:
+  /// **'Pin to the top'**
+  String get hcPinToTop;
+
+  /// No description provided for @hcPublish.
+  ///
+  /// In en, this message translates to:
+  /// **'Publish'**
+  String get hcPublish;
+
+  /// No description provided for @hcPublished.
+  ///
+  /// In en, this message translates to:
+  /// **'Published.'**
+  String get hcPublished;
+
+  /// No description provided for @hcWriteTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Write a title.'**
+  String get hcWriteTitle;
+
+  /// No description provided for @hcWriteMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Write the message.'**
+  String get hcWriteMessage;
+
+  /// No description provided for @hcTooLong.
+  ///
+  /// In en, this message translates to:
+  /// **'This is too long — please shorten it.'**
+  String get hcTooLong;
+
+  /// No description provided for @hcNoticePushNote.
+  ///
+  /// In en, this message translates to:
+  /// **'A notice also rings the phones of everyone it is for.'**
+  String get hcNoticePushNote;
+
+  /// No description provided for @hcConfirmPublish.
+  ///
+  /// In en, this message translates to:
+  /// **'Publish this now? Everyone it is for will see it in the app.'**
+  String get hcConfirmPublish;
+
+  /// No description provided for @hcTodaysCollections.
+  ///
+  /// In en, this message translates to:
+  /// **'Today\'s collections'**
+  String get hcTodaysCollections;
+
+  /// No description provided for @hcNothingCollectedToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing has been collected today.'**
+  String get hcNothingCollectedToday;
+
+  /// No description provided for @hcByCashier.
+  ///
+  /// In en, this message translates to:
+  /// **'by {name}'**
+  String hcByCashier(String name);
+
+  /// No description provided for @hcStaffList.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff list'**
+  String get hcStaffList;
+
+  /// No description provided for @hcStaffProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff profile'**
+  String get hcStaffProfile;
+
+  /// No description provided for @hcEmpCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Employee code'**
+  String get hcEmpCode;
+
+  /// No description provided for @hcDepartment.
+  ///
+  /// In en, this message translates to:
+  /// **'Department'**
+  String get hcDepartment;
+
+  /// No description provided for @hcJoined.
+  ///
+  /// In en, this message translates to:
+  /// **'Joined'**
+  String get hcJoined;
+
+  /// No description provided for @hcClassTeacherOf.
+  ///
+  /// In en, this message translates to:
+  /// **'Class teacher of'**
+  String get hcClassTeacherOf;
+
+  /// No description provided for @hcMobile.
+  ///
+  /// In en, this message translates to:
+  /// **'Mobile'**
+  String get hcMobile;
+
+  /// No description provided for @hcNoOtherDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'No other details on record.'**
+  String get hcNoOtherDetails;
+
+  /// No description provided for @hcChangeMobile.
+  ///
+  /// In en, this message translates to:
+  /// **'Add / change mobile'**
+  String get hcChangeMobile;
+
+  /// No description provided for @hcRosterMissingMobile.
+  ///
+  /// In en, this message translates to:
+  /// **'{missing} of {total} staff have no mobile on record, so they cannot sign in to the staff app. Tap the red phone to add the number.'**
+  String hcRosterMissingMobile(int missing, int total);
+
+  /// No description provided for @hcStaffPresentToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff present today'**
+  String get hcStaffPresentToday;
+
+  /// No description provided for @hcStaffAbsentToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff absent today'**
+  String get hcStaffAbsentToday;
+
+  /// No description provided for @hcNoStaffPresent.
+  ///
+  /// In en, this message translates to:
+  /// **'No one is marked present yet.'**
+  String get hcNoStaffPresent;
+
+  /// No description provided for @hcNoStaffAbsent.
+  ///
+  /// In en, this message translates to:
+  /// **'No one is marked absent today.'**
+  String get hcNoStaffAbsent;
+
+  /// No description provided for @hcExemptNotListed.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff exempt from attendance are not counted or listed.'**
+  String get hcExemptNotListed;
+
+  /// No description provided for @hcStaffCountsNotLoaded.
+  ///
+  /// In en, this message translates to:
+  /// **'Present and absent could not be loaded — pull down to try again.'**
+  String get hcStaffCountsNotLoaded;
+
+  /// No description provided for @hcStaffToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff today'**
+  String get hcStaffToday;
+
+  /// No description provided for @hcOpenAttendance.
+  ///
+  /// In en, this message translates to:
+  /// **'Attendance'**
+  String get hcOpenAttendance;
+
+  /// No description provided for @hcNothingRecordedToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing recorded today'**
+  String get hcNothingRecordedToday;
+
+  /// No description provided for @hcAuditNotLoaded.
+  ///
+  /// In en, this message translates to:
+  /// **'Marks entry, leave decisions and similar work could not be loaded — pull down to try again.'**
+  String get hcAuditNotLoaded;
+
+  /// No description provided for @hcActivitySummary.
+  ///
+  /// In en, this message translates to:
+  /// **'{active} of {total} staff have recorded work today'**
+  String hcActivitySummary(int active, int total);
+
+  /// No description provided for @hcActPunchIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Punched in at {time}'**
+  String hcActPunchIn(String time);
+
+  /// No description provided for @hcActPunchOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Punched out at {time}'**
+  String hcActPunchOut(String time);
+
+  /// No description provided for @hcActRegisters.
+  ///
+  /// In en, this message translates to:
+  /// **'Marked attendance ({count})'**
+  String hcActRegisters(int count);
+
+  /// No description provided for @hcActHomework.
+  ///
+  /// In en, this message translates to:
+  /// **'Posted homework ({count})'**
+  String hcActHomework(int count);
+
+  /// No description provided for @hcActMarks.
+  ///
+  /// In en, this message translates to:
+  /// **'Entered marks for {qty} students'**
+  String hcActMarks(int qty);
+
+  /// No description provided for @hcActCoScholastic.
+  ///
+  /// In en, this message translates to:
+  /// **'Co-scholastic ratings ({count})'**
+  String hcActCoScholastic(int count);
+
+  /// No description provided for @hcActClassSheet.
+  ///
+  /// In en, this message translates to:
+  /// **'Updated the class sheet ({count})'**
+  String hcActClassSheet(int count);
+
+  /// No description provided for @hcActStudentRecords.
+  ///
+  /// In en, this message translates to:
+  /// **'Updated student records ({count})'**
+  String hcActStudentRecords(int count);
+
+  /// No description provided for @hcActFees.
+  ///
+  /// In en, this message translates to:
+  /// **'Collected {amount} in {count} receipts'**
+  String hcActFees(String amount, int count);
+
+  /// No description provided for @hcActReceiptEdit.
+  ///
+  /// In en, this message translates to:
+  /// **'Edited receipts ({count})'**
+  String hcActReceiptEdit(int count);
+
+  /// No description provided for @hcActLeaveApplied.
+  ///
+  /// In en, this message translates to:
+  /// **'Applied for leave'**
+  String get hcActLeaveApplied;
+
+  /// No description provided for @hcActStaffLeave.
+  ///
+  /// In en, this message translates to:
+  /// **'Decided staff leave ({count})'**
+  String hcActStaffLeave(int count);
+
+  /// No description provided for @hcActStudentLeave.
+  ///
+  /// In en, this message translates to:
+  /// **'Decided student leave ({count})'**
+  String hcActStudentLeave(int count);
+
+  /// No description provided for @hcActProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Updated own profile'**
+  String get hcActProfile;
+
+  /// No description provided for @hcActLastAt.
+  ///
+  /// In en, this message translates to:
+  /// **'last at {time}'**
+  String hcActLastAt(String time);
 }
 
 class _LDelegate extends LocalizationsDelegate<L> {
