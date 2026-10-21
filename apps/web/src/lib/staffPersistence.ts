@@ -4,6 +4,7 @@
  */
 
 import { serialSave } from "@/lib/serialSave";
+import { rosterEmpKey } from "@/lib/staffProtectedFields";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
@@ -437,7 +438,10 @@ async function upsertStaffBundle(
   ): Map<string, string> => {
     const m = new Map<string, string>();
     for (const r of rows ?? []) {
-      const k = String((r as Record<string, unknown>)[key] ?? "").trim();
+      // Employee codes compare upper-cased and trimmed — the same key the
+      // protected-field guard judges a row by (staffProtectedFields.rosterEmpKey).
+      const raw = String((r as Record<string, unknown>)[key] ?? "");
+      const k = key === "emp_code" ? rosterEmpKey(raw) : raw.trim();
       if (k) m.set(k, String(r.id));
     }
     return m;
@@ -484,7 +488,7 @@ async function upsertStaffBundle(
       // The API route feeds request JSON straight through; normalize so a
       // partial record can't crash the row builders further down.
       const s = normalizeStaffRecord(raw);
-      const emp = (s.empCode || "").trim();
+      const emp = rosterEmpKey(s.empCode);
       const dbId = emp ? stfIdByEmp.get(emp) : undefined;
       if (dbId && dbId !== s.id) stfRemap.set(s.id, dbId);
       return {
@@ -498,7 +502,7 @@ async function upsertStaffBundle(
           : s.designationId,
       };
     }),
-    (s) => (s.empCode || "").trim() || s.id,
+    (s) => rosterEmpKey(s.empCode) || s.id,
   );
 
   const rowsBySlice: Record<(typeof STAFF_STAMPED_SLICES)[number], Record<string, unknown>[]> = {
@@ -599,22 +603,33 @@ async function pushStaffSliceNow(
       error?: string;
       stamps?: RowStamps;
       conflicts?: RowConflicts;
+      refused?: RowConflicts;
+      refusal?: string;
     } | null;
     if (!res.ok || !body?.ok) {
       const message = body?.error || `HTTP ${res.status}`;
       console.warn("[staff] push failed", message);
-      // A protected-field refusal (bank / Aadhaar / PAN / pay, the login —
-      // 2.2b) is said where the person is, not only in the console: the
-      // shared desk-sync record toasts a 403 whose message it recognises.
+      // A protected-field refusal (bank / Aadhaar / PAN / pay, a sign-in
+      // detail — 2.2b) is said where the person is, once, and the refused
+      // rows go back to the server's copy (below) so they are not re-sent
+      // with every later save from this tab.
       if (res.status === 403) {
         const { recordDeskSyncFailure } = await import("@/lib/deskSyncStatus");
         recordDeskSyncFailure(MODULE, { status: 403, error: message });
+        if (body?.refused) onStampConflicts(MODULE, body.refused);
       }
       return { ok: false, error: message };
     }
     applyStampedSave(MODULE, holder, stamps, body, STAFF_STAMPED_SLICES);
     // A record changed elsewhere first was not written: reload, and say so.
     onStampConflicts(MODULE, body.conflicts);
+    if (body.refused && body.refusal) {
+      // Some rows were refused (protected fields), the rest saved: say why,
+      // once, and re-read the roster so the refused rows are the server's again.
+      const { recordDeskSyncFailure } = await import("@/lib/deskSyncStatus");
+      recordDeskSyncFailure(MODULE, { status: 403, error: body.refusal });
+      onStampConflicts(MODULE, body.refused);
+    }
     return { ok: true };
   } catch (e) {
     console.warn("[staff] push error", e);

@@ -5,11 +5,11 @@
  */
 import { NextResponse } from "next/server";
 import { invalidateServerMastersCache } from "@/lib/api/v1/auth";
-import { requireAnyStaffPermission } from "@/lib/apiRouteAuth.server";
+import { functionGrantHeldOnServer, requireStaffApi } from "@/lib/apiRouteAuth.server";
 import { readRowsByIds, writeStaffSensitive } from "@/lib/data/server/repo";
 import { buildSensitiveOps, parseSensitiveOps } from "@/lib/data/server/staffSensitive";
 import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
-import { staffActorOf, staffSensitiveAuthority } from "@/lib/staffProtectedFields";
+import { STAFF_SENSITIVE_FEATURE, staffActorOf, staffSensitiveAuthority } from "@/lib/staffProtectedFields";
 import { withBuildCheck } from "@/lib/staleBuild.server";
 
 export const runtime = "nodejs";
@@ -23,25 +23,25 @@ export const POST = withBuildCheck(async (req: Request, ctx: RouteCtx) => {
   const { collection } = await ctx.params;
   if (collection !== "sis.staff") return fail(404, "not_found", "Unknown collection");
 
-  // The RBAC gate: payroll · edit or accounts · edit (the owner holds every
-  // module). staffSensitiveAuthority below then names WHICH authority, for
-  // the database's record — the same rule, from the same session.
-  const auth = await requireAnyStaffPermission(req, [
-    { module: "payroll", action: "edit" },
-    { module: "accounts", action: "edit" },
-  ]);
+  // The RBAC gate: the owner, or the FUNCTION staff.sensitive_edit as a
+  // function grant (director, 21 Oct 2026: owner + accountant). Staff,
+  // payroll or accounts · edit as such do not open it — the Office and Admin
+  // roles hold those for their daily work.
+  const auth = await requireStaffApi(req);
   if (!auth.ok) return auth.response;
   // The mirror-sync secret is a machine, not a person: never an authority.
   if (auth.viaMirrorSecret) return fail(403, "auth", "Protected staff fields are changed only by a signed-in person.");
 
   const { session, masters, rbac } = auth.ctx;
-  const authority = staffSensitiveAuthority(session, masters, rbac);
+  const authority = staffSensitiveAuthority(session, masters, rbac, { rbacKnown: auth.ctx.rbacKnown !== false });
   const actor = staffActorOf(session);
-  if (!authority || !actor) {
+  // The same answer, asked the catalog's way: an owner, or the function held as a function grant.
+  const gated = authority === "owner" || functionGrantHeldOnServer(auth.ctx, STAFF_SENSITIVE_FEATURE, "edit");
+  if (!authority || !gated || !actor) {
     return fail(
       403,
       "auth",
-      "Bank, UPI, Aadhaar, PAN and pay can be changed only by the owner or with the payroll or accounts function.",
+      "Bank, UPI, Aadhaar, PAN and pay can be changed only by the owner or with the bank & pay details function.",
     );
   }
 

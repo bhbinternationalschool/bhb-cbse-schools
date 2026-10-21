@@ -13,6 +13,9 @@
  */
 
 import { writeAudit } from "@/lib/audit.server";
+import { staffSignInLinks } from "@/lib/data/server/repo";
+import { takenLinksOf } from "@/lib/staffProtectedFields";
+import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, requestMeta, resolveApiAuth, type ApiAuthContext } from "@/lib/api/v1/auth";
 import {
@@ -97,6 +100,21 @@ export async function PATCH(request: Request) {
     const approval = Object.keys(split.approval);
     if (!direct.length && !approval.length) return apiOk({ saved: [], sentForApproval: [], profile: await view(ctx, staffId) });
 
+    // An e-mail is a sign-in link (/api/auth/session resolves a login by it):
+    // nobody takes another member's, or an owner's (data-layer 2.2b review).
+    if (typeof split.direct.email === "string" && split.direct.email.trim()) {
+      const next = split.direct.email.trim().toLowerCase();
+      let links: Record<string, unknown>[];
+      try {
+        links = await staffSignInLinks();
+      } catch {
+        throw new ApiError("server_error", "Could not check the e-mail — nothing was saved. Try again.", 503);
+      }
+      const taken = takenLinksOf(links.filter((l) => String(l.id) !== staffId));
+      if (taken.emails.has(next) || isProtectedSuperAdminEmail(next)) {
+        throw new ApiError("bad_request", "Nothing was saved — that e-mail belongs to another member of staff.", 400);
+      }
+    }
     if (direct.length) {
       const w = await patchStaffRow(staffId, () => split.direct);
       if (!w.ok) throw new ApiError("server_error", `Not saved — ${w.error}`, 503);

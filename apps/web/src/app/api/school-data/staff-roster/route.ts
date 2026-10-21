@@ -9,6 +9,7 @@ import {
 import { invalidateServerMastersCache } from "@/lib/api/v1/auth";
 import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
 import {
+  prepareRosterRows,
   rosterSaveRefusal,
   staffActorOf,
   staffSensitiveAuthority,
@@ -95,7 +96,8 @@ export async function POST(req: Request) {
   }
 
   const incoming = (body.state.staff ?? []) as StaffRecord[];
-  const stamps = readStampsParam(body.stamps, STAFF_STAMPED_SLICES);
+  let stamps = readStampsParam(body.stamps, STAFF_STAMPED_SLICES);
+  let refused: { refusedIds: string[]; message: string } | null = null;
   if (incoming.length > 0) {
     // Read the stored roster to judge this save against (always, since 2.2b:
     // the protected-field rule below needs it, not only the password fill).
@@ -106,31 +108,49 @@ export async function POST(req: Request) {
         { status: 503 },
       );
     }
-    // Browsers never receive loginPassword any more (staffRosterRedact), so a
-    // blank one in a save means "not sent", not "clear it": keep the stored.
-    const pw = new Map((stored.staff as StaffRecord[]).map((s) => [s.id, s.loginPassword || ""]));
-    const filled = incoming.map((s) => (s.loginPassword ? s : { ...s, loginPassword: pw.get(s.id) || "" }));
-    body.state = { ...body.state, staff: filled };
+    // Each row is judged — and written — against the stored row the save
+    // lands on: by employee code first, else id, exactly as upsertStaffBundle
+    // remaps (rosterTargetOf). A protected or sign-in key the row does not
+    // carry is the STORED value (absent = keep): the push normalises an absent
+    // key to "", which would otherwise blank a bank account. Browsers never
+    // receive loginPassword (staffRosterRedact), so a blank one means "not
+    // sent", not "clear it": keep the stored.
+    const storedStaff = stored.staff as StaffRecord[];
+    type Rec = Parameters<typeof rosterSaveRefusal>[0][number];
+    const filled = prepareRosterRows(storedStaff as unknown as Rec[], incoming as unknown as Rec[]) as unknown as StaffRecord[];
 
-    // Bank, UPI, Aadhaar, PAN and pay: only the owner or the payroll /
-    // accounts function; the login username: only the owner; a password:
-    // never set (data-layer 2.2b, director 20 Oct 2026). This route writes
-    // sis_staff directly, past the database's own guard, so it is checked
-    // here — from the session, never from the body.
+    // Bank, UPI, Aadhaar, PAN and pay: only the owner or the bank & pay
+    // details function; a set sign-in link (login, e-mail, mobile): only the
+    // owner; a password: never set (data-layer 2.2b; director 20–21 Oct
+    // 2026). This route writes sis_staff directly, past the database's own
+    // guard, so it is checked here — from the session, never from the body.
     const authority: StaffAuthority | null = auth.viaMirrorSecret
       ? null
-      : staffSensitiveAuthority(auth.ctx.session, auth.ctx.masters, auth.ctx.rbac);
+      : staffSensitiveAuthority(auth.ctx.session, auth.ctx.masters, auth.ctx.rbac, { rbacKnown: auth.ctx.rbacKnown !== false });
     const named = stamps ? new Set(Object.keys(stamps.staff ?? {})) : null;
-    const refusal = rosterSaveRefusal(
-      stored.staff as unknown as Parameters<typeof rosterSaveRefusal>[0],
-      filled as unknown as Parameters<typeof rosterSaveRefusal>[1],
-      named,
-      authority,
-    );
+    const refusal = rosterSaveRefusal(storedStaff as unknown as Rec[], filled as unknown as Rec[], named, authority);
     if (refusal) {
-      console.warn(`[staff-roster] refused a save by ${auth.viaMirrorSecret ? "mirror" : auth.ctx.session.staffId || "?"}: ${refusal}`);
-      return NextResponse.json({ ok: false, error: refusal, reason: "protected_fields" }, { status: 403 });
+      console.warn(
+        `[staff-roster] refused ${refusal.refusedIds.length} row(s) of a save by ${auth.viaMirrorSecret ? "mirror" : auth.ctx.session.staffId || "?"}: ${refusal.message}`,
+      );
     }
+    const refusedSet = new Set(refusal?.refusedIds ?? []);
+    const kept = filled.filter((s) => !refusedSet.has(s.id));
+    if (refusal && kept.length === 0 && !(body.state.departments?.length || body.state.designations?.length)) {
+      // Nothing else in the save: nothing written.
+      return NextResponse.json(
+        { ok: false, error: refusal.message, reason: "protected_fields", refused: { staff: refusal.refusedIds } },
+        { status: 403 },
+      );
+    }
+    // The refused rows leave the save (and its stamps); every other row saves.
+    body.state = { ...body.state, staff: kept };
+    if (stamps?.staff && refusal) {
+      const staffStamps = { ...stamps.staff };
+      for (const id of refusal.refusedIds) delete staffStamps[id];
+      stamps = { ...stamps, staff: staffStamps };
+    }
+    refused = refusal;
   }
 
   // Stamped (current browsers): only the rows named, each at its stamp.
@@ -145,7 +165,15 @@ export async function POST(req: Request) {
   if (result.kept) {
     console.warn(`[staff-roster] unstamped save left ${result.kept} stored row(s) as they were`);
   }
-  return NextResponse.json({ ok: true, stamps: result.stamps, conflicts: result.conflicts });
+  // Refused rows are said: the browser forgets their stamps, re-reads the
+  // roster (its copy of those rows goes back to the server's) and toasts the
+  // reason once — never re-sending them with every later save.
+  return NextResponse.json({
+    ok: true,
+    stamps: result.stamps,
+    conflicts: result.conflicts,
+    ...(refused ? { refused: { staff: refused.refusedIds }, refusal: refused.message } : {}),
+  });
 }
 
 /**

@@ -15,6 +15,7 @@ import {
   type RbacState,
 } from "@/lib/rbac";
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
 import { ApiError } from "@/lib/api/v1/errors";
 import { staffRoleCodeFor } from "@/lib/staffSessionRole";
 import { trackServerWork } from "@/lib/serverWork";
@@ -222,7 +223,10 @@ async function buildServerMasters(): Promise<BuildResult<MastersState>> {
     // re-reads.
     return { ok: false, error: "staff roster", fallback: state };
   }
-  if (staffBundle.staff.length > 0) state.staff = staffBundle.staff;
+  // The roster was READ: it is the truth even when empty (every member
+  // removed — 2.2b), and revalidateStaffSession may then decide on it.
+  state.staff = staffBundle.staff;
+  rosterRead.add(state);
   if (staffBundle.departments.length > 0) {
     state.departments = staffBundle.departments;
   }
@@ -230,6 +234,14 @@ async function buildServerMasters(): Promise<BuildResult<MastersState>> {
     state.designations = staffBundle.designations;
   }
   return { ok: true, value: state };
+}
+
+/** Masters copies whose staff roster was read from sis_staff (not left as the desk's own). */
+const rosterRead = new WeakSet<MastersState>();
+
+/** Was this copy's roster read from the database (so an empty one means "nobody")? */
+export function serverRosterWasRead(state: MastersState): boolean {
+  return rosterRead.has(state);
 }
 
 /** The slice stamps each cached Masters copy was read with (by object identity; never in the copy itself). */
@@ -332,8 +344,13 @@ export function revalidateStaffSession(
 ): DemoSession {
   if (session.persona !== "staff" || !session.staffId) return session;
   const roster = masters.staff ?? [];
-  if (roster.length === 0) return session;
+  // An empty roster that was READ means nobody is on it (all removed — 2.2b);
+  // one that was not read (no database, a fallback) decides nothing.
+  if (roster.length === 0 && !serverRosterWasRead(masters)) return session;
   const me = roster.find((s) => s.id === session.staffId);
+  // The owner is never locked out by the roster (a removed or emptied roster
+  // must stay restorable from the app).
+  if (!me && isProtectedSuperAdminEmail(session.email)) return session;
   if (!me || me.status !== "active") {
     throw new ApiError(
       "unauthorized",

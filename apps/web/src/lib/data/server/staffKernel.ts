@@ -21,6 +21,7 @@ import {
   protectedChangeRefusal,
   protectedChanges,
   redactStaffRowProfile,
+  takenLinksOf,
   withStoredProtectedKeys,
 } from "@/lib/staffProtectedFields";
 import type { WriteOp } from "../types";
@@ -50,9 +51,13 @@ export async function prepareStaffOps(
   ops: readonly WriteOp<Row>[],
   by: string,
   readStored: (ids: string[]) => Promise<Map<string, Row>>,
+  /** The sign-in links (e-mail, mobile) of every live member, for the "not another member's" rule. */
+  readLinks: () => Promise<readonly Row[]> = async () => [],
 ): Promise<StaffOpsVerdict> {
   if (!by.trim()) return { ok: false, status: 403, message: "A signed-in member of staff is required to change staff records." };
-  const needsStored = ops.filter((o) => o.op === "upsert" && isObj((o as { row?: unknown }).row) && "profile" in ((o as { row: Row }).row));
+  const touches = (r: Row) => "profile" in r || "email" in r || "mobile" in r;
+  const needsStored = ops.filter((o) => o.op === "upsert" && isObj((o as { row?: unknown }).row) && touches((o as { row: Row }).row));
+  let links: readonly Row[] | null = null;
   let stored = new Map<string, Row>();
   if (needsStored.length) {
     try {
@@ -77,8 +82,8 @@ export async function prepareStaffOps(
     const row: Row = { ...raw };
     delete row.deleted_by;
     delete row.tenant_id;
-    if ("profile" in row) {
-      if (!isObj(row.profile)) return { ok: false, status: 400, message: `${op.id}: profile must be an object` };
+    if (touches(row)) {
+      if ("profile" in row && !isObj(row.profile)) return { ok: false, status: 400, message: `${op.id}: profile must be an object` };
       const before = stored.get(op.id) ?? null;
       // Sensitive keys are judged here only when the write would otherwise
       // LAND (its base is the stored revision, or a new id with no base): a
@@ -93,15 +98,35 @@ export async function prepareStaffOps(
       // the base and the sent keys are laid on it — a key is cleared by sending
       // it as "" or null, never by leaving it out. (Protected keys left out are
       // therefore kept too; withStoredProtectedKeys says so explicitly.)
-      const profile = withStoredProtectedKeys(storedProfile, { ...(storedProfile ?? {}), ...(row.profile as Row) });
+      const profile = withStoredProtectedKeys(storedProfile, { ...(storedProfile ?? {}), ...((row.profile as Row | undefined) ?? {}) });
       const empCode = String(row.emp_code ?? (profile as Row).empCode ?? before?.emp_code ?? "");
-      const change = protectedChanges(storedProfile, profile, { empCode });
+      // The sign-in links live in their own columns (what sign-in reads) and in
+      // the profile: judged as one — the column when the write names it.
+      const storedView: Row | null = before
+        ? { ...(storedProfile ?? {}), email: before.email ?? storedProfile?.email, mobile: before.mobile ?? storedProfile?.mobile }
+        : null;
+      const view: Row = {
+        ...profile,
+        ...("email" in row ? { email: row.email } : {}),
+        ...("mobile" in row ? { mobile: row.mobile } : {}),
+      };
+      if (!("email" in row) && !("email" in ((row.profile as Row | undefined) ?? {}))) delete view.email;
+      if (!("mobile" in row) && !("mobile" in ((row.profile as Row | undefined) ?? {}))) delete view.mobile;
+      if (links === null && ("email" in view || "mobile" in view)) {
+        try {
+          links = await readLinks();
+        } catch (e) {
+          return { ok: false, status: 503, message: `Could not read the staff sign-in details to check this change — nothing was written (${e instanceof Error ? e.message : String(e)}).` };
+        }
+      }
+      const taken = takenLinksOf((links ?? []).filter((l) => String(l.id) !== op.id));
+      const change = protectedChanges(storedView, view, { empCode, taken });
       const why = protectedChangeRefusal(
         String(row.full_name ?? (profile as Row).fullName ?? before?.full_name ?? op.id),
         lands ? change : { sensitive: [], login: change.login },
       );
       if (why) return { ok: false, status: 403, message: why };
-      row.profile = profile;
+      if ("profile" in row) row.profile = profile;
     }
     out.push({ op: "upsert", id: op.id, base: op.base, row });
   }

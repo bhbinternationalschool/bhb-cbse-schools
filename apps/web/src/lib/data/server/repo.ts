@@ -413,6 +413,38 @@ export async function readRowsByIds(table: string, ids: readonly string[]): Prom
   return out;
 }
 
+/** id, email and mobile of every live (not removed) staff member — the sign-in links (2.2b). Throws on a failed read. */
+export async function staffSignInLinks(): Promise<Row[]> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) throw new Error("Supabase tenant not configured");
+  const res = await fetchAllPages<Row>((from, to) =>
+    ctx.sb
+      .from("sis_staff")
+      .select("id, email, mobile")
+      .eq("tenant_id", ctx.tenantId)
+      .is("deleted_at", null)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  if (res.error || res.truncated) throw new Error(res.error ?? "staff sign-in links truncated");
+  return res.rows;
+}
+
+/** How many elements one list slice holds now. Throws on a failed read. */
+export async function sliceElementCount(src: SliceSource): Promise<number> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) throw new Error("Supabase tenant not configured");
+  const { data, error } = await ctx.sb
+    .from(src.table)
+    .select("payload")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("slice_key", src.key)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const payload = (data as { payload?: unknown } | null)?.payload;
+  return Array.isArray(payload) ? payload.length : 0;
+}
+
 /**
  * Stored elements of one list slice by key (data-layer 2.2b: the function-
  * grant check needs the stored element's class before a teacher's write).

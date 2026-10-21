@@ -10,6 +10,7 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { resetStaffPersistenceCache } from "@/lib/staffPersistence";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
+import { mobileKey, staffSensitiveAuthority } from "@/lib/staffProtectedFields";
 
 export const runtime = "nodejs";
 
@@ -49,6 +50,13 @@ export async function POST(request: Request) {
     );
     if (clash) {
       throw new ApiError("bad_request", `That number is already on ${clash.fullName}'s record`, 400);
+    }
+    // The mobile is a sign-in link (staff OTP): recording a missing one is the
+    // office's job; CHANGING one that is set hands that person's sign-in to
+    // another phone — the owner's (data-layer 2.2b review, 21 Oct 2026).
+    const was = mobileKey(staff.mobile);
+    if (was && !/^0+$/.test(was) && was !== mobile && staffSensitiveAuthority(ctx.session, ctx.masters, ctx.rbac, { rbacKnown: ctx.rbacKnown !== false }) !== "owner") {
+      throw new ApiError("forbidden", `${staff.fullName} already has a registered mobile — only the owner changes a sign-in link.`, 403);
     }
 
     const tctx = await getServerTenantContext();

@@ -21,6 +21,7 @@
 import {
   STAFF_LOGIN_PROFILE_KEYS,
   STAFF_SENSITIVE_PROFILE_KEYS,
+  STAFF_SIGNIN_LINK_KEYS,
   protectedChangeRefusal,
   protectedChanges,
   refusedProtectedKeys,
@@ -36,7 +37,7 @@ export type SensitiveBuild =
   | { ok: true; ops: WriteOp<Row>[] }
   | { ok: false; status: 400 | 403 | 404 | 409; message: string };
 
-const ALLOWED = new Set<string>([...STAFF_SENSITIVE_PROFILE_KEYS, ...STAFF_LOGIN_PROFILE_KEYS]);
+const ALLOWED = new Set<string>([...STAFF_SENSITIVE_PROFILE_KEYS, ...STAFF_LOGIN_PROFILE_KEYS, ...STAFF_SIGNIN_LINK_KEYS]);
 const isObj = (v: unknown): v is Row => !!v && typeof v === "object" && !Array.isArray(v);
 
 /** The body's ops, shape-checked. */
@@ -52,7 +53,7 @@ export function parseSensitiveOps(raw: unknown): SensitiveRequestOp[] | string {
     if (o.base != null && typeof o.base !== "string") return `${o.id}: base must be the record's revision`;
     if (!isObj(o.fields) || Object.keys(o.fields).length === 0) return `${o.id}: fields must name at least one field`;
     const bad = Object.keys(o.fields).filter((k) => !ALLOWED.has(k));
-    if (bad.length) return `${o.id}: ${bad.join(", ")} cannot be written here — only bank, UPI, Aadhaar, PAN, pay and the login`;
+    if (bad.length) return `${o.id}: ${bad.join(", ")} cannot be written here — only bank, UPI, Aadhaar, PAN, pay and the sign-in details`;
     out.push({ id: o.id, base: (o.base as string | null) ?? null, fields: o.fields as Record<string, unknown> });
   }
   return out;
@@ -72,7 +73,8 @@ export function buildSensitiveOps(
       return { ok: false, status: 409, message: `${op.id}: say which version you changed (base) — nothing was written` };
     }
     const storedProfile = isObj(row.profile) ? (row.profile as Row) : {};
-    const change = protectedChanges(storedProfile, op.fields, { empCode: String(row.emp_code ?? "") });
+    const storedView = { ...storedProfile, email: row.email ?? storedProfile.email, mobile: row.mobile ?? storedProfile.mobile };
+    const change = protectedChanges(storedView, op.fields, { empCode: String(row.emp_code ?? "") });
     const refused = refusedProtectedKeys(change, op.fields, authority);
     const why = protectedChangeRefusal(String(row.full_name || op.id), refused);
     if (why) return { ok: false, status: 403, message: why };
@@ -80,7 +82,12 @@ export function buildSensitiveOps(
       op: "upsert",
       id: op.id,
       base: op.base as Revision,
-      row: { profile: { ...storedProfile, ...op.fields } },
+      row: {
+        profile: { ...storedProfile, ...op.fields },
+        // A sign-in link lives in its own column too (what sign-in reads).
+        ...("email" in op.fields ? { email: String(op.fields.email ?? "").trim() } : {}),
+        ...("mobile" in op.fields ? { mobile: String(op.fields.mobile ?? "").trim() } : {}),
+      },
     });
   }
   return { ok: true, ops: out };

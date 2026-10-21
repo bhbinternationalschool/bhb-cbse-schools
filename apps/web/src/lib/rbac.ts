@@ -502,6 +502,12 @@ export const BUILT_IN_GRANT_ADDITIONS: {
     grant: { feature: "notices.parent_app_usage", actions: ["view", "send"] },
     why: "Director, 12 Oct 2026: the office sends parent-app invitations",
   },
+  {
+    id: "2026-10-21.accounts.staff_sensitive_edit",
+    roleCode: "accounts",
+    grant: { feature: "staff.sensitive_edit", actions: ["edit"] },
+    why: "Director, 21 Oct 2026: a staff record's bank, UPI, Aadhaar, PAN and pay are changed only by the owner and the accountant",
+  },
 ];
 
 /** Built-in role templates (Phase 1) — Accounts has no payroll. */
@@ -715,6 +721,8 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("trust", ["view", "create", "edit", "export", "approve"]),
         // no payroll, masters edit, settings
       ],
+      // The accountant changes staff bank / ID / pay details (director, 21 Oct 2026).
+      featureGrants: [{ feature: "staff.sensitive_edit", actions: ["edit"] }],
     },
     {
       id: "role_transport",

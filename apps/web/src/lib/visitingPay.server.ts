@@ -254,6 +254,8 @@ async function readStaffRow(staffId: string): Promise<StaffRowLite | null | "err
     .select("id, full_name, emp_code, category, status, mobile, profile")
     .eq("tenant_id", ctx.tenantId)
     .eq("id", staffId)
+    // A removed member (2.2b soft remove) is not paid or set up.
+    .is("deleted_at", null)
     .maybeSingle();
   if (error) return "error";
   return (data as StaffRowLite | null) ?? null;

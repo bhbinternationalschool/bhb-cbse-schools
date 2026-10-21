@@ -43,7 +43,7 @@ export function isFeatureRefusalMessage(msg: string | null | undefined): boolean
   return (
     !!msg &&
     // The last two: staff records' protected fields (lib/staffProtectedFields, 2.2b).
-    /(ask the office to give your role this\.|only for the classes you teach\.|could not be read — nothing was saved\.|or with the payroll or accounts function\.|only the owner changes a login username\.)$/.test(
+    /(ask the office to give your role this\.|only for the classes you teach\.|could not be read — nothing was saved\.|or with the bank & pay details function\.|only the owner changes a sign-in link\.)$/.test(
       msg.trim(),
     )
   );

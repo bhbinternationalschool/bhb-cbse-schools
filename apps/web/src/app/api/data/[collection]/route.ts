@@ -36,6 +36,8 @@ import {
   list,
   readRowsByIds,
   revisionsOf,
+  sliceElementCount,
+  staffSignInLinks,
   write,
   writeSlice,
   writeSliceBatch,
@@ -277,12 +279,14 @@ async function postOps(req: Request, ctx: RouteCtx) {
     );
   }
   // A batch big enough to time out is a batch that will be retried forever.
-  if (ops.length > def.list.maxLimit) {
+  // 500 for every collection (the batch RPC's own ceiling), less where the
+  // registry says so.
+  if (ops.length > Math.min(def.list.maxLimit, 500)) {
     return NextResponse.json(
       {
         ok: false,
         kind: "invalid",
-        message: `Too many ops (${ops.length}); the limit is ${def.list.maxLimit}`,
+        message: `Too many ops (${ops.length}); the limit is ${Math.min(def.list.maxLimit, 500)}`,
         conflicts: [],
       },
       { status: 400 },
@@ -324,6 +328,33 @@ async function postOps(req: Request, ctx: RouteCtx) {
   // function that owns the list, within its actions and, for a class-scoped
   // one, the person's own classes (data-layer 2.2b).
   if (collectionKind(def) === "slice") {
+    // The commit rules, on the server too (the browser's useMastersMutation
+    // says the same): removing is one element per save, and no save leaves a
+    // list empty — every whole-list wipe looked like a save that did.
+    const deletes = ops.filter((o) => o.op === "delete").length;
+    if (deletes > 1) {
+      return NextResponse.json(
+        { ok: false, kind: "invalid", message: `One removal per save (this one removes ${deletes}) — nothing was saved.`, conflicts: [] },
+        { status: 400 },
+      );
+    }
+    if (deletes === 1 && !ops.some((o) => o.op === "upsert")) {
+      let size: number;
+      try {
+        size = await sliceElementCount(def.slice!);
+      } catch (e) {
+        return NextResponse.json(
+          { ok: false, kind: "unavailable", message: `Could not read the list to check this removal — nothing was saved (${e instanceof Error ? e.message : String(e)}).`, conflicts: [] },
+          { status: 503 },
+        );
+      }
+      if (size <= 1) {
+        return NextResponse.json(
+          { ok: false, kind: "invalid", message: `This would leave ${def.slice!.key} empty — nothing was saved.`, conflicts: [] },
+          { status: 400 },
+        );
+      }
+    }
     const gate = await sliceFunctionGate(req, def, ops, functionOnly ? "function" : "module", auth.ctx);
     if (!gate.ok) {
       return NextResponse.json({ ok: false, kind: gate.kind, message: gate.message, conflicts: [] }, { status: gate.status });
@@ -335,7 +366,7 @@ async function postOps(req: Request, ctx: RouteCtx) {
   // Staff records: protected fields, `by` from the session (data-layer 2.2b).
   if (def.staffRecords) {
     const by = auth.viaMirrorSecret ? "mirror-sync" : staffActorOf(auth.ctx.session);
-    const prepared = await prepareStaffOps(ops, by, (ids) => readRowsByIds(def.table, ids));
+    const prepared = await prepareStaffOps(ops, by, (ids) => readRowsByIds(def.table, ids), () => staffSignInLinks());
     if (!prepared.ok) {
       const kind = prepared.status === 403 ? "auth" : prepared.status === 400 ? "invalid" : "unavailable";
       return NextResponse.json({ ok: false, kind, message: prepared.message, conflicts: [] }, { status: prepared.status });

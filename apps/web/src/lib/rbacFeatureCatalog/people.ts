@@ -163,6 +163,21 @@ export const PEOPLE_FEATURES: RbacFeatureDef[] = [
   // book. Reading staff_hr without Staff (change) shows your own rows only;
   // these functions show their slices whole (desk-slice route).
   {
+    // Director, 21 Oct 2026: a staff record's bank, UPI, Aadhaar, PAN and pay
+    // are changed only by the owner and the accountant. A FUNCTION, so the
+    // office and admin keep payroll · edit / accounts · edit for their daily
+    // work without reaching these fields: POST /api/data/sis.staff/sensitive
+    // asks for this function as a function grant (functionGrantHeldOnServer),
+    // never for the staff, payroll or accounts module as such
+    // (lib/staffProtectedFields.staffSensitiveAuthority).
+    id: "staff.sensitive_edit",
+    module: "staff",
+    label: "Bank, ID & pay details",
+    blurb: "Change a staff member's bank account, UPI, Aadhaar, PAN and pay. Owner and accountant only.",
+    actions: ["edit"],
+    routes: ["/api/data/sis.staff/sensitive"],
+  },
+  {
     id: "staff.leave",
     module: "staff",
     label: "Leave approvals",

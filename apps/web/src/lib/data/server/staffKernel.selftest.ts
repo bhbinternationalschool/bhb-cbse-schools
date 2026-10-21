@@ -16,7 +16,9 @@ import { emptyMastersShell, type MastersState } from "@/lib/masters";
 import {
   STAFF_SENSITIVE_PROFILE_KEYS,
   protectedChanges,
+  prepareRosterRows,
   rosterSaveRefusal,
+  rosterTargetOf,
   staffSensitiveAuthority,
   withStoredProtectedKeys,
 } from "@/lib/staffProtectedFields";
@@ -107,6 +109,39 @@ async function section2(): Promise<void> {
   assert.ok(!(await neu({ fullName: "New", empCode: "E-099", bankAccountNo: "1" })).ok, "bank on create");
   assert.ok(!(await neu({ fullName: "New", empCode: "E-099", loginPassword: "x" })).ok, "password on create");
 
+  // Sign-in links (review #6) through the kernel: a set e-mail / mobile column is the owner's.
+  const links = async () => [
+    { id: "stf_7", email: "asha@school.test", mobile: "9876543210" },
+    { id: "stf_9", email: "other@school.test", mobile: "9000000009" },
+  ];
+  const readL = async (ids: string[]) =>
+    new Map(ids.filter((i) => i === "stf_7").map((i) => [i, { ...storedRow, email: "asha@school.test" }]));
+  const em = await prepareStaffOps([op({ op: "upsert", id: "stf_7", base: T0, row: { email: "me@attacker.test" } })], "stf_1", readL, links);
+  assert.ok(!em.ok && em.status === 403 && /email/.test(em.message), "changing a set e-mail column: refused");
+  const mob = await prepareStaffOps([op({ op: "upsert", id: "stf_7", base: T0, row: { mobile: "9111111111" } })], "stf_1", readL, links);
+  assert.ok(!mob.ok && /mobile/.test(mob.message), "changing a set mobile column: refused");
+  const same = await prepareStaffOps([op({ op: "upsert", id: "stf_7", base: T0, row: { mobile: "+91 98765-43210" } })], "stf_1", readL, links);
+  assert.ok(same.ok, "the same number spelt differently is no change");
+  const newWithTaken = await prepareStaffOps(
+    [op({ op: "upsert", id: "stf_new", base: null, row: { email: "OTHER@school.test", profile: { fullName: "N" } } })],
+    "stf_1",
+    readL,
+    links,
+  );
+  assert.ok(!newWithTaken.ok, "a new record with another member's e-mail: refused");
+  const newFree = await prepareStaffOps(
+    [op({ op: "upsert", id: "stf_new", base: null, row: { email: "new@school.test", mobile: "9222222222", profile: { fullName: "N" } } })],
+    "stf_1",
+    readL,
+    links,
+  );
+  assert.ok(newFree.ok, "a new record with free sign-in links: fine");
+  // Review #3 through the kernel: blank username → the default from the code is fine on an existing record.
+  const blankLogin = async (ids: string[]) =>
+    new Map(ids.map((i) => [i, { ...storedRow, profile: { ...storedProfile, loginUsername: "" } }]));
+  const derived = await prepareStaffOps([op({ op: "upsert", id: "stf_7", base: T0, row: { profile: { loginUsername: "e-007" } } })], "stf_1", blankLogin);
+  assert.ok(derived.ok, derived.ok ? "" : derived.message);
+
   // Remove: `by` is the SESSION's, whatever the body says; deleted_by is never the body's.
   const del = await prepareStaffOps([op({ op: "delete", id: "stf_7", base: T0, by: "someone-else" })], "stf_1", read);
   assert.ok(del.ok);
@@ -183,21 +218,32 @@ async function section2(): Promise<void> {
   const s = (staffId: string, extra: Partial<SessionLike> = {}): SessionLike => ({ roleCode: "teacher", staffId, fullName: staffId, persona: "staff", ...extra });
   assert.equal(staffSensitiveAuthority(s("s_own"), masters, st), "owner");
   assert.equal(staffSensitiveAuthority(s("x", { email: "director@bhbinternational.school" }), masters, st), "owner");
-  assert.equal(staffSensitiveAuthority(s("s_pay"), masters, st), "payroll", "the office role holds payroll · edit");
-  assert.equal(staffSensitiveAuthority(s("s_acc"), masters, st), "accounts");
+  // Director, 21 Oct 2026: owner + accountant only. The Office role holds
+  // payroll · edit and accounts · edit for its daily work — NOT an authority.
+  assert.equal(staffSensitiveAuthority(s("s_pay"), masters, st), null, "the office role is not an authority");
+  assert.equal(staffSensitiveAuthority(s("s_acc"), masters, st), "accounts", "the accountant (staff.sensitive_edit) is");
+  const adm = assign(rbac, "s_adm", "admin");
+  assert.equal(staffSensitiveAuthority(s("s_adm"), masters, adm), null, "the admin role is not an authority");
+  const prin = assign(rbac, "s_pr", "principal");
+  assert.equal(staffSensitiveAuthority(s("s_pr"), masters, prin), null, "nor the principal (whole modules, no function grant)");
+  // The function given to one person (a personal allow) makes them one.
+  const allowOne: RbacState = {
+    ...st,
+    userGrants: [{ id: "g0", staffId: "s_tch", feature: "staff.sensitive_edit", effect: "allow", actions: ["edit"], note: "", grantedBy: "", grantedAt: "", expiresOn: "" }],
+  };
+  assert.equal(staffSensitiveAuthority(s("s_tch"), masters, allowOne), "accounts");
+  assert.equal(staffSensitiveAuthority(s("s_acc"), masters, st, { rbacKnown: false }), null, "roles unreadable: only a protected owner e-mail");
+  assert.equal(staffSensitiveAuthority(s("x", { email: "director@bhbinternational.school" }), masters, st, { rbacKnown: false }), "owner");
   assert.equal(staffSensitiveAuthority(s("s_tch"), masters, st), null);
   assert.equal(staffSensitiveAuthority(s("s_pl"), masters, st), null, "staff · edit alone is NOT an authority");
-  // A personal deny of payroll and accounts edit takes it away.
+  // A personal deny of the function takes it away from the accountant.
   const denied: RbacState = {
     ...st,
-    userGrants: [
-      { id: "g1", staffId: "s_pay", denyModule: "payroll", effect: "deny", actions: ["edit"], note: "", grantedBy: "", grantedAt: "", expiresOn: "" },
-      { id: "g2", staffId: "s_pay", denyModule: "accounts", effect: "deny", actions: ["edit"], note: "", grantedBy: "", grantedAt: "", expiresOn: "" },
-    ],
+    userGrants: [{ id: "g1", staffId: "s_acc", feature: "staff.sensitive_edit", effect: "deny", actions: ["edit"], note: "", grantedBy: "", grantedAt: "", expiresOn: "" }],
   };
-  assert.equal(staffSensitiveAuthority(s("s_pay"), masters, denied), null, "personal deny wins");
+  assert.equal(staffSensitiveAuthority(s("s_acc"), masters, denied), null, "personal deny wins");
   assert.equal(staffSensitiveAuthority(s("s_own", { persona: "parent" }), masters, st), null, "only staff sessions");
-  console.log("  ✓ authority: owner / payroll / accounts from the session; staff · edit alone, teacher, parent: none");
+  console.log("  ✓ authority: owner or the staff.sensitive_edit function (accountant); office, admin, principal, staff · edit: none");
 }
 
 /* ── 6. The sensitive route's rules ── */
@@ -213,6 +259,9 @@ async function section2(): Promise<void> {
   assert.equal(prof.panNo, "");
   assert.equal(prof.addressCurrent, "Home", "everything else is the stored profile");
   assert.equal(prof.loginPassword, "plain-secret");
+  const owned = buildSensitiveOps([{ id: "stf_7", base: T0, fields: { email: "asha.new@school.test" } }], stored, "owner");
+  assert.ok(owned.ok && (owned.ops[0] as { row: Row }).row.email === "asha.new@school.test", "the owner changes an e-mail — column and profile");
+  assert.ok(!buildSensitiveOps([{ id: "stf_7", base: T0, fields: { mobile: "9111111111" } }], stored, "accounts").ok, "the accountant may not change a mobile");
   const name = buildSensitiveOps([{ id: "stf_7", base: T0, fields: { loginUsername: "new.name" } }], stored, "payroll");
   assert.ok(!name.ok && name.status === 403, "payroll may not change a login");
   assert.ok(buildSensitiveOps([{ id: "stf_7", base: T0, fields: { loginUsername: "new.name" } }], stored, "owner").ok, "the owner may");
@@ -227,33 +276,85 @@ async function section2(): Promise<void> {
 
 /* ── 7. The OLD staff-roster save (POST /api/school-data/staff-roster) ── */
 {
-  const stored = [{ id: "stf_7", ...storedProfile }];
-  const edit = (patch: Row) => [{ id: "stf_7", ...storedProfile, ...patch }];
+  const A = { id: "stf_7", ...storedProfile, mobile: "9876543210", email: "asha@school.test" };
+  const B = { id: "stf_8", empCode: "E-008", fullName: "Bina", bankAccountNo: "BBB-111", loginUsername: "", email: "", mobile: "9000000008" };
+  const stored = [A, B];
+  const edit = (patch: Row) => [{ ...A, ...patch }];
   const named = new Set(["stf_7"]);
-  assert.equal(rosterSaveRefusal(stored, edit({ mobile: "1" }), named, null), null, "a plain edit passes");
-  assert.match(String(rosterSaveRefusal(stored, edit({ bankAccountNo: "9" }), named, null)), /bankAccountNo/);
-  assert.match(String(rosterSaveRefusal(stored, edit({ basicPay: "" }), named, null)), /basicPay/, "a blanking is a change");
-  assert.equal(rosterSaveRefusal(stored, edit({ bankAccountNo: "9" }), named, "payroll"), null, "payroll may");
-  assert.match(String(rosterSaveRefusal(stored, edit({ loginUsername: "x" }), named, "payroll")), /login/);
-  assert.equal(rosterSaveRefusal(stored, edit({ loginUsername: "x" }), named, "owner"), null);
-  assert.match(String(rosterSaveRefusal(stored, edit({ loginPassword: "set" }), named, "owner")), /login/);
+  const refuse = (...args: Parameters<typeof rosterSaveRefusal>) => rosterSaveRefusal(...args)?.message ?? null;
+  assert.equal(refuse(stored, edit({ addressCurrent: "New home" }), named, null), null, "a plain edit passes");
+  assert.match(String(refuse(stored, edit({ bankAccountNo: "9" }), named, null)), /bankAccountNo/);
+  assert.match(String(refuse(stored, edit({ basicPay: "" }), named, null)), /basicPay/, "a blanking is a change");
+  assert.equal(refuse(stored, edit({ bankAccountNo: "9" }), named, "accounts"), null, "the accountant may");
+  assert.match(String(refuse(stored, edit({ loginUsername: "x" }), named, "accounts")), /loginUsername/);
+  assert.equal(refuse(stored, edit({ loginUsername: "x" }), named, "owner"), null);
+  assert.match(String(refuse(stored, edit({ loginPassword: "set" }), named, "owner")), /loginPassword/);
   // Rows a save will not write are not judged: unnamed (stamped) / stored (unstamped).
-  assert.equal(rosterSaveRefusal(stored, edit({ bankAccountNo: "9" }), new Set(), null), null);
-  assert.equal(rosterSaveRefusal(stored, edit({ bankAccountNo: "9" }), null, null), null, "unstamped: stored rows are never replaced");
-  // Remapped by employee code onto the stored row.
-  assert.match(String(rosterSaveRefusal(stored, [{ ...storedProfile, id: "stf_other_id", panNo: "Z" }], new Set(["stf_other_id"]), null)), /panNo/);
-  // A new row with bank details (unstamped too).
-  assert.match(String(rosterSaveRefusal(stored, [{ id: "n1", empCode: "E-100", fullName: "N", bankAccountNo: "1" }], null, null)), /bankAccountNo/);
-  assert.equal(rosterSaveRefusal(stored, [{ id: "n1", empCode: "E-100", fullName: "N", bankAccountNo: "", loginUsername: "e-100", loginPassword: "" }], null, null), null);
-  console.log("  ✓ old staff-roster save: protected keys need the authority; only rows it writes are judged");
+  assert.equal(refuse(stored, edit({ bankAccountNo: "9" }), new Set(), null), null);
+  assert.equal(refuse(stored, edit({ bankAccountNo: "9" }), null, null), null, "unstamped: stored rows are never replaced");
+  // A new row with bank details (unstamped too); with blanks and the default username: fine.
+  assert.match(String(refuse(stored, [{ id: "n1", empCode: "E-100", fullName: "N", bankAccountNo: "1" }], null, null)), /bankAccountNo/);
+  assert.equal(refuse(stored, [{ id: "n1", empCode: "E-100", fullName: "N", bankAccountNo: "", loginUsername: "e-100", loginPassword: "" }], null, null), null);
+
+  // Review #1 — the row is judged where the write LANDS (employee code first,
+  // upper-cased, as upsertStaffBundle remaps), and an id/code mismatch is refused.
+  const hijack = refuse(stored, [{ ...A, empCode: "E-008" }], named, null); // own id, Bina's code, own (unchanged) bank
+  assert.match(String(hijack), /belongs to another member/, "own id + another member's code: refused");
+  const lower = rosterSaveRefusal(stored, [{ ...A, id: "brand_new", empCode: "e-008" }], new Set(["brand_new"]), null);
+  assert.match(String(lower?.message), /not saved/, "a new id with Bina's code (lower-case) is judged against Bina: bank differs → refused");
+  assert.deepEqual(lower?.refusedIds, ["brand_new"]);
+  assert.equal(rosterTargetOf(stored, { id: "zz", empCode: " e-008 " }).target?.id, "stf_8");
+
+  // Review #2 — absent = keep: a row WITHOUT bankAccountNo/upiId/panNo keeps the stored ones.
+  const lean = { id: "stf_7", empCode: "E-007", fullName: "Asha Rao", addressCurrent: "Moved", loginPassword: "" };
+  const [prepared] = prepareRosterRows(stored, [lean as Row & { id: string }]);
+  assert.equal(prepared!.bankAccountNo, "000111222", "absent bank account = the stored one, not blank");
+  assert.equal(prepared!.upiId, "asha@upi");
+  assert.equal(prepared!.panNo, "ABCDE1234F");
+  assert.equal(prepared!.loginPassword, "plain-secret", "a blank password = the stored one");
+  assert.equal(prepared!.email, "asha@school.test");
+  assert.equal(refuse(stored, [prepared!], named, null), null, "…and so it passes the guard: nothing protected changes");
+
+  // Review #3 — the staff form derives loginUsername from the code on EVERY save:
+  // blank → default on an existing record is not a login change.
+  const noLogin = { ...A, loginUsername: "" };
+  assert.equal(refuse([noLogin, B], [{ ...noLogin, loginUsername: "e-007" }], named, null), null, "blank → default username: allowed");
+  assert.match(String(refuse([noLogin, B], [{ ...noLogin, loginUsername: "boss@else" }], named, null)), /loginUsername/);
+  assert.match(String(refuse(stored, [{ ...A, loginUsername: "e-007" }], named, null)), /loginUsername/, "a SET username is not replaced by the default");
+
+  // Review #6 — sign-in links: a set e-mail / mobile is the owner's; a blank one may be filled, not with another member's.
+  assert.match(String(refuse(stored, edit({ email: "me@attacker.test" }), named, null)), /email/, "changing a set e-mail");
+  assert.equal(refuse(stored, edit({ email: "me@attacker.test" }), named, "owner"), null);
+  assert.match(String(refuse(stored, edit({ mobile: "9999999999" }), named, "accounts")), /mobile/, "changing a set mobile");
+  assert.equal(refuse(stored, edit({ mobile: "+91 98765 43210" }), named, null), null, "the same number spelt differently");
+  const blankB = new Set(["stf_8"]);
+  assert.equal(refuse(stored, [{ ...B, email: "bina@school.test" }], blankB, null), null, "filling a blank e-mail");
+  assert.match(String(refuse(stored, [{ ...B, email: "ASHA@school.test" }], blankB, null)), /email/, "…but not with another member's");
+  assert.match(String(refuse(stored, [{ ...B, email: "director@bhbinternational.school" }], blankB, null)), /email/, "…nor an owner e-mail");
+  const noMobile = { ...B, mobile: "" };
+  assert.match(String(refuse([A, noMobile], [{ ...noMobile, mobile: "9876543210" }], blankB, null)), /mobile/, "a blank mobile filled with another member's");
+  assert.equal(refuse([A, noMobile], [{ ...noMobile, mobile: "9000000077" }], blankB, null), null, "a blank mobile filled with a free one");
+
+  // Item 4 — several rows: only the offending one is refused, the others go.
+  const two = rosterSaveRefusal(stored, [{ ...A, bankAccountNo: "X" }, { ...B, fullName: "Bina K" }], new Set(["stf_7", "stf_8"]), null);
+  assert.deepEqual(two?.refusedIds, ["stf_7"], "only the protected-key row is refused");
+  console.log("  ✓ old staff-roster save: judged where it lands; absent = keep; default username; sign-in links; refused rows only");
 }
 
 /* ── 8. withStoredProtectedKeys / protectedChanges edge cases ── */
 {
   assert.deepEqual(withStoredProtectedKeys(null, { a: 1 }), { a: 1 });
   assert.deepEqual(protectedChanges({ panNo: "" }, { panNo: null }), { sensitive: [], login: [] }, "blank = null");
-  assert.deepEqual(protectedChanges({ basicPay: 25000 }, { basicPay: "25000" }).sensitive, ["basicPay"], "a type change is a change (as JSON)");
-  console.log("  ✓ blank = null = absent; values compared as JSON");
+  // Review #8 — canonical comparison.
+  assert.deepEqual(protectedChanges({ basicPay: 25000 }, { basicPay: "25000" }).sensitive, [], "25000 = \"25000\"");
+  assert.deepEqual(protectedChanges({ bankAccountNo: "000111" }, { bankAccountNo: 111 }).sensitive, ["bankAccountNo"], "leading zeros matter");
+  assert.deepEqual(
+    protectedChanges({ visitingPay: { rate: 500, mode: "hour" } }, { visitingPay: { mode: "hour", rate: "500" } }).sensitive,
+    [],
+    "key order and number spelling inside an object",
+  );
+  assert.deepEqual(protectedChanges({ visitingPay: { rate: 500 } }, { visitingPay: { rate: 600 } }).sensitive, ["visitingPay"]);
+  console.log("  ✓ canonical compare: blank = null = absent, key order, number vs string; leading zeros kept");
 }
 
 section2().then(
