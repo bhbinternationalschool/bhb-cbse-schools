@@ -40,6 +40,8 @@ import { assertLocalStack, sessionCookieHeader } from "./session";
 import { buildFixture, classId, staffId } from "./fixture";
 import type { DemoSession } from "@/lib/auth";
 import { pushDeskSliceToDb } from "@/lib/deskSliceNormalized.server";
+import { STAFF_SENSITIVE_PROFILE_KEYS } from "@/lib/staffProtectedKeys";
+
 
 type Outcome = { name: string; ok: boolean; detail: string };
 const outcomes: Outcome[] = [];
@@ -111,6 +113,17 @@ async function main(): Promise<void> {
     const rows = arr(obj(r.body.data).staff ?? r.body.staff ?? obj(r.body.data).rows ?? r.body.rows).map(obj);
     return { status: r.status, has: rows.some((s) => s.id === TARGET), n: rows.length };
   };
+  // ── 0. The app's sensitive-key list IS the database's ──────────────────
+  {
+    const APP_SENSITIVE_KEYS: string[] = [...STAFF_SENSITIVE_PROFILE_KEYS];
+    const r = await req(`${api}/rest/v1/rpc/_sis_staff_sensitive_keys`, { method: "POST", headers: svc, body: {} });
+    const db = arr(r.body._array).map(String);
+    record(
+      "the app's sensitive keys (lib/staffProtectedKeys) = _sis_staff_sensitive_keys() in the database",
+      r.status === 200 && db.length > 0 && JSON.stringify(db) === JSON.stringify(APP_SENSITIVE_KEYS),
+      `HTTP ${r.status}; db ${short(db)}; app ${short(APP_SENSITIVE_KEYS)}`,
+    );
+  }
   const original = await staffRow();
   if (!original.id) throw new Error(`${TARGET} is not on the stack`);
   const originalProfile = prof(original);

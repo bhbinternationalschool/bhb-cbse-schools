@@ -9,8 +9,6 @@
  * conflict answer), and the old staff-roster save's guard.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { redactStoredForAnswer } from "../answerRedaction";
 import { collectionDef } from "../registry";
 import { defaultRbacState, type RbacState, type SessionLike } from "@/lib/rbac";
@@ -59,19 +57,8 @@ const storedRow: Row = {
 const read = async (ids: string[]) => new Map(ids.filter((i) => i === "stf_7").map((i) => [i, storedRow]));
 const op = (o: object) => o as unknown as WriteOp<Row>;
 
-/* ── 1. The TS list is the database's list (_sis_staff_sensitive_keys) ── */
-{
-  const sql = readFileSync(
-    join(__dirname, "../../../../../../supabase/migrations/20261021090000_data_layer_masters_row_revs_staff_kernel.sql"),
-    "utf8",
-  );
-  const body = sql.slice(sql.indexOf("function public._sis_staff_sensitive_keys()"));
-  const at = body.indexOf("array[");
-  const arr = body.slice(at, body.indexOf("]", at) + 1);
-  const keys = [...arr.matchAll(/'([A-Za-z]+)'/g)].map((m) => m[1]);
-  assert.deepEqual(keys, [...STAFF_SENSITIVE_PROFILE_KEYS], "the sensitive keys must match the database's list");
-  console.log("  ✓ sensitive keys = _sis_staff_sensitive_keys()");
-}
+/* ── 1. The TS key list equals the database's _sis_staff_sensitive_keys():
+ *       checked against the real function on the stack (e2e/staff-kernel.acceptance.ts). */
 
 /* ── 2. Plain staff editing through the kernel: protected keys never change ── */
 async function section2(): Promise<void> {
