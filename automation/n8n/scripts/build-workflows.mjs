@@ -813,7 +813,7 @@ return [{ json: { today, weekday: now.getUTCDay(), ay: academicYearCode(now), ru
     wf,
     "Fetch: holidays today",
     "masters_desk_holidays",
-    `tenant_id=eq.${TENANT}&is_active=eq.true&starts_on=lte.{{ $('Context').first().json.today }}&ends_on=gte.{{ $('Context').first().json.today }}&select=title,kind,applies_to,working_override`,
+    `tenant_id=eq.${TENANT}&is_active=eq.true&starts_on=lte.{{ $('Context').first().json.today }}&ends_on=gte.{{ $('Context').first().json.today }}&select=title,kind,scope,mode,weekday,applies_to,working_override,is_published,academic_year_code,exception_dates`,
   );
   const getTasks = sbGet(
     wf,
@@ -847,7 +847,23 @@ const sectionName = Object.fromEntries(sections.map((s) => [s.id, s.name || s.id
 const subjectName = Object.fromEntries(subjects.map((s) => [s.id, s.name_en || s.code || s.id]));
 const cs = (g) => (className[g.classId] || g.classId || '?') + ' ' + (sectionName[g.sectionId] || g.sectionId || '');
 
-const holiday = holidays.find((h) => !h.working_override);
+// Mirror apps/web/src/lib/foundationMasters.ts isPublishedHoliday: only a
+// published, school-wide, non-staff-only rule closes the school for students.
+// Weekly rules (Sunday, pre-primary Saturday) count only on their weekday and
+// never on their exception dates; one-off rules are already date-filtered.
+const STAFF_ONLY = ['staff_all', 'staff_teaching', 'staff_non_teaching'];
+const holiday = holidays.find((h) => {
+  if (h.working_override) return false;
+  if (h.is_published === false) return false;
+  if ((h.scope || 'school') !== 'school') return false;
+  if (STAFF_ONLY.includes(h.applies_to || 'everyone')) return false;
+  if (h.academic_year_code && h.academic_year_code !== ctx.ay) return false;
+  if ((h.mode || 'one_off') === 'weekly') {
+    if (typeof h.weekday !== 'number' || h.weekday !== ctx.weekday) return false;
+    if (Array.isArray(h.exception_dates) && h.exception_dates.includes(ctx.today)) return false;
+  }
+  return true;
+});
 const sunday = ctx.weekday === 0;
 if (holiday || sunday) {
   return [{ json: { day: 'skip', reason: sunday ? 'Sunday' : ('Holiday: ' + holiday.title), ctx, counts: { leave: leave.length, tasks: tasks.length } } }];
