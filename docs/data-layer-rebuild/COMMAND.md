@@ -1657,6 +1657,43 @@ own (`payroll.spec` writes the statutory setup through the kernel API, not the p
 by type and read-through (no spec issues a number). A re-run of the holiday case on a used stack fails its control
 (Holi is left unpublished, not removed — a fresh stack is needed, as for the rest of the propagation project).
 
+*(2.2c review fixes, 22 Oct 2026, same PR #708.)* An independent review found three faults (plus four minor); each fix
+has a test that fails on the previous head (a6560347).
+- **Object slices lost updates.** School profile / brand / timing / statutory saves were based on the view's LATEST stamp
+  while the form kept unsaved typing over a newer saved value — a stale form silently put the other person's values
+  back. Now `useObjectDraft` (`components/masters/useObjectDraft.ts`) keeps the stamp each form was LOADED at (a clean
+  form follows a newer value and its stamp; the form's own save coming back moves it on); the panel passes it
+  (`MastersCommitOpts.objectBases`) and the save is based on it → a conflict ("Not saved — Someone changed this…"),
+  and the screen shows the newer value.
+- **Cascades were parents-first and not atomic.** Any action that writes more than one list or removes more than one
+  element (a class with its subject links, a subject with its components' links, a new class with its sections) is now
+  ONE `POST /api/data/masters/batch` (new route, `repo.writeMastersBatch` → `desk_slice_rows_write` across the lists of
+  `masters_desk_slices`, all or none; per-collection function gate and empty-list check as the single route); a
+  single list with at most one removal keeps its own route. Cap: 100 removals (production's largest cascade: a class
+  with 14 links). Staff link changes are written FIRST (children before parents): a refusal after them leaves a class
+  with no teacher link, never a link to a removed class or subject.
+- **The series bump was open to anyone with edit on seven modules, unbounded.** Now each built-in series belongs to the
+  module that issues it (ADMISSION/SRN → students or admissions, REGISTRATION → admissions or students, RECEIPT →
+  fees, TC/CERT_* → certificates, STAFF_ID/STAFF_AGREEMENT → staff, EXPENSE_VOUCHER → accounts; a Masters editor any
+  series; a school's own series Masters only), and a number may move a series at most 50 past its stored next — further
+  is refused (409), logged, and nothing moves. The browser retries a failed bump once and says a standing failure on
+  screen (sticky toast), not only in the console.
+- Minor: an overlay entry whose request never answers goes after 120 s; rows laid on from a save are re-normalised;
+  concurrent masters-desk re-reads share one follow-up; **a read no longer re-pushes** "local edits that never reached
+  the DB" (`ensureMastersHydrated` — a deletion in a frozen file: it pushed the tab's whole copy from a READ, and the
+  re-read after every element write would have re-sent a refused fee save).
+**Proof.** Self-test +4 checks (objects on the loaded stamp and the draft rule; a class + 14 links = one batch, a single
+removal its own route; the never-answered entry; one retry and a said failure for the bump; coalesced re-reads) — red
+on a6560347 (the modules did not exist / the planner refused > 12). `masters-element-writes.spec` +4 cases, each FAILING
+on a6560347 (fresh build, fresh stack): object (no conflict — the stale form saved), cascade with a stale link (the
+class was removed, links part-way), class with 14 links (refused, not removed), series (the certificates clerk moved
+RECEIPT: 200). This head, fresh stack: see the PR comment for the re-run.
+**Behaviour changes (review).** A form saved after someone else changed the same setting is refused and shows theirs
+(typing in that form is lost on the conflict — re-enter it). Removing a class or a subject with its links is all or
+nothing. Number series: a jump of more than 50 is refused — **a bulk student import whose admission numbers run more
+than 50 past the series' next number no longer moves the series** (the toast says so; set it in Masters → Numbering).
+The certificates clerk / counter can move only their own series.
+
 **2.3a Delete the gate and the events.** With every component reader on hooks: delete
 `CoreDataGate` (React Query's loading state replaces it), the `bhb-masters-updated` /
 `bhb-rbac-updated` / `bhb-desk-first-hydrated` events and their listeners (one is the
