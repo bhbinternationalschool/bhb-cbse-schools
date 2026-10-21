@@ -9,6 +9,8 @@
  * conflict answer), and the old staff-roster save's guard.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { redactStoredForAnswer } from "../answerRedaction";
 import { collectionDef } from "../registry";
 import {
@@ -25,10 +27,7 @@ import {
   STAFF_SENSITIVE_PROFILE_KEYS,
   protectedChanges,
   mobileFillCheck,
-  prepareRosterRows,
-  rosterSaveRefusal,
   staffHoldsPowerfulAccess,
-  rosterTargetOf,
   staffSensitiveAuthority,
   withStoredProtectedKeys,
 } from "@/lib/staffProtectedFields";
@@ -284,77 +283,15 @@ async function section2(): Promise<void> {
   console.log("  ✓ sensitive route: only protected keys, login owner-only, no password set, base required");
 }
 
-/* ── 7. The OLD staff-roster save (POST /api/school-data/staff-roster) ── */
+/* ── 7. The OLD staff-roster save is gone (data-layer 2.2d): POST answers 410
+ *      (route below); its guard (rosterSaveRefusal / prepareRosterRows) went
+ *      with it. The staff screens write through sis.staff (sections 1–5). ── */
 {
-  const A = { id: "stf_7", ...storedProfile, mobile: "9876543210", email: "asha@school.test" };
-  const B = { id: "stf_8", empCode: "E-008", fullName: "Bina", bankAccountNo: "BBB-111", loginUsername: "", email: "", mobile: "9000000008" };
-  const stored = [A, B];
-  const edit = (patch: Row) => [{ ...A, ...patch }];
-  const named = new Set(["stf_7"]);
-  const refuse = (...args: Parameters<typeof rosterSaveRefusal>) => rosterSaveRefusal(...args)?.message ?? null;
-  assert.equal(refuse(stored, edit({ addressCurrent: "New home" }), named, null), null, "a plain edit passes");
-  assert.match(String(refuse(stored, edit({ bankAccountNo: "9" }), named, null)), /bankAccountNo/);
-  assert.match(String(refuse(stored, edit({ basicPay: "" }), named, null)), /basicPay/, "a blanking is a change");
-  assert.equal(refuse(stored, edit({ bankAccountNo: "9" }), named, "accounts"), null, "the accountant may");
-  assert.match(String(refuse(stored, edit({ loginUsername: "x" }), named, "accounts")), /loginUsername/);
-  assert.equal(refuse(stored, edit({ loginUsername: "x" }), named, "owner"), null);
-  assert.match(String(refuse(stored, edit({ loginPassword: "set" }), named, "owner")), /loginPassword/);
-  // Rows a save will not write are not judged: unnamed (stamped) / stored (unstamped).
-  assert.equal(refuse(stored, edit({ bankAccountNo: "9" }), new Set(), null), null);
-  assert.equal(refuse(stored, edit({ bankAccountNo: "9" }), null, null), null, "unstamped: stored rows are never replaced");
-  // A new row with bank details (unstamped too); with blanks and the default username: fine.
-  assert.match(String(refuse(stored, [{ id: "n1", empCode: "E-100", fullName: "N", bankAccountNo: "1" }], null, null)), /bankAccountNo/);
-  assert.equal(refuse(stored, [{ id: "n1", empCode: "E-100", fullName: "N", bankAccountNo: "", loginUsername: "e-100", loginPassword: "" }], null, null), null);
-
-  // Review #1 — the row is judged where the write LANDS (employee code first,
-  // upper-cased, as upsertStaffBundle remaps), and an id/code mismatch is refused.
-  const hijack = refuse(stored, [{ ...A, empCode: "E-008" }], named, null); // own id, Bina's code, own (unchanged) bank
-  assert.match(String(hijack), /belongs to another member/, "own id + another member's code: refused");
-  const lower = rosterSaveRefusal(stored, [{ ...A, id: "brand_new", empCode: "e-008" }], new Set(["brand_new"]), null);
-  assert.match(String(lower?.message), /not saved/, "a new id with Bina's code (lower-case) is judged against Bina: bank differs → refused");
-  assert.deepEqual(lower?.refusedIds, ["brand_new"]);
-  assert.equal(rosterTargetOf(stored, { id: "zz", empCode: " e-008 " }).target?.id, "stf_8");
-
-  // Review #2 — absent = keep: a row WITHOUT bankAccountNo/upiId/panNo keeps the stored ones.
-  const lean = { id: "stf_7", empCode: "E-007", fullName: "Asha Rao", addressCurrent: "Moved", loginPassword: "" };
-  const [prepared] = prepareRosterRows(stored, [lean as Row & { id: string }]);
-  assert.equal(prepared!.bankAccountNo, "000111222", "absent bank account = the stored one, not blank");
-  assert.equal(prepared!.upiId, "asha@upi");
-  assert.equal(prepared!.panNo, "ABCDE1234F");
-  assert.equal(prepared!.loginPassword, "plain-secret", "a blank password = the stored one");
-  assert.equal(prepared!.email, "asha@school.test");
-  assert.equal(refuse(stored, [prepared!], named, null), null, "…and so it passes the guard: nothing protected changes");
-
-  // Review #3 — the staff form derives loginUsername from the code on EVERY save:
-  // blank → default on an existing record is not a login change.
-  const noLogin = { ...A, loginUsername: "" };
-  assert.equal(refuse([noLogin, B], [{ ...noLogin, loginUsername: "e-007" }], named, null), null, "blank → default username: allowed");
-  assert.match(String(refuse([noLogin, B], [{ ...noLogin, loginUsername: "boss@else" }], named, null)), /loginUsername/);
-  assert.match(String(refuse(stored, [{ ...A, loginUsername: "e-007" }], named, null)), /loginUsername/, "a SET username is not replaced by the default");
-
-  // Review #6 — sign-in links: a set e-mail / mobile is the owner's; a blank one may be filled, not with another member's.
-  assert.match(String(refuse(stored, edit({ email: "me@attacker.test" }), named, null)), /email/, "changing a set e-mail");
-  assert.equal(refuse(stored, edit({ email: "me@attacker.test" }), named, "owner"), null);
-  assert.match(String(refuse(stored, edit({ mobile: "9999999999" }), named, "accounts")), /mobile/, "changing a set mobile");
-  assert.equal(refuse(stored, edit({ mobile: "+91 98765 43210" }), named, null), null, "the same number spelt differently");
-  const blankB = new Set(["stf_8"]);
-  assert.match(String(refuse(stored, [{ ...B, email: "bina@school.test" }], blankB, null)), /email/, "filling a member's blank e-mail: the owner's");
-  assert.equal(refuse(stored, [{ ...B, email: "bina@school.test" }], blankB, "owner"), null);
-  const noMobile = { ...B, mobile: "" };
-  assert.match(String(refuse([A, noMobile], [{ ...noMobile, mobile: "9000000077" }], blankB, "accounts")), /mobile/, "filling a member's blank mobile: the owner's");
-  // A NEW record: free links fine; another member's or an owner e-mail refused.
-  const fresh = { id: "n2", empCode: "E-200", fullName: "New" };
-  assert.equal(refuse(stored, [{ ...fresh, email: "new@school.test", mobile: "9000000077" }], null, null), null, "a new member's free e-mail and mobile");
-  // Review E: said clearly — whose, why, and that the owner can set it.
-  assert.match(String(refuse(stored, [{ ...fresh, email: "ASHA@school.test" }], null, null)), /e-mail is already another member's.*owner/, "…not another member's");
-  assert.match(String(refuse(stored, [{ ...fresh, email: "director@bhbinternational.school" }], null, null)), /e-mail is already/, "…nor an owner e-mail");
-  assert.match(String(refuse(stored, [{ ...fresh, mobile: "+91 98765 43210" }], null, null)), /mobile is already another member's.*shared family phone/, "…nor another member's mobile");
-  assert.ok(isFeatureRefusalMessage(String(refuse(stored, [{ ...fresh, mobile: "+91 98765 43210" }], null, null))), "and toasted");
-
-  // Item 4 — several rows: only the offending one is refused, the others go.
-  const two = rosterSaveRefusal(stored, [{ ...A, bankAccountNo: "X" }, { ...B, fullName: "Bina K" }], new Set(["stf_7", "stf_8"]), null);
-  assert.deepEqual(two?.refusedIds, ["stf_7"], "only the protected-key row is refused");
-  console.log("  ✓ old staff-roster save: judged where it lands; absent = keep; default username; sign-in links; refused rows only");
+  const route = readFileSync(join(__dirname, "../../../app/api/school-data/staff-roster/route.ts"), "utf8");
+  const post = route.slice(route.indexOf("export async function POST"), route.indexOf("export async function DELETE"));
+  assert.match(post, /status: 410/, "POST staff-roster answers 410");
+  assert.ok(!/pushStaffRemoteServer/.test(post), "…and writes nothing");
+  console.log("  ✓ old staff-roster save: POST is 410, nothing written");
 }
 
 /* ── 8. withStoredProtectedKeys / protectedChanges edge cases ── */
@@ -416,16 +353,6 @@ async function section2(): Promise<void> {
   assert.equal(chk(null, "9000000077").kind, "none", "a new record is not a fill");
   assert.ok(isFeatureRefusalMessage((taken as { message: string }).message) && isFeatureRefusalMessage((strong as { message: string }).message));
 
-  // Through the old route: a fill passes and is reported for the log; a change does not; the owner may.
-  const S = { id: "s_t", empCode: "E-050", fullName: "Ravi", mobile: "", designationId: "des_t" };
-  const fills: string[] = [];
-  const ctx = (powerful: boolean, f?: string[]) => ({ inUse, isPowerful: () => powerful, fills: f });
-  assert.equal(rosterSaveRefusal([S], [{ ...S, mobile: "9000000077" }], new Set(["s_t"]), null, ctx(false, fills)), null);
-  assert.deepEqual(fills, ["s_t"], "the fill is reported (to be logged)");
-  assert.match(String(rosterSaveRefusal([S], [{ ...S, mobile: "9876543210" }], new Set(["s_t"]), null, ctx(false))?.message), /in use|another member of staff/);
-  assert.match(String(rosterSaveRefusal([S], [{ ...S, mobile: "9000000077" }], new Set(["s_t"]), null, ctx(true))?.message), /recorded by the owner/);
-  assert.match(String(rosterSaveRefusal([{ ...S, mobile: "9111111111" }], [{ ...S, mobile: "9000000077" }], new Set(["s_t"]), null, ctx(false))?.message), /mobile/, "a set number: the owner's");
-  assert.equal(rosterSaveRefusal([{ ...S, mobile: "9111111111" }], [{ ...S, mobile: "9000000077" }], new Set(["s_t"]), "owner", ctx(false)), null);
   console.log("  ✓ mobile rule: blank → free number for a non-powerful member (logged); in use / powerful / change → owner");
 }
 
@@ -450,7 +377,26 @@ async function section2(): Promise<void> {
   console.log("  ✓ Accounts gets staff.sensitive_edit once (stamped, audited); a removal by the office stands");
 }
 
-section2().then(
+/* ── 9b. The same mobile rule through the kernel (sis.staff — the office's
+ *        route since 2.2d: the old staff-roster save is 410). ── */
+async function section9b(): Promise<void> {
+  const blank = { ...storedRow, id: "s_t", mobile: "", profile: { ...storedProfile, mobile: "" } };
+  const set = { ...blank, mobile: "9111111111", profile: { ...storedProfile, mobile: "9111111111" } };
+  const reader = (r: Row) => async (ids: string[]) => new Map(ids.filter((i) => i === "s_t").map((i) => [i, r]));
+  const rule = (powerful: boolean) => ({ inUse: async () => new Set(["9876543210"]), isPowerful: () => powerful });
+  const send = (mobile: string) => [op({ op: "upsert", id: "s_t", base: T0, row: { mobile, profile: { mobile, designationId: "des_x" } } })];
+  const fill = await prepareStaffOps(send("9000000077"), "stf_1", reader(blank), async () => [], rule(false));
+  assert.ok(fill.ok && fill.mobileFills.includes("s_t"), "a blank mobile filled with a free number (and a designation) → lands, reported for the log");
+  const inUse = await prepareStaffOps(send("9876543210"), "stf_1", reader(blank), async () => [], rule(false));
+  assert.ok(!inUse.ok && inUse.status === 403, "a number in use → refused");
+  const strong = await prepareStaffOps(send("9000000077"), "stf_1", reader(blank), async () => [], rule(true));
+  assert.ok(!strong.ok && /recorded by the owner/.test(strong.message), "a powerful member → the owner's");
+  const change = await prepareStaffOps(send("9000000077"), "stf_1", reader(set), async () => [], rule(false));
+  assert.ok(!change.ok && /mobile/.test(change.message), "changing a set number → the owner's");
+  console.log("  ✓ mobile rule through sis.staff: blank → free number lands; in use / powerful / change refused");
+}
+
+section2().then(() => section9b()).then(
   () => console.log("staffKernel.selftest: all passed"),
   (e) => {
     console.error(e);

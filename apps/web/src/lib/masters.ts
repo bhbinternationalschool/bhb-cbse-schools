@@ -2216,9 +2216,6 @@ async function persistMastersClient(
 ): Promise<MastersSaveOutcome> {
   if (typeof window === "undefined") {
     setMirrorSlice("masters", state);
-    void trackServerWork(import("@/lib/staffPersistence").then(({ scheduleStaffSync }) => {
-      scheduleStaffSync(state);
-    }));
     return { ok: true };
   }
   // Same protection as writeMastersLocalRaw: a save that would leave the
@@ -2263,12 +2260,16 @@ async function persistMastersClient(
     console.warn("[masters] localStorage quota exceeded — using server DB persistence", e);
   }
   writeMastersMirrorMeta(new Date().toISOString());
+  // Staff records, departments and designations are NOT saved from here
+  // (data-layer 2.2d): the staff screens write them as rows through the
+  // kernel (lib/data/client/staffBookWrites). This save used to re-send the
+  // roster on every Masters save — and a fee head saved while the tab's
+  // roster was not yet loaded could push an empty or stale one.
   void trackServerWork(import("@/lib/staffPersistence").then(
-    ({ scheduleStaffSync, stripStaffFromMastersForBlob }) => {
+    ({ stripStaffFromMastersForBlob }) => {
       scheduleClientSchoolMirrorSync({
         masters: stripStaffFromMastersForBlob(state),
       });
-      scheduleStaffSync(state);
     },
   ));
   // Deliberately does NOT touch the desk meta. `bhb_masters_desk_db_meta_v1`

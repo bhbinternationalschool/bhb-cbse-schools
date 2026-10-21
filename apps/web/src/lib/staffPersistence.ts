@@ -3,7 +3,6 @@
  * Masters localStorage remains the working copy; Supabase overlays when configured.
  */
 
-import { serialSave } from "@/lib/serialSave";
 import { rosterEmpKey } from "@/lib/staffProtectedFields";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
@@ -24,23 +23,13 @@ import {
   staffDualWriteDbEnabled,
   staffReadFromDbEnabled,
 } from "@/lib/staffDbConfig";
-import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 import {
   dedupeHydration,
-  hasDeskLoaded,
   isDeskHydrated,
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
-import { trackServerWork } from "@/lib/serverWork";
-import {
-  applyStampedSave,
-  buildStampedSave,
-  captureRowStamps,
-  onStampConflicts,
-  type RowConflicts,
-  type RowStamps,
-} from "@/lib/rowStampClient";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 const MODULE = "staff";
@@ -94,9 +83,6 @@ export type StaffRow = {
   updated_at: string;
 };
 
-let pushTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingPush: MastersState | null = null;
-
 const DATA_URL_MAX = 8_000;
 
 export function staffRemoteEnabled() {
@@ -105,11 +91,6 @@ export function staffRemoteEnabled() {
 
 export function resetStaffPersistenceCache() {
   resetDeskHydrated(MODULE);
-  pendingPush = null;
-  if (pushTimer) {
-    clearTimeout(pushTimer);
-    pushTimer = null;
-  }
 }
 
 function photoForRemote(url: string): string {
@@ -567,76 +548,6 @@ export async function pushStaffRemoteServer(
   return upsertStaffBundle(ctx.sb, ctx.tenantId, state, stamps);
 }
 
-/** Browser: push the roster rows this browser changed, with their stamps. */
-/** One save at a time for this desk — see lib/serialSave. */
-export function pushStaffSlice(...args: Parameters<typeof pushStaffSliceNow>): ReturnType<typeof pushStaffSliceNow> {
-  return serialSave("staff-roster", () => pushStaffSliceNow(...args)) as ReturnType<typeof pushStaffSliceNow>;
-}
-
-async function pushStaffSliceNow(
-  state: MastersState,
-): Promise<{ ok: boolean; error?: string }> {
-  if (!staffRemoteEnabled()) return { ok: true };
-  if (typeof window === "undefined") return { ok: true };
-  const holder = state as unknown as Record<string, unknown>;
-  const stamps = buildStampedSave(MODULE, holder, STAFF_STAMPED_SLICES);
-  const lists: Record<string, unknown[]> = {};
-  let any = false;
-  for (const slice of STAFF_STAMPED_SLICES) {
-    const changed = stamps[slice] ?? {};
-    lists[slice] = ((holder[slice] as { id?: string }[] | undefined) ?? []).filter(
-      (r) => r && typeof r.id === "string" && r.id in changed,
-    );
-    if (lists[slice].length) any = true;
-  }
-  // Every Masters save calls this; most change no staff. Nothing to send.
-  if (!any) return { ok: true };
-  try {
-    const res = await fetch("/api/school-data/staff-roster", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ state: lists, stamps }),
-    });
-    const body = (await res.json().catch(() => null)) as {
-      ok?: boolean;
-      error?: string;
-      stamps?: RowStamps;
-      conflicts?: RowConflicts;
-      refused?: RowConflicts;
-      refusal?: string;
-    } | null;
-    if (!res.ok || !body?.ok) {
-      const message = body?.error || `HTTP ${res.status}`;
-      console.warn("[staff] push failed", message);
-      // A protected-field refusal (bank / Aadhaar / PAN / pay, a sign-in
-      // detail — 2.2b) is said where the person is, once, and the refused
-      // rows go back to the server's copy (below) so they are not re-sent
-      // with every later save from this tab.
-      if (res.status === 403) {
-        const { recordDeskSyncFailure } = await import("@/lib/deskSyncStatus");
-        recordDeskSyncFailure(MODULE, { status: 403, error: message });
-        if (body?.refused) onStampConflicts(MODULE, body.refused);
-      }
-      return { ok: false, error: message };
-    }
-    applyStampedSave(MODULE, holder, stamps, body, STAFF_STAMPED_SLICES);
-    // A record changed elsewhere first was not written: reload, and say so.
-    onStampConflicts(MODULE, body.conflicts);
-    if (body.refused && body.refusal) {
-      // Some rows were refused (protected fields), the rest saved: say why,
-      // once, and re-read the roster so the refused rows are the server's again.
-      const { recordDeskSyncFailure } = await import("@/lib/deskSyncStatus");
-      recordDeskSyncFailure(MODULE, { status: 403, error: body.refusal });
-      onStampConflicts(MODULE, body.refused);
-    }
-    return { ok: true };
-  } catch (e) {
-    console.warn("[staff] push error", e);
-    return { ok: false, error: String(e) };
-  }
-}
-
 /**
  * The old route's "wipe the roster" (DELETE /api/school-data/staff-roster),
  * since data-layer 2.2b a SOFT remove: every staff row not already removed
@@ -670,32 +581,6 @@ export async function softRemoveStaffRosterServer(by: string): Promise<{
   return { ok: true, removed: (data ?? []).length };
 }
 
-/** Browser: soft-remove the whole roster via the server API (no caller today). */
-export async function wipeRemoteStaffRoster(): Promise<{
-  ok: boolean;
-  error?: string;
-}> {
-  if (!staffRemoteEnabled()) return { ok: true };
-  if (typeof window === "undefined") return { ok: true };
-  try {
-    const res = await fetch("/api/school-data/staff-roster", {
-      method: "DELETE",
-      credentials: "same-origin",
-    });
-    const body = (await res.json().catch(() => null)) as {
-      ok?: boolean;
-      error?: string;
-    } | null;
-    if (!res.ok || !body?.ok) {
-      return { ok: false, error: body?.error || `HTTP ${res.status}` };
-    }
-    resetStaffPersistenceCache();
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: String(e) };
-  }
-}
-
 export function staffReadFromDbClientEnabled(): boolean {
   const flag = process.env.NEXT_PUBLIC_STAFF_READ_FROM_DB?.trim().toLowerCase();
   if (flag === "false" || flag === "0") return false;
@@ -714,37 +599,9 @@ export function stripStaffFromMastersForBlob(
   return stripped;
 }
 
-export function scheduleStaffSync(state: MastersState) {
-  if (!staffRemoteEnabled()) return;
-  if (typeof window === "undefined") {
-    void trackServerWork(pushStaffRemoteServer(state));
-    return;
-  }
-  // Never save staff records this page has not loaded (12 Oct 2026): without
-  // the server's stamps every edited row goes as "new" and is dropped.
-  // Every Masters save comes through here, most with no staff edit, so the
-  // notice is shown only when there were staff rows that could have changed.
-  if (!hasDeskLoaded(MODULE)) {
-    const held = STAFF_STAMPED_SLICES.some(
-      (k) => ((state as unknown as Record<string, unknown[] | undefined>)[k] ?? []).length > 0,
-    );
-    if (held) window.dispatchEvent(new CustomEvent("bhb-desk-not-loaded", { detail: { id: "staff" } }));
-    void ensureStaffHydrated();
-    return;
-  }
-  pendingPush = state;
-  if (pushTimer) clearTimeout(pushTimer);
-  pushTimer = setTimeout(() => {
-    const payload = pendingPush;
-    pendingPush = null;
-    pushTimer = null;
-    if (!payload) return;
-    void trackServerWork(pushStaffSlice(payload));
-  }, DESK_PUSH_DEBOUNCE_MS);
-}
-
 /**
- * Pull staff slice once, merge into Masters localStorage, then push desk.
+ * Pull staff slice once and lay it into the page copy (pull-only; the staff
+ * screens write rows through the kernel since data-layer 2.2d).
  */
 export function ensureStaffHydrated(): Promise<boolean> {
   if (!staffRemoteEnabled()) return Promise.resolve(false);
@@ -793,13 +650,6 @@ async function hydrateStaffOnce(): Promise<boolean> {
     changed = true;
   }
 
-  const localStaffCount = next.staff?.length ?? 0;
-  const remoteStaffCount = remote?.staff.length ?? 0;
-  // DB-read mode: hydrate is pull-only; don't push stale browser demo roster back to server.
-  if (!readFromDb && localStaffCount > 0) {
-    await pushStaffSlice(next);
-  }
-
   if (changed) {
     // Local-only. saveMasters() here pushed masters AND re-pushed the staff
     // roster on every staff hydrate (269 POST /staff-roster a day, audit
@@ -814,16 +664,5 @@ async function hydrateStaffOnce(): Promise<boolean> {
   // bhb-desk-first-hydrated, and access checks listening for it must find the
   // roster already in masters (review of #574).
   markDeskHydrated(MODULE);
-  // The roster as this browser now holds it, at the server's stamps, is the
-  // base of the next save: only rows changed from here are sent.
-  if (remote.stamps) {
-    captureRowStamps(
-      MODULE,
-      remote.stamps,
-      loadMasters() as unknown as Record<string, unknown>,
-      STAFF_STAMPED_SLICES,
-    );
-  }
-
   return changed;
 }

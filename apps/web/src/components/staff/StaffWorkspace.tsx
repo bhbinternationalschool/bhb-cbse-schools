@@ -4,7 +4,7 @@ import { PropelProgressPanel } from "@/components/staff/PropelProgressPanel";
 import { CoordinatorsPanel } from "@/components/staff/CoordinatorsPanel";
 import { ProfileChangeRequestsCard } from "@/components/staff/ProfileChangeRequestsCard";
 import { useAccessData } from "@/components/shell/useAccessData";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -20,7 +20,8 @@ import {
   isStaffActive,
   type StaffRecord,
 } from "@/lib/foundationMasters";
-import { loadMasters, saveMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
+import { loadMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
+import { readRemovedStaff, useStaffBookWrites } from "@/lib/data/client/staffBookWrites";
 import {
   applyStaffImport,
   downloadStaffImportTemplate,
@@ -247,19 +248,35 @@ export function StaffWorkspace() {
     return () => window.removeEventListener("bhb-masters-updated", onMasters);
   }, []);
 
-  function commit(next: MastersState, msg?: string) {
-    setState(next);
-    saveMasters(next);
-    if (msg) {
-      setNotice(msg);
-      window.setTimeout(() => setNotice(null), 2400);
+  // Every change here is a staff record write (data-layer 2.2d): the
+  // difference between the roster on screen and the action's result, laid on
+  // the records as stored now (sis.staff / sis.departments / sis.designations).
+  // The screen keeps showing the server's roster; the notice says "saved"
+  // only after the server confirmed, and a refusal says why.
+  const staffWrites = useStaffBookWrites();
+  const [saving, setSaving] = useState(false);
+  async function commit(next: MastersState, msg?: string): Promise<boolean> {
+    if (!state) return false;
+    setSaving(true);
+    setNotice("Saving…");
+    const r = await staffWrites.commit(state, next);
+    setSaving(false);
+    setState(loadMasters());
+    if (!r.ok) {
+      setNotice(r.message);
+      window.setTimeout(() => setNotice((n) => (n === r.message ? null : n)), 9000);
+      return false;
     }
+    const said = r.unchanged ? "Nothing changed." : msg ?? "Saved";
+    setNotice(said);
+    window.setTimeout(() => setNotice((n) => (n === said ? null : n)), 2400);
+    return true;
   }
 
   function toggleStatus(s: StaffRecord) {
-    if (!state) return;
+    if (!state || saving) return;
     const nextStatus = s.status === "active" ? "inactive" : "active";
-    commit(
+    void commit(
       {
         ...state,
         staff: state.staff.map((row) =>
@@ -271,14 +288,14 @@ export function StaffWorkspace() {
   }
 
   function onRemove(s: StaffRecord) {
-    if (!state) return;
+    if (!state || saving) return;
     const result = removeStaff(state, s.id);
     if (!result.ok) {
       setNotice(result.reason);
       window.setTimeout(() => setNotice(null), 3200);
       return;
     }
-    commit(result.state, `${s.empCode} removed`);
+    void commit(result.state, `${s.empCode} removed — restore it under "Removed staff" below`);
   }
 
   const stats = useMemo(() => {
@@ -470,7 +487,7 @@ export function StaffWorkspace() {
           title="Allocate teaching"
           description="Pick a teacher, then give them a class-teacher section and the subjects they teach."
         >
-          <TeachingAllocationPanel masters={state} ay={ay} onCommit={commit} />
+          <TeachingAllocationPanel masters={state} ay={ay} onCommit={(next, msg) => void commit(next, msg)} />
           {state ? (
             <div className="mt-4">
               <CoordinatorsPanel
@@ -770,7 +787,7 @@ export function StaffWorkspace() {
                     picked.has(r.id) && r.status !== "active" ? { ...r, status: "active" as const } : r,
                   ),
                 };
-                commit(next, `${ids.length} staff marked active`);
+                void commit(next, `${ids.length} staff marked active`);
                 rosterSelection.clear();
               },
             },
@@ -785,7 +802,7 @@ export function StaffWorkspace() {
                     picked.has(r.id) && r.status === "active" ? { ...r, status: "inactive" as const } : r,
                   ),
                 };
-                commit(next, `${ids.length} staff marked inactive`);
+                void commit(next, `${ids.length} staff marked inactive`);
                 rosterSelection.clear();
               },
             },
@@ -970,10 +987,20 @@ export function StaffWorkspace() {
       </div>
 
       <div id="staff-import" className="scroll-mt-24">
-        <StaffImportPanel
-          state={state}
-          onApplied={(next, msg) => {
-            commit(next, msg);
+        <StaffImportPanel state={state} onApplied={commit} />
+      </div>
+
+      <div id="staff-removed" className="scroll-mt-24">
+        <RemovedStaffPanel
+          visible={hasPermission(session, state, "staff", "edit")}
+          restore={async (id, label) => {
+            setNotice("Restoring…");
+            const r = await staffWrites.restore(id);
+            setState(loadMasters());
+            const said = r.ok ? `${label} restored` : r.message;
+            setNotice(said);
+            window.setTimeout(() => setNotice((n) => (n === said ? null : n)), r.ok ? 2400 : 9000);
+            return r.ok;
           }}
         />
       </div>
@@ -988,22 +1015,27 @@ function StaffImportPanel({
   onApplied,
 }: {
   state: MastersState;
-  onApplied: (next: MastersState, message: string) => void;
+  /** Resolves true only once the server confirmed the import's writes. */
+  onApplied: (next: MastersState, message: string) => Promise<boolean>;
 }) {
   const [csvText, setCsvText] = useState("");
   const [fileName, setFileName] = useState("");
   const [upsert, setUpsert] = useState(true);
-  const [replaceAll, setReplaceAll] = useState(false);
+  // "Clear the roster and import this file only" is gone (data-layer 2.2d): it
+  // never removed anyone on the server (the old roster save wrote only the
+  // rows it named), and as row writes it would soft-remove every member not
+  // in the file. Remove members one by one (inactivate, then Remove).
+  const replaceAll = false as const;
   const [preview, setPreview] = useState<StaffImportPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  function refreshPreview(text: string, nextUpsert: boolean, nextReplace: boolean) {
+  function refreshPreview(text: string, nextUpsert: boolean) {
     if (!text) {
       setPreview(null);
       return;
     }
-    setPreview(previewStaffImport(text, state, nextUpsert, nextReplace));
+    setPreview(previewStaffImport(text, state, nextUpsert, replaceAll));
   }
 
   async function onFile(file: File | null) {
@@ -1025,7 +1057,7 @@ function StaffImportPanel({
         text = await file.text();
       }
       setCsvText(text);
-      refreshPreview(text, upsert, replaceAll);
+      refreshPreview(text, upsert);
     } catch (err) {
       setLocalError(
         err instanceof Error ? err.message : "Could not read file",
@@ -1037,17 +1069,9 @@ function StaffImportPanel({
     }
   }
 
-  function runImport() {
+  async function runImport() {
     if (!csvText) {
       setLocalError("Choose a CSV or Excel file first");
-      return;
-    }
-    if (
-      replaceAll &&
-      !window.confirm(
-        "Replace the entire staff roster with this file? Existing staff rows will be removed.",
-      )
-    ) {
       return;
     }
     setBusy(true);
@@ -1064,15 +1088,17 @@ function StaffImportPanel({
         return;
       }
       setPreview(result);
-      onApplied(
+      const saved = await onApplied(
         result.state,
-        (replaceAll ? "Replaced roster · " : "") +
-          `Imported ${result.created} new, updated ${result.updated}` +
+        `Imported ${result.created} new, updated ${result.updated}` +
           (result.skipped ? `, skipped ${result.skipped}` : ""),
       );
+      if (!saved) {
+        setLocalError("The import was not saved — see the message at the top. The file is still loaded; fix it and import again.");
+        return;
+      }
       setCsvText("");
       setFileName("");
-      setReplaceAll(false);
     } finally {
       setBusy(false);
     }
@@ -1108,25 +1134,12 @@ function StaffImportPanel({
         <input
           type="checkbox"
           checked={upsert}
-          disabled={replaceAll}
           onChange={(e) => {
             setUpsert(e.target.checked);
-            refreshPreview(csvText, e.target.checked, replaceAll);
+            refreshPreview(csvText, e.target.checked);
           }}
         />
         Update existing rows with the same emp_code
-      </label>
-
-      <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-        <input
-          type="checkbox"
-          checked={replaceAll}
-          onChange={(e) => {
-            setReplaceAll(e.target.checked);
-            refreshPreview(csvText, upsert, e.target.checked);
-          }}
-        />
-        Clear current roster and import this file only
       </label>
 
       {localError ? (
@@ -1136,16 +1149,8 @@ function StaffImportPanel({
       {preview ? (
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3 text-sm">
           <p>
-            {replaceAll ? (
-              <>
-                Will replace roster · create <strong>{preview.created}</strong>
-              </>
-            ) : (
-              <>
-                Will create <strong>{preview.created}</strong>, update{" "}
-                <strong>{preview.updated}</strong>
-              </>
-            )}
+            Will create <strong>{preview.created}</strong>, update{" "}
+            <strong>{preview.updated}</strong>
             {preview.skipped ? (
               <>
                 , skip <strong>{preview.skipped}</strong>
@@ -1166,10 +1171,106 @@ function StaffImportPanel({
         type="button"
         disabled={busy || !csvText}
         className="rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
-        onClick={runImport}
+        onClick={() => void runImport()}
       >
-        {busy ? "Importing…" : replaceAll ? "Replace & import" : "Import staff"}
+        {busy ? "Importing…" : "Import staff"}
       </button>
+    </ErpPanel>
+  );
+}
+
+/**
+ * Members removed from the roster (data-layer 2.2d: Remove is a SOFT remove —
+ * hidden everywhere, with who and when, and restorable). Read from the server
+ * on open (GET /api/data/sis.staff?removed=1, staff · edit holders only).
+ */
+function RemovedStaffPanel({
+  visible,
+  restore,
+}: {
+  visible: boolean;
+  restore: (id: string, label: string) => Promise<boolean>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<Record<string, unknown>[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    const r = await readRemovedStaff();
+    if (!r.ok) {
+      setRows(null);
+      setError(r.error);
+      return;
+    }
+    setRows(r.rows);
+  }, []);
+
+  useEffect(() => {
+    if (open) void load();
+  }, [open, load]);
+
+  if (!visible) return null;
+  return (
+    <ErpPanel
+      title="Removed staff"
+      description="Members removed from the roster. They are hidden everywhere (lists, sign-in, payroll) until restored."
+    >
+      {!open ? (
+        <button
+          type="button"
+          className="text-sm font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline"
+          onClick={() => setOpen(true)}
+        >
+          Show removed staff
+        </button>
+      ) : error ? (
+        <p role="alert" className="text-sm text-[var(--danger)]">
+          Could not load the removed staff: {error}{" "}
+          <button type="button" className="underline" onClick={() => void load()}>
+            Retry
+          </button>
+        </p>
+      ) : rows === null ? (
+        <p className="text-sm text-[var(--muted)]">Loading…</p>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-[var(--muted)]">No removed staff.</p>
+      ) : (
+        <ul className="divide-y divide-[var(--border)]" data-testid="removed-staff">
+          {rows.map((r) => {
+            const id = String(r.id);
+            const label = `${String(r.full_name ?? "")} (${String(r.emp_code ?? "")})`;
+            const when = r.deleted_at ? new Date(String(r.deleted_at)).toLocaleString("en-IN") : "";
+            return (
+              <li key={id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                <span>
+                  <strong className="text-[var(--brand-deep)]">{label}</strong>
+                  <span className="ml-2 text-xs text-[var(--muted)]">
+                    removed {when}
+                    {r.deleted_by ? ` by ${String(r.deleted_by)}` : ""}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="rounded-lg border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                  disabled={busy !== null}
+                  aria-label={`Restore ${label}`}
+                  onClick={() => {
+                    setBusy(id);
+                    void restore(id, label).then(async () => {
+                      setBusy(null);
+                      await load();
+                    });
+                  }}
+                >
+                  {busy === id ? "Restoring…" : "Restore"}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </ErpPanel>
   );
 }

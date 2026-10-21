@@ -270,7 +270,6 @@ SELFTESTS=(
   test:desk-on-demand
   test:masters-section-saves
   test:accounts-row-stamps
-  test:staff-row-stamps
   test:desk-stamps
   test:attendance-row-stamps
   test:fee-extras-forward-only
@@ -581,6 +580,7 @@ SELFTESTS=(
   test:staff-kernel
   test:masters-writes
   test:masters-element-commit
+  test:staff-book-commit
   test:desk-feature-rev
   test:staff-requests
   test:survey-team-plan

@@ -20,7 +20,8 @@ import {
   staffQrPayload,
   type StaffRecord,
 } from "@/lib/foundationMasters";
-import { loadMasters, saveMasters, type MastersState } from "@/lib/masters";
+import { loadMasters, type MastersState } from "@/lib/masters";
+import { useStaffBookWrites } from "@/lib/data/client/staffBookWrites";
 import { persistSeriesUse, suggestFromSeriesCode } from "@/lib/numberSeries";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { StaffImageField } from "@/components/staff/StaffImageField";
@@ -127,6 +128,8 @@ export function StaffProfileForm(props: Props) {
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<StaffFieldErrors>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const staffWrites = useStaffBookWrites();
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [sameAddress, setSameAddress] = useState(false);
   /**
@@ -176,7 +179,10 @@ export function StaffProfileForm(props: Props) {
       setMasters(next);
       if (props.mode === "edit") {
         const existing = next.staff.find((s) => s.id === props.staffId);
-        if (existing) setDraft(normalizeStaffRecord(existing));
+        if (existing) {
+          setError(null);
+          setDraft(normalizeStaffRecord(existing));
+        }
       }
     })();
   }, [props]);
@@ -277,25 +283,64 @@ export function StaffProfileForm(props: Props) {
       qrPayload: staffQrPayload(code, draft.id),
       loginUsername: draft.loginUsername.trim() || defaultStaffLoginUsername(code),
     });
+    void writeRecord(row, props.mode === "create" ? "Staff created" : "Staff updated", { create: props.mode === "create" });
+  }
 
-    const staff =
-      props.mode === "create"
-        ? [...masters.staff, row]
-        : masters.staff.map((s) => (s.id === row.id ? row : s));
-    const next = { ...masters, staff };
-    saveMasters(next);
-    if (props.mode === "create" && row.empCode) {
-      persistSeriesUse("STAFF_ID", undefined, row.empCode);
-      setMasters(loadMasters());
-    } else {
-      setMasters(next);
-    }
-    setDraft(row);
+  /**
+   * The record as the form loaded it (the page copy) → `row`, written as the
+   * fields that changed, on the record as stored now (data-layer 2.2d: never
+   * the whole-book Masters save, which refused every staff save of a user
+   * without Masters · edit while this form said "Staff updated"). The notice
+   * is said only after the server confirmed; a refusal says why and keeps
+   * what was typed (a field someone else changed first shows their value).
+   */
+  async function writeRecord(
+    row: StaffRecord | null,
+    okMessage: string,
+    opts: { create?: boolean; removeId?: string; keepDraft?: boolean } = {},
+  ): Promise<boolean> {
+    if (!masters) return false;
+    const shownStaff = masters.staff;
+    const nextStaff = opts.removeId
+      ? shownStaff.filter((s) => s.id !== opts.removeId)
+      : opts.create
+        ? [...shownStaff, row!]
+        : shownStaff.map((s) => (s.id === row!.id ? row! : s));
+    setSaving(true);
     setError(null);
-    setNotice(props.mode === "create" ? "Staff created" : "Staff updated");
-    window.setTimeout(() => setNotice(null), 2000);
+    setNotice("Saving…");
+    const r = await staffWrites.commit({ staff: shownStaff }, { staff: nextStaff });
+    setSaving(false);
+    const fresh = loadMasters();
+    setMasters(fresh);
+    if (!r.ok) {
+      setNotice(null);
+      setError(r.message);
+      // A field someone else changed first: the form shows the stored value
+      // there (the rest of what was typed stays).
+      const clash = r.conflicts?.find((c) => c.id === (row?.id ?? opts.removeId));
+      if (clash && row) {
+        const stored = fresh.staff.find((s) => s.id === row.id);
+        if (stored) {
+          const back: Record<string, unknown> = {};
+          for (const f of clash.fields) {
+            const k = f.startsWith("docs.") ? "docs" : f;
+            if (k in stored) back[k] = (stored as unknown as Record<string, unknown>)[k];
+          }
+          setDraft((d) => (d ? normalizeStaffRecord({ ...d, ...back }) : d));
+        }
+      }
+      return false;
+    }
+    if (opts.removeId) return true;
+    if (opts.create && row?.empCode) persistSeriesUse("STAFF_ID", undefined, row.empCode);
+    const saved = row ? fresh.staff.find((s) => s.id === row.id) : undefined;
+    if (row && !opts.keepDraft) setDraft(saved ? normalizeStaffRecord(saved) : row);
+    setNotice(r.unchanged ? "Nothing changed" : okMessage);
+    window.setTimeout(() => setNotice(null), 2500);
+    if (!row) return true;
     const leave = () => {
-      if (props.mode === "create") {
+      if (opts.create) {
         router.push(`/staff/${row.id}/edit`);
         router.refresh();
       }
@@ -305,42 +350,44 @@ export function StaffProfileForm(props: Props) {
       // The profile is saved; the extra fields go on their own. A new
       // profile always moves on to its edit page (staying would invite a
       // second create); a failure is named in a toast.
-      void custom.saveFor(row.id).then((r) => {
-        if (r.message) {
-          pushToast({ kind: r.ok ? "success" : "error", message: r.message, durationMs: r.ok ? 3000 : 12000 });
+      void custom.saveFor(row.id).then((cr) => {
+        if (cr.message) {
+          pushToast({ kind: cr.ok ? "success" : "error", message: cr.message, durationMs: cr.ok ? 3000 : 12000 });
         }
-        if (!r.ok && props.mode === "edit") setTab("more");
+        if (!cr.ok && !opts.create) setTab("more");
         leave();
       });
-      return;
+      return true;
     }
     leave();
+    return true;
   }
 
   function setActiveStatus(status: "active" | "inactive") {
-    if (!masters || !draft || props.mode !== "edit") return;
-    const row = normalizeStaffRecord({ ...draft, status });
-    const next = {
-      ...masters,
-      staff: masters.staff.map((s) => (s.id === row.id ? row : s)),
-    };
-    saveMasters(next);
-    setMasters(next);
-    setDraft(row);
-    setNotice(status === "active" ? "Staff activated" : "Staff inactivated");
-    window.setTimeout(() => setNotice(null), 2000);
+    if (!masters || !draft || props.mode !== "edit" || saving) return;
+    const current = masters.staff.find((s) => s.id === draft.id);
+    if (!current) return;
+    // Only the status: anything else typed in the form stays unsaved.
+    const row = normalizeStaffRecord({ ...current, status });
+    void writeRecord(row, status === "active" ? "Staff activated" : "Staff inactivated", { keepDraft: true }).then((ok) => {
+      if (ok) setDraft((d) => (d ? { ...d, status } : d));
+    });
   }
 
   function onRemove() {
-    if (!masters || !draft || props.mode !== "edit") return;
+    if (!masters || !draft || props.mode !== "edit" || saving) return;
     const result = removeStaff(masters, draft.id);
     if (!result.ok) {
       setError(result.reason);
       return;
     }
-    saveMasters(result.state);
-    router.push("/staff");
-    router.refresh();
+    // A SOFT remove (hidden everywhere, restorable from Staff → Roster →
+    // Removed staff); the roster opens only once the server confirmed it.
+    void writeRecord(null, "Staff removed", { removeId: draft.id }).then((ok) => {
+      if (!ok) return;
+      router.push("/staff");
+      router.refresh();
+    });
   }
 
   const depName = useMemo(() => {
@@ -393,7 +440,7 @@ export function StaffProfileForm(props: Props) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {notice ? (
-            <span className="rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-1.5 text-xs font-medium text-[var(--brand-deep)]">
+            <span role="status" data-testid="staff-save-notice" className="rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-1.5 text-xs font-medium text-[var(--brand-deep)]">
               {notice}
             </span>
           ) : null}
@@ -424,7 +471,8 @@ export function StaffProfileForm(props: Props) {
           </Link>
           <button
             type="button"
-            className="rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white"
+            className="rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+            disabled={saving}
             onClick={save}
           >
             Save profile
@@ -433,7 +481,7 @@ export function StaffProfileForm(props: Props) {
       </div>
 
       {error ? (
-        <p className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-medium text-[var(--danger)]">
+        <p role="alert" data-testid="staff-save-error" className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-medium text-[var(--danger)]">
           {error}
         </p>
       ) : null}
@@ -1524,7 +1572,8 @@ export function StaffProfileForm(props: Props) {
         <div className="flex gap-2">
           <button
             type="button"
-            className="rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white"
+            className="rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+            disabled={saving}
             onClick={save}
           >
             Save profile
