@@ -97,8 +97,12 @@
   "leadRevisionHint": "Revise in the LEAD app: {book} → {chapter}",
   "@leadRevisionHint": {
     "placeholders": {
-      "book": {"type": "String"},
-      "chapter": {"type": "String"}
+      "book": {
+        "type": "String"
+      },
+      "chapter": {
+        "type": "String"
+      }
     }
   },
   "couldNotOpenLeadApp": "Could not open the LEAD app",
@@ -1065,10 +1069,22 @@
   "profAadhaarAdd": "Add",
   "profAadhaarCorrect": "Correct",
   "profAadhaarDialogTitle": "{who} — Aadhaar number",
-  "@profAadhaarDialogTitle": {"placeholders": {"who": {"type": "String"}}},
+  "@profAadhaarDialogTitle": {
+    "placeholders": {
+      "who": {
+        "type": "String"
+      }
+    }
+  },
   "profAadhaarInvalid": "This is not a valid 12-digit Aadhaar number — please check it.",
   "profAadhaarSaved": "Saved — XXXX-XXXX-{last4}",
-  "@profAadhaarSaved": {"placeholders": {"last4": {"type": "String"}}},
+  "@profAadhaarSaved": {
+    "placeholders": {
+      "last4": {
+        "type": "String"
+      }
+    }
+  },
   "profAadhaarUnchanged": "That number is already on record.",
   "profAadhaarKeptVerified": "The school has already verified this Aadhaar, so it was not changed. Please contact the school office.",
   "profDetailsOnRecord": "Details on record",
@@ -1513,7 +1529,16 @@
   "resultsOverallGrade": "Overall grade",
   "resultsRank": "Rank",
   "resultsRankOf": "{rank} of {size}",
-  "@resultsRankOf": {"placeholders": {"rank": {"type": "String"}, "size": {"type": "String"}}},
+  "@resultsRankOf": {
+    "placeholders": {
+      "rank": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
   "resultsClassAverage": "Class average",
   "resultsResult": "Result",
   "resultsAttendance": "Attendance",
@@ -1521,7 +1546,13 @@
   "resultsTeacherRemarks": "Class teacher's remarks",
   "resultsAbsentAll": "Absent in this examination",
   "resultsAbsentFor": "Absent for: {subjects}",
-  "@resultsAbsentFor": {"placeholders": {"subjects": {"type": "String"}}},
+  "@resultsAbsentFor": {
+    "placeholders": {
+      "subjects": {
+        "type": "String"
+      }
+    }
+  },
   "resultsAggregateNote": "Weighted result of the exams that count toward it.",
   "resultsNoMarks": "Marks for this exam are not ready yet. Please check again later.",
   "resultsHeld": "This report card is being held by the school office. Please contact the office.",
@@ -1530,7 +1561,36 @@
   "dateSheetTitle": "Date sheet",
   "dateSheetNone": "No upcoming exams have been published for this child yet.",
   "dateSheetMinutes": "{minutes} min",
-  "@dateSheetMinutes": {"placeholders": {"minutes": {"type": "String"}}},
+  "@dateSheetMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "schoolChatTitle": "School chat",
+  "schoolChatGroups": "Groups",
+  "schoolChatDirect": "Direct chats",
+  "schoolChatClassTeacherThread": "Message the class teacher",
+  "schoolChatNewMessage": "Message a teacher",
+  "schoolChatNoMessages": "No messages yet.",
+  "schoolChatNone": "No chats yet. A class or subject group appears once a teacher is assigned to it.",
+  "schoolChatWaiting": "Waiting for review",
+  "schoolChatRemoved": "Removed by the school",
+  "schoolChatMuted": "The school has muted you in this chat. You can still read messages.",
+  "schoolChatPaused": "The school has paused chat for this login. Please speak to the class teacher.",
+  "schoolChatSafety": "Messages are checked before others see them. Please be kind.",
+  "schoolChatAsChild": "Writing as {name}",
+  "@schoolChatAsChild": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "schoolChatAsParent": "Writing as the parent",
+  "schoolChatGroupNoMessages": "Group — no messages yet",
+  "schoolChatParentInbox": "Parent messages to the class teacher",
   "visitorMobileOptional": "Mobile number (optional)",
   "numberOfPeople": "Number of people",
   "vehicleNumberOptional": "Vehicle number (optional)",
@@ -1544,5 +1604,11 @@
   "readTheBill": "Read the bill",
   "aadhaarLast4Only": "Aadhaar is kept as the last 4 digits only",
   "visitorPeopleCount": "{count} people",
-  "@visitorPeopleCount": {"placeholders": {"count": {"type": "int"}}}
+  "@visitorPeopleCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  }
 }

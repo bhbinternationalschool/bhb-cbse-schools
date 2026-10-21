@@ -2839,3 +2839,35 @@ export async function readStaffScanImage<T>(opts: {
   if (!parsed) return { ok: false, failure: "read-failed", error: parseError };
   return { ok: true, result: parsed, generationId };
 }
+
+/**
+ * School chat: is this child / family message safe to show the group?
+ * (lib/schoolChatModeration.ts holds the prompt, the parser and the rules
+ * that run first.) Not cacheable — every message is judged on its own. A
+ * failure of any kind is returned as ok:false, which the caller HOLDS.
+ */
+export async function generateChatModerationJson(opts: {
+  text: string;
+  where: string;
+  requester: string;
+}): Promise<
+  | { ok: true; verdict: import("@/lib/schoolChatModeration").ModelVerdict; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const m = await import("@/lib/schoolChatModeration");
+  const r = await callLlmJson(
+    {
+      system: m.buildModerationSystemPrompt(),
+      userMessage: m.buildModerationUserPrompt(opts.text, opts.where),
+      maxTokens: 200,
+      temperature: 0,
+      geminiMaxTokens: 1024,
+      geminiTemperature: 0,
+      meta: { route: "school-chat-moderation", promptVersion: m.CHAT_MODERATION_PROMPT_VERSION },
+      precheck: startLlmPrecheck({ requester: opts.requester }),
+    },
+    m.parseModerationVerdict,
+  );
+  if (r.ok) return { ok: true, verdict: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "AI is not configured", engine: r.engine };
+}
