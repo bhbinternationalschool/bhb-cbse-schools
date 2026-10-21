@@ -65,7 +65,7 @@ export default defineConfig<GateOptions>({
   projects: [
     {
       name: "desktop",
-      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay|parent-web-tabs|fuel-per-bus-range|print-signatures)\.spec\.ts/,
+      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay|parent-web-tabs|fuel-per-bus-range|certificates-dues-gate|print-signatures)\.spec\.ts/,
       use: { ...desktop },
     },
     {
@@ -131,6 +131,16 @@ export default defineConfig<GateOptions>({
       name: "payroll-writes",
       testMatch: /payroll\.spec\.ts/,
       dependencies: ["propagation"],
+      use: { ...desktop },
+    },
+    {
+      // Seeds a tuition fee structure, which switches on the school's built-in
+      // 2026-27 structures for EVERY class (ensureFeeSetup) — every child then
+      // owes. So it runs after every other project (21 Oct 2026, the TC /
+      // no-dues gate) and takes its structure out again afterwards.
+      name: "cert-gate",
+      testMatch: /certificates-dues-gate\.spec\.ts/,
+      dependencies: ["money-writes", "staff-register", "notify-writes", "chat-writes", "payroll-writes"],
       use: { ...desktop },
     },
   ],

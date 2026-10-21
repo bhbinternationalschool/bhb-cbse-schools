@@ -9,6 +9,7 @@ import {
   categoryForTc,
   certificateEligibility,
   certificateKindLabel,
+  certificateNeedsDuesCheck,
   classLabelForStudent,
   classToWords,
   defaultSubjectsForClass,
@@ -22,10 +23,14 @@ import {
   suggestNextCertificateNumber,
   uidaiFormUrl,
   voidCertificate,
+  type CertificateDuesAnswer,
+  type CertificateDuesView,
   type CertificateIssue,
   type CertificateKind,
   type TcDetails,
 } from "@/lib/certificates";
+import { ErpQueryError, useErpQuery } from "@/lib/data/client/hooks";
+import { readView } from "@/lib/data/client/query";
 import {
   formatInr,
   searchFeeStudents,
@@ -259,12 +264,31 @@ export function CertificatesWorkspace() {
 
   const student = selected?.student ?? null;
 
+  // The child's open dues as the server counts them from the whole fee book.
+  // A TC / fee clearance is issued only on this answer: this tab's copy is
+  // the teaching subset for someone without the Masters grant (no fee
+  // structure — every child ₹0), and its fees / transport copies are partial
+  // for a role that cannot read those desks.
+  const duesQuery = useErpQuery<CertificateDuesView>(
+    ["certificate-dues", student?.id ?? ""],
+    `/api/data/views/certificate-dues?studentId=${encodeURIComponent(student?.id ?? "")}`,
+    {
+      desk: ["fee", "sis", "masters", "transport", "module_state:fee_adjustments"],
+      enabled: !!student,
+    },
+  );
+  const duesAnswer = duesAnswerOf(duesQuery.data, duesQuery.error);
+
   const eligibility = useMemo(() => {
     if (!student) return null;
-    return certificateEligibility(student, kind);
+    return certificateEligibility(student, kind, {
+      server: duesAnswer,
+      bookIsFull: mastersScope === "full",
+    });
     // holdDecisions.version: eligibility folds in checkHold, which reads a
     // snapshot that lands after the first render.
-  }, [student, kind, tick, holdDecisions.version]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- duesAnswer is rebuilt from the query each render; its parts are the deps
+  }, [student, kind, tick, holdDecisions.version, mastersScope, duesQuery.data, duesQuery.error]);
 
   useEffect(() => {
     const code = holdCodeForCertificate(kind);
@@ -439,7 +463,7 @@ export function CertificatesWorkspace() {
     window.setTimeout(() => setNotice(null), 3200);
   }
 
-  function onIssue() {
+  async function onIssue() {
     if (!student) {
       setCertStep("student");
       setError("Pick a student first — step 1 · Student");
@@ -459,7 +483,22 @@ export function CertificatesWorkspace() {
     );
     const principal = resolvePrincipal(mastersNow);
     const issuedBy = principal?.fullName || session.fullName;
+    // A certificate that states the fees are clear is decided on a fresh
+    // answer, not one read when the student was picked.
+    // The server re-reads the fee book for this one call (fresh=1). A failed
+    // re-check is a failed check, even with an older answer on screen.
+    const dues: CertificateDuesAnswer = certificateNeedsDuesCheck(kind)
+      ? await readView<CertificateDuesView>(
+          `/api/data/views/certificate-dues?studentId=${encodeURIComponent(student.id)}&fresh=1`,
+        ).then((r) =>
+          r.ok
+            ? duesAnswerOf(r.data, null)
+            : duesAnswerOf(undefined, new ErpQueryError(r.status, r.error)),
+        )
+      : duesAnswer;
+    if (certificateNeedsDuesCheck(kind)) void duesQuery.refetch();
     const result = issueCertificate({
+      dues: { server: dues, bookIsFull: mastersScope === "full" },
       kind,
       studentId: student.id,
       issuedBy,
@@ -1338,13 +1377,34 @@ export function CertificatesWorkspace() {
 
             {eligibility ? (
               <div className="mt-3 space-y-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-[11px]">
-                <p className="text-[var(--brand-deep)]">
-                  Open dues:{" "}
-                  <span className="font-bold">
-                    {formatInr(eligibility.openBalancePaise)}
-                  </span>{" "}
-                  ({eligibility.openDueCount} line
-                  {eligibility.openDueCount === 1 ? "" : "s"})
+                <p className="text-[var(--brand-deep)]" data-testid="cert-open-dues">
+                  {eligibility.openBalancePaise === null || eligibility.openDueCount === null ? (
+                    eligibility.duesUnknown === "role" ? (
+                      "Open dues: not shown for your role"
+                    ) : eligibility.duesUnknown === "failed" ? (
+                      <>
+                        Open dues: could not load{" "}
+                        <button
+                          type="button"
+                          className="font-bold underline"
+                          onClick={() => void duesQuery.refetch()}
+                        >
+                          Try again
+                        </button>
+                      </>
+                    ) : (
+                      "Open dues: checking…"
+                    )
+                  ) : (
+                    <>
+                      Open dues:{" "}
+                      <span className="font-bold">
+                        {formatInr(eligibility.openBalancePaise)}
+                      </span>{" "}
+                      ({eligibility.openDueCount} line
+                      {eligibility.openDueCount === 1 ? "" : "s"})
+                    </>
+                  )}
                 </p>
                 {eligibility.blockers.map((b) => (
                   <p key={b} className="font-semibold text-[var(--danger)]">
@@ -1381,7 +1441,7 @@ export function CertificatesWorkspace() {
                 (kind === "fees_paid" &&
                   (!!feesPaidPreview && "error" in feesPaidPreview))
               }
-              onClick={onIssue}
+              onClick={() => void onIssue()}
             >
               Issue & print
             </button>
@@ -1552,4 +1612,23 @@ export function CertificatesWorkspace() {
       />
     </ErpWorkspaceShell>
   );
+}
+
+/** The certificate-dues query as the gate reads it (lib/certificates.ts). */
+function duesAnswerOf(
+  data: CertificateDuesView | undefined,
+  error: Error | null,
+): CertificateDuesAnswer {
+  if (data) {
+    return {
+      state: "known",
+      openBalancePaise: data.openBalancePaise,
+      openDueCount: data.openDueCount,
+    };
+  }
+  if (error) {
+    const status = error instanceof ErpQueryError ? error.status : null;
+    return status === 401 || status === 403 ? { state: "role" } : { state: "failed" };
+  }
+  return { state: "checking" };
 }

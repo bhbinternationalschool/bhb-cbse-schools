@@ -34,7 +34,7 @@ import type {
   Subject,
 } from "@/lib/foundationMasters";
 import { normalizeStaffRecord, normalizeSubject } from "@/lib/foundationMasters";
-import type { RbacState, UserRoleAssignment } from "@/lib/rbac";
+import type { RbacRole, RbacState, UserRoleAssignment } from "@/lib/rbac";
 import { defaultRbacState } from "@/lib/rbac";
 import { REGISTRY_MODULES, type ModuleRegistryState } from "@/lib/moduleRegistry";
 import type { TimetableGrid, TimetableState } from "@/lib/timetable";
@@ -189,6 +189,15 @@ export const OFFICE_STAFF = 2;
 export const TIMETABLE_TEACHER = 3;
 /** Class teacher of Nursery-A (section 1), nothing else. */
 export const CLASS_TEACHER = 4;
+/**
+ * A certificates clerk (a school-made role, by assignment): Students (view,
+ * edit — the whole roster) and Certificates (issue) — and NO Masters, Fees or
+ * Transport grant. Masters answers the teaching subset (fee structure
+ * withheld) and the fees / transport desks are not read, so this tab's own
+ * copy holds no dues at all. The TC / no-dues gate spec signs in as this
+ * person (a peon on the roster, so no designation-inferred role either).
+ */
+export const CERT_CLERK_STAFF = 31;
 /** The sections the timetable-only teacher has periods in: III-A and V-A. */
 export const TIMETABLE_TEACHER_SECTIONS = [6, 8] as const;
 
@@ -296,7 +305,30 @@ function buildRbac(): RbacState {
     expiresOn: "",
     note: "e2e fixture: office by assignment",
   };
-  return { ...state, assignments: [assignment] };
+  const clerkRole: RbacRole = {
+    id: "e2e_role_cert_clerk",
+    code: "e2e_cert_clerk",
+    name: "Certificates clerk",
+    isBuiltIn: false,
+    isActive: true,
+    makerChecker: false,
+    permissions: [
+      { module: "home", actions: ["view"] },
+      { module: "students", actions: ["view", "edit"] },
+      { module: "certificates", actions: ["view", "create", "edit", "export"] },
+    ],
+    note: "e2e fixture: issues certificates, no Masters / Fees / Transport grant",
+  };
+  const clerk: UserRoleAssignment = {
+    id: "e2e_asg_cert_clerk",
+    staffId: staffId(CERT_CLERK_STAFF),
+    roleId: clerkRole.id,
+    isPrimary: true,
+    scope: { campusIds: [], classIds: [], departmentIds: [] },
+    expiresOn: "",
+    note: "e2e fixture: certificates clerk by assignment",
+  };
+  return { ...state, roles: [...state.roles, clerkRole], assignments: [assignment, clerk] };
 }
 
 function buildModuleRegistry(): ModuleRegistryState {
@@ -625,7 +657,13 @@ export type E2eFixture = {
    * propagation specs make their Masters changes as her);
    * teacher — class teacher of Nursery-A; timetableTeacher — timetable-only.
    */
-  sessions: { office: DemoSession; principal: DemoSession; teacher: DemoSession; timetableTeacher: DemoSession };
+  sessions: {
+    office: DemoSession;
+    principal: DemoSession;
+    teacher: DemoSession;
+    timetableTeacher: DemoSession;
+    certClerk: DemoSession;
+  };
   expected: {
     classes: number;
     sections: number;
@@ -718,6 +756,7 @@ export function buildFixture(): E2eFixture {
       principal: session(PRINCIPAL_STAFF, "principal"),
       teacher: session(CLASS_TEACHER, "teacher"),
       timetableTeacher: session(TIMETABLE_TEACHER, "teacher"),
+      certClerk: session(CERT_CLERK_STAFF, "staff"),
     },
     expected: {
       classes: classes.length,
