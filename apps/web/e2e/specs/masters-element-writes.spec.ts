@@ -22,6 +22,18 @@
  *  5. Class teacher (Masters → Classes → Sections → Teachers): setting IV-A's
  *     class teacher writes the two members' link lists through sis.staff
  *     (laid on each record as stored) — never the roster — and moves the link.
+ *
+ * Review fixes (22 Oct 2026):
+ *  6. Object slice: a profile form with unsaved typing, opened before another
+ *     person's save, is refused as a conflict on its save — it does not put
+ *     the other person's website back (it was saved on the view's LATEST stamp).
+ *  7. Cascade, all or none: removing a class whose screen holds a stale link
+ *     refuses the WHOLE removal — class and every link stay (before: the class
+ *     went first, then the links one by one until the stale one was refused).
+ *  8. A class with 14 links (production has such classes) is removed whole, in
+ *     ONE POST /api/data/masters/batch (before: refused, > 12 removals).
+ *  9. Number series: the certificates clerk may not move the fee receipts
+ *     (403); a number 100 past the next is refused (409) and moves nothing.
  */
 import type { APIRequestContext, Browser, Page, Request, Route } from "@playwright/test";
 import { normalizeSubject } from "@/lib/foundationMasters";
@@ -335,6 +347,7 @@ test("object: a profile form opened before another save conflicts instead of put
 const ZZ = "e2e_22c_cls_zz";
 
 async function seedClassWithLinks(req: APIRequestContext, n: number): Promise<string[]> {
+  await dropClassZZ(req); // whatever an earlier run left
   const subjects = listOf(await mastersView(req), "subjects").filter((s) => !s.parentId).slice(0, n);
   expect(subjects.length, `${n} subjects to link`).toBe(n);
   const cls = { id: ZZ, name: "XIII", sortOrder: 99, isActive: true, groupCode: classGroupCodeForName("XIII") };
@@ -360,6 +373,11 @@ async function dropClassZZ(req: APIRequestContext): Promise<void> {
   ];
   if (!ops.length) return;
   const res = await req.post("/api/data/masters/batch", { data: { ops } });
+  if (res.status() === 404) {
+    // A build without the batch route (the fail-on-old run): links first, one by one.
+    for (const o of [...ops].reverse()) await writeElements(req, o.collection, [{ op: "delete", id: o.id, base: o.base }]);
+    return;
+  }
   expect(res.status(), `clean up XIII: ${(await res.text()).slice(0, 200)}`).toBe(200);
 }
 
