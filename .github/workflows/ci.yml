@@ -848,6 +848,13 @@ jobs:
       - name: SQL test — desk_slice_row_write / desk_slice_object_write
         run: bash scripts/e2e-stack.sh sql-test supabase/tests/desk_slice_row_write.test.sql
 
+      # data-layer 2.2a: Masters elements compare-and-set on their own _rev
+      # (two different elements both land), no writer resets a _rev (ABA),
+      # batches are all-or-none, number series only move up, staff Remove is
+      # soft and restorable, bank/Aadhaar/PAN/pay need payroll/accounts.
+      - name: SQL test — Masters element _rev, batch, series bump, staff kernel rows
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/masters_row_revs_staff_kernel.test.sql
+
       # A voided fee receipt stays voided: a stale whole-desk push can no
       # longer clear voided_at and re-post the receipt (15 Oct 2026, R1).
       - name: SQL test — a voided fee receipt stays voided
