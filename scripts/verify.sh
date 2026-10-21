@@ -464,6 +464,7 @@ SELFTESTS=(
   test:teacher-contacts
   test:staff-month-calendar
   test:staff-roster-redact
+  test:staff-profile-validate
   test:sis-class-teacher
   test:punch-code
   test:wa-language-gate
