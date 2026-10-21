@@ -163,6 +163,9 @@ const List<ScreenGuide> staffScreenGuides = [
       "Grey columns marked **H** are holidays and Sundays.",
       "Under each name, **P/W** shows days present out of working days this month.",
       "The last row counts how many children were present each day.",
+      "Class teacher or office: tap a box to set P, A, L (late), HD or LE (leave).",
+      "Tap a date to fill that day for every child not yet marked (e.g. all P), then tap the absentees.",
+      "Tap **Save** at the bottom; a holiday or a future day is never saved.",
     ],
     stepsHi: [
       "पहले आपकी अपनी कक्षा खुलती है; दूसरी कक्षा के लिए ऊपर दो-तीर वाला बटन दबाएँ।",
@@ -171,6 +174,9 @@ const List<ScreenGuide> staffScreenGuides = [
       "**H** लिखे स्लेटी कॉलम छुट्टी और रविवार हैं।",
       "हर नाम के नीचे **P/W** इस महीने के कार्य-दिवसों में से उपस्थित दिन दिखाता है।",
       "आख़िरी पंक्ति हर दिन उपस्थित बच्चों की गिनती है।",
+      "कक्षाध्यापक या दफ़्तर: खाना दबाकर P, A, L (देर), HD या LE (छुट्टी) लगाएँ।",
+      "तारीख़ दबाकर उस दिन के सभी बिना-हाज़िरी बच्चों को एक साथ भरें (जैसे सब P), फिर अनुपस्थित बदलें।",
+      "नीचे **सहेजें** दबाएँ; छुट्टी या आगे का दिन कभी सहेजा नहीं जाता।",
     ],
     tipsEn: [
       "**L** means Late (counted present). Leave is **LE**; **HD** is a half day.",
@@ -865,6 +871,7 @@ const List<ScreenGuide> staffScreenGuides = [
     titleHi: "पीटीएम के दिन अभिभावकों से मिलें",
     stepsEn: [
       "See your PTM slots with time and room, and which family has booked each.",
+      "To call a new PTM, tap **Schedule PTM**: pick the date and one or more of your classes.",
       "To add your own slots to a PTM the office opened, tap **Add my slots**.",
       "Change a slot nobody has booked with the pencil, or remove it with the bin.",
       "Tap **Call** to phone a parent if needed.",
@@ -874,6 +881,7 @@ const List<ScreenGuide> staffScreenGuides = [
     ],
     stepsHi: [
       "अपने पीटीएम समय, कमरा और हर समय किस परिवार ने बुक किया, देखें।",
+      "नया पीटीएम बुलाने के लिए **पीटीएम तय करें** दबाएँ: तारीख़ और अपनी एक या अधिक कक्षाएँ चुनें।",
       "दफ़्तर के खोले पीटीएम में अपने समय जोड़ने के लिए **समय जोड़ें** दबाएँ।",
       "जिस समय को किसी ने बुक नहीं किया, उसे पेंसिल से बदलें या कूड़ेदान से हटाएँ।",
       "ज़रूरत हो तो अभिभावक को **फ़ोन करें** दबाएँ।",
@@ -1464,7 +1472,7 @@ const List<ScreenGuide> staffScreenGuides = [
     ],
   ),
   ScreenGuide(
-    id: "staff-today",
+    id: "staff-attendance-today",
     titleEn: "See which staff are present today",
     titleHi: "आज कौन-सा स्टाफ़ आया है, देखें",
     stepsEn: [
@@ -1524,14 +1532,14 @@ const List<ScreenGuide> staffScreenGuides = [
     stepsEn: [
       "Find the staff member in the list.",
       "Tap **Call** or **WhatsApp** to reach them.",
-      "To add or fix a number, tap the name.",
-      "Type the **10-digit mobile** and tap **Save**.",
+      "Tap a name to open their profile; the pencil there adds or fixes the number.",
+      "A red phone means no number: tap it, type the **10-digit mobile** and tap **Save**.",
     ],
     stepsHi: [
       "सूची में स्टाफ़ का नाम खोजें।",
       "बात के लिए **फ़ोन करें** या **व्हाट्सएप** दबाएँ।",
-      "नंबर जोड़ने या ठीक करने के लिए नाम दबाएँ।",
-      "**10 अंकों का मोबाइल** लिखें और **सहेजें** दबाएँ।",
+      "प्रोफ़ाइल खोलने के लिए नाम दबाएँ; वहाँ पेंसिल से नंबर जोड़ें या ठीक करें।",
+      "लाल फ़ोन का मतलब नंबर नहीं है: उसे दबाएँ, **10 अंकों का मोबाइल** लिखें और **सहेजें** दबाएँ।",
     ],
     tipsEn: [
       "If a name says **no mobile — cannot sign in**, add the number so they can use the app.",
@@ -1664,5 +1672,93 @@ const List<ScreenGuide> staffScreenGuides = [
       "अगर **अभी कोई सूचना प्रकाशित नहीं है।** दिखे, तो बाद में देखें।",
       "अगर सूची न खुले, तो इंटरनेट देखें और नीचे खींचकर ताज़ा करें।",
     ],
+  ),
+  ScreenGuide(
+    id: "staff-today",
+    titleEn: "See what each member of staff did today",
+    titleHi: "देखें कि आज हर स्टाफ़ ने क्या काम किया",
+    stepsEn: [
+      "Each card is one person, with what they did today and when.",
+      "You see punches, attendance marked, homework posted, marks entered, fees collected and leave decided.",
+      "People who did the most are at the top; **Nothing recorded today** means nothing was found for them.",
+      "Tap **Attendance** at the bottom for who is present, absent or not marked.",
+    ],
+    stepsHi: [
+      "हर कार्ड एक व्यक्ति का है, आज के काम और समय के साथ।",
+      "पंच, लगाई गई हाज़िरी, दिया गया गृहकार्य, भरे गए अंक, वसूली गई फ़ीस और छुट्टी के फ़ैसले दिखते हैं।",
+      "जिसने सबसे ज़्यादा काम किया वह ऊपर है; **आज कुछ दर्ज नहीं** का मतलब उनका कोई काम नहीं मिला।",
+      "कौन उपस्थित, अनुपस्थित या बिना दर्ज है, यह देखने के लिए नीचे **हाज़िरी** दबाएँ।",
+    ],
+    tipsEn: [
+      "Only work done in the ERP or the app shows here — teaching a class does not.",
+      "If a yellow note says marks entry could not be loaded, pull down to refresh.",
+    ],
+    tipsHi: [
+      "यहाँ सिर्फ़ ERP या ऐप में किया गया काम दिखता है — कक्षा में पढ़ाना नहीं।",
+      "अगर पीली सूचना कहे कि अंक प्रविष्टि लोड नहीं हुई, तो नीचे खींचकर ताज़ा करें।",
+    ],
+  ),
+  ScreenGuide(
+    id: "staff-profile",
+    titleEn: "See a colleague's profile",
+    titleHi: "किसी सहकर्मी की प्रोफ़ाइल देखें",
+    stepsEn: [
+      "The top shows their photo, designation and department.",
+      "Tap **Call** or **WhatsApp** beside the mobile to reach them.",
+      "Tap the pencil to add or fix their login mobile.",
+      "Below are their contact, personal and qualification details.",
+    ],
+    stepsHi: [
+      "ऊपर उनकी फ़ोटो, पद और विभाग है।",
+      "बात के लिए मोबाइल के पास **फ़ोन करें** या **व्हाट्सएप** दबाएँ।",
+      "लॉगिन मोबाइल जोड़ने या ठीक करने के लिए पेंसिल दबाएँ।",
+      "नीचे उनका संपर्क, निजी और योग्यता विवरण है।",
+    ],
+    tipsEn: [
+      "Aadhaar, PAN, bank and PF details are not shown here; the office has them.",
+    ],
+    tipsHi: [
+      "आधार, पैन, बैंक और पीएफ़ विवरण यहाँ नहीं दिखते; वे दफ़्तर के पास हैं।",
+    ],
+  ),
+  ScreenGuide(
+    id: "notice-compose",
+    titleEn: "Publish a notice or news",
+    titleHi: "सूचना या समाचार प्रकाशित करें",
+    stepsEn: [
+      "Choose **Notice** or **News** at the top.",
+      "Write the **Title** and the **Message**.",
+      "For a notice, choose who it is for and whether to pin it to the top.",
+      "Tap **Publish** and confirm.",
+    ],
+    stepsHi: [
+      "ऊपर **सूचना** या **समाचार** चुनें।",
+      "**शीर्षक** और **संदेश** लिखें।",
+      "सूचना के लिए चुनें कि किसके लिए है और क्या सबसे ऊपर रखनी है।",
+      "**प्रकाशित करें** दबाएँ और पक्का करें।",
+    ],
+    tipsEn: [
+      "A notice rings the phones of everyone it is for, so check it before publishing.",
+      "To change or take down a notice, use Communications in the ERP.",
+    ],
+    tipsHi: [
+      "सूचना जिनके लिए है उन सबके फ़ोन पर जाती है, इसलिए प्रकाशित करने से पहले जाँच लें।",
+      "सूचना बदलने या हटाने के लिए ERP में Communications खोलें।",
+    ],
+  ),
+  ScreenGuide(
+    id: "school-collections",
+    titleEn: "See today's fee collections",
+    titleHi: "आज की फ़ीस वसूली देखें",
+    stepsEn: [
+      "The top shows today's total and the receipt count, by payment mode.",
+      "Each receipt shows the family, the children, the mode, the time and who took it.",
+    ],
+    stepsHi: [
+      "ऊपर आज का कुल और रसीदों की गिनती, भुगतान के तरीक़े के अनुसार है।",
+      "हर रसीद में परिवार, बच्चे, तरीक़ा, समय और किसने ली, लिखा है।",
+    ],
+    tipsEn: ["The total matches the **Collected today** figure on your home."],
+    tipsHi: ["कुल आपके होम के **Collected today** आँकड़े से मिलता है।"],
   ),
 ];

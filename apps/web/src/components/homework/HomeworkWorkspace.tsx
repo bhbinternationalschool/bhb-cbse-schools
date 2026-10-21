@@ -14,6 +14,12 @@ import { DEFAULT_AY } from "@/lib/masters";
 import { QueryError } from "@/components/data/QueryError";
 import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, type SisState } from "@/lib/sis";
+import { uploadMedia } from "@/lib/mediaUpload";
+import {
+  homeworkAttachmentExt,
+  homeworkAttachmentFolder,
+  homeworkAttachmentKind,
+} from "@/lib/homeworkAttachments";
 import {
   acknowledgeSubmission,
   classLabel,
@@ -28,7 +34,6 @@ import {
   listPostsForDay,
   listSectionParentContacts,
   markHomeworkWhatsAppNotified,
-  readImageAsDataUrl,
   resolveTeacherHomeworkDefaults,
   rosterForSection,
   runHomeworkReport,
@@ -150,6 +155,11 @@ export function HomeworkWorkspace() {
   >({});
   const [attachUrl, setAttachUrl] = useState("");
   const [attachLabel, setAttachLabel] = useState("");
+  /** Files past the first (a multi-page scan from the staff app) — kept on edit. */
+  const [extraAttachments, setExtraAttachments] = useState<HomeworkPost["attachments"]>([]);
+  const [attaching, setAttaching] = useState(false);
+  // An uploaded file (or an older inline one) rather than a pasted link.
+  const attachIsFile = attachUrl.startsWith("data:") || attachUrl.startsWith("/api/file/");
   const [defaultsNote, setDefaultsNote] = useState<string | null>(null);
   const [notifyTarget, setNotifyTarget] = useState<{
     kind: "homework" | "diary";
@@ -399,6 +409,7 @@ export function HomeworkWorkspace() {
     setBodyHi("");
     setAttachUrl("");
     setAttachLabel("");
+    setExtraAttachments([]);
     setRequiresSubmit(false);
     setAiHint("");
     setReferenceAnswer("");
@@ -431,6 +442,7 @@ export function HomeworkWorkspace() {
     const att = p.attachments[0];
     setAttachUrl(att?.url || "");
     setAttachLabel(att?.label || "");
+    setExtraAttachments(p.attachments.slice(1));
     setTab("compose");
   }
 
@@ -457,8 +469,9 @@ export function HomeworkWorkspace() {
               label: attachLabel.trim() || "Attachment",
               url: attachUrl.trim(),
             },
+            ...extraAttachments,
           ]
-        : [],
+        : extraAttachments,
     };
     const wasEdit = !!editingPostId;
     const r = editingPostId
@@ -650,9 +663,29 @@ export function HomeworkWorkspace() {
     flash(`Opened WhatsApp for ${parentContacts.length} parent(s)`);
   }
 
+  /**
+   * Into the private bucket, in this section's homework folder — the same
+   * place the staff app's "Scan page" / "Upload file" put theirs
+   * (lib/homeworkAttachments.ts). Parents open it through
+   * /api/v1/homework/attachment. Uploads, or shows why not.
+   */
   async function onAttachFile(file: File | null) {
     if (!file) return;
-    const r = await readImageAsDataUrl(file);
+    if (!classId || !sectionId) {
+      setError("Choose the class and section first");
+      return;
+    }
+    if (!homeworkAttachmentExt(file.type, file.name)) {
+      setError("Attach a photo (JPG, PNG, WebP) or a PDF");
+      return;
+    }
+    setAttaching(true);
+    const r = await uploadMedia({
+      file,
+      visibility: "private",
+      pathPrefix: homeworkAttachmentFolder(classId, sectionId),
+    });
+    setAttaching(false);
     if (!r.ok) {
       setError(r.error);
       return;
@@ -900,25 +933,28 @@ export function HomeworkWorkspace() {
                         {p.bodyHi}
                       </p>
                     ) : null}
-                    {p.attachments[0]?.url ? (
-                      p.attachments[0].url.startsWith("data:image") ? (
+                    {p.attachments.map((a) =>
+                      !a.url ? null : (a.url.startsWith("data:") || a.url.startsWith("/api/file/")) &&
+                        homeworkAttachmentKind(a.url) === "image" ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
-                          src={p.attachments[0].url}
-                          alt={p.attachments[0].label || "Attachment"}
+                          key={a.id}
+                          src={a.url}
+                          alt={a.label || "Attachment"}
                           className="mt-2 max-h-40 rounded-lg border border-[var(--border)]"
                         />
                       ) : (
                         <a
-                          href={p.attachments[0].url}
+                          key={a.id}
+                          href={a.url}
                           target="_blank"
                           rel="noreferrer"
-                          className="mt-2 inline-block text-xs font-medium text-[#1565c0] underline"
+                          className="mr-3 mt-2 inline-block text-xs font-medium text-[#1565c0] underline"
                         >
-                          {p.attachments[0].label || "Attachment"}
+                          {a.label || "Attachment"}
                         </a>
-                      )
-                    ) : null}
+                      ),
+                    )}
                     {p.status === "published" ? (
                       <div className="mt-2 flex flex-wrap gap-3">
                         {!readOnly ? (
@@ -1169,19 +1205,21 @@ export function HomeworkWorkspace() {
             />
             <input
               className={`${field} mt-1 w-full`}
-              value={attachUrl.startsWith("data:") ? "" : attachUrl}
+              value={attachIsFile ? "" : attachUrl}
               onChange={(e) => {
                 setAttachUrl(e.target.value);
                 setAttachLabel("");
               }}
               placeholder={
-                attachUrl.startsWith("data:")
-                  ? `Attached: ${attachLabel || "file"} (clear URL to replace)`
-                  : "https://… worksheet link"
+                attaching
+                  ? "Uploading…"
+                  : attachIsFile
+                    ? `Attached: ${attachLabel || "file"} (clear URL to replace)`
+                    : "https://… worksheet link"
               }
-              disabled={attachUrl.startsWith("data:")}
+              disabled={attachIsFile || attaching}
             />
-            {attachUrl.startsWith("data:image") ? (
+            {attachIsFile && homeworkAttachmentKind(attachUrl) === "image" ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={attachUrl}
@@ -1189,7 +1227,12 @@ export function HomeworkWorkspace() {
                 className="mt-2 max-h-32 rounded-lg border"
               />
             ) : null}
-            {attachUrl.startsWith("data:") ? (
+            {extraAttachments.length ? (
+              <span className="mt-1 block">
+                + {extraAttachments.length} more file(s) from the staff app, kept as they are
+              </span>
+            ) : null}
+            {attachIsFile ? (
               <button
                 type="button"
                 className="mt-1 text-xs underline"

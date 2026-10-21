@@ -15,6 +15,11 @@ import {
   lineAdvancePicks,
   type AdvancePickRow,
 } from "@/lib/payrollAdvancePick";
+import {
+  normalizeStaffAdvance,
+  outstandingOf,
+  recoveredTotal,
+} from "@/lib/staffAdvanceTotals";
 export type AdvanceStatus = "open" | "closed";
 
 export type AdvanceSource = "cash" | "with_salary" | "other";
@@ -104,58 +109,10 @@ export function advancesStateIsEmpty(state: AdvanceState): boolean {
   return (state.advances?.length ?? 0) === 0;
 }
 
-function normalizeRecovery(r: Partial<AdvanceRecovery>): AdvanceRecovery {
-  const method: AdvanceRecoveryMethod =
-    r.method === "return_to_school" ? "return_to_school" : "salary";
-  return {
-    id: String(r.id || nid("ar")),
-    advanceId: String(r.advanceId || ""),
-    method,
-    payrollRunId: String(r.payrollRunId || ""),
-    month: String(r.month || ""),
-    amount: Math.max(0, Number(r.amount) || 0),
-    recoveredAt: String(r.recoveredAt || ""),
-    recoveredBy: String(r.recoveredBy || ""),
-    note: String(r.note || ""),
-    returnMode: (r.returnMode as PayrollPaymentMode) || "",
-  };
-}
-
-function normalizeAdvance(a: Partial<StaffAdvance>): StaffAdvance {
-  const amount = Math.max(0, Number(a.amount) || 0);
-  const recoveries = (Array.isArray(a.recoveries) ? a.recoveries : []).map(
-    normalizeRecovery,
-  );
-  const recovered = recoveries.reduce((s, r) => s + r.amount, 0);
-  const status: AdvanceStatus =
-    recovered >= amount - 0.5 ? "closed" : "open";
-  const source: AdvanceSource =
-    a.source === "with_salary" || a.source === "other" ? a.source : "cash";
-  return {
-    id: String(a.id || nid("adv")),
-    staffId: String(a.staffId || ""),
-    empCode: String(a.empCode || ""),
-    fullName: String(a.fullName || ""),
-    amount,
-    givenDate: String(a.givenDate || "").slice(0, 10),
-    paymentMode: (a.paymentMode as PayrollPaymentMode) || "cash",
-    note: String(a.note || ""),
-    source,
-    payrollRunId: String(a.payrollRunId || ""),
-    status,
-    createdBy: String(a.createdBy || ""),
-    createdAt: String(a.createdAt || ""),
-    recoveries,
-  };
-}
-
-export function recoveredTotal(adv: StaffAdvance): number {
-  return adv.recoveries.reduce((s, r) => s + r.amount, 0);
-}
-
-export function outstandingOf(adv: StaffAdvance): number {
-  return Math.max(0, adv.amount - recoveredTotal(adv));
-}
+// The register's arithmetic lives in lib/staffAdvanceTotals (pure), shared
+// with the staff app's management view so both read the same figures.
+const normalizeAdvance = normalizeStaffAdvance;
+export { recoveredTotal, outstandingOf };
 
 export function outstandingForStaff(staffId: string): number {
   return loadAdvances()

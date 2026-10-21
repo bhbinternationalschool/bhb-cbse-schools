@@ -3,6 +3,7 @@ import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
 import { loadFeeContext, istToday } from "@/lib/api/v1/staffFees";
 import { formatInr } from "@/lib/fees";
+import { assertSchoolWide } from "@/lib/api/v1/staffScope";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,12 @@ export const runtime = "nodejs";
  * has taken on a day, receipt by receipt, with a mode-wise total. This is
  * what they hand over at the end of the day, so it counts only their own
  * receipts and excludes anything voided.
+ *
+ * `scope=all` is the whole school's day — what the principal's "Collected
+ * today" card opens (request mr_mv9y9nazs38w). School-wide sessions only;
+ * with `academicYearCode` it counts that session's receipts, the same
+ * filter as the card's figure (lib/principalSnapshot.server), so the list
+ * adds up to the number that was tapped.
  */
 export async function GET(request: Request) {
   try {
@@ -19,6 +26,10 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const date = url.searchParams.get("date")?.trim() || istToday();
     const mine = url.searchParams.get("scope") !== "all";
+    // Every cashier's receipts, with the families' names: leadership and the
+    // office only, as the principal's snapshot itself.
+    if (!mine) await assertSchoolWide(ctx);
+    const ay = mine ? "" : url.searchParams.get("academicYearCode")?.trim() || "";
 
     const { fees, sis } = await loadFeeContext();
     const me = (ctx.session.fullName || "").trim().toLowerCase();
@@ -28,6 +39,7 @@ export async function GET(request: Request) {
     const rows = fees.vouchers
       .filter((v) => !v.voidedAt && v.collectionDate === date)
       .filter((v) => (mine ? (v.cashierName || "").trim().toLowerCase() === me : true))
+      .filter((v) => !ay || v.academicYearCode === ay)
       .sort((a, b) => (b.collectedAt || "").localeCompare(a.collectedAt || ""));
 
     const byMode = new Map<string, number>();

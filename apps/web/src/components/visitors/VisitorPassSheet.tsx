@@ -67,6 +67,14 @@ export function VisitorPassSheet({ entry }: { entry: VisitorEntry }) {
               <p className="font-semibold">{entry.personToMeet}</p>
             </div>
           ) : null}
+          {(entry.peopleCount ?? 1) > 1 || entry.vehicleNo ? (
+            <div>
+              <p className="text-[10px] uppercase text-[var(--muted)]">People · Vehicle</p>
+              <p className="font-semibold">
+                {[(entry.peopleCount ?? 1) > 1 ? `${entry.peopleCount} people` : "", entry.vehicleNo || ""].filter(Boolean).join(" · ")}
+              </p>
+            </div>
+          ) : null}
           <div>
             <p className="text-[10px] uppercase text-[var(--muted)]">Check-in · आने का समय</p>
             <p className="font-semibold">{new Date(entry.inTime).toLocaleString()}</p>

@@ -248,6 +248,52 @@ export async function listOptedOutSet(mobiles: string[]): Promise<Set<string>> {
   }
 }
 
+/**
+ * Numbers (E.164) still inside Meta's 24-hour customer-service window, with
+ * `marginMs` kept back so a window does not close while a broadcast is
+ * still going out.
+ *
+ * Fails CLOSED, unlike the single-number check below: a broadcast that
+ * cannot read the window sends everyone the approved template, which
+ * reaches people inside the window too. `ok: false` says the window was not
+ * known, so the preview can say so rather than claim "nobody is inside it".
+ */
+export async function listOpenWindowSet(
+  mobiles: string[],
+  opts?: { now?: Date; marginMs?: number },
+): Promise<{ ok: boolean; open: Set<string> }> {
+  const e164s = Array.from(
+    new Set(mobiles.map(toE164India).filter((m): m is string => !!m)),
+  );
+  if (e164s.length === 0) return { ok: true, open: new Set() };
+  const now = opts?.now ?? new Date();
+  const margin = Math.max(0, opts?.marginMs ?? 60 * 60 * 1000);
+  const since = new Date(now.getTime() - 24 * 60 * 60 * 1000 + margin).toISOString();
+  try {
+    const ctx = await getServerTenantContext();
+    if (!ctx) return { ok: false, open: new Set() };
+    const { data, error } = await ctx.sb
+      .from("wa_contact_state")
+      .select("mobile_e164, last_inbound_at")
+      .eq("tenant_id", ctx.tenantId)
+      .gte("last_inbound_at", since)
+      .in("mobile_e164", e164s);
+    if (error) {
+      console.warn("[waContactState] listOpenWindowSet query failed", error.message);
+      return { ok: false, open: new Set() };
+    }
+    return {
+      ok: true,
+      open: new Set(
+        (data as { mobile_e164: string }[]).map((r) => String(r.mobile_e164)),
+      ),
+    };
+  } catch (e) {
+    console.warn("[waContactState] listOpenWindowSet lookup failed", e);
+    return { ok: false, open: new Set() };
+  }
+}
+
 /** Fail open: on lookup error, assume within-window so a transient DB error
  * never blocks a legitimate free-text send (caller can still fall back to a
  * template if the send itself fails outside the real window). */

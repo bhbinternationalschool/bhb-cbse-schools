@@ -16,9 +16,12 @@ import "server-only";
 import { loadSis, type SisStudent } from "@/lib/sis";
 import {
   householdHits,
+  routeRiderStudentIds,
   sessionParentHits,
   type HouseholdHit,
 } from "@/lib/waAudienceHouseholds";
+import { ensureTransportHydratedServer } from "@/lib/transportPersistence";
+import { loadTransport } from "@/lib/transport";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureFeesHydratedServer } from "@/lib/feesPersistence.server";
 import { loadServerMasters } from "@/lib/api/v1/auth";
@@ -61,6 +64,12 @@ export type WaAudienceResolution = {
   skippedNotOnWhatsApp: number;
   /** In the audience but with no usable number at all. */
   skippedNoNumber: number;
+  /**
+   * Everyone the audience names (household ids, or staff ids), before any
+   * WhatsApp number filtering — the app notification reaches a family whose
+   * numbers are dead or opted out of WhatsApp just as well.
+   */
+  audienceRefIds: string[];
   error?: string;
 };
 
@@ -112,6 +121,10 @@ export async function resolveWaAudience(
     designations: Object.fromEntries(
       (masters.designations ?? []).map((d) => [d.id, d.name]),
     ),
+    routes:
+      spec.kind === "transport_route"
+        ? await routeNames().catch(() => ({}))
+        : undefined,
   });
   const base = {
     label,
@@ -119,6 +132,7 @@ export async function resolveWaAudience(
     skippedOptOut: 0,
     skippedNotOnWhatsApp: 0,
     skippedNoNumber: 0,
+    audienceRefIds: [] as string[],
   };
 
   // ── Staff ──────────────────────────────────────────────────────────────
@@ -180,6 +194,7 @@ export async function resolveWaAudience(
       ok: true,
       recipients: filtered.kept,
       ...base,
+      audienceRefIds: raw.map((s) => s.id),
       skippedNoNumber,
       skippedOptOut: filtered.skippedOptOut,
       skippedNotOnWhatsApp: filtered.skippedNotOnWhatsApp,
@@ -207,6 +222,19 @@ export async function resolveWaAudience(
     const want = new Set(spec.studentIds);
     hits = householdHits(
       (s) => want.has(s.id),
+      sis.students ?? [],
+      sis.households ?? [],
+    );
+  } else if (spec.kind === "transport_route") {
+    await ensureTransportHydratedServer().catch(() => false);
+    const transport = loadTransport();
+    const riders = routeRiderStudentIds(
+      transport.assignments ?? [],
+      spec.routeIds,
+      new Date().toISOString(),
+    );
+    hits = householdHits(
+      (s) => riders.has(s.id),
       sis.students ?? [],
       sis.households ?? [],
     );
@@ -281,11 +309,20 @@ export async function resolveWaAudience(
     ok: true,
     recipients: filtered.kept,
     ...base,
+    audienceRefIds: hits.map((h) => h.household.id),
     skippedNoNumber,
     skippedOptOut: filtered.skippedOptOut,
     skippedNotOnWhatsApp:
       filtered.skippedNotOnWhatsApp + skippedNotOnWhatsAppEntirely,
   };
+}
+
+/** Route id → "Route 3 (Bus 2)" for the confirm line. */
+async function routeNames(): Promise<Record<string, string>> {
+  await ensureTransportHydratedServer().catch(() => false);
+  return Object.fromEntries(
+    (loadTransport().routes ?? []).map((r) => [r.id, r.name || r.code || r.id]),
+  );
 }
 
 /**

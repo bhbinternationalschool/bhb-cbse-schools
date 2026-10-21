@@ -20,7 +20,9 @@ import { fetchOpenDuesSummary } from "@/lib/feesDeskAncillary.server";
 import { collectionsByMode, loadFees } from "@/lib/fees";
 import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
-import { loadStaffAttendance, staffMarkTotals } from "@/lib/staffAttendance";
+import { loadStaffAttendance } from "@/lib/staffAttendance";
+import { staffTodayRows, staffTodayTotals } from "@/lib/staffToday";
+import { readStaffTodayExempt } from "@/lib/staffToday.server";
 import { loadVault } from "@/lib/vault";
 import { stockReport } from "@/lib/inventory/reports.server";
 
@@ -58,6 +60,12 @@ export type PrincipalSnapshot = {
     activeCount: number;
     presentToday: number;
     absentToday: number;
+    /**
+     * false = who is exempt from attendance could not be read; present /
+     * absent then count everyone on the register and the app shows them as
+     * not loaded rather than as fact.
+     */
+    countsKnown: boolean;
   };
   admissions: {
     pipeline: number;
@@ -187,10 +195,19 @@ export async function buildPrincipalSnapshot(
   const staffToday = (staffAtt.registers ?? []).find(
     (r) => r.date === today && r.academicYearCode === ay,
   );
-  // staffMarkTotals, not summarizeStaffMarks: the latter is keyed by status
-  // code, so `.present` read undefined and every app showed 0 staff present
-  // against a full register (2026-09-16).
-  const staffSum = staffToday ? staffMarkTotals(staffToday.marks || []) : null;
+  // lib/staffToday: the same rows /api/v1/principal/lists?kind=staff_attendance
+  // lists, so the cards and the lists they open agree — exempt staff (the
+  // office's list, owner / admin) are in neither (request mr_mv9ym54sdge3).
+  // Present counts P + L + HD, as staffMarkTotals did (2026-09-16).
+  const staffExempt = await readStaffTodayExempt();
+  const staffSum = staffTodayTotals(
+    staffTodayRows({
+      staff: masters.staff ?? [],
+      designations: masters.designations ?? [],
+      marks: staffToday?.marks ?? [],
+      exempt: staffExempt.ids,
+    }),
+  );
   const activeStaff = (masters.staff ?? []).filter((s) => s.status === "active").length;
 
   const adm = loadAdmissions();
@@ -242,8 +259,9 @@ export async function buildPrincipalSnapshot(
     },
     staff: {
       activeCount: activeStaff,
-      presentToday: staffSum?.present ?? 0,
-      absentToday: staffSum?.absent ?? 0,
+      presentToday: staffSum.present,
+      absentToday: staffSum.absent,
+      countsKnown: staffExempt.known,
     },
     admissions: {
       pipeline,

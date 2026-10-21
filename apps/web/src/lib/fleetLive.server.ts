@@ -65,16 +65,50 @@ function rowToPosition(r: PositionRow): LivePosition {
   };
 }
 
-/** Latest position per tracker. Empty when nothing has ever reported. */
-export async function readLatestPositions(): Promise<LivePosition[]> {
+/**
+ * Latest position per tracker, saying whether the read worked. `ok:false`
+ * means the positions could not be read — NOT that no bus is reporting.
+ */
+export async function readLatestPositionsResult(): Promise<{ ok: true; positions: LivePosition[] } | { ok: false; error: string }> {
   const ctx = await getServerTenantContext();
-  if (!ctx) return [];
+  if (!ctx) return { ok: false, error: "No tenant context" };
   const { data, error } = await ctx.sb.rpc("fleet_latest_positions", { p_tenant_id: ctx.tenantId });
   if (error) {
     console.warn("[fleetLive] latest positions failed", error.message);
-    return [];
+    return { ok: false, error: error.message };
   }
-  return ((data ?? []) as PositionRow[]).map(rowToPosition);
+  return { ok: true, positions: ((data ?? []) as PositionRow[]).map(rowToPosition) };
+}
+
+/** Latest position per tracker. Empty when nothing has ever reported (or the read failed). */
+export async function readLatestPositions(): Promise<LivePosition[]> {
+  const r = await readLatestPositionsResult();
+  return r.ok ? r.positions : [];
+}
+
+/**
+ * One vehicle's track since an instant, oldest first, saying whether the read
+ * worked. Read newest-first under the cap and reversed, so a cap can only cut
+ * the oldest end — and hitting it is reported, never a silently short trail.
+ */
+export async function readVehicleTrackSince(
+  vehicleRef: string,
+  sinceIso: string,
+  cap = 600,
+): Promise<{ ok: true; points: LivePosition[]; truncated: boolean } | { ok: false; error: string }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "No tenant context" };
+  const { data, error } = await ctx.sb
+    .from("fleet_vehicle_positions")
+    .select("vehicle_ref, registration_number, recorded_at, lat, lng, speed_kmh, course_deg, ignition_on, fuel_percent, odometer_km")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("vehicle_ref", vehicleRef)
+    .gte("recorded_at", sinceIso)
+    .order("recorded_at", { ascending: false })
+    .limit(cap);
+  if (error) return { ok: false, error: error.message };
+  const rows = (data ?? []) as PositionRow[];
+  return { ok: true, points: rows.map(rowToPosition).reverse(), truncated: rows.length >= cap };
 }
 
 /** A vehicle's track for the last N minutes, oldest first — for the trail on the map. */

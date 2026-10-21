@@ -5,6 +5,7 @@ import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureHomeworkHydratedServer } from "@/lib/homeworkPersistence";
 import { loadHomework } from "@/lib/homework";
+import { homeworkAttachmentsForReaders } from "@/lib/homeworkAttachments";
 import { loadSis } from "@/lib/sis";
 import { isStudentAsset } from "@/lib/pinnacleAssets";
 import { publisherAssetsFor, readPinnacleAssets } from "@/lib/pinnacleAssets.server";
@@ -101,6 +102,9 @@ export async function GET(request: Request) {
         dueAt: p.dueAt || null,
         requiresSubmit: p.requiresSubmit,
         attachmentCount: p.attachments.length,
+        // Opened through /api/v1/homework/attachment (parents cannot read
+        // /api/file) — the same for an app upload and a web one.
+        attachments: homeworkAttachmentsForReaders(p),
         leadRevision: revision.get(p.id) ?? null,
       }));
 

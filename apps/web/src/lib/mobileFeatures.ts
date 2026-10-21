@@ -48,6 +48,8 @@ export type MobileFeatureId =
   | "staff_roster"
   | "broadcast"
   | "transport_requests"
+  | "staff_payslips_all"
+  | "staff_advances_all"
   // gate
   | "visitor_gate"
   | "gate_pass_release"
@@ -287,6 +289,25 @@ export const MOBILE_FEATURES: MobileFeature[] = [
     module: "transport",
     action: "edit",
     note: "The queue of parents asking for bus service.",
+  },
+  {
+    // 20 Oct 2026 (mr_mva1bgmhdfu3): read-only. Ordinary staff keep only
+    // their own payslips (my_payslips); this is everyone's, month by month.
+    id: "staff_payslips_all",
+    label: "Staff payslips",
+    group: "Leadership",
+    module: "payroll",
+    action: "view",
+    note: "Every staff member's pay for a session, month by month: gross, deductions, net, what was paid on which day and what is still unpaid. Read only.",
+  },
+  {
+    // 20 Oct 2026 (mr_mva1j71v1ttn): read-only, the web's Advances register.
+    id: "staff_advances_all",
+    label: "Staff advances",
+    group: "Leadership",
+    module: "staff_advances",
+    action: "view",
+    note: "Staff who hold an advance: taken, recovered and due, and each advance's recoveries. Read only.",
   },
   {
     id: "visitor_gate",
