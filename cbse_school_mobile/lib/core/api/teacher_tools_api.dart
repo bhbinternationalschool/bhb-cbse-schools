@@ -1,9 +1,12 @@
 part of "api_client.dart";
 
 // Two teacher tools (13 Oct 2026):
-//   * Message my classes — /api/v1/staff/broadcast. The server decides which
-//     sections a person may message (their own class / subject-teacher
-//     links; office-like roles get every section) and refuses any other.
+//   * Message my classes — sections and the send go through
+//     /api/v1/staff/broadcast/audience (22 Oct 2026; broadcast_audience_api),
+//     which scopes a teacher to their own sections and splits free text vs
+//     the approved "School notice" template by each family's 24-hour
+//     window. GET /api/v1/staff/broadcast still supplies the families per
+//     section and the sent list.
 //   * PTM slots — /api/v1/staff/ptm/slots. A teacher adds, changes or
 //     cancels their OWN slots in a PTM the office opened; a booked slot is
 //     never moved or removed from the phone.
@@ -110,26 +113,24 @@ class ClassBroadcastDesk {
   final List<ClassBroadcastSent>? sent;
 }
 
-class ClassBroadcastResult {
-  ClassBroadcastResult.fromJson(Map<String, dynamic> j)
-    : mode = _s(j, "mode"),
-      families = _i(j, "families"),
-      recipientCount = _i(j, "recipientCount"),
-      skippedOptOut = _i(j, "skippedOptOut"),
-      sent = _i(j, "sent"),
-      failed = _i(j, "failed"),
-      pushSent = j["push"] is Map
-          ? _i(Map<String, dynamic>.from(j["push"] as Map), "sent")
-          : 0;
+/// What "Message my classes" opens on: the sections the SEND accepts (the
+/// audience route's own scope), families per section and my sent list from
+/// GET /api/v1/staff/broadcast — both null when that read failed (unknown,
+/// never "0 families" / "nothing sent").
+class ClassMessageDesk {
+  ClassMessageDesk({
+    required this.options,
+    required this.familiesBySection,
+    required this.sent,
+  });
 
-  final String mode;
-  final int families;
-  final int recipientCount;
-  final int skippedOptOut;
-  final int sent;
-  final int failed;
-  final int pushSent;
-  bool get isDryRun => mode != "live";
+  final BroadcastAudienceOptions options;
+  final Map<String, int>? familiesBySection;
+  final List<ClassBroadcastSent>? sent;
+
+  List<BroadcastSectionOption> get sections => [
+    for (final c in options.classes) ...c.sections,
+  ];
 }
 
 // ---------------------------------------------------------------- PTM slots
@@ -190,28 +191,21 @@ extension TeacherToolsApi on ApiClient {
   Future<ClassBroadcastDesk> fetchClassBroadcast() async =>
       ClassBroadcastDesk.fromJson(await _getData("/api/v1/staff/broadcast"));
 
-  /// WhatsApp + app message to the families of [sectionIds] (all must be
-  /// mine — the server refuses otherwise). Dry run by default: it only
-  /// counts; pass [dryRun]=false after the person confirmed the count.
-  Future<ClassBroadcastResult> sendClassBroadcast({
-    required List<String> sectionIds,
-    required String body,
-    bool dryRun = true,
-  }) async {
-    // This route answers with a bare object, not the {data} envelope.
-    final res = await _slowHttp.post(
-      _uri("/api/v1/staff/broadcast"),
-      headers: await _authHeaders(),
-      body: jsonEncode({
-        "audience": "class_parents",
-        "sectionIds": sectionIds,
-        "body": body,
-        "dryRun": dryRun,
-      }),
+  /// The audience options (required) and the old GET's counts + sent list
+  /// (optional: a failure there leaves them unknown, the screen still sends).
+  Future<ClassMessageDesk> fetchClassMessageDesk() async {
+    final desk = fetchClassBroadcast().then<ClassBroadcastDesk?>(
+      (d) => d,
+      onError: (Object _) => null,
     );
-    if (res.statusCode != 200) _throwFrom(res);
-    return ClassBroadcastResult.fromJson(
-      jsonDecode(res.body) as Map<String, dynamic>,
+    final options = await fetchBroadcastAudienceOptions();
+    final old = await desk;
+    return ClassMessageDesk(
+      options: options,
+      familiesBySection: old == null
+          ? null
+          : {for (final s in old.sections) s.sectionId: s.families},
+      sent: old?.sent,
     );
   }
 
