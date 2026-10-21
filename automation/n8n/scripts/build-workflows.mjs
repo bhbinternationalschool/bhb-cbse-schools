@@ -367,12 +367,25 @@ const tpl = ($env.OFFICE_WA_TEMPLATE || '').trim();
 if (!tpl) return [];
 const failed = (res.results || []).filter((r) => r.status === 'failed' && /24h|template/i.test(String(r.error || '')));
 if (!failed.length) return [];
-const text = String(built.wa_text || '').replace(/\\s*[\\r\\n\\t]+\\s*/g, ' | ').replace(/ {5,}/g, '    ').trim().slice(0, 1000);
+// Meta rejects newlines, tabs and 4+ spaces inside a template parameter.
+const flat = (v, max) => String(v || '').replace(/\\s*[\\r\\n\\t]+\\s*/g, ' | ').replace(/ {4,}/g, '   ').trim().slice(0, max);
+const raw = String(built.wa_text || '');
+// OFFICE_WA_TEMPLATE_KEYS lists the template's body variables in order.
+// One key: the whole text goes in it. Three keys (the ERP's school-notice
+// template: schoolName, noticeTitle, noticeBody): school name, first line, rest.
+const keys = ($env.OFFICE_WA_TEMPLATE_KEYS || '1').split(',').map((k) => k.trim()).filter(Boolean);
+const nl = raw.indexOf('\\n');
+const title = flat(nl > 0 ? raw.slice(0, nl) : raw, 120);
+const rest = flat(nl > 0 ? raw.slice(nl + 1) : raw, 1000);
+let variables;
+if (keys.length >= 3) variables = { [keys[0]]: $env.OFFICE_SCHOOL_NAME || 'BHB International School', [keys[1]]: title, [keys[2]]: rest };
+else if (keys.length === 2) variables = { [keys[0]]: title, [keys[1]]: rest };
+else variables = { [keys[0]]: flat(raw, 1000) };
 return [{ json: { wa: {
   module: 'notifications',
   messages: failed.map((r) => ({
     mobile: r.mobile, urgent: true, messageId: 'office-tpl-' + Date.now() + '-' + r.mobile,
-    template: { name: tpl, language: $env.OFFICE_WA_TEMPLATE_LANG || 'en', variableKeys: ['1'], variables: { '1': text } },
+    template: { name: tpl, language: $env.OFFICE_WA_TEMPLATE_LANG || 'en', variableKeys: keys, variables },
   })),
 } } }];
 `,
