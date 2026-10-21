@@ -6,7 +6,7 @@
  *
  *   Masters: context OLD reads masters-desk (subjects + their stamps + the
  *   desk revision). Context NEW renames a subject through the kernel
- *   (POST /api/data/masters.subjects). OLD then sends the shapes an old tab
+ *   (POST /api/data/masters.subjects, on the element's `_rev`). OLD then sends the shapes an old tab
  *   sends — a section save of `subjects` (its pre-write copy, renamed back,
  *   and one without the subject) with its old stamp, and a whole-book save
  *   with the old desk revision. Each is refused (409) and the kernel's value
@@ -23,7 +23,10 @@ import type { APIRequestContext } from "@playwright/test";
 import { fx, expect, openAs, test } from "../support";
 
 const SUBJECT = "e2e_sub_eng";
-type Subject = { id: string; nameEn?: string };
+type Subject = { id: string; nameEn?: string; _rev?: number };
+
+/** The element's own `_rev` — its write base since data-layer 2.2b. */
+const revOf = (list: Record<string, unknown>, id: string) => String((list.rows as Subject[]).find((s) => s.id === id)?._rev ?? "");
 
 async function json(r: Awaited<ReturnType<APIRequestContext["get"]>>) {
   return (await r.json()) as Record<string, unknown>;
@@ -47,7 +50,7 @@ test("a whole-desk POST from a pre-write copy is refused and does not revert or 
     await test.step("the kernel writes (new build)", async () => {
       const list = await json(await now.page.request.get("/api/data/masters.subjects?limit=1000"));
       const w = await now.page.request.post("/api/data/masters.subjects", {
-        data: { ops: [{ op: "upsert", id: SUBJECT, base: list.revision, row: { nameEn: kernelName } }] },
+        data: { ops: [{ op: "upsert", id: SUBJECT, base: revOf(list, SUBJECT), row: { nameEn: kernelName } }] },
       });
       expect(w.status()).toBe(200);
     });
@@ -108,7 +111,7 @@ test("a whole-desk POST from a pre-write copy is refused and does not revert or 
     if (seeded) {
       const list = await json(await now.page.request.get("/api/data/masters.subjects?limit=1000"));
       await now.page.request.post("/api/data/masters.subjects", {
-        data: { ops: [{ op: "upsert", id: SUBJECT, base: list.revision, row: { nameEn: seeded.nameEn } }] },
+        data: { ops: [{ op: "upsert", id: SUBJECT, base: revOf(list, SUBJECT), row: { nameEn: seeded.nameEn } }] },
       });
     }
     await old.context.close();

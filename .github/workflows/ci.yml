@@ -714,6 +714,9 @@ jobs:
           npm run test:reference-views
           npm run test:masters-bridge
           npm run test:masters-pending
+          npm run test:staff-kernel
+          npm run test:masters-writes
+          npm run test:desk-feature-rev
           npm run test:staff-requests
           npm run test:notify
           npm run test:push-voice

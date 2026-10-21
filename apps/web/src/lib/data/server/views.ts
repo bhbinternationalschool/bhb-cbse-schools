@@ -32,13 +32,14 @@ import { NextResponse } from "next/server";
 import type { ApiAuthContext } from "@/lib/api/v1/auth";
 import type { RouteAuthResult } from "@/lib/apiRouteAuth.server";
 import type { MastersReadScope } from "@/lib/mastersReadScope.server";
-import { teachingMastersSubset } from "@/lib/mastersTeachingSubset";
+import { TEACHING_MASTERS_KEYS, teachingMastersSubset } from "@/lib/mastersTeachingSubset";
 import type { MastersState } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import type { RbacState } from "@/lib/rbac";
 import type { ModuleRegistryState } from "@/lib/moduleRegistry";
 import type { MastersBook, MastersView, RbacView, StaffListEntry, StaffListView } from "../viewTypes";
 import type { BuiltFrom, CacheRead } from "./referenceCache";
+import { MASTERS_OBJECT_SLICE_KEYS } from "../viewTypes";
 
 export type { MastersBook, MastersView, ModuleRegistryView, RbacView, StaffListEntry, StaffListView } from "../viewTypes";
 
@@ -54,6 +55,8 @@ export type ViewDeps = {
   /** A valid mirror sync secret on the request (hasMirrorSyncSecret). */
   mirrorSecret: (req: Request) => boolean;
   readMasters: () => Promise<CacheRead<MastersState>>;
+  /** The slice stamps a Masters copy was read with (object slices are written against them). */
+  mastersStamps?: (state: MastersState) => Record<string, string> | null;
   readRbac: () => Promise<CacheRead<RbacCopy>>;
   readModuleRegistry: () => Promise<CacheRead<ModuleRegistryState>>;
 };
@@ -116,7 +119,22 @@ export async function mastersViewGet(req: Request, deps: ViewDeps): Promise<Resp
     access.scope === "full"
       ? book
       : ({ version: book.version, ...teachingMastersSubset(book as unknown as Record<string, unknown>) } as unknown as MastersBook);
-  const view: MastersView = { scope: access.scope, masters };
+  // Every list element is passed through as stored — with its `_rev`, the
+  // base of its next write (data-layer 2.2b; no normalisation here drops
+  // it). Object slices carry no `_rev`: their base is the slice's stamp,
+  // given in `stamps` for each object slice this answer carries.
+  const stamps: Record<string, string> = {};
+  const all = deps.mastersStamps?.(read.value) ?? null;
+  if (all) {
+    for (const k of MASTERS_OBJECT_SLICE_KEYS) {
+      // The teaching subset fills withheld keys with the empty shell's
+      // defaults: only a key it is the truth for gets a stamp (a commit of a
+      // withheld object then has no base and is refused).
+      const served = access.scope === "full" || (TEACHING_MASTERS_KEYS as readonly string[]).includes(k);
+      if (served && all[k] && (masters as unknown as Record<string, unknown>)[k] !== undefined) stamps[k] = all[k]!;
+    }
+  }
+  const view: MastersView = { scope: access.scope, masters, stamps };
   return viewOk(view, read);
 }
 

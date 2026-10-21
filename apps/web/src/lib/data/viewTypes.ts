@@ -19,7 +19,17 @@ export type MastersView = {
    */
   scope: "full" | "teaching";
   masters: MastersBook;
+  /**
+   * Data-layer 2.2b: the stamp (`updated_at`) of each OBJECT slice this answer
+   * carries (schoolProfile, schoolTiming, midYearFeePolicy, statutoryConfig)
+   * — the base of its next write. List elements carry their own `_rev`.
+   * Absent from servers before 2.2b, and when the stamps were not read.
+   */
+  stamps?: Partial<Record<(typeof MASTERS_OBJECT_SLICE_KEYS)[number], string>>;
 };
+
+/** Masters' object slices (lib/mastersNormalized.server MASTERS_OBJECT_SLICES), as the views name them. */
+export const MASTERS_OBJECT_SLICE_KEYS = ["midYearFeePolicy", "schoolProfile", "schoolTiming", "statutoryConfig"] as const;
 
 export type StaffListEntry = {
   id: string;

@@ -3,9 +3,9 @@
 /**
  * The test-only subject editor behind /e2e/write-kernel (data-layer 1.5).
  *
- * Read: GET /api/data/masters.subjects — the slice's elements and its stamp.
- * Write: one element through useSaveMutation, base = the stamp this screen
- * read. On a conflict it says so (the shared describeWriteFailure text) and
+ * Read: GET /api/data/masters.subjects — the slice's elements, each with its
+ * own `_rev` (data-layer 2.2b). Write: one element through useSaveMutation,
+ * base = that element's `_rev` as this screen read it. On a conflict it says so (the shared describeWriteFailure text) and
  * reads again, so the screen shows what the server holds — the other
  * writer's value — and never re-sends its own over it.
  */
@@ -13,13 +13,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { readPage } from "@/lib/data/client/query";
 import { useSaveMutation } from "@/lib/data/client/useSaveMutation";
-import { describeWriteFailure, type Revision } from "@/lib/data/types";
+import { asRevision, describeWriteFailure } from "@/lib/data/types";
 
-type Subject = { id: string; nameEn?: string; code?: string };
+type Subject = { id: string; nameEn?: string; code?: string; _rev?: number };
 
 export function WriteKernelSubjects() {
   const [subjects, setSubjects] = useState<Subject[] | null>(null);
-  const [revision, setRevision] = useState<Revision | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [toast, setToast] = useState<string | null>(null);
@@ -33,7 +32,6 @@ export function WriteKernelSubjects() {
     }
     setLoadError(null);
     setSubjects(res.rows);
-    setRevision(res.revision ?? null);
     setDrafts({});
   }, []);
 
@@ -44,7 +42,8 @@ export function WriteKernelSubjects() {
   async function save(s: Subject) {
     setToast(null);
     const result = await mutation.save([
-      { op: "upsert", id: s.id, base: revision, row: { nameEn: drafts[s.id] ?? s.nameEn ?? "" } },
+      // The element's `_rev` from the server's answer is its base.
+      { op: "upsert", id: s.id, base: s._rev ? asRevision(String(s._rev)) : null, row: { nameEn: drafts[s.id] ?? s.nameEn ?? "" } },
     ]);
     // "Saved" only after the server said so; a failure in the one wording
     // every screen uses (describeWriteFailure).

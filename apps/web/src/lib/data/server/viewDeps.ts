@@ -7,7 +7,7 @@
  */
 // Server code, but no `import "server-only"`: the views self-test imports it under plain tsx.
 import { hasMirrorSyncSecret, requireStaffApi, requireStaffPermission } from "@/lib/apiRouteAuth.server";
-import { readServerMastersCopy, readServerRbacCopy } from "@/lib/api/v1/auth";
+import { readServerMastersCopy, readServerRbacCopy, serverMastersSliceStamps } from "@/lib/api/v1/auth";
 import { resolveMastersReadScope } from "@/lib/mastersReadScope.server";
 import type { ModuleRegistryState } from "@/lib/moduleRegistry";
 import { referenceCache, type BuildResult } from "./referenceCache";
@@ -36,6 +36,7 @@ export const viewDeps: ViewDeps = {
   requireSettingsView: (req) => requireStaffPermission(req, "settings", "view"),
   mirrorSecret: (req) => hasMirrorSyncSecret(req),
   readMasters: () => readServerMastersCopy(),
+  mastersStamps: (state) => serverMastersSliceStamps(state),
   readRbac: () => readServerRbacCopy(),
   readModuleRegistry: () => moduleRegistryCache.read(),
 };

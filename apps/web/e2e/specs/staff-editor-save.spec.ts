@@ -10,10 +10,14 @@
  * before saveMasters and no POST /api/school-data/staff-roster was ever sent.
  *
  * The fixture's staff are the same shape (login on, no username). The
- * Principal (staff.edit) opens one, changes the mobile, presses Save: the
- * roster POST must go out and succeed, and the server's record must carry
- * the new mobile (and the defaulted username). Writes, so it runs in the
+ * Principal (staff.edit) opens one, changes the father's name, presses Save:
+ * the roster POST must go out and succeed, and the server's record must carry
+ * the new value (and the defaulted username). Writes, so it runs in the
  * writing project after every read-only spec (playwright.config.ts).
+ *
+ * (Data-layer 2.2b, director 21 Oct 2026: a SET registered mobile is a
+ * sign-in link and is changed only by the owner — so this spec edits a plain
+ * field; the mobile rule has its own checks in e2e/staff-kernel.acceptance.ts.)
  */
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { staffId } from "../fixture";
@@ -32,11 +36,12 @@ test("staff editor: Save sends the change and the server record changes", async 
   expect(row.loginEnabled, "fixture: login enabled").toBe(true);
   expect(row.loginUsername, "fixture: no username").toBe("");
 
-  const next = `98${String(Date.now()).slice(-8)}`;
+  const next = `E2E Father ${String(Date.now()).slice(-6)}`;
   await page.goto(`/staff/${EDITED}/edit`);
   const mobile = page.locator("label", { hasText: "Mobile *" }).locator("input");
   await expect(mobile).toHaveValue(row.mobile, { timeout: 30_000 });
-  await mobile.fill(next);
+  const father = page.locator("label", { hasText: "Father's name" }).locator("input");
+  await father.fill(next);
 
   const posted = page.waitForResponse(
     (r) => r.url().includes("/api/school-data/staff-roster") && r.request().method() === "POST",
@@ -50,7 +55,8 @@ test("staff editor: Save sends the change and the server record changes", async 
 
   const after = (await (await context.request.get("/api/school-data/staff-roster")).json()) as Roster;
   const saved = after.staff.find((s) => s.id === EDITED);
-  expect(saved?.mobile, "server mobile").toBe(next);
+  expect(saved?.fatherName, "server father's name").toBe(next);
+  expect(saved?.mobile, "the mobile unchanged").toBe(row.mobile);
   expect(saved?.loginUsername, "server username defaulted from the emp code").toBe(row.empCode.toLowerCase());
   await context.close();
 });

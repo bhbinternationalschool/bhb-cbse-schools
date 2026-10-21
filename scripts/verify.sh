@@ -572,6 +572,9 @@ SELFTESTS=(
   test:reference-views
   test:masters-bridge
   test:masters-pending
+  test:staff-kernel
+  test:masters-writes
+  test:desk-feature-rev
   test:staff-requests
   test:survey-team-plan
   test:parent-api-scope

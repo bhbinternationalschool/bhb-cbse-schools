@@ -4,6 +4,7 @@
  */
 
 import { serialSave } from "@/lib/serialSave";
+import { rosterEmpKey } from "@/lib/staffProtectedFields";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
@@ -232,10 +233,15 @@ export async function fetchStaffRemoteServer(): Promise<StaffRemoteBundle | null
   const { sb, tenantId } = ctx;
 
   // Paged: PostgREST stops at 1,000 rows and calls the cut a success.
+  // A soft-removed member (deleted_at set — data-layer 2.2a/2.2b) is not on
+  // the roster: not listed, not resolved for permissions, and their session
+  // ends (revalidateStaffSession finds no record). Restoring clears deleted_at
+  // and they are back on the next read.
   const page = (table: string) =>
-    fetchAllPages<Record<string, unknown>>((from, to) =>
-      sb.from(table).select("*").eq("tenant_id", tenantId).order("id").range(from, to),
-    );
+    fetchAllPages<Record<string, unknown>>((from, to) => {
+      const q = sb.from(table).select("*").eq("tenant_id", tenantId);
+      return (table === "sis_staff" ? q.is("deleted_at", null) : q).order("id").range(from, to);
+    });
   const [depRes, desRes, stfRes] = await Promise.all([
     page("sis_departments"),
     page("sis_designations"),
@@ -432,7 +438,10 @@ async function upsertStaffBundle(
   ): Map<string, string> => {
     const m = new Map<string, string>();
     for (const r of rows ?? []) {
-      const k = String((r as Record<string, unknown>)[key] ?? "").trim();
+      // Employee codes compare upper-cased and trimmed — the same key the
+      // protected-field guard judges a row by (staffProtectedFields.rosterEmpKey).
+      const raw = String((r as Record<string, unknown>)[key] ?? "");
+      const k = key === "emp_code" ? rosterEmpKey(raw) : raw.trim();
       if (k) m.set(k, String(r.id));
     }
     return m;
@@ -479,7 +488,7 @@ async function upsertStaffBundle(
       // The API route feeds request JSON straight through; normalize so a
       // partial record can't crash the row builders further down.
       const s = normalizeStaffRecord(raw);
-      const emp = (s.empCode || "").trim();
+      const emp = rosterEmpKey(s.empCode);
       const dbId = emp ? stfIdByEmp.get(emp) : undefined;
       if (dbId && dbId !== s.id) stfRemap.set(s.id, dbId);
       return {
@@ -493,7 +502,7 @@ async function upsertStaffBundle(
           : s.designationId,
       };
     }),
-    (s) => (s.empCode || "").trim() || s.id,
+    (s) => rosterEmpKey(s.empCode) || s.id,
   );
 
   const rowsBySlice: Record<(typeof STAFF_STAMPED_SLICES)[number], Record<string, unknown>[]> = {
@@ -594,15 +603,33 @@ async function pushStaffSliceNow(
       error?: string;
       stamps?: RowStamps;
       conflicts?: RowConflicts;
+      refused?: RowConflicts;
+      refusal?: string;
     } | null;
     if (!res.ok || !body?.ok) {
       const message = body?.error || `HTTP ${res.status}`;
       console.warn("[staff] push failed", message);
+      // A protected-field refusal (bank / Aadhaar / PAN / pay, a sign-in
+      // detail — 2.2b) is said where the person is, once, and the refused
+      // rows go back to the server's copy (below) so they are not re-sent
+      // with every later save from this tab.
+      if (res.status === 403) {
+        const { recordDeskSyncFailure } = await import("@/lib/deskSyncStatus");
+        recordDeskSyncFailure(MODULE, { status: 403, error: message });
+        if (body?.refused) onStampConflicts(MODULE, body.refused);
+      }
       return { ok: false, error: message };
     }
     applyStampedSave(MODULE, holder, stamps, body, STAFF_STAMPED_SLICES);
     // A record changed elsewhere first was not written: reload, and say so.
     onStampConflicts(MODULE, body.conflicts);
+    if (body.refused && body.refusal) {
+      // Some rows were refused (protected fields), the rest saved: say why,
+      // once, and re-read the roster so the refused rows are the server's again.
+      const { recordDeskSyncFailure } = await import("@/lib/deskSyncStatus");
+      recordDeskSyncFailure(MODULE, { status: 403, error: body.refusal });
+      onStampConflicts(MODULE, body.refused);
+    }
     return { ok: true };
   } catch (e) {
     console.warn("[staff] push error", e);
@@ -610,51 +637,40 @@ async function pushStaffSliceNow(
   }
 }
 
-async function wipeStaffBundle(
-  sb: SupabaseClient,
-  tenantId: string,
-): Promise<{ ok: boolean; error?: string }> {
-  const { error: stfErr } = await sb
-    .from("sis_staff")
-    .delete()
-    .eq("tenant_id", tenantId);
-  if (stfErr) {
-    console.warn("[staff] wipe staff failed", stfErr.message);
-    return { ok: false, error: stfErr.message };
-  }
-  const { error: desErr } = await sb
-    .from("sis_designations")
-    .delete()
-    .eq("tenant_id", tenantId);
-  if (desErr) {
-    console.warn("[staff] wipe designations failed", desErr.message);
-    return { ok: false, error: desErr.message };
-  }
-  const { error: depErr } = await sb
-    .from("sis_departments")
-    .delete()
-    .eq("tenant_id", tenantId);
-  if (depErr) {
-    console.warn("[staff] wipe departments failed", depErr.message);
-    return { ok: false, error: depErr.message };
-  }
-  return { ok: true };
-}
-
-/** Service-role wipe — used by the API route (tenant reset flows). */
-export async function wipeRemoteStaffRosterServer(): Promise<{
+/**
+ * The old route's "wipe the roster" (DELETE /api/school-data/staff-roster),
+ * since data-layer 2.2b a SOFT remove: every staff row not already removed
+ * gets deleted_at = now and deleted_by = `by` (the session, set by the
+ * route), exactly as the kernel's Remove does — hidden everywhere, restorable
+ * one by one. Departments and designations are left as they are: they are
+ * the school's setup, and a restored member must find theirs. Nothing is
+ * hard-deleted any more (the director's decision, 20 Oct 2026).
+ */
+export async function softRemoveStaffRosterServer(by: string): Promise<{
   ok: boolean;
   error?: string;
+  removed?: number;
 }> {
+  if (!by.trim()) return { ok: false, error: "who removed the roster is required" };
   const { getServerTenantContext } = await import("@/lib/serverTenant");
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
-  const result = await wipeStaffBundle(ctx.sb, ctx.tenantId);
-  if (result.ok) resetStaffPersistenceCache();
-  return result;
+  const now = new Date().toISOString();
+  const { data, error } = await ctx.sb
+    .from("sis_staff")
+    .update({ deleted_at: now, deleted_by: by.trim(), updated_at: now })
+    .eq("tenant_id", ctx.tenantId)
+    .is("deleted_at", null)
+    .select("id");
+  if (error) {
+    console.warn("[staff] soft remove failed", error.message);
+    return { ok: false, error: error.message };
+  }
+  resetStaffPersistenceCache();
+  return { ok: true, removed: (data ?? []).length };
 }
 
-/** Browser: wipe staff roster via the server API. */
+/** Browser: soft-remove the whole roster via the server API (no caller today). */
 export async function wipeRemoteStaffRoster(): Promise<{
   ok: boolean;
   error?: string;

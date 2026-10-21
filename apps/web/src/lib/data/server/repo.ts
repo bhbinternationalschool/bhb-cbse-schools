@@ -23,7 +23,8 @@ import "server-only";
 
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { fetchAllPages } from "@/lib/supabase/pageAll";
-import { collectionDef, collectionKind, type CollectionDef, type SliceSource } from "../registry";
+import { redactStoredForAnswer } from "../answerRedaction";
+import { collectionDef, collectionIds, collectionKind, type CollectionDef, type SliceSource } from "../registry";
 import {
   asRevision,
   type ConflictReason,
@@ -56,6 +57,12 @@ export type ListParams = {
   cursor?: Cursor | null;
   /** Restrict to a teacher's reach. See RowScope. */
   scope?: RowScope;
+  /**
+   * Soft-delete collections only: list the REMOVED rows (deleted_at set)
+   * instead of the live ones — what a "Removed" list offers to restore
+   * (data-layer 2.2b, staff Remove). The route allows it to `edit` holders.
+   */
+  removed?: boolean;
 };
 
 /** Keyset cursor: the sort value and id of the last row on the page. */
@@ -191,7 +198,9 @@ export async function list(
     q = q.eq(k, v as string);
   }
   if (def.softDelete) {
-    q = q.is("deleted_at", null);
+    q = params.removed ? q.not("deleted_at", "is", null) : q.is("deleted_at", null);
+  } else if (params.removed) {
+    return { ok: false, code: "invalid", error: `${def.id} has no removed records (it is not soft-deleted)` };
   }
   // Scope in the WHERE clause (R5). Sections: section_id in (…) here, and the
   // (class, section) pair checked below — a child whose class moved but whose
@@ -379,6 +388,132 @@ export async function revisionsOf(
   };
 }
 
+/**
+ * Whole stored rows of a row collection's table by id (soft-deleted ones
+ * included — the caller decides), for a server-side check BEFORE a write
+ * (data-layer 2.2b: staff protected fields). Server use only: these rows
+ * are never sent to a browser from here. Throws on a failed read — unknown
+ * is never "no such row".
+ */
+export async function readRowsByIds(table: string, ids: readonly string[]): Promise<Map<string, Row>> {
+  const out = new Map<string, Row>();
+  const wanted = Array.from(new Set(ids.filter((x) => typeof x === "string" && x)));
+  if (wanted.length === 0) return out;
+  const ctx = await getServerTenantContext();
+  if (!ctx) throw new Error("Supabase tenant not configured");
+  for (let i = 0; i < wanted.length; i += 200) {
+    const { data, error } = await ctx.sb
+      .from(table)
+      .select("*")
+      .eq("tenant_id", ctx.tenantId)
+      .in("id", wanted.slice(i, i + 200));
+    if (error) throw new Error(error.message);
+    for (const r of (data ?? []) as unknown as Row[]) out.set(String(r.id), r);
+  }
+  return out;
+}
+
+/** id, email and mobile of every live (not removed) staff member — the sign-in links (2.2b). Throws on a failed read. */
+export async function staffSignInLinks(): Promise<Row[]> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) throw new Error("Supabase tenant not configured");
+  const res = await fetchAllPages<Row>((from, to) =>
+    ctx.sb
+      .from("sis_staff")
+      .select("id, email, mobile")
+      .eq("tenant_id", ctx.tenantId)
+      .is("deleted_at", null)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  if (res.error || res.truncated) throw new Error(res.error ?? "staff sign-in links truncated");
+  return res.rows;
+}
+
+/**
+ * Every mobile a sign-in resolves somebody by — live staff (the registered
+ * mobile), families (mobile, WhatsApp, alternate) and logins (profiles) — as
+ * the last 10 digits (+91, spaces, dashes and all spellings alike), each with
+ * whose it is. `exceptStaffId`: that member's own number is not "in use". For
+ * the director's mobile rule (21 Oct 2026). Throws on a failed read.
+ */
+export async function signInMobilesInUse(exceptStaffId?: string): Promise<Set<string>> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) throw new Error("Supabase tenant not configured");
+  const out = new Set<string>();
+  const add = (v: unknown) => {
+    const k = String(v ?? "").replace(/\D/g, "").slice(-10);
+    if (k.length === 10 && !/^0+$/.test(k)) out.add(k);
+  };
+  const page = (table: string, cols: string, liveOnly = false) =>
+    fetchAllPages<Row>((from, to) => {
+      const q = ctx.sb.from(table).select(cols).eq("tenant_id", ctx.tenantId);
+      return (liveOnly ? q.is("deleted_at", null) : q).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{
+        data: Row[] | null;
+        error: { message: string } | null;
+      }>;
+    });
+  const [staff, homes, logins] = await Promise.all([
+    page("sis_staff", "id, mobile", true),
+    page("sis_households", "id, mobile, whatsapp_mobile, alt_mobile"),
+    page("profiles", "id, mobile"),
+  ]);
+  for (const r of [staff, homes, logins]) {
+    if (r.error || r.truncated) throw new Error(r.error ?? "sign-in numbers truncated");
+  }
+  for (const s of staff.rows) if (String(s.id) !== exceptStaffId) add(s.mobile);
+  for (const h of homes.rows) {
+    add(h.mobile);
+    add(h.whatsapp_mobile);
+    add(h.alt_mobile);
+  }
+  for (const l of logins.rows) add(l.mobile);
+  return out;
+}
+
+/** How many elements one list slice holds now. Throws on a failed read. */
+export async function sliceElementCount(src: SliceSource): Promise<number> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) throw new Error("Supabase tenant not configured");
+  const { data, error } = await ctx.sb
+    .from(src.table)
+    .select("payload")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("slice_key", src.key)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const payload = (data as { payload?: unknown } | null)?.payload;
+  return Array.isArray(payload) ? payload.length : 0;
+}
+
+/**
+ * Stored elements of one list slice by key (data-layer 2.2b: the function-
+ * grant check needs the stored element's class before a teacher's write).
+ * Throws on a failed read.
+ */
+export async function readSliceElements(src: SliceSource, ids: readonly string[]): Promise<Map<string, Row>> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) throw new Error("Supabase tenant not configured");
+  const { data, error } = await ctx.sb
+    .from(src.table)
+    .select("payload")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("slice_key", src.key)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const payload = (data as { payload?: unknown } | null)?.payload;
+  if (payload != null && !Array.isArray(payload)) throw new Error(`${src.key}: the stored slice is not a list`);
+  const keyField = src.keyField ?? "id";
+  const want = new Set(ids);
+  const out = new Map<string, Row>();
+  for (const e of (payload as unknown[] | null) ?? []) {
+    if (!e || typeof e !== "object" || Array.isArray(e)) continue;
+    const k = String((e as Row)[keyField] ?? "");
+    if (want.has(k) && !out.has(k)) out.set(k, e as Row);
+  }
+  return out;
+}
+
 /** A missing kernel function is unavailable — the code fails closed (§0). */
 function rpcFailure(
   error: { code?: string; message: string },
@@ -447,6 +582,79 @@ export async function writeSlice(
  */
 export async function writeSliceElement(src: SliceSource, op: WriteOp<Row>): Promise<WriteResult<Row>> {
   return writeSliceOp(src, false, op);
+}
+
+/**
+ * Several elements of `_rev` slice collections in ONE transaction, through
+ * desk_slice_rows_write (data-layer 2.2a): all applied, or — one conflict —
+ * none, with every op's outcome. Bases are element `_rev`s only. ≤ 500 ops.
+ * Used for a Masters commit that changes more than one element (2.2b,
+ * useMastersMutation), so a commit never lands half-way.
+ */
+export async function writeSliceBatch(collectionId: string, ops: readonly WriteOp<Row>[]): Promise<WriteResult<Row>> {
+  const def = collectionDef(collectionId);
+  if (!def || !def.slice || collectionKind(def) !== "slice" || def.slice.base !== "rev") {
+    return { ok: false, kind: "invalid", message: `${collectionId} does not take a batch of element writes`, conflicts: [] };
+  }
+  if (ops.length === 0) return { ok: true, results: [], versions: {} };
+  if (ops.length > 500) {
+    return { ok: false, kind: "invalid", message: `At most 500 changes in one save (got ${ops.length})`, conflicts: [] };
+  }
+  const src = def.slice;
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, kind: "unavailable", message: "Supabase tenant not configured", conflicts: [] };
+  const p_ops = ops.map((op) => ({
+    slice: src.key,
+    op: op.op,
+    id: typeof op?.id === "string" ? op.id : "",
+    row: op.op === "upsert" ? ((op as { row?: unknown }).row ?? null) : null,
+    base: op.base == null ? null : String(op.base),
+    key: src.keyField ?? "id",
+  }));
+  const { data, error } = await ctx.sb.rpc("desk_slice_rows_write", {
+    p_tenant: ctx.tenantId,
+    p_table: src.table,
+    p_ops,
+  });
+  if (error) {
+    const f = rpcFailure(error);
+    return { ok: false, kind: f.kind, message: f.message, conflicts: [] };
+  }
+  const res = (data ?? {}) as {
+    ok?: boolean;
+    revision?: string | null;
+    results?: { id?: string; ok?: boolean; status?: string; reason?: string; rev?: number | null; stored?: Row | null }[];
+  };
+  const outcomes = res.results ?? [];
+  if (res.ok !== true) {
+    const conflicts: RecordOutcome<Row>[] = outcomes
+      .filter((r) => r.ok !== true)
+      .map((r) => ({
+        id: String(r.id ?? ""),
+        status: "conflict" as const,
+        revision: asRevision(r.rev == null ? "" : String(r.rev)),
+        stored: (r.stored ?? {}) as Row,
+        reason: asReason(r.reason),
+      }));
+    return {
+      ok: false,
+      kind: "conflict",
+      message: `${conflicts.length} of ${ops.length} change(s) were made elsewhere first — nothing was written`,
+      conflicts,
+    };
+  }
+  const versions: Record<string, Revision> = {};
+  const results: RecordOutcome<Row>[] = outcomes.map((r) => {
+    const id = String(r.id ?? "");
+    const rev = asRevision(r.rev == null ? "" : String(r.rev));
+    if (r.status !== "deleted") versions[id] = rev;
+    return {
+      id,
+      status: r.status === "unchanged" ? "unchanged" : r.status === "deleted" ? "deleted" : "applied",
+      revision: rev,
+    };
+  });
+  return { ok: true, results, versions, revision: res.revision ? asRevision(String(res.revision)) : null };
 }
 
 async function writeSliceOp(src: SliceSource, isObject: boolean, op: WriteOp<Row>): Promise<WriteResult<Row>> {
@@ -548,6 +756,33 @@ export async function write(
   return writeRows(def.table, ops);
 }
 
+function redactConflicts(def: CollectionDef | undefined, result: WriteResult<Row>): WriteResult<Row> {
+  if (result.ok || !def?.answerRedaction || result.conflicts.length === 0) return result;
+  return {
+    ...result,
+    conflicts: result.conflicts.map((c) =>
+      c.status === "conflict" ? { ...c, stored: redactStoredForAnswer(def, c.stored) } : c,
+    ),
+  };
+}
+
+/** The registry entry for a table (for answer redaction on table-level writes). */
+function defForTable(table: string): CollectionDef | undefined {
+  return collectionIdsByTable().get(table);
+}
+
+let byTable: Map<string, CollectionDef> | null = null;
+function collectionIdsByTable(): Map<string, CollectionDef> {
+  if (!byTable) {
+    byTable = new Map();
+    for (const id of collectionIds()) {
+      const d = collectionDef(id)!;
+      if (collectionKind(d) === "rows" && !byTable.has(d.table)) byTable.set(d.table, d);
+    }
+  }
+  return byTable;
+}
+
 /**
  * The same, for a table no collection exposes through the generic API —
  * a server module that decides every op itself (lib/notify/inbox.ts: a
@@ -574,7 +809,34 @@ export async function writeRows(table: string, ops: readonly WriteOp<Row>[]): Pr
     p_table: table,
     p_ops: ops,
   });
+  return redactConflicts(defForTable(table), guardedAnswer(data, error));
+}
 
+/**
+ * sis_staff ops through sis_staff_write_sensitive (data-layer 2.2a) — the
+ * only path that may change bank / UPI / Aadhaar / PAN / pay. The caller
+ * (POST /api/data/sis.staff/sensitive) has already decided `authority` and
+ * `actor` from the SESSION; nothing in a request body reaches either.
+ */
+export async function writeStaffSensitive(
+  ops: readonly WriteOp<Row>[],
+  authority: "owner" | "payroll" | "accounts",
+  actor: string,
+): Promise<WriteResult<Row>> {
+  if (ops.length === 0) return { ok: true, results: [], versions: {} };
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, kind: "unavailable", message: "Supabase tenant not configured", conflicts: [] };
+  const { data, error } = await ctx.sb.rpc("sis_staff_write_sensitive", {
+    p_tenant: ctx.tenantId,
+    p_ops: ops,
+    p_authority: authority,
+    p_actor: actor,
+  });
+  return redactConflicts(defForTable("sis_staff"), guardedAnswer(data, error));
+}
+
+/** desk_write_guarded's answer (or sis_staff_write_sensitive's — the same shape) as a WriteResult. */
+function guardedAnswer(data: unknown, error: { code?: string; message: string } | null): WriteResult<Row> {
   if (error) {
     // 42501 is the allowlist refusing the table — a bug or an attack, never
     // something to retry. 22023 is a malformed batch (an op without an id, an

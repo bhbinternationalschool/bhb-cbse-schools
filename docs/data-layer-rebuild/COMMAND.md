@@ -1322,7 +1322,9 @@ elements (registry `base: "rev"` for the 21 `masters.*` list collections). **2.2
 `ensureStudentClassLinks` stops saving). **2.2e** the fee-setup clone through `desk_slice_rows_write`.
 **2.2f** delete the whole-book push, `mastersSectionSave` and the function-only branch; the 410 stub; the
 acceptance above. *(The split was given to the 2.2a executor as "2.2a–2.2f"; the per-PR contents above
-are its reading of the step list — the director may re-cut 2.2b–2.2f.)*
+are its reading of the step list — the director may re-cut 2.2b–2.2f.)* **Re-cut by the director (20–21 Oct):**
+2.2b kernel plumbing (no screen moves) → 2.2c foundation panels, section teachers, timetable periods →
+2.2d staff editor and profile form → 2.2e fees → 2.2f deletions (masters-desk POST 410, `saveMasters` gone).
 
 *(2.2a built 21 Oct 2026, PR #697 — migration `20261021090000_data_layer_masters_row_revs_staff_kernel.sql`:
 **the director applies it to production before 2.2b deploys**; it is safe to apply ahead of time — no
@@ -1405,6 +1407,159 @@ element's `_rev` could then match (the old path resurrecting a deleted element i
 (`docs.*`) are **not** in the sensitive list — the director's list did not name them; adding one is a
 one-line change to `_sis_staff_sensitive_keys()`. Masters exports that dump whole elements will show a
 `_rev` field.
+
+*(2.2b built 21 Oct 2026, PR #702 — kernel plumbing; no screen moved, no migration.)* **What exists.**
+- **A staff write never wipes the record:** `profile` is one jsonb column and the kernel patches columns, so an
+  upsert's profile keys are laid on the STORED profile (a key is cleared by sending it blank, never by leaving it
+  out) — without this, a profile carrying only the changed keys replaced the whole record (found on the stack: an
+  edit sending `{fullName, mobile}` replaced a 69-key profile with those keys plus the protected ones; fixed and asserted key by key).
+- **Staff collections** (`lib/data/registry.ts`): `sis.staff` (soft delete; `staffRecords`), `sis.departments`,
+  `sis.designations` (hard delete) — module `staff`, view/edit `staff`; a delete of any of the three is a decision:
+  `staff · delete` (new `ApprovalRule.action`; the approval gate asked only `approve` before). `POST /api/data/sis.staff`:
+  a delete op's `by` is the SESSION's (staff id, else e-mail) whatever the body says, on every collection; an upsert
+  may not write `deleted_by`/`tenant_id`; restore = an upsert `{deleted_at: null}` at the removed row's revision
+  (`?ids=`). `GET /api/data/<softDelete collection>?removed=1` lists the removed rows (edit holders only).
+  `GET sis.staff` = the staff-roster GET's rule: whole rows (never `loginPassword`) for staff · edit and for the
+  person's own row, a directory for everyone else (`lib/data/server/staffKernel.ts`).
+- **Protected staff fields** (`lib/staffProtectedFields.ts`, keys in `lib/staffProtectedKeys.ts` = the database's
+  `_sis_staff_sensitive_keys()`, checked on the stack): bank, UPI, Aadhaar, PAN, pay — and, decided here, the
+  **login**: `loginUsername` is an identity link (`/api/auth/session` signs a Supabase login in as the row whose email
+  OR loginUsername matches) and `loginPassword` is a demo-era plain-text password (real sign-in is Supabase Auth).
+  Through `sis.staff` none of them changes (403 with the reason; the profile is ONE jsonb column, so keys an upsert
+  leaves out are laid on from the stored row — leaving them out is not a blanking; a stale copy's old bank value is
+  the database's 409, but a login change is refused even from a stale copy, having no database check). A new record
+  may carry the username the form derives from its employee code, or none; no bank details.
+  **`POST /api/data/sis.staff/sensitive`** (`app/api/data/[collection]/sensitive/route.ts`, rules in
+  `lib/data/server/staffSensitive.ts`): body `{ops:[{id, base, fields}]}`, fields = protected keys only; authority
+  from the SESSION (`staffSensitiveAuthority`: owner — protected e-mail or a role coded `owner`; else payroll · edit;
+  else accounts · edit; never the mirror secret), actor = the session's staff id; the stored profile with the given
+  fields laid on goes through `sis_staff_write_sensitive` (which logs field names to `sis_staff_sensitive_changes`).
+  Login username: owner only; a password is never SET by any path — the owner may clear one. Removed member: restore
+  first. **Finding:** the built-in `office` role holds payroll · edit and accounts · edit, and `admin` accounts · edit —
+  so every built-in role with staff · edit is also an authority; "plain staff editing" exists only for custom roles or
+  personal denies (how the stack proves the refusals).
+- **Conflict answers** never carry those keys: `answerRedaction` in the registry (sis.staff: profile's bank / UPI /
+  Aadhaar / PAN / pay / login), applied in the repo to every conflict `stored` row (`lib/data/answerRedaction.ts`) —
+  `write`, `writeRows` by table, and the sensitive route. (Review of 2.2a, item 1.)
+- **The old staff-roster route** (still the Staff screen's save until 2.2d): POST judges the rows it WILL write
+  (stamped: the rows named; unstamped: new rows only; stored rows matched by id, else by employee code) with the same
+  rule and the session's authority — a plain staff editor changing a protected key → 403, nothing written; the
+  browser's push records the 403 with `recordDeskSyncFailure`, whose toast now recognises these refusals
+  (`isFeatureRefusalMessage`). DELETE (the "wipe", no caller in the app) is a SOFT remove of every live staff row
+  (`deleted_at`, `deleted_by` = the session); departments and designations are no longer deleted. (Items 2 and 4.)
+- **Removed staff are hidden by every server-side list** (item 5), inventory: `fetchStaffRemoteServer` (staff-roster
+  GET; the server Masters cache behind `/api/data/views/{masters,staff-list}`, every `/api/v1/*` route reading
+  `ctx.masters.staff` — mobile roster, scope, payroll; the school mirror; and `revalidateStaffSession`, so a removed
+  member's session ends with 401), `/api/auth/session` (sign-in match), `authProvisioning` (OTP provisioning),
+  `erpChatActorLite`, `waRoleResolver.server` (WhatsApp identity ×2), `/api/v1/staff/profile-requests` (mobile clash),
+  `udiseTeacherSync.server`, `udiseSchoolProfile.server`, `noticePush.server`, `visitingPay.server` (visiting list),
+  `websiteContent.server` (public people). Left as they are (single records by id, history labels, an existence
+  check, the BigQuery export): `fetchStaffDocsById`, `staffSelfProfile.server`, `visitingPay` single-row reads,
+  `libraryCounter` labels, `staffAttendanceOutdoorDuty` id check, `bigQuerySyncCatalog`. Restoring clears
+  `deleted_at`: every reader shows them again (proved on the stack).
+- **Masters element writes:** the 21 `masters.*` list collections are `base: "rev"` — a read hands out each element's
+  `_rev` (no slice stamp), a write sends it; several ops in one request to a `_rev` list are ONE all-or-none
+  `desk_slice_rows_write` batch (`writeSliceBatch`, ≤ 500). Object slices keep the slice stamp. The masters view passes
+  `_rev` through (nothing normalises it away) and returns `stamps` — each object slice's `updated_at`, read with its
+  payload (`serverMastersSliceStamps`; a withheld object in the teaching answer gets none).
+- **Function grants in `POST /api/data/<masters list>`** (`lib/data/server/sliceFunctionGate.ts`, rule
+  `sliceFunctionRules.ts`): without masters · edit, the function that owns the list decides, op by op from the
+  STORED element (absent = create): a teacher's `masters.class_subjects` writes only in her classes (the stored
+  element's class and the written one); a whole-module holder personally denied a function's action is refused it.
+  `deskFeatureAuth` compares rows without `_rev` (item 3: a re-push carrying an older `_rev`, or none, is no change).
+- **Client:** `useMastersMutation(sliceKey)` (`lib/data/client/writeHooks.tsx`) — `commit(next)` compares the edited
+  list with the view's served list and sends only the differences on their served `_rev` (`mastersCommit.ts`): more
+  than ONE delete per commit, a list going empty, an id twice or missing, a withheld (teaching-subset) list, or an
+  object without a served stamp are refused with nothing sent; then the masters view refetches.
+  `useStaffMutation(collection)` + the **staff bridge** (`staffBridge.ts`): after a confirmed staff write (or a
+  conflict) the page copy's roster is re-read from the server (server wins; removed members leave it), so permission
+  checks and the old save's stamps follow. `writeStaffSensitiveFields()` posts to the sensitive route. Nothing on a
+  screen calls these yet (2.2c/2.2d). The test screen `/e2e/write-kernel` writes on the element's `_rev`.
+**Proof.** Self-tests (in `verify.sh` and CI): `test:staff-kernel` (protected keys refused fresh/stale, laid on when
+absent, `by` = session, conflict redaction, list directory, authority matrix incl. a personal deny, sensitive-route
+rules, the old route's guard), `test:masters-writes` (registry flip, commit adapter, function rule, the masters view's
+`_rev` + stamps, the bridge), `test:desk-feature-rev`. Fail-on-old: `test:desk-feature-rev` fails on the old
+`deskFeatureAuth` ("You may not change class subjects"); 17 mutations of the new code each turn a self-test red.
+Stack (`e2e/staff-kernel.acceptance.ts`, in `e2e-stack.sh check`): on this branch **18/18**; the same file (16 checks at
+the time) against the base branch's app code, built on the same stack: **3/16** — a member marked removed still listed by staff-roster, the staff-list
+view and the mobile roster and still signed in; a plain editor's bank change through the old route written ("OLD-ROUTE");
+the old DELETE hard-deleted 35 staff, 3 departments and 8 designations; the teacher's own-class link 403; sis.staff and
+the sensitive route 404. `write-kernel.acceptance.ts` §3 now on element `_rev`s (adds: a different element from the
+same load lands; two ops = one batch, a stale one writes nothing); `stale-writer.spec` / `write-conflict.spec` use the
+element's `_rev`. CI scoreboard: see the PR.
+**Not done / not proven.** No screen writes through the new hooks (2.2c/2.2d). The refusal TOAST of the old staff
+editor was not seen on a screen: on the stack the old editor (`/staff/<id>/edit`, opened from the roster) sends no
+`POST /api/school-data/staff-roster` at all on Save (no request in 30 s; seen on the base branch's build) — the old
+save path is gated on the staff desk having been loaded by that page (`scheduleStaffSync`/`hasDeskLoaded`); a
+pre-existing defect, left to 2.2d, which replaces that path. The function-grant path writes only `_rev` lists (an
+object slice still needs masters · edit). `pfNumber`/`uanNumber`/`esicNumber` and document files are still not
+protected (2.2a's list). The e-mail column is an identity link too (sign-in matches it) and stays plain staff · edit.
+
+*(2.2b review fixes, 21 Oct 2026, same PR #702.)* An independent review found eight faults; all fixed, each with a
+self-test that fails on the earlier head (shown by reverting each fix: red) and a stack acceptance re-run (22 checks;
+the earlier head's app on the same stack: **11/22**).
+- **Director's decision (21 Oct): sensitive staff fields = owner + accountant only.** Payroll·edit / accounts·edit are
+  NOT the authority any more: the Office role (production: payroll·edit + accounts·edit, 2 active staff) runs payroll
+  and the books daily, and Admin (accounts·edit, 2 active staff) the accounts — taking those grants away would stop
+  that work. So a new FUNCTION `staff.sensitive_edit` ("Bank, ID & pay details", `lib/rbacFeatureCatalog/people.ts`)
+  is the authority, held as a function grant only (`featureGrantHeld` / `functionGrantHeldOnServer` — never via the
+  staff, payroll or accounts module as such), given to the built-in **Accounts** role in code (`defaultBuiltInRoles`)
+  and, for schools that already stored their roles, through `BUILT_IN_GRANT_ADDITIONS`
+  (`2026-10-21.accounts.staff_sensitive_edit`: added once to the stored Accounts role — production: 2 active staff
+  hold it). Production read-only, 21 Oct: roles with payroll·edit or accounts·edit and active staff assigned —
+  office 2, admin 2, accounts 2, principal 2; personal grants: 2 `payroll` edit DENIES, 2 `staff` edit allows; no one
+  holds the new function yet. After deploy only the owner and the Accounts role's 2 members can change these fields;
+  the principal (whole modules, no function grant) no longer can.
+- **Old route judges each row where the write lands**: by employee code (upper-cased, trimmed — the write's remap now
+  uses the same key, `rosterEmpKey`) first, else id; an id that is one member with another member's code is refused.
+- **Absent = keep** on the old route (`prepareRosterRows`): its push normalised an absent key to "" — leaving the bank
+  keys out blanked them.
+- **The form's default username** (derived from the employee code on every save) over a blank one is not a login
+  change (29 of 35 active production staff have no username: the office could otherwise save almost nobody).
+- **Refused rows only**: the old route writes the other rows of a save, answers `refused: {staff: [ids]}` with the
+  reason; the browser toasts it once and re-reads the roster (the refused rows go back to the server's copy) instead
+  of re-sending them with every later save.
+- **Profile-request approvals** of bank / Aadhaar / PAN go through `sis_staff_write_sensitive` (logged, owner or the
+  function — the accountant may decide such requests without staff·edit), never to a removed member.
+- **Sign-in links**: `email` and `mobile` (sign-in resolves people by them) on an existing record — set or changed — are
+  the owner's (kernel, old route, `/api/v1/staff/roster/mobile`); a new record may carry ones no other member holds;
+  a member may not give themselves another member's or an owner's e-mail (self-service profile).
+- **Server-side commit caps** on `POST /api/data/masters.*`: more than one removal, a removal emptying the list, or more
+  than 500 ops (every collection) → 400.
+- **Canonical comparison** (sorted keys; a number and the string that spells it alike; leading zeros kept).
+- Minor: an empty roster that was READ ends non-owner sessions (all removed); the owner is never locked out by the
+  roster; `visitingPay` single-row reads and `patchStaffRow` skip removed members.
+**Behaviour changes (review):** the office, admin and principal can no longer change bank / UPI / Aadhaar / PAN / pay;
+the office can no longer set or change anyone's e-mail or registered mobile on an existing record (the owner can) —
+including recording a missing mobile from the phone; a save with one refused row now saves its other rows.
+
+*(2.2b, director's follow-up and re-review, 21 Oct 2026, same PR #702.)*
+- **The Accounts role's `staff.sensitive_edit` is automatic and once-only**: `BUILT_IN_GRANT_ADDITIONS` adds it to a
+  stored Accounts role once (stamped in `defaultsApplied`, audited); the template is stamped too; a later removal by the
+  office stands on every load (self-test).
+- **A missing staff mobile may be recorded by the office** (director): only blank (or 0000000000) → a 10-digit number;
+  refused when any other member, family (mobile, WhatsApp, alternate) or login (`profiles`) has it — compared as the
+  last 10 digits (`signInMobilesInUse`) — or when the member holds powerful access (principal designation; owner /
+  admin / accounts / principal role; payroll·edit or accounts·edit; the bank & pay function; an owner e-mail —
+  `staffHoldsPowerfulAccess`); changing a set number stays the owner's. Same rule in the kernel, the old staff-roster
+  route, `/api/v1/staff/roster/mobile` and profile-request approvals. Every fill is in the app audit log
+  (`audit_events`: who, which record, when — never the number; `sis_staff_sensitive_changes` allows only owner /
+  payroll / accounts authorities by its own check, so using it would need a migration). The roster/mobile audit line no
+  longer carries numbers.
+- **The accountant can use the function**: `/staff/<id>/edit` shows a holder of the function without staff·edit a panel
+  with only bank, UPI, Aadhaar, PAN and basic pay (`StaffSensitiveDetailsPanel`, saving through the sensitive route);
+  the full record is readable for them (staff-roster GET, `GET sis.staff`); Staff → Requests shows them, and lets them
+  decide, the bank / ID / pay requests. For everyone without the function those inputs on the profile are locked, with
+  a line saying who enters them — typed data is never silently dropped.
+- **Sign-in details are one person's** even for the owner (sensitive route: an e-mail or mobile another member, family
+  or login holds → 409); a new member with a number someone else has is refused with a message saying so (a shared
+  family phone?) and that the owner can set it.
+- Main's `staff-editor-save.spec` (the old editor's Save, #705) now edits the father's name: a set mobile is the owner's.
+**Proof.** Self-tests (mobile rule, powerful access, once-only grant) red on the previous head; the stack acceptance
+(31 checks) on the review head's app: 23/31 — every new rule failed there; this branch 31/31. New
+`e2e/specs/staff-sensitive-screens.spec.ts` (project `staff-sensitive`): fails on the review head (no locked note, no
+panel); passes here; screens seen — the office's locked Bank tab and the accountant's panel saving, desktop light and
+phone 375 (the app's dark theme was not applied by the browser's colour-scheme emulation — dark not seen).
 
 **2.3a Delete the gate and the events.** With every component reader on hooks: delete
 `CoreDataGate` (React Query's loading state replaces it), the `bhb-masters-updated` /

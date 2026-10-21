@@ -65,7 +65,7 @@ async function recipients(audience: SchoolNotice["audience"]): Promise<{ staff: 
   const wantStaff = audience === "all" || audience === "staff";
   const wantParents = audience === "all" || audience === "parents";
   const [staff, families] = await Promise.all([
-    wantStaff ? ctx.sb.from("sis_staff").select("id").eq("tenant_id", ctx.tenantId).eq("status", "active") : Promise.resolve({ data: [] as { id: string }[] }),
+    wantStaff ? ctx.sb.from("sis_staff").select("id").eq("tenant_id", ctx.tenantId).eq("status", "active").is("deleted_at", null) : Promise.resolve({ data: [] as { id: string }[] }),
     wantParents ? ctx.sb.from("sis_households").select("id").eq("tenant_id", ctx.tenantId) : Promise.resolve({ data: [] as { id: string }[] }),
   ]);
   return {

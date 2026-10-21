@@ -19,11 +19,13 @@
  *     exactly their sections' student rows through GET /api/data/sis.students
  *     (never the school), sis.households only their families; udise.* and
  *     ?ids= are 403 for them.
- *  3. slices (masters.subjects): the GET carries the slice stamp; a write with
- *     it → 200, erp_versions("masters") moves, the masters_desk_subjects row is
- *     synced, masters-desk serves it; the old stamp → 409 `stale` and nothing
- *     written; no base → 409 `unversioned`; Masters view-only → 403; two ops in
- *     one request → 400. Object slice (masters.school-profile) the same way.
+ *  3. slices (masters.subjects; element `_rev` bases since 2.2b): each element
+ *     carries its `_rev`; a write on it → 200 and `_rev` + 1, erp_versions
+ *     ("masters") moves, the masters_desk_subjects row is synced, masters-desk
+ *     serves it; a DIFFERENT element from the same load lands; the old `_rev`
+ *     → 409 `stale` and nothing written; no base → 409 `unversioned`; Masters
+ *     view-only → 403; two ops are one all-or-none batch. Object slice
+ *     (masters.school-profile) on its slice stamp.
  *  4. the step 1.1 finding: a class link without isOptional, through the new
  *     route AND through the old masters-desk POST, is saved with
  *     isOptional:false and the row tables follow (was: slice written, rows 500).
@@ -208,57 +210,83 @@ async function main(): Promise<void> {
     void session;
   }
 
-  // ── 3. Slices: masters.subjects ────────────────────────────────────────
+  // ── 3. Slices: masters.subjects — element `_rev` bases (data-layer 2.2b) ──
   const subjList = await req(`${app}/api/data/masters.subjects?limit=1000`, { headers: principal });
   const subjects = arr(subjList.body.rows).map(obj);
-  const stamp0 = String(subjList.body.revision ?? "");
   const subj = subjects.find((s) => s.id === "e2e_sub_eng") ?? subjects[0]!;
+  const other = subjects.find((s) => s.id !== subj.id)!;
   const name0 = String(subj.nameEn ?? "");
+  const rev0 = String(subj._rev ?? "");
   record(
-    "slice: GET masters.subjects = the seeded subjects with the slice stamp",
-    subjList.status === 200 && subjects.length === e.subjects && !!stamp0,
-    `HTTP ${subjList.status}, ${subjects.length} subjects (seeded ${e.subjects}), revision ${stamp0}`,
+    "slice: GET masters.subjects = the seeded subjects, each with its own _rev (no slice stamp)",
+    subjList.status === 200 && subjects.length === e.subjects && /^[1-9]\d*$/.test(rev0) && subjList.body.revision === undefined,
+    `HTTP ${subjList.status}, ${subjects.length} subjects (seeded ${e.subjects}), _rev ${rev0}, revision ${String(subjList.body.revision)}`,
   );
   const mv0 = obj((await versions()).masters);
-  let stamp1 = "";
+  let rev1 = "";
+  let otherRev = "";
   {
-    const r = await post("masters.subjects", principal, [{ op: "upsert", id: subj.id, base: stamp0, row: { nameEn: `${name0} (kernel)` } }]);
-    stamp1 = String(r.body.revision ?? "");
+    const r = await post("masters.subjects", principal, [{ op: "upsert", id: subj.id, base: rev0, row: { nameEn: `${name0} (kernel)` } }]);
+    rev1 = String(obj(r.body.versions)[String(subj.id)] ?? "");
     const mv1 = obj((await versions()).masters);
     const row = (await rest(`masters_desk_subjects?id=eq.${String(subj.id)}&select=name_en`))[0] ?? {};
     const desk = await req(`${app}/api/school-data/masters-desk`, { headers: principal });
     const served = obj(arr(desk.body.subjects).map(obj).find((s) => s.id === subj.id)).nameEn;
     record(
-      "slice: a write with the stamp → 200; erp_versions(masters) moved; row table synced; masters-desk serves it",
-      r.status === 200 && !!stamp1 && stamp1 !== stamp0 && mv1.updated_at !== mv0.updated_at &&
+      "slice: a write on the element's _rev → 200, _rev +1; erp_versions(masters) moved; row table synced; masters-desk serves it",
+      r.status === 200 && Number(rev1) === Number(rev0) + 1 && mv1.updated_at !== mv0.updated_at &&
         row.name_en === `${name0} (kernel)` && served === `${name0} (kernel)`,
-      `HTTP ${r.status}; masters ${String(mv0.updated_at)} → ${String(mv1.updated_at)}; row ${short(row.name_en)}; served ${short(served)}`,
+      `HTTP ${r.status}; _rev ${rev0} → ${rev1}; masters ${String(mv0.updated_at)} → ${String(mv1.updated_at)}; row ${short(row.name_en)}; served ${short(served)}`,
     );
   }
   {
-    const r = await post("masters.subjects", principal, [{ op: "upsert", id: subj.id, base: stamp0, row: { nameEn: "From an old copy" } }]);
+    // Another person, from the SAME load, edits a DIFFERENT subject: it lands (director, 20 Oct).
+    const r = await post("masters.subjects", principal, [
+      { op: "upsert", id: other.id, base: String(other._rev ?? ""), row: { nameEn: `${String(other.nameEn ?? "")} (B)` } },
+    ]);
+    otherRev = String(obj(r.body.versions)[String(other.id)] ?? "");
+    record(
+      "slice: a different element from the same load lands (only the same element conflicts)",
+      r.status === 200 && Number(otherRev) === Number(other._rev) + 1,
+      `HTTP ${r.status} ${r.status === 200 ? `_rev ${String(other._rev)} → ${otherRev}` : short(r.body.message)}`,
+    );
+  }
+  {
+    const r = await post("masters.subjects", principal, [{ op: "upsert", id: subj.id, base: rev0, row: { nameEn: "From an old copy" } }]);
     const c = obj(arr(r.body.conflicts)[0]);
     const now = await req(`${app}/api/data/masters.subjects?limit=1000`, { headers: principal });
-    const seen = obj(arr(now.body.rows).map(obj).find((s) => s.id === subj.id)).nameEn;
+    const seen = obj(arr(now.body.rows).map(obj).find((s) => s.id === subj.id));
     record(
-      "slice: the old stamp → 409 stale, nothing written",
-      r.status === 409 && c.reason === "stale" && seen === `${name0} (kernel)` && String(now.body.revision) === stamp1,
-      `HTTP ${r.status} reason=${String(c.reason)}; still ${short(seen)}`,
+      "slice: the element's old _rev → 409 stale, nothing written",
+      r.status === 409 && c.reason === "stale" && seen.nameEn === `${name0} (kernel)` && String(seen._rev) === rev1,
+      `HTTP ${r.status} reason=${String(c.reason)}; still ${short(seen.nameEn)} at _rev ${String(seen._rev)}`,
     );
   }
   {
     const r = await post("masters.subjects", principal, [{ op: "upsert", id: subj.id, base: null, row: { nameEn: "No base" } }]);
-    record("slice: no base on an existing slice → 409 unversioned", r.status === 409 && obj(arr(r.body.conflicts)[0]).reason === "unversioned", `HTTP ${r.status}`);
-    const v = await post("masters.subjects", office, [{ op: "upsert", id: subj.id, base: stamp1, row: { nameEn: "Office" } }]);
+    record("slice: no base on an existing element → 409 unversioned", r.status === 409 && obj(arr(r.body.conflicts)[0]).reason === "unversioned", `HTTP ${r.status}`);
+    const v = await post("masters.subjects", office, [{ op: "upsert", id: subj.id, base: rev1, row: { nameEn: "Office" } }]);
     record("slice: Masters view-only (office) → 403", v.status === 403, `HTTP ${v.status}`);
+    // Two ops = ONE all-or-none batch: one stale op and nothing of either lands.
     const two = await post("masters.subjects", principal, [
-      { op: "upsert", id: subj.id, base: stamp1, row: {} },
-      { op: "upsert", id: "x", base: stamp1, row: {} },
+      { op: "upsert", id: subj.id, base: rev1, row: { nameEn: "Batch A" } },
+      { op: "upsert", id: other.id, base: String(other._rev ?? ""), row: { nameEn: "Batch B (stale)" } },
     ]);
-    record("slice: two ops in one request → 400", two.status === 400, `HTTP ${two.status} ${short(two.body.message)}`);
+    const after = arr((await req(`${app}/api/data/masters.subjects?limit=1000`, { headers: principal })).body.rows).map(obj);
+    record(
+      "slice: two ops in one request are one batch — one stale op → 409 and NEITHER is written",
+      two.status === 409 && obj(after.find((s) => s.id === subj.id)).nameEn === `${name0} (kernel)` &&
+        obj(after.find((s) => s.id === other.id)).nameEn === `${String(other.nameEn ?? "")} (B)`,
+      `HTTP ${two.status} ${short(two.body.message)}`,
+    );
+    // Both put back in ONE batch on their current _revs.
+    const back = await post("masters.subjects", principal, [
+      { op: "upsert", id: other.id, base: otherRev, row: { nameEn: other.nameEn } },
+    ]);
+    record("slice: the other subject put back", back.status === 200, `HTTP ${back.status}`);
   }
   {
-    const r = await post("masters.subjects", principal, [{ op: "upsert", id: subj.id, base: stamp1, row: { nameEn: name0 } }]);
+    const r = await post("masters.subjects", principal, [{ op: "upsert", id: subj.id, base: rev1, row: { nameEn: name0 } }]);
     const back = await req(`${app}/api/data/masters.subjects?limit=1000`, { headers: principal });
     const restored = obj(arr(back.body.rows).map(obj).find((s) => s.id === subj.id));
     // Content exactly as seeded; the element's `_rev` (data-layer 2.2a) moved on by
@@ -293,10 +321,12 @@ async function main(): Promise<void> {
     const cs = await req(`${app}/api/data/masters.class-subjects?limit=1000`, { headers: principal });
     const link = { classId: "e2e_cls_01", subjectId: "e2e_sub_eng", isActive: true, periodsPerWeek: 1 };
     const id = "e2e_kernel_link";
-    const w = await post("masters.class-subjects", principal, [{ op: "upsert", id, base: String(cs.body.revision ?? ""), row: link }]);
+    void cs;
+    // A new element: no base (2.2b — element `_rev`s; the new link gets _rev 1).
+    const w = await post("masters.class-subjects", principal, [{ op: "upsert", id, base: null, row: link }]);
     const el = obj(arr((await req(`${app}/api/data/masters.class-subjects?limit=1000`, { headers: principal })).body.rows).map(obj).find((x) => x.id === id));
     const row = (await rest(`masters_desk_class_subjects?id=eq.${id}&select=is_optional`))[0] ?? {};
-    const del = await post("masters.class-subjects", principal, [{ op: "delete", id, base: String(w.body.revision ?? "") }]);
+    const del = await post("masters.class-subjects", principal, [{ op: "delete", id, base: String(obj(w.body.versions)[id] ?? "") }]);
     record(
       "1.1 finding (kernel): a class link without isOptional is saved as false and the rows follow",
       w.status === 200 && el.isOptional === false && row.is_optional === false && del.status === 200,

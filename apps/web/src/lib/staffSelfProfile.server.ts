@@ -41,7 +41,8 @@ export async function patchStaffRow(
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "Tenant unavailable" };
   for (let attempt = 0; attempt < 3; attempt++) {
-    const read = await ctx.sb.from("sis_staff").select("profile, updated_at").eq("tenant_id", ctx.tenantId).eq("id", staffId).maybeSingle();
+    // A removed member (2.2b soft remove) is not written to.
+    const read = await ctx.sb.from("sis_staff").select("profile, updated_at").eq("tenant_id", ctx.tenantId).eq("id", staffId).is("deleted_at", null).maybeSingle();
     if (read.error) return { ok: false, error: read.error.message };
     if (!read.data) return { ok: false, error: "Staff member not found" };
     const before = { ...((read.data.profile as Record<string, unknown>) || {}) };

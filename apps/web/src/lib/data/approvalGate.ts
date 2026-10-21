@@ -17,11 +17,17 @@
  * fires on the VALUE, not the column.
  */
 
-import type { RbacModule } from "@/lib/rbac";
+import type { RbacAction, RbacModule } from "@/lib/rbac";
 
 export type ApprovalRule = {
   /** Permission checked when the gate fires. Usually the collection's own. */
   readonly module: RbacModule;
+  /**
+   * The action checked on `module` when the gate fires; `approve` when
+   * absent. Staff removal asks `delete` (data-layer 2.2b), as the old
+   * staff-roster DELETE did.
+   */
+  readonly action?: RbacAction;
   /**
    * Column → the values that make a write a decision.
    * e.g. { status: ['published', 'scheduled'] }

@@ -6,8 +6,8 @@
  * Both contexts are the Principal (the fixture's Office role may only view
  * Masters). The screen is the test-only /e2e/write-kernel (GET
  * /api/data/masters.subjects, save through useSaveMutation → POST
- * /api/data/masters.subjects → desk_slice_row_write with the slice stamp it
- * read as the base). The subject is put back as seeded at the end.
+ * /api/data/masters.subjects → desk_slice_row_write with the element's `_rev`
+ * it read as the base — data-layer 2.2b). The subject is put back as seeded at the end.
  */
 import type { Page } from "@playwright/test";
 import { expect, metric, openAs, test } from "../support";
@@ -36,7 +36,7 @@ test("two contexts edit the same subject: the second is refused, told so, and sh
   const second = `English B-${tag}`;
   let original = "";
   try {
-    await test.step("both open the subject (B holds the same slice stamp as A)", async () => {
+    await test.step("both open the subject (B holds the same _rev as A)", async () => {
       await openEditor(a.page);
       await openEditor(b.page);
       original = (await nameOn(a.page).textContent()) ?? "";

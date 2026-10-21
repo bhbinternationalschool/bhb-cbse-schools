@@ -92,7 +92,9 @@ async function fetchStaffByMobileFromDb(
       "id, emp_code, full_name, stream, category, department_id, designation_id, campus_id, mobile, email, status, profile",
     )
     .eq("tenant_id", tenantId)
-    .eq("status", "active");
+    .eq("status", "active")
+    // A removed member (2.2b soft remove) is not staff on WhatsApp.
+    .is("deleted_at", null);
   if (error) {
     console.warn("[waIdentity] staff lookup failed", error.message);
     return null;
@@ -287,6 +289,7 @@ export async function addStaffAltMobile(
     )
     .eq("tenant_id", ctx.tenantId)
     .eq("id", staffId)
+    .is("deleted_at", null)
     .maybeSingle();
   if (error || !data) return { ok: false, error: error?.message || "staff record not found" };
   const row = data as StaffRow;

@@ -28,18 +28,27 @@
 import { NextResponse } from "next/server";
 import { invalidateServerMastersCache, invalidateServerRbacCache } from "@/lib/api/v1/auth";
 import { readStaffScopeForDesk } from "@/lib/api/v1/staffScope";
-import { requireStaffPermission, type RouteAuthSuccess } from "@/lib/apiRouteAuth.server";
+import { requireStaffApi, requireStaffPermission, type RouteAuthSuccess } from "@/lib/apiRouteAuth.server";
 import { batchNeedsApproval } from "@/lib/data/approvalGate";
 import { collectionDef, collectionKind, type CollectionDef } from "@/lib/data/registry";
 import {
   householdIdsForSections,
   list,
+  readRowsByIds,
   revisionsOf,
+  signInMobilesInUse,
+  sliceElementCount,
+  staffSignInLinks,
   write,
   writeSlice,
+  writeSliceBatch,
   type Row,
   type RowScope,
 } from "@/lib/data/server/repo";
+import { sliceFunctionGate } from "@/lib/data/server/sliceFunctionGate";
+import { prepareStaffOps, staffListRows } from "@/lib/data/server/staffKernel";
+import { staffActorOf, staffHoldsPowerfulAccess, staffSensitiveAuthority } from "@/lib/staffProtectedFields";
+import { logMobileFills } from "@/lib/staffMobileFillLog.server";
 import type { Cursor, FailCode, WriteOp, WriteResult } from "@/lib/data/types";
 import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
 import { hasPermission } from "@/lib/rbac";
@@ -105,15 +114,45 @@ export async function GET(req: Request, ctx: RouteCtx) {
     return NextResponse.json(result, { headers: { "Cache-Control": "private, no-store" } });
   }
 
+  // `?removed=1` — a soft-delete collection's REMOVED records (to restore
+  // one; data-layer 2.2b). Only for a holder of the collection's `edit`.
+  const removed = url.searchParams.get("removed") === "1";
+  if (removed) {
+    const editor =
+      auth.viaMirrorSecret || hasPermission(auth.ctx.session, auth.ctx.masters, def.rbac.edit, "edit", auth.ctx.rbac);
+    if (!editor || reach.scope) {
+      return NextResponse.json(
+        { ok: false, code: "auth", error: "Removed records are listed only for those who may restore them" },
+        { status: 403 },
+      );
+    }
+  }
+
   const result = await list(collection, {
     academicYearCode: url.searchParams.get("ay") ?? undefined,
     limit: rawLimit ? Number(rawLimit) : undefined,
     cursor: (url.searchParams.get("cursor") as Cursor | null) ?? null,
     scope: reach.scope,
+    removed,
   });
 
   if (!result.ok) {
     return NextResponse.json(result, { status: statusFor(result.code) });
+  }
+  if (def.staffRecords) {
+    // A directory for anyone without staff · edit (their own row in full);
+    // never a password, whoever asks (the staff-roster GET's rule).
+    // …and for the owner / the bank & pay details function (the accountant
+    // reads the records whose bank details it keeps).
+    const canEdit =
+      auth.viaMirrorSecret ||
+      hasPermission(auth.ctx.session, auth.ctx.masters, def.rbac.edit, "edit", auth.ctx.rbac) ||
+      staffSensitiveAuthority(auth.ctx.session, auth.ctx.masters, auth.ctx.rbac, { rbacKnown: auth.ctx.rbacKnown !== false }) !== null;
+    const selfStaffId = auth.viaMirrorSecret ? "" : auth.ctx.session.staffId || "";
+    return NextResponse.json(
+      { ...result, rows: staffListRows(result.rows, { canEdit, selfStaffId }) },
+      { headers: { "Cache-Control": "private, no-store" } },
+    );
   }
   return NextResponse.json(result, { headers: { "Cache-Control": "private, no-store" } });
 }
@@ -199,8 +238,18 @@ async function postOps(req: Request, ctx: RouteCtx) {
     );
   }
 
-  const auth = await requireStaffPermission(req, def.rbac.edit, "edit");
-  if (!auth.ok) return auth.response;
+  // The collection's `edit` — or, for a Masters list owned by a FUNCTION
+  // (Masters → Roles → functions: a teacher's own-class class subjects),
+  // that function, checked op by op below (data-layer 2.2b).
+  let auth = await requireStaffPermission(req, def.rbac.edit, "edit");
+  let functionOnly = false;
+  if (!auth.ok) {
+    if (auth.response.status !== 403 || collectionKind(def) !== "slice") return auth.response;
+    const viaFunction = await requireStaffApi(req);
+    if (!viaFunction.ok || viaFunction.viaMirrorSecret) return auth.response;
+    auth = viaFunction;
+    functionOnly = true;
+  }
 
   let body: { ops?: unknown };
   try {
@@ -228,14 +277,22 @@ async function postOps(req: Request, ctx: RouteCtx) {
     );
   }
 
-  const ops = body.ops as WriteOp<Row>[];
+  let ops = body.ops as WriteOp<Row>[];
+  if (ops.some((o) => !o || typeof o !== "object" || typeof (o as { id?: unknown }).id !== "string" || !(o as { id: string }).id)) {
+    return NextResponse.json(
+      { ok: false, kind: "invalid", message: "Every op is an object with a string id", conflicts: [] },
+      { status: 400 },
+    );
+  }
   // A batch big enough to time out is a batch that will be retried forever.
-  if (ops.length > def.list.maxLimit) {
+  // 500 for every collection (the batch RPC's own ceiling), less where the
+  // registry says so.
+  if (ops.length > Math.min(def.list.maxLimit, 500)) {
     return NextResponse.json(
       {
         ok: false,
         kind: "invalid",
-        message: `Too many ops (${ops.length}); the limit is ${def.list.maxLimit}`,
+        message: `Too many ops (${ops.length}); the limit is ${Math.min(def.list.maxLimit, 500)}`,
         conflicts: [],
       },
       { status: 400 },
@@ -254,7 +311,7 @@ async function postOps(req: Request, ctx: RouteCtx) {
     const approver = await requireStaffPermission(
       req,
       def.approval!.module,
-      "approve",
+      def.approval!.action ?? "approve",
     );
     if (!approver.ok) {
       return NextResponse.json(
@@ -272,13 +329,91 @@ async function postOps(req: Request, ctx: RouteCtx) {
     }
   }
 
+  // A Masters list element: who may write it, op by op — the whole module
+  // (unless the office turned that function off for this person), or the
+  // function that owns the list, within its actions and, for a class-scoped
+  // one, the person's own classes (data-layer 2.2b).
+  if (collectionKind(def) === "slice") {
+    // The commit rules, on the server too (the browser's useMastersMutation
+    // says the same): removing is one element per save, and no save leaves a
+    // list empty — every whole-list wipe looked like a save that did.
+    const deletes = ops.filter((o) => o.op === "delete").length;
+    if (deletes > 1) {
+      return NextResponse.json(
+        { ok: false, kind: "invalid", message: `One removal per save (this one removes ${deletes}) — nothing was saved.`, conflicts: [] },
+        { status: 400 },
+      );
+    }
+    if (deletes === 1 && !ops.some((o) => o.op === "upsert")) {
+      let size: number;
+      try {
+        size = await sliceElementCount(def.slice!);
+      } catch (e) {
+        return NextResponse.json(
+          { ok: false, kind: "unavailable", message: `Could not read the list to check this removal — nothing was saved (${e instanceof Error ? e.message : String(e)}).`, conflicts: [] },
+          { status: 503 },
+        );
+      }
+      if (size <= 1) {
+        return NextResponse.json(
+          { ok: false, kind: "invalid", message: `This would leave ${def.slice!.key} empty — nothing was saved.`, conflicts: [] },
+          { status: 400 },
+        );
+      }
+    }
+    const gate = await sliceFunctionGate(req, def, ops, functionOnly ? "function" : "module", auth.ctx);
+    if (!gate.ok) {
+      return NextResponse.json({ ok: false, kind: gate.kind, message: gate.message, conflicts: [] }, { status: gate.status });
+    }
+  } else if (functionOnly) {
+    return NextResponse.json({ ok: false, kind: "auth", message: "Forbidden", conflicts: [] }, { status: 403 });
+  }
+
+  // Staff records: protected fields, `by` from the session (data-layer 2.2b).
+  let mobileFills: string[] = [];
+  if (def.staffRecords) {
+    const by = auth.viaMirrorSecret ? "mirror-sync" : staffActorOf(auth.ctx.session);
+    const actx = auth.ctx;
+    const prepared = await prepareStaffOps(ops, by, (ids) => readRowsByIds(def.table, ids), () => staffSignInLinks(), {
+      inUse: () => signInMobilesInUse(),
+      isPowerful: (r) =>
+        staffHoldsPowerfulAccess(
+          { id: String(r.id), email: r.email, fullName: r.full_name, designationId: r.designation_id },
+          actx.masters,
+          actx.rbac,
+        ),
+    });
+    if (!prepared.ok) {
+      const kind = prepared.status === 403 ? "auth" : prepared.status === 400 ? "invalid" : "unavailable";
+      return NextResponse.json({ ok: false, kind, message: prepared.message, conflicts: [] }, { status: prepared.status });
+    }
+    ops = prepared.ops;
+    mobileFills = prepared.mobileFills;
+  } else {
+    // `by` is the server's to say, on every collection: a delete is stamped
+    // with the session (desk_write_guarded records it where the table has
+    // deleted_by), never with what the body claims.
+    const by = auth.viaMirrorSecret ? "mirror-sync" : staffActorOf(auth.ctx.session) || auth.ctx.session.fullName || "";
+    ops = ops.map((o) => {
+      const { by: _ignored, ...rest } = o as WriteOp<Row> & { by?: unknown };
+      void _ignored;
+      return (o.op === "delete" ? { ...rest, by } : rest) as WriteOp<Row>;
+    });
+  }
+
   // Rows go through desk_write_guarded; slice elements and object slices
-  // through their RPCs, one per request (registry `kind`).
+  // through their RPCs (registry `kind`) — one op per request, except a
+  // `_rev` list, whose several ops go as ONE all-or-none batch.
   const result =
-    collectionKind(def) === "rows" ? await write(collection, ops) : await writeSlice(collection, ops);
+    collectionKind(def) === "rows"
+      ? await write(collection, ops)
+      : collectionKind(def) === "slice" && def.slice?.base === "rev" && ops.length > 1
+        ? await writeSliceBatch(collection, ops)
+        : await writeSlice(collection, ops);
   invalidateAfterWrite(def, result);
   if (!result.ok) {
     return NextResponse.json(result, { status: statusFor(result.kind) });
   }
+  if (mobileFills.length && !auth.viaMirrorSecret) await logMobileFills(auth.ctx.session, mobileFills, "staff record (kernel)");
   return NextResponse.json(result);
 }

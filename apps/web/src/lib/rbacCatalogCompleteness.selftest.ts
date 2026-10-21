@@ -381,6 +381,7 @@ const MODULE_GATES = new RegExp(
       "featureAccess",
       "hasFeaturePermission",
       "orCommsFunction",
+      "functionGrantHeldOnServer",
       "isSuperAdmin[A-Za-z]*",
       "isProtectedSuperAdmin[A-Za-z]*",
     ].join("|") +
