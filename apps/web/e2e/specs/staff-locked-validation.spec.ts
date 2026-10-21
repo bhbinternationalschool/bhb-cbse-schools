@@ -10,11 +10,14 @@
  *  - Seed: staff 23's PAN set to a malformed value through the app's own
  *    sensitive write path (POST /api/data/sis.staff/sensitive, as staff 26
  *    given the built-in Accounts role for the run); put back afterwards.
- *  - The office edits the father's name: Save goes out and the server keeps
- *    the new name (and the stored PAN untouched).
- *  - The Principal, given the Accounts role too (staff · edit + the function,
- *    so the full form with the inputs open), types a malformed PAN: still
- *    refused with the PAN error, and nothing is posted.
+ *  - The Principal (staff · edit, NOT the function: the PAN input is locked)
+ *    edits the father's name: Save goes out and the server keeps the new name
+ *    (and the stored PAN untouched). The Principal, not the fixture's office:
+ *    the office holds Masters view-only, and saveMasters blocks its staff
+ *    saves before any request — a separate defect, outside this fix.
+ *  - The Principal, then given the Accounts role too (staff · edit + the
+ *    function, so the full form with the inputs open), types a malformed PAN:
+ *    still refused with the PAN error, and nothing is posted.
  * Writes, so it runs in the staff-sensitive project after every read-only spec.
  */
 import { pushDeskSliceToDb } from "@/lib/deskSliceNormalized.server";
@@ -31,28 +34,41 @@ const ACC = staffId(26);
 const PRINCIPAL = fx.sessions.principal.staffId!;
 const ASSIGN_ACC = "e2e_lockval_acc";
 const ASSIGN_PRIN = "e2e_lockval_prin";
+const ASSIGN_PRIN_OWN = "e2e_lockval_prin_own";
 const BAD_PAN = "BADPAN";
 
 type Roster = { ok: boolean; staff: StaffRecord[] };
 
-async function accountsRoles(on: boolean) {
-  const accRole = (fx.rbac.roles as { id: string; code: string }[]).find((r) => r.code === "accounts")!;
-  const extra = (id: string, staff: string, isPrimary: boolean) => ({
+async function accountsRoles(on: boolean, principalToo = false) {
+  const roles = fx.rbac.roles as { id: string; code: string }[];
+  const accRole = roles.find((r) => r.code === "accounts")!;
+  const extra = (id: string, staff: string, isPrimary: boolean, roleId = accRole.id) => ({
     id,
     staffId: staff,
-    roleId: accRole.id,
+    roleId,
     isPrimary,
     scope: { campusIds: [], classIds: [], departmentIds: [] },
     expiresOn: "",
     note: "spec",
   });
   const assignments = on
-    ? [...fx.rbac.assignments, extra(ASSIGN_ACC, ACC, true), extra(ASSIGN_PRIN, PRINCIPAL, false)]
+    ? [
+        ...fx.rbac.assignments,
+        extra(ASSIGN_ACC, ACC, true),
+        // An assignment replaces the session's role fallback, so the
+        // Principal keeps her own role (primary) and gains Accounts.
+        ...(principalToo
+          ? [
+              extra(ASSIGN_PRIN_OWN, PRINCIPAL, true, roles.find((r) => r.code === "principal")!.id),
+              extra(ASSIGN_PRIN, PRINCIPAL, false),
+            ]
+          : []),
+      ]
     : fx.rbac.assignments;
   const r = (await pushDeskSliceToDb(
     "rbac",
     { ...fx.rbac, assignments } as never,
-    on ? undefined : { deletes: { assignments: [ASSIGN_ACC, ASSIGN_PRIN] } },
+    on ? undefined : { deletes: { assignments: [ASSIGN_ACC, ASSIGN_PRIN, ASSIGN_PRIN_OWN] } },
   )) as { ok?: boolean };
   if (!r.ok) throw new Error("rbac push failed");
   await new Promise((res) => setTimeout(res, 2_600));
@@ -116,13 +132,19 @@ test.describe.serial("locked sensitive fields are not validated for who cannot e
     }
   });
 
-  test("the office saves a profile whose stored PAN is malformed", async ({ browser }, testInfo) => {
-    const { context, page } = await openAs(browser, "office");
+  test("staff · edit without the function saves a profile whose stored PAN is malformed", async ({ browser }, testInfo) => {
+    const { context, page } = await openAs(browser, "principal");
     try {
       const next = `E2E Father ${String(Date.now()).slice(-6)}`;
       await page.goto(`/staff/${TARGET}/edit`);
+      // The server's record (with the malformed PAN) is in the form, locked.
+      const tabs = page.locator('[aria-label="Staff profile sections"]');
+      await tabs.getByText("IDs", { exact: true }).first().click({ timeout: 30_000 });
+      const pan = page.locator("label", { hasText: "PAN" }).first().locator("input");
+      await expect(pan).toHaveValue(BAD_PAN, { timeout: 30_000 });
+      await expect(pan).toBeDisabled();
+      await tabs.getByText("Basic", { exact: true }).first().click();
       const father = page.locator("label", { hasText: "Father's name" }).locator("input");
-      await expect(father).toBeEnabled({ timeout: 30_000 });
       await father.fill(next);
       const posted = page.waitForResponse(
         (r) => r.url().includes("/api/school-data/staff-roster") && r.request().method() === "POST",
@@ -137,15 +159,16 @@ test.describe.serial("locked sensitive fields are not validated for who cannot e
       const saved = after.staff.find((s) => s.id === TARGET);
       expect(saved?.fatherName, "server father's name").toBe(next);
       expect(saved?.panNo, "the stored PAN untouched").toBe(BAD_PAN);
-      await page.locator('[aria-label="Staff profile sections"]').getByText("IDs", { exact: true }).first().click();
-      await expect(page.locator("label", { hasText: "PAN" }).first().locator("input")).toBeDisabled();
-      await shots(page, testInfo, "office ids tab after save");
+      await tabs.getByText("IDs", { exact: true }).first().click();
+      await expect(pan).toHaveValue(BAD_PAN);
+      await shots(page, testInfo, "no-function ids tab after save");
     } finally {
       await context.close();
     }
   });
 
   test("a holder of the function typing a malformed PAN is still refused", async ({ browser }, testInfo) => {
+    await accountsRoles(true, true);
     const { context, page } = await openAs(browser, "principal");
     try {
       let posts = 0;
@@ -155,7 +178,8 @@ test.describe.serial("locked sensitive fields are not validated for who cannot e
       await page.goto(`/staff/${TARGET}/edit`);
       await page.locator('[aria-label="Staff profile sections"]').getByText("IDs", { exact: true }).first().click({ timeout: 30_000 });
       const pan = page.locator("label", { hasText: "PAN" }).first().locator("input");
-      await expect(pan).toBeEnabled({ timeout: 30_000 });
+      await expect(pan).toHaveValue(BAD_PAN, { timeout: 30_000 });
+      await expect(pan).toBeEnabled();
       await pan.fill("ABC12");
       await page.getByRole("button", { name: "Save profile" }).first().click();
       await expect(page.getByText("Fix the highlighted fields before saving").first()).toBeVisible();
