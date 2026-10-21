@@ -5348,6 +5348,132 @@ abstract class L {
   /// **'Enter the bank name'**
   String get feeBankMissing;
 
+  /// No description provided for @busLiveTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Live route'**
+  String get busLiveTitle;
+
+  /// No description provided for @busLiveTapHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap a route to see the bus live on the map, with arrival times at each stop.'**
+  String get busLiveTapHint;
+
+  /// No description provided for @busLiveOnRun.
+  ///
+  /// In en, this message translates to:
+  /// **'On the road · {run}'**
+  String busLiveOnRun(String run);
+
+  /// No description provided for @busLivePositionAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Position at {time} ({ago})'**
+  String busLivePositionAt(String time, String ago);
+
+  /// No description provided for @busLiveStale.
+  ///
+  /// In en, this message translates to:
+  /// **'Last seen {time} — not live'**
+  String busLiveStale(String time);
+
+  /// No description provided for @busLiveStaleDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'The tracker has not reported for over {minutes} minutes, so no arrival times are shown.'**
+  String busLiveStaleDetail(String minutes);
+
+  /// No description provided for @busLiveOffShift.
+  ///
+  /// In en, this message translates to:
+  /// **'Not on a run right now'**
+  String get busLiveOffShift;
+
+  /// No description provided for @busLiveOffShiftLastSeen.
+  ///
+  /// In en, this message translates to:
+  /// **'Last seen {time}. Arrival times show only while a run is on.'**
+  String busLiveOffShiftLastSeen(String time);
+
+  /// No description provided for @busLiveOffShiftNoFix.
+  ///
+  /// In en, this message translates to:
+  /// **'Arrival times show only while a run is on.'**
+  String get busLiveOffShiftNoFix;
+
+  /// No description provided for @busLiveUntracked.
+  ///
+  /// In en, this message translates to:
+  /// **'No GPS position from this vehicle'**
+  String get busLiveUntracked;
+
+  /// No description provided for @busLiveUntrackedDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'{vehicle} has no tracker reporting, so its position and arrival times cannot be shown.'**
+  String busLiveUntrackedDetail(String vehicle);
+
+  /// No description provided for @busLiveNoVehicle.
+  ///
+  /// In en, this message translates to:
+  /// **'No vehicle is linked to this route'**
+  String get busLiveNoVehicle;
+
+  /// No description provided for @busLiveTrailUnread.
+  ///
+  /// In en, this message translates to:
+  /// **'The bus\'s track could not be read, so passed stops and arrival times are not shown.'**
+  String get busLiveTrailUnread;
+
+  /// No description provided for @busLivePassedAt.
+  ///
+  /// In en, this message translates to:
+  /// **'passed at {time}'**
+  String busLivePassedAt(String time);
+
+  /// No description provided for @busLiveNotSeen.
+  ///
+  /// In en, this message translates to:
+  /// **'not seen — the bus did not come near'**
+  String get busLiveNotSeen;
+
+  /// No description provided for @busLiveEta.
+  ///
+  /// In en, this message translates to:
+  /// **'about {time} · {minutes} min'**
+  String busLiveEta(String time, String minutes);
+
+  /// No description provided for @busLiveNoEta.
+  ///
+  /// In en, this message translates to:
+  /// **'no time yet'**
+  String get busLiveNoEta;
+
+  /// No description provided for @busLiveUnpinned.
+  ///
+  /// In en, this message translates to:
+  /// **'not pinned on the map'**
+  String get busLiveUnpinned;
+
+  /// No description provided for @busLiveSchoolEta.
+  ///
+  /// In en, this message translates to:
+  /// **'School: about {time} · {minutes} min'**
+  String busLiveSchoolEta(String time, String minutes);
+
+  /// No description provided for @busLiveEstimateNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Times are estimates from the bus\'s position, not promises. Stops are in the order this run visits them.'**
+  String get busLiveEstimateNote;
+
+  /// No description provided for @busLiveRouteMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'This route is not shown live for you. A driver sees only their own bus.'**
+  String get busLiveRouteMissing;
+
   /// No description provided for @mrEditHint.
   ///
   /// In en, this message translates to:

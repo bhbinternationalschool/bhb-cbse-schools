@@ -3095,6 +3095,92 @@ class LHi extends L {
   String get feeBankMissing => 'बैंक का नाम लिखें';
 
   @override
+  String get busLiveTitle => 'लाइव रूट';
+
+  @override
+  String get busLiveTapHint =>
+      'किसी रूट पर टैप करें — नक्शे पर बस की लाइव जगह और हर स्टॉप पर पहुँचने का समय दिखेगा।';
+
+  @override
+  String busLiveOnRun(String run) {
+    return 'सड़क पर · $run';
+  }
+
+  @override
+  String busLivePositionAt(String time, String ago) {
+    return '$time की जगह ($ago)';
+  }
+
+  @override
+  String busLiveStale(String time) {
+    return 'आखिरी बार $time पर दिखी — लाइव नहीं';
+  }
+
+  @override
+  String busLiveStaleDetail(String minutes) {
+    return 'ट्रैकर ने $minutes मिनट से ज़्यादा समय से जगह नहीं भेजी, इसलिए पहुँचने का समय नहीं दिखाया गया।';
+  }
+
+  @override
+  String get busLiveOffShift => 'अभी कोई फेरा नहीं चल रहा';
+
+  @override
+  String busLiveOffShiftLastSeen(String time) {
+    return 'आखिरी बार $time पर दिखी। पहुँचने का समय केवल फेरे के दौरान दिखता है।';
+  }
+
+  @override
+  String get busLiveOffShiftNoFix =>
+      'पहुँचने का समय केवल फेरे के दौरान दिखता है।';
+
+  @override
+  String get busLiveUntracked => 'इस गाड़ी से कोई GPS जगह नहीं मिली';
+
+  @override
+  String busLiveUntrackedDetail(String vehicle) {
+    return '$vehicle का कोई ट्रैकर जगह नहीं भेज रहा, इसलिए उसकी जगह और पहुँचने का समय नहीं दिखाया जा सकता।';
+  }
+
+  @override
+  String get busLiveNoVehicle => 'इस रूट से कोई गाड़ी जुड़ी नहीं है';
+
+  @override
+  String get busLiveTrailUnread =>
+      'बस का रास्ता पढ़ा नहीं जा सका, इसलिए निकले हुए स्टॉप और पहुँचने का समय नहीं दिखाया गया।';
+
+  @override
+  String busLivePassedAt(String time) {
+    return '$time पर निकली';
+  }
+
+  @override
+  String get busLiveNotSeen => 'नहीं दिखी — बस पास नहीं आई';
+
+  @override
+  String busLiveEta(String time, String minutes) {
+    return 'लगभग $time · $minutes मिनट';
+  }
+
+  @override
+  String get busLiveNoEta => 'अभी समय नहीं';
+
+  @override
+  String get busLiveUnpinned => 'नक्शे पर पिन नहीं';
+
+  @override
+  String busLiveSchoolEta(String time, String minutes) {
+    return 'स्कूल: लगभग $time · $minutes मिनट';
+  }
+
+  @override
+  String get busLiveEstimateNote =>
+      'समय बस की जगह से अनुमान है, वादा नहीं। स्टॉप इस फेरे के क्रम में हैं।';
+
+  @override
+  String get busLiveRouteMissing =>
+      'यह रूट आपके लिए लाइव नहीं दिखता। ड्राइवर केवल अपनी बस देखते हैं।';
+
+  @override
   String get mrEditHint =>
       'किसी खाने को दबाकर हाज़िरी लगाएँ। तारीख़ दबाकर उस दिन के सभी बिना-हाज़िरी बच्चों को एक साथ भरें, फिर अपवाद बदलें।';
 

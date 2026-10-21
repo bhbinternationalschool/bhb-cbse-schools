@@ -1975,6 +1975,99 @@
   },
   "feeBankName": "Bank name (required)",
   "feeBankMissing": "Enter the bank name",
+  "busLiveTitle": "Live route",
+  "busLiveTapHint": "Tap a route to see the bus live on the map, with arrival times at each stop.",
+  "busLiveOnRun": "On the road · {run}",
+  "@busLiveOnRun": {
+    "placeholders": {
+      "run": {
+        "type": "String"
+      }
+    }
+  },
+  "busLivePositionAt": "Position at {time} ({ago})",
+  "@busLivePositionAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      },
+      "ago": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveStale": "Last seen {time} — not live",
+  "@busLiveStale": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveStaleDetail": "The tracker has not reported for over {minutes} minutes, so no arrival times are shown.",
+  "@busLiveStaleDetail": {
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveOffShift": "Not on a run right now",
+  "busLiveOffShiftLastSeen": "Last seen {time}. Arrival times show only while a run is on.",
+  "@busLiveOffShiftLastSeen": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveOffShiftNoFix": "Arrival times show only while a run is on.",
+  "busLiveUntracked": "No GPS position from this vehicle",
+  "busLiveUntrackedDetail": "{vehicle} has no tracker reporting, so its position and arrival times cannot be shown.",
+  "@busLiveUntrackedDetail": {
+    "placeholders": {
+      "vehicle": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveNoVehicle": "No vehicle is linked to this route",
+  "busLiveTrailUnread": "The bus's track could not be read, so passed stops and arrival times are not shown.",
+  "busLivePassedAt": "passed at {time}",
+  "@busLivePassedAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveNotSeen": "not seen — the bus did not come near",
+  "busLiveEta": "about {time} · {minutes} min",
+  "@busLiveEta": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      },
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveNoEta": "no time yet",
+  "busLiveUnpinned": "not pinned on the map",
+  "busLiveSchoolEta": "School: about {time} · {minutes} min",
+  "@busLiveSchoolEta": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      },
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "busLiveEstimateNote": "Times are estimates from the bus's position, not promises. Stops are in the order this run visits them.",
+  "busLiveRouteMissing": "This route is not shown live for you. A driver sees only their own bus.",
   "mrEditHint": "Tap a box to mark it. Tap a date to fill that day for every child not yet marked, then tap the exceptions.",
   "mrViewOnly": "View only — the class teacher (or the office) fills this class's month register.",
   "mrUnsavedCount": "{count} unsaved change(s)",

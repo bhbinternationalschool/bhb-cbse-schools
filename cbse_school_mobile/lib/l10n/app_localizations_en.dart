@@ -3097,6 +3097,92 @@ class LEn extends L {
   String get feeBankMissing => 'Enter the bank name';
 
   @override
+  String get busLiveTitle => 'Live route';
+
+  @override
+  String get busLiveTapHint =>
+      'Tap a route to see the bus live on the map, with arrival times at each stop.';
+
+  @override
+  String busLiveOnRun(String run) {
+    return 'On the road · $run';
+  }
+
+  @override
+  String busLivePositionAt(String time, String ago) {
+    return 'Position at $time ($ago)';
+  }
+
+  @override
+  String busLiveStale(String time) {
+    return 'Last seen $time — not live';
+  }
+
+  @override
+  String busLiveStaleDetail(String minutes) {
+    return 'The tracker has not reported for over $minutes minutes, so no arrival times are shown.';
+  }
+
+  @override
+  String get busLiveOffShift => 'Not on a run right now';
+
+  @override
+  String busLiveOffShiftLastSeen(String time) {
+    return 'Last seen $time. Arrival times show only while a run is on.';
+  }
+
+  @override
+  String get busLiveOffShiftNoFix =>
+      'Arrival times show only while a run is on.';
+
+  @override
+  String get busLiveUntracked => 'No GPS position from this vehicle';
+
+  @override
+  String busLiveUntrackedDetail(String vehicle) {
+    return '$vehicle has no tracker reporting, so its position and arrival times cannot be shown.';
+  }
+
+  @override
+  String get busLiveNoVehicle => 'No vehicle is linked to this route';
+
+  @override
+  String get busLiveTrailUnread =>
+      'The bus\'s track could not be read, so passed stops and arrival times are not shown.';
+
+  @override
+  String busLivePassedAt(String time) {
+    return 'passed at $time';
+  }
+
+  @override
+  String get busLiveNotSeen => 'not seen — the bus did not come near';
+
+  @override
+  String busLiveEta(String time, String minutes) {
+    return 'about $time · $minutes min';
+  }
+
+  @override
+  String get busLiveNoEta => 'no time yet';
+
+  @override
+  String get busLiveUnpinned => 'not pinned on the map';
+
+  @override
+  String busLiveSchoolEta(String time, String minutes) {
+    return 'School: about $time · $minutes min';
+  }
+
+  @override
+  String get busLiveEstimateNote =>
+      'Times are estimates from the bus\'s position, not promises. Stops are in the order this run visits them.';
+
+  @override
+  String get busLiveRouteMissing =>
+      'This route is not shown live for you. A driver sees only their own bus.';
+
+  @override
   String get mrEditHint =>
       'Tap a box to mark it. Tap a date to fill that day for every child not yet marked, then tap the exceptions.';
 

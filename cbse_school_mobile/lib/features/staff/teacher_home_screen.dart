@@ -709,7 +709,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       case "Gate passes":
         await _pushScreen(VisitorGateScreen(api: widget.api));
       case "Transport":
-        await _pushScreen(BusRoutesScreen(api: widget.api));
+        await _pushScreen(BusRoutesScreen(api: widget.api, live: true));
       case "Bus register":
         await _pushScreen(BusRegisterScreen(api: widget.api));
       case "Log book":

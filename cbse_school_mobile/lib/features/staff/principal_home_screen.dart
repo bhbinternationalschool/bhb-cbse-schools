@@ -689,7 +689,7 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
         icon: Icons.directions_bus_outlined,
         label: "Transport",
         tone: ModuleTone.blue,
-        onTap: () => _push(BusRoutesScreen(api: widget.api)),
+        onTap: () => _push(BusRoutesScreen(api: widget.api, live: true)),
       ),
     ),
     (

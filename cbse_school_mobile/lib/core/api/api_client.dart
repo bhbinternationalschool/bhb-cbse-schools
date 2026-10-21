@@ -31,6 +31,7 @@ part "results_api.dart";
 part "notifications_api.dart";
 part "home_cards_api.dart";
 part "student_contact_api.dart";
+part "bus_routes_live_api.dart";
 part "school_chat_api.dart";
 part "games_api.dart";
 

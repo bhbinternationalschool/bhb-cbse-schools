@@ -427,6 +427,7 @@ jobs:
           npm run test:erp-ask
           npm run test:erp-reports
           npm run test:fleet-live
+          npm run test:bus-route-eta
           npm run test:udise-doc-intake
           npm run test:homework-expand
           npm run test:homework-page-scan
