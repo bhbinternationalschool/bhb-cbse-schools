@@ -17,7 +17,7 @@ import { dayKm, isMonth, istDate, monthDates, parseKm, rupeesToPaise } from "@/l
 import {
   accountsStatus,
   buildFuelVoucher,
-  busMonthTotals,
+  busPeriodTotals,
   isPaymentMode,
   kmBetweenFills,
   rateWarning,
@@ -36,7 +36,7 @@ import {
   lastOdometerByVehicle,
   postAccountsFuel,
   postFillToAccounts,
-  readFleetEdgeMonth,
+  readFleetEdgeRange,
   readRegisterFill,
   readRegisterFills,
   readUnpostedFills,
@@ -106,12 +106,13 @@ function shapeFill(f: RegisterFill, transport: TransportDeskBundle, kmSince: Map
 }
 
 /**
- * GET /api/v1/transport/fuel?month=YYYY-MM&vehicleId=
+ * GET /api/v1/transport/fuel?month=YYYY-MM&from=YYYY-MM-DD&to=YYYY-MM-DD&vehicleId=
  *
- * The fuel register for a month: every fill (IST dates, quantity with its
- * unit, ₹, odometer, dealer, payment, bill photo, who entered it, accounts
- * status), totals per bus with km only where a reading supports it, and
- * Fleet Edge distance / fuel used per bus beside them. Also the office's
+ * The fuel register for a period (from..to, else the month): every fill
+ * (IST dates, quantity with its unit, ₹, odometer, dealer, payment, bill
+ * photo, who entered it, accounts status), totals per bus for the SAME period
+ * with km only where a reading supports it, and Fleet Edge distance / fuel
+ * used per bus beside them. Also the office's
  * queue — every fill, any month, not yet in accounts — and whether the old
  * desk fuel log still has entries to import.
  *
@@ -153,8 +154,9 @@ export async function GET(request: Request) {
     if (!isMonth(month)) throw new ApiError("bad_request", "month must be YYYY-MM", 400);
     const vehicleFilter = (url.searchParams.get("vehicleId") || "").trim();
     const dates = monthDates(month);
-    // ?from&to — the fill list for any date range (Transport → Fuel table);
-    // the per-bus totals and Fleet Edge stay the month's.
+    // ?from&to — the period, for the fill list AND the per-bus totals, day
+    // log km and Fleet Edge (21 Oct 2026: the totals were the whole month's
+    // while the list showed the range). Without them, the month.
     const rangeFrom = (url.searchParams.get("from") || "").trim();
     const rangeTo = (url.searchParams.get("to") || "").trim();
     const isDay = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d);
@@ -163,9 +165,7 @@ export async function GET(request: Request) {
     }
     const listFrom = rangeFrom || dates[0]!;
     const listTo = rangeTo || dates[dates.length - 1]!;
-    const from = dates[0]!;
     const to = dates[dates.length - 1]!;
-    const readTo = listTo > to ? listTo : to;
 
     const transport = await loadTransportDesk();
     const access = registerAccess(ctx, transport, to < today ? to : today);
@@ -176,10 +176,10 @@ export async function GET(request: Request) {
 
     const [allRes, logsRes, fleetEdge, queueRes, banks] = await Promise.all([
       // Everything up to the later end: the previous fill is needed for km.
-      readRegisterFills({ to: readTo }),
-      readDayLogs({ from, to }),
-      readFleetEdgeMonth(
-        month,
+      readRegisterFills({ to: listTo }),
+      readDayLogs({ from: listFrom, to: listTo }),
+      readFleetEdgeRange(
+        { from: listFrom, to: listTo },
         vehicles.map((v) => ({ id: v.id, registrationNo: v.registrationNo, chassisNo: v.chassisNo ?? "" })),
       ),
       access.fleetWide ? readUnpostedFills() : Promise.resolve({ ok: true as const, fills: [] as RegisterFill[] }),
@@ -206,10 +206,11 @@ export async function GET(request: Request) {
       dayLogKm.set(l.vehicleId, cur);
     }
 
-    const totals = busMonthTotals({
-      month,
+    const totals = busPeriodTotals({
+      from: listFrom,
+      to: listTo,
       vehicleIds: vehicles.map((v) => v.id),
-      fills: allFills.filter((f) => f.fillDate <= to),
+      fills: allFills,
       dayLogKm,
       fleetEdge: fleetEdge.ok ? new Map([...fleetEdge.byVehicle].map(([k, x]) => [k, { km: x.km, fuelUsed: x.fuelUsed }])) : new Map(),
     }).map((t) => {

@@ -53,6 +53,14 @@ type Body = {
   variables?: Record<string, string>;
   /** Attendance, transport, health and safety. Skips quiet hours. */
   urgent?: boolean;
+  /**
+   * Send `text` as written — the words the staff member reviewed and edited
+   * in the app's composer — and use `familyKey` only for the permission and
+   * the log. Free text reaches the family only inside WhatsApp's 24-hour
+   * window; outside it the send is refused with that reason (waSend), never
+   * reported as sent.
+   */
+  textOnly?: boolean;
 };
 
 /**
@@ -86,6 +94,10 @@ export async function POST(request: Request) {
     if (!familyKey && !text) {
       throw new ApiError("bad_request", "Give a familyKey or some text", 400);
     }
+    const textOnly = body.textOnly === true;
+    if (textOnly && !text) {
+      throw new ApiError("bad_request", "The message is empty", 400);
+    }
 
     // The permission is the SCREEN's, not the endpoint's. A staff member who
     // cannot see the defaulter list cannot message a family about their dues
@@ -115,7 +127,7 @@ export async function POST(request: Request) {
     let fromPhoneNumberId: string | undefined;
     let variables: Record<string, string> | undefined;
 
-    if (familyKey) {
+    if (familyKey && !textOnly) {
       const { state: rawState } = await fetchServerBlob<WaTemplatesState>(
         "wa_templates_state",
       );

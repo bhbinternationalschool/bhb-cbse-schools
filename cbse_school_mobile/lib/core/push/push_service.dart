@@ -43,12 +43,35 @@ class PushService {
     "document": ("Documents", "दस्तावेज़"),
   };
 
+  /// Kinds whose channel id carries `_v2` (21 Oct 2026). Build 1.0.33+34
+  /// shipped placeholder clips for these, and Android keeps the sound a
+  /// channel was created with — the real clips need channel ids those
+  /// phones never had. The clip files keep their names (res/raw). Must
+  /// match PUSH_VOICE_V2_KINDS in apps/web/src/lib/pushVoice.ts.
+  static const voiceV2Kinds = {"approval", "document"};
+
+  /// The channel id for a kind's clip in one language.
+  static String voiceChannelId(String kind, String lang) =>
+      voiceV2Kinds.contains(kind)
+      ? "bhb_voice_${kind}_${lang}_v2"
+      : "bhb_voice_${kind}_$lang";
+
+  /// The res/raw clip a voice channel plays (drops any `_v2`).
+  static String voiceSoundOf(String channelId) =>
+      channelId.replaceFirst(RegExp(r"_v\d+$"), "");
+
+  /// Channels with the placeholder sounds — deleted at start-up so the
+  /// phone's notification settings don't list each line twice.
+  static List<String> get retiredVoiceChannelIds => [
+    for (final k in voiceV2Kinds) ...["bhb_voice_${k}_hi", "bhb_voice_${k}_en"],
+  ];
+
   static Iterable<String> get _voiceChannelIds => _voiceKinds.keys.expand(
-    (k) => ["bhb_voice_${k}_hi", "bhb_voice_${k}_en"],
+    (k) => [voiceChannelId(k, "hi"), voiceChannelId(k, "en")],
   );
 
   static String _voiceChannelName(String id) {
-    final parts = id.split("_"); // bhb voice <kind> <lang>
+    final parts = id.split("_"); // bhb voice <kind> <lang> [v2]
     final names = _voiceKinds[parts[2]];
     if (names == null) return id;
     return parts[3] == "hi"
@@ -118,17 +141,8 @@ class PushService {
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
         >();
-    for (final id in _voiceChannelIds) {
-      await androidLocal?.createNotificationChannel(
-        AndroidNotificationChannel(
-          id,
-          _voiceChannelName(id),
-          description: _channelDescription,
-          importance: Importance.high,
-          playSound: true,
-          sound: RawResourceAndroidNotificationSound(id),
-        ),
-      );
+    if (androidLocal != null) {
+      await setUpVoiceChannels(androidLocal, _channelDescription);
     }
 
     // iOS: show banners while the app is in the foreground too.
@@ -163,6 +177,31 @@ class PushService {
     FirebaseMessaging.instance.onTokenRefresh.listen((t) {
       unawaited(_send(t));
     });
+  }
+
+  /// Creates one channel per spoken line and deletes the retired
+  /// placeholder channels. Creating an existing channel only renames it;
+  /// deleting a missing one is a no-op, so this runs at every start.
+  @visibleForTesting
+  static Future<void> setUpVoiceChannels(
+    AndroidFlutterLocalNotificationsPlugin android,
+    String description,
+  ) async {
+    for (final id in retiredVoiceChannelIds) {
+      await android.deleteNotificationChannel(id);
+    }
+    for (final id in _voiceChannelIds) {
+      await android.createNotificationChannel(
+        AndroidNotificationChannel(
+          id,
+          _voiceChannelName(id),
+          description: description,
+          importance: Importance.high,
+          playSound: true,
+          sound: RawResourceAndroidNotificationSound(voiceSoundOf(id)),
+        ),
+      );
+    }
   }
 
   /// Ask for permission (no-op if already decided) and upload the current
@@ -255,7 +294,7 @@ class PushService {
                 importance: Importance.high,
                 priority: Priority.high,
                 playSound: true,
-                sound: RawResourceAndroidNotificationSound(voice),
+                sound: RawResourceAndroidNotificationSound(voiceSoundOf(voice)),
                 styleInformation: style,
               )
             : AndroidNotificationDetails(

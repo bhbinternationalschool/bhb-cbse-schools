@@ -4947,6 +4947,347 @@ abstract class L {
   /// **'See the leaderboard'**
   String get gamesSeeLeaderboard;
 
+  /// No description provided for @admAddWalkInLead.
+  ///
+  /// In en, this message translates to:
+  /// **'Add walk-in lead'**
+  String get admAddWalkInLead;
+
+  /// No description provided for @admWalkInTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'New walk-in lead'**
+  String get admWalkInTitle;
+
+  /// No description provided for @admChildName.
+  ///
+  /// In en, this message translates to:
+  /// **'Child\'s name'**
+  String get admChildName;
+
+  /// No description provided for @admClassSought.
+  ///
+  /// In en, this message translates to:
+  /// **'Class sought'**
+  String get admClassSought;
+
+  /// No description provided for @admParentName.
+  ///
+  /// In en, this message translates to:
+  /// **'Parent\'s name'**
+  String get admParentName;
+
+  /// No description provided for @admMotherNameOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'Mother\'s name (optional)'**
+  String get admMotherNameOptional;
+
+  /// No description provided for @admParentMobile.
+  ///
+  /// In en, this message translates to:
+  /// **'Parent\'s mobile (10 digits)'**
+  String get admParentMobile;
+
+  /// No description provided for @admNotes.
+  ///
+  /// In en, this message translates to:
+  /// **'Notes'**
+  String get admNotes;
+
+  /// No description provided for @admSourceWalkIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Source: walk-in'**
+  String get admSourceWalkIn;
+
+  /// No description provided for @admSaveLead.
+  ///
+  /// In en, this message translates to:
+  /// **'Save lead'**
+  String get admSaveLead;
+
+  /// No description provided for @admSaving.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving…'**
+  String get admSaving;
+
+  /// No description provided for @admFieldRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'{field} is required'**
+  String admFieldRequired(String field);
+
+  /// No description provided for @admMobileTenDigits.
+  ///
+  /// In en, this message translates to:
+  /// **'Mobile must be 10 digits'**
+  String get admMobileTenDigits;
+
+  /// No description provided for @admWalkInSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Lead {enquiryNo} added'**
+  String admWalkInSaved(String enquiryNo);
+
+  /// No description provided for @admWalkInSavedLinked.
+  ///
+  /// In en, this message translates to:
+  /// **'Lead {enquiryNo} added to a family already on file'**
+  String admWalkInSavedLinked(String enquiryNo);
+
+  /// No description provided for @admOptionsNotLoaded.
+  ///
+  /// In en, this message translates to:
+  /// **'Classes and fee heads could not be loaded: {reason}'**
+  String admOptionsNotLoaded(String reason);
+
+  /// No description provided for @admComposerTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Message to {name}'**
+  String admComposerTitle(String name);
+
+  /// No description provided for @admComposerLoading.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing the message…'**
+  String get admComposerLoading;
+
+  /// No description provided for @admComposerYourWords.
+  ///
+  /// In en, this message translates to:
+  /// **'Your message'**
+  String get admComposerYourWords;
+
+  /// No description provided for @admComposerInWindow.
+  ///
+  /// In en, this message translates to:
+  /// **'The family wrote to the school in the last 24 hours, so your message can go as written. Check or edit it, then tap Send.'**
+  String get admComposerInWindow;
+
+  /// No description provided for @admComposerOutOfWindow.
+  ///
+  /// In en, this message translates to:
+  /// **'WhatsApp delivers your own words only within 24 hours of the family\'s last message to the school. Outside that, only the school\'s approved message below can be sent.'**
+  String get admComposerOutOfWindow;
+
+  /// No description provided for @admComposerApproved.
+  ///
+  /// In en, this message translates to:
+  /// **'School\'s approved message'**
+  String get admComposerApproved;
+
+  /// No description provided for @admComposerApprovedNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Approved by WhatsApp in these exact words — it cannot be edited. It goes in the family\'s chosen language.'**
+  String get admComposerApprovedNote;
+
+  /// No description provided for @admComposerTemplateUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'The approved message cannot be sent: {reason}'**
+  String admComposerTemplateUnavailable(String reason);
+
+  /// No description provided for @admComposerSendMine.
+  ///
+  /// In en, this message translates to:
+  /// **'Send my message'**
+  String get admComposerSendMine;
+
+  /// No description provided for @admComposerSendApproved.
+  ///
+  /// In en, this message translates to:
+  /// **'Send approved message'**
+  String get admComposerSendApproved;
+
+  /// No description provided for @admComposerEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Write a message first'**
+  String get admComposerEmpty;
+
+  /// No description provided for @admComposerSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent from the school\'s WhatsApp.'**
+  String get admComposerSent;
+
+  /// No description provided for @admComposerQueued.
+  ///
+  /// In en, this message translates to:
+  /// **'Held — it goes out after the family\'s quiet hours.'**
+  String get admComposerQueued;
+
+  /// No description provided for @admComposerNotSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Not sent: {reason}'**
+  String admComposerNotSent(String reason);
+
+  /// No description provided for @admNewRegistration.
+  ///
+  /// In en, this message translates to:
+  /// **'New registration'**
+  String get admNewRegistration;
+
+  /// No description provided for @admRegister.
+  ///
+  /// In en, this message translates to:
+  /// **'Register'**
+  String get admRegister;
+
+  /// No description provided for @admRegisterChild.
+  ///
+  /// In en, this message translates to:
+  /// **'Register {child}'**
+  String admRegisterChild(String child);
+
+  /// No description provided for @admFeeHead.
+  ///
+  /// In en, this message translates to:
+  /// **'Fee head'**
+  String get admFeeHead;
+
+  /// No description provided for @admRegistrationFee.
+  ///
+  /// In en, this message translates to:
+  /// **'Registration fee (₹)'**
+  String get admRegistrationFee;
+
+  /// No description provided for @admMoneyReceivedNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Money received now'**
+  String get admMoneyReceivedNow;
+
+  /// No description provided for @admMoneyReceivedNowNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave off if the family will pay at the counter later — the fee stays due.'**
+  String get admMoneyReceivedNowNote;
+
+  /// No description provided for @admAmountReceived.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount received (₹)'**
+  String get admAmountReceived;
+
+  /// No description provided for @admPaidBy.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid by'**
+  String get admPaidBy;
+
+  /// No description provided for @admRefRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'{label} is required for a non-cash payment'**
+  String admRefRequired(String label);
+
+  /// No description provided for @admAmountMoreThanFee.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount received is more than the fee'**
+  String get admAmountMoreThanFee;
+
+  /// No description provided for @admWholeRupees.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter whole rupees'**
+  String get admWholeRupees;
+
+  /// No description provided for @admNoFeeHeads.
+  ///
+  /// In en, this message translates to:
+  /// **'No registration fee head is set up. The office adds one in Masters → Fee heads.'**
+  String get admNoFeeHeads;
+
+  /// No description provided for @admRegisteredDue.
+  ///
+  /// In en, this message translates to:
+  /// **'Registered {appNo} · fee ₹{fee} due'**
+  String admRegisteredDue(String appNo, String fee);
+
+  /// No description provided for @admRegisteredPaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Registered {appNo} · received ₹{paid} as {code} · balance ₹{balance}'**
+  String admRegisteredPaid(
+    String appNo,
+    String paid,
+    String code,
+    String balance,
+  );
+
+  /// No description provided for @admTabLeads.
+  ///
+  /// In en, this message translates to:
+  /// **'Leads'**
+  String get admTabLeads;
+
+  /// No description provided for @admTabRegistered.
+  ///
+  /// In en, this message translates to:
+  /// **'Registered ({count})'**
+  String admTabRegistered(String count);
+
+  /// No description provided for @admFollowUp.
+  ///
+  /// In en, this message translates to:
+  /// **'Follow up'**
+  String get admFollowUp;
+
+  /// No description provided for @admSendToSis.
+  ///
+  /// In en, this message translates to:
+  /// **'Send to SIS'**
+  String get admSendToSis;
+
+  /// No description provided for @admSendToSisNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Admitting into SIS gives the admission number, section and fee group and posts the fee receipt — that is done on the web ERP\'s Admissions screen. Open this lead there?'**
+  String get admSendToSisNote;
+
+  /// No description provided for @admOpenInErp.
+  ///
+  /// In en, this message translates to:
+  /// **'Open in web ERP'**
+  String get admOpenInErp;
+
+  /// No description provided for @admCouldNotOpenErp.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open the web ERP'**
+  String get admCouldNotOpenErp;
+
+  /// No description provided for @admFeeNotSet.
+  ///
+  /// In en, this message translates to:
+  /// **'Registration fee not set'**
+  String get admFeeNotSet;
+
+  /// No description provided for @admFeeWaived.
+  ///
+  /// In en, this message translates to:
+  /// **'Registration fee waived'**
+  String get admFeeWaived;
+
+  /// No description provided for @admFeeStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Fee ₹{fee} · paid ₹{paid} · due ₹{due}'**
+  String admFeeStatus(String fee, String paid, String due);
+
+  /// No description provided for @admNoRegisteredLeads.
+  ///
+  /// In en, this message translates to:
+  /// **'No registered leads are waiting to be sent to SIS.'**
+  String get admNoRegisteredLeads;
+
   /// No description provided for @pmAllStaff.
   ///
   /// In en, this message translates to:

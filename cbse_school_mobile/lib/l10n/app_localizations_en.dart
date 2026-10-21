@@ -2851,6 +2851,213 @@ class LEn extends L {
   String get gamesSeeLeaderboard => 'See the leaderboard';
 
   @override
+  String get admAddWalkInLead => 'Add walk-in lead';
+
+  @override
+  String get admWalkInTitle => 'New walk-in lead';
+
+  @override
+  String get admChildName => 'Child\'s name';
+
+  @override
+  String get admClassSought => 'Class sought';
+
+  @override
+  String get admParentName => 'Parent\'s name';
+
+  @override
+  String get admMotherNameOptional => 'Mother\'s name (optional)';
+
+  @override
+  String get admParentMobile => 'Parent\'s mobile (10 digits)';
+
+  @override
+  String get admNotes => 'Notes';
+
+  @override
+  String get admSourceWalkIn => 'Source: walk-in';
+
+  @override
+  String get admSaveLead => 'Save lead';
+
+  @override
+  String get admSaving => 'Saving…';
+
+  @override
+  String admFieldRequired(String field) {
+    return '$field is required';
+  }
+
+  @override
+  String get admMobileTenDigits => 'Mobile must be 10 digits';
+
+  @override
+  String admWalkInSaved(String enquiryNo) {
+    return 'Lead $enquiryNo added';
+  }
+
+  @override
+  String admWalkInSavedLinked(String enquiryNo) {
+    return 'Lead $enquiryNo added to a family already on file';
+  }
+
+  @override
+  String admOptionsNotLoaded(String reason) {
+    return 'Classes and fee heads could not be loaded: $reason';
+  }
+
+  @override
+  String admComposerTitle(String name) {
+    return 'Message to $name';
+  }
+
+  @override
+  String get admComposerLoading => 'Preparing the message…';
+
+  @override
+  String get admComposerYourWords => 'Your message';
+
+  @override
+  String get admComposerInWindow =>
+      'The family wrote to the school in the last 24 hours, so your message can go as written. Check or edit it, then tap Send.';
+
+  @override
+  String get admComposerOutOfWindow =>
+      'WhatsApp delivers your own words only within 24 hours of the family\'s last message to the school. Outside that, only the school\'s approved message below can be sent.';
+
+  @override
+  String get admComposerApproved => 'School\'s approved message';
+
+  @override
+  String get admComposerApprovedNote =>
+      'Approved by WhatsApp in these exact words — it cannot be edited. It goes in the family\'s chosen language.';
+
+  @override
+  String admComposerTemplateUnavailable(String reason) {
+    return 'The approved message cannot be sent: $reason';
+  }
+
+  @override
+  String get admComposerSendMine => 'Send my message';
+
+  @override
+  String get admComposerSendApproved => 'Send approved message';
+
+  @override
+  String get admComposerEmpty => 'Write a message first';
+
+  @override
+  String get admComposerSent => 'Sent from the school\'s WhatsApp.';
+
+  @override
+  String get admComposerQueued =>
+      'Held — it goes out after the family\'s quiet hours.';
+
+  @override
+  String admComposerNotSent(String reason) {
+    return 'Not sent: $reason';
+  }
+
+  @override
+  String get admNewRegistration => 'New registration';
+
+  @override
+  String get admRegister => 'Register';
+
+  @override
+  String admRegisterChild(String child) {
+    return 'Register $child';
+  }
+
+  @override
+  String get admFeeHead => 'Fee head';
+
+  @override
+  String get admRegistrationFee => 'Registration fee (₹)';
+
+  @override
+  String get admMoneyReceivedNow => 'Money received now';
+
+  @override
+  String get admMoneyReceivedNowNote =>
+      'Leave off if the family will pay at the counter later — the fee stays due.';
+
+  @override
+  String get admAmountReceived => 'Amount received (₹)';
+
+  @override
+  String get admPaidBy => 'Paid by';
+
+  @override
+  String admRefRequired(String label) {
+    return '$label is required for a non-cash payment';
+  }
+
+  @override
+  String get admAmountMoreThanFee => 'Amount received is more than the fee';
+
+  @override
+  String get admWholeRupees => 'Enter whole rupees';
+
+  @override
+  String get admNoFeeHeads =>
+      'No registration fee head is set up. The office adds one in Masters → Fee heads.';
+
+  @override
+  String admRegisteredDue(String appNo, String fee) {
+    return 'Registered $appNo · fee ₹$fee due';
+  }
+
+  @override
+  String admRegisteredPaid(
+    String appNo,
+    String paid,
+    String code,
+    String balance,
+  ) {
+    return 'Registered $appNo · received ₹$paid as $code · balance ₹$balance';
+  }
+
+  @override
+  String get admTabLeads => 'Leads';
+
+  @override
+  String admTabRegistered(String count) {
+    return 'Registered ($count)';
+  }
+
+  @override
+  String get admFollowUp => 'Follow up';
+
+  @override
+  String get admSendToSis => 'Send to SIS';
+
+  @override
+  String get admSendToSisNote =>
+      'Admitting into SIS gives the admission number, section and fee group and posts the fee receipt — that is done on the web ERP\'s Admissions screen. Open this lead there?';
+
+  @override
+  String get admOpenInErp => 'Open in web ERP';
+
+  @override
+  String get admCouldNotOpenErp => 'Could not open the web ERP';
+
+  @override
+  String get admFeeNotSet => 'Registration fee not set';
+
+  @override
+  String get admFeeWaived => 'Registration fee waived';
+
+  @override
+  String admFeeStatus(String fee, String paid, String due) {
+    return 'Fee ₹$fee · paid ₹$paid · due ₹$due';
+  }
+
+  @override
+  String get admNoRegisteredLeads =>
+      'No registered leads are waiting to be sent to SIS.';
+
+  @override
   String get pmAllStaff => 'All staff';
 
   @override
