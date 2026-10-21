@@ -55,6 +55,10 @@ const obj = (v: unknown): Record<string, unknown> =>
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const short = (v: unknown) => JSON.stringify(v ?? null).slice(0, 200);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// The app's reference caches (Masters + roster, roles) look at erp_versions at
+// most once per 2 s (data-layer 1.3): wait past that window after a change made
+// outside the app's own write paths.
+const PAST_VERSIONS_WINDOW = 2_600;
 
 async function req(
   url: string,
@@ -137,7 +141,7 @@ async function main(): Promise<void> {
       deleted_by: "acceptance",
       updated_at: new Date().toISOString(),
     });
-    await sleep(300);
+    await sleep(PAST_VERSIONS_WINDOW);
     const roster = await inRoster(office);
     const list = await inStaffList(office);
     const mobile = await inMobile(principal);
@@ -152,7 +156,7 @@ async function main(): Promise<void> {
       deleted_by: null,
       updated_at: new Date().toISOString(),
     });
-    await sleep(300);
+    await sleep(PAST_VERSIONS_WINDOW);
     const back = { roster: await inRoster(office), list: await inStaffList(office), mobile: await inMobile(principal) };
     const selfBack = (await req(`${app}/api/data/views/staff-list`, { headers: removedSelf })).status;
     record(
@@ -209,11 +213,15 @@ async function main(): Promise<void> {
       { op: "upsert", id: TARGET, base: r1.updated_at, row: { mobile: "9000000099", profile: { fullName: targetRec.fullName, mobile: "9000000099" } } },
     ]);
     const rB = await staffRow();
+    // Every other profile key exactly as before: the sent keys are laid on the stored profile.
+    const wiped = Object.keys(prof(r1)).filter(
+      (k) => !["mobile", "fullName"].includes(k) && JSON.stringify(prof(rB)[k]) !== JSON.stringify(prof(r1)[k]),
+    );
     record(
-      "sis.staff: a profile without the protected keys is not a blanking — they are kept; the edit lands",
+      "sis.staff: a profile with only the changed keys wipes nothing — protected keys and every other key kept; the edit lands",
       slim.status === 200 && rB.mobile === "9000000099" && prof(rB).bankAccountNo === SEED.bankAccountNo && prof(rB).panNo === SEED.panNo &&
-        prof(rB).basicPay === SEED.basicPay,
-      `HTTP ${slim.status} ${slim.status === 200 ? "" : short(slim.body)}; bank ${short(prof(rB).bankAccountNo)}`,
+        prof(rB).basicPay === SEED.basicPay && wiped.length === 0 && Object.keys(prof(r1)).length > 20,
+      `HTTP ${slim.status} ${slim.status === 200 ? "" : short(slim.body)}; bank ${short(prof(rB).bankAccountNo)}; keys ${Object.keys(prof(r1)).length}, changed besides mobile: ${short(wiped)}`,
     );
     const stale = await post("sis.staff", office, [{ op: "upsert", id: TARGET, base: r1.updated_at, row: { mobile: "9000000001" } }]);
     const c = obj(arr(stale.body.conflicts)[0]);
@@ -234,7 +242,7 @@ async function main(): Promise<void> {
     const officeDel = await post("sis.staff", office, [{ op: "delete", id: TARGET, base: r0.updated_at }]);
     const del = await post("sis.staff", principal, [{ op: "delete", id: TARGET, base: r0.updated_at, by: "someone-else" }]);
     const r1 = await staffRow();
-    await sleep(300);
+    await sleep(PAST_VERSIONS_WINDOW);
     const listed = arr((await req(`${app}/api/data/sis.staff?limit=500`, { headers: office })).body.rows).map(obj).some((s) => s.id === TARGET);
     const removed = await req(`${app}/api/data/sis.staff?removed=1&limit=500`, { headers: office });
     const removedHas = arr(removed.body.rows).map(obj).some((s) => s.id === TARGET);
@@ -251,7 +259,7 @@ async function main(): Promise<void> {
     const blind = await post("sis.staff", office, [{ op: "upsert", id: TARGET, base: null, row: { deleted_at: null } }]);
     const restore = await post("sis.staff", office, [{ op: "upsert", id: TARGET, base: rev, row: { deleted_at: null } }]);
     const r2 = await staffRow();
-    await sleep(300);
+    await sleep(PAST_VERSIONS_WINDOW);
     record(
       "restore: blind → 409; with the removed row's revision → 200, deleted_by cleared, back in every list",
       blind.status === 409 && restore.status === 200 && r2.deleted_at === null && r2.deleted_by === null &&
@@ -266,10 +274,17 @@ async function main(): Promise<void> {
       id: `e2e_deny_${module}`, staffId: fx.sessions.office.staffId, denyModule: module, effect: "deny", actions: ["edit"],
       note: "2.2b acceptance", grantedBy: "acceptance", grantedAt: new Date().toISOString(), expiresOn: "",
     });
+    // userGrants is a MERGE slice: a grant is removed only when the save names
+    // it (`deletes`), never by leaving it out.
+    const DENY_IDS = ["e2e_deny_payroll", "e2e_deny_accounts"];
     const pushRbac = async (userGrants: unknown[]) => {
-      const r = await pushDeskSliceToDb("rbac", { ...fx.rbac, userGrants } as never);
+      const r = await pushDeskSliceToDb(
+        "rbac",
+        { ...fx.rbac, userGrants } as never,
+        userGrants.length ? undefined : { deletes: { userGrants: DENY_IDS } },
+      );
       if (!(r as { ok?: boolean }).ok) throw new Error(`rbac push failed: ${short(r)}`);
-      await sleep(400);
+      await sleep(PAST_VERSIONS_WINDOW);
     };
     const rosterNow = async () => {
       const g = await req(`${app}/api/school-data/staff-roster`, { headers: office });
@@ -303,6 +318,9 @@ async function main(): Promise<void> {
     } finally {
       await pushRbac([]);
     }
+    const left = (await rest(`rbac_desk_slices?tenant_id=eq.${tenantId}&slice_key=eq.userGrants&select=payload`))[0];
+    const stillThere = arr(obj(left).payload).map(obj).filter((g) => DENY_IDS.includes(String(g.id)));
+    record("old staff-roster save: the two personal denies are removed again", stillThere.length === 0, `left ${stillThere.length}`);
     const b = await rosterNow();
     const back = await save({ ...b.me, mobile: String(original.mobile ?? ""), bankAccountNo: SEED.bankAccountNo }, b.stamp);
     const withAuth = await (async () => {
@@ -350,6 +368,21 @@ async function main(): Promise<void> {
     const r2 = await staffRow();
     await post("sis.staff", office, [{ op: "upsert", id: TARGET, base: r2.updated_at, row: { mobile: original.mobile, profile: { mobile: original.mobile } } }]);
     record("put back: the target's bank / PAN / Aadhaar / pay as seeded", w.status === 200, `HTTP ${w.status}`);
+  }
+
+  // The target's whole record exactly as it was found (profile, mobile).
+  {
+    await patch(`sis_staff?id=eq.${TARGET}&tenant_id=eq.${tenantId}`, {
+      profile: original.profile,
+      mobile: original.mobile,
+      updated_at: new Date().toISOString(),
+    });
+    const r = await staffRow();
+    record(
+      "put back: the target's profile and mobile exactly as found",
+      JSON.stringify(prof(r)) === JSON.stringify(originalProfile) && r.mobile === original.mobile && r.deleted_at === null,
+      `${Object.keys(prof(r)).length} profile keys`,
+    );
   }
 
   // ── F. A teacher's own-class class subject (function grant) ────────────

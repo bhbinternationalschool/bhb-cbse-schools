@@ -8,9 +8,9 @@
  *    An upsert may not write `deleted_by` (the server's), nor change a
  *    protected profile key (bank / UPI / Aadhaar / PAN / pay — the database
  *    refuses those too — or the login, which only the owner changes through
- *    the sensitive route). The profile is one jsonb column: the protected keys
- *    an upsert leaves out are laid on from the stored row, so leaving them out
- *    is never a blanking.
+ *    the sensitive route). The profile is one jsonb column: an upsert's
+ *    profile keys are laid on the STORED profile — a key left out is kept,
+ *    never wiped — so leaving the protected keys out is no blanking either.
  *  - staffListRows: what a list answer carries — the whole row (never the
  *    password) for a staff · edit holder and for the person's own row; a
  *    directory for everyone else (the staff-roster GET's rule since 29 Sep).
@@ -87,7 +87,13 @@ export async function prepareStaffOps(
       // database check, so they are judged on every write.
       const lands = before ? sameInstant(op.base, before.updated_at) : op.base == null;
       const storedProfile = before && isObj(before.profile) ? (before.profile as Row) : before ? {} : null;
-      const profile = withStoredProtectedKeys(storedProfile, row.profile as Row);
+      // `profile` is ONE jsonb column, and the kernel patches columns: sent as
+      // it is, a profile carrying only the changed keys would REPLACE the whole
+      // record (addresses, documents, class links …). So the stored profile is
+      // the base and the sent keys are laid on it — a key is cleared by sending
+      // it as "" or null, never by leaving it out. (Protected keys left out are
+      // therefore kept too; withStoredProtectedKeys says so explicitly.)
+      const profile = withStoredProtectedKeys(storedProfile, { ...(storedProfile ?? {}), ...(row.profile as Row) });
       const empCode = String(row.emp_code ?? (profile as Row).empCode ?? before?.emp_code ?? "");
       const change = protectedChanges(storedProfile, profile, { empCode });
       const why = protectedChangeRefusal(

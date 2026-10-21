@@ -71,10 +71,16 @@ async function section2(): Promise<void> {
   assert.equal(prof.loginPassword, "plain-secret", "an absent password is laid on from the stored row (not a blanking)");
   assert.equal(prof.bankAccountNo, "000111222");
 
-  // A profile WITHOUT the sensitive keys at all is not a blanking either.
+  // A profile WITHOUT the sensitive keys at all is not a blanking either — and
+  // no other key is wiped: the sent keys are laid on the stored profile.
   const slim = await prepareStaffOps([op({ op: "upsert", id: "stf_7", base: T0, row: { profile: { fullName: "Asha" } } })], "stf_1", read);
   assert.ok(slim.ok);
-  assert.equal(((slim.ok && (slim.ops[0] as { row: Row }).row.profile) as Row).panNo, "ABCDE1234F");
+  const slimProfile = (slim.ok && (slim.ops[0] as { row: Row }).row.profile) as Row;
+  assert.equal(slimProfile.panNo, "ABCDE1234F");
+  assert.equal(slimProfile.addressCurrent, "Home", "a key left out is kept, not wiped");
+  assert.equal(slimProfile.fullName, "Asha");
+  const cleared = await prepareStaffOps([op({ op: "upsert", id: "stf_7", base: T0, row: { profile: { addressCurrent: "" } } })], "stf_1", read);
+  assert.equal(((cleared.ok && (cleared.ops[0] as { row: Row }).row.profile) as Row).addressCurrent, "", "cleared by sending it blank");
 
   for (const [k, v] of [["bankAccountNo", "999"], ["panNo", ""], ["basicPay", "90000"], ["upiId", null], ["aadhaarNo", "1"]] as const) {
     const r = await prepareStaffOps([op({ op: "upsert", id: "stf_7", base: T0, row: { profile: { ...asRead, [k]: v } } })], "stf_1", read);

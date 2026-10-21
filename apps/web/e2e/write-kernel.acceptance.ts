@@ -220,7 +220,7 @@ async function main(): Promise<void> {
   record(
     "slice: GET masters.subjects = the seeded subjects, each with its own _rev (no slice stamp)",
     subjList.status === 200 && subjects.length === e.subjects && /^[1-9]\d*$/.test(rev0) && subjList.body.revision === undefined,
-    `HTTP ${subjList.status}, ${subjects.length} subjects (seeded ${e.subjects}), _rev ${rev0}, revision ${short(subjList.body.revision)}`,
+    `HTTP ${subjList.status}, ${subjects.length} subjects (seeded ${e.subjects}), _rev ${rev0}, revision ${String(subjList.body.revision)}`,
   );
   const mv0 = obj((await versions()).masters);
   let rev1 = "";
