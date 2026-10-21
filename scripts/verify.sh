@@ -574,6 +574,7 @@ SELFTESTS=(
   test:masters-pending
   test:staff-kernel
   test:masters-writes
+  test:masters-element-commit
   test:desk-feature-rev
   test:staff-requests
   test:survey-team-plan

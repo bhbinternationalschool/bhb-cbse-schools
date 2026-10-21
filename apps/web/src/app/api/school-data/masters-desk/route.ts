@@ -18,7 +18,7 @@ import {
 import { STAFF_OWNED_MASTERS_SLICES } from "@/lib/staffDbConfig";
 import { rowFingerprint } from "@/lib/sliceRevClient";
 import { fetchMastersFromRowTables } from "@/lib/mastersRowTables.server";
-import { guardMastersOverwrite, guardSubjectsOverwrite } from "@/lib/mastersWriteGuard";
+import { guardFoundationListsOverwrite, guardMastersOverwrite, guardSubjectsOverwrite } from "@/lib/mastersWriteGuard";
 import { guardMastersRevision } from "@/lib/mastersRevisionGuard";
 import {
   deskWriteGate,
@@ -385,6 +385,24 @@ export async function POST(req: Request) {
     );
     return NextResponse.json(
       { error: subjectVerdict.message, reason: "subject_wipe" },
+      { status: 409 },
+    );
+  }
+
+  // The Foundation lists are element writes since data-layer 2.2c: through
+  // this old path a body may not remove more than one element of any of
+  // them (nor empty one) — the shape of every whole-list wipe.
+  const foundationVerdict = guardFoundationListsOverwrite(
+    stored as unknown as Record<string, unknown>,
+    state as unknown as Record<string, unknown>,
+  );
+  if (!foundationVerdict.allow) {
+    console.warn(
+      `[masters-desk] rejected foundation list shrink`,
+      `list=${foundationVerdict.list} removed=${foundationVerdict.removed} stored=${foundationVerdict.stored}`,
+    );
+    return NextResponse.json(
+      { error: foundationVerdict.message, reason: "foundation_shrink", list: foundationVerdict.list },
       { status: 409 },
     );
   }

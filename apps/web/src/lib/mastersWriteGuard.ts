@@ -117,3 +117,54 @@ export function guardSubjectsOverwrite(
   }
   return { allow: true };
 }
+
+/**
+ * The Foundation lists through the OLD whole-book path (data-layer 2.2c).
+ *
+ * Since 2.2c the Masters editor writes campuses, years, terms, classes,
+ * sections, subjects, streams, class subjects, numbering and holidays one
+ * element at a time (POST /api/data/masters.*, at most one removal per save).
+ * The masters-desk POST is left only for the fee setup and older pages
+ * (until 2.2f). A body that reaches it with one of these lists may change
+ * elements and add them, but may not remove more than ONE element of any of
+ * them, nor empty one — every whole-list wipe (subjects on 10 Oct, the staff
+ * roster three times) was a save that removed many at once.
+ */
+export const FOUNDATION_GUARDED_LISTS = [
+  "campuses",
+  "academicYears",
+  "academicTerms",
+  "classes",
+  "sections",
+  "subjects",
+  "seniorStreams",
+  "classSubjects",
+  "numberSeries",
+  "holidays",
+] as const;
+
+export function guardFoundationListsOverwrite(
+  stored: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): ListGuardVerdict & { list?: string } {
+  const ids = (v: unknown): string[] =>
+    Array.isArray(v) ? v.map((e) => (e && typeof e === "object" ? String((e as { id?: unknown }).id ?? "") : "")).filter(Boolean) : [];
+  for (const key of FOUNDATION_GUARDED_LISTS) {
+    if (!Array.isArray(incoming[key]) || !Array.isArray(stored[key])) continue;
+    const before = ids(stored[key]);
+    const after = new Set(ids(incoming[key]));
+    const removed = before.filter((id) => !after.has(id)).length;
+    if (removed > 1 || (before.length > 0 && after.size === 0)) {
+      return {
+        allow: false,
+        list: key,
+        removed,
+        stored: before.length,
+        message:
+          `This save would remove ${removed} of ${before.length} ${key} at once. ${key} are saved one item at a time ` +
+          `since 21 Oct 2026 — this is an old or stale copy. Nothing was saved; reload the page and make the change again.`,
+      };
+    }
+  }
+  return { allow: true };
+}

@@ -534,6 +534,45 @@ function rpcFailure(
   return { kind: "unavailable", message: error.message };
 }
 
+/**
+ * masters_series_bump (data-layer 2.2a/2.2c): a number series' next number
+ * moves past one just issued — monotone, under the slice lock, no base.
+ */
+export async function bumpNumberSeries(
+  series: string,
+  used: number,
+  ay: string | null,
+): Promise<
+  | { ok: true; changed: boolean; status: "applied" | "unchanged"; id: string; next: number }
+  | { ok: false; status: 400 | 404 | 503; kind: "invalid" | "not_found" | "unavailable" | "auth"; message: string }
+> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, status: 503, kind: "unavailable", message: "Supabase tenant not configured" };
+  const { data, error } = await ctx.sb.rpc("masters_series_bump", {
+    p_tenant: ctx.tenantId,
+    p_series: series,
+    p_used: used,
+    p_ay: ay,
+  });
+  if (error) {
+    const f = rpcFailure(error);
+    return { ok: false, status: f.kind === "invalid" ? 400 : 503, kind: f.kind, message: f.message };
+  }
+  const res = (data ?? {}) as { ok?: boolean; status?: string; changed?: boolean; id?: string; next?: number };
+  if (res.ok !== true) {
+    return res.status === "not_found"
+      ? { ok: false, status: 404, kind: "not_found", message: `No number series ${series} in Masters.` }
+      : { ok: false, status: 503, kind: "unavailable", message: "The series bump returned no outcome" };
+  }
+  return {
+    ok: true,
+    changed: res.changed === true,
+    status: res.status === "applied" ? "applied" : "unchanged",
+    id: String(res.id ?? ""),
+    next: Number(res.next ?? 0),
+  };
+}
+
 function asReason(v: unknown): ConflictReason | undefined {
   return v === "stale" || v === "unversioned" || v === "deleted" ? v : undefined;
 }

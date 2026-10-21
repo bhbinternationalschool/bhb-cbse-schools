@@ -716,6 +716,7 @@ jobs:
           npm run test:masters-pending
           npm run test:staff-kernel
           npm run test:masters-writes
+          npm run test:masters-element-commit
           npm run test:desk-feature-rev
           npm run test:staff-requests
           npm run test:notify

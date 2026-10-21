@@ -1,5 +1,5 @@
 import type { NumberSeries } from "@/lib/foundationMasters";
-import { loadMasters, saveMasters } from "@/lib/masters";
+import { loadMasters } from "@/lib/masters";
 
 /** Find a series by stable code (e.g. ADMISSION, STAFF_ID). */
 export function findNumberSeries(
@@ -150,22 +150,52 @@ export function advanceMastersSeries(
   return numberSeries.map((s) => (s.id === series.id ? updated : s));
 }
 
-/** Persist counter bump to masters after issuing a number. */
+/**
+ * The number a formatted value carries for this series (its tail after the
+ * prefix), or null when it is not one of the series' numbers.
+ */
+export function seriesNumberOf(
+  series: NumberSeries,
+  academicYearCode: string | undefined,
+  usedFormatted: string,
+): number | null {
+  const prefix = resolveSeriesPrefix(series, academicYearCode);
+  const val = (usedFormatted || "").trim();
+  if (!val.startsWith(prefix)) return null;
+  const n = Number(val.slice(prefix.length));
+  return Number.isInteger(n) && n >= 1 ? n : null;
+}
+
+/**
+ * After issuing a number: move the series past it on the server
+ * (POST /api/data/masters.number-series/bump → masters_series_bump —
+ * data-layer 2.2c). Monotone and without a base, so two desks issuing at
+ * once cannot undo each other; the screens see the new next number at the
+ * next masters answer (the versions poll). Before 2.2c this saved the whole
+ * numberSeries list from the tab's copy through saveMasters.
+ */
 export function persistSeriesUse(
   code: string,
   academicYearCode: string | undefined,
   usedFormatted: string,
 ): void {
   if (typeof window === "undefined" || !usedFormatted?.trim()) return;
-  const masters = loadMasters();
-  const numberSeries = advanceMastersSeries(
-    masters.numberSeries,
-    code,
-    academicYearCode,
-    usedFormatted,
-  );
-  if (numberSeries === masters.numberSeries) return;
-  saveMasters({ ...masters, numberSeries });
+  const series = findNumberSeries(loadMasters().numberSeries, code);
+  if (!series) return;
+  const used = seriesNumberOf(series, academicYearCode, usedFormatted);
+  if (used === null) return;
+  // Already past it as far as this tab knows: nothing to move.
+  if (used + 1 <= peekNextSeriesNumber(series, academicYearCode)) return;
+  const ay = series.resetOnAy && academicYearCode?.trim() ? academicYearCode.trim() : undefined;
+  void fetch(`/api/data/${encodeURIComponent("masters.number-series")}/bump`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ series: series.code || series.id, used, ...(ay ? { ay } : {}) }),
+  })
+    .then(async (res) => {
+      if (!res.ok) console.warn(`[number-series] ${code} ${used}: not moved (${res.status}) ${(await res.text()).slice(0, 200)}`);
+    })
+    .catch((e: unknown) => console.warn(`[number-series] ${code} ${used}: not moved`, e));
 }
 
 export function bumpStudentSeriesUses(

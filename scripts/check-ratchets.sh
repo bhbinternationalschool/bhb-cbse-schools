@@ -280,6 +280,16 @@ count_metric() {
         | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//|#)' \
         | grep -vE 'selftest|\.test\.|export (async )?function' \
         | wc -l ;;
+    save_masters_call_sites)
+      # Data-layer 2.2c. Call sites of saveMasters( — the whole-book Masters
+      # save from a tab's copy — anywhere in src (definition, selftests and
+      # comment lines excluded). 2.2c moved the Foundation panels, the
+      # timetable's periods/week and the number series to element writes;
+      # 2.2d/2.2e move the rest; 2.2f deletes saveMasters (budget 0).
+      grep -rnE '\bsaveMasters\(' "$SRC" --include='*.ts' --include='*.tsx' 2>/dev/null \
+        | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//|#)' \
+        | grep -vE 'selftest|\.test\.|export (async )?function saveMasters' \
+        | wc -l ;;
     *)
       echo "-1" ;;
   esac
