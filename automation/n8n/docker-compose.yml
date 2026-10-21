@@ -33,6 +33,9 @@ services:
       N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_COMMUNITY_PACKAGES_ENABLED: "false"
       # The workflows read their secrets with {{ $env.NAME }} in HTTP nodes
       # and Code nodes. n8n 2.x blocks that by default; this opens it for
       # this one instance, whose only users are the school's own workflows.
@@ -43,13 +46,15 @@ services:
       EXECUTIONS_DATA_PRUNE: "true"
       EXECUTIONS_DATA_MAX_AGE: 336
       # Code nodes run on the built-in task runner (n8n 2.x default).
-      N8N_RUNNERS_ENABLED: "true"
+      # Task runners spawn a second Node process (~150 MB); the VM has 1 GB, so
+      # Code nodes run in the main process. Flip to "true" on an e2-small or bigger.
+      N8N_RUNNERS_ENABLED: "false"
       # --- n8n's own database: SQLite on the volume (default DB_TYPE) ---
       DB_SQLITE_POOL_SIZE: 2
       DB_SQLITE_VACUUM_ON_STARTUP: "true"
       # 1 GB VM: cap the Node heap so the kernel never OOM-kills n8n mid-huddle
       # (the README also adds a 2 GB swap file).
-      NODE_OPTIONS: --max-old-space-size=640
+      NODE_OPTIONS: --max-old-space-size=512
       # --- what the workflows need ($env.*) ---
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}
       SUPABASE_URL: ${SUPABASE_URL:?set SUPABASE_URL in .env}
