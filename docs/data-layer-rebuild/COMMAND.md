@@ -1568,6 +1568,95 @@ Holders of the function and the owner are still checked. Self-test cases in `sta
 fixture's office (staff · edit, Masters view-only) has its profile Save blocked by `saveMasters` before any request,
 while the form still says "Staff updated".
 
+*(2.2c built 21 Oct 2026, PR #PRNUM — the Foundation panels, the class/subject teacher links, Timetable's periods/week and
+the number series write elements; no migration.)* **What exists.**
+- **The Masters editor's commit** (`components/masters/MastersWorkspace.tsx`): panels still hand `commit(next)` a book;
+  `planMastersElementCommit` (`lib/data/client/mastersElementPlan.ts`, pure) turns the difference between the book ON
+  SCREEN and `next` into element writes for the Foundation lists — campuses, academic years, terms, classes, sections,
+  subjects, senior streams, class subjects, number series, holidays — and the objects school profile / school timing /
+  statutory setup: an element the action changed → one upsert (base = the revision of the element as SHOWN: the one
+  this tab's own save answered, else the `_rev` it carries, else the served one; a dropped key is sent as null); an
+  element it removed → a delete, ONE PER REQUEST (a user action that removes several — a subject with its components
+  from a class, a class with its links — is several saves in a row, parents first; > 12 in one action, an emptied
+  list, a missing or doubled id → refused, nothing sent); an object → one upsert on the view's stamp. Elements the
+  action did not touch are never sent, whatever a stale answer shows. `useMastersElementWrites()`
+  (`lib/data/client/writeHooks.tsx`) sends them request by request (each all-or-none on the server) and stops at the
+  first refusal; the masters view refetches. A refusal says "Not saved — …" (a conflict: "Someone changed this on
+  another device a moment ago — nothing was saved. The screen now shows their version; make your change again.").
+- **Class / subject teacher links** (`SectionTeachersPanel`, and the cascades of removing a class or section): a
+  change to `classTeacherLinks` / `subjectTeachingLinks` becomes, per member, the added links and the removed link
+  ids, laid on the record AS STORED NOW (GET `sis.staff`, its `updated_at` the base) and written through
+  `POST /api/data/sis.staff` with `{profile: {classTeacherLinks}}` only (2.2b lays it on the stored profile); then the
+  staff bridge re-reads the roster. Never the roster, never the old staff-roster route. Needs Staff · edit.
+- **Fee setup (2.2e) and staff setup (2.2d)** keys still save through `saveMasters` — only when an action changed one
+  of them, with the Foundation keys taken from the tab's page copy AS LOADED, so the old save never sends a Foundation
+  list. The 2.1h whole-book overlay now holds only its own keys.
+- **The overlay, per element** (`components/masters/mastersElementPending.ts`, pure): what a save sent is laid over
+  the answer element by element until an answer serves that element at the `_rev` the save answered (or later), or
+  no longer has it (a delete), or the object's stamp is the save's or later; a failed save drops its elements at
+  once; an unproven entry goes after 60 s. Everything else on screen is the latest answer — another person's change to
+  a different element of the same list shows at once. The editor re-asks every 2.5 s while an element is unproven.
+- **The masters-desk bridge** (`lib/data/client/mastersDeskBridge.ts`): after any element write (and on a conflict)
+  the tab's masters desk is re-read (`ensureMastersHydrated` after dropping its mark), so the OLD save's per-section
+  stamps follow the server — without it a fee edit right after a subject edit in the same tab was refused "changed on
+  another device". The old save waits for a running re-read. Goes with the old save (2.2e/2.2f).
+- **Timetable → Subject rules** (`TimetableRulesSetup`): periods/week = `useMastersMutation("classSubjects")` — only
+  the links whose number changed, one request; a teacher only in her own classes (2.2b's function-grant path).
+- **Number series** (`lib/numberSeries.ts persistSeriesUse`): `POST /api/data/masters.number-series/bump`
+  `{series, used, ay?}` → `masters_series_bump` (monotone, no base; new route `app/api/data/[collection]/bump`,
+  repo `bumpNumberSeries`). Allowed for a staff session with edit on masters, students, admissions, staff,
+  certificates, fees or accounts. The screens see the new next number at the next masters answer.
+- **The old path refuses a Foundation wipe** (`guardFoundationListsOverwrite`, `lib/mastersWriteGuard.ts`, in
+  `POST /api/school-data/masters-desk` before any write): a body that would remove more than ONE element of any
+  Foundation list, or empty one, is 409 `foundation_shrink`, nothing written (the 10 Oct subject wipe passed the old
+  2-subjects/10 % guard).
+- **School profile panel**: its tables now show the SAVED profile (they showed the form's draft, which was read once —
+  a profile saved elsewhere never reached an open panel); the form follows a newer saved profile unless it holds
+  unsaved typing. `SectionTeachersPanel`'s selects are labelled ("Class teacher of IV-A", "ENG teacher of IV-A").
+- New ratchet `save_masters_call_sites` (call sites of `saveMasters(` in src): 19 on main → **17** (TimetableRulesSetup,
+  numberSeries; the editor keeps one call for fee/staff setup).
+**Proof.** Self-test `test:masters-element-commit` (CI + verify.sh; 13 checks: one element on its shown `_rev`, a
+stale neighbour never sent, the stale element itself sent on ITS old `_rev`, parents first, one removal per request,
+emptying / too many / bad ids refused, objects on the stamp, staff links apart, fee keys → the old save, the overlay's
+proof and drops, the old path's guard). Specs (all on the real screens, e2e stack): `propagation.spec` 7 new cases
+(campus added, term added, number series prefix, government holiday approved, school profile website, class renamed,
+periods/week from Timetable) — A edits on the panel, the request must be element ops to that panel's collection and
+never masters-desk, the database holds it, and B (office) with the same panel open sees it within 30 s; the existing
+subject/section editor cases now go through element writes too. New `masters-element-writes.spec` (propagation
+project): **overlap** (two principals rename the sections of IV and V from screens loaded together → both on the
+server, no "Not saved", B's request = V's section only), **same element** (B held on the pre-save answer renames IV-A
+after A → "Not saved — …", A's name stays), **subject wipe** (an old masters-desk body dropping two subjects → 409
+`foundation_shrink`, nothing removed; two deletes in one kernel request → 400; deleting a subject on the screen sends
+exactly one delete op), **teacher** (Nursery-A's teacher marks Music optional in Nursery on the real screen → one
+element to `masters.class-subjects`, stored; the same in LKG → "Not saved — … not one of your classes", LKG unchanged),
+**class teacher** (IV-A's class teacher changed on Sections → Teachers: one `sis.staff` request with the two members,
+each op `{profile: {classTeacherLinks}}` only, every other profile key unchanged; put back on the screen).
+`masters-overlay.spec` now waits for the element writes and mocks the element 409. **Fail-on-old** (these specs,
+`apps/web/src` at origin/main cbd9b973 with only the class-teacher select's label added, fresh build, fresh stack):
+overlap FAILS (B's save refused — the sections slice's old stamp), subject wipe FAILS (the old body was accepted: two
+subjects removed), teacher FAILS (whole-book masters-desk save), class teacher FAILS (masters-desk / staff-roster
+save), both masters-overlay cases FAIL, all 7 new propagation cases FAIL ("no whole-book save"); same element passes
+on main too (coverage). This branch, fresh stack: `e2e-stack.sh check` all green (16, 22, 26, 31 + v1); counts +
+teacher + kernel + error + masters-exams-reports + stale-writer + write-conflict, desktop and phone-375: **73/73**;
+propagation + masters-overlay + masters-element-writes + student-upgrade + staff-editor-save: **34 passed, 1 skipped**
+(the staff cases stay expected-fail). Screens seen desktop-light and 375-dark: campuses, session, numbering, holidays,
+school, classes → sections → teachers, subjects, Timetable → Subject rules. counts.spec unchanged.
+**Behaviour changes users will notice.** Two people editing different items of one Masters list both save (before:
+the second got "changed on another device"); the same item at once → the second is told and shown the other's
+version. Removing several links in one action is several saves in a row (not atomic: a refusal part-way leaves the
+earlier removals done). Removing the LAST item of a Foundation list (e.g. the only holiday) is refused ("would leave …
+empty") — 2.2b's server rule, now reached from the screen. Number series now move for the office and the counter too
+(before: only a Masters editor's issue moved them — the rest were silently dropped). Setting a class teacher needs
+Staff · edit (it writes staff records). School profile tables show the saved profile, not the typing.
+**Not done / not proven.** Fee setup (2.2e), staff setup / departments / designations and the 13 other `saveMasters`
+callers (2.2d) still save whole. The masters-desk bridge re-reads the desk (~235 KB) after every element save while
+the old save lives. A class teacher set on another tab reaches B only after a reload (the staff side is the access
+copy until 2.3a — not tested as propagation). Multi-instance staleness is simulated at the network (one local
+instance). Brand & stamps / school timing / statutory panels write through the same path but have no spec of their
+own; the statutory setup is covered by `payroll.spec` (not run locally). The number-series bump route is exercised only
+by type and read-through (no spec issues a number). A re-run of the holiday case on a used stack fails its control
+(Holi is left unpublished, not removed — a fresh stack is needed, as for the rest of the propagation project).
+
 **2.3a Delete the gate and the events.** With every component reader on hooks: delete
 `CoreDataGate` (React Query's loading state replaces it), the `bhb-masters-updated` /
 `bhb-rbac-updated` / `bhb-desk-first-hydrated` events and their listeners (one is the
