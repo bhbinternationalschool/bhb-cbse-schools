@@ -40,7 +40,9 @@ export async function GET(req: Request) {
   // PAN, bank, salary or anyone's password (lib/staffRosterRedact.ts).
   const canEditStaff =
     auth.viaMirrorSecret ||
-    hasPermission(auth.ctx.session, auth.ctx.masters, "staff", "edit", auth.ctx.rbac);
+    hasPermission(auth.ctx.session, auth.ctx.masters, "staff", "edit", auth.ctx.rbac) ||
+    // The owner and the bank & pay details function read whole records (2.2b).
+    staffSensitiveAuthority(auth.ctx.session, auth.ctx.masters, auth.ctx.rbac, { rbacKnown: auth.ctx.rbacKnown !== false }) !== null;
   const selfStaffId = auth.viaMirrorSecret ? "" : auth.ctx.session.staffId || "";
   if (!auth.viaMirrorSecret) {
     try {

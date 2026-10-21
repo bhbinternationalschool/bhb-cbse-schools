@@ -31,7 +31,12 @@ import { StaffMessageTimelinePanel } from "@/components/staff/StaffMessageTimeli
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { pushToast } from "@/components/shell/Toast";
 import { useDemoSession } from "@/components/shell/SessionContext";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, loadRbac } from "@/lib/rbac";
+import { staffSensitiveAuthority } from "@/lib/staffProtectedFields";
+import { StaffSensitiveDetailsPanel } from "@/components/staff/StaffSensitiveDetailsPanel";
+
+const SENSITIVE_LOCKED =
+  "Bank, UPI, Aadhaar, PAN and pay are entered by the accountant or the owner (Bank, ID & pay details) — shown here, not editable for your role.";
 import {
   VISITING_PAY_BASES,
   normalizeVisitingPay,
@@ -192,6 +197,15 @@ export function StaffProfileForm(props: Props) {
     };
   }, [draft?.id, draft?.empCode, draft?.qrPayload]);
 
+  // Bank, UPI, Aadhaar, PAN and pay: the owner or the bank & pay details
+  // function only (director, 20–21 Oct 2026). For everyone else those inputs
+  // are shown but locked — typed data is never silently dropped by a save.
+  const canSensitive = useMemo(
+    () => !!masters && staffSensitiveAuthority(session, masters, loadRbac()) !== null,
+    [session, masters],
+  );
+  const canEditStaff = !!masters && hasPermission(session, masters, "staff", "edit");
+
   function patch(p: Partial<StaffRecord>) {
     setDraft((prev) => (prev ? { ...prev, ...p } : prev));
   }
@@ -339,6 +353,12 @@ export function StaffProfileForm(props: Props) {
       masters.designations.find((d) => d.id === draft.designationId)?.name ?? ""
     );
   }, [masters, draft?.designationId]);
+
+  // The accountant (bank & pay details function, no staff · edit) edits ONLY
+  // those fields, through the sensitive route — not the whole profile.
+  if (props.mode === "edit" && masters && !canEditStaff && canSensitive) {
+    return <StaffSensitiveDetailsPanel staffId={props.staffId} />;
+  }
 
   if (!masters || !draft) {
     return (
@@ -795,6 +815,7 @@ export function StaffProfileForm(props: Props) {
                     <select
                       className={field}
                       value={visitingPay.basis}
+                      disabled={!canSensitive}
                       onChange={(e) => patchVisiting({ basis: e.target.value as VisitingPayProfile["basis"] })}
                     >
                       <option value="">Choose…</option>
@@ -811,6 +832,7 @@ export function StaffProfileForm(props: Props) {
                     <input
                       className={field}
                       value={visitingPay.rateRupees}
+                      disabled={!canSensitive}
                       onChange={(e) => patchVisiting({ rateRupees: e.target.value })}
                       inputMode="decimal"
                       placeholder="e.g. 250"
@@ -820,6 +842,7 @@ export function StaffProfileForm(props: Props) {
                     <input
                       type="checkbox"
                       checked={visitingPay.tds194j}
+                      disabled={!canSensitive}
                       onChange={(e) => patchVisiting({ tds194j: e.target.checked })}
                     />
                     Deduct TDS (194J)
@@ -830,6 +853,8 @@ export function StaffProfileForm(props: Props) {
                   <input
                     className={field}
                     value={draft.panNo}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                     onChange={(e) => patch({ panNo: e.target.value.toUpperCase() })}
                     placeholder="AAAAA9999A"
                   />
@@ -974,6 +999,8 @@ export function StaffProfileForm(props: Props) {
                 <input
                   className={field}
                   value={draft.basicPay}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                   onChange={(e) => patch({ basicPay: e.target.value })}
                   inputMode="decimal"
                 />
@@ -1076,6 +1103,8 @@ export function StaffProfileForm(props: Props) {
               <input
                 className={field}
                 value={draft.aadhaarNo}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) => patch({ aadhaarNo: e.target.value })}
                 maxLength={12}
               />
@@ -1090,6 +1119,8 @@ export function StaffProfileForm(props: Props) {
               <input
                 className={field}
                 value={draft.panNo}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) => patch({ panNo: e.target.value.toUpperCase() })}
                 maxLength={10}
               />
@@ -1212,11 +1243,18 @@ export function StaffProfileForm(props: Props) {
 
         {tab === "bank" ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {!canSensitive ? (
+              <p className="sm:col-span-2 lg:col-span-3 rounded-lg bg-[var(--warn-soft,#fff7e6)] px-3 py-2 text-xs text-[var(--muted)]" data-testid="sensitive-locked">
+                {SENSITIVE_LOCKED}
+              </p>
+            ) : null}
             <label className={labelCls}>
               Account holder name
               <input
                 className={field}
                 value={draft.bankAccountName}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) => patch({ bankAccountName: e.target.value })}
               />
             </label>
@@ -1225,6 +1263,8 @@ export function StaffProfileForm(props: Props) {
               <input
                 className={field}
                 value={draft.bankName}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) => patch({ bankName: e.target.value })}
               />
             </label>
@@ -1233,6 +1273,8 @@ export function StaffProfileForm(props: Props) {
               <input
                 className={field}
                 value={draft.bankBranch}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) => patch({ bankBranch: e.target.value })}
               />
             </label>
@@ -1241,6 +1283,8 @@ export function StaffProfileForm(props: Props) {
               <input
                 className={field}
                 value={draft.bankAccountNo}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) => patch({ bankAccountNo: e.target.value })}
               />
             </label>
@@ -1249,6 +1293,8 @@ export function StaffProfileForm(props: Props) {
               <input
                 className={field}
                 value={draft.bankIfsc}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) =>
                   patch({ bankIfsc: e.target.value.toUpperCase() })
                 }
@@ -1269,6 +1315,8 @@ export function StaffProfileForm(props: Props) {
               <input
                 className={field}
                 value={draft.upiId}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) => patch({ upiId: e.target.value })}
               />
             </label>

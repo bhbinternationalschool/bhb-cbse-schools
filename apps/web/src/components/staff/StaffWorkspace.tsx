@@ -86,7 +86,8 @@ import { DocVerificationQueuePanel } from "@/components/students/DocVerification
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { StaffPresenceCard } from "@/components/staff/StaffPresenceCard";
 import { StaffGeoAdminPanel } from "@/components/staff/StaffGeoAdminPanel";
-import { canWriteModuleTab, featureGrantHeld, hasFeaturePermission, hasPermission, visibleModuleTabs } from "@/lib/rbac";
+import { canWriteModuleTab, featureGrantHeld, hasFeaturePermission, hasPermission, loadRbac, visibleModuleTabs } from "@/lib/rbac";
+import { staffSensitiveAuthority } from "@/lib/staffProtectedFields";
 import {
   CustomExportToggle,
   useCustomFieldExport,
@@ -534,7 +535,11 @@ export function StaffWorkspace() {
       ) : null}
       {tab === "requests" ? (
         <>
-          {hasPermission(session, state ?? loadMasters(), "staff", "edit") ? <ProfileChangeRequestsCard /> : null}
+          {hasPermission(session, state ?? loadMasters(), "staff", "edit") ||
+          staffSensitiveAuthority(session, state ?? loadMasters(), loadRbac()) !== null ? (
+            // The accountant decides bank / ID / pay requests (2.2b).
+            <ProfileChangeRequestsCard />
+          ) : null}
           <StaffRequestsPanel />
         </>
       ) : null}

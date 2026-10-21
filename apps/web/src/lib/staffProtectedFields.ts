@@ -218,6 +218,21 @@ export function staffHoldsPowerfulAccess(
   if (isProtectedSuperAdminEmail(email)) return true;
   const des = (masters?.designations ?? []).find((d) => d.id === staff.designationId);
   if (des && /principal/i.test(`${des.code ?? ""} ${des.name ?? ""}`)) return true;
+  // Roles are inferred from the roster (designation) when none is assigned:
+  // the member must be ON the roster copy, or inference falls back to the
+  // blank-login default (principal) and every member would look powerful.
+  if (!masters) return true;
+  const onRoster = (masters.staff ?? []).some((x) => x.id === staff.id);
+  const m: MastersState = onRoster
+    ? masters
+    : ({
+        ...masters,
+        staff: [
+          ...(masters.staff ?? []),
+          { id: staff.id, empCode: "", fullName: String(staff.fullName ?? ""), email, loginUsername: "", designationId: staff.designationId ?? null },
+        ],
+      } as unknown as MastersState);
+  masters = m;
   const as: SessionLike = { persona: "staff", roleCode: "", staffId: staff.id, email, fullName: String(staff.fullName ?? "") };
   if (resolveSessionRoles(rbac, as, masters).some((r) => ["owner", "admin", "accounts", "principal"].includes(r.code))) return true;
   if (hasPermission(as, masters, "payroll", "edit", rbac) || hasPermission(as, masters, "accounts", "edit", rbac)) return true;

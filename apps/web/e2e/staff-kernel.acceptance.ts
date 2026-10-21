@@ -443,6 +443,135 @@ async function main(): Promise<void> {
     );
   }
 
+  // ── I. Director, 21 Oct: the office records a MISSING mobile, under safeguards ──
+  {
+    const S31 = staffId(31); // a peon with the placeholder 0000000000
+    const S33 = staffId(33);
+    const S27 = staffId(27); // designation Accounts → powerful
+    const keep = { s27: await staffRow(S27), s26: await staffRow(staffId(26)), s31: await staffRow(S31), s33: await staffRow(S33) };
+    const setRaw = (id: string, body: Record<string, unknown>) =>
+      patch(`sis_staff?id=eq.${id}&tenant_id=eq.${tenantId}`, { ...body, updated_at: new Date().toISOString() });
+    const famMobile = String(fx.sis.households.find((h) => /^9\d{9}$/.test(String(h.mobile ?? "")))?.mobile ?? "");
+    const rev = async (id: string) => String((await staffRow(id)).updated_at ?? "");
+
+    // Kernel: a family's number (spelt +91 …) → refused; a free one → saved and logged without the number.
+    const fam = await post("sis.staff", office, [{ op: "upsert", id: S31, base: await rev(S31), row: { mobile: `+91 ${famMobile.slice(0, 5)} ${famMobile.slice(5)}` } }]);
+    const free = await post("sis.staff", office, [{ op: "upsert", id: S31, base: await rev(S31), row: { mobile: "9300000031" } }]);
+    await sleep(300);
+    const audit = await rest(`audit_events?tenant_id=eq.${tenantId}&entity_id=eq.${S31}&order=created_at.desc&limit=1&select=summary,after_state,actor_name`);
+    record(
+      "mobile rule (kernel): a family's number → 403; a free number on a peon's blank mobile → 200, audited without the number",
+      !!famMobile && fam.status === 403 && /family/.test(String(fam.body.message)) && free.status === 200 &&
+        (await staffRow(S31)).mobile === "9300000031" && /Registered mobile recorded/.test(String(obj(audit[0]).summary)) &&
+        !JSON.stringify(audit).includes("9300000031"),
+      `family ${fam.status} ${short(fam.body.message)}; free ${free.status} ${free.status === 200 ? "" : short(free.body)}; audit ${short(audit)}`,
+    );
+    // Powerful member (Accounts designation) with no mobile → the owner's.
+    await setRaw(S27, { mobile: "" });
+    await sleep(PAST_VERSIONS_WINDOW);
+    const strong = await post("sis.staff", office, [{ op: "upsert", id: S27, base: await rev(S27), row: { mobile: "9300000027" } }]);
+    record(
+      "mobile rule (kernel): a member with accounts access has no mobile → recording one is the owner's (403)",
+      strong.status === 403 && /recorded by the owner/.test(String(strong.body.message)),
+      `HTTP ${strong.status} ${short(strong.body.message)}`,
+    );
+    await setRaw(S27, { mobile: keep.s27.mobile, profile: keep.s27.profile });
+
+    // Old route: a fill of 33's placeholder → 200; with another member's number → 403.
+    const g = await req(`${app}/api/school-data/staff-roster`, { headers: office });
+    const r33 = arr(g.body.staff).map(obj).find((x) => x.id === S33)!;
+    const st33 = String(obj(obj(g.body.stamps).staff)[S33] ?? "");
+    const clash = await req(`${app}/api/school-data/staff-roster`, {
+      method: "POST",
+      headers: office,
+      body: { state: { staff: [{ ...r33, mobile: "9000000025" }] }, stamps: { staff: { [S33]: st33 } } },
+    });
+    const ok33 = await req(`${app}/api/school-data/staff-roster`, {
+      method: "POST",
+      headers: office,
+      body: { state: { staff: [{ ...r33, mobile: "9300000033" }] }, stamps: { staff: { [S33]: st33 } } },
+    });
+    record(
+      "mobile rule (old route): another member's number → 403; a free number on a blank mobile → 200",
+      clash.status === 403 && ok33.status === 200 && !obj(ok33.body).refused && (await staffRow(S33)).mobile === "9300000033",
+      `clash ${clash.status} ${short(clash.body.error)}; fill ${ok33.status} ${short(ok33.body)}`,
+    );
+
+    // The staff app's roster/mobile: fill → 200; changing a set number → 403 (principal); the owner may.
+    await setRaw(S31, { mobile: "0000000000" });
+    await sleep(PAST_VERSIONS_WINDOW);
+    const rm = (who: Record<string, string>, staff: string, mobile: string) =>
+      req(`${app}/api/v1/staff/roster/mobile`, { method: "POST", headers: who, body: { staffId: staff, mobile } });
+    const fill31 = await rm(principal, S31, "9300000131");
+    await sleep(PAST_VERSIONS_WINDOW);
+    const change31 = await rm(principal, S31, "9300000231");
+    const fam31 = await rm(owner, S31, famMobile);
+    record(
+      "mobile rule (roster/mobile): a blank mobile filled → 200; changing a set one → 403 for the principal; even the owner may not give a family's number",
+      fill31.status === 200 && change31.status === 403 && fam31.status === 400,
+      `fill ${fill31.status} ${fill31.status === 200 ? "" : short(fill31.body)}; change ${change31.status}; owner+family ${fam31.status}`,
+    );
+
+    // Profile requests (review B): a member asking to change a SET mobile → office cannot approve (owner's);
+    // a member with no mobile asking for a free one → the office approves, logged.
+    const self = (id: string) => as({ ...fx.sessions.teacher, staffId: id, fullName: fx.staff.staff.find((x) => x.id === id)!.fullName });
+    const askChange = await req(`${app}/api/v1/staff/me/profile`, { method: "PATCH", headers: self(TARGET), body: { fields: { mobile: "9300000025" } } });
+    await setRaw(S33, { mobile: "0000000000" });
+    await sleep(PAST_VERSIONS_WINDOW);
+    const askFill = await req(`${app}/api/v1/staff/me/profile`, { method: "PATCH", headers: self(S33), body: { fields: { mobile: "9300000333" } } });
+    const pend = arr((await req(`${app}/api/v1/staff/profile-requests`, { headers: office })).body.pending).map(obj);
+    const idOf = (staff: string) => String(pend.find((r) => r.staffId === staff && JSON.stringify(r.fields).includes("mobile"))?.id ?? "");
+    const decChange = await req(`${app}/api/v1/staff/profile-requests`, { method: "POST", headers: office, body: { id: idOf(TARGET), decision: "approve" } });
+    const decFill = await req(`${app}/api/v1/staff/profile-requests`, { method: "POST", headers: office, body: { id: idOf(S33), decision: "approve" } });
+    record(
+      "mobile rule (profile requests): changing a set mobile → office 403; filling a blank one with a free number → 200",
+      askChange.status === 200 && askFill.status === 200 && decChange.status === 403 && decFill.status === 200 &&
+        (await staffRow(S33)).mobile === "9300000333" && (await staffRow()).mobile === original.mobile,
+      `ask ${askChange.status}/${askFill.status}; change ${decChange.status} ${short(decChange.body.error)}; fill ${decFill.status} ${short(decFill.body)}`,
+    );
+    if (idOf(TARGET)) await req(`${app}/api/v1/staff/profile-requests`, { method: "POST", headers: office, body: { id: idOf(TARGET), decision: "reject", note: "acceptance" } });
+
+    // Review C: even the owner's sensitive route gives a sign-in detail to one person only.
+    await setRaw(staffId(26), { email: "e2e-26@school.test" });
+    const rT = await staffRow();
+    const ownMail = await sens(owner, [{ id: TARGET, base: rT.updated_at, fields: { email: "E2E-26@school.test" } }]);
+    const ownMob = await sens(owner, [{ id: TARGET, base: rT.updated_at, fields: { mobile: famMobile } }]);
+    record(
+      "owner's sensitive route: an e-mail or mobile another member / family holds → 409",
+      ownMail.status === 409 && ownMob.status === 409,
+      `email ${ownMail.status} ${short(ownMail.body.message)}; mobile ${ownMob.status}`,
+    );
+    await setRaw(staffId(26), { email: keep.s26.email });
+
+    // Review E: a NEW member with another member's mobile (a shared family phone) → refused, and said why.
+    const shared = await post("sis.staff", office, [
+      { op: "upsert", id: "e2e_22b_new_member", base: null, row: { emp_code: "E2E-901", full_name: "New Member", mobile: "9000000025", profile: { fullName: "New Member" } } },
+    ]);
+    record(
+      "a new member with another member's mobile → 403 saying it is already someone's (a shared family phone?) and only the owner can set it",
+      shared.status === 403 && /shared family phone/.test(String(shared.body.message)) && /owner/.test(String(shared.body.message)),
+      `HTTP ${shared.status} ${short(shared.body.message)}`,
+    );
+
+    // Review A: the accountant reads whole records (it keeps their bank details).
+    const accRows = arr((await req(`${app}/api/data/sis.staff?limit=500`, { headers: accountant })).body.rows).map(obj);
+    const t = accRows.find((x) => x.id === TARGET);
+    record(
+      "the accountant reads whole staff records (bank details) — never a password",
+      !!t && "bankAccountNo" in obj(t.profile) && !("loginPassword" in obj(t.profile)),
+      `${accRows.length} rows; target profile keys ${Object.keys(obj(t?.profile)).length}`,
+    );
+
+    // Put back: 31 and 33 exactly as found.
+    await setRaw(S31, { mobile: keep.s31.mobile, profile: keep.s31.profile });
+    await setRaw(S33, { mobile: keep.s33.mobile, profile: keep.s33.profile });
+    record(
+      "put back: the members whose mobiles were recorded, exactly as found",
+      (await staffRow(S31)).mobile === keep.s31.mobile && JSON.stringify(prof(await staffRow(S33))) === JSON.stringify(prof(keep.s33)),
+      "",
+    );
+  }
+
   // Put back: the accountant assignment, the other member's address.
   await pushRbac(false);
   {

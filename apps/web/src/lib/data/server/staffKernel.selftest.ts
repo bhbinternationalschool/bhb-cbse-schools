@@ -11,13 +11,23 @@
 import assert from "node:assert/strict";
 import { redactStoredForAnswer } from "../answerRedaction";
 import { collectionDef } from "../registry";
-import { defaultRbacState, type RbacState, type SessionLike } from "@/lib/rbac";
+import {
+  BUILT_IN_GRANT_ADDITIONS,
+  defaultBuiltInRoles,
+  defaultRbacState,
+  normalizeRbacState,
+  type RbacRole,
+  type RbacState,
+  type SessionLike,
+} from "@/lib/rbac";
 import { emptyMastersShell, type MastersState } from "@/lib/masters";
 import {
   STAFF_SENSITIVE_PROFILE_KEYS,
   protectedChanges,
+  mobileFillCheck,
   prepareRosterRows,
   rosterSaveRefusal,
+  staffHoldsPowerfulAccess,
   rosterTargetOf,
   staffSensitiveAuthority,
   withStoredProtectedKeys,
@@ -361,6 +371,83 @@ async function section2(): Promise<void> {
   );
   assert.deepEqual(protectedChanges({ visitingPay: { rate: 500 } }, { visitingPay: { rate: 600 } }).sensitive, ["visitingPay"]);
   console.log("  ✓ canonical compare: blank = null = absent, key order, number vs string; leading zeros kept");
+}
+
+/* ── 9. Director, 21 Oct: the office may record a MISSING mobile, under safeguards ── */
+{
+  const rbac = defaultRbacState();
+  const role = (code: string) => rbac.roles.find((r) => r.code === code)!;
+  const masters = {
+    ...emptyMastersShell(),
+    designations: [
+      { id: "des_pr", code: "PRIN", name: "Principal", departmentId: null, isActive: true },
+      { id: "des_t", code: "TGT", name: "TGT", departmentId: null, isActive: true },
+    ],
+    staff: [],
+  } as unknown as MastersState;
+  const withRole = (staffId: string, code: string): RbacState => ({
+    ...rbac,
+    assignments: [{ id: `a_${staffId}`, staffId, roleId: role(code).id, isPrimary: true, scope: { campusIds: [], classIds: [], departmentIds: [] }, expiresOn: "", note: "" }],
+  });
+  const plain = { id: "s_t", designationId: "des_t", email: "", fullName: "T" };
+  assert.equal(staffHoldsPowerfulAccess(plain, masters, rbac), false, "a teacher-designation member with no role");
+  assert.equal(staffHoldsPowerfulAccess({ ...plain, designationId: "des_pr" }, masters, rbac), true, "the principal designation");
+  for (const code of ["owner", "admin", "accounts", "principal", "office"]) {
+    assert.equal(staffHoldsPowerfulAccess(plain, masters, withRole("s_t", code)), true, `a member holding the ${code} role`);
+  }
+  assert.equal(staffHoldsPowerfulAccess(plain, masters, withRole("s_t", "teacher")), false, "the teacher role");
+  assert.equal(staffHoldsPowerfulAccess({ ...plain, email: "director@bhbinternational.school" }, masters, rbac), true, "an owner e-mail");
+  const allowFn: RbacState = {
+    ...rbac,
+    userGrants: [{ id: "g", staffId: "s_t", feature: "staff.sensitive_edit", effect: "allow", actions: ["edit"], note: "", grantedBy: "", grantedAt: "", expiresOn: "" }],
+  };
+  assert.equal(staffHoldsPowerfulAccess(plain, masters, allowFn), true, "the bank & pay details function, personally");
+
+  const inUse = new Set(["9876543210"]);
+  const chk = (stored: Record<string, unknown> | null, next: unknown, powerful = false) =>
+    mobileFillCheck(stored, { mobile: next }, { inUse, powerful, name: "Ravi" });
+  assert.equal(chk({ mobile: "" }, "9000000077").kind, "fill", "blank → a free number");
+  assert.equal(chk({ mobile: "0000000000" }, "9000000077").kind, "fill", "a placeholder counts as blank");
+  const taken = chk({ mobile: "" }, "+91 98765-43210");
+  assert.ok(taken.kind === "refuse" && /another member of staff, a family or a login/.test(taken.message), "a number in use (spelt with +91, spaces, dashes)");
+  const strong = chk({ mobile: "" }, "9000000077", true);
+  assert.ok(strong.kind === "refuse" && /recorded by the owner/.test(strong.message), "a powerful member: the owner's");
+  assert.equal(chk({ mobile: "9111111111" }, "9000000077").kind, "none", "changing a set number is not a fill");
+  assert.equal(chk(null, "9000000077").kind, "none", "a new record is not a fill");
+  assert.ok(isFeatureRefusalMessage((taken as { message: string }).message) && isFeatureRefusalMessage((strong as { message: string }).message));
+
+  // Through the old route: a fill passes and is reported for the log; a change does not; the owner may.
+  const S = { id: "s_t", empCode: "E-050", fullName: "Ravi", mobile: "", designationId: "des_t" };
+  const fills: string[] = [];
+  const ctx = (powerful: boolean, f?: string[]) => ({ inUse, isPowerful: () => powerful, fills: f });
+  assert.equal(rosterSaveRefusal([S], [{ ...S, mobile: "9000000077" }], new Set(["s_t"]), null, ctx(false, fills)), null);
+  assert.deepEqual(fills, ["s_t"], "the fill is reported (to be logged)");
+  assert.match(String(rosterSaveRefusal([S], [{ ...S, mobile: "9876543210" }], new Set(["s_t"]), null, ctx(false))?.message), /in use|another member of staff/);
+  assert.match(String(rosterSaveRefusal([S], [{ ...S, mobile: "9000000077" }], new Set(["s_t"]), null, ctx(true))?.message), /recorded by the owner/);
+  assert.match(String(rosterSaveRefusal([{ ...S, mobile: "9111111111" }], [{ ...S, mobile: "9000000077" }], new Set(["s_t"]), null, ctx(false))?.message), /mobile/, "a set number: the owner's");
+  assert.equal(rosterSaveRefusal([{ ...S, mobile: "9111111111" }], [{ ...S, mobile: "9000000077" }], new Set(["s_t"]), "owner", ctx(false)), null);
+  console.log("  ✓ mobile rule: blank → free number for a non-powerful member (logged); in use / powerful / change → owner");
+}
+
+/* ── 10. The Accounts role's staff.sensitive_edit: added once, a removal stands ── */
+{
+  const ADD = "2026-10-21.accounts.staff_sensitive_edit";
+  assert.ok(BUILT_IN_GRANT_ADDITIONS.some((a) => a.id === ADD && a.roleCode === "accounts"));
+  const tmpl = defaultBuiltInRoles().find((r) => r.code === "accounts")!;
+  assert.ok(tmpl.featureGrants?.some((g) => g.feature === "staff.sensitive_edit") && tmpl.defaultsApplied?.includes(ADD), "a fresh Accounts role carries it, stamped");
+  // Production's stored Accounts role: no function, no stamp.
+  const stored = { ...tmpl, featureGrants: [] } as RbacRole;
+  delete (stored as { defaultsApplied?: unknown }).defaultsApplied;
+  const once = normalizeRbacState({ version: 1, roles: [stored] });
+  const acc = once.roles.find((r) => r.code === "accounts")!;
+  assert.deepEqual(acc.featureGrants?.find((g) => g.feature === "staff.sensitive_edit")?.actions, ["edit"], "added to the stored role");
+  assert.ok(acc.defaultsApplied?.includes(ADD) && once.audit.some((e) => e.detail.includes(ADD)), "stamped and audited");
+  // The office removes it afterwards → it stays removed on every later load.
+  const removed = normalizeRbacState({ ...once, roles: once.roles.map((r) => (r.code === "accounts" ? { ...r, featureGrants: [] } : r)) });
+  assert.equal(removed.roles.find((r) => r.code === "accounts")!.featureGrants?.length, 0, "a removal stands");
+  const again = normalizeRbacState(removed);
+  assert.equal(again.roles.find((r) => r.code === "accounts")!.featureGrants?.length, 0, "…and is never re-added");
+  console.log("  ✓ Accounts gets staff.sensitive_edit once (stamped, audited); a removal by the office stands");
 }
 
 section2().then(

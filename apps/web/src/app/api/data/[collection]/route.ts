@@ -47,7 +47,7 @@ import {
 } from "@/lib/data/server/repo";
 import { sliceFunctionGate } from "@/lib/data/server/sliceFunctionGate";
 import { prepareStaffOps, staffListRows } from "@/lib/data/server/staffKernel";
-import { staffActorOf, staffHoldsPowerfulAccess } from "@/lib/staffProtectedFields";
+import { staffActorOf, staffHoldsPowerfulAccess, staffSensitiveAuthority } from "@/lib/staffProtectedFields";
 import { logMobileFills } from "@/lib/staffMobileFillLog.server";
 import type { Cursor, FailCode, WriteOp, WriteResult } from "@/lib/data/types";
 import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
@@ -142,8 +142,12 @@ export async function GET(req: Request, ctx: RouteCtx) {
   if (def.staffRecords) {
     // A directory for anyone without staff · edit (their own row in full);
     // never a password, whoever asks (the staff-roster GET's rule).
+    // …and for the owner / the bank & pay details function (the accountant
+    // reads the records whose bank details it keeps).
     const canEdit =
-      auth.viaMirrorSecret || hasPermission(auth.ctx.session, auth.ctx.masters, def.rbac.edit, "edit", auth.ctx.rbac);
+      auth.viaMirrorSecret ||
+      hasPermission(auth.ctx.session, auth.ctx.masters, def.rbac.edit, "edit", auth.ctx.rbac) ||
+      staffSensitiveAuthority(auth.ctx.session, auth.ctx.masters, auth.ctx.rbac, { rbacKnown: auth.ctx.rbacKnown !== false }) !== null;
     const selfStaffId = auth.viaMirrorSecret ? "" : auth.ctx.session.staffId || "";
     return NextResponse.json(
       { ...result, rows: staffListRows(result.rows, { canEdit, selfStaffId }) },
