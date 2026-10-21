@@ -537,6 +537,7 @@ jobs:
           npm run test:teacher-contacts
           npm run test:staff-month-calendar
           npm run test:staff-roster-redact
+          npm run test:staff-profile-validate
           npm run test:sis-class-teacher
           npm run test:punch-code
           npm run test:wa-language-gate
