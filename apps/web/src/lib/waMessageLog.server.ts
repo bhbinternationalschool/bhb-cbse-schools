@@ -60,12 +60,15 @@ export async function logWaInbound(input: {
   waMessageId?: string;
   replyToWaMessageId?: string;
   kind?: string;
+  /** A tapped button's id or template payload (kind "button"); the body is its label. */
+  buttonId?: string;
 }): Promise<void> {
   const mobile10 = last10(input.from);
   if (mobile10.length !== 10) return;
   try {
     const ctx = await getServerTenantContext();
     if (!ctx) return;
+    const buttonId = String(input.buttonId || "").slice(0, 256);
     const { error } = await ctx.sb.from("wa_messages").insert({
       tenant_id: ctx.tenantId,
       mobile10,
@@ -74,6 +77,9 @@ export async function logWaInbound(input: {
       body: String(input.text ?? "").slice(0, 4000),
       wa_message_id: input.waMessageId || "",
       reply_to_wa_message_id: input.replyToWaMessageId || "",
+      // Only when there is one: a database that has not taken the
+      // button_id migration yet still logs every typed message.
+      ...(buttonId ? { button_id: buttonId } : {}),
     });
     if (error) console.warn("[wa-log] inbound not logged:", error.message);
   } catch (e) {

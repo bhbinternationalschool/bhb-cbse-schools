@@ -137,6 +137,9 @@ jobs:
       - name: "Test — the webhook parser never invents text a parent did not send"
         working-directory: apps/web
         run: npm run test:wa-inbound-parse
+      - name: "Test — dispatch reply buttons: Meta's limits, and a tap that names its draft"
+        working-directory: apps/web
+        run: npm run test:wa-reply-buttons
       - name: Self-test — when the WhatsApp bots speak, and when they stay quiet
         working-directory: apps/web
         run: npm run test:wa-bot-silence

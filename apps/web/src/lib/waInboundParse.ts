@@ -44,6 +44,14 @@ export function parseMetaWebhookInbound(body: unknown): {
    * parent who sent the original.
    */
   replyToWaMessageId?: string;
+  /**
+   * A tapped button: `buttonId` is the machine value (a reply button's id,
+   * or a template quick reply's payload) and `buttonTitle` the label the
+   * person saw. `text` keeps its id-first rule so the bots' menus (ids like
+   * "purpose_admission") behave as before; the chat log stores both.
+   */
+  buttonId?: string;
+  buttonTitle?: string;
 }[] {
   const out: {
     fromWaId: string;
@@ -55,6 +63,8 @@ export function parseMetaWebhookInbound(body: unknown): {
     media?: WaInboundMediaRef;
     flowResponse?: WaInboundFlowResponse;
     replyToWaMessageId?: string;
+    buttonId?: string;
+    buttonTitle?: string;
   }[] = [];
   const root = body as {
     entry?: {
@@ -108,10 +118,16 @@ export function parseMetaWebhookInbound(body: unknown): {
           | { lat: number; lng: number; name?: string; address?: string }
           | undefined;
         let flowResponse: WaInboundFlowResponse | undefined;
+        let buttonId: string | undefined;
+        let buttonTitle: string | undefined;
         if (msg.type === "text") text = msg.text?.body || "";
-        else if (msg.type === "button")
+        else if (msg.type === "button") {
+          // A template's quick reply: the payload the sender attached (or the
+          // label when it attached none), and the label itself.
           text = msg.button?.payload || msg.button?.text || "";
-        else if (msg.type === "interactive") {
+          buttonId = text || undefined;
+          buttonTitle = msg.button?.text || undefined;
+        } else if (msg.type === "interactive") {
           const responseJson = msg.interactive?.nfm_reply?.response_json;
           if (msg.interactive?.type === "nfm_reply" && responseJson) {
             let flowToken = "";
@@ -123,12 +139,10 @@ export function parseMetaWebhookInbound(body: unknown): {
             }
             flowResponse = { flowToken, responseJson };
           } else {
-            text =
-              msg.interactive?.button_reply?.id ||
-              msg.interactive?.button_reply?.title ||
-              msg.interactive?.list_reply?.id ||
-              msg.interactive?.list_reply?.title ||
-              "";
+            const tapped = msg.interactive?.button_reply || msg.interactive?.list_reply;
+            text = tapped?.id || tapped?.title || "";
+            buttonId = tapped?.id || tapped?.title || undefined;
+            buttonTitle = tapped?.title || undefined;
           }
         } else if (msg.type === "image") {
           text = msg.image?.caption || "";
@@ -208,6 +222,8 @@ export function parseMetaWebhookInbound(body: unknown): {
           mediaNote,
           media,
           replyToWaMessageId: msg.context?.id || undefined,
+          buttonId,
+          buttonTitle,
         });
       }
     }

@@ -1325,6 +1325,36 @@ const SEED_DEFS: SeedDef[] = [
   },
   {
     /*
+      Sent to the DIRECTOR by the AI staff room (automation/n8n) when a draft
+      reply to a parent or vendor waits for a decision and the director has
+      not written to the school number in 24 hours — the reply-buttons
+      message the room sends inside the window cannot go out then. The two
+      quick replies are sent with payloads "Approve <id>" / "Reject <id>"
+      (dispatch `quickReplyPayloads`), so a tap reaches the room's poller
+      with the draft number even though the label carries none.
+    */
+    familyKey: "staff_office_approval",
+    nameEn: "Office draft needs a decision",
+    nameHi: "कार्यालय ड्राफ्ट पर निर्णय",
+    module: "staff",
+    category: "UTILITY",
+    metaName: "bhb_office_approval",
+    headerFormat: "NONE",
+    bodyEn:
+      "✉️ Draft #{{draftId}} from the school office needs your decision.\n\n{{draftSummary}}",
+    bodyHi:
+      "✉️ विद्यालय कार्यालय का ड्राफ्ट #{{draftId}} आपके निर्णय की प्रतीक्षा में है।\n\n{{draftSummary}}",
+    buttons: [
+      { type: "QUICK_REPLY", text: "✅ Approve" },
+      { type: "QUICK_REPLY", text: "❌ Reject" },
+    ],
+    buttonsHi: [
+      { type: "QUICK_REPLY", text: "✅ स्वीकृत" },
+      { type: "QUICK_REPLY", text: "❌ अस्वीकृत" },
+    ],
+  },
+  {
+    /*
       Sent to an OFFICE phone, never to a family: a message the bot could not
       answer, forwarded by the office relay when that phone has not written to
       the school number in the last 24 hours. Variables are in the order the
@@ -2230,6 +2260,8 @@ export function sampleValueForWaVar(name: string): string {
     date: "22 Jul 2026",
     time: "10:00 AM",
     otp: "123456",
+    draftId: "42",
+    draftSummary: "To: Mrs. Sharma | Subject: Re: TC request | Dear Mrs. Sharma, the transfer certificate will be ready on Friday.",
   };
   if (overrides[name]) return overrides[name]!;
   const fromCatalogue = WA_TEMPLATE_VARIABLES.find((v) => v.key === name)?.sample;

@@ -228,3 +228,68 @@ export async function sendWhatsAppInteractive(opts: {
     error: r.error,
   };
 }
+
+/**
+ * Reply buttons for the dispatch route — the same send as
+ * `sendWhatsAppReplyButtons`, with the guards every other outbound path has:
+ * opt-out / not-on-WhatsApp (`sendBlockFor`), Meta's 24-hour window (a
+ * closed window is reported as `windowClosed` so a job can resend as a
+ * template), the school number to send FROM, and the chat-view log.
+ *
+ * The bots call the unguarded sender above from inside an open window, so
+ * their behaviour does not change.
+ */
+export async function sendWhatsAppReplyButtonsChecked(opts: {
+  toMobile: string;
+  body: string;
+  footer?: string;
+  buttons: WaReplyButton[];
+  /** Meta phone_number_id to send FROM; env default when absent. */
+  fromPhoneNumberId?: string;
+}): Promise<{ ok: boolean; mode: string; error?: string; providerId?: string; windowClosed: boolean }> {
+  const to = waDigitsToE164India(opts.toMobile);
+  if (!to || to.length < 10) {
+    return { ok: false, mode: "none", error: "Invalid destination", windowClosed: false };
+  }
+  const { sendBlockFor, isWithin24HourWindow } = await import("@/lib/waContactState.server");
+  const blocked = await sendBlockFor(to);
+  if (blocked) return { ok: false, mode: "none", error: blocked.error, windowClosed: false };
+  if (!(await isWithin24HourWindow(to))) {
+    return {
+      ok: false,
+      mode: "none",
+      error: "Outside Meta's 24h session window — send an approved template instead",
+      windowClosed: true,
+    };
+  }
+  const { resolvePhoneNumberId } = await import("@/lib/waSend");
+  const phoneNumberId = resolvePhoneNumberId(opts.fromPhoneNumberId);
+  const metaToken = metaAccessToken();
+  if (!phoneNumberId || !metaToken) {
+    return { ok: false, mode: "stub", error: "Configure WHATSAPP_TOKEN + WHATSAPP_PHONE_ID", windowClosed: false };
+  }
+  const { buildReplyButtonsMessage } = await import("@/lib/waReplyButtons");
+  const message = buildReplyButtonsMessage({ to, body: opts.body, footer: opts.footer, buttons: opts.buttons });
+  const url = `https://graph.facebook.com/${metaGraphVersion()}/${phoneNumberId}/messages`;
+  let r: { ok: boolean; providerId?: string; error?: string };
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${metaToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify(message),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      messages?: { id?: string }[];
+      error?: { message?: string };
+    };
+    r = res.ok
+      ? { ok: true, providerId: json.messages?.[0]?.id || "ok" }
+      : { ok: false, error: json.error?.message || `Meta HTTP ${res.status}` };
+  } catch (e) {
+    r = { ok: false, error: e instanceof Error ? e.message : "Meta send failed" };
+  }
+  const result = { ...r, mode: "meta" };
+  await logInteractive(opts.toMobile, opts.body, opts.buttons.map((b) => b.title), result);
+  const { isWindowClosedError } = await import("@/lib/waReplyButtons");
+  return { ...result, windowClosed: !r.ok && isWindowClosedError(r.error) };
+}

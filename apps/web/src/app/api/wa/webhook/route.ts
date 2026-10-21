@@ -175,12 +175,15 @@ export async function POST(req: Request) {
     // relay answers and documents included (wa_messages; the chat view).
     {
       const { logWaInbound } = await import("@/lib/waMessageLog.server");
+      // A tapped button is logged as its label (what the person saw), with
+      // the id or payload beside it; the office poller reads either.
       await logWaInbound({
         from: msg.fromWaId,
-        text: msg.text || msg.mediaNote || (msg.location ? `📍 ${msg.location.name || ""} ${msg.location.lat},${msg.location.lng}`.trim() : ""),
+        text: msg.buttonTitle || msg.text || msg.mediaNote || (msg.location ? `📍 ${msg.location.name || ""} ${msg.location.lat},${msg.location.lng}`.trim() : ""),
         waMessageId: msg.waMessageId,
         replyToWaMessageId: (msg as { replyToWaMessageId?: string }).replyToWaMessageId,
-        kind: msg.media ? msg.media.mediaType : msg.location ? "location" : "text",
+        kind: msg.buttonId ? "button" : msg.media ? msg.media.mediaType : msg.location ? "location" : "text",
+        buttonId: msg.buttonId,
       });
     }
 

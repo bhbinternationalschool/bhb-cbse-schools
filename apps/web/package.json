@@ -393,6 +393,7 @@
     "test:sis-bot-fee-replies": "npx tsx src/lib/sisParentBotFeeReplies.selftest.ts",
     "test:wa-known-parent-role": "npx tsx src/lib/waKnownParentRole.selftest.ts",
     "test:wa-inbound-parse": "npx tsx src/lib/waInboundParse.selftest.ts",
+    "test:wa-reply-buttons": "npx tsx src/lib/waReplyButtons.selftest.ts",
     "test:wa-bot-silence": "npx tsx src/lib/waBotSilence.selftest.ts",
     "test:sis-bot-thread-merge": "npx tsx src/lib/waSisBotThreadMerge.selftest.ts",
     "test:job-applications": "npx tsx src/lib/jobApplications.selftest.ts",
