@@ -535,8 +535,9 @@ export function StaffWorkspace() {
       ) : null}
       {tab === "requests" ? (
         <>
-          {hasPermission(session, state ?? loadMasters(), "staff", "edit") ||
-          staffSensitiveAuthority(session, state ?? loadMasters(), loadRbac()) !== null ? (
+          {((m) => hasPermission(session, m, "staff", "edit") || staffSensitiveAuthority(session, m, loadRbac()) !== null)(
+            state ?? loadMasters(),
+          ) ? (
             // The accountant decides bank / ID / pay requests (2.2b).
             <ProfileChangeRequestsCard />
           ) : null}
