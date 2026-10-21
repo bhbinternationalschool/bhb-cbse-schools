@@ -231,7 +231,9 @@ export function StaffProfileForm(props: Props) {
 
   function save() {
     if (!masters || !draft) return;
-    const validation = validateStaffProfile(draft);
+    // Locked Aadhaar / PAN / IFSC are not checked for a user who cannot edit
+    // them — a malformed stored value would otherwise be a dead end.
+    const validation = validateStaffProfile(draft, { sensitive: canSensitive });
     if (Object.keys(validation).length > 0) {
       setFieldErrors(validation);
       setError("Fix the highlighted fields before saving");
