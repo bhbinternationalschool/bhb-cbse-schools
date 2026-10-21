@@ -596,6 +596,7 @@ SELFTESTS=(
   test:wa-number-gap
   test:session-scoped-students
   test:counter-discount-settled
+  test:staff-fee-collect
   test:student-attendance
   test:student-homework
   test:student-transport

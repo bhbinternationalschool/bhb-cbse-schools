@@ -684,6 +684,7 @@ jobs:
           npm run test:wa-number-gap
           npm run test:session-scoped-students
           npm run test:counter-discount-settled
+          npm run test:staff-fee-collect
           npm run test:student-attendance
           npm run test:student-homework
           npm run test:student-transport
