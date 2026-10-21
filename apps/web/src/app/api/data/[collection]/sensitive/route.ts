@@ -5,7 +5,7 @@
  */
 import { NextResponse } from "next/server";
 import { invalidateServerMastersCache } from "@/lib/api/v1/auth";
-import { requireStaffApi } from "@/lib/apiRouteAuth.server";
+import { requireAnyStaffPermission } from "@/lib/apiRouteAuth.server";
 import { readRowsByIds, writeStaffSensitive } from "@/lib/data/server/repo";
 import { buildSensitiveOps, parseSensitiveOps } from "@/lib/data/server/staffSensitive";
 import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
@@ -23,7 +23,13 @@ export const POST = withBuildCheck(async (req: Request, ctx: RouteCtx) => {
   const { collection } = await ctx.params;
   if (collection !== "sis.staff") return fail(404, "not_found", "Unknown collection");
 
-  const auth = await requireStaffApi(req);
+  // The RBAC gate: payroll · edit or accounts · edit (the owner holds every
+  // module). staffSensitiveAuthority below then names WHICH authority, for
+  // the database's record — the same rule, from the same session.
+  const auth = await requireAnyStaffPermission(req, [
+    { module: "payroll", action: "edit" },
+    { module: "accounts", action: "edit" },
+  ]);
   if (!auth.ok) return auth.response;
   // The mirror-sync secret is a machine, not a person: never an authority.
   if (auth.viaMirrorSecret) return fail(403, "auth", "Protected staff fields are changed only by a signed-in person.");
