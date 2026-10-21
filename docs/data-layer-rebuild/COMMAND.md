@@ -1533,6 +1533,34 @@ the earlier head's app on the same stack: **11/22**).
 the office can no longer set or change anyone's e-mail or registered mobile on an existing record (the owner can) —
 including recording a missing mobile from the phone; a save with one refused row now saves its other rows.
 
+*(2.2b, director's follow-up and re-review, 21 Oct 2026, same PR #702.)*
+- **The Accounts role's `staff.sensitive_edit` is automatic and once-only**: `BUILT_IN_GRANT_ADDITIONS` adds it to a
+  stored Accounts role once (stamped in `defaultsApplied`, audited); the template is stamped too; a later removal by the
+  office stands on every load (self-test).
+- **A missing staff mobile may be recorded by the office** (director): only blank (or 0000000000) → a 10-digit number;
+  refused when any other member, family (mobile, WhatsApp, alternate) or login (`profiles`) has it — compared as the
+  last 10 digits (`signInMobilesInUse`) — or when the member holds powerful access (principal designation; owner /
+  admin / accounts / principal role; payroll·edit or accounts·edit; the bank & pay function; an owner e-mail —
+  `staffHoldsPowerfulAccess`); changing a set number stays the owner's. Same rule in the kernel, the old staff-roster
+  route, `/api/v1/staff/roster/mobile` and profile-request approvals. Every fill is in the app audit log
+  (`audit_events`: who, which record, when — never the number; `sis_staff_sensitive_changes` allows only owner /
+  payroll / accounts authorities by its own check, so using it would need a migration). The roster/mobile audit line no
+  longer carries numbers.
+- **The accountant can use the function**: `/staff/<id>/edit` shows a holder of the function without staff·edit a panel
+  with only bank, UPI, Aadhaar, PAN and basic pay (`StaffSensitiveDetailsPanel`, saving through the sensitive route);
+  the full record is readable for them (staff-roster GET, `GET sis.staff`); Staff → Requests shows them, and lets them
+  decide, the bank / ID / pay requests. For everyone without the function those inputs on the profile are locked, with
+  a line saying who enters them — typed data is never silently dropped.
+- **Sign-in details are one person's** even for the owner (sensitive route: an e-mail or mobile another member, family
+  or login holds → 409); a new member with a number someone else has is refused with a message saying so (a shared
+  family phone?) and that the owner can set it.
+- Main's `staff-editor-save.spec` (the old editor's Save, #705) now edits the father's name: a set mobile is the owner's.
+**Proof.** Self-tests (mobile rule, powerful access, once-only grant) red on the previous head; the stack acceptance
+(31 checks) on the review head's app: 23/31 — every new rule failed there; this branch 31/31. New
+`e2e/specs/staff-sensitive-screens.spec.ts` (project `staff-sensitive`): fails on the review head (no locked note, no
+panel); passes here; screens seen — the office's locked Bank tab and the accountant's panel saving, desktop light and
+phone 375 (the app's dark theme was not applied by the browser's colour-scheme emulation — dark not seen).
+
 **2.3a Delete the gate and the events.** With every component reader on hooks: delete
 `CoreDataGate` (React Query's loading state replaces it), the `bhb-masters-updated` /
 `bhb-rbac-updated` / `bhb-desk-first-hydrated` events and their listeners (one is the
