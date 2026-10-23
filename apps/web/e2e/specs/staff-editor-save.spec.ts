@@ -44,14 +44,15 @@ test("staff editor: Save sends the change and the server record changes", async 
   await father.fill(next);
 
   const posted = page.waitForResponse(
-    (r) => r.url().includes("/api/school-data/staff-roster") && r.request().method() === "POST",
+    (r) => r.url().endsWith("/api/data/sis.staff") && r.request().method() === "POST",
     { timeout: 15_000 },
   );
   await page.getByRole("button", { name: "Save profile" }).first().click();
   await expect(page.getByText("Fix the highlighted fields before saving"), "Save refused the profile").toHaveCount(0);
   const res = await posted;
-  expect(res.status(), "POST staff-roster").toBe(200);
-  expect(((await res.json()) as { ok?: boolean }).ok, "POST staff-roster ok").toBe(true);
+  expect(res.status(), "POST sis.staff").toBe(200);
+  expect(((await res.json()) as { ok?: boolean }).ok, "POST sis.staff ok").toBe(true);
+  await expect(page.getByTestId("staff-save-notice")).toHaveText("Staff updated", { timeout: 15_000 });
 
   const after = (await (await context.request.get("/api/school-data/staff-roster")).json()) as Roster;
   const saved = after.staff.find((s) => s.id === EDITED);
