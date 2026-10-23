@@ -203,6 +203,8 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "relaySender", label: "Office relay: who sent it", group: "School", sample: "Priya Sharma (98765 43210), parent of Aarav Sharma, Class 5 A" },
   { key: "relayCode", label: "Office relay: reference code", group: "School", sample: "K7Q2" },
   { key: "relayMessage", label: "Office relay: the message", group: "School", sample: "I paid the fee yesterday but it still shows due" },
+  { key: "draftId", label: "Office draft: task number", group: "Staff", sample: "42", hint: "The office_tasks id the AI staff room asks the director to approve or reject." },
+  { key: "draftSummary", label: "Office draft: to, subject and text, one line", group: "Staff", sample: "To: Mrs. Sharma | Subject: Re: TC request | Dear Mrs. Sharma, the transfer certificate will be ready on Friday.", hint: "Newlines become ' | ' — Meta refuses a parameter with a line break." },
   { key: "briefDate", label: "Brief date", group: "School", sample: "10 Sep 2026" },
   { key: "collection", label: "Day's collection line", group: "Fees", sample: "₹4,850 in 7 receipts — Cash ₹3,000, UPI ₹1,850" },
   { key: "expenses", label: "Day's expenses line", group: "Fees", sample: "₹1,200 across 3 vouchers" },
@@ -1322,6 +1324,36 @@ const SEED_DEFS: SeedDef[] = [
       "📢 *{{schoolName}} की सूचना*\n\n*{{noticeTitle}}*\n\n{{noticeBody}}\n\nकृपया ध्यान से पढ़ें और कोई प्रश्न हो तो इसी संदेश का उत्तर दें। धन्यवाद! 🙏",
     footerEn: "School office",
     footerHi: "विद्यालय कार्यालय",
+  },
+  {
+    /*
+      Sent to the DIRECTOR by the AI staff room (automation/n8n) when a draft
+      reply to a parent or vendor waits for a decision and the director has
+      not written to the school number in 24 hours — the reply-buttons
+      message the room sends inside the window cannot go out then. The two
+      quick replies are sent with payloads "Approve <id>" / "Reject <id>"
+      (dispatch `quickReplyPayloads`), so a tap reaches the room's poller
+      with the draft number even though the label carries none.
+    */
+    familyKey: "staff_office_approval",
+    nameEn: "Office draft needs a decision",
+    nameHi: "कार्यालय ड्राफ्ट पर निर्णय",
+    module: "staff",
+    category: "UTILITY",
+    metaName: "bhb_office_approval",
+    headerFormat: "NONE",
+    bodyEn:
+      "✉️ Draft #{{draftId}} from the school office needs your decision.\n\n{{draftSummary}}\n\nTap a button below to decide.",
+    bodyHi:
+      "✉️ विद्यालय कार्यालय का ड्राफ्ट #{{draftId}} आपके निर्णय की प्रतीक्षा में है।\n\n{{draftSummary}}\n\nनिर्णय के लिए नीचे का बटन दबाएँ।",
+    buttons: [
+      { type: "QUICK_REPLY", text: "✅ Approve" },
+      { type: "QUICK_REPLY", text: "❌ Reject" },
+    ],
+    buttonsHi: [
+      { type: "QUICK_REPLY", text: "✅ स्वीकृत" },
+      { type: "QUICK_REPLY", text: "❌ अस्वीकृत" },
+    ],
   },
   {
     /*
