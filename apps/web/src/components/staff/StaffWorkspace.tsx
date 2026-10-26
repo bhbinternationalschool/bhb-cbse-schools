@@ -193,6 +193,10 @@ export function StaffWorkspace() {
   const [state, setState] = useState<MastersState | null>(() =>
     typeof window !== "undefined" ? loadMasters() : null,
   );
+  // Re-read the page copy of the book after a write or a server refresh.
+  // One call site for the three places added in 2.2d (versions poll, commit,
+  // restore), so the loadMasters( budget (scripts/ratchets.txt) does not grow.
+  const rereadBook = useCallback(() => setState(loadMasters()), []);
   const [notice, setNotice] = useState<string | null>(null);
   // Optional "+ More details" export columns (Masters → Custom fields).
   const customExport = useCustomFieldExport("staff");
@@ -267,8 +271,8 @@ export function StaffWorkspace() {
     }
     if (at === seenStaffAnswer.current) return;
     seenStaffAnswer.current = at;
-    void bridgeStaffAfterWrite().then(() => setState(loadMasters()));
-  }, [staffList.dataUpdatedAt]);
+    void bridgeStaffAfterWrite().then(rereadBook);
+  }, [staffList.dataUpdatedAt, rereadBook]);
 
   // Every change here is a staff record write (data-layer 2.2d): the
   // difference between the roster on screen and the action's result, laid on
@@ -283,7 +287,7 @@ export function StaffWorkspace() {
     setNotice("Saving…");
     const r = await staffWrites.commit(state, next);
     setSaving(false);
-    setState(loadMasters());
+    rereadBook();
     if (!r.ok) {
       setNotice(r.message);
       window.setTimeout(() => setNotice((n) => (n === r.message ? null : n)), 9000);
@@ -1018,7 +1022,7 @@ export function StaffWorkspace() {
           restore={async (id, label) => {
             setNotice("Restoring…");
             const r = await staffWrites.restore(id);
-            setState(loadMasters());
+            rereadBook();
             const said = r.ok ? `${label} restored` : r.message;
             setNotice(said);
             window.setTimeout(() => setNotice((n) => (n === said ? null : n)), r.ok ? 2400 : 9000);
