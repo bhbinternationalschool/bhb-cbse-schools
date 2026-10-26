@@ -16,9 +16,13 @@
  *     them (the server's roster neither), the row is SOFT-removed (who, when);
  *     "Removed staff" lists them and Restore brings them back. On main Remove
  *     only changed the tab's copy (nothing on the server): back after reload.
- *  4. Staff 0: with the staff roster's answer held back, the principal saves
- *     a fee head (the old whole-book Masters save, still 2.2e's) → no staff
- *     write of any kind and sis_staff unchanged (count and every revision).
+ *  4. Staff 0: with the staff roster answering EMPTY (nobody), the principal
+ *     saves a fee head (the old whole-book Masters save, still 2.2e's) → no
+ *     staff write of any kind and sis_staff unchanged (count and every
+ *     revision).
+ *     A roster that never answers is a different case: the page gate
+ *     (ErpModuleGate, since 12 Oct) shows "Checking access…" and no screen
+ *     opens, so there is no form to save from. Test 5 pins that.
  *
  * Writes staff records, so it runs in the staff-sensitive project after every
  * reader, and puts each record back.
@@ -178,19 +182,30 @@ test.describe.serial("the staff editor writes rows (data-layer 2.2d)", () => {
     }
   });
 
-  test("staff 0: a fee head saved while the roster's answer is held back writes no staff", async ({ browser }) => {
+  test("staff 0: a fee head saved while the roster comes back empty writes no staff", async ({ browser }) => {
     const { context, page } = await openAs(browser, "principal");
     const before = await rows(page);
     const code = `Z${String(Date.now()).slice(-5)}`;
     try {
       const writes = staffWrites(page);
-      // The roster's answer never comes (the 12 Oct "staff 0" shape).
-      await page.route("**/api/school-data/staff-roster", () => undefined);
+      // The roster answers with nobody (the 12 Oct "staff 0" shape): access
+      // loads (rbac + an empty roster), the form opens, the tab's copy holds
+      // no staff.
+      await page.route("**/api/school-data/staff-roster", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true, departments: [], designations: [], staff: [] }),
+        }),
+      );
       await page.goto("/masters?tab=fee-heads");
-      await page.locator("label", { hasText: "Code" }).locator("input").first().fill(code, { timeout: 30_000 });
-      await page.locator("label", { hasText: "Name" }).locator("input").first().fill(`E2E staff-zero ${code}`);
+      // The tab has two forms with a "Code" field (Add category above, Add fee
+      // head below): scope to the fee-head form, found by its SPORTS field.
+      const feeHeadForm = page.locator("form").filter({ has: page.locator("input[placeholder='SPORTS']") });
+      await feeHeadForm.locator("label", { hasText: "Code" }).locator("input").first().fill(code, { timeout: 30_000 });
+      await feeHeadForm.locator("label", { hasText: "Name" }).locator("input").first().fill(`E2E staff-zero ${code}`);
       const saved = page.waitForResponse((r) => /\/api\/school-data\/masters-desk$/.test(r.url()) && r.request().method() === "POST", { timeout: 20_000 });
-      await page.locator("form").filter({ has: page.locator("input[placeholder='SPORTS']") }).locator("button[type=submit]").first().click();
+      await feeHeadForm.locator("button[type=submit]").first().click();
       expect((await saved).status(), "the fee head saved").toBe(200);
       await page.waitForTimeout(3_000);
       expect(writes.filter((w) => !/masters-desk/.test(w)), "no staff write of any kind").toEqual([]);
@@ -207,6 +222,25 @@ test.describe.serial("the staff editor writes rows (data-layer 2.2d)", () => {
           data: { version: 2, feeHeads: d.feeHeads.filter((f) => f.code !== code), sliceBases: { feeHeads: d.sliceStamps?.feeHeads ?? "" } },
         });
       }
+      await context.close();
+    }
+  });
+
+  test("roster never answers: the page waits at \"Checking access…\", no form, no write", async ({ browser }) => {
+    const { context, page } = await openAs(browser, "principal");
+    try {
+      const writes = staffWrites(page);
+      // The answer never comes: access is never decided yes or no, so the
+      // Masters screen (and its fee-head form) does not open.
+      await page.route("**/api/school-data/staff-roster", () => undefined);
+      await page.goto("/masters?tab=fee-heads");
+      await expect(page.getByText("Checking access…")).toBeVisible({ timeout: 30_000 });
+      await page.waitForTimeout(3_000);
+      await expect(page.getByText("Checking access…")).toBeVisible();
+      await expect(page.locator("input[placeholder='SPORTS']"), "no fee-head form while access is unknown").toHaveCount(0);
+      expect(writes, "nothing written").toEqual([]);
+    } finally {
+      await page.unroute("**/api/school-data/staff-roster");
       await context.close();
     }
   });
