@@ -20,6 +20,7 @@ import { accessDataStatus, accessVerdict } from "./accessDataStatus";
 import { emptyMastersShell, type MastersState } from "./masters";
 import {
   canAccessHref,
+  canAccessMastersTab,
   defaultRbacState,
   hasPermission,
   resolveSessionRoles,
@@ -201,6 +202,33 @@ for (const ev of ["bhb-desk-first-hydrated", "bhb-masters-updated", "bhb-desk-hy
   );
   assert.ok(assignedRoleCodesFor("stf_teacher", scoped).includes("office"), "the scoped grant itself still exists");
   assert.deepEqual(assignedRoleCodesFor("stf_teacher", scoped, { unscopedOnly: true }), []);
+}
+
+
+// --- A principal opening Masters with an EMPTY roster ("staff 0"): the roster
+// answered with nobody, so the page copy holds no staff. Access must still be
+// decided from the session's own role (not denied, not guessed from the
+// roster), so the fee-head form opens and its save can be tested
+// (e2e/specs/staff-editor-writes.spec.ts, "staff 0").
+{
+  const principal = session("stf_principal", "Principal Like", "principal");
+  const none = emptyMastersShell();
+  assert.equal(none.staff.length, 0, "fixture: no roster");
+  assert.deepEqual(codes(principal, none), ["principal"], "principal from the session alone");
+  assert.ok(hasPermission(principal, none, "masters", "edit", defaultRbacState()), "principal: masters.edit with no roster");
+  assert.ok(canAccessMastersTab(principal, none, "fee-heads", defaultRbacState(), "edit"), "fee-heads tab opens for edit with no roster");
+  assert.ok(canAccessHref(principal, none, "/masters?tab=fee-heads", defaultRbacState()), "/masters?tab=fee-heads passes the page gate with no roster");
+  // And with the roster NOT loaded the gate never answers yes or no: it waits
+  // (loading) or says it could not check (failed). The fee-head form is behind
+  // that verdict, so a roster that never answers shows no form at all.
+  for (const st of ["loading", "failed"] as const) {
+    assert.equal(accessVerdict(st, () => true), st, `${st}: not "allowed" until the roster is known`);
+  }
+  assert.equal(
+    accessDataStatus({ remote: true, mounted: true, rbacLoaded: true, rosterLoaded: false, attemptSettled: false }),
+    "loading",
+    "a roster request that never answers keeps the gate on loading",
+  );
 }
 
 console.log("rbacAssignedRoles.selftest.ts: ok");
