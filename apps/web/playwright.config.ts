@@ -65,7 +65,7 @@ export default defineConfig<GateOptions>({
   projects: [
     {
       name: "desktop",
-      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay|masters-element-writes|parent-web-tabs|fuel-per-bus-range|certificates-dues-gate|staff-editor-save|print-signatures|staff-sensitive-screens|staff-locked-validation|staff-editor-writes|staff-followups|fee-writes|concession-template-apply)\.spec\.ts/,
+      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay|masters-element-writes|parent-web-tabs|fuel-per-bus-range|certificates-dues-gate|staff-editor-save|print-signatures|staff-sensitive-screens|staff-locked-validation|staff-editor-writes|staff-followups|fee-writes)\.spec\.ts/,
       use: { ...desktop },
     },
     {
@@ -158,7 +158,7 @@ export default defineConfig<GateOptions>({
       // switches on the built-in structures for every class, so it runs
       // after every other project and takes everything out again.
       name: "fee-writes",
-      testMatch: /(fee-writes|concession-template-apply)\.spec\.ts/,
+      testMatch: /fee-writes\.spec\.ts/,
       dependencies: ["cert-gate"],
       use: { ...desktop },
     },
