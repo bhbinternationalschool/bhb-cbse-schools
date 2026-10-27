@@ -18,6 +18,7 @@ import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth
 import { STAFF_DOC_LABELS } from "@/lib/foundationMasters";
 import { patchStaffRow, readOwnStaff } from "@/lib/staffSelfProfile.server";
 import { ownStaffDocUrlRefusal } from "@/lib/staffOwnDocUrl";
+import { staffDocDriveReceiptValid } from "@/lib/staffDocReceipt.server";
 
 export const runtime = "nodejs";
 
@@ -50,6 +51,13 @@ export async function POST(request: Request) {
       console.warn(`[staff/me/docs] ${staffId}: a file reference that is not their own upload for ${docKey} — refused`);
       throw new ApiError("bad_request", refusal, 400);
     }
+    // A Drive id is kept only with the upload route's receipt for THIS member
+    // and THIS document — never another member's file (2.2d follow-up).
+    const driveFileId = str(f?.driveFileId, 200);
+    if (driveFileId && !staffDocDriveReceiptValid(staffId, docKey, driveFileId, f?.driveReceipt)) {
+      console.warn(`[staff/me/docs] ${staffId}: a Drive file id without this upload's receipt for ${docKey} — refused`);
+      throw new ApiError("bad_request", "That file was not uploaded here for this document — nothing was submitted", 400);
+    }
     const now = new Date().toISOString();
     const submitted = {
       status: "pending",
@@ -57,7 +65,7 @@ export async function POST(request: Request) {
       mimeType: str(f?.mimeType, 120),
       size: typeof f?.size === "number" && Number.isFinite(f.size) ? f.size : 0,
       fileUrl,
-      ...(str(f?.driveFileId, 200) ? { driveFileId: str(f?.driveFileId, 200) } : {}),
+      ...(driveFileId ? { driveFileId } : {}),
       uploadedAt: str(f?.uploadedAt, 40) || now,
       submittedBy: own.staff.fullName,
       submittedAt: now,

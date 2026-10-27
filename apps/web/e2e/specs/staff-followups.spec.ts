@@ -30,6 +30,7 @@
 import type { Browser, BrowserContext, Locator, Page, TestInfo } from "@playwright/test";
 import { demoSessionCookieName, type DemoSession } from "@/lib/auth";
 import { mintSessionCookie } from "../session";
+import { staffDocDriveReceipt } from "@/lib/staffDocReceipt.server";
 import { classId, staffId } from "../fixture";
 import { APP_URL, expect, fx, openAs, test } from "../support";
 
@@ -132,6 +133,28 @@ test.describe("2.2d follow-ups", () => {
       await owner3.close();
       expect(stored.profile?.photoUrl).toBe(own);
       expect((stored.profile?.docs as Record<string, { status?: string; fileUrl?: string }>)?.photo?.status).toBe("pending");
+
+      // A Drive id is kept only with the upload route's receipt for THIS member and THIS document.
+      const withDrive = (driveFileId: string, driveReceipt?: string | null) =>
+        page.request.post("/api/v1/staff/me/docs", {
+          data: { docKey: "photo", file: { fileUrl: own, fileName: "p.png", mimeType: "image/png", size: 10, driveFileId, ...(driveReceipt ? { driveReceipt } : {}) } },
+        });
+      const owner4 = await ownerContext(browser);
+      const pre = await one(owner4, ME);
+      for (const [label, r] of [
+        ["no receipt", await withDrive("drive_other_member_file")],
+        ["another member's receipt", await withDrive("drive_other_member_file", staffDocDriveReceipt(OTHER, "photo", "drive_other_member_file"))],
+        ["another document's receipt", await withDrive("drive_mine_aadhaar", staffDocDriveReceipt(ME, "aadhaar", "drive_mine_aadhaar"))],
+      ] as const) {
+        expect(r.status(), `refused: ${label}`).toBe(400);
+      }
+      expect((await one(owner4, ME)).updated_at, "nothing written by a refused Drive id").toBe(pre.updated_at);
+      const mine = await withDrive("drive_my_photo", staffDocDriveReceipt(ME, "photo", "drive_my_photo"));
+      expect(mine.status(), `own receipt: ${(await mine.text()).slice(0, 200)}`).toBe(200);
+      const kept = (await one(owner4, ME)).profile?.docs as Record<string, Record<string, unknown>>;
+      expect(kept?.photo?.driveFileId).toBe("drive_my_photo");
+      expect(kept?.photo?.driveReceipt, "the receipt is never stored").toBeUndefined();
+      await owner4.close();
     } finally {
       await context.close();
     }
@@ -175,9 +198,23 @@ test.describe("2.2d follow-ups", () => {
       const dep = card("Add department");
       await dep.getByPlaceholder("Code").fill(`ZD${tag}`, { timeout: 30_000 });
       await dep.getByPlaceholder("Name").fill(`E2E dept ${tag}`);
+      // A refused save keeps what was typed (main cleared the fields before the answer).
+      await page.route("**/api/data/sis.departments", (route) =>
+        route.request().method() === "POST"
+          ? route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ ok: false, kind: "unavailable", message: "e2e: the server is busy", conflicts: [] }) })
+          : route.continue(),
+      );
+      const depRefused = page.waitForResponse((r) => r.url().endsWith("/api/data/sis.departments") && r.request().method() === "POST", { timeout: 15_000 });
+      await dep.getByRole("button", { name: "Add" }).click();
+      expect((await depRefused).status()).toBe(503);
+      await page.waitForTimeout(1_000);
+      await expect(dep.getByPlaceholder("Code"), "a refused save keeps the typing").toHaveValue(`ZD${tag}`);
+      await expect(dep.getByPlaceholder("Name")).toHaveValue(`E2E dept ${tag}`);
+      await page.unroute("**/api/data/sis.departments");
       const depSaved = page.waitForResponse((r) => r.url().endsWith("/api/data/sis.departments") && r.request().method() === "POST", { timeout: 15_000 });
       await dep.getByRole("button", { name: "Add" }).click();
       expect((await depSaved).status(), "department").toBe(200);
+      await expect(dep.getByPlaceholder("Code"), "cleared once saved").toHaveValue("", { timeout: 15_000 });
       const deps = ((await (await page.request.get("/api/data/sis.departments?limit=500")).json()) as { rows: { id: string; code: string; name: string }[] }).rows;
       const madeDep = deps.find((d) => d.code === `ZD${tag}`);
       expect(madeDep?.name).toBe(`E2E dept ${tag}`);

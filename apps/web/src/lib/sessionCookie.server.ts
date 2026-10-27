@@ -54,6 +54,27 @@ function hmac(payload: string, secret: string): string {
   return createHmac("sha256", secret).update(payload).digest("base64url");
 }
 
+/**
+ * Sign / check a short server-issued value (not a session) with the same
+ * secret — e.g. the receipt /api/documents/upload hands back for the Drive
+ * file it stored, so a later request can prove the id came from that upload.
+ * `purpose` keeps one kind of value from passing as another.
+ */
+export function signServerValue(purpose: string, value: string): string | null {
+  const secret = sessionSecret();
+  if (!secret) return null;
+  return hmac(`${purpose}\u0000${value}`, secret);
+}
+
+export function verifyServerValue(purpose: string, value: string, signature: unknown): boolean {
+  if (typeof signature !== "string" || !signature) return false;
+  const want = signServerValue(purpose, value);
+  if (!want) return false;
+  const a = Buffer.from(want);
+  const b = Buffer.from(signature);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 /** Encode + sign a session for use as a cookie value. */
 export function signSession(session: DemoSession): string | null {
   const secret = sessionSecret();

@@ -45,3 +45,20 @@ no("/api/file/staff/BHB_007/.hidden");
 no("/api/documents/staff/stf_7/photo", { staffId: "", empCode: "", docKey: "photo" });
 
 console.log("staffOwnDocUrl selftest: ok");
+
+// The Drive receipt: me/docs keeps a driveFileId only with the upload's receipt for THIS member and document.
+void (async () => {
+  const { staffDocDriveReceipt, staffDocDriveReceiptValid } = await import("./staffDocReceipt.server");
+  const r = staffDocDriveReceipt("stf_7", "photo", "drive_A");
+  assert.ok(r, "a receipt is issued");
+  assert.equal(staffDocDriveReceiptValid("stf_7", "photo", "drive_A", r), true);
+  assert.equal(staffDocDriveReceiptValid("stf_8", "photo", "drive_A", r), false, "another member");
+  assert.equal(staffDocDriveReceiptValid("stf_7", "aadhaar", "drive_A", r), false, "another document");
+  assert.equal(staffDocDriveReceiptValid("stf_7", "photo", "drive_B", r), false, "another Drive file");
+  assert.equal(staffDocDriveReceiptValid("stf_7", "photo", "drive_A", undefined), false, "no receipt");
+  assert.equal(staffDocDriveReceiptValid("stf_7", "photo", "drive_A", `${r}x`), false, "tampered");
+  console.log("staffDocReceipt selftest: ok");
+})().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
