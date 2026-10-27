@@ -394,6 +394,10 @@ export function MastersWorkspace() {
       onDone?.(false);
       return;
     }
+    if (opts?.guardEmptyYear) {
+      // A clone is always several lists → one batch; the guard rides on it.
+      for (const r of plan.requests) if (r.kind === "batch") r.guard = { noActiveFeeGroupsIn: opts.guardEmptyYear };
+    }
     const elementWork = plan.requests.length > 0 || plan.staff.length > 0;
     // Staff setup (departments, designations — and any other change to a
     // staff record) is written as staff rows (data-layer 2.2d). Every other

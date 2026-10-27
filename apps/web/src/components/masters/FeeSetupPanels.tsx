@@ -1,5 +1,6 @@
 "use client";
 
+import type { MastersCommitOpts } from "@/lib/data/client/mastersElementPlan";
 import {
   CLASS_GROUPS,
   SESSION_MONTHS,
@@ -41,7 +42,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { DraftDateInput } from "@/components/ui/draft-inputs";
 import { useDemoSessionOptional } from "@/components/shell/SessionContext";
 
-type Commit = (s: MastersState, msg?: string) => void;
+type Commit = (s: MastersState, msg?: string, opts?: MastersCommitOpts) => void;
 
 /** Header-selected session, falling back to the masters "current" year. */
 function useFeeSetupAy(state: MastersState): string {
@@ -94,6 +95,8 @@ export function CopyFeeSetupBanner({
     commit(
       next,
       `Fee setup copied ${fromAy} → ${ay} (groups + amounts, unpublished)`,
+      // Refused by the server if another tab already gave this year its groups.
+      { guardEmptyYear: ay },
     );
   }
 
@@ -809,6 +812,9 @@ function LateFeePanelInner({
         : String(rule.value / 100)
       : "100",
   );
+  // Switch the rule off rather than remove it (the kernel never empties a
+  // list — data-layer 2.2e review): an inactive rule charges nothing.
+  const [active, setActive] = useState(rule ? rule.isActive !== false : true);
   const [maxAmt, setMaxAmt] = useState(
     rule?.maxAmountPaise != null
       ? String(rule.maxAmountPaise / 100)
@@ -844,12 +850,12 @@ function LateFeePanelInner({
       feeHeadId: feeHeadIds[0]!,
       feeHeadIds,
       maxAmountPaise: maxAmt.trim() ? parseInrToPaise(maxAmt) : null,
-      isActive: true,
+      isActive: active,
     };
     const lateFeeRules = rule
       ? state.lateFeeRules.map((r) => (r.id === rule.id ? next : r))
       : [...state.lateFeeRules, next];
-    commit({ ...state, lateFeeRules }, "Late-fee rule saved");
+    commit({ ...state, lateFeeRules }, active ? "Late-fee rule saved" : "Late-fee rule saved — switched off, no late fee is charged");
   }
 
   const selectedNames = activeHeads
@@ -866,6 +872,11 @@ function LateFeePanelInner({
         heads this late-fee rule applies to.
       </p>
       <form onSubmit={save} className="mt-4 space-y-1">
+        <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
+          <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
+          Charge a late fee this session
+          <span className="text-[11px] text-[var(--muted)]">(untick to switch the rule off — it is kept, not removed)</span>
+        </label>
         <div className="mt-3">
           <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
             <span className="text-sm text-[var(--muted)]">Fee heads</span>

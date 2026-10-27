@@ -62,7 +62,7 @@ function recordWrites(page: Page): { url: string; body: unknown }[] {
   const out: { url: string; body: unknown }[] = [];
   page.on("request", (q: Request) => {
     if (q.method() !== "POST") return;
-    if (/\/api\/(data\/masters|school-data\/masters-desk)/.test(q.url())) {
+    if (/\/api\/(data\/masters|school-data\/masters-desk|fees\/counter-grants)/.test(q.url())) {
       out.push({ url: q.url().replace(/^.*\/api\//, ""), body: q.postDataJSON() });
     }
   });
@@ -285,9 +285,9 @@ async function setFeeGroup(req: APIRequestContext, id: string, group: string | n
 }
 
 /** The counter, the child picked, the first open month ticked and opened (a re-run finds April paid). */
-async function counterWithFirstMonth(page: Page): Promise<string> {
-  await page.goto(`/fees?tab=collect&q=${encodeURIComponent(CHILD.admissionNo)}`);
-  await page.getByRole("button", { name: new RegExp(CHILD.admissionNo) }).first().click({ timeout: 30_000 });
+async function counterWithFirstMonth(page: Page, child: typeof CHILD = CHILD): Promise<string> {
+  await page.goto(`/fees?tab=collect&q=${encodeURIComponent(child.admissionNo)}`);
+  await page.getByRole("button", { name: new RegExp(child.admissionNo) }).first().click({ timeout: 30_000 });
   // A month wholly open at ₹1,000 (the overlap case re-prices April and May; a
   // re-run finds earlier months paid or part-paid).
   const button = page.getByRole("button", { name: /^\w+ 2026 1 open · 1 overdue ₹1,000$/ }).first();
@@ -329,17 +329,26 @@ const OTHER_RULE = `${P}cnc_other`;
 const OTHER_GRANT = `${P}cg_other`;
 const OTHER_CHILD = fx.sis.students.find((s) => s.academicYearCode === AY_CURRENT && s.classId !== BILLED_CLASS && s.status === "active")!.id;
 
-test("counter grant: a recurring discount lands as its grant in one batch; voiding the receipt revokes exactly that grant", async ({ browser }) => {
-  const a = await pageAs(browser, "principal");
+/**
+ * The counter's recurring discount and the void, as `who`. Since the 2.2e
+ * review both go through POST /api/fees/counter-grants: the grant is written
+ * by the server once the receipt is in the database, the revoke once the void
+ * is — never masters-desk, never the kernel's Masters routes from the counter.
+ */
+async function counterGrantAndVoid(browser: Browser, who: Who, child: typeof CHILD): Promise<{ grant: Row }> {
+  const a = await pageAs(browser, who);
   const errors = collectPageErrors(a);
   const writes = recordWrites(a);
+  // The principal reads the stored grants (the office holds Masters · view).
+  const principal = await pageAs(browser, "principal");
+  let grant: Row | undefined;
   try {
-    await setFeeGroup(a.request, CHILD_ID, GROUP);
+    await setFeeGroup(principal.request, child.id, GROUP);
     // Another receipt's standing grant (another child — one discount per head
     // per child is the counter's rule) — must survive the void.
-    await keepAnotherGrant(a.request);
+    await keepAnotherGrant(principal.request);
 
-    await counterWithFirstMonth(a);
+    await counterWithFirstMonth(a, child);
     await a.getByRole("textbox", { name: "Discount on E2E FW Tuition" }).fill("100");
     await a.getByRole("checkbox", { name: "Also apply to future months" }).check();
     await expect(a.getByRole("checkbox", { name: "Also apply to future months" })).toBeChecked();
@@ -349,51 +358,157 @@ test("counter grant: a recurring discount lands as its grant in one batch; voidi
     await a.getByRole("combobox", { name: "Mode & account" }).selectOption("cash");
     await a.getByRole("button", { name: "Add line" }).click();
     await a.getByRole("button", { name: /^Collect · ₹900/ }).click();
-    // The receipt opens; the grant is written before the counter says "collected".
-    await expect(a.getByText("Receipt details")).toBeVisible({ timeout: 30_000 });
-    await a.screenshot({ path: test.info().outputPath("counter-receipt.png") });
+    await expect(a.getByText("Receipt details")).toBeVisible({ timeout: 60_000 });
+    await a.screenshot({ path: test.info().outputPath(`counter-receipt-${who}.png`) });
     await a.getByRole("button", { name: "Close", exact: true }).click();
 
-    // The grant, stored, carrying its receipt's marker.
-    const grants = () => mastersView(a.request).then((b) => listOf(b, "concessionGrants"));
-    await expect.poll(async () => (await grants()).filter((g) => g.studentId === CHILD_ID && /\[v:rcv_/.test(String(g.reason)) && g.id !== OTHER_GRANT).length, { timeout: 15_000 }).toBe(1);
-    const grant = (await grants()).find((g) => g.studentId === CHILD_ID && g.id !== OTHER_GRANT && /\[v:rcv_/.test(String(g.reason)))!;
-    expect(grant.status, "a principal's grant is approved").toBe("approved");
+    // The grant, stored once, carrying its receipt's marker and its giver.
+    const grants = () => mastersView(principal.request).then((b) => listOf(b, "concessionGrants"));
+    const mine = async () => (await grants()).filter((g) => g.studentId === child.id && /\[v:rcv_/.test(String(g.reason)) && g.status !== "rejected");
+    await expect.poll(async () => (await mine()).length, { timeout: 60_000 }).toBe(1);
+    grant = (await mine())[0]!;
+    expect(String(grant.id), "the counter's fixed id").toMatch(/^cg_ctr_/);
+    expect(grant.status, who === "office" ? "a clerk's grant waits for approval" : "a principal's grant is approved").toBe(who === "office" ? "pending" : "approved");
+    expect(String(grant.reason), "the giver is recorded").toContain(`by ${fx.sessions[who].fullName}`);
     const voucherId = String(grant.reason).match(/\[v:([^\]]+)\]/)![1];
     const receiptNo = String(grant.reason).match(/receipt (\S+) \[v:/)![1];
 
     expect(writes.filter((w) => w.url.includes("masters-desk")), "never the whole book").toEqual([]);
     expect(writes.some((w) => w.url === "data/masters.number-series/next"), "the receipt number was asked of the server").toBe(true);
-    const grantWrites = writes.filter((w) => w.url.startsWith("data/masters") && !w.url.includes("number-series"));
-    expect(grantWrites.length, "one request").toBe(1);
-    expect(grantWrites[0].url).toBe("data/masters/batch");
-    const ops = (grantWrites[0].body as { ops: BatchOp[] }).ops;
-    expect(ops.filter((o) => o.collection === "masters.concession-grants").map((o) => [o.op, o.id, o.base]), "the grant: one new element").toEqual([["upsert", grant.id, null]]);
-    expect(ops.every((o) => o.collection === "masters.concession-grants" || (o.collection === "masters.concessions" && o.base === null)), "and at most its new rule").toBe(true);
-    test.info().annotations.push({ type: "receipt", description: `${receiptNo} (${voucherId})` });
+    expect(writes.filter((w) => w.url.startsWith("data/masters") && !w.url.includes("number-series")), "no Masters write from the counter").toEqual([]);
+    const grantPosts = writes.filter((w) => w.url === "fees/counter-grants" && (w.body as { action?: string }).action === "grant");
+    expect(grantPosts.length, "the grant asked of the server (again while the receipt was on its way)").toBeGreaterThanOrEqual(1);
+    expect((grantPosts[0].body as { sourceVoucherId?: string }).sourceVoucherId, "tied to its receipt").toBe(voucherId);
+    test.info().annotations.push({ type: "receipt", description: `${who}: ${receiptNo} (${voucherId})` });
 
     // ── void the receipt ──
-    console.log("STEP void", receiptNo);
     writes.length = 0;
     await voidReceipt(a, receiptNo);
-    console.log("STEP voided");
-    await expect.poll(async () => (await grants()).find((g) => g.id === grant.id)?.status, { timeout: 20_000, message: "its grant revoked" }).toBe("rejected");
+    await expect.poll(async () => (await grants()).find((g) => g.id === grant!.id)?.status, { timeout: 60_000, message: "its grant revoked" }).toBe("rejected");
     const after = await grants();
-    expect(after.find((g) => g.id === grant.id)?.reason, "with the void note").toMatch(/auto-revoked — receipt .+ voided/);
+    expect(after.find((g) => g.id === grant!.id)?.reason, "with the void note").toMatch(/auto-revoked — receipt .+ voided/);
     expect(after.find((g) => g.id === OTHER_GRANT)?.status, "another receipt's grant stays").toBe("approved");
-    expect(writes.filter((w) => w.url.includes("masters-desk")), "never the whole book").toEqual([]);
-    const revoke = writes.filter((w) => w.url.startsWith("data/masters") && !w.url.includes("number-series"));
-    expect(revoke.length, "one request").toBe(1);
-    expect((revoke[0].body as { ops: BatchOp[] }).ops.map((o) => [o.collection, o.id, Object.keys(o.row ?? {}).sort().join(",")]), "exactly its grant, status + note").toEqual([
-      ["masters.concession-grants", grant.id, "reason,status"],
-    ]);
+    expect(writes.filter((w) => w.url.includes("masters-desk") || w.url.startsWith("data/masters")), "never a Masters write").toEqual([]);
+    const revokes = writes.filter((w) => w.url === "fees/counter-grants");
+    expect(revokes.length, "the revoke asked of the server").toBeGreaterThanOrEqual(1);
+    expect(revokes.every((w) => (w.body as { action?: string; voucherId?: string }).action === "revoke" && (w.body as { voucherId?: string }).voucherId === voucherId), "for exactly this receipt").toBe(true);
   } finally {
-    await setFeeGroup(a.request, CHILD_ID, null);
+    await setFeeGroup(principal.request, child.id, null);
     await a.context().close();
+    await principal.context().close();
   }
   expect(errors, "no page errors").toEqual([]);
+  return { grant: grant! };
+}
+
+test("counter grant: a recurring discount lands as its grant, once, through the server; voiding the receipt revokes exactly that grant", async ({ browser }) => {
+  await counterGrantAndVoid(browser, "principal", CHILD);
 });
 
+test("fees · edit clerk (Office, Masters view only): her counter grant lands once (pending); her void revokes exactly it; the catalogue and other grants stay closed to her", async ({ browser }) => {
+  const officeChild = CANDIDATES.find((s) => s.id !== CHILD_ID && s.id !== (CANDIDATES.at(-1) ?? CHILD).id) ?? CHILD;
+  await counterGrantAndVoid(browser, "office", officeChild);
+  const office = await pageAs(browser, "office");
+  try {
+    const book = await mastersView(office.request).catch(() => null);
+    const other = book ? elementOf(book, "concessionGrants", OTHER_GRANT) : null;
+    // another (non-counter) grant through the kernel: refused
+    const g = await writeElements(office.request, "masters.concession-grants", [
+      { op: "upsert", id: OTHER_GRANT, base: String(other?._rev ?? 0), row: { status: "rejected" } },
+    ]);
+    expect(g.status, `a non-counter grant: ${JSON.stringify(g.body).slice(0, 160)}`).toBe(403);
+    // the catalogue: refused
+    const c = await writeElements(office.request, "masters.concessions", [
+      { op: "upsert", id: `${P}cnc_by_office`, base: null, row: { id: `${P}cnc_by_office`, code: "E2E-FW-OFF", name: "Office rule", kind: "other", mode: "fixed", value: 100, feeHeadIds: [HEAD], isActive: true, notes: "e2e-fw" } },
+    ]);
+    expect(c.status, "the concession catalogue").toBe(403);
+    // a standing discount with no receipt: refused (a Masters decision)
+    const noReceipt = await office.request.post("/api/fees/counter-grants", {
+      data: { action: "grant", academicYearCode: AY_CURRENT, ground: "hardship", reason: "e2e-fw", items: [{ studentId: officeChild.id, studentName: "x", feeHeadId: HEAD, feeHeadName: "x", discountPaise: 100, dueLabel: "x", futureEffectiveFrom: "2026-11-10" }] },
+    });
+    expect(noReceipt.status(), "no receipt, no counter grant for a clerk").toBe(403);
+    // ending another receipt's grants: only once THAT receipt is voided
+    const live = fx.growing.receipts[0]!;
+    const early = await office.request.post("/api/fees/counter-grants", { data: { action: "revoke", voucherId: live.id, receiptNo: live.receiptNo } });
+    expect(early.status(), "a live receipt's grants are not ended").toBe(409);
+  } finally {
+    await office.context().close();
+  }
+  expect(elementOf(await mastersView((await pageAs(browser, "principal")).request), "concessionGrants", OTHER_GRANT)?.status, "the other grant untouched").toBe("approved");
+});
+
+test("two counters at once: the same grant asked twice together lands once", async ({ browser }) => {
+  const office = await pageAs(browser, "office");
+  const principal = await pageAs(browser, "principal");
+  const receipt = fx.growing.receipts[1]!; // a live fixture receipt, in the database
+  const child = fx.sis.students.find((s) => s.id === receipt.lines[0]?.studentId) ?? CHILD;
+  const body = {
+    action: "grant",
+    academicYearCode: AY_CURRENT,
+    ground: "hardship",
+    reason: "e2e-fw twice",
+    sourceVoucherId: receipt.id,
+    sourceReceiptNo: receipt.receiptNo,
+    items: [{ studentId: child.id, studentName: child.fullName, feeHeadId: HEAD, feeHeadName: "E2E FW Tuition", discountPaise: 7_700, dueLabel: "E2E FW Tuition · June", futureEffectiveFrom: "2026-07-10" }],
+  };
+  try {
+    const [r1, r2] = await Promise.all([
+      office.request.post("/api/fees/counter-grants", { data: body }),
+      office.request.post("/api/fees/counter-grants", { data: body }),
+    ]);
+    const statuses = [r1.status(), r2.status()].sort();
+    // one lands; the other is refused by the database (same fixed id) or, if
+    // it came second, finds the first on file
+    expect(statuses[0], `answers: ${await r1.text()} | ${await r2.text()}`).toBe(200);
+    const onFile = listOf(await mastersView(principal.request), "concessionGrants").filter(
+      (g) => g.studentId === child.id && String(g.reason).includes(`[v:${receipt.id}]`) && g.status !== "rejected",
+    );
+    expect(onFile.length, "exactly one grant").toBe(1);
+    // asked a third time: already on file, nothing new
+    const r3 = await office.request.post("/api/fees/counter-grants", { data: body });
+    expect(r3.status()).toBe(200);
+    expect(((await r3.json()) as { skipped?: number }).skipped, "already on file").toBe(1);
+  } finally {
+    await office.context().close();
+    await principal.context().close();
+  }
+});
+
+test("grant before receipt: a receipt the database refused never leaves a running grant behind", async ({ browser }) => {
+  test.setTimeout(240_000);
+  const child = CANDIDATES.at(-2) ?? CHILD;
+  const a = await pageAs(browser, "principal");
+  const principal = await pageAs(browser, "principal");
+  try {
+    await setFeeGroup(principal.request, child.id, GROUP);
+    // The fee desk push is refused (as a 23505 — two counters, one number — is).
+    await a.route("**/api/school-data/fees-vouchers", (route) =>
+      route.request().method() === "POST"
+        ? route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ ok: false, error: "duplicate key value violates unique constraint" }) })
+        : route.continue(),
+    );
+    await counterWithFirstMonth(a, child);
+    await a.getByRole("textbox", { name: "Discount on E2E FW Tuition" }).fill("100");
+    await a.getByRole("checkbox", { name: "Also apply to future months" }).check();
+    await a.getByRole("combobox", { name: "Why is this discount given?" }).selectOption("hardship");
+    await a.getByRole("textbox", { name: "Note (optional)" }).fill("e2e-fw refused");
+    await a.getByRole("combobox", { name: "Mode & account" }).selectOption("cash");
+    await a.getByRole("button", { name: "Add line" }).click();
+    await a.getByRole("button", { name: /^Collect · ₹900/ }).click();
+    // The server never sees the receipt → the grant is not written; the clerk is told.
+    await expect(a.getByText(/standing discount for receipt .* was NOT recorded yet/)).toBeVisible({ timeout: 90_000 });
+    await a.screenshot({ path: test.info().outputPath("grant-not-recorded.png") });
+    const stored = listOf(await mastersView(principal.request), "concessionGrants").filter((g) => g.studentId === child.id && g.status !== "rejected");
+    expect(stored, "no grant without its receipt").toEqual([]);
+    const kept = await a.evaluate(() => window.localStorage.getItem("bhb.counterGrantQueue.v1"));
+    expect(JSON.parse(kept ?? "[]").length, "kept for a retry").toBe(1);
+  } finally {
+    await a.unroute("**/api/school-data/fees-vouchers");
+    await setFeeGroup(principal.request, child.id, null);
+    await a.context().close();
+    await principal.context().close();
+  }
+});
 async function voidReceipt(page: Page, receiptNo: string): Promise<void> {
   // Same page (the counter's own copy holds the receipt it just made — its
   // push to the fee desk may still be on its way).
@@ -544,6 +659,39 @@ test("clone: one bad element in the batch and nothing is cloned; without it ever
     await a.context().close();
   }
   expect(errors, "no page errors").toEqual([]);
+});
+
+test("clone, stale second run: a tab loaded before another tab's clone is refused by the server — no duplicate set", async ({ browser }) => {
+  cleanup(); // the previous case's clone out again: the previous session has no groups
+  const p0 = await pageAs(browser, "principal");
+  // our seed comes back (cleanup took it out)
+  const reseed = await batch(p0.request, seedOps(await mastersView(p0.request)));
+  expect(reseed.status, `reseed: ${JSON.stringify(reseed.body).slice(0, 200)}`).toBe(200);
+  await p0.context().close();
+  const open = async () => {
+    const pg = await pageAs(browser, "principal");
+    await pg.goto("/fees");
+    await pg.locator("main").getByRole("button", { name: "Reports", exact: true }).first().click({ timeout: 30_000 });
+    await pg.getByRole("button", { name: /^More exports & setup/ }).click();
+    await expect(pg.getByRole("button", { name: "Prepare previous session" })).toBeVisible({ timeout: 30_000 });
+    return pg;
+  };
+  const a = await open();
+  const b = await open(); // loaded before A's clone: its copy has no 2025-26 groups
+  try {
+    await a.getByRole("button", { name: "Prepare previous session" }).click();
+    await expect(a.getByText(`Cloned fee setup into ${PREV_AY}`)).toBeVisible({ timeout: 30_000 });
+    const count = async () => listOf(await mastersView(a.request), "feeGroups").filter((g) => g.academicYearCode === PREV_AY).length;
+    const once = await count();
+    expect(once, "A cloned").toBeGreaterThan(0);
+    await b.getByRole("button", { name: "Prepare previous session" }).click();
+    await expect(b.getByText(/already has fee groups/)).toBeVisible({ timeout: 30_000 });
+    await b.screenshot({ path: test.info().outputPath("clone-stale-refused.png") });
+    expect(await count(), "no second set").toBe(once);
+  } finally {
+    await a.context().close();
+    await b.context().close();
+  }
 });
 
 // ── 6. The counter's receipt number comes from the records ─────────────────

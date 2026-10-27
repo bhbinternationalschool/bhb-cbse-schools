@@ -818,7 +818,8 @@ export async function preparePreviousSessionFeeSetup(
   const changes = diffMastersLists(m, next, ["installments", "feeGroups", "feeStructureLines"]);
   if (changes.length > 0) {
     const { writeMastersChanges } = await import("@/lib/data/client/mastersLibWrites");
-    const saved = await writeMastersChanges(changes);
+    // Only into a year with no fee groups as STORED (another tab may have cloned already).
+    const saved = await writeMastersChanges(changes, { guard: { noActiveFeeGroupsIn: fromAy } });
     if (!saved.ok) return { ok: false, error: `Nothing was cloned — ${saved.message}` };
   }
   return { ok: true, state: next, cloned: after > before, fromAy };

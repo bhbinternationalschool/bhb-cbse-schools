@@ -16,7 +16,7 @@ import { NextResponse } from "next/server";
 import { invalidateServerMastersCache } from "@/lib/api/v1/auth";
 import { requireStaffApi, requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { collectionDef, collectionKind } from "@/lib/data/registry";
-import { sliceElementCount, writeMastersBatch, type Row } from "@/lib/data/server/repo";
+import { readSliceList, sliceElementCount, writeMastersBatch, type Row } from "@/lib/data/server/repo";
 import { sliceFunctionGate } from "@/lib/data/server/sliceFunctionGate";
 import type { WriteOp } from "@/lib/data/types";
 import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
@@ -46,9 +46,9 @@ export const POST = withBuildCheck(async (req: Request, ctx: RouteCtx) => {
     mode = "function";
   }
 
-  let body: { ops?: unknown };
+  let body: { ops?: unknown; guard?: unknown };
   try {
-    body = (await req.json()) as { ops?: unknown };
+    body = (await req.json()) as { ops?: unknown; guard?: unknown };
   } catch {
     return fail(400, "invalid", "Invalid JSON");
   }
@@ -101,6 +101,25 @@ export const POST = withBuildCheck(async (req: Request, ctx: RouteCtx) => {
     }
     const gate = await sliceFunctionGate(req, def, ops, mode, auth.ctx);
     if (!gate.ok) return fail(gate.status, gate.kind, gate.message);
+  }
+
+  // A fee-setup clone into a year (data-layer 2.2e review): only into a year
+  // with NO active fee group as STORED — a second run from a stale tab would
+  // otherwise add a duplicate set (new ids each time). Checked here, on the
+  // stored groups, not on the sender's copy.
+  const guard = body.guard && typeof body.guard === "object" ? (body.guard as { noActiveFeeGroupsIn?: unknown }) : null;
+  const emptyYear = typeof guard?.noActiveFeeGroupsIn === "string" ? guard.noActiveFeeGroupsIn : "";
+  if (guard && !/^\d{4}-\d{2}$/.test(emptyYear)) return fail(400, "invalid", "guard.noActiveFeeGroupsIn must be a year like 2026-27");
+  if (emptyYear) {
+    let groups: Row[];
+    try {
+      groups = await readSliceList(collectionDef("masters.fee-groups")!.slice!);
+    } catch (e) {
+      return fail(503, "unavailable", `Could not read the fee groups to check this copy — nothing was saved (${e instanceof Error ? e.message : String(e)}).`);
+    }
+    if (groups.some((g) => g.academicYearCode === emptyYear && g.isActive !== false)) {
+      return fail(409, "conflict", `${emptyYear} already has fee groups — nothing was copied. Reload to see them.`);
+    }
   }
 
   const result = await writeMastersBatch(items);

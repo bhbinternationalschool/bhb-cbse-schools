@@ -52,14 +52,16 @@ export async function readStoredMastersLists(
   return { ok: true, lists };
 }
 
-async function postBatch(ops: readonly PlannedElementOp[]): Promise<MastersLibWriteOutcome> {
+export type BatchGuard = { noActiveFeeGroupsIn?: string };
+
+async function postBatch(ops: readonly PlannedElementOp[], guard?: BatchGuard): Promise<MastersLibWriteOutcome> {
   let res: Response;
   try {
     res = await fetch(`/api/data/${MASTERS_BATCH_PATH}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify({ ops: ops.map((o) => ({ collection: o.collection, ...o.op })) }),
+      body: JSON.stringify({ ops: ops.map((o) => ({ collection: o.collection, ...o.op })), ...(guard ? { guard } : {}) }),
     });
   } catch (e) {
     return { ok: false, kind: "network", message: e instanceof Error ? e.message : "Network request failed" };
@@ -69,14 +71,17 @@ async function postBatch(ops: readonly PlannedElementOp[]): Promise<MastersLibWr
   const kind = (body?.kind ??
     (res.status === 409 ? "conflict" : res.status === 403 ? "auth" : res.status === 400 ? "invalid" : "unavailable")) as Exclude<MastersLibWriteOutcome, { ok: true }>["kind"];
   const message =
-    kind === "conflict"
+    kind === "conflict" && !/already has fee groups/.test(body?.message ?? "")
       ? "Someone changed this on another device a moment ago — nothing was saved. Reload and try again."
       : body?.message ?? body?.error ?? `Request failed (${res.status})`;
   return { ok: false, kind, message };
 }
 
 /** Write one user action's Masters element changes, all or none. */
-export async function writeMastersChanges(changes: readonly MastersElementChange[]): Promise<MastersLibWriteOutcome> {
+export async function writeMastersChanges(
+  changes: readonly MastersElementChange[],
+  opts: { guard?: BatchGuard } = {},
+): Promise<MastersLibWriteOutcome> {
   if (typeof window === "undefined") {
     return { ok: false, kind: "invalid", message: "writeMastersChanges runs in the browser; the server writes through mastersLibWrites.server." };
   }
@@ -89,19 +94,9 @@ export async function writeMastersChanges(changes: readonly MastersElementChange
     return { ok: false, kind: plan.kind, message: plan.message };
   }
   if (plan.ops.length === 0) return { ok: true, written: 0 };
-  const out = await postBatch(plan.ops);
+  const out = await postBatch(plan.ops, opts.guard);
   await settle();
   return out;
-}
-
-/** Revoke the stored grants a voided receipt created (read fresh; one batch). */
-export async function revokeVoucherGrants(voucher: { id: string; receiptNo: string }): Promise<MastersLibWriteOutcome> {
-  if (typeof window === "undefined") return { ok: true, written: 0 };
-  const { revokeChangesForVoucher } = await import("../mastersElementChanges");
-  const read = await readStoredMastersLists(["concessionGrants"]);
-  if (!read.ok) return { ok: false, kind: "unavailable", message: read.message };
-  const changes = revokeChangesForVoucher(read.lists.get("concessionGrants")!.values(), voucher, new Date().toISOString().slice(0, 10));
-  return writeMastersChanges(changes);
 }
 
 /** The tab's masters copy and the masters view follow the server. */

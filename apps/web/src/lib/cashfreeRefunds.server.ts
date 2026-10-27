@@ -430,10 +430,13 @@ export async function applyRefundOutcome(event: CashfreeRefundEvent): Promise<Ap
   // The grants this receipt's counter discount created die with it — from
   // the database (data-layer 2.2e; before, the shared void "saved" the revoke
   // into this process's copy only). Only once the void itself reached the DB.
+  let revokeError = "";
   if (pushed) {
     const receiptNo = loadFees().vouchers.find((v) => v.id === voucherId)?.receiptNo ?? voucherId;
-    const { revokeVoucherGrantsServer } = await import("@/lib/data/server/mastersLibWrites.server");
-    await revokeVoucherGrantsServer({ id: voucherId, receiptNo });
+    const { revokeVoucherGrantsServer, GRANT_REVOKE_PENDING } = await import("@/lib/data/server/mastersLibWrites.server");
+    const revoked = await revokeVoucherGrantsServer({ id: voucherId, receiptNo });
+    // Recorded, retried on the next status check (pollRefund), shown with the refund.
+    if (!revoked.ok) revokeError = `${GRANT_REVOKE_PENDING} ${revoked.message}`;
   }
 
   await ctx.sb
@@ -441,7 +444,7 @@ export async function applyRefundOutcome(event: CashfreeRefundEvent): Promise<Ap
     .update({
       voucher_id: voucherId,
       applied_at: new Date().toISOString(),
-      last_error: pushed ? "" : "Receipt voided but the push to the database failed",
+      last_error: pushed ? revokeError : "Receipt voided but the push to the database failed",
       updated_at: new Date().toISOString(),
     })
     .eq("tenant_id", ctx.tenantId)
@@ -468,9 +471,11 @@ export async function applyRefundOutcome(event: CashfreeRefundEvent): Promise<Ap
  * without anybody opening the dashboard.
  */
 export async function pollRefund(refundId: string): Promise<{ ok: boolean; status: string }> {
-  if (!cashfreeKeysPresent()) return { ok: false, status: "" };
   const row = await getRefund(refundId);
   if (!row) return { ok: false, status: "" };
+  // A refund already applied whose discount end did not land: try it again.
+  if (row.appliedAt && row.voucherId) await retryRefundGrantRevoke(row.refundId, row.voucherId, row.lastError);
+  if (!cashfreeKeysPresent()) return { ok: false, status: "" };
   try {
     const res = await fetch(
       `${cashfreeBaseUrl()}/orders/${encodeURIComponent(row.orderId)}/refunds/${encodeURIComponent(refundId)}`,
@@ -484,4 +489,22 @@ export async function pollRefund(refundId: string): Promise<{ ok: boolean; statu
   } catch {
     return { ok: false, status: row.status };
   }
+}
+
+/**
+ * A refund whose receipt was voided but whose counter-discount grants were not
+ * ended (last_error starts GRANT_REVOKE_PENDING, data-layer 2.2e): end them
+ * now, and clear the note once done. Never throws.
+ */
+async function retryRefundGrantRevoke(refundId: string, voucherId: string, lastError: string): Promise<void> {
+  const { revokeVoucherGrantsServer, GRANT_REVOKE_PENDING } = await import("@/lib/data/server/mastersLibWrites.server");
+  if (!lastError.startsWith(GRANT_REVOKE_PENDING)) return;
+  const ctx = await getServerTenantContext();
+  if (!ctx) return;
+  const out = await revokeVoucherGrantsServer({ id: voucherId, receiptNo: voucherId });
+  await ctx.sb
+    .from("cashfree_refunds")
+    .update({ last_error: out.ok ? "" : `${GRANT_REVOKE_PENDING} ${out.message}`, updated_at: new Date().toISOString() })
+    .eq("tenant_id", ctx.tenantId)
+    .eq("refund_id", refundId);
 }

@@ -7,7 +7,6 @@ import { IndianRupee } from "lucide-react";
 import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
 import type { AccountsState } from "@/lib/accountsTypes";
 import {
-  canApproveConcession,
   canBackdateReceipt,
   canSeeModuleTab,
   hasPermission,
@@ -345,10 +344,7 @@ export function FeeTakeWorkspace() {
    * to future months" — the grant is simply recorded pending, and shows on
    * the parent's next bill only once it has been approved.
    */
-  const mayApproveConcession = useMemo(
-    () => (session ? canApproveConcession(session, masters) : false),
-    [session, masters],
-  );
+  // (Decided by the server since data-layer 2.2e — POST /api/fees/counter-grants.)
   /**
    * Same authority as approving a concession: owner, admin, principal. It
    * lets them date a receipt earlier than today even when the school has
@@ -1446,6 +1442,13 @@ export function FeeTakeWorkspace() {
   const refCheckBusy = useRef(false);
   const collectBusy = useRef(false);
 
+  // Counter discounts (or their end on a void) the server could not record
+  // yet are kept in this browser and tried again whenever Fee Take opens
+  // (data-layer 2.2e) — never dropped silently.
+  useEffect(() => {
+    void import("@/lib/data/client/counterGrantsClient").then(({ retryQueuedCounterGrants }) => retryQueuedCounterGrants());
+  }, []);
+
   /**
    * Look at the typed payment references before anything is saved: a date
    * or a phone number where a UTR belongs, or a reference already on another
@@ -1666,9 +1669,8 @@ export function FeeTakeWorkspace() {
         academicYearCode: ay,
         sourceVoucherId: voucher?.id,
         sourceReceiptNo: voucher?.receiptNo,
-        // Same rule as Masters: a clerk who cannot approve a grant there
-        // must not be able to approve one by ticking a box here.
-        canApprove: mayApproveConcession,
+        // Approval is the server's (from the session): a clerk who cannot
+        // approve a grant in Masters cannot approve one by ticking a box here.
       });
       if (!futureResult.ok) {
         futureConcessionMsg = ` · future grants failed: ${futureResult.error}`;

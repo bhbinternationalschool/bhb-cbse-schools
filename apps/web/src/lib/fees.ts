@@ -3955,26 +3955,21 @@ export function voidVoucher(voucherId: string): boolean {
  * Rejection, not deletion: the grant stays on file with the void note, so
  * Concessions shows why the discount stopped.
  *
- * Data-layer 2.2e: the grants are read FROM THE SERVER and only those are
- * patched (status + note), one all-or-none batch at each grant's `_rev` —
- * never the tab's whole book. A grant this tab never loaded is revoked too.
- * On the server this does nothing: the server routes that void a receipt
- * (refunds) revoke through lib/data/server/mastersLibWrites.server, because
- * a "save" here only ever changed that process's mirror copy.
+ * Data-layer 2.2e: done by the SERVER (POST /api/fees/counter-grants,
+ * action revoke) once the void itself is in the database, under the void's
+ * own authority (fees · edit — the clerk who voids need not hold Masters):
+ * exactly the stored grants carrying this receipt's marker, one batch. A
+ * revoke that cannot be done yet is kept and retried, and the clerk is told
+ * (lib/data/client/counterGrantsClient). On the server this does nothing:
+ * the server routes that void a receipt (refunds) revoke through
+ * lib/data/server/mastersLibWrites.server, because a "save" here only ever
+ * changed that process's mirror copy.
  */
 function revokeGrantsFromVoidedReceipt(voucher: CollectionVoucher): void {
   if (typeof window === "undefined") return;
   void trackServerWork(
-    import("@/lib/data/client/mastersLibWrites")
-      .then(({ revokeVoucherGrants }) => revokeVoucherGrants({ id: voucher.id, receiptNo: voucher.receiptNo }))
-      .then((out) => {
-        if (out.ok) return;
-        const message = `Receipt ${voucher.receiptNo} was voided, but the concession it granted was NOT revoked (${out.message}). Revoke it in Masters → Concessions.`;
-        console.warn(`[fees] ${message}`);
-        void import("@/components/shell/Toast")
-          .then(({ pushToast }) => pushToast({ kind: "error", message, durationMs: 0 }))
-          .catch(() => undefined);
-      })
+    import("@/lib/data/client/counterGrantsClient")
+      .then(({ revokeCounterGrants }) => revokeCounterGrants({ id: voucher.id, receiptNo: voucher.receiptNo }))
       .catch(() => undefined),
   );
 }

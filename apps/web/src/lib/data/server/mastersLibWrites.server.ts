@@ -22,6 +22,9 @@ import {
 } from "../mastersElementChanges";
 import { readSliceList, writeMastersBatch, type Row } from "./repo";
 
+/** last_error prefix on a refund row whose receipt's grants are still to be ended (retried by its next status check). */
+export const GRANT_REVOKE_PENDING = "GRANT_REVOKE_PENDING: the receipt is voided but its counter discount is still running —";
+
 export type ServerMastersWrite = { ok: true; written: number } | { ok: false; message: string };
 
 export async function writeMastersChangesServer(changes: readonly MastersElementChange[]): Promise<ServerMastersWrite> {

@@ -116,6 +116,8 @@ export type ElementRequest = {
   kind: "slice" | "object" | "batch";
   ops: WriteOp<Row>[];
   parts?: { sliceKey: FoundationKey; collection: string }[];
+  /** Batch only: a server-side precondition (the fee-setup clone: no active group in that year as stored). */
+  guard?: { noActiveFeeGroupsIn?: string };
 };
 
 /** What a panel may say about its commit. */
@@ -132,6 +134,11 @@ export type MastersCommitOpts = {
    * clears its form only then (2.2d follow-up: Staff setup's Add fields).
    */
   onDone?: (saved: boolean) => void;
+  /**
+   * The fee-setup clone (data-layer 2.2e review): write only if the server's
+   * STORED fee groups have no active group in this year — else nothing.
+   */
+  guardEmptyYear?: string;
 };
 
 export type StaffLinkChange = {
@@ -291,7 +298,13 @@ export function planMastersElementCommit(input: {
 
     const removed = [...before.keys()].filter((id) => !after.has(id) && onServer.has(id));
     if (onServer.size > 0 && removed.length >= onServer.size) {
-      return { ok: false, reason: `This would leave ${key} empty — nothing was saved. Remove items one at a time.` };
+      return {
+        ok: false,
+        reason:
+          key === "lateFeeRules"
+            ? "This is the school's only late-fee rule — it cannot be removed (nothing was saved). Switch it off instead: edit it and untick Active."
+            : `This would leave ${key} empty — nothing was saved. Remove items one at a time.`,
+      };
     }
     const ops: WriteOp<Row>[] = [];
     for (const [id, el] of after) {

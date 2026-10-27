@@ -190,3 +190,111 @@ ok(() => {
 });
 
 console.log(`mastersElementChanges.selftest: ok (${checks} checks)`);
+
+// ── 2.2e review fixes ──────────────────────────────────────────────────────
+import { counterGrantId, planCounterGrants } from "@/lib/counterConcession";
+import { recordCounterGrants, retryQueuedCounterGrants, revokeCounterGrants, COUNTER_GRANT_QUEUE_KEY, type Deps } from "./client/counterGrantsClient";
+import { emptyMastersShell, type MastersState } from "@/lib/masters";
+
+const reviewChecks: Promise<void>[] = [];
+
+// 6. the counter's grants planned on the STORED grants
+ok(() => {
+  const shell = emptyMastersShell() as MastersState;
+  const book: MastersState = {
+    ...shell,
+    feeHeads: [{ id: "h1", code: "TUI", nameEn: "Tuition", category: "academic", frequency: "monthly", isOptional: false, isRefundable: false, isActive: true, sortOrder: 1 } as MastersState["feeHeads"][number]],
+    concessions: [],
+    concessionGrants: [],
+  };
+  const req = {
+    items: [{ studentId: "s1", studentName: "A", feeHeadId: "h1", feeHeadName: "Tuition", discountPaise: 10_000, dueLabel: "Tuition · May", futureEffectiveFrom: "2026-06-10" }],
+    reason: "hardship",
+    academicYearCode: "2026-27",
+    ground: "hardship" as const,
+    sourceVoucherId: "rcv_1",
+    sourceReceiptNo: "RCV-00001",
+    canApprove: false,
+    by: "Clerk One",
+    nowIso: "2026-10-27T00:00:00Z",
+  };
+  const first = planCounterGrants(book, req);
+  assert.equal(first.newGrants.length, 1);
+  assert.equal(first.newGrants[0].id, "cg_ctr_s1_h1_1", "a fixed id: two counters at once write the same one");
+  assert.equal(first.newGrants[0].status, "pending", "a clerk without approval authority records it pending");
+  assert.match(first.newGrants[0].reason, /by Clerk One · receipt RCV-00001 \[v:rcv_1\]$/, "the giver and the receipt");
+  assert.equal(first.newRules.length, 1);
+  assert.equal(first.newRules[0].id, "cnc_ctr_h1_10000", "the counter rule's id is fixed per head and amount");
+  // the same again, on what is now stored: skipped (already on file), nothing new
+  const again = planCounterGrants(first.next, req);
+  assert.equal(again.newGrants.length, 0, "already on file → nothing written");
+  assert.equal(again.skipped, 1);
+  // another amount on the same head: blocked (one discount per head)
+  const other = planCounterGrants(first.next, { ...req, items: [{ ...req.items[0], discountPaise: 20_000 }], canApprove: true });
+  assert.equal(other.newGrants.length, 0, "a second discount on the head is refused");
+  assert.equal(other.blocked.length, 1);
+  assert.equal(counterGrantId("s1", "h1", first.next.concessionGrants), "cg_ctr_s1_h1_2", "the next one for that head is _2");
+});
+
+// 7. the client: waits for the receipt, keeps what it could not record, says so
+function fakeDeps(answers: { status: number; body: Record<string, unknown> }[]): Deps & { said: string[]; store: Map<string, string>; calls: string[] } {
+  const store = new Map<string, string>();
+  const said: string[] = [];
+  const calls: string[] = [];
+  let t = 0;
+  return {
+    said,
+    store,
+    calls,
+    fetch: (async (_u: unknown, init?: { body?: string }) => {
+      calls.push(String(init?.body ?? ""));
+      const a = answers.length > 1 ? answers.shift()! : answers[0];
+      return { status: a.status, json: async () => a.body } as unknown as Response;
+    }) as unknown as typeof fetch,
+    sleep: async (ms: number) => {
+      t += ms;
+    },
+    now: () => t,
+    say: (m: string) => void said.push(m),
+    storage: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) },
+  };
+}
+const grantBody = { items: [], reason: "", academicYearCode: "2026-27", sourceVoucherId: "rcv_9", sourceReceiptNo: "RCV-00009" };
+reviewChecks.push(
+  (async () => {
+    // receipt not in the database yet → asked again until it is
+    const d = fakeDeps([
+      { status: 409, body: { ok: false, kind: "receipt_pending" } },
+      { status: 409, body: { ok: false, kind: "receipt_pending" } },
+      { status: 200, body: { ok: true, granted: 1, skipped: 0, pending: 0, ruleLabels: [], blocked: [] } },
+    ]);
+    const r = await recordCounterGrants(grantBody, d);
+    assert.equal(r.ok, true);
+    assert.equal(d.calls.length, 3, "waited for the receipt");
+    assert.equal(d.store.get(COUNTER_GRANT_QUEUE_KEY) ?? "[]", "[]", "nothing kept");
+    // never in the database within the wait → kept, said, retried later
+    const d2 = fakeDeps([{ status: 409, body: { ok: false, kind: "receipt_pending", message: "not yet" } }]);
+    const r2 = await recordCounterGrants(grantBody, d2);
+    assert.equal(r2.ok, false);
+    assert.equal(JSON.parse(d2.store.get(COUNTER_GRANT_QUEUE_KEY)!).length, 1, "kept for a retry");
+    assert.ok(d2.said.some((m) => /NOT recorded yet/.test(m)), "the clerk is told");
+    const d3 = { ...d2, fetch: fakeDeps([{ status: 200, body: { ok: true } }]).fetch };
+    assert.equal(await retryQueuedCounterGrants(d3), 0, "the retry records it");
+    assert.equal(d2.store.get(COUNTER_GRANT_QUEUE_KEY), "[]");
+    // a refusal (403) is not kept, but said
+    const d4 = fakeDeps([{ status: 403, body: { ok: false, kind: "auth", message: "no" } }]);
+    const r4 = await revokeCounterGrants({ id: "rcv_9", receiptNo: "RCV-00009" }, d4);
+    assert.equal(r4.ok, false);
+    assert.equal(d4.store.get(COUNTER_GRANT_QUEUE_KEY), undefined, "not kept");
+    assert.ok(d4.said.some((m) => /NOT ended yet/.test(m)));
+    checks += 1;
+  })(),
+);
+
+void Promise.all(reviewChecks).then(
+  () => console.log(`mastersElementChanges.selftest (review): ok (${checks} checks)`),
+  (e: unknown) => {
+    console.error(e);
+    process.exit(1);
+  },
+);

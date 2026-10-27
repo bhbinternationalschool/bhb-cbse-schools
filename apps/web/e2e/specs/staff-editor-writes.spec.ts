@@ -204,7 +204,8 @@ test.describe.serial("the staff editor writes rows (data-layer 2.2d)", () => {
       const feeHeadForm = page.locator("form").filter({ has: page.locator("input[placeholder='SPORTS']") });
       await feeHeadForm.locator("label", { hasText: "Code" }).locator("input").first().fill(code, { timeout: 30_000 });
       await feeHeadForm.locator("label", { hasText: "Name" }).locator("input").first().fill(`E2E staff-zero ${code}`);
-      const saved = page.waitForResponse((r) => /\/api\/school-data\/masters-desk$/.test(r.url()) && r.request().method() === "POST", { timeout: 20_000 });
+      // Since data-layer 2.2e a fee head is an element write (POST /api/data/masters.fee-heads), never the book.
+      const saved = page.waitForResponse((r) => /\/api\/data\/masters(\.fee-heads|\/batch)$/.test(r.url()) && r.request().method() === "POST", { timeout: 20_000 });
       await feeHeadForm.locator("button[type=submit]").first().click();
       expect((await saved).status(), "the fee head saved").toBe(200);
       await page.waitForTimeout(3_000);
@@ -215,12 +216,19 @@ test.describe.serial("the staff editor writes rows (data-layer 2.2d)", () => {
       expect(rev(after), "every staff revision unchanged").toEqual(rev(before));
     } finally {
       await page.unroute("**/api/school-data/staff-roster");
-      // Put back: drop the fee head.
-      const d = (await (await page.request.get("/api/school-data/masters-desk")).json()) as { feeHeads: { code: string }[]; sliceStamps?: Record<string, string> };
-      if (d.feeHeads.some((f) => f.code === code)) {
-        await page.request.post("/api/school-data/masters-desk", {
-          data: { version: 2, feeHeads: d.feeHeads.filter((f) => f.code !== code), sliceBases: { feeHeads: d.sliceStamps?.feeHeads ?? "" } },
+      // Put back: drop the fee head (an element delete; the kernel never
+      // empties a list, so when it is the only stored head it is switched off).
+      const list = (await (await page.request.get("/api/data/masters.fee-heads?limit=1000")).json()) as { rows?: Record<string, unknown>[] };
+      const head = (list.rows ?? []).find((f) => f.code === code);
+      if (head) {
+        const del = await page.request.post("/api/data/masters.fee-heads", {
+          data: { ops: [{ op: "delete", id: String(head.id), base: String(head._rev ?? 0) }] },
         });
+        if (del.status() !== 200) {
+          await page.request.post("/api/data/masters.fee-heads", {
+            data: { ops: [{ op: "upsert", id: String(head.id), base: String(head._rev ?? 0), row: { isActive: false } }] },
+          });
+        }
       }
       await context.close();
     }
