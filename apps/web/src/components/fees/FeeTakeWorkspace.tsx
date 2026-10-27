@@ -1564,11 +1564,23 @@ export function FeeTakeWorkspace() {
     void executeCollect(futureConcessionPrompt?.selected ?? new Set());
   }
 
+  /**
+   * One collection at a time (data-layer 2.2e): the receipt number is asked
+   * of the server first and the grants are written after the receipt — a
+   * second click meanwhile must not start another collection.
+   */
   async function executeCollect(applyFutureKeys: Set<string>) {
-    if (!selectedStudent || !sis) return;
-    // One collection at a time: the receipt number is asked of the server
-    // first, and a second click meanwhile must not start another.
     if (collectBusy.current) return;
+    collectBusy.current = true;
+    try {
+      await executeCollectOnce(applyFutureKeys);
+    } finally {
+      collectBusy.current = false;
+    }
+  }
+
+  async function executeCollectOnce(applyFutureKeys: Set<string>) {
+    if (!selectedStudent || !sis) return;
     setFutureConcessionPrompt(null);
 
     let futureConcessionMsg = "";
@@ -1598,13 +1610,7 @@ export function FeeTakeWorkspace() {
     // is saved, so an unanswered request leaves nothing half done.
     let issuedReceiptNo: string | undefined;
     if (collectTarget > 0) {
-      collectBusy.current = true;
-      let issued: Awaited<ReturnType<typeof issueSeriesNumber>>;
-      try {
-        issued = await issueSeriesNumber("RECEIPT", ay);
-      } finally {
-        collectBusy.current = false;
-      }
+      const issued = await issueSeriesNumber("RECEIPT", ay);
       if (!issued.ok && issued.kind === "failed") {
         failCollect(`Not saved — the server did not give the next receipt number (${issued.message}). Try again.`);
         return;
