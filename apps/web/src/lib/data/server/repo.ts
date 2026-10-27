@@ -610,6 +610,51 @@ export async function bumpNumberSeries(
   };
 }
 
+/**
+ * masters_series_claim (migration 20261027090000): RESERVE the next number of
+ * a series kept on record (RECEIPT, SRN) in one transaction under the series
+ * lock — max(stored counter, highest on record + 1), and the counter moved
+ * past it. Two callers at the same instant get two numbers. A claimed number
+ * is gone even if the caller then fails to save (a gap, never a repeat).
+ */
+export async function claimNumberSeries(
+  series: string,
+  ay: string | null,
+): Promise<
+  | { ok: true; code: string; number: number; formatted: string; lifted: boolean }
+  | { ok: false; status: 400 | 404 | 503; kind: "invalid" | "not_found" | "unavailable" | "auth"; message: string }
+> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, status: 503, kind: "unavailable", message: "Supabase tenant not configured" };
+  const { data, error } = await ctx.sb.rpc("masters_series_claim", { p_tenant: ctx.tenantId, p_series: series, p_ay: ay });
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") {
+      return {
+        ok: false,
+        status: 503,
+        kind: "unavailable",
+        message: "Not issued — the number claim is not installed on the server yet (migration 20261027090000). Nothing was saved.",
+      };
+    }
+    if (error.code === "55P03") {
+      return { ok: false, status: 503, kind: "unavailable", message: "The number series is busy — try again in a moment." };
+    }
+    const f = rpcFailure(error);
+    return { ok: false, status: f.kind === "invalid" ? 400 : 503, kind: f.kind, message: f.message };
+  }
+  const res = (data ?? {}) as { ok?: boolean; status?: string; code?: string; number?: number; formatted?: string; lifted?: boolean };
+  if (res.ok !== true) {
+    return res.status === "not_found"
+      ? { ok: false, status: 404, kind: "not_found", message: `No number series ${series} in Masters.` }
+      : { ok: false, status: 503, kind: "unavailable", message: `The number claim returned no number (${res.status ?? "no outcome"})` };
+  }
+  const n = Number(res.number);
+  if (!Number.isSafeInteger(n) || n < 1 || typeof res.formatted !== "string") {
+    return { ok: false, status: 503, kind: "unavailable", message: "The number claim returned no number" };
+  }
+  return { ok: true, code: String(res.code ?? series), number: n, formatted: res.formatted, lifted: res.lifted === true };
+}
+
 function asReason(v: unknown): ConflictReason | undefined {
   return v === "stale" || v === "unversioned" || v === "deleted" ? v : undefined;
 }

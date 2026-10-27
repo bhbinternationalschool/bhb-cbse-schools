@@ -8,6 +8,9 @@
  * lib/data/server/numberSeriesIssued). A counter found behind its records is
  * LIFTED to that (masters_series_bump, monotone) and the lift is logged, so
  * every screen offers the right number from the next masters answer.
+ * RECEIPT and SRN are RESERVED (masters_series_claim, migration
+ * 20261027090000): each answer is a number nobody else is handed, and the
+ * counter is already past it — callers ask only when they are about to save.
  * Answer: { ok, series, next, formatted, lifted }. Same issuers as /bump.
  * Any other collection here is a 404.
  */
