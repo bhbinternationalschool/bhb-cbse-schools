@@ -1748,7 +1748,7 @@ approve, `me/docs`, or a holder's save needing both writes. The import's **"Clea
 was removed on purpose**: as row writes it would soft-remove every member not in the file — whole-roster wipes are what
 this rebuild removes (it never removed anyone on the server before either: the old save wrote only the rows it named).
 
-*(2.2d follow-ups built 27 Oct 2026, PR #FOLLOWUP_PR — fix/data-layer-2.2d-followups; no migration.)*
+*(2.2d follow-ups built 27 Oct 2026, PR #714 — fix/data-layer-2.2d-followups; no migration.)*
 - **`me/docs` takes only the school's own upload path** (`lib/staffOwnDocUrl.ts`): `/api/documents/staff/<own id>/<this
   docKey>` (what `/api/documents/upload` returns) or `/api/file/staff/<own folder>/<file>` (the private-media path the
   staff app's photo / signature routes build with `privateMediaUrl`). Anything else — another host or scheme, `//`, a
