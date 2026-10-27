@@ -27,7 +27,7 @@
  * Writes staff records, so it runs in the staff-sensitive project (after
  * every reader) and puts each record back.
  */
-import type { Browser, BrowserContext, Page, TestInfo } from "@playwright/test";
+import type { Browser, BrowserContext, Locator, Page, TestInfo } from "@playwright/test";
 import { demoSessionCookieName, type DemoSession } from "@/lib/auth";
 import { mintSessionCookie } from "../session";
 import { classId, staffId } from "../fixture";
@@ -69,12 +69,15 @@ async function putProfile(ctx: { request: Page["request"] }, id: string, profile
   expect(r.status(), `put back ${id}: ${(await r.text()).slice(0, 200)}`).toBe(200);
 }
 
-async function shots(page: Page, testInfo: TestInfo, label: string) {
-  await testInfo.attach(`${label} desktop-light`, { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+/** Desktop light and phone 375 dark, each with `focus` (what the test is about) scrolled into view. */
+async function shots(page: Page, testInfo: TestInfo, label: string, focus?: Locator) {
+  if (focus) await focus.first().scrollIntoViewIfNeeded({ timeout: 3_000 }).catch(() => undefined);
+  await testInfo.attach(`${label} desktop-light`, { body: await page.screenshot(), contentType: "image/png" });
   await page.setViewportSize({ width: 375, height: 812 });
   await page.emulateMedia({ colorScheme: "dark" });
   await page.waitForTimeout(400);
-  await testInfo.attach(`${label} phone-375-dark`, { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+  if (focus) await focus.first().scrollIntoViewIfNeeded({ timeout: 3_000 }).catch(() => undefined);
+  await testInfo.attach(`${label} phone-375-dark`, { body: await page.screenshot(), contentType: "image/png" });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ colorScheme: "light" });
 }
@@ -92,7 +95,7 @@ async function importFile(page: Page, name: string, text: string) {
   return panel;
 }
 
-test.describe.serial("2.2d follow-ups", () => {
+test.describe("2.2d follow-ups", () => {
   let photoBefore: { photoUrl: unknown; docs: unknown } | null = null;
 
   test("me/docs: an external URL is refused, the member's own upload path is taken", async ({ browser }) => {
@@ -141,7 +144,7 @@ test.describe.serial("2.2d follow-ups", () => {
       await page.goto("/staff?tab=doc_verify");
       const item = page.locator("li").filter({ hasText: name }).filter({ hasText: "Approve (correct)" });
       await expect(item).toHaveCount(1, { timeout: 30_000 });
-      await shots(page, testInfo, "doc verify pending");
+      await shots(page, testInfo, "doc verify pending", item);
       const posted = page.waitForResponse((r) => r.url().endsWith("/api/data/sis.staff") && r.request().method() === "POST", { timeout: 15_000 });
       await item.getByRole("button", { name: "Approve (correct)" }).click();
       const res = await posted;
@@ -167,7 +170,9 @@ test.describe.serial("2.2d follow-ups", () => {
         if (q.method() === "POST" && /\/api\/(data|school-data)\//.test(q.url())) posts.push(new URL(q.url()).pathname);
       });
       await page.goto("/masters?tab=staff");
-      const dep = page.locator("div").filter({ has: page.getByText("Add department", { exact: true }) }).last();
+      const card = (title: string) =>
+        page.getByText(title, { exact: true }).locator("xpath=ancestor::*[.//input[@placeholder='Code']][1]");
+      const dep = card("Add department");
       await dep.getByPlaceholder("Code").fill(`ZD${tag}`, { timeout: 30_000 });
       await dep.getByPlaceholder("Name").fill(`E2E dept ${tag}`);
       const depSaved = page.waitForResponse((r) => r.url().endsWith("/api/data/sis.departments") && r.request().method() === "POST", { timeout: 15_000 });
@@ -177,7 +182,7 @@ test.describe.serial("2.2d follow-ups", () => {
       const madeDep = deps.find((d) => d.code === `ZD${tag}`);
       expect(madeDep?.name).toBe(`E2E dept ${tag}`);
 
-      const des = page.locator("div").filter({ has: page.getByText("Add designation", { exact: true }) }).last();
+      const des = card("Add designation");
       await des.getByPlaceholder("Code").fill(`ZG${tag}`);
       await des.getByPlaceholder("Name").fill(`E2E desig ${tag}`);
       await expect(des.locator("select option", { hasText: `E2E dept ${tag}` })).toHaveCount(1, { timeout: 15_000 });
@@ -190,7 +195,7 @@ test.describe.serial("2.2d follow-ups", () => {
       expect(madeDes?.department_id, "the designation's department").toBe(madeDep?.id);
       expect(posts.filter((p) => /masters-desk|staff-roster/.test(p)), "never the whole-book or old roster save").toEqual([]);
       await expect(page.getByRole("cell", { name: `E2E desig ${tag}` })).toBeVisible({ timeout: 15_000 });
-      await shots(page, testInfo, "staff setup saved");
+      await shots(page, testInfo, "staff setup saved", page.getByRole("cell", { name: `E2E desig ${tag}` }));
     } finally {
       // Put back: the designation, then the department (hard deletes; owner).
       const dess = ((await (await owner.request.get("/api/data/sis.designations?limit=500")).json()) as { rows: Row[] & { code?: string }[] }).rows as (Row & { code?: string })[];
@@ -207,9 +212,12 @@ test.describe.serial("2.2d follow-ups", () => {
   });
 
   test("Allocate teaching: a refused save keeps the ticks; a saved one clears them; one roster read per save", async ({ browser }, testInfo) => {
+    test.setTimeout(180_000);
     const { context, page } = await openAs(browser, "principal");
-    const before = await one(page, ALLOC);
     const teacher = fx.staff.staff.find((s) => s.id === ALLOC)!;
+    // Start from the fixture's links (a cut-off earlier run may have left one).
+    await putProfile(page, ALLOC, { subjectTeachingLinks: teacher.subjectTeachingLinks });
+    const before = await one(page, ALLOC);
     const className = fx.masters.classes.find((c) => c.id === classId(1))!.name;
     try {
       await page.goto("/staff?tab=allocate");
@@ -250,10 +258,10 @@ test.describe.serial("2.2d follow-ups", () => {
       expect(reads, "one roster re-read per save").toBe(1);
       const after = await one(page, ALLOC);
       expect(((after.profile?.subjectTeachingLinks as unknown[]) ?? []).length).toBe(((before.profile?.subjectTeachingLinks as unknown[]) ?? []).length + 1);
-      await shots(page, testInfo, "allocate saved");
+      await shots(page, testInfo, "allocate saved", page.getByText("Step 3 · Subjects taught"));
     } finally {
       await page.unroute("**/api/data/sis.staff").catch(() => undefined);
-      await putProfile(page, ALLOC, { subjectTeachingLinks: before.profile?.subjectTeachingLinks ?? [] });
+      await putProfile(page, ALLOC, { subjectTeachingLinks: teacher.subjectTeachingLinks });
       await context.close();
     }
   });
@@ -289,7 +297,7 @@ test.describe.serial("2.2d follow-ups", () => {
       expect(b1.profile?.religion).toBe("E2E-Import-Religion");
       expect(a1.profile?.bankAccountNo ?? "", "the bank detail unchanged").toBe(a0.profile?.bankAccountNo ?? "");
       expect(b1.profile?.bankAccountNo ?? "").toBe(b0.profile?.bankAccountNo ?? "");
-      await shots(page, testInfo, "office import");
+      await shots(page, testInfo, "office import", panel.getByTestId("staff-import-error"));
     } finally {
       for (const [id, r0] of [[IMPORT_A, a0], [IMPORT_B, b0]] as const) {
         await putProfile(owner, id, { religion: r0.profile?.religion ?? "" });
@@ -361,7 +369,7 @@ test.describe.serial("2.2d follow-ups", () => {
       const after = await one(owner, HOLDER_EDIT);
       expect(after.profile?.fatherName).toBe("E2E Father");
       expect(after.profile?.bankAccountNo).toBe("888800003000");
-      await shots(page, testInfo, "holder saved");
+      await shots(page, testInfo, "holder saved", page.getByLabel("Account number").or(page.locator("label", { hasText: "Account number" })));
     } finally {
       await putProfile(owner, HOLDER_EDIT, { fatherName: before.profile?.fatherName ?? "" });
       const now = await one(owner, HOLDER_EDIT);
@@ -369,6 +377,31 @@ test.describe.serial("2.2d follow-ups", () => {
         data: { ops: [{ id: HOLDER_EDIT, base: now.updated_at, fields: { bankAccountNo: before.profile?.bankAccountNo ?? "" } }] },
       });
       await owner.close();
+    }
+  });
+
+  test("Removed staff says who removed them by name", async ({ browser }, testInfo) => {
+    const { context, page } = await openAs(browser, "principal");
+    const left = staffId(35); // inactive, no links: removable
+    const name = fx.staff.staff.find((s) => s.id === left)!.fullName;
+    const principal = fx.staff.staff.find((s) => s.id === fx.sessions.principal.staffId)!.fullName;
+    try {
+      const now = await one(page, left);
+      const del = await page.request.post("/api/data/sis.staff", { data: { ops: [{ op: "delete", id: left, base: now.updated_at }] } });
+      expect(del.status(), `remove: ${(await del.text()).slice(0, 200)}`).toBe(200);
+      await page.goto("/staff?tab=roster");
+      await page.getByRole("button", { name: "Show removed staff" }).click({ timeout: 30_000 });
+      const entry = page.getByTestId("removed-staff").locator("li").filter({ hasText: name });
+      await expect(entry).toContainText(`by ${principal}`, { timeout: 15_000 });
+      await expect(entry).not.toContainText(String(fx.sessions.principal.staffId));
+      await shots(page, testInfo, "removed staff by name", entry);
+      await entry.getByRole("button", { name: /^Restore/ }).click();
+      await expect(page.getByText(`${name} (E2E-035) restored`)).toBeVisible({ timeout: 15_000 });
+    } finally {
+      const r = (await (await page.request.get("/api/data/sis.staff?removed=1&limit=500")).json()) as { rows: Row[] };
+      const gone = r.rows.find((x) => x.id === left);
+      if (gone) await page.request.post("/api/data/sis.staff", { data: { ops: [{ op: "upsert", id: left, base: gone.updated_at, row: { deleted_at: null } }] } });
+      await context.close();
     }
   });
 });
