@@ -1897,7 +1897,7 @@ masters-element-writes + masters-overlay 15/15. Self-test +2 (planner on stored 
 **Not done.** Two counters issuing the same RECEIPT number at the same instant (`/next` does not reserve) still needs an
 atomic claim — a separate "[MIGRATION — director applies]" proposal, not built here.
 
-*(2.2f PR B built 28 Oct 2026, PR #PRB — server Masters writers on the batch kernel; no migration.)*
+*(2.2f PR B built 28 Oct 2026, PR #720 — server Masters writers on the batch kernel; no migration.)*
 - **Subject-request approval** (Masters → Subjects → Requests, `POST /api/masters/subject-requests`): the subjects and
   class links the approval adds / changes / removes are planned on the elements as stored now and written as ONE
   all-or-none batch (`diffMastersLists` → `writeMastersChangesServer` → `repo.writeMastersBatch`); before, the whole
