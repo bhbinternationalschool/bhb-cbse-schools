@@ -131,15 +131,18 @@ export function useErpQuery<T>(
   const parse = opts.parse;
   return useQuery<Raw<T>, Error, T>({
     queryKey: [...(typeof key === "string" ? [key] : key), path],
-    queryFn: async ({ signal }) => {
-      const r = await readView<unknown>(path, { signal });
-      if (!r.ok) throw new ErpQueryError(r.status, r.error);
-      return { data: parse ? parse(r.data) : (r.data as T), builtFrom: r.builtFrom };
-    },
+    queryFn: ({ signal }) => readRaw<T>(path, parse, signal),
     select: selectData,
     meta: { desks } satisfies DeskMeta,
     enabled: opts.enabled,
   });
+}
+
+/** One read of `path`, checked by `parse`; a failure throws (the query's `error`). */
+async function readRaw<T>(path: string, parse: ((data: unknown) => T) | undefined, signal?: AbortSignal): Promise<Raw<T>> {
+  const r = await readView<unknown>(path, { signal });
+  if (!r.ok) throw new ErpQueryError(r.status, r.error);
+  return { data: parse ? parse(r.data) : (r.data as T), builtFrom: r.builtFrom };
 }
 
 function deskQueries(client: QueryClient): QueryDeskInfo[] {
@@ -396,6 +399,31 @@ export function useMastersBuiltFrom(dataUpdatedAt: number): Versions | null {
     const raw = client.getQueryData<Raw<MastersView>>(["masters", MASTERS_VIEW_PATH]);
     return raw?.builtFrom ?? null;
   }, [client, dataUpdatedAt]);
+}
+
+/**
+ * Ask the masters view again NOW and resolve once it has answered (never
+ * throws; false = no tab client, or the read failed) — whether or not a
+ * mounted screen is showing it. Shares an in-flight read. The answer goes
+ * through acceptMastersAnswer like every other, so it replaces this tab's
+ * page copy (the 2.1 bridge) and the lib/ readers that still call
+ * loadMasters see the write this tab just made. Since data-layer 2.2f this
+ * replaces the masters-desk re-read (mastersDeskBridge, ~235 KB) that went
+ * with the old whole-book save.
+ */
+export async function refetchMastersAnswer(client: QueryClient | null = tabQueryClient): Promise<boolean> {
+  if (!client) return false;
+  try {
+    await client.fetchQuery<Raw<MastersView>>({
+      queryKey: ["masters", MASTERS_VIEW_PATH],
+      queryFn: ({ signal }) => readRaw<MastersView>(MASTERS_VIEW_PATH, (d) => acceptMastersAnswer(d), signal),
+      meta: { desks: ["masters"] } satisfies DeskMeta,
+      staleTime: 0,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function useMasters(opts: { enabled?: boolean } = {}): UseQueryResult<MastersView, Error> {

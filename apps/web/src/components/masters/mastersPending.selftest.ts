@@ -10,10 +10,9 @@
  *     (revision R1); the next answer of the masters view is the book from
  *     BEFORE the save (built from R0 — another instance's cache). It must not
  *     replace the overlay; commit B (school profile, another panel) is built
- *     from what the screen shows, and the section save it makes
- *     (mastersSectionSave, the real one, against the stamps A's push left)
- *     must not send A's section back with the old value. An answer built
- *     from R1 then replaces the overlay.
+ *     from what the screen shows. An answer built from R1 then replaces the
+ *     overlay. (The section save B once made through the old whole-book
+ *     path — mastersSectionSave — is gone since data-layer 2.2f.)
  *  2. A failed save drops the overlay once nothing else is saving (the tab
  *     takes the server's answer again); with a later commit still in flight
  *     that commit's answer decides.
@@ -30,8 +29,6 @@
 import assert from "node:assert/strict";
 import { buildFixture } from "../../../e2e/fixture";
 import { normalizeMastersRead, type MastersState } from "@/lib/masters";
-import { mastersSectionSave } from "@/lib/mastersNormalizedClient";
-import { rowFingerprint } from "@/lib/sliceRevClient";
 import {
   answerHoldsOverlay,
   changedMastersKeys,
@@ -61,12 +58,6 @@ function setSchoolPhone(s: MastersState, phone: string): MastersState {
   return { ...s, schoolProfile: { ...prof, phone } } as unknown as MastersState;
 }
 
-/** What mastersNormalizedClient's sliceBase holds after a push of `pushed`: each section's stamp + hash. */
-function sliceBaseAfter(pushed: MastersState, stamp: string): Map<string, { stamp: string; hash: number }> {
-  const rec = pushed as unknown as Record<string, unknown>;
-  return new Map(Object.keys(rec).map((k) => [k, { stamp, hash: rowFingerprint(rec[k] ?? null) }]));
-}
-
 let checks = 0;
 function check(name: string, fn: () => void) {
   fn();
@@ -75,7 +66,7 @@ function check(name: string, fn: () => void) {
 }
 
 // ── 1. Edit A survives a stale answer.
-check("a stale answer after a save does not replace the overlay; commit B does not resend A's section", () => {
+check("a stale answer after a save does not replace the overlay", () => {
   const before = book();
   const shown0 = before;
   assert.ok(shown0.campuses.length > 0, "fixture has a campus");
@@ -84,8 +75,6 @@ check("a stale answer after a save does not replace the overlay; commit B does n
   assert.deepEqual(overlay.keys, ["campuses"]);
   overlay = overlayOnSaved(overlay, { ok: true, revision: R1 });
   assert.ok(overlay, "a saved commit keeps the overlay until an answer holds it");
-  // A's push left every section at R1, campuses with A's content.
-  const sliceBase = sliceBaseAfter(a, R1);
 
   // The refetch lands on an instance whose cache still holds the book from R0.
   const stale = before;
@@ -96,9 +85,6 @@ check("a stale answer after a save does not replace the overlay; commit B does n
 
   // Commit B in another panel, from what the screen shows.
   const b = setSchoolPhone(shown1, "05412-000000");
-  const sent = mastersSectionSave(b as unknown as Record<string, unknown>, sliceBase);
-  assert.ok("schoolProfile" in sent.sections, "B's section is sent");
-  assert.ok(!("campuses" in sent.sections), "A's section is not sent again (it would carry the old name)");
   overlay = overlayOnCommit(overlay, shown1, b);
   assert.deepEqual(overlay.keys, ["campuses", "schoolProfile"]);
   overlay = overlayOnSaved(overlay, { ok: true, revision: R2 });

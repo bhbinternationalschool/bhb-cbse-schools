@@ -548,7 +548,6 @@ export function FeeTakeWorkspace() {
       scheduleClientSchoolMirrorSync({
         sis: s,
         fees: f,
-        masters: m,
         payments: loadPayments(),
       });
     });
@@ -576,14 +575,6 @@ export function FeeTakeWorkspace() {
       if (wipe.wiped) {
         flash(
           `Cleared ${wipe.removedVouchers} local receipt(s) — ready for re-import`,
-        );
-      }
-      const { applyFeeDiscountSeedNow } =
-        await import("@/lib/feeDiscountImportHydrate");
-      const discount = applyFeeDiscountSeedNow();
-      if (discount.applied > 0) {
-        flash(
-          `Applied ${discount.applied} student discount grant${discount.applied === 1 ? "" : "s"}`,
         );
       }
       refresh();

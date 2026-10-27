@@ -118,10 +118,9 @@ export async function prepareWorkspaceAfterLogin(): Promise<void> {
  * localStorage wipe then removed it for good.
  */
 export async function flushAllDeskSyncPending(): Promise<void> {
+  // (Masters has no pending push since data-layer 2.2f: its edits are
+  // element writes, each awaited by the screen that made it.)
   await Promise.allSettled([
-    import("@/lib/mastersNormalizedClient").then((m) =>
-      m.flushMastersDeskSyncPending(),
-    ),
     import("@/lib/sisNormalizedClient").then((m) => m.flushSisDeskSync()),
   ]);
 }

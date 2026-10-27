@@ -1,32 +1,15 @@
 import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
-import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
-import { invalidateServerMastersCache } from "@/lib/api/v1/auth";
-import { type MastersState } from "@/lib/masters";
+import { requireStaffApi } from "@/lib/apiRouteAuth.server";
 import { teachingMastersSubset } from "@/lib/mastersTeachingSubset";
 import { resolveMastersReadScope } from "@/lib/mastersReadScope.server";
-import { mastersDualWriteDbEnabled } from "@/lib/mastersDbConfig";
 import {
   fetchMastersDeskFromDb,
   fetchMastersSliceStamps,
   fetchMastersSyncMeta,
-  MASTERS_SLICE_KEYS,
-  pushMastersDeskToDb,
-  pushMastersSlicesToDb,
-  type MastersSliceKey,
 } from "@/lib/mastersNormalized.server";
-import { STAFF_OWNED_MASTERS_SLICES } from "@/lib/staffDbConfig";
-import { rowFingerprint } from "@/lib/sliceRevClient";
-import { FEE_LIST_KEYS, FEE_OBJECT_KEYS } from "@/lib/data/client/mastersElementPlan";
 import { fetchMastersFromRowTables } from "@/lib/mastersRowTables.server";
-import { guardFoundationListsOverwrite, guardMastersOverwrite, guardSubjectsOverwrite } from "@/lib/mastersWriteGuard";
-import { guardMastersRevision } from "@/lib/mastersRevisionGuard";
-import {
-  deskWriteGate,
-  deniedSliceGuard,
-  featurePushOutcome,
-  featureSavedResponse,
-} from "@/lib/deskFeatureGate.server";
+import { BUILD_HEADER, STALE_HEADER } from "@/lib/staleBuild.server";
 
 export const runtime = "nodejs";
 
@@ -53,7 +36,7 @@ function readFromRowTables(): boolean {
  * browser learns the school's classes. Every teacher who signed in on
  * 2026-09-29 saw "Select class…" with nothing under it. They now get the
  * teaching subset, marked `teachingOnly` so nothing mistakes it for the
- * whole desk (and a push of it is refused anyway: POST needs masters.edit).
+ * whole desk (and the POST is gone since data-layer 2.2f).
  */
 async function teachingMastersResponse() {
   const { bundle, meta, readFailed } = await fetchMastersDeskFromDb();
@@ -171,324 +154,37 @@ export async function GET(req: Request) {
   });
 }
 
+/**
+ * POST — gone (data-layer 2.2f). Masters is written one element at a time
+ * through the kernel: POST /api/data/masters.<list> (one element at its
+ * `_rev`), POST /api/data/masters/batch (one all-or-none batch across lists),
+ * and the number-series / counter-grant routes. The whole-book save, the
+ * section save (`sliceBases`) and the function-only teacher save that used to
+ * land here are refused for EVERY body — nothing is read, nothing written —
+ * and an old tab that still sends one is told to reload (the 1.2 stub:
+ * 410 `{ok:false, reason:"build_stale", reload:true}` + `X-Bhb-Build-Stale: 1`,
+ * one log line). Kept for one release, then deleted with the route's GET
+ * (2.3b).
+ */
 export async function POST(req: Request) {
-  // The whole of Masters, or some of its functions (a teacher's Class
-  // subjects) — lib/deskFeatureGate.server.ts.
-  const gate = await deskWriteGate(req, SCHOOL_DATA_DESK_RBAC["masters-desk"]);
-  if (gate.mode === "deny") return gate.response;
-  const featureGate = gate.mode === "feature" ? gate : null;
-  if (!mastersDualWriteDbEnabled()) {
-    return NextResponse.json({
-      ok: true,
-      skipped: true,
-      reason: "MASTERS_DUAL_WRITE_DB disabled",
-    });
-  }
-
-  let body: MastersState & { baseUpdatedAt?: string | null; sliceBases?: unknown };
-  try {
-    body = (await req.json()) as MastersState & { baseUpdatedAt?: string | null; sliceBases?: unknown };
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-
-  const { version: _v, baseUpdatedAt, sliceBases: rawBases, ...rest } = body;
-  let state = { version: 2 as const, ...rest } as MastersState;
-
-  const { bundle: stored, meta, readFailed, sliceStamps: storedStamps } = await fetchMastersDeskFromDb();
-
-  // Section saves (10 Oct 2026): the browser sends only the sections it
-  // changed, each with the stamp it loaded it at. Anything else in Masters is
-  // taken from what is stored, so the guards below still see the whole book.
-  const sliceBases =
-    rawBases && typeof rawBases === "object" && !Array.isArray(rawBases)
-      ? Object.fromEntries(
-          Object.entries(rawBases as Record<string, unknown>).filter(
-            ([k, v]) => typeof v === "string" && MASTERS_SLICE_KEYS.includes(k as MastersSliceKey),
-          ),
-        ) as Record<string, string>
-      : null;
-  const staffOwned = new Set<string>(STAFF_OWNED_MASTERS_SLICES as readonly string[]);
-  let sliceKeys: MastersSliceKey[] = sliceBases
-    ? (Object.keys(sliceBases) as MastersSliceKey[]).filter((k) => !staffOwned.has(k) && k in rest)
-    : [];
-
-  // No stored state, no guard. guardMastersOverwrite reads zero stored classes
-  // as `bootstrap` and allows the write — correct for a genuinely new tenant,
-  // catastrophic when the read merely failed. On 2026-08-10 a read timed out
-  // under load, the guard saw an empty bundle, and a wholesale id replacement
-  // was accepted: all 15 class ids rewritten, 711 students orphaned on class
-  // and section in one request, 268 fee lines with them.
-  //
-  // Refusing costs a retry. Guarding against data we never read costs the
-  // school its id generation, and the repair took a hand-built remap.
-  if (readFailed) {
-    console.error("[masters-desk] refusing push: stored state unreadable");
-    return NextResponse.json(
-      {
-        error:
-          "Could not read the saved masters to check this change against. " +
-          "Nothing was written — please try again.",
-        reason: "stored_unreadable",
-      },
-      { status: 503 },
-    );
-  }
-
-  // Optimistic locking: the push must carry the desk revision the client
-  // hydrated at. A mismatch means another device saved after this one
-  // loaded — refuse instead of last-write-wins, and let the client
-  // rehydrate. Missing base = legacy client, allowed but logged so we can
-  // see when they drain and tighten enforcement.
-  // Compare against meta.updatedAt first: it is the field GET serves as
-  // `updatedAt`, which is what the client stored as its base. (Push writes
-  // both columns from the same instant, so they normally agree.)
-  if (sliceBases && !featureGate) {
-    const sent = rest as unknown as Record<string, unknown>;
-    state = {
-      ...(stored as unknown as MastersState),
-      ...Object.fromEntries(sliceKeys.map((k) => [k, sent[k]])),
-      version: 2,
-    } as MastersState;
-  }
-
-  const revision = guardMastersRevision(
-    baseUpdatedAt ?? null,
-    meta?.updatedAt ?? meta?.lastUpdatedAt ?? null,
+  const auth = await requireStaffApi(req);
+  if (!auth.ok) return auth.response;
+  const who = auth.viaMirrorSecret ? "mirror" : auth.ctx.session.staffId || auth.ctx.session.email || "?";
+  console.warn(
+    JSON.stringify({
+      event: "masters-desk-post-gone",
+      who,
+      clientBuild: (req.headers.get(BUILD_HEADER) || "").trim().slice(0, 80) || null,
+    }),
   );
-  // Function-only writers are exempt: their browser is served the teaching
-  // subset with no revision, and their push is merged row by row onto the
-  // stored desk below — nothing of theirs can overwrite a newer save
-  // outside their own classes.
-  if (!revision.allow && !featureGate && !sliceBases) {
-    console.warn(
-      `[masters-desk] rejected stale push`,
-      `base=${baseUpdatedAt} stored=${revision.storedUpdatedAt}`,
-    );
-    return NextResponse.json(
-      {
-        error: revision.message,
-        reason: revision.reason,
-        storedUpdatedAt: revision.storedUpdatedAt,
-      },
-      { status: 409 },
-    );
-  }
-  // No revision at all, against a desk that has one, is a browser that never
-  // loaded masters — "legacy client" was the label, but it is precisely the
-  // empty, un-pulled copy every guard here exists to stop. Refused; the
-  // client rehydrates.
-  if (revision.reason === "unversioned" && meta && !featureGate && !sliceBases) {
-    console.warn("[masters-desk] rejected unversioned push");
-    return NextResponse.json(
-      {
-        error:
-          "This copy of masters was never loaded from the server, so it cannot be saved over it. " +
-          "The screen will refresh with the current data; re-apply your change.",
-        reason: "unversioned",
-      },
-      { status: 409 },
-    );
-  }
-
-  // Whole-module holder: refused only where the office has turned one of
-  // the Masters functions off for them (Masters → Roles → Assign to user).
-  if (!featureGate) {
-    const refused = await deniedSliceGuard(
-      req,
-      "masters",
-      async () => stored as unknown as Record<string, unknown>,
-      state,
-    );
-    if (refused) return refused;
-  }
-
-  // Function-only writers: the stored desk is the base, and only the slices
-  // their functions own are lifted in — row by row, inside their classes.
-  // Their browser holds the teaching subset only, so anything else in the
-  // push is not theirs to save and is ignored, never written.
-  if (featureGate) {
-    const className = new Map((stored.classes ?? []).map((c) => [c.id, c.name]));
-    // The school's subject list is never taken from a phone's reduced copy
-    // (10 Oct 2026: two such saves replaced it with a made-up list). A
-    // function holder may change their own classes' links; the list itself
-    // changes only on the full Masters screen, under the revision lock.
-    const pushed = {
-      ...state,
-      subjects: stored.subjects ?? [],
-      seniorStreams: stored.seniorStreams ?? [],
-    } as MastersState;
-    const merged = featurePushOutcome(
-      featureGate,
-      "masters",
-      stored,
-      pushed,
-      (id) => className.get(id) || "That class",
-    );
-    if (!merged.ok) return merged.response;
-    // A link to a subject the school does not have is a made-up copy, not
-    // an edit — refuse it rather than store a dangling link.
-    const knownSubjects = new Set((stored.subjects ?? []).map((x) => x.id));
-    const dangling = ((merged.state as unknown as MastersState).classSubjects ?? []).filter(
-      (l) => !knownSubjects.has(l.subjectId),
-    );
-    if (dangling.length > 0) {
-      console.warn(`[masters-desk] refused function-only push: ${dangling.length} link(s) to unknown subjects`);
-      return NextResponse.json(
-        {
-          error: "This copy links classes to subjects the school does not have. Nothing was saved; the screen will refresh.",
-          reason: "unknown_subject",
-        },
-        { status: 409 },
-      );
-    }
-    if (!merged.changed) return featureSavedResponse(false);
-    state = { ...(merged.state as unknown as MastersState), version: 2 };
-    // Only the sections the merge changed, at the stamps the read returned.
-    const before = stored as unknown as Record<string, unknown>;
-    const after = state as unknown as Record<string, unknown>;
-    sliceKeys = MASTERS_SLICE_KEYS.filter(
-      (k) => !staffOwned.has(k) && rowFingerprint(before[k] ?? null) !== rowFingerprint(after[k] ?? null),
-    );
-  }
-
-  // A client must not be able to replace the class-id generation wholesale.
-  // This is checked before the write, not after, because pushMastersDeskToDb
-  // upserts every slice in one go — by the time it returns, every student,
-  // lead and RTE seat referencing a class is already orphaned.
-  const verdict = guardMastersOverwrite(
-    (stored.classes ?? []).map((c) => c.id),
-    (state.classes ?? []).map((c) => c.id),
+  return NextResponse.json(
+    {
+      ok: false,
+      reason: "build_stale",
+      reload: true,
+      error:
+        "This page is out of date: Masters is now saved one item at a time. Reload the page and make the change again — nothing was saved.",
+    },
+    { status: 410, headers: { [STALE_HEADER]: "1" } },
   );
-  if (!verdict.allow) {
-    console.warn(
-      `[masters-desk] rejected ${verdict.reason} push`,
-      `stored=${verdict.storedCount} incoming=${verdict.incomingCount}`,
-    );
-    return NextResponse.json(
-      {
-        error: verdict.message,
-        reason: verdict.reason,
-        storedClassCount: verdict.storedCount,
-        incomingClassCount: verdict.incomingCount,
-      },
-      { status: 409 },
-    );
-  }
-
-  // Subjects and their class links, the same way (10 Oct 2026: a teacher's
-  // phone replaced the subject list and cut every teacher's assignments).
-  const subjectVerdict = guardSubjectsOverwrite(stored, state);
-  if (!subjectVerdict.allow) {
-    console.warn(
-      `[masters-desk] rejected subject wipe push`,
-      `removed=${subjectVerdict.removed} stored=${subjectVerdict.stored}`,
-    );
-    return NextResponse.json(
-      { error: subjectVerdict.message, reason: "subject_wipe" },
-      { status: 409 },
-    );
-  }
-
-  // The Foundation lists are element writes since data-layer 2.2c: through
-  // this old path a body may not remove more than one element of any of
-  // them (nor empty one) — the shape of every whole-list wipe.
-  const foundationVerdict = guardFoundationListsOverwrite(
-    stored as unknown as Record<string, unknown>,
-    state as unknown as Record<string, unknown>,
-  );
-  if (!foundationVerdict.allow) {
-    console.warn(
-      `[masters-desk] rejected foundation list shrink`,
-      `list=${foundationVerdict.list} removed=${foundationVerdict.removed} stored=${foundationVerdict.stored}`,
-    );
-    return NextResponse.json(
-      { error: foundationVerdict.message, reason: "foundation_shrink", list: foundationVerdict.list },
-      { status: 409 },
-    );
-  }
-
-  // The fee setup is element writes since data-layer 2.2e (fee heads, groups,
-  // structure lines, instalments, late fee, special fees, concession rules
-  // and grants, the mid-year policy — POST /api/data/masters.* and the batch
-  // route, one element at its `_rev`). Nothing current sends it here; a body
-  // that would CHANGE any of it is an old or stale copy — refused whole,
-  // nothing written (the fee line wipes of 1 and 6 Sep were whole-list
-  // writes from a copy).
-  {
-    const before = stored as unknown as Record<string, unknown>;
-    const after = state as unknown as Record<string, unknown>;
-    const feeChanged = [...FEE_LIST_KEYS, ...FEE_OBJECT_KEYS].filter(
-      (k) => rowFingerprint(before[k] ?? null) !== rowFingerprint(after[k] ?? null),
-    );
-    if (feeChanged.length) {
-      console.warn(`[masters-desk] rejected fee setup through the old path`, `lists=${feeChanged.join(",")}`);
-      return NextResponse.json(
-        {
-          error:
-            `This save would change ${feeChanged.join(", ")} through the old whole-book path. The fee setup is saved one ` +
-            `item at a time since 27 Oct 2026 — this is an old or stale copy. Nothing was saved; reload the page and make the change again.`,
-          reason: "fee_setup_elements",
-          list: feeChanged[0],
-        },
-        { status: 409 },
-      );
-    }
-  }
-
-  // Awaited: the previous fire-and-forget meant a failed write still returned
-  // ok:true, so a client could believe its masters were saved when they were
-  // not.
-  // The writer re-checks the revision and claims the next one atomically. A
-  // function holder's push was merged onto the desk read above, so that read
-  // is its base.
-  // Section saves (and function holders' merges) write only the sections
-  // named, all or none, each at its stamp. A browser from an older build
-  // still saves the whole book against the desk revision.
-  const pushed =
-    sliceBases || featureGate
-      ? await pushMastersSlicesToDb(
-          state,
-          sliceKeys,
-          featureGate
-            ? Object.fromEntries(sliceKeys.map((k) => [k, storedStamps?.[k] ?? ""]))
-            : (sliceBases as Record<string, string>),
-        )
-      : await pushMastersDeskToDb(state, { baseUpdatedAt: baseUpdatedAt ?? null });
-  // This process's masters reference cache (GET /api/data/views/masters, the
-  // v1 API's masters) holds the book from before this write: drop it, so the
-  // saving browser's refetch — which usually lands on this instance — is
-  // built after the write. (Other instances see the moved erp_versions
-  // within their 2 s window; the editor keeps its own copy until an answer
-  // built from this revision arrives.)
-  // A refused write (conflict) wrote nothing; any other outcome may have
-  // written the slices (a failed row-table sync comes after them).
-  if (pushed.ok || !pushed.conflict) invalidateServerMastersCache();
-  if (!pushed.ok) {
-    if (pushed.conflict) {
-      return NextResponse.json(
-        { error: pushed.error, reason: pushed.conflict, conflicts: pushed.conflicts },
-        { status: 409 },
-      );
-    }
-    return NextResponse.json(
-      { error: pushed.error || "Masters push failed" },
-      { status: 500 },
-    );
-  }
-  if (featureGate) {
-    // No revision back: this browser holds the teaching subset and must
-    // never take it as a base for a whole-desk push.
-    return featureSavedResponse(true);
-  }
-  return NextResponse.json({
-    ok: true,
-    classCount: body.classes?.length ?? 0,
-    feeHeadCount: body.feeHeads?.length ?? 0,
-    // The exact revision written to sync meta, not a fresh timestamp: the
-    // client stores this as the base for its next push, and it must equal
-    // what the revision guard will read back.
-    updatedAt: pushed.updatedAt || meta?.updatedAt || new Date().toISOString(),
-    sliceStamps: pushed.sliceStamps,
-  });
 }
