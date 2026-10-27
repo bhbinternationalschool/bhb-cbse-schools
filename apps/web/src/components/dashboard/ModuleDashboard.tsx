@@ -313,7 +313,7 @@ function ChartHoverTooltip({
   const modes = point.modeBreakup?.filter((m) => m.value > 0) ?? [];
   return (
     <div className="pointer-events-none absolute left-1/2 top-2 z-10 w-max max-w-[min(18rem,90vw)] -translate-x-1/2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-left shadow-lg">
-      <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
+      <p className="text-xs font-semibold text-[var(--muted)]">
         {point.date
           ? new Date(`${point.date}T12:00:00`).toLocaleDateString("en-IN", {
               weekday: "short",
@@ -513,7 +513,7 @@ function DonutChartSvg({
       <div className="relative mx-auto shrink-0" style={{ width: 240, height: 220 }}>
         {hoveredPoint ? (
           <div className="pointer-events-none absolute left-1/2 top-0 z-10 w-max max-w-[min(16rem,90vw)] -translate-x-1/2 -translate-y-1 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-center shadow-lg">
-            <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
+            <p className="text-xs font-semibold text-[var(--muted)]">
               {coloredRings[hover!.ring]?.label || hoveredPoint.label}
             </p>
             <p className="font-display text-base font-bold text-[var(--brand-deep)]">
@@ -583,7 +583,7 @@ function DonutChartSvg({
           return (
             <div key={ring.id}>
               {ring.label ? (
-                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
+                <p className="mb-2 text-xs font-semibold text-[var(--muted)]">
                   {ring.label}
                 </p>
               ) : null}
@@ -811,8 +811,8 @@ function DashboardTable({
   return (
     <section className="module-dash-panel overflow-hidden">
       <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 sm:px-5">
-        <Table2 className="h-5 w-5 text-[#2563eb]" aria-hidden />
-        <h3 className="text-base font-semibold text-[#2563eb]">
+        <Table2 className="h-5 w-5 text-[var(--chart-1)]" aria-hidden />
+        <h3 className="text-base font-semibold text-[var(--chart-1)]">
           {title}
         </h3>
         <span className="ml-auto rounded-full bg-[var(--card)]/80 px-3 py-1 text-sm font-bold tabular-nums text-[var(--brand-deep)]">
@@ -821,7 +821,7 @@ function DashboardTable({
       </div>
       <div className="max-h-[28rem] overflow-auto">
         <ErpTable minWidth="min-w-[28rem]" className="border-collapse">
-          <thead className="sticky top-0 z-[1] bg-[#f0efe6]">
+          <thead className="sticky top-0 z-[1] bg-[var(--surface-sunken)]">
             <tr>
               {columns.map((c) => {
                 const active = sortKey === c.key;
@@ -970,7 +970,7 @@ function KpiDetailDrawer({
       <DialogPopup aria-labelledby={titleId} className="module-dash-drawer max-h-[88vh] w-full max-w-2xl overflow-auto rounded-2xl bg-[var(--brand-cream)] shadow-2xl">
         <div className="sticky top-0 flex items-start gap-3 border-b border-[var(--border)] bg-[var(--brand-cream)] px-5 py-4">
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
+            <p className="text-sm font-semibold text-[var(--muted)]">
               KPI detail
             </p>
             <h2
@@ -1102,7 +1102,7 @@ function ChartPanel({
   return (
     <section className="module-dash-panel p-4 sm:p-5">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h3 className="text-base font-semibold text-[#2563eb] sm:text-base">
+        <h3 className="text-base font-semibold text-[var(--chart-1)] sm:text-base">
           {panelTitle}
         </h3>
         <div className="flex flex-wrap items-center gap-2">
@@ -1218,16 +1218,18 @@ export function ModuleDashboardView({
 
   return (
     <div className="module-dash mt-4 space-y-5 sm:space-y-6">
-      <header className="module-dash-hero rounded-2xl px-5 py-6 sm:px-7 sm:py-8">
-        <p className="text-sm font-bold uppercase tracking-[0.14em] text-[var(--brand-gold)]">
+      <header className="module-dash-hero flex flex-col gap-2 rounded-2xl px-5 py-5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-6 sm:px-7 sm:py-6">
+        <div className="min-w-0">
+          <h2 className="font-display text-2xl font-bold tracking-tight text-white sm:text-3xl">
+            {model.title}
+          </h2>
+          <p className="mt-1.5 max-w-3xl text-sm text-white/80 sm:text-base">
+            {model.subtitle}
+          </p>
+        </div>
+        <span className="shrink-0 text-sm font-medium text-[var(--brand-gold)] sm:text-right">
           {heroEyebrow}
-        </p>
-        <h2 className="mt-1 font-display text-3xl font-bold tracking-tight text-white sm:text-4xl md:text-5xl">
-          {model.title}
-        </h2>
-        <p className="mt-2 max-w-3xl text-base text-white/85 sm:text-lg">
-          {model.subtitle}
-        </p>
+        </span>
       </header>
 
       <section aria-label="Key performance indicators" className="space-y-5">
@@ -1360,7 +1362,7 @@ export function ModuleDashboardView({
 
       {model.quickLinks && model.quickLinks.length > 0 ? (
         <section className="module-dash-panel p-4 sm:p-5">
-          <h3 className="text-base font-semibold text-[#2563eb]">Jump in</h3>
+          <h3 className="text-base font-semibold text-[var(--chart-1)]">Jump in</h3>
           <ErpToolbar className="mt-3 justify-start">
             {model.quickLinks.map((link) =>
               link.href ? (
