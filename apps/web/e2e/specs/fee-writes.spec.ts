@@ -485,3 +485,61 @@ test("RTE waiver: unticking a head writes the waiver rule + grant in one batch; 
   }
   expect(errors, "no page errors").toEqual([]);
 });
+
+// ── 5. The fee-setup clone: all or nothing ─────────────────────────────────
+const PREV_AY = "2025-26";
+
+test("clone: one bad element in the batch and nothing is cloned; without it everything is, in one request", async ({ browser }) => {
+  const a = await pageAs(browser, "principal");
+  const errors = collectPageErrors(a);
+  const writes = recordWrites(a);
+  const prevGroups = async () => listOf(await mastersView(a.request), "feeGroups").filter((g) => g.academicYearCode === PREV_AY);
+  try {
+    expect(await prevGroups(), "no fee setup in the previous session yet").toEqual([]);
+    await a.goto("/fees");
+    await a.locator("main").getByRole("button", { name: "Reports", exact: true }).first().click({ timeout: 30_000 });
+    await a.getByRole("button", { name: /^More exports & setup/ }).click({ timeout: 30_000 });
+    const prepare = a.getByRole("button", { name: "Prepare previous session" });
+    await expect(prepare).toBeVisible({ timeout: 30_000 });
+
+    // (a) one element of the batch is bad (a base for an element that does not exist)
+    let spoiled = false;
+    await a.route("**/api/data/masters/batch", async (route) => {
+      const body = route.request().postDataJSON() as { ops: BatchOp[] };
+      const i = body.ops.findIndex((o) => o.collection === "masters.fee-structure-lines");
+      if (i >= 0) {
+        body.ops[i] = { ...body.ops[i], base: "7" };
+        spoiled = true;
+      }
+      await route.continue({ postData: JSON.stringify(body) });
+    });
+    await prepare.click();
+    await expect(a.getByText(/Nothing was cloned/)).toBeVisible({ timeout: 30_000 });
+    expect(spoiled, "the clone went through the batch route").toBe(true);
+    await a.screenshot({ path: test.info().outputPath("clone-refused.png") });
+    expect(await prevGroups(), "nothing cloned").toEqual([]);
+    expect(listOf(await mastersView(a.request), "installments").filter((i) => i.academicYearCode === PREV_AY), "no instalment either").toEqual([]);
+
+    // (b) the same action, untouched: everything, in ONE request
+    await a.unroute("**/api/data/masters/batch");
+    writes.length = 0;
+    await prepare.click();
+    await expect(a.getByText(`Cloned fee setup into ${PREV_AY}`)).toBeVisible({ timeout: 30_000 });
+    const book = await mastersView(a.request);
+    const cloned = listOf(book, "feeGroups").filter((g) => g.academicYearCode === PREV_AY);
+    const mine = cloned.find((g) => g.code === "E2E-FW");
+    expect(mine, "our group cloned").toBeTruthy();
+    expect(listOf(book, "feeStructureLines").filter((l) => l.feeGroupId === mine!.id).length, "with all twelve lines").toBe(12);
+    expect(listOf(book, "installments").filter((i) => i.academicYearCode === PREV_AY).length, "and the year's instalments").toBeGreaterThanOrEqual(12);
+    const sent = writes.filter((w) => w.url.startsWith("data/masters") && !w.url.includes("number-series"));
+    expect(writes.filter((w) => w.url.includes("masters-desk")), "never the whole book").toEqual([]);
+    expect(sent.length, "one request").toBe(1);
+    expect(sent[0].url).toBe("data/masters/batch");
+    const ops = (sent[0].body as { ops: BatchOp[] }).ops;
+    expect(ops.filter((o) => o.collection === "masters.fee-groups").length, "every cloned group in it").toBe(cloned.length);
+    await a.screenshot({ path: test.info().outputPath("clone-done.png") });
+  } finally {
+    await a.context().close();
+  }
+  expect(errors, "no page errors").toEqual([]);
+});

@@ -27,7 +27,9 @@ async function restore(): Promise<void> {
   type R = Record<string, unknown>;
   const ourGroups = new Set(
     (b.feeGroups ?? [])
-      .filter((g) => g.id.startsWith("e2e_fw_") || String(g.code ?? "").startsWith("E2E-FW"))
+      // ours, and every 2025-26 group: the fixture has none, so they are the
+      // fee-setup clone's copies (fee-writes case 5)
+      .filter((g) => g.id.startsWith("e2e_fw_") || String(g.code ?? "").startsWith("E2E-FW") || g.academicYearCode === "2025-26")
       .map((g) => g.id),
   );
   const ours: Record<(typeof KEYS)[number], (e: R) => boolean> = {
@@ -35,7 +37,7 @@ async function restore(): Promise<void> {
     concessions: (e) => String(e.id).startsWith("e2e_fw_") || String(e.notes ?? "").includes("e2e-fw") || String(e.id).startsWith("cnc_rtew_e2e_fw_"),
     feeStructureLines: (e) => String(e.id).startsWith("e2e_fw_") || ourGroups.has(String(e.feeGroupId)),
     feeGroups: (e) => ourGroups.has(String(e.id)),
-    installments: (e) => String(e.id).startsWith("e2e_fw_"),
+    installments: (e) => String(e.id).startsWith("e2e_fw_") || e.academicYearCode === "2025-26",
     feeHeads: (e) => String(e.id).startsWith("e2e_fw_"),
   };
   const next: R = { ...b };
