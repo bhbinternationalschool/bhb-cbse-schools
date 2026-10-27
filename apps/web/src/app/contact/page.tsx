@@ -17,6 +17,10 @@ export const metadata: Metadata = {
 
 const MAILTO = `mailto:${CONTACT.email}`;
 const TEL = CONTACT.phone ? `tel:${CONTACT.phone.replace(/\s/g, "")}` : null;
+// personal-whatsapp-allow: CONTACT.phone is the school's OWN WhatsApp Business
+// number (publicOrgProfile), so this public link lets a visitor start a chat TO
+// the office — an inbound contact link, not a staff member messaging a family
+// from a personal number, which is what this ratchet guards against.
 const WHATSAPP = CONTACT.phone
   ? `https://wa.me/${CONTACT.phone.replace(/[^0-9]/g, "")}`
   : null;
