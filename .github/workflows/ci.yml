@@ -738,6 +738,7 @@ jobs:
           npm run test:masters-writes
           npm run test:masters-element-commit
           npm run test:staff-book-commit
+          npm run test:staff-own-doc-url
           npm run test:desk-feature-rev
           npm run test:staff-requests
           npm run test:notify

@@ -197,7 +197,8 @@ export function decideStudentDocVerification(input: {
 export async function submitStaffDocForVerification(input: {
   staffId: string;
   docKey: StaffDocKey;
-  file: StaffDocFile;
+  /** driveReceipt: the upload route's proof that driveFileId is this upload's (never stored). */
+  file: StaffDocFile & { driveReceipt?: string };
   submittedBy: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!input.file.fileUrl) {
