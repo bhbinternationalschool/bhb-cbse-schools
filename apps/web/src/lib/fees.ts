@@ -3968,7 +3968,7 @@ export function voidVoucher(voucherId: string): boolean {
 function revokeGrantsFromVoidedReceipt(voucher: CollectionVoucher): void {
   if (typeof window === "undefined") return;
   void trackServerWork(
-    import("@/lib/data/client/counterGrantsClient")
+    import("@/lib/counterGrantsClient")
       .then(({ revokeCounterGrants }) => revokeCounterGrants({ id: voucher.id, receiptNo: voucher.receiptNo }))
       .catch(() => undefined),
   );

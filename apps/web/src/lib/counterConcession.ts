@@ -584,7 +584,7 @@ export async function applyFutureConcessionsFromCounter(input: {
   if (items.length === 0) {
     return { ok: true, granted: 0, skipped: 0, pending: 0, ruleLabels: [], blocked: [] };
   }
-  const { recordCounterGrants } = await import("@/lib/data/client/counterGrantsClient");
+  const { recordCounterGrants } = await import("@/lib/counterGrantsClient");
   return recordCounterGrants({
     items,
     reason: input.reason,

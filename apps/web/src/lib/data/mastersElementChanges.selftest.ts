@@ -193,7 +193,7 @@ console.log(`mastersElementChanges.selftest: ok (${checks} checks)`);
 
 // ── 2.2e review fixes ──────────────────────────────────────────────────────
 import { counterGrantId, planCounterGrants } from "@/lib/counterConcession";
-import { recordCounterGrants, retryQueuedCounterGrants, revokeCounterGrants, COUNTER_GRANT_QUEUE_KEY, type Deps } from "./client/counterGrantsClient";
+import { recordCounterGrants, retryQueuedCounterGrants, revokeCounterGrants, COUNTER_GRANT_QUEUE_KEY, type Deps } from "@/lib/counterGrantsClient";
 import { emptyMastersShell, type MastersState } from "@/lib/masters";
 
 const reviewChecks: Promise<void>[] = [];

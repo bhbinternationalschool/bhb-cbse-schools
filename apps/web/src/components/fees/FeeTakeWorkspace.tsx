@@ -1446,7 +1446,7 @@ export function FeeTakeWorkspace() {
   // yet are kept in this browser and tried again whenever Fee Take opens
   // (data-layer 2.2e) — never dropped silently.
   useEffect(() => {
-    void import("@/lib/data/client/counterGrantsClient").then(({ retryQueuedCounterGrants }) => retryQueuedCounterGrants());
+    void import("@/lib/counterGrantsClient").then(({ retryQueuedCounterGrants }) => retryQueuedCounterGrants());
   }, []);
 
   /**

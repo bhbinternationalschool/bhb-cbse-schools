@@ -664,6 +664,13 @@ test("clone: one bad element in the batch and nothing is cloned; without it ever
 test("clone, stale second run: a tab loaded before another tab's clone is refused by the server — no duplicate set", async ({ browser }) => {
   cleanup(); // the previous case's clone out again: the previous session has no groups
   const p0 = await pageAs(browser, "principal");
+  // the server's masters answer follows the restore (its cache moves with erp_versions)
+  await expect
+    .poll(async () => {
+      const v = await mastersView(p0.request);
+      return listOf(v, "feeGroups").filter((g) => g.academicYearCode === PREV_AY || g.id === GROUP).length;
+    }, { timeout: 30_000 })
+    .toBe(0);
   // our seed comes back (cleanup took it out)
   const reseed = await batch(p0.request, seedOps(await mastersView(p0.request)));
   expect(reseed.status, `reseed: ${JSON.stringify(reseed.body).slice(0, 200)}`).toBe(200);
