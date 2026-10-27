@@ -11,7 +11,7 @@
  * other one ("fee-writes", playwright.config.ts).
  *
  *  1. Fee-line wipe: an old whole-book body for the fee lists is refused by
- *     masters-desk (409 fee_setup_elements) — dropping two lines, or changing
+ *     masters-desk (410 build_stale since 2.2f) — dropping two lines, or changing
  *     one — and nothing changes; the kernel takes one removal per request.
  *  2. Overlap: two principals edit DIFFERENT fee lines from screens loaded
  *     together — both land, no "Not saved", B's request is B's line alone.
@@ -187,8 +187,8 @@ test("fee-line wipe: an old whole-book body for the fee lists is refused; the ke
       },
     });
     const dropBody = (await drop.json().catch(() => ({}))) as { reason?: string };
-    expect(drop.status(), `old body (drop two): ${JSON.stringify(dropBody).slice(0, 200)}`).toBe(409);
-    expect(dropBody.reason).toBe("fee_setup_elements");
+    expect(drop.status(), `old body (drop two): ${JSON.stringify(dropBody).slice(0, 200)}`).toBe(410);
+    expect(dropBody.reason).toBe("build_stale");
     // (b) the whole list with one amount changed — still the old path: refused
     const edit = await a.request.post("/api/school-data/masters-desk", {
       data: {
@@ -197,7 +197,7 @@ test("fee-line wipe: an old whole-book body for the fee lists is refused; the ke
         sliceBases: { feeStructureLines: desk.sliceStamps?.feeStructureLines ?? "" },
       },
     });
-    expect(edit.status(), "old body (edit one)").toBe(409);
+    expect(edit.status(), "old body (edit one)").toBe(410);
     // (c) two removals in one kernel request
     const book = await mastersView(a.request);
     const two = await writeElements(a.request, "masters.fee-structure-lines", [

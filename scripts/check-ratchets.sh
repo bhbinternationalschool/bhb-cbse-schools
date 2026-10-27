@@ -290,6 +290,15 @@ count_metric() {
         | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//|#)' \
         | grep -vE 'selftest|\.test\.|export (async )?function saveMasters' \
         | wc -l ;;
+    masters_desk_post)
+      # Data-layer 2.2f. Browser code that POSTs to the old masters-desk
+      # route (/api/school-data/masters-desk answers 410 for every body since
+      # 2.2f): a code line naming the route with method POST within the next
+      # six lines. The GET hydrate (method: "GET") is not counted. Target 0.
+      grep -rnE -A6 'api/school-data/masters-desk' "$SRC" --include='*.ts' --include='*.tsx' 2>/dev/null \
+        | grep -vE 'selftest|/app/api/school-data/masters-desk/' \
+        | grep -vE '^[^:-]+[:-][0-9]+[:-][[:space:]]*(\*|//|#)' \
+        | grep -cE 'method:[[:space:]]*["'"'"']POST' ;;
     *)
       echo "-1" ;;
   esac
