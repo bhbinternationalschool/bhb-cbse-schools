@@ -45,8 +45,10 @@ const read = (f: string) => readFileSync(join(__dirname, f), "utf8");
 
 // ── Every other writer passes a revision; the server copies can only bootstrap
 {
-  assert.ok(/pushMastersDeskToDb\(state, \{ baseUpdatedAt \}\)/.test(read("deskOpsLoad.server.ts")));
-  assert.ok(/pushMastersDeskToDb\(emptyMastersShell\(\), \{[\s\S]*?baseUpdatedAt: null/.test(read("ensureDeskCutover.server.ts")));
+  // (deskOpsLoad.saveOpsMasters, used only by a script, is deleted — data-layer 2.2f.)
+  assert.equal(/pushMastersDeskToDb/.test(read("deskOpsLoad.server.ts")), false);
+  // (ensureDeskCutover no longer writes Masters at all — data-layer 2.2f.)
+  assert.equal(/pushMastersDeskToDb/.test(read("ensureDeskCutover.server.ts")), false);
   assert.ok(/pushMastersDeskToDb\(state, \{ baseUpdatedAt: null \}\)/.test(read("mastersPersistence.ts")));
 }
 
