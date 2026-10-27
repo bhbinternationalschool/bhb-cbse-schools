@@ -1913,7 +1913,7 @@ atomic claim — a separate "[MIGRATION — director applies]" proposal, not bui
   read shared), which the 2.1 bridge lays on the page copy; the Masters editor's writes just invalidate the view. No more
   ~235 KB masters-desk re-read after every element write.
 - **`POST /api/school-data/masters-desk` answers 410** `{ok:false, reason:"build_stale", reload:true}` +
-  `X-Bhb-Build-Stale: 1` for every body (staff session required; one log line `event: masters-desk-post-gone` with who and
+  `X-Bhb-Build-Stale: 1` for every body (for anyone holding Masters or one of its functions — others get the 403 they always got; one log line `event: masters-desk-post-gone` with who and
   the client build). Nothing is read or written. The function-only branch, `sliceBases`, the revision lock and every
   guard call went with it; `mastersRevisionGuard.ts` (whole file) and `guardSubjectsOverwrite` /
   `guardFoundationListsOverwrite` / `guardListShrink` (mastersWriteGuard) were left unused and are deleted.

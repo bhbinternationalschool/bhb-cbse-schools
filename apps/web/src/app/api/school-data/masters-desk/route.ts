@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
-import { requireStaffApi } from "@/lib/apiRouteAuth.server";
+import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
+import { deskWriteGate } from "@/lib/deskFeatureGate.server";
 import { teachingMastersSubset } from "@/lib/mastersTeachingSubset";
 import { resolveMastersReadScope } from "@/lib/mastersReadScope.server";
 import {
@@ -163,13 +164,16 @@ export async function GET(req: Request) {
  * land here are refused for EVERY body — nothing is read, nothing written —
  * and an old tab that still sends one is told to reload (the 1.2 stub:
  * 410 `{ok:false, reason:"build_stale", reload:true}` + `X-Bhb-Build-Stale: 1`,
- * one log line). Kept for one release, then deleted with the route's GET
+ * one log line) — for everyone who holds Masters or one of its functions. Kept for one release, then deleted with the route's GET
  * (2.3b).
  */
 export async function POST(req: Request) {
-  const auth = await requireStaffApi(req);
-  if (!auth.ok) return auth.response;
-  const who = auth.viaMirrorSecret ? "mirror" : auth.ctx.session.staffId || auth.ctx.session.email || "?";
+  // Anyone who could save Masters here before — the module, or one of its
+  // functions (a teacher's Class subjects) — is told to reload; anyone else
+  // gets the refusal they always got.
+  const gate = await deskWriteGate(req, SCHOOL_DATA_DESK_RBAC["masters-desk"]);
+  if (gate.mode === "deny") return gate.response;
+  const who = gate.mode === "feature" ? gate.ctx.session.staffId || gate.ctx.session.email || "?" : "masters-holder";
   console.warn(
     JSON.stringify({
       event: "masters-desk-post-gone",
