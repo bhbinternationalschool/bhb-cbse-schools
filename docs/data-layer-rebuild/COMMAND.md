@@ -1897,7 +1897,7 @@ masters-element-writes + masters-overlay 15/15. Self-test +2 (planner on stored 
 **Not done.** Two counters issuing the same RECEIPT number at the same instant (`/next` does not reserve) still needs an
 atomic claim — a separate "[MIGRATION — director applies]" proposal, not built here.
 
-*(2.2f PR C built 28 Oct 2026, PR #PRC — MONEY, the director approves: concession templates on the batch kernel; no
+*(2.2f PR C built 28 Oct 2026, PR #721 — MONEY, the director approves: concession templates on the batch kernel; no
 migration.)* Fees → Bulk & PDC → Concession templates → Apply (`applyTemplate`, lib/feeConcessionTemplates.server.ts) writes
 the template's rule (created, or patched to match the template at its `_rev`) and one CREATED grant per student as ONE
 all-or-none `desk_slice_rows_write` batch (`writeMastersChangesServer`; it now says whether a refusal was a conflict, which
