@@ -65,7 +65,7 @@ export default defineConfig<GateOptions>({
   projects: [
     {
       name: "desktop",
-      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay|masters-element-writes|parent-web-tabs|fuel-per-bus-range|certificates-dues-gate|staff-editor-save|print-signatures|staff-sensitive-screens|staff-locked-validation|staff-editor-writes)\.spec\.ts/,
+      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|masters-overlay|masters-element-writes|parent-web-tabs|fuel-per-bus-range|certificates-dues-gate|staff-editor-save|print-signatures|staff-sensitive-screens|staff-locked-validation|staff-editor-writes|fee-writes)\.spec\.ts/,
       use: { ...desktop },
     },
     {
@@ -150,6 +150,16 @@ export default defineConfig<GateOptions>({
       name: "cert-gate",
       testMatch: /certificates-dues-gate\.spec\.ts/,
       dependencies: ["money-writes", "staff-register", "notify-writes", "chat-writes", "payroll-writes"],
+      use: { ...desktop },
+    },
+    {
+      // Seeds its own fee structure and writes concession grants, receipts,
+      // an RTE child and a fee-setup clone (data-layer 2.2e) — a structure
+      // switches on the built-in structures for every class, so it runs
+      // after every other project and takes everything out again.
+      name: "fee-writes",
+      testMatch: /fee-writes\.spec\.ts/,
+      dependencies: ["cert-gate"],
       use: { ...desktop },
     },
   ],
