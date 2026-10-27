@@ -31,7 +31,7 @@ async function restore(): Promise<void> {
       .map((g) => g.id),
   );
   const ours: Record<(typeof KEYS)[number], (e: R) => boolean> = {
-    concessionGrants: (e) => String(e.id).startsWith("e2e_fw_") || String(e.reason ?? "").includes("e2e-fw"),
+    concessionGrants: (e) => String(e.id).includes("e2e_fw_") || String(e.reason ?? "").includes("e2e-fw"),
     concessions: (e) => String(e.id).startsWith("e2e_fw_") || String(e.notes ?? "").includes("e2e-fw") || String(e.id).startsWith("cnc_rtew_e2e_fw_"),
     feeStructureLines: (e) => String(e.id).startsWith("e2e_fw_") || ourGroups.has(String(e.feeGroupId)),
     feeGroups: (e) => ourGroups.has(String(e.id)),
