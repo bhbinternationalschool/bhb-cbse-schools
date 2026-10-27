@@ -16,14 +16,12 @@ import {
   listConcessionPolicies,
   normalizeMastersRead,
   newId,
-  readMastersPageCopyRaw,
   removeCampus,
   removeClass,
   removeFeeHead,
   removeFeeHeadCategory,
   removeSection,
   resolveFeeHeadCategories,
-  saveMasters,
   type Campus,
   type FeeHead,
   type FeeHeadCategory,
@@ -48,17 +46,10 @@ import {
   type PendingElement,
 } from "@/components/masters/mastersElementPending";
 import { useMasters } from "@/lib/data/client/hooks";
-import { mastersDeskBridgeSettled } from "@/lib/data/client/mastersDeskBridge";
 import { planMastersElementCommit, type MastersCommitOpts } from "@/lib/data/client/mastersElementPlan";
 import { useMastersElementWrites } from "@/lib/data/client/writeHooks";
 import { useStaffBookWrites } from "@/lib/data/client/staffBookWrites";
 import type { StaffBook } from "@/lib/data/client/staffBookPlan";
-import {
-  answerHoldsOverlay,
-  overlayOnCommit,
-  overlayOnSaved,
-  type MastersOverlay,
-} from "@/components/masters/mastersPending";
 import { EditControl } from "@/components/masters/EditControl";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { SectionTeachersPanel } from "@/components/masters/SectionTeachersPanel";
@@ -243,12 +234,12 @@ export function MastersWorkspace() {
   // the `_rev` the view served. Until an answer serves an element at the
   // revision its save answered, the element as sent is laid over the answer
   // (./mastersElementPending). Staff setup (departments, designations) is
-  // written as staff rows since 2.2d (useStaffBookWrites). Fee setup (2.2e)
-  // still saves through saveMasters with the 2.1h whole-book overlay
-  // (./mastersPending) — only when an action changed one of those keys.
+  // written as staff rows since 2.2d (useStaffBookWrites). Fee setup is
+  // element writes too since 2.2e (fee heads, groups, structure lines,
+  // instalments, late fee, special fees, concessions and grants, the mid-year
+  // policy): nothing in this editor saves the whole book any more.
   const {
     masters: screenMasters,
-    builtFrom,
     error: mastersError,
     retry: retryMasters,
   } = useScreenMasters();
@@ -257,12 +248,6 @@ export function MastersWorkspace() {
     () => (screenMasters ? normalizeMastersRead(screenMasters) : null),
     [screenMasters],
   );
-  const [overlay, setOverlayState] = useState<MastersOverlay | null>(null);
-  const overlayRef = useRef<MastersOverlay | null>(null);
-  const setOverlay = (next: MastersOverlay | null) => {
-    overlayRef.current = next;
-    setOverlayState(next);
-  };
   const [pending, setPendingState] = useState<PendingElement[]>([]);
   const pendingRef = useRef<PendingElement[]>([]);
   const setPending = (next: PendingElement[]) => {
@@ -272,43 +257,13 @@ export function MastersWorkspace() {
   const saveSeq = useRef(0);
   const writeElements = useMastersElementWrites();
   const staffWrites = useStaffBookWrites();
-  /** Re-asks for the masters answer after a save while it does not hold it yet. */
-  const reasks = useRef(0);
   const state = useMemo(() => {
     if (!read) return null;
-    // The old save's overlay holds only the keys its saves changed (fee /
-    // staff setup); everything else is the server's latest answer.
-    let base = read;
-    if (overlay) {
-      const b = { ...read } as unknown as Record<string, unknown>;
-      const o = overlay.state as unknown as Record<string, unknown>;
-      for (const k of overlay.keys) b[k] = o[k];
-      base = b as unknown as MastersState;
-    }
     // Rows laid on from a save are the editor's own (normalised) elements, but
     // a dropped key travels as null: normalise the result like every answer.
-    return pending.length ? normalizeMastersRead(withPending(base, pending)) : base;
-  }, [overlay, read, pending]);
+    return pending.length ? normalizeMastersRead(withPending(read, pending)) : read;
+  }, [read, pending]);
   const [notice, setNotice] = useState<string | null>(null);
-
-  // An answer that holds every save of the overlay replaces it. One that does
-  // not (older than the save) is not shown: ask again shortly — another
-  // instance's cache sees the new revision within ~2 s — and after a few
-  // tries leave it to the versions poll, which refetches when Masters moves.
-  useEffect(() => {
-    if (!overlay || overlay.saving > 0) return;
-    if (answerHoldsOverlay(overlay, read, builtFrom)) {
-      setOverlay(null);
-      return;
-    }
-    if (reasks.current >= 4) return;
-    const t = window.setTimeout(() => {
-      reasks.current += 1;
-      void retryMasters();
-    }, 2_500);
-    return () => window.clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- retryMasters is React Query's refetch (stable)
-  }, [overlay, read, builtFrom]);
 
   // Element saves: every answer drops the elements it serves at (or past)
   // the revision their save answered. While some are unproven, ask again
@@ -439,12 +394,26 @@ export function MastersWorkspace() {
       onDone?.(false);
       return;
     }
+    if (opts?.guardEmptyYear) {
+      // A clone is always several lists → one batch; the guard rides on it.
+      for (const r of plan.requests) if (r.kind === "batch") r.guard = { noActiveFeeGroupsIn: opts.guardEmptyYear };
+    }
     const elementWork = plan.requests.length > 0 || plan.staff.length > 0;
     // Staff setup (departments, designations — and any other change to a
-    // staff record) is written as staff rows (data-layer 2.2d), never through
-    // the old whole-book save; only fee setup (2.2e) still goes there.
+    // staff record) is written as staff rows (data-layer 2.2d). Every other
+    // key is an element write (2.2e): a key with no element home (the fee
+    // back-dating switch, which has never had a place in the database) is
+    // refused, nothing sent — never the old whole-book save.
     const staffRest = plan.rest.filter((k) => (STAFF_SETUP_KEYS as readonly string[]).includes(k));
-    const legacyRest = plan.rest.filter((k) => !(STAFF_SETUP_KEYS as readonly string[]).includes(k));
+    const homeless = plan.rest.filter((k) => !(STAFF_SETUP_KEYS as readonly string[]).includes(k));
+    if (homeless.length) {
+      flash(
+        `Not saved — ${homeless.join(", ")} ${homeless.length === 1 ? "has" : "have"} no place in the school's database yet, so ${homeless.length === 1 ? "it" : "they"} cannot be saved from here.`,
+        7000,
+      );
+      onDone?.(false);
+      return;
+    }
     if (!elementWork && plan.rest.length === 0) {
       // Nothing changed: panels pass the book unchanged with a message
       // ("Campus code already exists", "Already linked to V").
@@ -456,7 +425,7 @@ export function MastersWorkspace() {
     // it synchronously is what made 16 refused writes look like 16 saves on
     // 2026-08-09.
     if (msg) setNotice("Saving…");
-    let waiting = (elementWork ? 1 : 0) + (legacyRest.length ? 1 : 0) + (staffRest.length ? 1 : 0);
+    let waiting = (elementWork ? 1 : 0) + (staffRest.length ? 1 : 0);
     let failed = false;
     const done = (ok: boolean, why?: string) => {
       waiting -= 1;
@@ -471,35 +440,6 @@ export function MastersWorkspace() {
       const pick = (book: MastersState) =>
         Object.fromEntries(staffRest.map((k) => [k, (book as unknown as Record<string, unknown>)[k]])) as StaffBook;
       void staffWrites.commit(pick(state), pick(next)).then((r) => done(r.ok, r.ok ? undefined : r.message));
-    }
-
-    if (legacyRest.length) {
-      // Fee setup: the old whole-book save, with only those
-      // keys taken from `next`. Everything else is the tab's page copy AS
-      // LOADED (raw — what the old save compares with; read after any
-      // re-read of the desk has finished), so the old save never sends a
-      // Foundation list: those go as elements, below.
-      const legacyBook = (): MastersState => {
-        const book = { ...(readMastersPageCopyRaw() ?? state) } as unknown as Record<string, unknown>;
-        for (const k of legacyRest) book[k] = (next as unknown as Record<string, unknown>)[k];
-        return book as unknown as MastersState;
-      };
-      // What the screen holds meanwhile: its own book with those keys as sent.
-      const shownBase = state;
-      const shownNext = { ...shownBase } as unknown as Record<string, unknown>;
-      for (const k of legacyRest) shownNext[k] = (next as unknown as Record<string, unknown>)[k];
-      setOverlay(overlayOnCommit(overlayRef.current, shownBase, shownNext as unknown as MastersState));
-      reasks.current = 0;
-      // Based on the stamps after this tab's last element write (mastersDeskBridge).
-      void mastersDeskBridgeSettled().then(() => saveMasters(legacyBook())).then((outcome) => {
-        const after = overlayOnSaved(
-          overlayRef.current,
-          outcome.ok ? { ok: true, revision: outcome.revision } : { ok: false },
-        );
-        setOverlay(after);
-        void retryMasters();
-        done(outcome.ok, outcome.ok ? undefined : after ? undefined : "Not saved — showing the school's saved Masters again.");
-      });
     }
 
     if (elementWork) {
@@ -623,7 +563,7 @@ export function MastersWorkspace() {
               canEdit={!readOnly}
               onMastersChanged={() => {
                 // The card changed Masters on the server: ask now. An open
-                // overlay stays until an answer holds it (never mid-save).
+                // element pending entries stay until an answer holds them.
                 void retryMasters();
               }}
             />

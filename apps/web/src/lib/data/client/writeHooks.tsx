@@ -189,7 +189,7 @@ async function writeBatch(
     res = await fetch(`/api/data/${MASTERS_BATCH_PATH}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ops: req.ops.map((op, i) => ({ collection: parts[i]?.collection, ...op })) }),
+      body: JSON.stringify({ ops: req.ops.map((op, i) => ({ collection: parts[i]?.collection, ...op })), ...(req.guard ? { guard: req.guard } : {}) }),
     });
   } catch (e) {
     return { ok: false, kind: "network", message: e instanceof Error ? e.message : "Network request failed", conflicts: [] };

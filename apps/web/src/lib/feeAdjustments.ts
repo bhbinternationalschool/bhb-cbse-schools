@@ -10,7 +10,6 @@ import {
   currentAcademicYearCode,
   formatInr,
   loadMasters,
-  saveMasters,
   type MastersState,
 } from "@/lib/masters";
 import { openFeeDues, type FeeDueLine } from "@/lib/fees";
@@ -795,9 +794,9 @@ export function formatAdjustLimitHint(): string {
 }
 
 /** Ensure previous AY has fee groups cloned from current (for arrears / rollover). */
-export function preparePreviousSessionFeeSetup(
+export async function preparePreviousSessionFeeSetup(
   masters?: MastersState,
-): { ok: true; state: MastersState; cloned: boolean; fromAy: string } | { ok: false; error: string } {
+): Promise<{ ok: true; state: MastersState; cloned: boolean; fromAy: string } | { ok: false; error: string }> {
   const m = masters ?? loadMasters();
   const toAy = currentAcademicYearCode(m);
   const years = (m.academicYears ?? [])
@@ -811,6 +810,17 @@ export function preparePreviousSessionFeeSetup(
   const before = m.feeGroups.filter((g) => g.academicYearCode === fromAy).length;
   const next = cloneFeeSetupToAcademicYear(m, toAy, fromAy);
   const after = next.feeGroups.filter((g) => g.academicYearCode === fromAy).length;
-  saveMasters(next);
+  // The clone is ALL OR NOTHING (director, 20 Oct 2026): the new groups,
+  // their lines and the year's instalments are ONE desk_slice_rows_write
+  // batch — one refused element and nothing is cloned. Never the tab's whole
+  // book (data-layer 2.2e).
+  const { diffMastersLists } = await import("@/lib/data/mastersElementChanges");
+  const changes = diffMastersLists(m, next, ["installments", "feeGroups", "feeStructureLines"]);
+  if (changes.length > 0) {
+    const { writeMastersChanges } = await import("@/lib/data/client/mastersLibWrites");
+    // Only into a year with no fee groups as STORED (another tab may have cloned already).
+    const saved = await writeMastersChanges(changes, { guard: { noActiveFeeGroupsIn: fromAy } });
+    if (!saved.ok) return { ok: false, error: `Nothing was cloned — ${saved.message}` };
+  }
   return { ok: true, state: next, cloned: after > before, fromAy };
 }

@@ -24,10 +24,8 @@ import {
   DEFAULT_AY,
   formatInr,
   loadMasters,
-  newId,
   normalizeConcessionGrant,
   normalizeConcessionRule,
-  saveMasters,
   type ConcessionGrant,
   type ConcessionRule,
   type MastersState,
@@ -318,6 +316,7 @@ export async function awardReferralForLead(input: {
   }
 
   let masters = loadMasters();
+  const loaded = masters;
   if (policy.maxPerSession > 0) {
     const mine = (masters.concessionGrants ?? []).filter(
       (g) =>
@@ -335,11 +334,34 @@ export async function awardReferralForLead(input: {
     }
   }
 
+  // The checks again, on the grants AS STORED (data-layer 2.2e review): two
+  // people rewarding at once each saw a tab copy without the other's reward.
+  // The grant's id is fixed per household and count — two at once write the
+  // same id and the database refuses the second.
+  const { readStoredMastersLists } = await import("@/lib/data/client/mastersLibWrites");
+  const fresh = await readStoredMastersLists(["concessionGrants"]);
+  if (!fresh.ok) return { ok: false, error: fresh.message };
+  const storedGrants = [...fresh.lists.get("concessionGrants")!.values()] as unknown as ConcessionGrant[];
+  if (rewardedLeadIds({ ...masters, concessionGrants: storedGrants }).has(input.lead.id)) {
+    return { ok: false, error: "This referral has already been rewarded" };
+  }
+  const householdKids = new Set(sis.students.filter((s) => s.householdId === householdId).map((s) => s.id));
+  const storedMine = storedGrants.filter(
+    (g) => String(g.id).startsWith(REWARD_GRANT_PREFIX) && g.status !== "rejected" && householdKids.has(g.studentId),
+  );
+  if (policy.maxPerSession > 0 && storedMine.length >= policy.maxPerSession) {
+    return {
+      ok: false,
+      error: `This parent has already had ${storedMine.length} referral reward(s) — the policy caps it at ${policy.maxPerSession}`,
+    };
+  }
+  const seq = storedGrants.filter((g) => String(g.id).startsWith(`${REWARD_GRANT_PREFIX}${householdId}_`)).length + 1;
+
   const ensured = ensureRewardRule(masters, policy, ay);
   masters = ensured.state;
 
   const grant: ConcessionGrant = normalizeConcessionGrant({
-    id: `${REWARD_GRANT_PREFIX}${newId("x")}`,
+    id: `${REWARD_GRANT_PREFIX}${householdId}_${seq}`,
     concessionId: ensured.rule.id,
     studentId: ward.id,
     status: "approved",
@@ -350,12 +372,18 @@ export async function awardReferralForLead(input: {
     siblingChildNo: null,
   });
 
-  const saved = await saveMasters({
-    ...masters,
-    concessionGrants: [...(masters.concessionGrants ?? []), grant],
-  });
+  // The reward rule (if new) and the grant, as element writes in one
+  // all-or-none batch (data-layer 2.2e) — never the tab's whole book.
+  const { diffMastersLists } = await import("@/lib/data/mastersElementChanges");
+  const { writeMastersChanges } = await import("@/lib/data/client/mastersLibWrites");
+  const saved = await writeMastersChanges(
+    diffMastersLists(loaded, { ...masters, concessionGrants: [...(masters.concessionGrants ?? []), grant] }, ["concessions", "concessionGrants"], {
+      // The reward rule's id is fixed per policy: already stored = use it.
+      ifAbsent: true,
+    }),
+  );
   if (!saved.ok) {
-    return { ok: false, error: `Could not save the reward (${saved.reason})` };
+    return { ok: false, error: `Could not save the reward (${saved.message})` };
   }
 
   return {

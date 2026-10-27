@@ -522,6 +522,7 @@
     "test:staff-kernel": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/lib/data/server/staffKernel.selftest.ts",
     "test:masters-writes": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/lib/data/client/mastersWrites.selftest.ts",
     "test:masters-element-commit": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/lib/data/client/mastersElementPlan.selftest.ts",
+    "test:masters-lib-writes": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/lib/data/mastersElementChanges.selftest.ts",
     "test:staff-book-commit": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/lib/data/client/staffBookPlan.selftest.ts",
     "test:staff-own-doc-url": "npx tsx src/lib/staffOwnDocUrl.selftest.ts",
     "test:desk-feature-rev": "npx tsx src/lib/deskFeatureAuthRev.selftest.ts",

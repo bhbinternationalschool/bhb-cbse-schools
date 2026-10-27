@@ -546,6 +546,14 @@ async function logEvent(eventType: string, row: CashgramRefundRow, extra: Record
 export async function refreshCashgramRefund(cashgramId: string): Promise<CashgramRefundRow | null> {
   const row = await getCashgramRefund(cashgramId);
   if (!row) return null;
+  {
+    // A refund applied whose receipt's discount end did not land: try again (data-layer 2.2e).
+    const { revokeVoucherGrantsServer, GRANT_REVOKE_PENDING } = await import("@/lib/data/server/mastersLibWrites.server");
+    if (row.appliedAt && row.voucherId && row.lastError.startsWith(GRANT_REVOKE_PENDING)) {
+      const out = await revokeVoucherGrantsServer({ id: row.voucherId, receiptNo: row.receiptNo || row.voucherId });
+      await update(cashgramId, { last_error: out.ok ? "" : `${GRANT_REVOKE_PENDING} ${out.message}` });
+    }
+  }
   if (!cashgramIsOpen(row.status) || row.status === "PENDING_APPROVAL") {
     // Paid but not fully booked (ledger post failed): finish it.
     if (row.status === "REDEEMED" && !row.appliedAt) await applyCashgramView({ ...viewOf(row), status: "REDEEMED" });
@@ -646,6 +654,13 @@ export async function applyCashgramView(view: CashgramView): Promise<{ applied: 
       const pushed = (await pushFeesRemoteServer(loadFees())).ok;
       if (!pushed) {
         await update(row.cashgramId, { last_error: "Receipt voided here but the save to the database failed — check the receipt" });
+      } else {
+        // Its counter-discount grants die with it, in the database (data-layer
+        // 2.2e). A failure is recorded on the row and retried by the next
+        // status check (refreshCashgramRefund) — never only a console line.
+        const { revokeVoucherGrantsServer, GRANT_REVOKE_PENDING } = await import("@/lib/data/server/mastersLibWrites.server");
+        const revoked = await revokeVoucherGrantsServer({ id: v.id, receiptNo: v.receiptNo });
+        if (!revoked.ok) await update(row.cashgramId, { last_error: `${GRANT_REVOKE_PENDING} ${revoked.message}` });
       }
     }
   }

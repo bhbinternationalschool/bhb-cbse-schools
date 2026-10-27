@@ -24,8 +24,13 @@
  *  - a change to a staff record's class / subject teacher links → a link
  *    change (added links, removed link ids) for that member, applied by the
  *    caller to the record AS STORED (sis.staff, data-layer 2.2b);
- *  - any other key that changed (fee setup — 2.2e; staff setup — 2.2d) is
- *    returned in `rest` for the old save, unchanged here.
+ *  - since 2.2e the fee setup lists (fee heads and their categories, fee
+ *    groups, structure lines, instalments, late-fee rules, special fees and
+ *    their assignments, concession kinds, rules and grants) and the
+ *    mid-year policy object go exactly the same way — a fee-setup clone to a
+ *    new year (groups + lines + instalments) is ONE all-or-none batch;
+ *  - any other key that changed (staff setup — written as staff rows by the
+ *    caller; anything else has no element home) is returned in `rest`.
  *
  * Elements nobody touched are never sent, whatever the view or the overlay
  * says about them: a stale answer on screen cannot be written back over a
@@ -56,13 +61,41 @@ export const FOUNDATION_LIST_KEYS = [
   "holidays",
 ] as const;
 
+/**
+ * The fee setup lists (data-layer 2.2e), parents before children: a head's
+ * category before the head, a group before its lines, a rule before its
+ * grants.
+ */
+export const FEE_LIST_KEYS = [
+  "feeHeadCategories",
+  "feeHeads",
+  "installments",
+  "feeGroups",
+  "feeStructureLines",
+  "lateFeeRules",
+  "specialFees",
+  "specialFeeAssignments",
+  "concessionKinds",
+  "concessions",
+  "concessionGrants",
+] as const;
+
+/** Every list the editor writes element by element, in request order. */
+export const ELEMENT_LIST_KEYS = [...FOUNDATION_LIST_KEYS, ...FEE_LIST_KEYS] as const;
+
 /** The Foundation objects (one value each, written on the slice stamp). */
 export const FOUNDATION_OBJECT_KEYS = ["schoolProfile", "schoolTiming", "statutoryConfig"] as const;
+
+/** The fee setup object (2.2e): the mid-year join policy. */
+export const FEE_OBJECT_KEYS = ["midYearFeePolicy"] as const;
+
+/** Every object the editor writes on its stamp. */
+export const ELEMENT_OBJECT_KEYS = [...FOUNDATION_OBJECT_KEYS, ...FEE_OBJECT_KEYS] as const;
 
 /** The staff-record fields the Masters editor changes: class and subject teacher links. */
 export const STAFF_LINK_FIELDS = ["classTeacherLinks", "subjectTeachingLinks"] as const;
 
-export type FoundationKey = (typeof FOUNDATION_LIST_KEYS)[number] | (typeof FOUNDATION_OBJECT_KEYS)[number];
+export type FoundationKey = (typeof ELEMENT_LIST_KEYS)[number] | (typeof ELEMENT_OBJECT_KEYS)[number];
 
 /**
  * One action may remove at most this many elements (the batch route's cap).
@@ -83,6 +116,8 @@ export type ElementRequest = {
   kind: "slice" | "object" | "batch";
   ops: WriteOp<Row>[];
   parts?: { sliceKey: FoundationKey; collection: string }[];
+  /** Batch only: a server-side precondition (the fee-setup clone: no active group in that year as stored). */
+  guard?: { noActiveFeeGroupsIn?: string };
 };
 
 /** What a panel may say about its commit. */
@@ -99,6 +134,11 @@ export type MastersCommitOpts = {
    * clears its form only then (2.2d follow-up: Staff setup's Add fields).
    */
   onDone?: (saved: boolean) => void;
+  /**
+   * The fee-setup clone (data-layer 2.2e review): write only if the server's
+   * STORED fee groups have no active group in this year — else nothing.
+   */
+  guardEmptyYear?: string;
 };
 
 export type StaffLinkChange = {
@@ -116,7 +156,7 @@ export type ElementPlan =
       /** In order: the list writes (one request, or ONE batch when several), then each object. Staff links go first (the writer). */
       requests: ElementRequest[];
       staff: StaffLinkChange[];
-      /** Other changed keys, for the old save (fees 2.2e, staff setup 2.2d). */
+      /** Other changed keys: staff setup (the caller writes staff rows), or keys with no element home. */
       rest: string[];
     }
   | { ok: false; reason: string };
@@ -216,8 +256,8 @@ export function planMastersElementCommit(input: {
       continue;
     }
     const target = foundationCollection(key);
-    const isList = (FOUNDATION_LIST_KEYS as readonly string[]).includes(key);
-    const isObject = (FOUNDATION_OBJECT_KEYS as readonly string[]).includes(key);
+    const isList = (ELEMENT_LIST_KEYS as readonly string[]).includes(key);
+    const isObject = (ELEMENT_OBJECT_KEYS as readonly string[]).includes(key);
     if (!target || (!isList && !isObject)) {
       rest.push(key);
       continue;
@@ -258,7 +298,13 @@ export function planMastersElementCommit(input: {
 
     const removed = [...before.keys()].filter((id) => !after.has(id) && onServer.has(id));
     if (onServer.size > 0 && removed.length >= onServer.size) {
-      return { ok: false, reason: `This would leave ${key} empty — nothing was saved. Remove items one at a time.` };
+      return {
+        ok: false,
+        reason:
+          key === "lateFeeRules"
+            ? "This is the school's only late-fee rule — it cannot be removed (nothing was saved). Switch it off instead: edit it and untick Active."
+            : `This would leave ${key} empty — nothing was saved. Remove items one at a time.`,
+      };
     }
     const ops: WriteOp<Row>[] = [];
     for (const [id, el] of after) {
@@ -279,8 +325,8 @@ export function planMastersElementCommit(input: {
   }
 
   const order = (k: string) => {
-    const i = (FOUNDATION_LIST_KEYS as readonly string[]).indexOf(k);
-    return i < 0 ? FOUNDATION_LIST_KEYS.length : i;
+    const i = (ELEMENT_LIST_KEYS as readonly string[]).indexOf(k);
+    return i < 0 ? ELEMENT_LIST_KEYS.length : i;
   };
   upserts.sort((a, b) => order(a.sliceKey) - order(b.sliceKey));
   removals.sort((a, b) => order(a.sliceKey) - order(b.sliceKey));

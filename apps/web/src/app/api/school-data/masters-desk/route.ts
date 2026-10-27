@@ -17,6 +17,7 @@ import {
 } from "@/lib/mastersNormalized.server";
 import { STAFF_OWNED_MASTERS_SLICES } from "@/lib/staffDbConfig";
 import { rowFingerprint } from "@/lib/sliceRevClient";
+import { FEE_LIST_KEYS, FEE_OBJECT_KEYS } from "@/lib/data/client/mastersElementPlan";
 import { fetchMastersFromRowTables } from "@/lib/mastersRowTables.server";
 import { guardFoundationListsOverwrite, guardMastersOverwrite, guardSubjectsOverwrite } from "@/lib/mastersWriteGuard";
 import { guardMastersRevision } from "@/lib/mastersRevisionGuard";
@@ -405,6 +406,34 @@ export async function POST(req: Request) {
       { error: foundationVerdict.message, reason: "foundation_shrink", list: foundationVerdict.list },
       { status: 409 },
     );
+  }
+
+  // The fee setup is element writes since data-layer 2.2e (fee heads, groups,
+  // structure lines, instalments, late fee, special fees, concession rules
+  // and grants, the mid-year policy — POST /api/data/masters.* and the batch
+  // route, one element at its `_rev`). Nothing current sends it here; a body
+  // that would CHANGE any of it is an old or stale copy — refused whole,
+  // nothing written (the fee line wipes of 1 and 6 Sep were whole-list
+  // writes from a copy).
+  {
+    const before = stored as unknown as Record<string, unknown>;
+    const after = state as unknown as Record<string, unknown>;
+    const feeChanged = [...FEE_LIST_KEYS, ...FEE_OBJECT_KEYS].filter(
+      (k) => rowFingerprint(before[k] ?? null) !== rowFingerprint(after[k] ?? null),
+    );
+    if (feeChanged.length) {
+      console.warn(`[masters-desk] rejected fee setup through the old path`, `lists=${feeChanged.join(",")}`);
+      return NextResponse.json(
+        {
+          error:
+            `This save would change ${feeChanged.join(", ")} through the old whole-book path. The fee setup is saved one ` +
+            `item at a time since 27 Oct 2026 — this is an old or stale copy. Nothing was saved; reload the page and make the change again.`,
+          reason: "fee_setup_elements",
+          list: feeChanged[0],
+        },
+        { status: 409 },
+      );
+    }
   }
 
   // Awaited: the previous fire-and-forget meant a failed write still returned

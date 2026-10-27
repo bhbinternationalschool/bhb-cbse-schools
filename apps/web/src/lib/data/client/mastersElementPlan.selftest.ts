@@ -6,7 +6,8 @@
  *     served `_rev` (or the revision a save of this tab answered); a stale
  *     answer's other elements are never sent; removals one per request,
  *     parents first; an emptied list / too many removals / bad ids refused;
- *     objects on the stamp; staff link changes apart; other keys → `rest`.
+ *     objects on the stamp; staff link changes apart; fee keys as elements
+ *     (2.2e); other keys → `rest`.
  *  2. applyStaffLinkChange: laid on the record as stored.
  *  3. mastersElementPending: the per-element overlay and its `_rev` proof.
  *  4. guardFoundationListsOverwrite: the old path may not remove > 1 element.
@@ -161,7 +162,7 @@ function main(): void {
     console.log("  ✓ base = the revision this tab's own save answered, when the view lags");
   }
 
-  /* ── 1g. Objects on the stamp; staff links apart; fee keys → rest ── */
+  /* ── 1g. Objects on the stamp; staff links apart; fee keys are elements (2.2e) ── */
   {
     const next = {
       ...served,
@@ -170,8 +171,12 @@ function main(): void {
       staff: [{ ...served.staff[0], classTeacherLinks: [] }],
     };
     const p = ok(planMastersElementCommit({ shown: served, next, served, stamps: { schoolProfile: "2026-10-21T10:00:00Z" } }));
-    assert.deepEqual(p.requests.map((r) => [r.collection, r.kind, String(r.ops[0].base)]), [["masters.school-profile", "object", "2026-10-21T10:00:00Z"]]);
-    assert.deepEqual(p.rest, ["feeHeads"]);
+    // Since 2.2e a fee head is an element write too (lists first, then objects).
+    assert.deepEqual(p.requests.map((r) => [r.collection, r.kind, String(r.ops[0].base)]), [
+      ["masters.fee-heads", "slice", "1"],
+      ["masters.school-profile", "object", "2026-10-21T10:00:00Z"],
+    ]);
+    assert.deepEqual(p.rest, []);
     assert.deepEqual(p.staff, [{ staffId: "t1", field: "classTeacherLinks", put: [], remove: ["ctl1"] }]);
     const noStamp = planMastersElementCommit({ shown: served, next: { ...served, schoolProfile: { name: "X" } }, served });
     assert.equal(noStamp.ok, false, "an object without a served stamp is refused");
@@ -179,7 +184,7 @@ function main(): void {
     const other = ok(planMastersElementCommit({ shown: served, next: { ...served, staff: [{ ...served.staff[0], fullName: "Asha R" }] }, served }));
     assert.deepEqual(other.rest, ["staff"]);
     assert.deepEqual(other.staff, []);
-    console.log("  ✓ object on its stamp; teacher links as link changes; fee keys and other staff edits → the old save");
+    console.log("  ✓ object on its stamp; teacher links as link changes; fee keys as elements; other staff edits → rest");
   }
 
   /* ── 1h. Bad ids ── */

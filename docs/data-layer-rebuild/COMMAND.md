@@ -1773,6 +1773,130 @@ the own path; Doc-verify approve on the screen; Masters → Staff setup departme
 office's import message; the owner's 51-member import (51 / 50 / 1); the owner's profile save needing both writes.
 Fail-on-old results: see the PR.
 
+*(2.2e built 27 Oct 2026, PR #716 — fee setup and the concession-grant writers write Masters elements; the counter's
+receipt number and the enrolment SRN come from the server; no migration. MONEY — the director approves.)* **What exists.**
+- **The Masters fee setup is element writes** (`lib/data/client/mastersElementPlan.ts`: `FEE_LIST_KEYS` — fee-head
+  categories, fee heads, instalments, fee groups, structure lines, late-fee rules, special fees and their assignments,
+  concession kinds, rules and grants — and `FEE_OBJECT_KEYS` = the mid-year policy), planned exactly as the Foundation
+  lists (2.2c): one changed element → one upsert on its shown `_rev`; a cascade, several lists or several removals →
+  ONE all-or-none `POST /api/data/masters/batch`. The Masters → Fee structure "Copy groups & amounts" clone is therefore
+  one batch. `MastersWorkspace` no longer calls `saveMasters` at all (the 2.1h whole-book overlay is gone from it); a key
+  with no element home — the fee back-dating switch, which has NEVER been stored in the database (not a slice; found
+  here) — is refused on screen ("has no place in the school's database yet"), nothing sent.
+- **lib/ writers state their element changes** (`lib/data/mastersElementChanges.ts`, pure): `diffMastersLists(before,
+  after, keys)` → create (new id) / patch (only the keys that changed, expecting the values the caller saw) / delete;
+  `planMastersElementChanges` plans them against the elements AS STORED NOW (read fresh from `GET /api/data/masters.<list>`,
+  each with its `_rev` — the tab copy carries none): a key this action sets that someone changed meanwhile → conflict,
+  nothing sent; another key of the same element changed meanwhile is kept (the kernel patches). Browser:
+  `writeMastersChanges` (`lib/data/client/mastersLibWrites.ts`) — one user action = ONE batch, then the tab's masters copy is
+  re-read (bridge) and the masters view invalidated (`invalidateTabDesks`, new in hooks.tsx). Callers: the counter's
+  recurring discount and "change the standing discount" (`lib/counterConcession.ts`, now async and awaited — a refusal is
+  said, before it was fire-and-forget), the RTE head waiver and "Remove RTE" (`lib/rteEws.ts`; fixed ids → `ifAbsent`),
+  the referral reward (`lib/referralRewards.ts`), the previous-session fee clone (`lib/feeAdjustments.ts
+  preparePreviousSessionFeeSetup`, Fee Take → Reports → More exports & setup — all or nothing, director's decision).
+- **A voided receipt revokes exactly its grants, from the server** (`revokeChangesForVoucher`): every STORED grant carrying
+  the receipt's `[v:<id>]` marker that is not already rejected → status rejected + the void note, one batch (a grant made
+  from another tab is revoked too; another receipt's marker — e.g. `rcv_10` vs `rcv_1` — never matches). A failure is a
+  sticky toast. **Server-side voids** (Cashfree refund `lib/cashfreeRefunds.server.ts`, Cashgram refund
+  `lib/cashgramRefunds.server.ts`) never revoked anything in the database before — the shared code's `saveMasters` only
+  changed that process's mirror; now, once the void reached the DB, `revokeVoucherGrantsServer`
+  (`lib/data/server/mastersLibWrites.server.ts`, `repo.readSliceList` + `writeMastersBatch`).
+- **The old path refuses fee setup:** `POST /api/school-data/masters-desk` answers 409 `fee_setup_elements`, nothing
+  written, for a body that would CHANGE any fee list or the mid-year policy (dropping lines, or editing one — a stale copy).
+- **Receipt numbers from the records:** `POST /api/data/masters.number-series/next`'s rule moved to
+  `lib/data/server/numberSeriesNext.server.ts` (`nextSeriesNumberServer`; the route is unchanged in behaviour). The web
+  counter (Fee Take collect and Manual book) asks it BEFORE anything is saved (`issueSeriesNumber`, `lib/numberSeries.ts`)
+  and `collectPayment({issuedReceiptNo})` takes the later of it and the tab's own suggestion, never a number the tab
+  already holds (`chooseReceiptNo`); no answer → "Not saved — the server did not give the next receipt number", nothing
+  saved (no RECEIPT series in Masters → the built-in numbering as before). The mobile counter route
+  (`/api/v1/staff/fees/collect`) issues by the same rule and then moves the counter past it (`recordSeriesUseServer`) —
+  before, a server route's receipt never moved the counter (`persistSeriesUse` is browser-only), which is how production's
+  RECEIPT counter fell to 701 with receipts on record to RCV-00710 (read-only SELECT, 27 Oct). The counter holds one
+  collection at a time until its grants are written. **SRN:** enrolment from Admissions (three buttons) and RTE "Send to
+  SIS" ask the server for the SRN the same way (`laterSeriesNumber`).
+- Ratchets: `save_masters_call_sites` 11 → **2** (left for 2.2f: `lib/staffAttendanceRules.ts`, `lib/masters.ts
+  ensureStudentClassLinks`); `load_masters_calls_src` 347 → 346. `persistMastersSystemImport`
+  (`lib/feeDiscountImportHydrate.ts`, the fee-discount seed import) is a whole-book writer the ratchet does not count —
+  2.2f must take it too.
+**Production sizes (read-only SELECTs, 27 Oct):** concessionGrants 231 elements (13 KB; 121 carry a receipt marker),
+concessions 91, feeStructureLines 270 over 17 groups (2025-26: 8 groups of 15–17 lines; 2026-27: 9 groups of 2–18), so a
+year's clone is ~160 ops (batch cap 500). No element in production carries `_rev` yet (absent = 0 — the 2.2a rule).
+**Proof.** Self-test `test:masters-lib-writes` (CI + verify.sh; diff/plan/revoke/editor-plan/receipt-number) — five mutations
+each turn it red (no field check; a marker prefix match; a create over a stored id; the tab's number; fee keys back to
+`rest`). `test:masters-element-commit` updated (a fee head is an element write). Spec `e2e/specs/fee-writes.spec.ts` (own
+project `fee-writes`, after `cert-gate`; seeds its own fee setup through the kernel and takes it out with
+`scripts/e2e-restore-fee-writes.ts`): fee-line wipe (old body dropping two lines / editing one → 409; two removals in one
+kernel request → 400; nothing changed); overlap (two principals, April and May lines, both land, B's request = May's line
+alone); counter grant (a recurring discount at the real counter → ONE batch whose grant op is the new grant; the grant
+carries its receipt marker; voiding that receipt on Receipts → exactly that grant rejected with the void note, another
+receipt's grant stays approved, one batch with `{status, reason}` only); RTE waiver (untick a head → rule + grant in one
+batch; tick → that grant deleted); clone (one bad element injected into the batch → "Nothing was cloned", no group and no
+instalment in 2025-26; untouched → every group, our group's 12 lines and the instalments, ONE request); receipt number
+(the counter loaded, then a phone receipt RCV-000N with the counter put behind → the counter issues N + 1, and the
+counter moves past it); screens seen desktop-light and 375-dark (fee structure, concessions, counter). **Fail-on-old**
+(apps/web/src at origin/main 06cb7b0f, the same spec, same stack): all six behavioural cases FAIL — wipe (old body
+accepted, 200), overlap (B's save refused: May stayed ₹1,000), counter grant (199 lines of whole-book masters-desk saves),
+RTE (217), clone (no batch: cloned through the old save), receipt number (the counter issued **RCV-00048, the number
+the phone had just issued**); the screens case passes on both (coverage). This branch: all seven pass;
+`masters-element-writes` + `masters-overlay` 15/15. CI scoreboard: see the PR.
+**Behaviour changes users will notice.** Two people editing different fee lines / heads / grants both save (before: the
+second got "changed on another device"). A counter discount made recurring, a standing-discount change, an RTE head
+waiver and a referral reward now WAIT for the save and say when it was refused (before they reported success at once and
+the save could silently fail — e.g. the Office role (Masters view only, plus the class-subjects function) had its
+counter grant silently dropped by the old function-only push; now the batch route refuses it (403) and the clerk is told —
+read from the code, not run on the stack). Taking the last item off a fee list (the only late-fee rule, the last grant) is refused
+("would leave … empty") — 2.2b's rule, now reached from these screens. The back-dating switch (Masters → Fee rules)
+says it cannot be saved (it never was, beyond that one tab). The counter asks the server for the receipt number first: a
+collect is refused, nothing saved, when the server cannot answer; receipt numbers never repeat one issued on the phone
+or another desk. Receipts voided by a Cashfree / Cashgram refund now end their counter-discount grants.
+**Not done / not proven.** The server-side revoke (refund routes) is not exercised by a spec (no refund on the stack). The
+SRN on enrolment is proven by self-test only, not on a screen. Two counters asking at the same instant can still be
+given the same number (`/next` does not reserve; the database's unique `(tenant, receipt_no)` refuses the second push) —
+an atomic claim needs an RPC (a "[MIGRATION — director applies]" PR). The bounce of a cheque voids its receipt without
+revoking its grants (pre-existing; `bounceCheque` never did). Registration-fee receipts (`lib/registrationFeeLedger.ts`),
+online settlement (`lib/payments.ts`) and the bulk tools (`lib/feeTools.server.ts`) still take the copy's receipt number
+(5.1's money path). The Office role holds no Masters concessions function: its counter grants were dropped before and are
+refused now — whether `fees · edit` should be allowed to write counter grants is the director's decision. The fail-on-old run used a stack the new code had
+already written to (receipts can only be voided).
+
+*(2.2e review fixes + director's decision, 27 Oct 2026, same PR #716.)* An independent money review found five faults;
+each fix has a case in `fee-writes.spec` that FAILS on the pre-review head f5efc784 (fresh build, same stack).
+- **Director's decision:** a clerk with fees · edit may record a COUNTER concession grant (Fee Take) tied to a receipt
+  marker `[v:<id>]`, under the existing grounds / approval rules (a clerk without approval authority records it
+  *pending*), and end exactly those grants when the receipt is voided. The concession catalogue and every other grant still
+  need Masters · edit (`POST /api/data/masters.*` unchanged). Built as `POST /api/fees/counter-grants`
+  (`lib/data/server/counterGrants.server.ts`), not by opening the grants collection to fees · edit; the giver is the
+  session — written into the grant ("by <name>") and logged.
+- **Grant only after the receipt is in the database** (review 1): the server writes a receipt's grants only when that
+  voucher is in `fee_desk_vouchers` and not voided (else 409 `receipt_pending`, nothing written); the counter asks again
+  every 2 s for a minute, then keeps the request (`lib/counterGrantsClient.ts`, a browser outbox of unsent writes — not a
+  data copy; outside `lib/data`) and retries each time Fee Take opens, with a toast that stays.
+- **Revoke on void under the void's authority** (review 2): the same route, `action: revoke`, fees · edit, only once the
+  void is in the database, exactly the stored grants with that marker; kept and retried like a grant.
+- **Duplicate checks on the stored grants** (review 3): "already on file", "one discount per head" and approval run on the
+  server on the STORED concessions/grants (`planCounterGrants`, pure); counter grant ids are fixed per child + head + count
+  (`cg_ctr_<student>_<head>_<n>`) and counter rule ids per head + amount — two counters at once write the same id and the
+  database refuses the second, whose retry then finds the first on file. The referral reward re-checks "already rewarded"
+  and `maxPerSession` on the stored grants and uses `cg_ref_<household>_<n>`.
+- **Clone target year on the server** (review 4): the clone's batch carries `guard: {noActiveFeeGroupsIn: <year>}`; the
+  batch route refuses (409 "already has fee groups") when the STORED groups have an active group in that year.
+- **Refund revokes recorded** (review 5): a failed revoke after a Cashfree / Cashgram refund writes
+  `GRANT_REVOKE_PENDING: …` into the refund row's `last_error` (shown with the refund) and the next status check
+  (`pollRefund`, `refreshCashgramRefund`) retries it and clears it on success. *Not run on the stack (no refunds there).*
+- Minor: Masters → Late fee has "Charge a late fee this session" (untick = rule kept, switched off); the last late-fee rule
+  cannot be removed and the message says to switch it off. Special-fee assignments have no on/off flag (not added).
+- The 2.2d `staff 0` case now waits for the fee head's ELEMENT write (2.2e moved it off masters-desk — the old wait timed
+  out, nothing else changed); it still asserts no staff write of any kind and every `sis_staff` row/revision unchanged.
+  Proved still sharp: a mutation making the fee path also POST the tab's roster turns it red ("no staff write of any kind":
+  `/api/school-data/staff-roster`).
+**Fail-on-old (f5efc784):** counter grant (random id `cg_…`, not the fixed counter id — the tab-copy writer), the fees ·
+edit clerk (her grant refused: no Masters authority), two counters (the route does not exist: 404), grant before receipt
+(the grant was written with the receipt refused — no "not recorded" notice), stale clone (fails, by a timeout on B's
+button — not at the intended assertion). This head, fresh stack then re-used: fee-writes 11/11; staff 0 1/1;
+masters-element-writes + masters-overlay 15/15. Self-test +2 (planner on stored grants, the outbox's wait/keep/say).
+**Not done.** Two counters issuing the same RECEIPT number at the same instant (`/next` does not reserve) still needs an
+atomic claim — a separate "[MIGRATION — director applies]" proposal, not built here.
+
 **2.3a Delete the gate and the events.** With every component reader on hooks: delete
 `CoreDataGate` (React Query's loading state replaces it), the `bhb-masters-updated` /
 `bhb-rbac-updated` / `bhb-desk-first-hydrated` events and their listeners (one is the

@@ -1,5 +1,6 @@
 "use client";
 
+import { issueSeriesNumber } from "@/lib/numberSeries";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { DraftDateInput } from "@/components/ui/draft-inputs";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
@@ -771,7 +772,7 @@ export function AdmissionsWorkspace() {
     openLead(leadId);
   }
 
-  function doAdmitLead(leadId: string) {
+  async function doAdmitLead(leadId: string) {
     if (!masters) return;
     const cur = loadAdmissions();
     const refusal = withheldFeeGroupRefusal(feesWithheld, cur.leads.find((l) => l.id === leadId));
@@ -780,7 +781,14 @@ export function AdmissionsWorkspace() {
       window.setTimeout(() => setNotice(null), 3200);
       return;
     }
-    const r = enrollLead(cur, leadId, session.fullName, masters);
+    // The SRN from the server (data-layer 2.2e): max(the SRN counter, the
+    // highest SRN on record + 1) — never this tab's copy alone.
+    const srnIssued = await issueSeriesNumber("SRN", undefined);
+    if (!srnIssued.ok && srnIssued.kind === "failed") {
+      setNotice(`Not sent — the server did not give the next SRN (${srnIssued.message}). Try again.`);
+      return;
+    }
+    const r = enrollLead(cur, leadId, session.fullName, masters, { srn: srnIssued.ok ? srnIssued.formatted : undefined });
     if (!r.ok) {
       setNotice(r.reason);
       window.setTimeout(() => setNotice(null), 3200);
@@ -866,7 +874,7 @@ export function AdmissionsWorkspace() {
       onOpenStudent: (id: string) => setProfileStudentId(id),
       onRegister: doRegisterLead,
       onVerifyDocs: doVerifyDocsLead,
-      onAdmitToSis: doAdmitLead,
+      onAdmitToSis: (leadId: string) => void doAdmitLead(leadId),
       onAssignMe: doAssignMeLead,
       onMarkLost: doMarkLostLead,
       onVerifyWithSis: doVerifySuspectedWithSis,
@@ -930,14 +938,21 @@ export function AdmissionsWorkspace() {
     commit(r.state, "Documents verified");
   }
 
-  function doEnroll() {
+  async function doEnroll() {
     if (!state || !selected || !masters) return;
     const refusal = withheldFeeGroupRefusal(feesWithheld, selected);
     if (refusal) {
       setNotice(refusal);
       return;
     }
-    const r = enrollLead(state, selected.id, session.fullName, masters);
+    // The SRN from the server (data-layer 2.2e): max(the SRN counter, the
+    // highest SRN on record + 1) — never this tab's copy alone.
+    const srnIssued = await issueSeriesNumber("SRN", undefined);
+    if (!srnIssued.ok && srnIssued.kind === "failed") {
+      setNotice(`Not sent — the server did not give the next SRN (${srnIssued.message}). Try again.`);
+      return;
+    }
+    const r = enrollLead(state, selected.id, session.fullName, masters, { srn: srnIssued.ok ? srnIssued.formatted : undefined });
     if (!r.ok) {
       setNotice(r.reason);
       return;
@@ -2101,7 +2116,7 @@ export function AdmissionsWorkspace() {
               onPatch={patchSelected}
               onRegister={doRegister}
               onVerify={doVerify}
-              onEnroll={doEnroll}
+              onEnroll={() => void doEnroll()}
               onLost={doLost}
               onOpenLead={openLead}
               onOpenStudent={(id) => setProfileStudentId(id)}
